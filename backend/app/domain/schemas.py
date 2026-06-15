@@ -124,6 +124,8 @@ class DOEPlan(BaseModel):
     factors: list[DOEFactor]
     runs: list[DOERun]
     notes: str = ""
+    plan_id: str = ""  # assigned + cached by the workflow for export/round-trip
+    domain: ProductDomain | None = None  # carried so exported runs round-trip on import
 
 
 class OptimizationResult(BaseModel):

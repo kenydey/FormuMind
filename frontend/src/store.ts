@@ -36,6 +36,8 @@ interface AppState {
   setMeasured: (runId: number, value: number) => void;
   submitResults: () => Promise<void>;
   refreshModels: () => Promise<void>;
+  exportDoe: (format: "csv" | "xlsx") => void;
+  importCsv: (file: File) => Promise<void>;
 }
 
 const defaultRequirement: Requirement = {
@@ -146,6 +148,28 @@ export const useStore = create<AppState>((set, get) => ({
       set({ models: await api.models() });
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  exportDoe: (format) => {
+    const { doePlan } = get();
+    if (!doePlan?.plan_id) {
+      set({ error: "请先生成 DOE 计划再导出" });
+      return;
+    }
+    window.open(api.doeExportUrl(doePlan.plan_id, format), "_blank");
+  },
+
+  importCsv: async (file) => {
+    set({ busy: "training", error: null });
+    try {
+      const report = await api.importExperimentsCsv(file, get().requirement.domain);
+      set({ models: report.trained, trainMessage: report.message });
+      await get().runResearch();
+    } catch (e) {
+      set({ error: `CSV 导入失败：${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      set({ busy: "idle" });
     }
   },
 }));

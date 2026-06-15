@@ -91,6 +91,8 @@ export interface DOEPlan {
   factors: DOEFactor[];
   runs: DOERun[];
   notes: string;
+  plan_id: string;
+  domain: ProductDomain | null;
 }
 
 export interface ExperimentRecord {
@@ -154,6 +156,24 @@ export const api = {
   submitExperiments: (records: ExperimentRecord[]) =>
     post<TrainingReport>("/api/experiments", { records, retrain: true }),
   models: () => get<ModelInfo[]>("/api/models"),
+  doeExportUrl: (planId: string, format: "csv" | "xlsx" = "csv") =>
+    `/api/doe/${planId}/export?format=${format}`,
+  importExperimentsCsv: async (file: File, domain?: ProductDomain): Promise<TrainingReport> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const q = domain ? `?domain=${domain}` : "";
+    const res = await fetch(`/api/experiments/import-csv${q}`, { method: "POST", body: fd });
+    if (!res.ok) {
+      let detail = `${res.status}`;
+      try {
+        detail = (await res.json()).detail ?? detail;
+      } catch {
+        // ignore parse failure, keep status code
+      }
+      throw new Error(detail);
+    }
+    return res.json();
+  },
 };
 
 // Poll a task until it terminates, invoking onUpdate on each tick.

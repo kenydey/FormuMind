@@ -6,6 +6,8 @@ formulation levers are tuned per product family.
 """
 from __future__ import annotations
 
+import threading
+import uuid
 from collections.abc import Callable
 
 from ..config import get_settings
@@ -117,13 +119,38 @@ def _levers_for(form: Formulation) -> list[tuple[str, float, float]]:
     return LEVERS[form.domain]
 
 
+# In-memory DOE plan cache so generated plans can be exported / round-tripped
+# via /api/doe/{plan_id}/export. Bounded to avoid unbounded growth in long runs.
+_PLAN_CACHE: dict[str, DOEPlan] = {}
+_PLAN_CACHE_LOCK = threading.Lock()
+_PLAN_CACHE_MAX = 64
+
+
+def _cache_plan(plan: DOEPlan) -> None:
+    with _PLAN_CACHE_LOCK:
+        _PLAN_CACHE[plan.plan_id] = plan
+        if len(_PLAN_CACHE) > _PLAN_CACHE_MAX:
+            # Drop the oldest inserted plan (dicts preserve insertion order).
+            oldest = next(iter(_PLAN_CACHE))
+            _PLAN_CACHE.pop(oldest, None)
+
+
+def get_cached_plan(plan_id: str) -> DOEPlan | None:
+    with _PLAN_CACHE_LOCK:
+        return _PLAN_CACHE.get(plan_id)
+
+
 def build_doe(req: Requirement, design: str = "full_factorial") -> DOEPlan:
     base = knowledge.baseline_formulation(req)
     factors = [DOEFactor(name=name, low=low, high=high, unit="wt%") for name, low, high in _levers_for(base)]
     # Cure temperature is a meaningful process factor for thermosets.
     if req.domain == ProductDomain.anticorrosion_coating:
         factors.append(DOEFactor(name="cure_temperature_c", low=max(20.0, req.cure_temperature_c - 30), high=req.cure_temperature_c, unit="C"))
-    return doe_engine.build_plan(factors, design=design)
+    plan = doe_engine.build_plan(factors, design=design)
+    plan.plan_id = uuid.uuid4().hex
+    plan.domain = req.domain
+    _cache_plan(plan)
+    return plan
 
 
 def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:

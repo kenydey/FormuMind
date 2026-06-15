@@ -13,6 +13,7 @@ dependencies = [
     "uvicorn[standard]>=0.27",
     "pydantic>=2.6",
     "pydantic-settings>=2.1",
+    "python-multipart>=0.0.9",
     "celery>=5.3",
     "redis>=5.0",
     "numpy>=1.26",
@@ -43,6 +44,7 @@ intel = [
     "paper-qa>=4.0",
     "chemcrow>=0.3",
 ]
+export = ["openpyxl>=3.1"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

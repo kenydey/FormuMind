@@ -52,7 +52,7 @@ const DESIGNS = [
 ];
 
 export default function DoeResultsPanel() {
-  const { requirement, doePlan, measured, models, trainMessage, busy, generateDoe, setMeasured, submitResults } =
+  const { requirement, doePlan, measured, models, trainMessage, busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv } =
     useStore();
   const metric = OBJECTIVE_METRIC[requirement.domain];
 
@@ -79,6 +79,20 @@ export default function DoeResultsPanel() {
           >
             {busy === "doe" ? "生成中…" : "生成 DOE"}
           </button>
+          <label className="text-xs border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50 cursor-pointer">
+            导入 CSV
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              disabled={busy !== "idle"}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importCsv(f);
+                e.target.value = ""; // allow re-importing the same filename
+              }}
+            />
+          </label>
         </div>
       </div>
 
@@ -97,7 +111,25 @@ export default function DoeResultsPanel() {
         </p>
       ) : (
         <>
-          <div className="text-[11px] text-slate-500 mb-2">{doePlan.notes}</div>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-[11px] text-slate-500 min-w-0 truncate">{doePlan.notes}</span>
+            <div className="flex gap-1.5 shrink-0">
+              <button
+                onClick={() => exportDoe("csv")}
+                className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                title="导出 DOE 实验记录表（含空白实测列）"
+              >
+                导出 CSV
+              </button>
+              <button
+                onClick={() => exportDoe("xlsx")}
+                className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                title="导出 XLSX（需后端 openpyxl）"
+              >
+                XLSX
+              </button>
+            </div>
+          </div>
           <div className="max-h-56 overflow-y-auto border border-edge rounded">
             <table className="w-full text-[11px]">
               <thead className="sticky top-0 bg-panel">

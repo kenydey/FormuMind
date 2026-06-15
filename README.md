@@ -63,7 +63,7 @@ the **Bayesian optimizer** — are implemented for real in pure numpy.
 # Backend
 cd backend
 pip install -e ".[dev]"
-pytest -q                          # 32 tests, all offline
+pytest -q                          # 47 tests, all offline
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 
 # Frontend (separate shell)
@@ -86,11 +86,14 @@ docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 |--------|------|---------|
 | POST | `/api/research` | retrieve prior art + RAG + recommended formulations |
 | POST | `/api/doe?design=…` | generate a DOE plan (`full_factorial`, `fractional_factorial`, `plackett_burman`, `ccd`, `lhs`) |
-| POST | `/api/optimize` | start the async closed-loop optimizer → returns `task_id` |
+| GET | `/api/doe/{plan_id}/export?format=csv\|xlsx` | export a generated plan as a fill-in worksheet (blank `measured_*` columns) |
+| POST | `/api/optimize` | start the async **multi-objective** closed-loop optimizer → returns `task_id` |
 | GET | `/api/tasks/{id}` | poll task progress + result (Top-N leaderboard) |
 | POST | `/api/experiments` | feed back measured DOE/lab results → persist + (re)train models |
+| POST | `/api/experiments/import-csv` | upload a filled-in worksheet → bulk-ingest results + (re)train |
 | POST | `/api/train` | force a retrain over all stored experiments |
 | GET | `/api/models` | list trained models with `n_samples`, `R²`, `cv_R²`, `RMSE` |
+| GET | `/api/ingredients` | full raw-material library incl. price (CNY/kg) & VOC contribution |
 | GET | `/api/meta`, `/api/templates/{domain}` | metadata & baseline templates |
 | GET | `/health` | service + active-engine status |
 
@@ -130,6 +133,7 @@ pip install -e ".[llm]"      # Anthropic Claude
 pip install -e ".[science]"  # scipy, scikit-learn, RDKit, ChemFormula
 pip install -e ".[intel]"    # patent_client, paper-qa, chemcrow
 pip install -e ".[heavy]"    # torch, deepchem, transformers, summit, ase
+pip install -e ".[export]"   # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
 
 > The performance numbers produced offline are engineering-reasonable estimates
