@@ -1,0 +1,81 @@
+"""Async task orchestration.
+
+Long-running work (the optimization loop, patent ingestion) is dispatched here.
+Two execution paths share one workflow implementation:
+
+* **Celery tasks** (``optimize_task``) — used when a broker/worker is deployed.
+* **In-process TaskManager** — a thread-backed registry the API polls via
+  ``GET /api/tasks/{id}``. It works with no Redis/worker, keeping the MVP
+  self-contained while preserving the async, non-blocking UX.
+"""
+from __future__ import annotations
+
+import threading
+import uuid
+from typing import Any
+
+from ..domain.schemas import Requirement, TaskState, TaskStatus
+from ..pipeline import workflow
+from .celery_app import celery_app
+
+
+class TaskManager:
+    """Thread-safe in-process registry of background jobs."""
+
+    def __init__(self) -> None:
+        self._tasks: dict[str, TaskStatus] = {}
+        self._lock = threading.Lock()
+
+    def _set(self, task_id: str, **changes: Any) -> None:
+        with self._lock:
+            status = self._tasks[task_id]
+            self._tasks[task_id] = status.model_copy(update=changes)
+
+    def get(self, task_id: str) -> TaskStatus | None:
+        with self._lock:
+            return self._tasks.get(task_id)
+
+    def submit_optimization(self, req: Requirement, iterations: int | None = None) -> str:
+        task_id = uuid.uuid4().hex
+        with self._lock:
+            self._tasks[task_id] = TaskStatus(
+                task_id=task_id, kind="optimize", state=TaskState.pending
+            )
+
+        def _run() -> None:
+            self._set(task_id, state=TaskState.running, message="starting optimizer")
+            try:
+                def progress(p: float, msg: str) -> None:
+                    self._set(task_id, progress=round(p, 3), message=msg)
+
+                result = workflow.run_optimization(req, iterations=iterations, progress_cb=progress)
+                self._set(
+                    task_id,
+                    state=TaskState.completed,
+                    progress=1.0,
+                    message="done",
+                    result=result.model_dump(),
+                )
+            except Exception as exc:  # surface failures to the poller
+                self._set(task_id, state=TaskState.failed, message=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return task_id
+
+
+task_manager = TaskManager()
+
+
+@celery_app.task(name="formumind.optimize")
+def optimize_task(requirement: dict, iterations: int | None = None) -> dict:
+    """Celery entry point mirroring the in-process path (for deployed workers)."""
+    req = Requirement(**requirement)
+    return workflow.run_optimization(req, iterations=iterations).model_dump()
+
+
+@celery_app.task(name="formumind.ingest_patents")
+def ingest_patents_task(requirement: dict) -> dict:
+    """Fetch + index prior art (delegates to the research workflow)."""
+    req = Requirement(**requirement)
+    result = workflow.run_research(req)
+    return {"ingested": len(result.evidence)}
