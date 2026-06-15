@@ -16,7 +16,6 @@ from ..domain.schemas import (
     DOEFactor,
     DOEPlan,
     Formulation,
-    Ingredient,
     OptimizationResult,
     ProductDomain,
     Requirement,
@@ -25,6 +24,7 @@ from ..domain.schemas import (
 from ..services import literature, llm, predictor
 from ..services.optimizer import BayesianOptimizer, Factor
 from ..services.rag import TfidfStore
+from . import reconstruct
 
 # Per-domain optimization levers: (ingredient name, role-fallback, low%, high%)
 # and the objective metric to maximise.
@@ -51,10 +51,17 @@ OBJECTIVE: dict[ProductDomain, str] = {
 }
 
 
-def _score_and_validate(form: Formulation) -> Formulation:
-    form.predicted = predictor.predict(form)
+def process_for(req: Requirement) -> dict:
+    """Process parameters used as predictor features (cure temp for thermosets)."""
+    if req.domain == ProductDomain.anticorrosion_coating:
+        return {"cure_temperature_c": req.cure_temperature_c}
+    return {}
+
+
+def _score_and_validate(form: Formulation, process: dict | None = None) -> Formulation:
+    form.predicted = predictor.predict(form, process)
     form.warnings = validate_formulation(form)
-    form.score = predictor.objective_value(form, OBJECTIVE[form.domain])
+    form.score = predictor.objective_value(form, OBJECTIVE[form.domain], process)
     return form
 
 
@@ -64,7 +71,8 @@ def run_research(req: Requirement) -> ResearchResult:
     store.ingest(evidence)
     grounded = store.query(req.headline(), k=min(5, len(evidence))) or evidence
 
-    recommended = [_score_and_validate(f) for f in knowledge.variant_formulations(req, n=3)]
+    process = process_for(req)
+    recommended = [_score_and_validate(f, process) for f in knowledge.variant_formulations(req, n=3)]
     recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
 
     mechanism, chat = llm.synthesize_research(req, grounded, recommended)
@@ -92,17 +100,7 @@ def build_doe(req: Requirement, design: str = "full_factorial") -> DOEPlan:
 
 def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:
     """Build a fresh formulation with lever ingredient percentages overridden."""
-    base = knowledge.baseline_formulation(req)
-    ings: list[Ingredient] = []
-    overridden = dict(values)
-    for ing in base.ingredients:
-        new = ing.model_copy(deep=True)
-        if new.name in overridden:
-            new.weight_pct = round(overridden.pop(new.name), 4)
-        ings.append(new)
-    # Re-balance with the solvent component so weights still close to 100.
-    rebalanced = knowledge._balanced(base.name, base.domain, ings, base.rationale)
-    return rebalanced
+    return reconstruct.formulation_from_factors(req.domain, values)
 
 
 def run_optimization(
@@ -117,6 +115,7 @@ def run_optimization(
     factors = [Factor(name=n, low=lo, high=hi) for n, lo, hi in levers]
     opt = BayesianOptimizer(factors=factors, seed=42)
     objective = OBJECTIVE[req.domain]
+    process = process_for(req)
     history: list[float] = []  # best-so-far convergence curve
     best_so_far = float("-inf")
 
@@ -124,7 +123,7 @@ def run_optimization(
         x = opt.suggest()
         values = {f.name: v for f, v in zip(factors, x)}
         form = _apply_levers(req, values)
-        score = predictor.objective_value(form, objective)
+        score = predictor.objective_value(form, objective, process)
         opt.observe(x, score)
         best_so_far = max(best_so_far, score)
         history.append(round(best_so_far, 3))
@@ -134,7 +133,7 @@ def run_optimization(
     top: list[Formulation] = []
     for x, score in opt.ranked(settings.top_n_formulas):
         values = {f.name: v for f, v in zip(factors, x)}
-        form = _score_and_validate(_apply_levers(req, values))
+        form = _score_and_validate(_apply_levers(req, values), process)
         form.name = f"Optimized {req.domain.value} (score {score:.1f})"
         top.append(form)
     return OptimizationResult(

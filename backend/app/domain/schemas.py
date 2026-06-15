@@ -133,3 +133,40 @@ class TaskStatus(BaseModel):
     progress: float = 0.0
     message: str = ""
     result: dict[str, Any] | None = None
+
+
+class ExperimentRecord(BaseModel):
+    """A single measured DOE/lab result fed back into the platform.
+
+    ``factors`` are the formulation levers in natural units (matching a DOE
+    run's ``natural`` values, e.g. ingredient wt% and cure temperature), and
+    ``measured`` holds the lab-observed property values keyed by metric name.
+    """
+
+    domain: ProductDomain
+    factors: dict[str, float] = Field(default_factory=dict)
+    cure_temperature_c: float | None = None
+    measured: dict[str, float]
+    source: str = "lab"
+    label: str = ""
+
+
+class ExperimentSubmission(BaseModel):
+    records: list[ExperimentRecord]
+    retrain: bool = True
+
+
+class ModelInfo(BaseModel):
+    domain: ProductDomain
+    metric: str
+    backend: str  # sklearn-rf / numpy-ridge
+    n_samples: int
+    r2: float
+    cv_r2: float | None = None
+    rmse: float
+
+
+class TrainingReport(BaseModel):
+    trained: list[ModelInfo]
+    total_records: int
+    message: str = ""

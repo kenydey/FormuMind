@@ -1,8 +1,12 @@
 import { create } from "zustand";
 import {
   api,
+  OBJECTIVE_METRIC,
   pollTask,
+  type DOEPlan,
+  type ExperimentRecord,
   type Formulation,
+  type ModelInfo,
   type ProductDomain,
   type Requirement,
   type ResearchResult,
@@ -14,13 +18,23 @@ interface AppState {
   research: ResearchResult | null;
   task: TaskStatus | null;
   leaderboard: Formulation[];
-  busy: "idle" | "researching" | "optimizing";
+  busy: "idle" | "researching" | "optimizing" | "doe" | "training";
   error: string | null;
+
+  // DOE feedback loop
+  doePlan: DOEPlan | null;
+  measured: Record<number, number>; // run_id -> measured objective value
+  models: ModelInfo[];
+  trainMessage: string;
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
   runResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
+  generateDoe: (design: string) => Promise<void>;
+  setMeasured: (runId: number, value: number) => void;
+  submitResults: () => Promise<void>;
+  refreshModels: () => Promise<void>;
 }
 
 const defaultRequirement: Requirement = {
@@ -42,6 +56,10 @@ export const useStore = create<AppState>((set, get) => ({
   leaderboard: [],
   busy: "idle",
   error: null,
+  doePlan: null,
+  measured: {},
+  models: [],
+  trainMessage: "",
 
   setField: (key, value) =>
     set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
@@ -70,6 +88,59 @@ export const useStore = create<AppState>((set, get) => ({
       set({ error: String(e) });
     } finally {
       set({ busy: "idle" });
+    }
+  },
+
+  generateDoe: async (design) => {
+    set({ busy: "doe", error: null });
+    try {
+      const doePlan = await api.doe(get().requirement, design);
+      set({ doePlan, measured: {} });
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ busy: "idle" });
+    }
+  },
+
+  setMeasured: (runId, value) =>
+    set((s) => ({ measured: { ...s.measured, [runId]: value } })),
+
+  submitResults: async () => {
+    const { doePlan, measured, requirement } = get();
+    if (!doePlan) return;
+    const metric = OBJECTIVE_METRIC[requirement.domain];
+    const records: ExperimentRecord[] = doePlan.runs
+      .filter((r) => measured[r.run_id] !== undefined && !Number.isNaN(measured[r.run_id]))
+      .map((r) => ({
+        domain: requirement.domain,
+        factors: r.natural,
+        cure_temperature_c: r.natural["cure_temperature_c"] ?? null,
+        measured: { [metric]: measured[r.run_id] },
+        source: "doe",
+      }));
+    if (records.length === 0) {
+      set({ error: "请先为至少一个实验填写实测值" });
+      return;
+    }
+    set({ busy: "training", error: null });
+    try {
+      const report = await api.submitExperiments(records);
+      set({ models: report.trained, trainMessage: report.message });
+      // Refresh recommendations so the newly trained model takes effect.
+      await get().runResearch();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ busy: "idle" });
+    }
+  },
+
+  refreshModels: async () => {
+    try {
+      set({ models: await api.models() });
+    } catch (e) {
+      set({ error: String(e) });
     }
   },
 }));

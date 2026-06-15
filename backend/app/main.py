@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import doe, formulations, optimize, research, tasks
+from .api import doe, experiments, formulations, optimize, research, tasks
 from .config import get_settings
 
 settings = get_settings()
@@ -33,6 +33,7 @@ app.include_router(doe.router)
 app.include_router(optimize.router)
 app.include_router(tasks.router)
 app.include_router(formulations.router)
+app.include_router(experiments.router)
 
 
 @app.get("/health", tags=["meta"])

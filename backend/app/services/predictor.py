@@ -12,6 +12,7 @@ public :func:`predict` signature is unchanged.
 """
 from __future__ import annotations
 
+from ..domain import features
 from ..domain.chemistry import amine_epoxy_ratio
 from ..domain.schemas import Formulation, ProductDomain
 
@@ -42,8 +43,37 @@ def _molecular_features(form: Formulation) -> dict[str, float]:
     return {"mean_logp": weighted_logp / total} if total else {}
 
 
-def predict(form: Formulation) -> dict[str, float]:
-    """Return predicted properties keyed by metric name."""
+def _blend_trained(form: Formulation, process: dict | None, props: dict[str, float]) -> dict[str, float]:
+    """Override/blend empirical predictions with data-driven models.
+
+    For each metric that has a trained model, blend the model output with the
+    empirical prior, trusting the model more as measured samples accumulate:
+    ``w = n / (n + K)``. This avoids over-fitting on a handful of points while
+    converging to the data as the DOE loop is fed back.
+    """
+    # Imported lazily to avoid an import cycle (training -> reconstruct -> ...).
+    from .training import registry
+
+    if not registry.info():
+        return props
+    vec = features.vector(form, process)
+    k = 8.0
+    for metric in list(props.keys()):
+        out = registry.predict(form.domain, metric, vec)
+        if out is None:
+            continue
+        model_pred, n = out
+        w = n / (n + k)
+        props[metric] = round(w * model_pred + (1.0 - w) * props[metric], 3)
+    return props
+
+
+def predict(form: Formulation, process: dict | None = None) -> dict[str, float]:
+    """Return predicted properties keyed by metric name.
+
+    ``process`` carries non-composition features (e.g. ``cure_temperature_c``)
+    used by trained models. When trained models exist they are blended in.
+    """
     props: dict[str, float] = {}
     mol = _molecular_features(form)
 
@@ -90,10 +120,12 @@ def predict(form: Formulation) -> dict[str, float]:
         # LogP nudges barrier/cleaning behaviour when descriptors are present.
         if "salt_spray_hours" in props:
             props["salt_spray_hours"] = round(props["salt_spray_hours"] * (1.0 + 0.01 * mol["mean_logp"]), 1)
+
+    props = _blend_trained(form, process, props)
     return props
 
 
-def objective_value(form: Formulation, objective: str) -> float:
+def objective_value(form: Formulation, objective: str, process: dict | None = None) -> float:
     """Scalar objective (higher is better) used by the optimizer."""
-    props = predict(form)
+    props = predict(form, process)
     return float(props.get(objective, next(iter(props.values()), 0.0)))

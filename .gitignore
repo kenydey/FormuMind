@@ -19,4 +19,5 @@ frontend/vite.config.js
 
 # Data / runtime
 shared_data/
+data/
 *.log

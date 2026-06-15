@@ -65,6 +65,58 @@ export interface TaskStatus {
   result: OptimizationResult | null;
 }
 
+export interface DOEFactor {
+  name: string;
+  low: number;
+  high: number;
+  unit: string;
+}
+
+export interface DOERun {
+  run_id: number;
+  coded: Record<string, number>;
+  natural: Record<string, number>;
+}
+
+export interface DOEPlan {
+  design: string;
+  factors: DOEFactor[];
+  runs: DOERun[];
+  notes: string;
+}
+
+export interface ExperimentRecord {
+  domain: ProductDomain;
+  factors: Record<string, number>;
+  cure_temperature_c?: number | null;
+  measured: Record<string, number>;
+  source?: string;
+  label?: string;
+}
+
+export interface ModelInfo {
+  domain: ProductDomain;
+  metric: string;
+  backend: string;
+  n_samples: number;
+  r2: number;
+  cv_r2: number | null;
+  rmse: number;
+}
+
+export interface TrainingReport {
+  trained: ModelInfo[];
+  total_records: number;
+  message: string;
+}
+
+// Objective metric collected per domain (mirrors backend OBJECTIVE map).
+export const OBJECTIVE_METRIC: Record<ProductDomain, string> = {
+  anticorrosion_coating: "salt_spray_hours",
+  degreaser: "cleaning_efficiency",
+  surface_treatment: "salt_spray_hours",
+};
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
@@ -75,9 +127,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  return res.json();
+}
+
 export const api = {
   research: (req: Requirement) => post<ResearchResult>("/api/research", req),
-  doe: (req: Requirement, design: string) => post<unknown>(`/api/doe?design=${design}`, req),
+  doe: (req: Requirement, design: string) => post<DOEPlan>(`/api/doe?design=${design}`, req),
   startOptimize: (req: Requirement, iterations: number) =>
     post<{ task_id: string; poll_url: string }>("/api/optimize", { requirement: req, iterations }),
   task: async (id: string): Promise<TaskStatus> => {
@@ -85,6 +143,9 @@ export const api = {
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
     return res.json();
   },
+  submitExperiments: (records: ExperimentRecord[]) =>
+    post<TrainingReport>("/api/experiments", { records, retrain: true }),
+  models: () => get<ModelInfo[]>("/api/models"),
 };
 
 // Poll a task until it terminates, invoking onUpdate on each tick.

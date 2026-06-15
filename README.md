@@ -11,9 +11,15 @@ cure temperature, cleaning efficiency, VOC limit…) and runs a closed loop:
 requirement → patent/literature retrieval → RAG-grounded research
             → recommended formulations → DOE plan → cure/interface simulation
             → Bayesian closed-loop optimization → Top-N formula leaderboard
+                          ↑                                  │
+                          └──── DOE experimental results ◄───┘
+                                (train data-driven models)
 ```
 
 The goal is to raise formulation success rate and shorten the development cycle.
+Measured DOE/lab results are fed back to **train data-driven prediction models**
+that progressively supersede the empirical surrogate, so recommendations and
+optimization improve as real data accumulates.
 
 ## Architecture
 
@@ -57,7 +63,7 @@ the **Bayesian optimizer** — are implemented for real in pure numpy.
 # Backend
 cd backend
 pip install -e ".[dev]"
-pytest -q                          # 26 tests, all offline
+pytest -q                          # 32 tests, all offline
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 
 # Frontend (separate shell)
@@ -82,8 +88,37 @@ docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 | POST | `/api/doe?design=…` | generate a DOE plan (`full_factorial`, `fractional_factorial`, `plackett_burman`, `ccd`, `lhs`) |
 | POST | `/api/optimize` | start the async closed-loop optimizer → returns `task_id` |
 | GET | `/api/tasks/{id}` | poll task progress + result (Top-N leaderboard) |
+| POST | `/api/experiments` | feed back measured DOE/lab results → persist + (re)train models |
+| POST | `/api/train` | force a retrain over all stored experiments |
+| GET | `/api/models` | list trained models with `n_samples`, `R²`, `cv_R²`, `RMSE` |
 | GET | `/api/meta`, `/api/templates/{domain}` | metadata & baseline templates |
 | GET | `/health` | service + active-engine status |
+
+## DOE feedback & model training (回灌)
+
+The empirical predictor is only a prior. As you run the DOE plans the platform
+proposes and measure real performance, post the results back:
+
+```bash
+curl -X POST localhost:8000/api/experiments -H 'content-type: application/json' -d '{
+  "records": [
+    {"domain": "anticorrosion_coating",
+     "factors": {"Zinc phosphate": 12, "Bisphenol-A epoxy (DGEBA)": 38, "Polyamide hardener": 14},
+     "cure_temperature_c": 80,
+     "measured": {"salt_spray_hours": 980}}
+  ]
+}'
+```
+
+Each record is featurized (`backend/app/domain/features.py`) into a role-based
+composition + process vector. Once a metric has at least
+`FORMUMIND_MIN_TRAIN_SAMPLES` (default 4) samples, a model is trained per
+`(domain, metric)` — scikit-learn `RandomForestRegressor` when installed,
+otherwise a self-contained numpy ridge regressor. `predictor.predict` then
+**blends** the trained model with the empirical prior, weighting the model more
+as samples accumulate (`w = n / (n + 8)`), so optimization and recommendations
+shift toward measured reality. The dataset is the source of truth: models are
+rebuilt from the persisted experiments on startup (no model binaries stored).
 
 ## Enabling the real engines
 

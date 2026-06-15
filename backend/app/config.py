@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     optimize_iterations: int = 24
     top_n_formulas: int = 5
 
+    # Experiment feedback / model training.
+    # Where measured DOE results are persisted (JSON). Trained models are
+    # rebuilt from this dataset on startup, so no model binaries are stored.
+    experiments_path: str = "./data/experiments.json"
+    # Minimum measured samples before a trained model is used for a metric.
+    min_train_samples: int = 4
+    # Retrain automatically when new experiments are submitted.
+    auto_retrain: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -2,6 +2,7 @@ import RequirementPanel from "./components/RequirementPanel";
 import ChatPanel from "./components/ChatPanel";
 import SimPlaceholder from "./components/SimPlaceholder";
 import FormulaLeaderboard from "./components/FormulaLeaderboard";
+import DoeResultsPanel from "./components/DoeResultsPanel";
 
 export default function App() {
   return (
@@ -20,9 +21,10 @@ export default function App() {
           <RequirementPanel />
         </div>
 
-        {/* Centre: AI research / chat stream */}
-        <div className="col-span-5 min-h-0">
+        {/* Centre: AI research stream (top) + DOE feedback loop (bottom) */}
+        <div className="col-span-5 min-h-0 grid grid-rows-2 gap-3">
           <ChatPanel />
+          <DoeResultsPanel />
         </div>
 
         {/* Right: 3D sim (top) + leaderboard (bottom) */}

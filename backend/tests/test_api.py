@@ -64,3 +64,49 @@ def test_template_endpoint():
     r = client.get("/api/templates/surface_treatment")
     assert r.status_code == 200
     assert r.json()["domain"] == "surface_treatment"
+
+
+def test_experiment_feedback_trains_model():
+    from app.services.training import registry
+
+    registry.reset(persist=True)
+    try:
+        records = [
+            {
+                "domain": "anticorrosion_coating",
+                "factors": {"Zinc phosphate": z, "Bisphenol-A epoxy (DGEBA)": 38, "Polyamide hardener": 14},
+                "cure_temperature_c": 80,
+                "measured": {"salt_spray_hours": 200 + 80 * z},
+            }
+            for z in [3, 5, 7, 9, 11, 13]
+        ]
+        r = client.post("/api/experiments", json={"records": records, "retrain": True})
+        assert r.status_code == 200
+        report = r.json()
+        assert report["total_records"] == 6
+        assert any(m["metric"] == "salt_spray_hours" for m in report["trained"])
+
+        models = client.get("/api/models").json()
+        assert any(m["domain"] == "anticorrosion_coating" for m in models)
+
+        # Force-retrain endpoint also works.
+        assert client.post("/api/train").json()["trained"]
+    finally:
+        registry.reset(persist=True)
+
+
+def test_experiment_below_threshold_reports_no_model():
+    from app.services.training import registry
+
+    registry.reset(persist=True)
+    try:
+        records = [{
+            "domain": "degreaser",
+            "factors": {"Nonionic surfactant (C12-14 EO7)": 4},
+            "measured": {"cleaning_efficiency": 90},
+        }]
+        report = client.post("/api/experiments", json={"records": records}).json()
+        assert report["trained"] == []
+        assert "Need" in report["message"]
+    finally:
+        registry.reset(persist=True)
