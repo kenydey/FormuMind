@@ -1,0 +1,57 @@
+# FormuMind — service orchestration.
+#
+# Core profile (default): redis + backend + worker + frontend. Self-contained,
+# no credentials required (LLM and heavy science engines fall back to offline
+# implementations).
+#
+# Heavy profile (opt-in): mounts the C++/MD physics engines as official images
+# so they auto-upgrade without forking. Start them only when needed:
+#   docker compose --profile heavy up
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    environment:
+      FORMUMIND_REDIS_URL: redis://redis:6379/0
+      FORMUMIND_CELERY_EAGER: "false"
+      FORMUMIND_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  worker:
+    build: ./backend
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info
+    environment:
+      FORMUMIND_REDIS_URL: redis://redis:6379/0
+      FORMUMIND_CELERY_EAGER: "false"
+      FORMUMIND_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      - redis
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+  # --- Heavy MD / physics engines (opt-in, auto-upgrading official images) ---
+  lammps:
+    image: lammps/lammps:stable
+    profiles: ["heavy"]
+    volumes:
+      - ./shared_data:/data
+    command: ["sleep", "infinity"]
+
+  htpolynet:
+    image: ghcr.io/abramsgroup/htpolynet:latest
+    profiles: ["heavy"]
+    volumes:
+      - ./shared_data:/data
+    command: ["sleep", "infinity"]

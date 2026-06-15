@@ -1,0 +1,135 @@
+"""Shared domain schemas — the data contracts that flow end to end through the
+research → recommend → DOE → simulate → optimize pipeline.
+"""
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class ProductDomain(str, Enum):
+    """The three metal surface treatment product families FormuMind targets."""
+
+    anticorrosion_coating = "anticorrosion_coating"  # 防腐蚀涂料
+    degreaser = "degreaser"  # 脱脂剂
+    surface_treatment = "surface_treatment"  # 表面处理剂
+
+
+class Substrate(str, Enum):
+    carbon_steel = "carbon_steel"
+    galvanized_steel = "galvanized_steel"
+    aluminum = "aluminum"
+    stainless_steel = "stainless_steel"
+    magnesium_alloy = "magnesium_alloy"
+
+
+class Requirement(BaseModel):
+    """User-supplied R&D requirement captured from the left input panel."""
+
+    domain: ProductDomain
+    substrate: Substrate = Substrate.carbon_steel
+    # Anti-corrosion targets
+    salt_spray_hours: float = Field(0, ge=0, description="Target neutral salt spray resistance (h)")
+    film_weight_gsm: float = Field(0, ge=0, description="Target dry film weight / coating weight (g/m^2)")
+    cure_temperature_c: float = Field(80, ge=0, le=400, description="Max acceptable cure temperature (C)")
+    # Degreaser targets
+    cleaning_efficiency: float = Field(0, ge=0, le=100, description="Target soil removal (%)")
+    # Common constraints
+    voc_limit_gpl: float = Field(420, ge=0, description="Max VOC (g/L)")
+    ph_target: float | None = Field(None, ge=0, le=14)
+    notes: str = ""
+
+    def headline(self) -> str:
+        bits = [self.domain.value, f"on {self.substrate.value}"]
+        if self.salt_spray_hours:
+            bits.append(f"{self.salt_spray_hours:.0f}h salt spray")
+        if self.film_weight_gsm:
+            bits.append(f"{self.film_weight_gsm:.0f} g/m^2 film")
+        if self.cleaning_efficiency:
+            bits.append(f"{self.cleaning_efficiency:.0f}% cleaning")
+        return ", ".join(bits)
+
+
+class Ingredient(BaseModel):
+    name: str
+    role: str  # e.g. resin, hardener, inhibitor, surfactant, solvent, pigment
+    smiles: str | None = None
+    formula: str | None = None
+    molar_mass: float | None = None
+    weight_pct: float = Field(ge=0, le=100)
+
+
+class Formulation(BaseModel):
+    name: str
+    domain: ProductDomain
+    ingredients: list[Ingredient]
+    rationale: str = ""
+    predicted: dict[str, float] = Field(default_factory=dict)
+    score: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    def total_pct(self) -> float:
+        return round(sum(i.weight_pct for i in self.ingredients), 4)
+
+
+class Evidence(BaseModel):
+    """A retrieved patent or literature snippet with a citation."""
+
+    source: str  # USPTO / EPO / literature / seed
+    identifier: str
+    title: str
+    snippet: str
+    relevance: float = Field(ge=0, le=1)
+
+
+class ResearchResult(BaseModel):
+    requirement_headline: str
+    evidence: list[Evidence]
+    mechanism: str
+    recommended: list[Formulation]
+    chat_markdown: str
+
+
+class DOEFactor(BaseModel):
+    name: str
+    low: float
+    high: float
+    unit: str = ""
+
+
+class DOERun(BaseModel):
+    run_id: int
+    coded: dict[str, float]
+    natural: dict[str, float]
+
+
+class DOEPlan(BaseModel):
+    design: str  # full_factorial / fractional_factorial / plackett_burman / ccd / lhs
+    factors: list[DOEFactor]
+    runs: list[DOERun]
+    notes: str = ""
+
+
+class OptimizationResult(BaseModel):
+    iterations: int
+    objective: str
+    history: list[float]
+    top_formulations: list[Formulation]
+
+
+class TaskState(str, Enum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
+class TaskStatus(BaseModel):
+    task_id: str
+    kind: str
+    state: TaskState
+    progress: float = 0.0
+    message: str = ""
+    result: dict[str, Any] | None = None

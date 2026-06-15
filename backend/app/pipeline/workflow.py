@@ -1,0 +1,145 @@
+"""End-to-end orchestration: research -> recommend -> DOE -> simulate -> optimize.
+
+This is the glue layer. It maps domain requirements onto the service adapters
+and the DOE/optimizer engines, keeping a single source of truth for which
+formulation levers are tuned per product family.
+"""
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from ..config import get_settings
+from ..domain import doe as doe_engine
+from ..domain import knowledge
+from ..domain.chemistry import validate_formulation
+from ..domain.schemas import (
+    DOEFactor,
+    DOEPlan,
+    Formulation,
+    Ingredient,
+    OptimizationResult,
+    ProductDomain,
+    Requirement,
+    ResearchResult,
+)
+from ..services import literature, llm, predictor
+from ..services.optimizer import BayesianOptimizer, Factor
+from ..services.rag import TfidfStore
+
+# Per-domain optimization levers: (ingredient name, role-fallback, low%, high%)
+# and the objective metric to maximise.
+LEVERS: dict[ProductDomain, list[tuple[str, float, float]]] = {
+    ProductDomain.anticorrosion_coating: [
+        ("Zinc phosphate", 2.0, 14.0),
+        ("Bisphenol-A epoxy (DGEBA)", 28.0, 48.0),
+        ("Polyamide hardener", 8.0, 22.0),
+    ],
+    ProductDomain.degreaser: [
+        ("Nonionic surfactant (C12-14 EO7)", 2.0, 12.0),
+        ("Sodium metasilicate", 2.0, 14.0),
+    ],
+    ProductDomain.surface_treatment: [
+        ("Phosphoric acid", 3.0, 14.0),
+        ("Manganese dihydrogen phosphate", 1.0, 8.0),
+    ],
+}
+
+OBJECTIVE: dict[ProductDomain, str] = {
+    ProductDomain.anticorrosion_coating: "salt_spray_hours",
+    ProductDomain.degreaser: "cleaning_efficiency",
+    ProductDomain.surface_treatment: "salt_spray_hours",
+}
+
+
+def _score_and_validate(form: Formulation) -> Formulation:
+    form.predicted = predictor.predict(form)
+    form.warnings = validate_formulation(form)
+    form.score = predictor.objective_value(form, OBJECTIVE[form.domain])
+    return form
+
+
+def run_research(req: Requirement) -> ResearchResult:
+    evidence = literature.search(req)
+    store = TfidfStore()
+    store.ingest(evidence)
+    grounded = store.query(req.headline(), k=min(5, len(evidence))) or evidence
+
+    recommended = [_score_and_validate(f) for f in knowledge.variant_formulations(req, n=3)]
+    recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
+
+    mechanism, chat = llm.synthesize_research(req, grounded, recommended)
+    return ResearchResult(
+        requirement_headline=req.headline(),
+        evidence=grounded,
+        mechanism=mechanism,
+        recommended=recommended,
+        chat_markdown=chat,
+    )
+
+
+def _levers_for(form: Formulation) -> list[tuple[str, float, float]]:
+    return LEVERS[form.domain]
+
+
+def build_doe(req: Requirement, design: str = "full_factorial") -> DOEPlan:
+    base = knowledge.baseline_formulation(req)
+    factors = [DOEFactor(name=name, low=low, high=high, unit="wt%") for name, low, high in _levers_for(base)]
+    # Cure temperature is a meaningful process factor for thermosets.
+    if req.domain == ProductDomain.anticorrosion_coating:
+        factors.append(DOEFactor(name="cure_temperature_c", low=max(20.0, req.cure_temperature_c - 30), high=req.cure_temperature_c, unit="C"))
+    return doe_engine.build_plan(factors, design=design)
+
+
+def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:
+    """Build a fresh formulation with lever ingredient percentages overridden."""
+    base = knowledge.baseline_formulation(req)
+    ings: list[Ingredient] = []
+    overridden = dict(values)
+    for ing in base.ingredients:
+        new = ing.model_copy(deep=True)
+        if new.name in overridden:
+            new.weight_pct = round(overridden.pop(new.name), 4)
+        ings.append(new)
+    # Re-balance with the solvent component so weights still close to 100.
+    rebalanced = knowledge._balanced(base.name, base.domain, ings, base.rationale)
+    return rebalanced
+
+
+def run_optimization(
+    req: Requirement,
+    iterations: int | None = None,
+    progress_cb: Callable[[float, str], None] | None = None,
+) -> OptimizationResult:
+    settings = get_settings()
+    iterations = iterations or settings.optimize_iterations
+    base = knowledge.baseline_formulation(req)
+    levers = _levers_for(base)
+    factors = [Factor(name=n, low=lo, high=hi) for n, lo, hi in levers]
+    opt = BayesianOptimizer(factors=factors, seed=42)
+    objective = OBJECTIVE[req.domain]
+    history: list[float] = []  # best-so-far convergence curve
+    best_so_far = float("-inf")
+
+    for it in range(iterations):
+        x = opt.suggest()
+        values = {f.name: v for f, v in zip(factors, x)}
+        form = _apply_levers(req, values)
+        score = predictor.objective_value(form, objective)
+        opt.observe(x, score)
+        best_so_far = max(best_so_far, score)
+        history.append(round(best_so_far, 3))
+        if progress_cb:
+            progress_cb((it + 1) / iterations, f"iter {it + 1}/{iterations}: best={best_so_far:.1f}")
+
+    top: list[Formulation] = []
+    for x, score in opt.ranked(settings.top_n_formulas):
+        values = {f.name: v for f, v in zip(factors, x)}
+        form = _score_and_validate(_apply_levers(req, values))
+        form.name = f"Optimized {req.domain.value} (score {score:.1f})"
+        top.append(form)
+    return OptimizationResult(
+        iterations=iterations,
+        objective=objective,
+        history=history,
+        top_formulations=top,
+    )
