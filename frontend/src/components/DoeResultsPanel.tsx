@@ -1,5 +1,47 @@
+import type { ModelInfo } from "../api";
 import { OBJECTIVE_METRIC } from "../api";
 import { useStore } from "../store";
+
+function R2Gauge({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(1, value));
+  const angle = pct * 180;
+  const r = 20;
+  const cx = 28, cy = 28;
+  const toXY = (deg: number) => {
+    const rad = ((deg - 180) * Math.PI) / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  };
+  const start = toXY(0);
+  const end = toXY(angle);
+  const large = angle > 180 ? 1 : 0;
+  const color = pct > 0.85 ? "#34d399" : pct > 0.6 ? "#fbbf24" : "#f87171";
+  return (
+    <svg width="56" height="32" viewBox="0 0 56 36" className="shrink-0">
+      <path d={`M ${toXY(0).x} ${toXY(0).y} A ${r} ${r} 0 0 1 ${toXY(180).x} ${toXY(180).y}`}
+        fill="none" stroke="#1e293b" strokeWidth="5" strokeLinecap="round" />
+      {pct > 0.01 && (
+        <path d={`M ${start.x} ${start.y} A ${r} ${r} 0 ${large} 1 ${end.x} ${end.y}`}
+          fill="none" stroke={color} strokeWidth="5" strokeLinecap="round" />
+      )}
+      <text x={cx} y={cy + 8} textAnchor="middle" fill={color} fontSize="9" fontFamily="monospace">
+        {(value * 100).toFixed(0)}%
+      </text>
+    </svg>
+  );
+}
+
+function ModelCard({ m }: { m: ModelInfo }) {
+  return (
+    <div className="flex items-center gap-2 border border-edge/40 rounded p-1.5 bg-ink/40">
+      <R2Gauge value={m.r2} />
+      <div className="text-[10px] leading-snug">
+        <div className="text-accent2 font-mono">{m.metric}</div>
+        <div className="text-slate-500">{m.backend} · n={m.n_samples}</div>
+        <div className="text-slate-500">RMSE={m.rmse}{m.cv_r2 != null ? ` · cvR²=${m.cv_r2}` : ""}</div>
+      </div>
+    </div>
+  );
+}
 
 const DESIGNS = [
   { value: "full_factorial", label: "全因子" },
@@ -41,16 +83,9 @@ export default function DoeResultsPanel() {
       </div>
 
       {models.length > 0 && (
-        <div className="mb-3 text-[11px] text-slate-300 space-y-1">
+        <div className="mb-3 grid grid-cols-2 gap-1.5">
           {models.map((m) => (
-            <div key={`${m.domain}-${m.metric}`} className="flex flex-wrap gap-2 items-center">
-              <span className="text-accent2 font-mono">{m.metric}</span>
-              <span className="bg-edge px-1.5 py-0.5 rounded">{m.backend}</span>
-              <span>n={m.n_samples}</span>
-              <span>R²={m.r2}</span>
-              {m.cv_r2 != null && <span>cvR²={m.cv_r2}</span>}
-              <span>RMSE={m.rmse}</span>
-            </div>
+            <ModelCard key={`${m.domain}-${m.metric}`} m={m} />
           ))}
         </div>
       )}

@@ -14,44 +14,139 @@ from __future__ import annotations
 from .schemas import Formulation, Ingredient, ProductDomain, Requirement, Substrate
 
 # --- Raw material library ------------------------------------------------
-# Each entry: name -> (role, formula, smiles, molar_mass g/mol)
+# Fields: role, formula, smiles, molar_mass (g/mol),
+#         price_cny_per_kg (engineering estimate),
+#         voc_contrib (mass fraction that becomes VOC, 0-1)
 RAW_MATERIALS: dict[str, dict] = {
     # Resins / film formers (anti-corrosion)
-    "Bisphenol-A epoxy (DGEBA)": {"role": "resin", "formula": "C21H24O4", "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", "molar_mass": 340.41},
-    "Waterborne acrylic emulsion": {"role": "resin", "formula": None, "smiles": "CCOC(=O)C(C)=C", "molar_mass": 100.12},
-    "Polyurethane dispersion": {"role": "resin", "formula": None, "smiles": None, "molar_mass": None},
-    "Zinc-rich epoxy binder": {"role": "resin", "formula": None, "smiles": None, "molar_mass": None},
+    "Bisphenol-A epoxy (DGEBA)": {
+        "role": "resin", "formula": "C21H24O4",
+        "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", "molar_mass": 340.41,
+        "price_cny_per_kg": 28.0, "voc_contrib": 0.0,
+    },
+    "Waterborne acrylic emulsion": {
+        "role": "resin", "formula": None, "smiles": "CCOC(=O)C(C)=C", "molar_mass": 100.12,
+        "price_cny_per_kg": 18.0, "voc_contrib": 0.02,
+    },
+    "Polyurethane dispersion": {
+        "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 32.0, "voc_contrib": 0.02,
+    },
+    "Zinc-rich epoxy binder": {
+        "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 35.0, "voc_contrib": 0.0,
+    },
     # Hardeners / curing agents
-    "Polyamide hardener": {"role": "hardener", "formula": None, "smiles": None, "molar_mass": None},
-    "Isophorone diamine (IPDA)": {"role": "hardener", "formula": "C10H22N2", "smiles": "CC1(C)CC(N)CC(C)(CN)C1", "molar_mass": 170.30},
-    "Blocked isocyanate (IPDI)": {"role": "hardener", "formula": "C12H18N2O2", "smiles": "O=C=NC1CC(C)(C)CC(CN=C=O)C1", "molar_mass": 222.28},
+    "Polyamide hardener": {
+        "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 22.0, "voc_contrib": 0.0,
+    },
+    "Isophorone diamine (IPDA)": {
+        "role": "hardener", "formula": "C10H22N2",
+        "smiles": "CC1(C)CC(N)CC(C)(CN)C1", "molar_mass": 170.30,
+        "price_cny_per_kg": 55.0, "voc_contrib": 0.08,
+    },
+    "Blocked isocyanate (IPDI)": {
+        "role": "hardener", "formula": "C12H18N2O2",
+        "smiles": "O=C=NC1CC(C)(C)CC(CN=C=O)C1", "molar_mass": 222.28,
+        "price_cny_per_kg": 65.0, "voc_contrib": 0.0,
+    },
     # Corrosion inhibitors / passivators
-    "Zinc phosphate": {"role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11},
-    "Zinc molybdate": {"role": "inhibitor", "formula": "ZnMoO4", "smiles": None, "molar_mass": 225.33},
-    "Cerium nitrate": {"role": "inhibitor", "formula": "Ce(NO3)3", "smiles": None, "molar_mass": 326.13},
-    "2-Mercaptobenzothiazole": {"role": "inhibitor", "formula": "C7H5NS2", "smiles": "c1ccc2c(c1)nc(s2)S", "molar_mass": 167.25},
+    "Zinc phosphate": {
+        "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11,
+        "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
+    },
+    "Zinc molybdate": {
+        "role": "inhibitor", "formula": "ZnMoO4", "smiles": None, "molar_mass": 225.33,
+        "price_cny_per_kg": 45.0, "voc_contrib": 0.0,
+    },
+    "Cerium nitrate": {
+        "role": "inhibitor", "formula": "Ce(NO3)3", "smiles": None, "molar_mass": 326.13,
+        "price_cny_per_kg": 120.0, "voc_contrib": 0.0,
+    },
+    "2-Mercaptobenzothiazole": {
+        "role": "inhibitor", "formula": "C7H5NS2",
+        "smiles": "c1ccc2c(c1)nc(s2)S", "molar_mass": 167.25,
+        "price_cny_per_kg": 28.0, "voc_contrib": 0.0,
+    },
     # Pigments / fillers
-    "Titanium dioxide": {"role": "pigment", "formula": "TiO2", "smiles": None, "molar_mass": 79.87},
-    "Talc": {"role": "filler", "formula": "Mg3Si4O10(OH)2", "smiles": None, "molar_mass": 379.27},
-    "Fumed silica": {"role": "filler", "formula": "SiO2", "smiles": None, "molar_mass": 60.08},
+    "Titanium dioxide": {
+        "role": "pigment", "formula": "TiO2", "smiles": None, "molar_mass": 79.87,
+        "price_cny_per_kg": 18.0, "voc_contrib": 0.0,
+    },
+    "Talc": {
+        "role": "filler", "formula": "Mg3Si4O10(OH)2", "smiles": None, "molar_mass": 379.27,
+        "price_cny_per_kg": 3.0, "voc_contrib": 0.0,
+    },
+    "Fumed silica": {
+        "role": "filler", "formula": "SiO2", "smiles": None, "molar_mass": 60.08,
+        "price_cny_per_kg": 30.0, "voc_contrib": 0.0,
+    },
     # Solvents
-    "Xylene": {"role": "solvent", "formula": "C8H10", "smiles": "Cc1ccccc1C", "molar_mass": 106.17},
-    "Deionized water": {"role": "solvent", "formula": "H2O", "smiles": "O", "molar_mass": 18.02},
-    "Butyl glycol": {"role": "solvent", "formula": "C6H14O2", "smiles": "CCCCOCCO", "molar_mass": 118.17},
+    "Xylene": {
+        "role": "solvent", "formula": "C8H10", "smiles": "Cc1ccccc1C", "molar_mass": 106.17,
+        "price_cny_per_kg": 8.0, "voc_contrib": 1.0,
+    },
+    "Deionized water": {
+        "role": "solvent", "formula": "H2O", "smiles": "O", "molar_mass": 18.02,
+        "price_cny_per_kg": 0.01, "voc_contrib": 0.0,
+    },
+    "Butyl glycol": {
+        "role": "solvent", "formula": "C6H14O2", "smiles": "CCCCOCCO", "molar_mass": 118.17,
+        "price_cny_per_kg": 14.0, "voc_contrib": 0.95,
+    },
     # Degreaser actives
-    "Sodium hydroxide": {"role": "builder", "formula": "NaOH", "smiles": None, "molar_mass": 40.00},
-    "Sodium metasilicate": {"role": "builder", "formula": "Na2SiO3", "smiles": None, "molar_mass": 122.06},
-    "Sodium tripolyphosphate": {"role": "builder", "formula": "Na5P3O10", "smiles": None, "molar_mass": 367.86},
-    "Nonionic surfactant (C12-14 EO7)": {"role": "surfactant", "formula": None, "smiles": None, "molar_mass": 600.0},
-    "Sodium gluconate": {"role": "chelant", "formula": "C6H11NaO7", "smiles": None, "molar_mass": 218.14},
-    "D-Limonene": {"role": "solvent", "formula": "C10H16", "smiles": "CC(=C)C1CCC(C)=CC1", "molar_mass": 136.24},
+    "Sodium hydroxide": {
+        "role": "builder", "formula": "NaOH", "smiles": None, "molar_mass": 40.00,
+        "price_cny_per_kg": 3.5, "voc_contrib": 0.0,
+    },
+    "Sodium metasilicate": {
+        "role": "builder", "formula": "Na2SiO3", "smiles": None, "molar_mass": 122.06,
+        "price_cny_per_kg": 5.0, "voc_contrib": 0.0,
+    },
+    "Sodium tripolyphosphate": {
+        "role": "builder", "formula": "Na5P3O10", "smiles": None, "molar_mass": 367.86,
+        "price_cny_per_kg": 7.0, "voc_contrib": 0.0,
+    },
+    "Nonionic surfactant (C12-14 EO7)": {
+        "role": "surfactant", "formula": None, "smiles": None, "molar_mass": 600.0,
+        "price_cny_per_kg": 22.0, "voc_contrib": 0.0,
+    },
+    "Sodium gluconate": {
+        "role": "chelant", "formula": "C6H11NaO7", "smiles": None, "molar_mass": 218.14,
+        "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
+    },
+    "D-Limonene": {
+        "role": "solvent", "formula": "C10H16",
+        "smiles": "CC(=C)C1CCC(C)=CC1", "molar_mass": 136.24,
+        "price_cny_per_kg": 25.0, "voc_contrib": 0.85,
+    },
     # Surface treatment actives
-    "Phosphoric acid": {"role": "active", "formula": "H3PO4", "smiles": "OP(=O)(O)O", "molar_mass": 97.99},
-    "Zinc oxide": {"role": "active", "formula": "ZnO", "smiles": None, "molar_mass": 81.38},
-    "Manganese dihydrogen phosphate": {"role": "active", "formula": "Mn(H2PO4)2", "smiles": None, "molar_mass": 248.94},
-    "Sodium nitrite": {"role": "accelerator", "formula": "NaNO2", "smiles": None, "molar_mass": 69.00},
-    "Hexafluorozirconic acid": {"role": "active", "formula": "H2ZrF6", "smiles": None, "molar_mass": 208.23},
-    "(3-Aminopropyl)triethoxysilane (APTES)": {"role": "active", "formula": "C9H23NO3Si", "smiles": "CCO[Si](OCC)(OCC)CCCN", "molar_mass": 221.37},
+    "Phosphoric acid": {
+        "role": "active", "formula": "H3PO4", "smiles": "OP(=O)(O)O", "molar_mass": 97.99,
+        "price_cny_per_kg": 5.0, "voc_contrib": 0.0,
+    },
+    "Zinc oxide": {
+        "role": "active", "formula": "ZnO", "smiles": None, "molar_mass": 81.38,
+        "price_cny_per_kg": 20.0, "voc_contrib": 0.0,
+    },
+    "Manganese dihydrogen phosphate": {
+        "role": "active", "formula": "Mn(H2PO4)2", "smiles": None, "molar_mass": 248.94,
+        "price_cny_per_kg": 18.0, "voc_contrib": 0.0,
+    },
+    "Sodium nitrite": {
+        "role": "accelerator", "formula": "NaNO2", "smiles": None, "molar_mass": 69.00,
+        "price_cny_per_kg": 6.0, "voc_contrib": 0.0,
+    },
+    "Hexafluorozirconic acid": {
+        "role": "active", "formula": "H2ZrF6", "smiles": None, "molar_mass": 208.23,
+        "price_cny_per_kg": 95.0, "voc_contrib": 0.0,
+    },
+    "(3-Aminopropyl)triethoxysilane (APTES)": {
+        "role": "active", "formula": "C9H23NO3Si",
+        "smiles": "CCO[Si](OCC)(OCC)CCCN", "molar_mass": 221.37,
+        "price_cny_per_kg": 85.0, "voc_contrib": 0.55,
+    },
 }
 
 

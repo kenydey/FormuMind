@@ -19,6 +19,17 @@ def test_meta_lists_domains():
     assert "anticorrosion_coating" in r.json()["domains"]
 
 
+def test_ingredients_endpoint():
+    r = client.get("/api/ingredients")
+    assert r.status_code == 200
+    data = r.json()
+    assert "Xylene" in data
+    assert data["Xylene"]["price_cny_per_kg"] == 8.0
+    assert data["Xylene"]["voc_contrib"] == 1.0
+    assert "Deionized water" in data
+    assert data["Deionized water"]["voc_contrib"] == 0.0
+
+
 def test_research_endpoint():
     payload = {"domain": "degreaser", "substrate": "carbon_steel", "cleaning_efficiency": 95, "ph_target": 12.5}
     r = client.post("/api/research", json=payload)

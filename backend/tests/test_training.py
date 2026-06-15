@@ -59,6 +59,24 @@ def test_persistence_round_trip(tmp_path):
     assert reg2.info(), "models rebuilt from persisted dataset on load"
 
 
+def test_predict_with_std_returns_three_tuple(tmp_path):
+    reg = ModelRegistry(path=str(tmp_path / "exp.json"))
+    reg.add(_coating_records(n=12))
+    form = reconstruct.formulation_from_factors(ProductDomain.anticorrosion_coating, {"Zinc phosphate": 8.0})
+    vec = features.vector(form, {"cure_temperature_c": 80.0})
+    result = reg.predict_with_std(ProductDomain.anticorrosion_coating, "salt_spray_hours", vec)
+    assert result is not None
+    pred, std, n = result
+    assert n == 12
+    assert pred > 0
+    assert std >= 0.0  # non-negative uncertainty
+
+
+def test_predict_with_std_returns_none_for_unknown(tmp_path):
+    reg = ModelRegistry(path=str(tmp_path / "exp.json"))
+    assert reg.predict_with_std(ProductDomain.anticorrosion_coating, "salt_spray_hours", [0.0] * 16) is None
+
+
 def test_predictor_blends_trained_model():
     """Feeding back high measured values must pull predictions above the prior."""
     registry.reset(persist=True)
@@ -73,5 +91,23 @@ def test_predictor_blends_trained_model():
 
         assert blended > baseline  # model evidence moved the prediction up
         assert blended < 4000.0    # but blended, not fully overridden, at n=10
+    finally:
+        registry.reset(persist=True)
+
+
+def test_predictor_predict_full_returns_std():
+    """predict_full should return non-empty predicted_std when trained models exist."""
+    registry.reset(persist=True)
+    try:
+        records = _coating_records(n=10, slope=80.0, intercept=200.0)
+        registry.add(records)
+        form = reconstruct.formulation_from_factors(ProductDomain.anticorrosion_coating, {"Zinc phosphate": 8.0})
+        props, std = predictor.predict_full(form, {"cure_temperature_c": 80.0})
+        assert "salt_spray_hours" in props
+        assert "cost_cny_per_kg" in props
+        assert "voc_gpl" in props
+        assert "sustainability_idx" in props
+        assert "salt_spray_hours" in std
+        assert std["salt_spray_hours"] >= 0.0
     finally:
         registry.reset(persist=True)

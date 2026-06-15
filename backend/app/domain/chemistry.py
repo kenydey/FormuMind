@@ -65,11 +65,13 @@ def _parse_mass(formula: str) -> float:
     return round(stack[0], 4)
 
 
-def validate_formulation(form: Formulation) -> list[str]:
+def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) -> list[str]:
     """Return a list of human-readable warnings about a formulation.
 
     Checks weight-percent closure and recomputes molar masses where a formula
     is available, flagging inconsistencies with the declared value.
+    When ``voc_limit_gpl`` is supplied and the formulation's ``predicted``
+    dict already contains ``voc_gpl``, a VOC-exceedance warning is appended.
     """
     warnings: list[str] = []
     total = form.total_pct()
@@ -87,6 +89,10 @@ def validate_formulation(form: Formulation) -> list[str]:
                     f"{ing.name}: declared M={ing.molar_mass} but formula {ing.formula} gives {computed}."
                 )
             ing.molar_mass = ing.molar_mass or computed
+    if voc_limit_gpl is not None and "voc_gpl" in form.predicted:
+        voc = form.predicted["voc_gpl"]
+        if voc > voc_limit_gpl:
+            warnings.append(f"VOC {voc:.0f} g/L exceeds limit {voc_limit_gpl:.0f} g/L.")
     return warnings
 
 

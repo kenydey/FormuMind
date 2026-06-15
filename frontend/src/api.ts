@@ -23,12 +23,19 @@ export interface Ingredient {
   molar_mass?: number | null;
 }
 
+export interface ObjectiveSpec {
+  metric: string;
+  weight: number;
+  direction: "maximize" | "minimize";
+}
+
 export interface Formulation {
   name: string;
   domain: ProductDomain;
   ingredients: Ingredient[];
   rationale: string;
   predicted: Record<string, number>;
+  predicted_std: Record<string, number>;
   score: number | null;
   warnings: string[];
 }
@@ -52,6 +59,7 @@ export interface ResearchResult {
 export interface OptimizationResult {
   iterations: number;
   objective: string;
+  objectives: ObjectiveSpec[];
   history: number[];
   top_formulations: Formulation[];
 }

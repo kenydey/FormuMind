@@ -25,6 +25,17 @@ class Substrate(str, Enum):
     magnesium_alloy = "magnesium_alloy"
 
 
+class ObjectiveSpec(BaseModel):
+    """One term of a multi-objective optimization goal."""
+
+    metric: str  # e.g. "salt_spray_hours", "cost_cny_per_kg", "voc_gpl"
+    weight: float = Field(default=1.0, ge=0.0, le=1.0)
+    direction: str = Field(default="maximize", pattern="^(maximize|minimize)$")
+    # Normalization bounds — auto-filled by the optimizer if not provided.
+    ref_min: float | None = None
+    ref_max: float | None = None
+
+
 class Requirement(BaseModel):
     """User-supplied R&D requirement captured from the left input panel."""
 
@@ -40,6 +51,8 @@ class Requirement(BaseModel):
     voc_limit_gpl: float = Field(420, ge=0, description="Max VOC (g/L)")
     ph_target: float | None = Field(None, ge=0, le=14)
     notes: str = ""
+    # Multi-objective: when empty the workflow fills in domain defaults.
+    objectives: list[ObjectiveSpec] = Field(default_factory=list)
 
     def headline(self) -> str:
         bits = [self.domain.value, f"on {self.substrate.value}"]
@@ -67,6 +80,7 @@ class Formulation(BaseModel):
     ingredients: list[Ingredient]
     rationale: str = ""
     predicted: dict[str, float] = Field(default_factory=dict)
+    predicted_std: dict[str, float] = Field(default_factory=dict)
     score: float | None = None
     warnings: list[str] = Field(default_factory=list)
 
@@ -115,6 +129,7 @@ class DOEPlan(BaseModel):
 class OptimizationResult(BaseModel):
     iterations: int
     objective: str
+    objectives: list[ObjectiveSpec] = Field(default_factory=list)
     history: list[float]
     top_formulations: list[Formulation]
 

@@ -18,6 +18,7 @@ interface AppState {
   research: ResearchResult | null;
   task: TaskStatus | null;
   leaderboard: Formulation[];
+  optimizationHistory: number[];  // best-so-far convergence curve
   busy: "idle" | "researching" | "optimizing" | "doe" | "training";
   error: string | null;
 
@@ -54,6 +55,7 @@ export const useStore = create<AppState>((set, get) => ({
   research: null,
   task: null,
   leaderboard: [],
+  optimizationHistory: [],
   busy: "idle",
   error: null,
   doePlan: null,
@@ -83,7 +85,10 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const { task_id } = await api.startOptimize(get().requirement, 24);
       const final = await pollTask(task_id, (t) => set({ task: t }));
-      if (final.result) set({ leaderboard: final.result.top_formulations });
+      if (final.result) set({
+        leaderboard: final.result.top_formulations,
+        optimizationHistory: final.result.history,
+      });
     } catch (e) {
       set({ error: String(e) });
     } finally {

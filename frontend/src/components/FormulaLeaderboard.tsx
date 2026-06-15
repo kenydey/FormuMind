@@ -18,11 +18,21 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
       {open && (
         <div className="mt-2 space-y-2">
           <div className="flex flex-wrap gap-1">
-            {Object.entries(form.predicted).map(([k, v]) => (
-              <span key={k} className="text-[10px] bg-edge px-1.5 py-0.5 rounded text-slate-300">
-                {k}: <span className="text-accent2 font-mono">{v}</span>
-              </span>
-            ))}
+            {Object.entries(form.predicted).map(([k, v]) => {
+              const std = form.predicted_std?.[k];
+              const stdHigh = std != null && std > Math.abs(v) * 0.2;
+              return (
+                <span key={k} className="text-[10px] bg-edge px-1.5 py-0.5 rounded text-slate-300">
+                  {k}:{" "}
+                  <span className={`font-mono ${stdHigh ? "text-amber-400" : "text-accent2"}`}>{v}</span>
+                  {std != null && (
+                    <span className={`ml-0.5 font-mono ${stdHigh ? "text-amber-500" : "text-slate-500"}`}>
+                      ±{std.toFixed(std < 1 ? 3 : 1)}
+                    </span>
+                  )}
+                </span>
+              );
+            })}
           </div>
           <table className="w-full text-xs">
             <tbody>

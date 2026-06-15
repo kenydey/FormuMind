@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import EvidencePanel from "./EvidencePanel";
 
 // Minimal markdown-ish renderer: headings, bold, list items, code spans.
 function renderLine(line: string, i: number) {
@@ -38,8 +39,11 @@ export default function ChatPanel() {
       )}
 
       {research && (
-        <div className="flex flex-col gap-0.5">
-          {research.chat_markdown.split("\n").map((l, i) => renderLine(l, i))}
+        <div className="flex flex-col gap-2">
+          <EvidencePanel />
+          <div className="flex flex-col gap-0.5 border-t border-edge/40 pt-2">
+            {research.chat_markdown.split("\n").map((l, i) => renderLine(l, i))}
+          </div>
         </div>
       )}
     </section>

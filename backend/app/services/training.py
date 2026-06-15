@@ -39,6 +39,7 @@ class _RidgeModel:
         self._std: np.ndarray
         self._w: np.ndarray
         self._b: float = 0.0
+        self._rmse: float = 0.0  # training RMSE used as constant uncertainty estimate
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         self._mean = X.mean(axis=0)
@@ -50,10 +51,15 @@ class _RidgeModel:
         yc = y - self._b
         a = Xs.T @ Xs + self.alpha * np.eye(n_features)
         self._w = np.linalg.solve(a, Xs.T @ yc)
+        residuals = y - self.predict(X)
+        self._rmse = float(np.sqrt(np.mean(residuals ** 2)))
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         Xs = (X - self._mean) / self._std
         return Xs @ self._w + self._b
+
+    def predict_std(self, X: np.ndarray) -> float:
+        return self._rmse
 
 
 def _make_regressor():
@@ -72,6 +78,10 @@ def _make_regressor():
 
             def predict(self, X):
                 return self._m.predict(X)
+
+            def predict_std(self, X) -> float:
+                tree_preds = np.array([t.predict(X)[0] for t in self._m.estimators_])
+                return float(np.std(tree_preds))
 
         return _SkModel(), "sklearn-rf"
     except Exception:
@@ -204,6 +214,22 @@ class ModelRegistry:
                 return None
             arr = np.array([feature_vec], dtype=float)
             return float(trained.model.predict(arr)[0]), trained.info.n_samples
+
+    def predict_with_std(
+        self, domain: ProductDomain, metric: str, feature_vec: list[float]
+    ) -> tuple[float, float, int] | None:
+        """Return (prediction, std, n_samples) for a trained metric, else None.
+
+        std is the ensemble std for sklearn-RF; training RMSE for numpy-ridge.
+        """
+        with self._lock:
+            trained = self._models.get((domain, metric))
+            if trained is None:
+                return None
+            arr = np.array([feature_vec], dtype=float)
+            pred = float(trained.model.predict(arr)[0])
+            std = float(trained.model.predict_std(arr))
+            return pred, std, trained.info.n_samples
 
     def info(self) -> list[ModelInfo]:
         with self._lock:
