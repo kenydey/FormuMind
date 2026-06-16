@@ -87,3 +87,167 @@ class BayesianOptimizer:
     def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
         order = np.argsort(self._y)[::-1][:top_n]
         return [(self._X[i], self._y[i]) for i in order]
+
+    @property
+    def engine(self) -> str:
+        return "numpy-ucb"
+
+
+# ── Optional real-engine adapters ────────────────────────────────────────────
+# Both expose the same suggest()/observe()/ranked()/best interface as
+# BayesianOptimizer, so the workflow can swap them in transparently. Each is
+# gated behind an availability probe; build_optimizer() picks the best one
+# installed and silently falls back to the numpy optimizer otherwise.
+
+
+def _optuna_available() -> bool:
+    try:
+        import optuna  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _summit_available() -> bool:
+    try:
+        import summit  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+@dataclass
+class OptunaOptimizer:
+    """Optuna ask/tell optimizer (TPE sampler) over the scalar objective.
+
+    A pure-CPU, pip-installable upgrade over the random-UCB search: the TPE
+    sampler models the objective and concentrates sampling in promising
+    regions. Maximises the same aggregated score the workflow already computes,
+    so it is a drop-in replacement.
+    """
+
+    factors: list[Factor]
+    seed: int = 0
+    _X: list[list[float]] = field(default_factory=list)
+    _y: list[float] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        import optuna
+
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        self._study = optuna.create_study(
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=self.seed),
+        )
+        self._pending: dict[tuple, object] = {}
+
+    @staticmethod
+    def _key(x: list[float]) -> tuple:
+        return tuple(round(float(v), 6) for v in x)
+
+    def suggest(self, n_candidates: int = 64, kappa: float = 1.5) -> list[float]:
+        trial = self._study.ask()
+        x = [trial.suggest_float(f.name, f.low, f.high) for f in self.factors]
+        self._pending[self._key(x)] = trial
+        return x
+
+    def observe(self, x: list[float], y: float) -> None:
+        trial = self._pending.pop(self._key(x), None)
+        if trial is not None:
+            self._study.tell(trial, float(y))
+        self._X.append(list(x))
+        self._y.append(float(y))
+
+    @property
+    def best(self) -> tuple[list[float], float] | None:
+        if not self._y:
+            return None
+        i = int(np.argmax(self._y))
+        return self._X[i], self._y[i]
+
+    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
+        order = np.argsort(self._y)[::-1][:top_n]
+        return [(self._X[i], self._y[i]) for i in order]
+
+    @property
+    def engine(self) -> str:
+        return "optuna-tpe"
+
+
+@dataclass
+class SummitOptimizer:
+    """Summit single-objective Bayesian optimizer (SOBO) adapter.
+
+    Wraps Summit's domain/strategy API behind the same sequential
+    suggest/observe interface. Best-effort: any API/version mismatch raises in
+    __post_init__ so build_optimizer() can fall back to a lighter engine.
+    """
+
+    factors: list[Factor]
+    seed: int = 0
+    _X: list[list[float]] = field(default_factory=list)
+    _y: list[float] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        from summit.domain import ContinuousVariable, Domain
+        from summit.strategies import SOBO
+        from summit.utils.dataset import DataSet
+
+        self._DataSet = DataSet
+        domain = Domain()
+        for f in self.factors:
+            domain += ContinuousVariable(name=f.name, description=f.name, bounds=[f.low, f.high])
+        domain += ContinuousVariable(
+            name="objective", description="aggregated score", bounds=[0.0, 1e6], is_objective=True, maximize=True
+        )
+        self._domain = domain
+        self._strategy = SOBO(domain)
+        self._prev = None  # previous experiments DataSet fed back to the strategy
+
+    def suggest(self, n_candidates: int = 64, kappa: float = 1.5) -> list[float]:
+        suggestion = self._strategy.suggest_experiments(1, prev_res=self._prev)
+        self._last = suggestion
+        return [float(suggestion[f.name].iloc[0]) for f in self.factors]
+
+    def observe(self, x: list[float], y: float) -> None:
+        ds = self._last.copy()
+        ds["objective", "DATA"] = float(y)
+        self._prev = ds
+        self._X.append(list(x))
+        self._y.append(float(y))
+
+    @property
+    def best(self) -> tuple[list[float], float] | None:
+        if not self._y:
+            return None
+        i = int(np.argmax(self._y))
+        return self._X[i], self._y[i]
+
+    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
+        order = np.argsort(self._y)[::-1][:top_n]
+        return [(self._X[i], self._y[i]) for i in order]
+
+    @property
+    def engine(self) -> str:
+        return "summit-sobo"
+
+
+def build_optimizer(factors: list[Factor], seed: int = 0):
+    """Return the best available optimizer, falling back to the numpy engine.
+
+    Priority: Summit (heavy extra) > Optuna (optimize extra) > numpy UCB.
+    Construction-time failures degrade gracefully to the next tier.
+    """
+    if _summit_available():
+        try:
+            return SummitOptimizer(factors=factors, seed=seed)
+        except Exception:
+            pass
+    if _optuna_available():
+        try:
+            return OptunaOptimizer(factors=factors, seed=seed)
+        except Exception:
+            pass
+    return BayesianOptimizer(factors=factors, seed=seed)

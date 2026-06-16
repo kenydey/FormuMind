@@ -24,10 +24,11 @@ optimization improve as real data accumulates.
 ## Documentation
 
 New here? Start with the **5-minute quick-start** (with screenshots), then dive
-into the full guide for the API, configuration, and every v0.2 feature:
+into the full guide for the API, configuration, and every v0.3 feature:
 
 - 🚀 Quick start — [English](docs/QUICKSTART.md) · [中文](docs/快速入门.md)
-- 📗 User guide — [English](docs/USER_GUIDE.md) · [中文](docs/使用指南.md)
+- 📗 User Guide (English) — [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+- 📘 使用指南（中文）— [docs/使用指南.md](docs/使用指南.md)
 
 ## Architecture
 
@@ -51,11 +52,17 @@ toolchain required — and "lights up" the real engine when it is installed:
 
 | Capability | Real engine (optional) | Built-in fallback |
 |------------|------------------------|-------------------|
-| Research / chat | Anthropic Claude (`anthropic`) | rule-based synthesis over the knowledge base |
-| Patent/literature | `patent_client`, `paper-qa` | curated seed corpus per domain |
+| Research / chat | 9 LLM providers — Claude, OpenAI, Gemini, Grok, Meta (Groq), DeepSeek, Qwen, Kimi, MiniMax | rule-based synthesis over the knowledge base |
+| Patent search | `patent_client` | curated seed corpus per domain |
+| Literature search | `arxiv`, `semanticscholar` | (offline returns no extra hits) |
+| Internet search | `duckduckgo-search` | (offline returns no extra hits) |
+| File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
 | RAG store | OpenNotebook pipeline | in-memory TF-IDF index |
-| Property prediction | RDKit + DeepChem/ChemBERTa | transparent empirical surrogate |
-| Optimization | Summit (Bayesian/TSEMO) | numpy UCB Bayesian optimizer |
+| Grounded Q&A | ChemCrow agent (chemistry questions) · paper-qa (semantic synthesis) | TF-IDF re-rank → configured LLM → snippet |
+| Property prediction | RDKit + DeepChem/ChemBERTa · MoLFormer (reserved) | transparent empirical surrogate |
+| VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
+| Compound data | PubChemPy (SMILES / molar mass) | hand-curated raw-material library |
+| Optimization | Summit (Bayesian/TSEMO) → Optuna (NSGA-II/TPE, CPU) | numpy UCB Bayesian optimizer |
 | Stoichiometry | ChemFormula / RDKit | self-contained formula parser |
 | Cure/MD simulation | HTPolyNet · LUNAR · LAMMPS (Docker) | analytic cure/interface approximation |
 
@@ -92,7 +99,11 @@ docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/research` | retrieve prior art + RAG + recommended formulations |
+| POST | `/api/search` | multi-source retrieval (patents / literature / internet) → merged, de-duped evidence |
+| POST | `/api/ingest` | upload a local file (PDF/DOCX/XLSX/PPTX/HTML/image…) → extracted evidence chunks |
+| POST | `/api/chat` | Q&A grounded in the loaded sources (RAG re-rank → LLM answer with citations) |
+| GET/POST | `/api/settings` | read / update the active LLM provider, model, key, base URL; `POST /api/settings/test` checks the connection |
+| POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
 | POST | `/api/doe?design=…` | generate a DOE plan (`full_factorial`, `fractional_factorial`, `plackett_burman`, `ccd`, `lhs`) |
 | GET | `/api/doe/{plan_id}/export?format=csv\|xlsx` | export a generated plan as a fill-in worksheet (blank `measured_*` columns) |
 | POST | `/api/optimize` | start the async **multi-objective** closed-loop optimizer → returns `task_id` |
@@ -137,12 +148,28 @@ Install the optional extras on a capable machine and the adapters switch over
 automatically — no code change:
 
 ```bash
-pip install -e ".[llm]"      # Anthropic Claude
-pip install -e ".[science]"  # scipy, scikit-learn, RDKit, ChemFormula
-pip install -e ".[intel]"    # patent_client, paper-qa, chemcrow
-pip install -e ".[heavy]"    # torch, deepchem, transformers, summit, ase
-pip install -e ".[export]"   # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
+pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
+pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
+pip install -e ".[optimize]"     # optuna (CPU multi-objective optimizer, NSGA-II/TPE)
+pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
+pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
+pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
+pip install -e ".[export]"       # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
+
+The optimizer auto-selects the best engine installed (**Summit** → **Optuna** →
+the built-in numpy optimizer); grounded Q&A routes chemistry questions to
+**ChemCrow** and otherwise uses **paper-qa** semantic synthesis, both falling
+back to the TF-IDF + LLM path. Set `FORMUMIND_ENRICH_COMPOUNDS=true` to let
+**PubChemPy** backfill missing SMILES/molar-mass on startup. None of these are
+required — each lights up automatically when its library is present.
+
+The seven OpenAI-compatible providers (Grok, Meta via Groq, DeepSeek, Qwen,
+Kimi, MiniMax — plus OpenAI itself) all run through the single `openai` SDK
+with a per-provider `base_url`; Claude uses `anthropic` and Gemini uses
+`google-genai`. Pick the active provider/model in the in-app **Settings** dialog
+or via the `FORMUMIND_LLM_PROVIDER` / `FORMUMIND_*_API_KEY` environment variables
+(see `.env.example`).
 
 > The performance numbers produced offline are engineering-reasonable estimates
 > for screening, not laboratory-validated specifications.

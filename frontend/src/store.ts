@@ -4,14 +4,18 @@ import {
   api,
   OBJECTIVE_METRIC,
   pollTask,
+  type ChatMessage,
   type DOEPlan,
+  type Evidence,
   type ExperimentRecord,
   type Formulation,
+  type LLMConfig,
   type ModelInfo,
   type ObjectiveSpec,
   type ProductDomain,
   type Requirement,
   type ResearchResult,
+  type SearchSourceType,
   type TaskStatus,
 } from "./api";
 
@@ -65,6 +69,19 @@ interface AppState {
   history: SessionSnapshot[];
   historyOpen: boolean;
 
+  // v0.3 source + chat
+  searchQuery: string;
+  sourceTypes: SearchSourceType[];
+  sources: Evidence[];
+  chatHistory: ChatMessage[];
+  searchBusy: boolean;
+  chatBusy: boolean;
+  // Modal 可见性
+  openModal: string | null;   // "requirements" | "recommend" | "doe" | "optimize" | null
+  // Settings
+  llmConfig: LLMConfig;
+  settingsOpen: boolean;
+
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
   setObjectives: (objectives: ObjectiveSpec[]) => void;
@@ -79,6 +96,19 @@ interface AppState {
   toggleHistory: () => void;
   restoreSnapshot: (snap: SessionSnapshot) => void;
   clearHistory: () => void;
+
+  // v0.3 actions
+  setSearchQuery: (q: string) => void;
+  setSourceTypes: (types: SearchSourceType[]) => void;
+  addSources: (evidence: Evidence[]) => void;
+  removeSource: (id: string) => void;
+  clearSources: () => void;
+  searchSources: () => Promise<void>;
+  uploadFile: (file: File) => Promise<void>;
+  sendChat: (question: string) => Promise<void>;
+  setOpenModal: (name: string | null) => void;
+  setLlmConfig: (config: Partial<LLMConfig>) => void;
+  toggleSettings: () => void;
 }
 
 const defaultRequirement: Requirement = {
@@ -136,6 +166,17 @@ export const useStore = create<AppState>()(
       trainMessage: "",
       history: [],
       historyOpen: false,
+
+      // v0.3 initial state
+      searchQuery: "",
+      sourceTypes: ["patents", "literature"] as SearchSourceType[],
+      sources: [],
+      chatHistory: [],
+      searchBusy: false,
+      chatBusy: false,
+      openModal: null,
+      llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
+      settingsOpen: false,
 
       setField: (key, value) =>
         set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
@@ -290,11 +331,98 @@ export const useStore = create<AppState>()(
       },
 
       clearHistory: () => set({ history: [] }),
+
+      // v0.3 actions
+      setSearchQuery: (q) => set({ searchQuery: q }),
+
+      setSourceTypes: (types) => set({ sourceTypes: types }),
+
+      addSources: (evidence) =>
+        set((s) => ({
+          sources: [
+            ...s.sources,
+            ...evidence.filter(
+              (e) => !s.sources.some((x) => (x.identifier || x.title) === (e.identifier || e.title))
+            ),
+          ],
+        })),
+
+      removeSource: (id) =>
+        set((s) => ({ sources: s.sources.filter((e) => (e.identifier || e.title) !== id) })),
+
+      clearSources: () => set({ sources: [], chatHistory: [] }),
+
+      searchSources: async () => {
+        const { searchQuery, sourceTypes, requirement } = get();
+        set({ searchBusy: true, error: null });
+        try {
+          const res = await api.search({
+            query: searchQuery,
+            source_types: sourceTypes,
+            requirement,
+            limit_per_source: 5,
+          });
+          get().addSources(res.evidence);
+        } catch (e) {
+          set({ error: String(e) });
+        } finally {
+          set({ searchBusy: false });
+        }
+      },
+
+      uploadFile: async (file) => {
+        set({ searchBusy: true, error: null });
+        try {
+          const res = await api.ingest(file);
+          get().addSources(res.evidence);
+        } catch (e) {
+          set({ error: `文件上传失败：${e instanceof Error ? e.message : String(e)}` });
+        } finally {
+          set({ searchBusy: false });
+        }
+      },
+
+      sendChat: async (question) => {
+        const { sources, requirement, chatHistory } = get();
+        set({
+          chatBusy: true,
+          chatHistory: [...chatHistory, { role: "user", content: question }],
+        });
+        try {
+          const res = await api.chat({
+            question,
+            sources,
+            domain: requirement.domain,
+          });
+          set((s) => ({
+            chatHistory: [
+              ...s.chatHistory,
+              { role: "assistant", content: res.answer, citations: res.citations },
+            ],
+          }));
+        } catch (e) {
+          set((s) => ({
+            chatHistory: [
+              ...s.chatHistory,
+              { role: "assistant", content: `错误：${String(e)}` },
+            ],
+          }));
+        } finally {
+          set({ chatBusy: false });
+        }
+      },
+
+      setOpenModal: (name) => set({ openModal: name }),
+
+      setLlmConfig: (config) =>
+        set((s) => ({ llmConfig: { ...s.llmConfig, ...config } })),
+
+      toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
     }),
     {
       name: "formumind-history",
-      // Only persist the history list; all other state is transient.
-      partialize: (state) => ({ history: state.history }),
+      // Persist history list and llmConfig.
+      partialize: (state) => ({ history: state.history, llmConfig: state.llmConfig }),
     }
   )
 );

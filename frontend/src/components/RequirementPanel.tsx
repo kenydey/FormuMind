@@ -205,14 +205,16 @@ function ObjectivesEditor({
   );
 }
 
-export default function RequirementPanel() {
+export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
   const { requirement, setField, setDomain, setObjectives, runResearch, runOptimize, busy } =
     useStore();
   const domain = requirement.domain;
 
   return (
-    <aside className="glass rounded-xl p-4 flex flex-col gap-1 overflow-y-auto">
-      <h2 className="text-sm uppercase tracking-widest text-accent2 mb-2">研发需求 · Requirements</h2>
+    <aside className={embedded ? "flex flex-col gap-1" : "glass rounded-xl p-4 flex flex-col gap-1 overflow-y-auto"}>
+      {!embedded && (
+        <h2 className="text-sm uppercase tracking-widest text-accent2 mb-2">研发需求 · Requirements</h2>
+      )}
 
       {/* Domain */}
       <label className="block mb-2">
@@ -306,23 +308,25 @@ export default function RequirementPanel() {
         </label>
       )}
 
-      {/* Action buttons */}
-      <div className="mt-auto pt-3 flex flex-col gap-2">
-        <button
-          disabled={busy !== "idle"}
-          onClick={runResearch}
-          className="bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
-        >
-          {busy === "researching" ? "检索中…" : "① 检索专利并推荐配方"}
-        </button>
-        <button
-          disabled={busy !== "idle"}
-          onClick={runOptimize}
-          className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-2 text-sm disabled:opacity-40"
-        >
-          {busy === "optimizing" ? "寻优中…" : "② 运行 DOE 寻优闭环"}
-        </button>
-      </div>
+      {/* Action buttons (hidden when embedded inside the actions modal) */}
+      {!embedded && (
+        <div className="mt-auto pt-3 flex flex-col gap-2">
+          <button
+            disabled={busy !== "idle"}
+            onClick={runResearch}
+            className="bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
+          >
+            {busy === "researching" ? "检索中…" : "① 检索专利并推荐配方"}
+          </button>
+          <button
+            disabled={busy !== "idle"}
+            onClick={runOptimize}
+            className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-2 text-sm disabled:opacity-40"
+          >
+            {busy === "optimizing" ? "寻优中…" : "② 运行 DOE 寻优闭环"}
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

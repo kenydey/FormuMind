@@ -40,6 +40,53 @@ def _molecular_features(form: Formulation) -> dict[str, float]:
     return {"mean_logp": weighted_logp / total} if total else {}
 
 
+def _molformer_available() -> bool:
+    """Reserved hook for IBM MoLFormer embeddings (heavy GPU path)."""
+    return False
+
+
+def _molformer_features(form: Formulation) -> dict[str, float]:  # pragma: no cover - reserved
+    """Reserved: MoLFormer SMILES-embedding features for richer prediction.
+
+    Intentionally a no-op for now. When wired up, this would load the IBM
+    MoLFormer checkpoint (``transformers``, GPU recommended; declared in the
+    ``heavy`` extra) and return pooled-embedding descriptors per formulation to
+    augment ``_molecular_features``. Returns ``{}`` until the engine is enabled,
+    so the empirical surrogate is unaffected.
+    """
+    if not _molformer_available():
+        return {}
+    # TODO: heavy GPU path — load MoLFormer, embed ingredient SMILES, pool.
+    return {}
+
+
+def _mixture_density_kgL(form: Formulation) -> float:
+    """Mass-weighted liquid density (kg/L) for VOC concentration.
+
+    Uses Caleb Bell's ``thermo`` when installed to look up component densities
+    by name; otherwise returns the nominal 1.3 kg/L assumption used previously,
+    so offline behaviour is unchanged.
+    """
+    try:  # pragma: no cover - requires thermo
+        from thermo import Chemical
+
+        inv_rho, total = 0.0, 0.0
+        for ing in form.ingredients:
+            try:
+                rho = Chemical(ing.name).rho  # kg/m^3 at ambient
+            except Exception:
+                rho = None
+            if rho and rho > 0:
+                frac = ing.weight_pct / 100.0
+                inv_rho += frac / (rho / 1000.0)  # kg/L
+                total += frac
+        if total > 0.5 and inv_rho > 0:
+            return float(total / inv_rho)
+    except Exception:
+        pass
+    return 1.3
+
+
 def _cost_and_sustainability(form: Formulation, voc_limit: float = 420.0) -> dict[str, float]:
     """Compute cost (CNY/kg), VOC (g/L, density ~1.3), sustainability index."""
     cost = 0.0
@@ -51,8 +98,10 @@ def _cost_and_sustainability(form: Formulation, voc_limit: float = 420.0) -> dic
         frac = ing.weight_pct / 100.0
         cost += price * frac
         voc_mass_frac += voc_c * frac
-    assumed_density_kgL = 1.3
-    voc_gpl = round(voc_mass_frac * assumed_density_kgL * 1000, 1)
+    # Density grounds the mass-fraction VOC into g/L. thermo computes a real
+    # mass-weighted density when installed; otherwise the 1.3 kg/L nominal.
+    density_kgL = _mixture_density_kgL(form)
+    voc_gpl = round(voc_mass_frac * density_kgL * 1000, 1)
     # Sustainability index (0=bad, 100=best): penalise high VOC and high cost.
     voc_penalty = min(50.0, (voc_gpl / max(voc_limit, 1)) * 50.0)
     cost_penalty = min(50.0, (cost / 50.0) * 50.0)  # 50 CNY/kg = full penalty

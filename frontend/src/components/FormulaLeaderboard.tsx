@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import type { Formulation } from "../api";
 import { copyFormulaJson, downloadFormulaCsv, exportFormulaToPdf } from "../utils/export";
+import MolViewer from "./MolViewer";
 
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
@@ -98,6 +99,7 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
+          <MolViewer entries={form.ingredients.map((i) => ({ name: i.name, smiles: i.smiles }))} />
         </div>
       )}
     </div>

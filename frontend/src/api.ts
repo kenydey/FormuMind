@@ -175,7 +175,97 @@ export const api = {
     }
     return res.json();
   },
+
+  search: (req: SearchRequest) =>
+    post<SearchResponse>("/api/search", req),
+
+  ingest: async (file: File): Promise<IngestResponse> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/ingest", { method: "POST", body: fd });
+    if (!res.ok) throw new Error(`/api/ingest -> ${res.status}`);
+    return res.json();
+  },
+
+  chat: (req: ChatRequest) => post<ChatResponse>("/api/chat", req),
+
+  getSettings: () => get<LLMSettingsResponse>("/api/settings"),
+
+  postSettings: (update: Partial<LLMConfig> & { api_key?: string }) =>
+    post<{ ok: boolean; message?: string }>("/api/settings", update),
+
+  testConnection: () =>
+    post<{ ok: boolean; provider: string; model: string; message: string }>(
+      "/api/settings/test", {}
+    ),
 };
+
+// ── v0.3 新增类型 ────────────────────────────────────────────────────────────
+
+export type SearchSourceType = "patents" | "literature" | "internet" | "local";
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  citations?: Evidence[];
+}
+
+export interface LLMModelOption {
+  id: string;
+  label: string;
+  recommended?: boolean;
+}
+
+export interface LLMProviderInfo {
+  id: string;
+  label: string;
+  base_url?: string;
+  models: LLMModelOption[];
+}
+
+export interface LLMConfig {
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+}
+
+export interface SearchRequest {
+  query?: string;
+  source_types: SearchSourceType[];
+  requirement?: Requirement;
+  limit_per_source?: number;
+}
+
+export interface SearchResponse {
+  evidence: Evidence[];
+  total: number;
+}
+
+export interface IngestResponse {
+  filename: string;
+  evidence: Evidence[];
+  total: number;
+}
+
+export interface ChatRequest {
+  question: string;
+  sources: Evidence[];
+  domain?: string;
+}
+
+export interface ChatResponse {
+  answer: string;
+  citations: Evidence[];
+}
+
+export interface LLMSettingsResponse {
+  provider: string;
+  model: string;
+  key_set: boolean;
+  base_url?: string;
+  providers: LLMProviderInfo[];
+}
 
 // Poll a task until it terminates, invoking onUpdate on each tick.
 export async function pollTask(

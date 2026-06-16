@@ -25,7 +25,7 @@ from ..domain.schemas import (
     ResearchResult,
 )
 from ..services import literature, llm, predictor
-from ..services.optimizer import BayesianOptimizer, Factor
+from ..services.optimizer import Factor, build_optimizer
 from ..services.rag import TfidfStore
 from . import reconstruct
 
@@ -95,8 +95,19 @@ def _score_and_validate(
     return form
 
 
-def run_research(req: Requirement) -> ResearchResult:
-    evidence = literature.search(req)
+def run_research(req: Requirement, pre_sources: list | None = None) -> ResearchResult:
+    """Run the research pipeline.
+
+    If ``pre_sources`` is provided (non-empty list of Evidence), internal
+    patent/literature retrieval is skipped and the supplied evidence is used
+    directly — this allows the /api/search and /api/ingest endpoints to feed
+    evidence into the pipeline without a redundant network round-trip.
+    """
+    from ..domain.schemas import Evidence as _Evidence
+    if pre_sources:
+        evidence: list[_Evidence] = list(pre_sources)
+    else:
+        evidence = literature.search(req)
     store = TfidfStore()
     store.ingest(evidence)
     grounded = store.query(req.headline(), k=min(5, len(evidence))) or evidence
@@ -168,7 +179,7 @@ def run_optimization(
     base = knowledge.baseline_formulation(req)
     levers = _levers_for(base)
     factors = [Factor(name=n, low=lo, high=hi) for n, lo, hi in levers]
-    opt = BayesianOptimizer(factors=factors, seed=42)
+    opt = build_optimizer(factors=factors, seed=42)
     objective = OBJECTIVE[req.domain]
     objectives = req.objectives or default_objectives(req.domain)
     process = process_for(req)
@@ -208,4 +219,5 @@ def run_optimization(
         objectives=objectives,
         history=history,
         top_formulations=top,
+        engine=getattr(opt, "engine", "numpy-ucb"),
     )

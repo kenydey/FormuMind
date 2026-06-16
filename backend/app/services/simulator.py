@@ -34,6 +34,11 @@ class SimulationReport:
 
 
 def _heavy_available() -> bool:
+    # Reserved future hook for reactive-MD cure simulation: HTPolyNet builds the
+    # thermoset crosslink network and LUNAR handles LAMMPS pre/post-processing
+    # (force-field assignment, fix bond/react topology, Tg / free-volume). Both
+    # run via the Docker ``heavy`` profile, so this module only probes for ASE as
+    # a lightweight proxy and otherwise returns the analytic approximation.
     try:  # pragma: no cover - heavy deps
         import ase  # noqa: F401
 
