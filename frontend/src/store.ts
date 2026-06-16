@@ -8,11 +8,30 @@ import {
   type ExperimentRecord,
   type Formulation,
   type ModelInfo,
+  type ObjectiveSpec,
   type ProductDomain,
   type Requirement,
   type ResearchResult,
   type TaskStatus,
 } from "./api";
+
+export const DOMAIN_OBJECTIVES: Record<ProductDomain, ObjectiveSpec[]> = {
+  anticorrosion_coating: [
+    { metric: "salt_spray_hours", weight: 0.5, direction: "maximize" },
+    { metric: "cost_cny_per_kg", weight: 0.25, direction: "minimize" },
+    { metric: "sustainability_idx", weight: 0.25, direction: "maximize" },
+  ],
+  degreaser: [
+    { metric: "cleaning_efficiency", weight: 0.5, direction: "maximize" },
+    { metric: "cost_cny_per_kg", weight: 0.3, direction: "minimize" },
+    { metric: "voc_gpl", weight: 0.2, direction: "minimize" },
+  ],
+  surface_treatment: [
+    { metric: "salt_spray_hours", weight: 0.5, direction: "maximize" },
+    { metric: "coating_weight_gsm", weight: 0.2, direction: "maximize" },
+    { metric: "cost_cny_per_kg", weight: 0.3, direction: "minimize" },
+  ],
+};
 
 export interface SessionSnapshot {
   id: string;
@@ -47,6 +66,7 @@ interface AppState {
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
+  setObjectives: (objectives: ObjectiveSpec[]) => void;
   runResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
   generateDoe: (design: string) => Promise<void>;
@@ -70,6 +90,7 @@ const defaultRequirement: Requirement = {
   voc_limit_gpl: 420,
   ph_target: null,
   notes: "",
+  objectives: [...DOMAIN_OBJECTIVES.anticorrosion_coating],
 };
 
 const MAX_HISTORY = 20;
@@ -117,7 +138,17 @@ export const useStore = create<AppState>()(
       setField: (key, value) =>
         set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
 
-      setDomain: (d) => set((s) => ({ requirement: { ...s.requirement, domain: d } })),
+      setDomain: (d) =>
+        set((s) => ({
+          requirement: {
+            ...s.requirement,
+            domain: d,
+            objectives: [...DOMAIN_OBJECTIVES[d]],
+          },
+        })),
+
+      setObjectives: (objectives) =>
+        set((s) => ({ requirement: { ...s.requirement, objectives } })),
 
       runResearch: async () => {
         set({ busy: "researching", error: null });
