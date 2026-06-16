@@ -54,3 +54,15 @@ class TfidfStore:
             scored.append((score, ev))
         scored.sort(key=lambda s: s[0], reverse=True)
         return [ev for score, ev in scored[:k] if score > 0] or self.docs[:k]
+
+
+def build_store() -> TfidfStore:
+    """Return the retrieval store used to re-rank evidence for grounded Q&A.
+
+    The in-memory TF-IDF index is the reliable default and the offline
+    fallback. Semantic synthesis (paper-qa) and the chemistry agent (ChemCrow)
+    are layered on top in ``llm.answer_question`` rather than here, because they
+    are end-to-end answer engines, not drop-in re-rankers. Keeping retrieval and
+    synthesis separate lets each tier degrade independently.
+    """
+    return TfidfStore()

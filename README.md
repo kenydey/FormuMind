@@ -58,8 +58,11 @@ toolchain required — and "lights up" the real engine when it is installed:
 | Internet search | `duckduckgo-search` | (offline returns no extra hits) |
 | File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
 | RAG store | OpenNotebook pipeline | in-memory TF-IDF index |
-| Property prediction | RDKit + DeepChem/ChemBERTa | transparent empirical surrogate |
-| Optimization | Summit (Bayesian/TSEMO) | numpy UCB Bayesian optimizer |
+| Grounded Q&A | ChemCrow agent (chemistry questions) · paper-qa (semantic synthesis) | TF-IDF re-rank → configured LLM → snippet |
+| Property prediction | RDKit + DeepChem/ChemBERTa · MoLFormer (reserved) | transparent empirical surrogate |
+| VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
+| Compound data | PubChemPy (SMILES / molar mass) | hand-curated raw-material library |
+| Optimization | Summit (Bayesian/TSEMO) → Optuna (NSGA-II/TPE, CPU) | numpy UCB Bayesian optimizer |
 | Stoichiometry | ChemFormula / RDKit | self-contained formula parser |
 | Cure/MD simulation | HTPolyNet · LUNAR · LAMMPS (Docker) | analytic cure/interface approximation |
 
@@ -146,12 +149,20 @@ automatically — no code change:
 
 ```bash
 pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
-pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula
-pip install -e ".[intel]"        # patent_client, paper-qa, arxiv, semanticscholar, duckduckgo-search
+pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
+pip install -e ".[optimize]"     # optuna (CPU multi-objective optimizer, NSGA-II/TPE)
+pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
-pip install -e ".[heavy]"        # torch, deepchem, transformers, summit, ase
+pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
 pip install -e ".[export]"       # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
+
+The optimizer auto-selects the best engine installed (**Summit** → **Optuna** →
+the built-in numpy optimizer); grounded Q&A routes chemistry questions to
+**ChemCrow** and otherwise uses **paper-qa** semantic synthesis, both falling
+back to the TF-IDF + LLM path. Set `FORMUMIND_ENRICH_COMPOUNDS=true` to let
+**PubChemPy** backfill missing SMILES/molar-mass on startup. None of these are
+required — each lights up automatically when its library is present.
 
 The seven OpenAI-compatible providers (Grok, Meta via Groq, DeepSeek, Qwen,
 Kimi, MiniMax — plus OpenAI itself) all run through the single `openai` SDK

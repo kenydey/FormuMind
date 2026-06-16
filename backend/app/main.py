@@ -5,6 +5,8 @@ CORS for the Vite frontend.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -14,11 +16,27 @@ from .config import get_settings
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Optionally enrich the raw-material library via PubChem (opt-in, best-effort)."""
+    if settings.enrich_compounds:
+        try:  # pragma: no cover - opt-in network path
+            from .domain.knowledge import RAW_MATERIALS
+            from .services.compounds import enrich_materials
+
+            enrich_materials(RAW_MATERIALS)
+        except Exception:
+            pass
+    yield
+
+
 app = FastAPI(
     title="FormuMind",
     description="AI-assisted formulation R&D platform for metal surface treatment "
     "(anti-corrosion coatings, degreasers, surface treatment agents).",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

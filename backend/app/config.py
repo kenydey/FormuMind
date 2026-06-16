@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # 检索设置
     search_limit_per_source: int = 5
 
+    # 可选增强引擎（adapter + 离线回退；缺库或关闭时行为不变）
+    # 启动时用 PubChemPy 按化学名补全知识库的 SMILES/分子量（需 intel extra + 网络）。
+    enrich_compounds: bool = False
+    # 化学类问题路由到 ChemCrow 智能体（需 intel extra + 有效 LLM key）。
+    use_chemcrow: bool = True
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {

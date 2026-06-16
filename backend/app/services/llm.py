@@ -285,6 +285,84 @@ def synthesize_research(
     return mechanism, _legacy_offline_narrative(req, evidence, recommended)
 
 
+# ── Optional knowledge-agent adapters (best-effort, with fallback) ───────────
+# These upgrade the grounded-Q&A path when the corresponding optional library
+# is installed and configured. Each is gated behind an availability probe and a
+# try/except so the default TF-IDF + multi-LLM path (and the offline fallback)
+# are never affected when the library is absent or its API has drifted.
+
+_CHEM_KEYWORDS = (
+    "smiles", "logp", "溶解度", "solubility", "毒性", "toxicity", "相容", "compatib",
+    "molecular weight", "分子量", "反应", "reaction", "synthes", "合成", "structure",
+    "结构", "官能团", "functional group", "boiling", "沸点", "melting", "熔点", "pka",
+)
+
+
+def _is_chemistry_question(question: str) -> bool:
+    q = question.lower()
+    return any(k in q for k in _CHEM_KEYWORDS)
+
+
+def _chemcrow_available() -> bool:
+    try:
+        import chemcrow  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _paperqa_available() -> bool:
+    try:
+        import paperqa  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _chemcrow_answer(question: str) -> str | None:
+    """Route a chemistry question through the ChemCrow ReAct agent."""
+    try:  # pragma: no cover - requires chemcrow + API key
+        from chemcrow.agents import ChemCrow
+
+        settings = get_settings()
+        key = settings.openai_api_key or settings.get_active_api_key()
+        if not key:
+            return None
+        agent = ChemCrow(model=settings.llm_model, temp=0.1, openai_api_key=key)
+        result = agent.run(question)
+        return str(result) if result else None
+    except Exception:
+        return None
+
+
+def _paperqa_answer(
+    question: str, sources: list[Evidence]
+) -> tuple[str, list[Evidence]] | None:
+    """Answer via paper-qa's semantic retrieval + cited synthesis."""
+    try:  # pragma: no cover - requires paper-qa + embeddings/LLM
+        from paperqa import Docs
+
+        docs = Docs()
+        by_key: dict[str, Evidence] = {}
+        for ev in sources:
+            text = f"{ev.title}. {ev.snippet}".strip()
+            if not text:
+                continue
+            key = ev.identifier or ev.title
+            docs.add_texts_from_str(text, citation=ev.title, docname=key) if hasattr(
+                docs, "add_texts_from_str"
+            ) else docs.add_texts(text, citation=ev.title, docname=key)  # type: ignore
+            by_key[key] = ev
+        answer = docs.query(question)
+        text = getattr(answer, "answer", None) or str(answer)
+        cited = [by_key[k] for k in by_key if k in (getattr(answer, "context", "") or "")]
+        return text, (cited or sources[:6])
+    except Exception:
+        return None
+
+
 def answer_question(
     question: str,
     sources: list[Evidence],
@@ -292,18 +370,44 @@ def answer_question(
 ) -> tuple[str, list[Evidence]]:
     """Answer a user question grounded in the provided sources.
 
+    Routing (each tier degrades gracefully to the next):
+      1. ChemCrow — for chemistry-flavoured questions, when installed + keyed.
+      2. paper-qa — semantic retrieval + cited synthesis, when installed.
+      3. TF-IDF re-rank → configured multi-LLM provider.
+      4. Offline: the most relevant retrieved snippet.
+
     Returns (answer_text, cited_sources).
     """
-    from ..services.rag import TfidfStore
+    from ..services.rag import build_store
+
+    settings = get_settings()
+
+    # Tier 1: ChemCrow for chemistry questions.
+    if settings.use_chemcrow and _is_chemistry_question(question) and _chemcrow_available():
+        cc = _chemcrow_answer(question)
+        if cc:
+            # Re-rank for citation chips even though ChemCrow answered.
+            store = build_store()
+            store.ingest(sources)
+            relevant = store.query(question, k=min(6, len(sources))) or sources[:6]
+            return cc, relevant
+
     # Re-rank sources by relevance to the question.
-    store = TfidfStore()
+    store = build_store()
     store.ingest(sources)
     relevant = store.query(question, k=min(6, len(sources))) or sources[:6]
 
+    # Tier 2: paper-qa semantic synthesis with citations.
+    if _paperqa_available() and sources:
+        pq = _paperqa_answer(question, sources)
+        if pq:
+            return pq
+
+    # Tier 3: configured multi-LLM provider over re-ranked sources.
     prompt = _chat_prompt(question, relevant, domain)
     answer = _call_llm(prompt)
     if not answer:
-        # Offline fallback: return the most relevant snippet.
+        # Tier 4 — offline fallback: return the most relevant snippet.
         if relevant:
             answer = f"根据已加载资料：{relevant[0].snippet[:300]}…"
         else:

@@ -134,6 +134,9 @@ class OptimizationResult(BaseModel):
     objectives: list[ObjectiveSpec] = Field(default_factory=list)
     history: list[float]
     top_formulations: list[Formulation]
+    # Which optimizer engine produced this result (e.g. "numpy-ucb",
+    # "optuna-tpe", "summit-sobo"). Default preserves backward compatibility.
+    engine: str = "numpy-ucb"
 
 
 class TaskState(str, Enum):

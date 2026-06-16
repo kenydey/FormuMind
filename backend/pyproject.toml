@@ -32,18 +32,23 @@ science = [
     "scikit-learn>=1.4",
     "rdkit>=2023.9",
     "ChemFormula>=1.3",
+    "thermo>=0.2",          # physical-property estimation (density → VOC g/L)
 ]
+# CPU-only, pip-installable multi-objective / Bayesian optimizer. Sits between
+# the built-in numpy UCB fallback and the heavy Summit engine.
+optimize = ["optuna>=3.4"]
 heavy = [
     "torch>=2.2",
     "deepchem>=2.8",
-    "transformers>=4.40",
-    "summit>=0.8",
+    "transformers>=4.40",   # also the MoLFormer embedding path (reserved)
+    "summit>=0.8",          # Bayesian/TSEMO optimization (auto-detected)
     "ase>=3.22",
 ]
 intel = [
     "patent-client>=5.0",
-    "paper-qa>=4.0",
-    "chemcrow>=0.3",
+    "paper-qa>=4.0",        # semantic RAG synthesis (auto-detected in chat)
+    "chemcrow>=0.3",        # chemistry ReAct agent (auto-detected in chat)
+    "pubchempy>=1.0.4",     # enrich raw-material SMILES/molar-mass from PubChem
     "arxiv>=2.1",
     "semanticscholar>=0.8",
     "duckduckgo-search>=6.0",

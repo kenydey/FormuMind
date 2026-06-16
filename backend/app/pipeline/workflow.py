@@ -25,7 +25,7 @@ from ..domain.schemas import (
     ResearchResult,
 )
 from ..services import literature, llm, predictor
-from ..services.optimizer import BayesianOptimizer, Factor
+from ..services.optimizer import Factor, build_optimizer
 from ..services.rag import TfidfStore
 from . import reconstruct
 
@@ -179,7 +179,7 @@ def run_optimization(
     base = knowledge.baseline_formulation(req)
     levers = _levers_for(base)
     factors = [Factor(name=n, low=lo, high=hi) for n, lo, hi in levers]
-    opt = BayesianOptimizer(factors=factors, seed=42)
+    opt = build_optimizer(factors=factors, seed=42)
     objective = OBJECTIVE[req.domain]
     objectives = req.objectives or default_objectives(req.domain)
     process = process_for(req)
@@ -219,4 +219,5 @@ def run_optimization(
         objectives=objectives,
         history=history,
         top_formulations=top,
+        engine=getattr(opt, "engine", "numpy-ucb"),
     )
