@@ -23,11 +23,11 @@ optimization improve as real data accumulates.
 
 ## Documentation
 
-A detailed feature walkthrough and usage guide (UI tour, the full closed-loop
-workflow, all v0.2 features, API reference, configuration, FAQ):
+New here? Start with the **5-minute quick-start** (with screenshots), then dive
+into the full guide for the API, configuration, and every v0.2 feature:
 
-- 📗 **[User Guide (English)](docs/USER_GUIDE.md)**
-- 📘 **[使用指南（中文）](docs/使用指南.md)**
+- 🚀 Quick start — [English](docs/QUICKSTART.md) · [中文](docs/快速入门.md)
+- 📗 User guide — [English](docs/USER_GUIDE.md) · [中文](docs/使用指南.md)
 
 ## Architecture
 
