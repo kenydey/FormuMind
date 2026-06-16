@@ -21,6 +21,14 @@ Measured DOE/lab results are fed back to **train data-driven prediction models**
 that progressively supersede the empirical surrogate, so recommendations and
 optimization improve as real data accumulates.
 
+## Documentation
+
+A detailed feature walkthrough and usage guide (UI tour, the full closed-loop
+workflow, all v0.2 features, API reference, configuration, FAQ):
+
+- 📗 **[User Guide (English)](docs/USER_GUIDE.md)**
+- 📘 **[使用指南（中文）](docs/使用指南.md)**
+
 ## Architecture
 
 A lightweight "glue" monorepo: FormuMind owns the orchestration, domain
