@@ -135,7 +135,8 @@ class OptimizationResult(BaseModel):
     history: list[float]
     top_formulations: list[Formulation]
     # Which optimizer engine produced this result (e.g. "numpy-ucb",
-    # "optuna-tpe", "summit-sobo"). Default preserves backward compatibility.
+    # "optuna-tpe", "summit-sobo", "botorch-ei"). Default preserves
+    # backward compatibility.
     engine: str = "numpy-ucb"
 
 

@@ -55,6 +55,15 @@ intel = [
 ]
 file_ingest = ["markitdown>=0.0.1", "pypdf>=4.0", "python-docx>=1.1"]
 export = ["openpyxl>=3.1"]
+# Semantic-embedding RAG upgrade: sentence-transformers + optional chromadb.
+# CPU-only; no GPU required. Activates EmbeddingStore in rag.py automatically.
+embedding = ["sentence-transformers>=2.6"]
+# True Gaussian-process optimizer (BoTorch + gpytorch + torch CPU).
+# Activates BotorchOptimizer (GP + Log-EI acquisition) in optimizer.py.
+bo = ["botorch>=0.10", "gpytorch>=1.11", "torch>=2.2"]
+# CIELAB / CIEDE2000 colorimetry. Pure Python, no GPU.
+# Activates delta_e + lab_L/a/b metrics in the predictor.
+color = ["colour-science>=0.4"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

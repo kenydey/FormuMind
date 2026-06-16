@@ -35,3 +35,36 @@ def test_amine_epoxy_ratio_present_for_2k_system():
     form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
     ratio = chemistry.amine_epoxy_ratio(form)
     assert ratio is not None and ratio > 0
+
+
+# ── PVC / CPVC / Solids-by-Volume ─────────────────────────────────────────────
+
+def test_pvc_positive_for_pigmented_formula():
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
+    val = chemistry.pvc(form)
+    assert val > 0, "Anticorrosion primer contains pigments; PVC must be > 0"
+    assert val < 100, "PVC must be < 100%"
+
+
+def test_solids_by_volume_in_range():
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
+    sbv = chemistry.solids_by_volume(form)
+    # Typical solventborne primer: 40–70% SBV; waterborne may be lower.
+    assert 20.0 < sbv < 90.0, f"Solids by volume {sbv} outside plausible range"
+
+
+def test_cpvc_returns_value_when_oil_absorption_known():
+    """At least the pigments with oil_absorption data should yield a CPVC."""
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
+    # The anticorrosion template uses TiO₂, Talc, Fumed silica, Zinc phosphate —
+    # all of which now carry oil_absorption in the knowledge base.
+    val = chemistry.cpvc(form)
+    assert val is not None, "Expected CPVC from Asbeck formula with known OA values"
+    assert 10.0 < val < 80.0, f"CPVC {val} outside plausible range"
+
+
+def test_pvc_degreaser_is_zero_or_near_zero():
+    """Degreaser has no pigments; PVC should be zero."""
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.degreaser))
+    val = chemistry.pvc(form)
+    assert val == 0.0, f"Degreaser should have PVC=0, got {val}"

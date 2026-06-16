@@ -105,3 +105,87 @@ def amine_epoxy_ratio(form: Formulation) -> float | None:
     if resin <= 0 or hardener <= 0:
         return None
     return round(resin / hardener, 3)
+
+
+# ── Pigment Volume Concentration (PVC / CPVC / solids-by-volume) ──────────────
+# Core coating descriptors that the empirical predictor lacked. They are
+# volume-based, so each component's mass fraction is divided by its density to
+# get a relative volume. Densities come from the knowledge base when available;
+# otherwise role-based nominal values keep the calculation usable offline.
+
+# Particulate solids that count toward the pigment volume (pigments, extenders,
+# and particulate anti-corrosive pigments such as zinc phosphate/molybdate).
+_PIGMENT_ROLES = {"pigment", "filler", "inhibitor"}
+_VOLATILE_ROLES = {"solvent"}  # evaporate from the dry film
+_ROLE_DENSITY_GCM3: dict[str, float] = {
+    "pigment": 3.8, "filler": 2.6, "inhibitor": 3.1, "resin": 1.1,
+    "hardener": 1.0, "active": 1.5, "accelerator": 1.5, "builder": 2.1,
+    "surfactant": 1.0, "chelant": 1.5, "solvent": 0.95, "additive": 1.1,
+}
+
+
+def _density_gcm3(name: str, role: str) -> float:
+    """Component density (g/cm³): knowledge-base value, then role nominal."""
+    from .knowledge import RAW_MATERIALS
+
+    spec = RAW_MATERIALS.get(name, {})
+    rho = spec.get("density_gcm3")
+    if rho and rho > 0:
+        return float(rho)
+    return _ROLE_DENSITY_GCM3.get(role, 1.2)
+
+
+def _component_volumes(form: Formulation) -> tuple[float, float, float]:
+    """Return (pigment_volume, binder_solids_volume, volatile_volume) — relative
+    volumes (mass-fraction / density) over the formulation."""
+    pigment = binder = volatile = 0.0
+    for ing in form.ingredients:
+        vol = ing.weight_pct / _density_gcm3(ing.name, ing.role)
+        if ing.role in _PIGMENT_ROLES:
+            pigment += vol
+        elif ing.role in _VOLATILE_ROLES:
+            volatile += vol
+        else:
+            binder += vol
+    return pigment, binder, volatile
+
+
+def pvc(form: Formulation) -> float:
+    """Pigment Volume Concentration (%): pigment volume / dry-film volume."""
+    pigment, binder, _ = _component_volumes(form)
+    denom = pigment + binder
+    return round(100.0 * pigment / denom, 2) if denom > 0 else 0.0
+
+
+def solids_by_volume(form: Formulation) -> float:
+    """Solids by Volume (%): non-volatile volume / total wet volume."""
+    pigment, binder, volatile = _component_volumes(form)
+    total = pigment + binder + volatile
+    return round(100.0 * (pigment + binder) / total, 2) if total > 0 else 0.0
+
+
+def cpvc(form: Formulation) -> float | None:
+    """Critical Pigment Volume Concentration (%) via the Asbeck–Van Loo formula.
+
+    CPVC = 1 / (1 + OA·ρ_p / 93.5), where OA is the pigment-blend oil absorption
+    (g oil / 100 g pigment) and ρ_p its mean density. Returns None when oil
+    absorption is unknown for the pigment blend (so the descriptor degrades
+    gracefully rather than reporting a fabricated value).
+    """
+    from .knowledge import RAW_MATERIALS
+
+    oa_w = rho_w = mass = 0.0
+    for ing in form.ingredients:
+        if ing.role not in _PIGMENT_ROLES:
+            continue
+        oa = RAW_MATERIALS.get(ing.name, {}).get("oil_absorption")
+        if oa is None:
+            return None
+        oa_w += oa * ing.weight_pct
+        rho_w += _density_gcm3(ing.name, ing.role) * ing.weight_pct
+        mass += ing.weight_pct
+    if mass <= 0:
+        return None
+    oa_avg, rho_avg = oa_w / mass, rho_w / mass
+    cpvc_frac = 1.0 / (1.0 + oa_avg * rho_avg / 93.5)
+    return round(100.0 * cpvc_frac, 2)

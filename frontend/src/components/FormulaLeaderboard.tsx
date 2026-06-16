@@ -53,11 +53,32 @@ function ExportMenu({ form }: { form: Formulation }) {
 
 function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
   const [open, setOpen] = useState(rank === 1);
+
+  // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
+  const labL = form.predicted?.["lab_L"];
+  const labA = form.predicted?.["lab_a"];
+  const labB = form.predicted?.["lab_b"];
+  const deltaE = form.predicted?.["delta_e"];
+  const hasColor = labL != null && labA != null && labB != null;
+  const swatchBg = hasColor ? `lab(${labL} ${labA} ${labB})` : undefined;
+
+  // PVC summary badge.
+  const pvcVal = form.predicted?.["pvc_pct"];
+  const cpvcVal = form.predicted?.["cpvc_pct"];
+  const ratio = form.predicted?.["pvc_to_cpvc_ratio"];
+
   return (
     <div className="border border-edge rounded-lg p-3 bg-ink/60">
       <div className="w-full flex items-center justify-between gap-2">
         <button className="flex items-center gap-2 min-w-0 flex-1" onClick={() => setOpen((o) => !o)}>
           <span className="text-accent2 font-mono text-xs shrink-0">#{rank}</span>
+          {hasColor && (
+            <span
+              className="shrink-0 w-4 h-4 rounded border border-edge/60"
+              style={{ background: swatchBg }}
+              title={`L*=${labL?.toFixed(1)} a*=${labA?.toFixed(1)} b*=${labB?.toFixed(1)}${deltaE != null ? `  ΔE₀₀=${deltaE.toFixed(1)}` : ""}`}
+            />
+          )}
           <span className="text-sm text-slate-200 truncate">{form.name}</span>
         </button>
         <div className="flex items-center gap-2 shrink-0">
@@ -69,22 +90,51 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
       </div>
       {open && (
         <div className="mt-2 space-y-2">
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(form.predicted).map(([k, v]) => {
-              const std = form.predicted_std?.[k];
-              const stdHigh = std != null && std > Math.abs(v) * 0.2;
-              return (
-                <span key={k} className="text-[10px] bg-edge px-1.5 py-0.5 rounded text-slate-300">
-                  {k}:{" "}
-                  <span className={`font-mono ${stdHigh ? "text-amber-400" : "text-accent2"}`}>{v}</span>
-                  {std != null && (
-                    <span className={`ml-0.5 font-mono ${stdHigh ? "text-amber-500" : "text-slate-500"}`}>
-                      ±{std.toFixed(std < 1 ? 3 : 1)}
-                    </span>
-                  )}
+          {/* PVC / CPVC summary row */}
+          {pvcVal != null && (
+            <div className="flex flex-wrap gap-1 text-[10px]">
+              <span className="bg-edge/60 px-1.5 py-0.5 rounded text-slate-300">
+                PVC <span className="font-mono text-accent2">{pvcVal.toFixed(1)}%</span>
+              </span>
+              {cpvcVal != null && (
+                <span className="bg-edge/60 px-1.5 py-0.5 rounded text-slate-300">
+                  CPVC <span className="font-mono text-accent2">{cpvcVal.toFixed(1)}%</span>
                 </span>
-              );
-            })}
+              )}
+              {ratio != null && (
+                <span
+                  className={`bg-edge/60 px-1.5 py-0.5 rounded ${ratio < 1 ? "text-emerald-400" : "text-amber-400"}`}
+                  title={ratio < 1 ? "PVC < CPVC: good barrier film" : "PVC > CPVC: porous film, poor barrier"}
+                >
+                  PVC/CPVC <span className="font-mono">{ratio.toFixed(2)}</span>
+                  {ratio < 1 ? " ✓" : " ⚠"}
+                </span>
+              )}
+              {form.predicted?.["solids_by_volume_pct"] != null && (
+                <span className="bg-edge/60 px-1.5 py-0.5 rounded text-slate-300">
+                  SBV <span className="font-mono text-accent2">{form.predicted["solids_by_volume_pct"].toFixed(1)}%</span>
+                </span>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(form.predicted)
+              .filter(([k]) => !["lab_L","lab_a","lab_b","pvc_pct","cpvc_pct","pvc_to_cpvc_ratio","solids_by_volume_pct"].includes(k))
+              .map(([k, v]) => {
+                const std = form.predicted_std?.[k];
+                const stdHigh = std != null && std > Math.abs(v) * 0.2;
+                return (
+                  <span key={k} className="text-[10px] bg-edge px-1.5 py-0.5 rounded text-slate-300">
+                    {k}:{" "}
+                    <span className={`font-mono ${stdHigh ? "text-amber-400" : "text-accent2"}`}>{v}</span>
+                    {std != null && (
+                      <span className={`ml-0.5 font-mono ${stdHigh ? "text-amber-500" : "text-slate-500"}`}>
+                        ±{std.toFixed(std < 1 ? 3 : 1)}
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
           </div>
           <table className="w-full text-xs">
             <tbody>

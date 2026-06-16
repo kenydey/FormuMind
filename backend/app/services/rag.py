@@ -24,6 +24,7 @@ def _tokenize(text: str) -> list[str]:
 
 @dataclass
 class TfidfStore:
+    backend: str = "tfidf"
     docs: list[Evidence] = field(default_factory=list)
     _tokens: list[list[str]] = field(default_factory=list)
     _df: Counter = field(default_factory=Counter)
@@ -56,13 +57,101 @@ class TfidfStore:
         return [ev for score, ev in scored[:k] if score > 0] or self.docs[:k]
 
 
-def build_store() -> TfidfStore:
+# ── Optional semantic embedding store (sentence-transformers) ────────────────
+# A drop-in re-ranker that understands meaning ("epoxy" ≈ "bisphenol-A"), unlike
+# the lexical TF-IDF index. Gated behind an availability probe; build_store()
+# selects it when installed and configured, else falls back to TF-IDF. The model
+# (all-MiniLM-L6-v2, ~22 MB) runs CPU-only; embeddings are cosine-compared with
+# numpy, so no vector database is needed for the ephemeral per-request store.
+
+_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def _embedding_available() -> bool:
+    try:
+        import sentence_transformers  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+# Cache the loaded model so repeated chat requests don't reload it.
+_MODEL_CACHE: dict[str, object] = {}
+
+
+def _load_model(name: str):
+    if name not in _MODEL_CACHE:
+        from sentence_transformers import SentenceTransformer
+
+        _MODEL_CACHE[name] = SentenceTransformer(name)
+    return _MODEL_CACHE[name]
+
+
+@dataclass
+class EmbeddingStore:
+    """Semantic retrieval over sentence-transformer embeddings (cosine sim)."""
+
+    backend: str = "embedding"
+    model_name: str = _EMBED_MODEL
+    docs: list[Evidence] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self._model = _load_model(self.model_name)
+        self._mat = None  # np.ndarray of normalized doc embeddings
+
+    def ingest(self, evidence: list[Evidence]) -> int:
+        import numpy as np
+
+        texts = [f"{ev.title} {ev.snippet}" for ev in evidence]
+        self.docs.extend(evidence)
+        if texts:
+            embs = np.asarray(
+                self._model.encode(texts, normalize_embeddings=True), dtype=float
+            )
+            self._mat = embs if self._mat is None else np.vstack([self._mat, embs])
+        return len(self.docs)
+
+    def query(self, text: str, k: int = 5) -> list[Evidence]:
+        if not self.docs or self._mat is None:
+            return []
+        import numpy as np
+
+        q = np.asarray(
+            self._model.encode([text], normalize_embeddings=True), dtype=float
+        )[0]
+        sims = self._mat @ q
+        order = np.argsort(sims)[::-1][:k]
+        return [self.docs[i] for i in order]
+
+
+def active_rag_backend() -> str:
+    """Name of the retrieval backend that ``build_store`` will select.
+
+    Cheap to call (no model load) so API responses can report it.
+    """
+    from ..config import get_settings
+
+    settings = get_settings()
+    if settings.rag_backend in ("embedding", "auto") and _embedding_available():
+        return "embedding"
+    return "tfidf"
+
+
+def build_store():
     """Return the retrieval store used to re-rank evidence for grounded Q&A.
 
-    The in-memory TF-IDF index is the reliable default and the offline
-    fallback. Semantic synthesis (paper-qa) and the chemistry agent (ChemCrow)
-    are layered on top in ``llm.answer_question`` rather than here, because they
-    are end-to-end answer engines, not drop-in re-rankers. Keeping retrieval and
-    synthesis separate lets each tier degrade independently.
+    Priority: the semantic ``EmbeddingStore`` (when sentence-transformers is
+    installed and ``rag_backend`` allows it) over the in-memory TF-IDF index,
+    which remains the reliable default and offline fallback. Semantic synthesis
+    (paper-qa) and the chemistry agent (ChemCrow) are layered on top in
+    ``llm.answer_question`` rather than here, because they are end-to-end answer
+    engines, not drop-in re-rankers. Keeping retrieval and synthesis separate
+    lets each tier degrade independently.
     """
+    if active_rag_backend() == "embedding":
+        try:
+            return EmbeddingStore()
+        except Exception:
+            pass
     return TfidfStore()

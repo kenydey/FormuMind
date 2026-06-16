@@ -17,6 +17,10 @@ from .schemas import Formulation, Ingredient, ProductDomain, Requirement, Substr
 # Fields: role, formula, smiles, molar_mass (g/mol),
 #         price_cny_per_kg (engineering estimate),
 #         voc_contrib (mass fraction that becomes VOC, 0-1)
+# Optional fields used by the PVC/CPVC and colorimetry engines (all optional;
+# absent → role-based nominal density and CPVC/ΔE degrade gracefully):
+#         density_gcm3 (g/cm³), oil_absorption (g oil / 100 g pigment),
+#         lab (CIELAB [L*, a*, b*] for particulate pigments)
 RAW_MATERIALS: dict[str, dict] = {
     # Resins / film formers (anti-corrosion)
     "Bisphenol-A epoxy (DGEBA)": {
@@ -55,10 +59,12 @@ RAW_MATERIALS: dict[str, dict] = {
     "Zinc phosphate": {
         "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11,
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
+        "density_gcm3": 3.1, "oil_absorption": 25.0, "lab": [92.0, -0.5, 2.0],
     },
     "Zinc molybdate": {
         "role": "inhibitor", "formula": "ZnMoO4", "smiles": None, "molar_mass": 225.33,
         "price_cny_per_kg": 45.0, "voc_contrib": 0.0,
+        "density_gcm3": 4.3, "oil_absorption": 20.0, "lab": [95.0, -1.0, 3.0],
     },
     "Cerium nitrate": {
         "role": "inhibitor", "formula": "Ce(NO3)3", "smiles": None, "molar_mass": 326.13,
@@ -73,14 +79,17 @@ RAW_MATERIALS: dict[str, dict] = {
     "Titanium dioxide": {
         "role": "pigment", "formula": "TiO2", "smiles": None, "molar_mass": 79.87,
         "price_cny_per_kg": 18.0, "voc_contrib": 0.0,
+        "density_gcm3": 4.0, "oil_absorption": 18.0, "lab": [97.0, -0.6, 1.8],
     },
     "Talc": {
         "role": "filler", "formula": "Mg3Si4O10(OH)2", "smiles": None, "molar_mass": 379.27,
         "price_cny_per_kg": 3.0, "voc_contrib": 0.0,
+        "density_gcm3": 2.75, "oil_absorption": 35.0, "lab": [90.0, -0.8, 2.5],
     },
     "Fumed silica": {
         "role": "filler", "formula": "SiO2", "smiles": None, "molar_mass": 60.08,
         "price_cny_per_kg": 30.0, "voc_contrib": 0.0,
+        "density_gcm3": 2.2, "oil_absorption": 100.0, "lab": [94.0, -0.3, 1.0],
     },
     # Solvents
     "Xylene": {

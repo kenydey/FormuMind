@@ -11,7 +11,7 @@ Each metric is returned together with a ``predicted_std`` uncertainty estimate.
 from __future__ import annotations
 
 from ..domain import features, knowledge
-from ..domain.chemistry import amine_epoxy_ratio
+from ..domain.chemistry import amine_epoxy_ratio, cpvc, pvc, solids_by_volume
 from ..domain.schemas import Formulation, ProductDomain
 
 
@@ -85,6 +85,34 @@ def _mixture_density_kgL(form: Formulation) -> float:
     except Exception:
         pass
     return 1.3
+
+
+def _pvc_metrics(form: Formulation) -> dict[str, float]:
+    """Pigment volume concentration descriptors (empty for pigment-free systems).
+
+    Reports PVC, solids-by-volume, and — when oil-absorption data exists for the
+    pigment blend — CPVC and the PVC/CPVC ratio. The ratio is the key indicator
+    of whether a film sits below CPVC (good barrier/gloss) or above it (porous).
+    """
+    pvc_val = pvc(form)
+    if pvc_val <= 0:
+        return {}
+    out: dict[str, float] = {
+        "pvc_pct": pvc_val,
+        "solids_by_volume_pct": solids_by_volume(form),
+    }
+    cpvc_val = cpvc(form)
+    if cpvc_val:
+        out["cpvc_pct"] = cpvc_val
+        out["pvc_to_cpvc_ratio"] = round(pvc_val / cpvc_val, 3)
+    return out
+
+
+def _color_metrics(form: Formulation) -> dict[str, float]:
+    """CIELAB + ΔE₀₀ color descriptors; empty when no color-bearing pigment."""
+    from .colorimetry import color_metrics
+
+    return color_metrics(form)
 
 
 def _cost_and_sustainability(form: Formulation, voc_limit: float = 420.0) -> dict[str, float]:
@@ -195,6 +223,9 @@ def predict_full(
 
     # Cost / VOC / sustainability (always computed; not blended with trained models).
     props.update(_cost_and_sustainability(form))
+    # PVC / CPVC / solids-by-volume and CIELAB color (empty for pigment-free systems).
+    props.update(_pvc_metrics(form))
+    props.update(_color_metrics(form))
 
     props, std = _blend_trained(form, process, props)
     return props, std

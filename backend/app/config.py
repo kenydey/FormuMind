@@ -61,6 +61,9 @@ class Settings(BaseSettings):
 
     # 检索设置
     search_limit_per_source: int = 5
+    # RAG 检索后端：auto（有 sentence-transformers 则用语义嵌入，否则 TF-IDF）/
+    # embedding（强制语义）/ tfidf（强制词袋）。缺库时一律回退 TF-IDF。
+    rag_backend: str = "auto"
 
     # 可选增强引擎（adapter + 离线回退；缺库或关闭时行为不变）
     # 启动时用 PubChemPy 按化学名补全知识库的 SMILES/分子量（需 intel extra + 网络）。

@@ -124,3 +124,86 @@ def test_molformer_hook_is_inert():
     form = baseline_formulation(_REQ)
     assert predictor._molformer_available() is False
     assert predictor._molformer_features(form) == {}
+
+
+# ── v0.4: PVC / CPVC / SBV descriptors always present for pigmented systems ───
+
+def test_predict_full_includes_pvc_for_pigmented_formula():
+    from app.domain.knowledge import baseline_formulation
+
+    form = baseline_formulation(_REQ)
+    props, _ = predictor.predict_full(form)
+    assert "pvc_pct" in props, "pvc_pct must be in predicted for pigmented primer"
+    assert "solids_by_volume_pct" in props
+
+
+def test_pvc_descriptor_absent_for_pigment_free():
+    from app.domain.knowledge import baseline_formulation
+    from app.domain.schemas import Requirement, ProductDomain
+
+    form = baseline_formulation(Requirement(domain=ProductDomain.degreaser))
+    props, _ = predictor.predict_full(form)
+    assert "pvc_pct" not in props, "Pigment-free degreaser should not have pvc_pct"
+
+
+# ── v0.4: color metrics (CIE76 offline fallback) ──────────────────────────────
+
+def test_predict_full_includes_color_for_pigmented_formula():
+    from app.domain.knowledge import baseline_formulation
+
+    form = baseline_formulation(_REQ)
+    props, _ = predictor.predict_full(form)
+    assert "delta_e" in props, "delta_e color metric expected for pigmented primer"
+    assert props["delta_e"] >= 0.0
+
+
+# ── v0.4: BoTorch availability probe safe without the library ─────────────────
+
+def test_botorch_probe_safe_without_lib():
+    from app.services.optimizer import _botorch_available
+
+    assert isinstance(_botorch_available(), bool)
+
+
+def test_optimization_result_engine_includes_botorch_when_installed():
+    from app.pipeline import workflow
+    from app.services.optimizer import _botorch_available
+
+    res = workflow.run_optimization(_REQ, iterations=6)
+    valid = {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei"}
+    assert res.engine in valid, f"Unknown engine: {res.engine}"
+
+
+# ── v0.4: Embedding RAG probe safe without sentence-transformers ──────────────
+
+def test_embedding_probe_safe_without_lib():
+    from app.services.rag import _embedding_available, active_rag_backend
+
+    assert isinstance(_embedding_available(), bool)
+    backend = active_rag_backend()
+    assert backend in ("embedding", "tfidf")
+
+
+def test_build_store_always_returns_store_with_query():
+    from app.domain.schemas import Evidence
+    from app.services.rag import build_store
+
+    store = build_store()
+    ev = Evidence(source="test", identifier="t1", title="Epoxy coating", snippet="test", relevance=1.0)
+    store.ingest([ev])
+    results = store.query("epoxy coating", k=1)
+    assert len(results) >= 1
+
+
+# ── v0.4: QC placeholder endpoint ─────────────────────────────────────────────
+
+def test_qc_placeholder_returns_empty_defects():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    resp = client.post("/api/qc/analyze", json={"image_url": "http://example.com/img.jpg"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["defects"] == []
+    assert data["engine"] == "placeholder"
