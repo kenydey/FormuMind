@@ -58,6 +58,7 @@ interface AppState {
   doePlan: DOEPlan | null;
   measured: Record<number, number>;
   models: ModelInfo[];
+  modelHistory: ModelInfo[][];   // one entry per training event; for R² trend charts
   trainMessage: string;
 
   // Session history (persisted to localStorage)
@@ -131,6 +132,7 @@ export const useStore = create<AppState>()(
       doePlan: null,
       measured: {},
       models: [],
+      modelHistory: [],
       trainMessage: "",
       history: [],
       historyOpen: false,
@@ -220,7 +222,12 @@ export const useStore = create<AppState>()(
         set({ busy: "training", error: null });
         try {
           const report = await api.submitExperiments(records);
-          set({ models: report.trained, trainMessage: report.message });
+          const { modelHistory } = get();
+          set({
+            models: report.trained,
+            modelHistory: [...modelHistory, report.trained],
+            trainMessage: report.message,
+          });
           await get().runResearch();
         } catch (e) {
           set({ error: String(e) });
@@ -250,7 +257,12 @@ export const useStore = create<AppState>()(
         set({ busy: "training", error: null });
         try {
           const report = await api.importExperimentsCsv(file, get().requirement.domain);
-          set({ models: report.trained, trainMessage: report.message });
+          const { modelHistory } = get();
+          set({
+            models: report.trained,
+            modelHistory: [...modelHistory, report.trained],
+            trainMessage: report.message,
+          });
           await get().runResearch();
         } catch (e) {
           set({ error: `CSV 导入失败：${e instanceof Error ? e.message : String(e)}` });
@@ -270,6 +282,7 @@ export const useStore = create<AppState>()(
           research: null,         // research markdown isn't stored — show fresh context
           doePlan: null,
           measured: {},
+          modelHistory: [],
           trainMessage: "",
           historyOpen: false,
           error: null,

@@ -1,3 +1,10 @@
+import {
+  LineChart,
+  Line,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+} from "recharts";
 import type { ModelInfo } from "../api";
 import { OBJECTIVE_METRIC } from "../api";
 import { useStore } from "../store";
@@ -30,15 +37,54 @@ function R2Gauge({ value }: { value: number }) {
   );
 }
 
-function ModelCard({ m }: { m: ModelInfo }) {
+function R2Trend({ trend }: { trend: number[] }) {
+  if (trend.length < 2) return null;
+  const data = trend.map((r2, i) => ({ t: i + 1, r2 }));
+  const color = trend[trend.length - 1] > 0.85
+    ? "#34d399"
+    : trend[trend.length - 1] > 0.6
+      ? "#fbbf24"
+      : "#f87171";
   return (
-    <div className="flex items-center gap-2 border border-edge/40 rounded p-1.5 bg-ink/40">
-      <R2Gauge value={m.r2} />
-      <div className="text-[10px] leading-snug">
-        <div className="text-accent2 font-mono">{m.metric}</div>
-        <div className="text-slate-500">{m.backend} · n={m.n_samples}</div>
-        <div className="text-slate-500">RMSE={m.rmse}{m.cv_r2 != null ? ` · cvR²=${m.cv_r2}` : ""}</div>
+    <div className="mt-1.5 h-10">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <ReferenceLine y={0.85} stroke="#34d399" strokeDasharray="3 2" strokeOpacity={0.35} />
+          <Tooltip
+            contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 4, fontSize: 10, padding: "2px 6px" }}
+            labelFormatter={(v) => `训练 #${v}`}
+            formatter={(v: number) => [`R²=${v.toFixed(3)}`, ""]}
+            itemStyle={{ color }}
+          />
+          <Line
+            type="monotone"
+            dataKey="r2"
+            stroke={color}
+            strokeWidth={1.5}
+            dot={{ r: 2, fill: color }}
+            activeDot={{ r: 3 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ModelCard({ m, trend }: { m: ModelInfo; trend: number[] }) {
+  return (
+    <div className="border border-edge/40 rounded p-1.5 bg-ink/40">
+      <div className="flex items-center gap-2">
+        <R2Gauge value={m.r2} />
+        <div className="text-[10px] leading-snug min-w-0">
+          <div className="text-accent2 font-mono truncate">{m.metric}</div>
+          <div className="text-slate-500">{m.backend} · n={m.n_samples}</div>
+          <div className="text-slate-500">
+            RMSE={m.rmse.toFixed(m.rmse < 1 ? 3 : 1)}
+            {m.cv_r2 != null ? ` · cvR²=${m.cv_r2.toFixed(2)}` : ""}
+          </div>
+        </div>
       </div>
+      <R2Trend trend={trend} />
     </div>
   );
 }
@@ -52,9 +98,19 @@ const DESIGNS = [
 ];
 
 export default function DoeResultsPanel() {
-  const { requirement, doePlan, measured, models, trainMessage, busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv } =
-    useStore();
+  const {
+    requirement, doePlan, measured, models, modelHistory, trainMessage,
+    busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv,
+  } = useStore();
   const metric = OBJECTIVE_METRIC[requirement.domain];
+
+  // Build per-model R² trend from modelHistory.
+  function trendFor(m: ModelInfo): number[] {
+    return modelHistory
+      .flatMap((snapshot) =>
+        snapshot.filter((s) => s.domain === m.domain && s.metric === m.metric).map((s) => s.r2)
+      );
+  }
 
   return (
     <section className="glass rounded-xl p-4 overflow-y-auto">
@@ -89,7 +145,7 @@ export default function DoeResultsPanel() {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) importCsv(f);
-                e.target.value = ""; // allow re-importing the same filename
+                e.target.value = "";
               }}
             />
           </label>
@@ -99,7 +155,7 @@ export default function DoeResultsPanel() {
       {models.length > 0 && (
         <div className="mb-3 grid grid-cols-2 gap-1.5">
           {models.map((m) => (
-            <ModelCard key={`${m.domain}-${m.metric}`} m={m} />
+            <ModelCard key={`${m.domain}-${m.metric}`} m={m} trend={trendFor(m)} />
           ))}
         </div>
       )}
