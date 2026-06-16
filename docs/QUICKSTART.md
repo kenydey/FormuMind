@@ -26,61 +26,82 @@ offline.
 
 ## Step 0 · Overview
 
-A dark, industrial three-column layout: requirements on the left, research & DOE
-in the center, convergence chart & leaderboard on the right.
+FormuMind v0.3 uses a NotebookLM-style three-pane layout that separates
+**inputs → research → outputs**: **Sources** on the left, **Research** Q&A in
+the center, and the **Actions** toolbar on the right. The header holds
+**⚙ Settings** (LLM provider) and **🕐 History**.
 
 ![Overview](./images/01-overview.png)
 
-- **Left**: pick a product domain / substrate, set target metrics with sliders
-  (salt-spray, film weight, cure temperature, VOC limit).
-- **Center**: AI research stream (top) and DOE feedback (bottom).
-- **Right**: convergence chart (placeholder until you optimize) and the Top-N
-  leaderboard.
+- **Left (Sources)**: research-topic prompt box, source-type checkboxes
+  (patents / literature / internet / local files), file upload, a **Search**
+  button, and the loaded-sources list.
+- **Center (Research)**: chat that answers questions grounded in the loaded
+  sources, with citations.
+- **Right (Actions)**: four buttons — 🧪 Requirements, ⭐ Recommend,
+  🔬 DOE Design, 📈 Optimization — each opening a focused modal.
 
 ---
 
-## Step 1 · Research patents & recommend formulations
+## Step 1 · Load sources
 
-After setting the requirement, click **① research patents & recommend
-formulations** (bottom-left).
+Type a research topic (e.g. "low-VOC waterborne anti-corrosion coating"), tick
+the source types to search (patents / literature / internet), and click
+**Search**. You can also upload local files (PDF/DOCX/XLSX/PPTX/HTML/images),
+parsed via markitdown.
 
-![Research](./images/02-research.png)
+![Search & sources](./images/02-search.png)
 
-The platform:
-- retrieves patent/literature evidence (center "Research Stream", click ▼ to
-  expand snippets, sorted by relevance);
-- shows a reaction-mechanism summary (highlighted blue paragraph);
-- produces 3 recommended formulations in the right-hand leaderboard — each card
-  shows the ingredient table and predicted metrics, including the
-  auto-computed `cost_cny_per_kg`, `voc_gpl`, and `sustainability_idx`.
-
----
-
-## Step 2 · Run the DOE optimization loop
-
-Click **② run DOE optimization loop** to start Bayesian multi-objective
-optimization (24 iterations by default).
-
-![Optimize](./images/03-optimize.png)
-
-- A **convergence line chart** appears top-right: X = iteration, Y = best
-  objective score, hover for exact values.
-- The leaderboard updates to the **Top-5 optimized formulations** (cards named
-  `Optimized …` with a score).
-- Optimization balances salt-spray, cost and sustainability simultaneously
-  (weighted multi-objective aggregation; default weights in the user guide).
+Results from every selected source are merged, de-duplicated, ranked by
+relevance, and listed in the left column (each removable). Offline, patent
+search returns the curated seed corpus; literature/internet search need the
+optional `intel` libraries.
 
 ---
 
-## Step 3 · Generate a DOE and feed measured results back
+## Step 2 · Ask the sources (grounded Q&A)
 
-In the "DOE Feedback" area, choose a design (e.g. **central composite CCD**) and
-click **Generate DOE**.
+In the center column, ask a question about the loaded sources — e.g. "What is
+the main corrosion-protection mechanism in these patents?". The answer is
+**grounded in the evidence** (TF-IDF re-rank → LLM) and shows citation chips
+linking back to the sources used.
 
-![DOE table](./images/04-doe.png)
+![Research Q&A](./images/03-research.png)
 
-You get a run table — one row per experiment, natural factor values plus a blank
-"measured" column. Two feedback paths:
+---
+
+## Step 3 · Choose your LLM (Settings)
+
+Click **⚙ Settings** in the header. FormuMind supports **nine providers** —
+Claude, OpenAI, Gemini, Grok, Meta (via Groq), DeepSeek, Qwen, Kimi, MiniMax.
+Pick a provider and model, paste an API key, optionally set a custom base URL,
+then **Save & test connection**. With no key, everything still runs via the
+offline rule engine.
+
+![Settings · multi-LLM](./images/04-settings.png)
+
+---
+
+## Step 4 · Recommend formulations
+
+Open **⭐ Recommend** (right column) and click **research patents & recommend
+formulations**. The Top-N leaderboard appears — each card shows the ingredient
+table and predicted metrics, including the auto-computed `cost_cny_per_kg`,
+`voc_gpl`, and `sustainability_idx` (with ± uncertainty).
+
+![Recommend · leaderboard](./images/05-recommend.png)
+
+---
+
+## Step 5 · Generate a DOE and feed results back
+
+Open **🔬 DOE Design**, choose a design (e.g. **central composite CCD**) and
+click **Generate DOE**. You get a run table — one row per experiment, natural
+factor values plus a blank "measured" column.
+
+![DOE design](./images/06-doe.png)
+
+Two feedback paths:
 
 1. **Manual**: type lab-measured values into the "measured" column, then click
    **③ feed back results and train model**.
@@ -93,24 +114,26 @@ recommendations/optimization switch to the "empirical + measured" blend.
 
 ---
 
-## Step 4 · Review and restore session history
+## Step 6 · Run the optimization loop
 
-After every successful research / optimize / feedback run, a session snapshot is
-saved automatically. Click the **🕐 History** button in the header.
+Open **📈 Optimization** and click **run optimization loop** to start Bayesian
+multi-objective optimization (24 iterations by default). The **convergence
+chart** plots the best-so-far objective score per iteration; hover for exact
+values. The leaderboard updates to the optimized Top-5 formulations, balancing
+salt-spray, cost and sustainability simultaneously.
 
-![History](./images/05-history.png)
+![Optimization · convergence](./images/07-optimize.png)
 
-- The right drawer lists the last 20 sessions with domain, time, Top-1 formula
-  name and score.
-- Click any entry to **restore** that session's requirement and leaderboard.
-- History lives in browser localStorage and survives a page refresh.
+> Every successful research / recommend / optimize / feedback run is saved as a
+> session snapshot — open **🕐 History** in the header to review and restore the
+> last 20 sessions (stored in browser localStorage).
 
 ---
 
 ## Next steps
 
-- Custom objective weights, batch feedback, wiring up the real engines? See the
-  **[full User Guide](./USER_GUIDE.md)**.
+- Custom objective weights, batch feedback, multi-LLM configuration, wiring up
+  the real engines? See the **[full User Guide](./USER_GUIDE.md)**.
 - Interactive API docs: start the backend and visit
   **http://localhost:8000/docs**.
 
