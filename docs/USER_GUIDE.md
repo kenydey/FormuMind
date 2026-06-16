@@ -72,8 +72,11 @@ it is installed.
 | Internet search | `duckduckgo-search` | (offline returns no extra hits) |
 | File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
 | RAG store | OpenNotebook pipeline | in-memory TF-IDF index |
-| Property prediction | RDKit + DeepChem/ChemBERTa | transparent empirical surrogate |
-| Optimization | Summit (Bayesian/TSEMO) | numpy UCB Bayesian optimizer |
+| Grounded Q&A | ChemCrow agent (chemistry questions) · paper-qa (semantic synthesis) | TF-IDF re-rank → configured LLM → snippet |
+| Property prediction | RDKit + DeepChem/ChemBERTa · MoLFormer (reserved) | transparent empirical surrogate |
+| VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
+| Compound data | PubChemPy (SMILES / molar mass) | hand-curated raw-material library |
+| Optimization | Summit (Bayesian/TSEMO) → Optuna (NSGA-II/TPE, CPU) | numpy UCB Bayesian optimizer |
 | Stoichiometry | ChemFormula / RDKit | self-contained formula parser |
 | Cure / MD simulation | HTPolyNet · LUNAR · LAMMPS (Docker) | analytic approximation |
 
@@ -161,7 +164,11 @@ The platform will:
 - synthesize a mechanism explanation and research conversation.
 
 **Result**: the center shows mechanism + evidence + chat; the leaderboard shows
-the 3 recommended formulations.
+the 3 recommended formulations. Expand a card to see its ingredient table,
+predicted metrics with uncertainty, and the **3D molecular-viewer panel**
+(see §5.9).
+
+![Recommend · leaderboard with molecular viewer](./images/05-recommend.png)
 
 ### Step ② — run the optimization loop
 
@@ -223,7 +230,8 @@ All 26 raw materials in the knowledge base carry `price_cny_per_kg` and
 `voc_contrib` (volatile fraction, 0–1). Every prediction computes:
 
 - `cost_cny_per_kg` — mass-fraction-weighted formulation cost;
-- `voc_gpl` — VOC content (g/L, assuming density ~1.3 kg/L);
+- `voc_gpl` — VOC content (g/L); density defaults to ~1.3 kg/L but is computed
+  from a real mass-weighted mixture density when the `thermo` library is present;
 - `sustainability_idx` — sustainability index (0–100, penalizing high VOC and cost).
 
 When a formulation's VOC exceeds the requirement's `voc_limit_gpl`, the card
@@ -294,6 +302,38 @@ relevance into the left-column source list. The center-column chat then answers
 questions **grounded in those sources**: a TF-IDF re-rank selects the most
 relevant evidence, the LLM composes an answer, and the citations used are shown
 as chips under each reply.
+
+### 5.8 Optional intelligence engines (auto-detected)
+
+Beyond the LLM providers, FormuMind layers several specialist engines on top of
+the built-in fallbacks. Each is **auto-detected**: install its library and the
+adapter switches over with no code change; absent, the platform keeps using the
+deterministic offline path, so behaviour never breaks.
+
+- **Optimizer tiering** — the closed-loop optimizer auto-selects the best engine
+  installed: **Summit** (Bayesian/TSEMO, the `heavy` extra) → **Optuna**
+  (NSGA-II/TPE, CPU-only, the lightweight `optimize` extra) → the built-in numpy
+  UCB optimizer. The `engine` used is reported on the optimization result.
+- **Grounded-Q&A routing** — a chemistry-flavoured question (LogP, solubility,
+  toxicity, compatibility, reaction, structure…) is routed to the **ChemCrow**
+  agent when installed; other questions use **paper-qa** semantic synthesis with
+  page-level citations. Both fall back to the TF-IDF re-rank → configured LLM →
+  snippet path.
+- **Compound enrichment** — set `FORMUMIND_ENRICH_COMPOUNDS=true` and, with
+  **PubChemPy** installed, the platform backfills missing SMILES / molar-mass on
+  the raw-material library at startup (curated values always win).
+- **Physically-grounded VOC** — with **thermo** installed, `voc_gpl` is computed
+  from a real mass-weighted mixture density instead of the nominal 1.3 kg/L
+  assumption.
+
+### 5.9 3D molecular viewer (reserved)
+
+Each expanded leaderboard card carries a **3D molecular-viewer panel**. In this
+release it is a **placeholder + data contract**: it lists the formulation
+components that carry a SMILES string and notes that they will be rendered as
+ball-and-stick models via **3Dmol.js**. The full WebGL viewer (and the reserved
+**MoLFormer** embedding path for richer property prediction) ships in a later
+upgrade; the placeholder keeps the bundle lightweight today.
 
 ---
 
@@ -466,6 +506,8 @@ defaults.
 | `FORMUMIND_<PROVIDER>_API_KEY` | empty | API key, e.g. `FORMUMIND_ANTHROPIC_API_KEY`, `FORMUMIND_DEEPSEEK_API_KEY`; falls back to offline synthesis when unset |
 | `FORMUMIND_LLM_BASE_URL` | provider default | override the OpenAI-compatible base URL |
 | `FORMUMIND_SEARCH_LIMIT_PER_SOURCE` | `5` | max results fetched per source type |
+| `FORMUMIND_USE_CHEMCROW` | `true` | route chemistry questions to ChemCrow when installed |
+| `FORMUMIND_ENRICH_COMPOUNDS` | `false` | backfill SMILES/molar-mass via PubChem on startup (needs `intel` + network) |
 | `FORMUMIND_DB_URL` | `sqlite:///./data/formumind.db` | experiment database; can point at Postgres |
 | `FORMUMIND_REDIS_URL` | `redis://localhost:6379/0` | Celery broker |
 | `FORMUMIND_CELERY_EAGER` | `true` | run tasks in-process without a broker |
@@ -492,10 +534,11 @@ over automatically — no code change:
 
 ```bash
 pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
-pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula
-pip install -e ".[intel]"        # patent_client, paper-qa, arxiv, semanticscholar, duckduckgo-search
+pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
+pip install -e ".[optimize]"     # optuna (CPU multi-objective optimizer, NSGA-II/TPE)
+pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
-pip install -e ".[heavy]"        # torch, deepchem, transformers, summit, ase
+pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
 pip install -e ".[export]"       # openpyxl (XLSX export; CSV needs nothing)
 ```
 
@@ -503,7 +546,13 @@ After installing the `science` extra:
 - property prediction adds RDKit molecular descriptor features;
 - model training upgrades from numpy ridge to scikit-learn random forest (with
   ensemble uncertainty);
-- stoichiometry validation switches to ChemFormula for exact computation.
+- stoichiometry validation switches to ChemFormula for exact computation;
+- `thermo` grounds the VOC g/L calculation in a real mixture density.
+
+The optimizer auto-selects the strongest engine installed (**Summit** →
+**Optuna** → numpy), and grounded Q&A routes chemistry questions to **ChemCrow**
+and others to **paper-qa**, both falling back to TF-IDF + the configured LLM
+(see §5.8). None of these are required — each lights up automatically.
 
 ---
 
@@ -519,9 +568,11 @@ lab-validated specifications. Feed real DOE results back so data-driven models
 progressively supersede the empirical prior.
 
 **Q: Where is the 3D simulation?**
-This version keeps 3D visualization as a skeleton + data contract only; real
-OVITO/3Dmol trajectory rendering needs HTPolyNet/LAMMPS (Docker `heavy`
-profile). The right column currently shows the optimization convergence chart.
+Each leaderboard card now has a **3D molecular-viewer panel**, currently a
+placeholder + data contract (it lists the SMILES-bearing components to be drawn
+via 3Dmol.js). Full WebGL rendering — and reactive-MD trajectory rendering via
+HTPolyNet/LAMMPS (Docker `heavy` profile) — ship in a later upgrade. The
+optimization convergence chart is shown in the Optimization modal.
 
 **Q: Is patent retrieval a live online crawl?**
 By default it uses an offline seed corpus per domain. Adapters for real
@@ -538,6 +589,9 @@ Experiment data is persisted in the backend SQLite/Postgres database.
 > redesign (Sources / Research / Actions), multi-LLM support across nine
 > providers with an in-app Settings dialog, multi-source research (patents /
 > literature / internet), local file upload with markitdown, and RAG-grounded
-> Q&A — on top of the v0.2 feature set (multi-objective optimization,
-> cost/sustainability, confidence intervals, DOE import/export, SQL persistence,
-> formula export, convergence chart, model dashboard, and session history).
+> Q&A — plus auto-detected intelligence engines (Summit/Optuna optimization,
+> ChemCrow/paper-qa Q&A, PubChem enrichment, thermo-grounded VOC) and a reserved
+> 3D molecular viewer — on top of the v0.2 feature set (multi-objective
+> optimization, cost/sustainability, confidence intervals, DOE import/export,
+> SQL persistence, formula export, convergence chart, model dashboard, and
+> session history).

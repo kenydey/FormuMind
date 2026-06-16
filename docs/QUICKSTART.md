@@ -87,9 +87,11 @@ offline rule engine.
 Open **⭐ Recommend** (right column) and click **research patents & recommend
 formulations**. The Top-N leaderboard appears — each card shows the ingredient
 table and predicted metrics, including the auto-computed `cost_cny_per_kg`,
-`voc_gpl`, and `sustainability_idx` (with ± uncertainty).
+`voc_gpl`, and `sustainability_idx` (with ± uncertainty). Expand a card and a
+**3D molecular-viewer panel** lists the SMILES-bearing components to be rendered
+via 3Dmol.js (a reserved placeholder in this release).
 
-![Recommend · leaderboard](./images/05-recommend.png)
+![Recommend · leaderboard with molecular viewer](./images/05-recommend.png)
 
 ---
 
@@ -134,6 +136,10 @@ salt-spray, cost and sustainability simultaneously.
 
 - Custom objective weights, batch feedback, multi-LLM configuration, wiring up
   the real engines? See the **[full User Guide](./USER_GUIDE.md)**.
+- Want stronger engines? They auto-detect on install — `pip install -e ".[optimize]"`
+  for the Optuna optimizer, `".[intel]"` for ChemCrow/paper-qa Q&A and PubChem
+  enrichment, `".[science]"` for thermo-grounded VOC. Nothing is required; each
+  lights up automatically.
 - Interactive API docs: start the backend and visit
   **http://localhost:8000/docs**.
 
