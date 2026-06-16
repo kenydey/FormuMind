@@ -21,6 +21,14 @@ Measured DOE/lab results are fed back to **train data-driven prediction models**
 that progressively supersede the empirical surrogate, so recommendations and
 optimization improve as real data accumulates.
 
+## Documentation
+
+New here? Start with the **5-minute quick-start** (with screenshots), then dive
+into the full guide for the API, configuration, and every v0.2 feature:
+
+- 🚀 Quick start — [English](docs/QUICKSTART.md) · [中文](docs/快速入门.md)
+- 📗 User guide — [English](docs/USER_GUIDE.md) · [中文](docs/使用指南.md)
+
 ## Architecture
 
 A lightweight "glue" monorepo: FormuMind owns the orchestration, domain
@@ -63,7 +71,7 @@ the **Bayesian optimizer** — are implemented for real in pure numpy.
 # Backend
 cd backend
 pip install -e ".[dev]"
-pytest -q                          # 47 tests, all offline
+pytest -q                          # 58 tests, all offline
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 
 # Frontend (separate shell)

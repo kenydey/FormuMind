@@ -2,6 +2,12 @@
 
 export type ProductDomain = "anticorrosion_coating" | "degreaser" | "surface_treatment";
 
+export interface ObjectiveSpec {
+  metric: string;
+  weight: number;
+  direction: "maximize" | "minimize";
+}
+
 export interface Requirement {
   domain: ProductDomain;
   substrate: string;
@@ -12,6 +18,7 @@ export interface Requirement {
   voc_limit_gpl: number;
   ph_target: number | null;
   notes: string;
+  objectives: ObjectiveSpec[];
 }
 
 export interface Ingredient {
@@ -21,12 +28,6 @@ export interface Ingredient {
   formula?: string | null;
   smiles?: string | null;
   molar_mass?: number | null;
-}
-
-export interface ObjectiveSpec {
-  metric: string;
-  weight: number;
-  direction: "maximize" | "minimize";
 }
 
 export interface Formulation {
