@@ -66,8 +66,11 @@ it is installed.
 
 | Capability | Real engine (optional) | Built-in fallback |
 |------------|------------------------|-------------------|
-| Research / chat | Anthropic Claude (`anthropic`) | rule-based synthesis over the knowledge base |
-| Patent / literature | `patent_client`, `paper-qa` | curated seed corpus per domain |
+| Research / chat | 9 LLM providers — Claude, OpenAI, Gemini, Grok, Meta (Groq), DeepSeek, Qwen, Kimi, MiniMax | rule-based synthesis over the knowledge base |
+| Patent search | `patent_client` | curated seed corpus per domain |
+| Literature search | `arxiv`, `semanticscholar` | (offline returns no extra hits) |
+| Internet search | `duckduckgo-search` | (offline returns no extra hits) |
+| File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
 | RAG store | OpenNotebook pipeline | in-memory TF-IDF index |
 | Property prediction | RDKit + DeepChem/ChemBERTa | transparent empirical surrogate |
 | Optimization | Summit (Bayesian/TSEMO) | numpy UCB Bayesian optimizer |
@@ -82,49 +85,73 @@ it is installed.
 
 ## 3. UI tour
 
-A dark, industrial three-column layout:
+A dark, industrial NotebookLM-style three-column layout that separates **inputs
+→ research → outputs**:
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  FormuMind · metal surface treatment R&D platform   [🕐 History (n)] │
-├──────────────┬─────────────────────────────┬────────────────────────┤
-│  Requirements│  AI Research Stream          │  Convergence (chart)   │
-│              │  · mechanism                 │                        │
-│  · domain    │  · evidence cards            │                        │
-│  · substrate │  · chat stream               ├────────────────────────┤
-│  · sliders   ├─────────────────────────────┤  Top-N Leaderboard     │
-│  · VOC limit │  DOE Feedback                │  · formula cards       │
-│              │  · design / generate / import│  · predicted ± std     │
-│  [① research]│  · model quality gauges      │  · export JSON/CSV/PDF │
-│  [② optimize]│  · run table (fill measured) │                        │
-└──────────────┴─────────────────────────────┴────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  FormuMind · metal surface treatment R&D platform  [⚙ Settings] [🕐 History] │
+├──────────────────┬───────────────────────────┬───────────────────────┤
+│  Sources (left)  │  Research (center)         │  Actions (right)      │
+│                  │                            │                       │
+│ · research topic │  RAG-grounded Q&A:         │ 🧪 Requirements       │
+│   (prompt box)   │  · chat with the loaded    │ ⭐ Recommend          │
+│ · source types:  │    sources                 │ 🔬 DOE Design         │
+│   ☑ patents      │  · citation chips per      │ 📈 Optimization       │
+│   ☑ literature   │    answer                  │                       │
+│   ☑ internet     │                            │  (each opens a modal) │
+│   ☑ local files  │  [ask the sources… ][send] │                       │
+│ [⬆ upload][search]│                            │                       │
+│ ── loaded (N) ── │                            │                       │
+│ 📄 patent · ✕    │                            │                       │
+│ 📚 arxiv  · ✕    │                            │                       │
+│ 📎 local  · ✕    │                            │                       │
+└──────────────────┴───────────────────────────┴───────────────────────┘
 ```
 
-- **Left (Requirements)**: pick domain and substrate, set target metrics with
-  sliders, two primary action buttons.
-- **Center top (Research Stream)**: reaction mechanism, evidence cards (sorted by
-  relevance, expandable snippets), and the AI research conversation.
-- **Center bottom (DOE Feedback)**: choose a DOE design, generate a plan,
-  import/export CSV, the model-quality dashboard, and fill in measured values to
-  retrain.
-- **Right top (Convergence)**: the best-so-far optimization curve after a run
-  (placeholder animation when idle).
-- **Right bottom (Leaderboard)**: Top-N formula cards with ingredient tables,
-  predicted metrics (with ± uncertainty), and an export menu.
-- **Header (History)**: clock button + live count badge opens the session
-  history drawer.
+- **Left (Sources)**: a **research-topic prompt box** at the top (sets the
+  context for searches and Q&A), checkboxes to choose which source types to
+  search (patents / literature / internet / local files), a file-upload button,
+  a **Search** button, and the list of loaded sources (each removable).
+- **Center (Research)**: a chat interface that answers questions **grounded in
+  the loaded sources** (TF-IDF re-rank → LLM answer), with citation chips linking
+  back to the evidence used.
+- **Right (Actions)**: four buttons that each open a focused **modal** —
+  🧪 Requirements (domain / substrate / objectives / constraints),
+  ⭐ Recommend (AI-recommended Top-N formulations),
+  🔬 DOE Design (generate plan, fill measured values, retrain, model gauges),
+  📈 Optimization (run the Bayesian loop, convergence chart). Status badges on
+  each button show running / result counts.
+- **Header**: ⚙ **Settings** (LLM provider, model, API key, base URL) and
+  🕐 **History** (session snapshot drawer, with a live count badge).
 
 ---
 
 ## 4. The full closed-loop workflow
 
-### Step ① — set requirement and retrieve recommendations
+### Step ⓪ — load sources and research the topic (left + center)
 
-1. In the left column, pick a **domain** (e.g. "anti-corrosion coating") and a
-   **substrate** (e.g. `carbon_steel`).
-2. Drag the sliders to set targets — salt-spray hours, film weight, cure
-   temperature, VOC limit (sliders switch with the domain).
-3. Click **① research patents & recommend formulations**.
+1. In the **left column**, type your research topic in the prompt box (e.g.
+   "waterborne anti-corrosion coating with low VOC").
+2. Tick the source types to search — **patents**, **literature** (arXiv +
+   Semantic Scholar), **internet** (DuckDuckGo) — and/or **upload local files**
+   (PDF/DOCX/XLSX/PPTX/HTML/images, parsed via markitdown). Click **Search**.
+3. Loaded sources appear in the list below. In the **center column**, ask
+   questions about them — answers are grounded in the loaded evidence and cite
+   the sources used.
+
+> Offline, the patent search returns the curated seed corpus; literature and
+> internet search need the optional `intel` libraries (see §12).
+
+### Step ① — set requirement and retrieve recommendations (right-column modals)
+
+The four research functions live in the **right column** as buttons; each opens
+a modal popup so you can focus on one task at a time.
+
+1. Open **🧪 Requirements**: pick a **domain** (e.g. "anti-corrosion coating")
+   and a **substrate** (e.g. `carbon_steel`), then set the optimization
+   objectives, weights, directions and constraints (e.g. VOC limit).
+2. Open **⭐ Recommend** and click **research patents & recommend formulations**.
 
 The platform will:
 - retrieve patent/literature evidence for the domain (offline seed corpus);
@@ -136,10 +163,11 @@ The platform will:
 **Result**: the center shows mechanism + evidence + chat; the leaderboard shows
 the 3 recommended formulations.
 
-### Step ② — run the DOE optimization loop
+### Step ② — run the optimization loop
 
-Click **② run DOE optimization loop**. The platform runs an asynchronous
-Bayesian multi-objective optimization (24 iterations by default):
+Open the **📈 Optimization** modal and click **run optimization loop**. The
+platform runs an asynchronous Bayesian multi-objective optimization (24
+iterations by default):
 
 - the optimizer samples the design space of key formulation levers (e.g. zinc
   inhibitor loading, resin and hardener ratio);
@@ -152,7 +180,7 @@ the Top-5 optimized formulations.
 
 ### Step ③ — generate a DOE and feed measured results back
 
-1. In the DOE Feedback area, choose a design type (central composite CCD,
+1. In the **🔬 DOE Design** modal, choose a design type (central composite CCD,
    Plackett-Burman, …) and click **Generate DOE**.
 2. The system produces a run table (one row per experiment, natural factor
    values + a blank measured column).
@@ -223,6 +251,49 @@ values.
 Each trained model shows a half-circle SVG R² gauge (green >85% / amber >60% /
 red otherwise) plus backend type (sklearn-rf or numpy-ridge), sample count,
 RMSE, and cross-validated R².
+
+### 5.6 Multi-LLM provider support
+
+The research synthesis and grounded Q&A can run on any of **nine LLM
+providers**, selectable from the ⚙ **Settings** dialog (or via environment
+variables). All seven OpenAI-compatible providers share the single `openai` SDK
+with a per-provider `base_url`; Claude uses `anthropic` and Gemini uses
+`google-genai`.
+
+| Provider | Recommended model | SDK / base URL |
+|----------|-------------------|----------------|
+| Anthropic (Claude) | `claude-sonnet-4-6` | `anthropic` |
+| OpenAI | `gpt-4o` | `openai` |
+| Google (Gemini) | `gemini-2.0-flash` | `google-genai` |
+| xAI (Grok) | `grok-2` | `openai` · `https://api.x.ai/v1` |
+| Meta (via Groq) | `llama-3.3-70b-versatile` | `openai` · `https://api.groq.com/openai/v1` |
+| DeepSeek | `deepseek-chat` | `openai` · `https://api.deepseek.com` |
+| Qwen (通义千问) | `qwen-plus` | `openai` · `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Kimi (Moonshot) | `moonshot-v1-128k` | `openai` · `https://api.moonshot.cn/v1` |
+| MiniMax | `abab6.5s-chat` | `openai` · `https://api.minimax.chat/v1` |
+
+In Settings, pick a provider and model, paste an API key (with show/hide), set a
+custom base URL if needed, and click **Save & test connection**. The key is
+synced to the backend for the session and persisted in browser localStorage.
+With no key configured, everything still works via the offline rule engine.
+
+### 5.7 Multi-source research, file upload & grounded Q&A
+
+The research step is split into selectable sources, all behind adapters with
+offline fallbacks:
+
+- **Patents** — `patent_client` (offline: curated seed corpus per domain);
+- **Literature** — arXiv + Semantic Scholar;
+- **Internet** — DuckDuckGo (no API key required);
+- **Local files** — upload PDF/DOCX/XLSX/PPTX/HTML/images; **markitdown**
+  converts them to text (falling back to `pypdf` / `python-docx`), then splits
+  the text into evidence chunks.
+
+Results from all selected sources are merged, de-duplicated, and ranked by
+relevance into the left-column source list. The center-column chat then answers
+questions **grounded in those sources**: a TF-IDF re-rank selects the most
+relevant evidence, the LLM composes an answer, and the citations used are shown
+as chips under each reply.
 
 ---
 
@@ -306,7 +377,11 @@ The **Export ▾** menu on each leaderboard card offers:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/research` | retrieve prior art + RAG + recommended formulations |
+| POST | `/api/search` | multi-source retrieval (patents / literature / internet) → merged, de-duped evidence |
+| POST | `/api/ingest` | upload a local file → extracted evidence chunks |
+| POST | `/api/chat` | Q&A grounded in the loaded sources (RAG re-rank → LLM answer with citations) |
+| GET/POST | `/api/settings` | read / update the active LLM provider, model, key, base URL (`POST /api/settings/test` checks the connection) |
+| POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
 | POST | `/api/doe?design=…` | generate a DOE plan (5 designs) |
 | GET | `/api/doe/{plan_id}/export?format=csv\|xlsx` | export a fill-in worksheet (blank measured columns) |
 | POST | `/api/optimize` | start the async multi-objective optimizer → returns `task_id` |
@@ -386,8 +461,11 @@ defaults.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ANTHROPIC_API_KEY` | empty | Claude key; falls back to offline synthesis when unset |
-| `FORMUMIND_LLM_MODEL` | `claude-fable-5` | LLM model |
+| `FORMUMIND_LLM_PROVIDER` | `anthropic` | active provider: `anthropic`/`openai`/`gemini`/`xai`/`groq`/`deepseek`/`qwen`/`moonshot`/`minimax` |
+| `FORMUMIND_LLM_MODEL` | `claude-sonnet-4-6` | LLM model for the active provider |
+| `FORMUMIND_<PROVIDER>_API_KEY` | empty | API key, e.g. `FORMUMIND_ANTHROPIC_API_KEY`, `FORMUMIND_DEEPSEEK_API_KEY`; falls back to offline synthesis when unset |
+| `FORMUMIND_LLM_BASE_URL` | provider default | override the OpenAI-compatible base URL |
+| `FORMUMIND_SEARCH_LIMIT_PER_SOURCE` | `5` | max results fetched per source type |
 | `FORMUMIND_DB_URL` | `sqlite:///./data/formumind.db` | experiment database; can point at Postgres |
 | `FORMUMIND_REDIS_URL` | `redis://localhost:6379/0` | Celery broker |
 | `FORMUMIND_CELERY_EAGER` | `true` | run tasks in-process without a broker |
@@ -413,11 +491,12 @@ Install the corresponding extras on a capable machine and the adapters switch
 over automatically — no code change:
 
 ```bash
-pip install -e ".[llm]"      # Anthropic Claude
-pip install -e ".[science]"  # scipy, scikit-learn, RDKit, ChemFormula
-pip install -e ".[intel]"    # patent_client, paper-qa, chemcrow
-pip install -e ".[heavy]"    # torch, deepchem, transformers, summit, ase
-pip install -e ".[export]"   # openpyxl (XLSX export; CSV needs nothing)
+pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
+pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula
+pip install -e ".[intel]"        # patent_client, paper-qa, arxiv, semanticscholar, duckduckgo-search
+pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
+pip install -e ".[heavy]"        # torch, deepchem, transformers, summit, ase
+pip install -e ".[export]"       # openpyxl (XLSX export; CSV needs nothing)
 ```
 
 After installing the `science` extra:
@@ -455,7 +534,10 @@ Experiment data is persisted in the backend SQLite/Postgres database.
 
 ---
 
-> This document corresponds to FormuMind v0.2 (ten upgrades: multi-objective
-> optimization, cost/sustainability, confidence intervals, DOE import/export,
-> SQL persistence, evidence panel, formula export, convergence chart, model
-> dashboard, and session history).
+> This document corresponds to FormuMind v0.3: a NotebookLM-style three-pane
+> redesign (Sources / Research / Actions), multi-LLM support across nine
+> providers with an in-app Settings dialog, multi-source research (patents /
+> literature / internet), local file upload with markitdown, and RAG-grounded
+> Q&A — on top of the v0.2 feature set (multi-objective optimization,
+> cost/sustainability, confidence intervals, DOE import/export, SQL persistence,
+> formula export, convergence chart, model dashboard, and session history).
