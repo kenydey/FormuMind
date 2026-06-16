@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     top_n_formulas: int = 5
 
     # Experiment feedback / model training.
-    # Where measured DOE results are persisted (JSON). Trained models are
-    # rebuilt from this dataset on startup, so no model binaries are stored.
+    # Measured DOE results are persisted in a SQL database (SQLite by default;
+    # point db_url at Postgres etc. for multi-process deployments). Trained
+    # models are rebuilt from this dataset on startup, so no model binaries are
+    # stored. ``experiments_path`` is retained for one-time migration of legacy
+    # JSON datasets into the database.
+    db_url: str = "sqlite:///./data/formumind.db"
     experiments_path: str = "./data/experiments.json"
     # Minimum measured samples before a trained model is used for a metric.
     min_train_samples: int = 4

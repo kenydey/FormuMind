@@ -63,7 +63,7 @@ the **Bayesian optimizer** — are implemented for real in pure numpy.
 # Backend
 cd backend
 pip install -e ".[dev]"
-pytest -q                          # 47 tests, all offline
+pytest -q                          # 58 tests, all offline
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 
 # Frontend (separate shell)

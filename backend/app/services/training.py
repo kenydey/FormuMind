@@ -1,24 +1,24 @@
 """Experiment feedback & model training.
 
-Closes the DOE loop: measured lab results are stored, and a data-driven
-regression model is trained per (domain, metric). Once enough samples exist the
-trained model supersedes the empirical surrogate inside ``predictor.predict``.
+Closes the DOE loop: measured lab results are stored via a pluggable
+:class:`ExperimentStore`, and a data-driven regression model is trained per
+(domain, metric). Once enough samples exist the trained model supersedes the
+empirical surrogate inside ``predictor.predict``.
 
-Training backend follows the adapter+fallback pattern:
-* scikit-learn ``RandomForestRegressor`` when ``scikit-learn`` is installed;
-* otherwise a self-contained numpy ridge regressor (standardised features,
-  closed-form solution) — no third-party dependency, fully deterministic.
+Persistence follows the adapter+fallback pattern:
+* :class:`~app.db.store.SqlExperimentStore` (SQLAlchemy, SQLite by default) —
+  transactional, concurrency-safe, Postgres-ready — is the production default.
+* :class:`~app.db.store.JsonExperimentStore` — the v0.1 JSON file store,
+  retained for isolated unit tests (pass ``path=`` to ``ModelRegistry``).
 
-Models are not pickled: the experiment dataset is the source of truth and
-models are rebuilt from it on load, which keeps persistence simple and
-reproducible.
+Training backend follows the same pattern:
+* scikit-learn ``RandomForestRegressor`` when installed;
+* otherwise a self-contained numpy ridge regressor.
 """
 from __future__ import annotations
 
-import json
 import math
 import threading
-from pathlib import Path
 
 import numpy as np
 
@@ -39,7 +39,7 @@ class _RidgeModel:
         self._std: np.ndarray
         self._w: np.ndarray
         self._b: float = 0.0
-        self._rmse: float = 0.0  # training RMSE used as constant uncertainty estimate
+        self._rmse: float = 0.0
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         self._mean = X.mean(axis=0)
@@ -118,13 +118,26 @@ class _Trained:
         self.info = info
 
 
-class ModelRegistry:
-    """Stores experiment records and per-(domain, metric) trained models."""
+def _make_store(path: str | None):
+    """Return an ExperimentStore: JsonExperimentStore when *path* is given
+    (backward-compat for tests), otherwise SqlExperimentStore with the
+    default session factory."""
+    if path is not None:
+        from ..db.store import JsonExperimentStore
+        return JsonExperimentStore(path)
+    from ..db.database import default_session_factory
+    from ..db.store import SqlExperimentStore
+    return SqlExperimentStore(default_session_factory())
 
-    def __init__(self, path: str | None = None) -> None:
+
+class ModelRegistry:
+    """Stores experiment records via a pluggable store and trains per-(domain, metric) models."""
+
+    def __init__(self, path: str | None = None, store=None) -> None:
         settings = get_settings()
-        self.path = Path(path or settings.experiments_path)
         self.min_samples = settings.min_train_samples
+        # Explicit store > path (backwards-compat) > default SQL store.
+        self._store = store if store is not None else _make_store(path)
         self._records: list[ExperimentRecord] = []
         self._models: dict[tuple[ProductDomain, str], _Trained] = {}
         self._lock = threading.RLock()
@@ -132,29 +145,24 @@ class ModelRegistry:
 
     # --- persistence ---------------------------------------------------
     def load(self) -> None:
+        """Reload records from the backing store and retrain all models."""
         with self._lock:
-            self._records = []
-            if self.path.exists():
-                raw = json.loads(self.path.read_text() or "[]")
-                self._records = [ExperimentRecord(**r) for r in raw]
+            self._records = self._store.all()
             self._retrain_all()
 
-    def _persist(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps([r.model_dump() for r in self._records], indent=2))
-
     def reset(self, persist: bool = False) -> None:
+        """Clear in-memory records and models; when *persist* is True also wipe the store."""
         with self._lock:
             self._records = []
             self._models = {}
             if persist:
-                self._persist()
+                self._store.clear()
 
     # --- ingestion -----------------------------------------------------
     def add(self, records: list[ExperimentRecord], retrain: bool = True) -> None:
         with self._lock:
+            self._store.add(records)
             self._records.extend(records)
-            self._persist()
             if retrain:
                 self._retrain_all()
 
@@ -218,10 +226,7 @@ class ModelRegistry:
     def predict_with_std(
         self, domain: ProductDomain, metric: str, feature_vec: list[float]
     ) -> tuple[float, float, int] | None:
-        """Return (prediction, std, n_samples) for a trained metric, else None.
-
-        std is the ensemble std for sklearn-RF; training RMSE for numpy-ridge.
-        """
+        """Return (prediction, std, n_samples) for a trained metric, else None."""
         with self._lock:
             trained = self._models.get((domain, metric))
             if trained is None:
@@ -236,5 +241,12 @@ class ModelRegistry:
             return [t.info for t in self._models.values()]
 
 
-# Global registry used by the API and the predictor.
-registry = ModelRegistry()
+# Global registry — uses SqlExperimentStore (SQLite by default).
+# On startup, if a legacy experiments.json exists, migrate it into the DB.
+def _build_registry() -> ModelRegistry:
+    from ..db.migrate import migrate_json_if_needed
+    migrate_json_if_needed()
+    return ModelRegistry()
+
+
+registry = _build_registry()
