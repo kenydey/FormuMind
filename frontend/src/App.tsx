@@ -1,31 +1,44 @@
-import RequirementPanel from "./components/RequirementPanel";
-import ChatPanel from "./components/ChatPanel";
-import SimPlaceholder from "./components/SimPlaceholder";
-import FormulaLeaderboard from "./components/FormulaLeaderboard";
-import DoeResultsPanel from "./components/DoeResultsPanel";
+import SourcesPanel from "./components/SourcesPanel";
+import ResearchPanel from "./components/ResearchPanel";
+import ActionsPanel from "./components/ActionsPanel";
 import HistoryPanel from "./components/HistoryPanel";
+import SettingsModal from "./components/SettingsModal";
 import { useStore } from "./store";
+
+function GearIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
 
 function ClockIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
+      <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }
 
 export default function App() {
-  const { toggleHistory, history } = useStore();
-
+  const { toggleHistory, toggleSettings, history } = useStore();
   return (
     <div className="h-screen flex flex-col bg-ink text-slate-300">
-      <header className="px-5 py-3 border-b border-edge flex items-center gap-3">
+      <header className="px-5 py-3 border-b border-edge flex items-center gap-3 shrink-0">
         <div className="w-2.5 h-2.5 rounded-full bg-accent shadow-[0_0_12px_#38bdf8]" />
         <h1 className="font-semibold tracking-tight text-slate-100">
           FormuMind <span className="text-slate-500 font-normal text-sm">· 金属表面处理配方研发平台</span>
         </h1>
-        <span className="ml-auto text-xs text-slate-500 font-mono">脱脂 · 表面处理 · 防腐涂料</span>
+        <span className="ml-auto text-xs text-slate-500 font-mono hidden sm:block">脱脂 · 表面处理 · 防腐涂料</span>
+        <button
+          onClick={toggleSettings}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
+          title="设置"
+        >
+          <GearIcon />
+          <span>设置</span>
+        </button>
         <button
           onClick={toggleHistory}
           className="relative flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
@@ -41,26 +54,20 @@ export default function App() {
         </button>
       </header>
 
-      <main className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden">
-        {/* Left: requirement input */}
+      <main className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
         <div className="col-span-3 min-h-0">
-          <RequirementPanel />
+          <SourcesPanel />
         </div>
-
-        {/* Centre: AI research stream (top) + DOE feedback loop (bottom) */}
-        <div className="col-span-5 min-h-0 grid grid-rows-2 gap-3">
-          <ChatPanel />
-          <DoeResultsPanel />
+        <div className="col-span-5 min-h-0">
+          <ResearchPanel />
         </div>
-
-        {/* Right: convergence chart (top) + leaderboard (bottom) */}
-        <div className="col-span-4 min-h-0 grid grid-rows-2 gap-3">
-          <SimPlaceholder />
-          <FormulaLeaderboard />
+        <div className="col-span-4 min-h-0">
+          <ActionsPanel />
         </div>
       </main>
 
       <HistoryPanel />
+      <SettingsModal />
     </div>
   );
 }

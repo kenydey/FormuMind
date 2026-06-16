@@ -62,12 +62,115 @@ def _online_search(req: Requirement, limit: int) -> list[Evidence] | None:
 
 
 def search(req: Requirement, limit: int = 8) -> list[Evidence]:
-    online = _online_search(req, limit)
-    if online:
-        return online
+    """Backward-compatible public entry point — delegates to search_patents."""
+    return search_patents(req, limit)
+
+
+def search_patents(req: Requirement, limit: int = 5) -> list[Evidence]:
+    """专利搜索（patent_client + 种子语料回退）。"""
+    result = _online_search(req, limit)
+    if result:
+        return result
     corpus = SEED_CORPUS.get(req.domain, [])
     evidence = [
         Evidence(relevance=round(max(0.4, 1.0 - i * 0.08), 2), **doc)
         for i, doc in enumerate(corpus)
     ]
     return evidence[:limit]
+
+
+def search_arxiv(query: str, limit: int = 5) -> list[Evidence]:
+    """arXiv 学术预印本搜索（arxiv 库）。"""
+    try:
+        import arxiv  # type: ignore
+        client = arxiv.Client()
+        results = list(client.results(arxiv.Search(query=query, max_results=limit, sort_by=arxiv.SortCriterion.Relevance)))
+        return [
+            Evidence(
+                source="arXiv",
+                identifier=r.entry_id,
+                title=r.title,
+                snippet=(r.summary or "")[:500],
+                relevance=1.0 - i * 0.1,
+            )
+            for i, r in enumerate(results)
+        ]
+    except Exception:
+        return []
+
+
+def search_semantic_scholar(query: str, limit: int = 5) -> list[Evidence]:
+    """Semantic Scholar 学术文献搜索。"""
+    try:
+        from semanticscholar import SemanticScholar  # type: ignore
+        sch = SemanticScholar()
+        results = sch.search_paper(query, limit=limit)
+        out = []
+        for i, p in enumerate(results):
+            out.append(Evidence(
+                source="Semantic Scholar",
+                identifier=p.externalIds.get("DOI", p.paperId) if p.externalIds else p.paperId,
+                title=p.title or "Untitled",
+                snippet=(p.abstract or "")[:500],
+                relevance=1.0 - i * 0.1,
+            ))
+        return out
+    except Exception:
+        return []
+
+
+def search_web(query: str, limit: int = 5) -> list[Evidence]:
+    """DuckDuckGo 互联网搜索（无需 API key）。"""
+    try:
+        from duckduckgo_search import DDGS  # type: ignore
+        results = list(DDGS().text(query, max_results=limit))
+        return [
+            Evidence(
+                source="Internet",
+                identifier=r.get("href", ""),
+                title=r.get("title", ""),
+                snippet=r.get("body", "")[:500],
+                relevance=1.0 - i * 0.1,
+            )
+            for i, r in enumerate(results)
+        ]
+    except Exception:
+        return []
+
+
+def search_by_types(
+    query: str,
+    source_types: list[str],
+    req: Requirement | None = None,
+    limit_per_source: int = 5,
+) -> list[Evidence]:
+    """多源并行检索，合并结果。
+
+    source_types: 任意子集 ["patents", "literature", "internet", "local"]
+    """
+    results: list[Evidence] = []
+    q = query or (req.headline() if req else "coating formulation")
+
+    if "patents" in source_types:
+        if req:
+            results.extend(search_patents(req, limit_per_source))
+        else:
+            results.extend(search_arxiv(q, limit_per_source))  # fallback
+
+    if "literature" in source_types:
+        results.extend(search_arxiv(q, limit_per_source))
+        results.extend(search_semantic_scholar(q, limit_per_source))
+
+    if "internet" in source_types:
+        results.extend(search_web(q, limit_per_source))
+
+    # "local" 由 ingest 端点单独处理，此处不检索
+    # 去重（按 identifier）并按相关度排序
+    seen: set[str] = set()
+    deduped: list[Evidence] = []
+    for e in sorted(results, key=lambda x: x.relevance, reverse=True):
+        key = e.identifier or e.title
+        if key not in seen:
+            seen.add(key)
+            deduped.append(e)
+    return deduped

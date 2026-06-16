@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # LLM (Anthropic Claude). When unset, the LLM service falls back to the
     # deterministic rule-based synthesiser built on the domain knowledge base.
     anthropic_api_key: str | None = None
-    llm_model: str = "claude-fable-5"
+    llm_model: str = "claude-sonnet-4-6"
     llm_max_tokens: int = 2048
 
     # Celery / Redis. Without a reachable broker the worker runs eagerly
@@ -46,6 +46,36 @@ class Settings(BaseSettings):
     min_train_samples: int = 4
     # Retrain automatically when new experiments are submitted.
     auto_retrain: bool = True
+
+    # 多 LLM 供应商
+    llm_provider: str = "anthropic"          # 当前激活的供应商
+    llm_base_url: str | None = None          # OpenAI 兼容 API 的自定义 base URL
+    openai_api_key: str | None = None
+    gemini_api_key: str | None = None
+    groq_api_key: str | None = None          # Meta via Groq
+    deepseek_api_key: str | None = None
+    qwen_api_key: str | None = None
+    moonshot_api_key: str | None = None      # Kimi
+    minimax_api_key: str | None = None
+    xai_api_key: str | None = None           # Grok
+
+    # 检索设置
+    search_limit_per_source: int = 5
+
+    def get_active_api_key(self) -> str | None:
+        """根据 llm_provider 返回对应的 API key。"""
+        mapping = {
+            "anthropic": self.anthropic_api_key,
+            "openai": self.openai_api_key,
+            "gemini": self.gemini_api_key,
+            "groq": self.groq_api_key,
+            "deepseek": self.deepseek_api_key,
+            "qwen": self.qwen_api_key,
+            "moonshot": self.moonshot_api_key,
+            "minimax": self.minimax_api_key,
+            "xai": self.xai_api_key,
+        }
+        return mapping.get(self.llm_provider)
 
 
 @lru_cache

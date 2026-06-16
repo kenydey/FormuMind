@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import doe, experiments, formulations, optimize, research, tasks
+from .api import search as search_router, ingest as ingest_router, chat as chat_router, settings as settings_router
 from .config import get_settings
 
 settings = get_settings()
@@ -34,6 +35,10 @@ app.include_router(optimize.router)
 app.include_router(tasks.router)
 app.include_router(formulations.router)
 app.include_router(experiments.router)
+app.include_router(search_router.router, prefix="/api")
+app.include_router(ingest_router.router, prefix="/api")
+app.include_router(chat_router.router, prefix="/api")
+app.include_router(settings_router.router, prefix="/api")
 
 
 @app.get("/health", tags=["meta"])

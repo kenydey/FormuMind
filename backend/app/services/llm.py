@@ -1,56 +1,246 @@
-"""LLM service (Anthropic Claude adapter + deterministic offline fallback).
+"""Multi-provider LLM service.
 
-``synthesize_research`` produces the chat-stream narrative and reaction
-mechanism shown in the centre panel. With ``ANTHROPIC_API_KEY`` set it calls
-Claude grounded on the retrieved evidence; otherwise it composes a structured,
-citation-backed narrative from the domain knowledge base so the platform is
-fully functional and tests stay deterministic.
+Providers supported:
+  anthropic  – Claude (via anthropic SDK)
+  openai     – GPT-4o etc. (via openai SDK)
+  gemini     – Google Gemini (via google-genai SDK)
+  xai        – Grok (openai-compatible, base https://api.x.ai/v1)
+  groq       – Meta Llama via Groq (openai-compatible)
+  deepseek   – DeepSeek (openai-compatible, base https://api.deepseek.com)
+  qwen       – Qwen/DashScope (openai-compatible, base https://dashscope.aliyuncs.com/compatible-mode/v1)
+  moonshot   – Kimi (openai-compatible, base https://api.moonshot.cn/v1)
+  minimax    – MiniMax (openai-compatible, base https://api.minimax.chat/v1)
+
+All providers fall back to the offline rule-based synthesizer if
+the SDK is missing or the API call fails.
 """
 from __future__ import annotations
 
 from ..config import get_settings
-from ..domain.knowledge import MECHANISMS
-from ..domain.schemas import Evidence, Formulation, Requirement
+from ..domain.schemas import Evidence, ProductDomain, Requirement
+
+# ── Provider metadata ────────────────────────────────────────────────────────
+# Used by the settings API to enumerate available options.
+PROVIDERS: list[dict] = [
+    {
+        "id": "anthropic",
+        "label": "Anthropic (Claude)",
+        "models": [
+            {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5 (快速)"},
+            {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (推荐)", "recommended": True},
+            {"id": "claude-opus-4-8", "label": "Claude Opus 4.8 (最强)"},
+        ],
+    },
+    {
+        "id": "openai",
+        "label": "OpenAI",
+        "models": [
+            {"id": "gpt-4o-mini", "label": "GPT-4o Mini (快速)"},
+            {"id": "gpt-4o", "label": "GPT-4o (推荐)", "recommended": True},
+            {"id": "o1-mini", "label": "o1-mini (推理)"},
+        ],
+    },
+    {
+        "id": "gemini",
+        "label": "Google Gemini",
+        "models": [
+            {"id": "gemini-1.5-flash", "label": "Gemini 1.5 Flash (快速)"},
+            {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (推荐)", "recommended": True},
+            {"id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro"},
+        ],
+    },
+    {
+        "id": "xai",
+        "label": "xAI (Grok)",
+        "base_url": "https://api.x.ai/v1",
+        "models": [
+            {"id": "grok-2", "label": "Grok-2 (推荐)", "recommended": True},
+            {"id": "grok-2-mini", "label": "Grok-2 Mini (快速)"},
+        ],
+    },
+    {
+        "id": "groq",
+        "label": "Meta (via Groq)",
+        "base_url": "https://api.groq.com/openai/v1",
+        "models": [
+            {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B (极速)"},
+            {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B (推荐)", "recommended": True},
+        ],
+    },
+    {
+        "id": "deepseek",
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "models": [
+            {"id": "deepseek-chat", "label": "DeepSeek V3 (推荐)", "recommended": True},
+            {"id": "deepseek-reasoner", "label": "DeepSeek R1 (推理)"},
+        ],
+    },
+    {
+        "id": "qwen",
+        "label": "Qwen (通义千问)",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "models": [
+            {"id": "qwen-turbo", "label": "Qwen Turbo (快速)"},
+            {"id": "qwen-plus", "label": "Qwen Plus (推荐)", "recommended": True},
+            {"id": "qwen-max", "label": "Qwen Max (最强)"},
+        ],
+    },
+    {
+        "id": "moonshot",
+        "label": "Kimi (Moonshot)",
+        "base_url": "https://api.moonshot.cn/v1",
+        "models": [
+            {"id": "moonshot-v1-8k", "label": "Moonshot 8K (极速)"},
+            {"id": "moonshot-v1-32k", "label": "Moonshot 32K"},
+            {"id": "moonshot-v1-128k", "label": "Moonshot 128K (推荐)", "recommended": True},
+        ],
+    },
+    {
+        "id": "minimax",
+        "label": "MiniMax",
+        "base_url": "https://api.minimax.chat/v1",
+        "models": [
+            {"id": "abab6.5s-chat", "label": "abab6.5s (推荐)", "recommended": True},
+            {"id": "abab5.5-chat", "label": "abab5.5 (快速)"},
+        ],
+    },
+]
+
+_PROVIDER_INDEX: dict[str, dict] = {p["id"]: p for p in PROVIDERS}
 
 
-def _try_claude(prompt: str) -> str | None:
-    settings = get_settings()
-    if not settings.anthropic_api_key:
-        return None
-    try:  # pragma: no cover - requires network + key
-        import anthropic
+# ── Low-level completion helpers ─────────────────────────────────────────────
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> str | None:
+    try:
+        import anthropic  # type: ignore
+        client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
-            model=settings.llm_model,
-            max_tokens=settings.llm_max_tokens,
+            model=model,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        return "".join(block.text for block in msg.content if getattr(block, "type", "") == "text")
+        return msg.content[0].text
     except Exception:
         return None
 
 
-def _evidence_prompt(req: Requirement, evidence: list[Evidence]) -> str:
-    cites = "\n".join(f"- [{e.identifier}] {e.title}: {e.snippet}" for e in evidence)
+def _complete_openai_compatible(
+    prompt: str, api_key: str, model: str, max_tokens: int, base_url: str | None = None
+) -> str | None:
+    try:
+        from openai import OpenAI  # type: ignore
+        kwargs: dict = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return resp.choices[0].message.content
+    except Exception:
+        return None
+
+
+def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
+    try:
+        import google.generativeai as genai  # type: ignore
+        genai.configure(api_key=api_key)
+        m = genai.GenerativeModel(model)
+        resp = m.generate_content(prompt)
+        return resp.text
+    except Exception:
+        return None
+
+
+def _call_llm(prompt: str) -> str | None:
+    """Route to the configured provider; return None on any failure."""
+    settings = get_settings()
+    provider = settings.llm_provider
+    api_key = settings.get_active_api_key()
+    if not api_key:
+        return None
+    model = settings.llm_model
+    max_tokens = settings.llm_max_tokens
+
+    if provider == "anthropic":
+        return _complete_anthropic(prompt, api_key, model, max_tokens)
+    if provider == "gemini":
+        return _complete_gemini(prompt, api_key, model)
+
+    # All other providers are OpenAI-compatible.
+    meta = _PROVIDER_INDEX.get(provider, {})
+    # Allow settings to override the default base_url (e.g. self-hosted endpoint).
+    base_url = settings.llm_base_url or meta.get("base_url")
+    return _complete_openai_compatible(prompt, api_key, model, max_tokens, base_url)
+
+
+# ── Prompt builders ──────────────────────────────────────────────────────────
+
+def _evidence_prompt(req: Requirement, evidence: list[Evidence], recommended: list) -> str:
+    citations = "\n".join(
+        f"[{e.source}] {e.title}: {e.snippet[:300]}" for e in evidence[:6]
+    )
+    recs = "\n".join(
+        f"- {f.name}: {', '.join(i.name for i in f.ingredients[:4])}" for f in recommended[:3]
+    )
     return (
-        f"You are a coatings/surface-treatment formulation chemist. Requirement: {req.headline()}.\n"
-        f"Cure temperature limit {req.cure_temperature_c} C, VOC limit {req.voc_limit_gpl} g/L.\n"
-        f"Relevant prior art:\n{cites}\n\n"
-        "Explain the protection/cleaning mechanism and justify a starting formulation, citing sources."
+        f"You are a formulation chemist specializing in metal surface treatment.\n"
+        f"Domain: {req.domain.value}\nSubstrate: {req.substrate.value}\n"
+        f"Cure temperature ≤ {req.cure_temperature_c}°C, VOC ≤ {req.voc_limit_gpl} g/L\n\n"
+        f"Evidence from patents/literature:\n{citations}\n\n"
+        f"Candidate formulations:\n{recs}\n\n"
+        f"Summarise the reaction mechanism and explain why the top candidate is recommended. "
+        f"Be concise (≤ 200 words). Reply in the same language as the domain context (Chinese preferred)."
     )
 
 
-def synthesize_research(
-    req: Requirement, evidence: list[Evidence], recommended: list[Formulation]
-) -> tuple[str, str]:
-    """Return (mechanism, chat_markdown)."""
-    mechanism = MECHANISMS[req.domain]
-    claude = _try_claude(_evidence_prompt(req, evidence))
-    if claude:
-        return mechanism, claude
+def _chat_prompt(question: str, evidence: list[Evidence], domain: str | None) -> str:
+    context = "\n".join(
+        f"[{i+1}] ({e.source}) {e.title}: {e.snippet[:400]}" for i, e in enumerate(evidence[:8])
+    )
+    domain_hint = f"Domain context: {domain}\n" if domain else ""
+    return (
+        f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
+        f"Cite sources by number [1], [2], etc.\n"
+        f"{domain_hint}\n"
+        f"Sources:\n{context}\n\n"
+        f"Question: {question}\n\n"
+        f"Answer concisely in the same language as the question:"
+    )
 
-    # Deterministic offline narrative.
+
+# ── Offline fallback ─────────────────────────────────────────────────────────
+
+def _offline_synthesis(req: Requirement, evidence: list[Evidence], recommended: list) -> tuple[str, str]:
+    """Deterministic rule-based synthesis — works without any API key."""
+    domain_names = {
+        ProductDomain.anticorrosion_coating: "防腐蚀涂料",
+        ProductDomain.degreaser: "脱脂剂",
+        ProductDomain.surface_treatment: "表面处理剂",
+    }
+    d = domain_names.get(req.domain, req.domain.value)
+    top = recommended[0] if recommended else None
+    mech = (
+        f"{d}的核心机理：{'环氧树脂与固化剂形成交联网络，缓蚀剂（磷酸锌等）在界面形成致密保护膜，阻断腐蚀电化学反应。' if req.domain == ProductDomain.anticorrosion_coating else '表面活性剂降低油-水界面张力，使油污乳化脱落；碱性助剂（磷酸钠、碳酸钠）皂化动植物油脂。' if req.domain == ProductDomain.degreaser else '磷化/铬化/硅烷偶联形成转化膜，提升基材与后续涂层的附着力与耐蚀性。'}"
+    )
+    chat = f"## {d} 配方研究报告\n\n**机理**：{mech}\n\n"
+    if top:
+        chat += f"**推荐配方**：{top.name}，预测耐盐雾 {top.predicted.get('salt_spray_hours', '—')} h，成本 {top.predicted.get('cost_cny_per_kg', '—')} CNY/kg。\n"
+    if evidence:
+        chat += f"\n**检索到 {len(evidence)} 条参考文献**，相关度最高：{evidence[0].title}。"
+    return mech, chat
+
+
+# ── Backward-compatible helpers used by existing pipeline ────────────────────
+
+def _legacy_offline_narrative(req: Requirement, evidence: list[Evidence], recommended: list) -> str:
+    """Re-create the original deterministic markdown narrative for the pipeline."""
+    from ..domain.knowledge import MECHANISMS
+    mechanism = MECHANISMS[req.domain]
     lines = [
         f"### Research summary — {req.headline()}",
         "",
@@ -69,4 +259,70 @@ def synthesize_research(
         "",
         "_Next: generate a DOE plan on the key levers, then run the closed-loop optimizer to rank the top candidates._",
     ]
-    return mechanism, "\n".join(lines)
+    return "\n".join(lines)
+
+
+# ── Public API ───────────────────────────────────────────────────────────────
+
+def synthesize_research(
+    req: Requirement,
+    evidence: list[Evidence],
+    recommended: list,
+) -> tuple[str, str]:
+    """Return (mechanism_text, chat_markdown). Falls back offline if LLM unavailable.
+
+    Backward-compatible with the existing pipeline (accepts Formulation list).
+    """
+    from ..domain.knowledge import MECHANISMS
+    mechanism = MECHANISMS[req.domain]
+
+    prompt = _evidence_prompt(req, evidence, recommended)
+    result = _call_llm(prompt)
+    if result:
+        return mechanism, result
+
+    # Original deterministic offline narrative (preserves existing test behaviour).
+    return mechanism, _legacy_offline_narrative(req, evidence, recommended)
+
+
+def answer_question(
+    question: str,
+    sources: list[Evidence],
+    domain: str | None = None,
+) -> tuple[str, list[Evidence]]:
+    """Answer a user question grounded in the provided sources.
+
+    Returns (answer_text, cited_sources).
+    """
+    from ..services.rag import TfidfStore
+    # Re-rank sources by relevance to the question.
+    store = TfidfStore()
+    store.ingest(sources)
+    relevant = store.query(question, k=min(6, len(sources))) or sources[:6]
+
+    prompt = _chat_prompt(question, relevant, domain)
+    answer = _call_llm(prompt)
+    if not answer:
+        # Offline fallback: return the most relevant snippet.
+        if relevant:
+            answer = f"根据已加载资料：{relevant[0].snippet[:300]}…"
+        else:
+            answer = "暂无相关资料，请先检索或上传文献。"
+    return answer, relevant
+
+
+def test_connection() -> dict:
+    """Test the current LLM configuration. Returns {ok, provider, model, message}."""
+    settings = get_settings()
+    provider = settings.llm_provider
+    api_key = settings.get_active_api_key()
+    if not api_key:
+        return {"ok": False, "provider": provider, "model": settings.llm_model,
+                "message": f"未配置 {provider} 的 API Key"}
+    result = _call_llm("Reply with exactly: OK")
+    if result and "ok" in result.lower():
+        return {"ok": True, "provider": provider, "model": settings.llm_model, "message": "连接成功"}
+    if result:
+        return {"ok": True, "provider": provider, "model": settings.llm_model, "message": "连接成功（响应异常）"}
+    return {"ok": False, "provider": provider, "model": settings.llm_model,
+            "message": "API 调用失败，请检查 API Key 和网络"}
