@@ -231,7 +231,25 @@ export const useStore = create<AppState>()(
       generateDoe: async (design) => {
         set({ busy: "doe", error: null });
         try {
-          const doePlan = await api.doe(get().requirement, design);
+          let doePlan;
+          if (design === "ai_active") {
+            // Active learning endpoint: annotates most informative runs
+            const req = get().requirement;
+            const res = await fetch("/api/doe/active", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...req,
+                existing_records: [],
+                n_suggest: 4,
+                doe_design: "lhs",
+              }),
+            });
+            if (!res.ok) throw new Error(`/api/doe/active -> ${res.status}`);
+            doePlan = await res.json();
+          } else {
+            doePlan = await api.doe(get().requirement, design);
+          }
           set({ doePlan, measured: {} });
         } catch (e) {
           set({ error: String(e) });

@@ -189,3 +189,89 @@ def cpvc(form: Formulation) -> float | None:
     oa_avg, rho_avg = oa_w / mass, rho_w / mass
     cpvc_frac = 1.0 / (1.0 + oa_avg * rho_avg / 93.5)
     return round(100.0 * cpvc_frac, 2)
+
+
+# ── v0.5: Compatibility & Safety Checker ─────────────────────────────────────
+
+# Roles that indicate strong acid or strong base character
+_ACID_INGREDIENT_NAMES = {"Phosphoric acid"}
+_BASE_INGREDIENT_NAMES = {"Sodium hydroxide", "Sodium metasilicate"}
+
+# EU REACH SVHC candidates relevant to metal-treatment coatings
+_SVHC_NAMES = {
+    "Zinc molybdate",      # molybdate, potential SVHC
+    "Cerium nitrate",      # rare earth nitrate
+    "Sodium nitrite",      # nitrite accelerator
+}
+
+# EU VOC Directive 2010/75/EU product categories (simplified)
+_WATERBORNE_THRESHOLD_GPL = 250.0
+_HIGHSOLIDS_SOLVENT_MAX_GPL = 80.0
+
+
+def check_acid_base_conflict(form: Formulation) -> list[str]:
+    """Warn if strong acid and strong base co-exist in the same formulation."""
+    has_acid = any(i.name in _ACID_INGREDIENT_NAMES for i in form.ingredients if i.weight_pct > 0.1)
+    has_base = any(i.name in _BASE_INGREDIENT_NAMES for i in form.ingredients if i.weight_pct > 0.1)
+    if has_acid and has_base:
+        acids = [i.name for i in form.ingredients if i.name in _ACID_INGREDIENT_NAMES]
+        bases = [i.name for i in form.ingredients if i.name in _BASE_INGREDIENT_NAMES]
+        return [f"Acid-base conflict: {', '.join(acids)} vs {', '.join(bases)} — verify pH stability."]
+    return []
+
+
+def check_svhc(form: Formulation) -> list[str]:
+    """List ingredients that are EU REACH SVHC candidates (knowledge-base + name list)."""
+    from .knowledge import RAW_MATERIALS
+
+    found = []
+    for ing in form.ingredients:
+        if ing.weight_pct <= 0:
+            continue
+        spec = RAW_MATERIALS.get(ing.name, {})
+        if spec.get("svhc") or ing.name in _SVHC_NAMES:
+            found.append(ing.name)
+    if found:
+        return [f"REACH SVHC candidate(s) detected: {', '.join(found)}. Confirm regulatory status."]
+    return []
+
+
+def check_voc_category(form: Formulation, voc_gpl: float | None = None) -> str:
+    """Classify formulation under EU VOC Directive 2010/75/EU (simplified).
+
+    Returns one of: "waterborne", "high-solids", "solventborne", "solvent-free".
+    Uses pre-computed voc_gpl if supplied; otherwise looks at solvent roles.
+    """
+    water_pct = sum(i.weight_pct for i in form.ingredients if i.name == "Deionized water")
+    solvent_pct = sum(i.weight_pct for i in form.ingredients
+                      if i.role == "solvent" and i.name != "Deionized water")
+
+    if water_pct > 40 and (voc_gpl is None or voc_gpl < _WATERBORNE_THRESHOLD_GPL):
+        return "waterborne"
+    if solvent_pct < 5:
+        return "solvent-free"
+    if voc_gpl is not None and voc_gpl <= _HIGHSOLIDS_SOLVENT_MAX_GPL:
+        return "high-solids"
+    return "solventborne"
+
+
+def full_safety_check(
+    form: Formulation,
+    voc_gpl: float | None = None,
+    voc_limit_gpl: float | None = None,
+) -> list[str]:
+    """Aggregate all safety/compliance warnings, extending validate_formulation().
+
+    Returns a list of human-readable warning strings (empty = no issues).
+    """
+    warnings: list[str] = []
+    warnings.extend(check_acid_base_conflict(form))
+    warnings.extend(check_svhc(form))
+
+    # VOC limit check (only when both limit and measured value are known)
+    if voc_gpl is not None and voc_limit_gpl is not None and voc_gpl > voc_limit_gpl:
+        warnings.append(
+            f"VOC {voc_gpl:.0f} g/L exceeds limit {voc_limit_gpl:.0f} g/L "
+            f"(category: {check_voc_category(form, voc_gpl)})."
+        )
+    return warnings

@@ -117,6 +117,7 @@ class DOERun(BaseModel):
     run_id: int
     coded: dict[str, float]
     natural: dict[str, float]
+    ai_suggested: bool = False
 
 
 class DOEPlan(BaseModel):
@@ -191,3 +192,44 @@ class TrainingReport(BaseModel):
     trained: list[ModelInfo]
     total_records: int
     message: str = ""
+
+
+# ── v0.5: IP analysis ────────────────────────────────────────────────────────
+
+class PatentRisk(BaseModel):
+    patent_id: str
+    title: str
+    risk: str  # "high" | "medium" | "low" | "unknown"
+    claim_overlap: str
+    recommendation: str
+
+
+class IPReport(BaseModel):
+    formulation_name: str
+    novelty_score: float  # 0=likely infringes … 1=highly novel
+    risks: list[PatentRisk]
+    whitespace_hints: list[str]
+    raw_patents_searched: int
+    engine: str  # "llm" | "offline-keyword"
+
+
+class IPAnalysisRequest(BaseModel):
+    formulation: Formulation
+    limit_patents: int = 10
+
+
+# ── v0.5: Process parameter optimization ────────────────────────────────────
+
+class ProcessOptRequest(BaseModel):
+    domain: ProductDomain
+    iterations: int = 18
+    objectives: list[ObjectiveSpec] = Field(default_factory=list)
+
+
+class ProcessOptResult(BaseModel):
+    domain: str
+    iterations: int
+    engine: str
+    history: list[float]
+    best_params: dict[str, float]
+    predicted_outcome: dict[str, float]

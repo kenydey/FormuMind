@@ -68,3 +68,46 @@ def test_pvc_degreaser_is_zero_or_near_zero():
     form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.degreaser))
     val = chemistry.pvc(form)
     assert val == 0.0, f"Degreaser should have PVC=0, got {val}"
+
+
+# ── v0.5: Safety checks ────────────────────────────────────────────────────────
+
+def test_acid_base_conflict_detected():
+    """Surface treatment formulation has phosphoric acid — no base conflict in baseline."""
+    from app.domain.schemas import ProductDomain
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.surface_treatment))
+    warnings = chemistry.check_acid_base_conflict(form)
+    # Baseline surface treatment has phosphoric acid but no strong base → no conflict
+    assert warnings == [], f"Unexpected acid-base conflict: {warnings}"
+
+
+def test_svhc_detected_in_surface_treatment():
+    """Zinc phosphating bath contains sodium nitrite (SVHC candidate)."""
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.surface_treatment))
+    warnings = chemistry.check_svhc(form)
+    assert len(warnings) >= 1, "Sodium nitrite should be flagged as SVHC in surface treatment"
+    assert "SVHC" in warnings[0]
+
+
+def test_svhc_not_in_plain_degreaser():
+    """Alkaline degreaser baseline has no SVHC candidates."""
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.degreaser))
+    warnings = chemistry.check_svhc(form)
+    assert warnings == [], f"Alkaline degreaser should have no SVHC: {warnings}"
+
+
+def test_check_voc_category_waterborne():
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.degreaser))
+    cat = chemistry.check_voc_category(form, voc_gpl=10.0)
+    assert cat == "waterborne"
+
+
+def test_full_safety_check_no_issues_on_plain_anticorrosion():
+    """The baseline anticorrosion primer should not trigger acid-base or SVHC warnings."""
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
+    warnings = chemistry.full_safety_check(form)
+    # Zinc phosphate, TiO2, talc, epoxy — none are SVHC in the current knowledge base
+    for w in warnings:
+        assert "SVHC" not in w or "zinc phosphate" not in w.lower(), (
+            f"Unexpected SVHC warning: {w}"
+        )

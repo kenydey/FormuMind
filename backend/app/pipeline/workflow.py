@@ -13,7 +13,7 @@ from collections.abc import Callable
 from ..config import get_settings
 from ..domain import doe as doe_engine
 from ..domain import knowledge
-from ..domain.chemistry import validate_formulation
+from ..domain.chemistry import full_safety_check, validate_formulation
 from ..domain.schemas import (
     DOEFactor,
     DOEPlan,
@@ -91,6 +91,8 @@ def _score_and_validate(
     form.predicted, form.predicted_std = predictor.predict_full(form, process)
     voc_limit = req.voc_limit_gpl if req else None
     form.warnings = validate_formulation(form, voc_limit_gpl=voc_limit)
+    voc_gpl = form.predicted.get("voc_gpl")
+    form.warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
     form.score = float(form.predicted.get(OBJECTIVE[form.domain], 0.0))
     return form
 

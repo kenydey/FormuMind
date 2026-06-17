@@ -198,6 +198,12 @@ export const api = {
     post<{ ok: boolean; provider: string; model: string; message: string }>(
       "/api/settings/test", {}
     ),
+
+  analyzeIP: (req: IPAnalysisRequest) =>
+    post<IPReport>("/api/ip/analyze", req),
+
+  optimizeProcess: (req: ProcessOptRequest) =>
+    post<ProcessOptResult>("/api/process-optimize", req),
 };
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
@@ -265,6 +271,44 @@ export interface LLMSettingsResponse {
   key_set: boolean;
   base_url?: string;
   providers: LLMProviderInfo[];
+}
+
+// ── v0.5 新增类型 ────────────────────────────────────────────────────────────
+
+export interface PatentRisk {
+  patent_id: string;
+  title: string;
+  risk: "high" | "medium" | "low" | "unknown";
+  claim_overlap: string;
+  recommendation: string;
+}
+
+export interface IPReport {
+  formulation_name: string;
+  novelty_score: number;
+  risks: PatentRisk[];
+  whitespace_hints: string[];
+  raw_patents_searched: number;
+  engine: string;
+}
+
+export interface IPAnalysisRequest {
+  formulation: Formulation;
+  limit_patents?: number;
+}
+
+export interface ProcessOptRequest {
+  domain: ProductDomain;
+  iterations?: number;
+}
+
+export interface ProcessOptResult {
+  domain: string;
+  iterations: number;
+  engine: string;
+  history: number[];
+  best_params: Record<string, number>;
+  predicted_outcome: Record<string, number>;
 }
 
 // Poll a task until it terminates, invoking onUpdate on each tick.

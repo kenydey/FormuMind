@@ -3,15 +3,17 @@ import RequirementPanel from "./RequirementPanel";
 import FormulaLeaderboard from "./FormulaLeaderboard";
 import DoeResultsPanel from "./DoeResultsPanel";
 import SimPlaceholder from "./SimPlaceholder";
+import ProcessOptModal from "./ProcessOptModal";
 import { useStore } from "../store";
 
-type ModalName = "requirements" | "recommend" | "doe" | "optimize";
+type ModalName = "requirements" | "recommend" | "doe" | "optimize" | "process";
 
 const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = [
   { id: "requirements", icon: "🧪", title: "技术需求", desc: "设置产品域、基材与优化目标" },
   { id: "recommend", icon: "⭐", title: "推荐配方", desc: "AI 检索并推荐 Top-N 配方" },
   { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并回灌训练" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
+  { id: "process", icon: "⚙️", title: "工艺优化", desc: "固化/分散/膜厚等工艺参数优化" },
 ];
 
 function Badge({ children, tone }: { children: React.ReactNode; tone: "accent" | "amber" }) {
@@ -126,6 +128,15 @@ export default function ActionsPanel() {
         ) : (
           <p className="text-slate-500 text-sm">运行寻优后，此处显示收敛折线图与最优配方。</p>
         )}
+      </Modal>
+
+      <Modal
+        title="⚙️ 工艺参数优化 · Process Optimization"
+        open={openModal === "process"}
+        onClose={() => setOpenModal(null)}
+        wide
+      >
+        <ProcessOptModal />
       </Modal>
     </aside>
   );

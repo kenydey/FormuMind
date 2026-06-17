@@ -3,6 +3,8 @@ import { useStore } from "../store";
 import type { Formulation } from "../api";
 import { copyFormulaJson, downloadFormulaCsv, exportFormulaToPdf } from "../utils/export";
 import MolViewer from "./MolViewer";
+import Modal from "./Modal";
+import IPReportModal from "./IPReportModal";
 
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
@@ -53,6 +55,7 @@ function ExportMenu({ form }: { form: Formulation }) {
 
 function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
   const [open, setOpen] = useState(rank === 1);
+  const [ipOpen, setIpOpen] = useState(false);
 
   // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
   const labL = form.predicted?.["lab_L"];
@@ -150,8 +153,22 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
           <MolViewer entries={form.ingredients.map((i) => ({ name: i.name, smiles: i.smiles }))} />
+          <button
+            onClick={(e) => { e.stopPropagation(); setIpOpen(true); }}
+            className="w-full mt-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent2 hover:border-accent2/50"
+          >
+            🔍 IP 合规分析
+          </button>
         </div>
       )}
+      <Modal
+        title={`IP 分析 · ${form.name}`}
+        open={ipOpen}
+        onClose={() => setIpOpen(false)}
+        wide
+      >
+        <IPReportModal form={form} />
+      </Modal>
     </div>
   );
 }

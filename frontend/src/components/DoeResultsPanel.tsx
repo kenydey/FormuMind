@@ -95,6 +95,7 @@ const DESIGNS = [
   { value: "plackett_burman", label: "Plackett-Burman" },
   { value: "ccd", label: "中心复合 CCD" },
   { value: "lhs", label: "拉丁超立方" },
+  { value: "ai_active", label: "🧠 AI 主动选点" },
 ];
 
 export default function DoeResultsPanel() {
@@ -201,8 +202,16 @@ export default function DoeResultsPanel() {
               </thead>
               <tbody>
                 {doePlan.runs.map((run) => (
-                  <tr key={run.run_id} className="border-t border-edge/40">
-                    <td className="px-2 py-1 text-slate-500">{run.run_id}</td>
+                  <tr
+                    key={run.run_id}
+                    className={`border-t border-edge/40 ${(run as { ai_suggested?: boolean }).ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
+                  >
+                    <td className="px-2 py-1 text-slate-500">
+                      {run.run_id}
+                      {(run as { ai_suggested?: boolean }).ai_suggested && (
+                        <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
+                      )}
+                    </td>
                     {doePlan.factors.map((f) => (
                       <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
                         {run.natural[f.name]}

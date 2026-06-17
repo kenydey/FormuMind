@@ -207,3 +207,131 @@ def test_qc_placeholder_returns_empty_defects():
     data = resp.json()
     assert data["defects"] == []
     assert data["engine"] == "placeholder"
+
+
+# ── v0.5: Rheology (Fox Tg / Mooney) always returns VEI ──────────────────────
+
+def test_predict_full_includes_viscoelastic_index():
+    from app.domain.knowledge import baseline_formulation
+
+    form = baseline_formulation(_REQ)
+    props, _ = predictor.predict_full(form)
+    assert "viscoelastic_index" in props, "viscoelastic_index should always be present"
+    assert 0.0 <= props["viscoelastic_index"] <= 1.0
+
+
+def test_predict_full_includes_tg_for_polymer_formula():
+    from app.domain.knowledge import baseline_formulation
+
+    form = baseline_formulation(_REQ)
+    props, _ = predictor.predict_full(form)
+    assert "tg_celsius" in props, "Fox Tg should be present for epoxy/polyamide formula"
+    assert -100 < props["tg_celsius"] < 200
+
+
+# ── v0.5: Safety checks wired into workflow ───────────────────────────────────
+
+def test_full_safety_check_standalone():
+    from app.domain.chemistry import full_safety_check
+    from app.domain.knowledge import baseline_formulation
+    from app.domain.schemas import ProductDomain, Requirement
+
+    form = baseline_formulation(Requirement(domain=ProductDomain.surface_treatment))
+    warnings = full_safety_check(form)
+    # Surface treatment has sodium nitrite → SVHC warning expected
+    assert isinstance(warnings, list)
+    assert any("SVHC" in w for w in warnings), "Sodium nitrite SVHC warning expected"
+
+
+# ── v0.5: Process optimizer endpoint ─────────────────────────────────────────
+
+def test_process_optimize_endpoint():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    resp = client.post("/api/process-optimize", json={
+        "domain": "anticorrosion_coating",
+        "iterations": 4,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["engine"] in {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei"}
+    assert len(data["history"]) == 4
+    assert "best_params" in data
+    assert "predicted_outcome" in data
+
+
+# ── v0.5: IP analysis endpoint ────────────────────────────────────────────────
+
+def test_ip_analysis_endpoint():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.domain.knowledge import baseline_formulation
+
+    client = TestClient(app)
+    form = baseline_formulation(_REQ)
+    payload = {
+        "formulation": {
+            "name": form.name,
+            "domain": form.domain.value,
+            "ingredients": [
+                {"name": i.name, "role": i.role, "weight_pct": i.weight_pct}
+                for i in form.ingredients
+            ],
+            "rationale": form.rationale,
+            "predicted": {},
+            "predicted_std": {},
+            "warnings": [],
+        },
+        "limit_patents": 3,
+    }
+    resp = client.post("/api/ip/analyze", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert 0.0 <= data["novelty_score"] <= 1.0
+    assert data["engine"] in ("llm", "offline-keyword")
+    assert data["raw_patents_searched"] >= 1
+
+
+# ── v0.5: Active Learning DOE endpoint ───────────────────────────────────────
+
+def test_active_doe_endpoint():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    payload = {
+        "domain": "anticorrosion_coating",
+        "substrate": "carbon_steel",
+        "salt_spray_hours": 500,
+        "film_weight_gsm": 70,
+        "cure_temperature_c": 80,
+        "cleaning_efficiency": 0,
+        "voc_limit_gpl": 420,
+        "ph_target": None,
+        "notes": "",
+        "objectives": [],
+        "existing_records": [],
+        "n_suggest": 3,
+        "doe_design": "lhs",
+    }
+    resp = client.post("/api/doe/active", json=payload)
+    assert resp.status_code == 200
+    plan = resp.json()
+    assert plan["design"] == "lhs"
+    ai_runs = [r for r in plan["runs"] if r.get("ai_suggested")]
+    assert len(ai_runs) == 3, f"Expected 3 AI-suggested runs, got {len(ai_runs)}"
+
+
+# ── v0.5: MD simulation probe (LAMMPS unavailable → None) ────────────────────
+
+def test_lammps_probe_safe_without_executable():
+    from app.services.md_simulation import _lammps_available, submit_cure_simulation
+
+    # In CI there is no LAMMPS_EXEC set → must return False / None gracefully
+    if _lammps_available():
+        return  # skip if somehow LAMMPS is installed
+    assert _lammps_available() is False
+    result = submit_cure_simulation("test-form", cure_temp_c=80.0)
+    assert result is None
