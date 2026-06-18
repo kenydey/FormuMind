@@ -15,6 +15,8 @@ from .api import search as search_router, ingest as ingest_router, chat as chat_
 from .api import qc as qc_router
 from .api import ip_analysis as ip_router
 from .api import process_optimize as process_router
+from .api import loop as loop_router
+from .api import intent as intent_router
 from .config import get_settings
 
 settings = get_settings()
@@ -63,6 +65,8 @@ app.include_router(settings_router.router, prefix="/api")
 app.include_router(qc_router.router, prefix="/api")
 app.include_router(ip_router.router)
 app.include_router(process_router.router)
+app.include_router(loop_router.router)
+app.include_router(intent_router.router)
 
 
 @app.get("/health", tags=["meta"])

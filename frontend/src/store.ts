@@ -10,6 +10,7 @@ import {
   type ExperimentRecord,
   type Formulation,
   type LLMConfig,
+  type LoopReport,
   type ModelInfo,
   type ObjectiveSpec,
   type ProductDomain,
@@ -55,8 +56,13 @@ interface AppState {
   task: TaskStatus | null;
   leaderboard: Formulation[];
   optimizationHistory: number[];
-  busy: "idle" | "researching" | "optimizing" | "doe" | "training";
+  busy: "idle" | "researching" | "optimizing" | "doe" | "training" | "looping";
   error: string | null;
+
+  // v0.6 self-driving loop
+  loopReport: LoopReport | null;
+  rmseHistory: Record<string, number>[];   // one snapshot per loop turn
+  intentBusy: boolean;
 
   // DOE feedback loop
   doePlan: DOEPlan | null;
@@ -109,6 +115,10 @@ interface AppState {
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
+
+  // v0.6 actions
+  runLoop: () => Promise<void>;
+  applyIntent: (text: string) => Promise<string[]>;
 }
 
 const defaultRequirement: Requirement = {
@@ -178,6 +188,11 @@ export const useStore = create<AppState>()(
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
       settingsOpen: false,
 
+      // v0.6 initial state
+      loopReport: null,
+      rmseHistory: [],
+      intentBusy: false,
+
       setField: (key, value) =>
         set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
 
@@ -225,6 +240,56 @@ export const useStore = create<AppState>()(
           set({ error: String(e) });
         } finally {
           set({ busy: "idle" });
+        }
+      },
+
+      runLoop: async () => {
+        set({ busy: "looping", error: null });
+        try {
+          const { task_id } = await api.loopIterate(get().requirement, 24, 4);
+          const final = await pollTask(task_id, (t) => set({ task: t }));
+          const report = final.result as unknown as LoopReport | null;
+          if (report) {
+            // Refresh leaderboard from the optimization, DOE from the next batch,
+            // and append an RMSE snapshot for the closed-loop trend.
+            const leaderboard = report.optimization.top_formulations;
+            set((s) => ({
+              loopReport: report,
+              leaderboard,
+              optimizationHistory: report.optimization.history,
+              doePlan: report.next_doe,
+              measured: {},
+              models: report.model_info,
+              rmseHistory: [...s.rmseHistory, report.rmse_by_metric],
+            }));
+            const { requirement, models, history } = get();
+            set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, report.optimization.history)) });
+          }
+        } catch (e) {
+          set({ error: String(e) });
+        } finally {
+          set({ busy: "idle" });
+        }
+      },
+
+      applyIntent: async (text) => {
+        set({ intentBusy: true, error: null });
+        try {
+          const result = await api.parseIntent(text);
+          // Merge parsed requirement into the form; keep objectives in sync with domain.
+          set((s) => ({
+            requirement: {
+              ...s.requirement,
+              ...result.requirement,
+              objectives: DOMAIN_OBJECTIVES[result.requirement.domain] ?? s.requirement.objectives,
+            },
+          }));
+          return result.extracted_fields;
+        } catch (e) {
+          set({ error: String(e) });
+          return [];
+        } finally {
+          set({ intentBusy: false });
         }
       },
 

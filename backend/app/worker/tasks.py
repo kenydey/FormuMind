@@ -62,6 +62,43 @@ class TaskManager:
         threading.Thread(target=_run, daemon=True).start()
         return task_id
 
+    def submit_loop(
+        self, req: Requirement, iterations: int | None = None, n_suggest: int = 4
+    ) -> str:
+        """Run one self-driving loop turn (optimize + next-DOE) in the background."""
+        from ..services import auto_loop
+
+        task_id = uuid.uuid4().hex
+        with self._lock:
+            self._tasks[task_id] = TaskStatus(
+                task_id=task_id, kind="loop", state=TaskState.pending
+            )
+
+        def _run() -> None:
+            self._set(task_id, state=TaskState.running, message="starting loop")
+            try:
+                def progress(p: float, msg: str) -> None:
+                    self._set(task_id, progress=round(p, 3), message=msg)
+
+                result = auto_loop.loop_iterate(
+                    req,
+                    optimize_iterations=iterations or 24,
+                    n_suggest=n_suggest,
+                    progress_cb=progress,
+                )
+                self._set(
+                    task_id,
+                    state=TaskState.completed,
+                    progress=1.0,
+                    message="done",
+                    result=result.model_dump(),
+                )
+            except Exception as exc:  # surface failures to the poller
+                self._set(task_id, state=TaskState.failed, message=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return task_id
+
 
 task_manager = TaskManager()
 
@@ -79,3 +116,14 @@ def ingest_patents_task(requirement: dict) -> dict:
     req = Requirement(**requirement)
     result = workflow.run_research(req)
     return {"ingested": len(result.evidence)}
+
+
+@celery_app.task(name="formumind.loop")
+def loop_task(requirement: dict, iterations: int | None = None, n_suggest: int = 4) -> dict:
+    """Celery entry point for the self-driving loop (for deployed workers)."""
+    from ..services import auto_loop
+
+    req = Requirement(**requirement)
+    return auto_loop.loop_iterate(
+        req, optimize_iterations=iterations or 24, n_suggest=n_suggest
+    ).model_dump()

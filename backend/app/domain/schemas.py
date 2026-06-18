@@ -233,3 +233,37 @@ class ProcessOptResult(BaseModel):
     history: list[float]
     best_params: dict[str, float]
     predicted_outcome: dict[str, float]
+
+
+# ── v0.6: Self-driving closed loop ───────────────────────────────────────────
+
+class LoopRequest(Requirement):
+    """Requirement extended with closed-loop iteration controls."""
+
+    optimize_iterations: int = 24
+    n_suggest: int = 4
+
+
+class LoopReport(BaseModel):
+    """One turn of the experiment → retrain → optimize → next-DOE loop."""
+
+    domain: str
+    total_records: int
+    model_info: list[ModelInfo] = Field(default_factory=list)
+    rmse_by_metric: dict[str, float] = Field(default_factory=dict)
+    optimization: OptimizationResult
+    next_doe: DOEPlan
+    engine: str
+
+
+# ── v0.6: Natural-language intent parsing ────────────────────────────────────
+
+class IntentParseRequest(BaseModel):
+    text: str
+
+
+class IntentResult(BaseModel):
+    requirement: Requirement
+    confidence: float  # 0..1 heuristic confidence
+    extracted_fields: list[str]  # which Requirement fields were populated
+    engine: str  # "llm" | "offline-heuristic"

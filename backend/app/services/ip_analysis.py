@@ -161,21 +161,10 @@ def _llm_analysis(form: Formulation, patents: list) -> IPReport | None:
     try:
         from . import llm as llm_service
 
-        prompt = _build_ip_prompt(form, patents)
-        raw = llm_service._call_llm(prompt)
-        if not raw:
+        data = llm_service.complete_json(_build_ip_prompt(form, patents))
+        if not data:
             return None
 
-        import json
-
-        # Extract JSON from the response (handle markdown code fences)
-        json_str = raw.strip()
-        if "```" in json_str:
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-
-        data = json.loads(json_str)
         risks = [
             PatentRisk(
                 patent_id=r.get("patent_id", "unknown"),

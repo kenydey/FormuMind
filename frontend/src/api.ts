@@ -85,6 +85,7 @@ export interface DOERun {
   run_id: number;
   coded: Record<string, number>;
   natural: Record<string, number>;
+  ai_suggested?: boolean;
 }
 
 export interface DOEPlan {
@@ -204,6 +205,16 @@ export const api = {
 
   optimizeProcess: (req: ProcessOptRequest) =>
     post<ProcessOptResult>("/api/process-optimize", req),
+
+  loopIterate: (req: Requirement, optimize_iterations = 24, n_suggest = 4) =>
+    post<{ task_id: string; poll_url: string }>("/api/loop/iterate", {
+      ...req,
+      optimize_iterations,
+      n_suggest,
+    }),
+
+  parseIntent: (text: string) =>
+    post<IntentResult>("/api/intent/parse", { text }),
 };
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
@@ -309,6 +320,25 @@ export interface ProcessOptResult {
   history: number[];
   best_params: Record<string, number>;
   predicted_outcome: Record<string, number>;
+}
+
+// ── v0.6 新增类型 ────────────────────────────────────────────────────────────
+
+export interface LoopReport {
+  domain: string;
+  total_records: number;
+  model_info: ModelInfo[];
+  rmse_by_metric: Record<string, number>;
+  optimization: OptimizationResult;
+  next_doe: DOEPlan;
+  engine: string;
+}
+
+export interface IntentResult {
+  requirement: Requirement;
+  confidence: number;
+  extracted_fields: string[];
+  engine: string;
 }
 
 // Poll a task until it terminates, invoking onUpdate on each tick.

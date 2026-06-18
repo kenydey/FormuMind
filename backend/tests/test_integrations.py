@@ -335,3 +335,71 @@ def test_lammps_probe_safe_without_executable():
     assert _lammps_available() is False
     result = submit_cure_simulation("test-form", cure_temp_c=80.0)
     assert result is None
+
+
+# ── v0.6: Intent parsing endpoint ─────────────────────────────────────────────
+
+def test_intent_parse_endpoint_offline():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    resp = client.post("/api/intent/parse", json={
+        "text": "开发汽车底盘环保水性环氧防腐涂料，耐盐雾1000小时，120℃固化",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["requirement"]["domain"] == "anticorrosion_coating"
+    assert data["requirement"]["salt_spray_hours"] == 1000.0
+    assert data["engine"] in ("llm", "offline-heuristic")
+    assert "salt_spray_hours" in data["extracted_fields"]
+
+
+# ── v0.6: Self-driving loop endpoint (task handle + poll) ─────────────────────
+
+def test_loop_iterate_endpoint():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    payload = {
+        "domain": "anticorrosion_coating",
+        "substrate": "carbon_steel",
+        "salt_spray_hours": 500,
+        "film_weight_gsm": 70,
+        "cure_temperature_c": 80,
+        "cleaning_efficiency": 0,
+        "voc_limit_gpl": 420,
+        "ph_target": None,
+        "notes": "",
+        "objectives": [],
+        "optimize_iterations": 6,
+        "n_suggest": 3,
+    }
+    resp = client.post("/api/loop/iterate", json=payload)
+    assert resp.status_code == 200
+    handle = resp.json()
+    assert "task_id" in handle and "poll_url" in handle
+
+    # In the CI baseline Celery runs eager / in-thread; poll until terminal.
+    import time
+
+    for _ in range(100):
+        st = client.get(handle["poll_url"]).json()
+        if st["state"] in ("completed", "failed"):
+            break
+        time.sleep(0.1)
+    assert st["state"] == "completed", f"loop task did not complete: {st}"
+    result = st["result"]
+    assert result["domain"] == "anticorrosion_coating"
+    assert result["optimization"]["top_formulations"]
+    ai_runs = [r for r in result["next_doe"]["runs"] if r.get("ai_suggested")]
+    assert len(ai_runs) == 3
+
+
+def test_complete_json_helper_safe_without_llm():
+    from app.services.llm import complete_json
+
+    # No API key in CI → _call_llm returns None → complete_json returns None
+    result = complete_json('Return {"x": 1}')
+    assert result is None or isinstance(result, dict)
