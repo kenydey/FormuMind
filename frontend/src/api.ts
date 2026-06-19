@@ -219,7 +219,7 @@ export const api = {
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
 
-export type SearchSourceType = "patents" | "literature" | "internet" | "local";
+export type SearchSourceType = "patents" | "literature" | "internet" | "local" | "notebooklm";
 
 export interface ChatMessage {
   role: "user" | "assistant";

@@ -164,6 +164,10 @@ def search_by_types(
     if "internet" in source_types:
         results.extend(search_web(q, limit_per_source))
 
+    if "notebooklm" in source_types:
+        from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
+        results.extend(search_notebooklm(q, limit_per_source))
+
     # "local" 由 ingest 端点单独处理，此处不检索
     # 去重（按 identifier）并按相关度排序
     seen: set[str] = set()

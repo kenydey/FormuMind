@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     # 化学类问题路由到 ChemCrow 智能体（需 intel extra + 有效 LLM key）。
     use_chemcrow: bool = True
 
+    # NotebookLM 作为检索 Source（notebooklm-py 直连库；浏览器会话认证）。
+    # 需 `notebooklm` extra + 一次性 `notebooklm login` 生成会话文件。
+    # 未启用 / 未登录 / 库未装时 search_notebooklm() 静默返回 []。
+    notebooklm_enabled: bool = False
+    notebooklm_notebook_id: str | None = None
+    notebooklm_storage_path: str = "./data/notebooklm_auth.json"
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {
