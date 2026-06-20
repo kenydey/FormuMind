@@ -93,6 +93,8 @@ for automotive underbody, salt spray ≥ 1000 h, cures at 120 °C"*. Click
 temperature are extracted and auto-filled (LLM when configured, otherwise the
 deterministic regex fallback).
 
+![NL Intent · auto-fill requirements](./images/08-nl-intent.png)
+
 ---
 
 ## Step 5 · Recommend formulations + IP analysis
@@ -159,6 +161,8 @@ salt-spray, cost and sustainability simultaneously.
   shows model R²/RMSE cards (with a ↓ trend arrow), the convergence chart, and
   the next DOE batch (AI rows highlighted in violet). Export the next batch as
   CSV and the loop continues.
+
+![Self-Driving Loop · convergence + next DOE](./images/09-loop.png)
 
 > Every successful research / recommend / optimize / feedback / loop run is
 > saved as a session snapshot — open **🕐 History** in the header to review and
