@@ -37,7 +37,7 @@ def test_settings_lists_all_providers():
 
 
 def test_settings_update_switches_provider():
-    r = client.post("/api/settings", json={"provider": "deepseek", "model": "deepseek-chat"})
+    r = client.post("/api/settings", json={"provider": "deepseek", "model": "deepseek-v4-pro"})
     assert r.status_code == 200
     assert r.json()["provider"] == "deepseek"
     # Restore default so other tests are unaffected.

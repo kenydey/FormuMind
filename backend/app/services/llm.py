@@ -72,8 +72,8 @@ PROVIDERS: list[dict] = [
         "label": "DeepSeek",
         "base_url": "https://api.deepseek.com",
         "models": [
-            {"id": "deepseek-chat", "label": "DeepSeek V3 (推荐)", "recommended": True},
-            {"id": "deepseek-reasoner", "label": "DeepSeek R1 (推理)"},
+            {"id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro (最强)", "recommended": True},
+            {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash (快速经济)"},
         ],
     },
     {
