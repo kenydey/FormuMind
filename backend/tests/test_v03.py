@@ -79,6 +79,23 @@ def test_search_by_types_dedupes():
     assert len(ids) == len(set(ids))
 
 
+def test_search_seed_corpus_filtered_by_query():
+    # Offline seed corpus is now filtered by query relevance, so different
+    # queries return different, query-relevant subsets (not the full fixed list).
+    req = literature.Requirement(**_REQUIREMENT)
+    zinc = literature.search_by_types("zinc phosphate", ["patents"], req=req, limit_per_source=5)
+    cerium = literature.search_by_types("cerium inhibitor", ["patents"], req=req, limit_per_source=5)
+
+    zinc_ids = {e.identifier for e in zinc}
+    cerium_ids = {e.identifier for e in cerium}
+
+    # Each query surfaces its own relevant patent…
+    assert "US9982145B2" in zinc_ids        # zinc phosphate primer
+    assert "EP3211048A1" in cerium_ids      # cerium-based inhibitor primer
+    # …and the two result sets differ (query actually drives the results).
+    assert zinc_ids != cerium_ids
+
+
 def test_ingest_text_file():
     content = b"Zinc phosphate is a corrosion inhibitor.\n\nEpoxy resin provides film formation."
     r = client.post("/api/ingest", files={"file": ("note.txt", content, "text/plain")})

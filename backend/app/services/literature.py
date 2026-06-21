@@ -7,6 +7,9 @@ domains, so research always returns cited evidence.
 """
 from __future__ import annotations
 
+import concurrent.futures
+import re
+
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 
 # Curated seed corpus — representative, paraphrased abstracts used offline.
@@ -38,6 +41,34 @@ SEED_CORPUS: dict[ProductDomain, list[dict]] = {
          "snippet": "Cerium nitrate post-treatment precipitates cerium oxide/hydroxide at cathodic sites, inhibiting corrosion on aluminum alloys."},
     ],
 }
+
+# Identifiers that belong to the offline seed corpus — used to tell offline
+# fallback evidence apart from real online hits (online results are never filtered).
+_SEED_IDENTIFIERS = {d["identifier"] for docs in SEED_CORPUS.values() for d in docs}
+
+# Bilingual keyword tokenizer: English words by run, Chinese by single char.
+_KW_RE = re.compile(r"[a-z0-9]+|[一-鿿]")
+
+
+def _keywords(text: str) -> set[str]:
+    return set(_KW_RE.findall(text.lower()))
+
+
+def _filter_seed_by_query(
+    seeds: list[Evidence], query: str, min_keep: int = 2
+) -> list[Evidence]:
+    """Keep seed entries whose title+snippet share a keyword with the query.
+
+    Falls back to the ``min_keep`` highest-relevance entries when nothing matches,
+    so offline research always returns some cited evidence.
+    """
+    q_kw = _keywords(query)
+    if not q_kw or not seeds:
+        return seeds
+    matched = [e for e in seeds if q_kw & _keywords(f"{e.title} {e.snippet}")]
+    if matched:
+        return matched
+    return sorted(seeds, key=lambda x: x.relevance, reverse=True)[:min_keep]
 
 
 def _online_search(req: Requirement, limit: int) -> list[Evidence] | None:
@@ -120,16 +151,19 @@ def search_semantic_scholar(query: str, limit: int = 5) -> list[Evidence]:
 
 
 def search_web(query: str, limit: int = 5) -> list[Evidence]:
-    """DuckDuckGo 互联网搜索（无需 API key）。"""
+    """DuckDuckGo 互联网搜索（ddgs，无需 API key）。"""
     try:
-        from duckduckgo_search import DDGS  # type: ignore
+        try:
+            from ddgs import DDGS  # type: ignore  # 新包名
+        except ImportError:
+            from duckduckgo_search import DDGS  # type: ignore  # 旧包兜底（向后兼容）
         results = list(DDGS().text(query, max_results=limit))
         return [
             Evidence(
                 source="Internet",
-                identifier=r.get("href", ""),
+                identifier=r.get("href") or r.get("url") or "",  # ddgs 新版可能用 url
                 title=r.get("title", ""),
-                snippet=r.get("body", "")[:500],
+                snippet=(r.get("body") or "")[:500],
                 relevance=1.0 - i * 0.1,
             )
             for i, r in enumerate(results)
@@ -148,27 +182,51 @@ def search_by_types(
 
     source_types: 任意子集 ["patents", "literature", "internet", "local"]
     """
-    results: list[Evidence] = []
     q = query or (req.headline() if req else "coating formulation")
 
+    # Build one independent task per source; each runs concurrently so a slow
+    # source cannot hold up the rest. "local" is handled by the ingest endpoint.
+    tasks: list = []
     if "patents" in source_types:
-        if req:
-            results.extend(search_patents(req, limit_per_source))
-        else:
-            results.extend(search_arxiv(q, limit_per_source))  # fallback
-
+        tasks.append(
+            (lambda: search_patents(req, limit_per_source))
+            if req
+            else (lambda: search_arxiv(q, limit_per_source))  # fallback
+        )
     if "literature" in source_types:
-        results.extend(search_arxiv(q, limit_per_source))
-        results.extend(search_semantic_scholar(q, limit_per_source))
-
+        tasks.append(lambda: search_arxiv(q, limit_per_source))
+        tasks.append(lambda: search_semantic_scholar(q, limit_per_source))
     if "internet" in source_types:
-        results.extend(search_web(q, limit_per_source))
-
+        tasks.append(lambda: search_web(q, limit_per_source))
     if "notebooklm" in source_types:
-        from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
-        results.extend(search_notebooklm(q, limit_per_source))
+        def _notebooklm() -> list[Evidence]:
+            from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
 
-    # "local" 由 ingest 端点单独处理，此处不检索
+            return search_notebooklm(q, limit_per_source)
+
+        tasks.append(_notebooklm)
+
+    results: list[Evidence] = []
+    if tasks:
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks))
+        futures = [ex.submit(t) for t in tasks]
+        try:
+            # Concurrent window: each source gets up to 10 s; slower ones are skipped.
+            for fut in concurrent.futures.as_completed(futures, timeout=10):
+                try:
+                    results.extend(fut.result())
+                except Exception:
+                    continue
+        except concurrent.futures.TimeoutError:
+            pass  # a source exceeded the window — drop it silently
+        ex.shutdown(wait=False)  # don't block on any still-running source
+
+    # Filter only the offline seed corpus by query relevance; online hits are
+    # already query-targeted and pass through untouched.
+    seeds = [e for e in results if e.identifier in _SEED_IDENTIFIERS]
+    online = [e for e in results if e.identifier not in _SEED_IDENTIFIERS]
+    results = online + _filter_seed_by_query(seeds, q)
+
     # 去重（按 identifier）并按相关度排序
     seen: set[str] = set()
     deduped: list[Evidence] = []
