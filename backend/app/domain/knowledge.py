@@ -24,6 +24,10 @@ from .schemas import Formulation, Ingredient, ProductDomain, Requirement, Substr
 # Optional fields used by rheology / safety engines:
 #         tg_k (glass-transition temp K, for Fox-equation Tg prediction)
 #         svhc (bool, EU REACH SVHC candidate)
+# Optional field used by the multi-agent ChemistAgent (v0.8):
+#         carrier ("aqueous" | "solvent" | "both") — solvent-carrier components
+#         (e.g. water-insoluble blocked isocyanates) are intercepted by the
+#         Chemist Agent when used in a waterborne system. Absent → "both".
 RAW_MATERIALS: dict[str, dict] = {
     # Resins / film formers (anti-corrosion)
     "Bisphenol-A epoxy (DGEBA)": {
@@ -36,11 +40,13 @@ RAW_MATERIALS: dict[str, dict] = {
         "role": "resin", "formula": None, "smiles": "CCOC(=O)C(C)=C", "molar_mass": 100.12,
         "price_cny_per_kg": 18.0, "voc_contrib": 0.02,
         "tg_k": 278.0,  # acrylic latex Tg ≈ +5 °C
+        "carrier": "aqueous",
     },
     "Polyurethane dispersion": {
         "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
         "price_cny_per_kg": 32.0, "voc_contrib": 0.02,
         "tg_k": 233.0,  # PUD Tg ≈ −40 °C
+        "carrier": "aqueous",
     },
     "Zinc-rich epoxy binder": {
         "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
@@ -62,6 +68,30 @@ RAW_MATERIALS: dict[str, dict] = {
         "role": "hardener", "formula": "C12H18N2O2",
         "smiles": "O=C=NC1CC(C)(C)CC(CN=C=O)C1", "molar_mass": 222.28,
         "price_cny_per_kg": 65.0, "voc_contrib": 0.0,
+        "carrier": "solvent",  # free NCO groups hydrolyse in water
+    },
+    "Desmodur BL 3175": {
+        # Solvent-borne blocked (3,5-dimethylpyrazole-capped) HDI isocyanurate
+        # crosslinker — water-insoluble; deblocks on bake and the freed NCO
+        # reacts with water in aqueous systems (foaming, poor film). Capped NCO
+        # means no free-isocyanate SMARTS match → caught via the carrier rule.
+        "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 78.0, "voc_contrib": 0.30,
+        "carrier": "solvent", "water_compatible": False,
+    },
+    "Waterborne polyisocyanate (hydrophilic HDI)": {
+        # Hydrophilically-modified HDI polyisocyanate (Bayhydur-type) — designed
+        # to disperse in water; the recommended crosslinker for 2K waterborne PU.
+        "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 72.0, "voc_contrib": 0.05,
+        "carrier": "aqueous", "water_compatible": True,
+    },
+    "Bismuth neodecanoate": {
+        # Bismuth cure catalyst for waterborne 2K-PU — preferred over tin (DBTL)
+        # in aqueous systems, which promotes side reactions with water.
+        "role": "accelerator", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 140.0, "voc_contrib": 0.0,
+        "carrier": "both",
     },
     # Corrosion inhibitors / passivators
     "Zinc phosphate": {

@@ -267,3 +267,53 @@ class IntentResult(BaseModel):
     confidence: float  # 0..1 heuristic confidence
     extracted_fields: list[str]  # which Requirement fields were populated
     engine: str  # "llm" | "offline-heuristic"
+
+
+# ── v0.8: Hierarchical multi-agent review ────────────────────────────────────
+# All agent context and API responses are pure JSON (these pydantic models).
+# The supervisor (InitializeAgent) dispatches to expert agents (Chemist,
+# Inspector); each returns an AgentFinding; the supervisor aggregates them into
+# a single ReviewVerdict.
+
+class Recommendation(BaseModel):
+    """A concrete remediation suggested by an expert agent."""
+
+    kind: str  # "substitute_crosslinker" | "substitute_resin" | "swap_catalyst" | "remove" | "review"
+    target: str | None = None  # the offending ingredient, if any
+    suggestion: str  # the recommended material or action
+    rationale: str  # why this remediation applies
+
+
+class AgentIssue(BaseModel):
+    """One problem detected by an expert agent."""
+
+    code: str  # machine-readable, e.g. "isocyanate_water_incompatibility", "svhc"
+    severity: str  # "high" | "medium" | "low"
+    ingredient: str | None = None
+    message: str
+    recommendations: list[Recommendation] = Field(default_factory=list)
+
+
+class AgentFinding(BaseModel):
+    """The verdict from a single expert agent."""
+
+    agent: str  # "chemist" | "inspector"
+    status: str  # "pass" | "warn" | "intercept"
+    issues: list[AgentIssue] = Field(default_factory=list)
+    engine: str  # "deterministic" | "deterministic+llm"
+
+
+class ReviewVerdict(BaseModel):
+    """The aggregated verdict returned by the supervisor agent."""
+
+    formulation_name: str
+    overall_status: str  # "pass" | "warn" | "intercept" (worst of all findings)
+    findings: list[AgentFinding] = Field(default_factory=list)
+    recommendations: list[Recommendation] = Field(default_factory=list)  # merged + deduped
+    engine: str  # "deterministic" | "deterministic+llm"
+
+
+class AgentReviewRequest(BaseModel):
+    formulation: Formulation
+    requirement: Requirement | None = None
+    explain: bool = True  # enable optional LLM explanation polish (skipped when no key)

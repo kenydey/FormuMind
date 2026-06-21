@@ -17,6 +17,7 @@ from .api import ip_analysis as ip_router
 from .api import process_optimize as process_router
 from .api import loop as loop_router
 from .api import intent as intent_router
+from .api import agents as agents_router
 from .config import get_settings
 
 settings = get_settings()
@@ -67,6 +68,7 @@ app.include_router(ip_router.router)
 app.include_router(process_router.router)
 app.include_router(loop_router.router)
 app.include_router(intent_router.router)
+app.include_router(agents_router.router)
 
 
 @app.get("/health", tags=["meta"])
@@ -76,4 +78,5 @@ def health() -> dict:
         "app": settings.app_name,
         "llm": "claude" if settings.anthropic_api_key else "offline-fallback",
         "celery_eager": settings.celery_eager,
+        "agent_bus": settings.agent_bus_enabled,
     }

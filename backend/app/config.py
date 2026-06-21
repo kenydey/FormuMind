@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     notebooklm_notebook_id: str | None = None
     notebooklm_storage_path: str = "./data/notebooklm_auth.json"
 
+    # 多智能体事件总线（v0.8）。Redis Pub/Sub 仅作预留：默认关闭，
+    # agents.bus.publish() 在关闭 / Redis 不可达 / redis 库缺失时静默 no-op。
+    # 为下一阶段重物理计算（physics_jobs 频道）的异步投递做准备。
+    agent_bus_enabled: bool = False
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {
