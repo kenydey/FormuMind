@@ -61,12 +61,27 @@ class Settings(BaseSettings):
 
     # 检索设置
     search_limit_per_source: int = 5
+    # RAG 检索后端：auto（有 sentence-transformers 则用语义嵌入，否则 TF-IDF）/
+    # embedding（强制语义）/ tfidf（强制词袋）。缺库时一律回退 TF-IDF。
+    rag_backend: str = "auto"
 
     # 可选增强引擎（adapter + 离线回退；缺库或关闭时行为不变）
     # 启动时用 PubChemPy 按化学名补全知识库的 SMILES/分子量（需 intel extra + 网络）。
     enrich_compounds: bool = False
     # 化学类问题路由到 ChemCrow 智能体（需 intel extra + 有效 LLM key）。
     use_chemcrow: bool = True
+
+    # NotebookLM 作为检索 Source（notebooklm-py 直连库；浏览器会话认证）。
+    # 需 `notebooklm` extra + 一次性 `notebooklm login` 生成会话文件。
+    # 未启用 / 未登录 / 库未装时 search_notebooklm() 静默返回 []。
+    notebooklm_enabled: bool = False
+    notebooklm_notebook_id: str | None = None
+    notebooklm_storage_path: str = "./data/notebooklm_auth.json"
+
+    # 多智能体事件总线（v0.8）。Redis Pub/Sub 仅作预留：默认关闭，
+    # agents.bus.publish() 在关闭 / Redis 不可达 / redis 库缺失时静默 no-op。
+    # 为下一阶段重物理计算（physics_jobs 频道）的异步投递做准备。
+    agent_bus_enabled: bool = False
 
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""

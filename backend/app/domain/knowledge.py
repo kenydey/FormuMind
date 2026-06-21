@@ -17,29 +17,47 @@ from .schemas import Formulation, Ingredient, ProductDomain, Requirement, Substr
 # Fields: role, formula, smiles, molar_mass (g/mol),
 #         price_cny_per_kg (engineering estimate),
 #         voc_contrib (mass fraction that becomes VOC, 0-1)
+# Optional fields used by the PVC/CPVC and colorimetry engines (all optional;
+# absent → role-based nominal density and CPVC/ΔE degrade gracefully):
+#         density_gcm3 (g/cm³), oil_absorption (g oil / 100 g pigment),
+#         lab (CIELAB [L*, a*, b*] for particulate pigments)
+# Optional fields used by rheology / safety engines:
+#         tg_k (glass-transition temp K, for Fox-equation Tg prediction)
+#         svhc (bool, EU REACH SVHC candidate)
+# Optional field used by the multi-agent ChemistAgent (v0.8):
+#         carrier ("aqueous" | "solvent" | "both") — solvent-carrier components
+#         (e.g. water-insoluble blocked isocyanates) are intercepted by the
+#         Chemist Agent when used in a waterborne system. Absent → "both".
 RAW_MATERIALS: dict[str, dict] = {
     # Resins / film formers (anti-corrosion)
     "Bisphenol-A epoxy (DGEBA)": {
         "role": "resin", "formula": "C21H24O4",
         "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", "molar_mass": 340.41,
         "price_cny_per_kg": 28.0, "voc_contrib": 0.0,
+        "tg_k": 253.0,  # uncured DGEBA Tg ≈ −20 °C
     },
     "Waterborne acrylic emulsion": {
         "role": "resin", "formula": None, "smiles": "CCOC(=O)C(C)=C", "molar_mass": 100.12,
         "price_cny_per_kg": 18.0, "voc_contrib": 0.02,
+        "tg_k": 278.0,  # acrylic latex Tg ≈ +5 °C
+        "carrier": "aqueous",
     },
     "Polyurethane dispersion": {
         "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
         "price_cny_per_kg": 32.0, "voc_contrib": 0.02,
+        "tg_k": 233.0,  # PUD Tg ≈ −40 °C
+        "carrier": "aqueous",
     },
     "Zinc-rich epoxy binder": {
         "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
         "price_cny_per_kg": 35.0, "voc_contrib": 0.0,
+        "tg_k": 263.0,  # zinc-rich epoxy Tg ≈ −10 °C
     },
     # Hardeners / curing agents
     "Polyamide hardener": {
         "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
         "price_cny_per_kg": 22.0, "voc_contrib": 0.0,
+        "tg_k": 313.0,  # polyamide hardener Tg ≈ +40 °C
     },
     "Isophorone diamine (IPDA)": {
         "role": "hardener", "formula": "C10H22N2",
@@ -50,19 +68,47 @@ RAW_MATERIALS: dict[str, dict] = {
         "role": "hardener", "formula": "C12H18N2O2",
         "smiles": "O=C=NC1CC(C)(C)CC(CN=C=O)C1", "molar_mass": 222.28,
         "price_cny_per_kg": 65.0, "voc_contrib": 0.0,
+        "carrier": "solvent",  # free NCO groups hydrolyse in water
+    },
+    "Desmodur BL 3175": {
+        # Solvent-borne blocked (3,5-dimethylpyrazole-capped) HDI isocyanurate
+        # crosslinker — water-insoluble; deblocks on bake and the freed NCO
+        # reacts with water in aqueous systems (foaming, poor film). Capped NCO
+        # means no free-isocyanate SMARTS match → caught via the carrier rule.
+        "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 78.0, "voc_contrib": 0.30,
+        "carrier": "solvent", "water_compatible": False,
+    },
+    "Waterborne polyisocyanate (hydrophilic HDI)": {
+        # Hydrophilically-modified HDI polyisocyanate (Bayhydur-type) — designed
+        # to disperse in water; the recommended crosslinker for 2K waterborne PU.
+        "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 72.0, "voc_contrib": 0.05,
+        "carrier": "aqueous", "water_compatible": True,
+    },
+    "Bismuth neodecanoate": {
+        # Bismuth cure catalyst for waterborne 2K-PU — preferred over tin (DBTL)
+        # in aqueous systems, which promotes side reactions with water.
+        "role": "accelerator", "formula": None, "smiles": None, "molar_mass": None,
+        "price_cny_per_kg": 140.0, "voc_contrib": 0.0,
+        "carrier": "both",
     },
     # Corrosion inhibitors / passivators
     "Zinc phosphate": {
         "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11,
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
+        "density_gcm3": 3.1, "oil_absorption": 25.0, "lab": [92.0, -0.5, 2.0],
     },
     "Zinc molybdate": {
         "role": "inhibitor", "formula": "ZnMoO4", "smiles": None, "molar_mass": 225.33,
         "price_cny_per_kg": 45.0, "voc_contrib": 0.0,
+        "density_gcm3": 4.3, "oil_absorption": 20.0, "lab": [95.0, -1.0, 3.0],
+        "svhc": True,
     },
     "Cerium nitrate": {
         "role": "inhibitor", "formula": "Ce(NO3)3", "smiles": None, "molar_mass": 326.13,
         "price_cny_per_kg": 120.0, "voc_contrib": 0.0,
+        "svhc": True,
     },
     "2-Mercaptobenzothiazole": {
         "role": "inhibitor", "formula": "C7H5NS2",
@@ -73,14 +119,17 @@ RAW_MATERIALS: dict[str, dict] = {
     "Titanium dioxide": {
         "role": "pigment", "formula": "TiO2", "smiles": None, "molar_mass": 79.87,
         "price_cny_per_kg": 18.0, "voc_contrib": 0.0,
+        "density_gcm3": 4.0, "oil_absorption": 18.0, "lab": [97.0, -0.6, 1.8],
     },
     "Talc": {
         "role": "filler", "formula": "Mg3Si4O10(OH)2", "smiles": None, "molar_mass": 379.27,
         "price_cny_per_kg": 3.0, "voc_contrib": 0.0,
+        "density_gcm3": 2.75, "oil_absorption": 35.0, "lab": [90.0, -0.8, 2.5],
     },
     "Fumed silica": {
         "role": "filler", "formula": "SiO2", "smiles": None, "molar_mass": 60.08,
         "price_cny_per_kg": 30.0, "voc_contrib": 0.0,
+        "density_gcm3": 2.2, "oil_absorption": 100.0, "lab": [94.0, -0.3, 1.0],
     },
     # Solvents
     "Xylene": {
@@ -137,6 +186,7 @@ RAW_MATERIALS: dict[str, dict] = {
     "Sodium nitrite": {
         "role": "accelerator", "formula": "NaNO2", "smiles": None, "molar_mass": 69.00,
         "price_cny_per_kg": 6.0, "voc_contrib": 0.0,
+        "svhc": True,
     },
     "Hexafluorozirconic acid": {
         "role": "active", "formula": "H2ZrF6", "smiles": None, "molar_mass": 208.23,

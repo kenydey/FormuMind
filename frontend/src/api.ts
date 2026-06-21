@@ -85,6 +85,7 @@ export interface DOERun {
   run_id: number;
   coded: Record<string, number>;
   natural: Record<string, number>;
+  ai_suggested?: boolean;
 }
 
 export interface DOEPlan {
@@ -198,11 +199,27 @@ export const api = {
     post<{ ok: boolean; provider: string; model: string; message: string }>(
       "/api/settings/test", {}
     ),
+
+  analyzeIP: (req: IPAnalysisRequest) =>
+    post<IPReport>("/api/ip/analyze", req),
+
+  optimizeProcess: (req: ProcessOptRequest) =>
+    post<ProcessOptResult>("/api/process-optimize", req),
+
+  loopIterate: (req: Requirement, optimize_iterations = 24, n_suggest = 4) =>
+    post<{ task_id: string; poll_url: string }>("/api/loop/iterate", {
+      ...req,
+      optimize_iterations,
+      n_suggest,
+    }),
+
+  parseIntent: (text: string) =>
+    post<IntentResult>("/api/intent/parse", { text }),
 };
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
 
-export type SearchSourceType = "patents" | "literature" | "internet" | "local";
+export type SearchSourceType = "patents" | "literature" | "internet" | "local" | "notebooklm";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -265,6 +282,63 @@ export interface LLMSettingsResponse {
   key_set: boolean;
   base_url?: string;
   providers: LLMProviderInfo[];
+}
+
+// ── v0.5 新增类型 ────────────────────────────────────────────────────────────
+
+export interface PatentRisk {
+  patent_id: string;
+  title: string;
+  risk: "high" | "medium" | "low" | "unknown";
+  claim_overlap: string;
+  recommendation: string;
+}
+
+export interface IPReport {
+  formulation_name: string;
+  novelty_score: number;
+  risks: PatentRisk[];
+  whitespace_hints: string[];
+  raw_patents_searched: number;
+  engine: string;
+}
+
+export interface IPAnalysisRequest {
+  formulation: Formulation;
+  limit_patents?: number;
+}
+
+export interface ProcessOptRequest {
+  domain: ProductDomain;
+  iterations?: number;
+}
+
+export interface ProcessOptResult {
+  domain: string;
+  iterations: number;
+  engine: string;
+  history: number[];
+  best_params: Record<string, number>;
+  predicted_outcome: Record<string, number>;
+}
+
+// ── v0.6 新增类型 ────────────────────────────────────────────────────────────
+
+export interface LoopReport {
+  domain: string;
+  total_records: number;
+  model_info: ModelInfo[];
+  rmse_by_metric: Record<string, number>;
+  optimization: OptimizationResult;
+  next_doe: DOEPlan;
+  engine: string;
+}
+
+export interface IntentResult {
+  requirement: Requirement;
+  confidence: number;
+  extracted_fields: string[];
+  engine: string;
 }
 
 // Poll a task until it terminates, invoking onUpdate on each tick.

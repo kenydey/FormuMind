@@ -118,6 +118,17 @@ def _summit_available() -> bool:
         return False
 
 
+def _botorch_available() -> bool:
+    try:
+        import botorch  # noqa: F401
+        import gpytorch  # noqa: F401
+        import torch  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 @dataclass
 class OptunaOptimizer:
     """Optuna ask/tell optimizer (TPE sampler) over the scalar objective.
@@ -234,12 +245,94 @@ class SummitOptimizer:
         return "summit-sobo"
 
 
+@dataclass
+class BotorchOptimizer:
+    """BoTorch Gaussian-process optimizer with Expected-Improvement acquisition.
+
+    Fits a ``SingleTaskGP`` to the observed (x, score) pairs and maximises a
+    log-Expected-Improvement acquisition each step — a true GP posterior with
+    calibrated uncertainty, unlike the numpy UCB stand-in or Optuna's TPE. Keeps
+    the same scalar suggest/observe/ranked interface, so the workflow swaps it in
+    transparently. Any per-step modelling failure degrades to a random draw.
+    """
+
+    factors: list[Factor]
+    seed: int = 0
+    _X: list[list[float]] = field(default_factory=list)
+    _y: list[float] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        import torch
+
+        torch.manual_seed(self.seed)
+        self._rng = np.random.default_rng(self.seed)
+        self._bounds = np.array(
+            [[f.low for f in self.factors], [f.high for f in self.factors]], dtype=float
+        )
+
+    def _random_point(self) -> list[float]:
+        return [self._rng.uniform(f.low, f.high) for f in self.factors]
+
+    def suggest(self, n_candidates: int = 64, kappa: float = 1.5) -> list[float]:
+        if len(self._X) < max(4, len(self.factors) + 1):
+            return self._random_point()
+        try:
+            import torch
+            from botorch.acquisition.analytic import LogExpectedImprovement
+            from botorch.fit import fit_gpytorch_mll
+            from botorch.models import SingleTaskGP
+            from botorch.optim import optimize_acqf
+            from botorch.utils.transforms import normalize, unnormalize
+            from gpytorch.mlls import ExactMarginalLogLikelihood
+
+            bounds = torch.tensor(self._bounds, dtype=torch.double)
+            X = normalize(torch.tensor(self._X, dtype=torch.double), bounds)
+            Y = torch.tensor(self._y, dtype=torch.double).unsqueeze(-1)
+            Y = (Y - Y.mean()) / (Y.std() + 1e-9)  # standardize for stable GP fit
+            gp = SingleTaskGP(X, Y)
+            fit_gpytorch_mll(ExactMarginalLogLikelihood(gp.likelihood, gp))
+            acq = LogExpectedImprovement(gp, best_f=Y.max())
+            d = len(self.factors)
+            unit = torch.stack(
+                [torch.zeros(d, dtype=torch.double), torch.ones(d, dtype=torch.double)]
+            )
+            cand, _ = optimize_acqf(acq, bounds=unit, q=1, num_restarts=5, raw_samples=64)
+            x = unnormalize(cand.detach(), bounds).squeeze(0).tolist()
+            return [self.factors[i].clip(v) for i, v in enumerate(x)]
+        except Exception:
+            return self._random_point()
+
+    def observe(self, x: list[float], y: float) -> None:
+        self._X.append(list(x))
+        self._y.append(float(y))
+
+    @property
+    def best(self) -> tuple[list[float], float] | None:
+        if not self._y:
+            return None
+        i = int(np.argmax(self._y))
+        return self._X[i], self._y[i]
+
+    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
+        order = np.argsort(self._y)[::-1][:top_n]
+        return [(self._X[i], self._y[i]) for i in order]
+
+    @property
+    def engine(self) -> str:
+        return "botorch-ei"
+
+
 def build_optimizer(factors: list[Factor], seed: int = 0):
     """Return the best available optimizer, falling back to the numpy engine.
 
-    Priority: Summit (heavy extra) > Optuna (optimize extra) > numpy UCB.
-    Construction-time failures degrade gracefully to the next tier.
+    Priority: BoTorch GP-EI (bo extra) > Summit (heavy) > Optuna (optimize) >
+    numpy UCB. Construction-time failures degrade gracefully to the next tier.
     """
+    if _botorch_available():
+        try:
+            return BotorchOptimizer(factors=factors, seed=seed)
+        except Exception:
+            pass
     if _summit_available():
         try:
             return SummitOptimizer(factors=factors, seed=seed)

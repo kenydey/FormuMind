@@ -12,6 +12,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import doe, experiments, formulations, optimize, research, tasks
 from .api import search as search_router, ingest as ingest_router, chat as chat_router, settings as settings_router
+from .api import qc as qc_router
+from .api import ip_analysis as ip_router
+from .api import process_optimize as process_router
+from .api import loop as loop_router
+from .api import intent as intent_router
+from .api import agents as agents_router
 from .config import get_settings
 
 settings = get_settings()
@@ -57,6 +63,12 @@ app.include_router(search_router.router, prefix="/api")
 app.include_router(ingest_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+app.include_router(qc_router.router, prefix="/api")
+app.include_router(ip_router.router)
+app.include_router(process_router.router)
+app.include_router(loop_router.router)
+app.include_router(intent_router.router)
+app.include_router(agents_router.router)
 
 
 @app.get("/health", tags=["meta"])
@@ -66,4 +78,5 @@ def health() -> dict:
         "app": settings.app_name,
         "llm": "claude" if settings.anthropic_api_key else "offline-fallback",
         "celery_eager": settings.celery_eager,
+        "agent_bus": settings.agent_bus_enabled,
     }

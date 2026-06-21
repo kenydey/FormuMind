@@ -178,6 +178,32 @@ def _call_llm(prompt: str) -> str | None:
     return _complete_openai_compatible(prompt, api_key, model, max_tokens, base_url)
 
 
+def complete_json(prompt: str) -> dict | None:
+    """Call the configured LLM and parse its reply as a JSON object.
+
+    Tolerates ```` ```json ```` markdown fences. Returns None when no LLM is
+    configured or the reply is not valid JSON. Shared by the IP-analysis and
+    intent-parsing agents so the fence-stripping logic lives in one place.
+    """
+    import json
+
+    raw = _call_llm(prompt)
+    if not raw:
+        return None
+    text = raw.strip()
+    if "```" in text:
+        # Take the content of the first fenced block.
+        text = text.split("```", 2)[1] if text.count("```") >= 2 else text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
 # ── Prompt builders ──────────────────────────────────────────────────────────
 
 def _evidence_prompt(req: Requirement, evidence: list[Evidence], recommended: list) -> str:

@@ -1,5 +1,43 @@
+import { useState } from "react";
 import { useStore, DOMAIN_OBJECTIVES } from "../store";
 import type { ObjectiveSpec, ProductDomain } from "../api";
+
+function IntentParser() {
+  const { applyIntent, intentBusy } = useStore();
+  const [text, setText] = useState("");
+  const [filled, setFilled] = useState<string[] | null>(null);
+
+  const run = async () => {
+    if (!text.trim()) return;
+    const fields = await applyIntent(text.trim());
+    setFilled(fields);
+  };
+
+  return (
+    <div className="mb-3 border border-edge rounded p-2 bg-ink/40">
+      <span className="text-xs text-slate-400 uppercase tracking-wider">✨ 智能解析 · NL Intent</span>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        placeholder="用一句话描述研发项目，例如：开发汽车底盘环保水性环氧防腐涂料，耐盐雾1000小时，120℃固化"
+        className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-xs text-slate-200 resize-none"
+      />
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[10px] text-slate-500">
+          {filled && filled.length > 0 ? `已填充：${filled.join(", ")}` : "解析后自动填充下方表单"}
+        </span>
+        <button
+          onClick={run}
+          disabled={intentBusy || !text.trim()}
+          className="text-[11px] border border-accent text-accent rounded px-2 py-0.5 hover:bg-accent/10 disabled:opacity-40"
+        >
+          {intentBusy ? "解析中…" : "解析填表"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const DOMAINS: { value: ProductDomain; label: string }[] = [
   { value: "anticorrosion_coating", label: "防腐蚀涂料 · Anti-corrosion" },
@@ -215,6 +253,9 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
       {!embedded && (
         <h2 className="text-sm uppercase tracking-widest text-accent2 mb-2">研发需求 · Requirements</h2>
       )}
+
+      {/* Natural-language intent parser (v0.6) */}
+      <IntentParser />
 
       {/* Domain */}
       <label className="block mb-2">

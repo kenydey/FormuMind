@@ -7,6 +7,7 @@ const SOURCE_TYPES: { id: SearchSourceType; label: string; icon: string }[] = [
   { id: "literature", label: "文献 Literature", icon: "📚" },
   { id: "internet", label: "互联网 Internet", icon: "🌐" },
   { id: "local", label: "本地文件 Local", icon: "📎" },
+  { id: "notebooklm", label: "NotebookLM", icon: "📓" },
 ];
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
@@ -17,6 +18,7 @@ function iconForSource(source: string): string {
   if (s.includes("arxiv") || s.includes("semantic") || s.includes("literature") || s.includes("paper"))
     return "📚";
   if (s.includes("web") || s.includes("duck") || s.includes("internet")) return "🌐";
+  if (s.includes("notebooklm")) return "📓";
   return "📎";
 }
 

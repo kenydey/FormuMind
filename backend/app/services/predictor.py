@@ -11,7 +11,7 @@ Each metric is returned together with a ``predicted_std`` uncertainty estimate.
 from __future__ import annotations
 
 from ..domain import features, knowledge
-from ..domain.chemistry import amine_epoxy_ratio
+from ..domain.chemistry import amine_epoxy_ratio, cpvc, pvc, solids_by_volume
 from ..domain.schemas import Formulation, ProductDomain
 
 
@@ -23,40 +23,57 @@ def _has_waterborne(form: Formulation) -> bool:
     return any(i.name == "Deionized water" and i.weight_pct > 30 for i in form.ingredients)
 
 
+_RDKIT_DESCRIPTORS = [
+    ("MolWt",              "mean_molwt"),
+    ("MolLogP",            "mean_logp"),
+    ("TPSA",               "mean_tpsa"),
+    ("NumHDonors",         "mean_hbd"),
+    ("NumHAcceptors",      "mean_hba"),
+    ("NumRotatableBonds",  "mean_rot_bonds"),
+    ("FractionCSP3",       "mean_fsp3"),
+    ("RingCount",          "mean_ring_count"),
+]
+
+
 def _molecular_features(form: Formulation) -> dict[str, float]:
-    """Optional RDKit-derived descriptors; empty dict when RDKit is absent."""
+    """RDKit-derived descriptors weighted by ingredient wt%; empty when RDKit absent.
+
+    Computes 8 physicochemical descriptors for each SMILES-bearing component
+    and returns the wt%-weighted mean. More informative than the single
+    mean_logp previously returned.
+    """
     try:
         from rdkit import Chem  # type: ignore
         from rdkit.Chem import Descriptors  # type: ignore
     except Exception:
         return {}
-    weighted_logp, total = 0.0, 0.0
+
+    accum: dict[str, float] = {col: 0.0 for _, col in _RDKIT_DESCRIPTORS}
+    total = 0.0
     for ing in form.ingredients:
-        if ing.smiles:
-            mol = Chem.MolFromSmiles(ing.smiles)
-            if mol is not None:
-                weighted_logp += Descriptors.MolLogP(mol) * ing.weight_pct
-                total += ing.weight_pct
-    return {"mean_logp": weighted_logp / total} if total else {}
+        if not ing.smiles:
+            continue
+        mol = Chem.MolFromSmiles(ing.smiles)
+        if mol is None:
+            continue
+        w = ing.weight_pct
+        for rdkit_name, col in _RDKIT_DESCRIPTORS:
+            val = getattr(Descriptors, rdkit_name, lambda m: 0.0)(mol)
+            accum[col] += float(val) * w
+        total += w
+
+    if total <= 0:
+        return {}
+    return {col: round(v / total, 4) for col, v in accum.items()}
 
 
 def _molformer_available() -> bool:
-    """Reserved hook for IBM MoLFormer embeddings (heavy GPU path)."""
+    """MoLFormer GPU path is permanently disabled (replaced by RDKit multi-descriptors)."""
     return False
 
 
-def _molformer_features(form: Formulation) -> dict[str, float]:  # pragma: no cover - reserved
-    """Reserved: MoLFormer SMILES-embedding features for richer prediction.
-
-    Intentionally a no-op for now. When wired up, this would load the IBM
-    MoLFormer checkpoint (``transformers``, GPU recommended; declared in the
-    ``heavy`` extra) and return pooled-embedding descriptors per formulation to
-    augment ``_molecular_features``. Returns ``{}`` until the engine is enabled,
-    so the empirical surrogate is unaffected.
-    """
-    if not _molformer_available():
-        return {}
-    # TODO: heavy GPU path — load MoLFormer, embed ingredient SMILES, pool.
+def _molformer_features(form: Formulation) -> dict[str, float]:
+    """GPU MoLFormer path — permanently inert; RDKit descriptors used instead."""
     return {}
 
 
@@ -85,6 +102,52 @@ def _mixture_density_kgL(form: Formulation) -> float:
     except Exception:
         pass
     return 1.3
+
+
+def _pvc_metrics(form: Formulation) -> dict[str, float]:
+    """Pigment volume concentration descriptors (empty for pigment-free systems).
+
+    Reports PVC, solids-by-volume, and — when oil-absorption data exists for the
+    pigment blend — CPVC and the PVC/CPVC ratio. The ratio is the key indicator
+    of whether a film sits below CPVC (good barrier/gloss) or above it (porous).
+    """
+    pvc_val = pvc(form)
+    if pvc_val <= 0:
+        return {}
+    out: dict[str, float] = {
+        "pvc_pct": pvc_val,
+        "solids_by_volume_pct": solids_by_volume(form),
+    }
+    cpvc_val = cpvc(form)
+    if cpvc_val:
+        out["cpvc_pct"] = cpvc_val
+        out["pvc_to_cpvc_ratio"] = round(pvc_val / cpvc_val, 3)
+    return out
+
+
+def _color_metrics(form: Formulation) -> dict[str, float]:
+    """CIELAB + ΔE₀₀ color descriptors; empty when no color-bearing pigment."""
+    from .colorimetry import color_metrics
+
+    return color_metrics(form)
+
+
+def _rheology_metrics(form: Formulation) -> dict[str, float]:
+    """Fox Tg and Mooney viscosity index; empty when data is insufficient."""
+    try:
+        from .rheology import fox_tg_celsius, mooney_viscosity, viscoelastic_index
+
+        out: dict[str, float] = {}
+        tg_c = fox_tg_celsius(form)
+        if tg_c is not None:
+            out["tg_celsius"] = tg_c
+        eta_r = mooney_viscosity(form)
+        if eta_r is not None:
+            out["viscosity_relative"] = eta_r
+        out["viscoelastic_index"] = viscoelastic_index(form)
+        return out
+    except Exception:
+        return {}
 
 
 def _cost_and_sustainability(form: Formulation, voc_limit: float = 420.0) -> dict[str, float]:
@@ -191,10 +254,20 @@ def predict_full(
         props["adhesion_promotion_idx"] = round(active * 0.6 + 1.0, 2)
 
     if mol and "salt_spray_hours" in props:
-        props["salt_spray_hours"] = round(props["salt_spray_hours"] * (1.0 + 0.01 * mol["mean_logp"]), 1)
+        logp = mol.get("mean_logp", 0.0)
+        tpsa = mol.get("mean_tpsa", 0.0)
+        fsp3 = mol.get("mean_fsp3", 0.0)
+        # Multi-descriptor correction: logP (barrier), TPSA (water permeation), fsp3 (flex)
+        mol_correction = 1.0 + 0.01 * logp - 0.002 * (tpsa / 100.0) + 0.005 * fsp3
+        props["salt_spray_hours"] = round(props["salt_spray_hours"] * mol_correction, 1)
 
     # Cost / VOC / sustainability (always computed; not blended with trained models).
     props.update(_cost_and_sustainability(form))
+    # PVC / CPVC / solids-by-volume and CIELAB color (empty for pigment-free systems).
+    props.update(_pvc_metrics(form))
+    props.update(_color_metrics(form))
+    # Rheology: Fox Tg, Mooney viscosity, viscoelastic index.
+    props.update(_rheology_metrics(form))
 
     props, std = _blend_trained(form, process, props)
     return props, std

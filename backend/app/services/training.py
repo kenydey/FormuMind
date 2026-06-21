@@ -170,6 +170,15 @@ class ModelRegistry:
     def total_records(self) -> int:
         return len(self._records)
 
+    def records_for(self, domain: ProductDomain) -> list[ExperimentRecord]:
+        """Return all stored experiment records for one product domain.
+
+        Lets the self-driving loop fetch its own training history without the
+        caller having to pass records in explicitly.
+        """
+        with self._lock:
+            return [rec for rec in self._records if rec.domain == domain]
+
     # --- training ------------------------------------------------------
     def _dataset(self, domain: ProductDomain, metric: str) -> tuple[np.ndarray, np.ndarray] | None:
         rows, ys = [], []

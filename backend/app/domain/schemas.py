@@ -117,6 +117,7 @@ class DOERun(BaseModel):
     run_id: int
     coded: dict[str, float]
     natural: dict[str, float]
+    ai_suggested: bool = False
 
 
 class DOEPlan(BaseModel):
@@ -135,7 +136,8 @@ class OptimizationResult(BaseModel):
     history: list[float]
     top_formulations: list[Formulation]
     # Which optimizer engine produced this result (e.g. "numpy-ucb",
-    # "optuna-tpe", "summit-sobo"). Default preserves backward compatibility.
+    # "optuna-tpe", "summit-sobo", "botorch-ei"). Default preserves
+    # backward compatibility.
     engine: str = "numpy-ucb"
 
 
@@ -190,3 +192,128 @@ class TrainingReport(BaseModel):
     trained: list[ModelInfo]
     total_records: int
     message: str = ""
+
+
+# ── v0.5: IP analysis ────────────────────────────────────────────────────────
+
+class PatentRisk(BaseModel):
+    patent_id: str
+    title: str
+    risk: str  # "high" | "medium" | "low" | "unknown"
+    claim_overlap: str
+    recommendation: str
+
+
+class IPReport(BaseModel):
+    formulation_name: str
+    novelty_score: float  # 0=likely infringes … 1=highly novel
+    risks: list[PatentRisk]
+    whitespace_hints: list[str]
+    raw_patents_searched: int
+    engine: str  # "llm" | "offline-keyword"
+
+
+class IPAnalysisRequest(BaseModel):
+    formulation: Formulation
+    limit_patents: int = 10
+
+
+# ── v0.5: Process parameter optimization ────────────────────────────────────
+
+class ProcessOptRequest(BaseModel):
+    domain: ProductDomain
+    iterations: int = 18
+    objectives: list[ObjectiveSpec] = Field(default_factory=list)
+
+
+class ProcessOptResult(BaseModel):
+    domain: str
+    iterations: int
+    engine: str
+    history: list[float]
+    best_params: dict[str, float]
+    predicted_outcome: dict[str, float]
+
+
+# ── v0.6: Self-driving closed loop ───────────────────────────────────────────
+
+class LoopRequest(Requirement):
+    """Requirement extended with closed-loop iteration controls."""
+
+    optimize_iterations: int = 24
+    n_suggest: int = 4
+
+
+class LoopReport(BaseModel):
+    """One turn of the experiment → retrain → optimize → next-DOE loop."""
+
+    domain: str
+    total_records: int
+    model_info: list[ModelInfo] = Field(default_factory=list)
+    rmse_by_metric: dict[str, float] = Field(default_factory=dict)
+    optimization: OptimizationResult
+    next_doe: DOEPlan
+    engine: str
+
+
+# ── v0.6: Natural-language intent parsing ────────────────────────────────────
+
+class IntentParseRequest(BaseModel):
+    text: str
+
+
+class IntentResult(BaseModel):
+    requirement: Requirement
+    confidence: float  # 0..1 heuristic confidence
+    extracted_fields: list[str]  # which Requirement fields were populated
+    engine: str  # "llm" | "offline-heuristic"
+
+
+# ── v0.8: Hierarchical multi-agent review ────────────────────────────────────
+# All agent context and API responses are pure JSON (these pydantic models).
+# The supervisor (InitializeAgent) dispatches to expert agents (Chemist,
+# Inspector); each returns an AgentFinding; the supervisor aggregates them into
+# a single ReviewVerdict.
+
+class Recommendation(BaseModel):
+    """A concrete remediation suggested by an expert agent."""
+
+    kind: str  # "substitute_crosslinker" | "substitute_resin" | "swap_catalyst" | "remove" | "review"
+    target: str | None = None  # the offending ingredient, if any
+    suggestion: str  # the recommended material or action
+    rationale: str  # why this remediation applies
+
+
+class AgentIssue(BaseModel):
+    """One problem detected by an expert agent."""
+
+    code: str  # machine-readable, e.g. "isocyanate_water_incompatibility", "svhc"
+    severity: str  # "high" | "medium" | "low"
+    ingredient: str | None = None
+    message: str
+    recommendations: list[Recommendation] = Field(default_factory=list)
+
+
+class AgentFinding(BaseModel):
+    """The verdict from a single expert agent."""
+
+    agent: str  # "chemist" | "inspector"
+    status: str  # "pass" | "warn" | "intercept"
+    issues: list[AgentIssue] = Field(default_factory=list)
+    engine: str  # "deterministic" | "deterministic+llm"
+
+
+class ReviewVerdict(BaseModel):
+    """The aggregated verdict returned by the supervisor agent."""
+
+    formulation_name: str
+    overall_status: str  # "pass" | "warn" | "intercept" (worst of all findings)
+    findings: list[AgentFinding] = Field(default_factory=list)
+    recommendations: list[Recommendation] = Field(default_factory=list)  # merged + deduped
+    engine: str  # "deterministic" | "deterministic+llm"
+
+
+class AgentReviewRequest(BaseModel):
+    formulation: Formulation
+    requirement: Requirement | None = None
+    explain: bool = True  # enable optional LLM explanation polish (skipped when no key)
