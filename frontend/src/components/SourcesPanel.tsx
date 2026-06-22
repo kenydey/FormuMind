@@ -40,6 +40,7 @@ export default function SourcesPanel() {
     searchBusy,
     runDeepResearch,
     busy,
+    error,
   } = useStore();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -260,6 +261,18 @@ export default function SourcesPanel() {
       >
         {busy === "researching" ? "🔬 深度研究中…" : "🔬 深度研究"}
       </button>
+
+      {/* Search error — shown when backend is unreachable or the API returns an error */}
+      {!searchBusy && error && (
+        <div className="shrink-0 text-xs bg-red-500/10 border border-red-500/20 rounded p-2 text-red-300 leading-relaxed">
+          ⚠ 检索失败：{error.replace(/^Error:\s*/, "")}
+          {(error.includes("Failed to fetch") || error.includes("fetch")) && (
+            <div className="mt-0.5 text-red-400/70">
+              请确认后端已启动：<code className="text-red-300 bg-ink/60 rounded px-1">uvicorn app.main:app --port 8000</code>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="border-t border-edge shrink-0" />
 
