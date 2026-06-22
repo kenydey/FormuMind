@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from ..domain.schemas import Evidence, Requirement, ResearchResult
+from ..domain.schemas import DeepResearchRequest, Evidence, Requirement, ResearchResult
 from ..pipeline import workflow
+from ..worker.tasks import task_manager
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -32,3 +33,21 @@ def start_research(body: ResearchRequest) -> ResearchResult:
     req = Requirement(**{k: v for k, v in body.model_dump().items() if k != "sources"})
     pre_sources = body.sources if body.sources else None
     return workflow.run_research(req, pre_sources=pre_sources)
+
+
+class DeepResearchHandle(BaseModel):
+    task_id: str
+    poll_url: str
+
+
+@router.post("/research/deep", response_model=DeepResearchHandle)
+def start_deep_research(body: DeepResearchRequest) -> DeepResearchHandle:
+    """Kick off async knowledge-cohort deep research; poll GET /api/tasks/{id}.
+
+    Returns a task handle immediately (the cohort retrieval + multi-agent
+    synthesis is long-running). The result is a ``ComprehensiveReport``.
+    """
+    req = Requirement(**{k: v for k, v in body.model_dump().items() if k != "topic"})
+    topic = body.topic or req.headline()
+    task_id = task_manager.submit_comprehensive_research(topic, req)
+    return DeepResearchHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")

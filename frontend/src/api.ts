@@ -218,6 +218,12 @@ export const api = {
 
   getSourceStatus: () =>
     get<Record<string, SourceStatus>>("/api/search/status"),
+
+  deepResearch: (topic: string, req: Requirement) =>
+    post<{ task_id: string; poll_url: string }>("/api/research/deep", {
+      ...req,
+      topic,
+    }),
 };
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
@@ -349,6 +355,16 @@ export interface IntentResult {
   requirement: Requirement;
   confidence: number;
   extracted_fields: string[];
+  engine: string;
+}
+
+export interface ComprehensiveReport {
+  topic: string;
+  report_markdown: string;
+  citations: Evidence[];
+  candidates: Formulation[];
+  web_count: number;
+  kb_count: number;
   engine: string;
 }
 

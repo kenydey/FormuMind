@@ -5,6 +5,7 @@ import {
   OBJECTIVE_METRIC,
   pollTask,
   type ChatMessage,
+  type ComprehensiveReport,
   type DOEPlan,
   type Evidence,
   type ExperimentRecord,
@@ -54,6 +55,7 @@ export interface SessionSnapshot {
 interface AppState {
   requirement: Requirement;
   research: ResearchResult | null;
+  deepReport: ComprehensiveReport | null;
   task: TaskStatus | null;
   leaderboard: Formulation[];
   optimizationHistory: number[];
@@ -94,6 +96,7 @@ interface AppState {
   setDomain: (d: ProductDomain) => void;
   setObjectives: (objectives: ObjectiveSpec[]) => void;
   runResearch: () => Promise<void>;
+  runDeepResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
   generateDoe: (design: string) => Promise<void>;
   setMeasured: (runId: number, value: number) => void;
@@ -167,6 +170,7 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       requirement: defaultRequirement,
       research: null,
+      deepReport: null,
       task: null,
       leaderboard: [],
       optimizationHistory: [],
@@ -221,6 +225,37 @@ export const useStore = create<AppState>()(
           // Save snapshot after research completes.
           const { requirement, models, optimizationHistory, history } = get();
           set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, optimizationHistory)) });
+        } catch (e) {
+          set({ error: String(e) });
+        } finally {
+          set({ busy: "idle" });
+        }
+      },
+
+      runDeepResearch: async () => {
+        const { searchQuery, requirement } = get();
+        set({ busy: "researching", error: null });
+        try {
+          const { task_id } = await api.deepResearch(searchQuery, requirement);
+          const final = await pollTask(task_id, (t) => set({ task: t }));
+          if (final.state === "failed") {
+            set({ error: final.message || "deep research failed" });
+            return;
+          }
+          const report = final.result as unknown as ComprehensiveReport | null;
+          if (report) {
+            set({ deepReport: report });
+            // Feed citations into the sources panel and candidates into the board.
+            if (report.citations?.length) get().addSources(report.citations);
+            if (report.candidates?.length) set({ leaderboard: report.candidates });
+            // Surface the report as an assistant message in the center Q&A area.
+            const msg: ChatMessage = {
+              role: "assistant",
+              content: report.report_markdown,
+              citations: report.citations,
+            };
+            set((s) => ({ chatHistory: [...s.chatHistory, msg] }));
+          }
         } catch (e) {
           set({ error: String(e) });
         } finally {

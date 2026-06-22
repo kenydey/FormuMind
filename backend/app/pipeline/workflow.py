@@ -26,7 +26,7 @@ from ..domain.schemas import (
 )
 from ..services import literature, llm, predictor
 from ..services.optimizer import Factor, build_optimizer
-from ..services.rag import TfidfStore
+from ..services.rag import build_store
 from . import reconstruct
 
 # Per-domain optimization levers: (ingredient name, role-fallback, low%, high%)
@@ -110,7 +110,8 @@ def run_research(req: Requirement, pre_sources: list | None = None) -> ResearchR
         evidence: list[_Evidence] = list(pre_sources)
     else:
         evidence = literature.search(req)
-    store = TfidfStore()
+    # Semantic store when sentence-transformers is installed, else TF-IDF.
+    store = build_store()
     store.ingest(evidence)
     grounded = store.query(req.headline(), k=min(5, len(evidence))) or evidence
 

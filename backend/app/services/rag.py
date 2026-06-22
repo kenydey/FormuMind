@@ -155,3 +155,94 @@ def build_store():
         except Exception:
             pass
     return TfidfStore()
+
+
+# ── Advanced RAG: HyDE query expansion + LLM semantic re-ranking ──────────────
+# Both are pure enhancements layered on top of build_store(); each degrades to a
+# behaviour-preserving no-op when no LLM is configured, so offline retrieval is
+# unchanged. They exist to cut "chemical hallucination": HyDE anchors retrieval
+# to the *content* an answer would contain (surfacing real citable evidence
+# instead of letting the model free-associate), and the re-ranker drops
+# off-topic context before synthesis so the LLM is grounded only on the most
+# relevant prior art.
+
+
+def hyde_expand(query: str, domain: str | None = None) -> str:
+    """HyDE (Hypothetical Document Embeddings) query expansion.
+
+    Ask the LLM for a short hypothetical technical abstract that an ideal answer
+    would resemble, then append it to the query. Embedding/TF-IDF retrieval then
+    matches on *meaning* rather than surface keywords, surfacing real evidence to
+    ground the answer against. When no LLM is available the original query is
+    returned unchanged — retrieval behaviour is identical to before.
+    """
+    from . import llm as _llm
+
+    ctx = f"（领域：{domain}）" if domain else ""
+    prompt = (
+        f"针对以下研究主题{ctx}，写一段约 80 词的假设性技术摘要，"
+        f"描述理想文献/专利中会出现的关键配方参数、机理与材料。仅输出摘要正文，不要前缀。\n\n"
+        f"研究主题：{query}"
+    )
+    try:
+        hint = _llm._call_llm(prompt)
+    except Exception:
+        hint = None
+    return f"{query}\n\n{hint}" if hint else query
+
+
+def _rerank_prompt(query: str, candidates: list[Evidence]) -> str:
+    lines = "\n".join(
+        f"[{i}] ({e.source}) {e.title}: {e.snippet[:200]}"
+        for i, e in enumerate(candidates)
+    )
+    return (
+        "你是检索相关性评审。给定研究主题与若干候选证据，为每条证据按其与主题的"
+        "语义相关性打分（0.0 完全无关 … 1.0 高度相关）。\n"
+        f"研究主题：{query}\n\n候选证据：\n{lines}\n\n"
+        '仅返回 JSON：{"scores": [{"i": 0, "score": 0.9}, ...]}（i 为方括号内编号）。'
+    )
+
+
+def llm_rerank(query: str, candidates: list[Evidence], k: int = 6) -> list[Evidence]:
+    """Re-rank retrieved candidates by LLM-judged semantic relevance, return top-k.
+
+    Filters off-topic evidence *before* synthesis so the answer engine is
+    grounded only on the most relevant prior art. On any failure (no LLM,
+    malformed JSON) it returns ``candidates[:k]`` — i.e. the upstream store's
+    ordering is preserved, so this is a zero-risk enhancement.
+    """
+    if not candidates:
+        return []
+    if len(candidates) <= 1:
+        return candidates[:k]
+
+    from . import llm as _llm
+
+    try:
+        data = _llm.complete_json(_rerank_prompt(query, candidates))
+    except Exception:
+        data = None
+
+    scores = (data or {}).get("scores") if isinstance(data, dict) else None
+    if not isinstance(scores, list):
+        return candidates[:k]
+
+    ranking: dict[int, float] = {}
+    for item in scores:
+        try:
+            idx = int(item["i"])
+            if 0 <= idx < len(candidates):
+                ranking[idx] = float(item["score"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not ranking:
+        return candidates[:k]
+
+    # Score-desc; unscored candidates keep original relative order at the tail.
+    order = sorted(
+        range(len(candidates)),
+        key=lambda i: (ranking.get(i, -1.0), -i),
+        reverse=True,
+    )
+    return [candidates[i] for i in order[:k]]

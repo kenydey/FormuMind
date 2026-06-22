@@ -106,6 +106,32 @@ class ResearchResult(BaseModel):
     chat_markdown: str
 
 
+class ComprehensiveReport(BaseModel):
+    """Output of the KnowledgeCohort deep-research orchestrator.
+
+    A citation-grounded research report synthesised by cross-validating web and
+    knowledge-base evidence, plus candidate formulations for the topic.
+    """
+
+    topic: str
+    report_markdown: str
+    citations: list[Evidence] = Field(default_factory=list)
+    candidates: list[Formulation] = Field(default_factory=list)
+    web_count: int = 0
+    kb_count: int = 0
+    engine: str = "offline"  # "llm" | "offline"
+
+
+class DeepResearchRequest(Requirement):
+    """Requirement plus a free-text research topic for /api/research/deep.
+
+    ``topic`` drives multi-source retrieval and synthesis; when empty the
+    requirement headline is used instead.
+    """
+
+    topic: str = ""
+
+
 class DOEFactor(BaseModel):
     name: str
     low: float

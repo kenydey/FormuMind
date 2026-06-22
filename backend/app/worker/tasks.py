@@ -99,6 +99,40 @@ class TaskManager:
         threading.Thread(target=_run, daemon=True).start()
         return task_id
 
+    def submit_comprehensive_research(
+        self, topic: str, req: Requirement | None = None
+    ) -> str:
+        """Run a knowledge-cohort deep research pass in the background."""
+        from ..services import knowledge_cohort
+
+        task_id = uuid.uuid4().hex
+        with self._lock:
+            self._tasks[task_id] = TaskStatus(
+                task_id=task_id, kind="research", state=TaskState.pending
+            )
+
+        def _run() -> None:
+            self._set(task_id, state=TaskState.running, message="starting deep research")
+            try:
+                def progress(p: float, msg: str) -> None:
+                    self._set(task_id, progress=round(p, 3), message=msg)
+
+                result = knowledge_cohort.conduct_research(
+                    topic, req=req, progress_cb=progress
+                )
+                self._set(
+                    task_id,
+                    state=TaskState.completed,
+                    progress=1.0,
+                    message="done",
+                    result=result.model_dump(),
+                )
+            except Exception as exc:  # surface failures to the poller
+                self._set(task_id, state=TaskState.failed, message=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return task_id
+
 
 task_manager = TaskManager()
 
@@ -127,3 +161,12 @@ def loop_task(requirement: dict, iterations: int | None = None, n_suggest: int =
     return auto_loop.loop_iterate(
         req, optimize_iterations=iterations or 24, n_suggest=n_suggest
     ).model_dump()
+
+
+@celery_app.task(name="formumind.deep_research")
+def deep_research_task(topic: str, requirement: dict | None = None) -> dict:
+    """Celery entry point for knowledge-cohort deep research (for deployed workers)."""
+    from ..services import knowledge_cohort
+
+    req = Requirement(**requirement) if requirement else None
+    return knowledge_cohort.conduct_research(topic, req=req).model_dump()

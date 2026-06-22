@@ -179,11 +179,13 @@ def test_search_response_includes_source_status():
     assert body["source_status"]["patents"]["available"] is True
     assert body["source_status"]["patents"]["offline_fallback"] is True
 
-    # In CI (no intel extra installed) online sources are unavailable.
-    assert body["source_status"]["literature"]["available"] is False
-    assert body["source_status"]["literature"]["hint"] is not None
-    assert body["source_status"]["internet"]["available"] is False
-    assert body["source_status"]["internet"]["hint"] is not None
+    # Online sources: availability is environment-dependent (intel extra), but
+    # the contract holds either way — when unavailable a setup hint is provided.
+    for src in ("literature", "internet"):
+        st = body["source_status"][src]
+        assert isinstance(st["available"], bool)
+        if not st["available"]:
+            assert st["hint"] is not None
 
     # NotebookLM defaults to unconfigured.
     nb = body["source_status"]["notebooklm"]
