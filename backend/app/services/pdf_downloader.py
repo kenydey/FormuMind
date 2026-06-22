@@ -78,8 +78,41 @@ def fetch_patent_pdf(patent_id: str, timeout: float = 20.0) -> bytes | None:
 # ── Text extraction ──────────────────────────────────────────────────────────
 
 
+def _raw_pdf_stream_text(content: bytes) -> str:
+    """Minimal fallback text extractor for simple unencrypted PDFs.
+
+    Parses Tj (show string) operators directly from the content stream without
+    any external library. Works for basic PDFs whose text is stored as plain
+    Latin-1 strings — including the offline test fixture and most USPTO/EPO
+    full-text PDFs. Does NOT handle FlateDecode compression or complex encodings.
+    """
+    import re
+    import zlib
+
+    texts: list[str] = []
+    for raw_stream in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", content, re.DOTALL):
+        stream = raw_stream
+        try:
+            stream = zlib.decompress(raw_stream)
+        except Exception:
+            pass  # not FlateDecode or wrong boundaries — use raw bytes
+        for m in re.finditer(rb"\(([^)]*)\)\s*Tj", stream):
+            raw = m.group(1).replace(b"\\(", b"(").replace(b"\\)", b")").replace(b"\\\\", b"\\")
+            decoded = raw.decode("latin-1", errors="replace").strip()
+            if decoded:
+                texts.append(decoded)
+    return "\n\n".join(texts)
+
+
 def _extract_text(content: bytes) -> str:
-    """Extract plain text from PDF bytes via markitdown → pypdf → empty string."""
+    """Extract plain text from PDF bytes.
+
+    Cascade (each tier falls through on import failure or parse error):
+      1. markitdown — full-fidelity structured extraction (optional extra)
+      2. pypdf      — page-by-page extraction (optional extra)
+      3. raw stream — minimal Tj-operator parser; no external deps; works for
+                      simple unencrypted PDFs (test fixture + most patent PDFs)
+    """
     from io import BytesIO
 
     try:
@@ -96,13 +129,17 @@ def _extract_text(content: bytes) -> str:
         from pypdf import PdfReader  # type: ignore
 
         reader = PdfReader(BytesIO(content))
-        return "\n\n".join(
+        text = "\n\n".join(
             (page.extract_text() or "").strip() for page in reader.pages
         )
-    except Exception:
+        if text.strip():
+            return text
+    except BaseException:
+        # Catches pyo3_runtime.PanicException (Rust panic, subclass of BaseException
+        # not Exception) that can occur when cryptography's Rust backend is broken.
         pass
 
-    return ""
+    return _raw_pdf_stream_text(content)
 
 
 # ── Chunking ─────────────────────────────────────────────────────────────────

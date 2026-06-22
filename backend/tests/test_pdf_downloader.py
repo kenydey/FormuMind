@@ -167,3 +167,91 @@ def test_cohort_pdf_download_gate_is_off_by_default():
     assert settings.pdf_download is False, (
         "pdf_download must default to False to keep tests offline"
     )
+
+
+# ── Real PDF fixture tests (no mocks — exercises actual parsing cascade) ───────
+
+_FIXTURE = (
+    __file__.replace("test_pdf_downloader.py", "fixtures/sample_patent.pdf")
+)
+_KNOWN_TOKENS = ["zinc phosphate", "500 hours", "waterborne epoxy"]
+
+
+def _fixture_bytes() -> bytes:
+    with open(_FIXTURE, "rb") as f:
+        return f.read()
+
+
+def test_extract_text_real_pdf():
+    """_extract_text() on real fixture bytes returns non-empty text with known tokens.
+
+    Does NOT monkeypatch _extract_text — this exercises the actual cascade
+    (markitdown → pypdf → _raw_pdf_stream_text) on committed fixture bytes.
+    """
+    content = _fixture_bytes()
+    text = pd._extract_text(content)
+    assert text, "_extract_text returned empty string on real fixture"
+    lower = text.lower()
+    for tok in _KNOWN_TOKENS:
+        assert tok in lower, f"Expected token '{tok}' not found in extracted text"
+
+
+def test_pdf_to_evidence_real_pdf():
+    """pdf_to_evidence() on real fixture bytes produces correct Evidence items.
+
+    Validates identifier format, source/title pass-through, snippet content,
+    and relevance decreasing across chunks.
+    """
+    content = _fixture_bytes()
+    result = pd.pdf_to_evidence(
+        content,
+        source="USPTO",
+        identifier="US9982145B2",
+        title="Waterborne Epoxy Anticorrosive Coating",
+        base_relevance=1.0,
+    )
+    assert len(result) >= 1, "Expected at least one Evidence chunk from real PDF"
+    # Identifier pattern: original#p<n>
+    assert result[0].identifier == "US9982145B2#p0"
+    assert result[0].source == "USPTO"
+    assert result[0].title == "Waterborne Epoxy Anticorrosive Coating"
+    # At least one known token should appear somewhere across the chunks
+    all_snippets = " ".join(c.snippet.lower() for c in result)
+    assert any(tok in all_snippets for tok in _KNOWN_TOKENS), (
+        "None of the known tokens found in pdf_to_evidence chunks"
+    )
+    # Relevance should decrease (or stay equal) across chunks
+    if len(result) > 1:
+        assert result[0].relevance >= result[1].relevance
+
+
+def test_enrich_with_fulltext_real_pdf(monkeypatch):
+    """enrich_with_fulltext() replaces a patent Evidence with real full-text chunks.
+
+    fetch_patent_pdf is monkeypatched to return fixture bytes — zero network calls.
+    Validates that the original abstract-only item is replaced with paragraph chunks.
+    """
+    content = _fixture_bytes()
+    monkeypatch.setattr(pd, "fetch_patent_pdf", lambda *a, **kw: content)
+
+    original = Evidence(
+        source="USPTO",
+        identifier="US9982145B2",
+        title="Waterborne epoxy anticorrosive coating with zinc phosphate",
+        snippet="Abstract only — short placeholder.",
+        relevance=0.95,
+    )
+    result = pd.enrich_with_fulltext([original], max_pdfs=1)
+
+    # Original single item should be replaced by full-text chunks
+    assert len(result) >= 1
+    chunk_ids = [e.identifier for e in result if "#p" in e.identifier]
+    assert len(chunk_ids) >= 1, "No full-text chunks produced from real PDF fixture"
+    assert all(cid.startswith("US9982145B2#p") for cid in chunk_ids)
+    # Source and title should be inherited from the original Evidence
+    assert all(e.source == "USPTO" for e in result)
+    # At least one snippet should contain a known token
+    all_text = " ".join(e.snippet.lower() for e in result)
+    assert any(tok in all_text for tok in _KNOWN_TOKENS), (
+        "None of the known tokens found in enriched Evidence snippets"
+    )

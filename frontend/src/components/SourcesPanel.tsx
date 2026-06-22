@@ -15,6 +15,8 @@ const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.
 function iconForSource(source: string): string {
   const s = source.toLowerCase();
   if (s.includes("patent")) return "📄";
+  // ChemCrow must be checked before "web" / "literature" since "ChemCrow-Web" contains "web"
+  if (s.includes("chemcrow")) return "🧪";
   if (s.includes("arxiv") || s.includes("semantic") || s.includes("literature") || s.includes("paper"))
     return "📚";
   if (s.includes("web") || s.includes("duck") || s.includes("internet")) return "🌐";
@@ -59,6 +61,11 @@ export default function SourcesPanel() {
   const notebooklmStatus = sourceStatus["notebooklm"];
   const showNotebooklmHint =
     notebooklmSelected && notebooklmStatus && !notebooklmStatus.available;
+
+  const chemcrowStatus = sourceStatus["chemcrow"];
+  const chemcrowRelevant =
+    sourceTypes.includes("literature") || sourceTypes.includes("internet");
+  const showChemcrowBadge = chemcrowRelevant && chemcrowStatus !== undefined;
 
   function statusDot(id: SearchSourceType) {
     const st = sourceStatus[id];
@@ -146,6 +153,41 @@ export default function SourcesPanel() {
           {notebooklmStatus.reason === "session_missing" && (
             <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block">
               notebooklm login
+            </code>
+          )}
+        </div>
+      )}
+
+      {/* ChemCrow chemistry-enhanced retrieval badge */}
+      {showChemcrowBadge && (
+        <div
+          className={`shrink-0 text-xs rounded p-2 border flex flex-col gap-0.5 ${
+            chemcrowStatus.available
+              ? "bg-teal-500/10 border-teal-500/20"
+              : "bg-slate-800/60 border-edge"
+          }`}
+        >
+          <span
+            className={`font-medium flex items-center gap-1 ${
+              chemcrowStatus.available ? "text-teal-300" : "text-slate-400"
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                chemcrowStatus.available ? "bg-teal-400" : "bg-slate-600"
+              }`}
+            />
+            🧪 ChemCrow 化学增强检索
+            {chemcrowStatus.available ? " · 已启用" : " · 未安装"}
+          </span>
+          {!chemcrowStatus.available && chemcrowStatus.hint && (
+            <span className="text-slate-500 leading-relaxed">
+              {chemcrowStatus.hint}
+            </span>
+          )}
+          {!chemcrowStatus.available && (
+            <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block break-all">
+              pip install -e &apos;.[intel]&apos;
             </code>
           )}
         </div>

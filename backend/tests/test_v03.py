@@ -157,10 +157,15 @@ def test_source_status_endpoint():
     r = client.get("/api/search/status")
     assert r.status_code == 200
     body = r.json()
-    # All four retrieval sources must be present.
-    for src in ("patents", "literature", "internet", "notebooklm"):
+    # All retrieval sources must be present, including the chemcrow key (v0.9).
+    for src in ("patents", "literature", "internet", "notebooklm", "chemcrow"):
         assert src in body, f"Missing source: {src}"
         assert "available" in body[src]
+    # chemcrow is a library-optional source; not available without intel extra.
+    cc = body["chemcrow"]
+    assert isinstance(cc["available"], bool)
+    if not cc["available"]:
+        assert cc["hint"] is not None, "chemcrow hint required when unavailable"
 
 
 def test_search_response_includes_source_status():
@@ -192,6 +197,12 @@ def test_search_response_includes_source_status():
     assert nb["available"] is False
     assert nb["reason"] is not None
     assert nb["hint"] is not None
+
+    # ChemCrow key must be present (v0.9); library-optional, bool availability.
+    cc = body["source_status"]["chemcrow"]
+    assert isinstance(cc["available"], bool)
+    if not cc["available"]:
+        assert cc["hint"] is not None, "chemcrow hint required when unavailable"
 
 
 def test_notebooklm_setup_status_default():

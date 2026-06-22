@@ -350,6 +350,16 @@ def get_source_availability() -> dict[str, dict]:
                 else "pip install -e '.[intel]' 启用 DuckDuckGo + ChemCrow 互联网检索"
             ),
         },
+        "chemcrow": {
+            "available": chemcrow_ok,
+            "offline_fallback": False,
+            "reason": None if chemcrow_ok else "library_missing",
+            "hint": (
+                None
+                if chemcrow_ok
+                else "pip install -e '.[intel]' 启用 ChemCrow WebSearch (SerpAPI) + LitSearch (paper-qa) 化学增强检索"
+            ),
+        },
         "notebooklm": get_setup_status(),
         "local": {
             "available": True,
