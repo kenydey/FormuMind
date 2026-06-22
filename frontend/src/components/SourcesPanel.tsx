@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import type { SearchSourceType } from "../api";
 
@@ -29,13 +29,20 @@ export default function SourcesPanel() {
     sourceTypes,
     setSourceTypes,
     sources,
+    sourceStatus,
     removeSource,
     clearSources,
     searchSources,
+    loadSourceStatus,
     uploadFile,
     searchBusy,
   } = useStore();
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Load source availability on mount so badges appear before first search
+  useEffect(() => {
+    loadSourceStatus();
+  }, [loadSourceStatus]);
 
   function toggleType(t: SearchSourceType) {
     if (sourceTypes.includes(t)) {
@@ -46,6 +53,32 @@ export default function SourcesPanel() {
   }
 
   const localSelected = sourceTypes.includes("local");
+  const notebooklmSelected = sourceTypes.includes("notebooklm");
+  const notebooklmStatus = sourceStatus["notebooklm"];
+  const showNotebooklmHint =
+    notebooklmSelected && notebooklmStatus && !notebooklmStatus.available;
+
+  function statusDot(id: SearchSourceType) {
+    const st = sourceStatus[id];
+    if (!st) return null;
+    if (st.available) {
+      return <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" title="可用" />;
+    }
+    if (st.offline_fallback) {
+      return (
+        <span
+          className="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0"
+          title={st.hint ?? "仅离线模式"}
+        />
+      );
+    }
+    return (
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-red-400/70 shrink-0"
+        title={st.hint ?? "来源不可用"}
+      />
+    );
+  }
 
   return (
     <aside className="glass rounded-xl p-4 flex flex-col gap-3 h-full overflow-hidden">
@@ -87,11 +120,58 @@ export default function SourcesPanel() {
                 {on ? "✓" : ""}
               </span>
               <span>{t.icon}</span>
-              <span className="truncate">{t.label}</span>
+              <span className="truncate flex-1">{t.label}</span>
+              {statusDot(t.id)}
             </button>
           );
         })}
       </div>
+
+      {/* NotebookLM setup hint */}
+      {showNotebooklmHint && (
+        <div className="shrink-0 text-xs bg-yellow-400/10 border border-yellow-400/20 rounded p-2 flex flex-col gap-0.5">
+          <span className="text-yellow-300 font-medium">
+            📓 NotebookLM 未配置
+          </span>
+          <span className="text-slate-400 leading-relaxed">
+            {notebooklmStatus.hint}
+          </span>
+          {notebooklmStatus.reason === "library_missing" && (
+            <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block break-all">
+              pip install -e &apos;.[notebooklm]&apos;
+            </code>
+          )}
+          {notebooklmStatus.reason === "session_missing" && (
+            <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block">
+              notebooklm login
+            </code>
+          )}
+        </div>
+      )}
+
+      {/* Unavailable source summary (after first search) */}
+      {Object.keys(sourceStatus).length > 0 && (
+        (() => {
+          const unavail = SOURCE_TYPES.filter((t) => {
+            const st = sourceStatus[t.id];
+            return st && !st.available && !st.offline_fallback && t.id !== "notebooklm";
+          });
+          if (unavail.length === 0) return null;
+          const hint = sourceStatus[unavail[0].id]?.hint;
+          return (
+            <div className="shrink-0 text-[11px] bg-slate-800/60 border border-edge rounded p-2 text-slate-400">
+              <span className="text-slate-300">
+                {unavail.map((t) => t.icon).join(" ")} 库未安装
+              </span>
+              {hint && (
+                <div className="mt-0.5 text-slate-500 truncate" title={hint}>
+                  {hint}
+                </div>
+              )}
+            </div>
+          );
+        })()
+      )}
 
       {/* Upload + search */}
       <div className="flex gap-2 shrink-0">

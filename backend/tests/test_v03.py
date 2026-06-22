@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services import ingestion, literature
+from app.services.notebooklm import get_setup_status
 
 client = TestClient(app)
 
@@ -148,3 +149,65 @@ def test_research_accepts_preloaded_sources():
     # Pre-loaded source must surface in the evidence list.
     identifiers = [e["identifier"] for e in r.json()["evidence"]]
     assert "US-TEST" in identifiers
+
+
+# ── Source availability / status tests ──────────────────────────────────────
+
+def test_source_status_endpoint():
+    r = client.get("/api/search/status")
+    assert r.status_code == 200
+    body = r.json()
+    # All four retrieval sources must be present.
+    for src in ("patents", "literature", "internet", "notebooklm"):
+        assert src in body, f"Missing source: {src}"
+        assert "available" in body[src]
+
+
+def test_search_response_includes_source_status():
+    r = client.post(
+        "/api/search",
+        json={
+            "query": "epoxy",
+            "source_types": ["patents", "literature", "internet", "notebooklm"],
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "source_status" in body
+
+    # Patents always available (offline seed corpus fallback).
+    assert body["source_status"]["patents"]["available"] is True
+    assert body["source_status"]["patents"]["offline_fallback"] is True
+
+    # In CI (no intel extra installed) online sources are unavailable.
+    assert body["source_status"]["literature"]["available"] is False
+    assert body["source_status"]["literature"]["hint"] is not None
+    assert body["source_status"]["internet"]["available"] is False
+    assert body["source_status"]["internet"]["hint"] is not None
+
+    # NotebookLM defaults to unconfigured.
+    nb = body["source_status"]["notebooklm"]
+    assert nb["available"] is False
+    assert nb["reason"] is not None
+    assert nb["hint"] is not None
+
+
+def test_notebooklm_setup_status_default():
+    # Default config → library_missing or not_enabled, never ready.
+    status = get_setup_status()
+    assert status["available"] is False
+    assert status["reason"] in ("library_missing", "not_enabled", "no_notebook_id", "session_missing")
+    assert status["hint"] is not None
+
+
+def test_source_availability_patents_always_present():
+    avail = literature.get_source_availability()
+    assert avail["patents"]["available"] is True
+    # Without patent_client, offline_fallback must be True.
+    try:
+        import patent_client  # noqa: F401
+        patent_installed = True
+    except Exception:
+        patent_installed = False
+    if not patent_installed:
+        assert avail["patents"]["offline_fallback"] is True

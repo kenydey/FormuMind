@@ -17,6 +17,7 @@ import {
   type Requirement,
   type ResearchResult,
   type SearchSourceType,
+  type SourceStatus,
   type TaskStatus,
 } from "./api";
 
@@ -79,6 +80,7 @@ interface AppState {
   searchQuery: string;
   sourceTypes: SearchSourceType[];
   sources: Evidence[];
+  sourceStatus: Record<string, SourceStatus>;
   chatHistory: ChatMessage[];
   searchBusy: boolean;
   chatBusy: boolean;
@@ -110,6 +112,7 @@ interface AppState {
   removeSource: (id: string) => void;
   clearSources: () => void;
   searchSources: () => Promise<void>;
+  loadSourceStatus: () => Promise<void>;
   uploadFile: (file: File) => Promise<void>;
   sendChat: (question: string) => Promise<void>;
   setOpenModal: (name: string | null) => void;
@@ -181,6 +184,7 @@ export const useStore = create<AppState>()(
       searchQuery: "",
       sourceTypes: ["patents", "literature"] as SearchSourceType[],
       sources: [],
+      sourceStatus: {} as Record<string, SourceStatus>,
       chatHistory: [],
       searchBusy: false,
       chatBusy: false,
@@ -446,10 +450,20 @@ export const useStore = create<AppState>()(
             limit_per_source: 5,
           });
           get().addSources(res.evidence);
+          if (res.source_status) set({ sourceStatus: res.source_status });
         } catch (e) {
           set({ error: String(e) });
         } finally {
           set({ searchBusy: false });
+        }
+      },
+
+      loadSourceStatus: async () => {
+        try {
+          const status = await api.getSourceStatus();
+          set({ sourceStatus: status });
+        } catch {
+          // silently ignore — status badges just won't appear yet
         }
       },
 

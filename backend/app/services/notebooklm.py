@@ -107,3 +107,44 @@ def search_notebooklm(query: str, limit: int = 5) -> list[Evidence]:
         return _run_async(_aquery(query, limit))
     except Exception:
         return []
+
+
+def get_setup_status() -> dict:
+    """Return detailed NotebookLM configuration status with user-actionable hints."""
+    try:
+        import notebooklm  # type: ignore  # noqa: F401
+        lib_ok = True
+    except Exception:
+        lib_ok = False
+
+    if not lib_ok:
+        return {
+            "available": False,
+            "offline_fallback": False,
+            "reason": "library_missing",
+            "hint": "pip install -e '.[notebooklm]'，然后运行 notebooklm login 完成 Google 授权",
+        }
+
+    s = get_settings()
+    if not s.notebooklm_enabled:
+        return {
+            "available": False,
+            "offline_fallback": False,
+            "reason": "not_enabled",
+            "hint": "设置环境变量 FORMUMIND_NOTEBOOKLM_ENABLED=true",
+        }
+    if not s.notebooklm_notebook_id:
+        return {
+            "available": False,
+            "offline_fallback": False,
+            "reason": "no_notebook_id",
+            "hint": "设置 FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID=your-notebook-id",
+        }
+    if not os.path.exists(s.notebooklm_storage_path):
+        return {
+            "available": False,
+            "offline_fallback": False,
+            "reason": "session_missing",
+            "hint": "运行 notebooklm login 完成 Google 账号授权（一次性操作）",
+        }
+    return {"available": True, "offline_fallback": False, "reason": None, "hint": None}

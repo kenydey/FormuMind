@@ -236,3 +236,65 @@ def search_by_types(
             seen.add(key)
             deduped.append(e)
     return deduped
+
+
+def get_source_availability() -> dict[str, dict]:
+    """Check runtime availability of each source type via local import probing.
+
+    Does not make any network requests. Called by /api/search and /api/search/status
+    to surface install/config hints in the UI.
+    """
+    def _ok(*pkgs: str) -> bool:
+        for pkg in pkgs:
+            try:
+                __import__(pkg)
+                return True
+            except Exception:
+                pass
+        return False
+
+    from .notebooklm import get_setup_status
+
+    patents_online = _ok("patent_client")
+    lit_ok = _ok("arxiv") and _ok("semanticscholar")
+    web_ok = _ok("ddgs") or _ok("duckduckgo_search")
+
+    return {
+        "patents": {
+            "available": True,  # always available via offline seed corpus
+            "offline_fallback": not patents_online,
+            "reason": None if patents_online else "offline_seed",
+            "hint": (
+                None
+                if patents_online
+                else "pip install -e '.[intel]' 启用真实 USPTO/EPO 专利检索"
+            ),
+        },
+        "literature": {
+            "available": lit_ok,
+            "offline_fallback": False,
+            "reason": None if lit_ok else "library_missing",
+            "hint": (
+                None
+                if lit_ok
+                else "pip install -e '.[intel]' 启用 arXiv + Semantic Scholar 学术文献检索"
+            ),
+        },
+        "internet": {
+            "available": web_ok,
+            "offline_fallback": False,
+            "reason": None if web_ok else "library_missing",
+            "hint": (
+                None
+                if web_ok
+                else "pip install -e '.[intel]' 启用 DuckDuckGo 互联网检索"
+            ),
+        },
+        "notebooklm": get_setup_status(),
+        "local": {
+            "available": True,
+            "offline_fallback": False,
+            "reason": None,
+            "hint": None,
+        },
+    }

@@ -215,6 +215,9 @@ export const api = {
 
   parseIntent: (text: string) =>
     post<IntentResult>("/api/intent/parse", { text }),
+
+  getSourceStatus: () =>
+    get<Record<string, SourceStatus>>("/api/search/status"),
 };
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
@@ -254,9 +257,17 @@ export interface SearchRequest {
   limit_per_source?: number;
 }
 
+export interface SourceStatus {
+  available: boolean;
+  offline_fallback?: boolean;
+  reason?: string | null;
+  hint?: string | null;
+}
+
 export interface SearchResponse {
   evidence: Evidence[];
   total: number;
+  source_status?: Record<string, SourceStatus>;
 }
 
 export interface IngestResponse {
