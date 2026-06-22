@@ -1,0 +1,24 @@
+# FormuMind backend — locked core runtime dependencies.
+#
+# These are the always-required packages for the API + worker to boot. They are
+# pinned to versions verified by the test suite (193 passing) so Docker builds
+# are reproducible. The abstract dependency declaration lives in pyproject.toml;
+# this file is the concrete lock used by the Dockerfile and CI.
+#
+# Optional scientific / LLM / retrieval engines are NOT listed here — they ship
+# as pyproject extras (llm, science, intel, heavy, embedding, bo, color, …) and
+# every service degrades gracefully when they are absent. Install them on demand:
+#   pip install -e ".[intel,science]"
+#
+# Dev / test tooling lives in requirements-dev.txt.
+
+fastapi==0.137.1
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
+pydantic-settings==2.14.1
+python-multipart==0.0.32
+sqlalchemy==2.0.51
+celery==5.6.3
+redis==8.0.0
+numpy==2.4.6
+httpx==0.28.1

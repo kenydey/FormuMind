@@ -1,7 +1,11 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+
+# Install deps from the lockfile for reproducible builds (cached layer).
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Build the production bundle.
 COPY . .
 RUN npm run build
 

@@ -1,0 +1,13 @@
+# FormuMind backend — dev / test tooling (locked).
+#
+# Includes the core runtime via -r, plus the test stack. pypdf is here (not in
+# requirements.txt) because it is only needed to exercise the real PDF-parsing
+# path in tests; production uses the stdlib raw-stream fallback when absent.
+#
+#   pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest==9.1.0
+pytest-asyncio==1.4.0
+pypdf==6.14.0
