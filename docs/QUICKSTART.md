@@ -34,8 +34,13 @@ the center, and the **Actions** toolbar on the right. The header holds
 ![Overview](./images/01-overview.png)
 
 - **Left (Sources)**: research-topic prompt box, source-type checkboxes
-  (patents / literature / internet / local files / **📓 NotebookLM**), file
-  upload, a **Search** button, and the loaded-sources list.
+  (patents / literature / internet / local files / **📓 NotebookLM**) each with
+  a **status dot** (green = available online, yellow = offline fallback, red =
+  library not installed), file upload, a **Search** button, a **🔬 Deep
+  Research** button (below Search) that triggers multi-agent KnowledgeCohort
+  research, a **🧪 ChemCrow** chemistry-enhancement badge that appears when
+  Literature or Internet are selected, an error banner shown when search fails,
+  and the loaded-sources list.
 - **Center (Research)**: chat that answers questions grounded in the loaded
   sources, with citations.
 - **Right (Actions)**: six buttons — 🧪 Requirements, ⭐ Recommend,
@@ -59,6 +64,24 @@ search returns the curated seed corpus; literature/internet search need the
 optional `intel` libraries; NotebookLM needs the `notebooklm` extra and a
 one-time browser login (see §12 of the full guide).
 
+**v0.9 source panel additions:**
+
+- **Status dots** beside each source-type checkbox give real-time availability
+  at a glance: green = available online, yellow = offline fallback active
+  (patents always have a seed corpus even offline), red = required library not
+  installed.
+- When **Literature** or **Internet** is selected, a **🧪 ChemCrow** badge
+  appears in the panel indicating whether ChemCrow chemistry-enhanced retrieval
+  is active (`[intel]` extra required).
+- The **🔬 Deep Research** button (below Search) calls the async
+  `POST /api/research/deep` endpoint. It launches **KnowledgeCohort** — a
+  multi-agent pipeline comprising a `web_agent` and a `kb_agent` (with HyDE
+  query expansion and LLM re-ranking), followed by a `report_agent` that
+  cross-validates evidence and enforces cited conclusions. Use it when you need
+  a thorough synthesised report rather than a quick keyword search.
+- An **error banner** is displayed in the Sources column if a search request
+  fails, with the reason returned by the backend.
+
 ---
 
 ## Step 2 · Ask the sources (grounded Q&A)
@@ -79,6 +102,12 @@ Claude, OpenAI, Gemini, Grok, Meta (via Groq), DeepSeek, Qwen, Kimi, MiniMax.
 Pick a provider and model, paste an API key, optionally set a custom base URL,
 then **Save & test connection**. With no key, everything still runs via the
 offline rule engine.
+
+**DeepSeek model names (v0.9):** the previous `deepseek-chat` and
+`deepseek-reasoner` identifiers have been replaced. Use
+`deepseek-v4-pro` (flagship, recommended for quality) or
+`deepseek-v4-flash` (fast and economical) when selecting DeepSeek as your
+provider.
 
 ![Settings · multi-LLM](./images/04-settings.png)
 
@@ -174,6 +203,8 @@ salt-spray, cost and sustainability simultaneously.
 
 - Custom objective weights, batch feedback, multi-LLM configuration, IP
   reports, NotebookLM bridging, real-engine wiring? See the **[full User Guide](./USER_GUIDE.md)**.
+- `pip install -e ".[dev]"` installs the full development environment including
+  **193 tests** (run with `pytest`).
 - Want stronger engines? They auto-detect on install — `pip install -e ".[optimize]"`
   for the Optuna optimizer, `".[bo]"` for the BoTorch Gaussian-process optimizer,
   `".[intel]"` for ChemCrow/paper-qa Q&A and PubChem enrichment, `".[science]"`

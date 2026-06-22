@@ -131,7 +131,18 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   context for searches and Q&A), checkboxes to choose which source types to
   search (patents / literature / internet / local files / **📓 NotebookLM**), a
   file-upload button, a **Search** button, and the list of loaded sources (each
-  removable).
+  removable). Each source-type checkbox carries a **status dot**: green = library
+  installed and available, yellow = offline fallback active (patents always have
+  a curated seed corpus), red = library missing. Below the Search button, a
+  **🔬 Deep Research** button triggers `POST /api/research/deep` — the
+  KnowledgeCohort multi-agent pipeline (`web_agent` + `kb_agent` with HyDE query
+  expansion + LLM re-rank + `report_agent` with cross-validation and forced
+  per-claim citations); the result is an async task whose output appears in the
+  center column automatically. When the **Literature** or **Internet** source is
+  selected, a **🧪 ChemCrow badge** indicates whether chemistry-enhanced
+  retrieval (SerpAPI + paper-qa) is enabled. If a search fails (e.g. the backend
+  is not running), a red **error banner** with a backend startup hint is shown at
+  the top of the panel.
 - **Center (Research)**: a chat interface that answers questions **grounded in
   the loaded sources** (semantic embedding or TF-IDF re-rank → LLM answer), with
   citation chips linking back to the evidence used.
@@ -166,6 +177,12 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 
 > Offline, the patent search returns the curated seed corpus; literature,
 > internet and NotebookLM search need their optional extras (see §12).
+
+> After loading, the **status dots** on each source-type checkbox reflect which
+> sources are actually available in the current environment. For a fully automated
+> multi-source run, use the **🔬 Deep Research** button below the Search button:
+> it launches the KnowledgeCohort pipeline (web + KB + HyDE + re-rank +
+> cross-validation report) without requiring manual Q&A in the center column.
 
 ### Step ① — set requirement and retrieve recommendations (right-column modals)
 
@@ -354,7 +371,7 @@ with a per-provider `base_url`; Claude uses `anthropic` and Gemini uses
 | Google (Gemini) | `gemini-2.0-flash` | `google-genai` |
 | xAI (Grok) | `grok-2` | `openai` · `https://api.x.ai/v1` |
 | Meta (via Groq) | `llama-3.3-70b-versatile` | `openai` · `https://api.groq.com/openai/v1` |
-| DeepSeek | `deepseek-chat` | `openai` · `https://api.deepseek.com` |
+| DeepSeek | `deepseek-v4-pro` (flagship, recommended) / `deepseek-v4-flash` (fast, economical) | `openai` · `https://api.deepseek.com` |
 | Qwen (通义千问) | `qwen-plus` | `openai` · `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | Kimi (Moonshot) | `moonshot-v1-128k` | `openai` · `https://api.moonshot.cn/v1` |
 | MiniMax | `abab6.5s-chat` | `openai` · `https://api.minimax.chat/v1` |
@@ -380,6 +397,13 @@ offline fallbacks:
 - **Local files** — upload PDF/DOCX/XLSX/PPTX/HTML/images; **markitdown**
   converts them to text (falling back to `pypdf` / `python-docx`), then splits
   the text into evidence chunks.
+- **Deep Research** — the 🔬 button in the left panel runs `POST /api/research/deep`, an async
+  KnowledgeCohort pipeline: `web_agent` (DuckDuckGo), `kb_agent` (HyDE query expansion →
+  vector/TF-IDF re-rank → `llm_rerank` → `answer_question`), and `report_agent`
+  (cross-validates web vs. KB sources, enforces per-claim `[source]` citations and
+  marks insufficient-evidence gaps). The result is a structured `ComprehensiveReport`
+  with `report_markdown`, `citations`, and `candidates` that auto-populate the center
+  column and leaderboard.
 
 Results from all selected sources are merged, de-duplicated, and ranked by
 relevance into the left-column source list. The center-column chat then answers
@@ -408,6 +432,11 @@ deterministic offline path, so behaviour never breaks.
   agent when installed; other questions use **paper-qa** semantic synthesis with
   page-level citations. Both fall back to the TF-IDF re-rank → configured LLM →
   snippet path.
+- **ChemCrow availability badge** — when the `intel` extra is installed and
+  **Literature** or **Internet** is selected, the Sources panel shows a green
+  🧪 badge ("ChemCrow chemistry-enhanced retrieval · enabled"); when `intel` is
+  absent, a grey badge with a `pip install -e '.[intel]'` hint is displayed
+  instead.
 - **Semantic RAG** — with `sentence-transformers` installed (the `embedding`
   extra), the RAG store upgrades from TF-IDF to MiniLM embeddings + chromadb,
   significantly improving recall on synonyms (e.g. "epoxy" ↔ "bisphenol-A").
@@ -577,6 +606,9 @@ The **Export ▾** menu on each leaderboard card offers:
 | GET/POST | `/api/settings` | read / update the active LLM provider, model, key, base URL (`POST /api/settings/test` checks the connection) |
 | POST | `/api/intent/parse` | natural-language project brief → structured `Requirement` (LLM `complete_json` or regex fallback) |
 | POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
+| POST | `/api/research/deep` | async deep-research: KnowledgeCohort multi-agent pipeline (web + KB + HyDE + re-rank + cross-validation report) → returns `task_id` |
+| GET | `/api/search/status` | lightweight per-source availability check (no retrieval, no network) |
+| POST | `/api/agents/review` | multi-agent formulation review: ChemistAgent (RDKit + water-incompatibility rules) + InspectorAgent (SVHC/VOC) + InitializeAgent supervisor → `ReviewVerdict` |
 | POST | `/api/ip/analyze` | per-formula novelty score, infringement-risk list, white-space hints |
 | POST | `/api/doe?design=…` | generate a DOE plan (5 designs) |
 | POST | `/api/doe/active` | 🧠 active-learning DOE: surrogate EI selection (LHS fallback) |
@@ -654,13 +686,21 @@ curl -X POST localhost:8000/api/optimize -H 'content-type: application/json' -d 
 # Backend
 cd backend
 pip install -e ".[dev]"
-pytest -q                          # 152+ tests, all offline
+pytest -q                          # 193 tests, all offline
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 
 # Frontend (separate shell)
 cd frontend
 npm install
 npm run dev                        # http://localhost:5173
+```
+
+For production or Docker deployments, use the locked runtime deps:
+
+```bash
+# Locked runtime deps (for Docker / production)
+pip install -r requirements.txt
+pip install -e . --no-deps
 ```
 
 ### Docker
@@ -698,6 +738,8 @@ defaults.
 | `FORMUMIND_TOP_N_FORMULAS` | `5` | leaderboard size |
 | `FORMUMIND_MIN_TRAIN_SAMPLES` | `4` | min samples before training a metric's model |
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
+| `FORMUMIND_PDF_DOWNLOAD` | `false` | Download patent PDFs for full-text extraction during deep research (requires network + USPTO/EPO access; false by default to keep tests offline) |
+| `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per KnowledgeCohort run |
 
 ### Data persistence (B5)
 
