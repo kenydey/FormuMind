@@ -134,6 +134,16 @@ class KnowledgeCohort:
         else:
             patents = literature.search_by_types(topic, ["patents"], limit_per_source=8)
 
+        # Optionally enrich top patents with full-text PDF content.
+        # Gated by pdf_download=false so CI tests stay fully offline.
+        from ..config import get_settings as _get_settings
+        _cfg = _get_settings()
+        if _cfg.pdf_download and patents:
+            from . import pdf_downloader as _pdf
+            patents = _pdf.enrich_with_fulltext(
+                patents, max_pdfs=_cfg.pdf_download_max
+            )
+
         _progress(0.35, "web agent: market & supply-chain signal")
         web = self.web_agent(topic)
 

@@ -196,8 +196,10 @@ def search_by_types(
     if "literature" in source_types:
         tasks.append(lambda: search_arxiv(q, limit_per_source))
         tasks.append(lambda: search_semantic_scholar(q, limit_per_source))
+        tasks.append(lambda: search_chemcrow_lit(q, limit_per_source))
     if "internet" in source_types:
         tasks.append(lambda: search_web(q, limit_per_source))
+        tasks.append(lambda: search_chemcrow_web(q, limit_per_source))
     if "notebooklm" in source_types:
         def _notebooklm() -> list[Evidence]:
             from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
@@ -238,6 +240,63 @@ def search_by_types(
     return deduped
 
 
+def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:
+    """Chemistry-optimized web search via ChemCrow's WebSearch tool (SerpAPI).
+
+    ChemCrow's WebSearch is distinct from DuckDuckGo: it uses SerpAPI under
+    the hood, which requires a ``SERPAPI_API_KEY`` env var and returns
+    chemistry-focused snippets ranked by relevance to scientific queries.
+    Falls back to [] when chemcrow is not installed or SerpAPI key absent.
+    """
+    try:
+        from chemcrow.tools import WebSearch  # type: ignore
+
+        tool = WebSearch()
+        result_text = tool._run(query) if hasattr(tool, "_run") else tool.run(query)  # type: ignore
+        if not result_text:
+            return []
+        return [
+            Evidence(
+                source="ChemCrow-Web",
+                identifier=f"chemweb:{abs(hash(query)) % 0xFFFF:04x}",
+                title=f"SerpAPI: {query[:80]}",
+                snippet=str(result_text)[:600],
+                relevance=0.88,
+            )
+        ]
+    except Exception:
+        return []
+
+
+def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
+    """Chemical literature search via ChemCrow's LiteratureSearch tool.
+
+    ChemCrow's LitSearch queries paper-qa + FAISS over scientific literature,
+    returning cited answers from PubMed / arXiv / Semantic Scholar.  It is
+    semantically richer than raw arXiv/S2 abstract retrieval because it uses
+    paper-qa's embedding-based retrieval and citation extraction.
+    Falls back to [] when chemcrow / paper-qa is not installed.
+    """
+    try:
+        from chemcrow.tools import LiteratureSearch  # type: ignore
+
+        tool = LiteratureSearch()
+        result_text = tool._run(query) if hasattr(tool, "_run") else tool.run(query)  # type: ignore
+        if not result_text:
+            return []
+        return [
+            Evidence(
+                source="ChemCrow-Lit",
+                identifier=f"chemlit:{abs(hash(query)) % 0xFFFF:04x}",
+                title=f"LitSearch: {query[:80]}",
+                snippet=str(result_text)[:600],
+                relevance=0.92,
+            )
+        ]
+    except Exception:
+        return []
+
+
 def get_source_availability() -> dict[str, dict]:
     """Check runtime availability of each source type via local import probing.
 
@@ -258,6 +317,7 @@ def get_source_availability() -> dict[str, dict]:
     patents_online = _ok("patent_client")
     lit_ok = _ok("arxiv") and _ok("semanticscholar")
     web_ok = _ok("ddgs") or _ok("duckduckgo_search")
+    chemcrow_ok = _ok("chemcrow")
 
     return {
         "patents": {
@@ -275,9 +335,9 @@ def get_source_availability() -> dict[str, dict]:
             "offline_fallback": False,
             "reason": None if lit_ok else "library_missing",
             "hint": (
-                None
+                (None if chemcrow_ok else "pip install -e '.[intel]' 启用 ChemCrow LitSearch (SerpAPI + paper-qa) 化学文献检索")
                 if lit_ok
-                else "pip install -e '.[intel]' 启用 arXiv + Semantic Scholar 学术文献检索"
+                else "pip install -e '.[intel]' 启用 arXiv + Semantic Scholar + ChemCrow 学术文献检索"
             ),
         },
         "internet": {
@@ -285,9 +345,9 @@ def get_source_availability() -> dict[str, dict]:
             "offline_fallback": False,
             "reason": None if web_ok else "library_missing",
             "hint": (
-                None
+                (None if chemcrow_ok else "pip install -e '.[intel]' 启用 ChemCrow WebSearch (SerpAPI) 化学优化搜索")
                 if web_ok
-                else "pip install -e '.[intel]' 启用 DuckDuckGo 互联网检索"
+                else "pip install -e '.[intel]' 启用 DuckDuckGo + ChemCrow 互联网检索"
             ),
         },
         "notebooklm": get_setup_status(),

@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     # 为下一阶段重物理计算（physics_jobs 频道）的异步投递做准备。
     agent_bus_enabled: bool = False
 
+    # PDF 全文下载（v0.9）。启用后 KnowledgeCohort 在检索到专利后尝试下载 PDF，
+    # 将摘要替换为全文段落，提升 kb_agent 的合成质量。默认关闭以保证测试速度。
+    # 需要网络访问 USPTO / EPO / Google Patents 服务器。
+    pdf_download: bool = False
+    pdf_download_max: int = 3     # 每次研究最多下载几篇专利 PDF
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {
