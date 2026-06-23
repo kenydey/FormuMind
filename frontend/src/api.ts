@@ -71,7 +71,7 @@ export interface TaskStatus {
   state: "pending" | "running" | "completed" | "failed";
   progress: number;
   message: string;
-  result: OptimizationResult | null;
+  result: Record<string, unknown> | null;
 }
 
 export interface DOEFactor {
@@ -146,7 +146,8 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
-  research: (req: Requirement) => post<ResearchResult>("/api/research", req),
+  research: (req: Requirement, sources: Evidence[] = []) =>
+    post<ResearchResult>("/api/research", { ...req, sources }),
   doe: (req: Requirement, design: string) => post<DOEPlan>(`/api/doe?design=${design}`, req),
   startOptimize: (req: Requirement, iterations: number) =>
     post<{ task_id: string; poll_url: string }>("/api/optimize", { requirement: req, iterations }),
@@ -239,10 +240,11 @@ export const api = {
   getSourceStatus: () =>
     get<Record<string, SourceStatus>>("/api/search/status"),
 
-  deepResearch: (topic: string, req: Requirement) =>
+  deepResearch: (topic: string, req: Requirement, source_types: SearchSourceType[]) =>
     post<{ task_id: string; poll_url: string }>("/api/research/deep", {
       ...req,
       topic,
+      source_types,
     }),
 
   listDependencies: () =>

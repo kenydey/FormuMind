@@ -37,7 +37,8 @@ def _search_relevant_patents(
     from . import literature
 
     req = Requirement(domain=domain, substrate=Substrate.carbon_steel)
-    patents = literature.search_patents(req, limit=limit)
+    query = " ".join(terms)
+    patents = literature.search_patents(req, limit=limit, query=query)
 
     # Score patents by term overlap (TF-IDF-like keyword relevance)
     def _score(ev) -> float:

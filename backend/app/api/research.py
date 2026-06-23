@@ -16,21 +16,15 @@ class ResearchRequest(Requirement):
     """Extends Requirement with optional pre-loaded sources from the frontend.
 
     When ``sources`` is non-empty, internal patent/literature retrieval is
-    skipped and the supplied evidence is used directly.  This allows the
-    /api/search and /api/ingest endpoints to feed evidence into the research
-    pipeline without a redundant round-trip.
-
-    Fully backward-compatible: a plain Requirement JSON body is valid here
-    because ``sources`` defaults to an empty list.
+    skipped and the supplied evidence is used directly.
     """
 
-    # Pre-loaded sources from frontend; if non-empty, skip internal retrieval.
     sources: list[Evidence] = Field(default_factory=list)
 
 
 @router.post("/research", response_model=ResearchResult)
 def start_research(body: ResearchRequest) -> ResearchResult:
-    """Run literature/patent retrieval + RAG + recommendation for a requirement."""
+    """同步配方推荐：检索 + RAG + 推荐（可用预加载 sources 跳过重复检索）。"""
     req = Requirement(**{k: v for k, v in body.model_dump().items() if k != "sources"})
     pre_sources = body.sources if body.sources else None
     return workflow.run_research(req, pre_sources=pre_sources)
@@ -43,18 +37,19 @@ class DeepResearchHandle(BaseModel):
 
 @router.post("/research/deep", response_model=DeepResearchHandle)
 def start_deep_research(body: DeepResearchRequest) -> DeepResearchHandle:
-    """Kick off async knowledge-cohort deep research; poll GET /api/tasks/{id}.
-
-    Returns a task handle immediately (the cohort retrieval + multi-agent
-    synthesis is long-running). The result is a ``ComprehensiveReport``.
-    """
-    req = Requirement(**{k: v for k, v in body.model_dump().items() if k != "topic"})
+    """异步深度研究：多源检索 + RAG + 引用报告。轮询 GET /api/tasks/{id}。"""
+    req = Requirement(**{
+        k: v for k, v in body.model_dump().items()
+        if k not in ("topic", "source_types")
+    })
     topic = body.topic or req.headline()
-    task_id = task_manager.submit_comprehensive_research(topic, req)
+    task_id = task_manager.submit_comprehensive_research(
+        topic, req, source_types=body.source_types
+    )
     return DeepResearchHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")
 
 
-@router.get("/research/expand", response_model=ExpandedQuery)
+@router.get("/research/expand", response_model=ExpandedQuery, deprecated=True)
 def expand_research_query(topic: str = Query(..., min_length=1)) -> ExpandedQuery:
-    """调试端点：将自然语言主题扩展为结构化检索查询（QueryExpander）。"""
+    """兼容别名 — 请优先使用 GET /api/search/expand。"""
     return QueryExpander().expand(topic)

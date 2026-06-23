@@ -129,6 +129,24 @@ def search_patents(
     return filtered[offset : offset + limit]
 
 
+def search_patents_by_query(
+    query: str, limit: int = 5, offset: int = 0
+) -> list[Evidence]:
+    """仅按用户 query 检索专利（无 Requirement 时使用种子语料回退）。"""
+    result = _online_search(None, query, limit + offset)
+    if result:
+        return result[offset : offset + limit]
+    all_seeds: list[Evidence] = []
+    for domain_docs in SEED_CORPUS.values():
+        for i, doc in enumerate(domain_docs):
+            if doc.get("source") in ("USPTO", "EPO"):
+                all_seeds.append(
+                    Evidence(relevance=round(max(0.4, 1.0 - i * 0.08), 2), **doc)
+                )
+    filtered = _filter_seed_by_query(all_seeds, query)
+    return filtered[offset : offset + limit]
+
+
 def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
     """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
     try:
@@ -258,8 +276,12 @@ def _build_streams(
                 lambda off, q=query: search_patents(req, page_size, offset=off, query=q),
                 True,
             )
-        else:  # no requirement → use arXiv as a stand-in patent stream
-            add("patents", lambda off: search_arxiv(query, page_size, offset=off), True)
+        else:
+            add(
+                "patents",
+                lambda off, q=query: search_patents_by_query(q, page_size, offset=off),
+                True,
+            )
     if "literature" in source_types:
         add("arxiv", lambda off: search_arxiv(query, page_size, offset=off), True)
         add("s2", lambda off: search_semantic_scholar(query, page_size, offset=off), True)

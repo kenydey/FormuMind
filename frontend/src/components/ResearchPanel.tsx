@@ -14,7 +14,7 @@ function CitationChip({ ev }: { ev: Evidence }) {
 }
 
 export default function ResearchPanel() {
-  const { chatHistory, chatBusy, sendChat, sources, selectedSources } = useStore();
+  const { chatHistory, chatBusy, sendChat, sources, selectedSources, deepReport } = useStore();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -40,6 +40,12 @@ export default function ResearchPanel() {
           基于左栏已选的 {selectedCount} / {sources.length} 条资料进行问答（RAG 接地）
         </p>
       </div>
+
+      {deepReport && (
+        <div className="mx-4 mt-3 mb-1 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-[11px] text-violet-200 shrink-0">
+          深度研究报告已生成（{deepReport.citations?.length ?? 0} 条引用）— 见下方对话与左栏资料列表
+        </div>
+      )}
 
       {/* Conversation */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-4 flex flex-col gap-3">

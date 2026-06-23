@@ -2,11 +2,13 @@
 POST /api/search/stream — Incremental search; returns a task handle the client
      polls so it can render results while the search keeps going.
 GET  /api/search/status — Per-source availability check (no network requests).
+GET  /api/search/expand — Query expansion debug endpoint.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from ..domain.schemas import Evidence, Requirement
 from ..services import literature
+from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..worker.tasks import task_manager
 
 router = APIRouter()
@@ -85,3 +87,9 @@ def search_stream(req: SearchRequest) -> TaskHandle:
         per_source_cap=req.limit_per_source,
     )
     return TaskHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")
+
+
+@router.get("/search/expand", response_model=ExpandedQuery)
+def expand_search_query(topic: str = Query(..., min_length=1)) -> ExpandedQuery:
+    """将自然语言主题扩展为结构化检索查询（QueryExpander）。"""
+    return QueryExpander().expand(topic)

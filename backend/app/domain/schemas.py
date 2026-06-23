@@ -130,6 +130,10 @@ class DeepResearchRequest(Requirement):
     """
 
     topic: str = ""
+    source_types: list[str] = Field(
+        default_factory=lambda: ["patents", "literature", "internet"],
+        description="与 /api/search 相同的信息源类别",
+    )
 
 
 class DOEFactor(BaseModel):

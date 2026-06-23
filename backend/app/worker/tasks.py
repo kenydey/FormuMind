@@ -1,12 +1,14 @@
 """Async task orchestration.
 
-Long-running work (the optimization loop, patent ingestion) is dispatched here.
-Two execution paths share one workflow implementation:
+All HTTP-facing async work (search, deep research, optimization, ingestion)
+runs through **TaskManager** — a thread-backed registry the API polls via
+``GET /api/tasks/{id}``. It works with no Redis or Celery worker, keeping the
+MVP self-contained while preserving the async, non-blocking UX.
 
-* **Celery tasks** (``optimize_task``) — used when a broker/worker is deployed.
-* **In-process TaskManager** — a thread-backed registry the API polls via
-  ``GET /api/tasks/{id}``. It works with no Redis/worker, keeping the MVP
-  self-contained while preserving the async, non-blocking UX.
+**Celery tasks** at the bottom of this module (``optimize_task``,
+``deep_research_task``, etc.) are legacy mirrors for optional horizontal
+scaling when ``docker compose --profile celery up`` is used. The FastAPI routes
+never dispatch to Celery directly.
 
 All in-process tasks are persisted to disk on every state update so a uvicorn
 ``--reload`` (or any process restart) does not cause the frontend poll loop to
@@ -160,15 +162,18 @@ class TaskManager:
         return task_id
 
     def submit_comprehensive_research(
-        self, topic: str, req: Requirement | None = None
+        self,
+        topic: str,
+        req: Requirement | None = None,
+        source_types: list[str] | None = None,
     ) -> str:
-        """Run a knowledge-cohort deep research pass in the background."""
-        from ..services import knowledge_cohort
+        """Run deep research in the background (DeepResearchEngine)."""
+        from ..services.deep_research import DeepResearchEngine
 
         task_id = uuid.uuid4().hex
         self._register(
             task_id,
-            TaskStatus(task_id=task_id, kind="research", state=TaskState.pending),
+            TaskStatus(task_id=task_id, kind="deep_research", state=TaskState.pending),
         )
 
         def _run() -> None:
@@ -177,8 +182,23 @@ class TaskManager:
                 def progress(p: float, msg: str) -> None:
                     self._set(task_id, progress=round(p, 3), message=msg)
 
-                result = knowledge_cohort.conduct_research(
-                    topic, req=req, progress_cb=progress
+                def retrieval_progress(partial: list) -> None:
+                    self._set(
+                        task_id,
+                        message=f"已检索 {len(partial)} 条，继续深度研究…",
+                        result={
+                            "topic": topic,
+                            "citations": [e.model_dump() for e in partial],
+                            "partial": True,
+                        },
+                    )
+
+                result = DeepResearchEngine().run(
+                    topic,
+                    req=req,
+                    source_types=source_types,
+                    progress_cb=progress,
+                    retrieval_progress_cb=retrieval_progress,
                 )
                 self._set(
                     task_id,
@@ -187,7 +207,7 @@ class TaskManager:
                     message="done",
                     result=result.model_dump(),
                 )
-            except Exception as exc:  # surface failures to the poller
+            except Exception as exc:
                 self._set(task_id, state=TaskState.failed, message=str(exc))
 
         threading.Thread(target=_run, daemon=True).start()
@@ -316,9 +336,13 @@ def loop_task(requirement: dict, iterations: int | None = None, n_suggest: int =
 
 
 @celery_app.task(name="formumind.deep_research")
-def deep_research_task(topic: str, requirement: dict | None = None) -> dict:
-    """Celery entry point for knowledge-cohort deep research (for deployed workers)."""
-    from ..services import knowledge_cohort
+def deep_research_task(
+    topic: str,
+    requirement: dict | None = None,
+    source_types: list[str] | None = None,
+) -> dict:
+    """Celery entry point for deep research (legacy mirror; API uses TaskManager)."""
+    from ..services.deep_research import DeepResearchEngine
 
     req = Requirement(**requirement) if requirement else None
-    return knowledge_cohort.conduct_research(topic, req=req).model_dump()
+    return DeepResearchEngine().run(topic, req=req, source_types=source_types).model_dump()
