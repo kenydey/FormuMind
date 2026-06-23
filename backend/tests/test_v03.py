@@ -92,6 +92,42 @@ def test_settings_test_connection_reports_sdk_missing(monkeypatch):
     get_settings.cache_clear()
 
 
+def test_openai_message_text_uses_reasoning_content_fallback():
+    from app.services.llm import _openai_message_text
+
+    class Msg:
+        content = ""
+        reasoning_content = "OK, connection works"
+
+    assert _openai_message_text(Msg()) == "OK, connection works"
+
+
+def test_settings_test_connection_deepseek_probe_disables_thinking(monkeypatch):
+    from app.config import get_settings
+    from app.services import llm as llm_mod
+
+    get_settings.cache_clear()
+    s = get_settings()
+    s.llm_provider = "deepseek"
+    s.llm_model = "deepseek-v4-pro"
+    object.__setattr__(s, "deepseek_api_key", "sk-test")
+
+    captured: dict = {}
+
+    def fake_detail(prompt, api_key, model, max_tokens, base_url=None, *, probe=False):
+        captured["probe"] = probe
+        captured["max_tokens"] = max_tokens
+        return "OK", None
+
+    monkeypatch.setattr(llm_mod, "_complete_openai_compatible_detail", fake_detail)
+    r = client.post("/api/settings/test", json={})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert captured["probe"] is True
+    assert captured["max_tokens"] >= 64
+    get_settings.cache_clear()
+
+
 def test_settings_test_connection_offline():
     r = client.post("/api/settings/test", json={})
     assert r.status_code == 200

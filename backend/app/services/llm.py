@@ -121,6 +121,34 @@ def _resolve_openai_base_url(provider: str, override: str | None) -> str | None:
     return url or None
 
 
+def _is_deepseek_model(model: str) -> bool:
+    """Whether the model id belongs to DeepSeek's thinking-capable family."""
+    return model.lower().startswith("deepseek-")
+
+
+def _openai_message_text(message) -> str | None:
+    """Extract assistant text from OpenAI-compatible responses.
+
+    DeepSeek V4 thinking models may place chain-of-thought in ``reasoning_content``
+    while leaving ``content`` empty, especially when ``max_tokens`` is small.
+    """
+    content = (getattr(message, "content", None) or "").strip()
+    if content:
+        return content
+
+    reasoning = getattr(message, "reasoning_content", None)
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning.strip()
+
+    # Some SDK versions stash provider-specific fields in model_extra.
+    extra = getattr(message, "model_extra", None) or {}
+    reasoning = extra.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning.strip()
+
+    return None
+
+
 # ── Low-level completion helpers ─────────────────────────────────────────────
 
 def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> str | None:
@@ -145,7 +173,13 @@ def _complete_openai_compatible(
 
 
 def _complete_openai_compatible_detail(
-    prompt: str, api_key: str, model: str, max_tokens: int, base_url: str | None = None
+    prompt: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    *,
+    probe: bool = False,
 ) -> tuple[str | None, str | None]:
     """Call an OpenAI-compatible chat API; return (text, error_message)."""
     try:
@@ -157,13 +191,18 @@ def _complete_openai_compatible_detail(
         if base_url:
             kwargs["base_url"] = base_url
         client = OpenAI(**kwargs)
-        resp = client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        content = resp.choices[0].message.content
-        return (content, None) if content else (None, "API 返回空响应")
+        create_kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        # Connection probes use a short prompt; disable DeepSeek thinking so the
+        # final answer lands in ``content`` instead of consuming the token budget.
+        if probe and _is_deepseek_model(model):
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        resp = client.chat.completions.create(**create_kwargs)
+        text = _openai_message_text(resp.choices[0].message)
+        return (text, None) if text else (None, "API 返回空响应")
     except Exception as exc:
         return None, str(exc)
 
@@ -486,7 +525,12 @@ def test_connection() -> dict:
     else:
         base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
         result, error = _complete_openai_compatible_detail(
-            prompt, api_key, model, min(settings.llm_max_tokens, 16), base_url
+            prompt,
+            api_key,
+            model,
+            min(settings.llm_max_tokens, 64),
+            base_url,
+            probe=True,
         )
 
     if result and "ok" in result.lower():
