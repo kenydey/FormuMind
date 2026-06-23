@@ -13,7 +13,7 @@ cd backend
 python3 -m venv .venv              # create once
 source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
 pip install -e ".[dev]"
-uvicorn app.main:app --reload      # http://localhost:8000/docs
+uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
 # Frontend (terminal 2)
 cd frontend

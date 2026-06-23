@@ -7,12 +7,49 @@ Two execution paths share one workflow implementation:
 * **In-process TaskManager** — a thread-backed registry the API polls via
   ``GET /api/tasks/{id}``. It works with no Redis/worker, keeping the MVP
   self-contained while preserving the async, non-blocking UX.
+
+Dep-install tasks additionally persist their result to disk so a uvicorn
+``--reload`` (triggered when pip writes to .venv/site-packages) does not
+cause the frontend's poll loop to receive a permanent 404.
 """
 from __future__ import annotations
 
+import json
+import os
 import threading
 import uuid
+from pathlib import Path
 from typing import Any
+
+# Filesystem fallback for tasks that survive a process restart (dep-install only).
+_TASK_PERSIST_DIR = Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
+
+
+def _persist_task(task_id: str, status: "TaskStatus") -> None:
+    """Write a completed/failed dep-install task to disk (best-effort)."""
+    try:
+        _TASK_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+        data = status.model_dump()
+        # TaskState is an enum; serialise to its value so json.dumps works.
+        data["state"] = data["state"].value if hasattr(data["state"], "value") else data["state"]
+        (_TASK_PERSIST_DIR / f"{task_id}.json").write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception:
+        pass  # persistence is a best-effort fallback; never crash the install thread
+
+
+def load_persisted_task(task_id: str) -> "TaskStatus | None":
+    """Recover a dep-install task result from disk after a process restart."""
+    path = _TASK_PERSIST_DIR / f"{task_id}.json"
+    if not path.exists():
+        return None
+    try:
+        from ..domain.schemas import TaskStatus as _TS
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return _TS(**data)
+    except Exception:
+        return None
 
 from ..domain.schemas import Requirement, TaskState, TaskStatus
 from ..pipeline import workflow
@@ -159,6 +196,12 @@ class TaskManager:
                 )
             except Exception as exc:  # surface failures to the poller
                 self._set(task_id, state=TaskState.failed, message=str(exc))
+            finally:
+                # Persist to disk so uvicorn --reload doesn't 404 the poll loop.
+                with self._lock:
+                    final = self._tasks.get(task_id)
+                if final is not None:
+                    _persist_task(task_id, final)
 
         threading.Thread(target=_run, daemon=True).start()
         return task_id

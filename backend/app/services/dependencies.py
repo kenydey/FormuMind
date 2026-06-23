@@ -49,7 +49,7 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("paper-qa", "paperqa", "intel", "paper-qa 语义 RAG 文献综合"),
     Dependency(
         "chemcrow", "chemcrow", "intel", "ChemCrow 化学增强检索 / 工具链",
-        spec="chemcrow>=0.3,!=0.3.20",  # 0.3.20 pins openai==0.27.8 (conflict)
+        spec="chemcrow>=0.3.7",  # versions <0.3.7 pin openai==0.27.8, conflicts with openai>=1.30
     ),
     Dependency("pubchempy", "pubchempy", "intel", "PubChem 原料 SMILES / 分子量富集"),
     # ── Embedding RAG ──────────────────────────────────────────────────────

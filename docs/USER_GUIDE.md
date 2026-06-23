@@ -689,7 +689,7 @@ python3 -m venv .venv              # create once (required on Debian/Ubuntu with
 source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
 pip install -e ".[dev]"
 pytest -q                          # 193 tests, all offline
-uvicorn app.main:app --reload      # http://localhost:8000/docs
+uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
 # Frontend (separate shell)
 cd frontend

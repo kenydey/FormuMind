@@ -5,7 +5,7 @@ FastAPI + Celery gateway for the FormuMind formulation R&D platform.
 ```bash
 pip install -e ".[dev]"      # core + test deps
 pytest -q                    # run the test suite (fully offline)
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --reload-exclude .venv
 ```
 
 Optional engines (LLM, scientific, heavy MD) are declared as extras in
