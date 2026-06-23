@@ -84,10 +84,12 @@ def health() -> dict:
         except Exception:
             return False
 
+    llm_key = settings.get_active_api_key()
     return {
         "status": "ok",
         "app": settings.app_name,
-        "llm": "claude" if settings.anthropic_api_key else "offline-fallback",
+        "llm": settings.llm_provider if llm_key else "offline-fallback",
+        "llm_key_set": bool(llm_key),
         "celery_eager": settings.celery_eager,
         "agent_bus": settings.agent_bus_enabled,
         "installed_extras": {

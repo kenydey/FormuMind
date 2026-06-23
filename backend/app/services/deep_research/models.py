@@ -16,14 +16,13 @@ class DocumentType(str, Enum):
     PATENT = "专利"
 
 
-# 来源字符串 → 文档类型映射（用于 from_evidence 推断）
 _PATENT_SOURCES = frozenset({"uspto", "epo", "patent", "google patents"})
 _LITERATURE_SOURCES = frozenset({
     "arxiv", "semantic scholar", "literature", "openalex", "chemcrow-lit", "doi",
 })
 
 
-class ResearchResult(BaseModel):
+class RetrievalHit(BaseModel):
     """单条多源检索命中记录，统一各 API 的字段差异。"""
 
     title: str = Field(description="标题")
@@ -38,7 +37,6 @@ class ResearchResult(BaseModel):
     relevance: float = Field(default=0.5, ge=0.0, le=1.0, description="相关性得分")
 
     def to_evidence(self) -> Evidence:
-        """转换为现有 API / 前端使用的 Evidence 模型。"""
         return Evidence(
             source=self.source,
             identifier=self.identifier or self.url or self.title,
@@ -48,8 +46,7 @@ class ResearchResult(BaseModel):
         )
 
     @classmethod
-    def from_evidence(cls, ev: Evidence) -> ResearchResult:
-        """从现有 Evidence 反向构造统一检索结果。"""
+    def from_evidence(cls, ev: Evidence) -> RetrievalHit:
         src_lower = (ev.source or "").lower()
         if any(k in src_lower for k in _PATENT_SOURCES):
             doc_type = DocumentType.PATENT
@@ -71,8 +68,11 @@ class ResearchResult(BaseModel):
         )
 
 
-def to_evidence_list(results: list[ResearchResult]) -> list[Evidence]:
-    """批量转换为 Evidence 列表。"""
+# 向后兼容别名（Phase 1 命名）
+ResearchResult = RetrievalHit
+
+
+def to_evidence_list(results: list[RetrievalHit]) -> list[Evidence]:
     return [r.to_evidence() for r in results]
 
 
@@ -89,30 +89,23 @@ class ExpandedQuery(BaseModel):
     )
 
 
-class ResearchReport(BaseModel):
-    """多源检索汇总报告（Phase 2+ 将填充 RAG 融合与 Markdown 正文）。"""
+class RetrievalReport(BaseModel):
+    """多源检索汇总（检索阶段输出，不含 Markdown 合成报告）。"""
 
     topic: str = Field(description="用户原始研究主题")
-    expanded_query: ExpandedQuery | None = Field(
-        default=None, description="查询扩展结果"
-    )
-    results: list[ResearchResult] = Field(
-        default_factory=list, description="归一化检索命中列表"
-    )
-    source_counts: dict[str, int] = Field(
-        default_factory=dict, description="各来源命中数量统计"
-    )
+    expanded_query: ExpandedQuery | None = Field(default=None, description="查询扩展结果")
+    results: list[RetrievalHit] = Field(default_factory=list, description="归一化检索命中列表")
+    source_counts: dict[str, int] = Field(default_factory=dict, description="各来源命中数量统计")
     engine: str = Field(default="offline", description="引擎模式：llm / offline")
 
     @classmethod
     def from_results(
         cls,
         topic: str,
-        results: list[ResearchResult],
+        results: list[RetrievalHit],
         expanded: ExpandedQuery | None = None,
         engine: str = "offline",
-    ) -> ResearchReport:
-        """根据结果列表构建报告并自动统计来源分布。"""
+    ) -> RetrievalReport:
         counts = dict(Counter(r.source for r in results))
         return cls(
             topic=topic,
@@ -123,5 +116,7 @@ class ResearchReport(BaseModel):
         )
 
     def to_evidence(self) -> list[Evidence]:
-        """导出为 Evidence 列表，供现有 UI / RAG 管线消费。"""
         return to_evidence_list(self.results)
+
+
+ResearchReport = RetrievalReport

@@ -37,6 +37,7 @@ export default function ActionsPanel() {
     runResearch,
     runOptimize,
     busy,
+    formulationBusy,
     leaderboard,
     models,
     optimizationHistory,
@@ -45,7 +46,7 @@ export default function ActionsPanel() {
 
   function badgeFor(id: ModalName) {
     if (id === "recommend") {
-      if (busy === "researching") return <Badge tone="amber">检索中…</Badge>;
+      if (formulationBusy) return <Badge tone="amber">配方检索中…</Badge>;
       if (leaderboard.length > 0) return <Badge tone="accent">{leaderboard.length} 条</Badge>;
     }
     if (id === "doe" && models.length > 0) return <Badge tone="accent">{models.length} 模型</Badge>;
@@ -97,11 +98,11 @@ export default function ActionsPanel() {
         wide
       >
         <button
-          disabled={busy !== "idle"}
+          disabled={busy !== "idle" || formulationBusy}
           onClick={runResearch}
           className="mb-4 w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
         >
-          {busy === "researching" ? "检索中…" : "检索专利并推荐配方"}
+          {formulationBusy ? "检索中…" : "检索专利并推荐配方"}
         </button>
         <FormulaLeaderboard />
       </Modal>

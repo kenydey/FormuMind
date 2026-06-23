@@ -44,7 +44,7 @@ export default function SourcesPanel() {
     uploadFile,
     searchBusy,
     runDeepResearch,
-    busy,
+    deepResearchBusy,
     error,
   } = useStore();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -365,11 +365,11 @@ export default function SourcesPanel() {
       {/* Deep research: async multi-agent knowledge cohort */}
       <button
         onClick={runDeepResearch}
-        disabled={busy === "researching" || searchBusy}
+        disabled={deepResearchBusy || searchBusy}
         className="shrink-0 w-full border border-accent2/40 bg-accent2/10 hover:bg-accent2/20 text-accent2 font-semibold rounded px-3 py-1.5 text-sm disabled:opacity-40 flex items-center justify-center gap-1.5"
-        title="多源检索 + 高级 RAG（HyDE/重排）+ 多智能体交叉验证，生成带引用的研究报告"
+        title="多源检索 + QueryExpander 扩展 + RAG 重排 + 引用报告"
       >
-        {busy === "researching" ? "🔬 深度研究中…" : "🔬 深度研究"}
+        {deepResearchBusy ? "🔬 深度研究中…" : "🔬 深度研究"}
       </button>
 
       {/* Search error — shown when backend is unreachable or the API returns an error */}

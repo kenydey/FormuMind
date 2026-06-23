@@ -398,6 +398,14 @@ def _chemcrow_available() -> bool:
         return False
 
 
+def _chemcrow_llm_ready() -> bool:
+    """ChemCrow agent expects an OpenAI-compatible API key."""
+    settings = get_settings()
+    if settings.openai_api_key:
+        return True
+    return settings.llm_provider == "openai" and bool(settings.get_active_api_key())
+
+
 def _paperqa_available() -> bool:
     try:
         import paperqa  # noqa: F401
@@ -468,8 +476,13 @@ def answer_question(
 
     settings = get_settings()
 
-    # Tier 1: ChemCrow for chemistry questions.
-    if settings.use_chemcrow and _is_chemistry_question(question) and _chemcrow_available():
+    # Tier 1: ChemCrow for chemistry questions (requires OpenAI-compatible key).
+    if (
+        settings.use_chemcrow
+        and _chemcrow_llm_ready()
+        and _is_chemistry_question(question)
+        and _chemcrow_available()
+    ):
         cc = _chemcrow_answer(question)
         if cc:
             # Re-rank for citation chips even though ChemCrow answered.

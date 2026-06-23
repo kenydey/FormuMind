@@ -1,9 +1,11 @@
-"""Celery application.
+"""Celery application (legacy / optional).
+
+The API executes async jobs via ``TaskManager`` in ``tasks.py``; Celery is only
+needed when running the optional ``worker`` service (``--profile celery``).
 
 Configured to use Redis as broker/result backend when reachable. The
-``celery_eager`` setting (default True) makes tasks run synchronously in-process
-so the API works without a running worker or broker — ideal for development,
-CI, and the offline MVP.
+``celery_eager`` setting (default True) makes Celery tasks run synchronously
+in-process so tests and CI work without a running worker or broker.
 """
 from __future__ import annotations
 

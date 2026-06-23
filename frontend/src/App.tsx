@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import SourcesPanel from "./components/SourcesPanel";
 import ResearchPanel from "./components/ResearchPanel";
 import ActionsPanel from "./components/ActionsPanel";
@@ -23,7 +24,12 @@ function ClockIcon() {
 }
 
 export default function App() {
-  const { toggleHistory, toggleSettings, history } = useStore();
+  const { toggleHistory, toggleSettings, history, hydrateLlmSettings } = useStore();
+
+  useEffect(() => {
+    hydrateLlmSettings();
+  }, [hydrateLlmSettings]);
+
   return (
     <div className="h-screen flex flex-col bg-ink text-slate-300">
       <header className="px-5 py-3 border-b border-edge flex items-center gap-3 shrink-0">

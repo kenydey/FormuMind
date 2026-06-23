@@ -244,7 +244,7 @@ function ObjectivesEditor({
 }
 
 export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
-  const { requirement, setField, setDomain, setObjectives, runResearch, runOptimize, busy } =
+  const { requirement, setField, setDomain, setObjectives, runResearch, runOptimize, busy, formulationBusy } =
     useStore();
   const domain = requirement.domain;
 
@@ -353,11 +353,11 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
       {!embedded && (
         <div className="mt-auto pt-3 flex flex-col gap-2">
           <button
-            disabled={busy !== "idle"}
+            disabled={busy !== "idle" || formulationBusy}
             onClick={runResearch}
             className="bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
           >
-            {busy === "researching" ? "检索中…" : "① 检索专利并推荐配方"}
+            {formulationBusy ? "检索中…" : "① 检索专利并推荐配方"}
           </button>
           <button
             disabled={busy !== "idle"}

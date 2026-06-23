@@ -18,9 +18,16 @@ export default function SettingsModal() {
     setResult(null);
     api
       .getSettings()
-      .then((s) => setProviders(s.providers))
+      .then((s) => {
+        setProviders(s.providers);
+        setLlmConfig({
+          provider: s.provider,
+          model: s.model,
+          baseUrl: s.base_url ?? undefined,
+        });
+      })
       .catch(() => setProviders([]));
-  }, [settingsOpen]);
+  }, [settingsOpen, setLlmConfig]);
 
   const current = providers.find((p) => p.id === llmConfig.provider);
   const models = current?.models ?? [];

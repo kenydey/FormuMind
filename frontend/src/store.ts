@@ -14,6 +14,7 @@ import {
   type LoopReport,
   type ModelInfo,
   type ObjectiveSpec,
+  type OptimizationResult,
   type ProductDomain,
   type Requirement,
   type ResearchResult,
@@ -86,6 +87,8 @@ interface AppState {
   sourceStatus: Record<string, SourceStatus>;
   chatHistory: ChatMessage[];
   searchBusy: boolean;
+  deepResearchBusy: boolean;
+  formulationBusy: boolean;
   chatBusy: boolean;
   // Modal 可见性
   openModal: string | null;   // "requirements" | "recommend" | "doe" | "optimize" | null
@@ -121,6 +124,7 @@ interface AppState {
   deselectAllSources: () => void;
   searchSources: () => Promise<void>;
   loadSourceStatus: () => Promise<void>;
+  hydrateLlmSettings: () => Promise<void>;
   uploadFile: (file: File) => Promise<void>;
   sendChat: (question: string) => Promise<void>;
   setOpenModal: (name: string | null) => void;
@@ -199,6 +203,8 @@ export const useStore = create<AppState>()(
       sourceStatus: {} as Record<string, SourceStatus>,
       chatHistory: [],
       searchBusy: false,
+      deepResearchBusy: false,
+      formulationBusy: false,
       chatBusy: false,
       openModal: null,
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
@@ -226,38 +232,46 @@ export const useStore = create<AppState>()(
         set((s) => ({ requirement: { ...s.requirement, objectives } })),
 
       runResearch: async () => {
-        set({ busy: "researching", error: null });
+        set({ formulationBusy: true, error: null });
         try {
-          const research = await api.research(get().requirement);
+          const { requirement, sources, selectedSources } = get();
+          const active = sources.filter((e) =>
+            selectedSources.includes(e.identifier || e.title)
+          );
+          const payload = active.length > 0 ? active : sources;
+          const research = await api.research(requirement, payload);
           const leaderboard = research.recommended;
           set({ research, leaderboard });
-          // Save snapshot after research completes.
-          const { requirement, models, optimizationHistory, history } = get();
+          const { models, optimizationHistory, history } = get();
           set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, optimizationHistory)) });
         } catch (e) {
           set({ error: String(e) });
         } finally {
-          set({ busy: "idle" });
+          set({ formulationBusy: false });
         }
       },
 
       runDeepResearch: async () => {
-        const { searchQuery, requirement } = get();
-        set({ busy: "researching", error: null });
+        const { searchQuery, requirement, sourceTypes } = get();
+        set({ deepResearchBusy: true, error: null });
         try {
-          const { task_id } = await api.deepResearch(searchQuery, requirement);
-          const final = await pollTask(task_id, (t) => set({ task: t }));
+          const { task_id } = await api.deepResearch(searchQuery, requirement, sourceTypes);
+          const final = await pollTask(task_id, (t) => {
+            set({ task: t });
+            const partial = t.result as { citations?: Evidence[]; partial?: boolean } | null;
+            if (partial?.partial && partial.citations?.length) {
+              get().addSources(partial.citations);
+            }
+          });
           if (final.state === "failed") {
-            set({ error: final.message || "deep research failed" });
+            set({ error: final.message || "深度研究失败" });
             return;
           }
           const report = final.result as unknown as ComprehensiveReport | null;
           if (report) {
             set({ deepReport: report });
-            // Feed citations into the sources panel and candidates into the board.
             if (report.citations?.length) get().addSources(report.citations);
             if (report.candidates?.length) set({ leaderboard: report.candidates });
-            // Surface the report as an assistant message in the center Q&A area.
             const msg: ChatMessage = {
               role: "assistant",
               content: report.report_markdown,
@@ -268,7 +282,7 @@ export const useStore = create<AppState>()(
         } catch (e) {
           set({ error: String(e) });
         } finally {
-          set({ busy: "idle" });
+          set({ deepResearchBusy: false });
         }
       },
 
@@ -277,9 +291,10 @@ export const useStore = create<AppState>()(
         try {
           const { task_id } = await api.startOptimize(get().requirement, 24);
           const final = await pollTask(task_id, (t) => set({ task: t }));
-          if (final.result) {
-            const leaderboard = final.result.top_formulations;
-            const optHistory = final.result.history;
+          const opt = final.result as unknown as OptimizationResult | null;
+          if (opt) {
+            const leaderboard = opt.top_formulations;
+            const optHistory = opt.history;
             set({ leaderboard, optimizationHistory: optHistory });
             const { requirement, models, history } = get();
             set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, optHistory)) });
@@ -541,7 +556,32 @@ export const useStore = create<AppState>()(
           const status = await api.getSourceStatus();
           set({ sourceStatus: status });
         } catch {
-          // silently ignore — status badges just won't appear yet
+          // silently ignore
+        }
+      },
+
+      hydrateLlmSettings: async () => {
+        try {
+          const remote = await api.getSettings();
+          const local = get().llmConfig;
+          set({
+            llmConfig: {
+              provider: remote.provider || local.provider,
+              model: remote.model || local.model,
+              apiKey: local.apiKey,
+              baseUrl: remote.base_url ?? local.baseUrl,
+            },
+          });
+          if (local.apiKey && !remote.key_set) {
+            await api.postSettings({
+              provider: remote.provider || local.provider,
+              model: remote.model || local.model,
+              api_key: local.apiKey,
+              baseUrl: remote.base_url ?? local.baseUrl,
+            });
+          }
+        } catch {
+          // offline — keep localStorage config
         }
       },
 
