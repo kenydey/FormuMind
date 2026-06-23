@@ -8,25 +8,28 @@ Two execution paths share one workflow implementation:
   ``GET /api/tasks/{id}``. It works with no Redis/worker, keeping the MVP
   self-contained while preserving the async, non-blocking UX.
 
-Dep-install tasks additionally persist their result to disk so a uvicorn
-``--reload`` (triggered when pip writes to .venv/site-packages) does not
-cause the frontend's poll loop to receive a permanent 404.
+All in-process tasks are persisted to disk on every state update so a uvicorn
+``--reload`` (or any process restart) does not cause the frontend poll loop to
+receive a permanent 404.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
-# Filesystem fallback for tasks that survive a process restart (dep-install only).
+logger = logging.getLogger(__name__)
+
+# Filesystem fallback so tasks survive a process restart (uvicorn --reload, etc.).
 _TASK_PERSIST_DIR = Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
 
 
 def _persist_task(task_id: str, status: "TaskStatus") -> None:
-    """Write a completed/failed dep-install task to disk (best-effort)."""
+    """Write task status to disk (best-effort)."""
     try:
         _TASK_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
         data = status.model_dump()
@@ -36,11 +39,11 @@ def _persist_task(task_id: str, status: "TaskStatus") -> None:
             json.dumps(data, ensure_ascii=False), encoding="utf-8"
         )
     except Exception:
-        pass  # persistence is a best-effort fallback; never crash the install thread
+        pass  # persistence is best-effort; never crash background threads
 
 
 def load_persisted_task(task_id: str) -> "TaskStatus | None":
-    """Recover a dep-install task result from disk after a process restart."""
+    """Recover a task result from disk after a process restart."""
     path = _TASK_PERSIST_DIR / f"{task_id}.json"
     if not path.exists():
         return None
@@ -63,21 +66,41 @@ class TaskManager:
         self._tasks: dict[str, TaskStatus] = {}
         self._lock = threading.Lock()
 
+    def _register(self, task_id: str, status: TaskStatus) -> None:
+        """Store a new task in memory and on disk."""
+        with self._lock:
+            self._tasks[task_id] = status
+        _persist_task(task_id, status)
+
     def _set(self, task_id: str, **changes: Any) -> None:
         with self._lock:
-            status = self._tasks[task_id]
-            self._tasks[task_id] = status.model_copy(update=changes)
+            status = self._tasks.get(task_id)
+            if status is None:
+                status = load_persisted_task(task_id)
+            if status is None:
+                logger.warning("task %s not found for update", task_id)
+                return
+            updated = status.model_copy(update=changes)
+            self._tasks[task_id] = updated
+        _persist_task(task_id, updated)
 
     def get(self, task_id: str) -> TaskStatus | None:
         with self._lock:
-            return self._tasks.get(task_id)
+            status = self._tasks.get(task_id)
+        if status is not None:
+            return status
+        status = load_persisted_task(task_id)
+        if status is not None:
+            with self._lock:
+                self._tasks[task_id] = status
+        return status
 
     def submit_optimization(self, req: Requirement, iterations: int | None = None) -> str:
         task_id = uuid.uuid4().hex
-        with self._lock:
-            self._tasks[task_id] = TaskStatus(
-                task_id=task_id, kind="optimize", state=TaskState.pending
-            )
+        self._register(
+            task_id,
+            TaskStatus(task_id=task_id, kind="optimize", state=TaskState.pending),
+        )
 
         def _run() -> None:
             self._set(task_id, state=TaskState.running, message="starting optimizer")
@@ -106,10 +129,10 @@ class TaskManager:
         from ..services import auto_loop
 
         task_id = uuid.uuid4().hex
-        with self._lock:
-            self._tasks[task_id] = TaskStatus(
-                task_id=task_id, kind="loop", state=TaskState.pending
-            )
+        self._register(
+            task_id,
+            TaskStatus(task_id=task_id, kind="loop", state=TaskState.pending),
+        )
 
         def _run() -> None:
             self._set(task_id, state=TaskState.running, message="starting loop")
@@ -143,10 +166,10 @@ class TaskManager:
         from ..services import knowledge_cohort
 
         task_id = uuid.uuid4().hex
-        with self._lock:
-            self._tasks[task_id] = TaskStatus(
-                task_id=task_id, kind="research", state=TaskState.pending
-            )
+        self._register(
+            task_id,
+            TaskStatus(task_id=task_id, kind="research", state=TaskState.pending),
+        )
 
         def _run() -> None:
             self._set(task_id, state=TaskState.running, message="starting deep research")
@@ -186,10 +209,10 @@ class TaskManager:
         from ..services import literature
 
         task_id = uuid.uuid4().hex
-        with self._lock:
-            self._tasks[task_id] = TaskStatus(
-                task_id=task_id, kind="search", state=TaskState.pending
-            )
+        self._register(
+            task_id,
+            TaskStatus(task_id=task_id, kind="search", state=TaskState.pending),
+        )
 
         def _run() -> None:
             self._set(task_id, state=TaskState.running, message="检索中…")
@@ -239,10 +262,10 @@ class TaskManager:
         from ..services import dependencies as deps
 
         task_id = uuid.uuid4().hex
-        with self._lock:
-            self._tasks[task_id] = TaskStatus(
-                task_id=task_id, kind="deps", state=TaskState.pending
-            )
+        self._register(
+            task_id,
+            TaskStatus(task_id=task_id, kind="deps", state=TaskState.pending),
+        )
 
         def _run() -> None:
             verb = "upgrading" if upgrade else "installing"
@@ -258,12 +281,6 @@ class TaskManager:
                 )
             except Exception as exc:  # surface failures to the poller
                 self._set(task_id, state=TaskState.failed, message=str(exc))
-            finally:
-                # Persist to disk so uvicorn --reload doesn't 404 the poll loop.
-                with self._lock:
-                    final = self._tasks.get(task_id)
-                if final is not None:
-                    _persist_task(task_id, final)
 
         threading.Thread(target=_run, daemon=True).start()
         return task_id

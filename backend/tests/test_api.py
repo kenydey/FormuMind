@@ -71,6 +71,43 @@ def test_unknown_task_404():
     assert r.status_code == 404
 
 
+def test_search_task_survives_process_restart(monkeypatch, tmp_path):
+    """Simulate uvicorn --reload: in-memory registry cleared but poll still works."""
+    from app.worker import tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "_TASK_PERSIST_DIR", tmp_path)
+
+    r = client.post(
+        "/api/search/stream",
+        json={
+            "query": "epoxy zinc phosphate",
+            "source_types": ["patents"],
+            "requirement": {
+                "domain": "anticorrosion_coating",
+                "substrate": "carbon_steel",
+                "salt_spray_hours": 500,
+                "film_weight_gsm": 70,
+                "cure_temperature_c": 80,
+                "cleaning_efficiency": 90,
+                "voc_limit_gpl": 420,
+                "ph_target": None,
+                "notes": "",
+                "objectives": [],
+            },
+        },
+    )
+    assert r.status_code == 200
+    task_id = r.json()["task_id"]
+
+    # Simulate process restart: wipe in-memory task registry.
+    tasks_mod.task_manager._tasks.clear()
+
+    # Poll must not 404 — task was persisted to disk on registration.
+    poll = client.get(f"/api/tasks/{task_id}")
+    assert poll.status_code == 200, poll.text
+    assert poll.json()["task_id"] == task_id
+
+
 def test_template_endpoint():
     r = client.get("/api/templates/surface_treatment")
     assert r.status_code == 200
