@@ -73,10 +73,24 @@ app.include_router(agents_router.router)
 
 @app.get("/health", tags=["meta"])
 def health() -> dict:
+    def _ok(pkg: str) -> bool:
+        try:
+            __import__(pkg)
+            return True
+        except Exception:
+            return False
+
     return {
         "status": "ok",
         "app": settings.app_name,
         "llm": "claude" if settings.anthropic_api_key else "offline-fallback",
         "celery_eager": settings.celery_eager,
         "agent_bus": settings.agent_bus_enabled,
+        "installed_extras": {
+            "chemcrow": _ok("chemcrow"),
+            "paperqa": _ok("paperqa"),
+            "patent_client": _ok("patent_client"),
+            "sentence_transformers": _ok("sentence_transformers"),
+            "rdkit": _ok("rdkit"),
+        },
     }

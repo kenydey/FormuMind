@@ -187,9 +187,14 @@ export default function SourcesPanel() {
             </span>
           )}
           {!chemcrowStatus.available && (
-            <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block break-all">
-              pip install -e &apos;.[intel]&apos;
-            </code>
+            <>
+              <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block break-all">
+                source .venv/bin/activate
+              </code>
+              <code className="mt-0.5 text-[10px] text-slate-300 bg-ink/60 rounded px-1 py-0.5 block break-all">
+                pip install -e &apos;.[intel]&apos;
+              </code>
+            </>
           )}
         </div>
       )}

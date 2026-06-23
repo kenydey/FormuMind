@@ -10,6 +10,8 @@ For the full reference see [USER_GUIDE.md](./USER_GUIDE.md) (中文: [快速入�
 ```bash
 # Backend (terminal 1)
 cd backend
+python3 -m venv .venv              # create once
+source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
 pip install -e ".[dev]"
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 

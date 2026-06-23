@@ -685,6 +685,8 @@ curl -X POST localhost:8000/api/optimize -H 'content-type: application/json' -d 
 ```bash
 # Backend
 cd backend
+python3 -m venv .venv              # create once (required on Debian/Ubuntu with PEP 668)
+source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
 pip install -e ".[dev]"
 pytest -q                          # 193 tests, all offline
 uvicorn app.main:app --reload      # http://localhost:8000/docs
