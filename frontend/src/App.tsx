@@ -3,6 +3,7 @@ import ResearchPanel from "./components/ResearchPanel";
 import ActionsPanel from "./components/ActionsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import SettingsModal from "./components/SettingsModal";
+import DegradedBanner from "./components/DegradedBanner";
 import { useStore } from "./store";
 
 function GearIcon() {
@@ -53,6 +54,8 @@ export default function App() {
           )}
         </button>
       </header>
+
+      <DegradedBanner />
 
       <main className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden min-h-0">
         <div className="col-span-3 min-h-0">

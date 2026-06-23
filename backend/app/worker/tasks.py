@@ -133,6 +133,36 @@ class TaskManager:
         threading.Thread(target=_run, daemon=True).start()
         return task_id
 
+    def submit_dependency_install(
+        self, names: list[str], upgrade: bool = False
+    ) -> str:
+        """Run a pip install/upgrade of optional dependencies in the background."""
+        from ..services import dependencies as deps
+
+        task_id = uuid.uuid4().hex
+        with self._lock:
+            self._tasks[task_id] = TaskStatus(
+                task_id=task_id, kind="deps", state=TaskState.pending
+            )
+
+        def _run() -> None:
+            verb = "upgrading" if upgrade else "installing"
+            self._set(task_id, state=TaskState.running, message=f"{verb} {', '.join(names)}")
+            try:
+                result = deps.install(names, upgrade=upgrade)
+                self._set(
+                    task_id,
+                    state=TaskState.completed if result["ok"] else TaskState.failed,
+                    progress=1.0,
+                    message=result.get("summary", "done"),
+                    result=result,
+                )
+            except Exception as exc:  # surface failures to the poller
+                self._set(task_id, state=TaskState.failed, message=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return task_id
+
 
 task_manager = TaskManager()
 

@@ -18,6 +18,7 @@ from .api import process_optimize as process_router
 from .api import loop as loop_router
 from .api import intent as intent_router
 from .api import agents as agents_router
+from .api import dependencies as dependencies_router
 from .config import get_settings
 
 settings = get_settings()
@@ -69,6 +70,7 @@ app.include_router(process_router.router)
 app.include_router(loop_router.router)
 app.include_router(intent_router.router)
 app.include_router(agents_router.router)
+app.include_router(dependencies_router.router)
 
 
 @app.get("/health", tags=["meta"])

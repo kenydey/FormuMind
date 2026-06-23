@@ -224,6 +224,15 @@ export const api = {
       ...req,
       topic,
     }),
+
+  listDependencies: () =>
+    get<DependencyListResponse>("/api/dependencies"),
+
+  installDependencies: (names: string[], upgrade = false) =>
+    post<{ task_id: string; poll_url: string }>("/api/dependencies/install", {
+      names,
+      upgrade,
+    }),
 };
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
@@ -366,6 +375,30 @@ export interface ComprehensiveReport {
   web_count: number;
   kb_count: number;
   engine: string;
+}
+
+// ── Dependency management ────────────────────────────────────────────────────
+
+export interface DependencyInfo {
+  pip_name: string;
+  import_name: string;
+  extra: string;
+  enables: string;
+  installed: boolean;
+  version: string | null;
+}
+
+export interface DependencyListResponse {
+  dependencies: DependencyInfo[];
+  online_core_missing: string[];
+}
+
+export interface DependencyInstallResult {
+  ok: boolean;
+  returncode?: number;
+  summary: string;
+  stdout?: string;
+  stderr?: string;
 }
 
 // Poll a task until it terminates, invoking onUpdate on each tick.

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal";
+import DependencyManager from "./DependencyManager";
 import { useStore } from "../store";
 import { api, type LLMProviderInfo } from "../api";
 
 export default function SettingsModal() {
-  const { settingsOpen, toggleSettings, llmConfig, setLlmConfig } = useStore();
+  const { settingsOpen, toggleSettings, llmConfig, setLlmConfig, settingsTab, setSettingsTab } =
+    useStore();
   const [providers, setProviders] = useState<LLMProviderInfo[]>([]);
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -57,6 +59,29 @@ export default function SettingsModal() {
 
   return (
     <Modal title="设置 · Settings" open={settingsOpen} onClose={toggleSettings}>
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 border-b border-edge">
+        {([
+          ["llm", "大模型"],
+          ["deps", "依赖管理"],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setSettingsTab(id)}
+            className={`text-sm px-3 py-1.5 -mb-px border-b-2 transition-colors ${
+              settingsTab === id
+                ? "border-accent text-accent"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {settingsTab === "deps" ? (
+        <DependencyManager />
+      ) : (
       <div className="space-y-4">
         <p className="text-xs text-slate-500">
           配置用于研究问答与配方综述的大语言模型。API Key 仅在本次会话内同步到后端，浏览器使用 localStorage 持久化保存。
@@ -160,6 +185,7 @@ export default function SettingsModal() {
           </button>
         </div>
       </div>
+      )}
     </Modal>
   );
 }

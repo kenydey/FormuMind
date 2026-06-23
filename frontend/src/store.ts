@@ -91,6 +91,7 @@ interface AppState {
   // Settings
   llmConfig: LLMConfig;
   settingsOpen: boolean;
+  settingsTab: "llm" | "deps";
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -121,6 +122,8 @@ interface AppState {
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
+  openSettings: (tab?: "llm" | "deps") => void;
+  setSettingsTab: (tab: "llm" | "deps") => void;
 
   // v0.6 actions
   runLoop: () => Promise<void>;
@@ -195,6 +198,7 @@ export const useStore = create<AppState>()(
       openModal: null,
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
       settingsOpen: false,
+      settingsTab: "llm",
 
       // v0.6 initial state
       loopReport: null,
@@ -550,6 +554,10 @@ export const useStore = create<AppState>()(
         set((s) => ({ llmConfig: { ...s.llmConfig, ...config } })),
 
       toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
+
+      openSettings: (tab = "llm") => set({ settingsOpen: true, settingsTab: tab }),
+
+      setSettingsTab: (tab) => set({ settingsTab: tab }),
     }),
     {
       name: "formumind-history",
