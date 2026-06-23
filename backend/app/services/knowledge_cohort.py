@@ -130,7 +130,7 @@ class KnowledgeCohort:
 
         _progress(0.1, "fetching patents / prior art")
         if req:
-            patents = literature.search_patents(req, limit=8)
+            patents = literature.search_patents(req, limit=8, query=topic)
         else:
             patents = literature.search_by_types(topic, ["patents"], limit_per_source=8)
 

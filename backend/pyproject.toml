@@ -26,7 +26,8 @@ dependencies = [
 # with `pip install -e .[heavy]` on a machine that can support them, or run the
 # corresponding Docker images (see docker-compose.yml).
 [project.optional-dependencies]
-llm = ["anthropic>=0.25", "openai>=1.30", "google-genai>=0.7"]
+llm = ["anthropic>=0.25", "openai>=1.30", "google-genai>=0.7",
+       "langchain-core>=0.3", "langchain-openai>=0.2", "langchain-anthropic>=0.3"]
 science = [
     "scipy>=1.11",
     "scikit-learn>=1.4",

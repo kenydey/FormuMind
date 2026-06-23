@@ -1,11 +1,12 @@
 """Research endpoint: retrieve prior art and produce recommended formulations."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from ..domain.schemas import DeepResearchRequest, Evidence, Requirement, ResearchResult
 from ..pipeline import workflow
+from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..worker.tasks import task_manager
 
 router = APIRouter(prefix="/api", tags=["research"])
@@ -51,3 +52,9 @@ def start_deep_research(body: DeepResearchRequest) -> DeepResearchHandle:
     topic = body.topic or req.headline()
     task_id = task_manager.submit_comprehensive_research(topic, req)
     return DeepResearchHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")
+
+
+@router.get("/research/expand", response_model=ExpandedQuery)
+def expand_research_query(topic: str = Query(..., min_length=1)) -> ExpandedQuery:
+    """调试端点：将自然语言主题扩展为结构化检索查询（QueryExpander）。"""
+    return QueryExpander().expand(topic)

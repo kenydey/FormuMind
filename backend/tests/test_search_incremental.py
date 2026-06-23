@@ -116,6 +116,22 @@ def test_search_default_includes_internet():
     assert "internet" in SearchRequest().source_types
 
 
+def test_literature_availability_uses_or_logic():
+    """get_source_availability uses OR for arxiv/semanticscholar (not AND)."""
+    import inspect
+
+    source = inspect.getsource(literature.get_source_availability)
+    assert '_ok("arxiv") or _ok("semanticscholar")' in source
+
+
+def test_build_patent_query_used_in_search_patents():
+    req = literature.Requirement(**_REQUIREMENT)
+    results = literature.search_patents(req, query="zinc phosphate", limit=5)
+    assert len(results) >= 1
+    zinc_ids = {e.identifier for e in results}
+    assert "US9982145B2" in zinc_ids
+
+
 # ── NotebookLM authorization / runtime config ────────────────────────────────
 
 def test_notebooklm_auth_status_has_granular_flags():

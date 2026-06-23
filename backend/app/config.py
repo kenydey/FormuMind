@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     pdf_download: bool = False
     pdf_download_max: int = 3     # 每次研究最多下载几篇专利 PDF
 
+    # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
+    openalex_mailto: str | None = None       # OpenAlex 礼貌池标识
+    epo_consumer_key: str | None = None      # EPO OPS API consumer key
+    epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
+    uspto_api_key: str | None = None           # USPTO Open Data API key
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {

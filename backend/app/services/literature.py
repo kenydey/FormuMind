@@ -8,9 +8,12 @@ domains, so research always returns cited evidence.
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import re
 
 from ..domain.schemas import Evidence, ProductDomain, Requirement
+
+logger = logging.getLogger(__name__)
 
 # Curated seed corpus — representative, paraphrased abstracts used offline.
 SEED_CORPUS: dict[ProductDomain, list[dict]] = {
@@ -71,15 +74,23 @@ def _filter_seed_by_query(
     return sorted(seeds, key=lambda x: x.relevance, reverse=True)[:min_keep]
 
 
-def _online_search(req: Requirement, limit: int) -> list[Evidence] | None:
+def _build_patent_query(req: Requirement | None, query: str) -> str:
+    """Combine user search box text with requirement headline for patent retrieval."""
+    parts = [p for p in [query.strip(), req.headline() if req else ""] if p]
+    return " ".join(dict.fromkeys(parts))
+
+
+def _online_search(
+    req: Requirement | None, query: str, limit: int
+) -> list[Evidence] | None:
     """Attempt real patent retrieval; return None if unavailable."""
     try:
         from patent_client import Patent  # type: ignore
     except Exception:
         return None
     try:
-        query = req.headline()
-        results = Patent.objects.filter(query).limit(limit)  # pragma: no cover - network
+        search_q = _build_patent_query(req, query)
+        results = Patent.objects.filter(search_q).limit(limit)  # pragma: no cover - network
         evidence = []
         for i, p in enumerate(results):
             evidence.append(Evidence(
@@ -88,26 +99,34 @@ def _online_search(req: Requirement, limit: int) -> list[Evidence] | None:
                 relevance=max(0.1, 1.0 - i * 0.02),
             ))
         return evidence or None
-    except Exception:  # pragma: no cover - network/credentials
+    except Exception as exc:  # pragma: no cover - network/credentials
+        logger.warning("patent_client online search failed: %s", exc)
         return None
 
 
-def search(req: Requirement, limit: int = 8) -> list[Evidence]:
+def search(req: Requirement, limit: int = 8, query: str = "") -> list[Evidence]:
     """Backward-compatible public entry point — delegates to search_patents."""
-    return search_patents(req, limit)
+    return search_patents(req, query=query, limit=limit)
 
 
-def search_patents(req: Requirement, limit: int = 5, offset: int = 0) -> list[Evidence]:
+def search_patents(
+    req: Requirement,
+    limit: int = 5,
+    offset: int = 0,
+    query: str = "",
+) -> list[Evidence]:
     """专利搜索（patent_client + 种子语料回退）。``offset`` 支持增量翻页。"""
-    result = _online_search(req, limit + offset)
+    result = _online_search(req, query, limit + offset)
     if result:
         return result[offset : offset + limit]
     corpus = SEED_CORPUS.get(req.domain, [])
+    seed_query = query or _build_patent_query(req, "")
     evidence = [
         Evidence(relevance=round(max(0.4, 1.0 - i * 0.08), 2), **doc)
         for i, doc in enumerate(corpus)
     ]
-    return evidence[offset : offset + limit]
+    filtered = _filter_seed_by_query(evidence, seed_query)
+    return filtered[offset : offset + limit]
 
 
 def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
@@ -128,7 +147,8 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
             )
             for i, r in enumerate(results)
         ]
-    except Exception:
+    except Exception as exc:
+        logger.warning("arXiv search failed: %s", exc)
         return []
 
 
@@ -140,15 +160,18 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
         results = list(sch.search_paper(query, limit=min(100, limit + offset)))[offset : offset + limit]
         out = []
         for i, p in enumerate(results):
+            ext = p.externalIds or {}
+            identifier = ext.get("DOI") or p.paperId or ""
             out.append(Evidence(
                 source="Semantic Scholar",
-                identifier=p.externalIds.get("DOI", p.paperId) if p.externalIds else p.paperId,
+                identifier=identifier,
                 title=p.title or "Untitled",
                 snippet=(p.abstract or "")[:500],
                 relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
             ))
         return out
-    except Exception:
+    except Exception as exc:
+        logger.warning("Semantic Scholar search failed: %s", exc)
         return []
 
 
@@ -170,7 +193,8 @@ def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
             )
             for i, r in enumerate(results)
         ]
-    except Exception:
+    except Exception as exc:
+        logger.warning("DuckDuckGo search failed: %s", exc)
         return []
 
 
@@ -229,7 +253,11 @@ def _build_streams(
 
     if "patents" in source_types:
         if req is not None:
-            add("patents", lambda off: search_patents(req, page_size, offset=off), True)
+            add(
+                "patents",
+                lambda off, q=query: search_patents(req, page_size, offset=off, query=q),
+                True,
+            )
         else:  # no requirement → use arXiv as a stand-in patent stream
             add("patents", lambda off: search_arxiv(query, page_size, offset=off), True)
     if "literature" in source_types:
@@ -354,7 +382,8 @@ def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:
                 relevance=0.88,
             )
         ]
-    except Exception:
+    except Exception as exc:
+        logger.warning("ChemCrow WebSearch failed: %s", exc)
         return []
 
 
@@ -383,7 +412,8 @@ def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
                 relevance=0.92,
             )
         ]
-    except Exception:
+    except Exception as exc:
+        logger.warning("ChemCrow LiteratureSearch failed: %s", exc)
         return []
 
 
@@ -405,7 +435,7 @@ def get_source_availability() -> dict[str, dict]:
     from .notebooklm import get_setup_status
 
     patents_online = _ok("patent_client")
-    lit_ok = _ok("arxiv") and _ok("semanticscholar")
+    lit_ok = _ok("arxiv") or _ok("semanticscholar")
     web_ok = _ok("ddgs") or _ok("duckduckgo_search")
     chemcrow_ok = _ok("chemcrow")
 
