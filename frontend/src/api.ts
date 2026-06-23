@@ -205,7 +205,15 @@ export const api = {
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   postSettings: (update: Partial<LLMConfig> & { api_key?: string }) =>
-    post<{ ok: boolean; message?: string }>("/api/settings", update),
+    post<{ ok: boolean; provider: string; model: string; message: string }>(
+      "/api/settings",
+      {
+        provider: update.provider,
+        model: update.model,
+        api_key: update.api_key,
+        base_url: update.baseUrl,
+      }
+    ),
 
   testConnection: () =>
     post<{ ok: boolean; provider: string; model: string; message: string }>(

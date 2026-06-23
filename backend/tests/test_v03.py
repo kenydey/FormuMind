@@ -45,6 +45,53 @@ def test_settings_update_switches_provider():
     client.post("/api/settings", json={"provider": "anthropic"})
 
 
+def test_settings_accepts_camelcase_base_url(monkeypatch):
+    from app.config import get_settings
+    from app.services import llm as llm_mod
+
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        llm_mod,
+        "test_connection",
+        lambda: {"ok": True, "provider": "deepseek", "model": "deepseek-v4-pro", "message": "连接成功"},
+    )
+    client.post(
+        "/api/settings",
+        json={
+            "provider": "deepseek",
+            "model": "deepseek-v4-pro",
+            "api_key": "sk-test",
+            "baseUrl": "https://api.deepseek.com",
+        },
+    )
+    s = get_settings()
+    assert s.llm_base_url == "https://api.deepseek.com"
+    assert s.deepseek_api_key == "sk-test"
+    get_settings.cache_clear()
+
+
+def test_settings_test_connection_reports_sdk_missing(monkeypatch):
+    from app.config import get_settings
+    from app.services import llm as llm_mod
+
+    get_settings.cache_clear()
+    s = get_settings()
+    s.llm_provider = "deepseek"
+    s.llm_model = "deepseek-v4-pro"
+    object.__setattr__(s, "deepseek_api_key", "sk-test")
+
+    def boom(*args, **kwargs):
+        return None, "未安装 openai SDK，请执行 pip install -e '.[llm]'"
+
+    monkeypatch.setattr(llm_mod, "_complete_openai_compatible_detail", boom)
+    r = client.post("/api/settings/test", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert "openai SDK" in body["message"]
+    get_settings.cache_clear()
+
+
 def test_settings_test_connection_offline():
     r = client.post("/api/settings/test", json={})
     assert r.status_code == 200

@@ -110,6 +110,17 @@ PROVIDERS: list[dict] = [
 _PROVIDER_INDEX: dict[str, dict] = {p["id"]: p for p in PROVIDERS}
 
 
+def _provider_default_base_url(provider: str) -> str | None:
+    """Return the catalog default base URL for OpenAI-compatible providers."""
+    return _PROVIDER_INDEX.get(provider, {}).get("base_url")
+
+
+def _resolve_openai_base_url(provider: str, override: str | None) -> str | None:
+    """Pick the effective base URL and normalise empty strings."""
+    url = (override or "").strip() or _provider_default_base_url(provider)
+    return url or None
+
+
 # ── Low-level completion helpers ─────────────────────────────────────────────
 
 def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> str | None:
@@ -129,8 +140,19 @@ def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) 
 def _complete_openai_compatible(
     prompt: str, api_key: str, model: str, max_tokens: int, base_url: str | None = None
 ) -> str | None:
+    text, _ = _complete_openai_compatible_detail(prompt, api_key, model, max_tokens, base_url)
+    return text
+
+
+def _complete_openai_compatible_detail(
+    prompt: str, api_key: str, model: str, max_tokens: int, base_url: str | None = None
+) -> tuple[str | None, str | None]:
+    """Call an OpenAI-compatible chat API; return (text, error_message)."""
     try:
         from openai import OpenAI  # type: ignore
+    except ImportError:
+        return None, "未安装 openai SDK，请执行 pip install -e '.[llm]'"
+    try:
         kwargs: dict = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
@@ -140,9 +162,10 @@ def _complete_openai_compatible(
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        return resp.choices[0].message.content
-    except Exception:
-        return None
+        content = resp.choices[0].message.content
+        return (content, None) if content else (None, "API 返回空响应")
+    except Exception as exc:
+        return None, str(exc)
 
 
 def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
@@ -172,9 +195,7 @@ def _call_llm(prompt: str) -> str | None:
         return _complete_gemini(prompt, api_key, model)
 
     # All other providers are OpenAI-compatible.
-    meta = _PROVIDER_INDEX.get(provider, {})
-    # Allow settings to override the default base_url (e.g. self-hosted endpoint).
-    base_url = settings.llm_base_url or meta.get("base_url")
+    base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
     return _complete_openai_compatible(prompt, api_key, model, max_tokens, base_url)
 
 
@@ -446,13 +467,35 @@ def test_connection() -> dict:
     settings = get_settings()
     provider = settings.llm_provider
     api_key = settings.get_active_api_key()
+    model = settings.llm_model
     if not api_key:
-        return {"ok": False, "provider": provider, "model": settings.llm_model,
-                "message": f"未配置 {provider} 的 API Key"}
-    result = _call_llm("Reply with exactly: OK")
+        return {
+            "ok": False,
+            "provider": provider,
+            "model": model,
+            "message": f"未配置 {provider} 的 API Key",
+        }
+
+    prompt = "Reply with exactly: OK"
+    if provider == "anthropic":
+        result = _complete_anthropic(prompt, api_key, model, min(settings.llm_max_tokens, 16))
+        error = None if result else "Anthropic API 调用失败，请检查 API Key 和网络"
+    elif provider == "gemini":
+        result = _complete_gemini(prompt, api_key, model)
+        error = None if result else "Gemini API 调用失败，请检查 API Key 和网络"
+    else:
+        base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
+        result, error = _complete_openai_compatible_detail(
+            prompt, api_key, model, min(settings.llm_max_tokens, 16), base_url
+        )
+
     if result and "ok" in result.lower():
-        return {"ok": True, "provider": provider, "model": settings.llm_model, "message": "连接成功"}
+        return {"ok": True, "provider": provider, "model": model, "message": "连接成功"}
     if result:
-        return {"ok": True, "provider": provider, "model": settings.llm_model, "message": "连接成功（响应异常）"}
-    return {"ok": False, "provider": provider, "model": settings.llm_model,
-            "message": "API 调用失败，请检查 API Key 和网络"}
+        return {"ok": True, "provider": provider, "model": model, "message": "连接成功（响应异常）"}
+    detail = error or "API 调用失败，请检查 API Key 和网络"
+    if "Authentication" in detail or "401" in detail or "invalid" in detail.lower():
+        detail = "API Key 无效或已过期，请检查密钥是否正确"
+    elif "model" in detail.lower() and ("not found" in detail.lower() or "does not exist" in detail.lower()):
+        detail = f"模型 {model} 不存在或当前账户无权限，请更换模型后重试"
+    return {"ok": False, "provider": provider, "model": model, "message": detail}

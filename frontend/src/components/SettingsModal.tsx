@@ -42,13 +42,12 @@ export default function SettingsModal() {
     setTesting(true);
     setResult(null);
     try {
-      await api.postSettings({
+      const t = await api.postSettings({
         provider: llmConfig.provider,
         model: llmConfig.model,
         api_key: llmConfig.apiKey || undefined,
         baseUrl: llmConfig.baseUrl,
       });
-      const t = await api.testConnection();
       setResult({ ok: t.ok, message: t.message });
     } catch (e) {
       setResult({ ok: false, message: String(e) });
