@@ -82,6 +82,7 @@ interface AppState {
   searchQuery: string;
   sourceTypes: SearchSourceType[];
   sources: Evidence[];
+  selectedSources: string[];   // ids (identifier||title) of sources fed into Q&A
   sourceStatus: Record<string, SourceStatus>;
   chatHistory: ChatMessage[];
   searchBusy: boolean;
@@ -115,6 +116,9 @@ interface AppState {
   addSources: (evidence: Evidence[]) => void;
   removeSource: (id: string) => void;
   clearSources: () => void;
+  toggleSourceSelected: (id: string) => void;
+  selectAllSources: () => void;
+  deselectAllSources: () => void;
   searchSources: () => Promise<void>;
   loadSourceStatus: () => Promise<void>;
   uploadFile: (file: File) => Promise<void>;
@@ -189,8 +193,9 @@ export const useStore = create<AppState>()(
 
       // v0.3 initial state
       searchQuery: "",
-      sourceTypes: ["patents", "literature"] as SearchSourceType[],
+      sourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
       sources: [],
+      selectedSources: [],
       sourceStatus: {} as Record<string, SourceStatus>,
       chatHistory: [],
       searchBusy: false,
@@ -464,32 +469,66 @@ export const useStore = create<AppState>()(
       setSourceTypes: (types) => set({ sourceTypes: types }),
 
       addSources: (evidence) =>
-        set((s) => ({
-          sources: [
-            ...s.sources,
-            ...evidence.filter(
-              (e) => !s.sources.some((x) => (x.identifier || x.title) === (e.identifier || e.title))
-            ),
-          ],
-        })),
+        set((s) => {
+          const fresh = evidence.filter(
+            (e) => !s.sources.some((x) => (x.identifier || x.title) === (e.identifier || e.title))
+          );
+          const freshIds = fresh.map((e) => e.identifier || e.title);
+          return {
+            sources: [...s.sources, ...fresh],
+            // Newly added sources default to selected (NotebookLM-style).
+            selectedSources: [...new Set([...s.selectedSources, ...freshIds])],
+          };
+        }),
 
       removeSource: (id) =>
-        set((s) => ({ sources: s.sources.filter((e) => (e.identifier || e.title) !== id) })),
+        set((s) => ({
+          sources: s.sources.filter((e) => (e.identifier || e.title) !== id),
+          selectedSources: s.selectedSources.filter((x) => x !== id),
+        })),
 
-      clearSources: () => set({ sources: [], chatHistory: [] }),
+      clearSources: () => set({ sources: [], selectedSources: [], chatHistory: [] }),
+
+      toggleSourceSelected: (id) =>
+        set((s) => ({
+          selectedSources: s.selectedSources.includes(id)
+            ? s.selectedSources.filter((x) => x !== id)
+            : [...s.selectedSources, id],
+        })),
+
+      selectAllSources: () =>
+        set((s) => ({ selectedSources: s.sources.map((e) => e.identifier || e.title) })),
+
+      deselectAllSources: () => set({ selectedSources: [] }),
 
       searchSources: async () => {
         const { searchQuery, sourceTypes, requirement } = get();
         set({ searchBusy: true, error: null });
         try {
-          const res = await api.search({
+          // Incremental search: poll the task and render results as they arrive,
+          // continuing until no source turns up new related material.
+          const { task_id } = await api.searchStream({
             query: searchQuery,
             source_types: sourceTypes,
             requirement,
-            limit_per_source: 5,
+            total_limit: 300,
           });
-          get().addSources(res.evidence);
-          if (res.source_status) set({ sourceStatus: res.source_status });
+          const final = await pollTask(task_id, (t) => {
+            const r = t.result as unknown as
+              | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
+              | null;
+            const partial = r?.evidence ?? [];
+            if (partial.length) get().addSources(partial);
+          });
+          if (final.state === "failed") {
+            set({ error: final.message || "检索失败" });
+          } else {
+            const r = final.result as unknown as
+              | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
+              | null;
+            if (r?.evidence?.length) get().addSources(r.evidence);
+            if (r?.source_status) set({ sourceStatus: r.source_status });
+          }
         } catch (e) {
           set({ error: String(e) });
         } finally {
@@ -519,7 +558,11 @@ export const useStore = create<AppState>()(
       },
 
       sendChat: async (question) => {
-        const { sources, requirement, chatHistory } = get();
+        const { sources, selectedSources, requirement, chatHistory } = get();
+        // Only the selected sources ground the answer (NotebookLM-style).
+        const active = sources.filter((e) =>
+          selectedSources.includes(e.identifier || e.title)
+        );
         set({
           chatBusy: true,
           chatHistory: [...chatHistory, { role: "user", content: question }],
@@ -527,7 +570,7 @@ export const useStore = create<AppState>()(
         try {
           const res = await api.chat({
             question,
-            sources,
+            sources: active,
             domain: requirement.domain,
           });
           set((s) => ({

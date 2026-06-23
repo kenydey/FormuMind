@@ -1,19 +1,28 @@
-"""POST /api/search — Multi-source evidence retrieval.
+"""POST /api/search — Multi-source evidence retrieval (single-shot).
+POST /api/search/stream — Incremental search; returns a task handle the client
+     polls so it can render results while the search keeps going.
 GET  /api/search/status — Per-source availability check (no network requests).
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
 from ..domain.schemas import Evidence, Requirement
 from ..services import literature
+from ..worker.tasks import task_manager
 
 router = APIRouter()
 
 
 class SearchRequest(BaseModel):
     query: str = ""
-    source_types: list[str] = ["patents", "literature"]
+    source_types: list[str] = ["patents", "literature", "internet"]
     requirement: Requirement | None = None
-    limit_per_source: int = 5
+    limit_per_source: int = 50    # per-source page size (effectively no hard cap)
+    total_limit: int = 300        # overall cap across all sources, ranked by relevance
+
+
+class TaskHandle(BaseModel):
+    task_id: str
+    poll_url: str
 
 
 class SourceStatus(BaseModel):
@@ -51,9 +60,28 @@ def search_sources(req: SearchRequest):
         source_types=req.source_types,
         req=req.requirement,
         limit_per_source=req.limit_per_source,
+        total_limit=req.total_limit,
     )
     return SearchResponse(
         evidence=evidence,
         total=len(evidence),
         source_status=_build_status(),
     )
+
+
+@router.post("/search/stream", response_model=TaskHandle)
+def search_stream(req: SearchRequest) -> TaskHandle:
+    """Kick off an incremental search; poll GET /api/tasks/{id} for growing results.
+
+    Results accumulate round by round until no source turns up new related
+    evidence (no fixed time budget), capped at ``total_limit`` and ranked by
+    relevance to the query.
+    """
+    task_id = task_manager.submit_search(
+        query=req.query,
+        source_types=req.source_types,
+        req=req.requirement,
+        total_limit=req.total_limit,
+        per_source_cap=req.limit_per_source,
+    )
+    return TaskHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")

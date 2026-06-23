@@ -18,9 +18,13 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import os
+import subprocess
+import sys
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
+
+NOTEBOOKLM_URL = "https://notebooklm.google.com"
 
 
 def _notebooklm_available() -> bool:
@@ -109,42 +113,141 @@ def search_notebooklm(query: str, limit: int = 5) -> list[Evidence]:
         return []
 
 
-def get_setup_status() -> dict:
-    """Return detailed NotebookLM configuration status with user-actionable hints."""
+def _lib_installed() -> bool:
     try:
         import notebooklm  # type: ignore  # noqa: F401
-        lib_ok = True
+        return True
     except Exception:
-        lib_ok = False
+        return False
+
+
+def can_launch_browser() -> bool:
+    """Heuristic: can this machine pop a real browser window for `notebooklm login`?
+
+    True on desktop macOS/Windows, or on Linux with an X11/Wayland display. False
+    on headless/remote servers — the UI then shows the manual fallback instead.
+    """
+    if sys.platform in ("darwin", "win32"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def set_runtime_config(
+    enabled: bool | None = None, notebook_id: str | None = None
+) -> dict:
+    """Mutate NotebookLM settings in-memory at runtime (mirrors api/settings.py),
+    so users configure it from the UI without editing environment variables."""
+    s = get_settings()
+    if enabled is not None:
+        object.__setattr__(s, "notebooklm_enabled", bool(enabled))
+    if notebook_id is not None:
+        object.__setattr__(s, "notebooklm_notebook_id", notebook_id or None)
+    return get_setup_status()
+
+
+def start_login() -> dict:
+    """Trigger the one-time Google authorization for NotebookLM.
+
+    When a browser can be launched on the backend machine, spawn the allowlisted
+    ``notebooklm login`` CLI (detached, non-blocking) which opens a Google login
+    window; the SDK saves the browser session itself. On headless/remote backends
+    (or when the lib is missing) return a ``manual`` payload so the UI can guide
+    the user instead. The command is a fixed literal — no user input is ever
+    interpolated into the subprocess.
+    """
+    if not _lib_installed():
+        return {
+            "started": False,
+            "mode": "manual",
+            "reason": "library_missing",
+            "hint": "先在「依赖管理」安装 notebooklm-py，再完成 Google 授权",
+            "command": "pip install -e '.[notebooklm]'",
+            "manual_url": NOTEBOOKLM_URL,
+        }
+    if not can_launch_browser():
+        return {
+            "started": False,
+            "mode": "manual",
+            "reason": "no_display",
+            "hint": "后端无图形界面，请在运行后端的机器上执行 `notebooklm login` 完成 Google 授权（一次性）",
+            "command": "notebooklm login",
+            "manual_url": NOTEBOOKLM_URL,
+        }
+    try:
+        # Fixed, allowlisted command — never built from request data.
+        subprocess.Popen(
+            ["notebooklm", "login"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return {
+            "started": True,
+            "mode": "browser",
+            "reason": None,
+            "hint": "已在本机打开 Google 登录窗口，完成授权后稍候，状态将自动变为已就绪。",
+            "command": "notebooklm login",
+            "manual_url": NOTEBOOKLM_URL,
+        }
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        return {
+            "started": False,
+            "mode": "manual",
+            "reason": "launch_failed",
+            "hint": f"自动启动失败（{exc}）。请手动执行 `notebooklm login` 完成 Google 授权。",
+            "command": "notebooklm login",
+            "manual_url": NOTEBOOKLM_URL,
+        }
+
+
+def get_setup_status() -> dict:
+    """Return detailed NotebookLM configuration status with user-actionable hints.
+
+    Carries the original ``available/offline_fallback/reason/hint`` contract plus
+    granular booleans (``lib_installed``/``enabled``/``notebook_id_set``/
+    ``session_present``/``can_launch_browser``) the auth UI uses to decide which
+    control to show. Extra keys are ignored by the ``SourceStatus`` model used on
+    ``/api/search/status``.
+    """
+    s = get_settings()
+    lib_ok = _lib_installed()
+    session_present = bool(
+        s.notebooklm_storage_path and os.path.exists(s.notebooklm_storage_path)
+    )
+    base = {
+        "lib_installed": lib_ok,
+        "enabled": bool(s.notebooklm_enabled),
+        "notebook_id_set": bool(s.notebooklm_notebook_id),
+        "notebook_id": s.notebooklm_notebook_id,
+        "session_present": session_present,
+        "can_launch_browser": can_launch_browser(),
+        "offline_fallback": False,
+    }
 
     if not lib_ok:
-        return {
-            "available": False,
-            "offline_fallback": False,
-            "reason": "library_missing",
-            "hint": "pip install -e '.[notebooklm]'，然后运行 notebooklm login 完成 Google 授权",
-        }
-
-    s = get_settings()
-    if not s.notebooklm_enabled:
-        return {
-            "available": False,
-            "offline_fallback": False,
-            "reason": "not_enabled",
-            "hint": "设置环境变量 FORMUMIND_NOTEBOOKLM_ENABLED=true",
-        }
-    if not s.notebooklm_notebook_id:
-        return {
-            "available": False,
-            "offline_fallback": False,
-            "reason": "no_notebook_id",
-            "hint": "设置 FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID=your-notebook-id",
-        }
-    if not os.path.exists(s.notebooklm_storage_path):
-        return {
-            "available": False,
-            "offline_fallback": False,
-            "reason": "session_missing",
-            "hint": "运行 notebooklm login 完成 Google 账号授权（一次性操作）",
-        }
-    return {"available": True, "offline_fallback": False, "reason": None, "hint": None}
+        base.update(
+            available=False,
+            reason="library_missing",
+            hint="在「依赖管理」安装 notebooklm-py，然后点击「授权登录」完成 Google 授权",
+        )
+    elif not s.notebooklm_enabled:
+        base.update(
+            available=False,
+            reason="not_enabled",
+            hint="启用 NotebookLM 并填写 Notebook ID 后点击「授权登录」",
+        )
+    elif not s.notebooklm_notebook_id:
+        base.update(
+            available=False,
+            reason="no_notebook_id",
+            hint="填写 Notebook ID（NotebookLM 笔记本链接中的 ID）",
+        )
+    elif not session_present:
+        base.update(
+            available=False,
+            reason="session_missing",
+            hint="点击「授权登录」完成 Google 账号授权（一次性操作）",
+        )
+    else:
+        base.update(available=True, reason=None, hint=None)
+    return base

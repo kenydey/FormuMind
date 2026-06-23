@@ -85,7 +85,7 @@ def _online_search(req: Requirement, limit: int) -> list[Evidence] | None:
             evidence.append(Evidence(
                 source="USPTO", identifier=str(getattr(p, "publication_number", f"P{i}")),
                 title=str(getattr(p, "title", "")), snippet=str(getattr(p, "abstract", ""))[:400],
-                relevance=max(0.1, 1.0 - i * 0.05),
+                relevance=max(0.1, 1.0 - i * 0.02),
             ))
         return evidence or None
     except Exception:  # pragma: no cover - network/credentials
@@ -97,32 +97,34 @@ def search(req: Requirement, limit: int = 8) -> list[Evidence]:
     return search_patents(req, limit)
 
 
-def search_patents(req: Requirement, limit: int = 5) -> list[Evidence]:
-    """专利搜索（patent_client + 种子语料回退）。"""
-    result = _online_search(req, limit)
+def search_patents(req: Requirement, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """专利搜索（patent_client + 种子语料回退）。``offset`` 支持增量翻页。"""
+    result = _online_search(req, limit + offset)
     if result:
-        return result
+        return result[offset : offset + limit]
     corpus = SEED_CORPUS.get(req.domain, [])
     evidence = [
         Evidence(relevance=round(max(0.4, 1.0 - i * 0.08), 2), **doc)
         for i, doc in enumerate(corpus)
     ]
-    return evidence[:limit]
+    return evidence[offset : offset + limit]
 
 
-def search_arxiv(query: str, limit: int = 5) -> list[Evidence]:
-    """arXiv 学术预印本搜索（arxiv 库）。"""
+def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
     try:
         import arxiv  # type: ignore
         client = arxiv.Client()
-        results = list(client.results(arxiv.Search(query=query, max_results=limit, sort_by=arxiv.SortCriterion.Relevance)))
+        results = list(client.results(arxiv.Search(
+            query=query, max_results=limit + offset, sort_by=arxiv.SortCriterion.Relevance
+        )))[offset : offset + limit]
         return [
             Evidence(
                 source="arXiv",
                 identifier=r.entry_id,
                 title=r.title,
                 snippet=(r.summary or "")[:500],
-                relevance=1.0 - i * 0.1,
+                relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
             )
             for i, r in enumerate(results)
         ]
@@ -130,12 +132,12 @@ def search_arxiv(query: str, limit: int = 5) -> list[Evidence]:
         return []
 
 
-def search_semantic_scholar(query: str, limit: int = 5) -> list[Evidence]:
-    """Semantic Scholar 学术文献搜索。"""
+def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """Semantic Scholar 学术文献搜索。``offset`` 支持增量翻页。"""
     try:
         from semanticscholar import SemanticScholar  # type: ignore
         sch = SemanticScholar()
-        results = sch.search_paper(query, limit=limit)
+        results = list(sch.search_paper(query, limit=min(100, limit + offset)))[offset : offset + limit]
         out = []
         for i, p in enumerate(results):
             out.append(Evidence(
@@ -143,28 +145,28 @@ def search_semantic_scholar(query: str, limit: int = 5) -> list[Evidence]:
                 identifier=p.externalIds.get("DOI", p.paperId) if p.externalIds else p.paperId,
                 title=p.title or "Untitled",
                 snippet=(p.abstract or "")[:500],
-                relevance=1.0 - i * 0.1,
+                relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
             ))
         return out
     except Exception:
         return []
 
 
-def search_web(query: str, limit: int = 5) -> list[Evidence]:
-    """DuckDuckGo 互联网搜索（ddgs，无需 API key）。"""
+def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """DuckDuckGo 互联网搜索（ddgs，无需 API key）。``offset`` 支持增量翻页。"""
     try:
         try:
             from ddgs import DDGS  # type: ignore  # 新包名
         except ImportError:
             from duckduckgo_search import DDGS  # type: ignore  # 旧包兜底（向后兼容）
-        results = list(DDGS().text(query, max_results=limit))
+        results = list(DDGS().text(query, max_results=limit + offset))[offset : offset + limit]
         return [
             Evidence(
                 source="Internet",
                 identifier=r.get("href") or r.get("url") or "",  # ddgs 新版可能用 url
                 title=r.get("title", ""),
                 snippet=(r.get("body") or "")[:500],
-                relevance=1.0 - i * 0.1,
+                relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
             )
             for i, r in enumerate(results)
         ]
@@ -172,72 +174,160 @@ def search_web(query: str, limit: int = 5) -> list[Evidence]:
         return []
 
 
-def search_by_types(
-    query: str,
-    source_types: list[str],
-    req: Requirement | None = None,
-    limit_per_source: int = 5,
+def _overlap(e: Evidence, q_kw: set[str]) -> int:
+    """Number of query keywords appearing in an evidence's title+snippet."""
+    if not q_kw:
+        return 1
+    return len(q_kw & _keywords(f"{e.title} {e.snippet}"))
+
+
+def _is_weblike(e: Evidence) -> bool:
+    """Internet/web sources are the junk-prone ones worth filtering hard."""
+    s = (e.source or "").lower()
+    return "internet" in s or "web" in s or "duck" in s
+
+
+def _merge_filter_rank(
+    results: list[Evidence], query: str, total_limit: int
 ) -> list[Evidence]:
-    """多源并行检索，合并结果。
+    """Filter junk, dedupe, rank by relevance, and cap to ``total_limit``.
 
-    source_types: 任意子集 ["patents", "literature", "internet", "local"]
+    Relevance/junk rules:
+    * Offline seed corpus → kept via :func:`_filter_seed_by_query` (query-matched,
+      else a couple of top entries so research is never empty).
+    * Internet/web hits with zero query-keyword overlap are dropped as junk.
+    * arXiv / Semantic Scholar / patents are already query-targeted and pass
+      through, but everything is ranked by (keyword overlap, source relevance).
     """
-    q = query or (req.headline() if req else "coating formulation")
-
-    # Build one independent task per source; each runs concurrently so a slow
-    # source cannot hold up the rest. "local" is handled by the ingest endpoint.
-    tasks: list = []
-    if "patents" in source_types:
-        tasks.append(
-            (lambda: search_patents(req, limit_per_source))
-            if req
-            else (lambda: search_arxiv(q, limit_per_source))  # fallback
-        )
-    if "literature" in source_types:
-        tasks.append(lambda: search_arxiv(q, limit_per_source))
-        tasks.append(lambda: search_semantic_scholar(q, limit_per_source))
-        tasks.append(lambda: search_chemcrow_lit(q, limit_per_source))
-    if "internet" in source_types:
-        tasks.append(lambda: search_web(q, limit_per_source))
-        tasks.append(lambda: search_chemcrow_web(q, limit_per_source))
-    if "notebooklm" in source_types:
-        def _notebooklm() -> list[Evidence]:
-            from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
-
-            return search_notebooklm(q, limit_per_source)
-
-        tasks.append(_notebooklm)
-
-    results: list[Evidence] = []
-    if tasks:
-        ex = concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks))
-        futures = [ex.submit(t) for t in tasks]
-        try:
-            # Concurrent window: each source gets up to 10 s; slower ones are skipped.
-            for fut in concurrent.futures.as_completed(futures, timeout=10):
-                try:
-                    results.extend(fut.result())
-                except Exception:
-                    continue
-        except concurrent.futures.TimeoutError:
-            pass  # a source exceeded the window — drop it silently
-        ex.shutdown(wait=False)  # don't block on any still-running source
-
-    # Filter only the offline seed corpus by query relevance; online hits are
-    # already query-targeted and pass through untouched.
+    q_kw = _keywords(query)
     seeds = [e for e in results if e.identifier in _SEED_IDENTIFIERS]
     online = [e for e in results if e.identifier not in _SEED_IDENTIFIERS]
-    results = online + _filter_seed_by_query(seeds, q)
+    filtered_online = [
+        e for e in online if not _is_weblike(e) or _overlap(e, q_kw) > 0
+    ]
+    merged = filtered_online + _filter_seed_by_query(seeds, query)
 
-    # 去重（按 identifier）并按相关度排序
     seen: set[str] = set()
     deduped: list[Evidence] = []
-    for e in sorted(results, key=lambda x: x.relevance, reverse=True):
+    for e in sorted(merged, key=lambda x: (_overlap(x, q_kw), x.relevance), reverse=True):
         key = e.identifier or e.title
         if key not in seen:
             seen.add(key)
             deduped.append(e)
-    return deduped
+    return deduped[:total_limit]
+
+
+def _build_streams(
+    query: str, source_types: list[str], req: Requirement | None, page_size: int
+) -> list[dict]:
+    """One paged stream per source. ``paged`` sources support offset/round paging;
+    single-shot sources (chemcrow/notebooklm) yield once then finish."""
+    streams: list[dict] = []
+
+    def add(name: str, fetch, paged: bool) -> None:
+        streams.append({"name": name, "fetch": fetch, "cursor": 0, "paged": paged, "done": False})
+
+    if "patents" in source_types:
+        if req is not None:
+            add("patents", lambda off: search_patents(req, page_size, offset=off), True)
+        else:  # no requirement → use arXiv as a stand-in patent stream
+            add("patents", lambda off: search_arxiv(query, page_size, offset=off), True)
+    if "literature" in source_types:
+        add("arxiv", lambda off: search_arxiv(query, page_size, offset=off), True)
+        add("s2", lambda off: search_semantic_scholar(query, page_size, offset=off), True)
+        add("chemlit", lambda off: search_chemcrow_lit(query, page_size), False)
+    if "internet" in source_types:
+        add("web", lambda off: search_web(query, page_size, offset=off), True)
+        add("chemweb", lambda off: search_chemcrow_web(query, page_size), False)
+    if "notebooklm" in source_types:
+        def _nb(off: int) -> list[Evidence]:
+            from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
+
+            return search_notebooklm(query, page_size)
+
+        add("notebooklm", _nb, False)
+    return streams
+
+
+def iter_search(
+    query: str,
+    source_types: list[str],
+    req: Requirement | None = None,
+    total_limit: int = 300,
+    per_source_cap: int = 50,
+    max_rounds: int = 20,
+    progress_cb=None,
+) -> list[Evidence]:
+    """Incremental multi-source retrieval — fetch in rounds until no source turns
+    up new related results (no fixed time budget).
+
+    Each round pulls the next page from every still-active source concurrently
+    (no per-source timeout); a source is marked done when it is single-shot or a
+    round yields no new unseen identifiers. ``progress_cb`` (if given) receives the
+    ranked-so-far evidence after every round, so the UI can render results while
+    the search keeps going. Stops when all sources are exhausted, ~``total_limit``
+    related results are gathered, or the ``max_rounds`` safety bound is hit.
+    """
+    q = query or (req.headline() if req else "coating formulation")
+    page_size = max(1, min(per_source_cap, 50))
+    streams = _build_streams(q, source_types, req, page_size)
+
+    raw: list[Evidence] = []
+    seen_ids: set[str] = set()
+    rounds = 0
+    while (
+        any(not st["done"] for st in streams)
+        and len(raw) < total_limit * 2
+        and rounds < max_rounds
+    ):
+        rounds += 1
+        active = [st for st in streams if not st["done"]]
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(active)))
+        futures = {ex.submit(st["fetch"], st["cursor"]): st for st in active}
+        # No timeout: stopping is driven by results, not the clock.
+        for fut in concurrent.futures.as_completed(futures):
+            st = futures[fut]
+            try:
+                page = fut.result() or []
+            except Exception:
+                page = []
+            st["cursor"] += page_size
+            new = [e for e in page if (e.identifier or e.title) not in seen_ids]
+            for e in new:
+                seen_ids.add(e.identifier or e.title)
+            raw.extend(new)
+            # Exhausted: single-shot source, or a round with no new sources.
+            if not st["paged"] or not new:
+                st["done"] = True
+        ex.shutdown(wait=False)
+        if progress_cb is not None:
+            progress_cb(_merge_filter_rank(raw, q, total_limit))
+
+    final = _merge_filter_rank(raw, q, total_limit)
+    if progress_cb is not None:
+        progress_cb(final)
+    return final
+
+
+def search_by_types(
+    query: str,
+    source_types: list[str],
+    req: Requirement | None = None,
+    limit_per_source: int = 50,
+    total_limit: int = 300,
+) -> list[Evidence]:
+    """多源检索，合并结果（同步、一次性返回——薄封装 :func:`iter_search`）。
+
+    source_types: 任意子集 ["patents", "literature", "internet", "notebooklm"]。
+    "local" 由 /api/ingest 处理，不在此检索。
+    """
+    return iter_search(
+        query,
+        source_types,
+        req=req,
+        total_limit=total_limit,
+        per_source_cap=limit_per_source,
+    )
 
 
 def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:

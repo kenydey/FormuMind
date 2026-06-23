@@ -180,6 +180,18 @@ export const api = {
   search: (req: SearchRequest) =>
     post<SearchResponse>("/api/search", req),
 
+  searchStream: (req: SearchRequest) =>
+    post<{ task_id: string; poll_url: string }>("/api/search/stream", req),
+
+  notebooklmStatus: () =>
+    get<NotebookLMStatus>("/api/notebooklm/auth-status"),
+
+  notebooklmConfig: (cfg: { enabled?: boolean; notebook_id?: string }) =>
+    post<NotebookLMStatus>("/api/notebooklm/config", cfg),
+
+  notebooklmLogin: () =>
+    post<NotebookLMLoginResult>("/api/notebooklm/login", {}),
+
   ingest: async (file: File): Promise<IngestResponse> => {
     const fd = new FormData();
     fd.append("file", file);
@@ -270,6 +282,28 @@ export interface SearchRequest {
   source_types: SearchSourceType[];
   requirement?: Requirement;
   limit_per_source?: number;
+  total_limit?: number;
+}
+
+export interface NotebookLMStatus {
+  available: boolean;
+  reason?: string | null;
+  hint?: string | null;
+  lib_installed?: boolean;
+  enabled?: boolean;
+  notebook_id_set?: boolean;
+  notebook_id?: string | null;
+  session_present?: boolean;
+  can_launch_browser?: boolean;
+}
+
+export interface NotebookLMLoginResult {
+  started: boolean;
+  mode: "browser" | "manual";
+  reason?: string | null;
+  hint?: string | null;
+  command?: string | null;
+  manual_url?: string | null;
 }
 
 export interface SourceStatus {

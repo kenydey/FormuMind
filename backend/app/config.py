@@ -60,7 +60,8 @@ class Settings(BaseSettings):
     xai_api_key: str | None = None           # Grok
 
     # 检索设置
-    search_limit_per_source: int = 5
+    search_limit_per_source: int = 50    # 每源单页大小（增量翻页，实际不设硬上限）
+    search_total_limit: int = 300        # 全部来源合并后的总量上限（按相关性排序截断）
     # RAG 检索后端：auto（有 sentence-transformers 则用语义嵌入，否则 TF-IDF）/
     # embedding（强制语义）/ tfidf（强制词袋）。缺库时一律回退 TF-IDF。
     rag_backend: str = "auto"

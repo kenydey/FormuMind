@@ -170,6 +170,68 @@ class TaskManager:
         threading.Thread(target=_run, daemon=True).start()
         return task_id
 
+    def submit_search(
+        self,
+        query: str,
+        source_types: list[str],
+        req: Requirement | None = None,
+        total_limit: int = 300,
+        per_source_cap: int = 50,
+    ) -> str:
+        """Run an incremental multi-source search in the background.
+
+        Results accumulate into ``result.evidence`` as each round completes, so the
+        client can poll ``GET /api/tasks/{id}`` and render sources while the search
+        keeps going (stops when no source turns up new related results)."""
+        from ..services import literature
+
+        task_id = uuid.uuid4().hex
+        with self._lock:
+            self._tasks[task_id] = TaskStatus(
+                task_id=task_id, kind="search", state=TaskState.pending
+            )
+
+        def _run() -> None:
+            self._set(task_id, state=TaskState.running, message="检索中…")
+            try:
+                def progress(partial) -> None:
+                    self._set(
+                        task_id,
+                        message=f"已找到 {len(partial)} 条，继续搜索…",
+                        result={
+                            "evidence": [e.model_dump() for e in partial],
+                            "total": len(partial),
+                        },
+                    )
+
+                final = literature.iter_search(
+                    query,
+                    source_types,
+                    req=req,
+                    total_limit=total_limit,
+                    per_source_cap=per_source_cap,
+                    progress_cb=progress,
+                )
+                status = {
+                    k: v for k, v in literature.get_source_availability().items()
+                }
+                self._set(
+                    task_id,
+                    state=TaskState.completed,
+                    progress=1.0,
+                    message=f"检索完成，共 {len(final)} 条",
+                    result={
+                        "evidence": [e.model_dump() for e in final],
+                        "total": len(final),
+                        "source_status": status,
+                    },
+                )
+            except Exception as exc:  # surface failures to the poller
+                self._set(task_id, state=TaskState.failed, message=str(exc))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return task_id
+
     def submit_dependency_install(
         self, names: list[str], upgrade: bool = False
     ) -> str:

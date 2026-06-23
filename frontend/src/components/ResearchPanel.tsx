@@ -14,7 +14,7 @@ function CitationChip({ ev }: { ev: Evidence }) {
 }
 
 export default function ResearchPanel() {
-  const { chatHistory, chatBusy, sendChat, sources } = useStore();
+  const { chatHistory, chatBusy, sendChat, sources, selectedSources } = useStore();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -22,7 +22,8 @@ export default function ResearchPanel() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [chatHistory, chatBusy]);
 
-  const canSend = sources.length > 0 && !chatBusy;
+  const selectedCount = selectedSources.length;
+  const canSend = selectedCount > 0 && !chatBusy;
 
   function submit() {
     const q = draft.trim();
@@ -36,7 +37,7 @@ export default function ResearchPanel() {
       <div className="px-4 py-3 border-b border-edge shrink-0">
         <h2 className="text-sm uppercase tracking-widest text-accent2">研究 · Research</h2>
         <p className="text-[11px] text-slate-500 mt-0.5">
-          基于左栏已加载的 {sources.length} 条资料进行问答（RAG 接地）
+          基于左栏已选的 {selectedCount} / {sources.length} 条资料进行问答（RAG 接地）
         </p>
       </div>
 
@@ -46,7 +47,9 @@ export default function ResearchPanel() {
           <div className="text-slate-600 text-sm m-auto text-center max-w-sm">
             {sources.length === 0
               ? "先在左栏检索或上传资料，然后在此向资料提问。"
-              : "资料已就绪。在下方输入问题，例如「这些专利的主要防腐机理是什么？」"}
+              : selectedCount === 0
+                ? "请在左栏勾选至少一条资料用于问答。"
+                : "资料已就绪。在下方输入问题，例如「这些专利的主要防腐机理是什么？」"}
           </div>
         ) : (
           chatHistory.map((m, i) => (
@@ -96,7 +99,13 @@ export default function ResearchPanel() {
             }}
             rows={2}
             disabled={!canSend}
-            placeholder={sources.length === 0 ? "请先加载资料…" : "向资料提问…（Enter 发送，Shift+Enter 换行）"}
+            placeholder={
+              sources.length === 0
+                ? "请先加载资料…"
+                : selectedCount === 0
+                  ? "请先勾选资料…"
+                  : "向资料提问…（Enter 发送，Shift+Enter 换行）"
+            }
             className="flex-1 bg-ink border border-edge rounded px-2.5 py-1.5 text-sm resize-none focus:border-accent/50 outline-none disabled:opacity-50"
           />
           <button
