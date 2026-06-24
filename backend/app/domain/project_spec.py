@@ -1,0 +1,136 @@
+"""ProjectSpec helpers — normalize free-text requirements and derive DOE levers."""
+from __future__ import annotations
+
+from .schemas import DOEFactor, Formulation, Ingredient, LeverSpec, ObjectiveSpec, ProductDomain, Requirement
+
+# Roles typically held fixed (solvent fills to 100%).
+_FIXED_ROLES = frozenset({"solvent", "pigment", "filler", "additive"})
+_PROCESS_KEYS = frozenset({"cure_temperature_c"})
+
+_DOMAIN_LABELS: dict[ProductDomain, str] = {
+    ProductDomain.anticorrosion_coating: "防腐蚀涂料",
+    ProductDomain.degreaser: "脱脂剂",
+    ProductDomain.surface_treatment: "表面处理剂",
+}
+
+_LEGACY_LEVERS: dict[ProductDomain, list[tuple[str, float, float]]] = {
+    ProductDomain.anticorrosion_coating: [
+        ("Zinc phosphate", 2.0, 14.0),
+        ("Bisphenol-A epoxy (DGEBA)", 28.0, 48.0),
+        ("Polyamide hardener", 8.0, 22.0),
+    ],
+    ProductDomain.degreaser: [
+        ("Nonionic surfactant (C12-14 EO7)", 2.0, 12.0),
+        ("Sodium metasilicate", 2.0, 14.0),
+    ],
+    ProductDomain.surface_treatment: [
+        ("Phosphoric acid", 3.0, 14.0),
+        ("Manganese dihydrogen phosphate", 1.0, 8.0),
+    ],
+}
+
+
+def effective_project_id(req: Requirement) -> str:
+    if req.project_id:
+        return req.project_id
+    if req.product_type:
+        return req.product_type.strip().lower().replace(" ", "_")[:64]
+    return req.domain.value
+
+
+def normalize_requirement(req: Requirement) -> Requirement:
+    """Fill product_type/application from legacy fields when empty."""
+    data = req.model_dump()
+    if not data.get("product_type"):
+        data["product_type"] = _DOMAIN_LABELS.get(req.domain, req.domain.value)
+    if not data.get("application"):
+        data["application"] = req.substrate.value
+    if not data.get("project_id"):
+        data["project_id"] = effective_project_id(req)
+    return Requirement(**data)
+
+
+def primary_objective(req: Requirement) -> str:
+    objectives = req.objectives
+    if objectives:
+        return objectives[0].metric
+    from ..pipeline.workflow import OBJECTIVE
+
+    return OBJECTIVE.get(req.domain, "salt_spray_hours")
+
+
+def default_objectives_for(req: Requirement) -> list[ObjectiveSpec]:
+    from ..pipeline.workflow import default_objectives
+
+    return default_objectives(req.domain)
+
+
+def _bounds_from_pct(current: float, *, margin: float = 0.3) -> tuple[float, float]:
+    lo = max(0.0, current * (1.0 - margin))
+    hi = min(100.0, current * (1.0 + margin))
+    if hi - lo < 1.0:
+        hi = min(100.0, lo + 1.0)
+    return round(lo, 4), round(hi, 4)
+
+
+def derive_levers_from_formulation(form: Formulation) -> list[LeverSpec]:
+    """Pick adjustable ingredients from a formulation (exclude fixed roles)."""
+    levers: list[LeverSpec] = []
+    for ing in form.ingredients:
+        if ing.role in _FIXED_ROLES:
+            continue
+        if ing.weight_pct <= 0:
+            continue
+        lo, hi = _bounds_from_pct(ing.weight_pct)
+        levers.append(LeverSpec(name=ing.name, low=lo, high=hi, unit="wt%"))
+    return levers[:6]
+
+
+def derive_process_levers(req: Requirement) -> list[LeverSpec]:
+    levers: list[LeverSpec] = []
+    cure = req.cure_temperature_c
+    if cure is not None and req.domain == ProductDomain.anticorrosion_coating:
+        levers.append(
+            LeverSpec(
+                name="cure_temperature_c",
+                low=max(20.0, cure - 30),
+                high=float(cure),
+                unit="C",
+            )
+        )
+    return levers
+
+
+def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[LeverSpec]:
+    """Resolve DOE levers: explicit > formulation > legacy domain table."""
+    if req.levers:
+        return list(req.levers)
+    source = form or req.active_formulation
+    if source and source.ingredients:
+        derived = derive_levers_from_formulation(source)
+        if derived:
+            return derived + derive_process_levers(req)
+    legacy = _LEGACY_LEVERS.get(req.domain, [])
+    levers = [LeverSpec(name=n, low=lo, high=hi, unit="wt%") for n, lo, hi in legacy]
+    return levers + derive_process_levers(req)
+
+
+def levers_to_doe_factors(levers: list[LeverSpec]) -> list[DOEFactor]:
+    return [DOEFactor(name=l.name, low=l.low, high=l.high, unit=l.unit) for l in levers]
+
+
+def formulation_from_materials(req: Requirement) -> Formulation | None:
+    if not req.materials:
+        return None
+    ings = [
+        Ingredient(
+            name=m.name,
+            role=m.role,
+            weight_pct=m.weight_pct,
+            smiles=m.smiles,
+            formula=m.formula,
+        )
+        for m in req.materials
+    ]
+    name = req.product_type or req.domain.value
+    return Formulation(name=name, domain=req.domain, ingredients=ings, rationale="project materials")

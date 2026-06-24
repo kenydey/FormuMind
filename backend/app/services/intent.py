@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from ..domain.project_spec import default_objectives_for, normalize_requirement
 from ..domain.schemas import (
     IntentResult,
     ProductDomain,
@@ -130,6 +131,14 @@ def _offline_parse(text: str) -> IntentResult:
         req.ph_target = min(14.0, ph)
         extracted.append("ph_target")
 
+    snippet = text.strip()
+    if len(snippet) > 3:
+        req.product_type = snippet[:80]
+        extracted.append("product_type")
+    req.application = substrate.value
+    req.objectives = default_objectives_for(req)
+    req = normalize_requirement(req)
+
     # Confidence scales with how many fields we recognised (domain always counts).
     confidence = round(min(0.9, 0.3 + 0.12 * len(set(extracted))), 2)
     return IntentResult(
@@ -148,6 +157,8 @@ Brief:
 
 Return ONLY a JSON object with these keys (omit a key if not stated):
 {{
+  "product_type": "<short product description>",
+  "application": "<substrate or use case>",
   "domain": "anticorrosion_coating" | "degreaser" | "surface_treatment",
   "substrate": "carbon_steel" | "galvanized_steel" | "aluminum" | "stainless_steel" | "magnesium_alloy",
   "salt_spray_hours": <number>,
@@ -174,13 +185,16 @@ def _llm_parse(text: str) -> IntentResult | None:
 
         # Build a Requirement from the recognised keys; pydantic validates ranges.
         allowed = {
-            "domain", "substrate", "salt_spray_hours", "film_weight_gsm",
+            "product_type", "application", "domain", "substrate", "salt_spray_hours", "film_weight_gsm",
             "cure_temperature_c", "cleaning_efficiency", "voc_limit_gpl", "ph_target",
         }
         fields = {k: v for k, v in data.items() if k in allowed and v is not None}
         if "domain" not in fields:
             return None  # domain is mandatory; let the offline path handle it
         req = Requirement(**fields)
+        if not req.objectives:
+            req.objectives = default_objectives_for(req)
+        req = normalize_requirement(req)
         extracted = sorted(fields.keys())
         return IntentResult(
             requirement=req,

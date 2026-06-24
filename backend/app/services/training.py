@@ -139,7 +139,7 @@ class ModelRegistry:
         # Explicit store > path (backwards-compat) > default SQL store.
         self._store = store if store is not None else _make_store(path)
         self._records: list[ExperimentRecord] = []
-        self._models: dict[tuple[ProductDomain, str], _Trained] = {}
+        self._models: dict[tuple[str, str], _Trained] = {}
         self._lock = threading.RLock()
         self.load()
 
@@ -170,20 +170,28 @@ class ModelRegistry:
     def total_records(self) -> int:
         return len(self._records)
 
-    def records_for(self, domain: ProductDomain) -> list[ExperimentRecord]:
-        """Return all stored experiment records for one product domain.
-
-        Lets the self-driving loop fetch its own training history without the
-        caller having to pass records in explicitly.
-        """
+    def records_for(self, domain: ProductDomain, project_id: str = "") -> list[ExperimentRecord]:
+        """Return stored experiment records for a domain / project."""
         with self._lock:
-            return [rec for rec in self._records if rec.domain == domain]
+            pid = project_id or domain.value
+            return [
+                rec
+                for rec in self._records
+                if rec.domain == domain
+                and (not project_id or rec.project_id in ("", pid, domain.value))
+            ]
 
     # --- training ------------------------------------------------------
-    def _dataset(self, domain: ProductDomain, metric: str) -> tuple[np.ndarray, np.ndarray] | None:
+    def _dataset(
+        self, domain: ProductDomain, metric: str, project_id: str = ""
+    ) -> tuple[np.ndarray, np.ndarray] | None:
         rows, ys = [], []
+        pid = project_id or domain.value
         for rec in self._records:
             if rec.domain != domain or metric not in rec.measured:
+                continue
+            rec_pid = rec.project_id or rec.domain.value
+            if project_id and rec_pid not in (pid, domain.value, ""):
                 continue
             form = reconstruct.formulation_from_factors(rec.domain, rec.factors)
             process = {"cure_temperature_c": rec.cure_temperature_c or 0.0}
@@ -198,24 +206,32 @@ class ModelRegistry:
 
     def _retrain_all(self) -> None:
         self._models = {}
-        for domain in ProductDomain:
-            for metric in self._metrics_for(domain):
-                data = self._dataset(domain, metric)
-                if data is None:
-                    continue
-                X, y = data
-                model, backend = _make_regressor()
-                model.fit(X, y)
-                info = ModelInfo(
-                    domain=domain,
-                    metric=metric,
-                    backend=backend,
-                    n_samples=len(y),
-                    r2=round(_r2(y, np.asarray(model.predict(X))), 4),
-                    cv_r2=(round(v, 4) if (v := _kfold_r2(X, y)) is not None else None),
-                    rmse=round(math.sqrt(np.mean((y - np.asarray(model.predict(X))) ** 2)), 4),
-                )
-                self._models[(domain, metric)] = _Trained(model, info)
+        keys: set[tuple[str, str]] = set()
+        for rec in self._records:
+            pid = rec.project_id or rec.domain.value
+            for m in rec.measured:
+                keys.add((pid, m))
+        for pid, metric in keys:
+            domain = next((r.domain for r in self._records if (r.project_id or r.domain.value) == pid), None)
+            if domain is None:
+                continue
+            data = self._dataset(domain, metric, project_id=pid)
+            if data is None:
+                continue
+            X, y = data
+            model, backend = _make_regressor()
+            model.fit(X, y)
+            info = ModelInfo(
+                domain=domain,
+                project_id=pid,
+                metric=metric,
+                backend=backend,
+                n_samples=len(y),
+                r2=round(_r2(y, np.asarray(model.predict(X))), 4),
+                cv_r2=(round(v, 4) if (v := _kfold_r2(X, y)) is not None else None),
+                rmse=round(math.sqrt(np.mean((y - np.asarray(model.predict(X))) ** 2)), 4),
+            )
+            self._models[(pid, metric)] = _Trained(model, info)
 
     def train(self) -> list[ModelInfo]:
         with self._lock:
@@ -223,21 +239,39 @@ class ModelRegistry:
             return [t.info for t in self._models.values()]
 
     # --- inference -----------------------------------------------------
-    def predict(self, domain: ProductDomain, metric: str, feature_vec: list[float]) -> tuple[float, int] | None:
+    def predict(
+        self,
+        domain: ProductDomain,
+        metric: str,
+        feature_vec: list[float],
+        *,
+        project_id: str = "",
+    ) -> tuple[float, int] | None:
         """Return (prediction, n_samples) for a trained metric, else None."""
         with self._lock:
-            trained = self._models.get((domain, metric))
+            pid = project_id or domain.value
+            trained = self._models.get((pid, metric))
+            if trained is None:
+                trained = self._models.get((domain.value, metric))
             if trained is None:
                 return None
             arr = np.array([feature_vec], dtype=float)
             return float(trained.model.predict(arr)[0]), trained.info.n_samples
 
     def predict_with_std(
-        self, domain: ProductDomain, metric: str, feature_vec: list[float]
+        self,
+        domain: ProductDomain,
+        metric: str,
+        feature_vec: list[float],
+        *,
+        project_id: str = "",
     ) -> tuple[float, float, int] | None:
         """Return (prediction, std, n_samples) for a trained metric, else None."""
         with self._lock:
-            trained = self._models.get((domain, metric))
+            pid = project_id or domain.value
+            trained = self._models.get((pid, metric))
+            if trained is None and project_id:
+                trained = self._models.get((domain.value, metric))
             if trained is None:
                 return None
             arr = np.array([feature_vec], dtype=float)

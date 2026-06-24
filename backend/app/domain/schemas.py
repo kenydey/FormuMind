@@ -37,9 +37,42 @@ class ObjectiveSpec(BaseModel):
     target_value: float | None = None
 
 
+class LeverSpec(BaseModel):
+    """A tunable DOE/optimization factor (ingredient wt% or process parameter)."""
+
+    name: str
+    low: float
+    high: float
+    unit: str = "wt%"
+
+
+class MaterialSpec(BaseModel):
+    """Project-level raw material entry (extends global RAW_MATERIALS)."""
+
+    name: str
+    role: str = "additive"
+    weight_pct: float = Field(default=0.0, ge=0, le=100)
+    smiles: str | None = None
+    formula: str | None = None
+    price_cny_per_kg: float | None = None
+    voc_contrib: float | None = None
+
+
+class MetricPriorSpec(BaseModel):
+    """Declarative prior for a custom metric (YAML or builtin alias)."""
+
+    metric: str
+    prior_yaml: str | None = None
+    builtin_alias: str | None = None
+    confidence: str = "cold-start"
+
+
 class Requirement(BaseModel):
     """User-supplied R&D requirement captured from the left input panel."""
 
+    project_id: str = ""
+    product_type: str = ""
+    application: str = ""
     domain: ProductDomain
     substrate: Substrate = Substrate.carbon_steel
     # Anti-corrosion targets
@@ -52,11 +85,17 @@ class Requirement(BaseModel):
     voc_limit_gpl: float | None = Field(420, ge=0, description="Max VOC (g/L); None disables VOC limit checks")
     ph_target: float | None = Field(None, ge=0, le=14)
     notes: str = ""
-    # Multi-objective: when empty the workflow fills in domain defaults.
     objectives: list[ObjectiveSpec] = Field(default_factory=list)
+    levers: list[LeverSpec] = Field(default_factory=list)
+    materials: list[MaterialSpec] = Field(default_factory=list)
+    metric_priors: list[MetricPriorSpec] = Field(default_factory=list)
+    constraints: dict[str, float | None] = Field(default_factory=dict)
+    active_formulation: Formulation | None = None
 
     def headline(self) -> str:
-        bits = [self.domain.value, f"on {self.substrate.value}"]
+        label = self.product_type or self.domain.value
+        app = self.application or self.substrate.value
+        bits = [label, f"on {app}"]
         if self.salt_spray_hours:
             bits.append(f"{self.salt_spray_hours:.0f}h salt spray")
         if self.film_weight_gsm:
@@ -82,6 +121,7 @@ class Formulation(BaseModel):
     rationale: str = ""
     predicted: dict[str, float] = Field(default_factory=dict)
     predicted_std: dict[str, float] = Field(default_factory=dict)
+    prediction_tiers: dict[str, str] = Field(default_factory=dict)
     score: float | None = None
     warnings: list[str] = Field(default_factory=list)
 
@@ -213,6 +253,7 @@ class ExperimentRecord(BaseModel):
     """
 
     domain: ProductDomain
+    project_id: str = ""
     factors: dict[str, float] = Field(default_factory=dict)
     cure_temperature_c: float | None = None
     measured: dict[str, float]
@@ -227,6 +268,7 @@ class ExperimentSubmission(BaseModel):
 
 class ModelInfo(BaseModel):
     domain: ProductDomain
+    project_id: str = ""
     metric: str
     backend: str  # sklearn-rf / numpy-ridge
     n_samples: int
@@ -366,3 +408,6 @@ class AgentReviewRequest(BaseModel):
     formulation: Formulation
     requirement: Requirement | None = None
     explain: bool = True  # enable optional LLM explanation polish (skipped when no key)
+
+
+Requirement.model_rebuild()

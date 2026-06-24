@@ -6,14 +6,15 @@ import {
 } from "./constants/constraints";
 import {
   api,
-  OBJECTIVE_METRIC,
   pollTask,
+  primaryObjectiveMetric,
   type ChatMessage,
   type ComprehensiveReport,
   type DOEPlan,
   type Evidence,
   type ExperimentRecord,
   type Formulation,
+  type LeverSpec,
   type LLMConfig,
   type LoopReport,
   type ModelInfo,
@@ -112,6 +113,8 @@ interface AppState {
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
   setObjectives: (objectives: ObjectiveSpec[]) => void;
+  setLevers: (levers: LeverSpec[]) => void;
+  loadExampleProject: (exampleId: string) => Promise<void>;
   setActiveConstraints: (keys: ConstraintKey[]) => void;
   setConstraintValue: (key: ConstraintKey, value: number) => void;
   clearConstraintValue: (key: ConstraintKey) => void;
@@ -159,6 +162,9 @@ interface AppState {
 }
 
 const defaultRequirement: Requirement = {
+  project_id: "anticorrosion_coating",
+  product_type: "防腐蚀环氧底漆",
+  application: "carbon_steel",
   domain: "anticorrosion_coating",
   substrate: "carbon_steel",
   salt_spray_hours: 500,
@@ -169,6 +175,12 @@ const defaultRequirement: Requirement = {
   ph_target: null,
   notes: "",
   objectives: [...DOMAIN_OBJECTIVES.anticorrosion_coating],
+  levers: [
+    { name: "Zinc phosphate", low: 2, high: 14, unit: "wt%" },
+    { name: "Bisphenol-A epoxy (DGEBA)", low: 28, high: 48, unit: "wt%" },
+    { name: "Polyamide hardener", low: 8, high: 22, unit: "wt%" },
+    { name: "cure_temperature_c", low: 50, high: 80, unit: "C" },
+  ],
 };
 
 const MAX_HISTORY = 20;
@@ -183,7 +195,9 @@ function makeSnapshot(
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     timestamp: new Date().toISOString(),
     domain: requirement.domain,
-    headline: `${requirement.domain} · ${requirement.substrate}`,
+    headline: requirement.product_type
+      ? `${requirement.product_type} · ${requirement.application ?? requirement.substrate}`
+      : `${requirement.domain} · ${requirement.substrate}`,
     topScore: leaderboard[0]?.score ?? null,
     requirement: { ...requirement },
     leaderboard,
@@ -252,8 +266,31 @@ export const useStore = create<AppState>()(
           requirement: {
             ...s.requirement,
             domain: d,
+            objectives: s.requirement.objectives.length
+              ? s.requirement.objectives
+              : [...DOMAIN_OBJECTIVES[d]],
           },
         })),
+
+      setLevers: (levers) =>
+        set((s) => ({ requirement: { ...s.requirement, levers } })),
+
+      loadExampleProject: async (exampleId) => {
+        set({ error: null });
+        try {
+          const req = await api.loadExampleProject(exampleId);
+          set({
+            requirement: req,
+            activeConstraints: defaultConstraintsForDomain(req.domain),
+            research: null,
+            leaderboard: [],
+            doePlan: null,
+            measured: {},
+          });
+        } catch (e) {
+          set({ error: String(e) });
+        }
+      },
 
       setObjectives: (objectives) =>
         set((s) => ({ requirement: { ...s.requirement, objectives } })),
@@ -388,7 +425,13 @@ export const useStore = create<AppState>()(
             requirement: {
               ...s.requirement,
               ...result.requirement,
-              objectives: s.requirement.objectives,
+              objectives:
+                result.requirement.objectives?.length
+                  ? result.requirement.objectives
+                  : s.requirement.objectives,
+              levers: result.requirement.levers?.length
+                ? result.requirement.levers
+                : s.requirement.levers,
             },
           }));
           return result.extracted_fields;
@@ -438,11 +481,12 @@ export const useStore = create<AppState>()(
       submitResults: async () => {
         const { doePlan, measured, requirement } = get();
         if (!doePlan) return;
-        const metric = OBJECTIVE_METRIC[requirement.domain];
+        const metric = primaryObjectiveMetric(requirement);
         const records: ExperimentRecord[] = doePlan.runs
           .filter((r) => measured[r.run_id] !== undefined && !Number.isNaN(measured[r.run_id]))
           .map((r) => ({
             domain: requirement.domain,
+            project_id: requirement.project_id,
             factors: r.natural,
             cure_temperature_c: r.natural["cure_temperature_c"] ?? null,
             measured: { [metric]: measured[r.run_id] },

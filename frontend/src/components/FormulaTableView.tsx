@@ -1,5 +1,5 @@
-import type { Formulation, ProductDomain } from "../api";
-import { OBJECTIVE_METRIC } from "../api";
+import type { Formulation, Requirement } from "../api";
+import { primaryObjectiveMetric } from "../api";
 import { copyFormulaJson, downloadFormulaCsv } from "../utils/export";
 
 const METRIC_LABELS: Record<string, string> = {
@@ -19,14 +19,14 @@ function fmtMetric(form: Formulation, key: string): string {
 
 export default function FormulaTableView({
   forms,
-  domain,
+  requirement,
   onSelect,
 }: {
   forms: Formulation[];
-  domain: ProductDomain;
+  requirement: Requirement;
   onSelect?: (index: number) => void;
 }) {
-  const primary = OBJECTIVE_METRIC[domain];
+  const primary = primaryObjectiveMetric(requirement);
 
   return (
     <div className="overflow-x-auto border border-edge rounded-lg">

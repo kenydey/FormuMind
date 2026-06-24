@@ -9,7 +9,24 @@ export interface ObjectiveSpec {
   target_value?: number | null;
 }
 
+export interface LeverSpec {
+  name: string;
+  low: number;
+  high: number;
+  unit?: string;
+}
+
+export interface MaterialSpec {
+  name: string;
+  role: string;
+  weight_pct?: number;
+  smiles?: string | null;
+}
+
 export interface Requirement {
+  project_id?: string;
+  product_type?: string;
+  application?: string;
   domain: ProductDomain;
   substrate: string;
   salt_spray_hours: number;
@@ -20,6 +37,9 @@ export interface Requirement {
   ph_target: number | null;
   notes: string;
   objectives: ObjectiveSpec[];
+  levers?: LeverSpec[];
+  materials?: MaterialSpec[];
+  constraints?: Record<string, number | null>;
 }
 
 export interface Ingredient {
@@ -38,6 +58,7 @@ export interface Formulation {
   rationale: string;
   predicted: Record<string, number>;
   predicted_std: Record<string, number>;
+  prediction_tiers?: Record<string, string>;
   score: number | null;
   warnings: string[];
 }
@@ -113,6 +134,7 @@ export interface DOEPlan {
 
 export interface ExperimentRecord {
   domain: ProductDomain;
+  project_id?: string;
   factors: Record<string, number>;
   cure_temperature_c?: number | null;
   measured: Record<string, number>;
@@ -122,6 +144,7 @@ export interface ExperimentRecord {
 
 export interface ModelInfo {
   domain: ProductDomain;
+  project_id?: string;
   metric: string;
   backend: string;
   n_samples: number;
@@ -142,6 +165,11 @@ export const OBJECTIVE_METRIC: Record<ProductDomain, string> = {
   degreaser: "cleaning_efficiency",
   surface_treatment: "salt_spray_hours",
 };
+
+export function primaryObjectiveMetric(req: Requirement): string {
+  if (req.objectives?.length) return req.objectives[0].metric;
+  return OBJECTIVE_METRIC[req.domain];
+}
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -294,6 +322,9 @@ export const api = {
 
   parseIntent: (text: string) =>
     post<IntentResult>("/api/intent/parse", { text }),
+
+  loadExampleProject: (exampleId: string) =>
+    get<Requirement>(`/api/examples/${encodeURIComponent(exampleId)}`),
 
   getSourceStatus: () =>
     get<Record<string, SourceStatus>>("/api/search/status"),

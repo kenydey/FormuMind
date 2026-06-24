@@ -66,11 +66,13 @@ function FormulaCard({
   rank,
   cardRef,
   forceOpen,
+  objectiveMetrics,
 }: {
   form: Formulation;
   rank: number;
   cardRef?: (el: HTMLDivElement | null) => void;
   forceOpen?: boolean;
+  objectiveMetrics?: Set<string>;
 }) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
@@ -145,14 +147,24 @@ function FormulaCard({
               .map(([k, v]) => {
                 const std = form.predicted_std?.[k];
                 const stdHigh = std != null && std > Math.abs(v) * 0.2;
+                const isObjective = objectiveMetrics?.has(k);
+                const tier = form.prediction_tiers?.[k];
                 return (
-                  <span key={k} className="text-[10px] bg-edge px-1.5 py-0.5 rounded text-slate-300">
+                  <span
+                    key={k}
+                    className={`text-[10px] px-1.5 py-0.5 rounded text-slate-300 ${
+                      isObjective ? "bg-accent/20 ring-1 ring-accent/40" : "bg-edge"
+                    }`}
+                  >
                     {k}:{" "}
                     <span className={`font-mono ${stdHigh ? "text-amber-400" : "text-accent2"}`}>{v}</span>
                     {std != null && (
                       <span className={`ml-0.5 font-mono ${stdHigh ? "text-amber-500" : "text-slate-500"}`}>
                         ±{std.toFixed(std < 1 ? 3 : 1)}
                       </span>
+                    )}
+                    {tier && (
+                      <span className="ml-1 text-[9px] uppercase text-slate-500">{tier}</span>
                     )}
                   </span>
                 );
@@ -246,6 +258,7 @@ export default function FormulaLeaderboard() {
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
 
   function switchToCard(index: number) {
     setViewMode("cards");
@@ -284,7 +297,7 @@ export default function FormulaLeaderboard() {
       ) : viewMode === "table" ? (
         <FormulaTableView
           forms={leaderboard}
-          domain={requirement.domain}
+          requirement={requirement}
           onSelect={switchToCard}
         />
       ) : (
@@ -298,6 +311,7 @@ export default function FormulaLeaderboard() {
                 cardRefs.current[i] = el;
               }}
               forceOpen={highlightIndex === i}
+              objectiveMetrics={objectiveMetrics}
             />
           ))}
         </div>

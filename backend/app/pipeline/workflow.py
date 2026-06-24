@@ -88,12 +88,27 @@ def _score_and_validate(
     process: dict | None = None,
     req: Requirement | None = None,
 ) -> Formulation:
-    form.predicted, form.predicted_std = predictor.predict_full(form, process)
+    from ..domain.project_spec import normalize_requirement, primary_objective
+
+    req = normalize_requirement(req) if req else None
+    form.predicted, form.predicted_std = predictor.predict_full(form, process, req=req)
     voc_limit = req.voc_limit_gpl if req else None
     form.warnings = validate_formulation(form, voc_limit_gpl=voc_limit)
     voc_gpl = form.predicted.get("voc_gpl")
     form.warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
-    form.score = float(form.predicted.get(OBJECTIVE[form.domain], 0.0))
+    if req and req.objectives:
+        if len(req.objectives) == 1:
+            metric = req.objectives[0].metric
+            form.score = float(form.predicted.get(metric, 0.0))
+        else:
+            objectives = req.objectives
+            bounds: dict[str, tuple[float, float]] = {}
+            for metric, val in form.predicted.items():
+                bounds[metric] = (val * 0.5, val * 1.5) if val > 0 else (0.0, 1.0)
+            form.score = float(predictor.multi_objective_score(form, objectives, process, bounds))
+    else:
+        metric = primary_objective(req) if req else OBJECTIVE[form.domain]
+        form.score = float(form.predicted.get(metric, 0.0))
     return form
 
 
@@ -191,23 +206,13 @@ def get_cached_plan(plan_id: str) -> DOEPlan | None:
 
 def build_doe_factors(req: Requirement) -> list:
     """Collect DOE factors for a requirement (shared by workflow and baybe)."""
-    from ..domain.schemas import DOEFactor
+    from ..domain.project_spec import levers_to_doe_factors, normalize_requirement, resolve_levers
+    from ..domain import knowledge
 
-    base = knowledge.baseline_formulation(req)
-    factors = [
-        DOEFactor(name=name, low=low, high=high, unit="wt%")
-        for name, low, high in _levers_for(base)
-    ]
-    if req.domain == ProductDomain.anticorrosion_coating and req.cure_temperature_c is not None:
-        factors.append(
-            DOEFactor(
-                name="cure_temperature_c",
-                low=max(20.0, req.cure_temperature_c - 30),
-                high=req.cure_temperature_c,
-                unit="C",
-            )
-        )
-    return factors
+    req = normalize_requirement(req)
+    base = req.active_formulation or knowledge.baseline_formulation(req)
+    levers = resolve_levers(req, base if hasattr(base, "ingredients") else None)
+    return levers_to_doe_factors(levers)
 
 
 def build_doe(
@@ -267,9 +272,14 @@ def run_optimization(
                 if resolved == "baybe":
                     raise
 
+    from ..domain.project_spec import resolve_levers
+
     base = knowledge.baseline_formulation(req)
-    levers = _levers_for(base)
-    factors = [Factor(name=n, low=lo, high=hi) for n, lo, hi in levers]
+    levers = resolve_levers(req, req.active_formulation or base)
+    factors = [
+        Factor(name=l.name, low=l.low, high=l.high)
+        for l in levers
+    ]
     opt = build_optimizer(factors=factors, seed=42)
     objective = OBJECTIVE[req.domain]
     objectives = req.objectives or default_objectives(req.domain)

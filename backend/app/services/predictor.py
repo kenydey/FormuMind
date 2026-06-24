@@ -177,7 +177,12 @@ def _cost_and_sustainability(form: Formulation, voc_limit: float = 420.0) -> dic
 
 
 def _blend_trained(
-    form: Formulation, process: dict | None, props: dict[str, float]
+    form: Formulation,
+    process: dict | None,
+    props: dict[str, float],
+    std: dict[str, float] | None = None,
+    *,
+    project_id: str = "",
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Blend empirical predictions with trained models.
 
@@ -188,13 +193,16 @@ def _blend_trained(
     """
     from .training import registry
 
-    std: dict[str, float] = {}
+    out_std: dict[str, float] = dict(std or {})
     if not registry.info():
-        return props, std
+        return props, out_std
     vec = features.vector(form, process)
+    pid = project_id or form.domain.value
     K = 8.0
     for metric in list(props.keys()):
-        out = registry.predict_with_std(form.domain, metric, vec)
+        out = registry.predict_with_std(form.domain, metric, vec, project_id=pid)
+        if out is None:
+            out = registry.predict_with_std(form.domain, metric, vec, project_id="")
         if out is None:
             continue
         model_pred, model_std, n = out
@@ -202,8 +210,8 @@ def _blend_trained(
         props[metric] = round(w * model_pred + (1.0 - w) * props[metric], 3)
         # Propagate uncertainty: blend model std with a nominal empirical std.
         empirical_std = abs(props[metric]) * 0.15  # 15% relative empirical uncertainty
-        std[metric] = round(w * model_std + (1.0 - w) * empirical_std, 3)
-    return props, std
+        out_std[metric] = round(w * model_std + (1.0 - w) * empirical_std, 3)
+    return props, out_std
 
 
 def predict(form: Formulation, process: dict | None = None) -> dict[str, float]:
@@ -212,10 +220,10 @@ def predict(form: Formulation, process: dict | None = None) -> dict[str, float]:
     return props
 
 
-def predict_full(
+def _predict_mechanistic(
     form: Formulation, process: dict | None = None
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Return (predicted, predicted_std) dicts including cost/VOC metrics."""
+    """Domain mechanistic + universal physics modules (no ML blend)."""
     props: dict[str, float] = {}
     mol = _molecular_features(form)
 
@@ -268,9 +276,24 @@ def predict_full(
     props.update(_color_metrics(form))
     # Rheology: Fox Tg, Mooney viscosity, viscoelastic index.
     props.update(_rheology_metrics(form))
+    return props, {}
 
-    props, std = _blend_trained(form, process, props)
-    return props, std
+
+def predict_full(
+    form: Formulation,
+    process: dict | None = None,
+    req=None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Return (predicted, predicted_std) dicts including cost/VOC metrics."""
+    if req is not None:
+        from .property.registry import predict_all
+
+        props, std, tiers = predict_all(form, process, req)
+        form.prediction_tiers = tiers
+        return props, std
+
+    props, _ = _predict_mechanistic(form, process)
+    return _blend_trained(form, process, props)
 
 
 def objective_value(form: Formulation, objective: str, process: dict | None = None) -> float:
@@ -281,16 +304,11 @@ def objective_value(form: Formulation, objective: str, process: dict | None = No
 
 def multi_objective_score(
     form: Formulation,
-    objectives: list,  # list[ObjectiveSpec]
+    objectives: list,
     process: dict | None = None,
     bounds: dict[str, tuple[float, float]] | None = None,
 ) -> float:
-    """Weighted aggregated score across multiple objectives.
-
-    Each objective is min-max normalised using ``bounds`` (auto-provided by the
-    optimizer) then multiplied by its weight.  ``direction='minimize'`` inverts
-    the normalized value so higher is always better.
-    """
+    """Weighted aggregated score across multiple objectives."""
     props = predict(form, process)
     bounds = bounds or {}
     total, total_weight = 0.0, 0.0

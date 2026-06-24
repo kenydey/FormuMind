@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from ..domain.examples import BUILTIN_METRICS, EXAMPLE_PROJECTS, ROLE_CATALOG, load_example
 from ..domain.knowledge import RAW_MATERIALS, baseline_formulation
 from ..domain.schemas import Formulation, ProductDomain, Requirement, Substrate
 
@@ -24,7 +25,18 @@ def metadata() -> dict:
         "doe_engines": ["auto", "native", "pydoe"],
         "al_engines": ["auto", "legacy", "baybe"],
         "pydoe_designs": list(PYDOE_DESIGNS),
+        "example_projects": [
+            {"id": k, "label": v["label"], "domain": v["domain"].value}
+            for k, v in EXAMPLE_PROJECTS.items()
+        ],
+        "builtin_metrics": BUILTIN_METRICS,
+        "role_catalog": ROLE_CATALOG,
     }
+
+
+@router.get("/examples/{example_id}", response_model=Requirement)
+def get_example_project(example_id: str) -> Requirement:
+    return load_example(example_id)
 
 
 @router.get("/ingredients")

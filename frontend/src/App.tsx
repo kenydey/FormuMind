@@ -35,9 +35,9 @@ export default function App() {
       <header className="px-5 py-3 border-b border-edge flex items-center gap-3 shrink-0">
         <div className="w-2.5 h-2.5 rounded-full bg-accent shadow-[0_0_12px_#38bdf8]" />
         <h1 className="font-semibold tracking-tight text-slate-100">
-          FormuMind <span className="text-slate-500 font-normal text-sm">· 金属表面处理配方研发平台</span>
+          FormuMind <span className="text-slate-500 font-normal text-sm">· Chemical Development Platform</span>
         </h1>
-        <span className="ml-auto text-xs text-slate-500 font-mono hidden sm:block">脱脂 · 表面处理 · 防腐涂料</span>
+        <span className="ml-auto text-xs text-slate-500 font-mono hidden sm:block">自由 ProjectSpec · 多目标 · DOE 闭环</span>
         <button
           onClick={toggleSettings}
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"

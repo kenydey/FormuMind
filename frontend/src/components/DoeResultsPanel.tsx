@@ -6,7 +6,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import type { ModelInfo } from "../api";
-import { OBJECTIVE_METRIC } from "../api";
+import { primaryObjectiveMetric } from "../api";
 import { useStore } from "../store";
 
 function R2Gauge({ value }: { value: number }) {
@@ -111,7 +111,7 @@ export default function DoeResultsPanel() {
     busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
   } = useStore();
-  const metric = OBJECTIVE_METRIC[requirement.domain];
+  const metric = primaryObjectiveMetric(requirement);
 
   const designs =
     doeEngine === "pydoe"

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore, DOMAIN_OBJECTIVES } from "../store";
 import type { ObjectiveSpec, ProductDomain, Requirement } from "../api";
 import ConstraintsEditor from "./ConstraintsEditor";
+import LeversEditor from "./LeversEditor";
 
 function IntentParser() {
   const { applyIntent, intentBusy } = useStore();
@@ -48,16 +49,15 @@ const DOMAINS: { value: ProductDomain; label: string }[] = [
 
 const SUBSTRATES = ["carbon_steel", "galvanized_steel", "aluminum", "stainless_steel", "magnesium_alloy"];
 
-// All possible metrics a user can choose as objectives.
 const ALL_METRICS: { metric: string; label: string; defaultDir: "maximize" | "minimize" }[] = [
-  { metric: "salt_spray_hours",    label: "耐盐雾 Salt Spray (h)",       defaultDir: "maximize" },
-  { metric: "cleaning_efficiency", label: "清洗率 Cleaning (%)",         defaultDir: "maximize" },
-  { metric: "cost_cny_per_kg",     label: "成本 Cost (CNY/kg)",          defaultDir: "minimize" },
-  { metric: "voc_gpl",             label: "VOC (g/L)",                   defaultDir: "minimize" },
-  { metric: "sustainability_idx",  label: "可持续性 Sustainability",      defaultDir: "maximize" },
-  { metric: "coating_weight_gsm",  label: "膜重 Coating Weight (g/m²)",  defaultDir: "maximize" },
-  { metric: "film_weight_gsm",     label: "干膜重 Dry Film (g/m²)",      defaultDir: "maximize" },
-  { metric: "ph_value",            label: "pH 值",                       defaultDir: "maximize" },
+  { metric: "salt_spray_hours", label: "耐盐雾 Salt Spray (h)", defaultDir: "maximize" },
+  { metric: "cleaning_efficiency", label: "清洗率 Cleaning (%)", defaultDir: "maximize" },
+  { metric: "cost_cny_per_kg", label: "成本 Cost (CNY/kg)", defaultDir: "minimize" },
+  { metric: "voc_gpl", label: "VOC (g/L)", defaultDir: "minimize" },
+  { metric: "sustainability_idx", label: "可持续性 Sustainability", defaultDir: "maximize" },
+  { metric: "coating_weight_gsm", label: "膜重 Coating Weight (g/m²)", defaultDir: "maximize" },
+  { metric: "film_weight_gsm", label: "干膜重 Dry Film (g/m²)", defaultDir: "maximize" },
+  { metric: "ph_value", label: "pH 值", defaultDir: "maximize" },
 ];
 
 function metaFor(metric: string) {
@@ -81,6 +81,7 @@ const TARGET_BOUNDS: Record<string, { min: number; max: number; step: number; un
   film_weight_gsm: { min: 0, max: 200, step: 5, unit: " g/m²" },
   ph_value: { min: 0, max: 14, step: 0.5, unit: "" },
 };
+
 function DirectionBadge({
   direction,
   onToggle,
@@ -171,9 +172,7 @@ function ObjectivesEditor({
   return (
     <div className="mb-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-slate-400 uppercase tracking-wider">
-          优化目标 · Objectives
-        </span>
+        <span className="text-xs text-slate-400 uppercase tracking-wider">优化目标 · Objectives</span>
         <button
           onClick={resetDefaults}
           className="text-[10px] text-slate-500 hover:text-accent transition-colors px-1.5 py-0.5 rounded border border-edge hover:border-accent/40"
@@ -182,12 +181,11 @@ function ObjectivesEditor({
         </button>
       </div>
 
-      {/* Objective rows */}
       <div className="flex flex-col gap-2">
         {objectives.map((obj, idx) => {
           const meta = metaFor(obj.metric);
           return (
-            <div key={obj.metric} className="bg-ink/60 border border-edge rounded p-2 space-y-1.5">
+            <div key={`${obj.metric}-${idx}`} className="bg-ink/60 border border-edge rounded p-2 space-y-1.5">
               <div className="flex items-center gap-2">
                 <DirectionBadge
                   direction={obj.direction}
@@ -197,9 +195,13 @@ function ObjectivesEditor({
                     })
                   }
                 />
-                <span className="flex-1 text-xs text-slate-300 truncate">
-                  {meta?.label ?? obj.metric}
-                </span>
+                <input
+                  value={obj.metric}
+                  onChange={(e) => update(idx, { metric: e.target.value.trim() })}
+                  className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
+                  placeholder="metric id"
+                />
+                <span className="text-[10px] text-slate-500 truncate max-w-[80px]">{meta?.label ?? ""}</span>
                 <button
                   onClick={() => remove(idx)}
                   className="shrink-0 text-slate-600 hover:text-rose-400 text-xs leading-none w-4 h-4 flex items-center justify-center"
@@ -239,9 +241,7 @@ function ObjectivesEditor({
                     className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
                     placeholder="—"
                   />
-                  <span className="text-[10px] text-slate-500 shrink-0">
-                    {TARGET_BOUNDS[obj.metric].unit}
-                  </span>
+                  <span className="text-[10px] text-slate-500 shrink-0">{TARGET_BOUNDS[obj.metric].unit}</span>
                 </div>
               )}
             </div>
@@ -249,7 +249,6 @@ function ObjectivesEditor({
         })}
       </div>
 
-      {/* Weight sum indicator */}
       {objectives.length > 0 && (
         <div
           className={`mt-1.5 text-[10px] text-right font-mono ${
@@ -261,11 +260,12 @@ function ObjectivesEditor({
         </div>
       )}
 
-      {/* Add objective */}
       {availableToAdd.length > 0 && (
         <select
           value=""
-          onChange={(e) => { if (e.target.value) addMetric(e.target.value); }}
+          onChange={(e) => {
+            if (e.target.value) addMetric(e.target.value);
+          }}
           className="mt-2 w-full bg-ink border border-edge rounded px-2 py-1 text-xs text-slate-400"
         >
           <option value="">+ 添加目标 Add objective…</option>
@@ -280,12 +280,45 @@ function ObjectivesEditor({
   );
 }
 
+function ExampleLoader() {
+  const { loadExampleProject } = useStore();
+  const [examples, setExamples] = useState<{ id: string; label: string }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/meta")
+      .then((r) => r.json())
+      .then((meta) => setExamples(meta.example_projects ?? []))
+      .catch(() => {});
+  }, []);
+
+  return (
+    <label className="block mb-3">
+      <span className="text-xs text-slate-400">加载示例项目 · Examples</span>
+      <select
+        defaultValue=""
+        onChange={(e) => {
+          if (e.target.value) void loadExampleProject(e.target.value);
+        }}
+        className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+      >
+        <option value="">选择内置示例…</option>
+        {examples.map((ex) => (
+          <option key={ex.id} value={ex.id}>
+            {ex.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
   const {
     requirement,
     setField,
     setDomain,
     setObjectives,
+    setLevers,
     activeConstraints,
     setActiveConstraints,
     setConstraintValue,
@@ -303,45 +336,63 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         <h2 className="text-sm uppercase tracking-widest text-accent2 mb-2">研发需求 · Requirements</h2>
       )}
 
-      {/* Natural-language intent parser (v0.6) */}
       <IntentParser />
+      <ExampleLoader />
 
-      {/* Domain */}
       <label className="block mb-2">
-        <span className="text-xs text-slate-400">产品域 · Domain</span>
-        <select
-          value={domain}
-          onChange={(e) => setDomain(e.target.value as ProductDomain)}
+        <span className="text-xs text-slate-400">产品类型 · Product type</span>
+        <input
+          value={requirement.product_type ?? ""}
+          onChange={(e) => setField("product_type", e.target.value)}
+          placeholder="例如：水性环氧防腐底漆"
           className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
-        >
-          {DOMAINS.map((d) => (
-            <option key={d.value} value={d.value}>
-              {d.label}
-            </option>
-          ))}
-        </select>
+        />
       </label>
 
-      {/* Substrate */}
-      <label className="block mb-3">
-        <span className="text-xs text-slate-400">基材 · Substrate</span>
-        <select
-          value={requirement.substrate}
-          onChange={(e) => setField("substrate", e.target.value)}
+      <label className="block mb-2">
+        <span className="text-xs text-slate-400">应用场景 · Application</span>
+        <input
+          value={requirement.application ?? requirement.substrate}
+          onChange={(e) => setField("application", e.target.value)}
+          placeholder="例如：carbon_steel / 汽车底盘"
           className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
-        >
-          {SUBSTRATES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        />
       </label>
 
-      {/* Divider */}
+      <details className="mb-2 border border-edge/60 rounded px-2 py-1">
+        <summary className="text-xs text-slate-500 cursor-pointer py-1">高级：Legacy 域预设</summary>
+        <label className="block mt-2 mb-2">
+          <span className="text-xs text-slate-400">产品域 · Domain</span>
+          <select
+            value={domain}
+            onChange={(e) => setDomain(e.target.value as ProductDomain)}
+            className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+          >
+            {DOMAINS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block mb-1">
+          <span className="text-xs text-slate-400">基材 · Substrate</span>
+          <select
+            value={requirement.substrate}
+            onChange={(e) => setField("substrate", e.target.value)}
+            className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+          >
+            {SUBSTRATES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+      </details>
+
       <div className="border-t border-edge mb-3" />
 
-      {/* Dynamic objectives editor */}
       <ObjectivesEditor
         objectives={requirement.objectives}
         onChange={setObjectives}
@@ -350,7 +401,10 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         onSyncField={setField}
       />
 
-      {/* Divider */}
+      <div className="border-t border-edge mb-3" />
+
+      <LeversEditor levers={requirement.levers ?? []} onChange={setLevers} />
+
       <div className="border-t border-edge mb-3" />
 
       <ConstraintsEditor
@@ -362,7 +416,6 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         onClearValue={clearConstraintValue}
       />
 
-      {/* Action buttons (hidden when embedded inside the actions modal) */}
       {!embedded && (
         <div className="mt-auto pt-3 flex flex-col gap-2">
           <button
