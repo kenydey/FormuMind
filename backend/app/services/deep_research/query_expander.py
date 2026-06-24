@@ -10,8 +10,19 @@ from .models import ExpandedQuery
 
 logger = logging.getLogger(__name__)
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+|[一-鿿]")
+_TOKEN_RE = re.compile(r"[a-z0-9]+|[一-鿿]+")
 _DEFAULT_IPC = ["C09D", "C09D175/04", "C08G18/00", "C23F"]
+
+def build_search_query(expanded: ExpandedQuery, topic: str = "") -> str:
+    """将扩展结果与用户主题合并为面向多源检索的查询串。"""
+    parts: list[str] = []
+    if topic.strip():
+        parts.append(topic.strip())
+    parts.extend(expanded.chinese_keywords)
+    parts.extend(expanded.english_synonyms)
+    parts.extend(expanded.ipc_cpc_suggestions)
+    return " ".join(dict.fromkeys(p for p in parts if p))
+
 
 _EXPAND_PROMPT = """你是一位涂料与多相聚合物研发领域的专利与文献检索专家。
 根据用户的自然语言输入，推断检索意图，并扩展为结构化检索词。

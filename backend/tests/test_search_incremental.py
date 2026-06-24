@@ -3,6 +3,8 @@
 All offline-safe: online retrieval libs degrade to [] and the NotebookLM auth
 flow is gated, so these assert the contract that holds with no extras installed.
 """
+import time
+
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
@@ -99,11 +101,13 @@ def test_search_stream_endpoint_returns_task_handle():
     body = r.json()
     assert "task_id" in body and body["poll_url"].endswith(body["task_id"])
 
-    # Poll to completion — offline this finishes near-instantly.
-    for _ in range(50):
+    # Poll to completion — may hit real network sources when intel extras are installed.
+    t = None
+    for _ in range(120):
         t = client.get(body["poll_url"]).json()
         if t["state"] in ("completed", "failed"):
             break
+        time.sleep(0.15)
     assert t["state"] == "completed"
     assert t["result"]["total"] >= 1
     assert "source_status" in t["result"]
