@@ -15,6 +15,9 @@ from ..domain.schemas import Evidence, ProductDomain, Requirement
 
 logger = logging.getLogger(__name__)
 
+# Per-source network ceiling — prevents one hung API from blocking the whole search.
+_SOURCE_TIMEOUT_SEC = 25
+
 # Curated seed corpus — representative, paraphrased abstracts used offline.
 SEED_CORPUS: dict[ProductDomain, list[dict]] = {
     ProductDomain.anticorrosion_coating: [
@@ -72,6 +75,41 @@ def _filter_seed_by_query(
     if matched:
         return matched
     return sorted(seeds, key=lambda x: x.relevance, reverse=True)[:min_keep]
+
+
+def _resolve_search_query(query: str) -> str:
+    """Expand a user topic via QueryExpander for cross-lingual retrieval."""
+    return _prepare_search_queries(query)[0]
+
+
+def _prepare_search_queries(query: str) -> tuple[str, str, str]:
+    """Return (rank_query, patent_query, western_query) for multi-source search."""
+    q = (query or "").strip()
+    if not q:
+        return q, q, q
+    from .deep_research.query_expander import QueryExpander, build_search_query
+
+    expanded = QueryExpander().expand(q)
+    rank_q = build_search_query(expanded, q)
+    patent_q = rank_q
+    western_parts = list(expanded.english_synonyms[:6])
+    if not western_parts:
+        western_parts = [p for p in expanded.chinese_keywords if re.search(r"[a-zA-Z]", p)]
+    western_q = " ".join(western_parts) if western_parts else q
+    return rank_q, patent_q, western_q
+
+
+def _fetch_with_timeout(fetch, cursor: int) -> list[Evidence]:
+    """Run one source page fetch with a hard timeout."""
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(fetch, cursor)
+    try:
+        return fut.result(timeout=_SOURCE_TIMEOUT_SEC) or []
+    except Exception as exc:
+        logger.warning("source fetch timed out or failed: %s", exc)
+        return []
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
 
 def _build_patent_query(req: Requirement | None, query: str) -> str:
@@ -151,10 +189,17 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
     """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
     try:
         import arxiv  # type: ignore
-        client = arxiv.Client()
-        results = list(client.results(arxiv.Search(
-            query=query, max_results=limit + offset, sort_by=arxiv.SortCriterion.Relevance
-        )))[offset : offset + limit]
+
+        client = arxiv.Client(page_size=50, delay_seconds=3, num_retries=1)
+        results = list(
+            client.results(
+                arxiv.Search(
+                    query=query,
+                    max_results=limit + offset,
+                    sort_by=arxiv.SortCriterion.Relevance,
+                )
+            )
+        )[offset : offset + limit]
         return [
             Evidence(
                 source="arXiv",
@@ -171,22 +216,37 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
 
 
 def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
-    """Semantic Scholar 学术文献搜索。``offset`` 支持增量翻页。"""
+    """Semantic Scholar 学术文献搜索（HTTP API + 超时，避免 SDK 挂死）。"""
     try:
-        from semanticscholar import SemanticScholar  # type: ignore
-        sch = SemanticScholar()
-        results = list(sch.search_paper(query, limit=min(100, limit + offset)))[offset : offset + limit]
-        out = []
-        for i, p in enumerate(results):
-            ext = p.externalIds or {}
-            identifier = ext.get("DOI") or p.paperId or ""
-            out.append(Evidence(
-                source="Semantic Scholar",
-                identifier=identifier,
-                title=p.title or "Untitled",
-                snippet=(p.abstract or "")[:500],
-                relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
-            ))
+        import httpx
+
+        want = min(100, limit + offset)
+        with httpx.Client(timeout=_SOURCE_TIMEOUT_SEC) as client:
+            resp = client.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={
+                    "query": query,
+                    "limit": want,
+                    "fields": "title,abstract,externalIds,paperId",
+                },
+                headers={"User-Agent": "FormuMind/0.1 (research platform)"},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        papers = (payload.get("data") or [])[offset : offset + limit]
+        out: list[Evidence] = []
+        for i, p in enumerate(papers):
+            ext = p.get("externalIds") or {}
+            identifier = ext.get("DOI") or p.get("paperId") or ""
+            out.append(
+                Evidence(
+                    source="Semantic Scholar",
+                    identifier=identifier,
+                    title=p.get("title") or "Untitled",
+                    snippet=(p.get("abstract") or "")[:500],
+                    relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
+                )
+            )
         return out
     except Exception as exc:
         logger.warning("Semantic Scholar search failed: %s", exc)
@@ -260,7 +320,11 @@ def _merge_filter_rank(
 
 
 def _build_streams(
-    query: str, source_types: list[str], req: Requirement | None, page_size: int
+    patent_query: str,
+    western_query: str,
+    source_types: list[str],
+    req: Requirement | None,
+    page_size: int,
 ) -> list[dict]:
     """One paged stream per source. ``paged`` sources support offset/round paging;
     single-shot sources (chemcrow/notebooklm) yield once then finish."""
@@ -273,27 +337,31 @@ def _build_streams(
         if req is not None:
             add(
                 "patents",
-                lambda off, q=query: search_patents(req, page_size, offset=off, query=q),
+                lambda off, q=patent_query: search_patents(req, page_size, offset=off, query=q),
                 True,
             )
         else:
             add(
                 "patents",
-                lambda off, q=query: search_patents_by_query(q, page_size, offset=off),
+                lambda off, q=patent_query: search_patents_by_query(q, page_size, offset=off),
                 True,
             )
     if "literature" in source_types:
-        add("arxiv", lambda off: search_arxiv(query, page_size, offset=off), True)
-        add("s2", lambda off: search_semantic_scholar(query, page_size, offset=off), True)
-        add("chemlit", lambda off: search_chemcrow_lit(query, page_size), False)
+        add("arxiv", lambda off, q=western_query: search_arxiv(q, page_size, offset=off), True)
+        add(
+            "s2",
+            lambda off, q=western_query: search_semantic_scholar(q, page_size, offset=off),
+            True,
+        )
+        add("chemlit", lambda off, q=western_query: search_chemcrow_lit(q, page_size), False)
     if "internet" in source_types:
-        add("web", lambda off: search_web(query, page_size, offset=off), True)
-        add("chemweb", lambda off: search_chemcrow_web(query, page_size), False)
+        add("web", lambda off, q=western_query: search_web(q, page_size, offset=off), True)
+        add("chemweb", lambda off, q=western_query: search_chemcrow_web(q, page_size), False)
     if "notebooklm" in source_types:
-        def _nb(off: int) -> list[Evidence]:
+        def _nb(off: int, q=western_query) -> list[Evidence]:
             from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
 
-            return search_notebooklm(query, page_size)
+            return search_notebooklm(q, page_size)
 
         add("notebooklm", _nb, False)
     return streams
@@ -319,8 +387,12 @@ def iter_search(
     related results are gathered, or the ``max_rounds`` safety bound is hit.
     """
     q = query or (req.headline() if req else "coating formulation")
+    if (query or "").strip():
+        rank_q, patent_q, western_q = _prepare_search_queries(q)
+    else:
+        rank_q = patent_q = western_q = q
     page_size = max(1, min(per_source_cap, 50))
-    streams = _build_streams(q, source_types, req, page_size)
+    streams = _build_streams(patent_q, western_q, source_types, req, page_size)
 
     raw: list[Evidence] = []
     seen_ids: set[str] = set()
@@ -333,27 +405,34 @@ def iter_search(
         rounds += 1
         active = [st for st in streams if not st["done"]]
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(active)))
-        futures = {ex.submit(st["fetch"], st["cursor"]): st for st in active}
-        # No timeout: stopping is driven by results, not the clock.
-        for fut in concurrent.futures.as_completed(futures):
-            st = futures[fut]
-            try:
-                page = fut.result() or []
-            except Exception:
-                page = []
-            st["cursor"] += page_size
-            new = [e for e in page if (e.identifier or e.title) not in seen_ids]
-            for e in new:
-                seen_ids.add(e.identifier or e.title)
-            raw.extend(new)
-            # Exhausted: single-shot source, or a round with no new sources.
-            if not st["paged"] or not new:
-                st["done"] = True
+        futures = {ex.submit(_fetch_with_timeout, st["fetch"], st["cursor"]): st for st in active}
+        try:
+            for fut in concurrent.futures.as_completed(
+                futures, timeout=_SOURCE_TIMEOUT_SEC + 10
+            ):
+                st = futures[fut]
+                try:
+                    page = fut.result() or []
+                except Exception:
+                    page = []
+                st["cursor"] += page_size
+                new = [e for e in page if (e.identifier or e.title) not in seen_ids]
+                for e in new:
+                    seen_ids.add(e.identifier or e.title)
+                raw.extend(new)
+                if not st["paged"] or not new:
+                    st["done"] = True
+        except TimeoutError:
+            logger.warning("search round timed out; marking slow sources done")
+            for fut, st in futures.items():
+                if not fut.done():
+                    fut.cancel()
+                    st["done"] = True
         ex.shutdown(wait=False)
         if progress_cb is not None:
-            progress_cb(_merge_filter_rank(raw, q, total_limit))
+            progress_cb(_merge_filter_rank(raw, rank_q, total_limit))
 
-    final = _merge_filter_rank(raw, q, total_limit)
+    final = _merge_filter_rank(raw, rank_q, total_limit)
     if progress_cb is not None:
         progress_cb(final)
     return final

@@ -11,7 +11,7 @@ from ...domain import knowledge
 from ...domain.schemas import ComprehensiveReport, Evidence, Requirement
 from .. import literature, llm, rag
 from .models import ExpandedQuery, RetrievalHit, RetrievalReport
-from .query_expander import QueryExpander
+from .query_expander import QueryExpander, build_search_query
 
 logger = logging.getLogger(__name__)
 
@@ -83,16 +83,6 @@ class DeepResearchEngine:
     def expand_query(self, topic: str) -> ExpandedQuery:
         return self._expander.expand(topic)
 
-    @staticmethod
-    def build_search_query(expanded: ExpandedQuery, topic: str = "") -> str:
-        parts: list[str] = []
-        if topic.strip():
-            parts.append(topic.strip())
-        parts.extend(expanded.chinese_keywords)
-        parts.extend(expanded.english_synonyms)
-        parts.extend(expanded.ipc_cpc_suggestions)
-        return " ".join(dict.fromkeys(p for p in parts if p))
-
     def retrieve(
         self,
         topic: str,
@@ -104,7 +94,7 @@ class DeepResearchEngine:
     ) -> tuple[list[Evidence], ExpandedQuery]:
         """QueryExpander + iter_search 多源检索。"""
         expanded = self.expand_query(topic)
-        combined_query = self.build_search_query(expanded, topic)
+        combined_query = build_search_query(expanded, topic)
         types = source_types or _DEFAULT_SOURCE_TYPES
         limit = total_limit or self._settings.search_total_limit
         cap = per_source_cap or self._settings.search_limit_per_source
@@ -213,7 +203,7 @@ class DeepResearchEngine:
                 evidence, max_pdfs=self._settings.pdf_download_max
             )
 
-        retrieval_query = self.build_search_query(expanded, topic)
+        retrieval_query = build_search_query(expanded, topic)
         web = [e for e in evidence if "internet" in (e.source or "").lower() or "web" in (e.source or "").lower()]
 
         _progress(0.55, "kb agent: re-rank + grounded synthesis")

@@ -112,10 +112,10 @@ def test_deep_research_endpoint_returns_task_and_completes():
     handle = r.json()
     assert "task_id" in handle and handle["poll_url"].endswith(handle["task_id"])
 
-    # Poll until completed (offline cohort is fast).
+    # Poll until completed (may hit real network sources when intel extras are installed).
     task_id = handle["task_id"]
     result = None
-    for _ in range(120):
+    for _ in range(240):
         tr = client.get(f"/api/tasks/{task_id}")
         assert tr.status_code == 200
         status = tr.json()
@@ -124,7 +124,7 @@ def test_deep_research_endpoint_returns_task_and_completes():
             break
         if status["state"] == "failed":
             raise AssertionError(f"deep research failed: {status['message']}")
-        time.sleep(0.15)
+        time.sleep(0.25)
 
     assert result is not None, "task did not complete in time"
     assert "report_markdown" in result
