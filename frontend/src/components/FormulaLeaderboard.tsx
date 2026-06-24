@@ -1,10 +1,18 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Formulation } from "../api";
-import { copyFormulaJson, downloadFormulaCsv, exportFormulaToPdf } from "../utils/export";
+import {
+  copyFormulaJson,
+  copyLeaderboardJson,
+  downloadFormulaCsv,
+  downloadLeaderboardCsv,
+  exportFormulaToPdf,
+  exportLeaderboardToPdf,
+} from "../utils/export";
 import MolViewer from "./MolViewer";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
+import FormulaTableView from "./FormulaTableView";
 
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
@@ -53,9 +61,20 @@ function ExportMenu({ form }: { form: Formulation }) {
   );
 }
 
-function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
+function FormulaCard({
+  form,
+  rank,
+  cardRef,
+  forceOpen,
+}: {
+  form: Formulation;
+  rank: number;
+  cardRef?: (el: HTMLDivElement | null) => void;
+  forceOpen?: boolean;
+}) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
+  const expanded = open || forceOpen;
 
   // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
   const labL = form.predicted?.["lab_L"];
@@ -71,7 +90,7 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
   const ratio = form.predicted?.["pvc_to_cpvc_ratio"];
 
   return (
-    <div className="border border-edge rounded-lg p-3 bg-ink/60">
+    <div ref={cardRef} className="border border-edge rounded-lg p-3 bg-ink/60">
       <div className="w-full flex items-center justify-between gap-2">
         <button className="flex items-center gap-2 min-w-0 flex-1" onClick={() => setOpen((o) => !o)}>
           <span className="text-accent2 font-mono text-xs shrink-0">#{rank}</span>
@@ -91,7 +110,7 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
           <ExportMenu form={form} />
         </div>
       </div>
-      {open && (
+      {expanded && (
         <div className="mt-2 space-y-2">
           {/* PVC / CPVC summary row */}
           {pvcVal != null && (
@@ -165,7 +184,8 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
         title={`IP 分析 · ${form.name}`}
         open={ipOpen}
         onClose={() => setIpOpen(false)}
-        wide
+        size="lg"
+        nested
       >
         <IPReportModal form={form} />
       </Modal>
@@ -173,19 +193,112 @@ function FormulaCard({ form, rank }: { form: Formulation; rank: number }) {
   );
 }
 
-export default function FormulaLeaderboard() {
-  const leaderboard = useStore((s) => s.leaderboard);
+function ListExportMenu({ forms }: { forms: Formulation[] }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (forms.length === 0) return null;
+
   return (
-    <section className="glass rounded-xl p-4 overflow-y-auto">
-      <h2 className="text-sm uppercase tracking-widest text-accent2 mb-3">
-        Top 推荐配方 · Leaderboard
-      </h2>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-[11px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50"
+      >
+        {copied ? "已复制 ✓" : "导出列表 ▾"}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-20 w-32 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
+            {[
+              {
+                label: "复制 JSON",
+                fn: async () => {
+                  await copyLeaderboardJson(forms);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                  setOpen(false);
+                },
+              },
+              { label: "导出 CSV", fn: () => { downloadLeaderboardCsv(forms); setOpen(false); } },
+              { label: "导出 PDF", fn: () => { void exportLeaderboardToPdf(forms); setOpen(false); } },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => void item.fn()}
+                className="block w-full text-left px-2.5 py-1.5 text-slate-300 hover:bg-accent/10 hover:text-accent"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function FormulaLeaderboard() {
+  const { leaderboard, requirement } = useStore();
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  function switchToCard(index: number) {
+    setViewMode("cards");
+    setHighlightIndex(index);
+    requestAnimationFrame(() => {
+      cardRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
+  return (
+    <section className="rounded-xl overflow-y-auto">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <h2 className="text-sm uppercase tracking-widest text-accent2 flex-1 min-w-[140px]">
+          Top 推荐配方 · Leaderboard
+        </h2>
+        <div className="flex items-center gap-1 border border-edge rounded overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setViewMode("cards")}
+            className={`text-[11px] px-2.5 py-1 ${viewMode === "cards" ? "bg-accent/20 text-accent" : "text-slate-400"}`}
+          >
+            卡片
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("table")}
+            className={`text-[11px] px-2.5 py-1 ${viewMode === "table" ? "bg-accent/20 text-accent" : "text-slate-400"}`}
+          >
+            列表
+          </button>
+        </div>
+        <ListExportMenu forms={leaderboard} />
+      </div>
       {leaderboard.length === 0 ? (
         <p className="text-slate-500 text-sm">尚无配方。先运行检索推荐或寻优。</p>
+      ) : viewMode === "table" ? (
+        <FormulaTableView
+          forms={leaderboard}
+          domain={requirement.domain}
+          onSelect={switchToCard}
+        />
       ) : (
         <div className="space-y-2">
           {leaderboard.map((f, i) => (
-            <FormulaCard key={`${f.name}-${i}`} form={f} rank={i + 1} />
+            <FormulaCard
+              key={`${f.name}-${i}`}
+              form={f}
+              rank={i + 1}
+              cardRef={(el) => {
+                cardRefs.current[i] = el;
+              }}
+              forceOpen={highlightIndex === i}
+            />
           ))}
         </div>
       )}

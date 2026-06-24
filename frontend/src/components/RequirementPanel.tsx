@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore, DOMAIN_OBJECTIVES } from "../store";
-import type { ObjectiveSpec, ProductDomain } from "../api";
+import type { ObjectiveSpec, ProductDomain, Requirement } from "../api";
+import ConstraintsEditor from "./ConstraintsEditor";
 
 function IntentParser() {
   const { applyIntent, intentBusy } = useStore();
@@ -63,37 +64,23 @@ function metaFor(metric: string) {
   return ALL_METRICS.find((m) => m.metric === metric);
 }
 
-function Slider(props: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  unit?: string;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block mb-3">
-      <div className="flex justify-between text-xs text-slate-400 mb-1">
-        <span>{props.label}</span>
-        <span className="text-accent font-mono">
-          {props.value}
-          {props.unit ?? ""}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step ?? 1}
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-        className="w-full accent-accent"
-      />
-    </label>
-  );
-}
+const METRIC_TO_REQUIREMENT_FIELD: Partial<Record<string, keyof Requirement>> = {
+  salt_spray_hours: "salt_spray_hours",
+  film_weight_gsm: "film_weight_gsm",
+  coating_weight_gsm: "film_weight_gsm",
+  cleaning_efficiency: "cleaning_efficiency",
+};
 
+const TARGET_BOUNDS: Record<string, { min: number; max: number; step: number; unit: string }> = {
+  salt_spray_hours: { min: 0, max: 3000, step: 50, unit: " h" },
+  cleaning_efficiency: { min: 0, max: 100, step: 1, unit: " %" },
+  cost_cny_per_kg: { min: 0, max: 200, step: 1, unit: " CNY/kg" },
+  voc_gpl: { min: 0, max: 700, step: 10, unit: " g/L" },
+  sustainability_idx: { min: 0, max: 1, step: 0.05, unit: "" },
+  coating_weight_gsm: { min: 0, max: 200, step: 5, unit: " g/m²" },
+  film_weight_gsm: { min: 0, max: 200, step: 5, unit: " g/m²" },
+  ph_value: { min: 0, max: 14, step: 0.5, unit: "" },
+};
 function DirectionBadge({
   direction,
   onToggle,
@@ -121,10 +108,14 @@ function ObjectivesEditor({
   objectives,
   onChange,
   domain,
+  requirement,
+  onSyncField,
 }: {
   objectives: ObjectiveSpec[];
   onChange: (objs: ObjectiveSpec[]) => void;
   domain: ProductDomain;
+  requirement: Requirement;
+  onSyncField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
 }) {
   const usedMetrics = new Set(objectives.map((o) => o.metric));
   const availableToAdd = ALL_METRICS.filter((m) => !usedMetrics.has(m.metric));
@@ -132,9 +123,23 @@ function ObjectivesEditor({
   const totalWeight = objectives.reduce((s, o) => s + o.weight, 0);
   const weightOk = Math.abs(totalWeight - 1.0) < 0.01;
 
+  function seedTarget(metric: string): number | null {
+    const field = METRIC_TO_REQUIREMENT_FIELD[metric];
+    if (field) {
+      const v = requirement[field];
+      return typeof v === "number" ? v : null;
+    }
+    return null;
+  }
+
   function update(idx: number, patch: Partial<ObjectiveSpec>) {
     const next = objectives.map((o, i) => (i === idx ? { ...o, ...patch } : o));
     onChange(next);
+    if (patch.target_value != null) {
+      const metric = next[idx]?.metric ?? objectives[idx]?.metric;
+      const field = metric ? METRIC_TO_REQUIREMENT_FIELD[metric] : undefined;
+      if (field) onSyncField(field, patch.target_value as Requirement[typeof field]);
+    }
   }
 
   function remove(idx: number) {
@@ -145,12 +150,22 @@ function ObjectivesEditor({
     const meta = metaFor(metric);
     onChange([
       ...objectives,
-      { metric, weight: 0.1, direction: meta?.defaultDir ?? "maximize" },
+      {
+        metric,
+        weight: 0.1,
+        direction: meta?.defaultDir ?? "maximize",
+        target_value: seedTarget(metric),
+      },
     ]);
   }
 
   function resetDefaults() {
-    onChange([...DOMAIN_OBJECTIVES[domain]]);
+    onChange(
+      DOMAIN_OBJECTIVES[domain].map((o) => ({
+        ...o,
+        target_value: seedTarget(o.metric) ?? o.target_value ?? null,
+      }))
+    );
   }
 
   return (
@@ -194,6 +209,7 @@ function ObjectivesEditor({
                 </button>
               </div>
               <div className="flex items-center gap-2">
+                <span className="text-[10px] text-slate-500 shrink-0 w-10">权重</span>
                 <input
                   type="range"
                   min={0.05}
@@ -207,6 +223,27 @@ function ObjectivesEditor({
                   {obj.weight.toFixed(2)}
                 </span>
               </div>
+              {TARGET_BOUNDS[obj.metric] && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 shrink-0 w-10">目标值</span>
+                  <input
+                    type="number"
+                    min={TARGET_BOUNDS[obj.metric].min}
+                    max={TARGET_BOUNDS[obj.metric].max}
+                    step={TARGET_BOUNDS[obj.metric].step}
+                    value={obj.target_value ?? seedTarget(obj.metric) ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      update(idx, { target_value: v });
+                    }}
+                    className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
+                    placeholder="—"
+                  />
+                  <span className="text-[10px] text-slate-500 shrink-0">
+                    {TARGET_BOUNDS[obj.metric].unit}
+                  </span>
+                </div>
+              )}
             </div>
           );
         })}
@@ -244,8 +281,20 @@ function ObjectivesEditor({
 }
 
 export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
-  const { requirement, setField, setDomain, setObjectives, runResearch, runOptimize, busy, formulationBusy } =
-    useStore();
+  const {
+    requirement,
+    setField,
+    setDomain,
+    setObjectives,
+    activeConstraints,
+    setActiveConstraints,
+    setConstraintValue,
+    clearConstraintValue,
+    runResearch,
+    runOptimize,
+    busy,
+    formulationBusy,
+  } = useStore();
   const domain = requirement.domain;
 
   return (
@@ -297,57 +346,21 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         objectives={requirement.objectives}
         onChange={setObjectives}
         domain={domain}
+        requirement={requirement}
+        onSyncField={setField}
       />
 
       {/* Divider */}
       <div className="border-t border-edge mb-3" />
 
-      {/* Process / constraint parameters */}
-      <span className="text-xs text-slate-400 uppercase tracking-wider mb-2 block">
-        工艺约束 · Constraints
-      </span>
-
-      <Slider
-        label="VOC 上限 · VOC limit"
-        unit=" g/L"
-        min={0}
-        max={700}
-        step={10}
-        value={requirement.voc_limit_gpl}
-        onChange={(v) => setField("voc_limit_gpl", v)}
+      <ConstraintsEditor
+        domain={domain}
+        requirement={requirement}
+        activeKeys={activeConstraints}
+        onActiveKeysChange={setActiveConstraints}
+        onSetValue={setConstraintValue}
+        onClearValue={clearConstraintValue}
       />
-
-      {domain === "anticorrosion_coating" && (
-        <Slider
-          label="固化温度上限 · Max cure temp"
-          unit="°C"
-          min={20}
-          max={300}
-          step={5}
-          value={requirement.cure_temperature_c}
-          onChange={(v) => setField("cure_temperature_c", v)}
-        />
-      )}
-
-      {domain === "degreaser" && (
-        <label className="block mb-3">
-          <div className="flex justify-between text-xs text-slate-400 mb-1">
-            <span>pH 目标 · pH target</span>
-            <span className="text-accent font-mono">
-              {requirement.ph_target ?? "—"}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={14}
-            step={0.5}
-            value={requirement.ph_target ?? 12}
-            onChange={(e) => setField("ph_target", Number(e.target.value))}
-            className="w-full accent-accent"
-          />
-        </label>
-      )}
 
       {/* Action buttons (hidden when embedded inside the actions modal) */}
       {!embedded && (

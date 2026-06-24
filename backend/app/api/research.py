@@ -20,14 +20,24 @@ class ResearchRequest(Requirement):
     """
 
     sources: list[Evidence] = Field(default_factory=list)
+    source_types: list[str] = Field(
+        default_factory=lambda: ["patents"],
+        description="Subset of patents|literature|internet|notebooklm|local",
+    )
+    query: str = ""
 
 
 @router.post("/research", response_model=ResearchResult)
 def start_research(body: ResearchRequest) -> ResearchResult:
     """同步配方推荐：检索 + RAG + 推荐（可用预加载 sources 跳过重复检索）。"""
-    req = Requirement(**{k: v for k, v in body.model_dump().items() if k != "sources"})
+    req = Requirement(**{k: v for k, v in body.model_dump().items() if k not in ("sources", "source_types", "query")})
     pre_sources = body.sources if body.sources else None
-    return workflow.run_research(req, pre_sources=pre_sources)
+    return workflow.run_research(
+        req,
+        pre_sources=pre_sources,
+        source_types=body.source_types,
+        query=body.query,
+    )
 
 
 class DeepResearchHandle(BaseModel):

@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
+  defaultConstraintsForDomain,
+  type ConstraintKey,
+} from "./constants/constraints";
+import {
   api,
   OBJECTIVE_METRIC,
   pollTask,
@@ -90,8 +94,10 @@ interface AppState {
   deepResearchBusy: boolean;
   formulationBusy: boolean;
   chatBusy: boolean;
+  recommendSourceTypes: SearchSourceType[];
   // Modal 可见性
   openModal: string | null;   // "requirements" | "recommend" | "doe" | "optimize" | null
+  activeConstraints: ConstraintKey[];
   // Settings
   llmConfig: LLMConfig;
   settingsOpen: boolean;
@@ -100,6 +106,9 @@ interface AppState {
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
   setObjectives: (objectives: ObjectiveSpec[]) => void;
+  setActiveConstraints: (keys: ConstraintKey[]) => void;
+  setConstraintValue: (key: ConstraintKey, value: number) => void;
+  clearConstraintValue: (key: ConstraintKey) => void;
   runResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
@@ -116,6 +125,7 @@ interface AppState {
   // v0.3 actions
   setSearchQuery: (q: string) => void;
   setSourceTypes: (types: SearchSourceType[]) => void;
+  setRecommendSourceTypes: (types: SearchSourceType[]) => void;
   addSources: (evidence: Evidence[]) => void;
   removeSource: (id: string) => void;
   clearSources: () => void;
@@ -206,7 +216,9 @@ export const useStore = create<AppState>()(
       deepResearchBusy: false,
       formulationBusy: false,
       chatBusy: false,
+      recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
       openModal: null,
+      activeConstraints: defaultConstraintsForDomain("anticorrosion_coating"),
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
       settingsOpen: false,
       settingsTab: "llm",
@@ -224,22 +236,37 @@ export const useStore = create<AppState>()(
           requirement: {
             ...s.requirement,
             domain: d,
-            objectives: [...DOMAIN_OBJECTIVES[d]],
           },
         })),
 
       setObjectives: (objectives) =>
         set((s) => ({ requirement: { ...s.requirement, objectives } })),
 
+      setActiveConstraints: (keys) => set({ activeConstraints: keys }),
+
+      setConstraintValue: (key, value) =>
+        set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
+
+      clearConstraintValue: (key) =>
+        set((s) => {
+          const nullable: ConstraintKey[] = ["voc_limit_gpl", "cure_temperature_c", "ph_target"];
+          const value = nullable.includes(key) ? null : 0;
+          return { requirement: { ...s.requirement, [key]: value } };
+        }),
+
       runResearch: async () => {
         set({ formulationBusy: true, error: null });
         try {
-          const { requirement, sources, selectedSources } = get();
-          const active = sources.filter((e) =>
+          const { requirement, sources, selectedSources, recommendSourceTypes, searchQuery } = get();
+          const types =
+            recommendSourceTypes.length > 0
+              ? recommendSourceTypes
+              : (["patents"] as SearchSourceType[]);
+          const selected = sources.filter((e) =>
             selectedSources.includes(e.identifier || e.title)
           );
-          const payload = active.length > 0 ? active : sources;
-          const research = await api.research(requirement, payload);
+          const payload = selected.length > 0 ? selected : sources;
+          const research = await api.research(requirement, payload, types, searchQuery.trim());
           const leaderboard = research.recommended;
           set({ research, leaderboard });
           const { models, optimizationHistory, history } = get();
@@ -344,7 +371,7 @@ export const useStore = create<AppState>()(
             requirement: {
               ...s.requirement,
               ...result.requirement,
-              objectives: DOMAIN_OBJECTIVES[result.requirement.domain] ?? s.requirement.objectives,
+              objectives: s.requirement.objectives,
             },
           }));
           return result.extracted_fields;
@@ -482,6 +509,8 @@ export const useStore = create<AppState>()(
       setSearchQuery: (q) => set({ searchQuery: q }),
 
       setSourceTypes: (types) => set({ sourceTypes: types }),
+
+      setRecommendSourceTypes: (types) => set({ recommendSourceTypes: types }),
 
       addSources: (evidence) =>
         set((s) => {
@@ -645,7 +674,11 @@ export const useStore = create<AppState>()(
     {
       name: "formumind-history",
       // Persist history list and llmConfig.
-      partialize: (state) => ({ history: state.history, llmConfig: state.llmConfig }),
+      partialize: (state) => ({
+        history: state.history,
+        llmConfig: state.llmConfig,
+        activeConstraints: state.activeConstraints,
+      }),
     }
   )
 );

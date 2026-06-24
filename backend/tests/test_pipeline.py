@@ -36,6 +36,26 @@ def test_research_voc_warning_when_over_limit():
     assert warning_found
 
 
+def test_research_source_types_filters_preloaded():
+    req = Requirement(domain=ProductDomain.anticorrosion_coating)
+    from app.domain.schemas import Evidence
+
+    mixed = [
+        Evidence(source="USPTO", identifier="US1", title="Pat", snippet="p", relevance=0.9),
+        Evidence(source="literature", identifier="DOI:1", title="Paper", snippet="l", relevance=0.8),
+    ]
+    result = workflow.run_research(req, pre_sources=mixed, source_types=["literature"])
+    assert result.evidence
+    assert all("literature" in e.source.lower() or e.identifier.startswith("DOI") for e in result.evidence)
+
+
+def test_research_source_types_live_search():
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+    result = workflow.run_research(req, source_types=["patents", "literature"])
+    assert result.evidence
+    assert len(result.recommended) == 3
+
+
 def test_build_doe_includes_cure_factor_for_coatings():
     req = Requirement(domain=ProductDomain.anticorrosion_coating, cure_temperature_c=100)
     plan = workflow.build_doe(req, design="full_factorial")

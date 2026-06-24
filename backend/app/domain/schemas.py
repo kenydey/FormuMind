@@ -34,6 +34,7 @@ class ObjectiveSpec(BaseModel):
     # Normalization bounds — auto-filled by the optimizer if not provided.
     ref_min: float | None = None
     ref_max: float | None = None
+    target_value: float | None = None
 
 
 class Requirement(BaseModel):
@@ -44,11 +45,11 @@ class Requirement(BaseModel):
     # Anti-corrosion targets
     salt_spray_hours: float = Field(0, ge=0, description="Target neutral salt spray resistance (h)")
     film_weight_gsm: float = Field(0, ge=0, description="Target dry film weight / coating weight (g/m^2)")
-    cure_temperature_c: float = Field(80, ge=0, le=400, description="Max acceptable cure temperature (C)")
+    cure_temperature_c: float | None = Field(80, ge=0, le=400, description="Max acceptable cure temperature (C)")
     # Degreaser targets
     cleaning_efficiency: float = Field(0, ge=0, le=100, description="Target soil removal (%)")
     # Common constraints
-    voc_limit_gpl: float = Field(420, ge=0, description="Max VOC (g/L)")
+    voc_limit_gpl: float | None = Field(420, ge=0, description="Max VOC (g/L); None disables VOC limit checks")
     ph_target: float | None = Field(None, ge=0, le=14)
     notes: str = ""
     # Multi-objective: when empty the workflow fills in domain defaults.

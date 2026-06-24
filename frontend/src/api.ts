@@ -6,6 +6,7 @@ export interface ObjectiveSpec {
   metric: string;
   weight: number;
   direction: "maximize" | "minimize";
+  target_value?: number | null;
 }
 
 export interface Requirement {
@@ -13,9 +14,9 @@ export interface Requirement {
   substrate: string;
   salt_spray_hours: number;
   film_weight_gsm: number;
-  cure_temperature_c: number;
+  cure_temperature_c: number | null;
   cleaning_efficiency: number;
-  voc_limit_gpl: number;
+  voc_limit_gpl: number | null;
   ph_target: number | null;
   notes: string;
   objectives: ObjectiveSpec[];
@@ -146,8 +147,13 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
-  research: (req: Requirement, sources: Evidence[] = []) =>
-    post<ResearchResult>("/api/research", { ...req, sources }),
+  research: (
+    req: Requirement,
+    sources: Evidence[] = [],
+    sourceTypes: SearchSourceType[] = ["patents"],
+    query = ""
+  ) =>
+    post<ResearchResult>("/api/research", { ...req, sources, source_types: sourceTypes, query }),
   doe: (req: Requirement, design: string) => post<DOEPlan>(`/api/doe?design=${design}`, req),
   startOptimize: (req: Requirement, iterations: number) =>
     post<{ task_id: string; poll_url: string }>("/api/optimize", { requirement: req, iterations }),

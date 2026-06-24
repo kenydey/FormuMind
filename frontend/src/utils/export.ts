@@ -3,6 +3,7 @@
 // imported only when the user actually requests a PDF, keeping them out of the
 // main bundle.
 import type { Formulation } from "../api";
+import { OBJECTIVE_METRIC } from "../api";
 
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -106,4 +107,112 @@ export async function exportFormulaToPdf(form: Formulation): Promise<void> {
   }
 
   doc.save(`${slug(form.name)}.pdf`);
+}
+
+function csvCell(value: string | number): string {
+  const s = String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function leaderboardToCsv(forms: Formulation[]): string {
+  const header = [
+    "Rank",
+    "Name",
+    "Domain",
+    "Score",
+    "Primary metric",
+    "Primary value",
+    "Cost CNY/kg",
+    "VOC g/L",
+    "Ingredient count",
+    "Warnings",
+  ];
+  const lines = [header.join(",")];
+  for (let i = 0; i < forms.length; i++) {
+    const f = forms[i];
+    const pk = OBJECTIVE_METRIC[f.domain] ?? "";
+    lines.push(
+      [
+        i + 1,
+        f.name,
+        f.domain,
+        f.score ?? "",
+        pk,
+        pk ? f.predicted[pk] : "",
+        f.predicted.cost_cny_per_kg ?? "",
+        f.predicted.voc_gpl ?? "",
+        f.ingredients.length,
+        f.warnings.join("; "),
+      ]
+        .map(csvCell)
+        .join(",")
+    );
+  }
+  lines.push("");
+  lines.push("# Ingredient details");
+  lines.push("Rank,Name,Ingredient,Role,Weight %");
+  for (let i = 0; i < forms.length; i++) {
+    for (const ing of forms[i].ingredients) {
+      lines.push([i + 1, forms[i].name, ing.name, ing.role, ing.weight_pct].map(csvCell).join(","));
+    }
+  }
+  return lines.join("\n");
+}
+
+export function downloadLeaderboardCsv(forms: Formulation[]): void {
+  const blob = new Blob([leaderboardToCsv(forms)], { type: "text/csv;charset=utf-8" });
+  triggerDownload(blob, `formulations_leaderboard_${forms.length}.csv`);
+}
+
+export async function copyLeaderboardJson(forms: Formulation[]): Promise<void> {
+  await navigator.clipboard.writeText(JSON.stringify(forms, null, 2));
+}
+
+export async function exportLeaderboardToPdf(forms: Formulation[]): Promise<void> {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const margin = 40;
+
+  doc.setFontSize(16);
+  doc.text("FormuMind — Formulation Leaderboard", margin, 40);
+  doc.setFontSize(10);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`${forms.length} recommended formulations`, margin, 58);
+
+  autoTable(doc, {
+    startY: 72,
+    head: [["#", "Name", "Score", "Cost", "VOC", "Ingredients"]],
+    body: forms.map((f, i) => [
+      String(i + 1),
+      f.name,
+      f.score != null ? f.score.toFixed(3) : "—",
+      f.predicted.cost_cny_per_kg?.toFixed(2) ?? "—",
+      f.predicted.voc_gpl?.toFixed(1) ?? "—",
+      String(f.ingredients.length),
+    ]),
+    styles: { fontSize: 9, cellPadding: 4 },
+    headStyles: { fillColor: [56, 189, 248], textColor: 20 },
+    margin: { left: margin, right: margin },
+  });
+
+  for (let i = 0; i < forms.length; i++) {
+    doc.addPage();
+    const f = forms[i];
+    doc.setFontSize(14);
+    doc.setTextColor(20, 30, 48);
+    doc.text(`#${i + 1}  ${f.name}`, margin, margin);
+    autoTable(doc, {
+      startY: margin + 20,
+      head: [["Ingredient", "Role", "Weight %"]],
+      body: f.ingredients.map((ing) => [ing.name, ing.role, `${ing.weight_pct}`]),
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [34, 211, 238], textColor: 20 },
+      margin: { left: margin, right: margin },
+    });
+  }
+
+  doc.save(`formulations_leaderboard_${forms.length}.pdf`);
 }

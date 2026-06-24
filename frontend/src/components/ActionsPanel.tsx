@@ -5,6 +5,7 @@ import DoeResultsPanel from "./DoeResultsPanel";
 import SimPlaceholder from "./SimPlaceholder";
 import ProcessOptModal from "./ProcessOptModal";
 import LoopModal from "./LoopModal";
+import SourceTypePicker, { isLocalEvidence } from "./SourceTypePicker";
 import { useStore } from "../store";
 
 type ModalName = "requirements" | "recommend" | "doe" | "optimize" | "process" | "loop";
@@ -42,6 +43,9 @@ export default function ActionsPanel() {
     models,
     optimizationHistory,
     loopReport,
+    recommendSourceTypes,
+    setRecommendSourceTypes,
+    sources,
   } = useStore();
 
   function badgeFor(id: ModalName) {
@@ -87,6 +91,7 @@ export default function ActionsPanel() {
         title="技术需求 · Requirements"
         open={openModal === "requirements"}
         onClose={() => setOpenModal(null)}
+        size="md"
       >
         <RequirementPanel embedded />
       </Modal>
@@ -95,15 +100,33 @@ export default function ActionsPanel() {
         title="推荐配方 · Recommended Formulations"
         open={openModal === "recommend"}
         onClose={() => setOpenModal(null)}
-        wide
+        size="xl"
       >
-        <button
-          disabled={busy !== "idle" || formulationBusy}
-          onClick={runResearch}
-          className="mb-4 w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
-        >
-          {formulationBusy ? "检索中…" : "检索专利并推荐配方"}
-        </button>
+        <div className="mb-4 space-y-3">
+          <div>
+            <span className="text-xs text-slate-400 uppercase tracking-wider block mb-2">
+              资料来源 · Sources
+            </span>
+            <SourceTypePicker
+              selected={recommendSourceTypes}
+              onChange={setRecommendSourceTypes}
+              compact
+            />
+          </div>
+          {recommendSourceTypes.includes("local") &&
+            !sources.some((e) => isLocalEvidence(e.source)) && (
+              <p className="text-[11px] text-amber-400">
+                已勾选本地文件，但左栏尚未上传资料。请先在「资料来源」上传或取消勾选。
+              </p>
+            )}
+          <button
+            disabled={busy !== "idle" || formulationBusy || recommendSourceTypes.length === 0}
+            onClick={runResearch}
+            className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
+          >
+            {formulationBusy ? "检索中…" : "检索并推荐配方"}
+          </button>
+        </div>
         <FormulaLeaderboard />
       </Modal>
 
@@ -111,7 +134,7 @@ export default function ActionsPanel() {
         title="DOE 设计 · Design of Experiments"
         open={openModal === "doe"}
         onClose={() => setOpenModal(null)}
-        wide
+        size="lg"
       >
         <DoeResultsPanel />
       </Modal>
@@ -120,7 +143,7 @@ export default function ActionsPanel() {
         title="寻优收敛 · Optimization"
         open={openModal === "optimize"}
         onClose={() => setOpenModal(null)}
-        wide
+        size="lg"
       >
         <button
           disabled={busy !== "idle"}
@@ -142,7 +165,7 @@ export default function ActionsPanel() {
         title="⚙️ 工艺参数优化 · Process Optimization"
         open={openModal === "process"}
         onClose={() => setOpenModal(null)}
-        wide
+        size="lg"
       >
         <ProcessOptModal />
       </Modal>
@@ -151,7 +174,7 @@ export default function ActionsPanel() {
         title="🔄 自驱动研发闭环 · Self-Driving Loop"
         open={openModal === "loop"}
         onClose={() => setOpenModal(null)}
-        wide
+        size="lg"
       >
         <LoopModal />
       </Modal>

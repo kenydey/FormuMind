@@ -214,7 +214,9 @@ def ingredient(name: str, weight_pct: float) -> Ingredient:
 
 # --- Baseline templates per domain --------------------------------------
 def _anticorrosion_template(req: Requirement) -> Formulation:
-    waterborne = req.voc_limit_gpl < 250 or req.cure_temperature_c < 60
+    voc_limit = req.voc_limit_gpl if req.voc_limit_gpl is not None else 9999.0
+    cure_temp = req.cure_temperature_c if req.cure_temperature_c is not None else 80.0
+    waterborne = voc_limit < 250 or cure_temp < 60
     if waterborne:
         resin, solvent = "Waterborne acrylic emulsion", "Deionized water"
     else:

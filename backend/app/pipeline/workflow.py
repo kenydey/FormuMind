@@ -78,7 +78,7 @@ def default_objectives(domain: ProductDomain) -> list[ObjectiveSpec]:
 
 def process_for(req: Requirement) -> dict:
     """Process parameters used as predictor features (cure temp for thermosets)."""
-    if req.domain == ProductDomain.anticorrosion_coating:
+    if req.domain == ProductDomain.anticorrosion_coating and req.cure_temperature_c is not None:
         return {"cure_temperature_c": req.cure_temperature_c}
     return {}
 
@@ -97,7 +97,37 @@ def _score_and_validate(
     return form
 
 
-def run_research(req: Requirement, pre_sources: list | None = None) -> ResearchResult:
+def _evidence_matches_type(evidence, source_type: str) -> bool:
+    src = (evidence.source or "").lower()
+    ident = (evidence.identifier or "").lower()
+    if source_type == "patents":
+        return any(x in src for x in ("uspto", "epo", "patent", "wipo")) or ident.startswith(("us", "ep", "wo"))
+    if source_type == "literature":
+        return any(
+            x in src
+            for x in ("literature", "arxiv", "semantic", "paper", "doi", "chemcrow-lit", "chemcrow_literature")
+        ) or ident.startswith("doi:")
+    if source_type == "internet":
+        return any(x in src for x in ("web", "duck", "internet", "chemcrow-web", "chemcrow_web", "serp"))
+    if source_type == "notebooklm":
+        return "notebooklm" in src
+    if source_type == "local":
+        return src == "local" or "upload" in src or "ingest" in src
+    return True
+
+
+def _filter_evidence_by_types(evidence: list, source_types: list[str]) -> list:
+    if not source_types:
+        return evidence
+    return [e for e in evidence if any(_evidence_matches_type(e, t) for t in source_types)]
+
+
+def run_research(
+    req: Requirement,
+    pre_sources: list | None = None,
+    source_types: list[str] | None = None,
+    query: str = "",
+) -> ResearchResult:
     """Run the research pipeline.
 
     If ``pre_sources`` is provided (non-empty list of Evidence), internal
@@ -106,10 +136,15 @@ def run_research(req: Requirement, pre_sources: list | None = None) -> ResearchR
     evidence into the pipeline without a redundant network round-trip.
     """
     from ..domain.schemas import Evidence as _Evidence
+
+    types = source_types or ["patents"]
+    q = query or req.headline()
+
     if pre_sources:
-        evidence: list[_Evidence] = list(pre_sources)
+        evidence: list[_Evidence] = _filter_evidence_by_types(list(pre_sources), types)
     else:
-        evidence = literature.search(req)
+        search_types = [t for t in types if t != "local"]
+        evidence = literature.search_by_types(q, search_types, req=req) if search_types else []
     # Semantic store when sentence-transformers is installed, else TF-IDF.
     store = build_store()
     store.ingest(evidence)
