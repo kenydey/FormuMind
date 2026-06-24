@@ -14,6 +14,8 @@ const EXTRA_LABELS: Record<string, string> = {
   science: "科学计算 · Science",
   optimize: "寻优器 · Optimize",
   bo: "高斯过程寻优 · BoTorch",
+  pydoe: "经典 DOE · pyDOE",
+  baybe: "贝叶斯主动学习 · BayBE",
   color: "色差 · Color",
   file_ingest: "文件解析 · Ingest",
   export: "导出 · Export",

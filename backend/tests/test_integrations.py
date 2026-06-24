@@ -318,10 +318,12 @@ def test_active_doe_endpoint():
     }
     resp = client.post("/api/doe/active", json=payload)
     assert resp.status_code == 200
-    plan = resp.json()
+    body = resp.json()
+    plan = body["plan"]
     assert plan["design"] == "lhs"
     ai_runs = [r for r in plan["runs"] if r.get("ai_suggested")]
     assert len(ai_runs) == 3, f"Expected 3 AI-suggested runs, got {len(ai_runs)}"
+    assert body.get("engine") in ("legacy", "baybe")
 
 
 # ── v0.5: MD simulation probe (LAMMPS unavailable → None) ────────────────────

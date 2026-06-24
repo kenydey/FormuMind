@@ -189,13 +189,38 @@ def get_cached_plan(plan_id: str) -> DOEPlan | None:
         return _PLAN_CACHE.get(plan_id)
 
 
-def build_doe(req: Requirement, design: str = "full_factorial") -> DOEPlan:
+def build_doe_factors(req: Requirement) -> list:
+    """Collect DOE factors for a requirement (shared by workflow and baybe)."""
+    from ..domain.schemas import DOEFactor
+
     base = knowledge.baseline_formulation(req)
-    factors = [DOEFactor(name=name, low=low, high=high, unit="wt%") for name, low, high in _levers_for(base)]
-    # Cure temperature is a meaningful process factor for thermosets.
-    if req.domain == ProductDomain.anticorrosion_coating:
-        factors.append(DOEFactor(name="cure_temperature_c", low=max(20.0, req.cure_temperature_c - 30), high=req.cure_temperature_c, unit="C"))
-    plan = doe_engine.build_plan(factors, design=design)
+    factors = [
+        DOEFactor(name=name, low=low, high=high, unit="wt%")
+        for name, low, high in _levers_for(base)
+    ]
+    if req.domain == ProductDomain.anticorrosion_coating and req.cure_temperature_c is not None:
+        factors.append(
+            DOEFactor(
+                name="cure_temperature_c",
+                low=max(20.0, req.cure_temperature_c - 30),
+                high=req.cure_temperature_c,
+                unit="C",
+            )
+        )
+    return factors
+
+
+def build_doe(
+    req: Requirement,
+    design: str = "full_factorial",
+    *,
+    engine: str = "auto",
+    n: int | None = None,
+) -> DOEPlan:
+    from ..services.engines.doe_registry import build_doe_plan
+
+    factors = build_doe_factors(req)
+    plan = build_doe_plan(factors, design=design, engine=engine, n=n)
     plan.plan_id = uuid.uuid4().hex
     plan.domain = req.domain
     _cache_plan(plan)
@@ -211,9 +236,37 @@ def run_optimization(
     req: Requirement,
     iterations: int | None = None,
     progress_cb: Callable[[float, str], None] | None = None,
+    *,
+    engine: str = "auto",
+    campaign_state: str | None = None,
+    existing_records: list | None = None,
 ) -> OptimizationResult:
     settings = get_settings()
     iterations = iterations or settings.optimize_iterations
+
+    resolved = (engine or "auto").lower()
+    if resolved in ("auto", "baybe"):
+        from ..services.engines.baybe_engine import BaybeCampaignEngine
+        from ..services.engines.doe_registry import baybe_available
+
+        if resolved == "baybe" or (resolved == "auto" and baybe_available()):
+            try:
+                baybe_eng = BaybeCampaignEngine()
+                if baybe_eng.available():
+                    from ..services.training import registry
+
+                    records = existing_records if existing_records is not None else registry.records_for(req.domain)
+                    return baybe_eng.run_optimization(
+                        req,
+                        iterations=iterations,
+                        campaign_state=campaign_state,
+                        measurements=list(records),
+                        progress_cb=progress_cb,
+                    )
+            except Exception:
+                if resolved == "baybe":
+                    raise
+
     base = knowledge.baseline_formulation(req)
     levers = _levers_for(base)
     factors = [Factor(name=n, low=lo, high=hi) for n, lo, hi in levers]

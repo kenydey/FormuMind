@@ -64,6 +64,19 @@ export interface OptimizationResult {
   objectives: ObjectiveSpec[];
   history: number[];
   top_formulations: Formulation[];
+  engine?: string;
+}
+
+export interface ActiveDoeResult {
+  plan: DOEPlan;
+  campaign_state: string | null;
+  engine: string;
+}
+
+export interface BaybeRecommendResult {
+  plan: DOEPlan;
+  campaign_state: string;
+  engine: string;
 }
 
 export interface TaskStatus {
@@ -154,9 +167,40 @@ export const api = {
     query = ""
   ) =>
     post<ResearchResult>("/api/research", { ...req, sources, source_types: sourceTypes, query }),
-  doe: (req: Requirement, design: string) => post<DOEPlan>(`/api/doe?design=${design}`, req),
-  startOptimize: (req: Requirement, iterations: number) =>
-    post<{ task_id: string; poll_url: string }>("/api/optimize", { requirement: req, iterations }),
+  doe: (req: Requirement, design: string, engine = "auto") =>
+    post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
+  activeDoe: (
+    req: Requirement,
+    opts: {
+      n_suggest?: number;
+      doe_design?: string;
+      engine?: string;
+      doe_engine?: string;
+      campaign_state?: string | null;
+      existing_records?: ExperimentRecord[];
+    } = {}
+  ) =>
+    post<ActiveDoeResult>("/api/doe/active", {
+      ...req,
+      existing_records: opts.existing_records,
+      n_suggest: opts.n_suggest ?? 4,
+      doe_design: opts.doe_design ?? "lhs",
+      engine: opts.engine ?? "auto",
+      doe_engine: opts.doe_engine ?? "auto",
+      campaign_state: opts.campaign_state ?? null,
+    }),
+  startOptimize: (
+    req: Requirement,
+    iterations: number,
+    engine = "auto",
+    campaignState?: string | null
+  ) =>
+    post<{ task_id: string; poll_url: string }>("/api/optimize", {
+      requirement: req,
+      iterations,
+      engine,
+      campaign_state: campaignState ?? null,
+    }),
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
@@ -233,11 +277,19 @@ export const api = {
   optimizeProcess: (req: ProcessOptRequest) =>
     post<ProcessOptResult>("/api/process-optimize", req),
 
-  loopIterate: (req: Requirement, optimize_iterations = 24, n_suggest = 4) =>
+  loopIterate: (
+    req: Requirement,
+    optimize_iterations = 24,
+    n_suggest = 4,
+    optimize_engine = "auto",
+    doe_engine = "auto"
+  ) =>
     post<{ task_id: string; poll_url: string }>("/api/loop/iterate", {
       ...req,
       optimize_iterations,
       n_suggest,
+      optimize_engine,
+      doe_engine,
     }),
 
   parseIntent: (text: string) =>

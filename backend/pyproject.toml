@@ -62,6 +62,10 @@ embedding = ["sentence-transformers>=2.6"]
 # True Gaussian-process optimizer (BoTorch + gpytorch + torch CPU).
 # Activates BotorchOptimizer (GP + Log-EI acquisition) in optimizer.py.
 bo = ["botorch>=0.10", "gpytorch>=1.11", "torch>=2.2"]
+# Classic DOE designs (LHS, CCD, mixture simplex, Sobol, …).
+pydoe = ["pydoe>=0.3"]
+# Enterprise Bayesian back-end for constrained active learning.
+baybe = ["baybe>=0.14", "pandas>=2.0"]
 # CIELAB / CIEDE2000 colorimetry. Pure Python, no GPU.
 # Activates delta_e + lab_L/a/b metrics in the predictor.
 color = ["colour-science>=0.4"]

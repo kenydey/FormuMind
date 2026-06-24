@@ -19,8 +19,16 @@ router = APIRouter(prefix="/api", tags=["loop"])
 def iterate_loop(payload: LoopRequest) -> TaskHandle:
     from ..domain.schemas import Requirement
 
-    req = Requirement(**payload.model_dump(exclude={"optimize_iterations", "n_suggest"}))
+    req = Requirement(
+        **payload.model_dump(
+            exclude={"optimize_iterations", "n_suggest", "optimize_engine", "doe_engine"}
+        )
+    )
     task_id = task_manager.submit_loop(
-        req, iterations=payload.optimize_iterations, n_suggest=payload.n_suggest
+        req,
+        iterations=payload.optimize_iterations,
+        n_suggest=payload.n_suggest,
+        optimize_engine=payload.optimize_engine,
+        doe_engine=payload.doe_engine,
     )
     return TaskHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")

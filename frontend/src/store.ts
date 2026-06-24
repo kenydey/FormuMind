@@ -75,6 +75,12 @@ interface AppState {
   // DOE feedback loop
   doePlan: DOEPlan | null;
   measured: Record<number, number>;
+  doeEngine: "auto" | "native" | "pydoe";
+  alEngine: "auto" | "legacy" | "baybe";
+  optimizeEngine: "auto" | "baybe" | "legacy";
+  loopDoeEngine: "auto" | "legacy" | "baybe";
+  campaignState: string | null;
+  lastAlEngine: string | null;
   models: ModelInfo[];
   modelHistory: ModelInfo[][];   // one entry per training event; for R² trend charts
   trainMessage: string;
@@ -113,6 +119,10 @@ interface AppState {
   runDeepResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
   generateDoe: (design: string) => Promise<void>;
+  setDoeEngine: (engine: "auto" | "native" | "pydoe") => void;
+  setAlEngine: (engine: "auto" | "legacy" | "baybe") => void;
+  setOptimizeEngine: (engine: "auto" | "baybe" | "legacy") => void;
+  setLoopDoeEngine: (engine: "auto" | "legacy" | "baybe") => void;
   setMeasured: (runId: number, value: number) => void;
   submitResults: () => Promise<void>;
   refreshModels: () => Promise<void>;
@@ -199,6 +209,12 @@ export const useStore = create<AppState>()(
       error: null,
       doePlan: null,
       measured: {},
+      doeEngine: "auto",
+      alEngine: "auto",
+      optimizeEngine: "auto",
+      loopDoeEngine: "auto",
+      campaignState: null,
+      lastAlEngine: null,
       models: [],
       modelHistory: [],
       trainMessage: "",
@@ -316,14 +332,15 @@ export const useStore = create<AppState>()(
       runOptimize: async () => {
         set({ busy: "optimizing", error: null });
         try {
-          const { task_id } = await api.startOptimize(get().requirement, 24);
+          const { requirement, optimizeEngine, campaignState } = get();
+          const { task_id } = await api.startOptimize(requirement, 24, optimizeEngine, campaignState);
           const final = await pollTask(task_id, (t) => set({ task: t }));
           const opt = final.result as unknown as OptimizationResult | null;
           if (opt) {
             const leaderboard = opt.top_formulations;
             const optHistory = opt.history;
             set({ leaderboard, optimizationHistory: optHistory });
-            const { requirement, models, history } = get();
+            const { models, history } = get();
             set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, optHistory)) });
           }
         } catch (e) {
@@ -336,12 +353,11 @@ export const useStore = create<AppState>()(
       runLoop: async () => {
         set({ busy: "looping", error: null });
         try {
-          const { task_id } = await api.loopIterate(get().requirement, 24, 4);
+          const { requirement, optimizeEngine, loopDoeEngine } = get();
+          const { task_id } = await api.loopIterate(requirement, 24, 4, optimizeEngine, loopDoeEngine);
           const final = await pollTask(task_id, (t) => set({ task: t }));
           const report = final.result as unknown as LoopReport | null;
           if (report) {
-            // Refresh leaderboard from the optimization, DOE from the next batch,
-            // and append an RMSE snapshot for the closed-loop trend.
             const leaderboard = report.optimization.top_formulations;
             set((s) => ({
               loopReport: report,
@@ -351,6 +367,7 @@ export const useStore = create<AppState>()(
               measured: {},
               models: report.model_info,
               rmseHistory: [...s.rmseHistory, report.rmse_by_metric],
+              lastAlEngine: report.engine,
             }));
             const { requirement, models, history } = get();
             set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, report.optimization.history)) });
@@ -386,32 +403,34 @@ export const useStore = create<AppState>()(
       generateDoe: async (design) => {
         set({ busy: "doe", error: null });
         try {
-          let doePlan;
+          const { requirement, doeEngine, alEngine, campaignState } = get();
           if (design === "ai_active") {
-            // Active learning endpoint: annotates most informative runs
-            const req = get().requirement;
-            const res = await fetch("/api/doe/active", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ...req,
-                existing_records: [],
-                n_suggest: 4,
-                doe_design: "lhs",
-              }),
+            const result = await api.activeDoe(requirement, {
+              engine: alEngine,
+              doe_engine: doeEngine,
+              campaign_state: campaignState,
             });
-            if (!res.ok) throw new Error(`/api/doe/active -> ${res.status}`);
-            doePlan = await res.json();
+            set({
+              doePlan: result.plan,
+              measured: {},
+              campaignState: result.campaign_state,
+              lastAlEngine: result.engine,
+            });
           } else {
-            doePlan = await api.doe(get().requirement, design);
+            const plan = await api.doe(requirement, design, doeEngine);
+            set({ doePlan: plan, measured: {} });
           }
-          set({ doePlan, measured: {} });
         } catch (e) {
           set({ error: String(e) });
         } finally {
           set({ busy: "idle" });
         }
       },
+
+      setDoeEngine: (engine) => set({ doeEngine: engine }),
+      setAlEngine: (engine) => set({ alEngine: engine }),
+      setOptimizeEngine: (engine) => set({ optimizeEngine: engine }),
+      setLoopDoeEngine: (engine) => set({ loopDoeEngine: engine }),
 
       setMeasured: (runId, value) =>
         set((s) => ({ measured: { ...s.measured, [runId]: value } })),
@@ -678,6 +697,11 @@ export const useStore = create<AppState>()(
         history: state.history,
         llmConfig: state.llmConfig,
         activeConstraints: state.activeConstraints,
+        campaignState: state.campaignState,
+        doeEngine: state.doeEngine,
+        alEngine: state.alEngine,
+        optimizeEngine: state.optimizeEngine,
+        loopDoeEngine: state.loopDoeEngine,
       }),
     }
   )

@@ -97,7 +97,14 @@ class TaskManager:
                 self._tasks[task_id] = status
         return status
 
-    def submit_optimization(self, req: Requirement, iterations: int | None = None) -> str:
+    def submit_optimization(
+        self,
+        req: Requirement,
+        iterations: int | None = None,
+        *,
+        engine: str = "auto",
+        campaign_state: str | None = None,
+    ) -> str:
         task_id = uuid.uuid4().hex
         self._register(
             task_id,
@@ -110,7 +117,13 @@ class TaskManager:
                 def progress(p: float, msg: str) -> None:
                     self._set(task_id, progress=round(p, 3), message=msg)
 
-                result = workflow.run_optimization(req, iterations=iterations, progress_cb=progress)
+                result = workflow.run_optimization(
+                    req,
+                    iterations=iterations,
+                    progress_cb=progress,
+                    engine=engine,
+                    campaign_state=campaign_state,
+                )
                 self._set(
                     task_id,
                     state=TaskState.completed,
@@ -125,7 +138,13 @@ class TaskManager:
         return task_id
 
     def submit_loop(
-        self, req: Requirement, iterations: int | None = None, n_suggest: int = 4
+        self,
+        req: Requirement,
+        iterations: int | None = None,
+        n_suggest: int = 4,
+        *,
+        optimize_engine: str = "auto",
+        doe_engine: str = "auto",
     ) -> str:
         """Run one self-driving loop turn (optimize + next-DOE) in the background."""
         from ..services import auto_loop
@@ -147,6 +166,8 @@ class TaskManager:
                     optimize_iterations=iterations or 24,
                     n_suggest=n_suggest,
                     progress_cb=progress,
+                    optimize_engine=optimize_engine,
+                    doe_engine=doe_engine,
                 )
                 self._set(
                     task_id,

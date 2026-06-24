@@ -16,22 +16,44 @@ function RmseTrend({ history, metric }: { history: Record<string, number>[]; met
 }
 
 export default function LoopModal() {
-  const { runLoop, busy, loopReport, rmseHistory, doePlan } = useStore();
+  const { runLoop, busy, loopReport, rmseHistory, doePlan, optimizeEngine, loopDoeEngine, setOptimizeEngine, setLoopDoeEngine } = useStore();
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-slate-400 max-w-md">
           一键自驱动闭环：读取已录入实验数据 → 用最新混合模型寻优 → 自动生成下一批主动学习
           DOE。形成 实验→数据→优化→新实验 的数字闭环。
         </p>
-        <button
-          disabled={busy !== "idle"}
-          onClick={runLoop}
-          className="shrink-0 border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-1.5 text-xs disabled:opacity-40"
-        >
-          {busy === "looping" ? "迭代中…" : "🔄 迭代一轮闭环"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <select
+            value={optimizeEngine}
+            onChange={(e) => setOptimizeEngine(e.target.value as "auto" | "baybe" | "legacy")}
+            className="bg-ink border border-edge rounded px-2 py-1 text-[10px]"
+            title="闭环寻优引擎"
+          >
+            <option value="auto">寻优：自动</option>
+            <option value="legacy">寻优：经典链</option>
+            <option value="baybe">寻优：baybe</option>
+          </select>
+          <select
+            value={loopDoeEngine}
+            onChange={(e) => setLoopDoeEngine(e.target.value as "auto" | "legacy" | "baybe")}
+            className="bg-ink border border-edge rounded px-2 py-1 text-[10px]"
+            title="下一批 DOE 引擎"
+          >
+            <option value="auto">DOE：自动</option>
+            <option value="legacy">DOE：经典 EI</option>
+            <option value="baybe">DOE：baybe</option>
+          </select>
+          <button
+            disabled={busy !== "idle"}
+            onClick={runLoop}
+            className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-1.5 text-xs disabled:opacity-40"
+          >
+            {busy === "looping" ? "迭代中…" : "🔄 迭代一轮闭环"}
+          </button>
+        </div>
       </div>
 
       {loopReport && (

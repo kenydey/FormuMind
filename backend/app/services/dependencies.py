@@ -75,6 +75,9 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("python-docx", "docx", "file_ingest", "DOCX 解析回退"),
     # ── Export ─────────────────────────────────────────────────────────────
     Dependency("openpyxl", "openpyxl", "export", "DOE / 结果 Excel 导出"),
+    Dependency("pydoe", "pydoe", "pydoe", "pyDOE 经典实验设计（LHS/CCD/混合物/Sobol）"),
+    Dependency("baybe", "baybe", "baybe", "BayBE 约束贝叶斯主动学习 Campaign"),
+    Dependency("pandas", "pandas", "baybe", "BayBE 测量数据 DataFrame 依赖"),
     # ── NotebookLM ─────────────────────────────────────────────────────────
     Dependency(
         "notebooklm-py", "notebooklm", "notebooklm", "NotebookLM 资料来源（非官方 SDK + 浏览器）",

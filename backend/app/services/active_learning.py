@@ -4,10 +4,14 @@ Uses the currently trained surrogate models (or the empirical predictor when
 no lab data is available) to score un-run DOE grid points by Expected
 Improvement, then returns the N most informative experiments. Replaces the
 random sampling in standard DOE with surrogate-guided selection.
+
+v0.7 adds optional baybe Campaign engine for continuous constrained recommendations.
 """
 from __future__ import annotations
 
-from ..domain.schemas import DOEPlan, DOERun, ExperimentRecord, ProductDomain, Requirement
+import uuid
+
+from ..domain.schemas import ActiveDoeResult, DOEPlan, DOERun, ExperimentRecord, ProductDomain, Requirement
 
 
 _MIN_TRAIN_SAMPLES = 3  # minimum records needed before surrogate-guided selection
@@ -111,27 +115,24 @@ def suggest_next_experiments(
     return result
 
 
-def active_learning_doe(
+def _legacy_active_learning_doe(
     req: Requirement,
-    existing: list[ExperimentRecord] | None = None,
-    n_suggest: int = 4,
-    design: str = "lhs",
+    existing: list[ExperimentRecord] | None,
+    n_suggest: int,
+    design: str,
+    *,
+    doe_engine: str = "auto",
 ) -> DOEPlan:
-    """Generate a DOE plan and annotate the most informative runs.
-
-    The plan is first built with the requested design, then the top
-    n_suggest runs are flagged with ``ai_suggested=True``.
-    """
     from ..pipeline.workflow import build_doe
 
-    plan = build_doe(req, design=design)
-    plan.notes = f"AI 主动选点 (n={n_suggest}, design={design})"
+    plan = build_doe(req, design=design, engine=doe_engine)
+    plan.notes = f"engine=legacy; AI 主动选点 (n={n_suggest}, design={design})"
 
     suggested_ids = {
         r.run_id
         for r in suggest_next_experiments(plan, existing or [], n_suggest=n_suggest)
     }
-    new_runs = [
+    plan.runs = [
         DOERun(
             run_id=r.run_id,
             coded=r.coded,
@@ -140,5 +141,58 @@ def active_learning_doe(
         )
         for r in plan.runs
     ]
-    plan.runs = new_runs
     return plan
+
+
+def active_learning_doe(
+    req: Requirement,
+    existing: list[ExperimentRecord] | None = None,
+    n_suggest: int = 4,
+    design: str = "lhs",
+    *,
+    engine: str = "auto",
+    campaign_state: str | None = None,
+    doe_engine: str = "auto",
+) -> ActiveDoeResult:
+    """Generate a DOE plan and annotate the most informative runs."""
+    eng = (engine or "auto").lower()
+    existing = existing or []
+    if not existing:
+        from ..services.training import registry
+
+        existing = list(registry.records_for(req.domain))
+
+    if eng in ("baybe", "auto"):
+        from ..services.engines.baybe_engine import BaybeCampaignEngine
+        from ..services.engines.doe_registry import baybe_available
+
+        if eng == "baybe" or baybe_available():
+            try:
+                baybe = BaybeCampaignEngine()
+                if baybe.available():
+                    result = baybe.recommend(
+                        req,
+                        campaign_state=campaign_state,
+                        measurements=existing,
+                        batch_size=n_suggest,
+                        design=f"baybe_{design}",
+                    )
+                    result.plan.plan_id = uuid.uuid4().hex
+                    result.plan.domain = req.domain
+                    from ..pipeline.workflow import _cache_plan
+
+                    _cache_plan(result.plan)
+                    return ActiveDoeResult(
+                        plan=result.plan,
+                        campaign_state=result.campaign_state,
+                        engine="baybe",
+                    )
+            except Exception:
+                if eng == "baybe":
+                    raise
+
+    plan = _legacy_active_learning_doe(req, existing, n_suggest, design, doe_engine=doe_engine)
+    from ..pipeline.workflow import _cache_plan
+
+    _cache_plan(plan)
+    return ActiveDoeResult(plan=plan, campaign_state=None, engine="legacy")

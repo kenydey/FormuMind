@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api", tags=["optimize"])
 class OptimizeRequest(BaseModel):
     requirement: Requirement
     iterations: int | None = None
+    engine: str = "auto"
+    campaign_state: str | None = None
 
 
 class TaskHandle(BaseModel):
@@ -22,5 +24,10 @@ class TaskHandle(BaseModel):
 
 @router.post("/optimize", response_model=TaskHandle)
 def start_optimization(payload: OptimizeRequest) -> TaskHandle:
-    task_id = task_manager.submit_optimization(payload.requirement, payload.iterations)
+    task_id = task_manager.submit_optimization(
+        payload.requirement,
+        payload.iterations,
+        engine=payload.engine,
+        campaign_state=payload.campaign_state,
+    )
     return TaskHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")

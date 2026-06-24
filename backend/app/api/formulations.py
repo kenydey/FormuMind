@@ -9,12 +9,21 @@ from ..domain.schemas import Formulation, ProductDomain, Requirement, Substrate
 router = APIRouter(prefix="/api", tags=["metadata"])
 
 
+from ..services.engines.pydoe_engine import PYDOE_DESIGNS
+
+_NATIVE_DESIGNS = ["full_factorial", "fractional_factorial", "plackett_burman", "ccd", "lhs"]
+_ALL_DESIGNS = _NATIVE_DESIGNS + [d for d in PYDOE_DESIGNS if d not in _NATIVE_DESIGNS]
+
+
 @router.get("/meta")
 def metadata() -> dict:
     return {
         "domains": [d.value for d in ProductDomain],
         "substrates": [s.value for s in Substrate],
-        "designs": ["full_factorial", "fractional_factorial", "plackett_burman", "ccd", "lhs"],
+        "designs": _ALL_DESIGNS,
+        "doe_engines": ["auto", "native", "pydoe"],
+        "al_engines": ["auto", "legacy", "baybe"],
+        "pydoe_designs": list(PYDOE_DESIGNS),
     }
 
 

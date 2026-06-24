@@ -89,23 +89,37 @@ function ModelCard({ m, trend }: { m: ModelInfo; trend: number[] }) {
   );
 }
 
-const DESIGNS = [
+const NATIVE_DESIGNS = [
   { value: "full_factorial", label: "全因子" },
   { value: "fractional_factorial", label: "部分因子" },
   { value: "plackett_burman", label: "Plackett-Burman" },
   { value: "ccd", label: "中心复合 CCD" },
   { value: "lhs", label: "拉丁超立方" },
-  { value: "ai_active", label: "🧠 AI 主动选点" },
 ];
+
+const PYDOE_DESIGNS = [
+  { value: "bbdesign", label: "Box-Behnken (pyDOE)" },
+  { value: "simplex_lattice", label: "混合物 simplex (pyDOE)" },
+  { value: "sobol", label: "Sobol 序列 (pyDOE)" },
+];
+
+const AI_DESIGN = { value: "ai_active", label: "🧠 AI 主动选点" };
 
 export default function DoeResultsPanel() {
   const {
     requirement, doePlan, measured, models, modelHistory, trainMessage,
     busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv,
+    doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
   } = useStore();
   const metric = OBJECTIVE_METRIC[requirement.domain];
 
-  // Build per-model R² trend from modelHistory.
+  const designs =
+    doeEngine === "pydoe"
+      ? [...NATIVE_DESIGNS.filter((d) => ["ccd", "lhs"].includes(d.value)), ...PYDOE_DESIGNS, AI_DESIGN]
+      : doeEngine === "native"
+        ? [...NATIVE_DESIGNS, AI_DESIGN]
+        : [...NATIVE_DESIGNS, ...PYDOE_DESIGNS, AI_DESIGN];
+
   function trendFor(m: ModelInfo): number[] {
     return modelHistory
       .flatMap((snapshot) =>
@@ -115,15 +129,35 @@ export default function DoeResultsPanel() {
 
   return (
     <section className="glass rounded-xl p-4 overflow-y-auto">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="text-sm uppercase tracking-widest text-accent2">DOE 实验结果回灌 · Feedback</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            value={doeEngine}
+            onChange={(e) => setDoeEngine(e.target.value as "auto" | "native" | "pydoe")}
+            className="bg-ink border border-edge rounded px-2 py-1 text-xs"
+            title="冷启动 DOE 引擎"
+          >
+            <option value="auto">DOE 引擎：自动</option>
+            <option value="native">经典 native</option>
+            <option value="pydoe">增强 pydoe</option>
+          </select>
+          <select
+            value={alEngine}
+            onChange={(e) => setAlEngine(e.target.value as "auto" | "legacy" | "baybe")}
+            className="bg-ink border border-edge rounded px-2 py-1 text-xs"
+            title="主动学习引擎（AI 选点时生效）"
+          >
+            <option value="auto">AL 引擎：自动</option>
+            <option value="legacy">经典 EI</option>
+            <option value="baybe">baybe Campaign</option>
+          </select>
           <select
             id="doe-design"
             defaultValue="ccd"
             className="bg-ink border border-edge rounded px-2 py-1 text-xs"
           >
-            {DESIGNS.map((d) => (
+            {designs.map((d) => (
               <option key={d.value} value={d.value}>
                 {d.label}
               </option>
@@ -169,7 +203,15 @@ export default function DoeResultsPanel() {
       ) : (
         <>
           <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="text-[11px] text-slate-500 min-w-0 truncate">{doePlan.notes}</span>
+            <span className="text-[11px] text-slate-500 min-w-0 truncate">
+              {doePlan.notes}
+              {lastAlEngine && (
+                <span className="ml-2 text-violet-400 font-mono">AL={lastAlEngine}</span>
+              )}
+              {campaignState && (
+                <span className="ml-2 text-slate-600" title="baybe Campaign 状态已保存到会话">· campaign ✓</span>
+              )}
+            </span>
             <div className="flex gap-1.5 shrink-0">
               <button
                 onClick={() => exportDoe("csv")}
@@ -204,11 +246,11 @@ export default function DoeResultsPanel() {
                 {doePlan.runs.map((run) => (
                   <tr
                     key={run.run_id}
-                    className={`border-t border-edge/40 ${(run as { ai_suggested?: boolean }).ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
+                    className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
                   >
                     <td className="px-2 py-1 text-slate-500">
                       {run.run_id}
-                      {(run as { ai_suggested?: boolean }).ai_suggested && (
+                      {run.ai_suggested && (
                         <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
                       )}
                     </td>

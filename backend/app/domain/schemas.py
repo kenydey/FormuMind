@@ -160,6 +160,22 @@ class DOEPlan(BaseModel):
     domain: ProductDomain | None = None  # carried so exported runs round-trip on import
 
 
+class BaybeRecommendResult(BaseModel):
+    """Stateless baybe roundtrip payload (not persisted to DB)."""
+
+    plan: DOEPlan
+    campaign_state: str
+    engine: str = "baybe"
+
+
+class ActiveDoeResult(BaseModel):
+    """Active-learning DOE response — plan plus optional baybe campaign state."""
+
+    plan: DOEPlan
+    campaign_state: str | None = None
+    engine: str = "legacy"
+
+
 class OptimizationResult(BaseModel):
     iterations: int
     objective: str
@@ -273,6 +289,8 @@ class LoopRequest(Requirement):
 
     optimize_iterations: int = 24
     n_suggest: int = 4
+    optimize_engine: str = "auto"
+    doe_engine: str = "auto"
 
 
 class LoopReport(BaseModel):

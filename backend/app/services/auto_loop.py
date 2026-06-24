@@ -34,6 +34,9 @@ def loop_iterate(
     optimize_iterations: int = 24,
     n_suggest: int = 4,
     progress_cb: Callable[[float, str], None] | None = None,
+    *,
+    optimize_engine: str = "auto",
+    doe_engine: str = "auto",
 ) -> LoopReport:
     """Run one full turn of the self-driving loop and bundle the result."""
     from . import active_learning
@@ -49,18 +52,26 @@ def loop_iterate(
         progress_cb(0.1, "optimizing with latest models")
 
     def _opt_progress(p: float, msg: str) -> None:
-        # Map the optimizer's 0..1 into the 0.1..0.85 band of the loop.
         if progress_cb:
             progress_cb(0.1 + p * 0.75, msg)
 
     optimization = workflow.run_optimization(
-        req, iterations=optimize_iterations, progress_cb=_opt_progress
+        req,
+        iterations=optimize_iterations,
+        progress_cb=_opt_progress,
+        engine=optimize_engine,
+        existing_records=records,
     )
 
     if progress_cb:
         progress_cb(0.9, "selecting next experiments")
-    next_doe = active_learning.active_learning_doe(
-        req, existing=records, n_suggest=n_suggest, design="lhs"
+    next_result = active_learning.active_learning_doe(
+        req,
+        existing=records,
+        n_suggest=n_suggest,
+        design="lhs",
+        engine=doe_engine,
+        doe_engine=doe_engine,
     )
 
     if progress_cb:
@@ -72,6 +83,6 @@ def loop_iterate(
         model_info=model_info,
         rmse_by_metric=rmse,
         optimization=optimization,
-        next_doe=next_doe,
+        next_doe=next_result.plan,
         engine=optimization.engine,
     )
