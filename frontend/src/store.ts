@@ -495,7 +495,7 @@ export const useStore = create<AppState>()(
       generateDoe: async (design) => {
         set({ busy: "doe", error: null });
         try {
-          const { requirement, doeEngine, alEngine, campaignState } = get();
+          const { requirement, doeEngine, alEngine, campaignState, workbenchCampaignId } = get();
           let plan: DOEPlan;
           let nextCampaignState = campaignState;
           let nextAlEngine: string | null = get().lastAlEngine;
@@ -504,6 +504,7 @@ export const useStore = create<AppState>()(
               engine: alEngine,
               doe_engine: doeEngine,
               campaign_state: campaignState,
+              workbench_campaign_id: workbenchCampaignId,
             });
             plan = result.plan;
             nextCampaignState = result.campaign_state ?? campaignState;

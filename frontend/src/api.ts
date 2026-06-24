@@ -263,6 +263,7 @@ export const api = {
       engine?: string;
       doe_engine?: string;
       campaign_state?: string | null;
+      workbench_campaign_id?: number | null;
       existing_records?: ExperimentRecord[];
     } = {}
   ) =>
@@ -274,6 +275,23 @@ export const api = {
       engine: opts.engine ?? "auto",
       doe_engine: opts.doe_engine ?? "auto",
       campaign_state: opts.campaign_state ?? null,
+      workbench_campaign_id: opts.workbench_campaign_id ?? null,
+    }),
+  baybeRecommend: (
+    req: Requirement,
+    opts: {
+      batch_size?: number;
+      campaign_state?: string | null;
+      workbench_campaign_id?: number | null;
+      existing_records?: ExperimentRecord[];
+    } = {}
+  ) =>
+    post<BaybeRecommendResult>("/api/baybe/recommend", {
+      ...req,
+      existing_records: opts.existing_records ?? [],
+      batch_size: opts.batch_size ?? 4,
+      campaign_state: opts.campaign_state ?? null,
+      workbench_campaign_id: opts.workbench_campaign_id ?? null,
     }),
   startOptimize: (
     req: Requirement,

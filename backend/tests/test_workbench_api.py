@@ -95,3 +95,39 @@ def test_fetch_campaign_data_for_baybe():
         assert float(measurements_Y.iloc[0]["salt_spray_hours"]) == 900.0
         merged = pd.concat([actual_X, measurements_Y], axis=1)
         assert "salt_spray_hours" in merged.columns
+
+
+def test_baybe_recommend_accepts_workbench_campaign_id(tmp_path):
+    client = _client_with_memory_db(tmp_path)
+    created = client.post("/api/experiments/workbench/campaigns", json={"plan": _plan().model_dump()}).json()
+    campaign_id = created["campaign_id"]
+    row = created["rows"][0]
+    client.put(
+        "/api/experiments/workbench/sync",
+        json={
+            "campaign_id": campaign_id,
+            "rows": [
+                {
+                    "id": row["id"],
+                    "status": "Pending",
+                    "actual_params": row["planned_params"],
+                    "measurements": {"salt_spray_hours": 880.0},
+                }
+            ],
+        },
+    )
+
+    res = client.post(
+        "/api/baybe/recommend",
+        json={
+            "domain": ProductDomain.anticorrosion_coating.value,
+            "salt_spray_hours": 500,
+            "workbench_campaign_id": campaign_id,
+            "batch_size": 2,
+        },
+    )
+    assert res.status_code in (200, 503)
+    if res.status_code == 200:
+        body = res.json()
+        assert len(body["plan"]["runs"]) == 2
+        assert body["campaign_state"]

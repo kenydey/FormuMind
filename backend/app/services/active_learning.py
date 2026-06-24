@@ -153,6 +153,7 @@ def active_learning_doe(
     engine: str = "auto",
     campaign_state: str | None = None,
     doe_engine: str = "auto",
+    workbench_campaign_id: int | None = None,
 ) -> ActiveDoeResult:
     """Generate a DOE plan and annotate the most informative runs."""
     eng = (engine or "auto").lower()
@@ -170,13 +171,18 @@ def active_learning_doe(
             try:
                 baybe = BaybeCampaignEngine()
                 if baybe.available():
-                    result = baybe.recommend(
-                        req,
-                        campaign_state=campaign_state,
-                        measurements=existing,
-                        batch_size=n_suggest,
-                        design=f"baybe_{design}",
-                    )
+                    from ..db.database import default_session_factory
+
+                    with default_session_factory()() as db:
+                        result = baybe.recommend(
+                            req,
+                            campaign_state=campaign_state,
+                            measurements=existing,
+                            batch_size=n_suggest,
+                            design=f"baybe_{design}",
+                            workbench_campaign_id=workbench_campaign_id,
+                            db=db,
+                        )
                     result.plan.plan_id = uuid.uuid4().hex
                     result.plan.domain = req.domain
                     from ..pipeline.workflow import _cache_plan

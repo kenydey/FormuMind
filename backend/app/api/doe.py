@@ -9,6 +9,7 @@ from fastapi.responses import Response
 
 import uuid
 
+from ..db.database import default_session_factory
 from ..domain.schemas import ActiveDoeResult, BaybeRecommendResult, DOEPlan, ExperimentRecord, Requirement
 from ..pipeline import workflow
 from ..services import io_export
@@ -45,6 +46,7 @@ class ActiveDoeRequest(Requirement):
     engine: str = "auto"
     doe_engine: str = "auto"
     campaign_state: str | None = None
+    workbench_campaign_id: int | None = None
 
 
 class BaybeRecommendRequest(Requirement):
@@ -53,6 +55,7 @@ class BaybeRecommendRequest(Requirement):
     existing_records: list[ExperimentRecord] = []
     batch_size: int = 4
     campaign_state: str | None = None
+    workbench_campaign_id: int | None = None
 
 
 @router.post("/doe/active", response_model=ActiveDoeResult)
@@ -67,6 +70,7 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
                 "engine",
                 "doe_engine",
                 "campaign_state",
+                "workbench_campaign_id",
             }
         )
     )
@@ -78,22 +82,35 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
         engine=req.engine,
         campaign_state=req.campaign_state,
         doe_engine=req.doe_engine,
+        workbench_campaign_id=req.workbench_campaign_id,
     )
 
 
 @router.post("/baybe/recommend", response_model=BaybeRecommendResult)
 def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
     """Pure baybe Campaign recommendation with JSON state roundtrip."""
-    base_req = Requirement(**req.model_dump(exclude={"existing_records", "batch_size", "campaign_state"}))
+    base_req = Requirement(
+        **req.model_dump(
+            exclude={
+                "existing_records",
+                "batch_size",
+                "campaign_state",
+                "workbench_campaign_id",
+            }
+        )
+    )
     engine = BaybeCampaignEngine()
     if not engine.available():
         raise HTTPException(status_code=503, detail="baybe is not installed")
-    result = engine.recommend(
-        base_req,
-        campaign_state=req.campaign_state,
-        measurements=req.existing_records,
-        batch_size=req.batch_size,
-    )
+    with default_session_factory()() as db:
+        result = engine.recommend(
+            base_req,
+            campaign_state=req.campaign_state,
+            measurements=req.existing_records,
+            batch_size=req.batch_size,
+            workbench_campaign_id=req.workbench_campaign_id,
+            db=db,
+        )
     result.plan.plan_id = uuid.uuid4().hex
     result.plan.domain = base_req.domain
     workflow._cache_plan(result.plan)
