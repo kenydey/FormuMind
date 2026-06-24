@@ -1,6 +1,8 @@
 """Baybe Campaign engine — stateless via JSON serialization."""
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from ...domain.schemas import (
     BaybeRecommendResult,
     ExperimentRecord,
@@ -21,6 +23,45 @@ from .adapters.baybe_space_builder import build_searchspace, factors_for_require
 from .adapters.doe_adapter import dataframe_to_doe_plan
 from .adapters.measurements_adapter import records_to_dataframe, surrogate_measurements_from_plan
 from .doe_registry import baybe_available, build_doe_plan
+
+
+def fetch_campaign_data_for_baybe(campaign_id: int, db: Session):
+    """Load completed workbench rows for BayBE ``add_measurements``.
+
+    Returns ``(actual_X, measurements_Y)`` where ``actual_X`` holds executed
+    formulation parameters and ``measurements_Y`` holds lab observations.
+    Concatenate column-wise before passing to BayBE when a single frame is needed.
+    """
+    import pandas as pd
+
+    from ...db.models import ExperimentRecord as WorkbenchRow
+
+    rows = (
+        db.query(WorkbenchRow)
+        .filter(
+            WorkbenchRow.campaign_id == campaign_id,
+            WorkbenchRow.status == "Completed",
+        )
+        .order_by(WorkbenchRow.id)
+        .all()
+    )
+    if not rows:
+        return pd.DataFrame(), pd.DataFrame()
+
+    actual_X = pd.DataFrame([dict(r.actual_params or r.planned_params or {}) for r in rows])
+    measurements_Y = pd.DataFrame([dict(r.measurements or {}) for r in rows])
+    return actual_X, measurements_Y
+
+
+def workbench_dataframes_to_baybe(actual_X, measurements_Y):
+    """Merge workbench parameter and measurement frames for ``add_measurements``."""
+    import pandas as pd
+
+    if actual_X is None or getattr(actual_X, "empty", True):
+        return pd.DataFrame()
+    if measurements_Y is None or getattr(measurements_Y, "empty", True):
+        return actual_X.copy()
+    return pd.concat([actual_X.reset_index(drop=True), measurements_Y.reset_index(drop=True)], axis=1)
 
 
 class BaybeCampaignEngine:
@@ -50,6 +91,8 @@ class BaybeCampaignEngine:
         measurements: list[ExperimentRecord] | None = None,
         batch_size: int = 4,
         design: str = "baybe_active",
+        workbench_campaign_id: int | None = None,
+        db: Session | None = None,
     ) -> BaybeRecommendResult:
         if not self.available():
             raise RuntimeError("baybe is not installed (pip install -e '.[baybe,bo,science]')")
@@ -65,6 +108,17 @@ class BaybeCampaignEngine:
 
         metric = primary_metric(req)
         df_meas = records_to_dataframe(measurements, req)
+        if workbench_campaign_id is not None and db is not None:
+            actual_X, measurements_Y = fetch_campaign_data_for_baybe(workbench_campaign_id, db)
+            df_wb = workbench_dataframes_to_baybe(actual_X, measurements_Y)
+            if not df_wb.empty:
+                import pandas as pd
+
+                df_meas = (
+                    pd.concat([df_meas, df_wb], ignore_index=True)
+                    if not df_meas.empty
+                    else df_wb
+                )
         if not df_meas.empty:
             campaign.add_measurements(df_meas)
 

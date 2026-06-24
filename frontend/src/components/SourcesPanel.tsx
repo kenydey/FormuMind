@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { api, type SearchSourceType, type NotebookLMStatus, type NotebookLMLoginResult } from "../api";
+import AddSourceModal from "./AddSourceModal";
 
 const SOURCE_TYPES: { id: SearchSourceType; label: string; icon: string }[] = [
   { id: "patents", label: "专利 Patents", icon: "📄" },
@@ -41,13 +42,14 @@ export default function SourcesPanel() {
     searchSources,
     loadSourceStatus,
     openSettings,
-    uploadFile,
+    uploadFiles,
     searchBusy,
     runDeepResearch,
     deepResearchBusy,
     error,
   } = useStore();
   const fileInput = useRef<HTMLInputElement>(null);
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
 
   // Load source availability on mount so badges appear before first search
   useEffect(() => {
@@ -336,10 +338,11 @@ export default function SourcesPanel() {
               ref={fileInput}
               type="file"
               accept={ACCEPT}
+              multiple
               className="hidden"
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadFile(f);
+                const files = Array.from(e.target.files ?? []);
+                if (files.length) void uploadFiles(files);
                 e.target.value = "";
               }}
             />
@@ -354,7 +357,7 @@ export default function SourcesPanel() {
           </>
         )}
         <button
-          onClick={searchSources}
+          onClick={() => void searchSources()}
           disabled={searchBusy || sourceTypes.length === 0}
           className="flex-1 bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-1.5 text-sm disabled:opacity-40"
         >
@@ -371,6 +374,16 @@ export default function SourcesPanel() {
       >
         {deepResearchBusy ? "🔬 深度研究中…" : "🔬 深度研究"}
       </button>
+
+      <button
+        type="button"
+        onClick={() => setAddSourceOpen(true)}
+        className="shrink-0 w-full border border-edge hover:border-accent/40 text-slate-300 hover:text-accent rounded px-3 py-1.5 text-sm flex items-center justify-center gap-1"
+      >
+        + 添加数据源
+      </button>
+
+      <AddSourceModal open={addSourceOpen} onClose={() => setAddSourceOpen(false)} />
 
       {/* Search error — shown when backend is unreachable or the API returns an error */}
       {!searchBusy && error && (

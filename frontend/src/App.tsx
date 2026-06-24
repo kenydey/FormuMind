@@ -24,11 +24,12 @@ function ClockIcon() {
 }
 
 export default function App() {
-  const { toggleHistory, toggleSettings, history, hydrateLlmSettings } = useStore();
+  const { toggleHistory, toggleSettings, projects, initProjects, hydrateLlmSettings } = useStore();
 
   useEffect(() => {
     hydrateLlmSettings();
-  }, [hydrateLlmSettings]);
+    void initProjects();
+  }, [hydrateLlmSettings, initProjects]);
 
   return (
     <div className="h-screen flex flex-col bg-ink text-slate-300">
@@ -49,13 +50,13 @@ export default function App() {
         <button
           onClick={toggleHistory}
           className="relative flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
-          title="历史会话"
+          title="项目历史"
         >
           <ClockIcon />
           <span>历史</span>
-          {history.length > 0 && (
+          {projects.length > 0 && (
             <span className="absolute -top-1 -right-1 text-[9px] bg-accent text-ink rounded-full w-4 h-4 flex items-center justify-center font-mono">
-              {history.length > 9 ? "9+" : history.length}
+              {projects.length > 9 ? "9+" : projects.length}
             </span>
           )}
         </button>

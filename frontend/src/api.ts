@@ -159,6 +159,38 @@ export interface TrainingReport {
   message: string;
 }
 
+export interface WorkbenchRow {
+  id: number;
+  campaign_id: number;
+  status: string;
+  planned_params: Record<string, number>;
+  actual_params: Record<string, number>;
+  measurements: Record<string, number | string>;
+}
+
+export interface WorkbenchCampaignResponse {
+  campaign_id: number;
+  name: string;
+  strategy: string;
+  status: string;
+  rows: WorkbenchRow[];
+}
+
+export interface BatchUpdateRequest {
+  campaign_id: number;
+  rows: Array<{
+    id: number;
+    status: string;
+    actual_params: Record<string, number>;
+    measurements: Record<string, number | string>;
+  }>;
+}
+
+export interface WorkbenchSyncResponse {
+  updated: number;
+  rows: WorkbenchRow[];
+}
+
 // Objective metric collected per domain (mirrors backend OBJECTIVE map).
 export const OBJECTIVE_METRIC: Record<ProductDomain, string> = {
   anticorrosion_coating: "salt_spray_hours",
@@ -185,6 +217,32 @@ async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json();
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  return res.json();
+}
+
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(path, { method: "DELETE" });
+  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  return res.json();
+}
+
+export interface ProjectDetailResponse {
+  id: string;
+  title: string;
+  headline: string;
+  domain: string;
+  created_at: string;
+  updated_at: string;
+  workspace: import("./projectWorkspace").ProjectWorkspacePayload;
 }
 
 export const api = {
@@ -236,6 +294,16 @@ export const api = {
   },
   submitExperiments: (records: ExperimentRecord[]) =>
     post<TrainingReport>("/api/experiments", { records, retrain: true }),
+  createWorkbenchCampaign: (plan: DOEPlan, name?: string, strategy?: string) =>
+    post<WorkbenchCampaignResponse>("/api/experiments/workbench/campaigns", {
+      plan,
+      name,
+      strategy,
+    }),
+  getWorkbenchCampaign: (campaignId: number) =>
+    get<WorkbenchCampaignResponse>(`/api/experiments/workbench/${campaignId}`),
+  syncWorkbench: (body: BatchUpdateRequest) =>
+    put<WorkbenchSyncResponse>("/api/experiments/workbench/sync", body),
   models: () => get<ModelInfo[]>("/api/models"),
   doeExportUrl: (planId: string, format: "csv" | "xlsx" = "csv") =>
     `/api/doe/${planId}/export?format=${format}`,
@@ -278,6 +346,45 @@ export const api = {
     if (!res.ok) throw new Error(`/api/ingest -> ${res.status}`);
     return res.json();
   },
+
+  ingestBatch: async (files: File[]): Promise<IngestResponse & { files_processed?: number }> => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f);
+    const res = await fetch("/api/ingest/batch", { method: "POST", body: fd });
+    if (!res.ok) throw new Error(`/api/ingest/batch -> ${res.status}`);
+    return res.json();
+  },
+
+  ingestUrl: (url: string) =>
+    post<IngestResponse>("/api/ingest/url", { url }),
+
+  ingestText: (text: string, title?: string) =>
+    post<IngestResponse>("/api/ingest/text", { text, title: title ?? "Pasted text" }),
+
+  listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
+
+  createProject: (title = "", requirement?: Requirement) =>
+    post<ProjectDetailResponse>("/api/projects", { title, requirement }),
+
+  getProject: (id: string) => get<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(id)}`),
+
+  updateProject: (id: string, workspace: import("./projectWorkspace").ProjectWorkspacePayload, title?: string) =>
+    put<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(id)}`, { workspace, title }),
+
+  deleteProject: (id: string) =>
+    del<{ ok: boolean }>(`/api/projects/${encodeURIComponent(id)}`),
+
+  migrateLocalProjects: (snapshots: {
+    id: string;
+    timestamp: string;
+    domain: string;
+    headline: string;
+    requirement: Requirement;
+    leaderboard: Formulation[];
+    models: ModelInfo[];
+    optimization_history: number[];
+  }[]) =>
+    post<import("./projectWorkspace").ProjectSummary[]>("/api/projects/migrate-local", { snapshots }),
 
   chat: (req: ChatRequest) => post<ChatResponse>("/api/chat", req),
 

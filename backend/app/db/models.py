@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -34,3 +34,54 @@ class ExperimentRow(Base):
     source: Mapped[str] = mapped_column(String(64), default="lab")
     label: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Campaign(Base):
+    """One AI optimization campaign (BayBE / active-learning round)."""
+
+    __tablename__ = "campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    strategy: Mapped[str] = mapped_column(String(64), default="BayBE-LHS")
+    status: Mapped[str] = mapped_column(String(32), default="IN_PROGRESS")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    records: Mapped[list["ExperimentRecord"]] = relationship(
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+        order_by="ExperimentRecord.id",
+    )
+
+
+class ExperimentRecord(Base):
+    """Single lab execution row for the AG Grid workbench (not training registry rows)."""
+
+    __tablename__ = "experiment_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="Pending")
+    planned_params: Mapped[dict] = mapped_column(JSON, nullable=False)
+    actual_params: Mapped[dict] = mapped_column(JSON, default=dict)
+    measurements: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    campaign: Mapped["Campaign"] = relationship(back_populates="records")
+
+
+class ProjectRow(Base):
+    """NotebookLM-style project workspace (JSON payload)."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    headline: Mapped[str] = mapped_column(String(512), default="")
+    domain: Mapped[str] = mapped_column(String(64), index=True, default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_archived: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

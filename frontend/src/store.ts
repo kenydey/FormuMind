@@ -1,9 +1,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
-  defaultConstraintsForDomain,
-  type ConstraintKey,
-} from "./constants/constraints";
+  applyWorkspacePayload,
+  buildWorkspacePayload,
+  isLegacyMigrated,
+  legacySnapshotsFromStorage,
+  markLegacyMigrated,
+  type ProjectSummary,
+  type StoreWorkspaceSlice,
+} from "./projectWorkspace";
 import {
   api,
   pollTask,
@@ -20,6 +25,7 @@ import {
   type ModelInfo,
   type ObjectiveSpec,
   type OptimizationResult,
+  type ProcessOptResult,
   type ProductDomain,
   type Requirement,
   type ResearchResult,
@@ -27,6 +33,10 @@ import {
   type SourceStatus,
   type TaskStatus,
 } from "./api";
+import {
+  defaultConstraintsForDomain,
+  type ConstraintKey,
+} from "./constants/constraints";
 
 export const DOMAIN_OBJECTIVES: Record<ProductDomain, ObjectiveSpec[]> = {
   anticorrosion_coating: [
@@ -46,9 +56,12 @@ export const DOMAIN_OBJECTIVES: Record<ProductDomain, ObjectiveSpec[]> = {
   ],
 };
 
+export type { ProjectSummary } from "./projectWorkspace";
+
+/** @deprecated use ProjectSummary — kept for migration typings */
 export interface SessionSnapshot {
   id: string;
-  timestamp: string;        // ISO-8601
+  timestamp: string;
   domain: ProductDomain;
   headline: string;
   topScore: number | null;
@@ -81,13 +94,17 @@ interface AppState {
   optimizeEngine: "auto" | "baybe" | "legacy";
   loopDoeEngine: "auto" | "legacy" | "baybe";
   campaignState: string | null;
+  workbenchCampaignId: number | null;
   lastAlEngine: string | null;
   models: ModelInfo[];
   modelHistory: ModelInfo[][];   // one entry per training event; for R² trend charts
   trainMessage: string;
 
-  // Session history (persisted to localStorage)
-  history: SessionSnapshot[];
+  // NotebookLM-style project persistence (SQLite via API)
+  projects: ProjectSummary[];
+  activeProjectId: string | null;
+  processOptResult: ProcessOptResult | null;
+  projectSaveBusy: boolean;
   historyOpen: boolean;
 
   // v0.3 source + chat
@@ -132,8 +149,13 @@ interface AppState {
   exportDoe: (format: "csv" | "xlsx") => void;
   importCsv: (file: File) => Promise<void>;
   toggleHistory: () => void;
-  restoreSnapshot: (snap: SessionSnapshot) => void;
-  clearHistory: () => void;
+  initProjects: () => Promise<void>;
+  scheduleAutosave: () => void;
+  saveProject: () => Promise<void>;
+  loadProject: (id: string) => Promise<void>;
+  createProject: (title?: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+  setProcessOptResult: (result: ProcessOptResult | null) => void;
 
   // v0.3 actions
   setSearchQuery: (q: string) => void;
@@ -145,10 +167,10 @@ interface AppState {
   toggleSourceSelected: (id: string) => void;
   selectAllSources: () => void;
   deselectAllSources: () => void;
-  searchSources: () => Promise<void>;
+  searchSources: (queryOverride?: string) => Promise<void>;
   loadSourceStatus: () => Promise<void>;
   hydrateLlmSettings: () => Promise<void>;
-  uploadFile: (file: File) => Promise<void>;
+  uploadFiles: (files: File[]) => Promise<void>;
   sendChat: (question: string) => Promise<void>;
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
@@ -183,31 +205,39 @@ const defaultRequirement: Requirement = {
   ],
 };
 
-const MAX_HISTORY = 20;
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+const AUTOSAVE_MS = 1500;
 
-function makeSnapshot(
-  requirement: Requirement,
-  leaderboard: Formulation[],
-  models: ModelInfo[],
-  optimizationHistory: number[],
-): SessionSnapshot {
+function workspaceSlice(state: AppState): StoreWorkspaceSlice {
   return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    timestamp: new Date().toISOString(),
-    domain: requirement.domain,
-    headline: requirement.product_type
-      ? `${requirement.product_type} · ${requirement.application ?? requirement.substrate}`
-      : `${requirement.domain} · ${requirement.substrate}`,
-    topScore: leaderboard[0]?.score ?? null,
-    requirement: { ...requirement },
-    leaderboard,
-    models,
-    optimizationHistory,
+    searchQuery: state.searchQuery,
+    sourceTypes: state.sourceTypes,
+    sources: state.sources,
+    selectedSources: state.selectedSources,
+    chatHistory: state.chatHistory,
+    deepReport: state.deepReport,
+    requirement: state.requirement,
+    activeConstraints: state.activeConstraints,
+    research: state.research,
+    leaderboard: state.leaderboard,
+    doePlan: state.doePlan,
+    measured: state.measured,
+    models: state.models,
+    modelHistory: state.modelHistory,
+    trainMessage: state.trainMessage,
+    campaignState: state.campaignState,
+    workbenchCampaignId: state.workbenchCampaignId,
+    optimizationHistory: state.optimizationHistory,
+    loopReport: state.loopReport,
+    rmseHistory: state.rmseHistory,
+    processOptResult: state.processOptResult,
+    doeEngine: state.doeEngine,
+    alEngine: state.alEngine,
+    optimizeEngine: state.optimizeEngine,
+    loopDoeEngine: state.loopDoeEngine,
+    recommendSourceTypes: state.recommendSourceTypes,
+    lastAlEngine: state.lastAlEngine,
   };
-}
-
-function pushToHistory(history: SessionSnapshot[], snap: SessionSnapshot): SessionSnapshot[] {
-  return [snap, ...history].slice(0, MAX_HISTORY);
 }
 
 export const useStore = create<AppState>()(
@@ -228,11 +258,15 @@ export const useStore = create<AppState>()(
       optimizeEngine: "auto",
       loopDoeEngine: "auto",
       campaignState: null,
+      workbenchCampaignId: null,
       lastAlEngine: null,
       models: [],
       modelHistory: [],
       trainMessage: "",
-      history: [],
+      projects: [],
+      activeProjectId: null,
+      processOptResult: null,
+      projectSaveBusy: false,
       historyOpen: false,
 
       // v0.3 initial state
@@ -258,10 +292,12 @@ export const useStore = create<AppState>()(
       rmseHistory: [],
       intentBusy: false,
 
-      setField: (key, value) =>
-        set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
+      setField: (key, value) => {
+        set((s) => ({ requirement: { ...s.requirement, [key]: value } }));
+        get().scheduleAutosave();
+      },
 
-      setDomain: (d) =>
+      setDomain: (d) => {
         set((s) => ({
           requirement: {
             ...s.requirement,
@@ -270,10 +306,14 @@ export const useStore = create<AppState>()(
               ? s.requirement.objectives
               : [...DOMAIN_OBJECTIVES[d]],
           },
-        })),
+        }));
+        get().scheduleAutosave();
+      },
 
-      setLevers: (levers) =>
-        set((s) => ({ requirement: { ...s.requirement, levers } })),
+      setLevers: (levers) => {
+        set((s) => ({ requirement: { ...s.requirement, levers } }));
+        get().scheduleAutosave();
+      },
 
       loadExampleProject: async (exampleId) => {
         set({ error: null });
@@ -287,25 +327,35 @@ export const useStore = create<AppState>()(
             doePlan: null,
             measured: {},
           });
+          get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });
         }
       },
 
-      setObjectives: (objectives) =>
-        set((s) => ({ requirement: { ...s.requirement, objectives } })),
+      setObjectives: (objectives) => {
+        set((s) => ({ requirement: { ...s.requirement, objectives } }));
+        get().scheduleAutosave();
+      },
 
-      setActiveConstraints: (keys) => set({ activeConstraints: keys }),
+      setActiveConstraints: (keys) => {
+        set({ activeConstraints: keys });
+        get().scheduleAutosave();
+      },
 
-      setConstraintValue: (key, value) =>
-        set((s) => ({ requirement: { ...s.requirement, [key]: value } })),
+      setConstraintValue: (key, value) => {
+        set((s) => ({ requirement: { ...s.requirement, [key]: value } }));
+        get().scheduleAutosave();
+      },
 
-      clearConstraintValue: (key) =>
+      clearConstraintValue: (key) => {
         set((s) => {
           const nullable: ConstraintKey[] = ["voc_limit_gpl", "cure_temperature_c", "ph_target"];
           const value = nullable.includes(key) ? null : 0;
           return { requirement: { ...s.requirement, [key]: value } };
-        }),
+        });
+        get().scheduleAutosave();
+      },
 
       runResearch: async () => {
         set({ formulationBusy: true, error: null });
@@ -322,8 +372,7 @@ export const useStore = create<AppState>()(
           const research = await api.research(requirement, payload, types, searchQuery.trim());
           const leaderboard = research.recommended;
           set({ research, leaderboard });
-          const { models, optimizationHistory, history } = get();
-          set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, optimizationHistory)) });
+          get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });
         } finally {
@@ -359,6 +408,7 @@ export const useStore = create<AppState>()(
             };
             set((s) => ({ chatHistory: [...s.chatHistory, msg] }));
           }
+          get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });
         } finally {
@@ -377,8 +427,7 @@ export const useStore = create<AppState>()(
             const leaderboard = opt.top_formulations;
             const optHistory = opt.history;
             set({ leaderboard, optimizationHistory: optHistory });
-            const { models, history } = get();
-            set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, optHistory)) });
+            get().scheduleAutosave();
           }
         } catch (e) {
           set({ error: String(e) });
@@ -406,8 +455,7 @@ export const useStore = create<AppState>()(
               rmseHistory: [...s.rmseHistory, report.rmse_by_metric],
               lastAlEngine: report.engine,
             }));
-            const { requirement, models, history } = get();
-            set({ history: pushToHistory(history, makeSnapshot(requirement, leaderboard, models, report.optimization.history)) });
+            get().scheduleAutosave();
           }
         } catch (e) {
           set({ error: String(e) });
@@ -434,6 +482,7 @@ export const useStore = create<AppState>()(
                 : s.requirement.levers,
             },
           }));
+          get().scheduleAutosave();
           return result.extracted_fields;
         } catch (e) {
           set({ error: String(e) });
@@ -447,53 +496,105 @@ export const useStore = create<AppState>()(
         set({ busy: "doe", error: null });
         try {
           const { requirement, doeEngine, alEngine, campaignState } = get();
+          let plan: DOEPlan;
+          let nextCampaignState = campaignState;
+          let nextAlEngine: string | null = get().lastAlEngine;
           if (design === "ai_active") {
             const result = await api.activeDoe(requirement, {
               engine: alEngine,
               doe_engine: doeEngine,
               campaign_state: campaignState,
             });
-            set({
-              doePlan: result.plan,
-              measured: {},
-              campaignState: result.campaign_state,
-              lastAlEngine: result.engine,
-            });
+            plan = result.plan;
+            nextCampaignState = result.campaign_state ?? campaignState;
+            nextAlEngine = result.engine;
           } else {
-            const plan = await api.doe(requirement, design, doeEngine);
-            set({ doePlan: plan, measured: {} });
+            plan = await api.doe(requirement, design, doeEngine);
           }
+          const strategy = design === "ai_active" ? `BayBE-${alEngine}` : `DOE-${design}`;
+          const wb = await api.createWorkbenchCampaign(plan, undefined, strategy);
+          set({
+            doePlan: plan,
+            measured: {},
+            campaignState: nextCampaignState,
+            lastAlEngine: nextAlEngine,
+            workbenchCampaignId: wb.campaign_id,
+          });
         } catch (e) {
           set({ error: String(e) });
         } finally {
           set({ busy: "idle" });
+          get().scheduleAutosave();
         }
       },
 
-      setDoeEngine: (engine) => set({ doeEngine: engine }),
-      setAlEngine: (engine) => set({ alEngine: engine }),
-      setOptimizeEngine: (engine) => set({ optimizeEngine: engine }),
-      setLoopDoeEngine: (engine) => set({ loopDoeEngine: engine }),
+      setDoeEngine: (engine) => {
+        set({ doeEngine: engine });
+        get().scheduleAutosave();
+      },
+      setAlEngine: (engine) => {
+        set({ alEngine: engine });
+        get().scheduleAutosave();
+      },
+      setOptimizeEngine: (engine) => {
+        set({ optimizeEngine: engine });
+        get().scheduleAutosave();
+      },
+      setLoopDoeEngine: (engine) => {
+        set({ loopDoeEngine: engine });
+        get().scheduleAutosave();
+      },
 
-      setMeasured: (runId, value) =>
-        set((s) => ({ measured: { ...s.measured, [runId]: value } })),
+      setMeasured: (runId, value) => {
+        set((s) => ({ measured: { ...s.measured, [runId]: value } }));
+        get().scheduleAutosave();
+      },
 
       submitResults: async () => {
-        const { doePlan, measured, requirement } = get();
+        const { doePlan, measured, requirement, workbenchCampaignId } = get();
         if (!doePlan) return;
         const metric = primaryObjectiveMetric(requirement);
-        const records: ExperimentRecord[] = doePlan.runs
-          .filter((r) => measured[r.run_id] !== undefined && !Number.isNaN(measured[r.run_id]))
-          .map((r) => ({
-            domain: requirement.domain,
-            project_id: requirement.project_id,
-            factors: r.natural,
-            cure_temperature_c: r.natural["cure_temperature_c"] ?? null,
-            measured: { [metric]: measured[r.run_id] },
-            source: "doe",
-          }));
+        let records: ExperimentRecord[] = [];
+
+        if (workbenchCampaignId != null) {
+          try {
+            const wb = await api.getWorkbenchCampaign(workbenchCampaignId);
+            records = wb.rows
+              .filter((r) => r.status === "Completed")
+              .filter((r) => {
+                const v = r.measurements?.[metric];
+                return v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v));
+              })
+              .map((r) => ({
+                domain: requirement.domain,
+                project_id: requirement.project_id,
+                factors: { ...(r.planned_params ?? {}), ...(r.actual_params ?? {}) },
+                cure_temperature_c:
+                  (r.actual_params?.cure_temperature_c ?? r.planned_params?.cure_temperature_c) ?? null,
+                measured: { [metric]: Number(r.measurements[metric]) },
+                source: "workbench",
+              }));
+          } catch (e) {
+            set({ error: String(e) });
+            return;
+          }
+        }
+
         if (records.length === 0) {
-          set({ error: "请先为至少一个实验填写实测值" });
+          records = doePlan.runs
+            .filter((r) => measured[r.run_id] !== undefined && !Number.isNaN(measured[r.run_id]))
+            .map((r) => ({
+              domain: requirement.domain,
+              project_id: requirement.project_id,
+              factors: r.natural,
+              cure_temperature_c: r.natural["cure_temperature_c"] ?? null,
+              measured: { [metric]: measured[r.run_id] },
+              source: "doe",
+            }));
+        }
+
+        if (records.length === 0) {
+          set({ error: "请先在实验台账中完成至少一行实测值，或为实验填写实测值" });
           return;
         }
         set({ busy: "training", error: null });
@@ -550,32 +651,177 @@ export const useStore = create<AppState>()(
 
       toggleHistory: () => set((s) => ({ historyOpen: !s.historyOpen })),
 
-      restoreSnapshot: (snap) => {
-        set({
-          requirement: snap.requirement,
-          leaderboard: snap.leaderboard,
-          models: snap.models,
-          optimizationHistory: snap.optimizationHistory,
-          research: null,         // research markdown isn't stored — show fresh context
-          doePlan: null,
-          measured: {},
-          modelHistory: [],
-          trainMessage: "",
-          historyOpen: false,
-          error: null,
-        });
+      scheduleAutosave: () => {
+        if (autosaveTimer) clearTimeout(autosaveTimer);
+        autosaveTimer = setTimeout(() => {
+          void get().saveProject();
+        }, AUTOSAVE_MS);
       },
 
-      clearHistory: () => set({ history: [] }),
+      saveProject: async () => {
+        const { activeProjectId } = get();
+        if (!activeProjectId) return;
+        set({ projectSaveBusy: true });
+        try {
+          const payload = buildWorkspacePayload(workspaceSlice(get()));
+          const title = get().searchQuery.trim() || get().requirement.product_type || undefined;
+          await api.updateProject(activeProjectId, payload, title);
+          const projects = await api.listProjects();
+          set({ projects });
+        } catch (e) {
+          set({ error: String(e) });
+        } finally {
+          set({ projectSaveBusy: false });
+        }
+      },
+
+      loadProject: async (id) => {
+        try {
+          const { activeProjectId } = get();
+          if (activeProjectId && activeProjectId !== id) {
+            await get().saveProject();
+          }
+          const detail = await api.getProject(id);
+          const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
+          if (!patch.activeConstraints?.length && patch.requirement) {
+            patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
+          }
+          set({
+            ...patch,
+            activeProjectId: id,
+            historyOpen: false,
+            error: null,
+            task: null,
+            busy: "idle",
+          });
+        } catch (e) {
+          set({ error: String(e) });
+        }
+      },
+
+      createProject: async (title = "") => {
+        try {
+          await get().saveProject();
+          const detail = await api.createProject(title);
+          const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
+          set({
+            ...patch,
+            searchQuery: title || "",
+            activeProjectId: detail.id,
+            research: null,
+            deepReport: null,
+            leaderboard: [],
+            chatHistory: [],
+            sources: [],
+            selectedSources: [],
+            doePlan: null,
+            measured: {},
+            loopReport: null,
+            rmseHistory: [],
+            processOptResult: null,
+            optimizationHistory: [],
+            modelHistory: [],
+            trainMessage: "",
+            campaignState: null,
+            workbenchCampaignId: null,
+            error: null,
+          });
+          const projects = await api.listProjects();
+          set({ projects });
+        } catch (e) {
+          set({ error: String(e) });
+        }
+      },
+
+      deleteProject: async (id) => {
+        try {
+          const { activeProjectId } = get();
+          if (activeProjectId && activeProjectId !== id) {
+            await get().saveProject();
+          }
+          await api.deleteProject(id);
+          const projects = await api.listProjects();
+          if (activeProjectId === id) {
+            set({ activeProjectId: null });
+            if (projects.length > 0) {
+              await get().loadProject(projects[0].id);
+            } else {
+              await get().createProject();
+            }
+          } else {
+            set({ projects });
+          }
+        } catch (e) {
+          set({ error: String(e) });
+        }
+      },
+
+      initProjects: async () => {
+        try {
+          if (!isLegacyMigrated()) {
+            const snaps = legacySnapshotsFromStorage();
+            if (snaps.length) {
+              await api.migrateLocalProjects(
+                snaps.map((s) => ({
+                  id: s.id,
+                  timestamp: s.timestamp,
+                  domain: s.domain,
+                  headline: s.headline,
+                  requirement: s.requirement,
+                  leaderboard: s.leaderboard,
+                  models: s.models,
+                  optimization_history: s.optimizationHistory,
+                }))
+              );
+              markLegacyMigrated();
+            }
+          }
+          let projects = await api.listProjects();
+          let activeId = get().activeProjectId;
+          if (projects.length === 0) {
+            const created = await api.createProject();
+            projects = await api.listProjects();
+            activeId = created.id;
+          }
+          if (!activeId || !projects.some((p) => p.id === activeId)) {
+            activeId = projects[0]?.id ?? null;
+          }
+          set({ projects, activeProjectId: activeId });
+          if (activeId) {
+            const detail = await api.getProject(activeId);
+            const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
+            if (!patch.activeConstraints?.length && patch.requirement) {
+              patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
+            }
+            set({ ...patch, activeProjectId: activeId });
+          }
+        } catch (e) {
+          set({ error: String(e) });
+        }
+      },
+
+      setProcessOptResult: (result) => {
+        set({ processOptResult: result });
+        get().scheduleAutosave();
+      },
 
       // v0.3 actions
-      setSearchQuery: (q) => set({ searchQuery: q }),
+      setSearchQuery: (q) => {
+        set({ searchQuery: q });
+        get().scheduleAutosave();
+      },
 
-      setSourceTypes: (types) => set({ sourceTypes: types }),
+      setSourceTypes: (types) => {
+        set({ sourceTypes: types });
+        get().scheduleAutosave();
+      },
 
-      setRecommendSourceTypes: (types) => set({ recommendSourceTypes: types }),
+      setRecommendSourceTypes: (types) => {
+        set({ recommendSourceTypes: types });
+        get().scheduleAutosave();
+      },
 
-      addSources: (evidence) =>
+      addSources: (evidence) => {
         set((s) => {
           const fresh = evidence.filter(
             (e) => !s.sources.some((x) => (x.identifier || x.title) === (e.identifier || e.title))
@@ -583,39 +829,49 @@ export const useStore = create<AppState>()(
           const freshIds = fresh.map((e) => e.identifier || e.title);
           return {
             sources: [...s.sources, ...fresh],
-            // Newly added sources default to selected (NotebookLM-style).
             selectedSources: [...new Set([...s.selectedSources, ...freshIds])],
           };
-        }),
+        });
+        get().scheduleAutosave();
+      },
 
-      removeSource: (id) =>
+      removeSource: (id) => {
         set((s) => ({
           sources: s.sources.filter((e) => (e.identifier || e.title) !== id),
           selectedSources: s.selectedSources.filter((x) => x !== id),
-        })),
+        }));
+        get().scheduleAutosave();
+      },
 
-      clearSources: () => set({ sources: [], selectedSources: [], chatHistory: [] }),
+      clearSources: () => {
+        set({ sources: [], selectedSources: [], chatHistory: [] });
+        get().scheduleAutosave();
+      },
 
-      toggleSourceSelected: (id) =>
+      toggleSourceSelected: (id) => {
         set((s) => ({
           selectedSources: s.selectedSources.includes(id)
             ? s.selectedSources.filter((x) => x !== id)
             : [...s.selectedSources, id],
-        })),
+        }));
+        get().scheduleAutosave();
+      },
 
       selectAllSources: () =>
         set((s) => ({ selectedSources: s.sources.map((e) => e.identifier || e.title) })),
 
       deselectAllSources: () => set({ selectedSources: [] }),
 
-      searchSources: async () => {
+      searchSources: async (queryOverride?: string) => {
         const { searchQuery, sourceTypes, requirement } = get();
+        const query = (queryOverride ?? searchQuery).trim();
+        if (queryOverride !== undefined) set({ searchQuery: query });
         set({ searchBusy: true, error: null });
         try {
           // Incremental search: poll the task and render results as they arrive,
           // continuing until no source turns up new related material.
           const { task_id } = await api.searchStream({
-            query: searchQuery,
+            query,
             source_types: sourceTypes,
             requirement,
             total_limit: 300,
@@ -636,6 +892,7 @@ export const useStore = create<AppState>()(
             if (r?.evidence?.length) get().addSources(r.evidence);
             if (r?.source_status) set({ sourceStatus: r.source_status });
           }
+          get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });
         } finally {
@@ -677,10 +934,14 @@ export const useStore = create<AppState>()(
         }
       },
 
-      uploadFile: async (file) => {
+      uploadFiles: async (files) => {
+        if (files.length === 0) return;
         set({ searchBusy: true, error: null });
         try {
-          const res = await api.ingest(file);
+          const res =
+            files.length === 1
+              ? await api.ingest(files[0])
+              : await api.ingestBatch(files);
           get().addSources(res.evidence);
         } catch (e) {
           set({ error: `文件上传失败：${e instanceof Error ? e.message : String(e)}` });
@@ -711,6 +972,7 @@ export const useStore = create<AppState>()(
               { role: "assistant", content: res.answer, citations: res.citations },
             ],
           }));
+          get().scheduleAutosave();
         } catch (e) {
           set((s) => ({
             chatHistory: [
@@ -736,16 +998,9 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "formumind-history",
-      // Persist history list and llmConfig.
       partialize: (state) => ({
-        history: state.history,
+        activeProjectId: state.activeProjectId,
         llmConfig: state.llmConfig,
-        activeConstraints: state.activeConstraints,
-        campaignState: state.campaignState,
-        doeEngine: state.doeEngine,
-        alEngine: state.alEngine,
-        optimizeEngine: state.optimizeEngine,
-        loopDoeEngine: state.loopDoeEngine,
       }),
     }
   )

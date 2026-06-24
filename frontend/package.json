@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "ag-grid-community": "^36.0.0",
+    "ag-grid-react": "^36.0.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "react": "^18.3.1",

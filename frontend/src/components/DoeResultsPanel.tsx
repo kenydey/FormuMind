@@ -8,6 +8,7 @@ import {
 import type { ModelInfo } from "../api";
 import { primaryObjectiveMetric } from "../api";
 import { useStore } from "../store";
+import LabWorkbench from "./LabWorkbench";
 
 function R2Gauge({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(1, value));
@@ -110,6 +111,7 @@ export default function DoeResultsPanel() {
     requirement, doePlan, measured, models, modelHistory, trainMessage,
     busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
+    workbenchCampaignId,
   } = useStore();
   const metric = primaryObjectiveMetric(requirement);
 
@@ -229,50 +231,60 @@ export default function DoeResultsPanel() {
               </button>
             </div>
           </div>
-          <div className="max-h-56 overflow-y-auto border border-edge rounded">
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 bg-panel">
-                <tr className="text-slate-400">
-                  <th className="text-left px-2 py-1">#</th>
-                  {doePlan.factors.map((f) => (
-                    <th key={f.name} className="text-right px-2 py-1 font-normal">
-                      {f.name.replace(" (DGEBA)", "").slice(0, 10)}
-                    </th>
-                  ))}
-                  <th className="text-right px-2 py-1 text-accent">实测 {metric}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {doePlan.runs.map((run) => (
-                  <tr
-                    key={run.run_id}
-                    className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
-                  >
-                    <td className="px-2 py-1 text-slate-500">
-                      {run.run_id}
-                      {run.ai_suggested && (
-                        <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
-                      )}
-                    </td>
-                    {doePlan.factors.map((f) => (
-                      <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
-                        {run.natural[f.name]}
-                      </td>
+          <div className="mb-2">
+            {workbenchCampaignId != null ? (
+              <LabWorkbench
+                campaignId={workbenchCampaignId}
+                doePlan={doePlan}
+                requirement={requirement}
+              />
+            ) : (
+              <div className="max-h-56 overflow-y-auto border border-edge rounded">
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 bg-panel">
+                    <tr className="text-slate-400">
+                      <th className="text-left px-2 py-1">#</th>
+                      {doePlan.factors.map((f) => (
+                        <th key={f.name} className="text-right px-2 py-1 font-normal">
+                          {f.name.replace(" (DGEBA)", "").slice(0, 10)}
+                        </th>
+                      ))}
+                      <th className="text-right px-2 py-1 text-accent">实测 {metric}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {doePlan.runs.map((run) => (
+                      <tr
+                        key={run.run_id}
+                        className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
+                      >
+                        <td className="px-2 py-1 text-slate-500">
+                          {run.run_id}
+                          {run.ai_suggested && (
+                            <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
+                          )}
+                        </td>
+                        {doePlan.factors.map((f) => (
+                          <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
+                            {run.natural[f.name]}
+                          </td>
+                        ))}
+                        <td className="px-2 py-1 text-right">
+                          <input
+                            type="number"
+                            className="w-20 bg-ink border border-edge rounded px-1 py-0.5 text-right text-accent2"
+                            value={measured[run.run_id] ?? ""}
+                            onChange={(e) =>
+                              setMeasured(run.run_id, e.target.value === "" ? NaN : Number(e.target.value))
+                            }
+                          />
+                        </td>
+                      </tr>
                     ))}
-                    <td className="px-2 py-1 text-right">
-                      <input
-                        type="number"
-                        className="w-20 bg-ink border border-edge rounded px-1 py-0.5 text-right text-accent2"
-                        value={measured[run.run_id] ?? ""}
-                        onChange={(e) =>
-                          setMeasured(run.run_id, e.target.value === "" ? NaN : Number(e.target.value))
-                        }
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
           <button
             disabled={busy !== "idle"}

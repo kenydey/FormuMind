@@ -1,15 +1,7 @@
 import { useState } from "react";
 import { LineChart, Line, Tooltip, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { useStore } from "../store";
-
-interface ProcessOptResult {
-  domain: string;
-  iterations: number;
-  engine: string;
-  history: number[];
-  best_params: Record<string, number>;
-  predicted_outcome: Record<string, number>;
-}
+import { api } from "../api";
 
 const PARAM_LABELS: Record<string, string> = {
   cure_temperature_c: "固化温度 (°C)",
@@ -37,24 +29,20 @@ const OUTCOME_LABELS: Record<string, string> = {
 };
 
 export default function ProcessOptModal() {
-  const { requirement } = useStore();
-  const [result, setResult] = useState<ProcessOptResult | null>(null);
+  const { requirement, processOptResult, setProcessOptResult } = useStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [iterations, setIterations] = useState(18);
+
+  const result = processOptResult;
 
   const run = async () => {
     if (!requirement) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/process-optimize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain: requirement.domain, iterations }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setResult(await res.json());
+      const res = await api.optimizeProcess({ domain: requirement.domain, iterations });
+      setProcessOptResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "请求失败");
     } finally {
