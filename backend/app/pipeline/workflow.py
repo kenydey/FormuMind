@@ -167,9 +167,14 @@ def run_research(
 
     process = process_for(req)
     recommended = [_score_and_validate(f, process, req) for f in knowledge.variant_formulations(req, n=3)]
+    from ..domain.formulation_gate import validate_formulations
+
+    recommended, gate_warnings = validate_formulations(recommended)
     recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
 
     mechanism, chat = llm.synthesize_research(req, grounded, recommended)
+    if gate_warnings:
+        chat = chat + "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in gate_warnings)
     return ResearchResult(
         requirement_headline=req.headline(),
         evidence=grounded,

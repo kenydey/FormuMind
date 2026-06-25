@@ -1,8 +1,15 @@
 """ExperimentRecord ↔ pandas for baybe Campaign.add_measurements."""
 from __future__ import annotations
 
+from ....domain.objective_contract import objective_metrics, normalize_objectives
 from ....domain.schemas import ExperimentRecord, Requirement
 from .baybe_objective_builder import primary_metric
+
+
+def _metrics_for_req(req: Requirement) -> list[str]:
+    objectives = normalize_objectives(req)
+    metrics = objective_metrics(objectives)
+    return metrics or [primary_metric(req)]
 
 
 def records_to_dataframe(records: list[ExperimentRecord], req: Requirement):
@@ -11,36 +18,42 @@ def records_to_dataframe(records: list[ExperimentRecord], req: Requirement):
     if not records:
         return pd.DataFrame()
 
-    metric = primary_metric(req)
+    metrics = _metrics_for_req(req)
     rows = []
     for rec in records:
         row = dict(rec.factors)
         if rec.cure_temperature_c is not None and "cure_temperature_c" not in row:
             row["cure_temperature_c"] = rec.cure_temperature_c
-        value = rec.measured.get(metric)
-        if value is None and rec.measured:
-            value = next(iter(rec.measured.values()))
-        row[metric] = value
+        for metric in metrics:
+            value = rec.measured.get(metric)
+            if value is None and metric == metrics[0] and rec.measured:
+                value = next(iter(rec.measured.values()), None)
+            row[metric] = value
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-def surrogate_measurements_from_plan(plan, req: Requirement, objective_metric: str):
+def surrogate_measurements_from_plan(plan, req: Requirement, objective_metric: str | None = None):
     """Build virtual measurements from predictor for cold-start baybe init."""
     import pandas as pd
 
     from ....pipeline import reconstruct
     from ....services import predictor
 
+    metrics = _metrics_for_req(req)
+    if objective_metric and objective_metric not in metrics:
+        metrics = [objective_metric, *metrics]
+
     rows = []
     for run in plan.runs:
+        row = dict(run.natural)
         try:
             form = reconstruct.formulation_from_factors(req.domain, run.natural)
             props = predictor.predict(form)
-            val = props.get(objective_metric, 0.0)
+            for metric in metrics:
+                row[metric] = props.get(metric, 0.0)
         except Exception:
-            val = 0.0
-        row = dict(run.natural)
-        row[objective_metric] = val
+            for metric in metrics:
+                row[metric] = 0.0
         rows.append(row)
     return pd.DataFrame(rows)

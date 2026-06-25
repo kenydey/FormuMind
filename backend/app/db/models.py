@@ -45,6 +45,10 @@ class Campaign(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     strategy: Mapped[str] = mapped_column(String(64), default="BayBE-LHS")
     status: Mapped[str] = mapped_column(String(32), default="IN_PROGRESS")
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    primary_metric: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    objectives_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    lever_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

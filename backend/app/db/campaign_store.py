@@ -5,18 +5,19 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..domain.schemas import DOEPlan
+from ..domain.objective_contract import (
+    empty_measurements_template,
+    normalize_objectives,
+    objectives_from_snapshot,
+    row_has_required_measurements,
+    validate_measurements,
+)
+from ..domain.schemas import DOEPlan, ProductDomain, Requirement
 from .models import Campaign, ExperimentRecord
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _row_has_measurements(measurements: dict) -> bool:
-    if not measurements:
-        return False
-    return any(v is not None and v != "" for v in measurements.values())
 
 
 class CampaignStore:
@@ -29,10 +30,30 @@ class CampaignStore:
         *,
         name: str | None = None,
         strategy: str = "BayBE-LHS",
+        req: Requirement | None = None,
+        project_id: str | None = None,
     ) -> Campaign:
         campaign_name = name or f"DOE {plan.design} ({plan.plan_id[:8] or 'local'})"
+        domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
+        objectives = normalize_objectives(req) if req else objectives_from_snapshot(None, domain)
+        lever_snapshot = (
+            [lev.model_dump() for lev in req.levers]
+            if req and req.levers
+            else [{"name": f.name, "low": f.low, "high": f.high, "unit": f.unit} for f in plan.factors]
+        )
+        meas_template = empty_measurements_template(objectives)
+        primary = objectives[0].metric if objectives else None
+
         with self._session_factory() as session:
-            campaign = Campaign(name=campaign_name, strategy=strategy, status="IN_PROGRESS")
+            campaign = Campaign(
+                name=campaign_name,
+                strategy=strategy,
+                status="IN_PROGRESS",
+                project_id=project_id,
+                primary_metric=primary,
+                objectives_snapshot=[o.model_dump() for o in objectives],
+                lever_snapshot=lever_snapshot,
+            )
             session.add(campaign)
             session.flush()
             for run in plan.runs:
@@ -42,7 +63,7 @@ class CampaignStore:
                         status="Pending",
                         planned_params=dict(run.natural),
                         actual_params=dict(run.natural),
-                        measurements={},
+                        measurements=dict(meas_template),
                     )
                 )
             session.commit()
@@ -70,21 +91,28 @@ class CampaignStore:
         campaign_id: int,
         rows: list[dict],
     ) -> tuple[int, list[ExperimentRecord]]:
-        """Apply grid updates; auto-complete rows with filled measurements."""
+        """Apply grid updates; auto-complete rows with filled primary objective."""
         updated = 0
         with self._session_factory() as session:
             campaign = session.get(Campaign, campaign_id)
             if campaign is None:
                 return 0, []
 
+            domain = ProductDomain.anticorrosion_coating
+            objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
+
             for payload in rows:
                 row = session.get(ExperimentRecord, payload["id"])
                 if row is None or row.campaign_id != campaign_id:
                     continue
                 row.actual_params = payload.get("actual_params") or {}
-                row.measurements = payload.get("measurements") or {}
+                raw_meas = payload.get("measurements") or {}
+                try:
+                    row.measurements = validate_measurements(raw_meas, objectives, strict=True)
+                except ValueError:
+                    row.measurements = validate_measurements(raw_meas, objectives)
                 status = payload.get("status") or row.status
-                if _row_has_measurements(row.measurements):
+                if row_has_required_measurements(row.measurements, objectives):
                     status = "Completed"
                 row.status = status
                 row.updated_at = _utcnow()

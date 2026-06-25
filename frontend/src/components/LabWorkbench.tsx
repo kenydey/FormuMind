@@ -1,25 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
-import type {
-  ColDef,
-  ICellRendererParams,
-  ValueParserParams,
-  ValueSetterParams,
-} from "ag-grid-community";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
-import { api, primaryObjectiveMetric } from "../api";
-import type { DOEPlan, Requirement, WorkbenchRow } from "../api";
+import { api } from "../api";
+import type { DOEPlan, ObjectiveSpec, Requirement, WorkbenchRow } from "../api";
+import {
+  buildWorkbenchColumnDefs,
+  effectiveObjectives,
+  factorKeysFromPlan,
+} from "../utils/workbenchColumns";
 
 interface LabWorkbenchProps {
   campaignId: number;
   doePlan: DOEPlan;
   requirement: Requirement;
+  objectivesSnapshot?: ObjectiveSpec[];
   onSaved?: (rows: WorkbenchRow[]) => void;
 }
-
-const RATING_OPTIONS = ["A", "B", "C", "D", "pass", "fail"];
 
 function StatusBadge({ value }: { value: string }) {
   const tone =
@@ -37,30 +36,26 @@ function StatusCellRenderer(props: ICellRendererParams) {
   return <StatusBadge value={String(props.value ?? "Pending")} />;
 }
 
-function numericParser(params: ValueParserParams) {
-  const raw = String(params.newValue ?? "").trim().replace(/\s+/g, "");
-  if (raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
-function isRatingField(key: string): boolean {
-  return /rating|grade|level/i.test(key) && !/hours|efficiency|temp/i.test(key);
-}
-
-export default function LabWorkbench({ campaignId, doePlan, requirement, onSaved }: LabWorkbenchProps) {
+export default function LabWorkbench({
+  campaignId,
+  doePlan,
+  requirement,
+  objectivesSnapshot,
+  onSaved,
+}: LabWorkbenchProps) {
   const gridRef = useRef<AgGridReact<WorkbenchRow>>(null);
   const [rows, setRows] = useState<WorkbenchRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<ObjectiveSpec[] | undefined>(objectivesSnapshot);
 
-  const metric = primaryObjectiveMetric(requirement);
-  const factorKeys = useMemo(() => {
-    if (doePlan.factors.length > 0) return doePlan.factors.map((f) => f.name);
-    const first = rows[0]?.planned_params ?? {};
-    return Object.keys(first);
-  }, [doePlan.factors, rows]);
+  const objectives = useMemo(
+    () => effectiveObjectives(requirement.objectives ?? [], snapshot),
+    [requirement.objectives, snapshot]
+  );
+
+  const factorKeys = useMemo(() => factorKeysFromPlan(doePlan, rows), [doePlan, rows]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +64,12 @@ export default function LabWorkbench({ campaignId, doePlan, requirement, onSaved
       setError(null);
       try {
         const data = await api.getWorkbenchCampaign(campaignId);
-        if (!cancelled) setRows(data.rows);
+        if (!cancelled) {
+          setRows(data.rows);
+          if (data.objectives_snapshot?.length) {
+            setSnapshot(data.objectives_snapshot as ObjectiveSpec[]);
+          }
+        }
       } catch (e) {
         if (!cancelled) setError(String(e));
       } finally {
@@ -82,63 +82,11 @@ export default function LabWorkbench({ campaignId, doePlan, requirement, onSaved
   }, [campaignId]);
 
   const columnDefs = useMemo<ColDef<WorkbenchRow>[]>(() => {
-    const cols: ColDef<WorkbenchRow>[] = [
-      { field: "id", headerName: "ID", editable: false, width: 64, pinned: "left" },
-      {
-        field: "status",
-        headerName: "状态",
-        editable: false,
-        width: 96,
-        cellRenderer: StatusCellRenderer,
-      },
-    ];
-
-    for (const key of factorKeys) {
-      const short = key.replace(" (DGEBA)", "").slice(0, 12);
-      cols.push({
-        colId: `planned_${key}`,
-        headerName: `计划 ${short}`,
-        editable: false,
-        valueGetter: (p) => p.data?.planned_params?.[key],
-        cellStyle: { backgroundColor: "#f3f4f6", color: "#374151" },
-        width: 108,
-      });
-      cols.push({
-        colId: `actual_${key}`,
-        headerName: `实际 ${short}`,
-        editable: true,
-        valueGetter: (p) => p.data?.actual_params?.[key],
-        valueSetter: (p: ValueSetterParams<WorkbenchRow>) => {
-          if (!p.data) return false;
-          p.data.actual_params = { ...p.data.actual_params, [key]: p.newValue as number };
-          return true;
-        },
-        valueParser: numericParser,
-        cellStyle: { backgroundColor: "#eff6ff", color: "#1e40af" },
-        width: 108,
-      });
-    }
-
-    cols.push({
-      colId: `meas_${metric}`,
-      headerName: `实测 ${metric}`,
-      editable: true,
-      valueGetter: (p) => p.data?.measurements?.[metric],
-      valueSetter: (p: ValueSetterParams<WorkbenchRow>) => {
-        if (!p.data) return false;
-        p.data.measurements = { ...p.data.measurements, [metric]: p.newValue as number | string };
-        return true;
-      },
-      valueParser: isRatingField(metric) ? undefined : numericParser,
-      cellEditor: isRatingField(metric) ? "agSelectCellEditor" : undefined,
-      cellEditorParams: isRatingField(metric) ? { values: RATING_OPTIONS } : undefined,
-      cellStyle: { backgroundColor: "#fefce8", color: "#713f12" },
-      flex: 1,
-      minWidth: 120,
-    });
-
+    const cols = buildWorkbenchColumnDefs(factorKeys, objectives);
+    const statusCol = cols.find((c) => c.field === "status");
+    if (statusCol) statusCol.cellRenderer = StatusCellRenderer;
     return cols;
-  }, [factorKeys, metric]);
+  }, [factorKeys, objectives]);
 
   const defaultColDef = useMemo<ColDef>(
     () => ({
@@ -207,7 +155,8 @@ export default function LabWorkbench({ campaignId, doePlan, requirement, onSaved
       </div>
       <div className="flex items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">
         <span className="text-[10px] text-slate-500">
-          {rows.filter((r) => r.status === "Completed").length}/{rows.length} 已完成 · 支持 Excel 粘贴
+          {rows.filter((r) => r.status === "Completed").length}/{rows.length} 已完成 ·{" "}
+          {objectives.length} 项指标 · 支持 Excel 粘贴
         </span>
         <button
           type="button"

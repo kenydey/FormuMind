@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from ..domain.examples import BUILTIN_METRICS, EXAMPLE_PROJECTS, ROLE_CATALOG, load_example
+from ..domain.formulation_gate import FormulationListResponse, validate_formulations
 from ..domain.knowledge import RAW_MATERIALS, baseline_formulation
 from ..domain.schemas import Formulation, ProductDomain, Requirement, Substrate
 
@@ -58,3 +60,19 @@ def ingredients() -> dict:
 def template(domain: ProductDomain) -> Formulation:
     req = Requirement(domain=domain)
     return baseline_formulation(req)
+
+
+class FormulationValidateRequest(BaseModel):
+    formulations: list[Formulation]
+
+
+class FormulationValidateResponse(BaseModel):
+    formulations: list[Formulation]
+    warnings: list[str]
+
+
+@router.post("/formulations/validate", response_model=FormulationValidateResponse)
+def validate_formulation_list(body: FormulationValidateRequest) -> FormulationValidateResponse:
+    """Validate and enrich leaderboard / LLM formulations (CAS, structure)."""
+    forms, warnings = validate_formulations(body.formulations)
+    return FormulationValidateResponse(formulations=forms, warnings=warnings)

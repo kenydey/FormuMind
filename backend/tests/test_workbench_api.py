@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.db.campaign_store import CampaignStore
 from app.db.database import make_engine, make_session_factory
 from app.db import campaign_store as campaign_store_module
-from app.domain.schemas import DOEPlan, DOERun, ProductDomain
+from app.domain.schemas import DOEPlan, DOERun, ProductDomain, Requirement, ObjectiveSpec
 from app.main import app
 
 
@@ -30,6 +30,31 @@ def _client_with_memory_db(tmp_path):
     factory = make_session_factory(engine)
     campaign_store_module._store = CampaignStore(factory)
     return TestClient(app)
+
+
+def _requirement() -> Requirement:
+    return Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        objectives=[
+            ObjectiveSpec(metric="salt_spray_hours", weight=0.6, direction="maximize"),
+            ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
+        ],
+    )
+
+
+def test_create_workbench_campaign_with_objectives_snapshot(tmp_path):
+    client = _client_with_memory_db(tmp_path)
+    req = _requirement()
+    res = client.post(
+        "/api/experiments/workbench/campaigns",
+        json={"plan": _plan().model_dump(), "requirement": req.model_dump()},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["objectives_snapshot"]) == 2
+    assert body["primary_metric"] == "salt_spray_hours"
+    assert "salt_spray_hours" in body["rows"][0]["measurements"]
+    assert "cost_cny_per_kg" in body["rows"][0]["measurements"]
 
 
 def test_create_workbench_campaign(tmp_path):
@@ -68,6 +93,41 @@ def test_sync_workbench_marks_completed(tmp_path):
     assert updated["updated"] == 1
     assert updated["rows"][0]["status"] == "Completed"
     assert updated["rows"][0]["measurements"]["salt_spray_hours"] == 860.0
+
+
+def test_fetch_campaign_data_for_baybe_multi_metric():
+    import pandas as pd
+
+    from app.db.models import ExperimentRecord as WorkbenchRow
+    from app.domain.schemas import ObjectiveSpec, Requirement
+    from app.services.engines.baybe_engine import fetch_campaign_data_for_baybe
+
+    engine = make_engine("sqlite:///:memory:")
+    factory = make_session_factory(engine)
+    store = CampaignStore(factory)
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        objectives=[
+            ObjectiveSpec(metric="salt_spray_hours", weight=0.6, direction="maximize"),
+            ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
+        ],
+    )
+    campaign = store.create_from_plan(_plan(), req=req)
+
+    with factory() as session:
+        row = session.query(WorkbenchRow).filter(WorkbenchRow.campaign_id == campaign.id).first()
+        row.actual_params = {"Zinc phosphate": 9.0, "cure_temperature_c": 82.0}
+        row.measurements = {"salt_spray_hours": 900.0, "cost_cny_per_kg": 18.5}
+        row.status = "Completed"
+        session.commit()
+
+        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session)
+        assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]
+        assert float(measurements_Y.iloc[0]["salt_spray_hours"]) == 900.0
+        assert float(measurements_Y.iloc[0]["cost_cny_per_kg"]) == 18.5
+        merged = pd.concat([actual_X, measurements_Y], axis=1)
+        assert "salt_spray_hours" in merged.columns
+        assert "cost_cny_per_kg" in merged.columns
 
 
 def test_fetch_campaign_data_for_baybe():

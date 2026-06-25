@@ -30,11 +30,26 @@ def fetch_campaign_data_for_baybe(campaign_id: int, db: Session):
 
     Returns ``(actual_X, measurements_Y)`` where ``actual_X`` holds executed
     formulation parameters and ``measurements_Y`` holds lab observations.
-    Concatenate column-wise before passing to BayBE when a single frame is needed.
+    Measurement columns follow ``Campaign.objectives_snapshot`` order; missing
+    keys are filled with NaN.
     """
+    import logging
+
     import pandas as pd
 
-    from ...db.models import ExperimentRecord as WorkbenchRow
+    from ...db.models import Campaign, ExperimentRecord as WorkbenchRow
+    from ...domain.objective_contract import objective_metrics, objectives_from_snapshot
+    from ...domain.schemas import ProductDomain
+
+    log = logging.getLogger(__name__)
+
+    campaign = db.get(Campaign, campaign_id)
+    domain = ProductDomain.anticorrosion_coating
+    objectives = objectives_from_snapshot(
+        campaign.objectives_snapshot if campaign else None,
+        domain,
+    )
+    metrics = objective_metrics(objectives)
 
     rows = (
         db.query(WorkbenchRow)
@@ -49,7 +64,26 @@ def fetch_campaign_data_for_baybe(campaign_id: int, db: Session):
         return pd.DataFrame(), pd.DataFrame()
 
     actual_X = pd.DataFrame([dict(r.actual_params or r.planned_params or {}) for r in rows])
-    measurements_Y = pd.DataFrame([dict(r.measurements or {}) for r in rows])
+
+    if not metrics:
+        first_meas = rows[0].measurements or {}
+        metrics = list(first_meas.keys())
+
+    meas_rows: list[dict] = []
+    for r in rows:
+        raw = dict(r.measurements or {})
+        row: dict = {}
+        for m in metrics:
+            if m not in raw or raw[m] is None or raw[m] == "":
+                log.warning("Campaign %s row %s missing measurement %r", campaign_id, r.id, m)
+                row[m] = float("nan")
+            else:
+                try:
+                    row[m] = float(raw[m])
+                except (TypeError, ValueError):
+                    row[m] = float("nan")
+        meas_rows.append(row)
+    measurements_Y = pd.DataFrame(meas_rows, columns=metrics) if metrics else pd.DataFrame()
     return actual_X, measurements_Y
 
 
@@ -157,6 +191,7 @@ class BaybeCampaignEngine:
         ranked: list[tuple[float, object]] = []
         state = campaign_state
         metric = primary_metric(req)
+        objective_metric_names = [o.metric for o in objectives]
         settings = get_settings()
 
         for r in range(rounds):
@@ -184,12 +219,16 @@ class BaybeCampaignEngine:
                 best_so_far = max(best_so_far, combined)
                 history.append(round(best_so_far, 3))
                 ranked.append((combined, form))
+                measured_vals = {
+                    m: form.predicted.get(m, combined if m == metric else form.predicted.get(m, 0.0))
+                    for m in objective_metric_names
+                }
                 measurements.append(
                     ExperimentRecord(
                         domain=req.domain,
                         factors=run.natural,
                         cure_temperature_c=run.natural.get("cure_temperature_c"),
-                        measured={metric: form.predicted.get(metric, combined)},
+                        measured=measured_vals,
                         source="baybe_opt",
                     )
                 )

@@ -12,7 +12,6 @@ import {
 import {
   api,
   pollTask,
-  primaryObjectiveMetric,
   type ChatMessage,
   type ComprehensiveReport,
   type DOEPlan,
@@ -33,6 +32,10 @@ import {
   type SourceStatus,
   type TaskStatus,
 } from "./api";
+import {
+  objectiveMetrics,
+  extractMeasuredValues,
+} from "./utils/objectiveContract";
 import {
   defaultConstraintsForDomain,
   type ConstraintKey,
@@ -517,7 +520,14 @@ export const useStore = create<AppState>()(
             plan = await api.doe(requirement, design, doeEngine);
           }
           const strategy = design === "ai_active" ? `BayBE-${alEngine}` : `DOE-${design}`;
-          const wb = await api.createWorkbenchCampaign(plan, undefined, strategy);
+          const { activeProjectId } = get();
+          const wb = await api.createWorkbenchCampaign(
+            plan,
+            undefined,
+            strategy,
+            requirement,
+            activeProjectId ?? undefined
+          );
           set({
             doePlan: plan,
             measured: {},
@@ -579,7 +589,7 @@ export const useStore = create<AppState>()(
       },
 
       ensureWorkbenchCampaign: async () => {
-        const { doePlan, workbenchCampaignId } = get();
+        const { doePlan, workbenchCampaignId, requirement, activeProjectId } = get();
         if (workbenchCampaignId != null) {
           await get().refreshWorkbenchStats();
           return workbenchCampaignId;
@@ -587,7 +597,13 @@ export const useStore = create<AppState>()(
         if (!doePlan) return null;
         try {
           const strategy = doePlan.design === "ai_active" ? "BayBE-restore" : `DOE-${doePlan.design}`;
-          const wb = await api.createWorkbenchCampaign(doePlan, undefined, strategy);
+          const wb = await api.createWorkbenchCampaign(
+            doePlan,
+            undefined,
+            strategy,
+            requirement,
+            activeProjectId ?? undefined
+          );
           set({ workbenchCampaignId: wb.campaign_id });
           get().scheduleAutosave();
           set({
@@ -608,27 +624,25 @@ export const useStore = create<AppState>()(
       submitResults: async () => {
         const { doePlan, measured, requirement, workbenchCampaignId } = get();
         if (!doePlan) return;
-        const metric = primaryObjectiveMetric(requirement);
+        const metrics = objectiveMetrics(requirement);
         let records: ExperimentRecord[] = [];
 
         if (workbenchCampaignId != null) {
           try {
             const wb = await api.getWorkbenchCampaign(workbenchCampaignId);
-            records = wb.rows
-              .filter((r) => r.status === "Completed")
-              .filter((r) => {
-                const v = r.measurements?.[metric];
-                return v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v));
-              })
-              .map((r) => ({
+            for (const r of wb.rows.filter((row) => row.status === "Completed")) {
+              const measuredValues = extractMeasuredValues(r.measurements, metrics);
+              if (!measuredValues) continue;
+              records.push({
                 domain: requirement.domain,
                 project_id: requirement.project_id,
                 factors: { ...(r.planned_params ?? {}), ...(r.actual_params ?? {}) },
                 cure_temperature_c:
                   (r.actual_params?.cure_temperature_c ?? r.planned_params?.cure_temperature_c) ?? null,
-                measured: { [metric]: Number(r.measurements[metric]) },
+                measured: measuredValues,
                 source: "workbench",
-              }));
+              });
+            }
           } catch (e) {
             set({ error: String(e) });
             return;
@@ -636,6 +650,7 @@ export const useStore = create<AppState>()(
         }
 
         if (records.length === 0) {
+          const primary = metrics[0];
           records = doePlan.runs
             .filter((r) => measured[r.run_id] !== undefined && !Number.isNaN(measured[r.run_id]))
             .map((r) => ({
@@ -643,7 +658,7 @@ export const useStore = create<AppState>()(
               project_id: requirement.project_id,
               factors: r.natural,
               cure_temperature_c: r.natural["cure_temperature_c"] ?? null,
-              measured: { [metric]: measured[r.run_id] },
+              measured: { [primary]: measured[r.run_id] },
               source: "doe",
             }));
         }

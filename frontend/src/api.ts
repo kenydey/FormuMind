@@ -3,10 +3,14 @@
 export type ProductDomain = "anticorrosion_coating" | "degreaser" | "surface_treatment";
 
 export interface ObjectiveSpec {
+  id?: string;
   metric: string;
+  display_name?: string;
   weight: number;
-  direction: "maximize" | "minimize";
+  direction: "maximize" | "minimize" | "match_target";
   target_value?: number | null;
+  unit?: string;
+  value_type?: "number" | "rating";
 }
 
 export interface LeverSpec {
@@ -47,6 +51,8 @@ export interface Ingredient {
   role: string;
   weight_pct: number;
   formula?: string | null;
+  mf_structure?: string | null;
+  cas_no?: string | null;
   smiles?: string | null;
   molar_mass?: number | null;
 }
@@ -173,6 +179,9 @@ export interface WorkbenchCampaignResponse {
   name: string;
   strategy: string;
   status: string;
+  project_id?: string | null;
+  primary_metric?: string | null;
+  objectives_snapshot?: ObjectiveSpec[];
   rows: WorkbenchRow[];
 }
 
@@ -312,11 +321,19 @@ export const api = {
   },
   submitExperiments: (records: ExperimentRecord[]) =>
     post<TrainingReport>("/api/experiments", { records, retrain: true }),
-  createWorkbenchCampaign: (plan: DOEPlan, name?: string, strategy?: string) =>
+  createWorkbenchCampaign: (
+    plan: DOEPlan,
+    name?: string,
+    strategy?: string,
+    requirement?: Requirement,
+    projectId?: string
+  ) =>
     post<WorkbenchCampaignResponse>("/api/experiments/workbench/campaigns", {
       plan,
       name,
       strategy,
+      requirement,
+      project_id: projectId,
     }),
   getWorkbenchCampaign: (campaignId: number) =>
     get<WorkbenchCampaignResponse>(`/api/experiments/workbench/${campaignId}`),

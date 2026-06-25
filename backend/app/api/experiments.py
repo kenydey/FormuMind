@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..db.campaign_store import get_campaign_store
-from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, TrainingReport
+from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, Requirement, TrainingReport
 from ..services import io_export
 from ..services.training import registry
 
@@ -48,6 +48,9 @@ class WorkbenchCampaignResponse(BaseModel):
     name: str
     strategy: str
     status: str
+    project_id: str | None = None
+    primary_metric: str | None = None
+    objectives_snapshot: list[dict[str, Any]] = Field(default_factory=list)
     rows: list[WorkbenchRowResponse]
 
 
@@ -60,6 +63,21 @@ class CreateWorkbenchCampaignRequest(BaseModel):
     plan: DOEPlan
     name: str | None = None
     strategy: str = "BayBE-LHS"
+    project_id: str | None = None
+    requirement: Requirement | None = None
+
+
+def _campaign_response(campaign, rows) -> WorkbenchCampaignResponse:
+    return WorkbenchCampaignResponse(
+        campaign_id=campaign.id,
+        name=campaign.name,
+        strategy=campaign.strategy,
+        status=campaign.status,
+        project_id=campaign.project_id,
+        primary_metric=campaign.primary_metric,
+        objectives_snapshot=campaign.objectives_snapshot or [],
+        rows=[_row_response(r) for r in rows],
+    )
 
 
 def _row_response(row) -> WorkbenchRowResponse:
@@ -138,15 +156,15 @@ def list_models() -> list[ModelInfo]:
 def create_workbench_campaign(req: CreateWorkbenchCampaignRequest) -> WorkbenchCampaignResponse:
     """Seed a campaign + pending rows from a generated DOE plan."""
     store = get_campaign_store()
-    campaign = store.create_from_plan(req.plan, name=req.name, strategy=req.strategy)
-    rows = store.list_rows(campaign.id)
-    return WorkbenchCampaignResponse(
-        campaign_id=campaign.id,
-        name=campaign.name,
-        strategy=campaign.strategy,
-        status=campaign.status,
-        rows=[_row_response(r) for r in rows],
+    campaign = store.create_from_plan(
+        req.plan,
+        name=req.name,
+        strategy=req.strategy,
+        req=req.requirement,
+        project_id=req.project_id,
     )
+    rows = store.list_rows(campaign.id)
+    return _campaign_response(campaign, rows)
 
 
 @router.get("/experiments/workbench/{campaign_id}", response_model=WorkbenchCampaignResponse)
@@ -156,13 +174,7 @@ def get_workbench_campaign(campaign_id: int) -> WorkbenchCampaignResponse:
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
     rows = store.list_rows(campaign_id)
-    return WorkbenchCampaignResponse(
-        campaign_id=campaign.id,
-        name=campaign.name,
-        strategy=campaign.strategy,
-        status=campaign.status,
-        rows=[_row_response(r) for r in rows],
-    )
+    return _campaign_response(campaign, rows)
 
 
 @router.put("/experiments/workbench/sync", response_model=WorkbenchSyncResponse)

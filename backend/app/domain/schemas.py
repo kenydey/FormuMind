@@ -4,9 +4,10 @@ research → recommend → DOE → simulate → optimize pipeline.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ProductDomain(str, Enum):
@@ -25,16 +26,33 @@ class Substrate(str, Enum):
     magnesium_alloy = "magnesium_alloy"
 
 
-class ObjectiveSpec(BaseModel):
-    """One term of a multi-objective optimization goal."""
+class ObjectiveDirection(str, Enum):
+    maximize = "maximize"
+    minimize = "minimize"
+    match_target = "match_target"
 
-    metric: str  # e.g. "salt_spray_hours", "cost_cny_per_kg", "voc_gpl"
+
+class ObjectiveSpec(BaseModel):
+    """One term of a multi-objective optimization goal (schema-driven contract)."""
+
+    id: str = ""
+    metric: str  # machine key, e.g. salt_spray_hours
+    display_name: str = ""
     weight: float = Field(default=1.0, ge=0.0, le=1.0)
-    direction: str = Field(default="maximize", pattern="^(maximize|minimize)$")
-    # Normalization bounds — auto-filled by the optimizer if not provided.
+    direction: str = Field(default="maximize")
     ref_min: float | None = None
     ref_max: float | None = None
     target_value: float | None = None
+    unit: str = ""
+    value_type: Literal["number", "rating"] = "number"
+
+    @model_validator(mode="after")
+    def _fill_defaults(self) -> ObjectiveSpec:
+        if not self.id:
+            object.__setattr__(self, "id", self.metric or uuid4().hex[:8])
+        if self.direction not in {d.value for d in ObjectiveDirection}:
+            object.__setattr__(self, "direction", "maximize")
+        return self
 
 
 class LeverSpec(BaseModel):
@@ -110,8 +128,18 @@ class Ingredient(BaseModel):
     role: str  # e.g. resin, hardener, inhibitor, surfactant, solvent, pigment
     smiles: str | None = None
     formula: str | None = None
+    mf_structure: str | None = None
+    cas_no: str | None = None
     molar_mass: float | None = None
     weight_pct: float = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _sync_formula_fields(self) -> Ingredient:
+        if self.mf_structure and not self.formula:
+            object.__setattr__(self, "formula", self.mf_structure)
+        elif self.formula and not self.mf_structure:
+            object.__setattr__(self, "mf_structure", self.formula)
+        return self
 
 
 class Formulation(BaseModel):

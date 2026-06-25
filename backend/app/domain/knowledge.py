@@ -33,6 +33,7 @@ RAW_MATERIALS: dict[str, dict] = {
     "Bisphenol-A epoxy (DGEBA)": {
         "role": "resin", "formula": "C21H24O4",
         "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", "molar_mass": 340.41,
+        "cas_no": "1675-54-3",
         "price_cny_per_kg": 28.0, "voc_contrib": 0.0,
         "tg_k": 253.0,  # uncured DGEBA Tg ≈ −20 °C
     },
@@ -50,6 +51,7 @@ RAW_MATERIALS: dict[str, dict] = {
     },
     "Zinc-rich epoxy binder": {
         "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
+        "cas_no": None,
         "price_cny_per_kg": 35.0, "voc_contrib": 0.0,
         "tg_k": 263.0,  # zinc-rich epoxy Tg ≈ −10 °C
     },
@@ -96,6 +98,7 @@ RAW_MATERIALS: dict[str, dict] = {
     # Corrosion inhibitors / passivators
     "Zinc phosphate": {
         "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11,
+        "cas_no": "7779-90-0",
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
         "density_gcm3": 3.1, "oil_absorption": 25.0, "lab": [92.0, -0.5, 2.0],
     },
@@ -202,11 +205,14 @@ RAW_MATERIALS: dict[str, dict] = {
 
 def ingredient(name: str, weight_pct: float) -> Ingredient:
     spec = RAW_MATERIALS.get(name, {})
+    formula = spec.get("formula")
     return Ingredient(
         name=name,
         role=spec.get("role", "additive"),
         smiles=spec.get("smiles"),
-        formula=spec.get("formula"),
+        formula=formula,
+        mf_structure=formula,
+        cas_no=spec.get("cas_no"),
         molar_mass=spec.get("molar_mass"),
         weight_pct=weight_pct,
     )

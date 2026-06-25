@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useStore, DOMAIN_OBJECTIVES } from "../store";
 import type { ObjectiveSpec, ProductDomain, Requirement } from "../api";
+import {
+  normalizeObjective,
+  normalizeObjectives,
+} from "../utils/objectiveContract";
 import ConstraintsEditor from "./ConstraintsEditor";
 import LeversEditor from "./LeversEditor";
 
@@ -86,21 +90,30 @@ function DirectionBadge({
   direction,
   onToggle,
 }: {
-  direction: "maximize" | "minimize";
+  direction: ObjectiveSpec["direction"];
   onToggle: () => void;
 }) {
-  const isMax = direction === "maximize";
+  const label =
+    direction === "match_target" ? "◎" : direction === "maximize" ? "↑" : "↓";
+  const title =
+    direction === "match_target"
+      ? "Match target (click to maximize)"
+      : direction === "maximize"
+        ? "Maximize (click to minimize)"
+        : "Minimize (click to match target)";
+  const tone =
+    direction === "match_target"
+      ? "bg-sky-500/20 text-sky-400 hover:bg-sky-500/30"
+      : direction === "maximize"
+        ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
+        : "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30";
   return (
     <button
       onClick={onToggle}
-      title={isMax ? "Click to minimize" : "Click to maximize"}
-      className={`shrink-0 w-6 h-6 rounded text-xs font-bold flex items-center justify-center transition-colors ${
-        isMax
-          ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
-          : "bg-rose-500/20 text-rose-400 hover:bg-rose-500/30"
-      }`}
+      title={title}
+      className={`shrink-0 w-6 h-6 rounded text-xs font-bold flex items-center justify-center transition-colors ${tone}`}
     >
-      {isMax ? "↑" : "↓"}
+      {label}
     </button>
   );
 }
@@ -134,7 +147,9 @@ function ObjectivesEditor({
   }
 
   function update(idx: number, patch: Partial<ObjectiveSpec>) {
-    const next = objectives.map((o, i) => (i === idx ? { ...o, ...patch } : o));
+    const next = objectives.map((o, i) =>
+      i === idx ? normalizeObjective({ ...o, ...patch }) : o
+    );
     onChange(next);
     if (patch.target_value != null) {
       const metric = next[idx]?.metric ?? objectives[idx]?.metric;
@@ -151,21 +166,23 @@ function ObjectivesEditor({
     const meta = metaFor(metric);
     onChange([
       ...objectives,
-      {
+      normalizeObjective({
         metric,
         weight: 0.1,
         direction: meta?.defaultDir ?? "maximize",
         target_value: seedTarget(metric),
-      },
+      }),
     ]);
   }
 
   function resetDefaults() {
     onChange(
-      DOMAIN_OBJECTIVES[domain].map((o) => ({
-        ...o,
-        target_value: seedTarget(o.metric) ?? o.target_value ?? null,
-      }))
+      normalizeObjectives(
+        DOMAIN_OBJECTIVES[domain].map((o) => ({
+          ...o,
+          target_value: seedTarget(o.metric) ?? o.target_value ?? null,
+        }))
+      )
     );
   }
 
@@ -191,7 +208,12 @@ function ObjectivesEditor({
                   direction={obj.direction}
                   onToggle={() =>
                     update(idx, {
-                      direction: obj.direction === "maximize" ? "minimize" : "maximize",
+                      direction:
+                        obj.direction === "maximize"
+                          ? "minimize"
+                          : obj.direction === "minimize"
+                            ? "match_target"
+                            : "maximize",
                     })
                   }
                 />
