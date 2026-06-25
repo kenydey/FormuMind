@@ -992,14 +992,16 @@ export const useStore = create<AppState>()(
       deselectAllSources: () => set({ selectedSources: [] }),
 
       searchSources: async (queryOverride?: string) => {
-        const { searchQuery, requirement } = get();
+        const { searchQuery, requirement, sourceTypes } = get();
         const query = (queryOverride ?? searchQuery).trim();
         if (queryOverride !== undefined) set({ searchQuery: query });
+        const types = sourceTypes.filter((t) => t !== "local");
         set({ searchBusy: true, error: null });
         try {
           const { task_id } = await api.searchStream({
             query,
             requirement,
+            source_types: types.length ? types : undefined,
             total_limit: 300,
           });
           const final = await awaitTaskStream(task_id, (ev) => {
