@@ -1,11 +1,15 @@
 """Baybe Campaign engine — stateless via JSON serialization."""
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
+from ...domain.objective_contract import align_dataframe_measurement_columns, objective_metrics
 from ...domain.schemas import (
     BaybeRecommendResult,
     ExperimentRecord,
+    ObjectiveSpec,
     OptimizationResult,
     Requirement,
 )
@@ -18,37 +22,31 @@ from ...pipeline.workflow import (
 )
 from ...services import predictor
 from ...config import get_settings
-from .adapters.baybe_objective_builder import build_objective, primary_metric
+from .adapters.baybe_objective_builder import build_objective_from_specs, primary_metric
 from .adapters.baybe_space_builder import build_searchspace, factors_for_requirement
 from .adapters.doe_adapter import dataframe_to_doe_plan
 from .adapters.measurements_adapter import records_to_dataframe, surrogate_measurements_from_plan
+from .campaign_objectives import resolve_campaign_objectives
 from .doe_registry import baybe_available, build_doe_plan
 
+log = logging.getLogger(__name__)
 
-def fetch_campaign_data_for_baybe(campaign_id: int, db: Session):
+
+def fetch_campaign_data_for_baybe(campaign_id: int, db: Session, req: Requirement | None = None):
     """Load completed workbench rows for BayBE ``add_measurements``.
 
-    Returns ``(actual_X, measurements_Y)`` where ``actual_X`` holds executed
-    formulation parameters and ``measurements_Y`` holds lab observations.
-    Measurement columns follow ``Campaign.objectives_snapshot`` order; missing
-    keys are filled with NaN.
+    Returns ``(actual_X, measurements_Y)`` where measurement columns follow
+    ``Campaign.objectives_snapshot`` order (SSOT = ``ObjectiveSpec.metric``).
     """
-    import logging
-
     import pandas as pd
 
-    from ...db.models import Campaign, ExperimentRecord as WorkbenchRow
-    from ...domain.objective_contract import objective_metrics, objectives_from_snapshot
+    from ...db.models import ExperimentRecord as WorkbenchRow
     from ...domain.schemas import ProductDomain
 
-    log = logging.getLogger(__name__)
+    if req is None:
+        req = Requirement(domain=ProductDomain.anticorrosion_coating)
 
-    campaign = db.get(Campaign, campaign_id)
-    domain = ProductDomain.anticorrosion_coating
-    objectives = objectives_from_snapshot(
-        campaign.objectives_snapshot if campaign else None,
-        domain,
-    )
+    objectives = resolve_campaign_objectives(db, campaign_id, req)
     metrics = objective_metrics(objectives)
 
     rows = (
@@ -87,7 +85,7 @@ def fetch_campaign_data_for_baybe(campaign_id: int, db: Session):
     return actual_X, measurements_Y
 
 
-def workbench_dataframes_to_baybe(actual_X, measurements_Y):
+def workbench_dataframes_to_baybe(actual_X, measurements_Y, metrics: list[str] | None = None):
     """Merge workbench parameter and measurement frames for ``add_measurements``."""
     import pandas as pd
 
@@ -95,7 +93,20 @@ def workbench_dataframes_to_baybe(actual_X, measurements_Y):
         return pd.DataFrame()
     if measurements_Y is None or getattr(measurements_Y, "empty", True):
         return actual_X.copy()
-    return pd.concat([actual_X.reset_index(drop=True), measurements_Y.reset_index(drop=True)], axis=1)
+    merged = pd.concat([actual_X.reset_index(drop=True), measurements_Y.reset_index(drop=True)], axis=1)
+    if metrics:
+        merged = align_dataframe_measurement_columns(merged, metrics, log=log)
+    return merged
+
+
+def _prepare_measurement_dataframe(df, metrics: list[str]):
+    if df is None or getattr(df, "empty", True):
+        return df
+    from ...domain.objective_contract import assert_dataframe_measurement_columns
+
+    aligned = align_dataframe_measurement_columns(df, metrics, log=log)
+    assert_dataframe_measurement_columns(aligned, metrics)
+    return aligned
 
 
 class BaybeCampaignEngine:
@@ -104,13 +115,13 @@ class BaybeCampaignEngine:
     def available(self) -> bool:
         return baybe_available()
 
-    def _new_campaign(self, req: Requirement, factors=None):
+    def _new_campaign(self, req: Requirement, objectives: list[ObjectiveSpec], factors=None):
         from baybe import Campaign
         from baybe.recommenders import BotorchRecommender, FPSRecommender, TwoPhaseMetaRecommender
 
         factor_list = factors_for_requirement(req, factors)
         searchspace = build_searchspace(req, factor_list)
-        objective = build_objective(req)
+        objective = build_objective_from_specs(objectives)
         recommender = TwoPhaseMetaRecommender(
             initial_recommender=FPSRecommender(),
             recommender=BotorchRecommender(),
@@ -133,32 +144,47 @@ class BaybeCampaignEngine:
 
         from baybe import Campaign
 
+        objectives = resolve_campaign_objectives(db, workbench_campaign_id, req)
+        metrics = objective_metrics(objectives)
+
         measurements = measurements or []
         if campaign_state:
             campaign = Campaign.from_json(campaign_state)
             factor_list = factors_for_requirement(req)
         else:
-            campaign, factor_list = self._new_campaign(req)
+            campaign, factor_list = self._new_campaign(req, objectives)
 
-        metric = primary_metric(req)
-        df_meas = records_to_dataframe(measurements, req)
+        df_meas = records_to_dataframe(measurements, req, objectives)
+        if not df_meas.empty and metrics:
+            df_meas = align_dataframe_measurement_columns(df_meas, metrics, log=log)
+
         if workbench_campaign_id is not None and db is not None:
-            actual_X, measurements_Y = fetch_campaign_data_for_baybe(workbench_campaign_id, db)
-            df_wb = workbench_dataframes_to_baybe(actual_X, measurements_Y)
+            actual_X, measurements_Y = fetch_campaign_data_for_baybe(workbench_campaign_id, db, req)
+            df_wb = workbench_dataframes_to_baybe(actual_X, measurements_Y, metrics)
             if not df_wb.empty:
                 import pandas as pd
 
+                log.info(
+                    "Workbench measurements for campaign %s: metrics=%s rows=%d",
+                    workbench_campaign_id,
+                    metrics,
+                    len(df_wb),
+                )
+                df_wb = _prepare_measurement_dataframe(df_wb, metrics)
                 df_meas = (
                     pd.concat([df_meas, df_wb], ignore_index=True)
                     if not df_meas.empty
                     else df_wb
                 )
+
         if not df_meas.empty:
-            campaign.add_measurements(df_meas)
+            campaign.add_measurements(_prepare_measurement_dataframe(df_meas, metrics))
 
         if campaign_state is None and df_meas.empty:
             seed_plan = build_doe_plan(factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8))
-            virtual = surrogate_measurements_from_plan(seed_plan, req, metric)
+            virtual = surrogate_measurements_from_plan(seed_plan, req, None)
+            if not virtual.empty and metrics:
+                virtual = align_dataframe_measurement_columns(virtual, metrics, log=log)
             if not virtual.empty:
                 campaign.add_measurements(virtual.head(min(3, len(virtual))))
 
@@ -178,6 +204,8 @@ class BaybeCampaignEngine:
         campaign_state: str | None = None,
         measurements: list[ExperimentRecord] | None = None,
         progress_cb=None,
+        workbench_campaign_id: int | None = None,
+        db: Session | None = None,
     ) -> OptimizationResult:
         """Iterative baybe batch recommendations scored via FormuMind predictor."""
         measurements = list(measurements or [])
@@ -185,13 +213,15 @@ class BaybeCampaignEngine:
         rounds = max(1, iterations // batch_size)
         history: list[float] = []
         best_so_far = float("-inf")
-        objectives = req.objectives or default_objectives(req.domain)
+        objectives = resolve_campaign_objectives(db, workbench_campaign_id, req)
+        if not objectives:
+            objectives = req.objectives or default_objectives(req.domain)
         process = process_for(req)
         bounds: dict[str, tuple[float, float]] = {}
         ranked: list[tuple[float, object]] = []
         state = campaign_state
         metric = primary_metric(req)
-        objective_metric_names = [o.metric for o in objectives]
+        objective_metric_names = objective_metrics(objectives)
         settings = get_settings()
 
         for r in range(rounds):
@@ -201,6 +231,8 @@ class BaybeCampaignEngine:
                 measurements=measurements,
                 batch_size=batch_size,
                 design="baybe_opt",
+                workbench_campaign_id=workbench_campaign_id,
+                db=db,
             )
             state = result.campaign_state
 

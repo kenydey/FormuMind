@@ -5,7 +5,8 @@ import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
 import { api } from "../api";
-import type { DOEPlan, ObjectiveSpec, Requirement, WorkbenchRow } from "../api";
+import type { DOEPlan, Requirement, WorkbenchRow } from "../api";
+import { useStore } from "../store";
 import {
   buildWorkbenchColumnDefs,
   effectiveObjectives,
@@ -16,7 +17,6 @@ interface LabWorkbenchProps {
   campaignId: number;
   doePlan: DOEPlan;
   requirement: Requirement;
-  objectivesSnapshot?: ObjectiveSpec[];
   onSaved?: (rows: WorkbenchRow[]) => void;
 }
 
@@ -40,7 +40,6 @@ export default function LabWorkbench({
   campaignId,
   doePlan,
   requirement,
-  objectivesSnapshot,
   onSaved,
 }: LabWorkbenchProps) {
   const gridRef = useRef<AgGridReact<WorkbenchRow>>(null);
@@ -48,11 +47,17 @@ export default function LabWorkbench({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<ObjectiveSpec[] | undefined>(objectivesSnapshot);
+  const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
+
+  const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
 
   const objectives = useMemo(
-    () => effectiveObjectives(requirement.objectives ?? [], snapshot),
-    [requirement.objectives, snapshot]
+    () =>
+      effectiveObjectives(
+        requirement.objectives ?? [],
+        workbenchObjectivesSnapshot ?? apiSnapshot
+      ),
+    [requirement.objectives, workbenchObjectivesSnapshot, apiSnapshot]
   );
 
   const factorKeys = useMemo(() => factorKeysFromPlan(doePlan, rows), [doePlan, rows]);
@@ -67,7 +72,7 @@ export default function LabWorkbench({
         if (!cancelled) {
           setRows(data.rows);
           if (data.objectives_snapshot?.length) {
-            setSnapshot(data.objectives_snapshot as ObjectiveSpec[]);
+            setApiSnapshot(data.objectives_snapshot);
           }
         }
       } catch (e) {
@@ -116,14 +121,24 @@ export default function LabWorkbench({
     setSaving(true);
     setError(null);
     try {
+      const syncMetrics = objectives.map((o) => o.metric);
       const res = await api.syncWorkbench({
         campaign_id: campaignId,
-        rows: allRows.map((r) => ({
-          id: r.id,
-          status: r.status,
-          actual_params: r.actual_params ?? {},
-          measurements: r.measurements ?? {},
-        })),
+        rows: allRows.map((r) => {
+          const measurements: Record<string, number | string> = {};
+          for (const m of syncMetrics) {
+            const v = r.measurements?.[m];
+            if (v !== undefined && v !== null && v !== "") {
+              measurements[m] = v as number | string;
+            }
+          }
+          return {
+            id: r.id,
+            status: r.status,
+            actual_params: r.actual_params ?? {},
+            measurements,
+          };
+        }),
       });
       setRows(res.rows);
       onSaved?.(res.rows);
@@ -138,8 +153,20 @@ export default function LabWorkbench({
     return <p className="text-xs text-slate-500 py-3">加载实验台账…</p>;
   }
 
+  const frozen = workbenchObjectivesSnapshot ?? apiSnapshot;
+
   return (
     <div className="shadow-sm rounded-lg border border-gray-200 dark:border-edge overflow-hidden bg-panel/30">
+      {frozen && frozen.length > 0 && (
+        <div className="px-2 py-1.5 border-b border-edge/30 bg-ink/30 text-[10px] text-slate-500">
+          本 Campaign 指标已冻结（键 = metric）：
+          {frozen.map((o) => (
+            <span key={o.metric} className="ml-2 font-mono text-accent2">
+              {o.display_name || o.metric}
+            </span>
+          ))}
+        </div>
+      )}
       {error && <p className="text-[11px] text-red-400 px-2 py-1 border-b border-edge/30">{error}</p>}
       <div className="ag-theme-alpine-dark w-full" style={{ height: 280 }}>
         <AgGridReact<WorkbenchRow>

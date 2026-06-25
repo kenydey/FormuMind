@@ -121,3 +121,44 @@ def objectives_from_snapshot(snapshot: list | None, domain: ProductDomain) -> li
 
         return [normalize_objective(o) for o in default_objectives(domain)]
     return [normalize_objective(ObjectiveSpec(**item)) for item in snapshot]
+
+
+def measurements_dict_for_row(raw: dict | None, metrics: list[str]) -> dict:
+    """Build a measurements dict containing only allowed metric keys."""
+    out: dict = {}
+    for m in metrics:
+        if raw and m in raw:
+            out[m] = raw[m]
+    return out
+
+
+def align_dataframe_measurement_columns(df, metrics: list[str], *, log=None):
+    """Ensure DataFrame contains all objective metric columns (SSOT = metric name).
+
+    Non-metric columns (DOE factors) are preserved. Missing metrics are filled
+    with NaN. Column order: factors first, then metrics in contract order.
+    """
+    import logging
+
+    log = log or logging.getLogger(__name__)
+    if df is None or getattr(df, "empty", True) or not metrics:
+        return df
+
+    out = df.copy()
+    factor_cols = [c for c in out.columns if c not in metrics]
+    for m in metrics:
+        if m not in out.columns:
+            log.warning("Measurement column %r missing from DataFrame; filling NaN", m)
+            out[m] = float("nan")
+    ordered = factor_cols + [m for m in metrics if m in out.columns]
+    return out[ordered]
+
+
+def assert_dataframe_measurement_columns(df, metrics: list[str]) -> None:
+    """Raise ValueError if any required metric column is entirely absent (all NaN ok)."""
+    if df is None or getattr(df, "empty", True):
+        return
+    missing = [m for m in metrics if m not in df.columns]
+    if missing:
+        raise ValueError(f"DataFrame missing required measurement columns: {missing}")
+

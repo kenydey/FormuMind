@@ -12,13 +12,21 @@ def _metrics_for_req(req: Requirement) -> list[str]:
     return metrics or [primary_metric(req)]
 
 
-def records_to_dataframe(records: list[ExperimentRecord], req: Requirement):
+def records_to_dataframe(
+    records: list[ExperimentRecord],
+    req: Requirement,
+    objectives: list | None = None,
+):
     import pandas as pd
+
+    from ....domain.objective_contract import normalize_objectives, objective_metrics
 
     if not records:
         return pd.DataFrame()
 
-    metrics = _metrics_for_req(req)
+    if objectives is None:
+        objectives = normalize_objectives(req)
+    metrics = objective_metrics(objectives) or [primary_metric(req)]
     rows = []
     for rec in records:
         row = dict(rec.factors)

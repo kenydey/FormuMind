@@ -15,6 +15,7 @@ class OptimizeRequest(BaseModel):
     iterations: int | None = None
     engine: str = "auto"
     campaign_state: str | None = None
+    workbench_campaign_id: int | None = None
 
 
 class TaskHandle(BaseModel):
@@ -29,5 +30,6 @@ def start_optimization(payload: OptimizeRequest) -> TaskHandle:
         payload.iterations,
         engine=payload.engine,
         campaign_state=payload.campaign_state,
+        workbench_campaign_id=payload.workbench_campaign_id,
     )
     return TaskHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")

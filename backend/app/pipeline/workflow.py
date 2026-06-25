@@ -24,9 +24,8 @@ from ..domain.schemas import (
     Requirement,
     ResearchResult,
 )
-from ..services import literature, llm, predictor
+from ..services import llm, predictor
 from ..services.optimizer import Factor, build_optimizer
-from ..services.rag import build_store
 from . import reconstruct
 
 # Per-domain optimization levers: (ingredient name, role-fallback, low%, high%)
@@ -143,55 +142,43 @@ def run_research(
     source_types: list[str] | None = None,
     query: str = "",
 ) -> ResearchResult:
-    """Run the research pipeline.
+    """Run CRAG research graph; returns grounded evidence and recommended formulations."""
+    from loguru import logger
 
-    If ``pre_sources`` is provided (non-empty list of Evidence), internal
-    patent/literature retrieval is skipped and the supplied evidence is used
-    directly — this allows the /api/search and /api/ingest endpoints to feed
-    evidence into the pipeline without a redundant network round-trip.
-    """
-    from ..domain.schemas import Evidence as _Evidence
+    from .research_graph import graph_state_to_research_result, run_research_graph
 
-    types = source_types or ["patents"]
+    if source_types:
+        logger.warning("run_research: source_types is deprecated; using ColBERT KB + federated fallback")
+
     q = query or req.headline()
+    pre_index = list(pre_sources) if pre_sources else None
 
-    if pre_sources:
-        evidence: list[_Evidence] = _filter_evidence_by_types(list(pre_sources), types)
-    else:
-        search_types = [t for t in types if t != "local"]
-        evidence = literature.search_by_types(q, search_types, req=req) if search_types else []
-    # Semantic store when sentence-transformers is installed, else TF-IDF.
-    store = build_store()
-    store.ingest(evidence)
-    grounded = store.query(req.headline(), k=min(5, len(evidence))) or evidence
+    state = run_research_graph(
+        topic=q,
+        req=req,
+        query=q,
+        pre_index=pre_index,
+    )
+    return graph_state_to_research_result(state, req)
 
-    process = process_for(req)
-    from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
-    from ..domain.objective_contract import normalize_objectives
-    from ..services import llm
 
-    rec_resp = llm.recommend_formulations(req, normalize_objectives(req), grounded, n=3)
-    forms = []
-    for rec in rec_resp.formulas:
-        try:
-            forms.append(recommended_to_formulation(rec))
-        except ValueError as exc:
-            rec_resp.warnings.append(str(exc))
-    recommended = [_score_and_validate(f, process, req) for f in forms]
-    recommended, gate_warnings = validate_formulations(recommended)
-    recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
+def run_research_graph_stream(
+    topic: str,
+    req: Requirement | None = None,
+    *,
+    query: str = "",
+    pre_index: list | None = None,
+    event_cb=None,
+):
+    """SSE-friendly wrapper around CRAG graph."""
+    from .research_graph import run_research_graph
 
-    mechanism, chat = llm.synthesize_research(req, grounded, recommended)
-    all_warnings = rec_resp.warnings + gate_warnings
-    if all_warnings:
-        chat = chat + "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in all_warnings)
-    return ResearchResult(
-        requirement_headline=req.headline(),
-        evidence=grounded,
-        mechanism=mechanism,
-        recommended=recommended,
-        chat_markdown=chat,
-        recommend_engine=rec_resp.engine,
+    return run_research_graph(
+        topic=topic,
+        req=req,
+        query=query or topic,
+        pre_index=pre_index,
+        progress_cb=event_cb,
     )
 
 
@@ -261,12 +248,14 @@ def run_optimization(
     engine: str = "auto",
     campaign_state: str | None = None,
     existing_records: list | None = None,
+    workbench_campaign_id: int | None = None,
 ) -> OptimizationResult:
     settings = get_settings()
     iterations = iterations or settings.optimize_iterations
 
     resolved = (engine or "auto").lower()
     if resolved in ("auto", "baybe"):
+        from ..db.database import default_session_factory
         from ..services.engines.baybe_engine import BaybeCampaignEngine
         from ..services.engines.doe_registry import baybe_available
 
@@ -277,13 +266,16 @@ def run_optimization(
                     from ..services.training import registry
 
                     records = existing_records if existing_records is not None else registry.records_for(req.domain)
-                    return baybe_eng.run_optimization(
-                        req,
-                        iterations=iterations,
-                        campaign_state=campaign_state,
-                        measurements=list(records),
-                        progress_cb=progress_cb,
-                    )
+                    with default_session_factory()() as db:
+                        return baybe_eng.run_optimization(
+                            req,
+                            iterations=iterations,
+                            campaign_state=campaign_state,
+                            measurements=list(records),
+                            progress_cb=progress_cb,
+                            workbench_campaign_id=workbench_campaign_id,
+                            db=db,
+                        )
             except Exception:
                 if resolved == "baybe":
                     raise

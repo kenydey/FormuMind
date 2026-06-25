@@ -28,7 +28,13 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Optionally enrich the raw-material library via PubChem (opt-in, best-effort)."""
+    """Bootstrap ColBERT seed corpus and optional PubChem enrichment."""
+    try:
+        from .services import colbert_store
+
+        colbert_store.bootstrap_seed_corpus()
+    except Exception:
+        pass
     if settings.enrich_compounds:
         try:  # pragma: no cover - opt-in network path
             from .domain.knowledge import RAW_MATERIALS

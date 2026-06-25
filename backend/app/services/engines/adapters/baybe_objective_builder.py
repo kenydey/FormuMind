@@ -28,24 +28,24 @@ def _numerical_target(obj: ObjectiveSpec):
         return NumericalTarget(name=obj.metric, mode="MAX")
 
 
-def build_objective(req: Requirement):
+def build_objective_from_specs(objectives: list[ObjectiveSpec]):
+    """Build BayBE objective from an explicit objective spec list (Campaign snapshot SSOT)."""
     from baybe.objectives import ParetoObjective, SingleTargetObjective
 
-    objectives = req.objectives or default_objectives(req.domain)
+    if not objectives:
+        raise ValueError("Cannot build BayBE objective from empty objectives list")
     if len(objectives) > 1:
         targets = [_numerical_target(o) for o in objectives]
         return ParetoObjective(targets=targets)
-    metric = primary_metric(req)
-    obj = objectives[0] if objectives else None
-    if obj and (obj.direction or "").lower() == "match_target":
+    obj = objectives[0]
+    if (obj.direction or "").lower() == "match_target":
         return SingleTargetObjective(target=_numerical_target(obj))
-    from baybe.targets import NumericalTarget
+    return SingleTargetObjective(target=_numerical_target(obj))
 
-    try:
-        target = NumericalTarget(name=metric, minimize=False)
-    except TypeError:
-        target = NumericalTarget(name=metric, mode="MAX")
-    return SingleTargetObjective(target=target)
+
+def build_objective(req: Requirement):
+    objectives = req.objectives or default_objectives(req.domain)
+    return build_objective_from_specs(objectives)
 
 
 def primary_metric(req: Requirement) -> str:

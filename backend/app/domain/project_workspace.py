@@ -48,6 +48,7 @@ class ProjectWorkspace(BaseModel):
     train_message: str = ""
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None
+    workbench_objectives_snapshot: list[dict] = Field(default_factory=list)
     optimization_history: list[float] = Field(default_factory=list)
     loop_report: LoopReport | None = None
     rmse_history: list[dict[str, float]] = Field(default_factory=list)

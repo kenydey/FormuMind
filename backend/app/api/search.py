@@ -5,7 +5,7 @@ GET  /api/search/status — Per-source availability check (no network requests).
 GET  /api/search/expand — Query expansion debug endpoint.
 """
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ..domain.schemas import Evidence, Requirement
 from ..services import literature
 from ..services.deep_research import ExpandedQuery, QueryExpander
@@ -16,10 +16,18 @@ router = APIRouter()
 
 class SearchRequest(BaseModel):
     query: str = ""
-    source_types: list[str] = ["patents", "literature", "internet"]
+    source_types: list[str] = Field(default_factory=list)
     requirement: Requirement | None = None
-    limit_per_source: int = 50    # per-source page size (effectively no hard cap)
-    total_limit: int = 300        # overall cap across all sources, ranked by relevance
+    limit_per_source: int = 50
+    total_limit: int = 300
+
+
+def _effective_source_types(request_types: list[str]) -> list[str]:
+    from ..config import get_settings
+
+    if request_types:
+        return request_types
+    return list(get_settings().federated_sources)
 
 
 class TaskHandle(BaseModel):
@@ -57,9 +65,10 @@ def source_status() -> dict[str, SourceStatus]:
 
 @router.post("/search", response_model=SearchResponse)
 def search_sources(req: SearchRequest):
+    types = _effective_source_types(req.source_types)
     evidence = literature.search_by_types(
         query=req.query,
-        source_types=req.source_types,
+        source_types=types,
         req=req.requirement,
         limit_per_source=req.limit_per_source,
         total_limit=req.total_limit,
@@ -81,7 +90,7 @@ def search_stream(req: SearchRequest) -> TaskHandle:
     """
     task_id = task_manager.submit_search(
         query=req.query,
-        source_types=req.source_types,
+        source_types=_effective_source_types(req.source_types),
         req=req.requirement,
         total_limit=req.total_limit,
         per_source_cap=req.limit_per_source,

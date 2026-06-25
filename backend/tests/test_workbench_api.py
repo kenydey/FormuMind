@@ -121,7 +121,7 @@ def test_fetch_campaign_data_for_baybe_multi_metric():
         row.status = "Completed"
         session.commit()
 
-        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session)
+        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session, _requirement())
         assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]
         assert float(measurements_Y.iloc[0]["salt_spray_hours"]) == 900.0
         assert float(measurements_Y.iloc[0]["cost_cny_per_kg"]) == 18.5
@@ -148,7 +148,7 @@ def test_fetch_campaign_data_for_baybe():
         row.status = "Completed"
         session.commit()
 
-        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session)
+        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session, _requirement())
         assert not actual_X.empty
         assert not measurements_Y.empty
         assert float(actual_X.iloc[0]["Zinc phosphate"]) == 9.0

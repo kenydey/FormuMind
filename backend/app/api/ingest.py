@@ -3,6 +3,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from ..domain.schemas import Evidence
+from ..services import colbert_store
 from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
 
 router = APIRouter()
@@ -33,6 +34,7 @@ class IngestTextRequest(BaseModel):
 async def ingest_document(file: UploadFile = File(...)):
     content = await file.read()
     evidence = ingest_file(file.filename or "upload", content)
+    colbert_store.index_evidence(evidence)
     return IngestResponse(filename=file.filename or "upload", evidence=evidence, total=len(evidence))
 
 
@@ -44,6 +46,7 @@ async def ingest_batch(files: list[UploadFile] = File(...)):
     for f in files:
         pairs.append((f.filename or "upload", await f.read()))
     evidence = ingest_files_batch(pairs)
+    colbert_store.index_evidence(evidence)
     return BatchIngestResponse(evidence=evidence, total=len(evidence), files_processed=len(files))
 
 
@@ -55,10 +58,12 @@ def ingest_from_url(req: IngestUrlRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}") from exc
+    colbert_store.index_evidence(evidence)
     return IngestResponse(filename=req.url, evidence=evidence, total=len(evidence))
 
 
 @router.post("/ingest/text", response_model=IngestResponse)
 def ingest_from_text(req: IngestTextRequest):
     evidence = ingest_text(req.text, req.title or "Pasted text")
+    colbert_store.index_evidence(evidence)
     return IngestResponse(filename=req.title or "Pasted text", evidence=evidence, total=len(evidence))

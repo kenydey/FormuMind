@@ -108,13 +108,22 @@ class RecommendFormulationsResponse(BaseModel):
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
 def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormulationsResponse:
-    """LLM structured formulation recommend with offline fallback and scoring."""
+    """LLM structured formulation recommend grounded on ColBERT + CRAG evidence."""
+    from ..pipeline.research_graph import resolve_grounded_evidence
+
     objectives = body.objectives or normalize_objectives(body.requirement)
+    query = body.requirement.headline()
     try:
+        grounded_result = resolve_grounded_evidence(
+            body.requirement,
+            query,
+            pre_index=body.sources or None,
+        )
+        evidence = grounded_result.grounded_evidence
         rec_resp = llm.recommend_formulations(
             body.requirement,
             objectives,
-            body.sources,
+            evidence,
             n=body.n,
         )
     except Exception as exc:

@@ -3,12 +3,33 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.schemas import ExperimentRecord, ProductDomain, Requirement
-from app.services.engines.baybe_engine import BaybeCampaignEngine
+from app.db.campaign_store import CampaignStore
+from app.db.database import make_engine, make_session_factory
+from app.db.models import ExperimentRecord as WorkbenchRow
+from app.domain.schemas import (
+    DOEPlan,
+    DOERun,
+    ExperimentRecord,
+    ObjectiveSpec,
+    ProductDomain,
+    Requirement,
+)
+from app.services.engines.baybe_engine import BaybeCampaignEngine, fetch_campaign_data_for_baybe
 from app.services.engines.doe_registry import baybe_available
 
 
 REQ = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+
+
+def _workbench_plan() -> DOEPlan:
+    return DOEPlan(
+        design="lhs",
+        factors=[],
+        runs=[DOERun(run_id=1, coded={}, natural={"Zinc phosphate": 8.0})],
+        notes="test",
+        plan_id="abc12345",
+        domain=ProductDomain.anticorrosion_coating,
+    )
 
 
 @pytest.mark.skipif(not baybe_available(), reason="baybe not installed")
@@ -35,6 +56,40 @@ def test_baybe_recommend_roundtrip():
     )
     assert len(r2.plan.runs) == 2
     assert r2.campaign_state != r1.campaign_state
+
+
+@pytest.mark.skipif(not baybe_available(), reason="baybe not installed")
+def test_baybe_recommend_with_workbench_multi_metric():
+    engine = make_engine("sqlite:///:memory:")
+    factory = make_session_factory(engine)
+    store = CampaignStore(factory)
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        objectives=[
+            ObjectiveSpec(metric="salt_spray_hours", weight=0.6, direction="maximize"),
+            ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
+        ],
+    )
+    campaign = store.create_from_plan(_workbench_plan(), req=req)
+
+    with factory() as session:
+        row = session.query(WorkbenchRow).filter(WorkbenchRow.campaign_id == campaign.id).first()
+        row.actual_params = {"Zinc phosphate": 9.0}
+        row.measurements = {"salt_spray_hours": 900.0, "cost_cny_per_kg": 18.0}
+        row.status = "Completed"
+        session.commit()
+
+        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session, req)
+        assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]
+
+        result = engine.recommend(
+            req,
+            batch_size=2,
+            workbench_campaign_id=campaign.id,
+            db=session,
+        )
+        assert len(result.plan.runs) == 2
+        assert result.campaign_state
 
 
 def test_baybe_unavailable_raises():

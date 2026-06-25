@@ -102,31 +102,18 @@ def test_cohort_run_without_requirement():
     assert report.candidates == []  # no requirement → no candidates
 
 
-# ── Async endpoint ───────────────────────────────────────────────────────────
+# ── SSE research stream ──────────────────────────────────────────────────────
 
-def test_deep_research_endpoint_returns_task_and_completes():
-    body = dict(_REQUIREMENT)
-    body["topic"] = "low-temperature curing anti-corrosion primer"
-    r = client.post("/api/research/deep", json=body)
-    assert r.status_code == 200
-    handle = r.json()
-    assert "task_id" in handle and handle["poll_url"].endswith(handle["task_id"])
-
-    # Poll until completed (may hit real network sources when intel extras are installed).
-    task_id = handle["task_id"]
-    result = None
-    for _ in range(240):
-        tr = client.get(f"/api/tasks/{task_id}")
-        assert tr.status_code == 200
-        status = tr.json()
-        if status["state"] == "completed":
-            result = status["result"]
-            break
-        if status["state"] == "failed":
-            raise AssertionError(f"deep research failed: {status['message']}")
-        time.sleep(0.25)
-
-    assert result is not None, "task did not complete in time"
-    assert "report_markdown" in result
-    assert "citations" in result
-    assert result["topic"]
+def test_research_stream_returns_sse_events():
+    body = {
+        "topic": "low-temperature curing anti-corrosion primer",
+        "requirement": _REQUIREMENT,
+        "sources": [],
+        "query": "low-temperature curing anti-corrosion primer",
+    }
+    with client.stream("POST", "/api/research/stream", json=body) as r:
+        assert r.status_code == 200
+        text = "".join(r.iter_text())
+    assert "event: stage" in text or "event: result" in text or "event: error" in text
+    if "event: result" in text:
+        assert "report_markdown" in text

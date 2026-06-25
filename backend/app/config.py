@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -62,9 +63,22 @@ class Settings(BaseSettings):
     # 检索设置
     search_limit_per_source: int = 50    # 每源单页大小（增量翻页，实际不设硬上限）
     search_total_limit: int = 300        # 全部来源合并后的总量上限（按相关性排序截断）
-    # RAG 检索后端：auto（有 sentence-transformers 则用语义嵌入，否则 TF-IDF）/
-    # embedding（强制语义）/ tfidf（强制词袋）。缺库时一律回退 TF-IDF。
+    # RAG 检索后端：auto（ColBERT > sentence-transformers > TF-IDF）/
+    # colbert / embedding / tfidf。缺库时一律回退 TF-IDF。
     rag_backend: str = "auto"
+
+    # ColBERT 持久知识库
+    colbert_index_dir: str = "./data/colbert_index"
+    colbert_model: str = "colbert-ir/colbertv2.0"
+    colbert_collection: str = "default"
+    colbert_top_k: int = 12
+    colbert_min_score: float = 0.35
+
+    # CRAG Fallback 默认联邦检索源（逗号分隔 env: FORMUMIND_FEDERATED_SOURCES）
+    federated_sources: list[str] = Field(
+        default_factory=lambda: ["patents", "literature", "internet"]
+    )
+    federated_sources_notebooklm: bool = False
 
     # 可选增强引擎（adapter + 离线回退；缺库或关闭时行为不变）
     # 启动时用 PubChemPy 按化学名补全知识库的 SMILES/分子量（需 intel extra + 网络）。

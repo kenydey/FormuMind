@@ -12,6 +12,7 @@ import {
 import {
   api,
   pollTask,
+  streamDeepResearch,
   type ChatMessage,
   type ComprehensiveReport,
   type DOEPlan,
@@ -98,6 +99,7 @@ interface AppState {
   loopDoeEngine: "auto" | "legacy" | "baybe";
   campaignState: string | null;
   workbenchCampaignId: number | null;
+  workbenchObjectivesSnapshot: ObjectiveSpec[] | null;
   workbenchStats: { completed: number; total: number; name: string; strategy: string } | null;
   lastAlEngine: string | null;
   models: ModelInfo[];
@@ -120,10 +122,11 @@ interface AppState {
   chatHistory: ChatMessage[];
   searchBusy: boolean;
   deepResearchBusy: boolean;
+  deepResearchStage: string;
+  deepResearchMessage: string;
   formulationBusy: boolean;
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
-  // Modal 可见性
   openModal: string | null;   // requirements | recommend | doe | workbench | optimize | process | loop
   activeConstraints: ConstraintKey[];
   // Settings
@@ -141,6 +144,7 @@ interface AppState {
   clearConstraintValue: (key: ConstraintKey) => void;
   runResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
+  refreshKnowledgeBase: () => Promise<void>;
   runOptimize: () => Promise<void>;
   generateDoe: (design: string) => Promise<void>;
   setDoeEngine: (engine: "auto" | "native" | "pydoe") => void;
@@ -233,6 +237,7 @@ function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     trainMessage: state.trainMessage,
     campaignState: state.campaignState,
     workbenchCampaignId: state.workbenchCampaignId,
+    workbenchObjectivesSnapshot: state.workbenchObjectivesSnapshot,
     optimizationHistory: state.optimizationHistory,
     loopReport: state.loopReport,
     rmseHistory: state.rmseHistory,
@@ -265,6 +270,7 @@ export const useStore = create<AppState>()(
       loopDoeEngine: "auto",
       campaignState: null,
       workbenchCampaignId: null,
+      workbenchObjectivesSnapshot: null,
       workbenchStats: null,
       lastAlEngine: null,
       models: [],
@@ -285,6 +291,8 @@ export const useStore = create<AppState>()(
       chatHistory: [],
       searchBusy: false,
       deepResearchBusy: false,
+      deepResearchStage: "",
+      deepResearchMessage: "",
       formulationBusy: false,
       chatBusy: false,
       recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
@@ -367,16 +375,12 @@ export const useStore = create<AppState>()(
       runResearch: async () => {
         set({ formulationBusy: true, error: null });
         try {
-          const { requirement, sources, selectedSources, recommendSourceTypes, searchQuery } = get();
-          const types =
-            recommendSourceTypes.length > 0
-              ? recommendSourceTypes
-              : (["patents"] as SearchSourceType[]);
+          const { requirement, sources, selectedSources, searchQuery } = get();
           const selected = sources.filter((e) =>
             selectedSources.includes(e.identifier || e.title)
           );
           const payload = selected.length > 0 ? selected : sources;
-          const research = await api.research(requirement, payload, types, searchQuery.trim());
+          const research = await api.research(requirement, payload, searchQuery.trim());
           const leaderboard = research.recommended;
           set({ research, leaderboard });
           get().scheduleAutosave();
@@ -388,46 +392,79 @@ export const useStore = create<AppState>()(
       },
 
       runDeepResearch: async () => {
-        const { searchQuery, requirement, sourceTypes } = get();
-        set({ deepResearchBusy: true, error: null });
+        const { searchQuery, requirement, sources } = get();
+        set({
+          deepResearchBusy: true,
+          deepResearchStage: "retrieve",
+          deepResearchMessage: "正在检索",
+          error: null,
+        });
         try {
-          const { task_id } = await api.deepResearch(searchQuery, requirement, sourceTypes);
-          const final = await pollTask(task_id, (t) => {
-            set({ task: t });
-            const partial = t.result as { citations?: Evidence[]; partial?: boolean } | null;
-            if (partial?.partial && partial.citations?.length) {
-              get().addSources(partial.citations);
-            }
-          });
-          if (final.state === "failed") {
-            set({ error: final.message || "深度研究失败" });
-            return;
-          }
-          const report = final.result as unknown as ComprehensiveReport | null;
-          if (report) {
-            set({ deepReport: report });
-            if (report.citations?.length) get().addSources(report.citations);
-            if (report.candidates?.length) set({ leaderboard: report.candidates });
-            const msg: ChatMessage = {
-              role: "assistant",
-              content: report.report_markdown,
-              citations: report.citations,
-            };
-            set((s) => ({ chatHistory: [...s.chatHistory, msg] }));
-          }
+          const report = await streamDeepResearch(
+            searchQuery,
+            requirement,
+            sources,
+            (event, data) => {
+              if (event === "stage") {
+                set({
+                  deepResearchStage: String(data.stage ?? ""),
+                  deepResearchMessage: String(data.message ?? ""),
+                });
+              }
+            },
+            searchQuery.trim()
+          );
+          set({ deepReport: report });
+          if (report.citations?.length) get().addSources(report.citations);
+          if (report.candidates?.length) set({ leaderboard: report.candidates });
+          const msg: ChatMessage = {
+            role: "assistant",
+            content: report.report_markdown,
+            citations: report.citations,
+          };
+          set((s) => ({ chatHistory: [...s.chatHistory, msg] }));
           get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });
         } finally {
-          set({ deepResearchBusy: false });
+          set({
+            deepResearchBusy: false,
+            deepResearchStage: "",
+            deepResearchMessage: "",
+          });
+        }
+      },
+
+      refreshKnowledgeBase: async () => {
+        const query = get().searchQuery.trim();
+        if (!query) {
+          set({ error: "请先输入研究主题" });
+          return;
+        }
+        set({ searchBusy: true, error: null });
+        try {
+          const res = await api.refreshKnowledgeBase(query);
+          set({
+            deepResearchMessage: `已入库 ${res.fetched} 条（索引共 ${res.indexed_total}）`,
+          });
+        } catch (e) {
+          set({ error: String(e) });
+        } finally {
+          set({ searchBusy: false });
         }
       },
 
       runOptimize: async () => {
         set({ busy: "optimizing", error: null });
         try {
-          const { requirement, optimizeEngine, campaignState } = get();
-          const { task_id } = await api.startOptimize(requirement, 24, optimizeEngine, campaignState);
+          const { requirement, optimizeEngine, campaignState, workbenchCampaignId } = get();
+          const { task_id } = await api.startOptimize(
+            requirement,
+            24,
+            optimizeEngine,
+            campaignState,
+            workbenchCampaignId
+          );
           const final = await pollTask(task_id, (t) => set({ task: t }));
           const opt = final.result as unknown as OptimizationResult | null;
           if (opt) {
@@ -534,6 +571,7 @@ export const useStore = create<AppState>()(
             campaignState: nextCampaignState,
             lastAlEngine: nextAlEngine,
             workbenchCampaignId: wb.campaign_id,
+            workbenchObjectivesSnapshot: wb.objectives_snapshot ?? null,
           });
           await get().refreshWorkbenchStats();
         } catch (e) {
@@ -582,6 +620,7 @@ export const useStore = create<AppState>()(
               name: wb.name,
               strategy: wb.strategy,
             },
+            workbenchObjectivesSnapshot: wb.objectives_snapshot ?? get().workbenchObjectivesSnapshot,
           });
         } catch {
           set({ workbenchStats: null });
@@ -604,7 +643,10 @@ export const useStore = create<AppState>()(
             requirement,
             activeProjectId ?? undefined
           );
-          set({ workbenchCampaignId: wb.campaign_id });
+          set({
+            workbenchCampaignId: wb.campaign_id,
+            workbenchObjectivesSnapshot: wb.objectives_snapshot ?? null,
+          });
           get().scheduleAutosave();
           set({
             workbenchStats: {
@@ -799,6 +841,7 @@ export const useStore = create<AppState>()(
             trainMessage: "",
             campaignState: null,
             workbenchCampaignId: null,
+            workbenchObjectivesSnapshot: null,
             workbenchStats: null,
             error: null,
           });
@@ -942,7 +985,7 @@ export const useStore = create<AppState>()(
       deselectAllSources: () => set({ selectedSources: [] }),
 
       searchSources: async (queryOverride?: string) => {
-        const { searchQuery, sourceTypes, requirement } = get();
+        const { searchQuery, requirement } = get();
         const query = (queryOverride ?? searchQuery).trim();
         if (queryOverride !== undefined) set({ searchQuery: query });
         set({ searchBusy: true, error: null });
@@ -951,7 +994,6 @@ export const useStore = create<AppState>()(
           // continuing until no source turns up new related material.
           const { task_id } = await api.searchStream({
             query,
-            source_types: sourceTypes,
             requirement,
             total_limit: 300,
           });

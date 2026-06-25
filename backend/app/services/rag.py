@@ -126,13 +126,13 @@ class EmbeddingStore:
 
 
 def active_rag_backend() -> str:
-    """Name of the retrieval backend that ``build_store`` will select.
-
-    Cheap to call (no model load) so API responses can report it.
-    """
+    """Name of the retrieval backend that ``build_store`` will select."""
     from ..config import get_settings
+    from . import colbert_store
 
     settings = get_settings()
+    if settings.rag_backend in ("colbert", "auto") and colbert_store.colbert_available():
+        return "colbert"
     if settings.rag_backend in ("embedding", "auto") and _embedding_available():
         return "embedding"
     return "tfidf"

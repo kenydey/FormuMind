@@ -142,12 +142,13 @@ class DeepResearchEngine:
         domain: str | None = None,
         k: int = 6,
     ) -> tuple[str, list[Evidence]]:
-        """RAG：扩展查询检索 → LLM 重排 → 接地合成（不使用 HyDE）。"""
-        if not evidence:
-            return "", []
-        store = rag.build_store()
-        store.ingest(evidence)
-        ranked = store.query(retrieval_query, k=min(k * 2, len(evidence)))
+        """RAG：ColBERT search + LLM rerank → grounded synthesis."""
+        from .. import colbert_store
+
+        if evidence:
+            colbert_store.index_evidence(evidence)
+        hits = colbert_store.search(retrieval_query, k=min(k * 2, max(k, len(evidence) or k)))
+        ranked = [h.evidence for h in hits] or evidence
         ranked = rag.llm_rerank(topic, ranked, k=k)
         answer, citations = llm.answer_question(topic, ranked, domain)
         return answer, citations
@@ -177,61 +178,39 @@ class DeepResearchEngine:
         progress_cb: Callable[[float, str], None] | None = None,
         retrieval_progress_cb: Callable[[list[Evidence]], None] | None = None,
     ) -> ComprehensiveReport:
-        """完整深度研究：扩展 → 多源检索 → RAG → 引用报告。"""
+        """完整深度研究 — delegates to CRAG research graph."""
+        from ...pipeline.research_graph import run_research_graph
 
-        def _progress(p: float, msg: str) -> None:
+        stage_map = {
+            "retrieve": (0.2, "正在检索"),
+            "grade": (0.45, "评估质量"),
+            "fallback": (0.55, "重试搜索"),
+            "generate": (0.75, "生成答案"),
+            "recommend": (0.9, "推荐配方"),
+        }
+
+        def graph_progress(stage: str, message: str, partial: dict | None = None) -> None:
+            if retrieval_progress_cb and stage == "retrieve" and partial:
+                pass
+            p, _ = stage_map.get(stage, (0.5, message))
             if progress_cb:
-                progress_cb(p, msg)
+                progress_cb(p, message)
 
-        domain = req.domain.value if req else None
-        types = source_types or _DEFAULT_SOURCE_TYPES
-
-        _progress(0.1, "expanding query & retrieving evidence")
-        evidence, expanded = self.retrieve(
-            topic,
-            source_types=types,
+        state = run_research_graph(
+            topic=topic,
             req=req,
-            total_limit=min(120, self._settings.search_total_limit),
-            per_source_cap=min(30, self._settings.search_limit_per_source),
-            progress_cb=retrieval_progress_cb,
+            query=topic,
+            progress_cb=graph_progress,
         )
-
-        if self._settings.pdf_download and evidence:
-            from .. import pdf_downloader as _pdf
-
-            evidence = _pdf.enrich_with_fulltext(
-                evidence, max_pdfs=self._settings.pdf_download_max
-            )
-
-        retrieval_query = build_search_query(expanded, topic)
-        web = [e for e in evidence if "internet" in (e.source or "").lower() or "web" in (e.source or "").lower()]
-
-        _progress(0.55, "kb agent: re-rank + grounded synthesis")
-        kb_answer, kb_ev = self.kb_agent(topic, retrieval_query, _dedupe(evidence), domain)
-
-        _progress(0.85, "report agent: cross-validation & citation")
-        report_md, citations, engine = self.report_agent(topic, kb_answer, _dedupe(evidence + kb_ev))
-
-        candidates: list = []
-        if req:
-            from .. import llm
-            from ..domain.formulation_gate import recommended_to_formulation
-            from ..domain.objective_contract import normalize_objectives
-
-            rec = llm.recommend_formulations(req, normalize_objectives(req), _dedupe(evidence), n=3)
-            for f in rec.formulas:
-                try:
-                    candidates.append(recommended_to_formulation(f))
-                except ValueError:
-                    continue
-
-        _progress(1.0, "done")
+        grounded = state.get("grounded_evidence") or []
+        if progress_cb:
+            progress_cb(1.0, "done")
         return ComprehensiveReport(
             topic=topic,
-            report_markdown=report_md,
-            citations=citations,
-            candidates=candidates,
-            web_count=len(web),
-            kb_count=len(kb_ev),
-            engine=engine,
+            report_markdown=state.get("report_markdown") or state.get("answer") or "",
+            citations=state.get("citations") or grounded,
+            candidates=state.get("recommended") or [],
+            web_count=0,
+            kb_count=len(grounded),
+            engine=state.get("recommend_engine") or "offline",
         )

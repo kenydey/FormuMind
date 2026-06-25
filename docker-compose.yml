@@ -32,6 +32,10 @@ services:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+    volumes:
+      - ./data/colbert_index:/app/data/colbert_index
+      - ./data:/app/data
     ports:
       - "8000:8000"
     depends_on:

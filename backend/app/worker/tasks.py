@@ -104,6 +104,7 @@ class TaskManager:
         *,
         engine: str = "auto",
         campaign_state: str | None = None,
+        workbench_campaign_id: int | None = None,
     ) -> str:
         task_id = uuid.uuid4().hex
         self._register(
@@ -123,6 +124,7 @@ class TaskManager:
                     progress_cb=progress,
                     engine=engine,
                     campaign_state=campaign_state,
+                    workbench_campaign_id=workbench_campaign_id,
                 )
                 self._set(
                     task_id,

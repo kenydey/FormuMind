@@ -294,13 +294,8 @@ export interface ProjectDetailResponse {
 }
 
 export const api = {
-  research: (
-    req: Requirement,
-    sources: Evidence[] = [],
-    sourceTypes: SearchSourceType[] = ["patents"],
-    query = ""
-  ) =>
-    post<ResearchResult>("/api/research", { ...req, sources, source_types: sourceTypes, query }),
+  research: (req: Requirement, sources: Evidence[] = [], query = "") =>
+    post<ResearchResult>("/api/research", { ...req, sources, query }),
   recommendFormulations: (
     req: Requirement,
     objectives?: ObjectiveSpec[],
@@ -357,13 +352,15 @@ export const api = {
     req: Requirement,
     iterations: number,
     engine = "auto",
-    campaignState?: string | null
+    campaignState?: string | null,
+    workbenchCampaignId?: number | null
   ) =>
     post<{ task_id: string; poll_url: string }>("/api/optimize", {
       requirement: req,
       iterations,
       engine,
       campaign_state: campaignState ?? null,
+      workbench_campaign_id: workbenchCampaignId ?? null,
     }),
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
@@ -522,12 +519,11 @@ export const api = {
   getSourceStatus: () =>
     get<Record<string, SourceStatus>>("/api/search/status"),
 
-  deepResearch: (topic: string, req: Requirement, source_types: SearchSourceType[]) =>
-    post<{ task_id: string; poll_url: string }>("/api/research/deep", {
-      ...req,
-      topic,
-      source_types,
-    }),
+  refreshKnowledgeBase: (query: string) =>
+    post<{ query: string; fetched: number; indexed_total: number; source_counts: Record<string, number> }>(
+      `/api/research/kb/refresh?query=${encodeURIComponent(query)}`,
+      {}
+    ),
 
   listDependencies: () =>
     get<DependencyListResponse>("/api/dependencies"),
@@ -538,6 +534,59 @@ export const api = {
       upgrade,
     }),
 };
+
+export type ResearchStreamHandler = (event: string, data: Record<string, unknown>) => void;
+
+/** SSE deep research — replaces deprecated poll-based /api/research/deep. */
+export async function streamDeepResearch(
+  topic: string,
+  req: Requirement,
+  sources: Evidence[],
+  onEvent: ResearchStreamHandler,
+  query = ""
+): Promise<ComprehensiveReport> {
+  const res = await fetch("/api/research/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, requirement: req, sources, query }),
+  });
+  if (!res.ok) throw new Error(`/api/research/stream -> ${res.status}`);
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("SSE body unavailable");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let report: ComprehensiveReport | null = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const block of parts) {
+      const lines = block.split("\n");
+      let event = "message";
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLine = line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      const data = JSON.parse(dataLine) as Record<string, unknown>;
+      onEvent(event, data);
+      if (event === "result") {
+        const inner = data.report as ComprehensiveReport | undefined;
+        if (inner) report = inner;
+      }
+      if (event === "error") {
+        throw new Error(String(data.detail ?? "深度研究失败"));
+      }
+    }
+  }
+  if (!report) throw new Error("深度研究未返回结果");
+  return report;
+}
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
 
@@ -571,7 +620,7 @@ export interface LLMConfig {
 
 export interface SearchRequest {
   query?: string;
-  source_types: SearchSourceType[];
+  source_types?: SearchSourceType[];
   requirement?: Requirement;
   limit_per_source?: number;
   total_limit?: number;

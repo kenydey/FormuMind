@@ -10,6 +10,7 @@ import type {
   Formulation,
   LoopReport,
   ModelInfo,
+  ObjectiveSpec,
   ProcessOptResult,
   Requirement,
   ResearchResult,
@@ -52,6 +53,7 @@ export interface ProjectWorkspacePayload {
   train_message: string;
   campaign_state: string | null;
   workbench_campaign_id: number | null;
+  workbench_objectives_snapshot: ObjectiveSpec[];
   optimization_history: number[];
   loop_report: LoopReport | null;
   rmse_history: Record<string, number>[];
@@ -82,6 +84,7 @@ export interface StoreWorkspaceSlice {
   trainMessage: string;
   campaignState: string | null;
   workbenchCampaignId: number | null;
+  workbenchObjectivesSnapshot: ObjectiveSpec[] | null;
   optimizationHistory: number[];
   loopReport: LoopReport | null;
   rmseHistory: Record<string, number>[];
@@ -117,6 +120,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     train_message: slice.trainMessage,
     campaign_state: slice.campaignState,
     workbench_campaign_id: slice.workbenchCampaignId,
+    workbench_objectives_snapshot: slice.workbenchObjectivesSnapshot ?? [],
     optimization_history: slice.optimizationHistory,
     loop_report: slice.loopReport,
     rmse_history: slice.rmseHistory,
@@ -160,6 +164,9 @@ export function applyWorkspacePayload(
     trainMessage: ws.train_message ?? "",
     campaignState: ws.campaign_state ?? null,
     workbenchCampaignId: ws.workbench_campaign_id ?? null,
+    workbenchObjectivesSnapshot: ws.workbench_objectives_snapshot?.length
+      ? ws.workbench_objectives_snapshot
+      : null,
     optimizationHistory: ws.optimization_history ?? [],
     loopReport: ws.loop_report ?? null,
     rmseHistory: ws.rmse_history ?? [],
