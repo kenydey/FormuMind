@@ -2,18 +2,20 @@ import Modal from "./Modal";
 import RequirementPanel from "./RequirementPanel";
 import FormulaLeaderboard from "./FormulaLeaderboard";
 import DoeResultsPanel from "./DoeResultsPanel";
+import WorkbenchModal from "./WorkbenchModal";
 import SimPlaceholder from "./SimPlaceholder";
 import ProcessOptModal from "./ProcessOptModal";
 import LoopModal from "./LoopModal";
 import SourceTypePicker, { isLocalEvidence } from "./SourceTypePicker";
 import { useStore } from "../store";
 
-type ModalName = "requirements" | "recommend" | "doe" | "optimize" | "process" | "loop";
+type ModalName = "requirements" | "recommend" | "doe" | "workbench" | "optimize" | "process" | "loop";
 
 const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = [
   { id: "requirements", icon: "🧪", title: "技术需求", desc: "设置产品域、基材与优化目标" },
   { id: "recommend", icon: "⭐", title: "推荐配方", desc: "AI 检索并推荐 Top-N 配方" },
-  { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并回灌训练" },
+  { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并导出记录表" },
+  { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实际参数与实测值，同步至 BayBE 闭环" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "process", icon: "⚙️", title: "工艺优化", desc: "固化/分散/膜厚等工艺参数优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
@@ -46,6 +48,8 @@ export default function ActionsPanel() {
     recommendSourceTypes,
     setRecommendSourceTypes,
     sources,
+    workbenchStats,
+    refreshWorkbenchStats,
   } = useStore();
 
   function badgeFor(id: ModalName) {
@@ -54,6 +58,13 @@ export default function ActionsPanel() {
       if (leaderboard.length > 0) return <Badge tone="accent">{leaderboard.length} 条</Badge>;
     }
     if (id === "doe" && models.length > 0) return <Badge tone="accent">{models.length} 模型</Badge>;
+    if (id === "workbench" && workbenchStats && workbenchStats.total > 0) {
+      return (
+        <Badge tone={workbenchStats.completed > 0 ? "accent" : "amber"}>
+          {workbenchStats.completed}/{workbenchStats.total}
+        </Badge>
+      );
+    }
     if (id === "optimize") {
       if (busy === "optimizing") return <Badge tone="amber">寻优中…</Badge>;
       if (optimizationHistory.length > 0) return <Badge tone="accent">已收敛</Badge>;
@@ -65,6 +76,11 @@ export default function ActionsPanel() {
     return null;
   }
 
+  function openWorkbench() {
+    setOpenModal("workbench");
+    void refreshWorkbenchStats();
+  }
+
   return (
     <aside className="glass rounded-xl p-4 flex flex-col gap-2.5 h-full overflow-y-auto">
       <h2 className="text-sm uppercase tracking-widest text-accent2 shrink-0">操作 · Actions</h2>
@@ -72,7 +88,7 @@ export default function ActionsPanel() {
       {ACTIONS.map((a) => (
         <button
           key={a.id}
-          onClick={() => setOpenModal(a.id)}
+          onClick={() => (a.id === "workbench" ? openWorkbench() : setOpenModal(a.id))}
           className="text-left border border-edge rounded-lg px-3 py-2.5 hover:border-accent/50 hover:bg-accent/5 transition-colors group"
         >
           <div className="flex items-center gap-2">
@@ -137,6 +153,15 @@ export default function ActionsPanel() {
         size="lg"
       >
         <DoeResultsPanel />
+      </Modal>
+
+      <Modal
+        title="实验台账 · Lab Workbench"
+        open={openModal === "workbench"}
+        onClose={() => setOpenModal(null)}
+        size="xl"
+      >
+        <WorkbenchModal />
       </Modal>
 
       <Modal

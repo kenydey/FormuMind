@@ -4,6 +4,9 @@ import react from "@vitejs/plugin-react";
 // Pure client-side SPA (no SSR) to keep future 3D canvas integration simple.
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ["ag-grid-react", "ag-grid-community"],
+  },
   server: {
     port: 5173,
     proxy: {

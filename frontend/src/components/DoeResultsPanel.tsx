@@ -8,7 +8,6 @@ import {
 import type { ModelInfo } from "../api";
 import { primaryObjectiveMetric } from "../api";
 import { useStore } from "../store";
-import LabWorkbench from "./LabWorkbench";
 
 function R2Gauge({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(1, value));
@@ -108,10 +107,10 @@ const AI_DESIGN = { value: "ai_active", label: "🧠 AI 主动选点" };
 
 export default function DoeResultsPanel() {
   const {
-    requirement, doePlan, measured, models, modelHistory, trainMessage,
-    busy, generateDoe, setMeasured, submitResults, exportDoe, importCsv,
+    requirement, doePlan, models, modelHistory, trainMessage,
+    busy, generateDoe, exportDoe, importCsv,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
-    workbenchCampaignId,
+    workbenchCampaignId, setOpenModal,
   } = useStore();
   const metric = primaryObjectiveMetric(requirement);
 
@@ -132,7 +131,7 @@ export default function DoeResultsPanel() {
   return (
     <section className="glass rounded-xl p-4 overflow-y-auto">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h2 className="text-sm uppercase tracking-widest text-accent2">DOE 实验结果回灌 · Feedback</h2>
+        <h2 className="text-sm uppercase tracking-widest text-accent2">DOE 实验设计</h2>
         <div className="flex flex-wrap gap-2 items-center">
           <select
             value={doeEngine}
@@ -200,7 +199,8 @@ export default function DoeResultsPanel() {
 
       {!doePlan ? (
         <p className="text-slate-500 text-sm">
-          生成 DOE 设计后，在此填入每个实验的实测 <span className="text-accent font-mono">{metric}</span>，回灌训练数据驱动的预测模型。
+          生成 DOE 设计后，请在 <span className="text-accent">实验台账</span> 中填报实测{" "}
+          <span className="text-accent font-mono">{metric}</span>，再回灌训练数据驱动模型。
         </p>
       ) : (
         <>
@@ -231,68 +231,56 @@ export default function DoeResultsPanel() {
               </button>
             </div>
           </div>
-          <div className="mb-2">
-            {workbenchCampaignId != null ? (
-              <LabWorkbench
-                campaignId={workbenchCampaignId}
-                doePlan={doePlan}
-                requirement={requirement}
-              />
-            ) : (
-              <div className="max-h-56 overflow-y-auto border border-edge rounded">
-                <table className="w-full text-[11px]">
-                  <thead className="sticky top-0 bg-panel">
-                    <tr className="text-slate-400">
-                      <th className="text-left px-2 py-1">#</th>
-                      {doePlan.factors.map((f) => (
-                        <th key={f.name} className="text-right px-2 py-1 font-normal">
-                          {f.name.replace(" (DGEBA)", "").slice(0, 10)}
-                        </th>
-                      ))}
-                      <th className="text-right px-2 py-1 text-accent">实测 {metric}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {doePlan.runs.map((run) => (
-                      <tr
-                        key={run.run_id}
-                        className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
-                      >
-                        <td className="px-2 py-1 text-slate-500">
-                          {run.run_id}
-                          {run.ai_suggested && (
-                            <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
-                          )}
-                        </td>
-                        {doePlan.factors.map((f) => (
-                          <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
-                            {run.natural[f.name]}
-                          </td>
-                        ))}
-                        <td className="px-2 py-1 text-right">
-                          <input
-                            type="number"
-                            className="w-20 bg-ink border border-edge rounded px-1 py-0.5 text-right text-accent2"
-                            value={measured[run.run_id] ?? ""}
-                            onChange={(e) =>
-                              setMeasured(run.run_id, e.target.value === "" ? NaN : Number(e.target.value))
-                            }
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+
+          <div className="border border-accent/30 bg-accent/5 rounded-lg px-3 py-2.5 mb-3 space-y-2">
+            <p className="text-[11px] text-slate-300">
+              {workbenchCampaignId != null
+                ? "台账已创建。请在实验台账中填写实际参数与实测值，保存后回灌训练。"
+                : "生成成功。打开实验台账填报实测数据。"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setOpenModal("workbench")}
+              className="text-xs border border-accent2 text-accent2 rounded px-3 py-1.5 hover:bg-accent2/10"
+            >
+              打开实验台账 →
+            </button>
           </div>
-          <button
-            disabled={busy !== "idle"}
-            onClick={submitResults}
-            className="mt-3 w-full bg-accent2/90 hover:bg-accent2 text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
-          >
-            {busy === "training" ? "训练中…" : "③ 回灌实验结果并训练模型"}
-          </button>
+
+          <div className="max-h-40 overflow-y-auto border border-edge rounded">
+            <table className="w-full text-[11px]">
+              <thead className="sticky top-0 bg-panel">
+                <tr className="text-slate-400">
+                  <th className="text-left px-2 py-1">#</th>
+                  {doePlan.factors.map((f) => (
+                    <th key={f.name} className="text-right px-2 py-1 font-normal">
+                      {f.name.replace(" (DGEBA)", "").slice(0, 10)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {doePlan.runs.map((run) => (
+                  <tr
+                    key={run.run_id}
+                    className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
+                  >
+                    <td className="px-2 py-1 text-slate-500">
+                      {run.run_id}
+                      {run.ai_suggested && (
+                        <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
+                      )}
+                    </td>
+                    {doePlan.factors.map((f) => (
+                      <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
+                        {run.natural[f.name]}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </section>

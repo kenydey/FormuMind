@@ -95,6 +95,7 @@ interface AppState {
   loopDoeEngine: "auto" | "legacy" | "baybe";
   campaignState: string | null;
   workbenchCampaignId: number | null;
+  workbenchStats: { completed: number; total: number; name: string; strategy: string } | null;
   lastAlEngine: string | null;
   models: ModelInfo[];
   modelHistory: ModelInfo[][];   // one entry per training event; for R² trend charts
@@ -120,7 +121,7 @@ interface AppState {
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
   // Modal 可见性
-  openModal: string | null;   // "requirements" | "recommend" | "doe" | "optimize" | null
+  openModal: string | null;   // requirements | recommend | doe | workbench | optimize | process | loop
   activeConstraints: ConstraintKey[];
   // Settings
   llmConfig: LLMConfig;
@@ -145,6 +146,8 @@ interface AppState {
   setLoopDoeEngine: (engine: "auto" | "legacy" | "baybe") => void;
   setMeasured: (runId: number, value: number) => void;
   submitResults: () => Promise<void>;
+  refreshWorkbenchStats: () => Promise<void>;
+  ensureWorkbenchCampaign: () => Promise<number | null>;
   refreshModels: () => Promise<void>;
   exportDoe: (format: "csv" | "xlsx") => void;
   importCsv: (file: File) => Promise<void>;
@@ -259,6 +262,7 @@ export const useStore = create<AppState>()(
       loopDoeEngine: "auto",
       campaignState: null,
       workbenchCampaignId: null,
+      workbenchStats: null,
       lastAlEngine: null,
       models: [],
       modelHistory: [],
@@ -521,6 +525,7 @@ export const useStore = create<AppState>()(
             lastAlEngine: nextAlEngine,
             workbenchCampaignId: wb.campaign_id,
           });
+          await get().refreshWorkbenchStats();
         } catch (e) {
           set({ error: String(e) });
         } finally {
@@ -549,6 +554,55 @@ export const useStore = create<AppState>()(
       setMeasured: (runId, value) => {
         set((s) => ({ measured: { ...s.measured, [runId]: value } }));
         get().scheduleAutosave();
+      },
+
+      refreshWorkbenchStats: async () => {
+        const id = get().workbenchCampaignId;
+        if (id == null) {
+          set({ workbenchStats: null });
+          return;
+        }
+        try {
+          const wb = await api.getWorkbenchCampaign(id);
+          const completed = wb.rows.filter((r) => r.status === "Completed").length;
+          set({
+            workbenchStats: {
+              completed,
+              total: wb.rows.length,
+              name: wb.name,
+              strategy: wb.strategy,
+            },
+          });
+        } catch {
+          set({ workbenchStats: null });
+        }
+      },
+
+      ensureWorkbenchCampaign: async () => {
+        const { doePlan, workbenchCampaignId } = get();
+        if (workbenchCampaignId != null) {
+          await get().refreshWorkbenchStats();
+          return workbenchCampaignId;
+        }
+        if (!doePlan) return null;
+        try {
+          const strategy = doePlan.design === "ai_active" ? "BayBE-restore" : `DOE-${doePlan.design}`;
+          const wb = await api.createWorkbenchCampaign(doePlan, undefined, strategy);
+          set({ workbenchCampaignId: wb.campaign_id });
+          get().scheduleAutosave();
+          set({
+            workbenchStats: {
+              completed: 0,
+              total: wb.rows.length,
+              name: wb.name,
+              strategy: wb.strategy,
+            },
+          });
+          return wb.campaign_id;
+        } catch (e) {
+          set({ error: String(e) });
+          return null;
+        }
       },
 
       submitResults: async () => {
@@ -695,6 +749,11 @@ export const useStore = create<AppState>()(
             task: null,
             busy: "idle",
           });
+          if (patch.workbenchCampaignId != null) {
+            await get().refreshWorkbenchStats();
+          } else {
+            set({ workbenchStats: null });
+          }
         } catch (e) {
           set({ error: String(e) });
         }
@@ -725,6 +784,7 @@ export const useStore = create<AppState>()(
             trainMessage: "",
             campaignState: null,
             workbenchCampaignId: null,
+            workbenchStats: null,
             error: null,
           });
           const projects = await api.listProjects();
@@ -795,6 +855,9 @@ export const useStore = create<AppState>()(
               patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
             }
             set({ ...patch, activeProjectId: activeId });
+            if (patch.workbenchCampaignId != null) {
+              await get().refreshWorkbenchStats();
+            }
           }
         } catch (e) {
           set({ error: String(e) });
