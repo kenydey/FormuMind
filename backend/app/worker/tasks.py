@@ -69,6 +69,14 @@ def _persist_terminal(
         stream_url=f"/api/tasks/{task_id}/stream",
     )
     _persist_task(task_id, status)
+    publish_progress(
+        task_id,
+        TaskProgressStatus.FAILED if failed else TaskProgressStatus.COMPLETED,
+        message=message or ("failed" if failed else "done"),
+        progress=0.0 if failed else 1.0,
+        data=result,
+        kind=kind,
+    )
 
 
 def _status_from_progress(task_id: str, kind: str) -> TaskStatus:

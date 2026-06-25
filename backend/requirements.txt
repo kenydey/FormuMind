@@ -22,6 +22,7 @@ celery==5.6.3
 redis==8.0.0
 numpy==2.4.6
 httpx==0.28.1
+tenacity>=8.2.0
 # Lightweight online retrieval (no API keys required for arXiv / DDG; S2 uses httpx).
 arxiv==4.0.0
 ddgs==9.14.4

@@ -20,6 +20,13 @@ import logging
 from typing import TypeVar
 
 from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry as tenacity_retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ..config import get_settings
 from ..domain.schemas import (
@@ -160,23 +167,75 @@ def _openai_message_text(message) -> str | None:
     return None
 
 
+log = logging.getLogger(__name__)
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+class LLMTransientError(Exception):
+    """Network / timeout / rate-limit — safe to retry."""
+
+
+class LLMValidationError(Exception):
+    """Response received but JSON/schema validation failed."""
+
+
+class LLMConfigError(Exception):
+    """Missing SDK or invalid configuration — do not retry."""
+
+
 # ── Low-level completion helpers ─────────────────────────────────────────────
 
 def _llm_timeout_seconds() -> float:
     return float(get_settings().llm_timeout_seconds)
 
 
-def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> str | None:
+_LLM_RETRY = tenacity_retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((LLMTransientError, TimeoutError, ConnectionError)),
+    before_sleep=before_sleep_log(log, logging.WARNING),
+    reraise=True,
+)
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(k in msg for k in ("401", "403", "authentication", "invalid api key", "unauthorized"))
+
+
+def _anthropic_request(prompt: str, api_key: str, model: str, max_tokens: int) -> str:
     try:
         import anthropic  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 anthropic SDK") from exc
+    try:
         client = anthropic.Anthropic(api_key=api_key, timeout=_llm_timeout_seconds())
         msg = client.messages.create(
             model=model,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        return msg.content[0].text
-    except Exception:
+        text = msg.content[0].text
+        if not text:
+            raise LLMTransientError("Anthropic API 返回空响应")
+        return text
+    except LLMConfigError:
+        raise
+    except Exception as exc:
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
+@_LLM_RETRY
+def _complete_anthropic_raw(prompt: str, api_key: str, model: str, max_tokens: int) -> str:
+    return _anthropic_request(prompt, api_key, model, max_tokens)
+
+
+def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> str | None:
+    try:
+        return _complete_anthropic_raw(prompt, api_key, model, max_tokens)
+    except (LLMConfigError, LLMTransientError):
         return None
 
 
@@ -185,6 +244,59 @@ def _complete_openai_compatible(
 ) -> str | None:
     text, _ = _complete_openai_compatible_detail(prompt, api_key, model, max_tokens, base_url)
     return text
+
+
+def _openai_compatible_request(
+    prompt: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    *,
+    probe: bool = False,
+) -> str:
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
+    try:
+        kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
+        create_kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if probe and _is_deepseek_model(model):
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        resp = client.chat.completions.create(**create_kwargs)
+        text = _openai_message_text(resp.choices[0].message)
+        if not text:
+            raise LLMTransientError("API 返回空响应")
+        return text
+    except LLMConfigError:
+        raise
+    except Exception as exc:
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
+@_LLM_RETRY
+def _complete_openai_compatible_raw(
+    prompt: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    *,
+    probe: bool = False,
+) -> str:
+    return _openai_compatible_request(
+        prompt, api_key, model, max_tokens, base_url, probe=probe
+    )
 
 
 def _complete_openai_compatible_detail(
@@ -198,38 +310,46 @@ def _complete_openai_compatible_detail(
 ) -> tuple[str | None, str | None]:
     """Call an OpenAI-compatible chat API; return (text, error_message)."""
     try:
-        from openai import OpenAI  # type: ignore
-    except ImportError:
-        return None, "未安装 openai SDK，请执行 pip install -e '.[llm]'"
-    try:
-        kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
-        if base_url:
-            kwargs["base_url"] = base_url
-        client = OpenAI(**kwargs)
-        create_kwargs: dict = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        # Connection probes use a short prompt; disable DeepSeek thinking so the
-        # final answer lands in ``content`` instead of consuming the token budget.
-        if probe and _is_deepseek_model(model):
-            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-        resp = client.chat.completions.create(**create_kwargs)
-        text = _openai_message_text(resp.choices[0].message)
-        return (text, None) if text else (None, "API 返回空响应")
-    except Exception as exc:
+        text = _complete_openai_compatible_raw(
+            prompt, api_key, model, max_tokens, base_url, probe=probe
+        )
+        return text, None
+    except LLMConfigError as exc:
         return None, str(exc)
+    except LLMTransientError as exc:
+        return None, str(exc)
+
+
+def _gemini_request(prompt: str, api_key: str, model: str) -> str:
+    try:
+        import google.generativeai as genai  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 google-generativeai SDK") from exc
+    try:
+        genai.configure(api_key=api_key)
+        m = genai.GenerativeModel(model)
+        resp = m.generate_content(prompt)
+        text = resp.text
+        if not text:
+            raise LLMTransientError("Gemini API 返回空响应")
+        return text
+    except LLMConfigError:
+        raise
+    except Exception as exc:
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
+@_LLM_RETRY
+def _complete_gemini_raw(prompt: str, api_key: str, model: str) -> str:
+    return _gemini_request(prompt, api_key, model)
 
 
 def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
     try:
-        import google.generativeai as genai  # type: ignore
-        genai.configure(api_key=api_key)
-        m = genai.GenerativeModel(model)
-        resp = m.generate_content(prompt)
-        return resp.text
-    except Exception:
+        return _complete_gemini_raw(prompt, api_key, model)
+    except (LLMConfigError, LLMTransientError):
         return None
 
 
@@ -279,10 +399,6 @@ def complete_json(prompt: str) -> dict | None:
         return None
 
 
-log = logging.getLogger(__name__)
-TModel = TypeVar("TModel", bound=BaseModel)
-
-
 def _strip_json_fences(text: str) -> str:
     text = text.strip()
     if "```" not in text:
@@ -295,6 +411,106 @@ def _strip_json_fences(text: str) -> str:
     if inner.startswith("json"):
         inner = inner[4:]
     return inner.strip()
+
+
+def _validate_structured(raw: str | None, model_type: type[TModel]) -> TModel:
+    if not raw:
+        raise LLMValidationError("Empty LLM response")
+    try:
+        import json
+
+        data = json.loads(_strip_json_fences(raw))
+        return model_type.model_validate(data)
+    except LLMValidationError:
+        raise
+    except Exception as exc:
+        raise LLMValidationError(f"JSON validation failed: {exc}") from exc
+
+
+def _openai_structured_request(
+    system: str,
+    user: str,
+    model_type: type[TModel],
+    *,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None,
+    schema: dict,
+) -> TModel:
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
+    try:
+        kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
+        create_kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": model_type.__name__,
+                    "schema": schema,
+                    "strict": True,
+                },
+            },
+        }
+        if _is_deepseek_model(model):
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        resp = client.chat.completions.create(**create_kwargs)
+        text = _openai_message_text(resp.choices[0].message)
+        return _validate_structured(text, model_type)
+    except (LLMValidationError, LLMConfigError):
+        raise
+    except Exception as exc:
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
+def _invoke_structured_once(
+    system: str,
+    user: str,
+    model_type: type[TModel],
+    *,
+    provider: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None,
+    schema: dict,
+) -> TModel:
+    if provider not in ("anthropic", "gemini"):
+        return _openai_structured_request(
+            system,
+            user,
+            model_type,
+            api_key=api_key,
+            model=model,
+            max_tokens=max_tokens,
+            base_url=base_url,
+            schema=schema,
+        )
+
+    combined = (
+        f"{system}\n\n"
+        f"Respond with ONLY valid JSON matching this schema (no markdown):\n"
+        f"{schema}\n\n"
+        f"{user}"
+    )
+    if provider == "anthropic":
+        raw = _anthropic_request(combined, api_key, model, max_tokens)
+    else:
+        raw = _gemini_request(combined, api_key, model)
+    return _validate_structured(raw, model_type)
 
 
 def complete_structured(
@@ -314,86 +530,42 @@ def complete_structured(
     model = settings.llm_model
     max_tokens = settings.llm_max_tokens
     schema = model_type.model_json_schema()
+    base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
 
-    def _validate(raw: str | None) -> tuple[TModel | None, str | None]:
-        if not raw:
-            return None, "Empty LLM response"
-        try:
-            import json
-
-            data = json.loads(_strip_json_fences(raw))
-            return model_type.model_validate(data), None
-        except Exception as exc:
-            return None, f"JSON validation failed: {exc}"
-
-    # OpenAI-compatible structured output
-    if provider not in ("anthropic", "gemini"):
-        try:
-            from openai import OpenAI  # type: ignore
-
-            base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
-            kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
-            if base_url:
-                kwargs["base_url"] = base_url
-            client = OpenAI(**kwargs)
-            create_kwargs: dict = {
-                "model": model,
-                "max_tokens": max_tokens,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": model_type.__name__,
-                        "schema": schema,
-                        "strict": True,
-                    },
-                },
-            }
-            if _is_deepseek_model(model):
-                create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-            resp = client.chat.completions.create(**create_kwargs)
-            text = _openai_message_text(resp.choices[0].message)
-            parsed, err = _validate(text)
-            if parsed:
-                return parsed, None
-            log.warning("OpenAI structured output failed: %s", err)
-        except Exception as exc:
-            log.warning("OpenAI structured call error (%s): %s", provider, exc)
-
-    # Anthropic / Gemini / fallback: prompt + complete_json-style parse
-    combined = (
-        f"{system}\n\n"
-        f"Respond with ONLY valid JSON matching this schema (no markdown):\n"
-        f"{schema}\n\n"
-        f"{user}"
+    structured_retry = tenacity_retry(
+        stop=stop_after_attempt(3 if retry else 1),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(
+            (LLMTransientError, LLMValidationError, TimeoutError, ConnectionError)
+        ),
+        before_sleep=before_sleep_log(log, logging.WARNING),
+        reraise=True,
     )
-    if provider == "anthropic":
-        raw = _complete_anthropic(combined, api_key, model, max_tokens)
-    elif provider == "gemini":
-        raw = _complete_gemini(combined, api_key, model)
-    else:
-        raw = _call_llm(combined)
 
-    parsed, err = _validate(raw)
-    if parsed:
-        return parsed, None
-    if retry:
-        fix_prompt = combined + f"\n\nPrevious output was invalid ({err}). Fix and return JSON only."
-        if provider == "anthropic":
-            raw2 = _complete_anthropic(fix_prompt, api_key, model, max_tokens)
-        elif provider == "gemini":
-            raw2 = _complete_gemini(fix_prompt, api_key, model)
-        else:
-            raw2 = _call_llm(fix_prompt)
-        parsed2, err2 = _validate(raw2)
-        if parsed2:
-            return parsed2, None
-        log.warning("Structured LLM retry failed: %s", err2)
-        return None, err2
-    return None, err
+    @structured_retry
+    def _run() -> TModel:
+        return _invoke_structured_once(
+            system,
+            user,
+            model_type,
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            max_tokens=max_tokens,
+            base_url=base_url,
+            schema=schema,
+        )
+
+    try:
+        return _run(), None
+    except LLMConfigError as exc:
+        return None, str(exc)
+    except (LLMTransientError, LLMValidationError) as exc:
+        log.warning("Structured LLM failed after retries: %s", exc)
+        return None, str(exc)
+    except Exception as exc:
+        log.warning("Structured LLM unexpected error: %s", exc)
+        return None, str(exc)
 
 
 def _objectives_prompt_block(objectives: list[ObjectiveSpec]) -> str:

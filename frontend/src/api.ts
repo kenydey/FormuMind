@@ -628,10 +628,25 @@ export function awaitTaskStream(
       fn();
     };
 
+    const resolveFromStatus = (s: TaskStatus) => {
+      const ev: TaskProgressEvent = {
+        status: s.state === "completed" ? "COMPLETED" : "FAILED",
+        message: s.message,
+        progress: s.progress,
+        data: s.result ?? undefined,
+      };
+      onEvent?.(ev);
+      if (s.state === "completed") {
+        finish(() => resolve(ev));
+      } else {
+        finish(() => reject(new Error(s.message || "任务失败")));
+      }
+    };
+
     const timer =
       timeoutMs > 0
         ? setTimeout(() => {
-            es.close();
+            es?.close();
             finish(() => reject(new Error(`任务超时（${Math.round(timeoutMs / 1000)}s）`)));
           }, timeoutMs)
         : null;
@@ -651,7 +666,25 @@ export function awaitTaskStream(
       },
       () => {
         es.close();
-        finish(() => reject(new Error("SSE 连接中断")));
+        pollTask(taskId, (s) => {
+          if (s.state === "running" || s.state === "pending") {
+            onEvent?.({
+              status: s.state === "running" ? "RUNNING" : "PENDING",
+              message: s.message,
+              progress: s.progress,
+            });
+          }
+        })
+          .then(resolveFromStatus)
+          .catch(() => {
+            finish(() =>
+              reject(
+                new Error(
+                  "SSE 连接中断 — 无法获取任务进度（请检查后端服务；若未启动 Redis，请确认后端已升级支持无 Redis 降级）"
+                )
+              )
+            );
+          });
       }
     );
   });

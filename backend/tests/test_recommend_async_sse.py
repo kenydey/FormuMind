@@ -6,7 +6,6 @@ import time
 from fastapi.testclient import TestClient
 
 from app.main import app
-from tests.redis_helpers import requires_redis
 
 client = TestClient(app)
 _REQUIREMENT = {
@@ -57,7 +56,6 @@ def test_recommend_completes_via_status():
     assert research.get("requirement_headline")
 
 
-@requires_redis
 def test_recommend_sse_stream_returns_progress_events():
     body = {**_REQUIREMENT, "sources": [], "query": "epoxy zinc phosphate primer"}
     r = client.post("/api/research/recommend", json=body)

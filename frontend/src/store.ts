@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { immer } from "zustand/middleware/immer";
 import {
   applyWorkspacePayload,
   buildWorkspacePayload,
@@ -255,7 +256,7 @@ function workspaceSlice(state: AppState): StoreWorkspaceSlice {
 
 export const useStore = create<AppState>()(
   persist(
-    (set, get) => ({
+    immer((set, get) => ({
       requirement: defaultRequirement,
       research: null,
       deepReport: null,
@@ -312,76 +313,88 @@ export const useStore = create<AppState>()(
       intentBusy: false,
 
       setField: (key, value) => {
-        set((s) => ({ requirement: { ...s.requirement, [key]: value } }));
+        set((d) => {
+          d.requirement[key] = value;
+        });
         get().scheduleAutosave();
       },
 
       setDomain: (d) => {
-        set((s) => ({
-          requirement: {
-            ...s.requirement,
-            domain: d,
-            objectives: s.requirement.objectives.length
-              ? s.requirement.objectives
-              : [...DOMAIN_OBJECTIVES[d]],
-          },
-        }));
+        set((draft) => {
+          draft.requirement.domain = d;
+          if (!draft.requirement.objectives.length) {
+            draft.requirement.objectives = [...DOMAIN_OBJECTIVES[d]];
+          }
+        });
         get().scheduleAutosave();
       },
 
       setLevers: (levers) => {
-        set((s) => ({ requirement: { ...s.requirement, levers } }));
+        set((draft) => {
+          draft.requirement.levers = levers;
+        });
         get().scheduleAutosave();
       },
 
       loadExampleProject: async (exampleId) => {
-        set({ error: null });
+        set((draft) => {
+          draft.error = null;
+        });
         try {
           const req = await api.loadExampleProject(exampleId);
-          set({
-            requirement: req,
-            activeConstraints: defaultConstraintsForDomain(req.domain),
-            research: null,
-            leaderboard: [],
-            doePlan: null,
-            measured: {},
+          set((draft) => {
+            draft.requirement = req;
+            draft.activeConstraints = defaultConstraintsForDomain(req.domain);
+            draft.research = null;
+            draft.leaderboard = [];
+            draft.doePlan = null;
+            draft.measured = {};
           });
           get().scheduleAutosave();
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         }
       },
 
       setObjectives: (objectives) => {
-        set((s) => ({ requirement: { ...s.requirement, objectives } }));
+        set((draft) => {
+          draft.requirement.objectives = objectives;
+        });
         get().scheduleAutosave();
       },
 
       setActiveConstraints: (keys) => {
-        set({ activeConstraints: keys });
+        set((draft) => {
+          draft.activeConstraints = keys;
+        });
         get().scheduleAutosave();
       },
 
       setConstraintValue: (key, value) => {
-        set((s) => ({ requirement: { ...s.requirement, [key]: value } }));
+        set((draft) => {
+          draft.requirement[key] = value;
+        });
         get().scheduleAutosave();
       },
 
       clearConstraintValue: (key) => {
-        set((s) => {
-          const nullable: ConstraintKey[] = ["voc_limit_gpl", "cure_temperature_c", "ph_target"];
-          const value = nullable.includes(key) ? null : 0;
-          return { requirement: { ...s.requirement, [key]: value } };
+        set((draft) => {
+          if (key === "voc_limit_gpl") draft.requirement.voc_limit_gpl = null;
+          else if (key === "cure_temperature_c") draft.requirement.cure_temperature_c = null;
+          else if (key === "ph_target") draft.requirement.ph_target = null;
+          else draft.requirement[key] = 0;
         });
         get().scheduleAutosave();
       },
 
       runResearch: async () => {
-        set({
-          formulationBusy: true,
-          recommendStage: "retrieve",
-          recommendMessage: "正在检索",
-          error: null,
+        set((draft) => {
+          draft.formulationBusy = true;
+          draft.recommendStage = "retrieve";
+          draft.recommendMessage = "正在检索";
+          draft.error = null;
         });
         try {
           const { requirement, sources, selectedSources, searchQuery } = get();
@@ -395,35 +408,40 @@ export const useStore = create<AppState>()(
             searchQuery.trim()
           );
           const final = await awaitTaskStream(task_id, (ev) => {
-            set({
-              recommendStage: ev.stage ?? "",
-              recommendMessage: ev.message ?? "",
-              task: progressToTaskStatus(task_id, "recommend", ev),
+            set((draft) => {
+              draft.recommendStage = ev.stage ?? "";
+              draft.recommendMessage = ev.message ?? "";
+              draft.task = progressToTaskStatus(task_id, "recommend", ev);
             });
           });
           const wrapped = final.data as { research?: ResearchResult } | undefined;
           const research = wrapped?.research;
           if (!research) throw new Error("推荐未返回结果");
-          set({ research, leaderboard: research.recommended });
+          set((draft) => {
+            draft.research = research;
+            draft.leaderboard = research.recommended;
+          });
           get().scheduleAutosave();
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({
-            formulationBusy: false,
-            recommendStage: "",
-            recommendMessage: "",
+          set((draft) => {
+            draft.formulationBusy = false;
+            draft.recommendStage = "";
+            draft.recommendMessage = "";
           });
         }
       },
 
       runDeepResearch: async () => {
         const { searchQuery, requirement, sources } = get();
-        set({
-          deepResearchBusy: true,
-          deepResearchStage: "retrieve",
-          deepResearchMessage: "正在检索",
-          error: null,
+        set((draft) => {
+          draft.deepResearchBusy = true;
+          draft.deepResearchStage = "retrieve";
+          draft.deepResearchMessage = "正在检索";
+          draft.error = null;
         });
         try {
           const { task_id } = await api.submitDeepResearch(
@@ -433,32 +451,42 @@ export const useStore = create<AppState>()(
             searchQuery.trim()
           );
           const final = await awaitTaskStream(task_id, (ev) => {
-            set({
-              deepResearchStage: ev.stage ?? "",
-              deepResearchMessage: ev.message ?? "",
-              task: progressToTaskStatus(task_id, "deep_research", ev),
+            set((draft) => {
+              draft.deepResearchStage = ev.stage ?? "";
+              draft.deepResearchMessage = ev.message ?? "";
+              draft.task = progressToTaskStatus(task_id, "deep_research", ev);
             });
           });
           const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
           const report = wrapped?.report;
           if (!report) throw new Error("深度研究未返回结果");
-          set({ deepReport: report });
+          set((draft) => {
+            draft.deepReport = report;
+          });
           if (report.citations?.length) get().addSources(report.citations);
-          if (report.candidates?.length) set({ leaderboard: report.candidates });
+          if (report.candidates?.length) {
+            set((draft) => {
+              draft.leaderboard = report.candidates!;
+            });
+          }
           const msg: ChatMessage = {
             role: "assistant",
             content: report.report_markdown,
             citations: report.citations,
           };
-          set((s) => ({ chatHistory: [...s.chatHistory, msg] }));
+          set((draft) => {
+            draft.chatHistory.push(msg);
+          });
           get().scheduleAutosave();
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({
-            deepResearchBusy: false,
-            deepResearchStage: "",
-            deepResearchMessage: "",
+          set((draft) => {
+            draft.deepResearchBusy = false;
+            draft.deepResearchStage = "";
+            draft.deepResearchMessage = "";
           });
         }
       },
@@ -466,24 +494,36 @@ export const useStore = create<AppState>()(
       refreshKnowledgeBase: async () => {
         const query = get().searchQuery.trim();
         if (!query) {
-          set({ error: "请先输入研究主题" });
+          set((draft) => {
+            draft.error = "请先输入研究主题";
+          });
           return;
         }
-        set({ searchBusy: true, error: null });
+        set((draft) => {
+          draft.searchBusy = true;
+          draft.error = null;
+        });
         try {
           const res = await api.refreshKnowledgeBase(query);
-          set({
-            deepResearchMessage: `已入库 ${res.fetched} 条（索引共 ${res.indexed_total}）`,
+          set((draft) => {
+            draft.deepResearchMessage = `已入库 ${res.fetched} 条（索引共 ${res.indexed_total}）`;
           });
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ searchBusy: false });
+          set((draft) => {
+            draft.searchBusy = false;
+          });
         }
       },
 
       runOptimize: async () => {
-        set({ busy: "optimizing", error: null });
+        set((draft) => {
+          draft.busy = "optimizing";
+          draft.error = null;
+        });
         try {
           const { requirement, optimizeEngine, campaignState, workbenchCampaignId } = get();
           const { task_id } = await api.startOptimize(
@@ -494,83 +534,102 @@ export const useStore = create<AppState>()(
             workbenchCampaignId
           );
           const final = await awaitTaskStream(task_id, (ev) =>
-            set({ task: progressToTaskStatus(task_id, "optimize", ev) })
+            set((draft) => {
+              draft.task = progressToTaskStatus(task_id, "optimize", ev);
+            })
           );
           const opt = final.data as unknown as OptimizationResult | null;
           if (opt?.top_formulations) {
-            set({
-              leaderboard: opt.top_formulations,
-              optimizationHistory: opt.history,
+            set((draft) => {
+              draft.leaderboard = opt.top_formulations;
+              draft.optimizationHistory = opt.history;
             });
             get().scheduleAutosave();
           }
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ busy: "idle" });
+          set((draft) => {
+            draft.busy = "idle";
+          });
         }
       },
 
       runLoop: async () => {
-        set({ busy: "looping", error: null });
+        set((draft) => {
+          draft.busy = "looping";
+          draft.error = null;
+        });
         try {
           const { requirement, optimizeEngine, loopDoeEngine } = get();
           const { task_id } = await api.loopIterate(requirement, 24, 4, optimizeEngine, loopDoeEngine);
           const final = await awaitTaskStream(task_id, (ev) =>
-            set({ task: progressToTaskStatus(task_id, "loop", ev) })
+            set((draft) => {
+              draft.task = progressToTaskStatus(task_id, "loop", ev);
+            })
           );
           const report = final.data as unknown as LoopReport | null;
           if (report) {
-            const leaderboard = report.optimization.top_formulations;
-            set((s) => ({
-              loopReport: report,
-              leaderboard,
-              optimizationHistory: report.optimization.history,
-              doePlan: report.next_doe,
-              measured: {},
-              models: report.model_info,
-              rmseHistory: [...s.rmseHistory, report.rmse_by_metric],
-              lastAlEngine: report.engine,
-            }));
+            set((draft) => {
+              draft.loopReport = report;
+              draft.leaderboard = report.optimization.top_formulations;
+              draft.optimizationHistory = report.optimization.history;
+              draft.doePlan = report.next_doe;
+              draft.measured = {};
+              draft.models = report.model_info;
+              draft.rmseHistory.push(report.rmse_by_metric);
+              draft.lastAlEngine = report.engine;
+            });
             get().scheduleAutosave();
           }
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ busy: "idle" });
+          set((draft) => {
+            draft.busy = "idle";
+          });
         }
       },
 
       applyIntent: async (text) => {
-        set({ intentBusy: true, error: null });
+        set((draft) => {
+          draft.intentBusy = true;
+          draft.error = null;
+        });
         try {
           const result = await api.parseIntent(text);
-          // Merge parsed requirement into the form; keep objectives in sync with domain.
-          set((s) => ({
-            requirement: {
-              ...s.requirement,
-              ...result.requirement,
-              objectives:
-                result.requirement.objectives?.length
-                  ? result.requirement.objectives
-                  : s.requirement.objectives,
-              levers: result.requirement.levers?.length
-                ? result.requirement.levers
-                : s.requirement.levers,
-            },
-          }));
+          set((draft) => {
+            Object.assign(draft.requirement, result.requirement);
+            if (result.requirement.objectives?.length) {
+              draft.requirement.objectives = result.requirement.objectives;
+            }
+            if (result.requirement.levers?.length) {
+              draft.requirement.levers = result.requirement.levers;
+            }
+          });
           get().scheduleAutosave();
           return result.extracted_fields;
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
           return [];
         } finally {
-          set({ intentBusy: false });
+          set((draft) => {
+            draft.intentBusy = false;
+          });
         }
       },
 
       generateDoe: async (design) => {
-        set({ busy: "doe", error: null });
+        set((draft) => {
+          draft.busy = "doe";
+          draft.error = null;
+        });
         try {
           const { requirement, doeEngine, alEngine, campaignState, workbenchCampaignId } = get();
           let plan: DOEPlan;
@@ -598,65 +657,84 @@ export const useStore = create<AppState>()(
             requirement,
             activeProjectId ?? undefined
           );
-          set({
-            doePlan: plan,
-            measured: {},
-            campaignState: nextCampaignState,
-            lastAlEngine: nextAlEngine,
-            workbenchCampaignId: wb.campaign_id,
-            workbenchObjectivesSnapshot: wb.objectives_snapshot ?? null,
+          set((draft) => {
+            draft.doePlan = plan;
+            draft.measured = {};
+            draft.campaignState = nextCampaignState;
+            draft.lastAlEngine = nextAlEngine;
+            draft.workbenchCampaignId = wb.campaign_id;
+            draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
           });
           await get().refreshWorkbenchStats();
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ busy: "idle" });
+          set((draft) => {
+            draft.busy = "idle";
+          });
           get().scheduleAutosave();
         }
       },
 
       setDoeEngine: (engine) => {
-        set({ doeEngine: engine });
+        set((draft) => {
+          draft.doeEngine = engine;
+        });
         get().scheduleAutosave();
       },
       setAlEngine: (engine) => {
-        set({ alEngine: engine });
+        set((draft) => {
+          draft.alEngine = engine;
+        });
         get().scheduleAutosave();
       },
       setOptimizeEngine: (engine) => {
-        set({ optimizeEngine: engine });
+        set((draft) => {
+          draft.optimizeEngine = engine;
+        });
         get().scheduleAutosave();
       },
       setLoopDoeEngine: (engine) => {
-        set({ loopDoeEngine: engine });
+        set((draft) => {
+          draft.loopDoeEngine = engine;
+        });
         get().scheduleAutosave();
       },
 
       setMeasured: (runId, value) => {
-        set((s) => ({ measured: { ...s.measured, [runId]: value } }));
+        set((draft) => {
+          draft.measured[runId] = value;
+        });
         get().scheduleAutosave();
       },
 
       refreshWorkbenchStats: async () => {
         const id = get().workbenchCampaignId;
         if (id == null) {
-          set({ workbenchStats: null });
+          set((draft) => {
+            draft.workbenchStats = null;
+          });
           return;
         }
         try {
           const wb = await api.getWorkbenchCampaign(id);
           const completed = wb.rows.filter((r) => r.status === "Completed").length;
-          set({
-            workbenchStats: {
+          set((draft) => {
+            draft.workbenchStats = {
               completed,
               total: wb.rows.length,
               name: wb.name,
               strategy: wb.strategy,
-            },
-            workbenchObjectivesSnapshot: wb.objectives_snapshot ?? get().workbenchObjectivesSnapshot,
+            };
+            draft.workbenchObjectivesSnapshot =
+              wb.objectives_snapshot ?? draft.workbenchObjectivesSnapshot;
           });
         } catch {
-          set({ workbenchStats: null });
+          set((draft) => {
+            draft.workbenchStats = null;
+          });
         }
       },
 
@@ -676,22 +754,22 @@ export const useStore = create<AppState>()(
             requirement,
             activeProjectId ?? undefined
           );
-          set({
-            workbenchCampaignId: wb.campaign_id,
-            workbenchObjectivesSnapshot: wb.objectives_snapshot ?? null,
-          });
-          get().scheduleAutosave();
-          set({
-            workbenchStats: {
+          set((draft) => {
+            draft.workbenchCampaignId = wb.campaign_id;
+            draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
+            draft.workbenchStats = {
               completed: 0,
               total: wb.rows.length,
               name: wb.name,
               strategy: wb.strategy,
-            },
+            };
           });
+          get().scheduleAutosave();
           return wb.campaign_id;
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
           return null;
         }
       },
@@ -719,7 +797,9 @@ export const useStore = create<AppState>()(
               });
             }
           } catch (e) {
-            set({ error: String(e) });
+            set((draft) => {
+              draft.error = String(e);
+            });
             return;
           }
         }
@@ -739,62 +819,88 @@ export const useStore = create<AppState>()(
         }
 
         if (records.length === 0) {
-          set({ error: "请先在实验台账中完成至少一行实测值，或为实验填写实测值" });
+          set((draft) => {
+            draft.error = "请先在实验台账中完成至少一行实测值，或为实验填写实测值";
+          });
           return;
         }
-        set({ busy: "training", error: null });
+        set((draft) => {
+          draft.busy = "training";
+          draft.error = null;
+        });
         try {
           const report = await api.submitExperiments(records);
           const { modelHistory } = get();
-          set({
-            models: report.trained,
-            modelHistory: [...modelHistory, report.trained],
-            trainMessage: report.message,
+          set((draft) => {
+            draft.models = report.trained;
+            draft.modelHistory = [...modelHistory, report.trained];
+            draft.trainMessage = report.message;
           });
           await get().runResearch();
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ busy: "idle" });
+          set((draft) => {
+            draft.busy = "idle";
+          });
         }
       },
 
       refreshModels: async () => {
         try {
-          set({ models: await api.models() });
+          const models = await api.models();
+          set((draft) => {
+            draft.models = models;
+          });
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         }
       },
 
       exportDoe: (format) => {
         const { doePlan } = get();
         if (!doePlan?.plan_id) {
-          set({ error: "请先生成 DOE 计划再导出" });
+          set((draft) => {
+            draft.error = "请先生成 DOE 计划再导出";
+          });
           return;
         }
         window.open(api.doeExportUrl(doePlan.plan_id, format), "_blank");
       },
 
       importCsv: async (file) => {
-        set({ busy: "training", error: null });
+        set((draft) => {
+          draft.busy = "training";
+          draft.error = null;
+        });
         try {
           const report = await api.importExperimentsCsv(file, get().requirement.domain);
           const { modelHistory } = get();
-          set({
-            models: report.trained,
-            modelHistory: [...modelHistory, report.trained],
-            trainMessage: report.message,
+          set((draft) => {
+            draft.models = report.trained;
+            draft.modelHistory = [...modelHistory, report.trained];
+            draft.trainMessage = report.message;
           });
           await get().runResearch();
         } catch (e) {
-          set({ error: `CSV 导入失败：${e instanceof Error ? e.message : String(e)}` });
+          set((draft) => {
+            draft.error = `CSV 导入失败：${e instanceof Error ? e.message : String(e)}`;
+          });
         } finally {
-          set({ busy: "idle" });
+          set((draft) => {
+            draft.busy = "idle";
+          });
         }
       },
 
-      toggleHistory: () => set((s) => ({ historyOpen: !s.historyOpen })),
+      toggleHistory: () =>
+        set((draft) => {
+          draft.historyOpen = !draft.historyOpen;
+        }),
 
       scheduleAutosave: () => {
         if (autosaveTimer) clearTimeout(autosaveTimer);
@@ -806,17 +912,25 @@ export const useStore = create<AppState>()(
       saveProject: async () => {
         const { activeProjectId } = get();
         if (!activeProjectId) return;
-        set({ projectSaveBusy: true });
+        set((draft) => {
+          draft.projectSaveBusy = true;
+        });
         try {
           const payload = buildWorkspacePayload(workspaceSlice(get()));
           const title = get().searchQuery.trim() || get().requirement.product_type || undefined;
           await api.updateProject(activeProjectId, payload, title);
           const projects = await api.listProjects();
-          set({ projects });
+          set((draft) => {
+            draft.projects = projects;
+          });
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ projectSaveBusy: false });
+          set((draft) => {
+            draft.projectSaveBusy = false;
+          });
         }
       },
 
@@ -831,21 +945,25 @@ export const useStore = create<AppState>()(
           if (!patch.activeConstraints?.length && patch.requirement) {
             patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
           }
-          set({
-            ...patch,
-            activeProjectId: id,
-            historyOpen: false,
-            error: null,
-            task: null,
-            busy: "idle",
+          set((draft) => {
+            Object.assign(draft, patch);
+            draft.activeProjectId = id;
+            draft.historyOpen = false;
+            draft.error = null;
+            draft.task = null;
+            draft.busy = "idle";
           });
           if (patch.workbenchCampaignId != null) {
             await get().refreshWorkbenchStats();
           } else {
-            set({ workbenchStats: null });
+            set((draft) => {
+              draft.workbenchStats = null;
+            });
           }
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         }
       },
 
@@ -854,34 +972,38 @@ export const useStore = create<AppState>()(
           await get().saveProject();
           const detail = await api.createProject(title);
           const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
-          set({
-            ...patch,
-            searchQuery: title || "",
-            activeProjectId: detail.id,
-            research: null,
-            deepReport: null,
-            leaderboard: [],
-            chatHistory: [],
-            sources: [],
-            selectedSources: [],
-            doePlan: null,
-            measured: {},
-            loopReport: null,
-            rmseHistory: [],
-            processOptResult: null,
-            optimizationHistory: [],
-            modelHistory: [],
-            trainMessage: "",
-            campaignState: null,
-            workbenchCampaignId: null,
-            workbenchObjectivesSnapshot: null,
-            workbenchStats: null,
-            error: null,
+          set((draft) => {
+            Object.assign(draft, patch);
+            draft.searchQuery = title || "";
+            draft.activeProjectId = detail.id;
+            draft.research = null;
+            draft.deepReport = null;
+            draft.leaderboard = [];
+            draft.chatHistory = [];
+            draft.sources = [];
+            draft.selectedSources = [];
+            draft.doePlan = null;
+            draft.measured = {};
+            draft.loopReport = null;
+            draft.rmseHistory = [];
+            draft.processOptResult = null;
+            draft.optimizationHistory = [];
+            draft.modelHistory = [];
+            draft.trainMessage = "";
+            draft.campaignState = null;
+            draft.workbenchCampaignId = null;
+            draft.workbenchObjectivesSnapshot = null;
+            draft.workbenchStats = null;
+            draft.error = null;
           });
           const projects = await api.listProjects();
-          set({ projects });
+          set((draft) => {
+            draft.projects = projects;
+          });
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         }
       },
 
@@ -894,17 +1016,23 @@ export const useStore = create<AppState>()(
           await api.deleteProject(id);
           const projects = await api.listProjects();
           if (activeProjectId === id) {
-            set({ activeProjectId: null });
+            set((draft) => {
+              draft.activeProjectId = null;
+            });
             if (projects.length > 0) {
               await get().loadProject(projects[0].id);
             } else {
               await get().createProject();
             }
           } else {
-            set({ projects });
+            set((draft) => {
+              draft.projects = projects;
+            });
           }
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         }
       },
 
@@ -938,91 +1066,130 @@ export const useStore = create<AppState>()(
           if (!activeId || !projects.some((p) => p.id === activeId)) {
             activeId = projects[0]?.id ?? null;
           }
-          set({ projects, activeProjectId: activeId });
+          set((draft) => {
+            draft.projects = projects;
+            draft.activeProjectId = activeId;
+          });
           if (activeId) {
             const detail = await api.getProject(activeId);
             const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
             if (!patch.activeConstraints?.length && patch.requirement) {
               patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
             }
-            set({ ...patch, activeProjectId: activeId });
+            set((draft) => {
+              Object.assign(draft, patch);
+              draft.activeProjectId = activeId;
+            });
             if (patch.workbenchCampaignId != null) {
               await get().refreshWorkbenchStats();
             }
           }
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         }
       },
 
       setProcessOptResult: (result) => {
-        set({ processOptResult: result });
+        set((draft) => {
+          draft.processOptResult = result;
+        });
         get().scheduleAutosave();
       },
 
       // v0.3 actions
       setSearchQuery: (q) => {
-        set({ searchQuery: q });
+        set((draft) => {
+          draft.searchQuery = q;
+        });
         get().scheduleAutosave();
       },
 
       setSourceTypes: (types) => {
-        set({ sourceTypes: types });
+        set((draft) => {
+          draft.sourceTypes = types;
+        });
         get().scheduleAutosave();
       },
 
       setRecommendSourceTypes: (types) => {
-        set({ recommendSourceTypes: types });
+        set((draft) => {
+          draft.recommendSourceTypes = types;
+        });
         get().scheduleAutosave();
       },
 
       addSources: (evidence) => {
-        set((s) => {
+        set((draft) => {
           const fresh = evidence.filter(
-            (e) => !s.sources.some((x) => (x.identifier || x.title) === (e.identifier || e.title))
+            (e) =>
+              !draft.sources.some(
+                (x) => (x.identifier || x.title) === (e.identifier || e.title)
+              )
           );
           const freshIds = fresh.map((e) => e.identifier || e.title);
-          return {
-            sources: [...s.sources, ...fresh],
-            selectedSources: [...new Set([...s.selectedSources, ...freshIds])],
-          };
+          draft.sources.push(...fresh);
+          for (const id of freshIds) {
+            if (!draft.selectedSources.includes(id)) {
+              draft.selectedSources.push(id);
+            }
+          }
         });
         get().scheduleAutosave();
       },
 
       removeSource: (id) => {
-        set((s) => ({
-          sources: s.sources.filter((e) => (e.identifier || e.title) !== id),
-          selectedSources: s.selectedSources.filter((x) => x !== id),
-        }));
+        set((draft) => {
+          draft.sources = draft.sources.filter((e) => (e.identifier || e.title) !== id);
+          draft.selectedSources = draft.selectedSources.filter((x) => x !== id);
+        });
         get().scheduleAutosave();
       },
 
       clearSources: () => {
-        set({ sources: [], selectedSources: [], chatHistory: [] });
+        set((draft) => {
+          draft.sources = [];
+          draft.selectedSources = [];
+          draft.chatHistory = [];
+        });
         get().scheduleAutosave();
       },
 
       toggleSourceSelected: (id) => {
-        set((s) => ({
-          selectedSources: s.selectedSources.includes(id)
-            ? s.selectedSources.filter((x) => x !== id)
-            : [...s.selectedSources, id],
-        }));
+        set((draft) => {
+          if (draft.selectedSources.includes(id)) {
+            draft.selectedSources = draft.selectedSources.filter((x) => x !== id);
+          } else {
+            draft.selectedSources.push(id);
+          }
+        });
         get().scheduleAutosave();
       },
 
       selectAllSources: () =>
-        set((s) => ({ selectedSources: s.sources.map((e) => e.identifier || e.title) })),
+        set((draft) => {
+          draft.selectedSources = draft.sources.map((e) => e.identifier || e.title);
+        }),
 
-      deselectAllSources: () => set({ selectedSources: [] }),
+      deselectAllSources: () =>
+        set((draft) => {
+          draft.selectedSources = [];
+        }),
 
       searchSources: async (queryOverride?: string) => {
         const { searchQuery, requirement, sourceTypes } = get();
         const query = (queryOverride ?? searchQuery).trim();
-        if (queryOverride !== undefined) set({ searchQuery: query });
+        if (queryOverride !== undefined) {
+          set((draft) => {
+            draft.searchQuery = query;
+          });
+        }
+        set((draft) => {
+          draft.searchBusy = true;
+          draft.error = null;
+        });
         const types = sourceTypes.filter((t) => t !== "local");
-        set({ searchBusy: true, error: null });
         try {
           const { task_id } = await api.searchStream({
             query,
@@ -1038,19 +1205,29 @@ export const useStore = create<AppState>()(
             | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
             | undefined;
           if (r?.evidence?.length) get().addSources(r.evidence);
-          if (r?.source_status) set({ sourceStatus: r.source_status });
+          if (r?.source_status) {
+            set((draft) => {
+              draft.sourceStatus = r.source_status!;
+            });
+          }
           get().scheduleAutosave();
         } catch (e) {
-          set({ error: String(e) });
+          set((draft) => {
+            draft.error = String(e);
+          });
         } finally {
-          set({ searchBusy: false });
+          set((draft) => {
+            draft.searchBusy = false;
+          });
         }
       },
 
       loadSourceStatus: async () => {
         try {
           const status = await api.getSourceStatus();
-          set({ sourceStatus: status });
+          set((draft) => {
+            draft.sourceStatus = status;
+          });
         } catch {
           // silently ignore
         }
@@ -1060,13 +1237,11 @@ export const useStore = create<AppState>()(
         try {
           const remote = await api.getSettings();
           const local = get().llmConfig;
-          set({
-            llmConfig: {
-              provider: remote.provider || local.provider,
-              model: remote.model || local.model,
-              apiKey: local.apiKey,
-              baseUrl: remote.base_url ?? local.baseUrl,
-            },
+          set((draft) => {
+            draft.llmConfig.provider = remote.provider || local.provider;
+            draft.llmConfig.model = remote.model || local.model;
+            draft.llmConfig.apiKey = local.apiKey;
+            draft.llmConfig.baseUrl = remote.base_url ?? local.baseUrl;
           });
           if (local.apiKey && !remote.key_set) {
             await api.postSettings({
@@ -1083,7 +1258,10 @@ export const useStore = create<AppState>()(
 
       uploadFiles: async (files) => {
         if (files.length === 0) return;
-        set({ searchBusy: true, error: null });
+        set((draft) => {
+          draft.searchBusy = true;
+          draft.error = null;
+        });
         try {
           const res =
             files.length === 1
@@ -1091,21 +1269,24 @@ export const useStore = create<AppState>()(
               : await api.ingestBatch(files);
           get().addSources(res.evidence);
         } catch (e) {
-          set({ error: `文件上传失败：${e instanceof Error ? e.message : String(e)}` });
+          set((draft) => {
+            draft.error = `文件上传失败：${e instanceof Error ? e.message : String(e)}`;
+          });
         } finally {
-          set({ searchBusy: false });
+          set((draft) => {
+            draft.searchBusy = false;
+          });
         }
       },
 
       sendChat: async (question) => {
-        const { sources, selectedSources, requirement, chatHistory } = get();
-        // Only the selected sources ground the answer (NotebookLM-style).
+        const { sources, selectedSources, requirement } = get();
         const active = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
-        set({
-          chatBusy: true,
-          chatHistory: [...chatHistory, { role: "user", content: question }],
+        set((draft) => {
+          draft.chatBusy = true;
+          draft.chatHistory.push({ role: "user", content: question });
         });
         try {
           const res = await api.chat({
@@ -1113,36 +1294,54 @@ export const useStore = create<AppState>()(
             sources: active,
             domain: requirement.domain,
           });
-          set((s) => ({
-            chatHistory: [
-              ...s.chatHistory,
-              { role: "assistant", content: res.answer, citations: res.citations },
-            ],
-          }));
+          set((draft) => {
+            draft.chatHistory.push({
+              role: "assistant",
+              content: res.answer,
+              citations: res.citations,
+            });
+          });
           get().scheduleAutosave();
         } catch (e) {
-          set((s) => ({
-            chatHistory: [
-              ...s.chatHistory,
-              { role: "assistant", content: `错误：${String(e)}` },
-            ],
-          }));
+          set((draft) => {
+            draft.chatHistory.push({
+              role: "assistant",
+              content: `错误：${String(e)}`,
+            });
+          });
         } finally {
-          set({ chatBusy: false });
+          set((draft) => {
+            draft.chatBusy = false;
+          });
         }
       },
 
-      setOpenModal: (name) => set({ openModal: name }),
+      setOpenModal: (name) =>
+        set((draft) => {
+          draft.openModal = name;
+        }),
 
       setLlmConfig: (config) =>
-        set((s) => ({ llmConfig: { ...s.llmConfig, ...config } })),
+        set((draft) => {
+          Object.assign(draft.llmConfig, config);
+        }),
 
-      toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
+      toggleSettings: () =>
+        set((draft) => {
+          draft.settingsOpen = !draft.settingsOpen;
+        }),
 
-      openSettings: (tab = "llm") => set({ settingsOpen: true, settingsTab: tab }),
+      openSettings: (tab = "llm") =>
+        set((draft) => {
+          draft.settingsOpen = true;
+          draft.settingsTab = tab;
+        }),
 
-      setSettingsTab: (tab) => set({ settingsTab: tab }),
-    }),
+      setSettingsTab: (tab) =>
+        set((draft) => {
+          draft.settingsTab = tab;
+        }),
+    })),
     {
       name: "formumind-history",
       partialize: (state) => ({
