@@ -10,7 +10,7 @@ from ..domain.schemas import Evidence, Requirement, ResearchResult
 from ..pipeline import workflow
 from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..services.federated_search import FederatedSearchEngine
-from ..worker.tasks import run_deep_research_task
+from ..worker.tasks import run_deep_research_task, run_recommend_task
 from .tasks import accepted_response
 
 router = APIRouter(prefix="/api", tags=["research"])
@@ -40,6 +40,23 @@ def start_research(body: ResearchRequest) -> ResearchResult:
     })
     pre_sources = body.sources if body.sources else None
     return workflow.run_research(req, pre_sources=pre_sources, query=body.query)
+
+
+@router.post("/research/recommend", status_code=202)
+def start_recommend_research(body: ResearchRequest) -> JSONResponse:
+    """Enqueue lightweight CRAG recommend; subscribe via GET /api/tasks/{id}/stream."""
+    req = Requirement(**{
+        k: v for k, v in body.model_dump().items()
+        if k not in ("sources", "source_types", "query")
+    })
+    payload = {
+        "topic": body.query or req.headline(),
+        "requirement": req.model_dump(),
+        "sources": [s.model_dump() for s in body.sources],
+        "query": body.query or req.headline(),
+    }
+    async_result = run_recommend_task.delay(payload)
+    return accepted_response(async_result.id, "recommend")
 
 
 @router.post("/research/deep", status_code=202)

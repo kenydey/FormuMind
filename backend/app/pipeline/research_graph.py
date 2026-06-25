@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -167,17 +167,85 @@ def grade_node(state: ResearchGraphState, settings: Settings | None = None) -> R
     return state
 
 
-def fallback_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
+def fallback_node(
+    state: ResearchGraphState,
+    settings: Settings | None = None,
+    *,
+    mode: Literal["recommend", "deep"] = "deep",
+) -> ResearchGraphState:
     settings = settings or get_settings()
     query = state.get("query") or state.get("topic") or ""
     req = state.get("req")
-    fed = FederatedSearchEngine(settings)
-    result = fed.search(query, req=req)
-    if result.evidence:
-        colbert_store.index_evidence(result.evidence, settings=settings)
-        state["evidence"] = result.evidence
+
+    if mode == "recommend":
+        from ..services import literature
+
+        fed = FederatedSearchEngine(settings)
+        types = fed.effective_sources()
+        evidence = literature.iter_search(
+            query,
+            types,
+            req=req,
+            total_limit=30,
+            per_source_cap=10,
+            max_rounds=1,
+        )
+    else:
+        fed = FederatedSearchEngine(settings)
+        result = fed.search(query, req=req)
+        evidence = result.evidence
+
+    if evidence:
+        colbert_store.index_evidence(evidence, settings=settings)
+        state["evidence"] = evidence
     state["fallback_used"] = True
     state["stage"] = "fallback"
+    return state
+
+
+def recommend_generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
+    """Lightweight recommend path — skip answer/report/synthesize LLM calls."""
+    from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
+    from ..domain.objective_contract import normalize_objectives
+    from ..pipeline.workflow import _score_and_validate, process_for
+
+    settings = settings or get_settings()
+    req = state.get("req")
+    grounded = state.get("grounded_evidence") or state.get("evidence") or []
+
+    mechanism = ""
+    chat = ""
+    recommended: list[Formulation] = []
+    recommend_engine = "offline"
+
+    if req:
+        rec_resp = llm.recommend_formulations(req, normalize_objectives(req), grounded, n=3)
+        recommend_engine = rec_resp.engine
+        process = process_for(req)
+        forms = []
+        for rec in rec_resp.formulas:
+            try:
+                forms.append(recommended_to_formulation(rec))
+            except ValueError as exc:
+                rec_resp.warnings.append(str(exc))
+        recommended = [_score_and_validate(f, process, req) for f in forms]
+        recommended, gate_warnings = validate_formulations(recommended)
+        recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
+        if recommended:
+            mechanism = recommended[0].rationale or ""
+            chat = f"已推荐 {len(recommended)} 条配方。"
+        else:
+            chat = "未能生成有效配方。"
+        if gate_warnings:
+            chat += "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in gate_warnings)
+    else:
+        chat = "缺少需求参数，无法推荐配方。"
+
+    state["mechanism"] = mechanism
+    state["chat_markdown"] = chat
+    state["recommended"] = recommended
+    state["recommend_engine"] = "llm" if recommend_engine == "llm" else "offline"
+    state["stage"] = "recommend"
     return state
 
 
@@ -240,6 +308,41 @@ def route_after_grade(state: ResearchGraphState) -> str:
     return "generate"
 
 
+def _needs_fallback(state: ResearchGraphState, mode: Literal["recommend", "deep"]) -> bool:
+    if state.get("grade") != GradeVerdict.incorrect or state.get("fallback_used"):
+        return False
+    if mode == "recommend" and (state.get("pre_index") or []):
+        return False
+    return True
+
+
+def _run_crag_retrieval(
+    state: ResearchGraphState,
+    settings: Settings,
+    mode: Literal["recommend", "deep"],
+    progress_cb: ProgressCallback | None,
+) -> ResearchGraphState:
+    _emit(progress_cb, "retrieve", "正在检索")
+    state = retrieve_node(state, settings)
+    _emit(
+        progress_cb,
+        "retrieve",
+        f"已召回 {len(state.get('evidence') or [])} 条",
+        {"evidence_count": len(state.get("evidence") or [])},
+    )
+
+    _emit(progress_cb, "grade", "评估质量")
+    state = grade_node(state, settings)
+
+    if _needs_fallback(state, mode):
+        _emit(progress_cb, "fallback", "重试搜索")
+        state = fallback_node(state, settings, mode=mode)
+        state = retrieve_node(state, settings)
+        state = grade_node(state, settings)
+
+    return state
+
+
 def run_research_graph(
     topic: str,
     req: Requirement | None = None,
@@ -248,6 +351,7 @@ def run_research_graph(
     pre_index: list[Evidence] | None = None,
     progress_cb: ProgressCallback | None = None,
     settings: Settings | None = None,
+    mode: Literal["recommend", "deep"] = "recommend",
 ) -> ResearchGraphState:
     """Execute CRAG pipeline (LangGraph-compatible linear runner)."""
     settings = settings or get_settings()
@@ -261,22 +365,15 @@ def run_research_graph(
         "fallback_used": False,
     }
 
-    _emit(progress_cb, "retrieve", "正在检索")
-    state = retrieve_node(state, settings)
-    _emit(progress_cb, "retrieve", f"已召回 {len(state.get('evidence') or [])} 条", {"evidence_count": len(state.get("evidence") or [])})
+    state = _run_crag_retrieval(state, settings, mode, progress_cb)
 
-    _emit(progress_cb, "grade", "评估质量")
-    state = grade_node(state, settings)
-
-    if route_after_grade(state) == "fallback":
-        _emit(progress_cb, "fallback", "重试搜索")
-        state = fallback_node(state, settings)
-        state = retrieve_node(state, settings)
-        state = grade_node(state, settings)
-
-    _emit(progress_cb, "generate", "生成答案")
-    state = generate_node(state, settings)
-    _emit(progress_cb, "recommend", "推荐配方")
+    if mode == "recommend":
+        _emit(progress_cb, "recommend", "推荐配方")
+        state = recommend_generate_node(state, settings)
+    else:
+        _emit(progress_cb, "generate", "生成答案")
+        state = generate_node(state, settings)
+        _emit(progress_cb, "recommend", "推荐配方")
     return state
 
 
@@ -289,13 +386,15 @@ def resolve_grounded_evidence(
 ) -> GroundedEvidenceResult:
     """ColBERT retrieve → CRAG grade → grounded_evidence SSOT."""
     settings = settings or get_settings()
-    state = run_research_graph(
-        topic=query,
-        req=req,
-        query=query,
-        pre_index=pre_index,
-        settings=settings,
-    )
+    q = query or req.headline()
+    state: ResearchGraphState = {
+        "topic": q,
+        "query": q,
+        "req": req,
+        "pre_index": pre_index or [],
+        "fallback_used": False,
+    }
+    state = _run_crag_retrieval(state, settings, "recommend", None)
     return GroundedEvidenceResult(
         query=query,
         evidence=state.get("evidence") or [],

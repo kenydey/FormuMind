@@ -103,6 +103,9 @@ class TaskManager:
 
     def register_celery_task(self, task_id: str, kind: str) -> None:
         self._kinds[task_id] = kind
+        existing = load_persisted_task(task_id)
+        if existing and existing.state in (TaskState.completed, TaskState.failed):
+            return
         register_pending(task_id, kind)
         status = TaskStatus(
             task_id=task_id,
@@ -172,6 +175,17 @@ class TaskManager:
         self.register_celery_task(async_result.id, "deep_research")
         return async_result.id
 
+    def submit_recommend(self, req, sources=None, query: str = "") -> str:
+        payload = {
+            "topic": query or (req.headline() if req else ""),
+            "requirement": req.model_dump() if hasattr(req, "model_dump") else req,
+            "sources": [s.model_dump() if hasattr(s, "model_dump") else s for s in (sources or [])],
+            "query": query or (req.headline() if req else ""),
+        }
+        async_result = run_recommend_task.delay(payload)
+        self.register_celery_task(async_result.id, "recommend")
+        return async_result.id
+
     def submit_search(self, query, source_types, req=None, total_limit=300, per_source_cap=50) -> str:
         payload = {
             "query": query,
@@ -235,6 +249,7 @@ def run_deep_research_task(self, payload: dict) -> dict:
             query=query,
             pre_index=sources or None,
             progress_cb=graph_progress,
+            mode="deep",
         )
         grounded = state.get("grounded_evidence") or []
         report = ComprehensiveReport(
@@ -269,6 +284,52 @@ def _stage_progress(stage: str) -> float:
         "generate": 0.75,
         "recommend": 0.9,
     }.get(stage, 0.5)
+
+
+@celery_app.task(bind=True, name="formumind.recommend")
+def run_recommend_task(self, payload: dict) -> dict:
+    from ..domain.schemas import Evidence, Requirement
+    from ..pipeline.research_graph import graph_state_to_research_result, run_research_graph
+
+    task_id = self.request.id
+    publish_progress(task_id, TaskProgressStatus.RUNNING, stage="retrieve", message="正在检索")
+    try:
+        req = Requirement(**payload["requirement"]) if payload.get("requirement") else None
+        if not req:
+            raise ValueError("requirement is required")
+        topic = payload.get("topic") or req.headline()
+        query = payload.get("query") or topic
+        sources = [Evidence.model_validate(s) for s in payload.get("sources") or []]
+
+        def graph_progress(stage: str, message: str, partial: dict | None = None) -> None:
+            publish_progress(
+                task_id,
+                TaskProgressStatus.RUNNING,
+                stage=stage,
+                message=message,
+                progress=_stage_progress(stage),
+                data=partial,
+            )
+
+        state = run_research_graph(
+            topic=topic,
+            req=req,
+            query=query,
+            pre_index=sources or None,
+            progress_cb=graph_progress,
+            mode="recommend",
+        )
+        research = graph_state_to_research_result(state, req)
+        result = {"research": research.model_dump()}
+        persist_result(task_id, result, failed=False)
+        _persist_terminal(task_id, "recommend", result)
+        return result
+    except Exception as exc:
+        logger.exception("recommend task failed")
+        err = {"error": str(exc)}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "recommend", err, failed=True, message=str(exc))
+        raise
 
 
 @celery_app.task(bind=True, name="formumind.optimize")
@@ -421,4 +482,5 @@ def run_deps_install_task(self, payload: dict) -> dict:
 optimize_task = run_optimize_task
 loop_task = run_loop_task
 deep_research_task = run_deep_research_task
+recommend_task = run_recommend_task
 ingest_patents_task = run_deep_research_task  # unused alias

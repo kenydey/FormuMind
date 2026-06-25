@@ -158,6 +158,7 @@ def run_research(
         req=req,
         query=q,
         pre_index=pre_index,
+        mode="recommend",
     )
     return graph_state_to_research_result(state, req)
 

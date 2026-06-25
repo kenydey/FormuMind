@@ -397,6 +397,9 @@ export const api = {
     query = ""
   ) =>
     postAccepted("/api/research/deep", { topic, requirement: req, sources, query }),
+
+  submitRecommendResearch: (req: Requirement, sources: Evidence[] = [], query = "") =>
+    postAccepted("/api/research/recommend", { ...req, sources, query }),
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
@@ -611,25 +614,44 @@ export function subscribeTaskStream(
 /** Await task completion via EventSource; resolves with terminal COMPLETED event. */
 export function awaitTaskStream(
   taskId: string,
-  onEvent?: (ev: TaskProgressEvent) => void
+  onEvent?: (ev: TaskProgressEvent) => void,
+  timeoutMs = 120_000
 ): Promise<TaskProgressEvent> {
   return new Promise((resolve, reject) => {
-    const es = subscribeTaskStream(
+    let settled = false;
+    let es: EventSource;
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn();
+    };
+
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            es.close();
+            finish(() => reject(new Error(`任务超时（${Math.round(timeoutMs / 1000)}s）`)));
+          }, timeoutMs)
+        : null;
+
+    es = subscribeTaskStream(
       taskId,
       (ev) => {
         onEvent?.(ev);
         if (ev.status === "COMPLETED" || ev.status === "FAILED") {
           es.close();
           if (ev.status === "FAILED") {
-            reject(new Error(ev.message || "任务失败"));
+            finish(() => reject(new Error(ev.message || "任务失败")));
           } else {
-            resolve(ev);
+            finish(() => resolve(ev));
           }
         }
       },
       () => {
         es.close();
-        reject(new Error("SSE 连接中断"));
+        finish(() => reject(new Error("SSE 连接中断")));
       }
     );
   });

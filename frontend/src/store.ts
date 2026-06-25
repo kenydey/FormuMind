@@ -125,6 +125,8 @@ interface AppState {
   deepResearchStage: string;
   deepResearchMessage: string;
   formulationBusy: boolean;
+  recommendStage: string;
+  recommendMessage: string;
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;   // requirements | recommend | doe | workbench | optimize | process | loop
@@ -294,6 +296,8 @@ export const useStore = create<AppState>()(
       deepResearchStage: "",
       deepResearchMessage: "",
       formulationBusy: false,
+      recommendStage: "",
+      recommendMessage: "",
       chatBusy: false,
       recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
       openModal: null,
@@ -373,21 +377,43 @@ export const useStore = create<AppState>()(
       },
 
       runResearch: async () => {
-        set({ formulationBusy: true, error: null });
+        set({
+          formulationBusy: true,
+          recommendStage: "retrieve",
+          recommendMessage: "正在检索",
+          error: null,
+        });
         try {
           const { requirement, sources, selectedSources, searchQuery } = get();
           const selected = sources.filter((e) =>
             selectedSources.includes(e.identifier || e.title)
           );
           const payload = selected.length > 0 ? selected : sources;
-          const research = await api.research(requirement, payload, searchQuery.trim());
-          const leaderboard = research.recommended;
-          set({ research, leaderboard });
+          const { task_id } = await api.submitRecommendResearch(
+            requirement,
+            payload,
+            searchQuery.trim()
+          );
+          const final = await awaitTaskStream(task_id, (ev) => {
+            set({
+              recommendStage: ev.stage ?? "",
+              recommendMessage: ev.message ?? "",
+              task: progressToTaskStatus(task_id, "recommend", ev),
+            });
+          });
+          const wrapped = final.data as { research?: ResearchResult } | undefined;
+          const research = wrapped?.research;
+          if (!research) throw new Error("推荐未返回结果");
+          set({ research, leaderboard: research.recommended });
           get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });
         } finally {
-          set({ formulationBusy: false });
+          set({
+            formulationBusy: false,
+            recommendStage: "",
+            recommendMessage: "",
+          });
         }
       },
 

@@ -162,10 +162,14 @@ def _openai_message_text(message) -> str | None:
 
 # ── Low-level completion helpers ─────────────────────────────────────────────
 
+def _llm_timeout_seconds() -> float:
+    return float(get_settings().llm_timeout_seconds)
+
+
 def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) -> str | None:
     try:
         import anthropic  # type: ignore
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=_llm_timeout_seconds())
         msg = client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -198,7 +202,7 @@ def _complete_openai_compatible_detail(
     except ImportError:
         return None, "未安装 openai SDK，请执行 pip install -e '.[llm]'"
     try:
-        kwargs: dict = {"api_key": api_key}
+        kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
         if base_url:
             kwargs["base_url"] = base_url
         client = OpenAI(**kwargs)
@@ -328,7 +332,7 @@ def complete_structured(
             from openai import OpenAI  # type: ignore
 
             base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
-            kwargs: dict = {"api_key": api_key}
+            kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
             if base_url:
                 kwargs["base_url"] = base_url
             client = OpenAI(**kwargs)

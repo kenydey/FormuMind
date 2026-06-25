@@ -32,6 +32,17 @@ function Badge({ children, tone }: { children: React.ReactNode; tone: "accent" |
   );
 }
 
+const RECOMMEND_STAGES = [
+  { id: "retrieve", label: "检索" },
+  { id: "grade", label: "评估" },
+  { id: "recommend", label: "推荐" },
+] as const;
+
+function recommendStageIndex(stage: string): number {
+  const idx = RECOMMEND_STAGES.findIndex((s) => s.id === stage);
+  return idx >= 0 ? idx : 0;
+}
+
 export default function ActionsPanel() {
   const {
     openModal,
@@ -40,6 +51,10 @@ export default function ActionsPanel() {
     runOptimize,
     busy,
     formulationBusy,
+    recommendStage,
+    recommendMessage,
+    sources,
+    task,
     leaderboard,
     models,
     optimizationHistory,
@@ -47,6 +62,11 @@ export default function ActionsPanel() {
     workbenchStats,
     refreshWorkbenchStats,
   } = useStore();
+
+  const activeRecommendIdx = recommendStageIndex(recommendStage);
+  const recommendProgressPct = formulationBusy
+    ? Math.round(((task?.progress ?? 0) || (activeRecommendIdx + 1) / RECOMMEND_STAGES.length) * 100)
+    : 0;
 
   function badgeFor(id: ModalName) {
     if (id === "recommend") {
@@ -118,6 +138,51 @@ export default function ActionsPanel() {
           <p className="text-[11px] text-slate-500">
             从 ColBERT 知识库经 CRAG 评估后推荐配方（源策略由后端配置，无需勾选专利/文献）。
           </p>
+          {sources.length === 0 && (
+            <p className="text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2">
+              建议先在左栏检索或上传资料以充实知识库；离线种子语料仍可用于基础推荐。
+            </p>
+          )}
+          {formulationBusy && (
+            <div className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                <span className="text-accent2 uppercase tracking-widest">推荐配方 · CRAG</span>
+                <span>{recommendMessage || "处理中…"}</span>
+              </div>
+              <div className="flex gap-1 mb-2">
+                {RECOMMEND_STAGES.map((s, i) => {
+                  const done = i < activeRecommendIdx;
+                  const active = i === activeRecommendIdx;
+                  return (
+                    <div key={s.id} className="flex-1 min-w-0">
+                      <div
+                        className={`h-1 rounded-full transition-colors ${
+                          done
+                            ? "bg-accent"
+                            : active
+                              ? "bg-accent/70 animate-pulse"
+                              : "bg-edge"
+                        }`}
+                      />
+                      <div
+                        className={`mt-1 text-[9px] text-center truncate ${
+                          active ? "text-accent font-semibold" : done ? "text-slate-400" : "text-slate-600"
+                        }`}
+                      >
+                        {s.label}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="h-1 bg-edge rounded overflow-hidden">
+                <div
+                  className="h-full bg-accent/80 transition-all duration-500"
+                  style={{ width: `${Math.min(100, recommendProgressPct)}%` }}
+                />
+              </div>
+            </div>
+          )}
           <button
             disabled={busy !== "idle" || formulationBusy}
             onClick={runResearch}

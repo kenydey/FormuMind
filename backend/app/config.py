@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     llm_model: str = "claude-sonnet-4-6"
     llm_max_tokens: int = 2048
+    llm_timeout_seconds: float = 60.0
 
     # Celery / Redis. Without a reachable broker the worker runs eagerly
     # (synchronously, in-process) which keeps the API usable everywhere.
