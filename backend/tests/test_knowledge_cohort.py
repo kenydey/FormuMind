@@ -102,18 +102,26 @@ def test_cohort_run_without_requirement():
     assert report.candidates == []  # no requirement → no candidates
 
 
-# ── SSE research stream ──────────────────────────────────────────────────────
+# ── Deep research async (202 + SSE) ──────────────────────────────────────────
 
-def test_research_stream_returns_sse_events():
+def test_deep_research_returns_202_and_completes():
     body = {
         "topic": "low-temperature curing anti-corrosion primer",
         "requirement": _REQUIREMENT,
         "sources": [],
         "query": "low-temperature curing anti-corrosion primer",
     }
-    with client.stream("POST", "/api/research/stream", json=body) as r:
-        assert r.status_code == 200
-        text = "".join(r.iter_text())
-    assert "event: stage" in text or "event: result" in text or "event: error" in text
-    if "event: result" in text:
-        assert "report_markdown" in text
+    r = client.post("/api/research/deep", json=body)
+    assert r.status_code == 202
+    handle = r.json()
+    assert handle["stream_url"].endswith("/stream")
+    assert handle["status_url"].endswith(handle["task_id"])
+
+    st = None
+    for _ in range(240):
+        st = client.get(handle["status_url"]).json()
+        if st["state"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+    assert st["state"] == "completed", st
+    assert st["result"]["report"]["report_markdown"]

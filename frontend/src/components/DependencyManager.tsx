@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   api,
-  pollTask,
+  awaitTaskStream,
   type DependencyInfo,
   type DependencyInstallResult,
 } from "../api";
@@ -78,9 +78,11 @@ export default function DependencyManager() {
     setProgress(`${upgrade ? "更新" : "安装"}中：${names.join(", ")} …`);
     try {
       const { task_id } = await api.installDependencies(names, upgrade);
-      const final = await pollTask(task_id, (s) => setProgress(s.message || "处理中…"));
-      const res = (final.result as unknown as DependencyInstallResult) ?? {
-        ok: final.state === "completed",
+      const final = await awaitTaskStream(task_id, (ev) =>
+        setProgress(ev.message || "处理中…")
+      );
+      const res = (final.data as unknown as DependencyInstallResult) ?? {
+        ok: false,
         summary: final.message,
       };
       setResult(res);

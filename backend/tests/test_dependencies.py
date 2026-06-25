@@ -57,14 +57,15 @@ def test_install_endpoint_rejects_unknown_name():
 
 
 def test_install_endpoint_accepts_known_name(monkeypatch):
-    # Don't actually run pip: stub the background submitter.
-    from app.worker.tasks import task_manager
+    class _FakeAsyncResult:
+        id = "fake-task-id"
 
-    monkeypatch.setattr(
-        task_manager, "submit_dependency_install", lambda names, upgrade=False: "fake-task-id"
-    )
+    from app.worker import tasks as worker_tasks
+
+    monkeypatch.setattr(worker_tasks.run_deps_install_task, "delay", lambda payload: _FakeAsyncResult())
     r = client.post("/api/dependencies/install", json={"names": ["arxiv"]})
-    assert r.status_code == 200
+    assert r.status_code == 202
     body = r.json()
     assert body["task_id"] == "fake-task-id"
-    assert body["poll_url"].endswith("fake-task-id")
+    assert body["stream_url"].endswith("fake-task-id/stream")
+    assert body["status_url"].endswith("fake-task-id")

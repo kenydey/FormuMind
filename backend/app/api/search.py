@@ -5,11 +5,13 @@ GET  /api/search/status — Per-source availability check (no network requests).
 GET  /api/search/expand — Query expansion debug endpoint.
 """
 from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from ..domain.schemas import Evidence, Requirement
 from ..services import literature
 from ..services.deep_research import ExpandedQuery, QueryExpander
-from ..worker.tasks import task_manager
+from ..worker.tasks import run_search_task
+from .tasks import accepted_response
 
 router = APIRouter()
 
@@ -32,7 +34,8 @@ def _effective_source_types(request_types: list[str]) -> list[str]:
 
 class TaskHandle(BaseModel):
     task_id: str
-    poll_url: str
+    stream_url: str
+    status_url: str
 
 
 class SourceStatus(BaseModel):
@@ -80,22 +83,16 @@ def search_sources(req: SearchRequest):
     )
 
 
-@router.post("/search/stream", response_model=TaskHandle)
-def search_stream(req: SearchRequest) -> TaskHandle:
-    """Kick off an incremental search; poll GET /api/tasks/{id} for growing results.
-
-    Results accumulate round by round until no source turns up new related
-    evidence (no fixed time budget), capped at ``total_limit`` and ranked by
-    relevance to the query.
-    """
-    task_id = task_manager.submit_search(
-        query=req.query,
-        source_types=_effective_source_types(req.source_types),
-        req=req.requirement,
-        total_limit=req.total_limit,
-        per_source_cap=req.limit_per_source,
-    )
-    return TaskHandle(task_id=task_id, poll_url=f"/api/tasks/{task_id}")
+@router.post("/search/stream", status_code=202)
+def search_stream(req: SearchRequest) -> JSONResponse:
+    async_result = run_search_task.delay({
+        "query": req.query,
+        "source_types": _effective_source_types(req.source_types),
+        "requirement": req.requirement.model_dump() if req.requirement else None,
+        "total_limit": req.total_limit,
+        "per_source_cap": req.limit_per_source,
+    })
+    return accepted_response(async_result.id, "search")
 
 
 @router.get("/search/expand", response_model=ExpandedQuery)

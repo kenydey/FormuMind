@@ -97,14 +97,15 @@ def test_search_stream_endpoint_returns_task_handle():
         "source_types": ["patents"],
         "requirement": _REQUIREMENT,
     })
-    assert r.status_code == 200
+    assert r.status_code == 202
     body = r.json()
-    assert "task_id" in body and body["poll_url"].endswith(body["task_id"])
+    assert "task_id" in body and body["stream_url"].endswith(f"{body['task_id']}/stream")
+    assert body["status_url"].endswith(body["task_id"])
 
-    # Poll to completion — may hit real network sources when intel extras are installed.
+    # Poll status snapshot until terminal — may hit real network when intel extras installed.
     t = None
     for _ in range(120):
-        t = client.get(body["poll_url"]).json()
+        t = client.get(body["status_url"]).json()
         if t["state"] in ("completed", "failed"):
             break
         time.sleep(0.15)

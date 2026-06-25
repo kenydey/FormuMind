@@ -645,7 +645,7 @@ curl -X POST localhost:8000/api/loop/iterate -H 'content-type: application/json'
   "optimize_iterations": 24,
   "n_suggest": 4
 }'
-# → {"task_id": "...", "poll_url": "/api/tasks/..."}
+# → {"task_id": "...", "stream_url": "/api/tasks/.../stream", "status_url": "/api/tasks/..."}
 # Poll /api/tasks/{id}; the result includes optimization.top_formulations,
 # next_doe (with ai_suggested flags) and rmse_by_metric.
 ```

@@ -317,6 +317,19 @@ class TaskStatus(BaseModel):
     progress: float = 0.0
     message: str = ""
     result: dict[str, Any] | None = None
+    stream_url: str = ""
+
+
+class AsyncTaskAccepted(BaseModel):
+    """HTTP 202 response when a Celery task is enqueued."""
+
+    task_id: str
+    stream_url: str
+    status_url: str
+
+
+# Backward-compatible alias used by some API modules
+TaskHandle = AsyncTaskAccepted
 
 
 class ExperimentRecord(BaseModel):

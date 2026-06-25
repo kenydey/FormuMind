@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Evidence } from "../api";
 
+const CRAG_STAGES = [
+  { id: "retrieve", label: "检索" },
+  { id: "grade", label: "评估" },
+  { id: "fallback", label: "补搜" },
+  { id: "generate", label: "生成" },
+  { id: "recommend", label: "推荐" },
+] as const;
+
+function stageIndex(stage: string): number {
+  const idx = CRAG_STAGES.findIndex((s) => s.id === stage);
+  return idx >= 0 ? idx : 0;
+}
+
 function CitationChip({ ev }: { ev: Evidence }) {
   return (
     <span
@@ -14,9 +27,25 @@ function CitationChip({ ev }: { ev: Evidence }) {
 }
 
 export default function ResearchPanel() {
-  const { chatHistory, chatBusy, sendChat, sources, selectedSources, deepReport } = useStore();
+  const {
+    chatHistory,
+    chatBusy,
+    sendChat,
+    sources,
+    selectedSources,
+    deepReport,
+    deepResearchBusy,
+    deepResearchStage,
+    deepResearchMessage,
+    task,
+  } = useStore();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const activeStageIdx = stageIndex(deepResearchStage);
+  const progressPct = deepResearchBusy
+    ? Math.round(((task?.progress ?? 0) || (activeStageIdx + 1) / CRAG_STAGES.length) * 100)
+    : 0;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -41,7 +70,48 @@ export default function ResearchPanel() {
         </p>
       </div>
 
-      {deepReport && (
+      {deepResearchBusy && (
+        <div className="mx-4 mt-3 mb-1 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5 shrink-0">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+            <span className="text-accent2 uppercase tracking-widest">深度研究 · CRAG</span>
+            <span>{deepResearchMessage || "处理中…"}</span>
+          </div>
+          <div className="flex gap-1 mb-2">
+            {CRAG_STAGES.map((s, i) => {
+              const done = i < activeStageIdx;
+              const active = i === activeStageIdx;
+              return (
+                <div key={s.id} className="flex-1 min-w-0">
+                  <div
+                    className={`h-1 rounded-full transition-colors ${
+                      done
+                        ? "bg-accent"
+                        : active
+                          ? "bg-accent/70 animate-pulse"
+                          : "bg-edge"
+                    }`}
+                  />
+                  <div
+                    className={`mt-1 text-[9px] text-center truncate ${
+                      active ? "text-accent font-semibold" : done ? "text-slate-400" : "text-slate-600"
+                    }`}
+                  >
+                    {s.label}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="h-1 bg-edge rounded overflow-hidden">
+            <div
+              className="h-full bg-accent/80 transition-all duration-500"
+              style={{ width: `${Math.min(100, progressPct)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {deepReport && !deepResearchBusy && (
         <div className="mx-4 mt-3 mb-1 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-[11px] text-violet-200 shrink-0">
           深度研究报告已生成（{deepReport.citations?.length ?? 0} 条引用）— 见下方对话与左栏资料列表
         </div>

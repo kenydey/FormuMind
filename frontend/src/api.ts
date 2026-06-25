@@ -145,6 +145,22 @@ export interface BaybeRecommendResult {
   engine: string;
 }
 
+export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export interface TaskProgressEvent {
+  status: TaskProgressStatus;
+  stage?: string;
+  message: string;
+  progress?: number;
+  data?: Record<string, unknown>;
+}
+
+export interface AsyncTaskAccepted {
+  task_id: string;
+  stream_url: string;
+  status_url: string;
+}
+
 export interface TaskStatus {
   task_id: string;
   kind: string;
@@ -152,6 +168,7 @@ export interface TaskStatus {
   progress: number;
   message: string;
   result: Record<string, unknown> | null;
+  stream_url?: string;
 }
 
 export interface DOEFactor {
@@ -261,6 +278,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function postAccepted(path: string, body: unknown): Promise<AsyncTaskAccepted> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status !== 202) throw new Error(`${path} -> ${res.status}`);
+  return res.json();
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -355,13 +382,21 @@ export const api = {
     campaignState?: string | null,
     workbenchCampaignId?: number | null
   ) =>
-    post<{ task_id: string; poll_url: string }>("/api/optimize", {
+    postAccepted("/api/optimize", {
       requirement: req,
       iterations,
       engine,
       campaign_state: campaignState ?? null,
       workbench_campaign_id: workbenchCampaignId ?? null,
     }),
+
+  submitDeepResearch: (
+    topic: string,
+    req: Requirement,
+    sources: Evidence[],
+    query = ""
+  ) =>
+    postAccepted("/api/research/deep", { topic, requirement: req, sources, query }),
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
@@ -410,8 +445,7 @@ export const api = {
   search: (req: SearchRequest) =>
     post<SearchResponse>("/api/search", req),
 
-  searchStream: (req: SearchRequest) =>
-    post<{ task_id: string; poll_url: string }>("/api/search/stream", req),
+  searchStream: (req: SearchRequest) => postAccepted("/api/search/stream", req),
 
   notebooklmStatus: () =>
     get<NotebookLMStatus>("/api/notebooklm/auth-status"),
@@ -502,7 +536,7 @@ export const api = {
     optimize_engine = "auto",
     doe_engine = "auto"
   ) =>
-    post<{ task_id: string; poll_url: string }>("/api/loop/iterate", {
+    postAccepted("/api/loop/iterate", {
       ...req,
       optimize_iterations,
       n_suggest,
@@ -529,63 +563,76 @@ export const api = {
     get<DependencyListResponse>("/api/dependencies"),
 
   installDependencies: (names: string[], upgrade = false) =>
-    post<{ task_id: string; poll_url: string }>("/api/dependencies/install", {
-      names,
-      upgrade,
-    }),
+    postAccepted("/api/dependencies/install", { names, upgrade }),
 };
 
-export type ResearchStreamHandler = (event: string, data: Record<string, unknown>) => void;
+const TASK_STATE_MAP: Record<TaskProgressStatus, TaskStatus["state"]> = {
+  PENDING: "pending",
+  RUNNING: "running",
+  COMPLETED: "completed",
+  FAILED: "failed",
+};
 
-/** SSE deep research — replaces deprecated poll-based /api/research/deep. */
-export async function streamDeepResearch(
-  topic: string,
-  req: Requirement,
-  sources: Evidence[],
-  onEvent: ResearchStreamHandler,
-  query = ""
-): Promise<ComprehensiveReport> {
-  const res = await fetch("/api/research/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, requirement: req, sources, query }),
-  });
-  if (!res.ok) throw new Error(`/api/research/stream -> ${res.status}`);
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error("SSE body unavailable");
+/** Map SSE progress event to legacy TaskStatus snapshot shape. */
+export function progressToTaskStatus(
+  taskId: string,
+  kind: string,
+  ev: TaskProgressEvent
+): TaskStatus {
+  return {
+    task_id: taskId,
+    kind,
+    state: TASK_STATE_MAP[ev.status],
+    progress: ev.progress ?? 0,
+    message: ev.message,
+    result: ev.data ?? null,
+    stream_url: `/api/tasks/${taskId}/stream`,
+  };
+}
 
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let report: ComprehensiveReport | null = null;
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-    for (const block of parts) {
-      const lines = block.split("\n");
-      let event = "message";
-      let dataLine = "";
-      for (const line of lines) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        if (line.startsWith("data:")) dataLine = line.slice(5).trim();
-      }
-      if (!dataLine) continue;
-      const data = JSON.parse(dataLine) as Record<string, unknown>;
-      onEvent(event, data);
-      if (event === "result") {
-        const inner = data.report as ComprehensiveReport | undefined;
-        if (inner) report = inner;
-      }
-      if (event === "error") {
-        throw new Error(String(data.detail ?? "深度研究失败"));
-      }
+/** Subscribe to task SSE progress (GET /api/tasks/{id}/stream). */
+export function subscribeTaskStream(
+  taskId: string,
+  onEvent: (ev: TaskProgressEvent) => void,
+  onError?: (err: Event) => void
+): EventSource {
+  const es = new EventSource(`/api/tasks/${taskId}/stream`);
+  es.onmessage = (e) => {
+    try {
+      onEvent(JSON.parse(e.data) as TaskProgressEvent);
+    } catch {
+      // ignore malformed frames
     }
-  }
-  if (!report) throw new Error("深度研究未返回结果");
-  return report;
+  };
+  es.onerror = onError ?? (() => es.close());
+  return es;
+}
+
+/** Await task completion via EventSource; resolves with terminal COMPLETED event. */
+export function awaitTaskStream(
+  taskId: string,
+  onEvent?: (ev: TaskProgressEvent) => void
+): Promise<TaskProgressEvent> {
+  return new Promise((resolve, reject) => {
+    const es = subscribeTaskStream(
+      taskId,
+      (ev) => {
+        onEvent?.(ev);
+        if (ev.status === "COMPLETED" || ev.status === "FAILED") {
+          es.close();
+          if (ev.status === "FAILED") {
+            reject(new Error(ev.message || "任务失败"));
+          } else {
+            resolve(ev);
+          }
+        }
+      },
+      () => {
+        es.close();
+        reject(new Error("SSE 连接中断"));
+      }
+    );
+  });
 }
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
@@ -776,7 +823,7 @@ export interface DependencyInstallResult {
   stderr?: string;
 }
 
-// Poll a task until it terminates, invoking onUpdate on each tick.
+/** Legacy poll fallback — prefer awaitTaskStream / subscribeTaskStream. */
 export async function pollTask(
   id: string,
   onUpdate: (s: TaskStatus) => void,

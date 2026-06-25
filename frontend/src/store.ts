@@ -11,8 +11,8 @@ import {
 } from "./projectWorkspace";
 import {
   api,
-  pollTask,
-  streamDeepResearch,
+  awaitTaskStream,
+  progressToTaskStatus,
   type ChatMessage,
   type ComprehensiveReport,
   type DOEPlan,
@@ -400,20 +400,22 @@ export const useStore = create<AppState>()(
           error: null,
         });
         try {
-          const report = await streamDeepResearch(
+          const { task_id } = await api.submitDeepResearch(
             searchQuery,
             requirement,
             sources,
-            (event, data) => {
-              if (event === "stage") {
-                set({
-                  deepResearchStage: String(data.stage ?? ""),
-                  deepResearchMessage: String(data.message ?? ""),
-                });
-              }
-            },
             searchQuery.trim()
           );
+          const final = await awaitTaskStream(task_id, (ev) => {
+            set({
+              deepResearchStage: ev.stage ?? "",
+              deepResearchMessage: ev.message ?? "",
+              task: progressToTaskStatus(task_id, "deep_research", ev),
+            });
+          });
+          const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
+          const report = wrapped?.report;
+          if (!report) throw new Error("深度研究未返回结果");
           set({ deepReport: report });
           if (report.citations?.length) get().addSources(report.citations);
           if (report.candidates?.length) set({ leaderboard: report.candidates });
@@ -465,12 +467,15 @@ export const useStore = create<AppState>()(
             campaignState,
             workbenchCampaignId
           );
-          const final = await pollTask(task_id, (t) => set({ task: t }));
-          const opt = final.result as unknown as OptimizationResult | null;
-          if (opt) {
-            const leaderboard = opt.top_formulations;
-            const optHistory = opt.history;
-            set({ leaderboard, optimizationHistory: optHistory });
+          const final = await awaitTaskStream(task_id, (ev) =>
+            set({ task: progressToTaskStatus(task_id, "optimize", ev) })
+          );
+          const opt = final.data as unknown as OptimizationResult | null;
+          if (opt?.top_formulations) {
+            set({
+              leaderboard: opt.top_formulations,
+              optimizationHistory: opt.history,
+            });
             get().scheduleAutosave();
           }
         } catch (e) {
@@ -485,8 +490,10 @@ export const useStore = create<AppState>()(
         try {
           const { requirement, optimizeEngine, loopDoeEngine } = get();
           const { task_id } = await api.loopIterate(requirement, 24, 4, optimizeEngine, loopDoeEngine);
-          const final = await pollTask(task_id, (t) => set({ task: t }));
-          const report = final.result as unknown as LoopReport | null;
+          const final = await awaitTaskStream(task_id, (ev) =>
+            set({ task: progressToTaskStatus(task_id, "loop", ev) })
+          );
+          const report = final.data as unknown as LoopReport | null;
           if (report) {
             const leaderboard = report.optimization.top_formulations;
             set((s) => ({
@@ -990,29 +997,20 @@ export const useStore = create<AppState>()(
         if (queryOverride !== undefined) set({ searchQuery: query });
         set({ searchBusy: true, error: null });
         try {
-          // Incremental search: poll the task and render results as they arrive,
-          // continuing until no source turns up new related material.
           const { task_id } = await api.searchStream({
             query,
             requirement,
             total_limit: 300,
           });
-          const final = await pollTask(task_id, (t) => {
-            const r = t.result as unknown as
-              | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
-              | null;
-            const partial = r?.evidence ?? [];
-            if (partial.length) get().addSources(partial);
+          const final = await awaitTaskStream(task_id, (ev) => {
+            const partial = ev.data?.evidence as Evidence[] | undefined;
+            if (partial?.length) get().addSources(partial);
           });
-          if (final.state === "failed") {
-            set({ error: final.message || "检索失败" });
-          } else {
-            const r = final.result as unknown as
-              | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
-              | null;
-            if (r?.evidence?.length) get().addSources(r.evidence);
-            if (r?.source_status) set({ sourceStatus: r.source_status });
-          }
+          const r = final.data as
+            | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
+            | undefined;
+          if (r?.evidence?.length) get().addSources(r.evidence);
+          if (r?.source_status) set({ sourceStatus: r.source_status });
           get().scheduleAutosave();
         } catch (e) {
           set({ error: String(e) });

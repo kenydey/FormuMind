@@ -379,15 +379,15 @@ def test_loop_iterate_endpoint():
         "n_suggest": 3,
     }
     resp = client.post("/api/loop/iterate", json=payload)
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     handle = resp.json()
-    assert "task_id" in handle and "poll_url" in handle
+    assert "task_id" in handle and "stream_url" in handle and "status_url" in handle
 
     # In the CI baseline Celery runs eager / in-thread; poll until terminal.
     import time
 
     for _ in range(100):
-        st = client.get(handle["poll_url"]).json()
+        st = client.get(handle["status_url"]).json()
         if st["state"] in ("completed", "failed"):
             break
         time.sleep(0.1)

@@ -50,7 +50,7 @@ def test_doe_endpoint():
 def test_optimize_then_poll():
     payload = {"requirement": {"domain": "anticorrosion_coating", "salt_spray_hours": 500}, "iterations": 8}
     r = client.post("/api/optimize", json=payload)
-    assert r.status_code == 200
+    assert r.status_code == 202
     task_id = r.json()["task_id"]
 
     # Poll until completion (in-process thread; should be fast).

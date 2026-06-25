@@ -4,10 +4,8 @@
 # credentials required (LLM and heavy science engines fall back to offline
 # implementations).
 #
-# Async jobs (search, deep research, optimization) are executed by the in-process
-# TaskManager inside the backend API — the frontend polls GET /api/tasks/{id}.
-# The Celery worker below is a legacy mirror for horizontal scaling only; it is
-# NOT required for normal operation and is not started by default.
+# Async jobs (search, deep research, optimization) run in Celery worker;
+# the frontend subscribes to GET /api/tasks/{id}/stream (SSE).
 #
 # Heavy profile (opt-in): mounts the C++/MD physics engines as official images
 # so they auto-upgrade without forking. Start them only when needed:
@@ -48,9 +46,8 @@ services:
       retries: 3
       start_period: 20s
 
-  # Legacy Celery worker — optional; API routes use TaskManager, not this service.
+  # Async jobs run in Celery worker; API returns 202 + SSE progress stream.
   worker:
-    profiles: ["celery"]
     build: ./backend
     restart: unless-stopped
     command: celery -A app.worker.celery_app.celery_app worker --loglevel=info
@@ -58,8 +55,14 @@ services:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+    volumes:
+      - ./data/colbert_index:/app/data/colbert_index
+      - ./data:/app/data
     depends_on:
       redis:
+        condition: service_healthy
+      backend:
         condition: service_healthy
 
   frontend:
