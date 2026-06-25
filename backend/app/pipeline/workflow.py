@@ -166,21 +166,32 @@ def run_research(
     grounded = store.query(req.headline(), k=min(5, len(evidence))) or evidence
 
     process = process_for(req)
-    recommended = [_score_and_validate(f, process, req) for f in knowledge.variant_formulations(req, n=3)]
-    from ..domain.formulation_gate import validate_formulations
+    from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
+    from ..domain.objective_contract import normalize_objectives
+    from ..services import llm
 
+    rec_resp = llm.recommend_formulations(req, normalize_objectives(req), grounded, n=3)
+    forms = []
+    for rec in rec_resp.formulas:
+        try:
+            forms.append(recommended_to_formulation(rec))
+        except ValueError as exc:
+            rec_resp.warnings.append(str(exc))
+    recommended = [_score_and_validate(f, process, req) for f in forms]
     recommended, gate_warnings = validate_formulations(recommended)
     recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
 
     mechanism, chat = llm.synthesize_research(req, grounded, recommended)
-    if gate_warnings:
-        chat = chat + "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in gate_warnings)
+    all_warnings = rec_resp.warnings + gate_warnings
+    if all_warnings:
+        chat = chat + "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in all_warnings)
     return ResearchResult(
         requirement_headline=req.headline(),
         evidence=grounded,
         mechanism=mechanism,
         recommended=recommended,
         chat_markdown=chat,
+        recommend_engine=rec_resp.engine,
     )
 
 

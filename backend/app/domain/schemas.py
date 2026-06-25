@@ -132,6 +132,12 @@ class Ingredient(BaseModel):
     cas_no: str | None = None
     molar_mass: float | None = None
     weight_pct: float = Field(ge=0, le=100)
+    # Lab-table fields (LLM recommend / UI)
+    component_type: str = ""
+    equivalents: float | None = None
+    mmol: float | None = None
+    amount_display: str = ""
+    notes: str = ""
 
     @model_validator(mode="after")
     def _sync_formula_fields(self) -> Ingredient:
@@ -139,6 +145,8 @@ class Ingredient(BaseModel):
             object.__setattr__(self, "formula", self.mf_structure)
         elif self.formula and not self.mf_structure:
             object.__setattr__(self, "mf_structure", self.formula)
+        if not self.component_type and self.role:
+            object.__setattr__(self, "component_type", self.role)
         return self
 
 
@@ -157,6 +165,44 @@ class Formulation(BaseModel):
         return round(sum(i.weight_pct for i in self.ingredients), 4)
 
 
+class RecommendedFormulaComponent(BaseModel):
+    """One row in the structured lab recipe table (LLM output + UI)."""
+
+    component_type: str = ""
+    name: str
+    cas_no: str = ""
+    mf: str = ""
+    smiles: str | None = None
+    molar_mass: float | None = None
+    equivalents: float | None = None
+    mmol: float | None = None
+    amount_display: str = ""
+    weight_pct: float | None = Field(default=None, ge=0, le=100)
+    notes: str = ""
+
+
+class RecommendedFormula(BaseModel):
+    """Structured formulation recommendation from the LLM recommend engine."""
+
+    name: str
+    domain: ProductDomain
+    rationale: str = ""
+    objectives_summary: str = ""
+    components: list[RecommendedFormulaComponent] = Field(default_factory=list)
+    predicted: dict[str, float] = Field(default_factory=dict)
+    score: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    engine: Literal["llm", "offline"] = "llm"
+
+
+class RecommendedFormulaListResponse(BaseModel):
+    """Wrapper for LLM structured output and API responses."""
+
+    formulas: list[RecommendedFormula] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    engine: Literal["llm", "offline"] = "offline"
+
+
 class Evidence(BaseModel):
     """A retrieved patent or literature snippet with a citation."""
 
@@ -173,6 +219,7 @@ class ResearchResult(BaseModel):
     mechanism: str
     recommended: list[Formulation]
     chat_markdown: str
+    recommend_engine: Literal["llm", "offline"] = "offline"
 
 
 class ComprehensiveReport(BaseModel):

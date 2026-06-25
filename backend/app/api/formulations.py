@@ -1,16 +1,29 @@
 """Metadata endpoint: domains, substrates, DOE designs, and baseline templates."""
 from __future__ import annotations
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+import logging
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from ..domain.examples import BUILTIN_METRICS, EXAMPLE_PROJECTS, ROLE_CATALOG, load_example
-from ..domain.formulation_gate import FormulationListResponse, validate_formulations
+from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
 from ..domain.knowledge import RAW_MATERIALS, baseline_formulation
-from ..domain.schemas import Formulation, ProductDomain, Requirement, Substrate
+from ..domain.objective_contract import normalize_objectives
+from ..domain.schemas import (
+    Evidence,
+    Formulation,
+    ObjectiveSpec,
+    ProductDomain,
+    RecommendedFormula,
+    Requirement,
+    Substrate,
+)
+from ..pipeline import workflow
+from ..services import llm
 
 router = APIRouter(prefix="/api", tags=["metadata"])
-
+log = logging.getLogger(__name__)
 
 from ..services.engines.pydoe_engine import PYDOE_DESIGNS
 
@@ -48,6 +61,7 @@ def ingredients() -> dict:
         name: {
             "role": spec.get("role"),
             "formula": spec.get("formula"),
+            "cas_no": spec.get("cas_no"),
             "molar_mass": spec.get("molar_mass"),
             "price_cny_per_kg": spec.get("price_cny_per_kg"),
             "voc_contrib": spec.get("voc_contrib"),
@@ -76,3 +90,54 @@ def validate_formulation_list(body: FormulationValidateRequest) -> FormulationVa
     """Validate and enrich leaderboard / LLM formulations (CAS, structure)."""
     forms, warnings = validate_formulations(body.formulations)
     return FormulationValidateResponse(formulations=forms, warnings=warnings)
+
+
+class RecommendFormulationsRequest(BaseModel):
+    requirement: Requirement
+    objectives: list[ObjectiveSpec] = Field(default_factory=list)
+    sources: list[Evidence] = Field(default_factory=list)
+    n: int = Field(default=3, ge=1, le=8)
+
+
+class RecommendFormulationsResponse(BaseModel):
+    formulas: list[RecommendedFormula]
+    engine: str
+    warnings: list[str] = Field(default_factory=list)
+    scored: list[Formulation] = Field(default_factory=list)
+
+
+@router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
+def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormulationsResponse:
+    """LLM structured formulation recommend with offline fallback and scoring."""
+    objectives = body.objectives or normalize_objectives(body.requirement)
+    try:
+        rec_resp = llm.recommend_formulations(
+            body.requirement,
+            objectives,
+            body.sources,
+            n=body.n,
+        )
+    except Exception as exc:
+        log.exception("recommend_formulations failed")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if not rec_resp.formulas:
+        raise HTTPException(status_code=503, detail="No formulations produced")
+
+    process = workflow.process_for(body.requirement)
+    scored: list[Formulation] = []
+    for rec in rec_resp.formulas:
+        try:
+            form = recommended_to_formulation(rec)
+            scored.append(workflow._score_and_validate(form, process, body.requirement))
+        except Exception as exc:
+            log.warning("Skip scoring formula %s: %s", rec.name, exc)
+            rec_resp.warnings.append(f"Scoring skipped for {rec.name}: {exc}")
+
+    scored.sort(key=lambda f: (f.score or 0.0), reverse=True)
+    return RecommendFormulationsResponse(
+        formulas=rec_resp.formulas,
+        engine=rec_resp.engine,
+        warnings=rec_resp.warnings,
+        scored=scored,
+    )

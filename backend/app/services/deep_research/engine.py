@@ -212,7 +212,18 @@ class DeepResearchEngine:
         _progress(0.85, "report agent: cross-validation & citation")
         report_md, citations, engine = self.report_agent(topic, kb_answer, _dedupe(evidence + kb_ev))
 
-        candidates = knowledge.variant_formulations(req, n=3) if req else []
+        candidates: list = []
+        if req:
+            from .. import llm
+            from ..domain.formulation_gate import recommended_to_formulation
+            from ..domain.objective_contract import normalize_objectives
+
+            rec = llm.recommend_formulations(req, normalize_objectives(req), _dedupe(evidence), n=3)
+            for f in rec.formulas:
+                try:
+                    candidates.append(recommended_to_formulation(f))
+                except ValueError:
+                    continue
 
         _progress(1.0, "done")
         return ComprehensiveReport(

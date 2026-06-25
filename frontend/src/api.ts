@@ -55,6 +55,11 @@ export interface Ingredient {
   cas_no?: string | null;
   smiles?: string | null;
   molar_mass?: number | null;
+  component_type?: string;
+  equivalents?: number | null;
+  mmol?: number | null;
+  amount_display?: string;
+  notes?: string;
 }
 
 export interface Formulation {
@@ -83,6 +88,40 @@ export interface ResearchResult {
   mechanism: string;
   recommended: Formulation[];
   chat_markdown: string;
+  recommend_engine?: "llm" | "offline";
+}
+
+export interface RecommendedFormulaComponent {
+  component_type?: string;
+  name: string;
+  cas_no?: string;
+  mf?: string;
+  smiles?: string | null;
+  molar_mass?: number | null;
+  equivalents?: number | null;
+  mmol?: number | null;
+  amount_display?: string;
+  weight_pct?: number | null;
+  notes?: string;
+}
+
+export interface RecommendedFormula {
+  name: string;
+  domain: ProductDomain;
+  rationale?: string;
+  objectives_summary?: string;
+  components: RecommendedFormulaComponent[];
+  predicted?: Record<string, number>;
+  score?: number | null;
+  warnings?: string[];
+  engine?: "llm" | "offline";
+}
+
+export interface RecommendFormulationsResponse {
+  formulas: RecommendedFormula[];
+  engine: string;
+  warnings: string[];
+  scored: Formulation[];
 }
 
 export interface OptimizationResult {
@@ -262,6 +301,18 @@ export const api = {
     query = ""
   ) =>
     post<ResearchResult>("/api/research", { ...req, sources, source_types: sourceTypes, query }),
+  recommendFormulations: (
+    req: Requirement,
+    objectives?: ObjectiveSpec[],
+    sources: Evidence[] = [],
+    n = 3
+  ) =>
+    post<RecommendFormulationsResponse>("/api/formulations/recommend", {
+      requirement: req,
+      objectives: objectives ?? req.objectives,
+      sources,
+      n,
+    }),
   doe: (req: Requirement, design: string, engine = "auto") =>
     post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
   activeDoe: (

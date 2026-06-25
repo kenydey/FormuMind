@@ -16,8 +16,19 @@ the SDK is missing or the API call fails.
 """
 from __future__ import annotations
 
+import logging
+from typing import TypeVar
+
+from pydantic import BaseModel
+
 from ..config import get_settings
-from ..domain.schemas import Evidence, ProductDomain, Requirement
+from ..domain.schemas import (
+    Evidence,
+    ObjectiveSpec,
+    ProductDomain,
+    RecommendedFormulaListResponse,
+    Requirement,
+)
 
 # ── Provider metadata ────────────────────────────────────────────────────────
 # Used by the settings API to enumerate available options.
@@ -262,6 +273,210 @@ def complete_json(prompt: str) -> dict | None:
         return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+log = logging.getLogger(__name__)
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+def _strip_json_fences(text: str) -> str:
+    text = text.strip()
+    if "```" not in text:
+        return text
+    parts = text.split("```")
+    if len(parts) >= 3:
+        inner = parts[1]
+    else:
+        inner = parts[1] if len(parts) > 1 else text
+    if inner.startswith("json"):
+        inner = inner[4:]
+    return inner.strip()
+
+
+def complete_structured(
+    system: str,
+    user: str,
+    model_type: type[TModel],
+    *,
+    retry: bool = True,
+) -> tuple[TModel | None, str | None]:
+    """Call LLM and parse response into a Pydantic model."""
+    settings = get_settings()
+    provider = settings.llm_provider
+    api_key = settings.get_active_api_key()
+    if not api_key:
+        return None, "No LLM API key configured"
+
+    model = settings.llm_model
+    max_tokens = settings.llm_max_tokens
+    schema = model_type.model_json_schema()
+
+    def _validate(raw: str | None) -> tuple[TModel | None, str | None]:
+        if not raw:
+            return None, "Empty LLM response"
+        try:
+            import json
+
+            data = json.loads(_strip_json_fences(raw))
+            return model_type.model_validate(data), None
+        except Exception as exc:
+            return None, f"JSON validation failed: {exc}"
+
+    # OpenAI-compatible structured output
+    if provider not in ("anthropic", "gemini"):
+        try:
+            from openai import OpenAI  # type: ignore
+
+            base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
+            kwargs: dict = {"api_key": api_key}
+            if base_url:
+                kwargs["base_url"] = base_url
+            client = OpenAI(**kwargs)
+            create_kwargs: dict = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": model_type.__name__,
+                        "schema": schema,
+                        "strict": True,
+                    },
+                },
+            }
+            if _is_deepseek_model(model):
+                create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            resp = client.chat.completions.create(**create_kwargs)
+            text = _openai_message_text(resp.choices[0].message)
+            parsed, err = _validate(text)
+            if parsed:
+                return parsed, None
+            log.warning("OpenAI structured output failed: %s", err)
+        except Exception as exc:
+            log.warning("OpenAI structured call error (%s): %s", provider, exc)
+
+    # Anthropic / Gemini / fallback: prompt + complete_json-style parse
+    combined = (
+        f"{system}\n\n"
+        f"Respond with ONLY valid JSON matching this schema (no markdown):\n"
+        f"{schema}\n\n"
+        f"{user}"
+    )
+    if provider == "anthropic":
+        raw = _complete_anthropic(combined, api_key, model, max_tokens)
+    elif provider == "gemini":
+        raw = _complete_gemini(combined, api_key, model)
+    else:
+        raw = _call_llm(combined)
+
+    parsed, err = _validate(raw)
+    if parsed:
+        return parsed, None
+    if retry:
+        fix_prompt = combined + f"\n\nPrevious output was invalid ({err}). Fix and return JSON only."
+        if provider == "anthropic":
+            raw2 = _complete_anthropic(fix_prompt, api_key, model, max_tokens)
+        elif provider == "gemini":
+            raw2 = _complete_gemini(fix_prompt, api_key, model)
+        else:
+            raw2 = _call_llm(fix_prompt)
+        parsed2, err2 = _validate(raw2)
+        if parsed2:
+            return parsed2, None
+        log.warning("Structured LLM retry failed: %s", err2)
+        return None, err2
+    return None, err
+
+
+def _objectives_prompt_block(objectives: list[ObjectiveSpec]) -> str:
+    lines = []
+    for o in objectives:
+        bits = [f"metric={o.metric}", f"direction={o.direction}", f"weight={o.weight}"]
+        if o.target_value is not None:
+            bits.append(f"target={o.target_value}")
+        if o.display_name:
+            bits.append(f"label={o.display_name}")
+        lines.append("- " + ", ".join(bits))
+    return "\n".join(lines) if lines else "- (use domain defaults)"
+
+
+def _recommend_system_prompt() -> str:
+    return (
+        "You are a formulation chemist for metal surface treatment (coatings, degreasers, conversion treatments).\n"
+        "Design formulations strictly from the provided objectives array.\n"
+        "Rules:\n"
+        "1. Every chemical component MUST include accurate cas_no and mf (molecular formula).\n"
+        "2. Include smiles when known; molar_mass when calculable.\n"
+        "3. For coating formulations weight_pct values should sum to approximately 100.\n"
+        "4. Populate component_type (resin/hardener/inhibitor/solvent/etc), amount_display, and notes in Chinese where helpful.\n"
+        "5. objectives_summary explains how the recipe meets each objective.\n"
+        "6. Return JSON only — no markdown fences."
+    )
+
+
+def _recommend_user_prompt(
+    req: Requirement,
+    objectives: list[ObjectiveSpec],
+    evidence: list[Evidence],
+    n: int,
+) -> str:
+    citations = "\n".join(
+        f"[{e.source}] {e.title}: {e.snippet[:200]}" for e in evidence[:6]
+    ) or "(no external evidence — use domain knowledge)"
+    return (
+        f"Domain: {req.domain.value}\n"
+        f"Substrate: {req.substrate.value}\n"
+        f"Headline: {req.headline()}\n"
+        f"Salt spray target (h): {req.salt_spray_hours}\n"
+        f"Cleaning target (%): {req.cleaning_efficiency}\n"
+        f"VOC limit (g/L): {req.voc_limit_gpl}\n"
+        f"Cure temp (C): {req.cure_temperature_c}\n"
+        f"Notes: {req.notes}\n\n"
+        f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
+        f"Evidence:\n{citations}\n\n"
+        f"Produce exactly {n} distinct recommended formulas in the formulas array."
+    )
+
+
+def recommend_formulations(
+    req: Requirement,
+    objectives: list[ObjectiveSpec] | None = None,
+    evidence: list[Evidence] | None = None,
+    *,
+    n: int = 3,
+) -> RecommendedFormulaListResponse:
+    """Primary recommend engine: LLM structured JSON with offline fallback."""
+    from ..domain.formulation_gate import offline_recommend_response, validate_recommended_formulas
+    from ..domain.knowledge import offline_recommend_fallback
+    from ..domain.objective_contract import normalize_objectives
+
+    objectives = objectives or normalize_objectives(req)
+    evidence = evidence or []
+
+    system = _recommend_system_prompt()
+    user = _recommend_user_prompt(req, objectives, evidence, n)
+
+    parsed, err = complete_structured(system, user, RecommendedFormulaListResponse)
+    if parsed and parsed.formulas:
+        normalized = [
+            f.model_copy(update={"domain": req.domain, "engine": "llm"})
+            for f in parsed.formulas[:n]
+        ]
+        formulas, val_warnings = validate_recommended_formulas(normalized)
+        return RecommendedFormulaListResponse(
+            formulas=formulas,
+            warnings=val_warnings + parsed.warnings,
+            engine="llm",
+        )
+
+    reason = err or "LLM structured recommend failed"
+    log.info("Falling back to offline recommend: %s", reason)
+    offline_forms = offline_recommend_fallback(req, n=n)
+    return offline_recommend_response(offline_forms, reason=reason)
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────

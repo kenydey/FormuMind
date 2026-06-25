@@ -13,6 +13,7 @@ import MolViewer from "./MolViewer";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import FormulaTableView from "./FormulaTableView";
+import RecommendedFormulaTable from "./RecommendedFormulaTable";
 
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
@@ -170,16 +171,7 @@ function FormulaCard({
                 );
               })}
           </div>
-          <table className="w-full text-xs">
-            <tbody>
-              {form.ingredients.map((ing) => (
-                <tr key={ing.name} className="border-b border-edge/40">
-                  <td className="py-0.5 text-slate-400">{ing.name}</td>
-                  <td className="py-0.5 text-right text-slate-200 font-mono">{ing.weight_pct}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <RecommendedFormulaTable ingredients={form.ingredients} />
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
@@ -254,7 +246,7 @@ function ListExportMenu({ forms }: { forms: Formulation[] }) {
 }
 
 export default function FormulaLeaderboard() {
-  const { leaderboard, requirement } = useStore();
+  const { leaderboard, requirement, research } = useStore();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -274,6 +266,17 @@ export default function FormulaLeaderboard() {
         <h2 className="text-sm uppercase tracking-widest text-accent2 flex-1 min-w-[140px]">
           Top 推荐配方 · Leaderboard
         </h2>
+        {research?.recommend_engine && (
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+              research.recommend_engine === "llm"
+                ? "border-accent/40 text-accent bg-accent/10"
+                : "border-slate-600 text-slate-400"
+            }`}
+          >
+            {research.recommend_engine === "llm" ? "LLM 推荐" : "离线模板"}
+          </span>
+        )}
         <div className="flex items-center gap-1 border border-edge rounded overflow-hidden">
           <button
             type="button"
