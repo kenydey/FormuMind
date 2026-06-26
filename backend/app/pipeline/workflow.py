@@ -152,6 +152,10 @@ def run_research(
 
     q = query or req.headline()
     pre_index = list(pre_sources) if pre_sources else None
+    # source_types no longer drives live retrieval, but an explicit filter still
+    # constrains which pre-loaded sources are admitted (they surface verbatim).
+    if pre_index and source_types:
+        pre_index = _filter_evidence_by_types(pre_index, source_types) or None
 
     state = run_research_graph(
         topic=q,

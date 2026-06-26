@@ -96,11 +96,11 @@ def test_search_task_survives_process_restart(monkeypatch, tmp_path):
             },
         },
     )
-    assert r.status_code == 200
+    assert r.status_code == 202
     task_id = r.json()["task_id"]
 
     # Simulate process restart: wipe in-memory task registry.
-    tasks_mod.task_manager._tasks.clear()
+    tasks_mod.task_manager._kinds.clear()
 
     # Poll must not 404 — task was persisted to disk on registration.
     poll = client.get(f"/api/tasks/{task_id}")

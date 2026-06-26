@@ -148,6 +148,13 @@ def retrieve_node(state: ResearchGraphState, settings: Settings | None = None) -
     colbert_store.bootstrap_seed_corpus(settings)
     hits = colbert_store.search(query, settings=settings)
     evidence = [h.evidence for h in hits]
+    # User-supplied sources are high-trust: keep them as candidates ahead of
+    # the retrieved hits (deduped) so an explicit pre-load always surfaces.
+    if pre:
+        pre_keys = {e.identifier or e.title for e in pre}
+        evidence = list(pre) + [
+            e for e in evidence if (e.identifier or e.title) not in pre_keys
+        ]
     evidence = llm_rerank(query, evidence, k=settings.colbert_top_k)
     state["evidence"] = evidence
     state["stage"] = "retrieve"
@@ -351,9 +358,15 @@ def run_research_graph(
     pre_index: list[Evidence] | None = None,
     progress_cb: ProgressCallback | None = None,
     settings: Settings | None = None,
-    mode: Literal["recommend", "deep"] = "recommend",
+    mode: Literal["recommend", "deep"] = "deep",
 ) -> ResearchGraphState:
-    """Execute CRAG pipeline (LangGraph-compatible linear runner)."""
+    """Execute CRAG pipeline (LangGraph-compatible linear runner).
+
+    ``deep`` (default) terminates at the ``generate`` node — full answer +
+    cited report, matching the canonical LangGraph definition. ``recommend``
+    is the lightweight opt-in path that skips answer/report synthesis and goes
+    straight to formulation recommendation.
+    """
     settings = settings or get_settings()
     q = query or topic or (req.headline() if req else "")
 

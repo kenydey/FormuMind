@@ -1,11 +1,30 @@
 """Tenacity retry behaviour for OpenAI-compatible LLM transport."""
 from __future__ import annotations
 
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.services import llm
+
+
+@pytest.fixture(autouse=True)
+def _stub_openai_module():
+    """The transport does ``from openai import OpenAI``. Provide a stub module
+    when the optional SDK isn't installed so ``patch("openai.OpenAI", ...)``
+    resolves and the retry logic is exercised offline."""
+    if "openai" in sys.modules:
+        yield
+        return
+    stub = types.ModuleType("openai")
+    stub.OpenAI = object  # replaced per-test via patch("openai.OpenAI", ...)
+    sys.modules["openai"] = stub
+    try:
+        yield
+    finally:
+        sys.modules.pop("openai", None)
 
 
 class _FakeMessage:

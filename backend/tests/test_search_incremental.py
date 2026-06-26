@@ -115,10 +115,14 @@ def test_search_stream_endpoint_returns_task_handle():
 
 
 def test_search_default_includes_internet():
-    """The default source set now includes internet (web results)."""
-    from app.api.search import SearchRequest
+    """The default source set now includes internet (web results).
 
-    assert "internet" in SearchRequest().source_types
+    The default moved from the request schema to settings.federated_sources;
+    an empty request resolves to that set via _effective_source_types.
+    """
+    from app.api.search import _effective_source_types
+
+    assert "internet" in _effective_source_types([])
 
 
 def test_literature_availability_uses_or_logic():
