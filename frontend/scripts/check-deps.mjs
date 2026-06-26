@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const req = createRequire(join(frontendRoot, "package.json"));
 
-const REQUIRED = ["ag-grid-react", "ag-grid-community"];
+const REQUIRED = ["ag-grid-react", "ag-grid-community", "immer"];
 const missing = REQUIRED.filter((name) => {
   try {
     req.resolve(name);

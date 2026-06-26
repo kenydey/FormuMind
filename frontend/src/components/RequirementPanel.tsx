@@ -3,7 +3,6 @@ import { useStore, DOMAIN_OBJECTIVES } from "../store";
 import type { ObjectiveSpec, ProductDomain, Requirement } from "../api";
 import {
   normalizeObjective,
-  normalizeObjectives,
 } from "../utils/objectiveContract";
 import ConstraintsEditor from "./ConstraintsEditor";
 import LeversEditor from "./LeversEditor";
@@ -120,16 +119,22 @@ function DirectionBadge({
 
 function ObjectivesEditor({
   objectives,
-  onChange,
   domain,
   requirement,
   onSyncField,
+  updateObjective,
+  removeObjective,
+  addObjective,
+  resetObjectivesForDomain,
 }: {
   objectives: ObjectiveSpec[];
-  onChange: (objs: ObjectiveSpec[]) => void;
   domain: ProductDomain;
   requirement: Requirement;
   onSyncField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
+  updateObjective: (idx: number, patch: Partial<ObjectiveSpec>) => void;
+  removeObjective: (idx: number) => void;
+  addObjective: (objective: ObjectiveSpec) => void;
+  resetObjectivesForDomain: (domain: ProductDomain) => void;
 }) {
   const usedMetrics = new Set(objectives.map((o) => o.metric));
   const availableToAdd = ALL_METRICS.filter((m) => !usedMetrics.has(m.metric));
@@ -147,43 +152,37 @@ function ObjectivesEditor({
   }
 
   function update(idx: number, patch: Partial<ObjectiveSpec>) {
-    const next = objectives.map((o, i) =>
-      i === idx ? normalizeObjective({ ...o, ...patch }) : o
-    );
-    onChange(next);
+    updateObjective(idx, patch);
     if (patch.target_value != null) {
-      const metric = next[idx]?.metric ?? objectives[idx]?.metric;
+      const metric = objectives[idx]?.metric;
       const field = metric ? METRIC_TO_REQUIREMENT_FIELD[metric] : undefined;
       if (field) onSyncField(field, patch.target_value as Requirement[typeof field]);
     }
   }
 
   function remove(idx: number) {
-    onChange(objectives.filter((_, i) => i !== idx));
+    removeObjective(idx);
   }
 
   function addMetric(metric: string) {
     const meta = metaFor(metric);
-    onChange([
-      ...objectives,
+    addObjective(
       normalizeObjective({
         metric,
         weight: 0.1,
         direction: meta?.defaultDir ?? "maximize",
         target_value: seedTarget(metric),
-      }),
-    ]);
+      })
+    );
   }
 
   function resetDefaults() {
-    onChange(
-      normalizeObjectives(
-        DOMAIN_OBJECTIVES[domain].map((o) => ({
-          ...o,
-          target_value: seedTarget(o.metric) ?? o.target_value ?? null,
-        }))
-      )
-    );
+    resetObjectivesForDomain(domain);
+    for (const o of DOMAIN_OBJECTIVES[domain]) {
+      const field = METRIC_TO_REQUIREMENT_FIELD[o.metric];
+      const tv = seedTarget(o.metric);
+      if (field && tv != null) onSyncField(field, tv as Requirement[typeof field]);
+    }
   }
 
   return (
@@ -339,8 +338,11 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
     requirement,
     setField,
     setDomain,
-    setObjectives,
     setLevers,
+    updateObjective,
+    removeObjective,
+    addObjective,
+    resetObjectivesForDomain,
     activeConstraints,
     setActiveConstraints,
     setConstraintValue,
@@ -417,10 +419,13 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
 
       <ObjectivesEditor
         objectives={requirement.objectives}
-        onChange={setObjectives}
         domain={domain}
         requirement={requirement}
         onSyncField={setField}
+        updateObjective={updateObjective}
+        removeObjective={removeObjective}
+        addObjective={addObjective}
+        resetObjectivesForDomain={resetObjectivesForDomain}
       />
 
       <div className="border-t border-edge mb-3" />

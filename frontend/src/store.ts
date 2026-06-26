@@ -35,8 +35,10 @@ import {
   type TaskStatus,
 } from "./api";
 import {
-  objectiveMetrics,
   extractMeasuredValues,
+  normalizeObjective,
+  normalizeObjectives,
+  objectiveMetrics,
 } from "./utils/objectiveContract";
 import {
   defaultConstraintsForDomain,
@@ -140,6 +142,10 @@ interface AppState {
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
   setObjectives: (objectives: ObjectiveSpec[]) => void;
+  updateObjective: (idx: number, patch: Partial<ObjectiveSpec>) => void;
+  removeObjective: (idx: number) => void;
+  addObjective: (objective: ObjectiveSpec) => void;
+  resetObjectivesForDomain: (domain: ProductDomain) => void;
   setLevers: (levers: LeverSpec[]) => void;
   loadExampleProject: (exampleId: string) => Promise<void>;
   setActiveConstraints: (keys: ConstraintKey[]) => void;
@@ -220,6 +226,57 @@ const defaultRequirement: Requirement = {
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 const AUTOSAVE_MS = 1500;
+
+function objectiveTargetFromRequirement(
+  req: Requirement,
+  metric: string
+): number | null {
+  if (metric === "salt_spray_hours") return req.salt_spray_hours;
+  if (metric === "film_weight_gsm" || metric === "coating_weight_gsm") {
+    return req.film_weight_gsm;
+  }
+  if (metric === "cleaning_efficiency") return req.cleaning_efficiency;
+  return null;
+}
+
+function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspaceSlice>): void {
+  if (patch.searchQuery !== undefined) draft.searchQuery = patch.searchQuery;
+  if (patch.sourceTypes !== undefined) draft.sourceTypes = patch.sourceTypes;
+  if (patch.sources !== undefined) draft.sources = patch.sources;
+  if (patch.selectedSources !== undefined) draft.selectedSources = patch.selectedSources;
+  if (patch.chatHistory !== undefined) draft.chatHistory = patch.chatHistory;
+  if (patch.deepReport !== undefined) draft.deepReport = patch.deepReport;
+  if (patch.requirement !== undefined) draft.requirement = patch.requirement;
+  if (patch.activeConstraints !== undefined) draft.activeConstraints = patch.activeConstraints;
+  if (patch.research !== undefined) draft.research = patch.research;
+  if (patch.leaderboard !== undefined) draft.leaderboard = patch.leaderboard;
+  if (patch.doePlan !== undefined) draft.doePlan = patch.doePlan;
+  if (patch.measured !== undefined) draft.measured = patch.measured;
+  if (patch.models !== undefined) draft.models = patch.models;
+  if (patch.modelHistory !== undefined) draft.modelHistory = patch.modelHistory;
+  if (patch.trainMessage !== undefined) draft.trainMessage = patch.trainMessage;
+  if (patch.campaignState !== undefined) draft.campaignState = patch.campaignState;
+  if (patch.workbenchCampaignId !== undefined) {
+    draft.workbenchCampaignId = patch.workbenchCampaignId;
+  }
+  if (patch.workbenchObjectivesSnapshot !== undefined) {
+    draft.workbenchObjectivesSnapshot = patch.workbenchObjectivesSnapshot;
+  }
+  if (patch.optimizationHistory !== undefined) {
+    draft.optimizationHistory = patch.optimizationHistory;
+  }
+  if (patch.loopReport !== undefined) draft.loopReport = patch.loopReport;
+  if (patch.rmseHistory !== undefined) draft.rmseHistory = patch.rmseHistory;
+  if (patch.processOptResult !== undefined) draft.processOptResult = patch.processOptResult;
+  if (patch.doeEngine !== undefined) draft.doeEngine = patch.doeEngine;
+  if (patch.alEngine !== undefined) draft.alEngine = patch.alEngine;
+  if (patch.optimizeEngine !== undefined) draft.optimizeEngine = patch.optimizeEngine;
+  if (patch.loopDoeEngine !== undefined) draft.loopDoeEngine = patch.loopDoeEngine;
+  if (patch.recommendSourceTypes !== undefined) {
+    draft.recommendSourceTypes = patch.recommendSourceTypes;
+  }
+  if (patch.lastAlEngine !== undefined) draft.lastAlEngine = patch.lastAlEngine;
+}
 
 function workspaceSlice(state: AppState): StoreWorkspaceSlice {
   return {
@@ -361,6 +418,44 @@ export const useStore = create<AppState>()(
       setObjectives: (objectives) => {
         set((draft) => {
           draft.requirement.objectives = objectives;
+        });
+        get().scheduleAutosave();
+      },
+
+      updateObjective: (idx, patch) => {
+        set((draft) => {
+          const obj = draft.requirement.objectives[idx];
+          if (!obj) return;
+          const merged = normalizeObjective({ ...obj, ...patch });
+          Object.assign(obj, merged);
+        });
+        get().scheduleAutosave();
+      },
+
+      removeObjective: (idx) => {
+        set((draft) => {
+          draft.requirement.objectives.splice(idx, 1);
+        });
+        get().scheduleAutosave();
+      },
+
+      addObjective: (objective) => {
+        set((draft) => {
+          draft.requirement.objectives.push(normalizeObjective(objective));
+        });
+        get().scheduleAutosave();
+      },
+
+      resetObjectivesForDomain: (domain) => {
+        set((draft) => {
+          const req = draft.requirement;
+          draft.requirement.objectives = normalizeObjectives(
+            DOMAIN_OBJECTIVES[domain].map((o) => ({
+              ...o,
+              target_value:
+                objectiveTargetFromRequirement(req, o.metric) ?? o.target_value ?? null,
+            }))
+          );
         });
         get().scheduleAutosave();
       },
@@ -603,13 +698,26 @@ export const useStore = create<AppState>()(
         try {
           const result = await api.parseIntent(text);
           set((draft) => {
-            Object.assign(draft.requirement, result.requirement);
-            if (result.requirement.objectives?.length) {
-              draft.requirement.objectives = result.requirement.objectives;
+            const r = result.requirement;
+            const req = draft.requirement;
+            if (r.project_id !== undefined) req.project_id = r.project_id;
+            if (r.product_type !== undefined) req.product_type = r.product_type;
+            if (r.application !== undefined) req.application = r.application;
+            if (r.domain !== undefined) req.domain = r.domain;
+            if (r.substrate !== undefined) req.substrate = r.substrate;
+            if (r.salt_spray_hours !== undefined) req.salt_spray_hours = r.salt_spray_hours;
+            if (r.film_weight_gsm !== undefined) req.film_weight_gsm = r.film_weight_gsm;
+            if (r.cure_temperature_c !== undefined) req.cure_temperature_c = r.cure_temperature_c;
+            if (r.cleaning_efficiency !== undefined) {
+              req.cleaning_efficiency = r.cleaning_efficiency;
             }
-            if (result.requirement.levers?.length) {
-              draft.requirement.levers = result.requirement.levers;
-            }
+            if (r.voc_limit_gpl !== undefined) req.voc_limit_gpl = r.voc_limit_gpl;
+            if (r.ph_target !== undefined) req.ph_target = r.ph_target;
+            if (r.notes !== undefined) req.notes = r.notes;
+            if (r.materials !== undefined) req.materials = r.materials;
+            if (r.constraints !== undefined) req.constraints = r.constraints;
+            if (r.objectives?.length) req.objectives = r.objectives;
+            if (r.levers?.length) req.levers = r.levers;
           });
           get().scheduleAutosave();
           return result.extracted_fields;
@@ -830,10 +938,9 @@ export const useStore = create<AppState>()(
         });
         try {
           const report = await api.submitExperiments(records);
-          const { modelHistory } = get();
           set((draft) => {
             draft.models = report.trained;
-            draft.modelHistory = [...modelHistory, report.trained];
+            draft.modelHistory.push(report.trained);
             draft.trainMessage = report.message;
           });
           await get().runResearch();
@@ -879,10 +986,9 @@ export const useStore = create<AppState>()(
         });
         try {
           const report = await api.importExperimentsCsv(file, get().requirement.domain);
-          const { modelHistory } = get();
           set((draft) => {
             draft.models = report.trained;
-            draft.modelHistory = [...modelHistory, report.trained];
+            draft.modelHistory.push(report.trained);
             draft.trainMessage = report.message;
           });
           await get().runResearch();
@@ -946,7 +1052,7 @@ export const useStore = create<AppState>()(
             patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
           }
           set((draft) => {
-            Object.assign(draft, patch);
+            applyPatchToDraft(draft, patch);
             draft.activeProjectId = id;
             draft.historyOpen = false;
             draft.error = null;
@@ -973,7 +1079,7 @@ export const useStore = create<AppState>()(
           const detail = await api.createProject(title);
           const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
           set((draft) => {
-            Object.assign(draft, patch);
+            applyPatchToDraft(draft, patch);
             draft.searchQuery = title || "";
             draft.activeProjectId = detail.id;
             draft.research = null;
@@ -1077,7 +1183,7 @@ export const useStore = create<AppState>()(
               patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
             }
             set((draft) => {
-              Object.assign(draft, patch);
+              applyPatchToDraft(draft, patch);
               draft.activeProjectId = activeId;
             });
             if (patch.workbenchCampaignId != null) {
