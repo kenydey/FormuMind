@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+_source_guide_type = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -74,6 +77,26 @@ class ExperimentRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     campaign: Mapped["Campaign"] = relationship(back_populates="records")
+
+
+class SourceDocument(Base):
+    """Ingested source with full text and LLM-extracted source guide."""
+
+    __tablename__ = "source_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    filename: Mapped[str] = mapped_column(String(512), default="")
+    title: Mapped[str] = mapped_column(String(512), default="")
+    source_kind: Mapped[str] = mapped_column(String(32), default="local")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_text_chars: Mapped[int] = mapped_column(Integer, default=0)
+    source_guide: Mapped[dict | None] = mapped_column(
+        _source_guide_type, nullable=True, comment="LLM 提取的全局参数空间与摘要"
+    )
+    extraction_status: Mapped[str] = mapped_column(String(32), default="pending")
+    extraction_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class ProjectRow(Base):

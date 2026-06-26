@@ -3,16 +3,31 @@
 Converts uploaded files to Evidence objects using markitdown as the primary
 parser (supports PDF, DOCX, XLSX, PPTX, HTML, images, audio, ZIP…).
 Falls back to pypdf / python-docx / built-in str when markitdown is unavailable.
+
+Pipeline: parse → LLM source_guide → token-aware chunk → persist SourceDocument.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import ipaddress
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ..domain.schemas import Evidence
+from ..config import get_settings
+from ..db.source_store import get_source_store
+from ..domain.schemas import Evidence, SourceGuideSchema
+from .source_guide import extract_source_guide
+
+
+@dataclass
+class IngestOutcome:
+    evidence: list[Evidence]
+    source_id: str | None = None
+    source_guide: SourceGuideSchema | None = None
+    extraction_status: str = "skipped"
 
 
 def _parse_with_markitdown(content: bytes, ext: str) -> str | None:
@@ -52,16 +67,69 @@ def _parse_text(content: bytes) -> str:
     return ""
 
 
+def _chunk_text(text: str, *, max_chars: int = 1600, overlap: int = 200) -> list[str]:
+    """Recursive split on \\n\\n > \\n > 句号，控制 chunk 大小。"""
+    text = text.strip()
+    if not text:
+        return []
+
+    if len(text) <= max_chars:
+        return [text]
+
+    for sep in ("\n\n", "\n", "。", ". "):
+        if sep not in text:
+            continue
+        parts = text.split(sep)
+        chunks: list[str] = []
+        current = ""
+        for i, part in enumerate(parts):
+            piece = part if i == len(parts) - 1 else part + sep
+            if len(current) + len(piece) <= max_chars:
+                current += piece
+            else:
+                if current.strip():
+                    chunks.append(current.strip())
+                if len(piece) > max_chars:
+                    chunks.extend(_chunk_text(piece, max_chars=max_chars, overlap=overlap))
+                    current = ""
+                else:
+                    current = piece
+        if current.strip():
+            chunks.append(current.strip())
+        if chunks:
+            return chunks
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
+
+
 def _to_evidence(text: str, filename: str, *, source: str = "local") -> list[Evidence]:
-    """Split text into paragraph-level Evidence chunks."""
+    """Split text into chunk-level Evidence objects."""
+    settings = get_settings()
     stem = Path(filename).stem if "." in filename else filename[:80]
-    chunks = [c.strip() for c in text.split("\n\n") if len(c.strip()) > 30]
+    chunks = _chunk_text(
+        text,
+        max_chars=settings.ingest_chunk_max_chars,
+        overlap=settings.ingest_chunk_overlap,
+    )
+    chunks = [c for c in chunks if len(c.strip()) > 30]
     if not chunks and text.strip():
         chunks = [text.strip()[:2000]]
     if not chunks:
         return []
-    evidence = []
-    for i, chunk in enumerate(chunks[:40]):
+
+    max_chunks = settings.ingest_max_chunks
+    evidence: list[Evidence] = []
+    for i, chunk in enumerate(chunks[:max_chunks]):
         ident = f"{stem}#{i}" if source == "local" else f"{filename}#{i}"
         evidence.append(
             Evidence(
@@ -75,14 +143,52 @@ def _to_evidence(text: str, filename: str, *, source: str = "local") -> list[Evi
     return evidence
 
 
-def ingest_file(filename: str, content: bytes) -> list[Evidence]:
-    """Parse an uploaded file and return a list of Evidence objects."""
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _ingest_parsed_text(
+    text: str,
+    *,
+    filename: str,
+    source_kind: str,
+    persist: bool = True,
+) -> IngestOutcome:
+    settings = get_settings()
+    guide: SourceGuideSchema | None = None
+    err: str | None = None
+    status = "skipped"
+
+    if settings.source_guide_enabled and text.strip() and settings.get_active_api_key():
+        guide, err = extract_source_guide(text, title=filename)
+        status = "ok" if guide else "failed"
+    elif settings.source_guide_enabled and text.strip() and not settings.get_active_api_key():
+        status = "skipped"
+
+    evidence = _to_evidence(text, filename, source=source_kind)
+
+    source_id: str | None = None
+    if persist and text.strip():
+        source_id = get_source_store().create(
+            filename=filename,
+            title=Path(filename).stem if "." in filename else filename[:80],
+            source_kind=source_kind,
+            full_text=text,
+            content_hash=_content_hash(text),
+            source_guide=guide,
+            extraction_status=status,
+            extraction_error=err,
+        )
+
+    return IngestOutcome(evidence, source_id, guide, status)
+
+
+def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> IngestOutcome:
+    """Parse an uploaded file and return ingest outcome."""
     ext = Path(filename).suffix.lower().lstrip(".")
 
-    # Try markitdown first (handles most formats)
     text = _parse_with_markitdown(content, ext)
 
-    # Fallbacks for common formats
     if not text:
         if ext == "pdf":
             text = _parse_pdf_fallback(content)
@@ -92,15 +198,16 @@ def ingest_file(filename: str, content: bytes) -> list[Evidence]:
             text = _parse_text(content)
 
     if not text or not text.strip():
-        return [Evidence(
+        placeholder = Evidence(
             source="local",
             identifier=filename,
             title=filename,
             snippet=f"无法提取文本内容（格式：{ext}）",
             relevance=0.5,
-        )]
+        )
+        return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
 
-    return _to_evidence(text, filename)
+    return _ingest_parsed_text(text, filename=filename, source_kind="local", persist=persist)
 
 
 def _is_safe_url(url: str) -> bool:
@@ -130,7 +237,7 @@ def _html_to_text(html: str) -> str:
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
-def ingest_url(url: str) -> list[Evidence]:
+def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     """Fetch a web page and convert to Evidence chunks."""
     if not _is_safe_url(url):
         raise ValueError("URL must be a public http(s) address")
@@ -148,45 +255,64 @@ def ingest_url(url: str) -> list[Evidence]:
         text = _parse_text(body)
 
     if not text.strip():
-        return [
-            Evidence(
-                source="web",
-                identifier=url,
-                title=url,
-                snippet="无法从该 URL 提取文本",
-                relevance=0.5,
-            )
-        ]
+        return IngestOutcome(
+            evidence=[
+                Evidence(
+                    source="web",
+                    identifier=url,
+                    title=url,
+                    snippet="无法从该 URL 提取文本",
+                    relevance=0.5,
+                )
+            ],
+            extraction_status="skipped",
+        )
 
-    chunks = _to_evidence(text, url, source="web")
-    if chunks:
-        chunks[0].identifier = url
-        chunks[0].title = url
-    return chunks
+    outcome = _ingest_parsed_text(text, filename=url, source_kind="web", persist=persist)
+    if outcome.evidence:
+        outcome.evidence[0].identifier = url
+        outcome.evidence[0].title = url
+    return outcome
 
 
-def ingest_text(text: str, title: str = "Pasted text") -> list[Evidence]:
+def ingest_text(text: str, title: str = "Pasted text", *, persist: bool = True) -> IngestOutcome:
     """Convert pasted plain text into Evidence chunks."""
     label = title.strip() or "Pasted text"
-    chunks = _to_evidence(text, label, source="pasted")
-    if chunks:
-        chunks[0].title = label
-        chunks[0].identifier = label
+    if not text.strip():
+        return IngestOutcome(evidence=[], extraction_status="skipped")
+
+    outcome = _ingest_parsed_text(text, filename=label, source_kind="pasted", persist=persist)
+    if outcome.evidence:
+        outcome.evidence[0].title = label
+        outcome.evidence[0].identifier = label
     elif text.strip():
-        return [
-            Evidence(
-                source="pasted",
-                identifier=label,
-                title=label,
-                snippet=text.strip()[:500],
-                relevance=1.0,
-            )
-        ]
-    return chunks
+        return IngestOutcome(
+            evidence=[
+                Evidence(
+                    source="pasted",
+                    identifier=label,
+                    title=label,
+                    snippet=text.strip()[:500],
+                    relevance=1.0,
+                )
+            ],
+            extraction_status=outcome.extraction_status,
+            source_id=outcome.source_id,
+            source_guide=outcome.source_guide,
+        )
+    return outcome
 
 
-def ingest_files_batch(files: list[tuple[str, bytes]]) -> list[Evidence]:
-    out: list[Evidence] = []
+def ingest_files_batch(files: list[tuple[str, bytes]], *, persist: bool = True) -> IngestOutcome:
+    all_evidence: list[Evidence] = []
+    last_outcome: IngestOutcome | None = None
     for name, content in files:
-        out.extend(ingest_file(name, content))
-    return out
+        outcome = ingest_file(name, content, persist=persist)
+        all_evidence.extend(outcome.evidence)
+        last_outcome = outcome
+    return IngestOutcome(
+        evidence=all_evidence,
+        source_id=last_outcome.source_id if last_outcome else None,
+        source_guide=last_outcome.source_guide if last_outcome else None,
+        extraction_status=last_outcome.extraction_status if last_outcome else "skipped",
+    )

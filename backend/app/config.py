@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
     uspto_api_key: str | None = None           # USPTO Open Data API key
 
+    # Source Guide LLM extraction (ingest pipeline)
+    source_guide_enabled: bool = True
+    source_guide_max_chars: int = 12000
+    ingest_max_chunks: int = 40
+    ingest_chunk_max_chars: int = 1600
+    ingest_chunk_overlap: int = 200
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {

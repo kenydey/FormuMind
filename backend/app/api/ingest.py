@@ -1,10 +1,15 @@
 """POST /api/ingest — Local file upload, URL fetch, pasted text, and batch upload."""
+from __future__ import annotations
+
+from datetime import datetime
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from ..domain.schemas import Evidence
+from ..domain.schemas import Evidence, SourceGuideSchema
 from ..services import colbert_store
 from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
+from ..db.source_store import get_source_store
 
 router = APIRouter()
 
@@ -13,12 +18,29 @@ class IngestResponse(BaseModel):
     filename: str
     evidence: list[Evidence]
     total: int
+    source_id: str | None = None
+    source_guide: SourceGuideSchema | None = None
+    extraction_status: str = "skipped"
 
 
 class BatchIngestResponse(BaseModel):
     evidence: list[Evidence]
     total: int
     files_processed: int
+    source_id: str | None = None
+    extraction_status: str = "skipped"
+
+
+class SourceDocumentResponse(BaseModel):
+    id: str
+    filename: str
+    title: str
+    source_kind: str
+    raw_text_chars: int
+    source_guide: SourceGuideSchema | None = None
+    extraction_status: str
+    extraction_error: str | None = None
+    created_at: datetime
 
 
 class IngestUrlRequest(BaseModel):
@@ -30,12 +52,24 @@ class IngestTextRequest(BaseModel):
     title: str = ""
 
 
+def _to_ingest_response(filename: str, outcome) -> IngestResponse:
+    return IngestResponse(
+        filename=filename,
+        evidence=outcome.evidence,
+        total=len(outcome.evidence),
+        source_id=outcome.source_id,
+        source_guide=outcome.source_guide,
+        extraction_status=outcome.extraction_status,
+    )
+
+
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(file: UploadFile = File(...)):
     content = await file.read()
-    evidence = ingest_file(file.filename or "upload", content)
-    colbert_store.index_evidence(evidence)
-    return IngestResponse(filename=file.filename or "upload", evidence=evidence, total=len(evidence))
+    filename = file.filename or "upload"
+    outcome = ingest_file(filename, content)
+    colbert_store.index_evidence(outcome.evidence)
+    return _to_ingest_response(filename, outcome)
 
 
 @router.post("/ingest/batch", response_model=BatchIngestResponse)
@@ -45,25 +79,53 @@ async def ingest_batch(files: list[UploadFile] = File(...)):
     pairs: list[tuple[str, bytes]] = []
     for f in files:
         pairs.append((f.filename or "upload", await f.read()))
-    evidence = ingest_files_batch(pairs)
-    colbert_store.index_evidence(evidence)
-    return BatchIngestResponse(evidence=evidence, total=len(evidence), files_processed=len(files))
+    outcome = ingest_files_batch(pairs)
+    colbert_store.index_evidence(outcome.evidence)
+    return BatchIngestResponse(
+        evidence=outcome.evidence,
+        total=len(outcome.evidence),
+        files_processed=len(files),
+        source_id=outcome.source_id,
+        extraction_status=outcome.extraction_status,
+    )
 
 
 @router.post("/ingest/url", response_model=IngestResponse)
 def ingest_from_url(req: IngestUrlRequest):
     try:
-        evidence = ingest_url(req.url.strip())
+        outcome = ingest_url(req.url.strip())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}") from exc
-    colbert_store.index_evidence(evidence)
-    return IngestResponse(filename=req.url, evidence=evidence, total=len(evidence))
+    colbert_store.index_evidence(outcome.evidence)
+    return _to_ingest_response(req.url, outcome)
 
 
 @router.post("/ingest/text", response_model=IngestResponse)
 def ingest_from_text(req: IngestTextRequest):
-    evidence = ingest_text(req.text, req.title or "Pasted text")
-    colbert_store.index_evidence(evidence)
-    return IngestResponse(filename=req.title or "Pasted text", evidence=evidence, total=len(evidence))
+    title = req.title or "Pasted text"
+    outcome = ingest_text(req.text, title)
+    colbert_store.index_evidence(outcome.evidence)
+    return _to_ingest_response(title, outcome)
+
+
+@router.get("/sources/{source_id}", response_model=SourceDocumentResponse)
+def get_source(source_id: str):
+    row = get_source_store().get(source_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    guide = None
+    if row.source_guide:
+        guide = SourceGuideSchema.model_validate(row.source_guide)
+    return SourceDocumentResponse(
+        id=row.id,
+        filename=row.filename,
+        title=row.title,
+        source_kind=row.source_kind,
+        raw_text_chars=row.raw_text_chars,
+        source_guide=guide,
+        extraction_status=row.extraction_status,
+        extraction_error=row.extraction_error,
+        created_at=row.created_at,
+    )

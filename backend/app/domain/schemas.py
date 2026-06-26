@@ -213,6 +213,34 @@ class Evidence(BaseModel):
     relevance: float = Field(ge=0, le=1)
 
 
+class ParameterBoundary(BaseModel):
+    min_value: float | None = Field(None, description="最小值")
+    max_value: float | None = Field(None, description="最大值")
+    unit: str = Field(..., description="单位，如 g/L, °C, % 等")
+
+
+class SourceGuideSchema(BaseModel):
+    summary: str = Field(..., max_length=600, description="300字内核心化学机理与工艺摘要")
+    key_entities: list[str] = Field(..., min_length=1, max_length=30)
+    parameter_space: dict[str, ParameterBoundary] = Field(default_factory=dict)
+    faqs: list[str] = Field(..., min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def _trim_summary(self) -> "SourceGuideSchema":
+        if len(self.summary) > 300:
+            self.summary = self.summary[:300]
+        return self
+
+
+class IngestResult(BaseModel):
+    filename: str
+    evidence: list[Evidence]
+    total: int
+    source_id: str | None = None
+    source_guide: SourceGuideSchema | None = None
+    extraction_status: Literal["ok", "skipped", "failed"] = "skipped"
+
+
 class ResearchResult(BaseModel):
     requirement_headline: str
     evidence: list[Evidence]
