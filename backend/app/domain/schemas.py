@@ -218,18 +218,38 @@ class ParameterBoundary(BaseModel):
     max_value: float | None = Field(None, description="最大值")
     unit: str = Field(..., description="单位，如 g/L, °C, % 等")
 
+    @model_validator(mode="after")
+    def check_physical_laws(self) -> "ParameterBoundary":
+        lo, hi = self.min_value, self.max_value
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError(f"物理定律冲突: {lo} > {hi}")
+        if lo is not None and lo < 0 and self.unit.strip() in ("g/L", "mg/L", "kg", "%", "wt%"):
+            raise ValueError(f"浓度不能为负: {lo}{self.unit}")
+        return self
+
 
 class SourceGuideSchema(BaseModel):
     summary: str = Field(..., max_length=600, description="300字内核心化学机理与工艺摘要")
     key_entities: list[str] = Field(..., min_length=1, max_length=30)
     parameter_space: dict[str, ParameterBoundary] = Field(default_factory=dict)
     faqs: list[str] = Field(..., min_length=1, max_length=5)
+    status: Literal["verified", "degraded"] = "verified"
 
     @model_validator(mode="after")
     def _trim_summary(self) -> "SourceGuideSchema":
         if len(self.summary) > 300:
             self.summary = self.summary[:300]
         return self
+
+    @classmethod
+    def degraded(cls, reason: str = "提取失败") -> "SourceGuideSchema":
+        return cls(
+            summary=reason,
+            key_entities=["未知"],
+            parameter_space={},
+            faqs=["该文献结构化提取未成功，请人工审核"],
+            status="degraded",
+        )
 
 
 class IngestResult(BaseModel):
@@ -238,7 +258,7 @@ class IngestResult(BaseModel):
     total: int
     source_id: str | None = None
     source_guide: SourceGuideSchema | None = None
-    extraction_status: Literal["ok", "skipped", "failed"] = "skipped"
+    extraction_status: Literal["ok", "skipped", "failed", "degraded"] = "skipped"
 
 
 class ResearchResult(BaseModel):

@@ -161,7 +161,12 @@ def _ingest_parsed_text(
 
     if settings.source_guide_enabled and text.strip() and settings.get_active_api_key():
         guide, err = extract_source_guide(text, title=filename)
-        status = "ok" if guide else "failed"
+        if guide and guide.status == "verified":
+            status = "ok"
+        elif guide:
+            status = "degraded"
+        else:
+            status = "failed"
     elif settings.source_guide_enabled and text.strip() and not settings.get_active_api_key():
         status = "skipped"
 
