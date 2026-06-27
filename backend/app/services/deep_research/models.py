@@ -16,9 +16,12 @@ class DocumentType(str, Enum):
     PATENT = "专利"
 
 
-_PATENT_SOURCES = frozenset({"uspto", "epo", "patent", "google patents"})
+_PATENT_SOURCES = frozenset({
+    "uspto", "epo", "patent", "google patents", "google patents cn", "cnipa",
+})
 _LITERATURE_SOURCES = frozenset({
     "arxiv", "semantic scholar", "literature", "openalex", "chemcrow-lit", "doi",
+    "serpapi scholar", "tavily",
 })
 
 

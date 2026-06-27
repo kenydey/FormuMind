@@ -221,6 +221,11 @@ def probe_secret(secret_id: str) -> dict:
             return {"ok": True, "message": "EPO OPS 凭证已配置（完整检索在专利搜索阶段验证）"}
         return {"ok": False, "message": "EPO Key/Secret 需同时配置"}
 
+    if secret_id == "openalex_mailto":
+        if s.openalex_mailto:
+            return {"ok": True, "message": "OpenAlex mailto 已配置"}
+        return {"ok": False, "message": "OpenAlex mailto 未配置（推荐填写以进入礼貌池）"}
+
     if secret_id.endswith("_api_key") and secret_id in _ATTR_BY_ID:
         if getattr(s, secret_id, None):
             return {"ok": True, "message": "密钥已保存（使用大模型 Tab 测试连接）"}

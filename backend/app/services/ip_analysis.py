@@ -33,12 +33,20 @@ def _search_relevant_patents(
     domain: ProductDomain,
     limit: int = 10,
 ) -> list:
-    """Search patents relevant to the formulation using existing literature service."""
+    """Search patents relevant to the formulation using expanded multi-source retrieval."""
     from . import literature
+    from .deep_research.query_expander import prepare_search_queries
 
     req = Requirement(domain=domain, substrate=Substrate.carbon_steel)
     query = " ".join(terms)
-    patents = literature.search_patents(req, limit=limit, query=query)
+    sq = prepare_search_queries(query)
+    patents = literature.search_patents(
+        req,
+        limit=limit,
+        query=sq.patent_q or query,
+        ipc_codes=sq.ipc_codes,
+        chinese_query=sq.chinese_q,
+    )
 
     # Score patents by term overlap (TF-IDF-like keyword relevance)
     def _score(ev) -> float:

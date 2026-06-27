@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     serpapi_api_key: str | None = None
     tavily_api_key: str | None = None
     arxiv_domain_filter: bool = True
+    arxiv_search_enabled: bool = True
+    openalex_enabled: bool = True
 
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True

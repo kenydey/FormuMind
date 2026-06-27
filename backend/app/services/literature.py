@@ -195,17 +195,35 @@ def search_patents(
     query: str = "",
     *,
     ipc_codes: tuple[str, ...] | list[str] | None = None,
+    chinese_query: str = "",
 ) -> list[Evidence]:
-    """专利搜索（patent_client + 种子语料回退）。``offset`` 支持增量翻页。"""
-    merged: list[Evidence] = []
-    epo = _search_epo_patents(query or _build_patent_query(req, ""), ipc_codes, limit, offset)
-    merged.extend(epo)
-    if len(merged) < limit:
-        result = _online_search(req, query, limit + offset - len(merged), ipc_codes=ipc_codes)
-        if result:
-            merged.extend(result[offset : offset + limit - len(epo)])
+    """专利搜索（EPO + USPTO + Google Patents + 中文专利并行，种子语料回退）。"""
+    from ..config import get_settings
+    from .search_providers import (
+        merge_patent_evidence,
+        search_cnipa_parallel,
+        search_google_patents_cn,
+        search_serpapi_patents,
+    )
+
+    patent_q = query or _build_patent_query(req, "")
+    want = limit + offset
+    settings = get_settings()
+    batches: list[list[Evidence]] = [
+        _search_epo_patents(patent_q, ipc_codes, want, 0),
+    ]
+    us = _online_search(req, patent_q, want, ipc_codes=ipc_codes)
+    if us:
+        batches.append(us)
+    if settings.serpapi_api_key:
+        batches.append(search_serpapi_patents(patent_q, want, 0, settings=settings))
+    cq = (chinese_query or "").strip()
+    if cq:
+        batches.append(search_google_patents_cn(cq, want, 0, settings=settings))
+        batches.append(search_cnipa_parallel(cq, want, 0, settings=settings))
+    merged = merge_patent_evidence(*batches, limit=want)
     if merged:
-        return merged[:limit]
+        return merged[offset : offset + limit]
     corpus = SEED_CORPUS.get(req.domain, [])
     seed_query = query or _build_patent_query(req, "")
     evidence = [
@@ -222,17 +240,34 @@ def search_patents_by_query(
     offset: int = 0,
     *,
     ipc_codes: tuple[str, ...] | list[str] | None = None,
+    chinese_query: str = "",
 ) -> list[Evidence]:
     """仅按用户 query 检索专利（无 Requirement 时使用种子语料回退）。"""
-    merged: list[Evidence] = []
-    epo = _search_epo_patents(query, ipc_codes, limit, offset)
-    merged.extend(epo)
-    if len(merged) < limit:
-        result = _online_search(None, query, limit + offset - len(merged), ipc_codes=ipc_codes)
-        if result:
-            merged.extend(result[offset : offset + limit - len(epo)])
+    from ..config import get_settings
+    from .search_providers import (
+        merge_patent_evidence,
+        search_cnipa_parallel,
+        search_google_patents_cn,
+        search_serpapi_patents,
+    )
+
+    want = limit + offset
+    settings = get_settings()
+    batches: list[list[Evidence]] = [
+        _search_epo_patents(query, ipc_codes, want, 0),
+    ]
+    us = _online_search(None, query, want, ipc_codes=ipc_codes)
+    if us:
+        batches.append(us)
+    if settings.serpapi_api_key:
+        batches.append(search_serpapi_patents(query, want, 0, settings=settings))
+    cq = (chinese_query or "").strip()
+    if cq:
+        batches.append(search_google_patents_cn(cq, want, 0, settings=settings))
+        batches.append(search_cnipa_parallel(cq, want, 0, settings=settings))
+    merged = merge_patent_evidence(*batches, limit=want)
     if merged:
-        return merged[:limit]
+        return merged[offset : offset + limit]
     all_seeds: list[Evidence] = []
     for domain_docs in SEED_CORPUS.values():
         for i, doc in enumerate(domain_docs):
@@ -248,7 +283,10 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
     """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
     from ..config import get_settings
 
-    use_filter = domain_filter if domain_filter is not None else get_settings().arxiv_domain_filter
+    settings = get_settings()
+    if not settings.arxiv_search_enabled:
+        return []
+    use_filter = domain_filter if domain_filter is not None else settings.arxiv_domain_filter
     arxiv_query = query
     if use_filter and query.strip():
         arxiv_query = (
@@ -336,6 +374,33 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
         return []
 
 
+def search_openalex(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """OpenAlex 学术文献（需 mailto 礼貌池，可在 config 关闭）。"""
+    from .search_providers import search_openalex as _openalex
+
+    return _openalex(query, limit, offset)
+
+
+def search_serpapi_literature(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """SerpAPI Scholar → Google Patents 优先链（文献向）。"""
+    from .search_providers import search_serpapi_chain
+
+    return search_serpapi_chain(query, limit, offset, prefer="scholar")
+
+
+def search_internet(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+    """互联网检索：Tavily 优先，DuckDuckGo 回退。"""
+    from ..config import get_settings
+    from .search_providers import search_tavily
+
+    settings = get_settings()
+    if settings.tavily_api_key:
+        hits = search_tavily(query, limit, offset, settings=settings)
+        if hits:
+            return hits
+    return search_web(query, limit, offset)
+
+
 def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
     """DuckDuckGo 互联网搜索（ddgs，无需 API key）。``offset`` 支持增量翻页。"""
     try:
@@ -367,7 +432,7 @@ def _is_patent_or_literature(e: Evidence) -> bool:
         k in s
         for k in (
             "uspto", "epo", "patent", "arxiv", "semantic", "literature",
-            "chemcrow", "openalex", "doi",
+            "chemcrow", "openalex", "doi", "serpapi", "tavily", "cnipa", "google patents",
         )
     )
 
@@ -388,7 +453,13 @@ def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
 def _is_weblike(e: Evidence) -> bool:
     """Internet/web sources are the junk-prone ones worth filtering hard."""
     s = (e.source or "").lower()
-    return "internet" in s or "web" in s or "duck" in s
+    return (
+        "internet" in s
+        or "web" in s
+        or "duck" in s
+        or "tavily" in s
+        or "cnipa" in s
+    )
 
 
 def _merge_filter_rank(
@@ -451,21 +522,32 @@ def _build_streams(
         if req is not None:
             add(
                 "patents",
-                lambda off, q=patent_query, ipc=ipc: search_patents(
-                    req, page_size, offset=off, query=q, ipc_codes=ipc
+                lambda off, q=patent_query, ipc=ipc, cq=chinese_query: search_patents(
+                    req, page_size, offset=off, query=q, ipc_codes=ipc, chinese_query=cq
                 ),
                 True,
             )
         else:
             add(
                 "patents",
-                lambda off, q=patent_query, ipc=ipc: search_patents_by_query(
-                    q, page_size, offset=off, ipc_codes=ipc
+                lambda off, q=patent_query, ipc=ipc, cq=chinese_query: search_patents_by_query(
+                    q, page_size, offset=off, ipc_codes=ipc, chinese_query=cq
                 ),
                 True,
             )
     if "literature" in source_types:
-        add("arxiv", lambda off, q=western_query: search_arxiv(q, page_size, offset=off), True)
+        from ..config import get_settings
+
+        lit_settings = get_settings()
+        add(
+            "serpapi_lit",
+            lambda off, q=western_query: search_serpapi_literature(q, page_size, offset=off),
+            True,
+        )
+        if lit_settings.openalex_enabled:
+            add("openalex", lambda off, q=western_query: search_openalex(q, page_size, offset=off), True)
+        if lit_settings.arxiv_search_enabled:
+            add("arxiv", lambda off, q=western_query: search_arxiv(q, page_size, offset=off), True)
         add(
             "s2",
             lambda off, q=western_query: search_semantic_scholar(q, page_size, offset=off),
@@ -474,7 +556,7 @@ def _build_streams(
         add("chemlit", lambda off, q=western_query: search_chemcrow_lit(q, page_size), False)
     if "internet" in source_types:
         web_q = chinese_query or western_query
-        add("web", lambda off, q=web_q: search_web(q, page_size, offset=off), True)
+        add("internet", lambda off, q=web_q: search_internet(q, page_size, offset=off), True)
         add("chemweb", lambda off, q=western_query: search_chemcrow_web(q, page_size), False)
     if "notebooklm" in source_types:
         def _nb(off: int, q=western_query) -> list[Evidence]:
@@ -662,17 +744,23 @@ def get_source_availability() -> dict[str, dict]:
         return False
 
     from .notebooklm import get_setup_status
-
-    patents_online = _ok("patent_client")
-    lit_ok = _ok("arxiv") or _ok("semanticscholar")
-    web_ok = _ok("ddgs") or _ok("duckduckgo_search")
-    chemcrow_ok = _ok("chemcrow")
     from ..config import get_settings
 
     s = get_settings()
     serpapi_ok = bool(s.serpapi_api_key)
     tavily_ok = bool(s.tavily_api_key)
     epo_ok = bool(s.epo_consumer_key and s.epo_consumer_secret)
+    openalex_ok = bool(s.openalex_enabled and s.openalex_mailto)
+
+    patents_online = _ok("patent_client")
+    lit_ok = (
+        _ok("arxiv")
+        or _ok("semanticscholar")
+        or openalex_ok
+        or serpapi_ok
+    )
+    web_ok = _ok("ddgs") or _ok("duckduckgo_search")
+    chemcrow_ok = _ok("chemcrow")
 
     return {
         "patents": {
@@ -690,19 +778,29 @@ def get_source_availability() -> dict[str, dict]:
             "offline_fallback": False,
             "reason": None if lit_ok else "library_missing",
             "hint": (
-                (None if chemcrow_ok else "pip install -e '.[intel]' 启用 ChemCrow LitSearch (SerpAPI + paper-qa) 化学文献检索")
+                (None if chemcrow_ok else "pip install -e '.[intel]' 启用 ChemCrow LitSearch")
                 if lit_ok
-                else "pip install -e '.[intel]' 启用 arXiv + Semantic Scholar + ChemCrow 学术文献检索"
+                else "pip install -e '.[intel]' 或配置 OpenAlex mailto / SerpAPI 启用学术检索"
             ),
+        },
+        "openalex": {
+            "available": openalex_ok,
+            "offline_fallback": False,
+            "reason": None if openalex_ok else "mailto_missing",
+            "hint": None if openalex_ok else "FORMUMIND_OPENALEX_MAILTO 未配置",
         },
         "internet": {
             "available": web_ok or serpapi_ok or tavily_ok,
             "offline_fallback": False,
             "reason": None if (web_ok or serpapi_ok or tavily_ok) else "library_missing",
             "hint": (
-                None
-                if serpapi_ok or tavily_ok
-                else "在设置 → API 配置 中填入 SerpAPI / Tavily 密钥"
+                "Tavily 已配置，优先于 DuckDuckGo"
+                if tavily_ok
+                else (
+                    None
+                    if serpapi_ok
+                    else "在设置 → API 配置 中填入 Tavily / SerpAPI 密钥，或 pip install ddgs"
+                )
             ),
         },
         "serpapi": {
@@ -722,6 +820,18 @@ def get_source_availability() -> dict[str, dict]:
             "offline_fallback": False,
             "reason": None if epo_ok else "key_missing",
             "hint": None if epo_ok else "FORMUMIND_EPO_CONSUMER_KEY/SECRET 未配置",
+        },
+        "google_patents_cn": {
+            "available": serpapi_ok,
+            "offline_fallback": False,
+            "reason": None if serpapi_ok else "key_missing",
+            "hint": None if serpapi_ok else "中文专利需 SerpAPI + chinese_q",
+        },
+        "cnipa": {
+            "available": tavily_ok or serpapi_ok,
+            "offline_fallback": False,
+            "reason": None if (tavily_ok or serpapi_ok) else "key_missing",
+            "hint": None if (tavily_ok or serpapi_ok) else "CNIPA 并行路需 Tavily 或 SerpAPI",
         },
         "chemcrow": {
             "available": chemcrow_ok,
