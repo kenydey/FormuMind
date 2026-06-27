@@ -4,11 +4,14 @@ Uses in-memory SQLite so no files are created and tests are fully isolated.
 """
 import json
 
+import httpx
+
 from app.db.database import make_engine, make_session_factory
-from app.db.migrate import migrate_from_stores
-from app.db.store import JsonExperimentStore, SqlExperimentStore
+from app.db.migrate import migrate_from_stores, migrate_inline_sql_to_datalab
+from app.db.store import DatalabExperimentStore, JsonExperimentStore, SqlExperimentStore
 from app.domain.schemas import ExperimentRecord, ProductDomain
 from app.services.training import ModelRegistry
+from tests.test_experiment_store_datalab import MockDatalabState, _mock_handler
 
 
 def _sql_store(engine=None):
@@ -165,6 +168,29 @@ def test_migrate_skips_when_db_not_empty(tmp_path):
     migrated = migrate_from_stores(str(json_path), sql_store)
     assert migrated == 0
     assert sql_store.count() == 1  # unchanged
+
+
+def test_migrate_inline_sql_to_datalab(tmp_path):
+    engine = make_engine(f"sqlite:///{tmp_path}/migrate.db")
+    factory = make_session_factory(engine)
+    legacy = SqlExperimentStore(factory)
+    legacy.add([_record()])
+
+    state = MockDatalabState()
+    client = httpx.Client(
+        base_url="http://datalab.test",
+        transport=httpx.MockTransport(_mock_handler(state)),
+    )
+    datalab = DatalabExperimentStore("http://datalab.test", factory)
+    datalab._client = client
+    try:
+        migrated = migrate_inline_sql_to_datalab(legacy, datalab)
+        assert migrated == 1
+        assert legacy.count() == 0
+        assert datalab.count() == 1
+        assert datalab.all()[0].measured["salt_spray_hours"] == 840.0
+    finally:
+        datalab.close()
 
 
 def test_migrate_skips_when_json_absent(tmp_path):

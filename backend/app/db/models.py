@@ -25,12 +25,18 @@ def _utcnow() -> datetime:
 
 
 class ExperimentRow(Base):
-    """One measured DOE/lab result fed back into the platform."""
+    """One measured DOE/lab result fed back into the platform.
+
+    When ``item_id`` is set the payload lives in Datalab (``formumind_training`` block);
+    otherwise factors/measured JSON columns hold the full record (sqlite fallback).
+    """
 
     __tablename__ = "experiments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     domain: Mapped[str] = mapped_column(String(64), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), default="", index=True)
     factors: Mapped[dict] = mapped_column(JSON, default=dict)
     cure_temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     measured: Mapped[dict] = mapped_column(JSON)

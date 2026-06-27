@@ -20,23 +20,29 @@ from ..domain.objective_contract import (
 )
 from ..domain.schemas import (
     DOEPlan,
-    DatalabDeleteResponse,
-    DatalabItemEnvelope,
     DatalabSampleResponse,
     ProductDomain,
     Requirement,
 )
 from .campaign_types import WorkbenchRow
+from .datalab_client import (
+    DatalabStoreError,
+    parse_create_sample_response,
+    parse_delete_response,
+    parse_item_envelope,
+    validate_blocks,
+)
 from .models import Campaign
 
 logger = logging.getLogger(__name__)
 
 _PARAMS_BLOCK = "formumind_params"
 _MEASUREMENTS_BLOCK = "formumind_measurements"
+_CAMPAIGN_BLOCKS = (_PARAMS_BLOCK, _MEASUREMENTS_BLOCK)
 
 
-class DatalabStoreError(ValueError):
-    """Raised when Datalab API responses fail Pydantic contract validation."""
+def _validate_campaign_blocks(item_data: dict[str, Any]) -> None:
+    validate_blocks(item_data, _CAMPAIGN_BLOCKS)
 
 
 def _utcnow() -> datetime:
@@ -79,7 +85,7 @@ def _parse_row_from_item(
     item_id: str,
     item_data: dict[str, Any],
 ) -> WorkbenchRow:
-    _validate_item_blocks(item_data)
+    _validate_campaign_blocks(item_data)
     blocks = item_data.get("blocks_obj") or {}
     params_block = (blocks.get(_PARAMS_BLOCK) or {}).get("data") or {}
     meas_block = (blocks.get(_MEASUREMENTS_BLOCK) or {}).get("data") or {}
@@ -92,38 +98,6 @@ def _parse_row_from_item(
         actual_params=dict(params_block.get("actual_params") or {}),
         measurements=dict(meas_block),
     )
-
-
-def _validate_item_blocks(item_data: dict[str, Any]) -> None:
-    blocks = item_data.get("blocks_obj")
-    if not isinstance(blocks, dict):
-        raise DatalabStoreError("Datalab item_data.blocks_obj missing or invalid")
-    for key in (_PARAMS_BLOCK, _MEASUREMENTS_BLOCK):
-        block = blocks.get(key)
-        if not isinstance(block, dict) or "data" not in block:
-            raise DatalabStoreError(f"Datalab block {key!r} missing or invalid")
-
-
-def _parse_create_sample_response(body: dict[str, Any], expected_item_id: str) -> DatalabSampleResponse:
-    entry_raw = body.get("sample_list_entry") if isinstance(body.get("sample_list_entry"), dict) else body
-    sample = DatalabSampleResponse.model_validate(entry_raw)
-    if sample.item_id != expected_item_id:
-        raise DatalabStoreError(
-            f"Datalab item_id mismatch: expected {expected_item_id!r}, got {sample.item_id!r}"
-        )
-    return sample
-
-
-def _parse_item_envelope(body: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(body.get("item_data"), dict):
-        envelope = DatalabItemEnvelope.model_validate(body)
-        item_data = envelope.item_data
-    elif isinstance(body.get("blocks_obj"), dict):
-        item_data = body
-    else:
-        raise DatalabStoreError("Datalab get-item-data response missing item_data")
-    _validate_item_blocks(item_data)
-    return item_data
 
 
 class CampaignStoreInterface(ABC):
@@ -293,7 +267,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         client = await self._ensure_client()
         resp = await client.post("/new-sample/", json=payload)
         resp.raise_for_status()
-        sample = _parse_create_sample_response(resp.json(), expected_id)
+        sample = parse_create_sample_response(resp.json(), expected_id)
         logger.info("Datalab created sample item_id=%s", sample.item_id)
         return sample
 
@@ -301,10 +275,10 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         client = await self._ensure_client()
         resp = await client.get(f"/get-item-data/{item_id}")
         resp.raise_for_status()
-        return _parse_item_envelope(resp.json())
+        return parse_item_envelope(resp.json(), validate=_validate_campaign_blocks)
 
     async def _save_item(self, item_id: str, item_data: dict[str, Any]) -> dict[str, Any]:
-        _validate_item_blocks(item_data)
+        _validate_campaign_blocks(item_data)
         payload = {"item_id": item_id, "data": item_data}
         logger.info("Datalab POST /save-item/ item_id=%s", item_id)
         client = await self._ensure_client()
@@ -316,9 +290,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         client = await self._ensure_client()
         resp = await client.post("/delete-sample/", json={"item_id": item_id})
         resp.raise_for_status()
-        body = DatalabDeleteResponse.model_validate(resp.json())
-        if body.status != "success":
-            raise DatalabStoreError(f"Datalab delete-sample failed for {item_id}: status={body.status}")
+        parse_delete_response(resp.json(), item_id)
 
     async def _rollback_created_samples(self, item_ids: list[str]) -> None:
         for item_id in reversed(item_ids):

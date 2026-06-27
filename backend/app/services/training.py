@@ -120,14 +120,12 @@ class _Trained:
 
 def _make_store(path: str | None):
     """Return an ExperimentStore: JsonExperimentStore when *path* is given
-    (backward-compat for tests), otherwise SqlExperimentStore with the
-    default session factory."""
+    (backward-compat for tests), otherwise the configured default store."""
     if path is not None:
         from ..db.store import JsonExperimentStore
         return JsonExperimentStore(path)
-    from ..db.database import default_session_factory
-    from ..db.store import SqlExperimentStore
-    return SqlExperimentStore(default_session_factory())
+    from ..db.store import get_experiment_store
+    return get_experiment_store()
 
 
 class ModelRegistry:
@@ -284,11 +282,11 @@ class ModelRegistry:
             return [t.info for t in self._models.values()]
 
 
-# Global registry — uses SqlExperimentStore (SQLite by default).
-# On startup, if a legacy experiments.json exists, migrate it into the DB.
+# Global registry — uses configured ExperimentStore (Datalab or SQLite).
+# On startup, migrate legacy experiments.json and inline SQL rows if needed.
 def _build_registry() -> ModelRegistry:
-    from ..db.migrate import migrate_json_if_needed
-    migrate_json_if_needed()
+    from ..db.migrate import migrate_experiments_if_needed
+    migrate_experiments_if_needed()
     return ModelRegistry()
 
 

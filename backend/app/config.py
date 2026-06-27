@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     datalab_max_connections: int = 10
     datalab_max_keepalive_connections: int = 5
 
+    # Experiment training persistence (Headless ELN)
+    experiment_backend: str = "sqlite"  # datalab | sqlite (tests / offline default)
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {

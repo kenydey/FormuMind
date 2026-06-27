@@ -33,7 +33,22 @@ def make_engine(db_url: str) -> Engine:
     engine = create_engine(db_url, future=True, connect_args=connect_args)
     Base.metadata.create_all(engine)
     _drop_legacy_workbench_table(engine)
+    _ensure_experiment_columns(engine)
     return engine
+
+
+def _ensure_experiment_columns(engine: Engine) -> None:
+    """Add Phase 2 index columns to legacy experiments tables."""
+    from sqlalchemy import inspect, text
+
+    if "experiments" not in inspect(engine).get_table_names():
+        return
+    cols = {c["name"] for c in inspect(engine).get_columns("experiments")}
+    with engine.begin() as conn:
+        if "item_id" not in cols:
+            conn.execute(text("ALTER TABLE experiments ADD COLUMN item_id VARCHAR(128)"))
+        if "project_id" not in cols:
+            conn.execute(text("ALTER TABLE experiments ADD COLUMN project_id VARCHAR(36) DEFAULT ''"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:

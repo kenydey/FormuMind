@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 
-from app.db.campaign_store import (
-    DatalabCampaignStore,
+from app.db.campaign_store import DatalabCampaignStore
+from app.db.datalab_client import (
     DatalabStoreError,
-    _parse_create_sample_response,
-    _parse_item_envelope,
+    parse_create_sample_response,
+    parse_item_envelope,
 )
 from app.db.database import make_engine, make_session_factory
 from app.domain.schemas import DOEPlan, DOERun, ProductDomain
@@ -212,18 +212,21 @@ async def test_close_releases_client(tmp_path):
 
 
 def test_parse_create_sample_response_valid():
-    sample = _parse_create_sample_response({"item_id": "abc", "name": "n"}, "abc")
+    sample = parse_create_sample_response({"item_id": "abc", "name": "n"}, "abc")
     assert sample.item_id == "abc"
 
 
 def test_parse_create_sample_response_mismatch():
     with pytest.raises(DatalabStoreError, match="item_id mismatch"):
-        _parse_create_sample_response({"item_id": "wrong"}, "expected")
+        parse_create_sample_response({"item_id": "wrong"}, "expected")
 
 
 def test_parse_item_envelope_requires_blocks():
     with pytest.raises(DatalabStoreError):
-        _parse_item_envelope({"item_data": {"blocks_obj": {}}})
+        parse_item_envelope({"item_data": {"blocks_obj": {}}}, required_blocks=(_PARAMS, _MEASUREMENTS))
 
-    item = _parse_item_envelope({"item_data": _item_data()})
+    item = parse_item_envelope(
+        {"item_data": _item_data()},
+        required_blocks=(_PARAMS, _MEASUREMENTS),
+    )
     assert _PARAMS in item["blocks_obj"]
