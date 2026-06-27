@@ -9,7 +9,6 @@ from fastapi.responses import Response
 
 import uuid
 
-from ..db.database import default_session_factory
 from ..domain.schemas import ActiveDoeResult, BaybeRecommendResult, DOEPlan, ExperimentRecord, Requirement
 from ..pipeline import workflow
 from ..services import io_export
@@ -102,15 +101,13 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
     engine = BaybeCampaignEngine()
     if not engine.available():
         raise HTTPException(status_code=503, detail="baybe is not installed")
-    with default_session_factory()() as db:
-        result = engine.recommend(
-            base_req,
-            campaign_state=req.campaign_state,
-            measurements=req.existing_records,
-            batch_size=req.batch_size,
-            workbench_campaign_id=req.workbench_campaign_id,
-            db=db,
-        )
+    result = engine.recommend(
+        base_req,
+        campaign_state=req.campaign_state,
+        measurements=req.existing_records,
+        batch_size=req.batch_size,
+        workbench_campaign_id=req.workbench_campaign_id,
+    )
     result.plan.plan_id = uuid.uuid4().hex
     result.plan.domain = base_req.domain
     workflow._cache_plan(result.plan)

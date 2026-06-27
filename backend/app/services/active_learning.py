@@ -171,18 +171,14 @@ def active_learning_doe(
             try:
                 baybe = BaybeCampaignEngine()
                 if baybe.available():
-                    from ..db.database import default_session_factory
-
-                    with default_session_factory()() as db:
-                        result = baybe.recommend(
-                            req,
-                            campaign_state=campaign_state,
-                            measurements=existing,
-                            batch_size=n_suggest,
-                            design=f"baybe_{design}",
-                            workbench_campaign_id=workbench_campaign_id,
-                            db=db,
-                        )
+                    result = baybe.recommend(
+                        req,
+                        campaign_state=campaign_state,
+                        measurements=existing,
+                        batch_size=n_suggest,
+                        design=f"baybe_{design}",
+                        workbench_campaign_id=workbench_campaign_id,
+                    )
                     result.plan.plan_id = uuid.uuid4().hex
                     result.plan.domain = req.domain
                     from ..pipeline.workflow import _cache_plan

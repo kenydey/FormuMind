@@ -5,6 +5,7 @@ per-(domain, metric) prediction models that supersede the empirical surrogate.
 
 The workbench routes persist per-campaign execution rows for AG Grid editing
 and BayBE closed-loop feedback from ``actual_params`` / ``measurements``.
+Workbench row data is stored in Datalab (SSOT) via :class:`DatalabCampaignStore`.
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..db.campaign_store import get_campaign_store
+from ..db.campaign_types import WorkbenchRow
+from ..db.models import Campaign
 from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, Requirement, TrainingReport
 from ..services import io_export
 from ..services.training import registry
@@ -37,6 +40,7 @@ class BatchUpdateRequest(BaseModel):
 class WorkbenchRowResponse(BaseModel):
     id: int
     campaign_id: int
+    item_id: str = ""
     status: str
     planned_params: dict[str, Any]
     actual_params: dict[str, float]
@@ -67,7 +71,7 @@ class CreateWorkbenchCampaignRequest(BaseModel):
     requirement: Requirement | None = None
 
 
-def _campaign_response(campaign, rows) -> WorkbenchCampaignResponse:
+def _campaign_response(campaign: Campaign, rows: list[WorkbenchRow]) -> WorkbenchCampaignResponse:
     return WorkbenchCampaignResponse(
         campaign_id=campaign.id,
         name=campaign.name,
@@ -80,10 +84,11 @@ def _campaign_response(campaign, rows) -> WorkbenchCampaignResponse:
     )
 
 
-def _row_response(row) -> WorkbenchRowResponse:
+def _row_response(row: WorkbenchRow) -> WorkbenchRowResponse:
     return WorkbenchRowResponse(
         id=row.id,
         campaign_id=row.campaign_id,
+        item_id=row.item_id,
         status=row.status,
         planned_params=row.planned_params or {},
         actual_params=row.actual_params or {},
@@ -153,39 +158,45 @@ def list_models() -> list[ModelInfo]:
 
 
 @router.post("/experiments/workbench/campaigns", response_model=WorkbenchCampaignResponse)
-def create_workbench_campaign(req: CreateWorkbenchCampaignRequest) -> WorkbenchCampaignResponse:
-    """Seed a campaign + pending rows from a generated DOE plan."""
+async def create_workbench_campaign(
+    payload: CreateWorkbenchCampaignRequest,
+) -> WorkbenchCampaignResponse:
+    """Seed a campaign + pending rows from a generated DOE plan (Datalab samples)."""
     store = get_campaign_store()
-    campaign = store.create_from_plan(
-        req.plan,
-        name=req.name,
-        strategy=req.strategy,
-        req=req.requirement,
-        project_id=req.project_id,
+    campaign = await store.create_from_plan(
+        payload.plan,
+        name=payload.name,
+        strategy=payload.strategy,
+        req=payload.requirement,
+        project_id=payload.project_id,
     )
-    rows = store.list_rows(campaign.id)
+    rows = await store.list_rows(campaign.id)
     return _campaign_response(campaign, rows)
 
 
 @router.get("/experiments/workbench/{campaign_id}", response_model=WorkbenchCampaignResponse)
-def get_workbench_campaign(campaign_id: int) -> WorkbenchCampaignResponse:
+async def get_workbench_campaign(
+    campaign_id: int,
+) -> WorkbenchCampaignResponse:
     store = get_campaign_store()
-    campaign = store.get_campaign(campaign_id)
+    campaign = await store.get_campaign(campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    rows = store.list_rows(campaign_id)
+    rows = await store.list_rows(campaign_id)
     return _campaign_response(campaign, rows)
 
 
 @router.put("/experiments/workbench/sync", response_model=WorkbenchSyncResponse)
-def sync_workbench(req: BatchUpdateRequest) -> WorkbenchSyncResponse:
-    """Batch-update workbench rows from AG Grid edits."""
+async def sync_workbench(
+    payload: BatchUpdateRequest,
+) -> WorkbenchSyncResponse:
+    """Batch-update workbench rows from AG Grid edits (forwarded to Datalab)."""
     store = get_campaign_store()
-    if store.get_campaign(req.campaign_id) is None:
+    if await store.get_campaign(payload.campaign_id) is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    updated, rows = store.batch_sync(
-        req.campaign_id,
-        [row.model_dump() for row in req.rows],
+    updated, rows = await store.batch_sync(
+        payload.campaign_id,
+        [row.model_dump() for row in payload.rows],
     )
     return WorkbenchSyncResponse(updated=updated, rows=[_row_response(r) for r in rows])

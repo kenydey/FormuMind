@@ -118,6 +118,11 @@ class Settings(BaseSettings):
     ingest_chunk_max_chars: int = 1600
     ingest_chunk_overlap: int = 200
 
+    # DOE workbench / campaign persistence (Headless ELN)
+    campaign_backend: str = "datalab"  # datalab | sqlite (local JSON fallback for tests)
+    datalab_api_url: str = "http://localhost:5001"
+    datalab_timeout_seconds: float = 30.0
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key。"""
         mapping = {

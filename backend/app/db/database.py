@@ -32,7 +32,18 @@ def make_engine(db_url: str) -> Engine:
         connect_args = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(db_url, future=True, connect_args=connect_args)
     Base.metadata.create_all(engine)
+    _drop_legacy_workbench_table(engine)
     return engine
+
+
+def _drop_legacy_workbench_table(engine: Engine) -> None:
+    """Remove deprecated experiment_records table (workbench SSOT → Datalab)."""
+    from sqlalchemy import inspect, text
+
+    if "experiment_records" not in inspect(engine).get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS experiment_records"))
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

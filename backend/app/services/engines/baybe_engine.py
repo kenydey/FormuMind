@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy.orm import Session
-
 from ...domain.objective_contract import align_dataframe_measurement_columns, objective_metrics
 from ...domain.schemas import (
     BaybeRecommendResult,
@@ -32,32 +30,31 @@ from .doe_registry import baybe_available, build_doe_plan
 log = logging.getLogger(__name__)
 
 
-def fetch_campaign_data_for_baybe(campaign_id: int, db: Session, req: Requirement | None = None):
+def fetch_campaign_data_for_baybe(
+    campaign_id: int,
+    req: Requirement | None = None,
+    *,
+    store=None,
+):
     """Load completed workbench rows for BayBE ``add_measurements``.
 
     Returns ``(actual_X, measurements_Y)`` where measurement columns follow
     ``Campaign.objectives_snapshot`` order (SSOT = ``ObjectiveSpec.metric``).
+    Data is read from the campaign store (Datalab SSOT or sqlite fallback).
     """
     import pandas as pd
 
-    from ...db.models import ExperimentRecord as WorkbenchRow
+    from ...db.campaign_store import get_campaign_store
     from ...domain.schemas import ProductDomain
 
     if req is None:
         req = Requirement(domain=ProductDomain.anticorrosion_coating)
 
-    objectives = resolve_campaign_objectives(db, campaign_id, req)
+    campaign_store = store or get_campaign_store()
+    objectives = resolve_campaign_objectives(campaign_store, campaign_id, req)
     metrics = objective_metrics(objectives)
 
-    rows = (
-        db.query(WorkbenchRow)
-        .filter(
-            WorkbenchRow.campaign_id == campaign_id,
-            WorkbenchRow.status == "Completed",
-        )
-        .order_by(WorkbenchRow.id)
-        .all()
-    )
+    rows = campaign_store.get_experiments_sync(campaign_id)
     if not rows:
         return pd.DataFrame(), pd.DataFrame()
 
@@ -137,14 +134,17 @@ class BaybeCampaignEngine:
         batch_size: int = 4,
         design: str = "baybe_active",
         workbench_campaign_id: int | None = None,
-        db: Session | None = None,
+        store=None,
     ) -> BaybeRecommendResult:
         if not self.available():
             raise RuntimeError("baybe is not installed (pip install -e '.[baybe,bo,science]')")
 
+        from ...db.campaign_store import get_campaign_store
+
+        campaign_store = store or get_campaign_store()
         from baybe import Campaign
 
-        objectives = resolve_campaign_objectives(db, workbench_campaign_id, req)
+        objectives = resolve_campaign_objectives(campaign_store, workbench_campaign_id, req)
         metrics = objective_metrics(objectives)
 
         measurements = measurements or []
@@ -158,8 +158,10 @@ class BaybeCampaignEngine:
         if not df_meas.empty and metrics:
             df_meas = align_dataframe_measurement_columns(df_meas, metrics, log=log)
 
-        if workbench_campaign_id is not None and db is not None:
-            actual_X, measurements_Y = fetch_campaign_data_for_baybe(workbench_campaign_id, db, req)
+        if workbench_campaign_id is not None:
+            actual_X, measurements_Y = fetch_campaign_data_for_baybe(
+                workbench_campaign_id, req, store=campaign_store
+            )
             df_wb = workbench_dataframes_to_baybe(actual_X, measurements_Y, metrics)
             if not df_wb.empty:
                 import pandas as pd
@@ -205,15 +207,18 @@ class BaybeCampaignEngine:
         measurements: list[ExperimentRecord] | None = None,
         progress_cb=None,
         workbench_campaign_id: int | None = None,
-        db: Session | None = None,
+        store=None,
     ) -> OptimizationResult:
         """Iterative baybe batch recommendations scored via FormuMind predictor."""
+        from ...db.campaign_store import get_campaign_store
+
+        campaign_store = store or get_campaign_store()
         measurements = list(measurements or [])
         batch_size = max(1, min(4, max(1, iterations // 6)))
         rounds = max(1, iterations // batch_size)
         history: list[float] = []
         best_so_far = float("-inf")
-        objectives = resolve_campaign_objectives(db, workbench_campaign_id, req)
+        objectives = resolve_campaign_objectives(campaign_store, workbench_campaign_id, req)
         if not objectives:
             objectives = req.objectives or default_objectives(req.domain)
         process = process_for(req)
@@ -232,7 +237,7 @@ class BaybeCampaignEngine:
                 batch_size=batch_size,
                 design="baybe_opt",
                 workbench_campaign_id=workbench_campaign_id,
-                db=db,
+                store=campaign_store,
             )
             state = result.campaign_state
 
