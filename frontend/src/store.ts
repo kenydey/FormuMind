@@ -137,7 +137,7 @@ interface AppState {
   // Settings
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps";
+  settingsTab: "llm" | "deps" | "api";
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -194,8 +194,8 @@ interface AppState {
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
-  openSettings: (tab?: "llm" | "deps") => void;
-  setSettingsTab: (tab: "llm" | "deps") => void;
+  openSettings: (tab?: "llm" | "deps" | "api") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api") => void;
 
   // v0.6 actions
   runLoop: () => Promise<void>;
@@ -360,7 +360,7 @@ export const useStore = create<AppState>()(
       recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
       openModal: null,
       activeConstraints: defaultConstraintsForDomain("anticorrosion_coating"),
-      llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6", apiKey: "" },
+      llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },
       settingsOpen: false,
       settingsTab: "llm",
 
@@ -1346,19 +1346,10 @@ export const useStore = create<AppState>()(
           set((draft) => {
             draft.llmConfig.provider = remote.provider || local.provider;
             draft.llmConfig.model = remote.model || local.model;
-            draft.llmConfig.apiKey = local.apiKey;
             draft.llmConfig.baseUrl = remote.base_url ?? local.baseUrl;
           });
-          if (local.apiKey && !remote.key_set) {
-            await api.postSettings({
-              provider: remote.provider || local.provider,
-              model: remote.model || local.model,
-              api_key: local.apiKey,
-              baseUrl: remote.base_url ?? local.baseUrl,
-            });
-          }
         } catch {
-          // offline — keep localStorage config
+          // offline — keep persisted provider/model
         }
       },
 
@@ -1452,7 +1443,11 @@ export const useStore = create<AppState>()(
       name: "formumind-history",
       partialize: (state) => ({
         activeProjectId: state.activeProjectId,
-        llmConfig: state.llmConfig,
+        llmConfig: {
+          provider: state.llmConfig.provider,
+          model: state.llmConfig.model,
+          baseUrl: state.llmConfig.baseUrl,
+        },
       }),
     }
   )

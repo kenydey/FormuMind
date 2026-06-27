@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 
 from ...config import Settings, get_settings
 from .. import llm
@@ -13,15 +14,79 @@ logger = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9]+|[一-鿿]+")
 _DEFAULT_IPC = ["C09D", "C09D175/04", "C08G18/00", "C23F"]
 
-def build_search_query(expanded: ExpandedQuery, topic: str = "") -> str:
-    """将扩展结果与用户主题合并为面向多源检索的查询串。"""
+
+@dataclass(frozen=True)
+class SearchQueries:
+    """Per-source query strings derived from QueryExpander output."""
+
+    expanded: ExpandedQuery
+    rank_q: str
+    patent_q: str
+    western_q: str
+    chinese_q: str
+    ipc_codes: tuple[str, ...]
+
+
+def build_rank_query(expanded: ExpandedQuery, topic: str = "") -> str:
+    """Merged query for relevance ranking (IPC weighted ×2)."""
     parts: list[str] = []
     if topic.strip():
         parts.append(topic.strip())
+    parts.extend(expanded.ipc_cpc_suggestions)
+    parts.extend(expanded.ipc_cpc_suggestions)
     parts.extend(expanded.chinese_keywords)
     parts.extend(expanded.english_synonyms)
-    parts.extend(expanded.ipc_cpc_suggestions)
     return " ".join(dict.fromkeys(p for p in parts if p))
+
+
+def build_patent_query(expanded: ExpandedQuery, topic: str = "") -> str:
+    """USPTO/EPO full-text patent search (English-heavy)."""
+    parts: list[str] = []
+    if topic.strip():
+        parts.append(topic.strip())
+    parts.extend(expanded.english_synonyms[:8])
+    return " ".join(dict.fromkeys(p for p in parts if p)) or topic
+
+
+def build_western_query(expanded: ExpandedQuery, topic: str = "") -> str:
+    """arXiv / Semantic Scholar / SerpAPI scholar."""
+    western = list(expanded.english_synonyms[:6])
+    if not western:
+        western = [p for p in expanded.chinese_keywords if re.search(r"[a-zA-Z]", p)]
+    return " ".join(western) if western else topic
+
+
+def build_chinese_query(expanded: ExpandedQuery, topic: str = "") -> str:
+    """Chinese patent / Chinese web retrieval."""
+    chinese = list(expanded.chinese_keywords[:8])
+    if not chinese and topic and re.search(r"[一-鿿]", topic):
+        chinese = [topic.strip()]
+    return " ".join(dict.fromkeys(chinese)) if chinese else ""
+
+
+def build_search_queries(expanded: ExpandedQuery, topic: str = "") -> str:
+    """Backward-compatible alias — returns rank query."""
+    return build_rank_query(expanded, topic)
+
+
+def prepare_search_queries(topic: str, settings: Settings | None = None) -> SearchQueries:
+    """Expand topic and build per-source query bundle."""
+    settings = settings or get_settings()
+    q = (topic or "").strip()
+    if not q:
+        empty = ExpandedQuery(intent="", chinese_keywords=[], english_synonyms=[], ipc_cpc_suggestions=[])
+        return SearchQueries(empty, "", "", "", "", ())
+
+    expanded = QueryExpander(settings).expand(q)
+    ipc = tuple(expanded.ipc_cpc_suggestions[:5])
+    return SearchQueries(
+        expanded=expanded,
+        rank_q=build_rank_query(expanded, q),
+        patent_q=build_patent_query(expanded, q),
+        western_q=build_western_query(expanded, q),
+        chinese_q=build_chinese_query(expanded, q),
+        ipc_codes=ipc,
+    )
 
 
 _EXPAND_PROMPT = """你是一位涂料与多相聚合物研发领域的专利与文献检索专家。

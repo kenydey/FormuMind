@@ -79,24 +79,16 @@ def _filter_seed_by_query(
 
 def _resolve_search_query(query: str) -> str:
     """Expand a user topic via QueryExpander for cross-lingual retrieval."""
-    return _prepare_search_queries(query)[0]
+    from .deep_research.query_expander import prepare_search_queries
+
+    return prepare_search_queries(query).rank_q
 
 
-def _prepare_search_queries(query: str) -> tuple[str, str, str]:
-    """Return (rank_query, patent_query, western_query) for multi-source search."""
-    q = (query or "").strip()
-    if not q:
-        return q, q, q
-    from .deep_research.query_expander import QueryExpander, build_search_query
+def _prepare_search_queries(query: str):
+    """Return SearchQueries bundle for multi-source search."""
+    from .deep_research.query_expander import prepare_search_queries
 
-    expanded = QueryExpander().expand(q)
-    rank_q = build_search_query(expanded, q)
-    patent_q = rank_q
-    western_parts = list(expanded.english_synonyms[:6])
-    if not western_parts:
-        western_parts = [p for p in expanded.chinese_keywords if re.search(r"[a-zA-Z]", p)]
-    western_q = " ".join(western_parts) if western_parts else q
-    return rank_q, patent_q, western_q
+    return prepare_search_queries(query)
 
 
 def _fetch_with_timeout(fetch, cursor: int) -> list[Evidence]:
@@ -119,7 +111,11 @@ def _build_patent_query(req: Requirement | None, query: str) -> str:
 
 
 def _online_search(
-    req: Requirement | None, query: str, limit: int
+    req: Requirement | None,
+    query: str,
+    limit: int,
+    *,
+    ipc_codes: tuple[str, ...] | list[str] | None = None,
 ) -> list[Evidence] | None:
     """Attempt real patent retrieval; return None if unavailable."""
     try:
@@ -128,6 +124,8 @@ def _online_search(
         return None
     try:
         search_q = _build_patent_query(req, query)
+        if ipc_codes:
+            search_q = f"{search_q} {' '.join(ipc_codes[:3])}".strip()
         results = Patent.objects.filter(search_q).limit(limit)  # pragma: no cover - network
         evidence = []
         for i, p in enumerate(results):
@@ -142,6 +140,49 @@ def _online_search(
         return None
 
 
+def _search_epo_patents(
+    query: str,
+    ipc_codes: tuple[str, ...] | list[str] | None,
+    limit: int,
+    offset: int = 0,
+) -> list[Evidence]:
+    """EPO Inpadoc search with optional CPC class filter."""
+    from ..config import get_settings
+
+    settings = get_settings()
+    if not settings.epo_consumer_key or not settings.epo_consumer_secret:
+        return []
+    try:
+        from patent_client import Inpadoc  # type: ignore
+        from ..services.secrets_store import sync_secrets_to_os_environ
+
+        sync_secrets_to_os_environ(settings)
+        filters: dict = {}
+        if query.strip():
+            filters["title_and_abstract"] = query.strip()
+        codes = list(ipc_codes or [])[:2]
+        if codes:
+            filters["cpc_class"] = codes[0]
+        if not filters:
+            return []
+        results = Inpadoc.objects.filter(**filters).limit(limit + offset)  # pragma: no cover
+        out: list[Evidence] = []
+        for i, p in enumerate(results):
+            out.append(
+                Evidence(
+                    source="EPO",
+                    identifier=str(getattr(p, "publication_number", getattr(p, "epodoc_publication", f"EP{i}"))),
+                    title=str(getattr(p, "title", "") or getattr(p, "patent_title", "")),
+                    snippet=str(getattr(p, "abstract", "") or "")[:400],
+                    relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
+                )
+            )
+        return out[offset : offset + limit]
+    except Exception as exc:
+        logger.warning("EPO Inpadoc search failed: %s", exc)
+        return []
+
+
 def search(req: Requirement, limit: int = 8, query: str = "") -> list[Evidence]:
     """Backward-compatible public entry point — delegates to search_patents."""
     return search_patents(req, query=query, limit=limit)
@@ -152,11 +193,19 @@ def search_patents(
     limit: int = 5,
     offset: int = 0,
     query: str = "",
+    *,
+    ipc_codes: tuple[str, ...] | list[str] | None = None,
 ) -> list[Evidence]:
     """专利搜索（patent_client + 种子语料回退）。``offset`` 支持增量翻页。"""
-    result = _online_search(req, query, limit + offset)
-    if result:
-        return result[offset : offset + limit]
+    merged: list[Evidence] = []
+    epo = _search_epo_patents(query or _build_patent_query(req, ""), ipc_codes, limit, offset)
+    merged.extend(epo)
+    if len(merged) < limit:
+        result = _online_search(req, query, limit + offset - len(merged), ipc_codes=ipc_codes)
+        if result:
+            merged.extend(result[offset : offset + limit - len(epo)])
+    if merged:
+        return merged[:limit]
     corpus = SEED_CORPUS.get(req.domain, [])
     seed_query = query or _build_patent_query(req, "")
     evidence = [
@@ -168,12 +217,22 @@ def search_patents(
 
 
 def search_patents_by_query(
-    query: str, limit: int = 5, offset: int = 0
+    query: str,
+    limit: int = 5,
+    offset: int = 0,
+    *,
+    ipc_codes: tuple[str, ...] | list[str] | None = None,
 ) -> list[Evidence]:
     """仅按用户 query 检索专利（无 Requirement 时使用种子语料回退）。"""
-    result = _online_search(None, query, limit + offset)
-    if result:
-        return result[offset : offset + limit]
+    merged: list[Evidence] = []
+    epo = _search_epo_patents(query, ipc_codes, limit, offset)
+    merged.extend(epo)
+    if len(merged) < limit:
+        result = _online_search(None, query, limit + offset - len(merged), ipc_codes=ipc_codes)
+        if result:
+            merged.extend(result[offset : offset + limit - len(epo)])
+    if merged:
+        return merged[:limit]
     all_seeds: list[Evidence] = []
     for domain_docs in SEED_CORPUS.values():
         for i, doc in enumerate(domain_docs):
@@ -185,8 +244,16 @@ def search_patents_by_query(
     return filtered[offset : offset + limit]
 
 
-def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: bool | None = None) -> list[Evidence]:
     """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
+    from ..config import get_settings
+
+    use_filter = domain_filter if domain_filter is not None else get_settings().arxiv_domain_filter
+    arxiv_query = query
+    if use_filter and query.strip():
+        arxiv_query = (
+            f"({query}) AND (cat:cond-mat.mtrl-sci OR cat:physics.chem-ph OR cat:cs.CE)"
+        )
     try:
         import arxiv  # type: ignore
 
@@ -194,7 +261,7 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
         results = list(
             client.results(
                 arxiv.Search(
-                    query=query,
+                    query=arxiv_query,
                     max_results=limit + offset,
                     sort_by=arxiv.SortCriterion.Relevance,
                 )
@@ -215,25 +282,41 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
         return []
 
 
+_ALLOWED_S2_FIELDS = frozenset({
+    "chemistry",
+    "materials science",
+    "engineering",
+    "environmental science",
+    "medicine",
+})
+
+
 def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
     """Semantic Scholar 学术文献搜索（HTTP API + 超时，避免 SDK 挂死）。"""
     try:
         import httpx
 
-        want = min(100, limit + offset)
+        want = min(100, (limit + offset) * 3)
         with httpx.Client(timeout=_SOURCE_TIMEOUT_SEC) as client:
             resp = client.get(
                 "https://api.semanticscholar.org/graph/v1/paper/search",
                 params={
                     "query": query,
                     "limit": want,
-                    "fields": "title,abstract,externalIds,paperId",
+                    "fields": "title,abstract,externalIds,paperId,fieldsOfStudy",
                 },
                 headers={"User-Agent": "FormuMind/0.1 (research platform)"},
             )
             resp.raise_for_status()
             payload = resp.json()
-        papers = (payload.get("data") or [])[offset : offset + limit]
+        papers = payload.get("data") or []
+        filtered = []
+        for p in papers:
+            fos = {str(x).lower() for x in (p.get("fieldsOfStudy") or [])}
+            if fos and not (fos & _ALLOWED_S2_FIELDS):
+                continue
+            filtered.append(p)
+        papers = filtered[offset : offset + limit]
         out: list[Evidence] = []
         for i, p in enumerate(papers):
             ext = p.get("externalIds") or {}
@@ -243,7 +326,7 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
                     source="Semantic Scholar",
                     identifier=identifier,
                     title=p.get("title") or "Untitled",
-                    snippet=(p.get("abstract") or "")[:500],
+                    snippet=(p.get("abstract") or "")[:1200],
                     relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
                 )
             )
@@ -276,11 +359,30 @@ def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
         return []
 
 
+def _is_patent_or_literature(e: Evidence) -> bool:
+    s = (e.source or "").lower()
+    if _is_weblike(e):
+        return False
+    return any(
+        k in s
+        for k in (
+            "uspto", "epo", "patent", "arxiv", "semantic", "literature",
+            "chemcrow", "openalex", "doi",
+        )
+    )
+
+
 def _overlap(e: Evidence, q_kw: set[str]) -> int:
     """Number of query keywords appearing in an evidence's title+snippet."""
     if not q_kw:
         return 1
     return len(q_kw & _keywords(f"{e.title} {e.snippet}"))
+
+
+def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
+    overlap = _overlap(e, q_kw)
+    overlap_norm = overlap / max(1, len(q_kw)) if q_kw else 0.0
+    return (overlap_norm * 0.7 + e.relevance * 0.3, e.relevance)
 
 
 def _is_weblike(e: Evidence) -> bool:
@@ -298,20 +400,28 @@ def _merge_filter_rank(
     * Offline seed corpus → kept via :func:`_filter_seed_by_query` (query-matched,
       else a couple of top entries so research is never empty).
     * Internet/web hits with zero query-keyword overlap are dropped as junk.
-    * arXiv / Semantic Scholar / patents are already query-targeted and pass
-      through, but everything is ranked by (keyword overlap, source relevance).
+    * Patents / literature require at least one keyword overlap (unless empty query).
     """
     q_kw = _keywords(query)
     seeds = [e for e in results if e.identifier in _SEED_IDENTIFIERS]
     online = [e for e in results if e.identifier not in _SEED_IDENTIFIERS]
-    filtered_online = [
-        e for e in online if not _is_weblike(e) or _overlap(e, q_kw) > 0
-    ]
+
+    def _keep(e: Evidence) -> bool:
+        if not q_kw:
+            return True
+        ov = _overlap(e, q_kw)
+        if _is_weblike(e):
+            return ov > 0
+        if _is_patent_or_literature(e):
+            return ov >= 1
+        return ov > 0
+
+    filtered_online = [e for e in online if _keep(e)]
     merged = filtered_online + _filter_seed_by_query(seeds, query)
 
     seen: set[str] = set()
     deduped: list[Evidence] = []
-    for e in sorted(merged, key=lambda x: (_overlap(x, q_kw), x.relevance), reverse=True):
+    for e in sorted(merged, key=lambda x: _rank_score(x, q_kw), reverse=True):
         key = e.identifier or e.title
         if key not in seen:
             seen.add(key)
@@ -325,6 +435,9 @@ def _build_streams(
     source_types: list[str],
     req: Requirement | None,
     page_size: int,
+    *,
+    ipc_codes: tuple[str, ...] | list[str] = (),
+    chinese_query: str = "",
 ) -> list[dict]:
     """One paged stream per source. ``paged`` sources support offset/round paging;
     single-shot sources (chemcrow/notebooklm) yield once then finish."""
@@ -334,16 +447,21 @@ def _build_streams(
         streams.append({"name": name, "fetch": fetch, "cursor": 0, "paged": paged, "done": False})
 
     if "patents" in source_types:
+        ipc = tuple(ipc_codes)
         if req is not None:
             add(
                 "patents",
-                lambda off, q=patent_query: search_patents(req, page_size, offset=off, query=q),
+                lambda off, q=patent_query, ipc=ipc: search_patents(
+                    req, page_size, offset=off, query=q, ipc_codes=ipc
+                ),
                 True,
             )
         else:
             add(
                 "patents",
-                lambda off, q=patent_query: search_patents_by_query(q, page_size, offset=off),
+                lambda off, q=patent_query, ipc=ipc: search_patents_by_query(
+                    q, page_size, offset=off, ipc_codes=ipc
+                ),
                 True,
             )
     if "literature" in source_types:
@@ -355,7 +473,8 @@ def _build_streams(
         )
         add("chemlit", lambda off, q=western_query: search_chemcrow_lit(q, page_size), False)
     if "internet" in source_types:
-        add("web", lambda off, q=western_query: search_web(q, page_size, offset=off), True)
+        web_q = chinese_query or western_query
+        add("web", lambda off, q=web_q: search_web(q, page_size, offset=off), True)
         add("chemweb", lambda off, q=western_query: search_chemcrow_web(q, page_size), False)
     if "notebooklm" in source_types:
         def _nb(off: int, q=western_query) -> list[Evidence]:
@@ -388,11 +507,20 @@ def iter_search(
     """
     q = query or (req.headline() if req else "coating formulation")
     if (query or "").strip():
-        rank_q, patent_q, western_q = _prepare_search_queries(q)
+        sq = _prepare_search_queries(q)
+        rank_q = sq.rank_q
+        patent_q = sq.patent_q
+        western_q = sq.western_q
+        chinese_q = sq.chinese_q
+        ipc_codes = sq.ipc_codes
     else:
-        rank_q = patent_q = western_q = q
+        rank_q = patent_q = western_q = chinese_q = q
+        ipc_codes = ()
     page_size = max(1, min(per_source_cap, 50))
-    streams = _build_streams(patent_q, western_q, source_types, req, page_size)
+    streams = _build_streams(
+        patent_q, western_q, source_types, req, page_size,
+        ipc_codes=ipc_codes, chinese_query=chinese_q,
+    )
 
     raw: list[Evidence] = []
     seen_ids: set[str] = set()
@@ -539,16 +667,22 @@ def get_source_availability() -> dict[str, dict]:
     lit_ok = _ok("arxiv") or _ok("semanticscholar")
     web_ok = _ok("ddgs") or _ok("duckduckgo_search")
     chemcrow_ok = _ok("chemcrow")
+    from ..config import get_settings
+
+    s = get_settings()
+    serpapi_ok = bool(s.serpapi_api_key)
+    tavily_ok = bool(s.tavily_api_key)
+    epo_ok = bool(s.epo_consumer_key and s.epo_consumer_secret)
 
     return {
         "patents": {
-            "available": True,  # always available via offline seed corpus
-            "offline_fallback": not patents_online,
-            "reason": None if patents_online else "offline_seed",
+            "available": True,
+            "offline_fallback": True,
+            "reason": None if (patents_online or epo_ok) else "offline_seed",
             "hint": (
                 None
-                if patents_online
-                else "pip install -e '.[intel]' 启用真实 USPTO/EPO 专利检索"
+                if patents_online or epo_ok
+                else "配置 EPO OPS 凭证或 pip install -e '.[intel]' 启用 USPTO 专利检索"
             ),
         },
         "literature": {
@@ -562,14 +696,32 @@ def get_source_availability() -> dict[str, dict]:
             ),
         },
         "internet": {
-            "available": web_ok,
+            "available": web_ok or serpapi_ok or tavily_ok,
             "offline_fallback": False,
-            "reason": None if web_ok else "library_missing",
+            "reason": None if (web_ok or serpapi_ok or tavily_ok) else "library_missing",
             "hint": (
-                (None if chemcrow_ok else "pip install -e '.[intel]' 启用 ChemCrow WebSearch (SerpAPI) 化学优化搜索")
-                if web_ok
-                else "pip install -e '.[intel]' 启用 DuckDuckGo + ChemCrow 互联网检索"
+                None
+                if serpapi_ok or tavily_ok
+                else "在设置 → API 配置 中填入 SerpAPI / Tavily 密钥"
             ),
+        },
+        "serpapi": {
+            "available": serpapi_ok,
+            "offline_fallback": False,
+            "reason": None if serpapi_ok else "key_missing",
+            "hint": None if serpapi_ok else "FORMUMIND_SERPAPI_API_KEY 未配置",
+        },
+        "tavily": {
+            "available": tavily_ok,
+            "offline_fallback": False,
+            "reason": None if tavily_ok else "key_missing",
+            "hint": None if tavily_ok else "FORMUMIND_TAVILY_API_KEY 未配置",
+        },
+        "epo": {
+            "available": epo_ok,
+            "offline_fallback": False,
+            "reason": None if epo_ok else "key_missing",
+            "hint": None if epo_ok else "FORMUMIND_EPO_CONSUMER_KEY/SECRET 未配置",
         },
         "chemcrow": {
             "available": chemcrow_ok,

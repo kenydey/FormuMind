@@ -30,6 +30,12 @@ settings = get_settings()
 async def lifespan(_app: FastAPI):
     """Bootstrap ColBERT seed corpus and optional PubChem enrichment."""
     try:
+        from .services.secrets_store import reload_settings
+
+        reload_settings()
+    except Exception:
+        pass
+    try:
         from .services import colbert_store
 
         colbert_store.bootstrap_seed_corpus()
@@ -47,7 +53,9 @@ async def lifespan(_app: FastAPI):
     try:
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store
+        from .services.secrets_store import reload_settings
 
+        reload_settings()
         await get_campaign_store().close()
         get_experiment_store().close()
     except Exception:

@@ -11,7 +11,7 @@ from ...domain import knowledge
 from ...domain.schemas import ComprehensiveReport, Evidence, Requirement
 from .. import literature, llm, rag
 from .models import ExpandedQuery, RetrievalHit, RetrievalReport
-from .query_expander import QueryExpander, build_search_query
+from .query_expander import QueryExpander, prepare_search_queries
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,10 @@ class DeepResearchEngine:
     ) -> tuple[list[Evidence], ExpandedQuery]:
         """QueryExpander + iter_search 多源检索。"""
         expanded = self.expand_query(topic)
-        combined_query = build_search_query(expanded, topic)
+        from .query_expander import prepare_search_queries
+
+        sq = prepare_search_queries(topic, self._settings)
+        combined_query = sq.rank_q
         types = source_types or _DEFAULT_SOURCE_TYPES
         limit = total_limit or self._settings.search_total_limit
         cap = per_source_cap or self._settings.search_limit_per_source

@@ -526,6 +526,14 @@ export const api = {
       "/api/settings/test", {}
     ),
 
+  getSecrets: () => get<SecretsListResponse>("/api/settings/secrets"),
+
+  postSecrets: (updates: Record<string, string>) =>
+    post<SecretsListResponse>("/api/settings/secrets", { updates }),
+
+  testSecret: (id: string) =>
+    post<{ ok: boolean; message: string }>("/api/settings/secrets/test", { id }),
+
   analyzeIP: (req: IPAnalysisRequest) =>
     post<IPReport>("/api/ip/analyze", req),
 
@@ -716,8 +724,21 @@ export interface LLMProviderInfo {
 export interface LLMConfig {
   provider: string;
   model: string;
-  apiKey: string;
   baseUrl?: string;
+}
+
+export interface SecretStatus {
+  id: string;
+  env_key: string;
+  label: string;
+  group: string;
+  set: boolean;
+  masked: string;
+}
+
+export interface SecretsListResponse {
+  secrets: SecretStatus[];
+  updated?: string[];
 }
 
 export interface SearchRequest {

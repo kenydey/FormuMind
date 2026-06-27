@@ -95,7 +95,17 @@ def search_stream(req: SearchRequest) -> JSONResponse:
     return accepted_response(async_result.id, "search")
 
 
-@router.get("/search/expand", response_model=ExpandedQuery)
-def expand_search_query(topic: str = Query(..., min_length=1)) -> ExpandedQuery:
+@router.get("/search/expand")
+def expand_search_query(topic: str = Query(..., min_length=1)) -> dict:
     """将自然语言主题扩展为结构化检索查询（QueryExpander）。"""
-    return QueryExpander().expand(topic)
+    from ..services.deep_research.query_expander import prepare_search_queries
+
+    sq = prepare_search_queries(topic)
+    return {
+        **sq.expanded.model_dump(),
+        "rank_q": sq.rank_q,
+        "patent_q": sq.patent_q,
+        "western_q": sq.western_q,
+        "chinese_q": sq.chinese_q,
+        "ipc_codes": list(sq.ipc_codes),
+    }

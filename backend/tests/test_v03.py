@@ -45,10 +45,12 @@ def test_settings_update_switches_provider():
     client.post("/api/settings", json={"provider": "anthropic"})
 
 
-def test_settings_accepts_camelcase_base_url(monkeypatch):
+def test_settings_accepts_camelcase_base_url(monkeypatch, tmp_path):
     from app.config import get_settings
     from app.services import llm as llm_mod
 
+    env_file = tmp_path / ".env"
+    monkeypatch.setenv("FORMUMIND_ENV_FILE", str(env_file))
     get_settings.cache_clear()
     monkeypatch.setattr(
         llm_mod,

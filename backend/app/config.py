@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
     uspto_api_key: str | None = None           # USPTO Open Data API key
 
+    # 检索增强 API（Phase 0+）
+    serpapi_api_key: str | None = None
+    tavily_api_key: str | None = None
+    arxiv_domain_filter: bool = True
+
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
     source_guide_max_chars: int = 12000

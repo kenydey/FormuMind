@@ -186,10 +186,18 @@ export default function SourcesPanel() {
         <span className="text-slate-700">·</span>
         <button
           type="button"
+          onClick={() => openSettings("api")}
+          className="hover:text-accent"
+        >
+          API 配置 →
+        </button>
+        <span className="text-slate-700">·</span>
+        <button
+          type="button"
           onClick={() => openSettings("deps")}
           className="hover:text-accent"
         >
-          NotebookLM / 依赖配置 →
+          NotebookLM / 依赖 →
         </button>
       </div>
 
