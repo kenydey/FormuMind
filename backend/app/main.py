@@ -44,6 +44,12 @@ async def lifespan(_app: FastAPI):
         except Exception:
             pass
     yield
+    try:
+        from .db.campaign_store import get_campaign_store
+
+        await get_campaign_store().close()
+    except Exception:
+        pass
 
 
 app = FastAPI(

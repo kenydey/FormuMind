@@ -18,7 +18,14 @@ from ..domain.objective_contract import (
     row_has_required_measurements,
     validate_measurements,
 )
-from ..domain.schemas import DOEPlan, ProductDomain, Requirement
+from ..domain.schemas import (
+    DOEPlan,
+    DatalabDeleteResponse,
+    DatalabItemEnvelope,
+    DatalabSampleResponse,
+    ProductDomain,
+    Requirement,
+)
 from .campaign_types import WorkbenchRow
 from .models import Campaign
 
@@ -26,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 _PARAMS_BLOCK = "formumind_params"
 _MEASUREMENTS_BLOCK = "formumind_measurements"
+
+
+class DatalabStoreError(ValueError):
+    """Raised when Datalab API responses fail Pydantic contract validation."""
 
 
 def _utcnow() -> datetime:
@@ -68,6 +79,7 @@ def _parse_row_from_item(
     item_id: str,
     item_data: dict[str, Any],
 ) -> WorkbenchRow:
+    _validate_item_blocks(item_data)
     blocks = item_data.get("blocks_obj") or {}
     params_block = (blocks.get(_PARAMS_BLOCK) or {}).get("data") or {}
     meas_block = (blocks.get(_MEASUREMENTS_BLOCK) or {}).get("data") or {}
@@ -80,6 +92,38 @@ def _parse_row_from_item(
         actual_params=dict(params_block.get("actual_params") or {}),
         measurements=dict(meas_block),
     )
+
+
+def _validate_item_blocks(item_data: dict[str, Any]) -> None:
+    blocks = item_data.get("blocks_obj")
+    if not isinstance(blocks, dict):
+        raise DatalabStoreError("Datalab item_data.blocks_obj missing or invalid")
+    for key in (_PARAMS_BLOCK, _MEASUREMENTS_BLOCK):
+        block = blocks.get(key)
+        if not isinstance(block, dict) or "data" not in block:
+            raise DatalabStoreError(f"Datalab block {key!r} missing or invalid")
+
+
+def _parse_create_sample_response(body: dict[str, Any], expected_item_id: str) -> DatalabSampleResponse:
+    entry_raw = body.get("sample_list_entry") if isinstance(body.get("sample_list_entry"), dict) else body
+    sample = DatalabSampleResponse.model_validate(entry_raw)
+    if sample.item_id != expected_item_id:
+        raise DatalabStoreError(
+            f"Datalab item_id mismatch: expected {expected_item_id!r}, got {sample.item_id!r}"
+        )
+    return sample
+
+
+def _parse_item_envelope(body: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(body.get("item_data"), dict):
+        envelope = DatalabItemEnvelope.model_validate(body)
+        item_data = envelope.item_data
+    elif isinstance(body.get("blocks_obj"), dict):
+        item_data = body
+    else:
+        raise DatalabStoreError("Datalab get-item-data response missing item_data")
+    _validate_item_blocks(item_data)
+    return item_data
 
 
 class CampaignStoreInterface(ABC):
@@ -128,6 +172,10 @@ class CampaignStoreInterface(ABC):
         import asyncio
 
         return asyncio.run(self.get_campaign(campaign_id))
+
+    async def close(self) -> None:
+        """Release external resources (no-op for sqlite fallback)."""
+        return None
 
 
 class _CampaignMetaMixin:
@@ -183,6 +231,14 @@ class _CampaignMetaMixin:
             campaign.updated_at = _utcnow()
             session.commit()
 
+    def _delete_campaign_meta(self, campaign_id: int) -> None:
+        with self._session_factory() as session:
+            campaign = session.get(Campaign, campaign_id)
+            if campaign is None:
+                return
+            session.delete(campaign)
+            session.commit()
+
     def _update_campaign_status(self, campaign_id: int, rows: list[WorkbenchRow]) -> None:
         with self._session_factory() as session:
             campaign = session.get(Campaign, campaign_id)
@@ -204,37 +260,73 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         session_factory: sessionmaker[Session],
         *,
         timeout: float = 30.0,
+        max_connections: int = 10,
+        max_keepalive_connections: int = 5,
     ) -> None:
         super().__init__(session_factory)
         self._api_url = api_url.rstrip("/")
         self._timeout = timeout
+        self._limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive_connections,
+        )
+        self._client: httpx.AsyncClient | None = None
 
-    async def _create_sample(self, sample_data: dict[str, Any]) -> dict[str, Any]:
+    async def _ensure_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                base_url=self._api_url,
+                timeout=self._timeout,
+                limits=self._limits,
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+
+    async def _create_sample(self, sample_data: dict[str, Any]) -> DatalabSampleResponse:
+        expected_id = str(sample_data["item_id"])
         payload = {"new_sample_data": sample_data, "generate_id_automatically": False}
-        logger.info("Datalab POST /new-sample/ payload=%s", payload)
-        async with httpx.AsyncClient(base_url=self._api_url, timeout=self._timeout) as client:
-            resp = await client.post("/new-sample/", json=payload)
-            resp.raise_for_status()
-            body = resp.json()
-        entry = body.get("sample_list_entry") or body
-        logger.info("Datalab created sample item_id=%s", entry.get("item_id") or sample_data.get("item_id"))
-        return entry
+        logger.info("Datalab POST /new-sample/ item_id=%s", expected_id)
+        client = await self._ensure_client()
+        resp = await client.post("/new-sample/", json=payload)
+        resp.raise_for_status()
+        sample = _parse_create_sample_response(resp.json(), expected_id)
+        logger.info("Datalab created sample item_id=%s", sample.item_id)
+        return sample
 
     async def _get_item(self, item_id: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(base_url=self._api_url, timeout=self._timeout) as client:
-            resp = await client.get(f"/get-item-data/{item_id}")
-            resp.raise_for_status()
-            body = resp.json()
-        item_data = body.get("item_data") if isinstance(body.get("item_data"), dict) else body
-        return item_data
+        client = await self._ensure_client()
+        resp = await client.get(f"/get-item-data/{item_id}")
+        resp.raise_for_status()
+        return _parse_item_envelope(resp.json())
 
     async def _save_item(self, item_id: str, item_data: dict[str, Any]) -> dict[str, Any]:
+        _validate_item_blocks(item_data)
         payload = {"item_id": item_id, "data": item_data}
         logger.info("Datalab POST /save-item/ item_id=%s", item_id)
-        async with httpx.AsyncClient(base_url=self._api_url, timeout=self._timeout) as client:
-            resp = await client.post("/save-item/", json=payload)
-            resp.raise_for_status()
-            return resp.json()
+        client = await self._ensure_client()
+        resp = await client.post("/save-item/", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _delete_sample(self, item_id: str) -> None:
+        client = await self._ensure_client()
+        resp = await client.post("/delete-sample/", json={"item_id": item_id})
+        resp.raise_for_status()
+        body = DatalabDeleteResponse.model_validate(resp.json())
+        if body.status != "success":
+            raise DatalabStoreError(f"Datalab delete-sample failed for {item_id}: status={body.status}")
+
+    async def _rollback_created_samples(self, item_ids: list[str]) -> None:
+        for item_id in reversed(item_ids):
+            try:
+                await self._delete_sample(item_id)
+                logger.info("Saga rollback: deleted sample %s", item_id)
+            except Exception as exc:
+                logger.error("Saga rollback failed for %s: %s", item_id, exc)
 
     async def create_from_plan(
         self,
@@ -251,31 +343,45 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
         objectives = normalize_objectives(req) if req else objectives_from_snapshot(None, domain)
         meas_template = empty_measurements_template(objectives)
+        created_item_ids: list[str] = []
         refs: list[dict] = []
 
-        for idx, run in enumerate(plan.runs, start=1):
-            item_id = _new_item_id(campaign.id, run.run_id or idx)
-            planned = dict(run.natural)
-            blocks = _blocks_for_row(
-                planned_params=planned,
-                actual_params=dict(planned),
-                measurements=dict(meas_template),
-                status="Pending",
-            )
-            sample_data = {
-                "item_id": item_id,
-                "name": f"{campaign.name} — run {idx}",
-                "description": f"FormuMind DOE run {run.run_id}",
-                "type": ["samples"],
-                "blocks_obj": blocks,
-                "display_order": [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK],
-            }
-            await self._create_sample(sample_data)
-            refs.append({"id": idx, "item_id": item_id})
+        try:
+            for idx, run in enumerate(plan.runs, start=1):
+                item_id = _new_item_id(campaign.id, run.run_id or idx)
+                planned = dict(run.natural)
+                blocks = _blocks_for_row(
+                    planned_params=planned,
+                    actual_params=dict(planned),
+                    measurements=dict(meas_template),
+                    status="Pending",
+                )
+                sample_data = {
+                    "item_id": item_id,
+                    "name": f"{campaign.name} — run {idx}",
+                    "description": f"FormuMind DOE run {run.run_id}",
+                    "type": ["samples"],
+                    "blocks_obj": blocks,
+                    "display_order": [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK],
+                }
+                created_item_ids.append(item_id)
+                await self._create_sample(sample_data)
+                refs.append({"id": idx, "item_id": item_id})
 
-        self._save_sample_refs(campaign.id, refs)
-        campaign.sample_refs = refs
-        return campaign
+            self._save_sample_refs(campaign.id, refs)
+            campaign.sample_refs = refs
+            return campaign
+
+        except Exception as exc:
+            logger.error(
+                "create_from_plan failed after %d/%d samples: %s",
+                len(created_item_ids),
+                len(plan.runs),
+                exc,
+            )
+            await self._rollback_created_samples(created_item_ids)
+            self._delete_campaign_meta(campaign.id)
+            raise
 
     async def get_campaign(self, campaign_id: int) -> Campaign | None:
         return self._get_campaign_sync(campaign_id)
@@ -288,11 +394,8 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         for ref in campaign.sample_refs or []:
             row_id = int(ref["id"])
             item_id = str(ref["item_id"])
-            try:
-                item_data = await self._get_item(item_id)
-                out.append(_parse_row_from_item(campaign_id, row_id, item_id, item_data))
-            except Exception as exc:
-                logger.warning("Datalab get-item failed for %s: %s", item_id, exc)
+            item_data = await self._get_item(item_id)
+            out.append(_parse_row_from_item(campaign_id, row_id, item_id, item_data))
         return out
 
     async def batch_sync(
@@ -340,7 +443,11 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             )
             item_data["blocks_obj"] = blocks
             item_data["display_order"] = [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK]
-            await self._save_item(item_id, item_data)
+            try:
+                await self._save_item(item_id, item_data)
+            except Exception as exc:
+                logger.warning("batch_sync save failed for %s: %s", item_id, exc)
+                continue
             updated += 1
 
         refreshed = await self.list_rows(campaign_id)
@@ -465,7 +572,13 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
 
     factory = default_session_factory()
     if s.campaign_backend == "datalab":
-        _store = DatalabCampaignStore(s.datalab_api_url, factory, timeout=s.datalab_timeout_seconds)
+        _store = DatalabCampaignStore(
+            s.datalab_api_url,
+            factory,
+            timeout=s.datalab_timeout_seconds,
+            max_connections=s.datalab_max_connections,
+            max_keepalive_connections=s.datalab_max_keepalive_connections,
+        )
     else:
         _store = SqliteCampaignStore(factory)
     return _store

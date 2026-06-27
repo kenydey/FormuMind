@@ -546,4 +546,31 @@ class AgentReviewRequest(BaseModel):
     explain: bool = True  # enable optional LLM explanation polish (skipped when no key)
 
 
+class DatalabSampleResponse(BaseModel):
+    """Datalab POST /new-sample/ sample_list_entry contract."""
+
+    item_id: str
+    name: str | None = None
+    refcode: str | None = None
+    status: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class DatalabItemEnvelope(BaseModel):
+    """Datalab GET /get-item-data/{id} outer wrapper."""
+
+    item_data: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"extra": "ignore"}
+
+
+class DatalabDeleteResponse(BaseModel):
+    """Datalab POST /delete-sample/ response."""
+
+    status: str
+
+    model_config = {"extra": "ignore"}
+
+
 Requirement.model_rebuild()
