@@ -14,9 +14,12 @@ from app.pipeline.research_graph import (
     GradeResult,
     GradeVerdict,
     apply_grade,
+    build_langgraph,
+    claim_check_node,
     grade_evidence,
-    run_research_graph,
+    route_after_claim_check,
     route_after_grade,
+    run_research_graph,
 )
 
 
@@ -65,7 +68,9 @@ def test_run_research_graph_offline(settings):
     assert "retrieve" in stages
     assert "grade" in stages
     assert "generate" in stages
+    assert "claim_check" in stages
     assert state.get("grounded_evidence") is not None
+    assert "verified_claims" in state
 
 
 def test_grade_evidence_offline_heuristic(settings):
@@ -75,3 +80,55 @@ def test_grade_evidence_offline_heuristic(settings):
     ]
     grade = grade_evidence("topic", evidence, settings)
     assert grade.verdict == GradeVerdict.correct
+
+
+def test_route_after_claim_check_to_regenerate():
+    state = {"claim_check_passed": False, "claim_check_attempts": 1}
+    assert route_after_claim_check(state) == "regenerate"
+
+
+def test_route_after_claim_check_to_end_when_passed():
+    state = {"claim_check_passed": True, "claim_check_attempts": 1}
+    assert route_after_claim_check(state) == "end"
+
+
+def test_claim_check_node_offline(settings):
+    state = {
+        "topic": "epoxy primer",
+        "report_markdown": (
+            "## 关键发现\n\n"
+            "- Waterborne epoxy with zinc phosphate inhibitor improves corrosion resistance.\n"
+        ),
+        "grounded_evidence": [
+            Evidence(
+                source="seed",
+                identifier="1",
+                title="Zinc phosphate epoxy",
+                snippet="Waterborne epoxy with zinc phosphate inhibitor.",
+                relevance=0.9,
+            )
+        ],
+    }
+    out = claim_check_node(state, settings)
+    assert out["stage"] == "claim_check"
+    assert out.get("verified_claims")
+
+
+def test_build_langgraph_invoke_offline(settings):
+    compiled = build_langgraph(settings)
+    if compiled is None:
+        pytest.skip("langgraph not installed")
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+    with patch("app.pipeline.research_graph.FederatedSearchEngine") as Fed:
+        Fed.return_value.search.return_value.evidence = []
+        result = compiled.invoke(
+            {
+                "topic": "epoxy corrosion primer",
+                "query": "epoxy corrosion primer",
+                "req": req,
+                "pre_index": [],
+                "fallback_used": False,
+            }
+        )
+    assert result.get("stage") in ("claim_check", "regenerate")
+    assert result.get("verified_claims") is not None

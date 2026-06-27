@@ -268,6 +268,9 @@ def run_deep_research_task(self, payload: dict) -> dict:
             web_count=0,
             kb_count=len(grounded),
             engine=state.get("recommend_engine") or "offline",
+            verified_claims=state.get("verified_claims") or [],
+            claim_check_engine="offline",
+            claim_check_pass_rate=float(state.get("claim_check_pass_rate") or 1.0),
         )
         result = {
             "report": report.model_dump(),
@@ -289,7 +292,9 @@ def _stage_progress(stage: str) -> float:
         "retrieve": 0.2,
         "grade": 0.45,
         "fallback": 0.55,
-        "generate": 0.75,
+        "generate": 0.7,
+        "claim_check": 0.82,
+        "regenerate": 0.86,
         "recommend": 0.9,
     }.get(stage, 0.5)
 

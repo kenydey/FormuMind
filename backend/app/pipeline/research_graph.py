@@ -59,6 +59,10 @@ class ResearchGraphState(TypedDict, total=False):
     recommend_engine: str
     stage: str
     report_markdown: str
+    verified_claims: list[dict]
+    claim_check_passed: bool
+    claim_check_attempts: int
+    claim_check_pass_rate: float
 
 
 ProgressCallback = Callable[[str, str, dict[str, Any] | None], None]
@@ -309,6 +313,82 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
     return state
 
 
+def claim_check_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
+    from .claim_checker import append_verification_footer, check_claims
+
+    settings = settings or get_settings()
+    topic = state.get("topic") or state.get("query") or ""
+    report = state.get("report_markdown") or state.get("answer") or ""
+    evidence = state.get("grounded_evidence") or state.get("citations") or []
+
+    result = check_claims(topic, report, evidence, settings)
+    state["verified_claims"] = [v.model_dump() for v in result.claims]
+    state["claim_check_pass_rate"] = result.pass_rate
+    state["claim_check_passed"] = result.claim_check_passed
+    state["claim_check_attempts"] = int(state.get("claim_check_attempts") or 0) + 1
+
+    if not result.claim_check_passed:
+        state["report_markdown"] = append_verification_footer(report, result)
+    state["stage"] = "claim_check"
+    return state
+
+
+def regenerate_report_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
+    from .claim_checker import ClaimVerdict, VerifiedClaim, regenerate_prompt
+    from ..services.deep_research.engine import DeepResearchEngine
+
+    settings = settings or get_settings()
+    raw_claims = state.get("verified_claims") or []
+    failed = [
+        VerifiedClaim.model_validate(v)
+        for v in raw_claims
+        if v.get("verdict") in (ClaimVerdict.unsupported.value, ClaimVerdict.conflicting.value)
+    ]
+    if not failed:
+        return state
+
+    topic = state.get("topic") or state.get("query") or ""
+    answer = state.get("answer") or ""
+    evidence = state.get("grounded_evidence") or state.get("citations") or []
+    narrowed = regenerate_prompt(topic, answer, failed)
+
+    engine = DeepResearchEngine(settings)
+    report_md, citations, _ = engine.report_agent(topic, narrowed, evidence)
+    state["report_markdown"] = report_md
+    state["citations"] = citations or evidence
+    state["stage"] = "regenerate"
+    return state
+
+
+def route_after_claim_check(state: ResearchGraphState) -> str:
+    if state.get("claim_check_passed"):
+        return "end"
+    if int(state.get("claim_check_attempts") or 0) < 2:
+        return "regenerate"
+    return "end"
+
+
+def _run_claim_check_loop(
+    state: ResearchGraphState,
+    settings: Settings,
+    progress_cb: ProgressCallback | None,
+) -> ResearchGraphState:
+    _emit(progress_cb, "claim_check", "核验论断")
+    state = claim_check_node(state, settings)
+    _emit(
+        progress_cb,
+        "claim_check",
+        f"核验通过率 {state.get('claim_check_pass_rate', 1.0):.0%}",
+        {"claim_check_pass_rate": state.get("claim_check_pass_rate")},
+    )
+    while not state.get("claim_check_passed") and int(state.get("claim_check_attempts") or 0) < 2:
+        _emit(progress_cb, "regenerate", "修正未支撑论断")
+        state = regenerate_report_node(state, settings)
+        _emit(progress_cb, "claim_check", "复核论断")
+        state = claim_check_node(state, settings)
+    return state
+
+
 def route_after_grade(state: ResearchGraphState) -> str:
     if state.get("grade") == GradeVerdict.incorrect and not state.get("fallback_used"):
         return "fallback"
@@ -386,6 +466,7 @@ def run_research_graph(
     else:
         _emit(progress_cb, "generate", "生成答案")
         state = generate_node(state, settings)
+        state = _run_claim_check_loop(state, settings, progress_cb)
         _emit(progress_cb, "recommend", "推荐配方")
     return state
 
@@ -452,13 +533,27 @@ def build_langgraph(settings: Settings | None = None):
     def _generate(s: ResearchGraphState) -> ResearchGraphState:
         return generate_node(s, settings)
 
+    def _claim_check(s: ResearchGraphState) -> ResearchGraphState:
+        return claim_check_node(s, settings)
+
+    def _regenerate(s: ResearchGraphState) -> ResearchGraphState:
+        return regenerate_report_node(s, settings)
+
     graph.add_node("retrieve", _retrieve)
     graph.add_node("grade", _grade)
     graph.add_node("fallback", _fallback)
     graph.add_node("generate", _generate)
+    graph.add_node("claim_check", _claim_check)
+    graph.add_node("regenerate", _regenerate)
     graph.set_entry_point("retrieve")
     graph.add_edge("retrieve", "grade")
     graph.add_conditional_edges("grade", route_after_grade, {"fallback": "fallback", "generate": "generate"})
     graph.add_edge("fallback", "retrieve")
-    graph.add_edge("generate", END)
+    graph.add_edge("generate", "claim_check")
+    graph.add_conditional_edges(
+        "claim_check",
+        route_after_claim_check,
+        {"regenerate": "regenerate", "end": END},
+    )
+    graph.add_edge("regenerate", "claim_check")
     return graph.compile()

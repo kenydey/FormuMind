@@ -185,7 +185,9 @@ class DeepResearchEngine:
             "retrieve": (0.2, "正在检索"),
             "grade": (0.45, "评估质量"),
             "fallback": (0.55, "重试搜索"),
-            "generate": (0.75, "生成答案"),
+            "generate": (0.7, "生成答案"),
+            "claim_check": (0.82, "核验论断"),
+            "regenerate": (0.86, "修正报告"),
             "recommend": (0.9, "推荐配方"),
         }
 
@@ -213,4 +215,7 @@ class DeepResearchEngine:
             web_count=0,
             kb_count=len(grounded),
             engine=state.get("recommend_engine") or "offline",
+            verified_claims=state.get("verified_claims") or [],
+            claim_check_engine="offline",
+            claim_check_pass_rate=float(state.get("claim_check_pass_rate") or 1.0),
         )

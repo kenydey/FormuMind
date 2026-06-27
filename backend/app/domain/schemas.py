@@ -284,6 +284,9 @@ class ComprehensiveReport(BaseModel):
     web_count: int = 0
     kb_count: int = 0
     engine: str = "offline"  # "llm" | "offline"
+    verified_claims: list[dict] = Field(default_factory=list)
+    claim_check_engine: str = "offline"
+    claim_check_pass_rate: float = 1.0
 
 
 class DeepResearchRequest(Requirement):

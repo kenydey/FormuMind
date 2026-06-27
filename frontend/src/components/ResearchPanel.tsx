@@ -7,6 +7,7 @@ const CRAG_STAGES = [
   { id: "grade", label: "评估" },
   { id: "fallback", label: "补搜" },
   { id: "generate", label: "生成" },
+  { id: "claim_check", label: "核验" },
   { id: "recommend", label: "推荐" },
 ] as const;
 
