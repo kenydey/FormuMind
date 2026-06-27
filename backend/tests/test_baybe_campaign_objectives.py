@@ -1,7 +1,9 @@
 """Tests for Campaign snapshot → BayBE objective alignment."""
 from __future__ import annotations
 
-from app.db.campaign_store import CampaignStore
+import asyncio
+
+from app.db.campaign_store import SqliteCampaignStore
 from app.db.database import make_engine, make_session_factory
 from app.domain.objective_contract import objective_metrics
 from app.domain.schemas import DOEPlan, DOERun, ObjectiveSpec, ProductDomain, Requirement
@@ -24,23 +26,24 @@ def _plan() -> DOEPlan:
 def test_resolve_campaign_objectives_from_snapshot():
     engine = make_engine("sqlite:///:memory:")
     factory = make_session_factory(engine)
-    store = CampaignStore(factory)
+    store = SqliteCampaignStore(factory)
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         objectives=[ObjectiveSpec(metric="voc_gpl", weight=1.0, direction="minimize")],
     )
-    campaign = store.create_from_plan(
-        _plan(),
-        req=Requirement(
-            domain=ProductDomain.anticorrosion_coating,
-            objectives=[
-                ObjectiveSpec(metric="salt_spray_hours", weight=0.6, direction="maximize"),
-                ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
-            ],
-        ),
+    campaign = asyncio.run(
+        store.create_from_plan(
+            _plan(),
+            req=Requirement(
+                domain=ProductDomain.anticorrosion_coating,
+                objectives=[
+                    ObjectiveSpec(metric="salt_spray_hours", weight=0.6, direction="maximize"),
+                    ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
+                ],
+            ),
+        )
     )
-    with factory() as session:
-        resolved = resolve_campaign_objectives(session, campaign.id, req)
+    resolved = resolve_campaign_objectives(store, campaign.id, req)
     metrics = objective_metrics(resolved)
     assert metrics == ["salt_spray_hours", "cost_cny_per_kg"]
 
@@ -60,7 +63,7 @@ def test_build_objective_from_specs_target_names_match_metrics():
 def test_fetch_columns_match_snapshot_metrics():
     engine = make_engine("sqlite:///:memory:")
     factory = make_session_factory(engine)
-    store = CampaignStore(factory)
+    store = SqliteCampaignStore(factory)
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         objectives=[
@@ -68,15 +71,20 @@ def test_fetch_columns_match_snapshot_metrics():
             ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
         ],
     )
-    campaign = store.create_from_plan(_plan(), req=req)
+    campaign = asyncio.run(store.create_from_plan(_plan(), req=req))
+    rows = asyncio.run(store.list_rows(campaign.id))
+    asyncio.run(
+        store.batch_sync(
+            campaign.id,
+            [
+                {
+                    "id": rows[0].id,
+                    "actual_params": {"Zinc phosphate": 9.0},
+                    "measurements": {"salt_spray_hours": 900.0, "cost_cny_per_kg": 18.0},
+                }
+            ],
+        )
+    )
 
-    with factory() as session:
-        from app.db.models import ExperimentRecord as WorkbenchRow
-
-        row = session.query(WorkbenchRow).filter(WorkbenchRow.campaign_id == campaign.id).first()
-        row.measurements = {"salt_spray_hours": 900.0, "cost_cny_per_kg": 18.0}
-        row.status = "Completed"
-        session.commit()
-
-        _, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session, req)
-        assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]
+    _, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, req, store=store)
+    assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]

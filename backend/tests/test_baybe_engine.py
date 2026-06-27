@@ -1,11 +1,12 @@
 """Tests for optional baybe Campaign engine."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from app.db.campaign_store import CampaignStore
+from app.db.campaign_store import SqliteCampaignStore
 from app.db.database import make_engine, make_session_factory
-from app.db.models import ExperimentRecord as WorkbenchRow
 from app.domain.schemas import (
     DOEPlan,
     DOERun,
@@ -60,9 +61,10 @@ def test_baybe_recommend_roundtrip():
 
 @pytest.mark.skipif(not baybe_available(), reason="baybe not installed")
 def test_baybe_recommend_with_workbench_multi_metric():
-    engine = make_engine("sqlite:///:memory:")
-    factory = make_session_factory(engine)
-    store = CampaignStore(factory)
+    baybe = BaybeCampaignEngine()
+    db_engine = make_engine("sqlite:///:memory:")
+    factory = make_session_factory(db_engine)
+    store = SqliteCampaignStore(factory)
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         objectives=[
@@ -70,26 +72,32 @@ def test_baybe_recommend_with_workbench_multi_metric():
             ObjectiveSpec(metric="cost_cny_per_kg", weight=0.4, direction="minimize"),
         ],
     )
-    campaign = store.create_from_plan(_workbench_plan(), req=req)
-
-    with factory() as session:
-        row = session.query(WorkbenchRow).filter(WorkbenchRow.campaign_id == campaign.id).first()
-        row.actual_params = {"Zinc phosphate": 9.0}
-        row.measurements = {"salt_spray_hours": 900.0, "cost_cny_per_kg": 18.0}
-        row.status = "Completed"
-        session.commit()
-
-        actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, session, req)
-        assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]
-
-        result = engine.recommend(
-            req,
-            batch_size=2,
-            workbench_campaign_id=campaign.id,
-            db=session,
+    campaign = asyncio.run(store.create_from_plan(_workbench_plan(), req=req))
+    rows = asyncio.run(store.list_rows(campaign.id))
+    asyncio.run(
+        store.batch_sync(
+            campaign.id,
+            [
+                {
+                    "id": rows[0].id,
+                    "actual_params": {"Zinc phosphate": 9.0},
+                    "measurements": {"salt_spray_hours": 900.0, "cost_cny_per_kg": 18.0},
+                }
+            ],
         )
-        assert len(result.plan.runs) == 2
-        assert result.campaign_state
+    )
+
+    actual_X, measurements_Y = fetch_campaign_data_for_baybe(campaign.id, req, store=store)
+    assert list(measurements_Y.columns) == ["salt_spray_hours", "cost_cny_per_kg"]
+
+    result = baybe.recommend(
+        req,
+        batch_size=2,
+        workbench_campaign_id=campaign.id,
+        store=store,
+    )
+    assert len(result.plan.runs) == 2
+    assert result.campaign_state
 
 
 def test_baybe_unavailable_raises():

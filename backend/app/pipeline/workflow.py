@@ -260,7 +260,6 @@ def run_optimization(
 
     resolved = (engine or "auto").lower()
     if resolved in ("auto", "baybe"):
-        from ..db.database import default_session_factory
         from ..services.engines.baybe_engine import BaybeCampaignEngine
         from ..services.engines.doe_registry import baybe_available
 
@@ -271,16 +270,14 @@ def run_optimization(
                     from ..services.training import registry
 
                     records = existing_records if existing_records is not None else registry.records_for(req.domain)
-                    with default_session_factory()() as db:
-                        return baybe_eng.run_optimization(
-                            req,
-                            iterations=iterations,
-                            campaign_state=campaign_state,
-                            measurements=list(records),
-                            progress_cb=progress_cb,
-                            workbench_campaign_id=workbench_campaign_id,
-                            db=db,
-                        )
+                    return baybe_eng.run_optimization(
+                        req,
+                        iterations=iterations,
+                        campaign_state=campaign_state,
+                        measurements=list(records),
+                        progress_cb=progress_cb,
+                        workbench_campaign_id=workbench_campaign_id,
+                    )
             except Exception:
                 if resolved == "baybe":
                     raise

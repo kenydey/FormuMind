@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 _source_guide_type = JSON().with_variant(JSONB(), "postgresql")
 
@@ -54,29 +54,8 @@ class Campaign(Base):
     lever_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
-
-    records: Mapped[list["ExperimentRecord"]] = relationship(
-        back_populates="campaign",
-        cascade="all, delete-orphan",
-        order_by="ExperimentRecord.id",
-    )
-
-
-class ExperimentRecord(Base):
-    """Single lab execution row for the AG Grid workbench (not training registry rows)."""
-
-    __tablename__ = "experiment_records"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
-    status: Mapped[str] = mapped_column(String(32), default="Pending")
-    planned_params: Mapped[dict] = mapped_column(JSON, nullable=False)
-    actual_params: Mapped[dict] = mapped_column(JSON, default=dict)
-    measurements: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
-
-    campaign: Mapped["Campaign"] = relationship(back_populates="records")
+    # Ordered Datalab sample refs: [{"id": 1, "item_id": "fm_c1_r1"}, ...]
+    sample_refs: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class SourceDocument(Base):
