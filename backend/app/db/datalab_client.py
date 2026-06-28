@@ -25,6 +25,25 @@ class DatalabUnavailableError(RuntimeError):
         self.reason = reason or ""
 
 
+# Datalab Headless API uses ``blocktype`` (no underscore) and string ``type`` on samples.
+# Comment blocks store arbitrary JSON in ``data`` (see datalab CommentBlock).
+DATALAB_SAMPLE_TYPE = "samples"
+DATALAB_BLOCK_KIND = "comment"
+
+
+def datalab_block(block_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Build a blocks_obj entry accepted by Datalab ``/new-sample/``."""
+    return {
+        "block_id": block_id,
+        "blocktype": DATALAB_BLOCK_KIND,
+        "data": data,
+    }
+
+
+def datalab_sample_type() -> str:
+    return DATALAB_SAMPLE_TYPE
+
+
 def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, str | None]:
     """Return (reachable, error_reason)."""
     import httpx

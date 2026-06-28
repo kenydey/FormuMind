@@ -41,3 +41,10 @@ def factors_for_requirement(req: Requirement, factors: list[DOEFactor] | None = 
     from ....pipeline.workflow import build_doe_factors
 
     return build_doe_factors(req)
+
+
+def factors_from_campaign(campaign, req: Requirement) -> list[DOEFactor]:
+    """Use Campaign.lever_snapshot when recommending from a workbench campaign."""
+    if campaign is not None and campaign.lever_snapshot:
+        return [DOEFactor(**item) for item in campaign.lever_snapshot]
+    return factors_for_requirement(req)

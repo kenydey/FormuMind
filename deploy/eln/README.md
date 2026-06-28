@@ -71,4 +71,15 @@ FORMUMIND_REDIS_URL=redis://redis:6379/0
 - API 返回 **503**，`detail` 含中文修复指引
 - 前端 DOE 弹窗显示具体错误
 
+## Datalab Headless API 契约（FormuMind payload）
+
+创建样品时 FormuMind 发送：
+
+| 字段 | 正确值 | 常见错误 |
+|------|--------|----------|
+| `type` | `"samples"`（字符串） | `["samples"]`（列表） |
+| `blocks_obj.*.blocktype` | `"comment"` | `block_type: "generic"` |
+
+自定义 JSON 存放在 comment block 的 `data` 字段（`formumind_params` / `formumind_measurements`）。
+
 开发/CI 仍可使用 `FORMUMIND_CAMPAIGN_BACKEND=sqlite`。

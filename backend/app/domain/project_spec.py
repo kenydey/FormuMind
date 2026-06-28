@@ -119,6 +119,43 @@ def levers_to_doe_factors(levers: list[LeverSpec]) -> list[DOEFactor]:
     return [DOEFactor(name=l.name, low=l.low, high=l.high, unit=l.unit) for l in levers]
 
 
+def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]:
+    """Persist DOE levers on Campaign — derive from plan.runs when factors list is empty."""
+    from .schemas import ProductDomain
+
+    if req and req.levers:
+        return [lev.model_dump() for lev in req.levers]
+    if plan.factors:
+        return [{"name": f.name, "low": f.low, "high": f.high, "unit": f.unit} for f in plan.factors]
+
+    domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
+    legacy_map = {name: (lo, hi) for name, lo, hi in _LEGACY_LEVERS.get(domain, [])}
+    keys: list[str] = []
+    seen: set[str] = set()
+    values: dict[str, list[float]] = {}
+    for run in plan.runs:
+        for key, raw in (run.natural or {}).items():
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+            try:
+                values.setdefault(key, []).append(float(raw))
+            except (TypeError, ValueError):
+                continue
+
+    snapshot: list[dict] = []
+    for name in keys:
+        if name in legacy_map:
+            lo, hi = legacy_map[name]
+            unit = "C" if name == "cure_temperature_c" else "wt%"
+        else:
+            samples = values.get(name) or [50.0]
+            lo, hi = _bounds_from_pct(sum(samples) / len(samples))
+            unit = "C" if name == "cure_temperature_c" else "wt%"
+        snapshot.append({"name": name, "low": lo, "high": hi, "unit": unit})
+    return snapshot
+
+
 def formulation_from_materials(req: Requirement) -> Formulation | None:
     if not req.materials:
         return None

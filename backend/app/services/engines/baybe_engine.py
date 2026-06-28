@@ -21,7 +21,7 @@ from ...pipeline.workflow import (
 from ...services import predictor
 from ...config import get_settings
 from .adapters.baybe_objective_builder import build_objective_from_specs, primary_metric
-from .adapters.baybe_space_builder import build_searchspace, factors_for_requirement
+from .adapters.baybe_space_builder import build_searchspace, factors_for_requirement, factors_from_campaign
 from .adapters.doe_adapter import dataframe_to_doe_plan
 from .adapters.measurements_adapter import records_to_dataframe, surrogate_measurements_from_plan
 from .campaign_objectives import resolve_campaign_objectives
@@ -148,11 +148,16 @@ class BaybeCampaignEngine:
         metrics = objective_metrics(objectives)
 
         measurements = measurements or []
+        wb_factors: list | None = None
+        if workbench_campaign_id is not None and campaign_state is None:
+            campaign_meta = campaign_store.get_campaign_sync(workbench_campaign_id)
+            wb_factors = factors_from_campaign(campaign_meta, req)
+
         if campaign_state:
             campaign = Campaign.from_json(campaign_state)
-            factor_list = factors_for_requirement(req)
+            factor_list = wb_factors or factors_for_requirement(req)
         else:
-            campaign, factor_list = self._new_campaign(req, objectives)
+            campaign, factor_list = self._new_campaign(req, objectives, wb_factors)
 
         df_meas = records_to_dataframe(measurements, req, objectives)
         if not df_meas.empty and metrics:

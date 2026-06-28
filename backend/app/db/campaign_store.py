@@ -29,6 +29,8 @@ from .datalab_client import (
     DatalabStoreError,
     DatalabUnavailableError,
     check_datalab_reachable,
+    datalab_block,
+    datalab_sample_type,
     parse_create_sample_response,
     parse_delete_response,
     parse_item_envelope,
@@ -64,20 +66,15 @@ def _blocks_for_row(
     status: str,
 ) -> dict[str, Any]:
     return {
-        _PARAMS_BLOCK: {
-            "block_id": _PARAMS_BLOCK,
-            "block_type": "generic",
-            "data": {
+        _PARAMS_BLOCK: datalab_block(
+            _PARAMS_BLOCK,
+            {
                 "planned_params": planned_params,
                 "actual_params": actual_params,
                 "status": status,
             },
-        },
-        _MEASUREMENTS_BLOCK: {
-            "block_id": _MEASUREMENTS_BLOCK,
-            "block_type": "generic",
-            "data": dict(measurements),
-        },
+        ),
+        _MEASUREMENTS_BLOCK: datalab_block(_MEASUREMENTS_BLOCK, dict(measurements)),
     }
 
 
@@ -172,11 +169,9 @@ class _CampaignMetaMixin:
         campaign_name = name or f"DOE {plan.design} ({plan.plan_id[:8] or 'local'})"
         domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
         objectives = normalize_objectives(req) if req else objectives_from_snapshot(None, domain)
-        lever_snapshot = (
-            [lev.model_dump() for lev in req.levers]
-            if req and req.levers
-            else [{"name": f.name, "low": f.low, "high": f.high, "unit": f.unit} for f in plan.factors]
-        )
+        from ..domain.project_spec import lever_snapshot_from_plan
+
+        lever_snapshot = lever_snapshot_from_plan(plan, req)
         primary = objectives[0].metric if objectives else None
         with self._session_factory() as session:
             campaign = Campaign(
@@ -334,7 +329,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                     "item_id": item_id,
                     "name": f"{campaign.name} — run {idx}",
                     "description": f"FormuMind DOE run {run.run_id}",
-                    "type": ["samples"],
+                    "type": datalab_sample_type(),
                     "blocks_obj": blocks,
                     "display_order": [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK],
                 }

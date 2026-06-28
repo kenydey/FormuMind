@@ -29,6 +29,8 @@ from .datalab_client import (
     DatalabStoreError,
     DatalabUnavailableError,
     check_datalab_reachable,
+    datalab_block,
+    datalab_sample_type,
     parse_create_sample_response,
     parse_delete_response,
     parse_item_envelope,
@@ -67,11 +69,7 @@ def _training_block_data(rec: ExperimentRecord) -> dict[str, Any]:
 
 def _blocks_for_training(rec: ExperimentRecord) -> dict[str, Any]:
     return {
-        _TRAINING_BLOCK: {
-            "block_id": _TRAINING_BLOCK,
-            "block_type": "generic",
-            "data": _training_block_data(rec),
-        }
+        _TRAINING_BLOCK: datalab_block(_TRAINING_BLOCK, _training_block_data(rec)),
     }
 
 
@@ -273,7 +271,7 @@ class DatalabExperimentStore:
                         "item_id": item_id,
                         "name": rec.label or f"Training {rec.domain.value}",
                         "description": "FormuMind experiment training record",
-                        "type": ["samples"],
+                        "type": datalab_sample_type(),
                         "blocks_obj": _blocks_for_training(rec),
                         "display_order": [_TRAINING_BLOCK],
                     }

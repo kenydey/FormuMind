@@ -41,7 +41,7 @@ def _item_data(*, status: str = "Pending") -> dict:
         "blocks_obj": {
             _PARAMS: {
                 "block_id": _PARAMS,
-                "block_type": "generic",
+                "blocktype": "comment",
                 "data": {
                     "planned_params": planned,
                     "actual_params": dict(planned),
@@ -50,7 +50,7 @@ def _item_data(*, status: str = "Pending") -> dict:
             },
             _MEASUREMENTS: {
                 "block_id": _MEASUREMENTS,
-                "block_type": "generic",
+                "blocktype": "comment",
                 "data": {"salt_spray_hours": None, "cost_cny_per_kg": None},
             },
         }
