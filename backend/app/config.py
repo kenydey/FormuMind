@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     ingest_chunk_overlap: int = 200
 
     # DOE workbench / campaign persistence (Headless ELN)
-    campaign_backend: str = "datalab"  # datalab | sqlite (local JSON fallback for tests)
+    campaign_backend: str = "sqlite"  # sqlite | datalab | auto (probe Datalab, else sqlite)
     datalab_api_url: str = "http://localhost:5001"
     datalab_timeout_seconds: float = 30.0
     datalab_max_connections: int = 10

@@ -34,6 +34,7 @@ def make_engine(db_url: str) -> Engine:
     Base.metadata.create_all(engine)
     _drop_legacy_workbench_table(engine)
     _ensure_experiment_columns(engine)
+    _ensure_campaign_columns(engine)
     return engine
 
 
@@ -49,6 +50,26 @@ def _ensure_experiment_columns(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE experiments ADD COLUMN item_id VARCHAR(128)"))
         if "project_id" not in cols:
             conn.execute(text("ALTER TABLE experiments ADD COLUMN project_id VARCHAR(36) DEFAULT ''"))
+
+
+def _ensure_campaign_columns(engine: Engine) -> None:
+    """Add workbench / Datalab columns to legacy campaigns tables."""
+    from sqlalchemy import inspect, text
+
+    if "campaigns" not in inspect(engine).get_table_names():
+        return
+    cols = {c["name"] for c in inspect(engine).get_columns("campaigns")}
+    with engine.begin() as conn:
+        if "project_id" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN project_id VARCHAR(36)"))
+        if "primary_metric" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN primary_metric VARCHAR(64)"))
+        if "objectives_snapshot" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN objectives_snapshot JSON"))
+        if "lever_snapshot" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN lever_snapshot JSON"))
+        if "sample_refs" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN sample_refs JSON DEFAULT '[]'"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:

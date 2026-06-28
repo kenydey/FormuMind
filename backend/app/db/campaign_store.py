@@ -535,6 +535,16 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
 _store: CampaignStoreInterface | None = None
 
 
+def _datalab_reachable(api_url: str, timeout: float = 2.0) -> bool:
+    """Lightweight TCP/HTTP probe — avoids selecting Datalab when the ELN is down."""
+    try:
+        with httpx.Client(base_url=api_url.rstrip("/"), timeout=timeout) as client:
+            client.get("/")
+        return True
+    except Exception:
+        return False
+
+
 def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterface:
     global _store
     if _store is not None:
@@ -543,7 +553,11 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
     from .database import default_session_factory
 
     factory = default_session_factory()
-    if s.campaign_backend == "datalab":
+    backend = (s.campaign_backend or "sqlite").lower()
+    use_datalab = backend == "datalab" or (
+        backend == "auto" and _datalab_reachable(s.datalab_api_url, timeout=min(2.0, s.datalab_timeout_seconds))
+    )
+    if use_datalab:
         _store = DatalabCampaignStore(
             s.datalab_api_url,
             factory,
@@ -551,7 +565,13 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
             max_connections=s.datalab_max_connections,
             max_keepalive_connections=s.datalab_max_keepalive_connections,
         )
+        logger.info("Campaign store: Datalab (%s)", s.datalab_api_url)
     else:
+        if backend in ("datalab", "auto"):
+            logger.warning(
+                "Datalab unreachable at %s — using sqlite campaign fallback",
+                s.datalab_api_url,
+            )
         _store = SqliteCampaignStore(factory)
     return _store
 

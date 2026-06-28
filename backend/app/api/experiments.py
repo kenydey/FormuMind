@@ -163,13 +163,19 @@ async def create_workbench_campaign(
 ) -> WorkbenchCampaignResponse:
     """Seed a campaign + pending rows from a generated DOE plan (Datalab samples)."""
     store = get_campaign_store()
-    campaign = await store.create_from_plan(
-        payload.plan,
-        name=payload.name,
-        strategy=payload.strategy,
-        req=payload.requirement,
-        project_id=payload.project_id,
-    )
+    try:
+        campaign = await store.create_from_plan(
+            payload.plan,
+            name=payload.name,
+            strategy=payload.strategy,
+            req=payload.requirement,
+            project_id=payload.project_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"实验台账创建失败：{exc}. 若未部署 Datalab，请设置 FORMUMIND_CAMPAIGN_BACKEND=sqlite",
+        ) from exc
     rows = await store.list_rows(campaign.id)
     return _campaign_response(campaign, rows)
 
