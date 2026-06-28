@@ -94,6 +94,7 @@ dev = [
     "httpx>=0.27",
     "pypdf>=4.0",             # real PDF parsing in test_pdf_downloader real-path tests
 ]
+postgres = ["psycopg2-binary>=2.9"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

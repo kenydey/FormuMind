@@ -1,0 +1,71 @@
+# FormuMind — Enterprise ELN overlay (Plan D)
+#
+# Usage:
+#   docker network create formumind-eln
+#   # Start official Datalab stack on the same network (see deploy/eln/README.md)
+#   docker compose -f docker-compose.yml -f docker-compose.eln.yml up
+#
+# For an existing external Datalab cluster, set FORMUMIND_DATALAB_API_URL only.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${FORMUMIND_PG_USER:-formumind}
+      POSTGRES_PASSWORD: ${FORMUMIND_PG_PASSWORD:-formumind}
+      POSTGRES_DB: ${FORMUMIND_PG_DB:-formumind}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FORMUMIND_PG_USER:-formumind} -d ${FORMUMIND_PG_DB:-formumind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - formumind-eln
+
+  backend:
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_DB_URL: postgresql+psycopg2://${FORMUMIND_PG_USER:-formumind}:${FORMUMIND_PG_PASSWORD:-formumind}@postgres:5432/${FORMUMIND_PG_DB:-formumind}
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - formumind-eln
+
+  worker:
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_DB_URL: postgresql+psycopg2://${FORMUMIND_PG_USER:-formumind}:${FORMUMIND_PG_PASSWORD:-formumind}@postgres:5432/${FORMUMIND_PG_DB:-formumind}
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - formumind-eln
+
+  frontend:
+    networks:
+      - formumind-eln
+
+  redis:
+    networks:
+      - formumind-eln
+
+networks:
+  formumind-eln:
+    name: formumind-eln
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -10,6 +10,36 @@ class DatalabStoreError(ValueError):
     """Raised when Datalab API responses fail Pydantic contract validation."""
 
 
+class DatalabUnavailableError(RuntimeError):
+    """Raised when Datalab ELN is required but unreachable."""
+
+    def __init__(self, api_url: str, reason: str | None = None) -> None:
+        msg = (
+            f"Datalab ELN 不可达（{api_url}）。"
+            "请确认 Datalab API 已启动且 FORMUMIND_DATALAB_API_URL 正确。"
+        )
+        if reason:
+            msg = f"{msg} 原因：{reason}"
+        super().__init__(msg)
+        self.api_url = api_url
+        self.reason = reason or ""
+
+
+def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, str | None]:
+    """Return (reachable, error_reason)."""
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url:
+        return False, "FORMUMIND_DATALAB_API_URL 未配置"
+    try:
+        with httpx.Client(base_url=url, timeout=timeout) as client:
+            client.get("/")
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
 def validate_blocks(item_data: dict[str, Any], required_blocks: tuple[str, ...]) -> None:
     blocks = item_data.get("blocks_obj")
     if not isinstance(blocks, dict):

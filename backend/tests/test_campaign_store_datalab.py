@@ -10,6 +10,7 @@ import pytest
 from app.db.campaign_store import DatalabCampaignStore
 from app.db.datalab_client import (
     DatalabStoreError,
+    DatalabUnavailableError,
     parse_create_sample_response,
     parse_item_envelope,
 )
@@ -131,7 +132,7 @@ async def test_create_from_plan_saga_rollback_on_mid_failure(tmp_path):
     state = MockDatalabState(fail_on_create_call=2)
     store = await _store_with_mock(tmp_path, state)
     try:
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(DatalabUnavailableError, match="500 Internal Server Error"):
             await store.create_from_plan(_plan())
 
         assert len(state.created) == 1
@@ -172,7 +173,7 @@ async def test_create_from_plan_saga_rollback_on_item_id_mismatch(tmp_path):
     store = DatalabCampaignStore("http://datalab.test", factory)
     store._client = client
     try:
-        with pytest.raises(DatalabStoreError, match="item_id mismatch"):
+        with pytest.raises(DatalabUnavailableError, match="item_id mismatch"):
             await store.create_from_plan(_plan(runs=1))
         assert state.deleted == state.created
     finally:

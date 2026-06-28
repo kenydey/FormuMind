@@ -27,6 +27,8 @@ from ..config import Settings, get_settings
 from ..domain.schemas import ExperimentRecord, ProductDomain
 from .datalab_client import (
     DatalabStoreError,
+    DatalabUnavailableError,
+    check_datalab_reachable,
     parse_create_sample_response,
     parse_delete_response,
     parse_item_envelope,
@@ -331,7 +333,14 @@ def get_experiment_store(settings: Settings | None = None) -> ExperimentStore:
     from .database import default_session_factory
 
     factory = default_session_factory()
-    if s.experiment_backend == "datalab":
+    backend = (s.experiment_backend or "sqlite").lower()
+    if backend == "datalab":
+        ok, reason = check_datalab_reachable(
+            s.datalab_api_url,
+            timeout=min(2.0, s.datalab_timeout_seconds),
+        )
+        if not ok:
+            raise DatalabUnavailableError(s.datalab_api_url, reason)
         _store = DatalabExperimentStore(
             s.datalab_api_url,
             factory,
@@ -340,6 +349,10 @@ def get_experiment_store(settings: Settings | None = None) -> ExperimentStore:
             max_keepalive_connections=s.datalab_max_keepalive_connections,
         )
     else:
+        if s.environment == "production":
+            logger.warning(
+                "SqlExperimentStore is deprecated for production; set FORMUMIND_EXPERIMENT_BACKEND=datalab"
+            )
         _store = SqlExperimentStore(factory)
     return _store
 
