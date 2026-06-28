@@ -17,10 +17,10 @@ COPY requirements.txt ./
 RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements.txt
 
-# 2) Install the application itself; deps are already satisfied above (--no-deps).
+# 2) Install application + LLM extras (DeepSeek/OpenAI-compatible providers).
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN pip install --no-deps -e .
+RUN pip install -e ".[llm]"
 
 EXPOSE 8000
 

@@ -26,10 +26,11 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
-      FORMUMIND_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
     volumes:
       - ./data/colbert_index:/app/data/colbert_index
@@ -51,10 +52,11 @@ services:
     build: ./backend
     restart: unless-stopped
     command: celery -A app.worker.celery_app.celery_app worker --loglevel=info
+    env_file:
+      - .env
     environment:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
-      FORMUMIND_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
     volumes:
       - ./data/colbert_index:/app/data/colbert_index

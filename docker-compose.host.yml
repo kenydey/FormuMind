@@ -1,0 +1,27 @@
+# Host-network overlay for environments where Docker bridge/iptables is restricted.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+#
+# All services share the host network namespace; nginx listens on :5173.
+
+services:
+  redis:
+    network_mode: host
+    ports: !reset []
+    command: redis-server --port 6379 --bind 127.0.0.1
+
+  backend:
+    network_mode: host
+    ports: !reset []
+    environment:
+      FORMUMIND_REDIS_URL: redis://127.0.0.1:6379/0
+
+  worker:
+    network_mode: host
+    environment:
+      FORMUMIND_REDIS_URL: redis://127.0.0.1:6379/0
+
+  frontend:
+    network_mode: host
+    ports: !reset []
+    volumes:
+      - ./frontend/nginx.host.conf:/etc/nginx/conf.d/default.conf:ro
