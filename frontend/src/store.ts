@@ -31,6 +31,8 @@ import {
   type Requirement,
   type ResearchResult,
   type SearchSourceType,
+  type SearchStreamProgress,
+  parseSearchStreamData,
   type SourceStatus,
   type TaskStatus,
 } from "./api";
@@ -124,6 +126,7 @@ interface AppState {
   sourceStatus: Record<string, SourceStatus>;
   chatHistory: ChatMessage[];
   searchBusy: boolean;
+  searchProgress: SearchStreamProgress | null;
   deepResearchBusy: boolean;
   deepResearchStage: string;
   deepResearchMessage: string;
@@ -350,6 +353,7 @@ export const useStore = create<AppState>()(
       sourceStatus: {} as Record<string, SourceStatus>,
       chatHistory: [],
       searchBusy: false,
+      searchProgress: null,
       deepResearchBusy: false,
       deepResearchStage: "",
       deepResearchMessage: "",
@@ -1294,6 +1298,16 @@ export const useStore = create<AppState>()(
         set((draft) => {
           draft.searchBusy = true;
           draft.error = null;
+          draft.sources = [];
+          draft.selectedSources = [];
+          draft.searchProgress = {
+            message: "正在排队…",
+            total: 0,
+            source: null,
+            newCount: 0,
+            sourcesDone: [],
+            sourcesPending: [],
+          };
         });
         const types = sourceTypes.filter((t) => t !== "local");
         try {
@@ -1303,10 +1317,26 @@ export const useStore = create<AppState>()(
             source_types: types.length ? types : undefined,
             total_limit: 300,
           });
-          const final = await awaitTaskStream(task_id, (ev) => {
-            const partial = ev.data?.evidence as Evidence[] | undefined;
-            if (partial?.length) get().addSources(partial);
-          });
+          const final = await awaitTaskStream(
+            task_id,
+            (ev) => {
+              const { evidence, progress } = parseSearchStreamData(
+                ev.data as Record<string, unknown> | undefined
+              );
+              set((draft) => {
+                draft.searchProgress = {
+                  message: ev.message || draft.searchProgress?.message || "检索中…",
+                  total: progress.total ?? draft.searchProgress?.total ?? 0,
+                  source: progress.source ?? null,
+                  newCount: progress.newCount ?? 0,
+                  sourcesDone: progress.sourcesDone ?? [],
+                  sourcesPending: progress.sourcesPending ?? [],
+                };
+              });
+              if (evidence.length) get().addSources(evidence);
+            },
+            300_000
+          );
           const r = final.data as
             | { evidence?: Evidence[]; source_status?: Record<string, SourceStatus> }
             | undefined;
@@ -1316,6 +1346,14 @@ export const useStore = create<AppState>()(
               draft.sourceStatus = r.source_status!;
             });
           }
+          set((draft) => {
+            draft.searchProgress = draft.searchProgress
+              ? {
+                  ...draft.searchProgress,
+                  message: final.message || `检索完成，共 ${draft.sources.length} 条`,
+                }
+              : null;
+          });
           get().scheduleAutosave();
         } catch (e) {
           set((draft) => {
@@ -1324,6 +1362,7 @@ export const useStore = create<AppState>()(
         } finally {
           set((draft) => {
             draft.searchBusy = false;
+            draft.searchProgress = null;
           });
         }
       },

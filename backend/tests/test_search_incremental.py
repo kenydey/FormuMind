@@ -49,14 +49,33 @@ def test_iter_search_offline_terminates_and_filters_seed():
 def test_iter_search_progress_callback_receives_results():
     req = literature.Requirement(**_REQUIREMENT)
     ticks: list[int] = []
+    meta_sources: list[str | None] = []
     literature.iter_search(
         "epoxy zinc phosphate",
         ["patents"],
         req=req,
         total_limit=300,
-        progress_cb=lambda partial: ticks.append(len(partial)),
+        progress_cb=lambda partial, meta=None: (
+            ticks.append(len(partial)),
+            meta_sources.append(meta.get("source") if meta else None),
+        ),
     )
     assert ticks, "progress_cb should fire at least once"
+    assert any(s is not None for s in meta_sources), "per-source meta expected"
+
+
+def test_iter_search_progress_fires_multiple_times():
+    """Per-source callbacks should tick more than once when multiple sub-sources run."""
+    req = literature.Requirement(**_REQUIREMENT)
+    ticks: list[int] = []
+    literature.iter_search(
+        "zinc phosphate coating",
+        ["literature", "internet"],
+        req=req,
+        total_limit=300,
+        progress_cb=lambda partial, meta=None: ticks.append(len(partial)),
+    )
+    assert len(ticks) >= 2, f"expected multiple progress ticks, got {len(ticks)}"
 
 
 def test_search_total_limit_caps_results():

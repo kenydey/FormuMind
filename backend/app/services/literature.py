@@ -580,12 +580,9 @@ def iter_search(
     """Incremental multi-source retrieval — fetch in rounds until no source turns
     up new related results (no fixed time budget).
 
-    Each round pulls the next page from every still-active source concurrently
-    (no per-source timeout); a source is marked done when it is single-shot or a
-    round yields no new unseen identifiers. ``progress_cb`` (if given) receives the
-    ranked-so-far evidence after every round, so the UI can render results while
-    the search keeps going. Stops when all sources are exhausted, ~``total_limit``
-    related results are gathered, or the ``max_rounds`` safety bound is hit.
+    Each round pulls the next page from every still-active source concurrently.
+    ``progress_cb`` (if given) is invoked after **each source** completes (not only
+    at round end), so the UI can render results while the search keeps going.
     """
     q = query or (req.headline() if req else "coating formulation")
     if (query or "").strip():
@@ -607,6 +604,22 @@ def iter_search(
     raw: list[Evidence] = []
     seen_ids: set[str] = set()
     rounds = 0
+
+    def _notify(*, source: str | None = None, new_count: int = 0) -> None:
+        if progress_cb is None:
+            return
+        ranked = _merge_filter_rank(raw, rank_q, total_limit)
+        meta = {
+            "source": source,
+            "new_count": new_count,
+            "sources_done": [s["name"] for s in streams if s["done"]],
+            "sources_pending": [s["name"] for s in streams if not s["done"]],
+        }
+        try:
+            progress_cb(ranked, meta)
+        except TypeError:
+            progress_cb(ranked)
+
     while (
         any(not st["done"] for st in streams)
         and len(raw) < total_limit * 2
@@ -632,19 +645,31 @@ def iter_search(
                 raw.extend(new)
                 if not st["paged"] or not new:
                     st["done"] = True
+                _notify(source=st["name"], new_count=len(new))
         except TimeoutError:
             logger.warning("search round timed out; marking slow sources done")
             for fut, st in futures.items():
                 if not fut.done():
                     fut.cancel()
                     st["done"] = True
+                    _notify(source=st["name"], new_count=0)
         ex.shutdown(wait=False)
-        if progress_cb is not None:
-            progress_cb(_merge_filter_rank(raw, rank_q, total_limit))
 
     final = _merge_filter_rank(raw, rank_q, total_limit)
     if progress_cb is not None:
-        progress_cb(final)
+        try:
+            progress_cb(
+                final,
+                {
+                    "source": None,
+                    "new_count": 0,
+                    "sources_done": [s["name"] for s in streams],
+                    "sources_pending": [],
+                    "final": True,
+                },
+            )
+        except TypeError:
+            progress_cb(final)
     return final
 
 

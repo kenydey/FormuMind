@@ -5,6 +5,22 @@ import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
 
+const SOURCE_LABELS: Record<string, string> = {
+  patents: "专利",
+  serpapi_lit: "Scholar",
+  openalex: "OpenAlex",
+  arxiv: "arXiv",
+  s2: "Semantic Scholar",
+  chemlit: "ChemCrow 文献",
+  internet: "互联网",
+  chemweb: "ChemCrow 网页",
+  notebooklm: "NotebookLM",
+};
+
+function sourceLabel(name: string): string {
+  return SOURCE_LABELS[name] || name;
+}
+
 function iconForSource(source: string): string {
   const s = source.toLowerCase();
   if (s.includes("patent")) return "📄";
@@ -35,6 +51,7 @@ export default function SourcesPanel() {
     openSettings,
     uploadFiles,
     searchBusy,
+    searchProgress,
     runDeepResearch,
     deepResearchBusy,
     deepResearchMessage,
@@ -152,8 +169,56 @@ export default function SourcesPanel() {
         disabled={!canSearch}
         className="shrink-0 w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
       >
-        {searchBusy ? "检索中…" : "开始检索"}
+        {searchBusy
+          ? searchProgress?.total
+            ? `检索中（${searchProgress.total} 条）…`
+            : "检索中…"
+          : "开始检索"}
       </button>
+
+      {searchBusy && searchProgress && (
+        <div className="shrink-0 rounded-lg border border-accent/25 bg-accent/5 px-3 py-2.5 text-[11px]">
+          <div className="flex items-center justify-between text-slate-400 mb-1.5">
+            <span className="text-accent2 uppercase tracking-widest">实时检索</span>
+            <span className="text-slate-300">{searchProgress.message}</span>
+          </div>
+          <div className="h-1.5 bg-edge rounded overflow-hidden mb-2">
+            <div
+              className="h-full bg-accent/80 transition-all duration-300 animate-pulse"
+              style={{
+                width: `${Math.min(100, Math.max(8, (searchProgress.total / 300) * 100))}%`,
+              }}
+            />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {searchProgress.sourcesDone.map((s) => (
+              <span
+                key={`done-${s}`}
+                className="px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-300 border border-teal-500/20"
+              >
+                ✓ {sourceLabel(s)}
+              </span>
+            ))}
+            {searchProgress.source &&
+              !searchProgress.sourcesDone.includes(searchProgress.source) && (
+                <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent border border-accent/30 animate-pulse">
+                  … {sourceLabel(searchProgress.source)}
+                </span>
+              )}
+            {searchProgress.sourcesPending
+              .filter((s) => s !== searchProgress.source)
+              .slice(0, 6)
+              .map((s) => (
+                <span
+                  key={`pending-${s}`}
+                  className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 border border-edge/60"
+                >
+                  {sourceLabel(s)}
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
 
       <button
         type="button"
@@ -240,7 +305,9 @@ export default function SourcesPanel() {
       <div className="flex-1 overflow-y-auto min-h-0 flex flex-col gap-1.5">
         {sources.length === 0 ? (
           <p className="text-slate-600 text-xs leading-relaxed">
-            勾选信息类别并填写主题后点击「开始检索」，或上传本地文件。检索完成后即可在中栏向资料提问。
+            {searchBusy
+              ? "正在检索，匹配结果将实时出现在下方列表…"
+              : "勾选信息类别并填写主题后点击「开始检索」，或上传本地文件。结果会逐条加载，无需等待全部完成。"}
           </p>
         ) : (
           sources.map((e) => {
@@ -279,6 +346,11 @@ export default function SourcesPanel() {
               </div>
             );
           })
+        )}
+        {searchBusy && sources.length > 0 && (
+          <p className="text-[10px] text-slate-500 text-center py-1 animate-pulse">
+            继续加载更多结果…
+          </p>
         )}
       </div>
     </aside>

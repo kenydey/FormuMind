@@ -391,14 +391,30 @@ def run_search_task(self, payload: dict) -> dict:
     req = Requirement(**payload["requirement"]) if payload.get("requirement") else None
 
     try:
-        def progress(partial) -> None:
+        def progress(partial, meta=None) -> None:
+            meta = meta or {}
+            source = meta.get("source")
+            new_count = int(meta.get("new_count") or 0)
+            done = meta.get("sources_done") or []
+            pending = meta.get("sources_pending") or []
+            if source:
+                msg = f"[{source}] +{new_count} 条（累计 {len(partial)}）"
+            elif meta.get("final"):
+                msg = f"检索完成，共 {len(partial)} 条"
+            else:
+                msg = f"已找到 {len(partial)} 条，继续搜索…"
             publish_progress(
                 task_id,
                 TaskProgressStatus.RUNNING,
-                message=f"已找到 {len(partial)} 条，继续搜索…",
+                stage=f"search:{source}" if source else "search",
+                message=msg,
                 data={
                     "evidence": [e.model_dump() for e in partial],
                     "total": len(partial),
+                    "source": source,
+                    "new_count": new_count,
+                    "sources_done": done,
+                    "sources_pending": pending,
                 },
             )
 

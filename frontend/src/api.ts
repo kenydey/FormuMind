@@ -800,6 +800,33 @@ export interface SearchResponse {
   source_status?: Record<string, SourceStatus>;
 }
 
+/** Incremental search progress payload (SSE task data). */
+export interface SearchStreamProgress {
+  message: string;
+  total: number;
+  source: string | null;
+  newCount: number;
+  sourcesDone: string[];
+  sourcesPending: string[];
+}
+
+export function parseSearchStreamData(
+  data: Record<string, unknown> | null | undefined
+): { evidence: Evidence[]; progress: Partial<SearchStreamProgress> } {
+  if (!data) return { evidence: [], progress: {} };
+  const evidence = Array.isArray(data.evidence) ? (data.evidence as Evidence[]) : [];
+  return {
+    evidence,
+    progress: {
+      total: typeof data.total === "number" ? data.total : evidence.length,
+      source: typeof data.source === "string" ? data.source : null,
+      newCount: typeof data.new_count === "number" ? data.new_count : 0,
+      sourcesDone: Array.isArray(data.sources_done) ? (data.sources_done as string[]) : [],
+      sourcesPending: Array.isArray(data.sources_pending) ? (data.sources_pending as string[]) : [],
+    },
+  };
+}
+
 export interface IngestResponse {
   filename: string;
   evidence: Evidence[];

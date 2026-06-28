@@ -66,8 +66,9 @@ def source_status() -> dict[str, SourceStatus]:
     return _build_status()
 
 
-@router.post("/search", response_model=SearchResponse)
+@router.post("/search", response_model=SearchResponse, deprecated=True)
 def search_sources(req: SearchRequest):
+    """同步一次性检索（legacy）。前端请使用 ``POST /api/search/stream`` 增量检索。"""
     types = _effective_source_types(req.source_types)
     evidence = literature.search_by_types(
         query=req.query,
