@@ -27,6 +27,8 @@ from ..domain.schemas import (
 from .campaign_types import WorkbenchRow
 from .datalab_client import (
     DatalabStoreError,
+    DatalabUnavailableError,
+    check_datalab_reachable,
     parse_create_sample_response,
     parse_delete_response,
     parse_item_envelope,
@@ -353,7 +355,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             )
             await self._rollback_created_samples(created_item_ids)
             self._delete_campaign_meta(campaign.id)
-            raise
+            raise DatalabUnavailableError(self._api_url, str(exc)) from exc
 
     async def get_campaign(self, campaign_id: int) -> Campaign | None:
         return self._get_campaign_sync(campaign_id)
@@ -535,14 +537,19 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
 _store: CampaignStoreInterface | None = None
 
 
-def _datalab_reachable(api_url: str, timeout: float = 2.0) -> bool:
-    """Lightweight TCP/HTTP probe — avoids selecting Datalab when the ELN is down."""
-    try:
-        with httpx.Client(base_url=api_url.rstrip("/"), timeout=timeout) as client:
-            client.get("/")
+def _datalab_required(settings: Settings) -> bool:
+    if settings.datalab_required:
         return True
-    except Exception:
-        return False
+    return settings.campaign_backend.lower() == "datalab" or settings.experiment_backend.lower() == "datalab"
+
+
+def _ensure_datalab_or_raise(settings: Settings) -> None:
+    ok, reason = check_datalab_reachable(
+        settings.datalab_api_url,
+        timeout=min(2.0, settings.datalab_timeout_seconds),
+    )
+    if not ok:
+        raise DatalabUnavailableError(settings.datalab_api_url, reason)
 
 
 def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterface:
@@ -554,10 +561,9 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
 
     factory = default_session_factory()
     backend = (s.campaign_backend or "sqlite").lower()
-    use_datalab = backend == "datalab" or (
-        backend == "auto" and _datalab_reachable(s.datalab_api_url, timeout=min(2.0, s.datalab_timeout_seconds))
-    )
-    if use_datalab:
+
+    if backend == "datalab" or (backend == "auto" and _datalab_required(s)):
+        _ensure_datalab_or_raise(s)
         _store = DatalabCampaignStore(
             s.datalab_api_url,
             factory,
@@ -565,14 +571,36 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
             max_connections=s.datalab_max_connections,
             max_keepalive_connections=s.datalab_max_keepalive_connections,
         )
-        logger.info("Campaign store: Datalab (%s)", s.datalab_api_url)
-    else:
-        if backend in ("datalab", "auto"):
-            logger.warning(
-                "Datalab unreachable at %s — using sqlite campaign fallback",
+        logger.info("Campaign store: Datalab SSOT (%s)", s.datalab_api_url)
+        return _store
+
+    if backend == "auto":
+        ok, _ = check_datalab_reachable(
+            s.datalab_api_url,
+            timeout=min(2.0, s.datalab_timeout_seconds),
+        )
+        if ok:
+            _store = DatalabCampaignStore(
                 s.datalab_api_url,
+                factory,
+                timeout=s.datalab_timeout_seconds,
+                max_connections=s.datalab_max_connections,
+                max_keepalive_connections=s.datalab_max_keepalive_connections,
             )
+            logger.info("Campaign store: Datalab (auto, %s)", s.datalab_api_url)
+            return _store
+        logger.warning(
+            "Campaign store: sqlite dev fallback (Datalab unreachable at %s)",
+            s.datalab_api_url,
+        )
         _store = SqliteCampaignStore(factory)
+        return _store
+
+    if s.environment == "production":
+        logger.warning(
+            "SqliteCampaignStore is deprecated for production; set FORMUMIND_CAMPAIGN_BACKEND=datalab"
+        )
+    _store = SqliteCampaignStore(factory)
     return _store
 
 

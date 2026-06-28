@@ -268,13 +268,30 @@ export function primaryObjectiveMetric(req: Requirement): string {
   return OBJECTIVE_METRIC[req.domain];
 }
 
+async function readApiError(res: Response, path: string): Promise<string> {
+  let detail = `${path} -> ${res.status}`;
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") {
+      detail = body.detail;
+    } else if (Array.isArray(body.detail)) {
+      detail = body.detail
+        .map((item) => (typeof item === "object" && item && "msg" in item ? String((item as { msg: unknown }).msg) : String(item)))
+        .join("；");
+    }
+  } catch {
+    // keep status fallback
+  }
+  return detail;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  if (!res.ok) throw new Error(await readApiError(res, path));
   return res.json();
 }
 
@@ -290,7 +307,7 @@ async function postAccepted(path: string, body: unknown): Promise<AsyncTaskAccep
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  if (!res.ok) throw new Error(await readApiError(res, path));
   return res.json();
 }
 
@@ -300,13 +317,13 @@ async function put<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  if (!res.ok) throw new Error(await readApiError(res, path));
   return res.json();
 }
 
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: "DELETE" });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  if (!res.ok) throw new Error(await readApiError(res, path));
   return res.json();
 }
 

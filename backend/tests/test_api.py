@@ -10,7 +10,10 @@ client = TestClient(app)
 def test_health():
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    body = r.json()
+    assert body["status"] in ("ok", "degraded")
+    assert "database" in body
+    assert "datalab" in body
 
 
 def test_meta_lists_domains():
