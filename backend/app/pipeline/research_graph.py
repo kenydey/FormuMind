@@ -9,6 +9,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
+from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..services import colbert_store, llm
 from ..services.federated_search import FederatedSearchEngine
@@ -448,7 +449,7 @@ def run_research_graph(
     straight to formulation recommendation.
     """
     settings = settings or get_settings()
-    q = query or topic or (req.headline() if req else "")
+    q = build_research_query(query or topic, req)
 
     state: ResearchGraphState = {
         "topic": topic,
@@ -480,7 +481,7 @@ def resolve_grounded_evidence(
 ) -> GroundedEvidenceResult:
     """ColBERT retrieve → CRAG grade → grounded_evidence SSOT."""
     settings = settings or get_settings()
-    q = query or req.headline()
+    q = build_research_query(query, req)
     state: ResearchGraphState = {
         "topic": q,
         "query": q,

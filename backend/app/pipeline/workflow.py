@@ -24,28 +24,12 @@ from ..domain.schemas import (
     Requirement,
     ResearchResult,
 )
+from ..domain.research_query import build_research_query
 from ..services import llm, predictor
 from ..services.optimizer import Factor, build_optimizer
 from . import reconstruct
 
-# Per-domain optimization levers: (ingredient name, role-fallback, low%, high%)
-# and the objective metric to maximise.
-LEVERS: dict[ProductDomain, list[tuple[str, float, float]]] = {
-    ProductDomain.anticorrosion_coating: [
-        ("Zinc phosphate", 2.0, 14.0),
-        ("Bisphenol-A epoxy (DGEBA)", 28.0, 48.0),
-        ("Polyamide hardener", 8.0, 22.0),
-    ],
-    ProductDomain.degreaser: [
-        ("Nonionic surfactant (C12-14 EO7)", 2.0, 12.0),
-        ("Sodium metasilicate", 2.0, 14.0),
-    ],
-    ProductDomain.surface_treatment: [
-        ("Phosphoric acid", 3.0, 14.0),
-        ("Manganese dihydrogen phosphate", 1.0, 8.0),
-    ],
-}
-
+# Per-domain optimization objective metric to maximise.
 OBJECTIVE: dict[ProductDomain, str] = {
     ProductDomain.anticorrosion_coating: "salt_spray_hours",
     ProductDomain.degreaser: "cleaning_efficiency",
@@ -150,7 +134,7 @@ def run_research(
     if source_types:
         logger.warning("run_research: source_types is deprecated; using ColBERT KB + federated fallback")
 
-    q = query or req.headline()
+    q = build_research_query(query, req)
     pre_index = list(pre_sources) if pre_sources else None
     # source_types no longer drives live retrieval, but an explicit filter still
     # constrains which pre-loaded sources are admitted (they surface verbatim).
@@ -187,8 +171,9 @@ def run_research_graph_stream(
     )
 
 
-def _levers_for(form: Formulation) -> list[tuple[str, float, float]]:
-    return LEVERS[form.domain]
+def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:
+    """Build a fresh formulation with lever ingredient percentages overridden."""
+    return reconstruct.formulation_from_factors(req, values)
 
 
 # In-memory DOE plan cache so generated plans can be exported / round-tripped
@@ -238,11 +223,6 @@ def build_doe(
     plan.domain = req.domain
     _cache_plan(plan)
     return plan
-
-
-def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:
-    """Build a fresh formulation with lever ingredient percentages overridden."""
-    return reconstruct.formulation_from_factors(req.domain, values)
 
 
 def run_optimization(

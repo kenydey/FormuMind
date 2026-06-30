@@ -248,7 +248,7 @@ class BaybeCampaignEngine:
 
             for run in result.plan.runs:
                 form = _score_and_validate(
-                    reconstruct.formulation_from_factors(req.domain, run.natural),
+                    reconstruct.formulation_from_factors(req, run.natural),
                     process,
                     req,
                 )

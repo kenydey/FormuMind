@@ -56,7 +56,7 @@ def surrogate_measurements_from_plan(plan, req: Requirement, objective_metric: s
     for run in plan.runs:
         row = dict(run.natural)
         try:
-            form = reconstruct.formulation_from_factors(req.domain, run.natural)
+            form = reconstruct.formulation_from_factors(req, run.natural)
             props = predictor.predict(form)
             for metric in metrics:
                 row[metric] = props.get(metric, 0.0)

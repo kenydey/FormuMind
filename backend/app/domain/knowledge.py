@@ -329,17 +329,28 @@ def offline_recommend_fallback(req: Requirement, n: int = 3) -> list[Formulation
     """Deterministic offline recommend fallback (no LLM). Not the primary product path."""
     base = baseline_formulation(req)
     variants = [base]
-    levers = {
+    domain_levers = {
         ProductDomain.anticorrosion_coating: ("Zinc phosphate", [1.4, 0.7]),
         ProductDomain.degreaser: ("Nonionic surfactant (C12-14 EO7)", [1.5, 0.6]),
-        ProductDomain.surface_treatment: ("Phosphoric acid", [1.3, 0.75]),
     }
-    target_role, factors = levers[req.domain]
+    target_role: str | None = None
+    factors = [1.3, 0.75]
+    if req.domain in domain_levers:
+        target_role, factors = domain_levers[req.domain]
+    else:
+        for ing in base.ingredients:
+            if ing.role not in ("solvent", "pigment", "filler", "additive") and ing.weight_pct > 0:
+                target_role = ing.name
+                break
+    if not target_role:
+        return variants[:n]
     labels = ["high-active", "lean"]
     for factor, label in zip(factors, labels):
         ings = [ing.model_copy(deep=True) for ing in base.ingredients]
         for ing in ings:
-            if ing.name == target_role or (target_role not in [i.name for i in ings] and ing.role == "inhibitor"):
+            if ing.name == target_role or (
+                target_role not in [i.name for i in ings] and ing.role in ("active", "inhibitor")
+            ):
                 ing.weight_pct = round(ing.weight_pct * factor, 4)
         f = _balanced(f"{base.name.split(' (')[0]} ({label})", req.domain, ings, base.rationale)
         variants.append(f)

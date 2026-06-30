@@ -11,6 +11,7 @@ import concurrent.futures
 import logging
 import re
 
+from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ def _fetch_with_timeout(fetch, cursor: int) -> list[Evidence]:
 
 def _build_patent_query(req: Requirement | None, query: str) -> str:
     """Combine user search box text with requirement headline for patent retrieval."""
-    parts = [p for p in [query.strip(), req.headline() if req else ""] if p]
+    parts = [p for p in [query.strip(), build_research_query("", req) if req else ""] if p]
     return " ".join(dict.fromkeys(parts))
 
 
@@ -584,7 +585,7 @@ def iter_search(
     ``progress_cb`` (if given) is invoked after **each source** completes (not only
     at round end), so the UI can render results while the search keeps going.
     """
-    q = query or (req.headline() if req else "coating formulation")
+    q = build_research_query(query, req)
     if (query or "").strip():
         sq = _prepare_search_queries(q)
         rank_q = sq.rank_q

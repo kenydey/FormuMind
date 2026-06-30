@@ -1,6 +1,7 @@
 """ProjectSpec helpers — normalize free-text requirements and derive DOE levers."""
 from __future__ import annotations
 
+from .levers import substrate_default_levers
 from .schemas import DOEFactor, Formulation, Ingredient, LeverSpec, ObjectiveSpec, ProductDomain, Requirement
 
 # Roles typically held fixed (solvent fills to 100%).
@@ -102,9 +103,12 @@ def derive_process_levers(req: Requirement) -> list[LeverSpec]:
 
 
 def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[LeverSpec]:
-    """Resolve DOE levers: explicit > formulation > legacy domain table."""
+    """Resolve DOE levers: explicit > substrate defaults > formulation > legacy domain table."""
     if req.levers:
         return list(req.levers)
+    substrate_levers = substrate_default_levers(req)
+    if substrate_levers:
+        return substrate_levers
     source = form or req.active_formulation
     if source and source.ingredients:
         derived = derive_levers_from_formulation(source)
@@ -129,6 +133,10 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
         return [{"name": f.name, "low": f.low, "high": f.high, "unit": f.unit} for f in plan.factors]
 
     domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
+    if req:
+        resolved = {lev.name: (lev.low, lev.high, lev.unit) for lev in resolve_levers(req)}
+    else:
+        resolved = {}
     legacy_map = {name: (lo, hi) for name, lo, hi in _LEGACY_LEVERS.get(domain, [])}
     keys: list[str] = []
     seen: set[str] = set()
@@ -145,13 +153,17 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
 
     snapshot: list[dict] = []
     for name in keys:
-        if name in legacy_map:
+        if name in resolved:
+            lo, hi, unit = resolved[name]
+        elif name in legacy_map:
             lo, hi = legacy_map[name]
-            unit = "C" if name == "cure_temperature_c" else "wt%"
+            unit = "C" if name in ("cure_temperature_c", "bath_temperature_c") else "wt%"
         else:
             samples = values.get(name) or [50.0]
             lo, hi = _bounds_from_pct(sum(samples) / len(samples))
-            unit = "C" if name == "cure_temperature_c" else "wt%"
+            unit = "C" if name in ("cure_temperature_c", "bath_temperature_c") else (
+                "min" if name == "immersion_time_min" else "wt%"
+            )
         snapshot.append({"name": name, "low": lo, "high": hi, "unit": unit})
     return snapshot
 
