@@ -75,6 +75,11 @@ export const CONSTRAINT_CATALOG: ConstraintDef[] = [
   },
 ];
 
+export function constraintLabelForKey(key: ConstraintKey): string {
+  const def = CONSTRAINT_CATALOG.find((c) => c.key === key);
+  return def ? def.label.split(" · ")[0] : key;
+}
+
 export function constraintAppliesToDomain(def: ConstraintDef, domain: ProductDomain): boolean {
   return def.domains === "all" || def.domains.includes(domain);
 }

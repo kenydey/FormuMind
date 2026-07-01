@@ -4,6 +4,7 @@ from app.domain.examples import load_example
 from app.domain.project_spec import (
     effective_project_id,
     levers_to_doe_factors,
+    normalize_constraints,
     normalize_requirement,
     primary_objective,
     resolve_levers,
@@ -56,3 +57,9 @@ def test_resolve_levers_from_formulation_when_no_explicit():
 def test_load_example_unknown_raises():
     with pytest.raises(KeyError):
         load_example("nonexistent")
+
+
+def test_normalize_constraints_includes_voc():
+    req = load_example("anticorrosion_coating")
+    merged = normalize_constraints(req)
+    assert "VOC 上限" in merged

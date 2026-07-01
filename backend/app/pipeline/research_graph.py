@@ -59,6 +59,8 @@ class ResearchGraphState(TypedDict, total=False):
     chat_markdown: str
     recommend_engine: str
     stage: str
+    modify_prompt: str
+    base_formulas: list[Formulation]
     report_markdown: str
     verified_claims: list[dict]
     claim_check_passed: bool
@@ -231,7 +233,14 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
     recommend_engine = "offline"
 
     if req:
-        rec_resp = llm.recommend_formulations(req, normalize_objectives(req), grounded, n=3)
+        rec_resp = llm.recommend_formulations(
+            req,
+            normalize_objectives(req),
+            grounded,
+            n=3,
+            modify_prompt=state.get("modify_prompt") or "",
+            base_formulas=state.get("base_formulas") or None,
+        )
         recommend_engine = rec_resp.engine
         process = process_for(req)
         forms = []
@@ -440,6 +449,8 @@ def run_research_graph(
     progress_cb: ProgressCallback | None = None,
     settings: Settings | None = None,
     mode: Literal["recommend", "deep"] = "deep",
+    modify_prompt: str = "",
+    base_formulas: list[Formulation] | None = None,
 ) -> ResearchGraphState:
     """Execute CRAG pipeline (LangGraph-compatible linear runner).
 
@@ -457,6 +468,8 @@ def run_research_graph(
         "req": req,
         "pre_index": pre_index or [],
         "fallback_used": False,
+        "modify_prompt": modify_prompt,
+        "base_formulas": base_formulas or [],
     }
 
     state = _run_crag_retrieval(state, settings, mode, progress_cb)

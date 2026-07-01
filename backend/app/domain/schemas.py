@@ -107,7 +107,10 @@ class Requirement(BaseModel):
     levers: list[LeverSpec] = Field(default_factory=list)
     materials: list[MaterialSpec] = Field(default_factory=list)
     metric_priors: list[MetricPriorSpec] = Field(default_factory=list)
-    constraints: dict[str, float | None] = Field(default_factory=dict)
+    constraints: dict[str, float | None] = Field(
+        default_factory=dict,
+        description="工艺约束 SSOT {名称: 值}，含自定义项；catalog 项同步写入",
+    )
     active_formulation: Formulation | None = None
 
     def headline(self) -> str:
@@ -130,6 +133,7 @@ class Ingredient(BaseModel):
     formula: str | None = None
     mf_structure: str | None = None
     cas_no: str | None = None
+    zh_name: str | None = None
     molar_mass: float | None = None
     weight_pct: float = Field(ge=0, le=100)
     # Lab-table fields (LLM recommend / UI)
@@ -155,6 +159,7 @@ class Formulation(BaseModel):
     domain: ProductDomain
     ingredients: list[Ingredient]
     rationale: str = ""
+    source: str = ""  # e.g. "manual", "ai_modify", "recommend"
     predicted: dict[str, float] = Field(default_factory=dict)
     predicted_std: dict[str, float] = Field(default_factory=dict)
     prediction_tiers: dict[str, str] = Field(default_factory=dict)

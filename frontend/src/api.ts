@@ -10,6 +10,8 @@ export interface ObjectiveSpec {
   direction: "maximize" | "minimize" | "match_target";
   target_value?: number | null;
   unit?: string;
+  ref_min?: number | null;
+  ref_max?: number | null;
   value_type?: "number" | "rating";
 }
 
@@ -46,6 +48,16 @@ export interface Requirement {
   constraints?: Record<string, number | null>;
 }
 
+export interface ChemicalLookupResult {
+  query: string;
+  cas: string;
+  iupac_name: string;
+  zh_name: string;
+  formula: string;
+  smiles?: string;
+  molar_mass?: number;
+}
+
 export interface Ingredient {
   name: string;
   role: string;
@@ -60,6 +72,7 @@ export interface Ingredient {
   mmol?: number | null;
   amount_display?: string;
   notes?: string;
+  zh_name?: string | null;
 }
 
 export interface Formulation {
@@ -72,6 +85,7 @@ export interface Formulation {
   prediction_tiers?: Record<string, string>;
   score: number | null;
   warnings: string[];
+  source?: string;
 }
 
 export interface Evidence {
@@ -417,6 +431,27 @@ export const api = {
 
   submitRecommendResearch: (req: Requirement, sources: Evidence[] = [], query = "") =>
     postAccepted("/api/research/recommend", { ...req, sources, query }),
+
+  submitModifyResearch: (
+    req: Requirement,
+    modifyPrompt: string,
+    baseFormulas: Formulation[],
+    sources: Evidence[] = [],
+    query = ""
+  ) =>
+    postAccepted("/api/research/modify", {
+      requirement: req,
+      modify_prompt: modifyPrompt,
+      base_formulas: baseFormulas,
+      sources,
+      query,
+    }),
+
+  submitManualFormulation: (formulation: Formulation, requirement?: Requirement) =>
+    post<Formulation>("/api/formulations/manual", { formulation, requirement }),
+
+  lookupChemical: (q: string) =>
+    get<ChemicalLookupResult>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
