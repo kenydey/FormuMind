@@ -3,9 +3,11 @@ import type { LeverSpec } from "../api";
 export default function LeversEditor({
   levers,
   onChange,
+  disabled,
 }: {
   levers: LeverSpec[];
   onChange: (levers: LeverSpec[]) => void;
+  disabled?: boolean;
 }) {
   function update(idx: number, patch: Partial<LeverSpec>) {
     onChange(levers.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -26,21 +28,25 @@ export default function LeversEditor({
         <button
           type="button"
           onClick={add}
-          className="text-[10px] text-slate-500 hover:text-accent border border-edge hover:border-accent/40 rounded px-1.5 py-0.5"
+          disabled={disabled}
+          className="text-[10px] text-slate-500 hover:text-accent border border-edge hover:border-accent/40 rounded px-1.5 py-0.5 disabled:opacity-40"
         >
           + 添加因子
         </button>
       </div>
       {levers.length === 0 ? (
-        <p className="text-[11px] text-slate-500">未定义因子时将自动从当前配方推导。</p>
+        <p className="text-[11px] text-slate-500">
+          未定义因子时将自动从当前配方推导。建议为当前基材显式定义 g/L 或 wt% 因子。
+        </p>
       ) : (
         <div className="flex flex-col gap-2">
           {levers.map((l, idx) => (
             <div key={`${l.name}-${idx}`} className="bg-ink/60 border border-edge rounded p-2 grid grid-cols-2 gap-2 text-xs">
               <input
                 value={l.name}
+                disabled={disabled}
                 onChange={(e) => update(idx, { name: e.target.value })}
-                className="col-span-2 bg-ink border border-edge rounded px-2 py-1"
+                className="col-span-2 bg-ink border border-edge rounded px-2 py-1 disabled:opacity-50"
                 placeholder="因子名称"
               />
               <label className="flex flex-col gap-0.5">
@@ -48,8 +54,9 @@ export default function LeversEditor({
                 <input
                   type="number"
                   value={l.low}
+                  disabled={disabled}
                   onChange={(e) => update(idx, { low: Number(e.target.value) })}
-                  className="bg-ink border border-edge rounded px-2 py-1 font-mono"
+                  className="bg-ink border border-edge rounded px-2 py-1 font-mono disabled:opacity-50"
                 />
               </label>
               <label className="flex flex-col gap-0.5">
@@ -57,20 +64,23 @@ export default function LeversEditor({
                 <input
                   type="number"
                   value={l.high}
+                  disabled={disabled}
                   onChange={(e) => update(idx, { high: Number(e.target.value) })}
-                  className="bg-ink border border-edge rounded px-2 py-1 font-mono"
+                  className="bg-ink border border-edge rounded px-2 py-1 font-mono disabled:opacity-50"
                 />
               </label>
               <input
                 value={l.unit ?? "wt%"}
+                disabled={disabled}
                 onChange={(e) => update(idx, { unit: e.target.value })}
-                className="bg-ink border border-edge rounded px-2 py-1 text-[10px]"
+                className="bg-ink border border-edge rounded px-2 py-1 text-[10px] disabled:opacity-50"
                 placeholder="单位"
               />
               <button
                 type="button"
+                disabled={disabled}
                 onClick={() => remove(idx)}
-                className="text-rose-400 hover:text-rose-300 text-[10px] justify-self-end"
+                className="text-rose-400 hover:text-rose-300 text-[10px] justify-self-end disabled:opacity-40"
               >
                 删除
               </button>

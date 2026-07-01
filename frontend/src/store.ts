@@ -44,6 +44,7 @@ import {
 } from "./utils/objectiveContract";
 import {
   defaultConstraintsForDomain,
+  constraintLabelForKey,
   type ConstraintKey,
 } from "./constants/constraints";
 
@@ -116,6 +117,7 @@ interface AppState {
   activeProjectId: string | null;
   processOptResult: ProcessOptResult | null;
   projectSaveBusy: boolean;
+  requirementLocked: boolean;
   historyOpen: boolean;
 
   // v0.3 source + chat
@@ -154,6 +156,13 @@ interface AppState {
   setActiveConstraints: (keys: ConstraintKey[]) => void;
   setConstraintValue: (key: ConstraintKey, value: number) => void;
   clearConstraintValue: (key: ConstraintKey) => void;
+  setCustomConstraint: (name: string, value: number) => void;
+  removeCustomConstraint: (name: string) => void;
+  saveRequirementAndRefresh: () => Promise<void>;
+  unlockRequirement: () => void;
+  addManualFormulation: () => Promise<void>;
+  modifyFormulationsWithAi: (prompt: string) => Promise<void>;
+  updateLeaderboardFormulation: (index: number, form: Formulation) => void;
   runResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
   refreshKnowledgeBase: () => Promise<void>;
@@ -219,6 +228,7 @@ const defaultRequirement: Requirement = {
   ph_target: null,
   notes: "",
   objectives: [...DOMAIN_OBJECTIVES.anticorrosion_coating],
+  constraints: {},
   levers: [
     { name: "Zinc phosphate", low: 2, high: 14, unit: "wt%" },
     { name: "Bisphenol-A epoxy (DGEBA)", low: 28, high: 48, unit: "wt%" },
@@ -343,6 +353,7 @@ export const useStore = create<AppState>()(
       activeProjectId: null,
       processOptResult: null,
       projectSaveBusy: false,
+      requirementLocked: false,
       historyOpen: false,
 
       // v0.3 initial state
@@ -474,6 +485,8 @@ export const useStore = create<AppState>()(
       setConstraintValue: (key, value) => {
         set((draft) => {
           draft.requirement[key] = value;
+          if (!draft.requirement.constraints) draft.requirement.constraints = {};
+          draft.requirement.constraints[constraintLabelForKey(key)] = value;
         });
         get().scheduleAutosave();
       },
@@ -484,6 +497,137 @@ export const useStore = create<AppState>()(
           else if (key === "cure_temperature_c") draft.requirement.cure_temperature_c = null;
           else if (key === "ph_target") draft.requirement.ph_target = null;
           else draft.requirement[key] = 0;
+          if (draft.requirement.constraints) {
+            delete draft.requirement.constraints[constraintLabelForKey(key)];
+          }
+        });
+        get().scheduleAutosave();
+      },
+
+      setCustomConstraint: (name, value) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        set((draft) => {
+          if (!draft.requirement.constraints) draft.requirement.constraints = {};
+          draft.requirement.constraints[trimmed] = value;
+        });
+        get().scheduleAutosave();
+      },
+
+      removeCustomConstraint: (name) => {
+        set((draft) => {
+          if (draft.requirement.constraints) {
+            delete draft.requirement.constraints[name];
+          }
+        });
+        get().scheduleAutosave();
+      },
+
+      saveRequirementAndRefresh: async () => {
+        if (autosaveTimer) {
+          clearTimeout(autosaveTimer);
+          autosaveTimer = null;
+        }
+        try {
+          await get().saveProject();
+        } catch {
+          return;
+        }
+        set((draft) => {
+          draft.requirementLocked = true;
+        });
+        await get().runResearch();
+      },
+
+      unlockRequirement: () => {
+        set((draft) => {
+          draft.requirementLocked = false;
+        });
+      },
+
+      addManualFormulation: async () => {
+        const { requirement } = get();
+        const empty: Formulation = {
+          name: "手动配方",
+          domain: requirement.domain,
+          ingredients: [{ name: "新组分", role: "additive", weight_pct: 0 }],
+          rationale: "用户手动添加",
+          predicted: {},
+          predicted_std: {},
+          score: null,
+          warnings: [],
+          source: "manual",
+        };
+        try {
+          const scored = await api.submitManualFormulation(empty, requirement);
+          set((draft) => {
+            draft.leaderboard = [...draft.leaderboard, scored];
+          });
+          get().scheduleAutosave();
+        } catch (e) {
+          set((draft) => {
+            draft.error = String(e);
+          });
+        }
+      },
+
+      modifyFormulationsWithAi: async (prompt: string) => {
+        set((draft) => {
+          draft.formulationBusy = true;
+          draft.recommendStage = "retrieve";
+          draft.recommendMessage = "AI 修改配方中";
+          draft.error = null;
+        });
+        try {
+          const { requirement, sources, selectedSources, searchQuery, leaderboard } = get();
+          const selected = sources.filter((e) =>
+            selectedSources.includes(e.identifier || e.title)
+          );
+          const payload = selected.length > 0 ? selected : sources;
+          const { task_id } = await api.submitModifyResearch(
+            requirement,
+            prompt,
+            leaderboard,
+            payload,
+            searchQuery.trim()
+          );
+          const final = await awaitTaskStream(task_id, (ev) => {
+            set((draft) => {
+              draft.recommendStage = ev.stage ?? "";
+              draft.recommendMessage = ev.message ?? "";
+              draft.task = progressToTaskStatus(task_id, "recommend", ev);
+            });
+          });
+          const wrapped = final.data as { research?: ResearchResult } | undefined;
+          const research = wrapped?.research;
+          if (!research) throw new Error("AI 修改未返回结果");
+          const newForms = research.recommended.map((f) => ({
+            ...f,
+            source: "ai_modify",
+          }));
+          set((draft) => {
+            draft.research = research;
+            draft.leaderboard = [...draft.leaderboard, ...newForms];
+          });
+          get().scheduleAutosave();
+        } catch (e) {
+          set((draft) => {
+            draft.error = String(e);
+          });
+        } finally {
+          set((draft) => {
+            draft.formulationBusy = false;
+            draft.recommendStage = "";
+            draft.recommendMessage = "";
+          });
+        }
+      },
+
+      updateLeaderboardFormulation: (index, form) => {
+        set((draft) => {
+          if (draft.leaderboard[index]) {
+            draft.leaderboard[index] = form;
+          }
         });
         get().scheduleAutosave();
       },

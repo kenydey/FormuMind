@@ -68,12 +68,16 @@ function FormulaCard({
   cardRef,
   forceOpen,
   objectiveMetrics,
+  formIndex: _formIndex,
+  onIngredientChange,
 }: {
   form: Formulation;
   rank: number;
   cardRef?: (el: HTMLDivElement | null) => void;
   forceOpen?: boolean;
   objectiveMetrics?: Set<string>;
+  formIndex: number;
+  onIngredientChange?: (ingIndex: number, ing: Formulation["ingredients"][0]) => void;
 }) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
@@ -105,6 +109,16 @@ function FormulaCard({
             />
           )}
           <span className="text-sm text-slate-200 truncate">{form.name}</span>
+          {form.source === "ai_modify" && (
+            <span className="text-[9px] px-1 py-0.5 rounded border border-accent2/40 text-accent2 shrink-0">
+              AI修改
+            </span>
+          )}
+          {form.source === "manual" && (
+            <span className="text-[9px] px-1 py-0.5 rounded border border-slate-600 text-slate-400 shrink-0">
+              手动
+            </span>
+          )}
         </button>
         <div className="flex items-center gap-2 shrink-0">
           {form.score != null && (
@@ -171,7 +185,10 @@ function FormulaCard({
                 );
               })}
           </div>
-          <RecommendedFormulaTable ingredients={form.ingredients} />
+          <RecommendedFormulaTable
+            ingredients={form.ingredients}
+            onIngredientChange={(ingIndex, ing) => onIngredientChange?.(ingIndex, ing)}
+          />
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
@@ -246,11 +263,35 @@ function ListExportMenu({ forms }: { forms: Formulation[] }) {
 }
 
 export default function FormulaLeaderboard() {
-  const { leaderboard, requirement, research } = useStore();
+  const {
+    leaderboard,
+    requirement,
+    research,
+    addManualFormulation,
+    modifyFormulationsWithAi,
+    updateLeaderboardFormulation,
+    formulationBusy,
+  } = useStore();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
+  const [showAiPrompt, setShowAiPrompt] = useState(false);
+  const [aiModifyPrompt, setAiModifyPrompt] = useState("");
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
+
+  function handleIngredientChange(formIndex: number, ingIndex: number, ing: Formulation["ingredients"][0]) {
+    const form = leaderboard[formIndex];
+    if (!form) return;
+    const ingredients = form.ingredients.map((item, i) => (i === ingIndex ? ing : item));
+    updateLeaderboardFormulation(formIndex, { ...form, ingredients });
+  }
+
+  async function handleAiModify() {
+    if (!aiModifyPrompt.trim()) return;
+    setShowAiPrompt(false);
+    await modifyFormulationsWithAi(aiModifyPrompt.trim());
+    setAiModifyPrompt("");
+  }
 
   function switchToCard(index: number) {
     setViewMode("cards");
@@ -310,6 +351,8 @@ export default function FormulaLeaderboard() {
               key={`${f.name}-${i}`}
               form={f}
               rank={i + 1}
+              formIndex={i}
+              onIngredientChange={(ingIndex, ing) => handleIngredientChange(i, ingIndex, ing)}
               cardRef={(el) => {
                 cardRefs.current[i] = el;
               }}
@@ -317,6 +360,56 @@ export default function FormulaLeaderboard() {
               objectiveMetrics={objectiveMetrics}
             />
           ))}
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-3">
+        <button
+          type="button"
+          onClick={() => void addManualFormulation()}
+          className="border border-accent text-accent rounded px-3 py-1 text-xs hover:bg-accent/10"
+        >
+          ✚ 手动添加配方
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowAiPrompt(true)}
+          disabled={formulationBusy || leaderboard.length === 0}
+          className="border border-accent2 text-accent2 rounded px-3 py-1 text-xs hover:bg-accent2/10 disabled:opacity-40"
+        >
+          🤖 AI 修改配方
+        </button>
+      </div>
+
+      {showAiPrompt && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-panel border border-edge rounded-xl p-6 w-[500px] max-w-[92vw]">
+            <h3 className="text-sm mb-3 text-slate-200">AI 配方修改要求</h3>
+            <textarea
+              rows={4}
+              value={aiModifyPrompt}
+              onChange={(e) => setAiModifyPrompt(e.target.value)}
+              placeholder="例：将 VOC 降至 250g/L 以下，用硅烷偶联剂替代部分环氧"
+              className="w-full bg-ink border border-edge rounded px-3 py-2 text-sm text-slate-200"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => setShowAiPrompt(false)}
+                className="border border-edge rounded px-4 py-1.5 text-sm text-slate-400"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAiModify()}
+                disabled={!aiModifyPrompt.trim() || formulationBusy}
+                className="bg-accent text-ink rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-40"
+              >
+                提交修改
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>

@@ -126,6 +126,7 @@ function ObjectivesEditor({
   removeObjective,
   addObjective,
   resetObjectivesForDomain,
+  locked,
 }: {
   objectives: ObjectiveSpec[];
   domain: ProductDomain;
@@ -135,6 +136,7 @@ function ObjectivesEditor({
   removeObjective: (idx: number) => void;
   addObjective: (objective: ObjectiveSpec) => void;
   resetObjectivesForDomain: (domain: ProductDomain) => void;
+  locked?: boolean;
 }) {
   const usedMetrics = new Set(objectives.map((o) => o.metric));
   const availableToAdd = ALL_METRICS.filter((m) => !usedMetrics.has(m.metric));
@@ -185,13 +187,29 @@ function ObjectivesEditor({
     }
   }
 
+  function addCustomObjective() {
+    addObjective(
+      normalizeObjective({
+        metric: `custom_${Date.now().toString(36)}`,
+        display_name: "自定义指标",
+        weight: 0.1,
+        direction: "maximize",
+        target_value: null,
+        unit: "",
+        ref_min: null,
+        ref_max: null,
+      })
+    );
+  }
+
   return (
     <div className="mb-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-slate-400 uppercase tracking-wider">优化目标 · Objectives</span>
         <button
           onClick={resetDefaults}
-          className="text-[10px] text-slate-500 hover:text-accent transition-colors px-1.5 py-0.5 rounded border border-edge hover:border-accent/40"
+          disabled={locked}
+          className="text-[10px] text-slate-500 hover:text-accent transition-colors px-1.5 py-0.5 rounded border border-edge hover:border-accent/40 disabled:opacity-40"
         >
           重置默认
         </button>
@@ -200,12 +218,14 @@ function ObjectivesEditor({
       <div className="flex flex-col gap-2">
         {objectives.map((obj, idx) => {
           const meta = metaFor(obj.metric);
+          const bounds = TARGET_BOUNDS[obj.metric];
           return (
             <div key={`${obj.metric}-${idx}`} className="bg-ink/60 border border-edge rounded p-2 space-y-1.5">
               <div className="flex items-center gap-2">
                 <DirectionBadge
                   direction={obj.direction}
                   onToggle={() =>
+                    !locked &&
                     update(idx, {
                       direction:
                         obj.direction === "maximize"
@@ -217,19 +237,30 @@ function ObjectivesEditor({
                   }
                 />
                 <input
-                  value={obj.metric}
-                  onChange={(e) => update(idx, { metric: e.target.value.trim() })}
-                  className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
-                  placeholder="metric id"
+                  value={obj.display_name ?? ""}
+                  disabled={locked}
+                  onChange={(e) => update(idx, { display_name: e.target.value })}
+                  className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs text-slate-200 disabled:opacity-50"
+                  placeholder="显示名称"
                 />
-                <span className="text-[10px] text-slate-500 truncate max-w-[80px]">{meta?.label ?? ""}</span>
                 <button
-                  onClick={() => remove(idx)}
-                  className="shrink-0 text-slate-600 hover:text-rose-400 text-xs leading-none w-4 h-4 flex items-center justify-center"
+                  onClick={() => !locked && remove(idx)}
+                  disabled={locked}
+                  className="shrink-0 text-slate-600 hover:text-rose-400 text-xs leading-none w-4 h-4 flex items-center justify-center disabled:opacity-40"
                   title="Remove objective"
                 >
                   ×
                 </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={obj.metric}
+                  disabled={locked}
+                  onChange={(e) => update(idx, { metric: e.target.value.trim() })}
+                  className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-400 disabled:opacity-50"
+                  placeholder="metric id"
+                />
+                <span className="text-[10px] text-slate-500 truncate max-w-[80px]">{meta?.label ?? ""}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-slate-500 shrink-0 w-10">权重</span>
@@ -239,32 +270,64 @@ function ObjectivesEditor({
                   max={1}
                   step={0.05}
                   value={obj.weight}
+                  disabled={locked}
                   onChange={(e) => update(idx, { weight: Number(e.target.value) })}
-                  className="flex-1 accent-accent"
+                  className="flex-1 accent-accent disabled:opacity-50"
                 />
                 <span className="text-[10px] font-mono text-accent w-8 text-right shrink-0">
                   {obj.weight.toFixed(2)}
                 </span>
               </div>
-              {TARGET_BOUNDS[obj.metric] && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-500 shrink-0 w-10">目标值</span>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-slate-500">目标值</span>
                   <input
                     type="number"
-                    min={TARGET_BOUNDS[obj.metric].min}
-                    max={TARGET_BOUNDS[obj.metric].max}
-                    step={TARGET_BOUNDS[obj.metric].step}
+                    disabled={locked}
                     value={obj.target_value ?? seedTarget(obj.metric) ?? ""}
                     onChange={(e) => {
                       const v = e.target.value === "" ? null : Number(e.target.value);
                       update(idx, { target_value: v });
                     }}
-                    className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
+                    className="bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200 disabled:opacity-50"
                     placeholder="—"
                   />
-                  <span className="text-[10px] text-slate-500 shrink-0">{TARGET_BOUNDS[obj.metric].unit}</span>
-                </div>
-              )}
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-slate-500">单位</span>
+                  <input
+                    value={obj.unit ?? ""}
+                    disabled={locked}
+                    onChange={(e) => update(idx, { unit: e.target.value })}
+                    className="bg-ink border border-edge rounded px-2 py-0.5 text-xs disabled:opacity-50"
+                    placeholder={bounds?.unit ?? "单位"}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-slate-500">下界</span>
+                  <input
+                    type="number"
+                    disabled={locked}
+                    value={obj.ref_min ?? ""}
+                    onChange={(e) =>
+                      update(idx, { ref_min: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                    className="bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono disabled:opacity-50"
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] text-slate-500">上界</span>
+                  <input
+                    type="number"
+                    disabled={locked}
+                    value={obj.ref_max ?? ""}
+                    onChange={(e) =>
+                      update(idx, { ref_max: e.target.value === "" ? null : Number(e.target.value) })
+                    }
+                    className="bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono disabled:opacity-50"
+                  />
+                </label>
+              </div>
             </div>
           );
         })}
@@ -284,12 +347,13 @@ function ObjectivesEditor({
       {availableToAdd.length > 0 && (
         <select
           value=""
+          disabled={locked}
           onChange={(e) => {
             if (e.target.value) addMetric(e.target.value);
           }}
-          className="mt-2 w-full bg-ink border border-edge rounded px-2 py-1 text-xs text-slate-400"
+          className="mt-2 w-full bg-ink border border-edge rounded px-2 py-1 text-xs text-slate-400 disabled:opacity-50"
         >
-          <option value="">+ 添加目标 Add objective…</option>
+          <option value="">+ 添加预设目标…</option>
           {availableToAdd.map((m) => (
             <option key={m.metric} value={m.metric}>
               {m.label}
@@ -297,6 +361,14 @@ function ObjectivesEditor({
           ))}
         </select>
       )}
+      <button
+        type="button"
+        disabled={locked}
+        onClick={addCustomObjective}
+        className="mt-2 w-full text-[11px] border border-accent/40 text-accent rounded px-2 py-1 hover:bg-accent/10 disabled:opacity-40"
+      >
+        + 自定义目标
+      </button>
     </div>
   );
 }
@@ -347,12 +419,17 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
     setActiveConstraints,
     setConstraintValue,
     clearConstraintValue,
+    saveRequirementAndRefresh,
+    unlockRequirement,
+    requirementLocked,
+    projectSaveBusy,
     runResearch,
     runOptimize,
     busy,
     formulationBusy,
   } = useStore();
   const domain = requirement.domain;
+  const locked = requirementLocked;
 
   return (
     <aside className={embedded ? "flex flex-col gap-1" : "glass rounded-xl p-4 flex flex-col gap-1 overflow-y-auto"}>
@@ -367,9 +444,10 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         <span className="text-xs text-slate-400">产品类型 · Product type</span>
         <input
           value={requirement.product_type ?? ""}
+          disabled={locked}
           onChange={(e) => setField("product_type", e.target.value)}
           placeholder="例如：水性环氧防腐底漆"
-          className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+          className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm disabled:opacity-50"
         />
       </label>
 
@@ -377,9 +455,10 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         <span className="text-xs text-slate-400">应用场景 · Application</span>
         <input
           value={requirement.application ?? requirement.substrate}
+          disabled={locked}
           onChange={(e) => setField("application", e.target.value)}
           placeholder="例如：carbon_steel / 汽车底盘"
-          className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+          className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm disabled:opacity-50"
         />
       </label>
 
@@ -426,11 +505,12 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         removeObjective={removeObjective}
         addObjective={addObjective}
         resetObjectivesForDomain={resetObjectivesForDomain}
+        locked={locked}
       />
 
       <div className="border-t border-edge mb-3" />
 
-      <LeversEditor levers={requirement.levers ?? []} onChange={setLevers} />
+      <LeversEditor levers={requirement.levers ?? []} onChange={setLevers} disabled={locked} />
 
       <div className="border-t border-edge mb-3" />
 
@@ -441,7 +521,27 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         onActiveKeysChange={setActiveConstraints}
         onSetValue={setConstraintValue}
         onClearValue={clearConstraintValue}
+        locked={locked}
       />
+
+      <div className="flex gap-2 mb-3">
+        <button
+          type="button"
+          onClick={() => void saveRequirementAndRefresh()}
+          disabled={projectSaveBusy || formulationBusy || locked}
+          className="bg-accent text-ink font-semibold rounded px-3 py-1.5 text-sm flex-1 disabled:opacity-40"
+        >
+          {projectSaveBusy || formulationBusy ? "保存中…" : "💾 保存需求"}
+        </button>
+        <button
+          type="button"
+          onClick={unlockRequirement}
+          disabled={!locked}
+          className="border border-edge text-slate-400 rounded px-3 py-1.5 text-sm disabled:opacity-40"
+        >
+          ✏️ 修改
+        </button>
+      </div>
 
       {!embedded && (
         <div className="mt-auto pt-3 flex flex-col gap-2">

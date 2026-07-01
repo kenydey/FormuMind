@@ -85,6 +85,21 @@ class FormulationValidateResponse(BaseModel):
     warnings: list[str]
 
 
+class ManualFormulationRequest(BaseModel):
+    formulation: Formulation
+    requirement: Requirement | None = None
+
+
+@router.post("/formulations/manual", response_model=Formulation)
+def add_manual_formulation(body: ManualFormulationRequest) -> Formulation:
+    """Validate, enrich, and score a user-entered formulation."""
+    req = body.requirement or Requirement(domain=body.formulation.domain)
+    forms, _warnings = validate_formulations([body.formulation])
+    form = forms[0].model_copy(update={"source": "manual"})
+    process = workflow.process_for(req)
+    return workflow._score_and_validate(form, process, req)
+
+
 @router.post("/formulations/validate", response_model=FormulationValidateResponse)
 def validate_formulation_list(body: FormulationValidateRequest) -> FormulationValidateResponse:
     """Validate and enrich leaderboard / LLM formulations (CAS, structure)."""

@@ -301,7 +301,7 @@ def _stage_progress(stage: str) -> float:
 
 @celery_app.task(bind=True, name="formumind.recommend")
 def run_recommend_task(self, payload: dict) -> dict:
-    from ..domain.schemas import Evidence, Requirement
+    from ..domain.schemas import Evidence, Formulation, Requirement
     from ..pipeline.research_graph import graph_state_to_research_result, run_research_graph
 
     task_id = self.request.id
@@ -313,6 +313,9 @@ def run_recommend_task(self, payload: dict) -> dict:
         topic = payload.get("topic") or req.headline()
         query = payload.get("query") or topic
         sources = [Evidence.model_validate(s) for s in payload.get("sources") or []]
+        base_formulas = [
+            Formulation.model_validate(f) for f in (payload.get("base_formulas") or [])
+        ] or None
 
         def graph_progress(stage: str, message: str, partial: dict | None = None) -> None:
             publish_progress(
@@ -331,6 +334,8 @@ def run_recommend_task(self, payload: dict) -> dict:
             pre_index=sources or None,
             progress_cb=graph_progress,
             mode="recommend",
+            modify_prompt=payload.get("modify_prompt") or "",
+            base_formulas=base_formulas,
         )
         research = graph_state_to_research_result(state, req)
         result = {"research": research.model_dump()}

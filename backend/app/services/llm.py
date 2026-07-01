@@ -576,8 +576,52 @@ def _objectives_prompt_block(objectives: list[ObjectiveSpec]) -> str:
             bits.append(f"target={o.target_value}")
         if o.display_name:
             bits.append(f"label={o.display_name}")
+        if o.unit:
+            bits.append(f"unit={o.unit}")
+        if o.ref_min is not None:
+            bits.append(f"ref_min={o.ref_min}")
+        if o.ref_max is not None:
+            bits.append(f"ref_max={o.ref_max}")
         lines.append("- " + ", ".join(bits))
     return "\n".join(lines) if lines else "- (use domain defaults)"
+
+
+def _constraints_prompt_block(req: Requirement) -> str:
+    from ..domain.project_spec import normalize_constraints
+
+    merged = normalize_constraints(req)
+    if not merged:
+        return ""
+    lines = "\n".join(f"- {k}: {v}" for k, v in merged.items())
+    return f"\n\n工艺约束 (必遵守):\n{lines}"
+
+
+def _levers_prompt_block(req: Requirement) -> str:
+    from ..domain.project_spec import resolve_levers
+
+    levers = resolve_levers(req)
+    if not levers:
+        return ""
+    lines = "\n".join(
+        f"- {lev.name}: {lev.low}–{lev.high} {lev.unit}" for lev in levers
+    )
+    return f"\n\n可调 DOE 因子:\n{lines}"
+
+
+def _base_formulas_prompt_block(base_formulas: list) -> str:
+    if not base_formulas:
+        return ""
+    lines = []
+    for form in base_formulas[:5]:
+        name = getattr(form, "name", str(form.get("name", "")))
+        ings = getattr(form, "ingredients", form.get("ingredients", []))
+        parts = []
+        for ing in ings[:12]:
+            iname = getattr(ing, "name", ing.get("name", ""))
+            pct = getattr(ing, "weight_pct", ing.get("weight_pct", ""))
+            parts.append(f"{iname} {pct}%")
+        lines.append(f"- {name}: " + ", ".join(parts))
+    return "\n\n待修改基准配方:\n" + "\n".join(lines)
 
 
 def _recommend_system_prompt() -> str:
@@ -599,10 +643,16 @@ def _recommend_user_prompt(
     objectives: list[ObjectiveSpec],
     evidence: list[Evidence],
     n: int,
+    *,
+    modify_prompt: str = "",
+    base_formulas: list | None = None,
 ) -> str:
     citations = "\n".join(
         f"[{e.source}] {e.title}: {e.snippet[:200]}" for e in evidence[:6]
     ) or "(no external evidence — use domain knowledge)"
+    modify_block = ""
+    if modify_prompt:
+        modify_block = f"\n\n用户修改要求:\n{modify_prompt.strip()}"
     return (
         f"Domain: {req.domain.value}\n"
         f"Substrate: {req.substrate.value}\n"
@@ -612,7 +662,11 @@ def _recommend_user_prompt(
         f"VOC limit (g/L): {req.voc_limit_gpl}\n"
         f"Cure temp (C): {req.cure_temperature_c}\n"
         f"Notes: {req.notes}\n\n"
-        f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
+        f"Objectives:\n{_objectives_prompt_block(objectives)}\n"
+        f"{_constraints_prompt_block(req)}"
+        f"{_levers_prompt_block(req)}"
+        f"{_base_formulas_prompt_block(base_formulas or [])}"
+        f"{modify_block}\n\n"
         f"Evidence:\n{citations}\n\n"
         f"Produce exactly {n} distinct recommended formulas in the formulas array."
     )
@@ -624,6 +678,8 @@ def recommend_formulations(
     evidence: list[Evidence] | None = None,
     *,
     n: int = 3,
+    modify_prompt: str = "",
+    base_formulas: list | None = None,
 ) -> RecommendedFormulaListResponse:
     """Primary recommend engine: LLM structured JSON with offline fallback."""
     from ..domain.formulation_gate import offline_recommend_response, validate_recommended_formulas
@@ -634,7 +690,11 @@ def recommend_formulations(
     evidence = evidence or []
 
     system = _recommend_system_prompt()
-    user = _recommend_user_prompt(req, objectives, evidence, n)
+    user = _recommend_user_prompt(
+        req, objectives, evidence, n,
+        modify_prompt=modify_prompt,
+        base_formulas=base_formulas,
+    )
 
     parsed, err = complete_structured(system, user, RecommendedFormulaListResponse)
     if parsed and parsed.formulas:

@@ -29,6 +29,14 @@ class DeepResearchRequest(BaseModel):
     query: str = ""
 
 
+class ModifyRequest(BaseModel):
+    requirement: Requirement
+    modify_prompt: str = Field(min_length=1)
+    base_formulas: list = Field(default_factory=list)
+    sources: list[Evidence] = Field(default_factory=list)
+    query: str = ""
+
+
 @router.post("/research", response_model=ResearchResult)
 def start_research(body: ResearchRequest) -> ResearchResult:
     """同步配方推荐：CRAG graph → grounded evidence → 推荐。"""
@@ -70,6 +78,28 @@ def start_deep_research(body: DeepResearchRequest) -> JSONResponse:
     }
     async_result = run_deep_research_task.delay(payload)
     return accepted_response(async_result.id, "deep_research")
+
+
+@router.post("/research/modify", status_code=202)
+def modify_recommendation(body: ModifyRequest) -> JSONResponse:
+    """AI-modify existing formulas: augment retrieval query and re-recommend."""
+    from ..domain.schemas import Formulation
+
+    req = body.requirement.model_copy(
+        update={"notes": f"{body.requirement.notes}\n[AI修改] {body.modify_prompt}".strip()}
+    )
+    base = [Formulation.model_validate(f) for f in body.base_formulas]
+    augmented_query = f"{body.query or req.headline()} {body.modify_prompt}".strip()
+    payload = {
+        "topic": augmented_query,
+        "requirement": req.model_dump(),
+        "sources": [s.model_dump() for s in body.sources],
+        "query": augmented_query,
+        "modify_prompt": body.modify_prompt,
+        "base_formulas": [f.model_dump() for f in base],
+    }
+    async_result = run_recommend_task.delay(payload)
+    return accepted_response(async_result.id, "recommend")
 
 
 @router.post("/research/kb/refresh")

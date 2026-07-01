@@ -14,6 +14,37 @@ _DOMAIN_LABELS: dict[ProductDomain, str] = {
     ProductDomain.surface_treatment: "表面处理剂",
 }
 
+_LEGACY_CONSTRAINT_LABELS: dict[str, str] = {
+    "voc_limit_gpl": "VOC 上限",
+    "cure_temperature_c": "固化温度上限",
+    "ph_target": "pH 目标",
+    "salt_spray_hours": "耐盐雾目标",
+    "film_weight_gsm": "干膜重目标",
+    "cleaning_efficiency": "清洗率目标",
+}
+
+
+def normalize_constraints(req: Requirement) -> dict[str, float]:
+    """Merge legacy scalar constraint fields with the custom constraints dict."""
+    out: dict[str, float] = {}
+    if req.voc_limit_gpl is not None:
+        out[_LEGACY_CONSTRAINT_LABELS["voc_limit_gpl"]] = float(req.voc_limit_gpl)
+    if req.cure_temperature_c is not None:
+        out[_LEGACY_CONSTRAINT_LABELS["cure_temperature_c"]] = float(req.cure_temperature_c)
+    if req.ph_target is not None:
+        out[_LEGACY_CONSTRAINT_LABELS["ph_target"]] = float(req.ph_target)
+    if req.salt_spray_hours:
+        out[_LEGACY_CONSTRAINT_LABELS["salt_spray_hours"]] = float(req.salt_spray_hours)
+    if req.film_weight_gsm:
+        out[_LEGACY_CONSTRAINT_LABELS["film_weight_gsm"]] = float(req.film_weight_gsm)
+    if req.cleaning_efficiency:
+        out[_LEGACY_CONSTRAINT_LABELS["cleaning_efficiency"]] = float(req.cleaning_efficiency)
+    for key, raw in (req.constraints or {}).items():
+        if raw is not None:
+            out[key] = float(raw)
+    return out
+
+
 _LEGACY_LEVERS: dict[ProductDomain, list[tuple[str, float, float]]] = {
     ProductDomain.anticorrosion_coating: [
         ("Zinc phosphate", 2.0, 14.0),
