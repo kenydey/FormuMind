@@ -16,7 +16,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings

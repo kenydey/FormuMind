@@ -57,6 +57,7 @@ export default function SourcesPanel() {
     deepResearchMessage,
     refreshKnowledgeBase,
     error,
+    usedSeedFallback,
   } = useStore();
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
@@ -138,6 +139,12 @@ export default function SourcesPanel() {
               </code>
             </div>
           )}
+        </div>
+      )}
+
+      {usedSeedFallback && sources.length > 0 && !searchBusy && (
+        <div className="shrink-0 text-[11px] text-amber-200/90 border border-amber-500/30 bg-amber-500/10 rounded px-2 py-1.5 leading-relaxed">
+          当前结果含<strong className="font-semibold">离线示例摘要</strong>（非实时专利数据）。配置在线检索后可获取真实文献。
         </div>
       )}
 
@@ -331,8 +338,13 @@ export default function SourcesPanel() {
                 </button>
                 <span className="shrink-0">{iconForSource(e.source)}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-slate-300 truncate" title={e.title}>
-                    {e.title}
+                  <div className="text-slate-300 truncate flex items-center gap-1" title={e.title}>
+                    {e.is_seed_corpus && (
+                      <span className="shrink-0 text-[9px] text-amber-400 border border-amber-500/40 rounded px-1">
+                        示例
+                      </span>
+                    )}
+                    <span className="truncate">{e.title}</span>
                   </div>
                   <div className="text-slate-600 truncate">{e.source}</div>
                 </div>

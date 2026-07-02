@@ -49,6 +49,11 @@ class SearchResponse(BaseModel):
     evidence: list[Evidence]
     total: int
     source_status: dict[str, SourceStatus] = {}
+    used_seed_fallback: bool = False
+
+
+def _used_seed_fallback(evidence: list[Evidence]) -> bool:
+    return any(e.is_seed_corpus for e in evidence)
 
 
 def _build_status() -> dict[str, SourceStatus]:
@@ -81,6 +86,7 @@ def search_sources(req: SearchRequest):
         evidence=evidence,
         total=len(evidence),
         source_status=_build_status(),
+        used_seed_fallback=_used_seed_fallback(evidence),
     )
 
 

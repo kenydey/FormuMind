@@ -96,6 +96,8 @@ export interface Evidence {
   title: string;
   snippet: string;
   relevance: number;
+  /** True when this row is from the offline seed corpus, not a live API hit. */
+  is_seed_corpus?: boolean;
 }
 
 export interface ResearchResult {
@@ -284,6 +286,20 @@ export function primaryObjectiveMetric(req: Requirement): string {
   return OBJECTIVE_METRIC[req.domain];
 }
 
+/** Normalized API failure for store actions and UI banners. */
+export class ApiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function formatApiError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 async function readApiError(res: Response, path: string): Promise<string> {
   let detail = `${path} -> ${res.status}`;
   try {
@@ -307,7 +323,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await readApiError(res, path));
+  if (!res.ok) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
 
@@ -317,13 +333,13 @@ async function postAccepted(path: string, body: unknown): Promise<AsyncTaskAccep
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (res.status !== 202) throw new Error(`${path} -> ${res.status}`);
+  if (res.status !== 202) throw new ApiError(`${path} -> ${res.status}`);
   return res.json();
 }
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(await readApiError(res, path));
+  if (!res.ok) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
 
@@ -333,13 +349,13 @@ async function put<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await readApiError(res, path));
+  if (!res.ok) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
 
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: "DELETE" });
-  if (!res.ok) throw new Error(await readApiError(res, path));
+  if (!res.ok) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
 
@@ -866,6 +882,7 @@ export interface SearchResponse {
   evidence: Evidence[];
   total: number;
   source_status?: Record<string, SourceStatus>;
+  used_seed_fallback?: boolean;
 }
 
 /** Incremental search progress payload (SSE task data). */
@@ -880,11 +897,18 @@ export interface SearchStreamProgress {
 
 export function parseSearchStreamData(
   data: Record<string, unknown> | null | undefined
-): { evidence: Evidence[]; progress: Partial<SearchStreamProgress> } {
-  if (!data) return { evidence: [], progress: {} };
+): {
+  evidence: Evidence[];
+  progress: Partial<SearchStreamProgress>;
+  usedSeedFallback: boolean;
+} {
+  if (!data) return { evidence: [], progress: {}, usedSeedFallback: false };
   const evidence = Array.isArray(data.evidence) ? (data.evidence as Evidence[]) : [];
+  const usedSeedFallback =
+    data.used_seed_fallback === true || evidence.some((e) => e.is_seed_corpus);
   return {
     evidence,
+    usedSeedFallback,
     progress: {
       total: typeof data.total === "number" ? data.total : evidence.length,
       source: typeof data.source === "string" ? data.source : null,

@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # Per-source network ceiling — prevents one hung API from blocking the whole search.
 _SOURCE_TIMEOUT_SEC = 25
 
+# Shared executor for per-source fetch timeouts (avoid creating a pool per call).
+_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+_ARXIV_CLIENT = None
+
 # Curated seed corpus — representative, paraphrased abstracts used offline.
 SEED_CORPUS: dict[ProductDomain, list[dict]] = {
     ProductDomain.anticorrosion_coating: [
@@ -94,16 +99,21 @@ def _prepare_search_queries(query: str):
     return prepare_search_queries(query)
 
 
+def _seed_evidence(doc: dict, index: int) -> Evidence:
+    return Evidence(
+        relevance=round(max(0.4, 1.0 - index * 0.08), 2),
+        is_seed_corpus=True,
+        **doc,
+    )
+
+
 def _fetch_with_timeout(fetch, cursor: int) -> list[Evidence]:
     """Run one source page fetch with a hard timeout."""
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(fetch, cursor)
+    fut = _FETCH_EXECUTOR.submit(fetch, cursor)
     try:
         return fut.result(timeout=_SOURCE_TIMEOUT_SEC) or []
     except Exception as exc:
         return degrade_return(logger, exc, "source fetch timed out or failed", [])
-    finally:
-        ex.shutdown(wait=False, cancel_futures=True)
 
 
 def _build_patent_query(req: Requirement | None, query: str) -> str:
@@ -228,10 +238,7 @@ def search_patents(
         return merged[offset : offset + limit]
     corpus = SEED_CORPUS.get(req.domain, [])
     seed_query = query or _build_patent_query(req, "")
-    evidence = [
-        Evidence(relevance=round(max(0.4, 1.0 - i * 0.08), 2), **doc)
-        for i, doc in enumerate(corpus)
-    ]
+    evidence = [_seed_evidence(doc, i) for i, doc in enumerate(corpus)]
     filtered = _filter_seed_by_query(evidence, seed_query)
     return filtered[offset : offset + limit]
 
@@ -274,11 +281,18 @@ def search_patents_by_query(
     for domain_docs in SEED_CORPUS.values():
         for i, doc in enumerate(domain_docs):
             if doc.get("source") in ("USPTO", "EPO"):
-                all_seeds.append(
-                    Evidence(relevance=round(max(0.4, 1.0 - i * 0.08), 2), **doc)
-                )
+                all_seeds.append(_seed_evidence(doc, i))
     filtered = _filter_seed_by_query(all_seeds, query)
     return filtered[offset : offset + limit]
+
+
+def _get_arxiv_client():
+    global _ARXIV_CLIENT
+    if _ARXIV_CLIENT is None:
+        import arxiv  # type: ignore
+
+        _ARXIV_CLIENT = arxiv.Client(page_size=50, delay_seconds=3, num_retries=1)
+    return _ARXIV_CLIENT
 
 
 def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: bool | None = None) -> list[Evidence]:
@@ -297,7 +311,7 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
     try:
         import arxiv  # type: ignore
 
-        client = arxiv.Client(page_size=50, delay_seconds=3, num_retries=1)
+        client = _get_arxiv_client()
         results = list(
             client.results(
                 arxiv.Search(

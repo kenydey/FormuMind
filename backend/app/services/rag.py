@@ -5,6 +5,11 @@ OpenNotebook is installed it can be delegated to; the built-in fallback is a
 self-contained in-memory TF-IDF index (pure Python) that ranks ingested
 snippets against a query — enough to ground recommendations with citations
 offline.
+
+**Persistence model:** ``TfidfStore`` / ``EmbeddingStore`` from ``build_store()``
+are ephemeral per-call re-rankers (ingest sources for one question, then query).
+Cross-request knowledge persistence lives in ``colbert_store`` when ColBERT or
+the on-disk manifest is enabled — not in the TF-IDF instance.
 """
 from __future__ import annotations
 

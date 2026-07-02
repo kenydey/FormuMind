@@ -71,7 +71,14 @@ def _parse_text(content: bytes) -> str:
     return ""
 
 
-def _chunk_text(text: str, *, max_chars: int = 1600, overlap: int = 200) -> list[str]:
+def _chunk_text(
+    text: str,
+    *,
+    max_chars: int = 1600,
+    overlap: int = 200,
+    max_depth: int = 10,
+    _depth: int = 0,
+) -> list[str]:
     """Recursive split on \\n\\n > \\n > 句号，控制 chunk 大小。"""
     text = text.strip()
     if not text:
@@ -80,11 +87,24 @@ def _chunk_text(text: str, *, max_chars: int = 1600, overlap: int = 200) -> list
     if len(text) <= max_chars:
         return [text]
 
+    if _depth >= max_depth:
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            end = min(start + max_chars, len(text))
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            if end >= len(text):
+                break
+            start = max(end - overlap, start + 1)
+        return chunks
+
     for sep in ("\n\n", "\n", "。", ". "):
         if sep not in text:
             continue
         parts = text.split(sep)
-        chunks: list[str] = []
+        chunks = []
         current = ""
         for i, part in enumerate(parts):
             piece = part if i == len(parts) - 1 else part + sep
@@ -94,7 +114,15 @@ def _chunk_text(text: str, *, max_chars: int = 1600, overlap: int = 200) -> list
                 if current.strip():
                     chunks.append(current.strip())
                 if len(piece) > max_chars:
-                    chunks.extend(_chunk_text(piece, max_chars=max_chars, overlap=overlap))
+                    chunks.extend(
+                        _chunk_text(
+                            piece,
+                            max_chars=max_chars,
+                            overlap=overlap,
+                            max_depth=max_depth,
+                            _depth=_depth + 1,
+                        )
+                    )
                     current = ""
                 else:
                     current = piece

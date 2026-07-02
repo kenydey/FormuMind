@@ -233,6 +233,7 @@ class Evidence(BaseModel):
     title: str
     snippet: str
     relevance: float = Field(ge=0, le=1)
+    is_seed_corpus: bool = False
 
 
 class ParameterBoundary(BaseModel):

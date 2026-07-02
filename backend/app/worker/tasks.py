@@ -437,6 +437,7 @@ def run_search_task(self, payload: dict) -> dict:
             "evidence": [e.model_dump() for e in final],
             "total": len(final),
             "source_status": status,
+            "used_seed_fallback": any(e.is_seed_corpus for e in final),
         }
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "search", data)
