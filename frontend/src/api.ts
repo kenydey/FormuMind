@@ -44,10 +44,12 @@ export interface Requirement {
   levers?: LeverSpec[];
   materials?: MaterialSpec[];
   constraints?: Record<string, number | null>;
+  constraint_values?: Record<string, number>;
 }
 
 export interface Ingredient {
   name: string;
+  zh_name?: string;
   role: string;
   weight_pct: number;
   formula?: string | null;
@@ -351,6 +353,36 @@ export const api = {
       objectives: objectives ?? req.objectives,
       sources,
       n,
+    }),
+  chemicalLookup: (q: string) =>
+    get<{
+      query: string;
+      cas: string;
+      iupac_name: string;
+      zh_name: string;
+      formula: string;
+      smiles?: string | null;
+      molar_mass?: number | null;
+      found: boolean;
+      source: string;
+    }>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
+  addManualFormulation: (formulation: Formulation, requirement?: Requirement) =>
+    post<{ formulation: Formulation; warnings: string[] }>("/api/formulations/manual", {
+      formulation,
+      requirement: requirement ?? null,
+    }),
+  modifyFormulations: (
+    req: Requirement,
+    modifyPrompt: string,
+    opts: { sources?: Evidence[]; baseFormulation?: Formulation; query?: string; n?: number } = {}
+  ) =>
+    post<RecommendFormulationsResponse>("/api/formulations/modify", {
+      requirement: req,
+      modify_prompt: modifyPrompt,
+      sources: opts.sources ?? [],
+      base_formulation: opts.baseFormulation ?? null,
+      query: opts.query ?? "",
+      n: opts.n ?? 3,
     }),
   doe: (req: Requirement, design: string, engine = "auto") =>
     post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),

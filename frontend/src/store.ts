@@ -137,6 +137,7 @@ interface AppState {
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;   // requirements | recommend | doe | workbench | optimize | process | loop
   activeConstraints: ConstraintKey[];
+  requirementSnapshot: Requirement | null;
   // Settings
   llmConfig: LLMConfig;
   settingsOpen: boolean;
@@ -154,6 +155,20 @@ interface AppState {
   setActiveConstraints: (keys: ConstraintKey[]) => void;
   setConstraintValue: (key: ConstraintKey, value: number) => void;
   clearConstraintValue: (key: ConstraintKey) => void;
+  addCustomConstraint: (name: string, value: number) => void;
+  removeCustomConstraint: (name: string) => void;
+  updateCustomConstraint: (name: string, value: number) => void;
+  captureRequirementSnapshot: () => void;
+  resetRequirement: () => void;
+  saveRequirementAndRefresh: () => Promise<void>;
+  setLeaderboard: (forms: Formulation[]) => void;
+  addManualFormula: () => Promise<void>;
+  updateFormulaIngredient: (
+    formulaIdx: number,
+    ingIdx: number,
+    patch: Partial<import("./api").Ingredient>
+  ) => void;
+  runAiModifyFormula: (prompt: string, baseIndex?: number) => Promise<void>;
   runResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
   refreshKnowledgeBase: () => Promise<void>;
@@ -225,6 +240,7 @@ const defaultRequirement: Requirement = {
     { name: "Polyamide hardener", low: 8, high: 22, unit: "wt%" },
     { name: "cure_temperature_c", low: 50, high: 80, unit: "C" },
   ],
+  constraint_values: {},
 };
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -364,6 +380,7 @@ export const useStore = create<AppState>()(
       recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
       openModal: null,
       activeConstraints: defaultConstraintsForDomain("anticorrosion_coating"),
+      requirementSnapshot: null,
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },
       settingsOpen: false,
       settingsTab: "llm",
@@ -486,6 +503,155 @@ export const useStore = create<AppState>()(
           else draft.requirement[key] = 0;
         });
         get().scheduleAutosave();
+      },
+
+      addCustomConstraint: (name, value) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        set((draft) => {
+          if (!draft.requirement.constraint_values) draft.requirement.constraint_values = {};
+          draft.requirement.constraint_values[trimmed] = value;
+        });
+        get().scheduleAutosave();
+      },
+
+      removeCustomConstraint: (name) => {
+        set((draft) => {
+          if (draft.requirement.constraint_values) {
+            delete draft.requirement.constraint_values[name];
+          }
+        });
+        get().scheduleAutosave();
+      },
+
+      updateCustomConstraint: (name, value) => {
+        set((draft) => {
+          if (!draft.requirement.constraint_values) draft.requirement.constraint_values = {};
+          draft.requirement.constraint_values[name] = value;
+        });
+        get().scheduleAutosave();
+      },
+
+      captureRequirementSnapshot: () => {
+        set((draft) => {
+          draft.requirementSnapshot = JSON.parse(JSON.stringify(draft.requirement));
+        });
+      },
+
+      resetRequirement: () => {
+        const snap = get().requirementSnapshot;
+        if (!snap) return;
+        set((draft) => {
+          draft.requirement = JSON.parse(JSON.stringify(snap));
+        });
+        get().scheduleAutosave();
+      },
+
+      saveRequirementAndRefresh: async () => {
+        let { activeProjectId, requirement } = get();
+        if (!activeProjectId) {
+          await get().createProject(requirement.product_type || "新项目");
+          activeProjectId = get().activeProjectId;
+        }
+        await get().saveProject();
+        get().captureRequirementSnapshot();
+        await get().runResearch();
+      },
+
+      setLeaderboard: (forms) => {
+        set((draft) => {
+          draft.leaderboard = forms;
+        });
+        get().scheduleAutosave();
+      },
+
+      addManualFormula: async () => {
+        const { requirement } = get();
+        const blank: Formulation = {
+          name: "手动配方",
+          domain: requirement.domain,
+          ingredients: [
+            {
+              name: "",
+              zh_name: "",
+              role: "additive",
+              weight_pct: 0,
+              cas_no: "",
+            },
+          ],
+          rationale: "手动输入",
+          predicted: {},
+          predicted_std: {},
+          score: null,
+          warnings: [],
+        };
+        try {
+          const { formulation } = await api.addManualFormulation(blank, requirement);
+          set((draft) => {
+            draft.leaderboard = [...draft.leaderboard, formulation];
+          });
+          get().scheduleAutosave();
+        } catch (e) {
+          set((draft) => {
+            draft.error = String(e);
+          });
+        }
+      },
+
+      updateFormulaIngredient: (formulaIdx, ingIdx, patch) => {
+        set((draft) => {
+          const form = draft.leaderboard[formulaIdx];
+          if (!form?.ingredients[ingIdx]) return;
+          Object.assign(form.ingredients[ingIdx], patch);
+        });
+        get().scheduleAutosave();
+      },
+
+      runAiModifyFormula: async (prompt, baseIndex = 0) => {
+        const { requirement, sources, selectedSources, searchQuery, leaderboard } = get();
+        const selected = sources.filter((e) =>
+          selectedSources.includes(e.identifier || e.title)
+        );
+        const payload = selected.length > 0 ? selected : sources;
+        const base = leaderboard[baseIndex];
+        set((draft) => {
+          draft.formulationBusy = true;
+          draft.recommendMessage = "AI 修改配方中…";
+          draft.error = null;
+        });
+        try {
+          const resp = await api.modifyFormulations(requirement, prompt, {
+            sources: payload,
+            baseFormulation: base,
+            query: searchQuery.trim(),
+            n: 3,
+          });
+          const scored = resp.scored?.length ? resp.scored : [];
+          if (!scored.length) throw new Error("AI 修改未返回配方");
+          set((draft) => {
+            draft.leaderboard = scored;
+            draft.research = {
+              requirement_headline:
+                requirement.product_type ||
+                `${requirement.domain} on ${requirement.application || requirement.substrate}`,
+              evidence: draft.research?.evidence ?? [],
+              mechanism: draft.research?.mechanism ?? "",
+              recommended: scored,
+              chat_markdown: `AI 修改：${prompt}`,
+              recommend_engine: (resp.engine === "llm" ? "llm" : "offline") as "llm" | "offline",
+            };
+          });
+          get().scheduleAutosave();
+        } catch (e) {
+          set((draft) => {
+            draft.error = String(e);
+          });
+        } finally {
+          set((draft) => {
+            draft.formulationBusy = false;
+            draft.recommendMessage = "";
+          });
+        }
       },
 
       runResearch: async () => {
@@ -1070,6 +1236,7 @@ export const useStore = create<AppState>()(
               draft.workbenchStats = null;
             });
           }
+          get().captureRequirementSnapshot();
         } catch (e) {
           set((draft) => {
             draft.error = String(e);
@@ -1193,6 +1360,7 @@ export const useStore = create<AppState>()(
             if (patch.workbenchCampaignId != null) {
               await get().refreshWorkbenchStats();
             }
+            get().captureRequirementSnapshot();
           }
         } catch (e) {
           set((draft) => {

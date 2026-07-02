@@ -199,7 +199,6 @@ function ObjectivesEditor({
 
       <div className="flex flex-col gap-2">
         {objectives.map((obj, idx) => {
-          const meta = metaFor(obj.metric);
           return (
             <div key={`${obj.metric}-${idx}`} className="bg-ink/60 border border-edge rounded p-2 space-y-1.5">
               <div className="flex items-center gap-2">
@@ -222,7 +221,6 @@ function ObjectivesEditor({
                   className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
                   placeholder="metric id"
                 />
-                <span className="text-[10px] text-slate-500 truncate max-w-[80px]">{meta?.label ?? ""}</span>
                 <button
                   onClick={() => remove(idx)}
                   className="shrink-0 text-slate-600 hover:text-rose-400 text-xs leading-none w-4 h-4 flex items-center justify-center"
@@ -230,6 +228,20 @@ function ObjectivesEditor({
                 >
                   ×
                 </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={obj.display_name ?? ""}
+                  onChange={(e) => update(idx, { display_name: e.target.value })}
+                  className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs text-slate-300"
+                  placeholder="显示名称"
+                />
+                <input
+                  value={obj.unit ?? ""}
+                  onChange={(e) => update(idx, { unit: e.target.value })}
+                  className="w-16 bg-ink border border-edge rounded px-2 py-0.5 text-xs text-slate-400"
+                  placeholder="单位"
+                />
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-slate-500 shrink-0 w-10">权重</span>
@@ -246,7 +258,7 @@ function ObjectivesEditor({
                   {obj.weight.toFixed(2)}
                 </span>
               </div>
-              {TARGET_BOUNDS[obj.metric] && (
+              {TARGET_BOUNDS[obj.metric] ? (
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-slate-500 shrink-0 w-10">目标值</span>
                   <input
@@ -263,6 +275,20 @@ function ObjectivesEditor({
                     placeholder="—"
                   />
                   <span className="text-[10px] text-slate-500 shrink-0">{TARGET_BOUNDS[obj.metric].unit}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 shrink-0 w-10">目标值</span>
+                  <input
+                    type="number"
+                    value={obj.target_value ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      update(idx, { target_value: v });
+                    }}
+                    className="flex-1 bg-ink border border-edge rounded px-2 py-0.5 text-xs font-mono text-slate-200"
+                    placeholder="—"
+                  />
                 </div>
               )}
             </div>
@@ -289,7 +315,7 @@ function ObjectivesEditor({
           }}
           className="mt-2 w-full bg-ink border border-edge rounded px-2 py-1 text-xs text-slate-400"
         >
-          <option value="">+ 添加目标 Add objective…</option>
+          <option value="">+ 从预设添加目标…</option>
           {availableToAdd.map((m) => (
             <option key={m.metric} value={m.metric}>
               {m.label}
@@ -297,6 +323,23 @@ function ObjectivesEditor({
           ))}
         </select>
       )}
+      <button
+        type="button"
+        onClick={() =>
+          addObjective(
+            normalizeObjective({
+              metric: `custom_${Date.now().toString(36)}`,
+              display_name: "自定义指标",
+              weight: 0.1,
+              direction: "maximize",
+              unit: "",
+            })
+          )
+        }
+        className="mt-2 w-full text-[11px] border border-dashed border-edge text-slate-400 rounded px-2 py-1 hover:border-accent/40 hover:text-accent"
+      >
+        + 添加自定义目标
+      </button>
     </div>
   );
 }
@@ -347,6 +390,13 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
     setActiveConstraints,
     setConstraintValue,
     clearConstraintValue,
+    addCustomConstraint,
+    removeCustomConstraint,
+    updateCustomConstraint,
+    saveRequirementAndRefresh,
+    resetRequirement,
+    requirementSnapshot,
+    projectSaveBusy,
     runResearch,
     runOptimize,
     busy,
@@ -441,7 +491,29 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         onActiveKeysChange={setActiveConstraints}
         onSetValue={setConstraintValue}
         onClearValue={clearConstraintValue}
+        onAddCustom={addCustomConstraint}
+        onRemoveCustom={removeCustomConstraint}
+        onUpdateCustom={updateCustomConstraint}
       />
+
+      <div className="flex gap-2 mb-3">
+        <button
+          type="button"
+          onClick={() => void saveRequirementAndRefresh()}
+          disabled={projectSaveBusy || formulationBusy}
+          className="bg-accent text-ink font-semibold rounded px-3 py-1.5 text-sm flex-1 disabled:opacity-40"
+        >
+          {projectSaveBusy || formulationBusy ? "保存中…" : "💾 保存需求"}
+        </button>
+        <button
+          type="button"
+          onClick={resetRequirement}
+          disabled={!requirementSnapshot}
+          className="border border-edge text-slate-400 rounded px-3 py-1.5 text-sm disabled:opacity-40"
+        >
+          恢复
+        </button>
+      </div>
 
       {!embedded && (
         <div className="mt-auto pt-3 flex flex-col gap-2">

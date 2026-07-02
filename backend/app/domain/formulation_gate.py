@@ -69,6 +69,7 @@ def component_to_ingredient(comp: RecommendedFormulaComponent) -> Ingredient:
     role = enriched.component_type or "additive"
     return Ingredient(
         name=enriched.name,
+        zh_name=enriched.zh_name or "",
         role=role,
         component_type=enriched.component_type or role,
         smiles=enriched.smiles,
@@ -89,6 +90,7 @@ def ingredient_to_component(ing: Ingredient) -> RecommendedFormulaComponent:
     return RecommendedFormulaComponent(
         component_type=enriched.component_type or enriched.role,
         name=enriched.name,
+        zh_name=enriched.zh_name or "",
         cas_no=enriched.cas_no or "",
         mf=enriched.formula or enriched.mf_structure or "",
         smiles=enriched.smiles,

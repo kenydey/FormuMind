@@ -594,6 +594,24 @@ def _recommend_system_prompt() -> str:
     )
 
 
+def _constraints_prompt_block(req: Requirement) -> str:
+    lines: list[str] = []
+    if req.voc_limit_gpl is not None:
+        lines.append(f"- VOC limit: {req.voc_limit_gpl} g/L")
+    if req.cure_temperature_c is not None:
+        lines.append(f"- Max cure temperature: {req.cure_temperature_c} °C")
+    if req.ph_target is not None:
+        lines.append(f"- Target pH: {req.ph_target}")
+    if req.film_weight_gsm:
+        lines.append(f"- Target film weight: {req.film_weight_gsm} g/m²")
+    for key, val in (req.constraints or {}).items():
+        if val is not None:
+            lines.append(f"- {key}: {val}")
+    for name, val in (req.constraint_values or {}).items():
+        lines.append(f"- {name}: {val}")
+    return "\n".join(lines) if lines else "- (none specified)"
+
+
 def _recommend_user_prompt(
     req: Requirement,
     objectives: list[ObjectiveSpec],
@@ -611,8 +629,11 @@ def _recommend_user_prompt(
         f"Cleaning target (%): {req.cleaning_efficiency}\n"
         f"VOC limit (g/L): {req.voc_limit_gpl}\n"
         f"Cure temp (C): {req.cure_temperature_c}\n"
+        f"Film weight target (g/m²): {req.film_weight_gsm}\n"
+        f"pH target: {req.ph_target}\n"
         f"Notes: {req.notes}\n\n"
         f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
+        f"Process constraints (must respect):\n{_constraints_prompt_block(req)}\n\n"
         f"Evidence:\n{citations}\n\n"
         f"Produce exactly {n} distinct recommended formulas in the formulas array."
     )
