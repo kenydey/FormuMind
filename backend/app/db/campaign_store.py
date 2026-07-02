@@ -1,6 +1,7 @@
 """Campaign workbench repository — Datalab Headless ELN (SSOT) with sqlite JSON fallback."""
 from __future__ import annotations
 
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import asyncio
 import concurrent.futures
 import logging

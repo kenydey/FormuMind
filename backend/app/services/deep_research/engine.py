@@ -1,6 +1,7 @@
 """深度研究引擎 — 查询扩展 → 多源检索 → RAG 融合 → 引用报告。"""
 from __future__ import annotations
 
+from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 from typing import Callable
 

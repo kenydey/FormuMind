@@ -1,6 +1,7 @@
 """Federated multi-source search facade for CRAG fallback ingestion."""
 from __future__ import annotations
 
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import time
 from typing import Callable
 
@@ -49,7 +50,7 @@ class FederatedSearchEngine:
         cap = per_source_cap or min(30, self._settings.search_limit_per_source)
         t0 = time.perf_counter()
 
-        logger.info("FederatedSearch query={!r} sources={}", query[:80], types)
+        logger.info("FederatedSearch query={!r} sources=%s", query[:80], types)
         try:
             evidence = literature.iter_search(
                 query,
@@ -60,7 +61,7 @@ class FederatedSearchEngine:
                 progress_cb=progress_cb,
             )
         except Exception as exc:
-            logger.exception("FederatedSearch failed: {}", exc)
+            logger.exception("FederatedSearch failed: %s", exc)
             evidence = []
 
         hits = [RetrievalHit.from_evidence(ev) for ev in evidence]

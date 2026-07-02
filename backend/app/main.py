@@ -5,11 +5,14 @@ CORS for the Vite frontend.
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from .services.errors import log_handled_exception, optional_import
 
 from .api import chemistry as chemistry_router
 from .api import doe, experiments, formulations, optimize, research, tasks
@@ -26,6 +29,7 @@ from .api import chemistry as chemistry_router
 from .api import projects as projects_router
 from .config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -36,22 +40,22 @@ async def lifespan(_app: FastAPI):
         from .services.secrets_store import reload_settings
 
         reload_settings()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "lifespan: reload_settings failed")
     try:
         from .services import colbert_store
 
         colbert_store.bootstrap_seed_corpus()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "lifespan: ColBERT bootstrap failed")
     if settings.enrich_compounds:
         try:  # pragma: no cover - opt-in network path
             from .domain.knowledge import RAW_MATERIALS
             from .services.compounds import enrich_materials
 
             enrich_materials(RAW_MATERIALS)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "lifespan: PubChem enrichment failed")
     try:
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store
@@ -60,9 +64,7 @@ async def lifespan(_app: FastAPI):
             get_campaign_store(settings)
             get_experiment_store(settings)
     except Exception as exc:
-        import logging
-
-        logging.getLogger(__name__).error("ELN store initialization failed: %s", exc)
+        log_handled_exception(logger, exc, "lifespan: ELN store initialization failed", level=logging.ERROR)
     yield
     try:
         from .db.campaign_store import get_campaign_store
@@ -72,8 +74,8 @@ async def lifespan(_app: FastAPI):
         reload_settings()
         await get_campaign_store().close()
         get_experiment_store().close()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "lifespan shutdown: store close failed")
 
 
 app = FastAPI(
@@ -128,11 +130,7 @@ def health() -> dict:
     cfg = get_settings()
 
     def _ok(pkg: str) -> bool:
-        try:
-            __import__(pkg)
-            return True
-        except Exception:
-            return False
+        return optional_import(pkg)
 
     llm_key = cfg.get_active_api_key()
     datalab_ok, datalab_reason = check_datalab_reachable(cfg.datalab_api_url)

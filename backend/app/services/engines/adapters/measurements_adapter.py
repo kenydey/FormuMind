@@ -1,6 +1,7 @@
 """ExperimentRecord ↔ pandas for baybe Campaign.add_measurements."""
 from __future__ import annotations
 
+from ...errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ....domain.objective_contract import objective_metrics, normalize_objectives
 from ....domain.schemas import ExperimentRecord, Requirement
 from .baybe_objective_builder import primary_metric

@@ -13,9 +13,13 @@ numpy and converges reliably for the low-dimensional formulation spaces here.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from dataclasses import dataclass, field
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -105,7 +109,8 @@ def _optuna_available() -> bool:
         import optuna  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -114,7 +119,8 @@ def _summit_available() -> bool:
         import summit  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -125,7 +131,8 @@ def _botorch_available() -> bool:
         import torch  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -331,16 +338,16 @@ def build_optimizer(factors: list[Factor], seed: int = 0):
     if _botorch_available():
         try:
             return BotorchOptimizer(factors=factors, seed=seed)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")
     if _summit_available():
         try:
             return SummitOptimizer(factors=factors, seed=seed)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")
     if _optuna_available():
         try:
             return OptunaOptimizer(factors=factors, seed=seed)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")
     return BayesianOptimizer(factors=factors, seed=seed)

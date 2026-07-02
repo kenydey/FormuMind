@@ -14,6 +14,7 @@ import re
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
+from .errors import degrade_return, log_handled_exception, optional_import
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +101,7 @@ def _fetch_with_timeout(fetch, cursor: int) -> list[Evidence]:
     try:
         return fut.result(timeout=_SOURCE_TIMEOUT_SEC) or []
     except Exception as exc:
-        logger.warning("source fetch timed out or failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "source fetch timed out or failed", [])
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
 
@@ -122,7 +122,7 @@ def _online_search(
     """Attempt real patent retrieval; return None if unavailable."""
     try:
         from patent_client import Patent  # type: ignore
-    except Exception:
+    except ImportError:
         return None
     try:
         search_q = _build_patent_query(req, query)
@@ -138,8 +138,7 @@ def _online_search(
             ))
         return evidence or None
     except Exception as exc:  # pragma: no cover - network/credentials
-        logger.warning("patent_client online search failed: %s", exc)
-        return None
+        return degrade_return(logger, exc, "patent_client online search failed", None)
 
 
 def _search_epo_patents(
@@ -183,8 +182,7 @@ def _search_epo_patents(
                 )
             return out[offset : offset + limit]
     except Exception as exc:
-        logger.warning("EPO Inpadoc search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "EPO Inpadoc search failed", [])
 
 
 def search(req: Requirement, limit: int = 8, query: str = "") -> list[Evidence]:
@@ -320,8 +318,7 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
             for i, r in enumerate(results)
         ]
     except Exception as exc:
-        logger.warning("arXiv search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "arXiv search failed", [])
 
 
 _ALLOWED_S2_FIELDS = frozenset({
@@ -374,8 +371,7 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
             )
         return out
     except Exception as exc:
-        logger.warning("Semantic Scholar search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "Semantic Scholar search failed", [])
 
 
 def search_openalex(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
@@ -424,8 +420,7 @@ def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
             for i, r in enumerate(results)
         ]
     except Exception as exc:
-        logger.warning("DuckDuckGo search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "DuckDuckGo search failed", [])
 
 
 def _is_patent_or_literature(e: Evidence) -> bool:
@@ -723,8 +718,7 @@ def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:
             )
         ]
     except Exception as exc:
-        logger.warning("ChemCrow WebSearch failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "ChemCrow WebSearch failed", [])
 
 
 def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
@@ -753,8 +747,7 @@ def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
             )
         ]
     except Exception as exc:
-        logger.warning("ChemCrow LiteratureSearch failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "ChemCrow LiteratureSearch failed", [])
 
 
 def get_source_availability() -> dict[str, dict]:
@@ -764,13 +757,7 @@ def get_source_availability() -> dict[str, dict]:
     to surface install/config hints in the UI.
     """
     def _ok(*pkgs: str) -> bool:
-        for pkg in pkgs:
-            try:
-                __import__(pkg)
-                return True
-            except Exception:
-                pass
-        return False
+        return any(optional_import(pkg) for pkg in pkgs)
 
     from .notebooklm import get_setup_status
     from ..config import get_settings

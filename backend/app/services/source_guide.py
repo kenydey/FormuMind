@@ -1,6 +1,7 @@
 """LLM-based structured source guide extraction for ingested documents."""
 from __future__ import annotations
 
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 import re
 

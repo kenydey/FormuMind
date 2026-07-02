@@ -6,6 +6,7 @@ read-only snapshot compatible with ``GET /api/tasks/{id}``.
 """
 from __future__ import annotations
 
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import json
 import logging
 import os
@@ -35,8 +36,8 @@ def _persist_task(task_id: str, status: TaskStatus) -> None:
         (_TASK_PERSIST_DIR / f"{task_id}.json").write_text(
             json.dumps(data, ensure_ascii=False), encoding="utf-8"
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "handled exception")
 
 
 def load_persisted_task(task_id: str) -> TaskStatus | None:
@@ -46,8 +47,8 @@ def load_persisted_task(task_id: str) -> TaskStatus | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return TaskStatus(**data)
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _persist_terminal(

@@ -8,6 +8,8 @@ Pipeline: parse → LLM source_guide → token-aware chunk → persist SourceDoc
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import hashlib
 import io
 import ipaddress
@@ -20,6 +22,8 @@ from ..config import get_settings
 from ..db.source_store import get_source_store
 from ..domain.schemas import Evidence, SourceGuideSchema
 from .source_guide import extract_source_guide
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,8 +40,8 @@ def _parse_with_markitdown(content: bytes, ext: str) -> str | None:
         md = MarkItDown()
         result = md.convert_stream(io.BytesIO(content), file_extension=ext)
         return result.text_content
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _parse_pdf_fallback(content: bytes) -> str:

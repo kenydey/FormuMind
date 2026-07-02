@@ -6,6 +6,8 @@ back to keyword-matching when no LLM is configured.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 
 from ..domain.schemas import (
@@ -17,6 +19,8 @@ from ..domain.schemas import (
     Requirement,
     Substrate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_chem_terms(form: Formulation) -> list[str]:
@@ -192,8 +196,8 @@ def _llm_analysis(form: Formulation, patents: list) -> IPReport | None:
             raw_patents_searched=len(patents),
             engine="llm",
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def analyze_ip_risk(req: IPAnalysisRequest) -> IPReport:

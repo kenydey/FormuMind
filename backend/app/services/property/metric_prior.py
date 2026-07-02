@@ -1,9 +1,13 @@
 """MetricPrior DSL evaluation (YAML/structured priors)."""
 from __future__ import annotations
 
+import logging
+from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ...domain import features
 from ...domain.chemistry import amine_epoxy_ratio
 from ...domain.schemas import Formulation, MetricPriorSpec, Requirement
+
+logger = logging.getLogger(__name__)
 
 
 def _sum_role(form: Formulation, role: str) -> float:
@@ -26,8 +30,8 @@ def evaluate_prior_spec(
             import yaml
 
             data = yaml.safe_load(spec.prior_yaml) or {}
-        except Exception:
-            return None, "cold-start"
+        except Exception as exc:
+            return degrade_return(logger, exc, "operation failed", None), "cold-start"
     else:
         data = {}
 
@@ -69,8 +73,8 @@ def evaluate_prior_spec(
                 corr += float(mol.get("tpsa", 0.0)) * (desc.get("mean_tpsa", 0.0) / 100.0)
                 corr += float(mol.get("fsp3", 0.0)) * desc.get("mean_fsp3", 0.0)
                 value *= corr
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")
 
     conf = spec.confidence or data.get("confidence", "prior")
     tier = "prior" if conf in ("user", "example", "high", "prior") else "role-based"

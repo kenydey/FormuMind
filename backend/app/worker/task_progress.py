@@ -1,6 +1,8 @@
 """Redis Pub/Sub progress bus for Celery async tasks (CQRS query side)."""
 from __future__ import annotations
 
+import logging
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import json
 import os
 from enum import Enum
@@ -11,6 +13,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 META_TTL_SECONDS = 86400
 RESULT_TTL_SECONDS = 86400
@@ -95,8 +99,8 @@ def _file_read_meta(task_id: str) -> dict[str, str] | None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return {k: str(v) for k, v in raw.items()}
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _file_write_result(task_id: str, result: dict[str, Any] | None) -> None:
@@ -112,8 +116,8 @@ def _file_read_result(task_id: str) -> dict[str, Any] | None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _redis_client():
@@ -148,7 +152,7 @@ def _store_progress(
         client.hset(_meta_key(task_id), mapping=meta)
         client.expire(_meta_key(task_id), META_TTL_SECONDS)
     except Exception as exc:
-        logger.warning("progress store failed for {}: {}", task_id, exc)
+        logger.warning("progress store failed for %s: %s", task_id, exc)
         _file_write_meta(task_id, event, kind=kind)
 
 
@@ -188,7 +192,7 @@ def persist_result(
             ex=RESULT_TTL_SECONDS,
         )
     except Exception as exc:
-        logger.warning("persist_result redis set failed for {}: {}", task_id, exc)
+        logger.warning("persist_result redis set failed for %s: %s", task_id, exc)
         _file_write_result(task_id, result)
     publish_progress(
         task_id,
@@ -205,8 +209,8 @@ def get_task_meta(task_id: str) -> dict[str, str] | None:
         meta = client.hgetall(_meta_key(task_id))
         if meta:
             return meta
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "handled exception")
     return _file_read_meta(task_id)
 
 
@@ -216,8 +220,8 @@ def get_task_result(task_id: str) -> dict[str, Any] | None:
         raw = client.get(_result_key(task_id))
         if raw:
             return json.loads(raw)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "handled exception")
     return _file_read_result(task_id)
 
 
@@ -228,7 +232,8 @@ def task_exists(task_id: str) -> bool:
         from .tasks import load_persisted_task
 
         return load_persisted_task(task_id) is not None
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 

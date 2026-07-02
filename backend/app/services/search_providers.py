@@ -5,6 +5,7 @@ swallows network errors (logs + returns []).
 """
 from __future__ import annotations
 
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 import re
 from typing import Any
@@ -96,8 +97,7 @@ def search_openalex(
             )
         return out
     except Exception as exc:
-        logger.warning("OpenAlex search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "OpenAlex search failed", [])
 
 
 def _serpapi_search(
@@ -151,8 +151,7 @@ def search_serpapi_scholar(
             )
         return out
     except Exception as exc:
-        logger.warning("SerpAPI Scholar search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "SerpAPI Scholar search failed", [])
 
 
 def search_serpapi_patents(
@@ -261,8 +260,7 @@ def search_tavily(
             )
         return out
     except Exception as exc:
-        logger.warning("Tavily search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "Tavily search failed", [])
 
 
 def search_google_patents_cn(

@@ -6,6 +6,8 @@ retrieval. Otherwise persists an Evidence manifest on disk and re-ranks via
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import json
 import re
 import threading
@@ -20,6 +22,8 @@ from pydantic import BaseModel, Field
 from ..config import Settings, get_settings
 from ..domain.schemas import Evidence
 from . import rag
+
+logger = logging.getLogger(__name__)
 
 SourceType = Literal["patents", "literature", "internet", "local", "notebooklm"]
 
@@ -59,7 +63,8 @@ def colbert_available() -> bool:
         import ragatouille  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -120,8 +125,7 @@ def _load_registry(settings: Settings, collection: str) -> dict[str, Evidence]:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return {k: Evidence.model_validate(v) for k, v in raw.items()}
     except Exception as exc:
-        logger.warning("Failed to load evidence registry {}: {}", path, exc)
-        return {}
+        return degrade_return(logger, exc, "Failed to load evidence registry", {})
 
 
 def _save_registry(settings: Settings, collection: str, registry: dict[str, Evidence]) -> None:
@@ -136,7 +140,7 @@ def _get_ragatouille_model(settings: Settings):
         return _MODEL_CACHE[settings.colbert_model]
     from ragatouille import RAGPretrainedModel
 
-    logger.info("Loading ColBERT model {}", settings.colbert_model)
+    logger.info("Loading ColBERT model %s", settings.colbert_model)
     model = RAGPretrainedModel.from_pretrained(settings.colbert_model)
     _MODEL_CACHE[settings.colbert_model] = model
     return model
@@ -185,7 +189,7 @@ def index_documents(
                         document_ids=doc_ids,
                     )
             except Exception as exc:
-                logger.exception("ColBERT index failed, using fallback registry only: {}", exc)
+                logger.exception("ColBERT index failed, using fallback registry only: %s", exc)
                 backend = "fallback"
 
         _save_registry(settings, collection, registry)
@@ -235,7 +239,7 @@ def search(
 
     registry = _load_registry(settings, collection)
     if not registry:
-        logger.debug("Empty registry for collection {}", collection)
+        logger.debug("Empty registry for collection %s", collection)
         return []
 
     filtered: list[Evidence] = list(registry.values())
@@ -276,7 +280,7 @@ def search(
             if hits:
                 return hits[:k]
         except Exception as exc:
-            logger.warning("ColBERT search failed, falling back to rag store: {}", exc)
+            logger.warning("ColBERT search failed, falling back to rag store: %s", exc)
 
     store = rag.build_store()
     store.ingest(filtered)
@@ -333,5 +337,5 @@ def bootstrap_seed_corpus(settings: Settings | None = None) -> int:
             )
         )
     count = index_evidence(evidence, settings=settings)
-    logger.info("Bootstrapped seed corpus: {} documents", count)
+    logger.info("Bootstrapped seed corpus: %s documents", count)
     return count

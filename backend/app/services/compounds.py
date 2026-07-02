@@ -12,9 +12,13 @@ tests, so offline behaviour stays deterministic.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _LOOKUP_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _CACHE_TTL_SEC = 86400  # 24h
@@ -40,7 +44,8 @@ def _pubchempy_available() -> bool:
         import pubchempy  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -128,8 +133,8 @@ def lookup(name: str) -> dict | None:
                 out["cas_no"] = s
                 break
         return out or None
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def lookup_compound(q: str) -> dict[str, Any]:
@@ -162,8 +167,8 @@ def lookup_compound(q: str) -> dict[str, Any]:
             result = _compound_to_result(q, c, syns)
             _cache_set(q, result)
             return result
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "handled exception")
 
     fallback = {
         "query": q,

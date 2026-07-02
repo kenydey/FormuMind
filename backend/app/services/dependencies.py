@@ -13,10 +13,14 @@ so the endpoints cannot be abused to pull in unknown code. The exact pip spec
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import subprocess
 import sys
 from dataclasses import dataclass
 from importlib import metadata, util
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -95,15 +99,16 @@ def _is_installed(import_name: str) -> bool:
     """True if the module can be located, without executing its top-level code."""
     try:
         return util.find_spec(import_name) is not None
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
 def _installed_version(dist_name: str) -> str | None:
     try:
         return metadata.version(dist_name)
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def status() -> list[dict]:

@@ -16,6 +16,7 @@ the SDK is missing or the API call fails.
 """
 from __future__ import annotations
 
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 from typing import TypeVar
 
@@ -223,6 +224,7 @@ def _anthropic_request(prompt: str, api_key: str, model: str, max_tokens: int) -
     except LLMConfigError:
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -280,6 +282,7 @@ def _openai_compatible_request(
     except LLMConfigError:
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -337,6 +340,7 @@ def _gemini_request(prompt: str, api_key: str, model: str) -> str:
     except LLMConfigError:
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -396,8 +400,8 @@ def complete_json(prompt: str) -> dict | None:
     try:
         data = json.loads(text)
         return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(log, exc, "operation failed", None)
 
 
 def _strip_json_fences(text: str) -> str:
@@ -472,6 +476,7 @@ def _openai_structured_request(
     except (LLMValidationError, LLMConfigError):
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -843,12 +848,7 @@ def _is_chemistry_question(question: str) -> bool:
 
 
 def _chemcrow_available() -> bool:
-    try:
-        import chemcrow  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return optional_import("chemcrow")
 
 
 def _chemcrow_llm_ready() -> bool:
@@ -860,12 +860,7 @@ def _chemcrow_llm_ready() -> bool:
 
 
 def _paperqa_available() -> bool:
-    try:
-        import paperqa  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return optional_import("paperqa")
 
 
 def _chemcrow_answer(question: str) -> str | None:
@@ -884,8 +879,8 @@ def _chemcrow_answer(question: str) -> str | None:
         )
         result = agent.run(question)
         return str(result) if result else None
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(log, exc, "operation failed", None)
 
 
 def _paperqa_answer(
@@ -910,8 +905,8 @@ def _paperqa_answer(
         text = getattr(answer, "answer", None) or str(answer)
         cited = [by_key[k] for k in by_key if k in (getattr(answer, "context", "") or "")]
         return text, (cited or sources[:6])
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(log, exc, "operation failed", None)
 
 
 def answer_question(

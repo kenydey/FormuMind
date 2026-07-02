@@ -8,12 +8,16 @@ offline.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 
 from ..domain.schemas import Evidence
+
+logger = logging.getLogger(__name__)
 
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -72,7 +76,8 @@ def _embedding_available() -> bool:
         import sentence_transformers  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -152,8 +157,8 @@ def build_store():
     if active_rag_backend() == "embedding":
         try:
             return EmbeddingStore()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")
     return TfidfStore()
 
 

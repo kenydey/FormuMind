@@ -1,11 +1,15 @@
 """pyDOE-backed DOE engine for cold-start experimental designs."""
 from __future__ import annotations
 
+import logging
+from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import numpy as np
 
 from ...domain.schemas import DOEFactor, DOEPlan
 from .adapters.doe_adapter import matrix_to_doe_plan
 from .native_doe_engine import build_native_plan
+
+logger = logging.getLogger(__name__)
 
 PYDOE_DESIGNS = frozenset({"lhs", "ccd", "bbdesign", "simplex_lattice", "sobol"})
 
@@ -15,7 +19,8 @@ def pydoe_available() -> bool:
         import pydoe  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 

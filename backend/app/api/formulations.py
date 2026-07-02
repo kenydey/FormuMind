@@ -1,6 +1,7 @@
 """Metadata endpoint: domains, substrates, DOE designs, and baseline templates."""
 from __future__ import annotations
 
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 
 from fastapi import APIRouter, HTTPException
