@@ -18,6 +18,7 @@ from ..domain.project_workspace import (
 )
 from ..domain.project_workspace import LegacySnapshotPayload
 from .models import ProjectRow
+from .session_utils import commit_session
 
 
 def _utcnow() -> datetime:
@@ -91,9 +92,9 @@ class ProjectStore:
             created_at=now,
             updated_at=now,
         )
-        with self._session_factory() as session:
+        with commit_session(self._session_factory) as session:
             session.add(row)
-            session.commit()
+            session.flush()
             session.refresh(row)
         return ProjectDetail(
             id=row.id,
@@ -112,7 +113,7 @@ class ProjectStore:
         *,
         title: str | None = None,
     ) -> ProjectDetail | None:
-        with self._session_factory() as session:
+        with commit_session(self._session_factory) as session:
             row = session.get(ProjectRow, project_id)
             if row is None or row.is_archived:
                 return None
@@ -122,7 +123,7 @@ class ProjectStore:
             if workspace.requirement:
                 row.domain = workspace.requirement.domain.value
             row.updated_at = _utcnow()
-            session.commit()
+            session.flush()
             session.refresh(row)
             ws = ProjectWorkspace.model_validate(row.payload or {})
             return ProjectDetail(
@@ -136,13 +137,12 @@ class ProjectStore:
             )
 
     def delete(self, project_id: str) -> bool:
-        with self._session_factory() as session:
+        with commit_session(self._session_factory) as session:
             row = session.get(ProjectRow, project_id)
             if row is None:
                 return False
             row.is_archived = True
             row.updated_at = _utcnow()
-            session.commit()
             return True
 
     def migrate_legacy(self, snapshots: list[LegacySnapshotPayload]) -> list[ProjectSummary]:

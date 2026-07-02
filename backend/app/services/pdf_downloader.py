@@ -2,7 +2,7 @@
 
 Downloads PDFs from public patent offices (USPTO, EPO) and parses them into
 chunked Evidence items using markitdown (preferred) or pypdf (fallback).
-Integrates with KnowledgeCohort to enrich abstract snippets with full text
+Integrates with DeepResearchEngine to enrich abstract snippets with full text
 when ``FORMUMIND_PDF_DOWNLOAD=true`` is set.
 
 Gated by the config flag so tests run offline without network requests.
@@ -195,7 +195,7 @@ def enrich_with_fulltext(
     Items without a downloadable PDF (no identifier, download failed, or
     max_pdfs exceeded) are returned unchanged.
 
-    Called by KnowledgeCohort.run() when FORMUMIND_PDF_DOWNLOAD=true.
+    Called by DeepResearchEngine.run() when FORMUMIND_PDF_DOWNLOAD=true.
     """
     enriched: list[Evidence] = []
     downloaded = 0

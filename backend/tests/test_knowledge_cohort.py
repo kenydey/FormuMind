@@ -11,7 +11,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.domain.schemas import Evidence, Requirement
-from app.services import knowledge_cohort, literature, rag
+from app.services.deep_research import DeepResearchEngine, conduct_research
+from app.services import literature, rag
 
 client = TestClient(app)
 
@@ -80,11 +81,11 @@ def test_llm_rerank_handles_empty_and_singleton():
     assert rag.llm_rerank("x", one, k=3) == one
 
 
-# ── KnowledgeCohort offline integrity ────────────────────────────────────────
+# ── DeepResearchEngine offline integrity ─────────────────────────────────────
 
 def test_cohort_run_offline_grounded_in_seed_corpus():
     req = Requirement(**_REQUIREMENT)
-    report = knowledge_cohort.KnowledgeCohort().run(
+    report = DeepResearchEngine().run(
         "epoxy zinc phosphate anti-corrosion coating", req=req
     )
     assert report.topic
@@ -97,7 +98,7 @@ def test_cohort_run_offline_grounded_in_seed_corpus():
 
 
 def test_cohort_run_without_requirement():
-    report = knowledge_cohort.conduct_research("anti-corrosion coating")
+    report = conduct_research("anti-corrosion coating")
     assert report.report_markdown
     assert report.candidates == []  # no requirement → no candidates
 

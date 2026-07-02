@@ -38,6 +38,7 @@ from .datalab_client import (
     validate_blocks,
 )
 from .models import ExperimentRow
+from .session_utils import commit_session
 
 logger = logging.getLogger(__name__)
 
@@ -163,14 +164,12 @@ class SqlExperimentStore:
     def add(self, records: list[ExperimentRecord]) -> None:
         if not records:
             return
-        with self._write_lock, self._session_factory() as session:
+        with self._write_lock, commit_session(self._session_factory) as session:
             session.add_all([_record_to_row(r) for r in records])
-            session.commit()
 
     def clear(self) -> None:
-        with self._write_lock, self._session_factory() as session:
+        with self._write_lock, commit_session(self._session_factory) as session:
             session.execute(delete(ExperimentRow).where(ExperimentRow.item_id.is_(None)))
-            session.commit()
 
     def count(self) -> int:
         with self._session_factory() as session:
@@ -310,9 +309,8 @@ class DatalabExperimentStore:
                 if row.item_id
             ]
         self._rollback_created_samples(item_ids)
-        with self._write_lock, self._session_factory() as session:
+        with self._write_lock, commit_session(self._session_factory) as session:
             session.execute(delete(ExperimentRow).where(ExperimentRow.item_id.isnot(None)))
-            session.commit()
 
     def count(self) -> int:
         with self._session_factory() as session:

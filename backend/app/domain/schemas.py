@@ -294,7 +294,7 @@ class ResearchResult(BaseModel):
 
 
 class ComprehensiveReport(BaseModel):
-    """Output of the KnowledgeCohort deep-research orchestrator.
+    """Output of the DeepResearchEngine deep-research orchestrator.
 
     A citation-grounded research report synthesised by cross-validating web and
     knowledge-base evidence, plus candidate formulations for the topic.
