@@ -25,8 +25,8 @@ def test_constraints_in_recommend_prompt():
         constraints={"pH 范围上限": 13},
     )
     block = _constraints_prompt_block(req)
-    assert "工艺约束" in block
     assert "pH 范围上限" in block
 
     prompt = _recommend_user_prompt(req, [], [], 2)
     assert "pH 范围上限" in prompt
+    assert "Process constraints" in prompt

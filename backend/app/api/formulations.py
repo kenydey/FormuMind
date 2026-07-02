@@ -85,21 +85,6 @@ class FormulationValidateResponse(BaseModel):
     warnings: list[str]
 
 
-class ManualFormulationRequest(BaseModel):
-    formulation: Formulation
-    requirement: Requirement | None = None
-
-
-@router.post("/formulations/manual", response_model=Formulation)
-def add_manual_formulation(body: ManualFormulationRequest) -> Formulation:
-    """Validate, enrich, and score a user-entered formulation."""
-    req = body.requirement or Requirement(domain=body.formulation.domain)
-    forms, _warnings = validate_formulations([body.formulation])
-    form = forms[0].model_copy(update={"source": "manual"})
-    process = workflow.process_for(req)
-    return workflow._score_and_validate(form, process, req)
-
-
 @router.post("/formulations/validate", response_model=FormulationValidateResponse)
 def validate_formulation_list(body: FormulationValidateRequest) -> FormulationValidateResponse:
     """Validate and enrich leaderboard / LLM formulations (CAS, structure)."""
@@ -158,6 +143,78 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
             log.warning("Skip scoring formula %s: %s", rec.name, exc)
             rec_resp.warnings.append(f"Scoring skipped for {rec.name}: {exc}")
 
+    scored.sort(key=lambda f: (f.score or 0.0), reverse=True)
+    return RecommendFormulationsResponse(
+        formulas=rec_resp.formulas,
+        engine=rec_resp.engine,
+        warnings=rec_resp.warnings,
+        scored=scored,
+    )
+
+
+class ManualFormulationRequest(BaseModel):
+    formulation: Formulation
+    requirement: Requirement | None = None
+
+
+class ManualFormulationResponse(BaseModel):
+    formulation: Formulation
+    warnings: list[str] = Field(default_factory=list)
+
+
+@router.post("/formulations/manual", response_model=ManualFormulationResponse)
+def add_manual_formulation(body: ManualFormulationRequest) -> ManualFormulationResponse:
+    """Validate, enrich, and optionally score a manually entered formulation."""
+    forms, warnings = validate_formulations([body.formulation])
+    form = forms[0].model_copy(update={"source": "manual"})
+    if body.requirement:
+        process = workflow.process_for(body.requirement)
+        form = workflow._score_and_validate(form, process, body.requirement)
+    return ManualFormulationResponse(formulation=form, warnings=warnings)
+
+
+class ModifyFormulationsRequest(BaseModel):
+    requirement: Requirement
+    modify_prompt: str = Field(min_length=1)
+    sources: list[Evidence] = Field(default_factory=list)
+    base_formulation: Formulation | None = None
+    query: str = ""
+    n: int = Field(default=3, ge=1, le=8)
+
+
+@router.post("/formulations/modify", response_model=RecommendFormulationsResponse)
+def modify_formulations(body: ModifyFormulationsRequest) -> RecommendFormulationsResponse:
+    """Re-run CRAG + recommend with an AI modification prompt appended."""
+    from ..domain.research_query import build_research_query
+    from ..pipeline.research_graph import resolve_grounded_evidence
+
+    req = body.requirement.model_copy(deep=True)
+    if body.base_formulation:
+        req.active_formulation = body.base_formulation
+    note = f"[AI modify] {body.modify_prompt}"
+    req.notes = f"{req.notes}\n{note}".strip() if req.notes else note
+
+    objectives = normalize_objectives(req)
+    query = build_research_query(f"{body.query} {body.modify_prompt}".strip(), req)
+    grounded_result = resolve_grounded_evidence(req, query, pre_index=body.sources or None)
+    rec_resp = llm.recommend_formulations(
+        req,
+        objectives,
+        grounded_result.grounded_evidence,
+        n=body.n,
+        modify_prompt=body.modify_prompt,
+        base_formulas=[body.base_formulation] if body.base_formulation else None,
+    )
+
+    process = workflow.process_for(req)
+    scored: list[Formulation] = []
+    for rec in rec_resp.formulas:
+        try:
+            form = recommended_to_formulation(rec)
+            scored.append(workflow._score_and_validate(form, process, req))
+        except Exception as exc:
+            log.warning("Skip scoring modified formula %s: %s", rec.name, exc)
+            rec_resp.warnings.append(f"Scoring skipped for {rec.name}: {exc}")
     scored.sort(key=lambda f: (f.score or 0.0), reverse=True)
     return RecommendFormulationsResponse(
         formulas=rec_resp.formulas,

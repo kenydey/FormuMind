@@ -419,9 +419,14 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
     setActiveConstraints,
     setConstraintValue,
     clearConstraintValue,
+    addCustomConstraint,
+    removeCustomConstraint,
+    updateCustomConstraint,
     saveRequirementAndRefresh,
     unlockRequirement,
+    resetRequirement,
     requirementLocked,
+    requirementSnapshot,
     projectSaveBusy,
     runResearch,
     runOptimize,
@@ -521,6 +526,9 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         onActiveKeysChange={setActiveConstraints}
         onSetValue={setConstraintValue}
         onClearValue={clearConstraintValue}
+        onAddCustom={addCustomConstraint}
+        onRemoveCustom={removeCustomConstraint}
+        onUpdateCustom={updateCustomConstraint}
         locked={locked}
       />
 
@@ -540,6 +548,14 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
           className="border border-edge text-slate-400 rounded px-3 py-1.5 text-sm disabled:opacity-40"
         >
           ✏️ 修改
+        </button>
+        <button
+          type="button"
+          onClick={resetRequirement}
+          disabled={!requirementSnapshot || locked}
+          className="border border-edge text-slate-400 rounded px-3 py-1.5 text-sm disabled:opacity-40"
+        >
+          恢复
         </button>
       </div>
 

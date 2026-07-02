@@ -46,6 +46,7 @@ export interface Requirement {
   levers?: LeverSpec[];
   materials?: MaterialSpec[];
   constraints?: Record<string, number | null>;
+  constraint_values?: Record<string, number>;
 }
 
 export interface ChemicalLookupResult {
@@ -60,6 +61,7 @@ export interface ChemicalLookupResult {
 
 export interface Ingredient {
   name: string;
+  zh_name?: string | null;
   role: string;
   weight_pct: number;
   formula?: string | null;
@@ -72,7 +74,6 @@ export interface Ingredient {
   mmol?: number | null;
   amount_display?: string;
   notes?: string;
-  zh_name?: string | null;
 }
 
 export interface Formulation {
@@ -366,6 +367,36 @@ export const api = {
       sources,
       n,
     }),
+  chemicalLookup: (q: string) =>
+    get<{
+      query: string;
+      cas: string;
+      iupac_name: string;
+      zh_name: string;
+      formula: string;
+      smiles?: string | null;
+      molar_mass?: number | null;
+      found: boolean;
+      source: string;
+    }>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
+  addManualFormulation: (formulation: Formulation, requirement?: Requirement) =>
+    post<{ formulation: Formulation; warnings: string[] }>("/api/formulations/manual", {
+      formulation,
+      requirement: requirement ?? null,
+    }),
+  modifyFormulations: (
+    req: Requirement,
+    modifyPrompt: string,
+    opts: { sources?: Evidence[]; baseFormulation?: Formulation; query?: string; n?: number } = {}
+  ) =>
+    post<RecommendFormulationsResponse>("/api/formulations/modify", {
+      requirement: req,
+      modify_prompt: modifyPrompt,
+      sources: opts.sources ?? [],
+      base_formulation: opts.baseFormulation ?? null,
+      query: opts.query ?? "",
+      n: opts.n ?? 3,
+    }),
   doe: (req: Requirement, design: string, engine = "auto") =>
     post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
   activeDoe: (
@@ -447,11 +478,6 @@ export const api = {
       query,
     }),
 
-  submitManualFormulation: (formulation: Formulation, requirement?: Requirement) =>
-    post<Formulation>("/api/formulations/manual", { formulation, requirement }),
-
-  lookupChemical: (q: string) =>
-    get<ChemicalLookupResult>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);

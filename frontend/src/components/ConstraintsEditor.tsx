@@ -1,10 +1,8 @@
 import { useState } from "react";
 import type { ProductDomain, Requirement } from "../api";
-import { useStore } from "../store";
 import {
   CONSTRAINT_CATALOG,
   constraintAppliesToDomain,
-  constraintLabelForKey,
   defaultConstraintsForDomain,
   getConstraintValue,
   type ConstraintKey,
@@ -65,9 +63,37 @@ function ConstraintSlider({
   );
 }
 
-const CATALOG_LABELS = new Set(
-  CONSTRAINT_CATALOG.map((c) => constraintLabelForKey(c.key))
-);
+function CustomConstraintRow({
+  name,
+  value,
+  onChange,
+  onRemove,
+}: {
+  name: string;
+  value: number;
+  onChange: (v: number) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="bg-ink/60 border border-accent/20 rounded p-2 mb-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-slate-300">{name}</span>
+        <button
+          onClick={onRemove}
+          className="shrink-0 text-slate-600 hover:text-rose-400 text-xs"
+        >
+          ×
+        </button>
+      </div>
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full bg-ink border border-edge rounded px-2 py-1 text-xs font-mono"
+      />
+    </div>
+  );
+}
 
 export default function ConstraintsEditor({
   domain,
@@ -76,6 +102,9 @@ export default function ConstraintsEditor({
   onActiveKeysChange,
   onSetValue,
   onClearValue,
+  onAddCustom,
+  onRemoveCustom,
+  onUpdateCustom,
   locked,
 }: {
   domain: ProductDomain;
@@ -84,20 +113,17 @@ export default function ConstraintsEditor({
   onActiveKeysChange: (keys: ConstraintKey[]) => void;
   onSetValue: (key: ConstraintKey, value: number) => void;
   onClearValue: (key: ConstraintKey) => void;
+  onAddCustom: (name: string, value: number) => void;
+  onRemoveCustom: (name: string) => void;
+  onUpdateCustom: (name: string, value: number) => void;
   locked?: boolean;
 }) {
-  const { setCustomConstraint, removeCustomConstraint } = useStore();
   const [customName, setCustomName] = useState("");
-  const [customValue, setCustomValue] = useState<number>(0);
-  const [customUnit, setCustomUnit] = useState("");
-
+  const [customValue, setCustomValue] = useState(0);
   const catalogForDomain = CONSTRAINT_CATALOG.filter((c) => constraintAppliesToDomain(c, domain));
   const activeSet = new Set(activeKeys);
   const availableToAdd = catalogForDomain.filter((c) => !activeSet.has(c.key));
-
-  const customEntries = Object.entries(requirement.constraints ?? {}).filter(
-    ([name]) => !CATALOG_LABELS.has(name)
-  );
+  const customEntries = Object.entries(requirement.constraint_values ?? {});
 
   function remove(key: ConstraintKey) {
     onActiveKeysChange(activeKeys.filter((k) => k !== key));
@@ -119,16 +145,6 @@ export default function ConstraintsEditor({
     for (const key of defaults) {
       onSetValue(key, getConstraintValue(requirement, key));
     }
-  }
-
-  function addCustomConstraint() {
-    const name = customName.trim();
-    if (!name || locked) return;
-    const label = customUnit ? `${name} (${customUnit})` : name;
-    setCustomConstraint(label, customValue);
-    setCustomName("");
-    setCustomValue(0);
-    setCustomUnit("");
   }
 
   return (
@@ -165,21 +181,14 @@ export default function ConstraintsEditor({
         );
       })}
 
-      {customEntries.map(([name, value]) => (
-        <div key={name} className="bg-ink/60 border border-edge rounded p-2 mb-2 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <span className="text-xs text-slate-300 block truncate">{name}</span>
-            <span className="text-[10px] font-mono text-accent">{value}</span>
-          </div>
-          <button
-            type="button"
-            disabled={locked}
-            onClick={() => removeCustomConstraint(name)}
-            className="text-rose-400 text-xs disabled:opacity-40"
-          >
-            ×
-          </button>
-        </div>
+      {customEntries.map(([name, val]) => (
+        <CustomConstraintRow
+          key={name}
+          name={name}
+          value={val}
+          onChange={(v) => onUpdateCustom(name, v)}
+          onRemove={() => onRemoveCustom(name)}
+        />
       ))}
 
       {activeKeys.length === 0 && customEntries.length === 0 && (
@@ -193,7 +202,7 @@ export default function ConstraintsEditor({
           onChange={(e) => {
             if (e.target.value) add(e.target.value as ConstraintKey);
           }}
-          className="w-full bg-ink border border-edge rounded px-2 py-1 text-xs text-slate-400 disabled:opacity-50"
+          className="w-full bg-ink border border-edge rounded px-2 py-1 text-xs text-slate-400 mb-2"
         >
           <option value="">+ 添加预设约束…</option>
           {availableToAdd.map((c) => (
@@ -206,7 +215,7 @@ export default function ConstraintsEditor({
 
       <div className="flex gap-2 mt-2">
         <input
-          placeholder="约束名称"
+          placeholder="自定义约束名称"
           value={customName}
           disabled={locked}
           onChange={(e) => setCustomName(e.target.value)}
@@ -220,18 +229,16 @@ export default function ConstraintsEditor({
           onChange={(e) => setCustomValue(Number(e.target.value))}
           className="w-20 bg-ink border border-edge rounded px-2 py-1 text-xs disabled:opacity-50"
         />
-        <input
-          placeholder="单位"
-          value={customUnit}
-          disabled={locked}
-          onChange={(e) => setCustomUnit(e.target.value)}
-          className="w-16 bg-ink border border-edge rounded px-2 py-1 text-xs disabled:opacity-50"
-        />
         <button
           type="button"
-          disabled={locked || !customName.trim()}
-          onClick={addCustomConstraint}
-          className="text-accent text-xs border border-accent/30 rounded px-2 disabled:opacity-40"
+          disabled={locked}
+          onClick={() => {
+            if (!customName.trim()) return;
+            onAddCustom(customName.trim(), customValue);
+            setCustomName("");
+            setCustomValue(0);
+          }}
+          className="text-accent text-xs border border-accent/30 rounded px-2 hover:bg-accent/10 disabled:opacity-40"
         >
           +
         </button>

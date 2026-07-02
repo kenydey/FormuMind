@@ -42,6 +42,9 @@ def normalize_constraints(req: Requirement) -> dict[str, float]:
     for key, raw in (req.constraints or {}).items():
         if raw is not None:
             out[key] = float(raw)
+    for key, raw in (req.constraint_values or {}).items():
+        if raw is not None:
+            out[key] = float(raw)
     return out
 
 

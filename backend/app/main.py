@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .api import chemistry as chemistry_router
 from .api import doe, experiments, formulations, optimize, research, tasks
 from .api import search as search_router, ingest as ingest_router, chat as chat_router, settings as settings_router
 from .api import qc as qc_router
@@ -111,6 +112,7 @@ app.include_router(dependencies_router.router)
 app.include_router(notebooklm_router.router)
 app.include_router(chemistry_router.router)
 app.include_router(projects_router.router)
+app.include_router(chemistry_router.router)
 
 
 from .db.datalab_client import DatalabUnavailableError, check_datalab_reachable

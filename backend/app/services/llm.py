@@ -586,16 +586,6 @@ def _objectives_prompt_block(objectives: list[ObjectiveSpec]) -> str:
     return "\n".join(lines) if lines else "- (use domain defaults)"
 
 
-def _constraints_prompt_block(req: Requirement) -> str:
-    from ..domain.project_spec import normalize_constraints
-
-    merged = normalize_constraints(req)
-    if not merged:
-        return ""
-    lines = "\n".join(f"- {k}: {v}" for k, v in merged.items())
-    return f"\n\n工艺约束 (必遵守):\n{lines}"
-
-
 def _levers_prompt_block(req: Requirement) -> str:
     from ..domain.project_spec import resolve_levers
 
@@ -638,6 +628,15 @@ def _recommend_system_prompt() -> str:
     )
 
 
+def _constraints_prompt_block(req: Requirement) -> str:
+    from ..domain.project_spec import normalize_constraints
+
+    merged = normalize_constraints(req)
+    if not merged:
+        return "- (none specified)"
+    return "\n".join(f"- {k}: {v}" for k, v in merged.items())
+
+
 def _recommend_user_prompt(
     req: Requirement,
     objectives: list[ObjectiveSpec],
@@ -661,9 +660,11 @@ def _recommend_user_prompt(
         f"Cleaning target (%): {req.cleaning_efficiency}\n"
         f"VOC limit (g/L): {req.voc_limit_gpl}\n"
         f"Cure temp (C): {req.cure_temperature_c}\n"
+        f"Film weight target (g/m²): {req.film_weight_gsm}\n"
+        f"pH target: {req.ph_target}\n"
         f"Notes: {req.notes}\n\n"
-        f"Objectives:\n{_objectives_prompt_block(objectives)}\n"
-        f"{_constraints_prompt_block(req)}"
+        f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
+        f"Process constraints (must respect):\n{_constraints_prompt_block(req)}\n"
         f"{_levers_prompt_block(req)}"
         f"{_base_formulas_prompt_block(base_formulas or [])}"
         f"{modify_block}\n\n"

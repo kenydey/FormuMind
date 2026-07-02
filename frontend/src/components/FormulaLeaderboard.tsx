@@ -65,19 +65,23 @@ function ExportMenu({ form }: { form: Formulation }) {
 function FormulaCard({
   form,
   rank,
+  formulaIdx,
   cardRef,
   forceOpen,
   objectiveMetrics,
-  formIndex: _formIndex,
   onIngredientChange,
 }: {
   form: Formulation;
   rank: number;
+  formulaIdx: number;
   cardRef?: (el: HTMLDivElement | null) => void;
   forceOpen?: boolean;
   objectiveMetrics?: Set<string>;
-  formIndex: number;
-  onIngredientChange?: (ingIndex: number, ing: Formulation["ingredients"][0]) => void;
+  onIngredientChange?: (
+    formulaIdx: number,
+    ingIdx: number,
+    patch: Partial<import("../api").Ingredient>
+  ) => void;
 }) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
@@ -187,7 +191,8 @@ function FormulaCard({
           </div>
           <RecommendedFormulaTable
             ingredients={form.ingredients}
-            onIngredientChange={(ingIndex, ing) => onIngredientChange?.(ingIndex, ing)}
+            editable={!!onIngredientChange}
+            onIngredientChange={(ingIdx, patch) => onIngredientChange?.(formulaIdx, ingIdx, patch)}
           />
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
@@ -267,9 +272,9 @@ export default function FormulaLeaderboard() {
     leaderboard,
     requirement,
     research,
-    addManualFormulation,
-    modifyFormulationsWithAi,
-    updateLeaderboardFormulation,
+    addManualFormula,
+    runAiModifyFormula,
+    updateFormulaIngredient,
     formulationBusy,
   } = useStore();
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
@@ -278,20 +283,6 @@ export default function FormulaLeaderboard() {
   const [aiModifyPrompt, setAiModifyPrompt] = useState("");
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
-
-  function handleIngredientChange(formIndex: number, ingIndex: number, ing: Formulation["ingredients"][0]) {
-    const form = leaderboard[formIndex];
-    if (!form) return;
-    const ingredients = form.ingredients.map((item, i) => (i === ingIndex ? ing : item));
-    updateLeaderboardFormulation(formIndex, { ...form, ingredients });
-  }
-
-  async function handleAiModify() {
-    if (!aiModifyPrompt.trim()) return;
-    setShowAiPrompt(false);
-    await modifyFormulationsWithAi(aiModifyPrompt.trim());
-    setAiModifyPrompt("");
-  }
 
   function switchToCard(index: number) {
     setViewMode("cards");
@@ -351,62 +342,68 @@ export default function FormulaLeaderboard() {
               key={`${f.name}-${i}`}
               form={f}
               rank={i + 1}
-              formIndex={i}
-              onIngredientChange={(ingIndex, ing) => handleIngredientChange(i, ingIndex, ing)}
+              formulaIdx={i}
               cardRef={(el) => {
                 cardRefs.current[i] = el;
               }}
               forceOpen={highlightIndex === i}
               objectiveMetrics={objectiveMetrics}
+              onIngredientChange={updateFormulaIngredient}
             />
           ))}
         </div>
       )}
-
       <div className="flex gap-2 mt-3">
         <button
           type="button"
-          onClick={() => void addManualFormulation()}
-          className="border border-accent text-accent rounded px-3 py-1 text-xs hover:bg-accent/10"
+          onClick={() => void addManualFormula()}
+          className="border border-accent text-accent rounded px-3 py-1.5 text-xs hover:bg-accent/10"
         >
           ✚ 手动添加配方
         </button>
         <button
           type="button"
           onClick={() => setShowAiPrompt(true)}
-          disabled={formulationBusy || leaderboard.length === 0}
-          className="border border-accent2 text-accent2 rounded px-3 py-1 text-xs hover:bg-accent2/10 disabled:opacity-40"
+          disabled={leaderboard.length === 0 || formulationBusy}
+          className="border border-accent2 text-accent2 rounded px-3 py-1.5 text-xs hover:bg-accent2/10 disabled:opacity-40"
         >
           🤖 AI 修改配方
         </button>
       </div>
-
       {showAiPrompt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-panel border border-edge rounded-xl p-6 w-[500px] max-w-[92vw]">
+          <div className="bg-panel border border-edge rounded-xl p-6 w-[min(500px,92vw)]">
             <h3 className="text-sm mb-3 text-slate-200">AI 配方修改要求</h3>
             <textarea
               rows={4}
               value={aiModifyPrompt}
               onChange={(e) => setAiModifyPrompt(e.target.value)}
               placeholder="例：将 VOC 降至 250g/L 以下，用硅烷偶联剂替代部分环氧"
-              className="w-full bg-ink border border-edge rounded px-3 py-2 text-sm text-slate-200"
+              className="w-full bg-ink border border-edge rounded px-3 py-2 text-sm text-slate-200 resize-none"
             />
             <div className="flex justify-end gap-2 mt-3">
               <button
                 type="button"
-                onClick={() => setShowAiPrompt(false)}
+                onClick={() => {
+                  setShowAiPrompt(false);
+                  setAiModifyPrompt("");
+                }}
                 className="border border-edge rounded px-4 py-1.5 text-sm text-slate-400"
               >
                 取消
               </button>
               <button
                 type="button"
-                onClick={() => void handleAiModify()}
                 disabled={!aiModifyPrompt.trim() || formulationBusy}
+                onClick={() => {
+                  void runAiModifyFormula(aiModifyPrompt.trim(), 0).then(() => {
+                    setShowAiPrompt(false);
+                    setAiModifyPrompt("");
+                  });
+                }}
                 className="bg-accent text-ink rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-40"
               >
-                提交修改
+                {formulationBusy ? "提交中…" : "提交修改"}
               </button>
             </div>
           </div>

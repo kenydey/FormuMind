@@ -109,7 +109,11 @@ class Requirement(BaseModel):
     metric_priors: list[MetricPriorSpec] = Field(default_factory=list)
     constraints: dict[str, float | None] = Field(
         default_factory=dict,
-        description="工艺约束 SSOT {名称: 值}，含自定义项；catalog 项同步写入",
+        description="Catalog constraint sync {label: value}",
+    )
+    constraint_values: dict[str, float] = Field(
+        default_factory=dict,
+        description="User-defined process constraints {name: value}",
     )
     active_formulation: Formulation | None = None
 
@@ -128,6 +132,7 @@ class Requirement(BaseModel):
 
 class Ingredient(BaseModel):
     name: str
+    zh_name: str = ""
     role: str  # e.g. resin, hardener, inhibitor, surfactant, solvent, pigment
     smiles: str | None = None
     formula: str | None = None
@@ -175,6 +180,7 @@ class RecommendedFormulaComponent(BaseModel):
 
     component_type: str = ""
     name: str
+    zh_name: str = ""
     cas_no: str = ""
     mf: str = ""
     smiles: str | None = None
