@@ -554,6 +554,20 @@ export const api = {
 
   listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
 
+  getDefaultLevers: (params: {
+    domain: ProductDomain;
+    substrate?: string;
+    cure_temperature_c?: number | null;
+  }) => {
+    const q = new URLSearchParams();
+    q.set("domain", params.domain);
+    if (params.substrate) q.set("substrate", params.substrate);
+    if (params.cure_temperature_c != null) {
+      q.set("cure_temperature_c", String(params.cure_temperature_c));
+    }
+    return get<{ levers: LeverSpec[] }>(`/api/meta/default-levers?${q.toString()}`);
+  },
+
   createProject: (title = "", requirement?: Requirement) =>
     post<ProjectDetailResponse>("/api/projects", { title, requirement }),
 

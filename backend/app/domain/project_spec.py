@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .levers import substrate_default_levers
-from .schemas import DOEFactor, Formulation, Ingredient, LeverSpec, ObjectiveSpec, ProductDomain, Requirement
+from .schemas import DOEFactor, Formulation, Ingredient, LeverSpec, ObjectiveSpec, ProductDomain, Requirement, Substrate
 
 # Roles typically held fixed (solvent fills to 100%).
 _FIXED_ROLES = frozenset({"solvent", "pigment", "filler", "additive"})
@@ -55,10 +55,7 @@ _LEGACY_LEVERS: dict[ProductDomain, list[tuple[str, float, float]]] = {
         ("Nonionic surfactant (C12-14 EO7)", 2.0, 12.0),
         ("Sodium metasilicate", 2.0, 14.0),
     ],
-    ProductDomain.surface_treatment: [
-        ("Phosphoric acid", 3.0, 14.0),
-        ("Manganese dihydrogen phosphate", 1.0, 8.0),
-    ],
+    # surface_treatment: use substrate_default_levers() in levers.py (SSOT)
 }
 
 
@@ -131,6 +128,22 @@ def derive_process_levers(req: Requirement) -> list[LeverSpec]:
             )
         )
     return levers
+
+
+def default_levers_for(
+    domain: ProductDomain,
+    substrate: Substrate = Substrate.carbon_steel,
+    *,
+    cure_temperature_c: float | None = None,
+) -> list[LeverSpec]:
+    """UI / API default DOE levers — same resolution as ``resolve_levers`` without explicit levers."""
+    req = Requirement(
+        domain=domain,
+        substrate=substrate,
+        cure_temperature_c=cure_temperature_c,
+        levers=[],
+    )
+    return resolve_levers(req)
 
 
 def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[LeverSpec]:

@@ -25,7 +25,7 @@ from .api import intent as intent_router
 from .api import agents as agents_router
 from .api import dependencies as dependencies_router
 from .api import notebooklm as notebooklm_router
-from .api import chemistry as chemistry_router
+from .api import meta as meta_router
 from .api import projects as projects_router
 from .config import get_settings
 
@@ -114,6 +114,7 @@ app.include_router(dependencies_router.router)
 app.include_router(notebooklm_router.router)
 app.include_router(chemistry_router.router)
 app.include_router(projects_router.router)
+app.include_router(meta_router.router)
 app.include_router(chemistry_router.router)
 
 
