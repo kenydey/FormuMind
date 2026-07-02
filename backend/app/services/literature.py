@@ -13,6 +13,8 @@ import re
 
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
+from ..services.runtime_secrets import effective_setting
+from .errors import degrade_return, log_handled_exception, optional_import
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +101,7 @@ def _fetch_with_timeout(fetch, cursor: int) -> list[Evidence]:
     try:
         return fut.result(timeout=_SOURCE_TIMEOUT_SEC) or []
     except Exception as exc:
-        logger.warning("source fetch timed out or failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "source fetch timed out or failed", [])
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
 
@@ -121,7 +122,7 @@ def _online_search(
     """Attempt real patent retrieval; return None if unavailable."""
     try:
         from patent_client import Patent  # type: ignore
-    except Exception:
+    except ImportError:
         return None
     try:
         search_q = _build_patent_query(req, query)
@@ -137,8 +138,7 @@ def _online_search(
             ))
         return evidence or None
     except Exception as exc:  # pragma: no cover - network/credentials
-        logger.warning("patent_client online search failed: %s", exc)
-        return None
+        return degrade_return(logger, exc, "patent_client online search failed", None)
 
 
 def _search_epo_patents(
@@ -149,39 +149,40 @@ def _search_epo_patents(
 ) -> list[Evidence]:
     """EPO Inpadoc search with optional CPC class filter."""
     from ..config import get_settings
+    from ..services.patent_client_env import epo_ops_env
 
     settings = get_settings()
-    if not settings.epo_consumer_key or not settings.epo_consumer_secret:
+    epo_key = effective_setting(settings, "epo_consumer_key")
+    epo_secret = effective_setting(settings, "epo_consumer_secret")
+    if not epo_key or not epo_secret:
         return []
     try:
         from patent_client import Inpadoc  # type: ignore
-        from ..services.secrets_store import sync_secrets_to_os_environ
 
-        sync_secrets_to_os_environ(settings)
-        filters: dict = {}
-        if query.strip():
-            filters["title_and_abstract"] = query.strip()
-        codes = list(ipc_codes or [])[:2]
-        if codes:
-            filters["cpc_class"] = codes[0]
-        if not filters:
-            return []
-        results = Inpadoc.objects.filter(**filters).limit(limit + offset)  # pragma: no cover
-        out: list[Evidence] = []
-        for i, p in enumerate(results):
-            out.append(
-                Evidence(
-                    source="EPO",
-                    identifier=str(getattr(p, "publication_number", getattr(p, "epodoc_publication", f"EP{i}"))),
-                    title=str(getattr(p, "title", "") or getattr(p, "patent_title", "")),
-                    snippet=str(getattr(p, "abstract", "") or "")[:400],
-                    relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
+        with epo_ops_env(epo_key, epo_secret):
+            filters: dict = {}
+            if query.strip():
+                filters["title_and_abstract"] = query.strip()
+            codes = list(ipc_codes or [])[:2]
+            if codes:
+                filters["cpc_class"] = codes[0]
+            if not filters:
+                return []
+            results = Inpadoc.objects.filter(**filters).limit(limit + offset)  # pragma: no cover
+            out: list[Evidence] = []
+            for i, p in enumerate(results):
+                out.append(
+                    Evidence(
+                        source="EPO",
+                        identifier=str(getattr(p, "publication_number", getattr(p, "epodoc_publication", f"EP{i}"))),
+                        title=str(getattr(p, "title", "") or getattr(p, "patent_title", "")),
+                        snippet=str(getattr(p, "abstract", "") or "")[:400],
+                        relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
+                    )
                 )
-            )
-        return out[offset : offset + limit]
+            return out[offset : offset + limit]
     except Exception as exc:
-        logger.warning("EPO Inpadoc search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "EPO Inpadoc search failed", [])
 
 
 def search(req: Requirement, limit: int = 8, query: str = "") -> list[Evidence]:
@@ -216,7 +217,7 @@ def search_patents(
     us = _online_search(req, patent_q, want, ipc_codes=ipc_codes)
     if us:
         batches.append(us)
-    if settings.serpapi_api_key:
+    if effective_setting(settings, "serpapi_api_key"):
         batches.append(search_serpapi_patents(patent_q, want, 0, settings=settings))
     cq = (chinese_query or "").strip()
     if cq:
@@ -260,7 +261,7 @@ def search_patents_by_query(
     us = _online_search(None, query, want, ipc_codes=ipc_codes)
     if us:
         batches.append(us)
-    if settings.serpapi_api_key:
+    if effective_setting(settings, "serpapi_api_key"):
         batches.append(search_serpapi_patents(query, want, 0, settings=settings))
     cq = (chinese_query or "").strip()
     if cq:
@@ -317,8 +318,7 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
             for i, r in enumerate(results)
         ]
     except Exception as exc:
-        logger.warning("arXiv search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "arXiv search failed", [])
 
 
 _ALLOWED_S2_FIELDS = frozenset({
@@ -371,8 +371,7 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
             )
         return out
     except Exception as exc:
-        logger.warning("Semantic Scholar search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "Semantic Scholar search failed", [])
 
 
 def search_openalex(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
@@ -395,7 +394,7 @@ def search_internet(query: str, limit: int = 5, offset: int = 0) -> list[Evidenc
     from .search_providers import search_tavily
 
     settings = get_settings()
-    if settings.tavily_api_key:
+    if effective_setting(settings, "tavily_api_key"):
         hits = search_tavily(query, limit, offset, settings=settings)
         if hits:
             return hits
@@ -421,8 +420,7 @@ def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
             for i, r in enumerate(results)
         ]
     except Exception as exc:
-        logger.warning("DuckDuckGo search failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "DuckDuckGo search failed", [])
 
 
 def _is_patent_or_literature(e: Evidence) -> bool:
@@ -720,8 +718,7 @@ def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:
             )
         ]
     except Exception as exc:
-        logger.warning("ChemCrow WebSearch failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "ChemCrow WebSearch failed", [])
 
 
 def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
@@ -750,8 +747,7 @@ def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
             )
         ]
     except Exception as exc:
-        logger.warning("ChemCrow LiteratureSearch failed: %s", exc)
-        return []
+        return degrade_return(logger, exc, "ChemCrow LiteratureSearch failed", [])
 
 
 def get_source_availability() -> dict[str, dict]:
@@ -761,22 +757,18 @@ def get_source_availability() -> dict[str, dict]:
     to surface install/config hints in the UI.
     """
     def _ok(*pkgs: str) -> bool:
-        for pkg in pkgs:
-            try:
-                __import__(pkg)
-                return True
-            except Exception:
-                pass
-        return False
+        return any(optional_import(pkg) for pkg in pkgs)
 
     from .notebooklm import get_setup_status
     from ..config import get_settings
 
     s = get_settings()
-    serpapi_ok = bool(s.serpapi_api_key)
-    tavily_ok = bool(s.tavily_api_key)
-    epo_ok = bool(s.epo_consumer_key and s.epo_consumer_secret)
-    openalex_ok = bool(s.openalex_enabled and s.openalex_mailto)
+    serpapi_ok = bool(effective_setting(s, "serpapi_api_key"))
+    tavily_ok = bool(effective_setting(s, "tavily_api_key"))
+    epo_ok = bool(
+        effective_setting(s, "epo_consumer_key") and effective_setting(s, "epo_consumer_secret")
+    )
+    openalex_ok = bool(s.openalex_enabled and effective_setting(s, "openalex_mailto"))
 
     patents_online = _ok("patent_client")
     lit_ok = (

@@ -1,9 +1,13 @@
 """Resolve DOE engine selection (native / pydoe / auto)."""
 from __future__ import annotations
 
+import logging
+from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ...domain.schemas import DOEFactor, DOEPlan
 from .native_doe_engine import build_native_plan
 from .pydoe_engine import PYDOE_DESIGNS, build_plan_with_fallback, pydoe_available
+
+logger = logging.getLogger(__name__)
 
 
 def baybe_available() -> bool:
@@ -11,7 +15,8 @@ def baybe_available() -> bool:
         import baybe  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 

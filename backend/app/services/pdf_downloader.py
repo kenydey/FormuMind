@@ -9,11 +9,15 @@ Gated by the config flag so tests run offline without network requests.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 
 import httpx
 
 from ..domain.schemas import Evidence
+
+logger = logging.getLogger(__name__)
 
 # ── URL construction ─────────────────────────────────────────────────────────
 
@@ -60,8 +64,8 @@ def fetch_pdf(url: str, timeout: float = 20.0) -> bytes | None:
         ct = r.headers.get("content-type", "")
         if r.status_code == 200 and "pdf" in ct.lower():
             return r.content
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "handled exception")
     return None
 
 
@@ -94,8 +98,8 @@ def _raw_pdf_stream_text(content: bytes) -> str:
         stream = raw_stream
         try:
             stream = zlib.decompress(raw_stream)
-        except Exception:
-            pass  # not FlateDecode or wrong boundaries — use raw bytes
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")  # not FlateDecode or wrong boundaries — use raw bytes
         for m in re.finditer(rb"\(([^)]*)\)\s*Tj", stream):
             raw = m.group(1).replace(b"\\(", b"(").replace(b"\\)", b")").replace(b"\\\\", b"\\")
             decoded = raw.decode("latin-1", errors="replace").strip()
@@ -122,8 +126,8 @@ def _extract_text(content: bytes) -> str:
         text = getattr(result, "text_content", "") or ""
         if text.strip():
             return text
-    except Exception:
-        pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "handled exception")
 
     try:
         from pypdf import PdfReader  # type: ignore

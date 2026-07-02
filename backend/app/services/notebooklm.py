@@ -15,6 +15,8 @@ Google endpoints that may change without notice; gate production use behind
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import asyncio
 import concurrent.futures
 import os
@@ -23,6 +25,8 @@ import sys
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
+
+logger = logging.getLogger(__name__)
 
 NOTEBOOKLM_URL = "https://notebooklm.google.com"
 
@@ -37,7 +41,8 @@ def _notebooklm_available() -> bool:
     try:
         import notebooklm  # type: ignore  # noqa: F401
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -117,7 +122,8 @@ def _lib_installed() -> bool:
     try:
         import notebooklm  # type: ignore  # noqa: F401
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 

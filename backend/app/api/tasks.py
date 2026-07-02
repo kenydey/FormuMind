@@ -1,6 +1,8 @@
 """Task status snapshot + SSE progress stream (CQRS query side)."""
 from __future__ import annotations
 
+import logging
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import asyncio
 import json
 import time
@@ -20,6 +22,8 @@ from ..worker.task_progress import (
     task_exists,
 )
 from ..worker.tasks import load_persisted_task, task_manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -66,8 +70,8 @@ def _event_from_meta(meta: dict[str, str]) -> TaskProgressEvent | None:
         return None
     try:
         return TaskProgressEvent.model_validate_json(raw)
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _sse_frame(event: TaskProgressEvent) -> str:
@@ -156,19 +160,19 @@ async def stream_task_progress(task_id: str) -> StreamingResponse:
                     if event.status in _TERMINAL:
                         break
             except asyncio.CancelledError:
-                logger.debug("SSE client disconnected for task {}", task_id)
+                logger.debug("SSE client disconnected for task %s", task_id)
                 raise
             finally:
                 try:
                     await pubsub.unsubscribe(channel_name(task_id))
                     await pubsub.aclose()
                     await client.aclose()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_handled_exception(logger, exc, "handled exception")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("SSE Redis unavailable for {}: {}", task_id, exc)
+            logger.warning("SSE Redis unavailable for {}: %s", task_id, exc)
             async for event in _poll_until_terminal(task_id):
                 yield _sse_frame(event)
 

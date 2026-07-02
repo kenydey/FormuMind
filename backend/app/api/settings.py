@@ -4,7 +4,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import get_settings
 from ..services.llm import PROVIDERS, _provider_default_base_url, test_connection
-from ..services.secrets_store import list_secret_status, probe_secret, update_secrets
+from ..services.runtime_secrets import effective_setting, get_runtime_secrets
+from ..services.secrets_store import (
+    SECRET_REGISTRY,
+    list_secret_status,
+    probe_secret,
+    update_secrets,
+)
 
 router = APIRouter()
 
@@ -28,23 +34,32 @@ class SecretTestRequest(BaseModel):
     id: str
 
 
+_SECRET_ATTR_IDS = {item[0] for item in SECRET_REGISTRY}
+
+
 def _apply_llm_update(update: LLMSettingsUpdate) -> None:
     s = get_settings()
-    provider_changed = update.provider is not None and update.provider != s.llm_provider
+    rs = get_runtime_secrets()
+    current_provider = effective_setting(s, "llm_provider")
+    provider_changed = update.provider is not None and update.provider != current_provider
     if update.provider is not None:
-        s.llm_provider = update.provider
+        rs.set("llm_provider", update.provider)
     if update.model is not None:
-        s.llm_model = update.model
+        rs.set("llm_model", update.model)
     if provider_changed and update.base_url is None:
-        s.llm_base_url = _provider_default_base_url(s.llm_provider)
+        new_provider = update.provider or current_provider
+        rs.set("llm_base_url", _provider_default_base_url(str(new_provider)))
     if update.base_url is not None:
-        s.llm_base_url = update.base_url.strip() or _provider_default_base_url(s.llm_provider)
+        rs.set("llm_base_url", update.base_url.strip() or _provider_default_base_url(
+            str(update.provider or current_provider)
+        ))
 
     if update.api_key is not None:
-        key_field = f"{s.llm_provider}_api_key"
-        if hasattr(s, key_field):
+        provider = str(update.provider or effective_setting(s, "llm_provider"))
+        key_field = f"{provider}_api_key"
+        if key_field in _SECRET_ATTR_IDS:
             update_secrets({key_field: update.api_key})
-        elif s.llm_provider == "anthropic":
+        elif provider == "anthropic":
             update_secrets({"anthropic_api_key": update.api_key})
 
 
@@ -52,10 +67,10 @@ def _apply_llm_update(update: LLMSettingsUpdate) -> None:
 def get_llm_settings():
     s = get_settings()
     return {
-        "provider": s.llm_provider,
-        "model": s.llm_model,
+        "provider": effective_setting(s, "llm_provider"),
+        "model": effective_setting(s, "llm_model"),
         "key_set": bool(s.get_active_api_key()),
-        "base_url": s.llm_base_url,
+        "base_url": effective_setting(s, "llm_base_url"),
         "providers": PROVIDERS,
     }
 

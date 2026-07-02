@@ -1,6 +1,7 @@
 """CRAG research graph — ColBERT retrieve → grade → fallback → generate."""
 from __future__ import annotations
 
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, Literal, TypedDict
@@ -99,7 +100,7 @@ def grade_evidence(topic: str, evidence: list[Evidence], settings: Settings | No
     try:
         data = llm.complete_json(_grade_prompt(topic, evidence))
     except Exception as exc:
-        logger.warning("Grade LLM failed: {}", exc)
+        logger.warning("Grade LLM failed: %s", exc)
         data = None
 
     if isinstance(data, dict) and data.get("verdict") in ("correct", "incorrect"):

@@ -8,9 +8,13 @@ offline / Celery-eager behaviour and keeps tests free of external services.
 """
 from __future__ import annotations
 
+import logging
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import json
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 # Logical channel keys → concrete Redis channel names.
 CHANNELS: dict[str, str] = {
@@ -37,8 +41,8 @@ def _client():
         client = redis.Redis.from_url(s.redis_url, socket_connect_timeout=0.2)
         client.ping()
         return client
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def publish(channel_key: str, payload: dict) -> bool:
@@ -55,7 +59,8 @@ def publish(channel_key: str, payload: dict) -> bool:
     try:
         client.publish(channel, json.dumps(payload, ensure_ascii=False))
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -75,5 +80,5 @@ def subscribe(channel_key: str):
         pubsub = client.pubsub()
         pubsub.subscribe(channel)
         return pubsub
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)

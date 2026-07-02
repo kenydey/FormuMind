@@ -7,6 +7,8 @@ feature works fully offline.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 
 from ..domain.project_spec import default_objectives_for, normalize_requirement
@@ -16,6 +18,8 @@ from ..domain.schemas import (
     Requirement,
     Substrate,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Keyword tables for the offline heuristic ─────────────────────────────────
 
@@ -202,8 +206,8 @@ def _llm_parse(text: str) -> IntentResult | None:
             extracted_fields=extracted,
             engine="llm",
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def parse_intent(text: str) -> IntentResult:

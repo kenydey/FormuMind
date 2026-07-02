@@ -1,12 +1,16 @@
 """Chemical name / CAS lookup via PubChem PUG REST with catalog fallback and 24h cache."""
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 import time
 from typing import Any
 from urllib.parse import quote
 
 from ..domain.knowledge import RAW_MATERIALS
+
+logger = logging.getLogger(__name__)
 
 _CJK_RE = re.compile(r"[一-鿿]")
 _CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -102,8 +106,8 @@ def _lookup_pubchem(q: str) -> dict[str, Any] | None:
                 "found": True,
                 "source": "pubchem",
             }
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _lookup_offline_compounds(q: str) -> dict[str, Any] | None:

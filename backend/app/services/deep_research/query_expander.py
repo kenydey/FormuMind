@@ -1,6 +1,7 @@
 """查询扩展引擎 — 将自然语言主题扩展为中英文关键词与 IPC/CPC 建议。"""
 from __future__ import annotations
 
+from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 import re
 from dataclasses import dataclass
@@ -139,8 +140,7 @@ class QueryExpander:
         try:
             data = llm.complete_json(prompt)
         except Exception as exc:
-            logger.warning("Query expansion LLM call failed: %s", exc)
-            return None
+            return degrade_return(logger, exc, "Query expansion LLM call failed", None)
 
         if not isinstance(data, dict):
             return None
@@ -154,8 +154,8 @@ class QueryExpander:
                     str(k) for k in (data.get("ipc_cpc_suggestions") or []) if k
                 ],
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            return degrade_return(logger, exc, "operation failed", None)
 
     def _offline_expand(self, user_query: str) -> ExpandedQuery:
         tokens = _TOKEN_RE.findall(user_query.lower())

@@ -9,10 +9,14 @@ and 3D-handoff contracts be exercised today.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from dataclasses import dataclass, field
 
 from ..domain.chemistry import amine_epoxy_ratio
 from ..domain.schemas import Formulation, ProductDomain
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,7 +47,8 @@ def _heavy_available() -> bool:
         import ase  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 

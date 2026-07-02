@@ -12,6 +12,8 @@ recommended.
 """
 from __future__ import annotations
 
+import logging
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ..domain.knowledge import RAW_MATERIALS
 from ..domain.schemas import (
     AgentFinding,
@@ -22,6 +24,8 @@ from ..domain.schemas import (
 )
 from . import rules
 
+logger = logging.getLogger(__name__)
+
 
 def _rdkit_chem():
     """Return rdkit.Chem or None (graceful when RDKit is not installed)."""
@@ -29,8 +33,8 @@ def _rdkit_chem():
         from rdkit import Chem  # type: ignore
 
         return Chem
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
 
 def _is_waterborne(form: Formulation) -> bool:

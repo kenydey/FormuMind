@@ -10,7 +10,11 @@ the function returns None rather than fabricating a value.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ..domain.schemas import Formulation
+
+logger = logging.getLogger(__name__)
 
 _POLYMER_ROLES = {"resin", "hardener"}
 _PIGMENT_ROLES = {"pigment", "filler", "inhibitor"}
@@ -69,8 +73,8 @@ def mooney_viscosity(form: Formulation) -> float | None:
         from ..domain.chemistry import pvc
 
         pvc_val = pvc(form)
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(logger, exc, "operation failed", None)
 
     if pvc_val <= 0:
         return None

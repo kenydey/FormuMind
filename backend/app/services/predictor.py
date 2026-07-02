@@ -10,9 +10,13 @@ Each metric is returned together with a ``predicted_std`` uncertainty estimate.
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ..domain import features, knowledge
 from ..domain.chemistry import amine_epoxy_ratio, cpvc, pvc, solids_by_volume
 from ..domain.schemas import Formulation, ProductDomain
+
+logger = logging.getLogger(__name__)
 
 
 def _sum_role(form: Formulation, role: str) -> float:
@@ -45,7 +49,7 @@ def _molecular_features(form: Formulation) -> dict[str, float]:
     try:
         from rdkit import Chem  # type: ignore
         from rdkit.Chem import Descriptors  # type: ignore
-    except Exception:
+    except ImportError:
         return {}
 
     accum: dict[str, float] = {col: 0.0 for _, col in _RDKIT_DESCRIPTORS}
@@ -99,8 +103,10 @@ def _mixture_density_kgL(form: Formulation) -> float:
                 total += frac
         if total > 0.5 and inv_rho > 0:
             return float(total / inv_rho)
-    except Exception:
-        pass
+    except ImportError:
+        return 1.3
+    except Exception as exc:
+        return degrade_return(logger, exc, "thermo density estimation", 1.3)
     return 1.3
 
 
@@ -146,7 +152,7 @@ def _rheology_metrics(form: Formulation) -> dict[str, float]:
             out["viscosity_relative"] = eta_r
         out["viscoelastic_index"] = viscoelastic_index(form)
         return out
-    except Exception:
+    except ImportError:
         return {}
 
 

@@ -104,9 +104,13 @@ def test_search_tavily_maps_results(monkeypatch):
     monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
 
     from app.config import get_settings
+    from app.services.runtime_secrets import get_runtime_secrets
+    from app.services.secrets_store import reload_settings
 
+    get_settings.cache_clear()
+    reload_settings()
+    get_runtime_secrets().set("tavily_api_key", "tvly-test")
     s = get_settings()
-    object.__setattr__(s, "tavily_api_key", "tvly-test")
     hits = search_tavily("防腐涂料", limit=2, settings=s)
     assert hits[0].source == "Tavily"
     assert hits[0].title == "Web hit"
@@ -120,9 +124,13 @@ def test_search_cnipa_parallel_uses_tavily_first(monkeypatch):
         ],
     )
     from app.config import get_settings
+    from app.services.runtime_secrets import get_runtime_secrets
+    from app.services.secrets_store import reload_settings
 
+    get_settings.cache_clear()
+    reload_settings()
+    get_runtime_secrets().set("tavily_api_key", "tvly-test")
     s = get_settings()
-    object.__setattr__(s, "tavily_api_key", "tvly-test")
     hits = search_cnipa_parallel("水性防腐", limit=2, settings=s)
     assert hits[0].source == "CNIPA (web)"
 
@@ -130,10 +138,13 @@ def test_search_cnipa_parallel_uses_tavily_first(monkeypatch):
 def test_literature_search_internet_prefers_tavily(monkeypatch):
     from app.config import get_settings
     from app.services import literature
+    from app.services.runtime_secrets import get_runtime_secrets
+    from app.services.secrets_store import reload_settings
 
     get_settings.cache_clear()
+    reload_settings()
+    get_runtime_secrets().set("tavily_api_key", "tvly-test")
     s = get_settings()
-    object.__setattr__(s, "tavily_api_key", "tvly-test")
 
     def fake_tavily(q, limit, offset, *, settings=None, topic="general"):
         return [Evidence(source="Tavily", identifier="u", title="T", snippet="s", relevance=0.5)]
@@ -146,6 +157,7 @@ def test_literature_search_internet_prefers_tavily(monkeypatch):
     hits = literature.search_internet("epoxy", limit=2)
     assert hits[0].source == "Tavily"
     get_settings.cache_clear()
+    reload_settings()
 
 
 def test_arxiv_disabled_returns_empty():

@@ -7,9 +7,13 @@ callers never branch on which engine is active.
 """
 from __future__ import annotations
 
+import logging
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 
 from .schemas import Formulation
+
+logger = logging.getLogger(__name__)
 
 # Standard atomic weights (g/mol), IUPAC abridged — enough for common
 # coating / surface-treatment raw materials.
@@ -36,8 +40,10 @@ def molar_mass(formula: str) -> float:
         import chemformula  # type: ignore
 
         return float(chemformula.ChemFormula(formula).formula_weight)
-    except Exception:
+    except ImportError:
         pass
+    except Exception as exc:
+        log_handled_exception(logger, exc, "chemformula molar mass")
     return _parse_mass(formula)
 
 

@@ -152,6 +152,7 @@ interface AppState {
   addObjective: (objective: ObjectiveSpec) => void;
   resetObjectivesForDomain: (domain: ProductDomain) => void;
   setLevers: (levers: LeverSpec[]) => void;
+  syncDefaultLevers: () => Promise<void>;
   loadExampleProject: (exampleId: string) => Promise<void>;
   setActiveConstraints: (keys: ConstraintKey[]) => void;
   setConstraintValue: (key: ConstraintKey, value: number) => void;
@@ -237,12 +238,7 @@ const defaultRequirement: Requirement = {
   notes: "",
   objectives: [...DOMAIN_OBJECTIVES.anticorrosion_coating],
   constraint_values: {},
-  levers: [
-    { name: "Zinc phosphate", low: 2, high: 14, unit: "wt%" },
-    { name: "Bisphenol-A epoxy (DGEBA)", low: 28, high: 48, unit: "wt%" },
-    { name: "Polyamide hardener", low: 8, high: 22, unit: "wt%" },
-    { name: "cure_temperature_c", low: 50, high: 80, unit: "C" },
-  ],
+  levers: [],
 };
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -397,6 +393,9 @@ export const useStore = create<AppState>()(
         set((d) => {
           d.requirement[key] = value;
         });
+        if (key === "substrate" || key === "cure_temperature_c") {
+          void get().syncDefaultLevers();
+        }
         get().scheduleAutosave();
       },
 
@@ -407,6 +406,7 @@ export const useStore = create<AppState>()(
             draft.requirement.objectives = [...DOMAIN_OBJECTIVES[d]];
           }
         });
+        void get().syncDefaultLevers();
         get().scheduleAutosave();
       },
 
@@ -415,6 +415,23 @@ export const useStore = create<AppState>()(
           draft.requirement.levers = levers;
         });
         get().scheduleAutosave();
+      },
+
+      syncDefaultLevers: async () => {
+        const { requirement, requirementLocked } = get();
+        if (requirementLocked) return;
+        try {
+          const { levers } = await api.getDefaultLevers({
+            domain: requirement.domain,
+            substrate: requirement.substrate,
+            cure_temperature_c: requirement.cure_temperature_c,
+          });
+          set((draft) => {
+            draft.requirement.levers = levers;
+          });
+        } catch {
+          /* keep existing levers when meta API unavailable */
+        }
       },
 
       loadExampleProject: async (exampleId) => {
@@ -1269,6 +1286,9 @@ export const useStore = create<AppState>()(
             draft.task = null;
             draft.busy = "idle";
           });
+          if (!get().requirement.levers?.length) {
+            await get().syncDefaultLevers();
+          }
           if (patch.workbenchCampaignId != null) {
             await get().refreshWorkbenchStats();
           } else {
@@ -1313,6 +1333,9 @@ export const useStore = create<AppState>()(
             draft.workbenchStats = null;
             draft.error = null;
           });
+          if (!get().requirement.levers?.length) {
+            await get().syncDefaultLevers();
+          }
           const projects = await api.listProjects();
           set((draft) => {
             draft.projects = projects;
@@ -1397,6 +1420,9 @@ export const useStore = create<AppState>()(
               applyPatchToDraft(draft, patch);
               draft.activeProjectId = activeId;
             });
+            if (!get().requirement.levers?.length) {
+              await get().syncDefaultLevers();
+            }
             if (patch.workbenchCampaignId != null) {
               await get().refreshWorkbenchStats();
             }

@@ -48,10 +48,13 @@ def test_settings_update_switches_provider():
 def test_settings_accepts_camelcase_base_url(monkeypatch, tmp_path):
     from app.config import get_settings
     from app.services import llm as llm_mod
+    from app.services.runtime_secrets import effective_setting
+    from app.services.secrets_store import reload_settings
 
     env_file = tmp_path / ".env"
     monkeypatch.setenv("FORMUMIND_ENV_FILE", str(env_file))
     get_settings.cache_clear()
+    reload_settings()
     monkeypatch.setattr(
         llm_mod,
         "test_connection",
@@ -67,20 +70,24 @@ def test_settings_accepts_camelcase_base_url(monkeypatch, tmp_path):
         },
     )
     s = get_settings()
-    assert s.llm_base_url == "https://api.deepseek.com"
-    assert s.deepseek_api_key == "sk-test"
+    assert effective_setting(s, "llm_base_url") == "https://api.deepseek.com"
+    assert effective_setting(s, "deepseek_api_key") == "sk-test"
     get_settings.cache_clear()
+    reload_settings()
 
 
 def test_settings_test_connection_reports_sdk_missing(monkeypatch):
     from app.config import get_settings
     from app.services import llm as llm_mod
+    from app.services.runtime_secrets import get_runtime_secrets
+    from app.services.secrets_store import reload_settings
 
     get_settings.cache_clear()
-    s = get_settings()
-    s.llm_provider = "deepseek"
-    s.llm_model = "deepseek-v4-pro"
-    object.__setattr__(s, "deepseek_api_key", "sk-test")
+    reload_settings()
+    rs = get_runtime_secrets()
+    rs.set("llm_provider", "deepseek")
+    rs.set("llm_model", "deepseek-v4-pro")
+    rs.set("deepseek_api_key", "sk-test")
 
     def boom(*args, **kwargs):
         return None, "未安装 openai SDK，请执行 pip install -e '.[llm]'"
@@ -92,6 +99,7 @@ def test_settings_test_connection_reports_sdk_missing(monkeypatch):
     assert body["ok"] is False
     assert "openai SDK" in body["message"]
     get_settings.cache_clear()
+    reload_settings()
 
 
 def test_openai_message_text_uses_reasoning_content_fallback():
@@ -107,12 +115,15 @@ def test_openai_message_text_uses_reasoning_content_fallback():
 def test_settings_test_connection_deepseek_probe_disables_thinking(monkeypatch):
     from app.config import get_settings
     from app.services import llm as llm_mod
+    from app.services.runtime_secrets import get_runtime_secrets
+    from app.services.secrets_store import reload_settings
 
     get_settings.cache_clear()
-    s = get_settings()
-    s.llm_provider = "deepseek"
-    s.llm_model = "deepseek-v4-pro"
-    object.__setattr__(s, "deepseek_api_key", "sk-test")
+    reload_settings()
+    rs = get_runtime_secrets()
+    rs.set("llm_provider", "deepseek")
+    rs.set("llm_model", "deepseek-v4-pro")
+    rs.set("deepseek_api_key", "sk-test")
 
     captured: dict = {}
 

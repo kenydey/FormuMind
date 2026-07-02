@@ -1,6 +1,7 @@
 """Post-generation Claim Checker — verify report claims against grounded evidence."""
 from __future__ import annotations
 
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 from enum import Enum
 
@@ -198,7 +199,7 @@ def check_claims(
             verified = verify_claims_llm(topic, claims, evidence)
             engine = "llm"
         except Exception as exc:
-            logger.warning("Claim check LLM failed: {}", exc)
+            logger.warning("Claim check LLM failed: %s", exc)
             verified = [verify_claim_offline(c, evidence) for c in claims]
     else:
         verified = [verify_claim_offline(c, evidence) for c in claims]

@@ -8,8 +8,12 @@ values (a screening-level approximation, not a spectral simulation).
 """
 from __future__ import annotations
 
+import logging
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ..domain.chemistry import _PIGMENT_ROLES, _density_gcm3
 from ..domain.schemas import Formulation
+
+logger = logging.getLogger(__name__)
 
 # Reference white for the ΔE comparison (perfect diffuse white).
 WHITE_LAB: tuple[float, float, float] = (100.0, 0.0, 0.0)
@@ -20,7 +24,8 @@ def _colour_available() -> bool:
         import colour  # noqa: F401
 
         return True
-    except Exception:
+    except Exception as exc:
+        log_handled_exception(logger, exc, "optional feature check")
         return False
 
 
@@ -37,8 +42,8 @@ def delta_e_2000(
             from colour.difference import delta_E_CIE2000
 
             return round(float(delta_E_CIE2000(np.array(lab1), np.array(lab2))), 3)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_handled_exception(logger, exc, "handled exception")
     return round(sum((a - b) ** 2 for a, b in zip(lab1, lab2)) ** 0.5, 3)
 
 

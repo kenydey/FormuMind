@@ -16,6 +16,7 @@ the SDK is missing or the API call fails.
 """
 from __future__ import annotations
 
+from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 from typing import TypeVar
 
@@ -29,6 +30,7 @@ from tenacity import (
 )
 
 from ..config import get_settings
+from ..services.runtime_secrets import effective_setting
 from ..domain.schemas import (
     Evidence,
     ObjectiveSpec,
@@ -222,6 +224,7 @@ def _anthropic_request(prompt: str, api_key: str, model: str, max_tokens: int) -
     except LLMConfigError:
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -279,6 +282,7 @@ def _openai_compatible_request(
     except LLMConfigError:
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -336,6 +340,7 @@ def _gemini_request(prompt: str, api_key: str, model: str) -> str:
     except LLMConfigError:
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -356,11 +361,11 @@ def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
 def _call_llm(prompt: str) -> str | None:
     """Route to the configured provider; return None on any failure."""
     settings = get_settings()
-    provider = settings.llm_provider
+    provider = effective_setting(settings, "llm_provider")
     api_key = settings.get_active_api_key()
     if not api_key:
         return None
-    model = settings.llm_model
+    model = effective_setting(settings, "llm_model")
     max_tokens = settings.llm_max_tokens
 
     if provider == "anthropic":
@@ -369,7 +374,7 @@ def _call_llm(prompt: str) -> str | None:
         return _complete_gemini(prompt, api_key, model)
 
     # All other providers are OpenAI-compatible.
-    base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
+    base_url = _resolve_openai_base_url(provider, effective_setting(settings, "llm_base_url"))
     return _complete_openai_compatible(prompt, api_key, model, max_tokens, base_url)
 
 
@@ -395,8 +400,8 @@ def complete_json(prompt: str) -> dict | None:
     try:
         data = json.loads(text)
         return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(log, exc, "operation failed", None)
 
 
 def _strip_json_fences(text: str) -> str:
@@ -471,6 +476,7 @@ def _openai_structured_request(
     except (LLMValidationError, LLMConfigError):
         raise
     except Exception as exc:
+        reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
@@ -522,15 +528,15 @@ def complete_structured(
 ) -> tuple[TModel | None, str | None]:
     """Call LLM and parse response into a Pydantic model."""
     settings = get_settings()
-    provider = settings.llm_provider
+    provider = effective_setting(settings, "llm_provider")
     api_key = settings.get_active_api_key()
     if not api_key:
         return None, "No LLM API key configured"
 
-    model = settings.llm_model
+    model = effective_setting(settings, "llm_model")
     max_tokens = settings.llm_max_tokens
     schema = model_type.model_json_schema()
-    base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
+    base_url = _resolve_openai_base_url(provider, effective_setting(settings, "llm_base_url"))
 
     structured_retry = tenacity_retry(
         stop=stop_after_attempt(3 if retry else 1),
@@ -842,29 +848,19 @@ def _is_chemistry_question(question: str) -> bool:
 
 
 def _chemcrow_available() -> bool:
-    try:
-        import chemcrow  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return optional_import("chemcrow")
 
 
 def _chemcrow_llm_ready() -> bool:
     """ChemCrow agent expects an OpenAI-compatible API key."""
     settings = get_settings()
-    if settings.openai_api_key:
+    if effective_setting(settings, "openai_api_key"):
         return True
-    return settings.llm_provider == "openai" and bool(settings.get_active_api_key())
+    return effective_setting(settings, "llm_provider") == "openai" and bool(settings.get_active_api_key())
 
 
 def _paperqa_available() -> bool:
-    try:
-        import paperqa  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return optional_import("paperqa")
 
 
 def _chemcrow_answer(question: str) -> str | None:
@@ -873,14 +869,18 @@ def _chemcrow_answer(question: str) -> str | None:
         from chemcrow.agents import ChemCrow
 
         settings = get_settings()
-        key = settings.openai_api_key or settings.get_active_api_key()
+        key = effective_setting(settings, "openai_api_key") or settings.get_active_api_key()
         if not key:
             return None
-        agent = ChemCrow(model=settings.llm_model, temp=0.1, openai_api_key=key)
+        agent = ChemCrow(
+            model=effective_setting(settings, "llm_model"),
+            temp=0.1,
+            openai_api_key=key,
+        )
         result = agent.run(question)
         return str(result) if result else None
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(log, exc, "operation failed", None)
 
 
 def _paperqa_answer(
@@ -905,8 +905,8 @@ def _paperqa_answer(
         text = getattr(answer, "answer", None) or str(answer)
         cited = [by_key[k] for k in by_key if k in (getattr(answer, "context", "") or "")]
         return text, (cited or sources[:6])
-    except Exception:
-        return None
+    except Exception as exc:
+        return degrade_return(log, exc, "operation failed", None)
 
 
 def answer_question(
@@ -969,9 +969,9 @@ def answer_question(
 def test_connection() -> dict:
     """Test the current LLM configuration. Returns {ok, provider, model, message}."""
     settings = get_settings()
-    provider = settings.llm_provider
+    provider = effective_setting(settings, "llm_provider")
     api_key = settings.get_active_api_key()
-    model = settings.llm_model
+    model = effective_setting(settings, "llm_model")
     if not api_key:
         return {
             "ok": False,
@@ -988,7 +988,7 @@ def test_connection() -> dict:
         result = _complete_gemini(prompt, api_key, model)
         error = None if result else "Gemini API 调用失败，请检查 API Key 和网络"
     else:
-        base_url = _resolve_openai_base_url(provider, settings.llm_base_url)
+        base_url = _resolve_openai_base_url(provider, effective_setting(settings, "llm_base_url"))
         result, error = _complete_openai_compatible_detail(
             prompt,
             api_key,

@@ -1,6 +1,7 @@
 """Shared Datalab Headless ELN HTTP contract helpers (campaign + experiment stores)."""
 from __future__ import annotations
 
+from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from typing import Any, Callable
 
 from ..domain.schemas import DatalabDeleteResponse, DatalabItemEnvelope, DatalabSampleResponse
