@@ -12,6 +12,7 @@ from app.main import app
 from app.services.secrets_store import (
     list_secret_status,
     read_env_file,
+    reload_settings,
     resolve_env_path,
     probe_secret,
     update_secrets,
@@ -26,8 +27,10 @@ def isolated_env(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     monkeypatch.setenv("FORMUMIND_ENV_FILE", str(env_file))
     get_settings.cache_clear()
+    reload_settings()
     yield env_file
     get_settings.cache_clear()
+    reload_settings()
 
 
 def test_resolve_env_path_honors_override(isolated_env):
@@ -64,6 +67,12 @@ def test_secrets_api_get_and_post(isolated_env):
     assert "tavily_api_key" in r2.json()["updated"]
     tavily = next(s for s in r2.json()["secrets"] if s["id"] == "tavily_api_key")
     assert tavily["set"] is True
+
+
+def test_update_secrets_does_not_write_os_environ(isolated_env, monkeypatch):
+    monkeypatch.delenv("FORMUMIND_SERPAPI_API_KEY", raising=False)
+    update_secrets({"serpapi_api_key": "abcdefghijklmnop"})
+    assert os.environ.get("FORMUMIND_SERPAPI_API_KEY") is None
 
 
 def test_probe_secret_epo_requires_both_keys(isolated_env):

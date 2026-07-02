@@ -13,6 +13,7 @@ import httpx
 
 from ..config import Settings, get_settings
 from ..domain.schemas import Evidence
+from ..services.runtime_secrets import effective_setting
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ def search_openalex(
         "per-page": min(25, limit + offset),
         "page": 1 + offset // 25,
     }
-    if settings.openalex_mailto:
-        params["mailto"] = settings.openalex_mailto
+    if effective_setting(settings, "openalex_mailto"):
+        params["mailto"] = effective_setting(settings, "openalex_mailto")
     try:
         with httpx.Client(timeout=_TIMEOUT_SEC) as client:
             resp = client.get("https://api.openalex.org/works", params=params)
@@ -130,7 +131,7 @@ def search_serpapi_scholar(
 ) -> list[Evidence]:
     """Google Scholar via SerpAPI."""
     settings = settings or get_settings()
-    key = settings.serpapi_api_key
+    key = effective_setting(settings, "serpapi_api_key")
     q = (query or "").strip()
     if not key or not q:
         return []
@@ -165,7 +166,7 @@ def search_serpapi_patents(
 ) -> list[Evidence]:
     """Google Patents via SerpAPI (English or Chinese query)."""
     settings = settings or get_settings()
-    key = settings.serpapi_api_key
+    key = effective_setting(settings, "serpapi_api_key")
     q = (query or "").strip()
     if not key or not q:
         return []
@@ -228,7 +229,7 @@ def search_tavily(
 ) -> list[Evidence]:
     """Tavily semantic web search."""
     settings = settings or get_settings()
-    key = settings.tavily_api_key
+    key = effective_setting(settings, "tavily_api_key")
     q = (query or "").strip()
     if not key or not q:
         return []
@@ -298,7 +299,7 @@ def search_cnipa_parallel(
     if not q:
         return []
     cn_query = f"{q} 中国专利 CNIPA site:cnipa.gov.cn OR site:patent.gov.cn"
-    if settings.tavily_api_key:
+    if effective_setting(settings, "tavily_api_key"):
         hits = search_tavily(cn_query, limit, offset, settings=settings, topic="general")
         if hits:
             return [
@@ -311,12 +312,12 @@ def search_cnipa_parallel(
                 )
                 for e in hits
             ]
-    if settings.serpapi_api_key:
+    if effective_setting(settings, "serpapi_api_key"):
         try:
             data = _serpapi_search(
                 "google",
                 cn_query,
-                settings.serpapi_api_key,
+                effective_setting(settings, "serpapi_api_key"),
                 limit,
                 offset,
                 extra_params={"hl": "zh-CN", "gl": "cn"},

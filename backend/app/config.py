@@ -137,19 +137,26 @@ class Settings(BaseSettings):
     experiment_backend: str = "sqlite"  # datalab | sqlite (dev/CI)
 
     def get_active_api_key(self) -> str | None:
-        """根据 llm_provider 返回对应的 API key。"""
+        """根据 llm_provider 返回对应的 API key（读取 runtime overlay）。"""
+        from .services.runtime_secrets import effective_setting, get_runtime_secrets
+
+        rs = get_runtime_secrets()
+        provider = effective_setting(self, "llm_provider")
         mapping = {
-            "anthropic": self.anthropic_api_key,
-            "openai": self.openai_api_key,
-            "gemini": self.gemini_api_key,
-            "groq": self.groq_api_key,
-            "deepseek": self.deepseek_api_key,
-            "qwen": self.qwen_api_key,
-            "moonshot": self.moonshot_api_key,
-            "minimax": self.minimax_api_key,
-            "xai": self.xai_api_key,
+            "anthropic": "anthropic_api_key",
+            "openai": "openai_api_key",
+            "gemini": "gemini_api_key",
+            "groq": "groq_api_key",
+            "deepseek": "deepseek_api_key",
+            "qwen": "qwen_api_key",
+            "moonshot": "moonshot_api_key",
+            "minimax": "minimax_api_key",
+            "xai": "xai_api_key",
         }
-        return mapping.get(self.llm_provider)
+        attr = mapping.get(str(provider))
+        if not attr:
+            return None
+        return effective_setting(self, attr)
 
 
 @lru_cache

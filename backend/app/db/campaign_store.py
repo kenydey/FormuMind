@@ -1,6 +1,8 @@
 """Campaign workbench repository — Datalab Headless ELN (SSOT) with sqlite JSON fallback."""
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import logging
 import uuid
 from abc import ABC, abstractmethod
@@ -43,6 +45,16 @@ logger = logging.getLogger(__name__)
 _PARAMS_BLOCK = "formumind_params"
 _MEASUREMENTS_BLOCK = "formumind_measurements"
 _CAMPAIGN_BLOCKS = (_PARAMS_BLOCK, _MEASUREMENTS_BLOCK)
+
+
+def _run_async(coro):
+    """Run async store methods from sync callers without nesting event loops."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(lambda: asyncio.run(coro)).result()
 
 
 def _validate_campaign_blocks(item_data: dict[str, Any]) -> None:
@@ -132,19 +144,13 @@ class CampaignStoreInterface(ABC):
         ...
 
     def list_rows_sync(self, campaign_id: int) -> list[WorkbenchRow]:
-        import asyncio
-
-        return asyncio.run(self.list_rows(campaign_id))
+        return _run_async(self.list_rows(campaign_id))
 
     def get_experiments_sync(self, campaign_id: int) -> list[WorkbenchRow]:
-        import asyncio
-
-        return asyncio.run(self.get_experiments(campaign_id))
+        return _run_async(self.get_experiments(campaign_id))
 
     def get_campaign_sync(self, campaign_id: int) -> Campaign | None:
-        import asyncio
-
-        return asyncio.run(self.get_campaign(campaign_id))
+        return _run_async(self.get_campaign(campaign_id))
 
     async def close(self) -> None:
         """Release external resources (no-op for sqlite fallback)."""
@@ -527,6 +533,18 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
     async def get_experiments(self, campaign_id: int) -> list[WorkbenchRow]:
         rows = await self.list_rows(campaign_id)
         return [r for r in rows if r.status == "Completed"]
+
+    def list_rows_sync(self, campaign_id: int) -> list[WorkbenchRow]:
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
+            return []
+        return self._refs_to_rows(campaign)
+
+    def get_experiments_sync(self, campaign_id: int) -> list[WorkbenchRow]:
+        return [r for r in self.list_rows_sync(campaign_id) if r.status == "Completed"]
+
+    def get_campaign_sync(self, campaign_id: int) -> Campaign | None:
+        return self._get_campaign_sync(campaign_id)
 
 
 _store: CampaignStoreInterface | None = None
