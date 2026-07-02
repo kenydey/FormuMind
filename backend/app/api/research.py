@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from ..domain.schemas import Evidence, Requirement, ResearchResult
+from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..pipeline import workflow
 from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..services.federated_search import FederatedSearchEngine
@@ -32,9 +32,11 @@ class DeepResearchRequest(BaseModel):
 class ModifyRequest(BaseModel):
     requirement: Requirement
     modify_prompt: str = Field(min_length=1)
-    base_formulas: list = Field(default_factory=list)
     sources: list[Evidence] = Field(default_factory=list)
+    base_formulas: list[Formulation] = Field(default_factory=list)
+    base_formulation: Formulation | None = None
     query: str = ""
+    n: int = Field(default=3, ge=1, le=8)
 
 
 @router.post("/research", response_model=ResearchResult)
@@ -82,21 +84,31 @@ def start_deep_research(body: DeepResearchRequest) -> JSONResponse:
 
 @router.post("/research/modify", status_code=202)
 def modify_recommendation(body: ModifyRequest) -> JSONResponse:
-    """AI-modify existing formulas: augment retrieval query and re-recommend."""
-    from ..domain.schemas import Formulation
+    """AI-modify formulas: async CRAG + recommend (subscribe via GET /api/tasks/{id}/stream)."""
+    from ..domain.research_query import build_research_query
 
-    req = body.requirement.model_copy(
-        update={"notes": f"{body.requirement.notes}\n[AI修改] {body.modify_prompt}".strip()}
+    req = body.requirement.model_copy(deep=True)
+    note = f"[AI modify] {body.modify_prompt}"
+    req.notes = f"{req.notes}\n{note}".strip() if req.notes else note
+
+    base_formulas = list(body.base_formulas)
+    if body.base_formulation is not None:
+        base_formulas.insert(0, body.base_formulation)
+    if base_formulas and req.active_formulation is None:
+        req.active_formulation = base_formulas[0]
+
+    augmented_query = build_research_query(
+        f"{body.query or req.headline()} {body.modify_prompt}".strip(),
+        req,
     )
-    base = [Formulation.model_validate(f) for f in body.base_formulas]
-    augmented_query = f"{body.query or req.headline()} {body.modify_prompt}".strip()
     payload = {
         "topic": augmented_query,
         "requirement": req.model_dump(),
         "sources": [s.model_dump() for s in body.sources],
         "query": augmented_query,
         "modify_prompt": body.modify_prompt,
-        "base_formulas": [f.model_dump() for f in base],
+        "base_formulas": [f.model_dump() for f in base_formulas],
+        "n": body.n,
     }
     async_result = run_recommend_task.delay(payload)
     return accepted_response(async_result.id, "recommend")

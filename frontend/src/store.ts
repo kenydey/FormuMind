@@ -638,32 +638,38 @@ export const useStore = create<AppState>()(
         const base = leaderboard[baseIndex];
         set((draft) => {
           draft.formulationBusy = true;
+          draft.recommendStage = "retrieve";
           draft.recommendMessage = "AI 修改配方中…";
           draft.error = null;
         });
         try {
-          const resp = await api.modifyFormulations(requirement, prompt, {
+          const { task_id } = await api.modifyFormulations(requirement, prompt, {
             sources: payload,
+            baseFormulas: leaderboard,
             baseFormulation: base,
             query: searchQuery.trim(),
             n: 3,
           });
-          const scored = (resp.scored?.length ? resp.scored : []).map((f) => ({
+          const final = await awaitTaskStream(task_id, (ev) => {
+            set((draft) => {
+              draft.recommendStage = ev.stage ?? "";
+              draft.recommendMessage = ev.message ?? "";
+              draft.task = progressToTaskStatus(task_id, "recommend", ev);
+            });
+          });
+          const wrapped = final.data as { research?: ResearchResult } | undefined;
+          const research = wrapped?.research;
+          if (!research?.recommended?.length) throw new Error("AI 修改未返回配方");
+          const scored = research.recommended.map((f) => ({
             ...f,
             source: "ai_modify",
           }));
-          if (!scored.length) throw new Error("AI 修改未返回配方");
           set((draft) => {
             draft.leaderboard = [...draft.leaderboard, ...scored];
             draft.research = {
-              requirement_headline:
-                requirement.product_type ||
-                `${requirement.domain} on ${requirement.application || requirement.substrate}`,
-              evidence: draft.research?.evidence ?? [],
-              mechanism: draft.research?.mechanism ?? "",
+              ...research,
               recommended: [...draft.leaderboard],
               chat_markdown: `AI 修改：${prompt}`,
-              recommend_engine: (resp.engine === "llm" ? "llm" : "offline") as "llm" | "offline",
             };
           });
           get().scheduleAutosave();
@@ -674,6 +680,7 @@ export const useStore = create<AppState>()(
         } finally {
           set((draft) => {
             draft.formulationBusy = false;
+            draft.recommendStage = "";
             draft.recommendMessage = "";
           });
         }

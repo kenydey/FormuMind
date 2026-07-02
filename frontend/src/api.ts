@@ -388,12 +388,19 @@ export const api = {
   modifyFormulations: (
     req: Requirement,
     modifyPrompt: string,
-    opts: { sources?: Evidence[]; baseFormulation?: Formulation; query?: string; n?: number } = {}
+    opts: {
+      sources?: Evidence[];
+      baseFormulas?: Formulation[];
+      baseFormulation?: Formulation;
+      query?: string;
+      n?: number;
+    } = {}
   ) =>
-    post<RecommendFormulationsResponse>("/api/formulations/modify", {
+    postAccepted("/api/research/modify", {
       requirement: req,
       modify_prompt: modifyPrompt,
       sources: opts.sources ?? [],
+      base_formulas: opts.baseFormulas ?? (opts.baseFormulation ? [opts.baseFormulation] : []),
       base_formulation: opts.baseFormulation ?? null,
       query: opts.query ?? "",
       n: opts.n ?? 3,
@@ -463,21 +470,6 @@ export const api = {
 
   submitRecommendResearch: (req: Requirement, sources: Evidence[] = [], query = "") =>
     postAccepted("/api/research/recommend", { ...req, sources, query }),
-
-  submitModifyResearch: (
-    req: Requirement,
-    modifyPrompt: string,
-    baseFormulas: Formulation[],
-    sources: Evidence[] = [],
-    query = ""
-  ) =>
-    postAccepted("/api/research/modify", {
-      requirement: req,
-      modify_prompt: modifyPrompt,
-      base_formulas: baseFormulas,
-      sources,
-      query,
-    }),
 
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`);
