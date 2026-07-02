@@ -63,3 +63,12 @@ def test_normalize_constraints_includes_voc():
     req = load_example("anticorrosion_coating")
     merged = normalize_constraints(req)
     assert "VOC 上限" in merged
+
+
+def test_normalize_constraints_from_constraint_values():
+    req = Requirement(
+        domain=ProductDomain.surface_treatment,
+        constraint_values={"浴温上限": 50.0},
+    )
+    merged = normalize_constraints(req)
+    assert merged["浴温上限"] == 50.0

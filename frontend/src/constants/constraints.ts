@@ -80,6 +80,10 @@ export function constraintLabelForKey(key: ConstraintKey): string {
   return def ? def.label.split(" · ")[0] : key;
 }
 
+export function catalogConstraintLabels(): Set<string> {
+  return new Set(CONSTRAINT_CATALOG.map((c) => constraintLabelForKey(c.key)));
+}
+
 export function constraintAppliesToDomain(def: ConstraintDef, domain: ProductDomain): boolean {
   return def.domains === "all" || def.domains.includes(domain);
 }

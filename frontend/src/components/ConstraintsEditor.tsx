@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ProductDomain, Requirement } from "../api";
 import {
   CONSTRAINT_CATALOG,
+  catalogConstraintLabels,
   constraintAppliesToDomain,
   defaultConstraintsForDomain,
   getConstraintValue,
@@ -123,7 +124,10 @@ export default function ConstraintsEditor({
   const catalogForDomain = CONSTRAINT_CATALOG.filter((c) => constraintAppliesToDomain(c, domain));
   const activeSet = new Set(activeKeys);
   const availableToAdd = catalogForDomain.filter((c) => !activeSet.has(c.key));
-  const customEntries = Object.entries(requirement.constraint_values ?? {});
+  const catalogLabels = catalogConstraintLabels();
+  const customEntries = Object.entries(requirement.constraint_values ?? {}).filter(
+    ([name]) => !catalogLabels.has(name)
+  );
 
   function remove(key: ConstraintKey) {
     onActiveKeysChange(activeKeys.filter((k) => k !== key));

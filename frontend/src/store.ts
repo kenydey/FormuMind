@@ -44,7 +44,6 @@ import {
 } from "./utils/objectiveContract";
 import {
   defaultConstraintsForDomain,
-  constraintLabelForKey,
   type ConstraintKey,
 } from "./constants/constraints";
 
@@ -237,7 +236,6 @@ const defaultRequirement: Requirement = {
   ph_target: null,
   notes: "",
   objectives: [...DOMAIN_OBJECTIVES.anticorrosion_coating],
-  constraints: {},
   constraint_values: {},
   levers: [
     { name: "Zinc phosphate", low: 2, high: 14, unit: "wt%" },
@@ -496,8 +494,6 @@ export const useStore = create<AppState>()(
       setConstraintValue: (key, value) => {
         set((draft) => {
           draft.requirement[key] = value;
-          if (!draft.requirement.constraints) draft.requirement.constraints = {};
-          draft.requirement.constraints[constraintLabelForKey(key)] = value;
         });
         get().scheduleAutosave();
       },
@@ -508,9 +504,6 @@ export const useStore = create<AppState>()(
           else if (key === "cure_temperature_c") draft.requirement.cure_temperature_c = null;
           else if (key === "ph_target") draft.requirement.ph_target = null;
           else draft.requirement[key] = 0;
-          if (draft.requirement.constraints) {
-            delete draft.requirement.constraints[constraintLabelForKey(key)];
-          }
         });
         get().scheduleAutosave();
       },
@@ -520,9 +513,7 @@ export const useStore = create<AppState>()(
         if (!trimmed) return;
         set((draft) => {
           if (!draft.requirement.constraint_values) draft.requirement.constraint_values = {};
-          if (!draft.requirement.constraints) draft.requirement.constraints = {};
           draft.requirement.constraint_values[trimmed] = value;
-          draft.requirement.constraints[trimmed] = value;
         });
         get().scheduleAutosave();
       },
@@ -532,9 +523,6 @@ export const useStore = create<AppState>()(
           if (draft.requirement.constraint_values) {
             delete draft.requirement.constraint_values[name];
           }
-          if (draft.requirement.constraints) {
-            delete draft.requirement.constraints[name];
-          }
         });
         get().scheduleAutosave();
       },
@@ -542,9 +530,7 @@ export const useStore = create<AppState>()(
       updateCustomConstraint: (name, value) => {
         set((draft) => {
           if (!draft.requirement.constraint_values) draft.requirement.constraint_values = {};
-          if (!draft.requirement.constraints) draft.requirement.constraints = {};
           draft.requirement.constraint_values[name] = value;
-          draft.requirement.constraints[name] = value;
         });
         get().scheduleAutosave();
       },
@@ -924,7 +910,15 @@ export const useStore = create<AppState>()(
             if (r.ph_target !== undefined) req.ph_target = r.ph_target;
             if (r.notes !== undefined) req.notes = r.notes;
             if (r.materials !== undefined) req.materials = r.materials;
-            if (r.constraints !== undefined) req.constraints = r.constraints;
+            if (r.constraints) {
+              if (!req.constraint_values) req.constraint_values = {};
+              for (const [k, v] of Object.entries(r.constraints)) {
+                if (v != null) req.constraint_values[k] = v;
+              }
+            }
+            if (r.constraint_values) {
+              req.constraint_values = { ...req.constraint_values, ...r.constraint_values };
+            }
             if (r.objectives?.length) req.objectives = r.objectives;
             if (r.levers?.length) req.levers = r.levers;
           });

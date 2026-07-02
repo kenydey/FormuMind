@@ -19,6 +19,21 @@ import type {
 
 const SOURCE_LIMIT = 300;
 
+/** Merge deprecated constraints dict into constraint_values when loading old projects. */
+export function migrateRequirementConstraints(req: Requirement): Requirement {
+  const legacy = req.constraints;
+  if (!legacy || !Object.keys(legacy).length) {
+    const { constraints: _c, ...rest } = req;
+    return rest as Requirement;
+  }
+  const cv = { ...(req.constraint_values ?? {}) };
+  for (const [k, v] of Object.entries(legacy)) {
+    if (v != null && !(k in cv)) cv[k] = v;
+  }
+  const { constraints: _c, ...rest } = req;
+  return { ...rest, constraint_values: cv };
+}
+
 export interface ProjectSummary {
   id: string;
   title: string;
@@ -151,7 +166,7 @@ export function applyWorkspacePayload(
     selectedSources: ws.selected_sources ?? [],
     chatHistory: ws.chat_history ?? [],
     deepReport: ws.deep_report ?? null,
-    requirement: ws.requirement ?? fallbackRequirement,
+    requirement: migrateRequirementConstraints(ws.requirement ?? fallbackRequirement),
     activeConstraints: (ws.active_constraints?.length
       ? ws.active_constraints
       : []) as ConstraintKey[],

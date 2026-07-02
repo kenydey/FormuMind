@@ -25,7 +25,7 @@ _LEGACY_CONSTRAINT_LABELS: dict[str, str] = {
 
 
 def normalize_constraints(req: Requirement) -> dict[str, float]:
-    """Merge legacy scalar constraint fields with the custom constraints dict."""
+    """Merge legacy scalar constraint fields with ``constraint_values`` (SSOT)."""
     out: dict[str, float] = {}
     if req.voc_limit_gpl is not None:
         out[_LEGACY_CONSTRAINT_LABELS["voc_limit_gpl"]] = float(req.voc_limit_gpl)
@@ -39,9 +39,6 @@ def normalize_constraints(req: Requirement) -> dict[str, float]:
         out[_LEGACY_CONSTRAINT_LABELS["film_weight_gsm"]] = float(req.film_weight_gsm)
     if req.cleaning_efficiency:
         out[_LEGACY_CONSTRAINT_LABELS["cleaning_efficiency"]] = float(req.cleaning_efficiency)
-    for key, raw in (req.constraints or {}).items():
-        if raw is not None:
-            out[key] = float(raw)
     for key, raw in (req.constraint_values or {}).items():
         if raw is not None:
             out[key] = float(raw)

@@ -107,15 +107,27 @@ class Requirement(BaseModel):
     levers: list[LeverSpec] = Field(default_factory=list)
     materials: list[MaterialSpec] = Field(default_factory=list)
     metric_priors: list[MetricPriorSpec] = Field(default_factory=list)
-    constraints: dict[str, float | None] = Field(
-        default_factory=dict,
-        description="Catalog constraint sync {label: value}",
-    )
     constraint_values: dict[str, float] = Field(
         default_factory=dict,
-        description="User-defined process constraints {name: value}",
+        description="工艺约束 SSOT {名称: 值}，含 catalog 标签与自定义项",
     )
     active_formulation: Formulation | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_constraints(cls, data: Any) -> Any:
+        """Merge deprecated ``constraints`` dict into ``constraint_values`` on load."""
+        if not isinstance(data, dict):
+            return data
+        legacy = data.pop("constraints", None)
+        if not legacy:
+            return data
+        cv = dict(data.get("constraint_values") or {})
+        for key, raw in legacy.items():
+            if raw is not None:
+                cv.setdefault(key, float(raw))
+        data["constraint_values"] = cv
+        return data
 
     def headline(self) -> str:
         label = self.product_type or self.domain.value
@@ -132,7 +144,6 @@ class Requirement(BaseModel):
 
 class Ingredient(BaseModel):
     name: str
-    zh_name: str = ""
     role: str  # e.g. resin, hardener, inhibitor, surfactant, solvent, pigment
     smiles: str | None = None
     formula: str | None = None

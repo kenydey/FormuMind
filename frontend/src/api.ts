@@ -45,8 +45,9 @@ export interface Requirement {
   objectives: ObjectiveSpec[];
   levers?: LeverSpec[];
   materials?: MaterialSpec[];
-  constraints?: Record<string, number | null>;
   constraint_values?: Record<string, number>;
+  /** @deprecated migrated to constraint_values on load */
+  constraints?: Record<string, number | null>;
 }
 
 export interface ChemicalLookupResult {
