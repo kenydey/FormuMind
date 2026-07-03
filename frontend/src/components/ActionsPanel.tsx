@@ -7,6 +7,7 @@ import SimPlaceholder from "./SimPlaceholder";
 import ProcessOptModal from "./ProcessOptModal";
 import LoopModal from "./LoopModal";
 import { useStore } from "../store";
+import { useShallow } from "zustand/react/shallow";
 
 type ModalName = "requirements" | "recommend" | "doe" | "workbench" | "optimize" | "process" | "loop";
 
@@ -61,7 +62,26 @@ export default function ActionsPanel() {
     loopReport,
     workbenchStats,
     refreshWorkbenchStats,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      openModal: s.openModal,
+      setOpenModal: s.setOpenModal,
+      runResearch: s.runResearch,
+      runOptimize: s.runOptimize,
+      busy: s.busy,
+      formulationBusy: s.formulationBusy,
+      recommendStage: s.recommendStage,
+      recommendMessage: s.recommendMessage,
+      sources: s.sources,
+      task: s.task,
+      leaderboard: s.leaderboard,
+      models: s.models,
+      optimizationHistory: s.optimizationHistory,
+      loopReport: s.loopReport,
+      workbenchStats: s.workbenchStats,
+      refreshWorkbenchStats: s.refreshWorkbenchStats,
+    }))
+  );
 
   const activeRecommendIdx = recommendStageIndex(recommendStage);
   const recommendProgressPct = formulationBusy

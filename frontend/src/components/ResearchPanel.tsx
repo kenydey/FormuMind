@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { Evidence } from "../api";
 
@@ -44,7 +45,20 @@ export default function ResearchPanel() {
     deepResearchStage,
     deepResearchMessage,
     task,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      chatHistory: s.chatHistory,
+      chatBusy: s.chatBusy,
+      sendChat: s.sendChat,
+      sources: s.sources,
+      selectedSources: s.selectedSources,
+      deepReport: s.deepReport,
+      deepResearchBusy: s.deepResearchBusy,
+      deepResearchStage: s.deepResearchStage,
+      deepResearchMessage: s.deepResearchMessage,
+      task: s.task,
+    }))
+  );
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 

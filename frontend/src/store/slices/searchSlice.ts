@@ -247,10 +247,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
-          draft.chatHistory.push({
-            role: "assistant",
-            content: `错误：${String(e)}`,
-          });
+          draft.error = formatApiError(e);
         });
       } finally {
         set((draft) => {

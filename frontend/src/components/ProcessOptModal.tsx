@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { LineChart, Line, Tooltip, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -29,7 +30,13 @@ const OUTCOME_LABELS: Record<string, string> = {
 };
 
 export default function ProcessOptModal() {
-  const { requirement, processOptResult, setProcessOptResult } = useStore();
+  const { requirement, processOptResult, setProcessOptResult } = useStore(
+    useShallow((s) => ({
+      requirement: s.requirement,
+      processOptResult: s.processOptResult,
+      setProcessOptResult: s.setProcessOptResult,
+    }))
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [iterations, setIterations] = useState(18);

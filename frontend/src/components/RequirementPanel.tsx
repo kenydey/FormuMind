@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore, DOMAIN_OBJECTIVES } from "../store";
 import type { ObjectiveSpec, ProductDomain, Requirement } from "../api";
 import {
@@ -8,7 +9,9 @@ import ConstraintsEditor from "./ConstraintsEditor";
 import LeversEditor from "./LeversEditor";
 
 function IntentParser() {
-  const { applyIntent, intentBusy } = useStore();
+  const { applyIntent, intentBusy } = useStore(
+    useShallow((s) => ({ applyIntent: s.applyIntent, intentBusy: s.intentBusy }))
+  );
   const [text, setText] = useState("");
   const [filled, setFilled] = useState<string[] | null>(null);
 
@@ -374,7 +377,7 @@ function ObjectivesEditor({
 }
 
 function ExampleLoader() {
-  const { loadExampleProject } = useStore();
+  const loadExampleProject = useStore((s) => s.loadExampleProject);
   const [examples, setExamples] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
@@ -432,7 +435,35 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
     runOptimize,
     busy,
     formulationBusy,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      requirement: s.requirement,
+      setField: s.setField,
+      setDomain: s.setDomain,
+      setLevers: s.setLevers,
+      updateObjective: s.updateObjective,
+      removeObjective: s.removeObjective,
+      addObjective: s.addObjective,
+      resetObjectivesForDomain: s.resetObjectivesForDomain,
+      activeConstraints: s.activeConstraints,
+      setActiveConstraints: s.setActiveConstraints,
+      setConstraintValue: s.setConstraintValue,
+      clearConstraintValue: s.clearConstraintValue,
+      addCustomConstraint: s.addCustomConstraint,
+      removeCustomConstraint: s.removeCustomConstraint,
+      updateCustomConstraint: s.updateCustomConstraint,
+      saveRequirementAndRefresh: s.saveRequirementAndRefresh,
+      unlockRequirement: s.unlockRequirement,
+      resetRequirement: s.resetRequirement,
+      requirementLocked: s.requirementLocked,
+      requirementSnapshot: s.requirementSnapshot,
+      projectSaveBusy: s.projectSaveBusy,
+      runResearch: s.runResearch,
+      runOptimize: s.runOptimize,
+      busy: s.busy,
+      formulationBusy: s.formulationBusy,
+    }))
+  );
   const domain = requirement.domain;
   const locked = requirementLocked;
 

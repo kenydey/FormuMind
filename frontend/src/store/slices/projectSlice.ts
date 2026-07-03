@@ -1,11 +1,13 @@
 import { api, formatApiError } from "../../api";
 import { applyWorkspacePayload, buildWorkspacePayload, isLegacyMigrated, legacySnapshotsFromStorage, markLegacyMigrated } from "../../projectWorkspace";
 import { defaultConstraintsForDomain } from "../../constants/constraints";
-import { applyPatchToDraft, autosave, AUTOSAVE_MS, workspaceSlice, defaultRequirement } from "../helpers";
+import { applyPatchToDraft, AUTOSAVE_MS, workspaceSlice, defaultRequirement } from "../helpers";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
 export function createProjectSlice(set: SliceSet, get: SliceGet) {
+  let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+
   return {
     toggleHistory: () =>
       set((draft) => {
@@ -13,10 +15,17 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       }),
 
     scheduleAutosave: () => {
-      if (autosave.timer) clearTimeout(autosave.timer);
-      autosave.timer = setTimeout(() => {
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => {
         void get().saveProject();
       }, AUTOSAVE_MS);
+    },
+
+    cancelAutosave: () => {
+      if (autosaveTimer) {
+        clearTimeout(autosaveTimer);
+        autosaveTimer = null;
+      }
     },
 
     saveProject: async () => {
@@ -220,5 +229,5 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
     },
 
     // v0.3 actions
-  } as Pick<AppState, 'toggleHistory' | 'scheduleAutosave' | 'saveProject' | 'loadProject' | 'createProject' | 'deleteProject' | 'initProjects' | 'setProcessOptResult'>;
+  } as Pick<AppState, 'toggleHistory' | 'scheduleAutosave' | 'cancelAutosave' | 'saveProject' | 'loadProject' | 'createProject' | 'deleteProject' | 'initProjects' | 'setProcessOptResult'>;
 }

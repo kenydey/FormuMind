@@ -1,7 +1,7 @@
 import { api, formatApiError } from "../../api";
 import { defaultConstraintsForDomain } from "../../constants/constraints";
 import { normalizeObjective, normalizeObjectives } from "../../utils/objectiveContract";
-import { autosave, objectiveTargetFromRequirement } from "../helpers";
+import { objectiveTargetFromRequirement } from "../helpers";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 import { DOMAIN_OBJECTIVES } from "../types";
@@ -188,10 +188,7 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
     },
 
     saveRequirementAndRefresh: async () => {
-      if (autosave.timer) {
-        clearTimeout(autosave.timer);
-        autosave.timer = null;
-      }
+      get().cancelAutosave();
       let { activeProjectId, requirement } = get();
       if (!activeProjectId) {
         await get().createProject(requirement.product_type || "新项目");

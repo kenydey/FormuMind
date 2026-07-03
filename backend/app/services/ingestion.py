@@ -247,6 +247,36 @@ def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> Inges
     return _ingest_parsed_text(text, filename=filename, source_kind="local", persist=persist)
 
 
+def _normalize_host(host: str) -> str:
+    return host.strip().lower().rstrip(".")
+
+
+def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
+def _host_resolves_to_blocked(host: str) -> bool:
+    import socket
+
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            infos = socket.getaddrinfo(host, None, family, socket.SOCK_STREAM)
+        except socket.gaierror:
+            continue
+        for info in infos:
+            addr = ipaddress.ip_address(info[4][0])
+            if _is_blocked_ip(addr):
+                return True
+    return False
+
+
 def _is_safe_url(url: str) -> bool:
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https"):
@@ -254,14 +284,18 @@ def _is_safe_url(url: str) -> bool:
     host = parsed.hostname
     if not host:
         return False
-    if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
+    host = _normalize_host(host)
+    if host in ("localhost", "localhost.localdomain", "0.0.0.0"):
+        return False
+    if host.endswith(".localhost") or host.endswith(".local"):
         return False
     try:
-        addr = ipaddress.ip_address(host)
-        if addr.is_private or addr.is_loopback or addr.is_link_local:
+        if _is_blocked_ip(ipaddress.ip_address(host)):
             return False
     except ValueError:
         pass
+    if _host_resolves_to_blocked(host):
+        return False
     return True
 
 

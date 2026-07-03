@@ -161,6 +161,7 @@ export interface AppState {
   toggleHistory: () => void;
   initProjects: () => Promise<void>;
   scheduleAutosave: () => void;
+  cancelAutosave: () => void;
   saveProject: () => Promise<void>;
   loadProject: (id: string) => Promise<void>;
   createProject: (title?: string) => Promise<void>;

@@ -21,9 +21,6 @@ export const defaultRequirement: Requirement = {
   levers: [],
 };
 
-export const autosave = {
-  timer: null as ReturnType<typeof setTimeout> | null,
-};
 export const AUTOSAVE_MS = 1500;
 
 export function objectiveTargetFromRequirement(

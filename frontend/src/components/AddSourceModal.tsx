@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { api, type SearchSourceType } from "../api";
 import { SOURCE_LIMIT } from "../projectWorkspace";
@@ -23,7 +24,19 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
     searchSources,
     uploadFiles,
     addSources,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      searchQuery: s.searchQuery,
+      sourceTypes: s.sourceTypes,
+      sources: s.sources,
+      selectedSources: s.selectedSources,
+      searchBusy: s.searchBusy,
+      setSourceTypes: s.setSourceTypes,
+      searchSources: s.searchSources,
+      uploadFiles: s.uploadFiles,
+      addSources: s.addSources,
+    }))
+  );
 
   const [keyword, setKeyword] = useState(searchQuery);
   const [modalTypes, setModalTypes] = useState<SearchSourceType[]>(

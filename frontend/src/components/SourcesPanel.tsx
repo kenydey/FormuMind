@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
@@ -58,7 +59,34 @@ export default function SourcesPanel() {
     refreshKnowledgeBase,
     error,
     usedSeedFallback,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      searchQuery: s.searchQuery,
+      setSearchQuery: s.setSearchQuery,
+      sourceTypes: s.sourceTypes,
+      setSourceTypes: s.setSourceTypes,
+      sources: s.sources,
+      selectedSources: s.selectedSources,
+      sourceStatus: s.sourceStatus,
+      removeSource: s.removeSource,
+      clearSources: s.clearSources,
+      toggleSourceSelected: s.toggleSourceSelected,
+      selectAllSources: s.selectAllSources,
+      deselectAllSources: s.deselectAllSources,
+      searchSources: s.searchSources,
+      loadSourceStatus: s.loadSourceStatus,
+      openSettings: s.openSettings,
+      uploadFiles: s.uploadFiles,
+      searchBusy: s.searchBusy,
+      searchProgress: s.searchProgress,
+      runDeepResearch: s.runDeepResearch,
+      deepResearchBusy: s.deepResearchBusy,
+      deepResearchMessage: s.deepResearchMessage,
+      refreshKnowledgeBase: s.refreshKnowledgeBase,
+      error: s.error,
+      usedSeedFallback: s.usedSeedFallback,
+    }))
+  );
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
 

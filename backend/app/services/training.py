@@ -167,7 +167,8 @@ class ModelRegistry:
 
     @property
     def total_records(self) -> int:
-        return len(self._records)
+        with self._lock:
+            return len(self._records)
 
     def records_for(self, domain: ProductDomain, project_id: str = "") -> list[ExperimentRecord]:
         """Return stored experiment records for a domain / project."""

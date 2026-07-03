@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import SourcesPanel from "./components/SourcesPanel";
 import ResearchPanel from "./components/ResearchPanel";
 import ActionsPanel from "./components/ActionsPanel";
@@ -24,7 +25,15 @@ function ClockIcon() {
 }
 
 export default function App() {
-  const { toggleHistory, toggleSettings, projects, initProjects, hydrateLlmSettings } = useStore();
+  const { toggleHistory, toggleSettings, projects, initProjects, hydrateLlmSettings } = useStore(
+    useShallow((s) => ({
+      toggleHistory: s.toggleHistory,
+      toggleSettings: s.toggleSettings,
+      projects: s.projects,
+      initProjects: s.initProjects,
+      hydrateLlmSettings: s.hydrateLlmSettings,
+    }))
+  );
 
   useEffect(() => {
     hydrateLlmSettings();

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { Formulation } from "../api";
 import {
@@ -276,7 +277,17 @@ export default function FormulaLeaderboard() {
     runAiModifyFormula,
     updateFormulaIngredient,
     formulationBusy,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      leaderboard: s.leaderboard,
+      requirement: s.requirement,
+      research: s.research,
+      addManualFormula: s.addManualFormula,
+      runAiModifyFormula: s.runAiModifyFormula,
+      updateFormulaIngredient: s.updateFormulaIngredient,
+      formulationBusy: s.formulationBusy,
+    }))
+  );
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const [showAiPrompt, setShowAiPrompt] = useState(false);

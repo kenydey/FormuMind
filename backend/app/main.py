@@ -28,6 +28,8 @@ from .api import notebooklm as notebooklm_router
 from .api import meta as meta_router
 from .api import projects as projects_router
 from .config import get_settings
+from .middleware.api_auth import install_api_auth
+from .middleware.rate_limit import RateLimitMiddleware
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -93,6 +95,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
+install_api_auth(app)
 
 app.include_router(research.router)
 app.include_router(doe.router)

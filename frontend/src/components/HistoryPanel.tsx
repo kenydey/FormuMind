@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useStore, type ProjectSummary } from "../store";
 import { SOURCE_LIMIT } from "../projectWorkspace";
 
@@ -83,7 +84,19 @@ export default function HistoryPanel() {
     loadProject,
     createProject,
     deleteProject,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      historyOpen: s.historyOpen,
+      projects: s.projects,
+      activeProjectId: s.activeProjectId,
+      sources: s.sources,
+      projectSaveBusy: s.projectSaveBusy,
+      toggleHistory: s.toggleHistory,
+      loadProject: s.loadProject,
+      createProject: s.createProject,
+      deleteProject: s.deleteProject,
+    }))
+  );
 
   if (!historyOpen) return null;
 

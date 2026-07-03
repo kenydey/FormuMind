@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import LabWorkbench from "./LabWorkbench";
 import { useStore } from "../store";
 
@@ -13,7 +14,19 @@ export default function WorkbenchModal() {
     refreshWorkbenchStats,
     submitResults,
     setOpenModal,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      doePlan: s.doePlan,
+      requirement: s.requirement,
+      workbenchCampaignId: s.workbenchCampaignId,
+      workbenchStats: s.workbenchStats,
+      busy: s.busy,
+      ensureWorkbenchCampaign: s.ensureWorkbenchCampaign,
+      refreshWorkbenchStats: s.refreshWorkbenchStats,
+      submitResults: s.submitResults,
+      setOpenModal: s.setOpenModal,
+    }))
+  );
   const [ready, setReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
 

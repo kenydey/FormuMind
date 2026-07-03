@@ -7,6 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from ..config import get_settings
 from ..domain.schemas import Evidence, SourceGuideSchema
 from ..services import colbert_store
 from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
@@ -53,6 +54,15 @@ class IngestTextRequest(BaseModel):
     title: str = ""
 
 
+def _enforce_upload_size(content: bytes, filename: str) -> None:
+    limit = get_settings().ingest_max_upload_bytes
+    if len(content) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File {filename!r} exceeds upload limit ({limit // (1024 * 1024)} MiB)",
+        )
+
+
 def _to_ingest_response(filename: str, outcome) -> IngestResponse:
     return IngestResponse(
         filename=filename,
@@ -68,6 +78,7 @@ def _to_ingest_response(filename: str, outcome) -> IngestResponse:
 async def ingest_document(file: UploadFile = File(...)):
     content = await file.read()
     filename = file.filename or "upload"
+    _enforce_upload_size(content, filename)
     outcome = ingest_file(filename, content)
     colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(filename, outcome)
@@ -79,7 +90,10 @@ async def ingest_batch(files: list[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="No files provided")
     pairs: list[tuple[str, bytes]] = []
     for f in files:
-        pairs.append((f.filename or "upload", await f.read()))
+        content = await f.read()
+        name = f.filename or "upload"
+        _enforce_upload_size(content, name)
+        pairs.append((name, content))
     outcome = ingest_files_batch(pairs)
     colbert_store.index_evidence(outcome.evidence)
     return BatchIngestResponse(

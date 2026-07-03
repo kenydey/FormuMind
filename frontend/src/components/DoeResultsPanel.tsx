@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import type { ModelInfo } from "../api";
 import { primaryObjectiveMetric } from "../api";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 
 function R2Gauge({ value }: { value: number }) {
@@ -111,7 +112,28 @@ export default function DoeResultsPanel() {
     busy, generateDoe, exportDoe, importCsv, error,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, setOpenModal,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      requirement: s.requirement,
+      doePlan: s.doePlan,
+      models: s.models,
+      modelHistory: s.modelHistory,
+      trainMessage: s.trainMessage,
+      busy: s.busy,
+      generateDoe: s.generateDoe,
+      exportDoe: s.exportDoe,
+      importCsv: s.importCsv,
+      error: s.error,
+      doeEngine: s.doeEngine,
+      alEngine: s.alEngine,
+      setDoeEngine: s.setDoeEngine,
+      setAlEngine: s.setAlEngine,
+      lastAlEngine: s.lastAlEngine,
+      campaignState: s.campaignState,
+      workbenchCampaignId: s.workbenchCampaignId,
+      setOpenModal: s.setOpenModal,
+    }))
+  );
   const metric = primaryObjectiveMetric(requirement);
 
   const designs =

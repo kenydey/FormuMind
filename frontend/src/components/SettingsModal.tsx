@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import Modal from "./Modal";
 import DependencyManager from "./DependencyManager";
 import ApiSettingsPanel from "./ApiSettingsPanel";
@@ -7,7 +8,16 @@ import { api, type LLMProviderInfo } from "../api";
 
 export default function SettingsModal() {
   const { settingsOpen, toggleSettings, llmConfig, setLlmConfig, settingsTab, setSettingsTab } =
-    useStore();
+    useStore(
+      useShallow((s) => ({
+        settingsOpen: s.settingsOpen,
+        toggleSettings: s.toggleSettings,
+        llmConfig: s.llmConfig,
+        setLlmConfig: s.setLlmConfig,
+        settingsTab: s.settingsTab,
+        setSettingsTab: s.setSettingsTab,
+      }))
+    );
   const [providers, setProviders] = useState<LLMProviderInfo[]>([]);
   const [keySet, setKeySet] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState("");

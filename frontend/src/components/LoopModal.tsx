@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import SimPlaceholder from "./SimPlaceholder";
 
@@ -16,7 +17,29 @@ function RmseTrend({ history, metric }: { history: Record<string, number>[]; met
 }
 
 export default function LoopModal() {
-  const { runLoop, busy, loopReport, rmseHistory, doePlan, optimizeEngine, loopDoeEngine, setOptimizeEngine, setLoopDoeEngine } = useStore();
+  const {
+    runLoop,
+    busy,
+    loopReport,
+    rmseHistory,
+    doePlan,
+    optimizeEngine,
+    loopDoeEngine,
+    setOptimizeEngine,
+    setLoopDoeEngine,
+  } = useStore(
+    useShallow((s) => ({
+      runLoop: s.runLoop,
+      busy: s.busy,
+      loopReport: s.loopReport,
+      rmseHistory: s.rmseHistory,
+      doePlan: s.doePlan,
+      optimizeEngine: s.optimizeEngine,
+      loopDoeEngine: s.loopDoeEngine,
+      setOptimizeEngine: s.setOptimizeEngine,
+      setLoopDoeEngine: s.setLoopDoeEngine,
+    }))
+  );
 
   return (
     <div className="space-y-4">

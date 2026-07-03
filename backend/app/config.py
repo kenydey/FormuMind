@@ -151,6 +151,11 @@ class Settings(BaseSettings):
     # Experiment training persistence (Headless ELN)
     experiment_backend: str = "sqlite"  # datalab | sqlite (dev/CI)
 
+    # API security (public deployment defaults)
+    api_auth_enabled: bool = True
+    api_token: str | None = None
+    ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
+
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key（读取 runtime overlay）。"""
         from .services.runtime_secrets import effective_setting, get_runtime_secrets

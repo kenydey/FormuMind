@@ -294,12 +294,6 @@ export class ApiError extends Error {
   }
 }
 
-export function formatApiError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
-
 async function readApiError(res: Response, path: string): Promise<string> {
   let detail = `${path} -> ${res.status}`;
   try {
@@ -317,10 +311,42 @@ async function readApiError(res: Response, path: string): Promise<string> {
   return detail;
 }
 
+export function formatApiError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+const API_TOKEN_STORAGE_KEY = "formumind-api-token";
+
+export function getApiToken(): string | null {
+  const fromEnv = import.meta.env.VITE_API_TOKEN;
+  if (typeof fromEnv === "string" && fromEnv.trim()) return fromEnv.trim();
+  try {
+    const stored = localStorage.getItem(API_TOKEN_STORAGE_KEY);
+    return stored?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setApiToken(token: string): void {
+  localStorage.setItem(API_TOKEN_STORAGE_KEY, token.trim());
+}
+
+function apiAuthHeaders(): Record<string, string> {
+  const token = getApiToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function jsonHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json", ...apiAuthHeaders() };
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new ApiError(await readApiError(res, path));
@@ -330,15 +356,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 async function postAccepted(path: string, body: unknown): Promise<AsyncTaskAccepted> {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (res.status !== 202) throw new ApiError(`${path} -> ${res.status}`);
+  if (res.status !== 202) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: apiAuthHeaders() });
   if (!res.ok) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
@@ -346,7 +372,7 @@ async function get<T>(path: string): Promise<T> {
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new ApiError(await readApiError(res, path));
@@ -354,7 +380,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: "DELETE" });
+  const res = await fetch(path, { method: "DELETE", headers: apiAuthHeaders() });
   if (!res.ok) throw new ApiError(await readApiError(res, path));
   return res.json();
 }
@@ -488,7 +514,7 @@ export const api = {
     postAccepted("/api/research/recommend", { ...req, sources, query }),
 
   task: async (id: string): Promise<TaskStatus> => {
-    const res = await fetch(`/api/tasks/${id}`);
+    const res = await fetch(`/api/tasks/${id}`, { headers: apiAuthHeaders() });
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
     return res.json();
   },
@@ -519,7 +545,11 @@ export const api = {
     const fd = new FormData();
     fd.append("file", file);
     const q = domain ? `?domain=${domain}` : "";
-    const res = await fetch(`/api/experiments/import-csv${q}`, { method: "POST", body: fd });
+    const res = await fetch(`/api/experiments/import-csv${q}`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
     if (!res.ok) {
       let detail = `${res.status}`;
       try {
@@ -549,7 +579,7 @@ export const api = {
   ingest: async (file: File): Promise<IngestResponse> => {
     const fd = new FormData();
     fd.append("file", file);
-    const res = await fetch("/api/ingest", { method: "POST", body: fd });
+    const res = await fetch("/api/ingest", { method: "POST", headers: apiAuthHeaders(), body: fd });
     if (!res.ok) throw new Error(`/api/ingest -> ${res.status}`);
     return res.json();
   },
@@ -557,7 +587,7 @@ export const api = {
   ingestBatch: async (files: File[]): Promise<IngestResponse & { files_processed?: number }> => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f);
-    const res = await fetch("/api/ingest/batch", { method: "POST", body: fd });
+    const res = await fetch("/api/ingest/batch", { method: "POST", headers: apiAuthHeaders(), body: fd });
     if (!res.ok) throw new Error(`/api/ingest/batch -> ${res.status}`);
     return res.json();
   },
@@ -702,13 +732,20 @@ export function progressToTaskStatus(
   };
 }
 
+function streamUrl(path: string): string {
+  const token = getApiToken();
+  if (!token) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}token=${encodeURIComponent(token)}`;
+}
+
 /** Subscribe to task SSE progress (GET /api/tasks/{id}/stream). */
 export function subscribeTaskStream(
   taskId: string,
   onEvent: (ev: TaskProgressEvent) => void,
   onError?: (err: Event) => void
 ): EventSource {
-  const es = new EventSource(`/api/tasks/${taskId}/stream`);
+  const es = new EventSource(streamUrl(`/api/tasks/${taskId}/stream`));
   es.onmessage = (e) => {
     try {
       onEvent(JSON.parse(e.data) as TaskProgressEvent);
@@ -724,7 +761,8 @@ export function subscribeTaskStream(
 export function awaitTaskStream(
   taskId: string,
   onEvent?: (ev: TaskProgressEvent) => void,
-  timeoutMs = 120_000
+  timeoutMs = 120_000,
+  signal?: AbortSignal
 ): Promise<TaskProgressEvent> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -734,7 +772,13 @@ export function awaitTaskStream(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       fn();
+    };
+
+    const onAbort = () => {
+      es?.close();
+      finish(() => reject(new Error("任务已取消")));
     };
 
     const resolveFromStatus = (s: TaskStatus) => {
@@ -759,6 +803,8 @@ export function awaitTaskStream(
             finish(() => reject(new Error(`任务超时（${Math.round(timeoutMs / 1000)}s）`)));
           }, timeoutMs)
         : null;
+
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     es = subscribeTaskStream(
       taskId,
@@ -1039,12 +1085,14 @@ export interface DependencyInstallResult {
 export async function pollTask(
   id: string,
   onUpdate: (s: TaskStatus) => void,
-  intervalMs = 400
+  intervalMs = 400,
+  maxAttempts = 300
 ): Promise<TaskStatus> {
-  for (;;) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const s = await api.task(id);
     onUpdate(s);
     if (s.state === "completed" || s.state === "failed") return s;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
+  throw new Error(`任务轮询超时（${maxAttempts} 次）`);
 }

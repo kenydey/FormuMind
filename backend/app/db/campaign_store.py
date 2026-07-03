@@ -5,6 +5,7 @@ from ..services.errors import degrade_return, log_handled_exception, optional_im
 import asyncio
 import concurrent.futures
 import logging
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -39,6 +40,7 @@ from .datalab_client import (
     parse_item_envelope,
     validate_blocks,
 )
+from .session_utils import commit_session
 from .models import Campaign
 
 logger = logging.getLogger(__name__)
@@ -163,6 +165,7 @@ class _CampaignMetaMixin:
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
+        self._write_lock = threading.RLock()
 
     def _create_campaign_meta(
         self,
@@ -180,53 +183,54 @@ class _CampaignMetaMixin:
 
         lever_snapshot = lever_snapshot_from_plan(plan, req)
         primary = objectives[0].metric if objectives else None
-        with self._session_factory() as session:
-            campaign = Campaign(
-                name=campaign_name,
-                strategy=strategy,
-                status="IN_PROGRESS",
-                project_id=project_id,
-                primary_metric=primary,
-                objectives_snapshot=[o.model_dump() for o in objectives],
-                lever_snapshot=lever_snapshot,
-                sample_refs=[],
-            )
-            session.add(campaign)
-            session.commit()
-            session.refresh(campaign)
-            return campaign
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = Campaign(
+                    name=campaign_name,
+                    strategy=strategy,
+                    status="IN_PROGRESS",
+                    project_id=project_id,
+                    primary_metric=primary,
+                    objectives_snapshot=[o.model_dump() for o in objectives],
+                    lever_snapshot=lever_snapshot,
+                    sample_refs=[],
+                )
+                session.add(campaign)
+                session.flush()
+                session.refresh(campaign)
+                return campaign
 
     def _get_campaign_sync(self, campaign_id: int) -> Campaign | None:
         with self._session_factory() as session:
             return session.get(Campaign, campaign_id)
 
     def _save_sample_refs(self, campaign_id: int, refs: list[dict]) -> None:
-        with self._session_factory() as session:
-            campaign = session.get(Campaign, campaign_id)
-            if campaign is None:
-                return
-            campaign.sample_refs = refs
-            campaign.updated_at = _utcnow()
-            session.commit()
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = session.get(Campaign, campaign_id)
+                if campaign is None:
+                    return
+                campaign.sample_refs = refs
+                campaign.updated_at = _utcnow()
 
     def _delete_campaign_meta(self, campaign_id: int) -> None:
-        with self._session_factory() as session:
-            campaign = session.get(Campaign, campaign_id)
-            if campaign is None:
-                return
-            session.delete(campaign)
-            session.commit()
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = session.get(Campaign, campaign_id)
+                if campaign is None:
+                    return
+                session.delete(campaign)
 
     def _update_campaign_status(self, campaign_id: int, rows: list[WorkbenchRow]) -> None:
-        with self._session_factory() as session:
-            campaign = session.get(Campaign, campaign_id)
-            if campaign is None:
-                return
-            completed = sum(1 for r in rows if r.status == "Completed")
-            total = len(rows)
-            campaign.status = "COMPLETED" if total > 0 and completed == total else "IN_PROGRESS"
-            campaign.updated_at = _utcnow()
-            session.commit()
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = session.get(Campaign, campaign_id)
+                if campaign is None:
+                    return
+                completed = sum(1 for r in rows if r.status == "Completed")
+                total = len(rows)
+                campaign.status = "COMPLETED" if total > 0 and completed == total else "IN_PROGRESS"
+                campaign.updated_at = _utcnow()
 
 
 class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
