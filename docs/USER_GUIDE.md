@@ -135,7 +135,7 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   installed and available, yellow = offline fallback active (patents always have
   a curated seed corpus), red = library missing. Below the Search button, a
   **🔬 Deep Research** button triggers `POST /api/research/deep` — the
-  KnowledgeCohort multi-agent pipeline (`web_agent` + `kb_agent` with HyDE query
+  DeepResearchEngine multi-agent pipeline (`web_agent` + `kb_agent` with HyDE query
   expansion + LLM re-rank + `report_agent` with cross-validation and forced
   per-claim citations); the result is an async task whose output appears in the
   center column automatically. When the **Literature** or **Internet** source is
@@ -181,7 +181,7 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 > After loading, the **status dots** on each source-type checkbox reflect which
 > sources are actually available in the current environment. For a fully automated
 > multi-source run, use the **🔬 Deep Research** button below the Search button:
-> it launches the KnowledgeCohort pipeline (web + KB + HyDE + re-rank +
+> it launches the DeepResearchEngine pipeline (web + KB + HyDE + re-rank +
 > cross-validation report) without requiring manual Q&A in the center column.
 
 ### Step ① — set requirement and retrieve recommendations (right-column modals)
@@ -398,7 +398,7 @@ offline fallbacks:
   converts them to text (falling back to `pypdf` / `python-docx`), then splits
   the text into evidence chunks.
 - **Deep Research** — the 🔬 button in the left panel runs `POST /api/research/deep`, an async
-  KnowledgeCohort pipeline: `web_agent` (DuckDuckGo), `kb_agent` (HyDE query expansion →
+  DeepResearchEngine pipeline: `web_agent` (DuckDuckGo), `kb_agent` (HyDE query expansion →
   vector/TF-IDF re-rank → `llm_rerank` → `answer_question`), and `report_agent`
   (cross-validates web vs. KB sources, enforces per-claim `[source]` citations and
   marks insufficient-evidence gaps). The result is a structured `ComprehensiveReport`
@@ -606,7 +606,7 @@ The **Export ▾** menu on each leaderboard card offers:
 | GET/POST | `/api/settings` | read / update the active LLM provider, model, key, base URL (`POST /api/settings/test` checks the connection) |
 | POST | `/api/intent/parse` | natural-language project brief → structured `Requirement` (LLM `complete_json` or regex fallback) |
 | POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
-| POST | `/api/research/deep` | async deep-research: KnowledgeCohort multi-agent pipeline (web + KB + HyDE + re-rank + cross-validation report) → returns `task_id` |
+| POST | `/api/research/deep` | async deep-research: DeepResearchEngine multi-agent pipeline (web + KB + HyDE + re-rank + cross-validation report) → returns `task_id` |
 | GET | `/api/search/status` | lightweight per-source availability check (no retrieval, no network) |
 | POST | `/api/agents/review` | multi-agent formulation review: ChemistAgent (RDKit + water-incompatibility rules) + InspectorAgent (SVHC/VOC) + InitializeAgent supervisor → `ReviewVerdict` |
 | POST | `/api/ip/analyze` | per-formula novelty score, infringement-risk list, white-space hints |
@@ -741,7 +741,7 @@ defaults.
 | `FORMUMIND_MIN_TRAIN_SAMPLES` | `4` | min samples before training a metric's model |
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
 | `FORMUMIND_PDF_DOWNLOAD` | `false` | Download patent PDFs for full-text extraction during deep research (requires network + USPTO/EPO access; false by default to keep tests offline) |
-| `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per KnowledgeCohort run |
+| `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |
 
 ### Data persistence (B5)
 

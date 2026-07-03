@@ -66,7 +66,10 @@ class DeepResearchEngine:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._expander = QueryExpander(self._settings)
-        self._http = httpx.Client(timeout=30.0)
+        self._http = httpx.Client(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
         self._openalex_mailto: str | None = self._settings.openalex_mailto
         self._epo_consumer_key: str | None = self._settings.epo_consumer_key
         self._epo_consumer_secret: str | None = self._settings.epo_consumer_secret
@@ -223,3 +226,20 @@ class DeepResearchEngine:
             claim_check_engine="offline",
             claim_check_pass_rate=float(state.get("claim_check_pass_rate") or 1.0),
         )
+
+
+def conduct_research(
+    topic: str,
+    req: Requirement | None = None,
+    source_types: list[str] | None = None,
+    progress_cb: Callable[[float, str], None] | None = None,
+    retrieval_progress_cb: Callable[[list[Evidence]], None] | None = None,
+) -> ComprehensiveReport:
+    """Module-level entry point for tasks and scripts."""
+    return DeepResearchEngine().run(
+        topic,
+        req=req,
+        source_types=source_types,
+        progress_cb=progress_cb,
+        retrieval_progress_cb=retrieval_progress_cb,
+    )

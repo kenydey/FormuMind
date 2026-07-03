@@ -5,10 +5,25 @@ boots and tests run without any external credentials or services.
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_ENVS = frozenset({"development", "dev", "test"})
+# Env keys read by subsystems but not declared on Settings.
+_INFRA_ENV_KEYS = frozenset({
+    "FORMUMIND_ENV_FILE",
+    "FORMUMIND_TASK_DIR",
+    "FORMUMIND_TASK_PROGRESS_DIR",
+})
+
+
+def _settings_extra_policy() -> str:
+    """Development/test: reject unknown env keys; production: ignore extras."""
+    env = os.getenv("FORMUMIND_ENVIRONMENT", "development").strip().lower()
+    return "forbid" if env in _DEV_ENVS else "ignore"
 
 
 class Settings(BaseSettings):
@@ -99,7 +114,7 @@ class Settings(BaseSettings):
     # 为下一阶段重物理计算（physics_jobs 频道）的异步投递做准备。
     agent_bus_enabled: bool = False
 
-    # PDF 全文下载（v0.9）。启用后 KnowledgeCohort 在检索到专利后尝试下载 PDF，
+    # PDF 全文下载（v0.9）。启用后 DeepResearchEngine 在检索到专利后尝试下载 PDF，
     # 将摘要替换为全文段落，提升 kb_agent 的合成质量。默认关闭以保证测试速度。
     # 需要网络访问 USPTO / EPO / Google Patents 服务器。
     pdf_download: bool = False
@@ -159,6 +174,21 @@ class Settings(BaseSettings):
         return effective_setting(self, attr)
 
 
+def _audit_formumind_env() -> None:
+    """In development/test, fail fast on typoed FORMUMIND_* env keys."""
+    if _settings_extra_policy() != "forbid":
+        return
+    known = {f"FORMUMIND_{name.upper()}" for name in Settings.model_fields}
+    known |= _INFRA_ENV_KEYS
+    unknown = sorted(k for k in os.environ if k.startswith("FORMUMIND_") and k not in known)
+    if unknown:
+        raise ValueError(
+            "Unknown FORMUMIND_* environment variables: " + ", ".join(unknown)
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    _audit_formumind_env()
+    return settings

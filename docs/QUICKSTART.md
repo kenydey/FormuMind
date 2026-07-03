@@ -39,7 +39,7 @@ the center, and the **Actions** toolbar on the right. The header holds
   (patents / literature / internet / local files / **📓 NotebookLM**) each with
   a **status dot** (green = available online, yellow = offline fallback, red =
   library not installed), file upload, a **Search** button, a **🔬 Deep
-  Research** button (below Search) that triggers multi-agent KnowledgeCohort
+  Research** button (below Search) that triggers multi-agent DeepResearchEngine
   research, a **🧪 ChemCrow** chemistry-enhancement badge that appears when
   Literature or Internet are selected, an error banner shown when search fails,
   and the loaded-sources list.
@@ -76,7 +76,7 @@ one-time browser login (see §12 of the full guide).
   appears in the panel indicating whether ChemCrow chemistry-enhanced retrieval
   is active (`[intel]` extra required).
 - The **🔬 Deep Research** button (below Search) calls the async
-  `POST /api/research/deep` endpoint. It launches **KnowledgeCohort** — a
+  `POST /api/research/deep` endpoint. It launches **DeepResearchEngine** — a
   multi-agent pipeline comprising a `web_agent` and a `kb_agent` (with HyDE
   query expansion and LLM re-ranking), followed by a `report_agent` that
   cross-validates evidence and enforces cited conclusions. Use it when you need

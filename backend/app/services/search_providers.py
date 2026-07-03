@@ -46,6 +46,26 @@ def _ranked(i: int, offset: int = 0) -> float:
     return round(max(0.1, 1.0 - (offset + i) * 0.02), 3)
 
 
+def _openalex_work_to_evidence(w: dict[str, Any], rank_index: int, global_offset: int) -> Evidence:
+    doi = (w.get("doi") or "").replace("https://doi.org/", "")
+    identifier = doi or w.get("id") or ""
+    abstract = ""
+    inv = w.get("abstract_inverted_index")
+    if isinstance(inv, dict):
+        pairs: list[tuple[int, str]] = []
+        for word, positions in inv.items():
+            for pos in positions:
+                pairs.append((pos, word))
+        abstract = " ".join(w for _, w in sorted(pairs))[:1200]
+    return Evidence(
+        source="OpenAlex",
+        identifier=identifier,
+        title=w.get("display_name") or "Untitled",
+        snippet=abstract[:1200],
+        relevance=_ranked(rank_index, global_offset),
+    )
+
+
 def search_openalex(
     query: str,
     limit: int = 5,
@@ -60,41 +80,35 @@ def search_openalex(
     q = (query or "").strip()
     if not q:
         return []
-    params: dict[str, Any] = {
-        "search": q,
-        "per-page": min(25, limit + offset),
-        "page": 1 + offset // 25,
-    }
+    if limit <= 0:
+        return []
+    base_params: dict[str, Any] = {"search": q, "per-page": 25}
     if effective_setting(settings, "openalex_mailto"):
-        params["mailto"] = effective_setting(settings, "openalex_mailto")
+        base_params["mailto"] = effective_setting(settings, "openalex_mailto")
     try:
-        with httpx.Client(timeout=_TIMEOUT_SEC) as client:
-            resp = client.get("https://api.openalex.org/works", params=params)
-            resp.raise_for_status()
-            payload = resp.json()
-        results = payload.get("results") or []
         out: list[Evidence] = []
-        for i, w in enumerate(results[offset % 25 : offset % 25 + limit]):
-            doi = (w.get("doi") or "").replace("https://doi.org/", "")
-            identifier = doi or w.get("id") or ""
-            abstract = ""
-            inv = w.get("abstract_inverted_index")
-            if isinstance(inv, dict):
-                # Reconstruct abstract from inverted index (OpenAlex format)
-                pairs: list[tuple[int, str]] = []
-                for word, positions in inv.items():
-                    for pos in positions:
-                        pairs.append((pos, word))
-                abstract = " ".join(w for _, w in sorted(pairs))[:1200]
-            out.append(
-                Evidence(
-                    source="OpenAlex",
-                    identifier=identifier,
-                    title=w.get("display_name") or "Untitled",
-                    snippet=abstract[:1200],
-                    relevance=_ranked(i, offset),
-                )
-            )
+        page = 1 + offset // 25
+        skip_in_page = offset % 25
+        global_idx = 0
+        with httpx.Client(timeout=_TIMEOUT_SEC) as client:
+            while len(out) < limit:
+                params = {**base_params, "page": page}
+                resp = client.get("https://api.openalex.org/works", params=params)
+                resp.raise_for_status()
+                results = resp.json().get("results") or []
+                if not results:
+                    break
+                page_added = 0
+                for w in results[skip_in_page:]:
+                    out.append(_openalex_work_to_evidence(w, global_idx, offset))
+                    global_idx += 1
+                    page_added += 1
+                    if len(out) >= limit:
+                        break
+                if page_added == 0 or len(results) < 25:
+                    break
+                skip_in_page = 0
+                page += 1
         return out
     except Exception as exc:
         return degrade_return(logger, exc, "OpenAlex search failed", [])

@@ -233,6 +233,7 @@ class Evidence(BaseModel):
     title: str
     snippet: str
     relevance: float = Field(ge=0, le=1)
+    is_seed_corpus: bool = False
 
 
 class ParameterBoundary(BaseModel):
@@ -293,7 +294,7 @@ class ResearchResult(BaseModel):
 
 
 class ComprehensiveReport(BaseModel):
-    """Output of the KnowledgeCohort deep-research orchestrator.
+    """Output of the DeepResearchEngine deep-research orchestrator.
 
     A citation-grounded research report synthesised by cross-validating web and
     knowledge-base evidence, plus candidate formulations for the topic.

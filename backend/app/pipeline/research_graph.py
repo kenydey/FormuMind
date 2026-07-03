@@ -288,7 +288,10 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
     state["citations"] = citations or grounded
 
     engine = DeepResearchEngine(settings)
-    report_md, report_citations, report_engine = engine.report_agent(topic, answer, grounded)
+    try:
+        report_md, report_citations, report_engine = engine.report_agent(topic, answer, grounded)
+    finally:
+        engine.close()
     state["report_markdown"] = report_md
     state["citations"] = report_citations or grounded
 
@@ -364,7 +367,10 @@ def regenerate_report_node(state: ResearchGraphState, settings: Settings | None 
     narrowed = regenerate_prompt(topic, answer, failed)
 
     engine = DeepResearchEngine(settings)
-    report_md, citations, _ = engine.report_agent(topic, narrowed, evidence)
+    try:
+        report_md, citations, _ = engine.report_agent(topic, narrowed, evidence)
+    finally:
+        engine.close()
     state["report_markdown"] = report_md
     state["citations"] = citations or evidence
     state["stage"] = "regenerate"

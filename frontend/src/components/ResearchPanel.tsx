@@ -22,6 +22,11 @@ function CitationChip({ ev }: { ev: Evidence }) {
       className="inline-flex items-center gap-1 bg-accent/10 border border-accent/30 text-accent rounded px-1.5 py-0.5 text-[10px] mr-1 mb-1"
       title={ev.snippet}
     >
+      {ev.is_seed_corpus && (
+        <span className="text-amber-400/90 shrink-0" title="离线示例摘要">
+          示例
+        </span>
+      )}
       <span className="truncate max-w-[140px]">{ev.title}</span>
     </span>
   );

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..domain.schemas import SourceGuideSchema
 from .models import SourceDocument
+from .session_utils import commit_session
 
 
 def _utcnow() -> datetime:
@@ -45,9 +46,8 @@ class SourceStore:
             extraction_error=extraction_error,
             created_at=_utcnow(),
         )
-        with self._session_factory() as session:
+        with commit_session(self._session_factory) as session:
             session.add(row)
-            session.commit()
         return source_id
 
     def get(self, source_id: str) -> SourceDocument | None:
