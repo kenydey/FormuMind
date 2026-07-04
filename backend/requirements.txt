@@ -1,7 +1,7 @@
 # FormuMind backend — locked core runtime dependencies.
 #
 # These are the always-required packages for the API + worker to boot. They are
-# pinned to versions verified by the test suite (193 passing) so Docker builds
+# pinned to versions verified by the test suite (430+ passing) so Docker builds
 # are reproducible. The abstract dependency declaration lives in pyproject.toml;
 # this file is the concrete lock used by the Dockerfile and CI.
 #

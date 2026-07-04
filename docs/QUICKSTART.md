@@ -8,10 +8,15 @@ For the full reference see [USER_GUIDE.md](./USER_GUIDE.md) (中文: [快速入�
 ## Prerequisite: start the platform
 
 ```bash
+# One-click (recommended)
+./scripts/install.sh
+cp .env.example .env    # intranet: FORMUMIND_API_AUTH_ENABLED=false
+
+# Or manual:
 # Backend (terminal 1)
 cd backend
-python3 -m venv .venv              # create once
-source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
@@ -21,8 +26,9 @@ npm install
 npm run dev                        # http://localhost:5173
 ```
 
-Open **http://localhost:5173**. No API key required — the platform runs fully
-offline.
+Open **http://localhost:5173**. No LLM API key is required for full offline use.
+If platform bearer auth is enabled, enter the **API access token** in Settings first
+(matching `FORMUMIND_API_TOKEN`), or set `FORMUMIND_API_AUTH_ENABLED=false`.
 
 ---
 
@@ -99,17 +105,20 @@ shows citation chips linking back to the sources used.
 
 ## Step 3 · Choose your LLM (Settings)
 
-Click **⚙ Settings** in the header. FormuMind supports **nine providers** —
-Claude, OpenAI, Gemini, Grok, Meta (via Groq), DeepSeek, Qwen, Kimi, MiniMax.
-Pick a provider and model, paste an API key, optionally set a custom base URL,
-then **Save & test connection**. With no key, everything still runs via the
-offline rule engine.
+Click **⚙ Settings** in the header. The dialog has three tabs:
 
-**DeepSeek model names (v0.9):** the previous `deepseek-chat` and
-`deepseek-reasoner` identifiers have been replaced. Use
-`deepseek-v4-pro` (flagship, recommended for quality) or
-`deepseek-v4-flash` (fast and economical) when selecting DeepSeek as your
-provider.
+| Tab | Purpose |
+|-----|---------|
+| **LLM** | Nine providers — model and **LLM API key** |
+| **API keys** | Tavily, SerpAPI, EPO, … search/data-source secrets |
+| **Dependencies** | Install optional pip packages (`llm`, `intel`, `science`, …) from the UI |
+
+If an **API access token** banner appears at the top, that is the **platform bearer**
+(`FORMUMIND_API_TOKEN`), not your LLM key. For intranet dev, set
+`FORMUMIND_API_AUTH_ENABLED=false` in `.env` and restart the backend.
+
+Pick provider and model, paste an API key, optionally set base URL, then **Save &
+test connection**. With no key, everything still runs via the offline rule engine.
 
 ![Settings · multi-LLM](./images/04-settings.png)
 
@@ -203,16 +212,11 @@ salt-spray, cost and sustainability simultaneously.
 
 ## Next steps
 
-- Custom objective weights, batch feedback, multi-LLM configuration, IP
-  reports, NotebookLM bridging, real-engine wiring? See the **[full User Guide](./USER_GUIDE.md)**.
-- `pip install -e ".[dev]"` installs the full development environment including
-  **193 tests** (run with `pytest`).
-- Want stronger engines? They auto-detect on install — `pip install -e ".[optimize]"`
-  for the Optuna optimizer, `".[bo]"` for the BoTorch Gaussian-process optimizer,
-  `".[intel]"` for ChemCrow/paper-qa Q&A and PubChem enrichment, `".[science]"`
-  for thermo-grounded VOC + PVC/Tg, `".[embedding]"` for semantic RAG,
-  `".[color]"` for CIELAB / ΔE₀₀, `".[notebooklm]"` for the NotebookLM source.
-  Nothing is required; each lights up automatically.
+- Custom objectives, `constraint_values`, manual / AI formula edits, multi-LLM and
+  search API setup? See the **[full User Guide](./USER_GUIDE.md)**.
+- `pytest -q` runs **430+** offline tests; `pip install -e ".[dev]"` for dev tooling.
+- Stronger engines auto-detect on install — `".[optimize]"`, `".[bo]"`, `".[intel]"`,
+  `".[science]"`, `".[embedding]"`, `".[colbert,crag]"`, `".[color]"`, `".[notebooklm]"`.
 - Interactive API docs: start the backend and visit
   **http://localhost:8000/docs**.
 

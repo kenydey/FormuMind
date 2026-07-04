@@ -32,6 +32,9 @@ services:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+      # Platform bearer auth (distinct from LLM vendor keys in Settings).
+      # Intranet: set FORMUMIND_API_AUTH_ENABLED=false in .env
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
     volumes:
       - ./data/colbert_index:/app/data/colbert_index
       - ./data:/app/data
@@ -58,6 +61,7 @@ services:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
     volumes:
       - ./data/colbert_index:/app/data/colbert_index
       - ./data:/app/data
@@ -68,7 +72,11 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Pre-bake bearer token when API auth is on (optional; can also enter in Settings).
+        VITE_API_TOKEN: ${FORMUMIND_API_TOKEN:-}
     restart: unless-stopped
     ports:
       - "5173:80"

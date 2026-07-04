@@ -72,13 +72,21 @@ the **Bayesian optimizer** — are implemented for real in pure numpy.
 
 ## Quick start
 
+### One-click install (Linux/macOS)
+
+```bash
+./scripts/install.sh                 # backend venv + [dev,llm] + frontend npm
+cp .env.example .env                 # optional keys; see API auth below
+```
+
 ### Local (no Docker, fully offline)
 
 ```bash
 # Backend
 cd backend
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                          # 58 tests, all offline
+pytest -q                          # 430+ tests, all offline
 uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
 # Frontend (separate shell)
@@ -90,24 +98,46 @@ npm run dev                        # http://localhost:5173
 ### Docker
 
 ```bash
-cp .env.example .env               # optional: add ANTHROPIC_API_KEY
+cp .env.example .env               # optional: LLM keys, FORMUMIND_API_TOKEN, Tavily/SerpAPI
 docker compose up                  # redis + backend + worker + frontend
 docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 ```
+
+**Intranet / lab LAN:** set `FORMUMIND_API_AUTH_ENABLED=false` in `.env` so the
+Settings dialog (LLM / API keys / dependency manager) works without a platform
+bearer token. **Public deployment:** keep auth on (default), set
+`FORMUMIND_API_TOKEN`, and mirror it in the UI (Settings → API 访问令牌) or via
+`VITE_API_TOKEN` at frontend build time (see `docker-compose.yml`).
+
+Host-network overlay (restricted Docker bridge): `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`
+
+Enterprise ELN (Postgres + Datalab): `docker compose -f docker-compose.yml -f docker-compose.eln.yml up` — see `deploy/eln/README.md`.
 
 ## API
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET | `/api/auth/status` | whether platform bearer auth is required (public, no token) |
 | POST | `/api/search` | multi-source retrieval (patents / literature / internet) → merged, de-duped evidence |
 | POST | `/api/ingest` | upload a local file (PDF/DOCX/XLSX/PPTX/HTML/image…) → extracted evidence chunks |
 | POST | `/api/chat` | Q&A grounded in the loaded sources (RAG re-rank → LLM answer with citations) |
 | GET/POST | `/api/settings` | read / update the active LLM provider, model, key, base URL; `POST /api/settings/test` checks the connection |
-| POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
+| GET/POST | `/api/settings/secrets` | grouped API keys (LLM, SerpAPI, Tavily, EPO, …) for Settings → API 配置 |
+| GET | `/api/dependencies` | optional-package install status (Settings → 依赖管理) |
+| POST | `/api/dependencies/install` | async pip install of catalogued extras → `task_id` + SSE |
+| GET | `/api/chemical/lookup?q=` | resolve ingredient name → CAS / SMILES / MW |
+| POST | `/api/intent/parse` | natural-language brief → structured `Requirement` (incl. `constraint_values`) |
+| POST | `/api/research` | CRAG-grounded retrieve + recommend formulations |
+| POST | `/api/research/deep` | async deep research → `task_id` + SSE |
+| POST | `/api/research/modify` | async AI formula modification from a prompt → `task_id` + SSE |
+| POST | `/api/formulations/recommend` | LLM structured formulation JSON (offline fallback when no key) |
+| POST | `/api/formulations/manual` | validate / enrich / score a hand-entered formulation |
+| POST | `/api/formulations/validate` | CAS / structure enrichment for formulation lists |
 | POST | `/api/doe?design=…` | generate a DOE plan (`full_factorial`, `fractional_factorial`, `plackett_burman`, `ccd`, `lhs`) |
 | GET | `/api/doe/{plan_id}/export?format=csv\|xlsx` | export a generated plan as a fill-in worksheet (blank `measured_*` columns) |
 | POST | `/api/optimize` | start the async **multi-objective** closed-loop optimizer → returns `task_id` |
 | GET | `/api/tasks/{id}` | poll task progress + result (Top-N leaderboard) |
+| GET | `/api/tasks/{id}/stream` | SSE progress (use `?token=` when bearer auth is on) |
 | POST | `/api/experiments` | feed back measured DOE/lab results → persist + (re)train models |
 | POST | `/api/experiments/import-csv` | upload a filled-in worksheet → bulk-ingest results + (re)train |
 | POST | `/api/train` | force a retrain over all stored experiments |
@@ -151,11 +181,22 @@ automatically — no code change:
 pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
 pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
 pip install -e ".[optimize]"     # optuna (CPU multi-objective optimizer, NSGA-II/TPE)
+pip install -e ".[bo]"           # BoTorch GP optimizer (requires torch CPU)
+pip install -e ".[baybe]"        # BayBE constrained Bayesian active learning
+pip install -e ".[pydoe]"        # pyDOE classic designs (LHS/CCD/Box-Behnken/…)
 pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
+pip install -e ".[embedding]"    # sentence-transformers semantic RAG
+pip install -e ".[colbert,crag]" # ColBERT index + LangGraph CRAG research pipeline
+pip install -e ".[color]"        # colour-science CIELAB / CIEDE2000
+pip install -e ".[notebooklm]"   # notebooklm-py + Playwright (NotebookLM source)
 pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
 pip install -e ".[export]"       # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
+
+Or use **Settings → 依赖管理** in the UI to install catalogued packages asynchronously
+(`POST /api/dependencies/install`). The `heavy` extra (multi-GB torch stack) is intentionally
+omitted from the one-click catalog — install it manually when needed.
 
 The optimizer auto-selects the best engine installed (**Summit** → **Optuna** →
 the built-in numpy optimizer); grounded Q&A routes chemistry questions to

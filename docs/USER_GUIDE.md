@@ -156,8 +156,14 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   thickness, bath temperature, pH, …),
   🔄 Self-Driving Loop (data → retrain → optimize → next active-learning DOE
   in one click). Status badges on each button show running / result counts.
-- **Header**: ⚙ **Settings** (LLM provider, model, API key, base URL) and
-  🕐 **History** (session snapshot drawer, with a live count badge).
+- **Header**: ⚙ **Settings** (three tabs: **LLM**, **API keys**, **Dependencies**) and
+  🕐 **History** (project snapshot drawer, with a live count badge).
+- **Two kinds of keys (do not confuse them)**:
+  - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
+    `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When
+    on, enter the same token at the top of Settings or bake `VITE_API_TOKEN` at build time.
+  - **LLM / search API keys** (DeepSeek, Tavily, SerpAPI, …): configured under
+    Settings → LLM or API keys, persisted in server `.env` — **not** the platform bearer.
 
 ---
 
@@ -377,9 +383,21 @@ with a per-provider `base_url`; Claude uses `anthropic` and Gemini uses
 | MiniMax | `abab6.5s-chat` | `openai` · `https://api.minimax.chat/v1` |
 
 In Settings, pick a provider and model, paste an API key (with show/hide), set a
-custom base URL if needed, and click **Save & test connection**. The key is
-synced to the backend for the session and persisted in browser localStorage.
-With no key configured, everything still works via the offline rule engine.
+custom base URL if needed, and click **Save & test connection**. Keys are written
+to the server `.env` (runtime overlay). With no key configured, everything still
+works via the offline rule engine.
+
+**Settings tabs:**
+
+| Tab | Purpose |
+|-----|---------|
+| LLM | Active provider, model, API key, base URL |
+| API keys | SerpAPI, Tavily, EPO, USPTO, … grouped secrets |
+| Dependencies | Catalogued optional pip packages; install via `POST /api/dependencies/install` (restart backend after) |
+
+If all tabs are empty and the console shows 401: bearer auth is on but the SPA has
+no platform token. Disable auth for intranet, or paste the **API access token**
+matching `FORMUMIND_API_TOKEN` at the top of Settings.
 
 ### 5.8 Multi-source research, file upload & grounded Q&A
 
@@ -602,8 +620,15 @@ The **Export ▾** menu on each leaderboard card offers:
 |--------|------|---------|
 | POST | `/api/search` | multi-source retrieval (patents / literature / internet / NotebookLM) → merged, de-duped evidence |
 | POST | `/api/ingest` | upload a local file → extracted evidence chunks |
+| GET | `/api/auth/status` | whether platform bearer auth is required (public) |
+| GET/POST | `/api/settings` | LLM provider, model, key, base URL; `POST /api/settings/test` |
+| GET/POST | `/api/settings/secrets` | grouped API keys (LLM, SerpAPI, Tavily, …) |
+| GET | `/api/dependencies` | optional-package install status |
+| POST | `/api/dependencies/install` | async pip install of catalogued extras |
+| GET | `/api/chemical/lookup` | ingredient name → CAS / SMILES / molar mass |
+| POST | `/api/formulations/manual` | validate / enrich / score a hand-entered formulation |
+| POST | `/api/research/modify` | async AI formula modification (SSE) |
 | POST | `/api/chat` | Q&A grounded in the loaded sources (semantic / TF-IDF re-rank → LLM answer with citations) |
-| GET/POST | `/api/settings` | read / update the active LLM provider, model, key, base URL (`POST /api/settings/test` checks the connection) |
 | POST | `/api/intent/parse` | natural-language project brief → structured `Requirement` (LLM `complete_json` or regex fallback) |
 | POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
 | POST | `/api/research/deep` | async deep-research: DeepResearchEngine multi-agent pipeline (web + KB + HyDE + re-rank + cross-validation report) → returns `task_id` |
@@ -680,6 +705,13 @@ curl -X POST localhost:8000/api/optimize -H 'content-type: application/json' -d 
 
 ## 10. Install & run
 
+### One-click install (Linux/macOS)
+
+```bash
+./scripts/install.sh
+cp .env.example .env    # intranet: FORMUMIND_API_AUTH_ENABLED=false
+```
+
 ### Local (no Docker, fully offline)
 
 ```bash
@@ -688,7 +720,7 @@ cd backend
 python3 -m venv .venv              # create once (required on Debian/Ubuntu with PEP 668)
 source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
 pip install -e ".[dev]"
-pytest -q                          # 193 tests, all offline
+pytest -q                          # 430+ tests, all offline
 uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
 # Frontend (separate shell)
@@ -700,7 +732,6 @@ npm run dev                        # http://localhost:5173
 For production or Docker deployments, use the locked runtime deps:
 
 ```bash
-# Locked runtime deps (for Docker / production)
 pip install -r requirements.txt
 pip install -e . --no-deps
 ```
@@ -708,10 +739,19 @@ pip install -e . --no-deps
 ### Docker
 
 ```bash
-cp .env.example .env               # optional: add ANTHROPIC_API_KEY
+cp .env.example .env               # LLM keys, FORMUMIND_API_TOKEN, Tavily/SerpAPI, …
 docker compose up                  # redis + backend + worker + frontend
 docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 ```
+
+**Intranet / lab:** set `FORMUMIND_API_AUTH_ENABLED=false` in `.env` so Settings loads
+without a platform bearer token. **Public:** keep default `true`, set
+`FORMUMIND_API_TOKEN`, and mirror via `VITE_API_TOKEN` at frontend build (see
+`docker-compose.yml`) or Settings → API access token.
+
+Host-network overlay: `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`
+
+Enterprise ELN: `docker compose -f docker-compose.yml -f docker-compose.eln.yml up` — see `deploy/eln/README.md`.
 
 ---
 
@@ -724,7 +764,11 @@ defaults.
 |----------|---------|---------|
 | `FORMUMIND_LLM_PROVIDER` | `anthropic` | active provider: `anthropic`/`openai`/`gemini`/`xai`/`groq`/`deepseek`/`qwen`/`moonshot`/`minimax` |
 | `FORMUMIND_LLM_MODEL` | `claude-sonnet-4-6` | LLM model for the active provider |
-| `FORMUMIND_<PROVIDER>_API_KEY` | empty | API key, e.g. `FORMUMIND_ANTHROPIC_API_KEY`, `FORMUMIND_DEEPSEEK_API_KEY`; falls back to offline synthesis when unset |
+| `FORMUMIND_<PROVIDER>_API_KEY` | empty | LLM vendor keys (managed in Settings) |
+| `FORMUMIND_API_AUTH_ENABLED` | `true` | platform Bearer auth on `/api/*`; use `false` for intranet dev |
+| `FORMUMIND_API_TOKEN` | empty | platform access token (not an LLM key); required when auth is on in production |
+| `FORMUMIND_SERPAPI_API_KEY` | empty | SerpAPI (Scholar / Patents) |
+| `FORMUMIND_TAVILY_API_KEY` | empty | Tavily semantic search |
 | `FORMUMIND_LLM_BASE_URL` | provider default | override the OpenAI-compatible base URL |
 | `FORMUMIND_SEARCH_LIMIT_PER_SOURCE` | `5` | max results fetched per source type |
 | `FORMUMIND_RAG_BACKEND` | `auto` | RAG store: `auto` (embedding if installed, else TF-IDF) / `embedding` / `tfidf` |
@@ -768,6 +812,7 @@ pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy,
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
 pip install -e ".[embedding]"    # sentence-transformers (+ chromadb) → semantic RAG
 pip install -e ".[color]"        # colour-science (CIELAB / CIEDE2000)
+pip install -e ".[colbert,crag]"   # ColBERT index + LangGraph CRAG pipeline
 pip install -e ".[notebooklm]"   # notebooklm-py[browser] (NotebookLM source; run `notebooklm login` once)
 pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
 pip install -e ".[export]"       # openpyxl (XLSX export; CSV needs nothing)
@@ -809,6 +854,11 @@ FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID=<your-notebook-id>
 ---
 
 ## 13. FAQ & scope notes
+
+**Q: Settings tabs are empty / 401 errors?**
+Default `FORMUMIND_API_AUTH_ENABLED=true` blocks `/api/settings` without a bearer
+token. Set `FORMUMIND_API_AUTH_ENABLED=false` for intranet, or enter the platform
+token matching `FORMUMIND_API_TOKEN` at the top of Settings (distinct from LLM keys).
 
 **Q: Does it work without an API key?**
 Yes. Everything runs end-to-end fully offline; only LLM research synthesis is
