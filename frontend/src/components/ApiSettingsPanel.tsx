@@ -9,21 +9,28 @@ const GROUP_LABELS: Record<string, string> = {
   infra: "基础设施",
 };
 
-export default function ApiSettingsPanel() {
+export default function ApiSettingsPanel({ reloadKey = 0 }: { reloadKey?: number }) {
   const [secrets, setSecrets] = useState<SecretStatus[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   async function refresh() {
-    const res = await api.getSecrets();
-    setSecrets(res.secrets);
+    setLoadError(null);
+    try {
+      const res = await api.getSecrets();
+      setSecrets(res.secrets ?? []);
+    } catch (e) {
+      setSecrets([]);
+      setLoadError(String(e));
+    }
   }
 
   useEffect(() => {
-    refresh().catch(() => setSecrets([]));
-  }, []);
+    void refresh();
+  }, [reloadKey]);
 
   const groups = secrets.reduce<Record<string, SecretStatus[]>>((acc, s) => {
     (acc[s.group] ||= []).push(s);
@@ -78,6 +85,16 @@ export default function ApiSettingsPanel() {
         API 密钥保存在服务器 <code className="text-slate-400">.env</code> 文件中。修改后点击「保存」即时生效；Celery
         Worker 需重启后读取新密钥。
       </p>
+
+      {loadError && (
+        <div className="text-xs rounded px-3 py-2 border border-rose-500/40 text-rose-400 bg-rose-500/10">
+          无法加载 API 配置：{loadError}
+        </div>
+      )}
+
+      {secrets.length === 0 && !loadError && (
+        <p className="text-xs text-slate-500 py-2">正在加载密钥列表…</p>
+      )}
 
       {Object.entries(groups).map(([group, items]) => (
         <section key={group}>

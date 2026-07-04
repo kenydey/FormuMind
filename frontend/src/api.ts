@@ -641,6 +641,9 @@ export const api = {
 
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
+  getAuthStatus: () =>
+    get<{ auth_required: boolean; hint: string }>("/api/auth/status"),
+
   postSettings: (update: Partial<LLMConfig> & { api_key?: string }) =>
     post<{ ok: boolean; provider: string; model: string; message: string }>(
       "/api/settings",

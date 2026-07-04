@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, formatApiError, getApiToken } from "../api";
 import { useStore } from "../store";
 
 /**
@@ -18,10 +18,20 @@ export default function DegradedBanner() {
     (async () => {
       const issues: string[] = [];
       try {
+        const auth = await api.getAuthStatus();
+        if (auth.auth_required && !getApiToken()) {
+          issues.push("未配置 API 访问令牌（设置页顶部可填写）");
+        }
+      } catch {
+        /* auth status unavailable */
+      }
+      try {
         const s = await api.getSettings();
         if (!s.key_set) issues.push("未配置大模型 API Key");
-      } catch {
-        /* settings unavailable — skip */
+      } catch (e) {
+        if (formatApiError(e).includes("401")) {
+          issues.push("API 令牌无效或未配置");
+        }
       }
       try {
         const status = await api.getSourceStatus();
@@ -41,6 +51,7 @@ export default function DegradedBanner() {
 
   if (dismissed || reasons.length === 0) return null;
 
+  const needsAuth = reasons.some((r) => r.includes("令牌"));
   const needsDeps = reasons.some((r) => r.includes("依赖"));
 
   return (
@@ -50,10 +61,10 @@ export default function DegradedBanner() {
         {reasons.join(" · ")} —— 当前部分功能（深度研究、在线检索、跨源交叉验证）以离线兜底运行。
       </span>
       <button
-        onClick={() => openSettings(needsDeps ? "deps" : "llm")}
+        onClick={() => openSettings(needsDeps ? "deps" : needsAuth ? "api" : "llm")}
         className="ml-auto shrink-0 border border-amber-400/40 text-amber-200 rounded px-2.5 py-1 hover:bg-amber-400/15"
       >
-        {needsDeps ? "去安装依赖" : "去配置大模型"} →
+        {needsAuth ? "去配置令牌" : needsDeps ? "去安装依赖" : "去配置大模型"} →
       </button>
       <button
         onClick={() => setDismissed(true)}

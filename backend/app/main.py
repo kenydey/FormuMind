@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from .services.errors import log_handled_exception, optional_import
 
+from .api import auth as auth_router
 from .api import chemistry as chemistry_router
 from .api import doe, experiments, formulations, optimize, research, tasks
 from .api import search as search_router, ingest as ingest_router, chat as chat_router, settings as settings_router
@@ -119,7 +120,7 @@ app.include_router(notebooklm_router.router)
 app.include_router(chemistry_router.router)
 app.include_router(projects_router.router)
 app.include_router(meta_router.router)
-app.include_router(chemistry_router.router)
+app.include_router(auth_router.router)
 
 
 from .db.datalab_client import DatalabUnavailableError, check_datalab_reachable
@@ -169,6 +170,7 @@ def health() -> dict:
         "environment": cfg.environment,
         "llm": cfg.llm_provider if llm_key else "offline-fallback",
         "llm_key_set": bool(llm_key),
+        "api_auth_enabled": cfg.api_auth_enabled,
         "celery_eager": cfg.celery_eager,
         "agent_bus": cfg.agent_bus_enabled,
         "database": {

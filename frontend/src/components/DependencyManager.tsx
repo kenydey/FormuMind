@@ -23,7 +23,7 @@ const EXTRA_LABELS: Record<string, string> = {
 };
 const EXTRA_ORDER = Object.keys(EXTRA_LABELS);
 
-export default function DependencyManager() {
+export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: number }) {
   const [deps, setDeps] = useState<DependencyInfo[]>([]);
   const [coreMissing, setCoreMissing] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -32,23 +32,27 @@ export default function DependencyManager() {
   const [progress, setProgress] = useState<string>("");
   const [result, setResult] = useState<DependencyInstallResult | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
+    setLoadError(null);
     try {
       const r = await api.listDependencies();
-      setDeps(r.dependencies);
-      setCoreMissing(r.online_core_missing);
-    } catch {
+      setDeps(r.dependencies ?? []);
+      setCoreMissing(r.online_core_missing ?? []);
+    } catch (e) {
       setDeps([]);
+      setCoreMissing([]);
+      setLoadError(String(e));
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    refresh();
-  }, []);
+    void refresh();
+  }, [reloadKey]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, DependencyInfo[]>();
@@ -140,6 +144,12 @@ export default function DependencyManager() {
         </button>
       </div>
 
+      {loadError && (
+        <div className="text-xs rounded px-3 py-2 border border-rose-500/40 text-rose-400 bg-rose-500/10">
+          无法加载依赖列表：{loadError}
+        </div>
+      )}
+
       {/* Progress / result */}
       {busy && (
         <div className="text-xs rounded px-3 py-2 border border-accent/40 text-accent bg-accent/10">
@@ -176,6 +186,9 @@ export default function DependencyManager() {
 
       {/* Catalog grouped by extra */}
       <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
+        {grouped.length === 0 && !loading && !loadError && (
+          <p className="text-xs text-slate-500 py-2">正在加载依赖目录…</p>
+        )}
         {grouped.map((g) => (
           <div key={g.extra}>
             <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">

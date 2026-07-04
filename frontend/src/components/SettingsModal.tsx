@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import Modal from "./Modal";
 import DependencyManager from "./DependencyManager";
 import ApiSettingsPanel from "./ApiSettingsPanel";
+import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import { useStore } from "../store";
-import { api, type LLMProviderInfo } from "../api";
+import { api, formatApiError, type LLMProviderInfo } from "../api";
 
 export default function SettingsModal() {
   const { settingsOpen, toggleSettings, llmConfig, setLlmConfig, settingsTab, setSettingsTab } =
@@ -24,15 +25,15 @@ export default function SettingsModal() {
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    if (!settingsOpen) return;
-    setResult(null);
-    setApiKeyDraft("");
-    api
+  const loadLlmSettings = useCallback(() => {
+    setLoadError(null);
+    return api
       .getSettings()
       .then((s) => {
-        setProviders(s.providers);
+        setProviders(s.providers ?? []);
         setKeySet(s.key_set);
         setLlmConfig({
           provider: s.provider,
@@ -40,8 +41,18 @@ export default function SettingsModal() {
           baseUrl: s.base_url ?? undefined,
         });
       })
-      .catch(() => setProviders([]));
-  }, [settingsOpen, setLlmConfig]);
+      .catch((e) => {
+        setProviders([]);
+        setLoadError(formatApiError(e));
+      });
+  }, [setLlmConfig]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    setResult(null);
+    setApiKeyDraft("");
+    void loadLlmSettings();
+  }, [settingsOpen, reloadKey, loadLlmSettings]);
 
   const current = providers.find((p) => p.id === llmConfig.provider);
   const models = current?.models ?? [];
@@ -71,11 +82,16 @@ export default function SettingsModal() {
       setKeySet(t.ok || keySet || !!apiKeyDraft.trim());
       setApiKeyDraft("");
       setResult({ ok: t.ok, message: t.message });
+      setLoadError(null);
     } catch (e) {
-      setResult({ ok: false, message: String(e) });
+      setResult({ ok: false, message: formatApiError(e) });
     } finally {
       setTesting(false);
     }
+  }
+
+  function onTokenSaved() {
+    setReloadKey((k) => k + 1);
   }
 
   return (
@@ -100,10 +116,21 @@ export default function SettingsModal() {
         ))}
       </div>
 
+      <ApiAccessPanel onTokenSaved={onTokenSaved} />
+
+      {loadError && settingsTab === "llm" && (
+        <div className="mb-3 text-xs rounded px-3 py-2 border border-rose-500/40 text-rose-400 bg-rose-500/10">
+          无法加载大模型配置：{loadError}
+          {isAuthError(loadError) && " — 请先在上方填写 API 访问令牌。"}
+        </div>
+      )}
+
       {settingsTab === "deps" ? (
-        <DependencyManager />
+        <DependencyManager reloadKey={reloadKey} />
       ) : settingsTab === "api" ? (
-        <ApiSettingsPanel />
+        <ApiSettingsPanel reloadKey={reloadKey} />
+      ) : providers.length === 0 && !loadError ? (
+        <p className="text-xs text-slate-500 py-4 text-center">正在加载供应商列表…</p>
       ) : (
         <div className="space-y-4">
           <p className="text-xs text-slate-500">
@@ -116,13 +143,18 @@ export default function SettingsModal() {
             <select
               value={llmConfig.provider}
               onChange={(e) => onProviderChange(e.target.value)}
-              className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+              disabled={providers.length === 0}
+              className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm disabled:opacity-50"
             >
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
+              {providers.length === 0 ? (
+                <option value={llmConfig.provider}>（无可用选项）</option>
+              ) : (
+                providers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 
@@ -131,14 +163,19 @@ export default function SettingsModal() {
             <select
               value={llmConfig.model}
               onChange={(e) => setLlmConfig({ model: e.target.value })}
-              className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm"
+              disabled={models.length === 0}
+              className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm disabled:opacity-50"
             >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                  {m.recommended ? " ⭐" : ""}
-                </option>
-              ))}
+              {models.length === 0 ? (
+                <option value={llmConfig.model}>（无可用选项）</option>
+              ) : (
+                models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.recommended ? " ⭐" : ""}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 
@@ -199,7 +236,7 @@ export default function SettingsModal() {
             </button>
             <button
               onClick={onSave}
-              disabled={testing}
+              disabled={testing || providers.length === 0}
               className="text-sm bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-4 py-1.5 disabled:opacity-40"
             >
               {testing ? "测试中…" : "保存并测试连接"}

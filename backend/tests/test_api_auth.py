@@ -46,3 +46,10 @@ def test_api_rejects_wrong_token(auth_client):
         headers={"Authorization": "Bearer wrong-token"},
     )
     assert r.status_code == 401
+
+
+def test_auth_status_is_public_without_token(auth_client):
+    r = auth_client.get("/api/auth/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["auth_required"] is True
