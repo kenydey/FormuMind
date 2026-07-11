@@ -317,6 +317,22 @@ export function formatApiError(err: unknown): string {
   return String(err);
 }
 
+/** Normalize evidence before POST /api/chat (clamp relevance, fill required fields). */
+export function sanitizeEvidenceForApi(ev: Evidence): Evidence {
+  const rel = Number(ev.relevance);
+  const identifier = (ev.identifier || ev.title || "source").trim() || "source";
+  const title = (ev.title || identifier).trim() || identifier;
+  const snippet = (ev.snippet ?? "").trim();
+  return {
+    ...ev,
+    source: (ev.source || "local").trim() || "local",
+    identifier,
+    title,
+    snippet: snippet || title,
+    relevance: Number.isFinite(rel) ? Math.min(1, Math.max(0, rel)) : 0.5,
+  };
+}
+
 const API_TOKEN_STORAGE_KEY = "formumind-api-token";
 
 export function getApiToken(): string | null {

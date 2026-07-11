@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_ENVS = frozenset({"development", "dev", "test"})
@@ -151,10 +151,18 @@ class Settings(BaseSettings):
     # Experiment training persistence (Headless ELN)
     experiment_backend: str = "sqlite"  # datalab | sqlite (dev/CI)
 
-    # API security (public deployment defaults)
-    api_auth_enabled: bool = True
+    # API security — unset env defers to environment: off in dev/test, on in production.
+    api_auth_enabled: bool | None = None
     api_token: str | None = None
     ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
+
+    @model_validator(mode="after")
+    def _default_api_auth_for_environment(self) -> "Settings":
+        if self.api_auth_enabled is not None:
+            return self
+        env = self.environment.strip().lower()
+        object.__setattr__(self, "api_auth_enabled", env in ("production", "prod"))
+        return self
 
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key（读取 runtime overlay）。"""

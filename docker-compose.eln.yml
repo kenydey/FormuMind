@@ -34,7 +34,7 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
-      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,7 +49,7 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
-      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy

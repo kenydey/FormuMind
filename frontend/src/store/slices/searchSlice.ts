@@ -1,4 +1,4 @@
-import { api, awaitTaskStream, formatApiError, parseSearchStreamData } from "../../api";
+import { api, awaitTaskStream, formatApiError, parseSearchStreamData, sanitizeEvidenceForApi } from "../../api";
 import type { Evidence, SourceStatus } from "../../api";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
@@ -224,11 +224,12 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
 
     sendChat: async (question) => {
       const { sources, selectedSources, requirement } = get();
-      const active = sources.filter((e) =>
-        selectedSources.includes(e.identifier || e.title)
-      );
+      const active = sources
+        .filter((e) => selectedSources.includes(e.identifier || e.title))
+        .map(sanitizeEvidenceForApi);
       set((draft) => {
         draft.chatBusy = true;
+        draft.error = null;
         draft.chatHistory.push({ role: "user", content: question });
       });
       try {
@@ -243,11 +244,17 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             content: res.answer,
             citations: res.citations,
           });
+          draft.error = null;
         });
         get().scheduleAutosave();
       } catch (e) {
+        const msg = formatApiError(e);
+        const hint =
+          msg.includes("401") || msg.toLowerCase().includes("api token")
+            ? " — 请在设置页填写 API 访问令牌，或将 FORMUMIND_API_AUTH_ENABLED=false"
+            : "";
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.error = `问答失败：${msg}${hint}`;
         });
       } finally {
         set((draft) => {
