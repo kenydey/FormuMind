@@ -73,3 +73,39 @@ def test_api_auth_enabled_by_default_in_production(monkeypatch):
         assert get_settings().api_auth_enabled is True
     finally:
         get_settings.cache_clear()
+
+
+def test_startup_fails_fast_when_production_auth_has_no_token(monkeypatch):
+    """Prod + auth enabled + no token must abort startup, not 500 on every request."""
+    monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "true")
+    monkeypatch.delenv("FORMUMIND_API_TOKEN", raising=False)
+    monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "production")
+    get_settings.cache_clear()
+    reset_dev_token_cache()
+    try:
+        with pytest.raises(RuntimeError, match="FORMUMIND_API_TOKEN"):
+            with TestClient(app):
+                pass
+    finally:
+        get_settings.cache_clear()
+        reset_dev_token_cache()
+
+
+def test_requests_get_503_when_auth_misconfigured_at_runtime(monkeypatch):
+    """If settings become misconfigured after startup, return a clear 503 (not 500)."""
+    monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "false")
+    monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "test")
+    get_settings.cache_clear()
+    reset_dev_token_cache()
+    try:
+        with TestClient(app) as client:
+            monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "true")
+            monkeypatch.delenv("FORMUMIND_API_TOKEN", raising=False)
+            monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "production")
+            get_settings.cache_clear()
+            r = client.get("/api/meta")
+            assert r.status_code == 503
+            assert "FORMUMIND_API_TOKEN" in r.json()["detail"]
+    finally:
+        get_settings.cache_clear()
+        reset_dev_token_cache()

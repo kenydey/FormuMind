@@ -100,7 +100,12 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         if not settings.api_auth_enabled or _is_public_path(request.url.path):
             return await call_next(request)
-        token = resolve_api_token(settings)
+        try:
+            token = resolve_api_token(settings)
+        except RuntimeError as exc:
+            # Misconfiguration (e.g. auth enabled in production without a token):
+            # surface a clear 503 instead of an opaque 500 on every request.
+            return JSONResponse(status_code=503, content={"detail": str(exc)})
         if token is None:
             return await call_next(request)
         provided = _extract_token(request)

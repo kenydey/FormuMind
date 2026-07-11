@@ -38,10 +38,14 @@ def _client_ip(request: Request) -> str:
 def _rule_for(request: Request) -> tuple[int, float] | None:
     path = request.url.path
     method = request.method.upper()
+    # Longest matching prefix wins so specific rules (e.g. /api/search/stream)
+    # are not shadowed by broader ones (e.g. /api/search).
+    best: tuple[int, tuple[int, float]] | None = None
     for rule_method, prefix, limit, window in _RATE_RULES:
         if method == rule_method and (path == prefix or path.startswith(f"{prefix}/")):
-            return limit, window
-    return None
+            if best is None or len(prefix) > best[0]:
+                best = (len(prefix), (limit, window))
+    return best[1] if best else None
 
 
 def _allow(key: tuple[str, str, str], limit: int, window: float) -> bool:

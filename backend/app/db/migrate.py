@@ -43,8 +43,10 @@ def migrate_inline_sql_to_datalab(legacy_store, datalab_store) -> int:
         return 0
     if datalab_store.count() > 0:
         return 0
-    legacy_store.clear()
+    # Write to Datalab first; only clear the legacy rows once the copy succeeded,
+    # otherwise a mid-migration failure would permanently lose the records.
     datalab_store.add(records)
+    legacy_store.clear()
     log.info("Migrated %d inline SQL experiment record(s) to Datalab.", len(records))
     return len(records)
 

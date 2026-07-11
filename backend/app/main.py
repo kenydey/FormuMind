@@ -39,6 +39,11 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Bootstrap ColBERT seed corpus and optional PubChem enrichment."""
+    # Fail fast on auth misconfiguration (production + auth enabled + no token)
+    # instead of returning 500 on every request.
+    from .middleware.api_auth import resolve_api_token
+
+    resolve_api_token(get_settings())
     try:
         from .services.secrets_store import reload_settings
 
