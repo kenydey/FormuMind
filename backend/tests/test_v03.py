@@ -229,6 +229,26 @@ def test_chat_grounded_in_sources():
     assert isinstance(body["citations"], list)
 
 
+def test_chat_clamps_out_of_range_relevance():
+    """Stale project rows may carry relevance > 1; chat must not 422."""
+    sources = [
+        {
+            "source": "local",
+            "identifier": "doc#0",
+            "title": "Note",
+            "snippet": "Zinc phosphate passivates steel.",
+            "relevance": 2.5,
+        }
+    ]
+    r = client.post(
+        "/api/chat",
+        json={"question": "机理？", "sources": sources, "domain": "anticorrosion_coating"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["answer"]
+
+
 def test_research_accepts_preloaded_sources():
     body = dict(_REQUIREMENT)
     body["sources"] = [

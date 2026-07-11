@@ -45,6 +45,7 @@ export default function ResearchPanel() {
     deepResearchStage,
     deepResearchMessage,
     task,
+    error,
   } = useStore(
     useShallow((s) => ({
       chatHistory: s.chatHistory,
@@ -57,6 +58,7 @@ export default function ResearchPanel() {
       deepResearchStage: s.deepResearchStage,
       deepResearchMessage: s.deepResearchMessage,
       task: s.task,
+      error: s.error,
     }))
   );
   const [draft, setDraft] = useState("");
@@ -134,6 +136,12 @@ export default function ResearchPanel() {
       {deepReport && !deepResearchBusy && (
         <div className="mx-4 mt-3 mb-1 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-[11px] text-violet-200 shrink-0">
           深度研究报告已生成（{deepReport.citations?.length ?? 0} 条引用）— 见下方对话与左栏资料列表
+        </div>
+      )}
+
+      {error && (
+        <div className="mx-4 mt-2 mb-1 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300 shrink-0">
+          ⚠ {error}
         </div>
       )}
 

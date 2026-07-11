@@ -53,3 +53,23 @@ def test_auth_status_is_public_without_token(auth_client):
     assert r.status_code == 200
     body = r.json()
     assert body["auth_required"] is True
+
+
+def test_api_auth_disabled_by_default_in_development(monkeypatch):
+    monkeypatch.delenv("FORMUMIND_API_AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "development")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().api_auth_enabled is False
+    finally:
+        get_settings.cache_clear()
+
+
+def test_api_auth_enabled_by_default_in_production(monkeypatch):
+    monkeypatch.delenv("FORMUMIND_API_AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "production")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().api_auth_enabled is True
+    finally:
+        get_settings.cache_clear()

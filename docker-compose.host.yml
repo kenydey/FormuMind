@@ -14,13 +14,13 @@ services:
     ports: !reset []
     environment:
       FORMUMIND_REDIS_URL: redis://127.0.0.1:6379/0
-      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
 
   worker:
     network_mode: host
     environment:
       FORMUMIND_REDIS_URL: redis://127.0.0.1:6379/0
-      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
 
   frontend:
     network_mode: host
