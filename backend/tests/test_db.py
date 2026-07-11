@@ -193,6 +193,27 @@ def test_migrate_inline_sql_to_datalab(tmp_path):
         datalab.close()
 
 
+def test_migrate_inline_sql_keeps_legacy_rows_when_datalab_add_fails(tmp_path):
+    """Regression: legacy rows must survive a failed Datalab write (add before clear)."""
+    engine = make_engine(f"sqlite:///{tmp_path}/migrate_fail.db")
+    factory = make_session_factory(engine)
+    legacy = SqlExperimentStore(factory)
+    legacy.add([_record()])
+
+    class FailingDatalab:
+        def count(self) -> int:
+            return 0
+
+        def add(self, records):
+            raise RuntimeError("datalab unreachable")
+
+    try:
+        migrate_inline_sql_to_datalab(legacy, FailingDatalab())
+    except RuntimeError:
+        pass
+    assert legacy.count() == 1  # data must NOT be lost
+
+
 def test_migrate_skips_when_json_absent(tmp_path):
     engine = make_engine("sqlite:///:memory:")
     sql_store = SqlExperimentStore(make_session_factory(engine))

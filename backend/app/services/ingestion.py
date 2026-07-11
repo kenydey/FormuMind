@@ -308,17 +308,46 @@ def _html_to_text(html: str) -> str:
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
+_MAX_REDIRECTS = 5
+
+
+def _fetch_public_url(url: str) -> "httpx.Response":
+    """GET *url*, following redirects manually and SSRF-validating every hop.
+
+    ``follow_redirects=True`` would let an external site 302 to localhost or
+    cloud-metadata endpoints after the initial safety check passed.
+    """
+    from urllib.parse import urljoin
+
+    import httpx
+
+    headers = {"User-Agent": "FormuMind/0.1 (research platform)"}
+    with httpx.Client(timeout=20.0, follow_redirects=False) as client:
+        current = url
+        for _ in range(_MAX_REDIRECTS + 1):
+            if not _is_safe_url(current):
+                raise ValueError("URL must be a public http(s) address")
+            resp = client.get(current, headers=headers)
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("location")
+                if not location:
+                    resp.raise_for_status()
+                    return resp
+                current = urljoin(current, location)
+                continue
+            resp.raise_for_status()
+            return resp
+    raise ValueError("Too many redirects")
+
+
 def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     """Fetch a web page and convert to Evidence chunks."""
     if not _is_safe_url(url):
         raise ValueError("URL must be a public http(s) address")
-    import httpx
 
-    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-        resp = client.get(url, headers={"User-Agent": "FormuMind/0.1 (research platform)"})
-        resp.raise_for_status()
-        content_type = (resp.headers.get("content-type") or "").lower()
-        body = resp.content
+    resp = _fetch_public_url(url)
+    content_type = (resp.headers.get("content-type") or "").lower()
+    body = resp.content
 
     if "html" in content_type or body.lstrip()[:15].lower().startswith(b"<!doctype") or b"<html" in body[:500].lower():
         text = _html_to_text(body.decode("utf-8", errors="replace"))
