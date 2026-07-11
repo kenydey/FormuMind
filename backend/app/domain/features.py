@@ -8,7 +8,7 @@ materials were used.
 """
 from __future__ import annotations
 
-from .chemistry import amine_epoxy_ratio
+from .chemistry import resin_hardener_weight_ratio
 from .schemas import Formulation
 
 ROLE_KEYS = [
@@ -16,7 +16,9 @@ ROLE_KEYS = [
     "builder", "solvent", "active", "accelerator", "chelant", "additive",
 ]
 DERIVED_KEYS = ["resin_hardener_ratio", "waterborne", "total_solids"]
-PROCESS_KEYS = ["cure_temperature_c"]
+# Process parameters that can act as DOE/optimization levers. Must cover every
+# name in levers._PROCESS_LEVER_NAMES so process factors reach trained models.
+PROCESS_KEYS = ["cure_temperature_c", "bath_temperature_c", "immersion_time_min"]
 
 FEATURE_KEYS: list[str] = ROLE_KEYS + DERIVED_KEYS + PROCESS_KEYS
 
@@ -29,7 +31,7 @@ def featurize(form: Formulation, process: dict | None = None) -> dict[str, float
         key = ing.role if ing.role in roles else "additive"
         roles[key] += ing.weight_pct
 
-    ratio = amine_epoxy_ratio(form) or 0.0
+    ratio = resin_hardener_weight_ratio(form) or 0.0
     waterborne = 1.0 if any(
         i.name == "Deionized water" and i.weight_pct > 30 for i in form.ingredients
     ) else 0.0
@@ -39,7 +41,8 @@ def featurize(form: Formulation, process: dict | None = None) -> dict[str, float
     feats["resin_hardener_ratio"] = float(ratio)
     feats["waterborne"] = waterborne
     feats["total_solids"] = round(total_solids, 4)
-    feats["cure_temperature_c"] = float(process.get("cure_temperature_c", 0.0))
+    for key in PROCESS_KEYS:
+        feats[key] = float(process.get(key, 0.0))
     return feats
 
 

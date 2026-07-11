@@ -13,7 +13,7 @@ import logging
 from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from dataclasses import dataclass, field
 
-from ..domain.chemistry import amine_epoxy_ratio
+from ..domain.chemistry import resin_hardener_weight_ratio
 from ..domain.schemas import Formulation, ProductDomain
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def simulate_cure(form: Formulation, cure_temp_c: float = 80.0) -> SimulationRep
     engine = "LAMMPS/HTPolyNet (reserved)" if _heavy_available() else "analytic-approximation"
 
     if form.domain == ProductDomain.anticorrosion_coating:
-        ratio = amine_epoxy_ratio(form) or 2.5
+        ratio = resin_hardener_weight_ratio(form) or 2.5
         # Conversion is highest near stoichiometric balance and adequate temperature.
         stoich = max(0.0, 1.0 - abs(ratio - 2.0) / 3.0)
         thermal = min(1.0, cure_temp_c / 120.0)

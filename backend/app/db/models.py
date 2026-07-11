@@ -34,7 +34,9 @@ class ExperimentRow(Base):
     __tablename__ = "experiments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    item_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    # Unique: one index row per Datalab sample — retries/concurrency must not
+    # duplicate training records (NULL for inline-SQL rows is exempt).
+    item_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True, index=True)
     domain: Mapped[str] = mapped_column(String(64), index=True)
     project_id: Mapped[str] = mapped_column(String(36), default="", index=True)
     factors: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -54,6 +56,9 @@ class Campaign(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     strategy: Mapped[str] = mapped_column(String(64), default="BayBE-LHS")
     status: Mapped[str] = mapped_column(String(32), default="IN_PROGRESS")
+    # Product domain the campaign optimizes (ProductDomain value); used to
+    # resolve default objectives instead of assuming anticorrosion coating.
+    domain: Mapped[str | None] = mapped_column(String(64), nullable=True)
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     primary_metric: Mapped[str | None] = mapped_column(String(64), nullable=True)
     objectives_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)

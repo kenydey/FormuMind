@@ -40,3 +40,10 @@ def substrate_default_levers(req: Requirement) -> list[LeverSpec] | None:
 
 def is_process_lever(name: str) -> bool:
     return name in _PROCESS_LEVER_NAMES
+
+
+def process_factors(values: dict[str, float]) -> dict[str, float]:
+    """Extract the process-lever entries (cure/bath temperature, immersion time)
+    from a DOE/optimizer factor dict so they can be fed to the predictor as
+    process features rather than ingredient weights."""
+    return {k: float(v) for k, v in values.items() if is_process_lever(k)}

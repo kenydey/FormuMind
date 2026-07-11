@@ -193,6 +193,48 @@ def test_migrate_inline_sql_to_datalab(tmp_path):
         datalab.close()
 
 
+def test_legacy_duplicate_item_ids_are_deduped_and_unique_enforced(tmp_path):
+    """Regression: one experiments index row per Datalab sample."""
+    import sqlite3
+
+    db_file = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(
+        "CREATE TABLE experiments ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, item_id VARCHAR(128), "
+        "domain VARCHAR(64), project_id VARCHAR(36) DEFAULT '', factors JSON, "
+        "cure_temperature_c FLOAT, measured JSON, source VARCHAR(64), "
+        "label VARCHAR(255), created_at DATETIME)"
+    )
+    for _ in range(3):
+        conn.execute(
+            "INSERT INTO experiments (item_id, domain, factors, measured, source, label) "
+            "VALUES ('dup_item', 'anticorrosion_coating', '{}', '{}', 'lab', '')"
+        )
+    conn.commit()
+    conn.close()
+
+    engine = make_engine(f"sqlite:///{db_file}")
+    with engine.connect() as c:
+        from sqlalchemy import text
+
+        count = c.execute(
+            text("SELECT COUNT(*) FROM experiments WHERE item_id = 'dup_item'")
+        ).scalar()
+        assert count == 1  # duplicates removed, earliest kept
+
+        import pytest as _pytest
+        from sqlalchemy.exc import IntegrityError
+
+        with _pytest.raises(IntegrityError):
+            c.execute(
+                text(
+                    "INSERT INTO experiments (item_id, domain, factors, measured, source, label) "
+                    "VALUES ('dup_item', 'anticorrosion_coating', '{}', '{}', 'lab', '')"
+                )
+            )
+
+
 def test_migrate_skips_when_json_absent(tmp_path):
     engine = make_engine("sqlite:///:memory:")
     sql_store = SqlExperimentStore(make_session_factory(engine))

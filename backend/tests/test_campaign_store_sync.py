@@ -22,6 +22,39 @@ def _plan() -> DOEPlan:
     )
 
 
+def test_campaign_persists_domain_and_batch_sync_resolves_it():
+    """Regression: batch_sync must not assume anticorrosion when snapshot is empty."""
+    engine = make_engine("sqlite:///:memory:")
+    factory = make_session_factory(engine)
+    store = SqliteCampaignStore(factory)
+    plan = DOEPlan(
+        design="lhs",
+        factors=[],
+        runs=[DOERun(run_id=1, coded={}, natural={"Phosphoric acid": 8.0})],
+        notes="test",
+        plan_id="dom1234",
+        domain=ProductDomain.surface_treatment,
+    )
+    campaign = asyncio.run(store.create_from_plan(plan))
+    assert campaign.domain == ProductDomain.surface_treatment.value
+
+    from app.db.campaign_store import _campaign_domain
+
+    stored = store.get_campaign_sync(campaign.id)
+    assert _campaign_domain(stored) == ProductDomain.surface_treatment
+
+
+def test_campaign_domain_falls_back_for_legacy_rows():
+    from types import SimpleNamespace
+
+    from app.db.campaign_store import _campaign_domain
+
+    legacy = SimpleNamespace(id=1, domain=None)
+    assert _campaign_domain(legacy) == ProductDomain.anticorrosion_coating
+    unknown = SimpleNamespace(id=2, domain="no-such-domain")
+    assert _campaign_domain(unknown) == ProductDomain.anticorrosion_coating
+
+
 def test_sqlite_sync_methods_skip_asyncio_run():
     engine = make_engine("sqlite:///:memory:")
     factory = make_session_factory(engine)

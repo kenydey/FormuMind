@@ -31,10 +31,19 @@ def test_validation_flags_no_errors_on_baseline():
     assert warnings == []
 
 
-def test_amine_epoxy_ratio_present_for_2k_system():
+def test_resin_hardener_weight_ratio_present_for_2k_system():
     form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
-    ratio = chemistry.amine_epoxy_ratio(form)
+    ratio = chemistry.resin_hardener_weight_ratio(form)
     assert ratio is not None and ratio > 0
+
+
+def test_validate_formulation_does_not_mutate_ingredients():
+    """Regression: validation must be side-effect free on caller-owned objects."""
+    form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
+    before = [(i.name, i.molar_mass) for i in form.ingredients]
+    chemistry.validate_formulation(form)
+    after = [(i.name, i.molar_mass) for i in form.ingredients]
+    assert before == after
 
 
 # ── PVC / CPVC / Solids-by-Volume ─────────────────────────────────────────────

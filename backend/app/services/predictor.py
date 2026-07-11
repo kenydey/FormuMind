@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ..domain import features, knowledge
-from ..domain.chemistry import amine_epoxy_ratio, cpvc, pvc, solids_by_volume
+from ..domain.chemistry import resin_hardener_weight_ratio, cpvc, pvc, solids_by_volume
 from ..domain.schemas import Formulation, ProductDomain
 
 logger = logging.getLogger(__name__)
@@ -213,9 +213,11 @@ def _blend_trained(
             continue
         model_pred, model_std, n = out
         w = n / (n + K)
-        props[metric] = round(w * model_pred + (1.0 - w) * props[metric], 3)
-        # Propagate uncertainty: blend model std with a nominal empirical std.
-        empirical_std = abs(props[metric]) * 0.15  # 15% relative empirical uncertainty
+        empirical_val = props[metric]
+        props[metric] = round(w * model_pred + (1.0 - w) * empirical_val, 3)
+        # Propagate uncertainty: blend model std with a nominal empirical std
+        # (15% relative, taken from the pre-blend mechanistic estimate).
+        empirical_std = abs(empirical_val) * 0.15
         out_std[metric] = round(w * model_std + (1.0 - w) * empirical_std, 3)
     return props, out_std
 
@@ -237,7 +239,7 @@ def _predict_mechanistic(
         inhibitor = _sum_role(form, "inhibitor")
         binder = _sum_role(form, "resin") + _sum_role(form, "hardener")
         filler = _sum_role(form, "filler") + _sum_role(form, "pigment")
-        ratio = amine_epoxy_ratio(form) or 2.5
+        ratio = resin_hardener_weight_ratio(form) or 2.5
         crosslink = max(0.0, 1.0 - abs(ratio - 2.0) / 3.0)
         salt_spray = (
             120.0 + inhibitor * 48.0 + binder * 6.5 + crosslink * 240.0

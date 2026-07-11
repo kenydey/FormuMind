@@ -25,6 +25,7 @@ import numpy as np
 
 from ..config import get_settings
 from ..domain import features
+from ..domain.levers import process_factors
 from ..domain.schemas import ExperimentRecord, ModelInfo, ProductDomain
 from ..pipeline import reconstruct  # lightweight: form-from-factors, no cycle
 
@@ -194,7 +195,10 @@ class ModelRegistry:
             if project_id and rec_pid not in (pid, domain.value, ""):
                 continue
             form = reconstruct.formulation_from_factors(rec.domain, rec.factors)
+            # Process levers (bath temp, immersion time…) live in rec.factors;
+            # merge them so trained models actually see those DOE dimensions.
             process = {"cure_temperature_c": rec.cure_temperature_c or 0.0}
+            process.update(process_factors(rec.factors))
             rows.append(features.vector(form, process))
             ys.append(rec.measured[metric])
         if len(rows) < self.min_samples:
