@@ -94,7 +94,6 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
                 warnings.append(
                     f"{ing.name}: declared M={ing.molar_mass} but formula {ing.formula} gives {computed}."
                 )
-            ing.molar_mass = ing.molar_mass or computed
     if voc_limit_gpl is not None and "voc_gpl" in form.predicted:
         voc = form.predicted["voc_gpl"]
         if voc > voc_limit_gpl:
@@ -102,9 +101,14 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
     return warnings
 
 
-def amine_epoxy_ratio(form: Formulation) -> float | None:
-    """Crude resin:hardener equivalent ratio used as a cross-link-density proxy
-    for two-component anti-corrosion systems. Returns None when not applicable.
+def resin_hardener_weight_ratio(form: Formulation) -> float | None:
+    """Resin:hardener **weight** ratio (total resin wt% / total hardener wt%).
+
+    This is NOT a stoichiometric equivalent ratio — it ignores epoxy equivalent
+    weight and amine hydrogen equivalent weight. It is used only as a crude
+    cross-link-density proxy for two-component systems, tuned so that a weight
+    ratio near 2.0 approximates a balanced DGEBA/polyamide mix.
+    Returns None when the formulation has no resin or no hardener.
     """
     resin = sum(i.weight_pct for i in form.ingredients if i.role == "resin")
     hardener = sum(i.weight_pct for i in form.ingredients if i.role == "hardener")

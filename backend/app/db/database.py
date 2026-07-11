@@ -50,6 +50,40 @@ def _ensure_experiment_columns(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE experiments ADD COLUMN item_id VARCHAR(128)"))
         if "project_id" not in cols:
             conn.execute(text("ALTER TABLE experiments ADD COLUMN project_id VARCHAR(36) DEFAULT ''"))
+    _ensure_unique_item_id(engine)
+
+
+def _ensure_unique_item_id(engine: Engine) -> None:
+    """Enforce one index row per Datalab sample on legacy DBs.
+
+    Deduplicates first (rows with the same item_id point at the same Datalab
+    sample — keep the earliest), then adds a unique index. NULL item_id rows
+    (inline-SQL records) are exempt in both SQLite and Postgres semantics.
+    """
+    import logging
+
+    from sqlalchemy import inspect, text
+
+    log = logging.getLogger(__name__)
+    indexes = inspect(engine).get_indexes("experiments")
+    if any(ix.get("unique") and ix.get("column_names") == ["item_id"] for ix in indexes):
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "DELETE FROM experiments WHERE item_id IS NOT NULL AND id NOT IN ("
+                    "SELECT MIN(id) FROM experiments WHERE item_id IS NOT NULL GROUP BY item_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_experiments_item_id "
+                    "ON experiments (item_id)"
+                )
+            )
+    except Exception as exc:  # pragma: no cover - legacy schema edge cases
+        log.warning("Could not enforce unique experiments.item_id: %s", exc)
 
 
 def _ensure_campaign_columns(engine: Engine) -> None:
@@ -70,6 +104,8 @@ def _ensure_campaign_columns(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE campaigns ADD COLUMN lever_snapshot JSON"))
         if "sample_refs" not in cols:
             conn.execute(text("ALTER TABLE campaigns ADD COLUMN sample_refs JSON DEFAULT '[]'"))
+        if "domain" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN domain VARCHAR(64)"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:

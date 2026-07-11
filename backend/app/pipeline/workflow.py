@@ -15,6 +15,7 @@ from ..config import get_settings
 from ..domain import doe as doe_engine
 from ..domain import knowledge
 from ..domain.chemistry import full_safety_check, validate_formulation
+from ..domain.levers import process_factors
 from ..domain.schemas import (
     DOEFactor,
     DOEPlan,
@@ -287,12 +288,15 @@ def run_optimization(
         x = opt.suggest()
         values = {f.name: v for f, v in zip(factors, x)}
         form = _apply_levers(req, values)
-        props = predictor.predict(form, process)
+        # Process levers (cure/bath temperature, immersion time) must reach the
+        # predictor per candidate, otherwise those DOE dimensions are inert.
+        iter_process = {**process, **process_factors(values)}
+        props = predictor.predict(form, iter_process)
         # Expand running bounds.
         for metric, val in props.items():
             lo, hi = bounds.get(metric, (val, val))
             bounds[metric] = (min(lo, val), max(hi, val))
-        score = predictor.multi_objective_score(form, objectives, process, bounds)
+        score = predictor.multi_objective_score(form, objectives, iter_process, bounds)
         opt.observe(x, score)
         best_so_far = max(best_so_far, score)
         history.append(round(best_so_far, 3))
@@ -302,7 +306,9 @@ def run_optimization(
     top: list[Formulation] = []
     for x, score in opt.ranked(settings.top_n_formulas):
         values = {f.name: v for f, v in zip(factors, x)}
-        form = _score_and_validate(_apply_levers(req, values), process, req)
+        form = _score_and_validate(
+            _apply_levers(req, values), {**process, **process_factors(values)}, req
+        )
         form.name = f"Optimized {req.domain.value} (score {score:.3f})"
         top.append(form)
     return OptimizationResult(

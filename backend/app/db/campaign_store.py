@@ -50,6 +50,17 @@ _MEASUREMENTS_BLOCK = "formumind_measurements"
 _CAMPAIGN_BLOCKS = (_PARAMS_BLOCK, _MEASUREMENTS_BLOCK)
 
 
+def _campaign_domain(campaign: Campaign) -> ProductDomain:
+    """Resolve the campaign's product domain (legacy rows may lack the column)."""
+    raw = getattr(campaign, "domain", None)
+    if raw:
+        try:
+            return ProductDomain(raw)
+        except ValueError:
+            logger.warning("Campaign %s has unknown domain %r", campaign.id, raw)
+    return ProductDomain.anticorrosion_coating
+
+
 def _run_async(coro):
     """Run async store methods from sync callers without nesting event loops."""
     try:
@@ -189,6 +200,7 @@ class _CampaignMetaMixin:
                     name=campaign_name,
                     strategy=strategy,
                     status="IN_PROGRESS",
+                    domain=domain.value,
                     project_id=project_id,
                     primary_metric=primary,
                     objectives_snapshot=[o.model_dump() for o in objectives],
@@ -387,7 +399,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return 0, []
 
-        domain = ProductDomain.anticorrosion_coating
+        domain = _campaign_domain(campaign)
         objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
         ref_by_id = {int(r["id"]): str(r["item_id"]) for r in (campaign.sample_refs or [])}
         updated = 0
@@ -507,7 +519,7 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return 0, []
 
-        domain = ProductDomain.anticorrosion_coating
+        domain = _campaign_domain(campaign)
         objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
         refs = list(campaign.sample_refs or [])
         ref_by_id = {int(r["id"]): r for r in refs}

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from ...domain import features
-from ...domain.chemistry import amine_epoxy_ratio
+from ...domain.chemistry import resin_hardener_weight_ratio
 from ...domain.schemas import Formulation, MetricPriorSpec, Requirement
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def evaluate_prior_spec(
 
     value = float(prior.get("intercept", 0.0))
     feats = features.featurize(form, process)
-    ratio = amine_epoxy_ratio(form) or 0.0
+    ratio = resin_hardener_weight_ratio(form) or 0.0
 
     for term in prior.get("terms", []):
         coef = float(term.get("coef", 0.0))
