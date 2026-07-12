@@ -164,6 +164,20 @@ def retrieve_node(state: ResearchGraphState, settings: Settings | None = None) -
             e for e in evidence if (e.identifier or e.title) not in pre_keys
         ]
     evidence = llm_rerank(query, evidence, k=settings.colbert_top_k)
+
+    # Persistent-KB grounding: append top chunks from the accumulated corpus
+    # (full-text patents/literature/web persisted by ingest + fulltext fetch)
+    # after the rerank cut, so recommendations always see the durable KB and
+    # the per-request index keeps its ranking.
+    if settings.kb_v2_enabled and settings.kb_recommend_top_k > 0:
+        from ..services import kb_index
+
+        kb_hits = kb_index.search_chunks(query, k=settings.kb_recommend_top_k)
+        if kb_hits:
+            seen = {e.identifier or e.title for e in evidence}
+            evidence = evidence + [
+                h for h in kb_hits if (h.identifier or h.title) not in seen
+            ]
     state["evidence"] = evidence
     state["stage"] = "retrieve"
     return state

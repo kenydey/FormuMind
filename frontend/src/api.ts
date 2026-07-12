@@ -688,6 +688,10 @@ export const api = {
 
   chat: (req: ChatRequest) => post<ChatResponse>("/api/chat", req),
 
+  kbStats: () => get<KBStats>("/api/kb/stats"),
+
+  kbReindex: () => post<KBReindexResult>("/api/kb/reindex", {}),
+
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   getAuthStatus: () =>
@@ -905,6 +909,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   citations?: Evidence[];
+  /** Persistent-KB chunks that grounded this assistant answer. */
+  kbChunksUsed?: number;
 }
 
 export interface LLMModelOption {
@@ -1032,6 +1038,27 @@ export interface ChatRequest {
 export interface ChatResponse {
   answer: string;
   citations: Evidence[];
+  /** Retrieval backend that served the citations (tfidf | embedding | colbert). */
+  rag_backend?: string;
+  /** Persistent-KB chunks merged into the grounding set for this answer. */
+  kb_chunks_used?: number;
+}
+
+/** Persistent knowledge base counters (GET /api/kb/stats). */
+export interface KBStats {
+  enabled: boolean;
+  sources: number;
+  sources_by_kind: Record<string, number>;
+  chunks: number;
+  embedded_chunks: number;
+  embedding_available: boolean;
+}
+
+export interface KBReindexResult {
+  reindexed_sources: number;
+  reindexed_chunks: number;
+  total_chunks: number;
+  embedded_chunks: number;
 }
 
 export interface LLMSettingsResponse {

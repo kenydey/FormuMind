@@ -234,6 +234,13 @@ def build_doe(
     review = chemtools.review_doe_factors(req, plan)
     if review:
         plan.notes = (plan.notes + "\n" if plan.notes else "") + "\n".join(review)
+    # Persistent-KB parameter-space fusion: advisory literature envelopes for
+    # factors documented in stored source guides (never mutates bounds).
+    from ..services import kb_index
+
+    kb_hints = kb_index.doe_parameter_hints([f.name for f in plan.factors])
+    if kb_hints:
+        plan.notes = (plan.notes + "\n" if plan.notes else "") + "\n".join(kb_hints)
     _cache_plan(plan)
     return plan
 

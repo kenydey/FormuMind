@@ -5,6 +5,7 @@ import {
   type ChemToolsStatus,
   type DependencyInfo,
   type DependencyInstallResult,
+  type KBStats,
 } from "../api";
 
 const CHEMTOOL_LABELS: Record<string, string> = {
@@ -47,6 +48,68 @@ function ChemToolsCard({ status }: { status: ChemToolsStatus | null }) {
   );
 }
 
+function KnowledgeBaseCard({
+  stats,
+  onReindex,
+  reindexing,
+}: {
+  stats: KBStats | null;
+  onReindex: () => void;
+  reindexing: boolean;
+}) {
+  if (!stats) return null;
+  return (
+    <div className="border border-edge/60 rounded p-2">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+          持久知识库
+          {!stats.enabled && <span className="text-amber-400 ml-1">（已禁用）</span>}
+        </div>
+        {stats.enabled && (
+          <button
+            onClick={onReindex}
+            disabled={reindexing}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400 hover:text-slate-200 hover:border-accent/50 disabled:opacity-50"
+            title="对已存储的全部文档重建切块与向量索引"
+          >
+            {reindexing ? "重建中…" : "重建索引"}
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1 text-[10px]">
+        <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-400">
+          文档 {stats.sources}
+        </span>
+        <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-400">
+          切块 {stats.chunks}
+        </span>
+        <span
+          className={`px-1.5 py-0.5 rounded border ${
+            stats.embedding_available
+              ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
+              : "border-edge bg-ink/60 text-slate-500"
+          }`}
+          title={
+            stats.embedding_available
+              ? "sentence-transformers 已安装，检索为语义向量模式"
+              : "未安装 sentence-transformers，检索为关键词模式（可在下方一键安装 Embedding）"
+          }
+        >
+          向量 {stats.embedded_chunks}/{stats.chunks}
+        </span>
+        {Object.entries(stats.sources_by_kind || {}).map(([kind, n]) => (
+          <span
+            key={kind}
+            className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-500"
+          >
+            {kind} ×{n}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Human labels for the extra groups, in display order.
 const EXTRA_LABELS: Record<string, string> = {
   llm: "大模型供应商 · LLM",
@@ -75,6 +138,8 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
   const [showLog, setShowLog] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chemTools, setChemTools] = useState<ChemToolsStatus | null>(null);
+  const [kbStats, setKbStats] = useState<KBStats | null>(null);
+  const [kbReindexing, setKbReindexing] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -94,6 +159,23 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
       setChemTools(await api.chemicalTools());
     } catch {
       setChemTools(null);
+    }
+    try {
+      setKbStats(await api.kbStats());
+    } catch {
+      setKbStats(null);
+    }
+  }
+
+  async function reindexKb() {
+    setKbReindexing(true);
+    try {
+      await api.kbReindex();
+      setKbStats(await api.kbStats());
+    } catch {
+      /* stats card simply keeps the previous numbers */
+    } finally {
+      setKbReindexing(false);
     }
   }
 
@@ -198,6 +280,7 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
       )}
 
       <ChemToolsCard status={chemTools} />
+      <KnowledgeBaseCard stats={kbStats} onReindex={() => void reindexKb()} reindexing={kbReindexing} />
 
       {/* Progress / result */}
       {busy && (
