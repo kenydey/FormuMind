@@ -142,6 +142,20 @@ class Settings(BaseSettings):
     arxiv_search_enabled: bool = True
     openalex_enabled: bool = True
 
+    # 检索结果内容过滤（KB P0）：规则层默认开启（保守规则：垃圾域名/
+    # 空洞摘要/近重复 SimHash）；LLM 批量质量判定默认关闭（每次检索一次调用）。
+    content_filter_enabled: bool = True
+    content_filter_min_snippet_chars: int = 40
+    content_filter_blocked_domains: list[str] = Field(default_factory=list)
+    content_filter_llm_judge: bool = False
+
+    # 检索结果全文获取（KB P0）：把摘要级命中升级为全文分块并持久化原文。
+    # 专利 PDF（USPTO/EPO/Google）+ OA 文献 PDF（OpenAlex/arXiv）+ 网页正文
+    # （trafilatura 优先）。默认关闭以保证测试离线；生产建议开启。
+    fulltext_enrich: bool = False
+    fulltext_max_docs: int = 8
+    fulltext_timeout_s: float = 20.0
+
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
     source_guide_max_chars: int = 12000
