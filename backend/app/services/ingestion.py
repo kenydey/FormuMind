@@ -132,6 +132,11 @@ def _ingest_parsed_text(
             extraction_status=status,
             extraction_error=err,
         )
+        # Persistent KB v2: chunk (+embed when available) into document_chunks
+        # so chat retrieval spans the whole corpus across restarts.
+        from .kb_index import index_source
+
+        index_source(source_id, text)
 
     return IngestOutcome(evidence, source_id, guide, status)
 

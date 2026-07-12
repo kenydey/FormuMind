@@ -204,7 +204,7 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str) -> str | None:
         existing = store.find_by_hash(content_hash)
         if existing is not None:
             return existing.id
-        return store.create(
+        source_id = store.create(
             filename=ev.identifier[:500],
             title=ev.title[:500],
             source_kind=kind,
@@ -212,6 +212,10 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str) -> str | None:
             content_hash=content_hash,
             extraction_status="fulltext",
         )
+        from .kb_index import index_source
+
+        index_source(source_id, text)
+        return source_id
     except Exception as exc:
         return degrade_return(logger, exc, "fulltext persistence failed", None)
 
