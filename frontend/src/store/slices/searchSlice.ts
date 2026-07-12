@@ -4,6 +4,10 @@ import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
 export function createSearchSlice(set: SliceSet, get: SliceGet) {
+  // Generation token: bumped on each searchSources call so late SSE callbacks
+  // from a superseded search cannot write results into the current one.
+  let searchGeneration = 0;
+
   return {
     setSearchQuery: (q) => {
       set((draft) => {
@@ -26,7 +30,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       get().scheduleAutosave();
     },
 
-    addSources: (evidence) => {
+    addSources: (evidence, opts) => {
       set((draft) => {
         const fresh = evidence.filter(
           (e) =>
@@ -42,7 +46,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           }
         }
       });
-      get().scheduleAutosave();
+      if (opts?.autosave !== false) get().scheduleAutosave();
     },
 
     removeSource: (id) => {
@@ -84,6 +88,9 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       }),
 
     searchSources: async (queryOverride?: string) => {
+      if (get().searchBusy) return; // one search at a time — UI buttons disable, store enforces
+      const generation = ++searchGeneration;
+      const isCurrent = () => generation === searchGeneration;
       const { searchQuery, requirement, sourceTypes } = get();
       const query = (queryOverride ?? searchQuery).trim();
       if (queryOverride !== undefined) {
@@ -93,7 +100,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       }
       set((draft) => {
         draft.searchBusy = true;
-        draft.error = null;
+        draft.searchError = null;
         draft.sources = [];
         draft.selectedSources = [];
         draft.usedSeedFallback = false;
@@ -117,6 +124,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         const final = await awaitTaskStream(
           task_id,
           (ev) => {
+            if (!isCurrent()) return; // stale callback from a superseded search
             const { evidence, progress, usedSeedFallback } = parseSearchStreamData(
               ev.data as Record<string, unknown> | undefined
             );
@@ -131,10 +139,13 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                 sourcesPending: progress.sourcesPending ?? [],
               };
             });
-            if (evidence.length) get().addSources(evidence);
+            // Incremental batches skip autosave — one save is scheduled at the end,
+            // instead of hundreds of debounce resets during a 300-result stream.
+            if (evidence.length) get().addSources(evidence, { autosave: false });
           },
           300_000
         );
+        if (!isCurrent()) return;
         const r = final.data as
           | {
               evidence?: Evidence[];
@@ -142,7 +153,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               used_seed_fallback?: boolean;
             }
           | undefined;
-        if (r?.evidence?.length) get().addSources(r.evidence);
+        if (r?.evidence?.length) get().addSources(r.evidence, { autosave: false });
         if (r?.source_status) {
           set((draft) => {
             draft.sourceStatus = r.source_status!;
@@ -163,14 +174,18 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         });
         get().scheduleAutosave();
       } catch (e) {
-        set((draft) => {
-          draft.error = formatApiError(e);
-        });
+        if (isCurrent()) {
+          set((draft) => {
+            draft.searchError = formatApiError(e);
+          });
+        }
       } finally {
-        set((draft) => {
-          draft.searchBusy = false;
-          draft.searchProgress = null;
-        });
+        if (isCurrent()) {
+          set((draft) => {
+            draft.searchBusy = false;
+            draft.searchProgress = null;
+          });
+        }
       }
     },
 
@@ -203,7 +218,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       if (files.length === 0) return;
       set((draft) => {
         draft.searchBusy = true;
-        draft.error = null;
+        draft.searchError = null;
       });
       try {
         const res =
@@ -213,7 +228,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         get().addSources(res.evidence);
       } catch (e) {
         set((draft) => {
-          draft.error = `文件上传失败：${e instanceof Error ? e.message : String(e)}`;
+          draft.searchError = `文件上传失败：${e instanceof Error ? e.message : String(e)}`;
         });
       } finally {
         set((draft) => {
@@ -229,7 +244,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         .map(sanitizeEvidenceForApi);
       set((draft) => {
         draft.chatBusy = true;
-        draft.error = null;
+        draft.chatError = null;
         draft.chatHistory.push({ role: "user", content: question });
       });
       try {
@@ -244,7 +259,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             content: res.answer,
             citations: res.citations,
           });
-          draft.error = null;
+          draft.chatError = null;
         });
         get().scheduleAutosave();
       } catch (e) {
@@ -254,7 +269,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             ? " — 请在设置页填写 API 访问令牌，或将 FORMUMIND_API_AUTH_ENABLED=false"
             : "";
         set((draft) => {
-          draft.error = `问答失败：${msg}${hint}`;
+          draft.chatError = `问答失败：${msg}${hint}`;
         });
       } finally {
         set((draft) => {

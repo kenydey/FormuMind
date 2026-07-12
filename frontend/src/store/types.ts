@@ -62,7 +62,11 @@ export interface AppState {
   leaderboard: Formulation[];
   optimizationHistory: number[];
   busy: "idle" | "researching" | "optimizing" | "doe" | "training" | "looping";
-  error: string | null;
+  /** Scoped errors — each panel renders only its own domain's failures. */
+  searchError: string | null;
+  chatError: string | null;
+  workflowError: string | null;
+  projectError: string | null;
 
   loopReport: LoopReport | null;
   rmseHistory: Record<string, number>[];
@@ -170,7 +174,7 @@ export interface AppState {
   setSearchQuery: (q: string) => void;
   setSourceTypes: (types: SearchSourceType[]) => void;
   setRecommendSourceTypes: (types: SearchSourceType[]) => void;
-  addSources: (evidence: Evidence[]) => void;
+  addSources: (evidence: Evidence[], opts?: { autosave?: boolean }) => void;
   removeSource: (id: string) => void;
   clearSources: () => void;
   toggleSourceSelected: (id: string) => void;

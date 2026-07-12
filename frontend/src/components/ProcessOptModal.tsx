@@ -48,7 +48,11 @@ export default function ProcessOptModal() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.optimizeProcess({ domain: requirement.domain, iterations });
+      const res = await api.optimizeProcess({
+        domain: requirement.domain,
+        iterations,
+        objectives: requirement.objectives,
+      });
       setProcessOptResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "请求失败");

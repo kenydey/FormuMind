@@ -55,7 +55,7 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
 
     loadExampleProject: async (exampleId) => {
       set((draft) => {
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const req = await api.loadExampleProject(exampleId);
@@ -70,7 +70,7 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
         get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       }
     },
@@ -193,10 +193,24 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
       if (!activeProjectId) {
         await get().createProject(requirement.product_type || "新项目");
         activeProjectId = get().activeProjectId;
+        if (!activeProjectId) {
+          set((draft) => {
+            draft.workflowError = `创建项目失败：${get().projectError ?? "未知错误"}`;
+          });
+          return;
+        }
       }
-      try {
-        await get().saveProject();
-      } catch {
+      // saveProject swallows its own errors into projectError, so the old
+      // try/catch here never fired and a failed save still locked the form.
+      set((draft) => {
+        draft.projectError = null;
+      });
+      await get().saveProject();
+      const saveError = get().projectError;
+      if (saveError) {
+        set((draft) => {
+          draft.workflowError = `保存需求失败：${saveError}`;
+        });
         return;
       }
       get().captureRequirementSnapshot();

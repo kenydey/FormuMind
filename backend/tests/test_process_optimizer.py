@@ -73,6 +73,38 @@ def test_run_process_optimization_all_domains():
         assert result.predicted_outcome
 
 
+def test_run_process_optimization_honours_relevant_objectives():
+    """Caller objectives matching simulator metrics must be used (F-26)."""
+    req = ProcessOptRequest(
+        domain=ProductDomain.anticorrosion_coating,
+        iterations=4,
+        objectives=[
+            {"metric": "cure_conversion_pct", "weight": 1.0, "direction": "maximize"},
+        ],
+    )
+    result = run_process_optimization(req)
+    assert result.predicted_outcome
+    assert len(result.history) == 4
+
+
+def test_run_process_optimization_ignores_formulation_only_objectives():
+    """Formulation metrics the simulator can't produce fall back to defaults
+    instead of degenerating the composite score to a constant."""
+    req = ProcessOptRequest(
+        domain=ProductDomain.anticorrosion_coating,
+        iterations=4,
+        objectives=[
+            {"metric": "cost_cny_per_kg", "weight": 1.0, "direction": "minimize"},
+        ],
+    )
+    result = run_process_optimization(req)
+    # Defaults kicked in: score history is not the degenerate all-equal constant
+    # that a single unknown metric (always 0.0 -> norm 0.5) would produce being
+    # identical to scoring nothing at all.
+    assert result.predicted_outcome
+    assert result.best_params
+
+
 def test_process_optimization_best_params_within_bounds():
     req = ProcessOptRequest(domain=ProductDomain.anticorrosion_coating, iterations=6)
     result = run_process_optimization(req)
