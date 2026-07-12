@@ -77,6 +77,11 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("markitdown", "markitdown", "file_ingest", "通用文档解析（PDF/DOCX/XLSX/PPTX…）"),
     Dependency("pypdf", "pypdf", "file_ingest", "PDF 解析回退"),
     Dependency("python-docx", "docx", "file_ingest", "DOCX 解析回退"),
+    Dependency("trafilatura", "trafilatura", "file_ingest", "网页正文抽取（去导航/广告 → Markdown）"),
+    Dependency(
+        "marker-pdf", "marker", "parse_pro",
+        "marker 版面感知 PDF → Markdown（表格保真，重型）",
+    ),
     # ── Export ─────────────────────────────────────────────────────────────
     Dependency("openpyxl", "openpyxl", "export", "DOE / 结果 Excel 导出"),
     Dependency("pydoe", "pydoe", "pydoe", "pyDOE 经典实验设计（LHS/CCD/混合物/Sobol）"),
