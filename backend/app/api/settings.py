@@ -1,6 +1,6 @@
 """GET/POST /api/settings — Runtime LLM + API secrets configuration."""
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
 from ..services.llm import PROVIDERS, _provider_default_base_url, test_connection
@@ -28,6 +28,11 @@ class LLMSettingsUpdate(BaseModel):
 
 class SecretsUpdate(BaseModel):
     updates: dict[str, str | None] = Field(default_factory=dict)
+
+
+class EnvFlagsUpdate(BaseModel):
+    # StrictBool: only JSON true/false — "yes"/"1" strings are rejected with 422.
+    updates: dict[str, StrictBool] = Field(default_factory=dict)
 
 
 class SecretTestRequest(BaseModel):
@@ -100,3 +105,18 @@ def post_secrets_update(body: SecretsUpdate):
 @router.post("/settings/secrets/test")
 def post_secret_test(body: SecretTestRequest):
     return probe_secret(body.id)
+
+
+@router.get("/settings/env-flags")
+def get_env_flags():
+    from ..services.env_flags import list_env_flags
+
+    return {"flags": list_env_flags()}
+
+
+@router.post("/settings/env-flags")
+def post_env_flags(body: EnvFlagsUpdate):
+    from ..services.env_flags import list_env_flags, update_env_flags
+
+    updated, rejected = update_env_flags(body.updates)
+    return {"updated": updated, "rejected": rejected, "flags": list_env_flags()}
