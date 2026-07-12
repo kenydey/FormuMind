@@ -169,6 +169,16 @@ export default function ResearchPanel() {
                 }`}
               >
                 <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                {m.role === "assistant" && (m.kbChunksUsed ?? 0) > 0 && (
+                  <div className="mt-1.5">
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
+                      title="本回答额外融合了持久知识库中的全文片段"
+                    >
+                      知识库 ×{m.kbChunksUsed}
+                    </span>
+                  </div>
+                )}
                 {m.citations && m.citations.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-edge/60 flex flex-wrap">
                     {m.citations.map((c, j) => (

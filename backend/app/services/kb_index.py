@@ -204,6 +204,82 @@ def search_chunks(query: str, k: int = 6) -> list[Evidence]:
         return degrade_return(logger, exc, "kb search failed", [])
 
 
+def aggregate_parameter_space() -> dict[str, dict]:
+    """Fuse the LLM-extracted parameter spaces of all stored source guides.
+
+    Returns {parameter_name: {min, max, unit, sources}} where min/max span the
+    union of documented ranges (literature-supported envelope) and ``sources``
+    counts how many documents mention the parameter.  Empty dict when the KB
+    is disabled/empty or no guide carries a parameter space.
+    """
+    if not kb_enabled():
+        return {}
+    try:
+        from ..db.models import SourceDocument
+        from ..db.source_store import get_source_store
+
+        with get_source_store()._session_factory() as session:
+            rows = session.query(SourceDocument.source_guide).filter(
+                SourceDocument.source_guide.isnot(None)
+            ).all()
+
+        fused: dict[str, dict] = {}
+        for (guide,) in rows:
+            space = (guide or {}).get("parameter_space") or {}
+            if not isinstance(space, dict):
+                continue
+            for name, bound in space.items():
+                if not isinstance(bound, dict):
+                    continue
+                lo, hi = bound.get("min_value"), bound.get("max_value")
+                unit = (bound.get("unit") or "").strip()
+                key = str(name).strip()
+                if not key:
+                    continue
+                entry = fused.setdefault(
+                    key, {"min": None, "max": None, "unit": unit, "sources": 0}
+                )
+                entry["sources"] += 1
+                if lo is not None:
+                    entry["min"] = lo if entry["min"] is None else min(entry["min"], lo)
+                if hi is not None:
+                    entry["max"] = hi if entry["max"] is None else max(entry["max"], hi)
+                if not entry["unit"] and unit:
+                    entry["unit"] = unit
+        return {k: v for k, v in fused.items() if v["min"] is not None or v["max"] is not None}
+    except Exception as exc:
+        return degrade_return(logger, exc, "kb parameter-space aggregation failed", {})
+
+
+def doe_parameter_hints(factor_names: list[str]) -> list[str]:
+    """Literature-envelope notes for DOE factors whose names match KB parameters.
+
+    Advisory only — factor bounds are never mutated; the researcher decides."""
+    space = aggregate_parameter_space()
+    if not space:
+        return []
+    notes: list[str] = []
+    lowered = {name.lower(): name for name in factor_names}
+    for param, entry in space.items():
+        match = next(
+            (
+                orig
+                for low, orig in lowered.items()
+                if low == param.lower() or param.lower() in low or low in param.lower()
+            ),
+            None,
+        )
+        if match is None:
+            continue
+        lo = entry["min"] if entry["min"] is not None else "?"
+        hi = entry["max"] if entry["max"] is not None else "?"
+        unit = f" {entry['unit']}" if entry["unit"] else ""
+        notes.append(
+            f"知识库文献范围：{match} ≈ {lo}–{hi}{unit}（{entry['sources']} 个来源）"
+        )
+    return notes
+
+
 def kb_stats() -> dict:
     """Corpus counters for the UI / API."""
     from ..db.chunk_store import get_chunk_store

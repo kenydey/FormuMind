@@ -168,6 +168,8 @@ class Settings(BaseSettings):
     kb_max_chunks_per_source: int = 200
     kb_search_scan_limit: int = 5000
     kb_chat_top_k: int = 6
+    # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
+    kb_recommend_top_k: int = 4
 
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True

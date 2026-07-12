@@ -243,6 +243,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             role: "assistant",
             content: res.answer,
             citations: res.citations,
+            kbChunksUsed: res.kb_chunks_used ?? 0,
           });
           draft.error = null;
         });
