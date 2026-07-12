@@ -55,6 +55,7 @@ CATALOG: tuple[Dependency, ...] = (
         "chemcrow", "chemcrow", "intel", "ChemCrow 化学增强检索 / 工具链",
         spec="chemcrow>=0.3.7",  # versions <0.3.7 pin openai==0.27.8, conflicts with openai>=1.30
     ),
+    Dependency("molbloom", "molbloom", "intel", "molbloom 分子专利预筛（SureChEMBL 布隆过滤器，无需 ChemCrow）"),
     Dependency("pubchempy", "pubchempy", "intel", "PubChem 原料 SMILES / 分子量富集"),
     # ── Embedding RAG ──────────────────────────────────────────────────────
     Dependency(

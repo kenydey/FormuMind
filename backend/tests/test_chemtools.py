@@ -58,7 +58,21 @@ def _install_fake_chemcrow(monkeypatch, **tool_outputs):
 # ── degradation invariance (chemcrow absent in CI) ───────────────────────────
 
 
-def test_all_calls_neutral_without_chemcrow():
+def _kill_native_backends(monkeypatch):
+    """Stub every non-ChemCrow backend so 'degradation' means 'nothing installed'.
+
+    The dev/CI box ships httpx (→ PubChem reachable) so without this the native
+    fallbacks would make real network calls; we blank them to test the truly
+    offline contract deterministically.
+    """
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: False)
+    monkeypatch.setattr(chemtools, "molbloom_available", lambda: False)
+    monkeypatch.setattr(chemtools, "_pubchem_get", lambda path: None)
+    monkeypatch.setattr(chemtools, "_molbloom_patented", lambda smiles: None)
+
+
+def test_all_calls_neutral_without_chemcrow(monkeypatch):
+    _kill_native_backends(monkeypatch)
     assert chemtools.name_to_smiles("epoxy resin") is None
     assert chemtools.name_to_cas("epoxy resin") is None
     assert chemtools.patent_check("CCO") is None
@@ -194,6 +208,7 @@ def test_timeout_returns_neutral(monkeypatch):
 
 
 def test_failures_are_not_cached(monkeypatch):
+    monkeypatch.setattr(chemtools, "_pubchem_get", lambda path: None)  # no PubChem fallback
     _install_fake_chemcrow(
         monkeypatch, Query2SMILES="Could not find a molecule matching the text."
     )
@@ -206,7 +221,8 @@ def test_failures_are_not_cached(monkeypatch):
 # ── chemical_profile aggregation ─────────────────────────────────────────────
 
 
-def test_chemical_profile_superset_without_chemcrow():
+def test_chemical_profile_superset_without_chemcrow(monkeypatch):
+    _kill_native_backends(monkeypatch)
     profile = chemtools.chemical_profile("Zinc phosphate")  # catalog hit
     # Base lookup fields survive untouched
     assert profile["found"] is True
@@ -261,6 +277,87 @@ def test_lookup_chemical_tier4_chemcrow(monkeypatch):
     assert hit["source"] == "chemcrow"
     assert hit["smiles"] == "C1CO1"
     assert hit["cas"] == "75-21-8"
+
+
+# ── native PubChem / molbloom fallbacks (no ChemCrow installed) ──────────────
+
+
+def test_name_to_smiles_pubchem_fallback(monkeypatch):
+    """With ChemCrow absent but PubChem reachable, name→SMILES still resolves."""
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
+    monkeypatch.setattr(
+        chemtools,
+        "_pubchem_get",
+        lambda path: {
+            "PropertyTable": {
+                "Properties": [{"CID": 2244, "SMILES": "CC(=O)Oc1ccccc1C(=O)O"}]
+            }
+        },
+    )
+    assert chemtools.chemcrow_available() is False
+    assert chemtools.name_to_smiles("aspirin") == "CC(=O)Oc1ccccc1C(=O)O"
+
+
+def test_name_to_cas_pubchem_fallback(monkeypatch):
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
+    monkeypatch.setattr(
+        chemtools,
+        "_pubchem_get",
+        lambda path: {
+            "InformationList": {
+                "Information": [{"Synonym": ["aspirin", "not-a-cas", "50-78-2"]}]
+            }
+        },
+    )
+    assert chemtools.name_to_cas("aspirin") == "50-78-2"
+
+
+def test_explosive_check_pubchem_fallback(monkeypatch):
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
+
+    def fake_get(path):
+        if "/cids/" in path:
+            return {"IdentifierList": {"CID": [7434]}}
+        return {"Record": {"Section": [{"TOCHeading": "GHS Classification",
+                                        "Information": [{"Value": "H201 Explosive"}]}]}}
+
+    monkeypatch.setattr(chemtools, "_pubchem_get", fake_get)
+    assert chemtools.explosive_check("121-82-4") is True
+
+    chemtools.clear_cache()
+
+    def fake_clear(path):
+        if "/cids/" in path:
+            return {"IdentifierList": {"CID": [702]}}
+        return {"Record": {"Section": [{"TOCHeading": "GHS Classification",
+                                        "Information": [{"Value": "H319 Pictogram"}]}]}}
+
+    monkeypatch.setattr(chemtools, "_pubchem_get", fake_clear)
+    assert chemtools.explosive_check("64-17-5") is False
+
+
+def test_patent_check_molbloom_fallback(monkeypatch):
+    monkeypatch.setattr(chemtools, "molbloom_available", lambda: True)
+    monkeypatch.setattr(chemtools, "_molbloom_patented", lambda smiles: True)
+    assert chemtools.patent_check("CCO") is True
+
+    chemtools.clear_cache()
+    monkeypatch.setattr(chemtools, "_molbloom_patented", lambda smiles: False)
+    assert chemtools.patent_check("CCN") is False
+
+
+def test_availability_reflects_native_backends(monkeypatch):
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
+    monkeypatch.setattr(chemtools, "molbloom_available", lambda: True)
+    caps = chemtools.availability()["capabilities"]
+    assert caps["name_to_smiles"]["available"] is True
+    assert caps["name_to_cas"]["available"] is True
+    assert caps["explosive_check"]["available"] is True
+    assert caps["patent_check"]["available"] is True
+    # controlled + web still need ChemCrow / SerpAPI
+    assert caps["controlled_check"]["available"] is False
+    assert caps["web_search"]["available"] is False
 
 
 # ── API endpoints ────────────────────────────────────────────────────────────

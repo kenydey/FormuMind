@@ -51,6 +51,7 @@ intel = [
     "patent-client>=5.0",
     "paper-qa>=4.0",        # semantic RAG synthesis (auto-detected in chat)
     "chemcrow>=0.3.7",          # versions <0.3.7 pin openai==0.27.8, conflicts with openai>=1.30
+    "molbloom>=2.0",        # standalone SureChEMBL patent pre-screen (no ChemCrow needed)
     "pubchempy>=1.0.4",     # enrich raw-material SMILES/molar-mass from PubChem
     "arxiv>=2.1",
     "semanticscholar>=0.8",
