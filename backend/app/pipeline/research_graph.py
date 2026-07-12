@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from ..config import Settings, get_settings
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
-from ..services import colbert_store, llm
+from ..services import chemtools, colbert_store, llm
 from ..services.federated_search import FederatedSearchEngine
 from ..services.rag import llm_rerank
 
@@ -253,6 +253,8 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
         recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
         recommended, gate_warnings = validate_formulations(recommended)
         recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
+        recommended, dedup_notes = chemtools.dedupe_similar_formulations(recommended)
+        gate_warnings.extend(dedup_notes)
         if recommended:
             mechanism = recommended[0].rationale or ""
             chat = f"已推荐 {len(recommended)} 条配方。"
@@ -313,6 +315,8 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
         recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
         recommended, gate_warnings = validate_formulations(recommended)
         recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
+        recommended, dedup_notes = chemtools.dedupe_similar_formulations(recommended)
+        gate_warnings.extend(dedup_notes)
         mechanism, chat = llm.synthesize_research(req, grounded, recommended)
         if gate_warnings:
             chat += "\n\n**Formulation validation:**\n" + "\n".join(

@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     # 缺 chemcrow/rdkit 或关闭开关时所有调用返回中性值，管线行为不变。
     chemtools_enabled: bool = True
     chemtools_timeout_s: float = 10.0
+    # v2 特征集：在 v1 特征向量后追加 6 个重量加权 RDKit 分子描述符
+    # （MolWt/LogP/TPSA/HBD/HBA/芳环数）。需 rdkit；切换后已训模型需重训
+    # （重启后 ModelRegistry 会从存储重训，故重启即可）。默认关闭保证兼容。
+    chemtools_descriptor_features: bool = False
 
     # NotebookLM 作为检索 Source（notebooklm-py 直连库；浏览器会话认证）。
     # 需 `notebooklm` extra + 一次性 `notebooklm login` 生成会话文件。
