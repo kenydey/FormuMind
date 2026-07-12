@@ -510,6 +510,12 @@ def _merge_filter_rank(
         if key not in seen:
             seen.add(key)
             deduped.append(e)
+
+    # Quality rule tier (blocked domains, garbage snippets, SimHash near-dups).
+    # Rank order is preserved so the higher-ranked copy of a near-dup survives.
+    from .content_filter import filter_evidence
+
+    deduped, _report = filter_evidence(deduped, query)
     return deduped[:total_limit]
 
 
@@ -669,6 +675,11 @@ def iter_search(
         ex.shutdown(wait=False)
 
     final = _merge_filter_rank(raw, rank_q, total_limit)
+
+    # Optional batched LLM quality judge — one call on the final ranked list.
+    from .content_filter import llm_quality_judge
+
+    final, judge_report = llm_quality_judge(final, rank_q)
     if progress_cb is not None:
         try:
             progress_cb(
@@ -679,6 +690,7 @@ def iter_search(
                     "sources_done": [s["name"] for s in streams],
                     "sources_pending": [],
                     "final": True,
+                    "filter": judge_report.as_dict(),
                 },
             )
         except TypeError:

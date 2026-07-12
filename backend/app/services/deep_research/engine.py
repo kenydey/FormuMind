@@ -114,6 +114,19 @@ class DeepResearchEngine:
             per_source_cap=cap,
             progress_cb=progress_cb,
         )
+
+        # Full-text acquisition: upgrade the top fetchable hits (patent PDF /
+        # OA literature PDF / web page body) to full-document chunks and
+        # persist the raw text. No-op unless FORMUMIND_FULLTEXT_ENRICH=true.
+        if self._settings.fulltext_enrich and evidence:
+            from ..fulltext_fetcher import enrich_search_results
+
+            evidence, _report = enrich_search_results(evidence)
+            if progress_cb is not None:
+                try:
+                    progress_cb(evidence)
+                except TypeError:
+                    pass
         return evidence, expanded
 
     def search(
