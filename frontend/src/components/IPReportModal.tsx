@@ -9,6 +9,12 @@ interface PatentRisk {
   recommendation: string;
 }
 
+interface MoleculePatentCheck {
+  name: string;
+  smiles: string;
+  patented: boolean | null;
+}
+
 interface IPReport {
   formulation_name: string;
   novelty_score: number;
@@ -16,6 +22,7 @@ interface IPReport {
   whitespace_hints: string[];
   raw_patents_searched: number;
   engine: string;
+  molecule_checks?: MoleculePatentCheck[];
 }
 
 const RISK_COLOR: Record<string, string> = {
@@ -129,6 +136,36 @@ export default function IPReportModal({ form }: { form: Formulation }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {(report.molecule_checks?.length ?? 0) > 0 && (
+            <div>
+              <h4 className="text-xs uppercase tracking-widest text-slate-400 mb-2">
+                分子级专利预筛（molbloom · SureChEMBL）
+              </h4>
+              <div className="space-y-1">
+                {report.molecule_checks!.map((c, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between gap-2 text-xs border border-edge/60 rounded px-2 py-1.5"
+                  >
+                    <span className="text-slate-300 truncate" title={c.smiles}>
+                      {c.name}
+                    </span>
+                    {c.patented === true ? (
+                      <span className="text-amber-400 shrink-0">🔒 已见于专利</span>
+                    ) : c.patented === false ? (
+                      <span className="text-emerald-400 shrink-0">✓ 未见收录</span>
+                    ) : (
+                      <span className="text-slate-500 shrink-0">— 未知</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                布隆过滤器预筛仅判断分子是否出现在专利语料，不代表权利要求覆盖；正式结论需 FTO 检索。
+              </p>
             </div>
           )}
 

@@ -412,6 +412,51 @@ def safety_flags(smiles: str | None, cas: str | None = None) -> dict[str, bool |
     }
 
 
+# ── formulation screening (recommend pipeline; advisory only) ────────────────
+
+_SCREEN_MIN_WT_PCT = 0.5
+
+
+def screen_formulation(form: Any) -> list[str]:
+    """Molecular patent + controlled-chemical pre-screen for a Formulation.
+
+    Returns advisory warning strings (never blocks).  Only ingredients with a
+    SMILES and a non-negligible weight are screened; every check is cached in
+    the gateway, and everything degrades to [] when chemcrow is absent.
+    """
+    if not (gateway_enabled() and chemcrow_available()):
+        return []
+    warnings: list[str] = []
+    for ing in getattr(form, "ingredients", []) or []:
+        smiles = getattr(ing, "smiles", None)
+        if not smiles or (getattr(ing, "weight_pct", 0.0) or 0.0) < _SCREEN_MIN_WT_PCT:
+            continue
+        name = getattr(ing, "name", "") or smiles
+        if patent_check(smiles) is True:
+            warnings.append(
+                f"IP 预筛：{name} 的分子结构已见于专利文献（molbloom），建议开展 FTO 检索"
+            )
+        if controlled_check(smiles) is True:
+            warnings.append(f"合规预筛：{name} 命中管制化学品清单")
+    return warnings
+
+
+def func_group_summary(items: list[tuple[str, str]], max_items: int = 8) -> str:
+    """One-line-per-material functional group summary for LLM prompts.
+
+    ``items`` is a list of (name, smiles).  Returns "" when no groups can be
+    resolved (offline), so callers can omit the prompt block entirely.
+    """
+    lines: list[str] = []
+    for name, smiles in items[:max_items]:
+        if not smiles:
+            continue
+        groups = func_groups(smiles)
+        if groups:
+            lines.append(f"- {name}: {', '.join(groups[:6])}")
+    return "\n".join(lines)
+
+
 # ── requirement material enrichment ──────────────────────────────────────────
 
 

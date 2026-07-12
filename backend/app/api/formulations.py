@@ -139,7 +139,7 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     for rec in rec_resp.formulas:
         try:
             form = recommended_to_formulation(rec)
-            scored.append(workflow._score_and_validate(form, process, body.requirement))
+            scored.append(workflow._score_and_validate(form, process, body.requirement, chem_screen=True))
         except Exception as exc:
             log.warning("Skip scoring formula %s: %s", rec.name, exc)
             rec_resp.warnings.append(f"Scoring skipped for {rec.name}: {exc}")
@@ -170,5 +170,5 @@ def add_manual_formulation(body: ManualFormulationRequest) -> ManualFormulationR
     form = forms[0].model_copy(update={"source": "manual"})
     if body.requirement:
         process = workflow.process_for(body.requirement)
-        form = workflow._score_and_validate(form, process, body.requirement)
+        form = workflow._score_and_validate(form, process, body.requirement, chem_screen=True)
     return ManualFormulationResponse(formulation=form, warnings=warnings)

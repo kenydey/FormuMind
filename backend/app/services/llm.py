@@ -643,6 +643,33 @@ def _constraints_prompt_block(req: Requirement) -> str:
     return "\n".join(f"- {k}: {v}" for k, v in merged.items())
 
 
+def _func_groups_prompt_block(req: Requirement, base_formulas: list | None) -> str:
+    """Functional-group summary of known materials (ChemCrow gateway; "" offline).
+
+    Grounds the LLM's structure choices in the actual chemistry of the
+    project's materials instead of name-level pattern matching.
+    """
+    from .chemtools import func_group_summary
+
+    items: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for m in req.materials or []:
+        if m.smiles and m.name not in seen:
+            items.append((m.name, m.smiles))
+            seen.add(m.name)
+    for f in base_formulas or []:
+        for ing in getattr(f, "ingredients", []) or []:
+            smiles = getattr(ing, "smiles", None)
+            name = getattr(ing, "name", "")
+            if smiles and name and name not in seen:
+                items.append((name, smiles))
+                seen.add(name)
+    summary = func_group_summary(items)
+    if not summary:
+        return ""
+    return f"\nKnown material functional groups (ground your chemistry in these):\n{summary}\n"
+
+
 def _recommend_user_prompt(
     req: Requirement,
     objectives: list[ObjectiveSpec],
@@ -672,6 +699,7 @@ def _recommend_user_prompt(
         f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
         f"Process constraints (must respect):\n{_constraints_prompt_block(req)}\n"
         f"{_levers_prompt_block(req)}"
+        f"{_func_groups_prompt_block(req, base_formulas)}"
         f"{_base_formulas_prompt_block(base_formulas or [])}"
         f"{modify_block}\n\n"
         f"Evidence:\n{citations}\n\n"
