@@ -8,6 +8,7 @@ from ..services.runtime_secrets import effective_setting, get_runtime_secrets
 from ..services.secrets_store import (
     SECRET_REGISTRY,
     list_secret_status,
+    persist_llm_runtime,
     probe_secret,
     update_secrets,
 )
@@ -66,6 +67,10 @@ def _apply_llm_update(update: LLMSettingsUpdate) -> None:
             update_secrets({key_field: update.api_key})
         elif provider == "anthropic":
             update_secrets({"anthropic_api_key": update.api_key})
+
+    # Overlay changes apply immediately; persist them so a restart reloads
+    # the same provider / model / base URL instead of the compiled defaults.
+    persist_llm_runtime()
 
 
 @router.get("/settings")

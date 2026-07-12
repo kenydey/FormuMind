@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, resolve_env_path
 from .runtime_secrets import (
     effective_setting,
     get_runtime_secrets,
@@ -43,18 +43,13 @@ _ATTR_BY_ID = {attr: (env, label, group) for attr, env, label, group in SECRET_R
 _SECRET_ATTRS = secret_attrs_from_registry(SECRET_REGISTRY)
 
 
-def resolve_env_path() -> Path:
-    """Prefer repo-root ``.env``, then ``backend/.env``."""
-    override = os.environ.get("FORMUMIND_ENV_FILE")
-    if override:
-        return Path(override)
-    backend = Path(__file__).resolve().parents[2]
-    workspace = backend.parent
-    if (workspace / ".env").exists():
-        return workspace / ".env"
-    if (backend / ".env").exists():
-        return backend / ".env"
-    return workspace / ".env"
+# Mutable LLM runtime settings persisted alongside the secrets so provider /
+# model / base-URL choices survive restarts (settings_attr -> env key).
+_LLM_RUNTIME_ENV: dict[str, str] = {
+    "llm_provider": "FORMUMIND_LLM_PROVIDER",
+    "llm_model": "FORMUMIND_LLM_MODEL",
+    "llm_base_url": "FORMUMIND_LLM_BASE_URL",
+}
 
 
 def _mask(value: str | None) -> str:
@@ -130,7 +125,59 @@ def bootstrap_runtime_secrets(settings: Settings | None = None) -> None:
     get_runtime_secrets().load_from_settings(s, _SECRET_ATTRS)
 
 
+def apply_persisted_ui_settings() -> None:
+    """Lift UI-managed keys from the runtime env file into ``os.environ``.
+
+    Real environment variables outrank dotenv values in pydantic-settings, so
+    in Docker a stale key injected at container creation (compose ``env_file``)
+    would silently beat whatever the user last saved through the Settings UI.
+    UI-saved values are the most recent explicit intent, so at startup we
+    promote exactly the managed keys — API secrets, LLM provider/model/base
+    URL, and boolean feature flags — from the runtime env file into the
+    process environment. Operator-level keys (DB / Redis / auth) are never
+    touched.
+    """
+    from .env_flags import FLAG_REGISTRY
+
+    managed = {env for _, env, _, _ in SECRET_REGISTRY}
+    managed |= set(_LLM_RUNTIME_ENV.values())
+    managed |= {flag.env_key for flag in FLAG_REGISTRY}
+    try:
+        saved = read_env_file()
+    except Exception as exc:
+        log_handled_exception(logger, exc, "apply_persisted_ui_settings: read failed")
+        return
+    applied = sorted(k for k in saved if k in managed)
+    for key in applied:
+        os.environ[key] = saved[key]
+    if applied:
+        get_settings.cache_clear()
+        logger.info(
+            "Restored %d persisted UI settings from %s", len(applied), resolve_env_path()
+        )
+
+
+def persist_llm_runtime() -> None:
+    """Persist the effective LLM provider/model/base URL to the env file.
+
+    The runtime overlay applies changes immediately; this write makes them
+    survive restarts. Empty values remove the key (``write_env_updates``
+    drops falsy entries), so clearing the base URL falls back to defaults.
+    """
+    s = get_settings()
+    writes: dict[str, str] = {}
+    for attr, env_key in _LLM_RUNTIME_ENV.items():
+        value = effective_setting(s, attr)
+        writes[env_key] = str(value) if value else ""
+    try:
+        write_env_updates(writes)
+    except OSError as exc:
+        # Read-only FS etc. — the runtime overlay still applied for this run.
+        logger.warning("LLM settings: .env persistence failed (%s)", exc)
+
+
 def reload_settings() -> Settings:
+    apply_persisted_ui_settings()
     get_settings.cache_clear()
     s = get_settings()
     bootstrap_runtime_secrets(s)
