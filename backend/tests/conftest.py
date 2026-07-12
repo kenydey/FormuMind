@@ -2,6 +2,13 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
 os.environ.setdefault("FORMUMIND_API_AUTH_ENABLED", "false")
 os.environ.setdefault("FORMUMIND_ENVIRONMENT", "test")
+# Settings persistence (LLM / secrets / env flags) writes a .env file; point it
+# at a session-scoped temp file so tests never touch the repo-root .env.
+os.environ.setdefault(
+    "FORMUMIND_ENV_FILE",
+    os.path.join(tempfile.mkdtemp(prefix="formumind-test-env-"), ".env"),
+)

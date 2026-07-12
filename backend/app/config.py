@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +25,41 @@ def _settings_extra_policy() -> str:
     """Development/test: reject unknown env keys; production: ignore extras."""
     env = os.getenv("FORMUMIND_ENVIRONMENT", "development").strip().lower()
     return "forbid" if env in _DEV_ENVS else "ignore"
+
+
+def _data_env_path() -> Path:
+    """``./data/.env`` — the data dir is CWD-relative by convention (matches
+    ``db_url`` / ``colbert_index_dir``) and is volume-mounted in Docker, so an
+    env file stored there survives container recreation."""
+    return Path("./data").resolve() / ".env"
+
+
+def resolve_env_path(backend_dir: Path | None = None) -> Path:
+    """The single canonical ``.env`` location, shared by reader and writer.
+
+    Historically the Settings UI *wrote* secrets to the repo-root ``.env``
+    while pydantic-settings *read* the CWD-relative ``.env`` — two different
+    files whenever the server didn't start from the repo root (and always in
+    Docker, where writes landed at the container root ``/.env``). Saved
+    settings therefore vanished on restart. Resolution order:
+
+    1. ``FORMUMIND_ENV_FILE`` explicit override;
+    2. first existing among repo-root ``.env``, ``backend/.env``, ``data/.env``;
+    3. creation default: repo-root ``.env`` for a source checkout, or the
+       persistent ``data/.env`` when the package sits at a filesystem root
+       (Docker image ``/app``) or the parent directory is not writable.
+    """
+    override = os.environ.get("FORMUMIND_ENV_FILE")
+    if override:
+        return Path(override)
+    backend = backend_dir or Path(__file__).resolve().parents[1]
+    workspace = backend.parent
+    for candidate in (workspace / ".env", backend / ".env", _data_env_path()):
+        if candidate.exists():
+            return candidate
+    if workspace == Path(workspace.anchor) or not os.access(workspace, os.W_OK):
+        return _data_env_path()
+    return workspace / ".env"
 
 
 class Settings(BaseSettings):
@@ -240,6 +276,8 @@ def _audit_formumind_env() -> None:
 
 @lru_cache
 def get_settings() -> Settings:
-    settings = Settings()
+    # Read the CWD .env (legacy behaviour) plus the canonical resolved path;
+    # the resolved file — where the Settings UI persists — takes precedence.
+    settings = Settings(_env_file=(".env", str(resolve_env_path())))
     _audit_formumind_env()
     return settings

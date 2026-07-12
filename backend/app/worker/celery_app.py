@@ -13,6 +13,15 @@ from celery import Celery
 
 from ..config import get_settings
 
+try:
+    # Restore UI-saved settings (secrets / LLM runtime / feature flags) before
+    # the worker caches Settings, mirroring the API's lifespan bootstrap.
+    from ..services.secrets_store import apply_persisted_ui_settings
+
+    apply_persisted_ui_settings()
+except Exception:  # pragma: no cover - never block worker boot on this
+    pass
+
 settings = get_settings()
 
 celery_app = Celery(
