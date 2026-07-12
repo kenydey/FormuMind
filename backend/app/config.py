@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     content_filter_blocked_domains: list[str] = Field(default_factory=list)
     content_filter_llm_judge: bool = False
 
+    # PDF 解析器层级（KB P1）："auto" = marker → MinerU → MarkItDown → pypdf
+    # 逐级回退；指定名称则固定首选（仍向下回退）。marker/MinerU 为重型可选
+    # 依赖（版面感知、表格保真的真 Markdown 输出）。
+    pdf_parser: str = "auto"
+
     # 检索结果全文获取（KB P0）：把摘要级命中升级为全文分块并持久化原文。
     # 专利 PDF（USPTO/EPO/Google）+ OA 文献 PDF（OpenAlex/arXiv）+ 网页正文
     # （trafilatura 优先）。默认关闭以保证测试离线；生产建议开启。

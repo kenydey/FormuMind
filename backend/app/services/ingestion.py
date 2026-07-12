@@ -1,17 +1,16 @@
 """Local file ingestion service.
 
-Converts uploaded files to Evidence objects using markitdown as the primary
-parser (supports PDF, DOCX, XLSX, PPTX, HTML, images, audio, ZIP…).
-Falls back to pypdf / python-docx / built-in str when markitdown is unavailable.
+Converts uploaded files to Evidence objects via the unified parsing layer
+(``services.parsing``: marker/MinerU/MarkItDown/pypdf cascade for PDFs,
+MarkItDown + format fallbacks for everything else) and structure-aware
+chunking (``services.chunking``: heading paths preserved, tables atomic).
 
-Pipeline: parse → LLM source_guide → token-aware chunk → persist SourceDocument.
+Pipeline: parse → LLM source_guide → structure-aware chunk → persist SourceDocument.
 """
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import hashlib
-import io
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -34,128 +33,42 @@ class IngestOutcome:
     extraction_status: str = "skipped"
 
 
-def _parse_with_markitdown(content: bytes, ext: str) -> str | None:
-    try:
-        from markitdown import MarkItDown  # type: ignore
-        md = MarkItDown()
-        result = md.convert_stream(io.BytesIO(content), file_extension=ext)
-        return result.text_content
-    except Exception as exc:
-        return degrade_return(logger, exc, "operation failed", None)
-
-
-def _parse_pdf_fallback(content: bytes) -> str:
-    try:
-        import pypdf  # type: ignore
-        reader = pypdf.PdfReader(io.BytesIO(content))
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
-    except Exception:
-        return ""
-
-
-def _parse_docx_fallback(content: bytes) -> str:
-    try:
-        import docx  # type: ignore
-        doc = docx.Document(io.BytesIO(content))
-        return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    except Exception:
-        return ""
-
-
 def _parse_text(content: bytes) -> str:
-    for enc in ("utf-8", "gbk", "latin-1"):
-        try:
-            return content.decode(enc)
-        except Exception:
-            continue
-    return ""
+    from .parsing import _parse_plain
+
+    return _parse_plain(content) or ""
 
 
 def _chunk_text(
-    text: str,
-    *,
-    max_chars: int = 1600,
-    overlap: int = 200,
-    max_depth: int = 10,
-    _depth: int = 0,
+    text: str, *, max_chars: int = 1600, overlap: int = 200, max_depth: int = 10
 ) -> list[str]:
-    """Recursive split on \\n\\n > \\n > 句号，控制 chunk 大小。"""
-    text = text.strip()
-    if not text:
-        return []
+    """Backward-compatible alias for the plain-text splitter (see chunking.py)."""
+    from .chunking import chunk_plain_text
 
-    if len(text) <= max_chars:
-        return [text]
-
-    if _depth >= max_depth:
-        chunks: list[str] = []
-        start = 0
-        while start < len(text):
-            end = min(start + max_chars, len(text))
-            chunk = text[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-            if end >= len(text):
-                break
-            start = max(end - overlap, start + 1)
-        return chunks
-
-    for sep in ("\n\n", "\n", "。", ". "):
-        if sep not in text:
-            continue
-        parts = text.split(sep)
-        chunks = []
-        current = ""
-        for i, part in enumerate(parts):
-            piece = part if i == len(parts) - 1 else part + sep
-            if len(current) + len(piece) <= max_chars:
-                current += piece
-            else:
-                if current.strip():
-                    chunks.append(current.strip())
-                if len(piece) > max_chars:
-                    chunks.extend(
-                        _chunk_text(
-                            piece,
-                            max_chars=max_chars,
-                            overlap=overlap,
-                            max_depth=max_depth,
-                            _depth=_depth + 1,
-                        )
-                    )
-                    current = ""
-                else:
-                    current = piece
-        if current.strip():
-            chunks.append(current.strip())
-        if chunks:
-            return chunks
-
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + max_chars, len(text))
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= len(text):
-            break
-        start = max(end - overlap, start + 1)
-    return chunks
+    return chunk_plain_text(text, max_chars=max_chars, overlap=overlap, max_depth=max_depth)
 
 
 def _to_evidence(text: str, filename: str, *, source: str = "local") -> list[Evidence]:
-    """Split text into chunk-level Evidence objects."""
+    """Split text into chunk-level Evidence objects (structure-aware).
+
+    Markdown heading paths are appended to chunk titles (``report (p.3) ·
+    实施例 > 实施例 2``) so TF-IDF / ColBERT retrieval and citations see the
+    document location; tables stay atomic.
+    """
+    from .chunking import chunk_markdown
+
     settings = get_settings()
     stem = Path(filename).stem if "." in filename else filename[:80]
-    chunks = _chunk_text(
+    chunks = chunk_markdown(
         text,
         max_chars=settings.ingest_chunk_max_chars,
         overlap=settings.ingest_chunk_overlap,
     )
-    chunks = [c for c in chunks if len(c.strip()) > 30]
+    chunks = [c for c in chunks if len(c.text.strip()) > 30]
     if not chunks and text.strip():
-        chunks = [text.strip()[:2000]]
+        from .chunking import Chunk
+
+        chunks = [Chunk(text.strip()[:2000])]
     if not chunks:
         return []
 
@@ -163,12 +76,15 @@ def _to_evidence(text: str, filename: str, *, source: str = "local") -> list[Evi
     evidence: list[Evidence] = []
     for i, chunk in enumerate(chunks[:max_chunks]):
         ident = f"{stem}#{i}" if source == "local" else f"{filename}#{i}"
+        title = stem if i == 0 else f"{stem} (p.{i+1})"
+        if chunk.heading_path:
+            title = f"{title} · {chunk.heading_path}"
         evidence.append(
             Evidence(
                 source=source,
                 identifier=ident,
-                title=stem if i == 0 else f"{stem} (p.{i+1})",
-                snippet=chunk[:500],
+                title=title,
+                snippet=chunk.text[:500],
                 relevance=1.0 - i * 0.01,
             )
         )
@@ -222,17 +138,10 @@ def _ingest_parsed_text(
 
 def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> IngestOutcome:
     """Parse an uploaded file and return ingest outcome."""
+    from .parsing import parse_document
+
     ext = Path(filename).suffix.lower().lstrip(".")
-
-    text = _parse_with_markitdown(content, ext)
-
-    if not text:
-        if ext == "pdf":
-            text = _parse_pdf_fallback(content)
-        elif ext in ("docx", "doc"):
-            text = _parse_docx_fallback(content)
-        elif ext in ("txt", "md", "csv", "html", "htm"):
-            text = _parse_text(content)
+    text = parse_document(content, ext).markdown
 
     if not text or not text.strip():
         placeholder = Evidence(
@@ -300,12 +209,10 @@ def _is_safe_url(url: str) -> bool:
 
 
 def _html_to_text(html: str) -> str:
-    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
-    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
-    text = re.sub(r"(?is)</p>", "\n\n", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+\n", "\n", text)
-    return re.sub(r"[ \t]+", " ", text).strip()
+    """HTML → Markdown/text via the unified parsing layer (trafilatura first)."""
+    from .parsing import html_to_markdown
+
+    return html_to_markdown(html)
 
 
 def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:

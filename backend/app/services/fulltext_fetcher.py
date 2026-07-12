@@ -26,7 +26,7 @@ import httpx
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
-from .errors import degrade_return, log_handled_exception
+from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
 
@@ -128,22 +128,10 @@ def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
 
 
 def _extract_web_text(html: str) -> str:
-    """trafilatura (boilerplate-free) → legacy HTML strip fallback."""
-    try:
-        import trafilatura  # type: ignore
+    """Web body → Markdown via the unified parsing layer (trafilatura first)."""
+    from .parsing import html_to_markdown
 
-        text = trafilatura.extract(
-            html, include_tables=True, include_links=False, favor_recall=True
-        )
-        if text and len(text.strip()) > 100:
-            return text
-    except ImportError:
-        pass
-    except Exception as exc:
-        log_handled_exception(logger, exc, "trafilatura extract failed")
-    from .ingestion import _html_to_text
-
-    return _html_to_text(html)
+    return html_to_markdown(html)
 
 
 def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:

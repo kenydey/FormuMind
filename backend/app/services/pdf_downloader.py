@@ -109,39 +109,18 @@ def _raw_pdf_stream_text(content: bytes) -> str:
 
 
 def _extract_text(content: bytes) -> str:
-    """Extract plain text from PDF bytes.
+    """Extract text/Markdown from PDF bytes.
 
-    Cascade (each tier falls through on import failure or parse error):
-      1. markitdown — full-fidelity structured extraction (optional extra)
-      2. pypdf      — page-by-page extraction (optional extra)
-      3. raw stream — minimal Tj-operator parser; no external deps; works for
-                      simple unencrypted PDFs (test fixture + most patent PDFs)
+    Delegates to the unified parsing layer (marker → MinerU → MarkItDown →
+    pypdf, per FORMUMIND_PDF_PARSER), then falls back to the dependency-free
+    raw Tj-operator parser that handles simple unencrypted PDFs (test fixture
+    + most patent PDFs).
     """
-    from io import BytesIO
+    from .parsing import parse_document
 
-    try:
-        from markitdown import MarkItDown  # type: ignore
-
-        result = MarkItDown().convert_stream(BytesIO(content), file_extension=".pdf")
-        text = getattr(result, "text_content", "") or ""
-        if text.strip():
-            return text
-    except Exception as exc:
-        log_handled_exception(logger, exc, "handled exception")
-
-    try:
-        from pypdf import PdfReader  # type: ignore
-
-        reader = PdfReader(BytesIO(content))
-        text = "\n\n".join(
-            (page.extract_text() or "").strip() for page in reader.pages
-        )
-        if text.strip():
-            return text
-    except BaseException:
-        # Catches pyo3_runtime.PanicException (Rust panic, subclass of BaseException
-        # not Exception) that can occur when cryptography's Rust backend is broken.
-        pass
+    result = parse_document(content, "pdf")
+    if result.ok:
+        return result.markdown
 
     return _raw_pdf_stream_text(content)
 
