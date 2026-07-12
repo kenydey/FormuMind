@@ -9,7 +9,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     runOptimize: async () => {
       set((draft) => {
         draft.busy = "optimizing";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const { requirement, optimizeEngine, campaignState, workbenchCampaignId } = get();
@@ -35,7 +35,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         }
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -47,7 +47,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     runLoop: async () => {
       set((draft) => {
         draft.busy = "looping";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const { requirement, optimizeEngine, loopDoeEngine } = get();
@@ -73,7 +73,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         }
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -85,7 +85,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     applyIntent: async (text) => {
       set((draft) => {
         draft.intentBusy = true;
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const result = await api.parseIntent(text);
@@ -123,7 +123,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         return result.extracted_fields;
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
         return [];
       } finally {
@@ -136,7 +136,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     generateDoe: async (design) => {
       set((draft) => {
         draft.busy = "doe";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const { requirement, doeEngine, alEngine, campaignState, workbenchCampaignId } = get();
@@ -176,7 +176,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         await get().refreshWorkbenchStats();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -279,7 +279,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         return wb.campaign_id;
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
         return null;
       }
@@ -309,7 +309,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           }
         } catch (e) {
           set((draft) => {
-            draft.error = formatApiError(e);
+            draft.workflowError = formatApiError(e);
           });
           return;
         }
@@ -331,13 +331,13 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
 
       if (records.length === 0) {
         set((draft) => {
-          draft.error = "请先在实验台账中完成至少一行实测值，或为实验填写实测值";
+          draft.workflowError = "请先在实验台账中完成至少一行实测值，或为实验填写实测值";
         });
         return;
       }
       set((draft) => {
         draft.busy = "training";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const report = await api.submitExperiments(records);
@@ -349,7 +349,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         await get().runResearch();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -366,7 +366,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       }
     },
@@ -375,7 +375,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       const { doePlan } = get();
       if (!doePlan?.plan_id) {
         set((draft) => {
-          draft.error = "请先生成 DOE 计划再导出";
+          draft.workflowError = "请先生成 DOE 计划再导出";
         });
         return;
       }
@@ -385,7 +385,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     importCsv: async (file) => {
       set((draft) => {
         draft.busy = "training";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const report = await api.importExperimentsCsv(file, get().requirement.domain);
@@ -397,7 +397,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         await get().runResearch();
       } catch (e) {
         set((draft) => {
-          draft.error = `CSV 导入失败：${e instanceof Error ? e.message : String(e)}`;
+          draft.workflowError = `CSV 导入失败：${e instanceof Error ? e.message : String(e)}`;
         });
       } finally {
         set((draft) => {

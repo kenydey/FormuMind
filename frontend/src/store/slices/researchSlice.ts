@@ -41,7 +41,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       }
     },
@@ -66,7 +66,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.formulationBusy = true;
         draft.recommendStage = "retrieve";
         draft.recommendMessage = "AI 修改配方中…";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const { task_id } = await api.modifyFormulations(requirement, prompt, {
@@ -101,7 +101,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -117,7 +117,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.formulationBusy = true;
         draft.recommendStage = "retrieve";
         draft.recommendMessage = "正在检索";
-        draft.error = null;
+        draft.workflowError = null;
       });
       try {
         const { requirement, sources, selectedSources, searchQuery } = get();
@@ -147,7 +147,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.workflowError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -164,7 +164,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.deepResearchBusy = true;
         draft.deepResearchStage = "retrieve";
         draft.deepResearchMessage = "正在检索";
-        draft.error = null;
+        draft.chatError = null;
       });
       try {
         const { task_id } = await api.submitDeepResearch(
@@ -203,7 +203,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.chatError = formatApiError(e);
         });
       } finally {
         set((draft) => {
@@ -218,13 +218,13 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       const query = get().searchQuery.trim();
       if (!query) {
         set((draft) => {
-          draft.error = "请先输入研究主题";
+          draft.searchError = "请先输入研究主题";
         });
         return;
       }
       set((draft) => {
         draft.searchBusy = true;
-        draft.error = null;
+        draft.searchError = null;
       });
       try {
         const res = await api.refreshKnowledgeBase(query);
@@ -233,7 +233,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         });
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.searchError = formatApiError(e);
         });
       } finally {
         set((draft) => {

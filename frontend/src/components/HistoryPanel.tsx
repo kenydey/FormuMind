@@ -80,6 +80,7 @@ export default function HistoryPanel() {
     activeProjectId,
     sources,
     projectSaveBusy,
+    projectError,
     toggleHistory,
     loadProject,
     createProject,
@@ -91,6 +92,7 @@ export default function HistoryPanel() {
       activeProjectId: s.activeProjectId,
       sources: s.sources,
       projectSaveBusy: s.projectSaveBusy,
+      projectError: s.projectError,
       toggleHistory: s.toggleHistory,
       loadProject: s.loadProject,
       createProject: s.createProject,
@@ -122,6 +124,11 @@ export default function HistoryPanel() {
             </button>
           </div>
         </div>
+        {projectError && (
+          <div className="mx-4 mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
+            ⚠ 项目操作失败：{projectError}
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {projects.length === 0 ? (

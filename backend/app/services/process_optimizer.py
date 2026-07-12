@@ -183,13 +183,18 @@ def run_process_optimization(req: ProcessOptRequest) -> ProcessOptResult:
 
     domain = req.domain
     levers = PROCESS_LEVERS.get(domain, [])
-    objectives = req.objectives or _DEFAULT_PROCESS_OBJECTIVES.get(domain, [])
     factors = [Factor(name=pf.name, low=pf.low, high=pf.high) for pf in levers]
     opt = build_optimizer(factors=factors, seed=7)
 
     # Seed bounds from the midpoint of each factor
     mid_params = {pf.name: (pf.low + pf.high) / 2 for pf in levers}
     mid_outcome = predict_process_outcome(domain, mid_params)
+
+    # Honour caller-supplied objectives, but only those the process simulator
+    # can actually produce for this domain — formulation-level metrics (e.g.
+    # cost_cny_per_kg) would score a constant 0 and skew the composite.
+    requested = [obj for obj in req.objectives if obj.metric in mid_outcome]
+    objectives = requested or _DEFAULT_PROCESS_OBJECTIVES.get(domain, [])
     bounds: dict[str, tuple[float, float]] = {}
     for metric, val in mid_outcome.items():
         bounds[metric] = (val * 0.3, val * 1.8) if val > 0 else (0.0, 1.0)

@@ -57,7 +57,7 @@ export default function SourcesPanel() {
     deepResearchBusy,
     deepResearchMessage,
     refreshKnowledgeBase,
-    error,
+    searchError,
     usedSeedFallback,
   } = useStore(
     useShallow((s) => ({
@@ -83,7 +83,7 @@ export default function SourcesPanel() {
       deepResearchBusy: s.deepResearchBusy,
       deepResearchMessage: s.deepResearchMessage,
       refreshKnowledgeBase: s.refreshKnowledgeBase,
-      error: s.error,
+      searchError: s.searchError,
       usedSeedFallback: s.usedSeedFallback,
     }))
   );
@@ -156,10 +156,10 @@ export default function SourcesPanel() {
         </div>
       )}
 
-      {!searchBusy && error && (
+      {!searchBusy && searchError && (
         <div className="shrink-0 text-xs bg-red-500/10 border border-red-500/20 rounded p-2 text-red-300 leading-relaxed">
-          ⚠ 检索失败：{error.replace(/^Error:\s*/, "")}
-          {(error.includes("Failed to fetch") || error.includes("fetch")) && (
+          ⚠ 检索失败：{searchError.replace(/^Error:\s*/, "")}
+          {(searchError.includes("Failed to fetch") || searchError.includes("fetch")) && (
             <div className="mt-0.5 text-red-400/70">
               请确认后端已启动：
               <code className="text-red-300 bg-ink/60 rounded px-1">

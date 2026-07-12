@@ -7,6 +7,12 @@ import type { AppState } from "../types";
 
 export function createProjectSlice(set: SliceSet, get: SliceGet) {
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Serialize saves: overlapping updateProject calls can land out of order and
+  // let a stale payload overwrite a newer one (last-write-wins on the server).
+  let saveChain: Promise<void> = Promise.resolve();
+  // React StrictMode double-mounts App; without a guard two concurrent
+  // initProjects runs can both see an empty list and create two projects.
+  let initInFlight: Promise<void> | null = null;
 
   return {
     toggleHistory: () =>
@@ -28,33 +34,40 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    saveProject: async () => {
-      const { activeProjectId } = get();
-      if (!activeProjectId) return;
-      set((draft) => {
-        draft.projectSaveBusy = true;
-      });
-      try {
-        const payload = buildWorkspacePayload(workspaceSlice(get()));
-        const title = get().searchQuery.trim() || get().requirement.product_type || undefined;
-        await api.updateProject(activeProjectId, payload, title);
-        const projects = await api.listProjects();
+    saveProject: () => {
+      const run = async () => {
+        const { activeProjectId } = get();
+        if (!activeProjectId) return;
         set((draft) => {
-          draft.projects = projects;
+          draft.projectSaveBusy = true;
         });
-      } catch (e) {
-        set((draft) => {
-          draft.error = formatApiError(e);
-        });
-      } finally {
-        set((draft) => {
-          draft.projectSaveBusy = false;
-        });
-      }
+        try {
+          const payload = buildWorkspacePayload(workspaceSlice(get()));
+          const title = get().searchQuery.trim() || get().requirement.product_type || undefined;
+          await api.updateProject(activeProjectId, payload, title);
+          const projects = await api.listProjects();
+          set((draft) => {
+            draft.projects = projects;
+          });
+        } catch (e) {
+          set((draft) => {
+            draft.projectError = formatApiError(e);
+          });
+        } finally {
+          set((draft) => {
+            draft.projectSaveBusy = false;
+          });
+        }
+      };
+      saveChain = saveChain.then(run, run);
+      return saveChain;
     },
 
     loadProject: async (id) => {
       try {
+        // A pending autosave for the old project must not fire after we've
+        // switched — it would write project A's snapshot under a stale timer.
+        get().cancelAutosave();
         const { activeProjectId } = get();
         if (activeProjectId && activeProjectId !== id) {
           await get().saveProject();
@@ -68,7 +81,10 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           applyPatchToDraft(draft, patch);
           draft.activeProjectId = id;
           draft.historyOpen = false;
-          draft.error = null;
+          draft.projectError = null;
+          draft.searchError = null;
+          draft.chatError = null;
+          draft.workflowError = null;
           draft.task = null;
           draft.busy = "idle";
         });
@@ -85,13 +101,14 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
         get().captureRequirementSnapshot();
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.projectError = formatApiError(e);
         });
       }
     },
 
     createProject: async (title = "") => {
       try {
+        get().cancelAutosave();
         await get().saveProject();
         const detail = await api.createProject(title);
         const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
@@ -117,7 +134,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.workbenchCampaignId = null;
           draft.workbenchObjectivesSnapshot = null;
           draft.workbenchStats = null;
-          draft.error = null;
+          draft.projectError = null;
         });
         if (!get().requirement.levers?.length) {
           await get().syncDefaultLevers();
@@ -128,7 +145,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
         });
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.projectError = formatApiError(e);
         });
       }
     },
@@ -157,13 +174,15 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
         }
       } catch (e) {
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.projectError = formatApiError(e);
         });
       }
     },
 
-    initProjects: async () => {
-      try {
+    initProjects: () => {
+      if (initInFlight) return initInFlight;
+      initInFlight = (async () => {
+        try {
         if (!isLegacyMigrated()) {
           const snaps = legacySnapshotsFromStorage();
           if (snaps.length) {
@@ -214,11 +233,15 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           }
           get().captureRequirementSnapshot();
         }
-      } catch (e) {
-        set((draft) => {
-          draft.error = formatApiError(e);
-        });
-      }
+        } catch (e) {
+          set((draft) => {
+            draft.projectError = formatApiError(e);
+          });
+        }
+      })().finally(() => {
+        initInFlight = null;
+      });
+      return initInFlight;
     },
 
     setProcessOptResult: (result) => {

@@ -45,9 +45,19 @@ export interface Requirement {
   objectives: ObjectiveSpec[];
   levers?: LeverSpec[];
   materials?: MaterialSpec[];
+  metric_priors?: MetricPriorSpec[];
+  active_formulation?: Formulation | null;
   constraint_values?: Record<string, number>;
   /** @deprecated migrated to constraint_values on load */
   constraints?: Record<string, number | null>;
+}
+
+/** Declarative prior for a custom metric (mirrors backend MetricPriorSpec). */
+export interface MetricPriorSpec {
+  metric: string;
+  prior_yaml?: string | null;
+  builtin_alias?: string | null;
+  confidence?: string;
 }
 
 export interface ChemicalLookupResult {
@@ -112,6 +122,7 @@ export interface ResearchResult {
 export interface RecommendedFormulaComponent {
   component_type?: string;
   name: string;
+  zh_name?: string;
   cas_no?: string;
   mf?: string;
   smiles?: string | null;
@@ -984,10 +995,21 @@ export function parseSearchStreamData(
   };
 }
 
+export interface SourceGuide {
+  summary: string;
+  key_entities: string[];
+  parameter_space?: Record<string, { min_value: number | null; max_value: number | null; unit: string }>;
+  faqs: string[];
+  status: "verified" | "degraded";
+}
+
 export interface IngestResponse {
   filename: string;
   evidence: Evidence[];
   total: number;
+  source_id?: string | null;
+  source_guide?: SourceGuide | null;
+  extraction_status?: string;
 }
 
 export interface ChatRequest {
@@ -999,6 +1021,8 @@ export interface ChatRequest {
 export interface ChatResponse {
   answer: string;
   citations: Evidence[];
+  /** Which retrieval backend served the citations (e.g. "tfidf", "colbert"). */
+  rag_backend?: string;
 }
 
 export interface LLMSettingsResponse {
@@ -1036,6 +1060,7 @@ export interface IPAnalysisRequest {
 export interface ProcessOptRequest {
   domain: ProductDomain;
   iterations?: number;
+  objectives?: ObjectiveSpec[];
 }
 
 export interface ProcessOptResult {
@@ -1066,6 +1091,14 @@ export interface IntentResult {
   engine: string;
 }
 
+export interface VerifiedClaim {
+  text: string;
+  verdict: "supported" | "unsupported" | "conflicting" | "insufficient";
+  evidence_indices?: number[];
+  source_tags?: string[];
+  reason?: string;
+}
+
 export interface ComprehensiveReport {
   topic: string;
   report_markdown: string;
@@ -1074,6 +1107,9 @@ export interface ComprehensiveReport {
   web_count: number;
   kb_count: number;
   engine: string;
+  verified_claims?: VerifiedClaim[];
+  claim_check_engine?: string;
+  claim_check_pass_rate?: number;
 }
 
 // ── Dependency management ────────────────────────────────────────────────────

@@ -45,7 +45,7 @@ export default function ResearchPanel() {
     deepResearchStage,
     deepResearchMessage,
     task,
-    error,
+    chatError,
   } = useStore(
     useShallow((s) => ({
       chatHistory: s.chatHistory,
@@ -58,7 +58,7 @@ export default function ResearchPanel() {
       deepResearchStage: s.deepResearchStage,
       deepResearchMessage: s.deepResearchMessage,
       task: s.task,
-      error: s.error,
+      chatError: s.chatError,
     }))
   );
   const [draft, setDraft] = useState("");
@@ -139,9 +139,9 @@ export default function ResearchPanel() {
         </div>
       )}
 
-      {error && (
+      {chatError && (
         <div className="mx-4 mt-2 mb-1 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300 shrink-0">
-          ⚠ {error}
+          ⚠ {chatError}
         </div>
       )}
 

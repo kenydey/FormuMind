@@ -109,7 +109,7 @@ const AI_DESIGN = { value: "ai_active", label: "🧠 AI 主动选点" };
 export default function DoeResultsPanel() {
   const {
     requirement, doePlan, models, modelHistory, trainMessage,
-    busy, generateDoe, exportDoe, importCsv, error,
+    busy, generateDoe, exportDoe, importCsv, workflowError,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, setOpenModal,
   } = useStore(
@@ -123,7 +123,7 @@ export default function DoeResultsPanel() {
       generateDoe: s.generateDoe,
       exportDoe: s.exportDoe,
       importCsv: s.importCsv,
-      error: s.error,
+      workflowError: s.workflowError,
       doeEngine: s.doeEngine,
       alEngine: s.alEngine,
       setDoeEngine: s.setDoeEngine,
@@ -152,9 +152,9 @@ export default function DoeResultsPanel() {
 
   return (
     <section className="glass rounded-xl p-4 overflow-y-auto">
-      {error && (
+      {workflowError && (
         <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-          {error}
+          {workflowError}
         </div>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
