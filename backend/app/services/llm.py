@@ -378,44 +378,61 @@ def _call_llm(prompt: str) -> str | None:
     return _complete_openai_compatible(prompt, api_key, model, max_tokens, base_url)
 
 
+def _json_candidates(text: str) -> list[str]:
+    """Candidate JSON payloads from an LLM reply, most specific first.
+
+    LLMs often wrap JSON in ```json fences, sometimes preceded by prose or
+    other fenced blocks — taking only the *first* fence loses the payload.
+    Yields every fenced block, then the raw text, then the outermost
+    ``{...}`` slice as a last resort.
+    """
+    text = (text or "").strip()
+    out: list[str] = []
+    if "```" in text:
+        parts = text.split("```")
+        for inner in parts[1::2]:  # odd indices = fenced contents
+            inner = inner.strip()
+            if inner.startswith("json"):
+                inner = inner[4:].strip()
+            if inner:
+                out.append(inner)
+    out.append(text)
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        out.append(text[start : end + 1])
+    return out
+
+
 def complete_json(prompt: str) -> dict | None:
     """Call the configured LLM and parse its reply as a JSON object.
 
-    Tolerates ```` ```json ```` markdown fences. Returns None when no LLM is
-    configured or the reply is not valid JSON. Shared by the IP-analysis and
-    intent-parsing agents so the fence-stripping logic lives in one place.
+    Tolerates ```` ```json ```` markdown fences (in any position, not just the
+    first block). Returns None when no LLM is configured or no candidate parses
+    as a JSON object. Shared by the IP-analysis and intent-parsing agents so
+    the fence-stripping logic lives in one place.
     """
     import json
 
     raw = _call_llm(prompt)
     if not raw:
         return None
-    text = raw.strip()
-    if "```" in text:
-        # Take the content of the first fenced block.
-        text = text.split("```", 2)[1] if text.count("```") >= 2 else text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else None
-    except Exception as exc:
-        return degrade_return(log, exc, "operation failed", None)
+    last_exc: Exception | None = None
+    for candidate in _json_candidates(raw):
+        try:
+            data = json.loads(candidate)
+        except Exception as exc:
+            last_exc = exc
+            continue
+        if isinstance(data, dict):
+            return data
+    if last_exc is not None:
+        return degrade_return(log, last_exc, "LLM reply not parseable as JSON object", None)
+    return None
 
 
 def _strip_json_fences(text: str) -> str:
-    text = text.strip()
-    if "```" not in text:
-        return text
-    parts = text.split("```")
-    if len(parts) >= 3:
-        inner = parts[1]
-    else:
-        inner = parts[1] if len(parts) > 1 else text
-    if inner.startswith("json"):
-        inner = inner[4:]
-    return inner.strip()
+    """Return the first candidate payload (kept for structured validation)."""
+    return _json_candidates(text)[0] if (text or "").strip() else ""
 
 
 def _validate_structured(raw: str | None, model_type: type[TModel]) -> TModel:
@@ -424,7 +441,16 @@ def _validate_structured(raw: str | None, model_type: type[TModel]) -> TModel:
     try:
         import json
 
-        data = json.loads(_strip_json_fences(raw))
+        data = None
+        last_exc: Exception | None = None
+        for candidate in _json_candidates(raw):
+            try:
+                data = json.loads(candidate)
+                break
+            except Exception as exc:
+                last_exc = exc
+        if data is None:
+            raise last_exc or LLMValidationError("No JSON object in LLM response")
         return model_type.model_validate(data)
     except LLMValidationError:
         raise

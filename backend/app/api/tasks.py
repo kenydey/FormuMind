@@ -78,6 +78,20 @@ def _sse_frame(event: TaskProgressEvent) -> str:
     return f"data: {event.model_dump_json()}\n\n"
 
 
+def _timeout_event(timeout_s: float) -> TaskProgressEvent:
+    """Terminal frame emitted when the stream gives up waiting.
+
+    Clients must be able to distinguish "stream timed out" from "still running":
+    without a terminal frame the EventSource just closes silently.
+    """
+    return TaskProgressEvent(
+        status=TaskProgressStatus.FAILED,
+        stage="stream_timeout",
+        message=f"进度流等待超时（{int(timeout_s)}s）— 任务可能仍在运行，请刷新任务状态",
+        progress=0.0,
+    )
+
+
 async def _poll_until_terminal(
     task_id: str,
     *,
@@ -104,6 +118,7 @@ async def _poll_until_terminal(
             return
 
         await asyncio.sleep(0.2)
+    yield _timeout_event(timeout_s)
 
 
 @router.get("/tasks/{task_id}/stream")
@@ -134,7 +149,9 @@ async def stream_task_progress(task_id: str) -> StreamingResponse:
             pubsub = client.pubsub()
             await pubsub.subscribe(channel_name(task_id))
             try:
-                deadline = time.monotonic() + 3600
+                stream_timeout = 3600.0
+                deadline = time.monotonic() + stream_timeout
+                timed_out = True
                 while time.monotonic() < deadline:
                     message = await pubsub.get_message(
                         ignore_subscribe_messages=True, timeout=1.0
@@ -158,7 +175,10 @@ async def stream_task_progress(task_id: str) -> StreamingResponse:
                         continue
                     yield _sse_frame(event)
                     if event.status in _TERMINAL:
+                        timed_out = False
                         break
+                if timed_out:
+                    yield _sse_frame(_timeout_event(stream_timeout))
             except asyncio.CancelledError:
                 logger.debug("SSE client disconnected for task %s", task_id)
                 raise
