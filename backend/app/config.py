@@ -161,6 +161,14 @@ class Settings(BaseSettings):
     fulltext_max_docs: int = 8
     fulltext_timeout_s: float = 20.0
 
+    # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
+    # document_chunks 表（装了 sentence-transformers 则带归一化向量），
+    # 问答检索覆盖整个累计语料而非单次请求携带的 sources。纯本地无网络。
+    kb_v2_enabled: bool = True
+    kb_max_chunks_per_source: int = 200
+    kb_search_scan_limit: int = 5000
+    kb_chat_top_k: int = 6
+
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
     source_guide_max_chars: int = 12000

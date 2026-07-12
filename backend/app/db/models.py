@@ -84,6 +84,32 @@ class SourceDocument(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class DocumentChunk(Base):
+    """Persistent KB chunk — one structure-aware chunk of a SourceDocument.
+
+    ``embedding`` (normalized vector, JSON list) is filled when
+    sentence-transformers is installed; text-only rows still serve keyword
+    retrieval, and ``reindex`` can backfill vectors later.
+    """
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    ord: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    heading_path: Mapped[str] = mapped_column(String(120), default="")
+    embedding: Mapped[list | None] = mapped_column(
+        # none_as_null: Python None must become SQL NULL (not JSON 'null'),
+        # so the embedded-rows count can filter with IS NOT NULL.
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="归一化句向量（JSON 数组）",
+    )
+    embedding_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class ProjectRow(Base):
     """NotebookLM-style project workspace (JSON payload)."""
 

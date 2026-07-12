@@ -72,19 +72,43 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[Evidence]
     rag_backend: str = "tfidf"  # which retrieval backend served the citations
+    kb_chunks_used: int = 0  # persistent-KB chunks merged into the grounding set
+
+
+def _augment_with_kb(question: str, sources: list[Evidence]) -> tuple[list[Evidence], int]:
+    """Merge top persistent-KB chunks into the grounding set (KB v2).
+
+    The client's sources keep priority; KB hits already present (same
+    identifier) are skipped. Empty KB / disabled flag → unchanged."""
+    from ..config import get_settings
+    from ..services import kb_index
+
+    settings = get_settings()
+    if not settings.kb_v2_enabled:
+        return sources, 0
+    hits = kb_index.search_chunks(question, k=settings.kb_chat_top_k)
+    if not hits:
+        return sources, 0
+    seen = {ev.identifier for ev in sources}
+    added = [h for h in hits if h.identifier not in seen]
+    return sources + added, len(added)
 
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     try:
         sources = [_sanitize_evidence(ev) for ev in req.sources]
+        sources, kb_used = _augment_with_kb(req.question.strip(), sources)
         answer, citations = answer_question(
             question=req.question.strip(),
             sources=sources,
             domain=req.domain,
         )
         return ChatResponse(
-            answer=answer, citations=citations, rag_backend=active_rag_backend()
+            answer=answer,
+            citations=citations,
+            rag_backend=active_rag_backend(),
+            kb_chunks_used=kb_used,
         )
     except HTTPException:
         raise
