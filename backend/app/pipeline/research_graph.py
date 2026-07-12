@@ -250,7 +250,7 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
                 forms.append(recommended_to_formulation(rec))
             except ValueError as exc:
                 rec_resp.warnings.append(str(exc))
-        recommended = [_score_and_validate(f, process, req) for f in forms]
+        recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
         recommended, gate_warnings = validate_formulations(recommended)
         recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
         if recommended:
@@ -310,7 +310,7 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
                 forms.append(recommended_to_formulation(rec))
             except ValueError as exc:
                 rec_resp.warnings.append(str(exc))
-        recommended = [_score_and_validate(f, process, req) for f in forms]
+        recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
         recommended, gate_warnings = validate_formulations(recommended)
         recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
         mechanism, chat = llm.synthesize_research(req, grounded, recommended)

@@ -71,6 +71,8 @@ def _score_and_validate(
     form: Formulation,
     process: dict | None = None,
     req: Requirement | None = None,
+    *,
+    chem_screen: bool = False,
 ) -> Formulation:
     from ..domain.project_spec import normalize_requirement, primary_objective
 
@@ -80,6 +82,12 @@ def _score_and_validate(
     form.warnings = validate_formulation(form, voc_limit_gpl=voc_limit)
     voc_gpl = form.predicted.get("voc_gpl")
     form.warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
+    if chem_screen:
+        # Molecular patent / controlled-chemical pre-screen (ChemCrow gateway).
+        # Only enabled on recommend paths — never inside optimization loops.
+        from ..services import chemtools
+
+        form.warnings.extend(chemtools.screen_formulation(form))
     if req and req.objectives:
         if len(req.objectives) == 1:
             metric = req.objectives[0].metric

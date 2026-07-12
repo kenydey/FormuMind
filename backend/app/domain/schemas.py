@@ -455,6 +455,14 @@ class PatentRisk(BaseModel):
     recommendation: str
 
 
+class MoleculePatentCheck(BaseModel):
+    """molbloom molecular patent pre-screen result for one ingredient."""
+
+    name: str
+    smiles: str
+    patented: bool | None = None  # True=seen in patents, False=novel, None=unknown
+
+
 class IPReport(BaseModel):
     formulation_name: str
     novelty_score: float  # 0=likely infringes … 1=highly novel
@@ -462,6 +470,7 @@ class IPReport(BaseModel):
     whitespace_hints: list[str]
     raw_patents_searched: int
     engine: str  # "llm" | "offline-keyword"
+    molecule_checks: list[MoleculePatentCheck] = Field(default_factory=list)
 
 
 class IPAnalysisRequest(BaseModel):

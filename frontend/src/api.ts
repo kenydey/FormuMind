@@ -60,6 +60,36 @@ export interface ChemicalLookupResult {
   molar_mass?: number;
 }
 
+/** Full dossier from /api/chemical/profile — superset of the lookup payload. */
+export interface ChemicalProfile {
+  query: string;
+  cas: string;
+  iupac_name: string;
+  zh_name: string;
+  formula: string;
+  smiles?: string | null;
+  molar_mass?: number | null;
+  found: boolean;
+  source: string;
+  func_groups: string[];
+  /** True=分子已见于专利文献（molbloom）, False=novel, null=unknown */
+  patented: boolean | null;
+  safety: { controlled: boolean | null; explosive: boolean | null };
+  chemtools: { enabled: boolean; chemcrow_installed: boolean };
+}
+
+export interface ChemToolsCapability {
+  available: boolean;
+  hint?: string | null;
+}
+
+export interface ChemToolsStatus {
+  enabled: boolean;
+  chemcrow_installed: boolean;
+  rdkit_installed: boolean;
+  capabilities: Record<string, ChemToolsCapability>;
+}
+
 export interface Ingredient {
   name: string;
   zh_name?: string | null;
@@ -438,6 +468,9 @@ export const api = {
       found: boolean;
       source: string;
     }>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
+  chemicalProfile: (q: string) =>
+    get<ChemicalProfile>(`/api/chemical/profile?q=${encodeURIComponent(q)}`),
+  chemicalTools: () => get<ChemToolsStatus>("/api/chemical/tools"),
   addManualFormulation: (formulation: Formulation, requirement?: Requirement) =>
     post<{ formulation: Formulation; warnings: string[] }>("/api/formulations/manual", {
       formulation,
@@ -1019,6 +1052,12 @@ export interface PatentRisk {
   recommendation: string;
 }
 
+export interface MoleculePatentCheck {
+  name: string;
+  smiles: string;
+  patented: boolean | null;
+}
+
 export interface IPReport {
   formulation_name: string;
   novelty_score: number;
@@ -1026,6 +1065,7 @@ export interface IPReport {
   whitespace_hints: string[];
   raw_patents_searched: number;
   engine: string;
+  molecule_checks?: MoleculePatentCheck[];
 }
 
 export interface IPAnalysisRequest {
@@ -1064,6 +1104,8 @@ export interface IntentResult {
   confidence: number;
   extracted_fields: string[];
   engine: string;
+  /** Advisory notices, e.g. controlled-chemical hits on parsed materials. */
+  warnings?: string[];
 }
 
 export interface ComprehensiveReport {

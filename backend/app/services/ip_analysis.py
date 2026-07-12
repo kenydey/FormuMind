@@ -14,6 +14,7 @@ from ..domain.schemas import (
     Formulation,
     IPAnalysisRequest,
     IPReport,
+    MoleculePatentCheck,
     PatentRisk,
     ProductDomain,
     Requirement,
@@ -200,16 +201,43 @@ def _llm_analysis(form: Formulation, patents: list) -> IPReport | None:
         return degrade_return(logger, exc, "operation failed", None)
 
 
+def _molecule_patent_checks(form: Formulation) -> list[MoleculePatentCheck]:
+    """molbloom structure-level pre-screen for each ingredient with a SMILES.
+
+    Complements the text-based patent search: molbloom checks whether the
+    exact molecule appears in the SureChEMBL patent corpus, which name
+    matching cannot do.  Empty when chemcrow is not installed.
+    """
+    from . import chemtools
+
+    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+        return []
+    checks: list[MoleculePatentCheck] = []
+    for ing in form.ingredients:
+        if not ing.smiles or ing.weight_pct < 0.5:
+            continue
+        checks.append(
+            MoleculePatentCheck(
+                name=ing.name,
+                smiles=ing.smiles,
+                patented=chemtools.patent_check(ing.smiles),
+            )
+        )
+    return checks
+
+
 def analyze_ip_risk(req: IPAnalysisRequest) -> IPReport:
     """Main entry point: run IP landscape analysis for a formulation.
 
-    Uses LLM when available; falls back to offline keyword matching.
+    Uses LLM when available; falls back to offline keyword matching.  Both
+    paths carry the molbloom molecular pre-screen in ``molecule_checks``.
     """
     form = req.formulation
     terms = _extract_chem_terms(form)
     patents = _search_relevant_patents(terms, form.domain, limit=req.limit_patents)
 
     result = _llm_analysis(form, patents)
-    if result is not None:
-        return result
-    return _offline_keyword_analysis(form, patents)
+    if result is None:
+        result = _offline_keyword_analysis(form, patents)
+    result.molecule_checks = _molecule_patent_checks(form)
+    return result

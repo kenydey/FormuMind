@@ -21,6 +21,26 @@ class FormulationListResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+def _chemtools_gap_fill(name: str, has_smiles: bool, has_cas: bool) -> dict:
+    """Resolve missing SMILES/CAS via the ChemCrow gateway (cached; no-op offline)."""
+    if has_smiles and has_cas:
+        return {}
+    from ..services import chemtools
+
+    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+        return {}
+    updates: dict = {}
+    if not has_smiles:
+        smiles = chemtools.name_to_smiles(name)
+        if smiles:
+            updates["smiles"] = smiles
+    if not has_cas:
+        cas = chemtools.name_to_cas(name)
+        if cas:
+            updates["cas_no"] = cas
+    return updates
+
+
 def enrich_ingredient(ing: Ingredient) -> Ingredient:
     spec = RAW_MATERIALS.get(ing.name, {})
     updates: dict = {}
@@ -37,6 +57,13 @@ def enrich_ingredient(ing: Ingredient) -> Ingredient:
         updates["role"] = spec["role"]
     if not ing.component_type and (ing.role or spec.get("role")):
         updates["component_type"] = ing.role or spec.get("role", "")
+    updates.update(
+        _chemtools_gap_fill(
+            ing.name,
+            has_smiles=bool(ing.smiles or updates.get("smiles")),
+            has_cas=bool(ing.cas_no or updates.get("cas_no")),
+        )
+    )
     return ing.model_copy(update=updates) if updates else ing
 
 
@@ -53,6 +80,13 @@ def enrich_component(comp: RecommendedFormulaComponent) -> RecommendedFormulaCom
         updates["molar_mass"] = spec["molar_mass"]
     if not comp.component_type and spec.get("role"):
         updates["component_type"] = spec["role"]
+    updates.update(
+        _chemtools_gap_fill(
+            comp.name,
+            has_smiles=bool(comp.smiles or updates.get("smiles")),
+            has_cas=bool(comp.cas_no or updates.get("cas_no")),
+        )
+    )
     return comp.model_copy(update=updates) if updates else comp
 
 

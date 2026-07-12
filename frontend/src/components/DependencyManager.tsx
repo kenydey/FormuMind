@@ -2,9 +2,50 @@ import { useEffect, useMemo, useState } from "react";
 import {
   api,
   awaitTaskStream,
+  type ChemToolsStatus,
   type DependencyInfo,
   type DependencyInstallResult,
 } from "../api";
+
+const CHEMTOOL_LABELS: Record<string, string> = {
+  name_to_smiles: "名称→SMILES",
+  name_to_cas: "名称→CAS",
+  func_groups: "官能团识别",
+  mol_similarity: "分子相似度",
+  patent_check: "分子专利预筛",
+  controlled_check: "管制品筛查",
+  explosive_check: "爆炸性筛查",
+  web_search: "化学网络检索",
+};
+
+function ChemToolsCard({ status }: { status: ChemToolsStatus | null }) {
+  if (!status) return null;
+  const caps = Object.entries(status.capabilities || {});
+  const okCount = caps.filter(([, c]) => c.available).length;
+  return (
+    <div className="border border-edge/60 rounded p-2">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+        ChemCrow 工具网关 · {okCount}/{caps.length} 可用
+        {!status.enabled && <span className="text-amber-400 ml-1">（已禁用）</span>}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {caps.map(([key, cap]) => (
+          <span
+            key={key}
+            title={cap.hint ?? undefined}
+            className={`text-[10px] px-1.5 py-0.5 rounded border ${
+              cap.available
+                ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
+                : "border-edge bg-ink/60 text-slate-500"
+            }`}
+          >
+            {cap.available ? "●" : "○"} {CHEMTOOL_LABELS[key] ?? key}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Human labels for the extra groups, in display order.
 const EXTRA_LABELS: Record<string, string> = {
@@ -33,6 +74,7 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
   const [result, setResult] = useState<DependencyInstallResult | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [chemTools, setChemTools] = useState<ChemToolsStatus | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -47,6 +89,11 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
       setLoadError(String(e));
     } finally {
       setLoading(false);
+    }
+    try {
+      setChemTools(await api.chemicalTools());
+    } catch {
+      setChemTools(null);
     }
   }
 
@@ -149,6 +196,8 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
           无法加载依赖列表：{loadError}
         </div>
       )}
+
+      <ChemToolsCard status={chemTools} />
 
       {/* Progress / result */}
       {busy && (
