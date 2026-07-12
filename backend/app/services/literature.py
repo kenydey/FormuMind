@@ -85,13 +85,6 @@ def _filter_seed_by_query(
     return sorted(seeds, key=lambda x: x.relevance, reverse=True)[:min_keep]
 
 
-def _resolve_search_query(query: str) -> str:
-    """Expand a user topic via QueryExpander for cross-lingual retrieval."""
-    from .deep_research.query_expander import prepare_search_queries
-
-    return prepare_search_queries(query).rank_q
-
-
 def _prepare_search_queries(query: str):
     """Return SearchQueries bundle for multi-source search."""
     from .deep_research.query_expander import prepare_search_queries
@@ -589,6 +582,7 @@ def iter_search(
     per_source_cap: int = 50,
     max_rounds: int = 20,
     progress_cb=None,
+    queries=None,
 ) -> list[Evidence]:
     """Incremental multi-source retrieval — fetch in rounds until no source turns
     up new related results (no fixed time budget).
@@ -596,10 +590,19 @@ def iter_search(
     Each round pulls the next page from every still-active source concurrently.
     ``progress_cb`` (if given) is invoked after **each source** completes (not only
     at round end), so the UI can render results while the search keeps going.
+
+    ``queries`` accepts a pre-built :class:`SearchQueries` bundle so callers that
+    already ran query expansion (e.g. DeepResearchEngine) don't trigger a second
+    LLM expansion here.
     """
     q = build_research_query(query, req)
-    if (query or "").strip():
+    if queries is not None:
+        sq = queries
+    elif (query or "").strip():
         sq = _prepare_search_queries(q)
+    else:
+        sq = None
+    if sq is not None:
         rank_q = sq.rank_q
         patent_q = sq.patent_q
         western_q = sq.western_q

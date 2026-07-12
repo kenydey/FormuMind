@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -74,13 +75,25 @@ def _to_ingest_response(filename: str, outcome) -> IngestResponse:
     )
 
 
+def _ingest_and_index(filename: str, content: bytes):
+    """Blocking parse + index — run off the event loop via asyncio.to_thread."""
+    outcome = ingest_file(filename, content)
+    colbert_store.index_evidence(outcome.evidence)
+    return outcome
+
+
+def _ingest_batch_and_index(pairs: list[tuple[str, bytes]]):
+    outcome = ingest_files_batch(pairs)
+    colbert_store.index_evidence(outcome.evidence)
+    return outcome
+
+
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(file: UploadFile = File(...)):
     content = await file.read()
     filename = file.filename or "upload"
     _enforce_upload_size(content, filename)
-    outcome = ingest_file(filename, content)
-    colbert_store.index_evidence(outcome.evidence)
+    outcome = await asyncio.to_thread(_ingest_and_index, filename, content)
     return _to_ingest_response(filename, outcome)
 
 
@@ -94,8 +107,7 @@ async def ingest_batch(files: list[UploadFile] = File(...)):
         name = f.filename or "upload"
         _enforce_upload_size(content, name)
         pairs.append((name, content))
-    outcome = ingest_files_batch(pairs)
-    colbert_store.index_evidence(outcome.evidence)
+    outcome = await asyncio.to_thread(_ingest_batch_and_index, pairs)
     return BatchIngestResponse(
         evidence=outcome.evidence,
         total=len(outcome.evidence),

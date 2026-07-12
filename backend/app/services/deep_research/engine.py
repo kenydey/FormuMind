@@ -5,8 +5,6 @@ from ..errors import degrade_return, log_handled_exception, optional_import, rer
 import logging
 from typing import Callable
 
-import httpx
-
 from ...config import Settings, get_settings
 from ...domain import knowledge
 from ...domain.schemas import ComprehensiveReport, Evidence, Requirement
@@ -66,17 +64,10 @@ class DeepResearchEngine:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._expander = QueryExpander(self._settings)
-        self._http = httpx.Client(
-            timeout=30.0,
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        )
-        self._openalex_mailto: str | None = self._settings.openalex_mailto
-        self._epo_consumer_key: str | None = self._settings.epo_consumer_key
-        self._epo_consumer_secret: str | None = self._settings.epo_consumer_secret
-        self._uspto_api_key: str | None = self._settings.uspto_api_key
 
     def close(self) -> None:
-        self._http.close()
+        """Retained for callers using try/finally — no resources held anymore."""
+        return None
 
     def __enter__(self) -> DeepResearchEngine:
         return self
@@ -96,25 +87,30 @@ class DeepResearchEngine:
         per_source_cap: int | None = None,
         progress_cb: Callable[[list[Evidence]], None] | None = None,
     ) -> tuple[list[Evidence], ExpandedQuery]:
-        """QueryExpander + iter_search 多源检索。"""
-        expanded = self.expand_query(topic)
-        from .query_expander import prepare_search_queries
+        """QueryExpander + iter_search 多源检索（查询扩展只执行一次）。"""
+        from ...domain.research_query import build_research_query
 
-        sq = prepare_search_queries(topic, self._settings)
-        combined_query = sq.rank_q
+        sq = prepare_search_queries(build_research_query(topic, req), self._settings)
         types = source_types or _DEFAULT_SOURCE_TYPES
         limit = total_limit or self._settings.search_total_limit
         cap = per_source_cap or self._settings.search_limit_per_source
 
         evidence = literature.iter_search(
-            combined_query,
+            topic,
             types,
             req=req,
             total_limit=limit,
             per_source_cap=cap,
             progress_cb=progress_cb,
+            queries=sq,
         )
-        return evidence, expanded
+        if self._settings.pdf_download and evidence:
+            from ..pdf_downloader import enrich_with_fulltext
+
+            evidence = enrich_with_fulltext(
+                evidence, max_pdfs=self._settings.pdf_download_max
+            )
+        return evidence, sq.expanded
 
     def search(
         self,

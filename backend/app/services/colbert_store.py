@@ -134,15 +134,22 @@ def _save_registry(settings: Settings, collection: str, registry: dict[str, Evid
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+_MODEL_LOAD_LOCK = threading.Lock()
+
+
 def _get_ragatouille_model(settings: Settings):
     if settings.colbert_model in _MODEL_CACHE:
         return _MODEL_CACHE[settings.colbert_model]
-    from ragatouille import RAGPretrainedModel
+    with _MODEL_LOAD_LOCK:
+        # Double-checked: another thread may have loaded it while we waited.
+        if settings.colbert_model in _MODEL_CACHE:
+            return _MODEL_CACHE[settings.colbert_model]
+        from ragatouille import RAGPretrainedModel
 
-    logger.info("Loading ColBERT model %s", settings.colbert_model)
-    model = RAGPretrainedModel.from_pretrained(settings.colbert_model)
-    _MODEL_CACHE[settings.colbert_model] = model
-    return model
+        logger.info("Loading ColBERT model %s", settings.colbert_model)
+        model = RAGPretrainedModel.from_pretrained(settings.colbert_model)
+        _MODEL_CACHE[settings.colbert_model] = model
+        return model
 
 
 def index_documents(
@@ -177,7 +184,13 @@ def index_documents(
                 texts = [d.text for d in docs]
                 doc_ids = [d.doc_id for d in docs]
                 if Path(index_path).exists() and (_collection_dir(settings, collection) / ".ragatouille").exists():
-                    model.add_to_index(index_name=collection, new_collection=docs)
+                    # Ragatouille expects raw texts + ids, not ColbertDocument objects.
+                    model.add_to_index(
+                        index_name=collection,
+                        new_collection=texts,
+                        new_document_ids=doc_ids,
+                        split_documents=False,
+                    )
                 else:
                     _collection_dir(settings, collection).mkdir(parents=True, exist_ok=True)
                     model.index(

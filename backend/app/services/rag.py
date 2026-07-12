@@ -17,6 +17,7 @@ import logging
 from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import math
 import re
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -88,14 +89,18 @@ def _embedding_available() -> bool:
 
 # Cache the loaded model so repeated chat requests don't reload it.
 _MODEL_CACHE: dict[str, object] = {}
+_MODEL_LOCK = threading.Lock()
 
 
 def _load_model(name: str):
-    if name not in _MODEL_CACHE:
-        from sentence_transformers import SentenceTransformer
+    if name in _MODEL_CACHE:
+        return _MODEL_CACHE[name]
+    with _MODEL_LOCK:
+        if name not in _MODEL_CACHE:
+            from sentence_transformers import SentenceTransformer
 
-        _MODEL_CACHE[name] = SentenceTransformer(name)
-    return _MODEL_CACHE[name]
+            _MODEL_CACHE[name] = SentenceTransformer(name)
+        return _MODEL_CACHE[name]
 
 
 @dataclass
