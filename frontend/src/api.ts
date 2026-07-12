@@ -87,6 +87,8 @@ export interface ChemToolsStatus {
   enabled: boolean;
   chemcrow_installed: boolean;
   rdkit_installed: boolean;
+  pubchem_available?: boolean;
+  molbloom_installed?: boolean;
   capabilities: Record<string, ChemToolsCapability>;
 }
 

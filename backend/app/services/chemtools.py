@@ -20,16 +20,20 @@ Design contract (mirrors the platform's optional-engine conventions):
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import re
 import threading
 import time
 from typing import Any, Callable, TypeVar
+from urllib.parse import quote
 
 from ..config import get_settings
 from .errors import degrade_return, optional_import
 
 logger = logging.getLogger(__name__)
+
+_PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest"
 
 T = TypeVar("T")
 
@@ -59,31 +63,71 @@ def rdkit_available() -> bool:
     return optional_import("rdkit")
 
 
+def _httpx_available() -> bool:
+    return optional_import("httpx")
+
+
+def pubchempy_available() -> bool:
+    return optional_import("pubchempy")
+
+
+def molbloom_available() -> bool:
+    return optional_import("molbloom")
+
+
+def pubchem_available() -> bool:
+    """A name/structure-resolution backend that does not need ChemCrow.
+
+    ChemCrow's Query2SMILES/Query2CAS/ExplosiveCheck are thin wrappers over the
+    public PubChem API; we can reach the same data directly through ``httpx``
+    (already a hard dependency) or ``pubchempy``.  Treating either as present
+    means these capabilities light up without the heavy ``chemcrow`` install.
+    """
+    return _httpx_available() or pubchempy_available()
+
+
 def availability() -> dict[str, Any]:
-    """Per-capability availability report (for /api/chemical/tools and UI)."""
+    """Per-capability availability report (for /api/chemical/tools and UI).
+
+    Each capability is available when *any* backend that can serve it is
+    present — ChemCrow is one option, not the only one:
+
+    * name→SMILES / name→CAS  → ChemCrow **or** PubChem (httpx/pubchempy);
+    * functional groups / similarity → ChemCrow **or** RDKit (local);
+    * molecular patent pre-screen → ChemCrow **or** ``molbloom`` (standalone);
+    * explosive screen → ChemCrow **or** PubChem GHS classification;
+    * controlled-chemical screen → ChemCrow only (ships the curated dataset);
+    * chemistry web search → ChemCrow + SERPAPI_API_KEY.
+    """
     enabled = gateway_enabled()
     cc = chemcrow_available()
     rd = rdkit_available()
+    pubchem = pubchem_available()
+    molbloom = molbloom_available()
     settings = get_settings()
     serp = bool(settings.serpapi_api_key)
 
     def cap(available: bool, hint: str | None) -> dict[str, Any]:
         return {"available": bool(enabled and available), "hint": None if (enabled and available) else hint}
 
-    install_hint = "pip install -e '.[intel]' 安装 ChemCrow 工具链"
+    intel_hint = "pip install -e '.[intel]' 安装 ChemCrow 工具链"
+    pubchem_hint = "需 httpx（已内置）或 pubchempy 以访问 PubChem；离线环境不可用"
     rdkit_hint = "pip install rdkit 或安装 intel extra"
+    molbloom_hint = "pip install molbloom 启用分子专利布隆过滤器（或安装 intel extra）"
     return {
         "enabled": enabled,
         "chemcrow_installed": cc,
         "rdkit_installed": rd,
+        "pubchem_available": pubchem,
+        "molbloom_installed": molbloom,
         "capabilities": {
-            "name_to_smiles": cap(cc, install_hint),
-            "name_to_cas": cap(cc, install_hint),
+            "name_to_smiles": cap(cc or pubchem, pubchem_hint),
+            "name_to_cas": cap(cc or pubchem, pubchem_hint),
             "func_groups": cap(cc or rd, rdkit_hint),
             "mol_similarity": cap(cc or rd, rdkit_hint),
-            "patent_check": cap(cc, install_hint + "（molbloom 分子专利布隆过滤器）"),
-            "controlled_check": cap(cc, install_hint),
-            "explosive_check": cap(cc, install_hint),
+            "patent_check": cap(cc or molbloom, molbloom_hint),
+            "controlled_check": cap(cc, intel_hint + "（含管制品数据集）"),
+            "explosive_check": cap(cc or pubchem, pubchem_hint + "；或安装 ChemCrow"),
             "web_search": {
                 "available": bool(enabled and cc and serp),
                 "hint": None if (enabled and cc and serp) else "需 ChemCrow + SERPAPI_API_KEY",
@@ -168,6 +212,115 @@ def _run_tool(tool: Any, arg: str) -> str | None:
     return str(out) if out is not None else None
 
 
+# ── native PubChem backend (no ChemCrow required) ────────────────────────────
+
+
+def _pubchem_get(path: str) -> Any | None:
+    """GET a PubChem REST / PUG-View path and return parsed JSON, else None.
+
+    Single choke-point for every native PubChem call: tests stub this one
+    function to keep the network out of unit runs, and any transport / status
+    failure degrades uniformly to ``None`` so callers stay neutral offline.
+    """
+    try:
+        import httpx  # type: ignore
+    except Exception:
+        return None
+    url = path if path.startswith("http") else f"{_PUBCHEM_BASE}{path}"
+    timeout = float(get_settings().chemtools_timeout_s)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(url)
+        if resp.status_code != 200:
+            return None
+        return resp.json()
+    except Exception as exc:
+        return degrade_return(logger, exc, "pubchem request failed", None)
+
+
+# PubChem renamed its SMILES properties in 2025: requesting ``SMILES`` returns
+# the absolute/isomeric SMILES under key ``SMILES``; ``ConnectivitySMILES`` is
+# the former ``CanonicalSMILES``.  One request fetches both; we prefer the
+# isomeric form when present.
+_PUBCHEM_SMILES_KEYS = ("SMILES", "ConnectivitySMILES", "IsomericSMILES", "CanonicalSMILES")
+
+
+def _pubchem_name_to_smiles(name: str) -> str | None:
+    encoded = quote(name, safe="")
+    data = _pubchem_get(
+        f"/pug/compound/name/{encoded}/property/SMILES,ConnectivitySMILES/JSON"
+    )
+    props = ((data or {}).get("PropertyTable") or {}).get("Properties") or []
+    if not props:
+        return None
+    row = props[0]
+    for key in _PUBCHEM_SMILES_KEYS:
+        smi = (row.get(key) or "").strip()
+        if smi and _looks_like_smiles(smi):
+            return smi
+    return None
+
+
+def _pubchem_name_to_cas(name: str) -> str | None:
+    # PubChem deprecated the RegistryNumber xref endpoint; the canonical CAS now
+    # lives among the compound synonyms (first CAS-format entry is the primary).
+    encoded = quote(name, safe="")
+    data = _pubchem_get(f"/pug/compound/name/{encoded}/synonyms/JSON")
+    info = ((data or {}).get("InformationList") or {}).get("Information") or []
+    for entry in info:
+        for syn in entry.get("Synonym", []) or []:
+            m = _CAS_RE.fullmatch(str(syn).strip())
+            if m:
+                return m.group(0)
+    return None
+
+
+def _pubchem_cid(query: str) -> int | None:
+    encoded = quote(query, safe="")
+    data = _pubchem_get(f"/pug/compound/name/{encoded}/cids/JSON")
+    cids = ((data or {}).get("IdentifierList") or {}).get("CID") or []
+    return int(cids[0]) if cids else None
+
+
+# GHS hazard statement codes for explosives (H200–H208, Section 2.1).
+_EXPLOSIVE_HCODES = ("H200", "H201", "H202", "H203", "H204", "H205", "H206", "H207", "H208")
+
+
+def _pubchem_explosive(cas: str) -> bool | None:
+    cid = _pubchem_cid(cas)
+    if not cid:
+        return None
+    data = _pubchem_get(
+        f"/pug_view/data/compound/{cid}/JSON?heading=GHS+Classification"
+    )
+    if not data:
+        return None
+    blob = json.dumps(data)
+    if any(code in blob for code in _EXPLOSIVE_HCODES) or "Explos" in blob:
+        return True
+    # GHS classification present but no explosive hazard → clear.
+    if "GHS" in blob or "Hazard" in blob or "Pictogram" in blob:
+        return False
+    return None
+
+
+# ── native molbloom backend (no ChemCrow required) ───────────────────────────
+
+
+def _molbloom_patented(smiles: str) -> bool | None:
+    """molbloom SureChEMBL patent membership. None when molbloom is absent."""
+    try:
+        import molbloom  # type: ignore
+    except Exception:
+        return None
+    try:
+        return bool(
+            molbloom.buy(smiles, canonicalize=rdkit_available(), catalog="surechembl")
+        )
+    except Exception as exc:
+        return degrade_return(logger, exc, "molbloom patent check failed", None)
+
+
 # ── name resolution (network; ChemCrow only) ─────────────────────────────────
 
 _SMILES_CHARS_RE = re.compile(r"^[A-Za-z0-9@+\-\[\]\(\)=#$/\\%.:*]+$")
@@ -179,20 +332,20 @@ def _looks_like_smiles(text: str) -> bool:
 
 
 def name_to_smiles(name: str) -> str | None:
-    """Resolve a chemical name to SMILES via ChemCrow Query2SMILES."""
+    """Resolve a chemical name to SMILES (ChemCrow Query2SMILES → PubChem)."""
     name = (name or "").strip()
-    if not name or not gateway_enabled() or not chemcrow_available():
+    if not name or not gateway_enabled() or not (chemcrow_available() or pubchem_available()):
         return None
 
     def compute() -> str | None:
         def call() -> str | None:
-            tool = _chemcrow_tool("Query2SMILES")
-            if tool is None:
-                return None
-            out = _run_tool(tool, name)
-            if out and _looks_like_smiles(out):
-                return out.strip()
-            return None
+            if chemcrow_available():
+                tool = _chemcrow_tool("Query2SMILES")
+                if tool is not None:
+                    out = _run_tool(tool, name)
+                    if out and _looks_like_smiles(out):
+                        return out.strip()
+            return _pubchem_name_to_smiles(name)
 
         return _run_with_timeout(call, None)
 
@@ -200,21 +353,22 @@ def name_to_smiles(name: str) -> str | None:
 
 
 def name_to_cas(name: str) -> str | None:
-    """Resolve a chemical name to a CAS number via ChemCrow Query2CAS."""
+    """Resolve a chemical name to a CAS number (ChemCrow Query2CAS → PubChem)."""
     name = (name or "").strip()
-    if not name or not gateway_enabled() or not chemcrow_available():
+    if not name or not gateway_enabled() or not (chemcrow_available() or pubchem_available()):
         return None
 
     def compute() -> str | None:
         def call() -> str | None:
-            tool = _chemcrow_tool("Query2CAS")
-            if tool is None:
-                return None
-            out = _run_tool(tool, name)
-            if not out:
-                return None
-            m = _CAS_RE.search(out)
-            return m.group(0) if m else None
+            if chemcrow_available():
+                tool = _chemcrow_tool("Query2CAS")
+                if tool is not None:
+                    out = _run_tool(tool, name)
+                    if out:
+                        m = _CAS_RE.search(out)
+                        if m:
+                            return m.group(0)
+            return _pubchem_name_to_cas(name)
 
         return _run_with_timeout(call, None)
 
@@ -363,25 +517,29 @@ def mol_similarity(smiles_a: str, smiles_b: str) -> float | None:
 
 
 def patent_check(smiles: str) -> bool | None:
-    """molbloom patent pre-screen. True=likely patented, False=novel, None=unknown."""
+    """molbloom patent pre-screen. True=likely patented, False=novel, None=unknown.
+
+    Prefers ChemCrow's PatentCheck tool when installed; otherwise calls the
+    standalone ``molbloom`` SureChEMBL filter directly (same data source).
+    """
     smiles = (smiles or "").strip()
-    if not smiles or not gateway_enabled() or not chemcrow_available():
+    if not smiles or not gateway_enabled() or not (chemcrow_available() or molbloom_available()):
         return None
 
     def compute() -> bool | None:
         def call() -> bool | None:
-            tool = _chemcrow_tool("PatentCheck")
-            if tool is None:
-                return None
-            out = _run_tool(tool, smiles)
-            if not out:
-                return None
-            lowered = out.lower()
-            if "not patented" in lowered or "novel" in lowered:
-                return False
-            if "patented" in lowered:
-                return True
-            return None
+            if chemcrow_available():
+                tool = _chemcrow_tool("PatentCheck")
+                if tool is not None:
+                    out = _run_tool(tool, smiles)
+                    if out:
+                        lowered = out.lower()
+                        if "not patented" in lowered or "novel" in lowered:
+                            return False
+                        if "patented" in lowered:
+                            return True
+                    return None
+            return _molbloom_patented(smiles)
 
         return _run_with_timeout(call, None)
 
@@ -415,25 +573,34 @@ def controlled_check(smiles_or_cas: str) -> bool | None:
 
 
 def explosive_check(cas: str) -> bool | None:
-    """GHS explosive screen by CAS. True=explosive hazard, False=clear, None=unknown."""
+    """GHS explosive screen by CAS. True=explosive hazard, False=clear, None=unknown.
+
+    Prefers ChemCrow's ExplosiveCheck; otherwise reads GHS Section 2.1
+    classification straight from PubChem PUG-View (same underlying source).
+    """
     cas = (cas or "").strip()
-    if not cas or not _CAS_RE.fullmatch(cas) or not gateway_enabled() or not chemcrow_available():
+    if (
+        not cas
+        or not _CAS_RE.fullmatch(cas)
+        or not gateway_enabled()
+        or not (chemcrow_available() or pubchem_available())
+    ):
         return None
 
     def compute() -> bool | None:
         def call() -> bool | None:
-            tool = _chemcrow_tool("ExplosiveCheck")
-            if tool is None:
-                return None
-            out = _run_tool(tool, cas)
-            if not out:
-                return None
-            lowered = out.lower()
-            if "not" in lowered and "explosi" in lowered:
-                return False
-            if "explosi" in lowered:
-                return True
-            return None
+            if chemcrow_available():
+                tool = _chemcrow_tool("ExplosiveCheck")
+                if tool is not None:
+                    out = _run_tool(tool, cas)
+                    if out:
+                        lowered = out.lower()
+                        if "not" in lowered and "explosi" in lowered:
+                            return False
+                        if "explosi" in lowered:
+                            return True
+                    return None
+            return _pubchem_explosive(cas)
 
         return _run_with_timeout(call, None)
 
@@ -697,14 +864,14 @@ def chemical_profile(q: str) -> dict[str, Any]:
     smiles = base.get("smiles")
     cas = base.get("cas") or ""
 
-    if gateway_enabled() and chemcrow_available():
+    if gateway_enabled() and (chemcrow_available() or pubchem_available()):
         if not smiles:
             smiles = name_to_smiles(q)
             if smiles:
                 base["smiles"] = smiles
                 base["found"] = True
                 if base.get("source") in ("none", "empty"):
-                    base["source"] = "chemcrow"
+                    base["source"] = "chemcrow" if chemcrow_available() else "pubchem"
         if not cas:
             resolved = name_to_cas(q)
             if resolved:
