@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
+import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
+
+// AG Grid v33+ 模块化架构：不注册模块时 editable 等能力被静默忽略
+// （error #200，缺 TextEditor/EditCore），台账无法录入数据。
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { api } from "../api";
 import type { DOEPlan, Requirement, WorkbenchRow } from "../api";
@@ -171,6 +176,9 @@ export default function LabWorkbench({
       <div className="ag-theme-alpine-dark w-full" style={{ height: 280 }}>
         <AgGridReact<WorkbenchRow>
           ref={gridRef}
+          // v33+ 默认启用 Theming API，与上面导入的 CSS 主题冲突（error #239）；
+          // 显式声明沿用 v32 风格的 CSS 主题（ag-theme-alpine-dark）。
+          theme="legacy"
           rowData={rows}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
