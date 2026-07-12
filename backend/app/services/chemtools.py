@@ -298,6 +298,42 @@ def func_groups(smiles: str) -> list[str]:
     return _cached("func_groups", smiles, compute) or []
 
 
+DESCRIPTOR_NAMES = ("mol_wt", "logp", "tpsa", "hbd", "hba", "arom_rings")
+
+
+def mol_descriptors(smiles: str) -> dict[str, float] | None:
+    """RDKit physicochemical descriptors for one molecule (cached).
+
+    Returns {mol_wt, logp, tpsa, hbd, hba, arom_rings} or None when RDKit is
+    unavailable or the SMILES does not parse.  Deterministic and local — used
+    by the opt-in v2 feature set in ``domain.features``.
+    """
+    smiles = (smiles or "").strip()
+    if not smiles or not gateway_enabled():
+        return None
+
+    def compute() -> dict[str, float] | None:
+        try:
+            from rdkit import Chem  # type: ignore
+            from rdkit.Chem import Descriptors, rdMolDescriptors  # type: ignore
+
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return None
+            return {
+                "mol_wt": round(float(Descriptors.MolWt(mol)), 3),
+                "logp": round(float(Descriptors.MolLogP(mol)), 3),
+                "tpsa": round(float(Descriptors.TPSA(mol)), 3),
+                "hbd": float(rdMolDescriptors.CalcNumHBD(mol)),
+                "hba": float(rdMolDescriptors.CalcNumHBA(mol)),
+                "arom_rings": float(rdMolDescriptors.CalcNumAromaticRings(mol)),
+            }
+        except Exception as exc:
+            return degrade_return(logger, exc, "rdkit descriptors failed", None)
+
+    return _cached("mol_descriptors", smiles, compute)
+
+
 def mol_similarity(smiles_a: str, smiles_b: str) -> float | None:
     """Tanimoto similarity of two molecules (ChemCrow MolSimilarity → RDKit)."""
     a, b = (smiles_a or "").strip(), (smiles_b or "").strip()
@@ -455,6 +491,155 @@ def func_group_summary(items: list[tuple[str, str]], max_items: int = 8) -> str:
         if groups:
             lines.append(f"- {name}: {', '.join(groups[:6])}")
     return "\n".join(lines)
+
+
+# ── DOE factor chemistry review ──────────────────────────────────────────────
+
+_EPOXIDE_LABELS = ("epoxide", "epoxy")
+_AMINE_LABELS = ("amine",)
+_CURE_FACTOR_NAMES = ("cure_temperature_c", "cure_time_min", "bake_temperature_c")
+
+
+def review_doe_factors(req: Any, plan: Any) -> list[str]:
+    """Chemistry sanity review of a DOE plan against the project materials.
+
+    Advisory notes only (appended to plan.notes, never blocking):
+    * controlled-chemical hits among project materials;
+    * a reactive epoxide + amine pair present while the design has no cure
+      factor — the classic missed-interaction in coating DOE.
+    Empty when the gateway is disabled or nothing resolves (offline).
+    """
+    if not gateway_enabled():
+        return []
+    notes: list[str] = []
+    materials = list(getattr(req, "materials", None) or [])
+    group_map: dict[str, list[str]] = {}
+    for m in materials:
+        smiles = getattr(m, "smiles", None)
+        if not smiles:
+            continue
+        name = getattr(m, "name", "") or smiles
+        if controlled_check(smiles) is True:
+            notes.append(f"化学审查：材料 {name} 命中管制化学品清单，实施 DOE 前请确认合规")
+        groups = func_groups(smiles)
+        if groups:
+            group_map[name] = [g.lower() for g in groups]
+
+    has_epoxide = any(
+        any(lbl in g for lbl in _EPOXIDE_LABELS for g in groups)
+        for groups in group_map.values()
+    )
+    has_amine = any(
+        any(lbl in g for lbl in _AMINE_LABELS for g in groups)
+        for groups in group_map.values()
+    )
+    if has_epoxide and has_amine:
+        factor_names = {
+            (getattr(f, "name", "") or "").lower() for f in getattr(plan, "factors", []) or []
+        }
+        if not factor_names & set(_CURE_FACTOR_NAMES):
+            notes.append(
+                "化学审查：材料含环氧基与胺基（反应对），当前设计未包含固化温度/时间因子，"
+                "建议纳入以捕获固化动力学交互效应"
+            )
+    return notes
+
+
+# ── formulation similarity dedup (recommend paths) ───────────────────────────
+
+_DEDUP_THRESHOLD = 0.96
+
+
+def _ingredient_similarity(a: Any, b: Any) -> float:
+    """Structure/name similarity of two ingredients scaled by weight closeness."""
+    wa = float(getattr(a, "weight_pct", 0.0) or 0.0)
+    wb = float(getattr(b, "weight_pct", 0.0) or 0.0)
+    if max(wa, wb) > 0:
+        weight_closeness = 1.0 - min(1.0, abs(wa - wb) / max(wa, wb))
+    else:
+        weight_closeness = 1.0
+    if (getattr(a, "name", "") or "").strip().lower() == (getattr(b, "name", "") or "").strip().lower():
+        return weight_closeness
+    sa, sb = getattr(a, "smiles", None), getattr(b, "smiles", None)
+    if sa and sb:
+        sim = mol_similarity(sa, sb)
+        if sim is not None:
+            return sim * weight_closeness
+    return 0.0
+
+
+def formulation_similarity(a: Any, b: Any) -> float:
+    """Symmetric weighted similarity of two formulations in [0, 1]."""
+
+    def directed(x: Any, y: Any) -> float:
+        total = 0.0
+        score = 0.0
+        for ing in getattr(x, "ingredients", []) or []:
+            w = float(getattr(ing, "weight_pct", 0.0) or 0.0)
+            if w <= 0:
+                continue
+            best = max(
+                (_ingredient_similarity(ing, other) for other in getattr(y, "ingredients", []) or []),
+                default=0.0,
+            )
+            total += w
+            score += w * best
+        return score / total if total > 0 else 0.0
+
+    return min(directed(a, b), directed(b, a))
+
+
+def _strict_similarity(a: Any, b: Any) -> float:
+    """Duplicate detector: the *weakest* ingredient match across both forms.
+
+    A weighted average would mask a deliberate change in a minor component
+    (e.g. an inhibitor at 5 wt% varied ±20% is a distinct design), so dedup
+    uses the min — every single ingredient must have a near-perfect
+    counterpart before two formulations count as duplicates.
+    """
+
+    def directed(x: Any, y: Any) -> float:
+        worst = 1.0
+        seen_any = False
+        for ing in getattr(x, "ingredients", []) or []:
+            if (getattr(ing, "weight_pct", 0.0) or 0.0) <= 0:
+                continue
+            seen_any = True
+            best = max(
+                (_ingredient_similarity(ing, other) for other in getattr(y, "ingredients", []) or []),
+                default=0.0,
+            )
+            worst = min(worst, best)
+        return worst if seen_any else 0.0
+
+    return min(directed(a, b), directed(b, a))
+
+
+def dedupe_similar_formulations(
+    forms: list[Any], threshold: float = _DEDUP_THRESHOLD
+) -> tuple[list[Any], list[str]]:
+    """Drop near-duplicate formulations, keeping the earlier (higher-ranked) one.
+
+    Callers pass score-sorted lists.  Name-identical composition matching works
+    offline; structure-level matching engages when RDKit/ChemCrow is present.
+    Returns (kept, notes).  No-op when the gateway is disabled or < 2 forms.
+    """
+    if not gateway_enabled() or len(forms) < 2:
+        return forms, []
+    kept: list[Any] = []
+    notes: list[str] = []
+    for form in forms:
+        dupe_of = next(
+            (k for k in kept if _strict_similarity(form, k) >= threshold), None
+        )
+        if dupe_of is None:
+            kept.append(form)
+        else:
+            notes.append(
+                f"已去重：{getattr(form, 'name', '?')} 与 {getattr(dupe_of, 'name', '?')} "
+                f"分子组成高度相似（≥{threshold:.2f}）"
+            )
+    return kept, notes
 
 
 # ── requirement material enrichment ──────────────────────────────────────────

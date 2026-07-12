@@ -224,12 +224,16 @@ def build_doe(
     engine: str = "auto",
     n: int | None = None,
 ) -> DOEPlan:
+    from ..services import chemtools
     from ..services.engines.doe_registry import build_doe_plan
 
     factors = build_doe_factors(req)
     plan = build_doe_plan(factors, design=design, engine=engine, n=n)
     plan.plan_id = uuid.uuid4().hex
     plan.domain = req.domain
+    review = chemtools.review_doe_factors(req, plan)
+    if review:
+        plan.notes = (plan.notes + "\n" if plan.notes else "") + "\n".join(review)
     _cache_plan(plan)
     return plan
 
