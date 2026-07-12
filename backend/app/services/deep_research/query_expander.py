@@ -70,6 +70,43 @@ def build_search_queries(expanded: ExpandedQuery, topic: str = "") -> str:
     return build_rank_query(expanded, topic)
 
 
+_CHEM_ENTITY_MAX_TERMS = 4
+
+
+def _augment_with_chemical_entities(expanded: ExpandedQuery) -> ExpandedQuery:
+    """Append CAS numbers for chemical entities among the English synonyms.
+
+    Patent full-text and scholarly indexes match CAS registry numbers far more
+    precisely than trivial names (e.g. "isophorone diamine" → "2855-13-2").
+    Resolution goes through the ChemCrow gateway (cached, hard timeout) and is
+    a strict no-op when chemcrow is not installed or the gateway is disabled,
+    so offline behaviour is unchanged.
+    """
+    from .. import chemtools
+
+    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+        return expanded
+    existing = set(expanded.english_synonyms)
+    extra: list[str] = []
+    for term in expanded.english_synonyms[:_CHEM_ENTITY_MAX_TERMS]:
+        t = term.strip()
+        # Skip obvious non-entities: too short, or long multi-word phrases.
+        if len(t) < 4 or len(t.split()) > 4:
+            continue
+        try:
+            cas = chemtools.name_to_cas(t)
+        except Exception as exc:
+            log_handled_exception(logger, exc, "chemical entity CAS resolution failed")
+            continue
+        if cas and cas not in existing and cas not in extra:
+            extra.append(cas)
+    if not extra:
+        return expanded
+    return expanded.model_copy(
+        update={"english_synonyms": [*expanded.english_synonyms, *extra]}
+    )
+
+
 def prepare_search_queries(topic: str, settings: Settings | None = None) -> SearchQueries:
     """Expand topic and build per-source query bundle."""
     settings = settings or get_settings()
@@ -78,7 +115,7 @@ def prepare_search_queries(topic: str, settings: Settings | None = None) -> Sear
         empty = ExpandedQuery(intent="", chinese_keywords=[], english_synonyms=[], ipc_cpc_suggestions=[])
         return SearchQueries(empty, "", "", "", "", ())
 
-    expanded = QueryExpander(settings).expand(q)
+    expanded = _augment_with_chemical_entities(QueryExpander(settings).expand(q))
     ipc = tuple(expanded.ipc_cpc_suggestions[:5])
     return SearchQueries(
         expanded=expanded,
