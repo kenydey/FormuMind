@@ -112,7 +112,7 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api";
+  settingsTab: "llm" | "deps" | "api" | "env";
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -184,8 +184,8 @@ export interface AppState {
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
-  openSettings: (tab?: "llm" | "deps" | "api") => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api") => void;
+  openSettings: (tab?: "llm" | "deps" | "api" | "env") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api" | "env") => void;
   runLoop: () => Promise<void>;
   applyIntent: (text: string) => Promise<string[]>;
 }

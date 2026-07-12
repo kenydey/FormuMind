@@ -692,6 +692,14 @@ export const api = {
 
   kbReindex: () => post<KBReindexResult>("/api/kb/reindex", {}),
 
+  getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
+
+  postEnvFlags: (updates: Record<string, boolean>) =>
+    post<{ updated: string[]; rejected: string[]; flags: EnvFlag[] }>(
+      "/api/settings/env-flags",
+      { updates },
+    ),
+
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   getAuthStatus: () =>
@@ -1052,6 +1060,19 @@ export interface KBStats {
   chunks: number;
   embedded_chunks: number;
   embedding_available: boolean;
+}
+
+/** Boolean feature flag backed by a FORMUMIND_* environment variable. */
+export interface EnvFlag {
+  attr: string;
+  env_key: string;
+  label: string;
+  description: string;
+  category: string;
+  category_label: string;
+  hint: string;
+  value: boolean;
+  default: boolean;
 }
 
 export interface KBReindexResult {

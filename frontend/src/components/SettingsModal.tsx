@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import Modal from "./Modal";
 import DependencyManager from "./DependencyManager";
 import ApiSettingsPanel from "./ApiSettingsPanel";
+import EnvFlagsPanel from "./EnvFlagsPanel";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import { useStore } from "../store";
 import { api, formatApiError, type LLMProviderInfo } from "../api";
@@ -100,6 +101,7 @@ export default function SettingsModal() {
         {([
           ["llm", "大模型"],
           ["api", "API 配置"],
+          ["env", "环境变量"],
           ["deps", "依赖管理"],
         ] as const).map(([id, label]) => (
           <button
@@ -129,6 +131,8 @@ export default function SettingsModal() {
         <DependencyManager reloadKey={reloadKey} />
       ) : settingsTab === "api" ? (
         <ApiSettingsPanel reloadKey={reloadKey} />
+      ) : settingsTab === "env" ? (
+        <EnvFlagsPanel reloadKey={reloadKey} />
       ) : providers.length === 0 && !loadError ? (
         <p className="text-xs text-slate-500 py-4 text-center">正在加载供应商列表…</p>
       ) : (
