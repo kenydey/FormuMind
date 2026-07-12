@@ -412,6 +412,44 @@ def safety_flags(smiles: str | None, cas: str | None = None) -> dict[str, bool |
     }
 
 
+# ── requirement material enrichment ──────────────────────────────────────────
+
+
+def enrich_material_specs(materials: list[Any]) -> list[str]:
+    """Fill missing SMILES on ``MaterialSpec`` rows in place; return warnings.
+
+    Resolution order per material: curated catalog (offline, always on) →
+    ChemCrow ``Query2SMILES`` (when installed).  Materials that resolve to a
+    structure are screened against the controlled-chemical list; hits are
+    reported as human-readable warnings, never as hard blocks.
+    """
+    from ..domain.knowledge import RAW_MATERIALS
+
+    warnings: list[str] = []
+    for m in materials or []:
+        name = (getattr(m, "name", "") or "").strip()
+        if not name:
+            continue
+        if not getattr(m, "smiles", None):
+            spec = RAW_MATERIALS.get(name)
+            if spec is None:
+                lowered = name.lower()
+                spec = next(
+                    (row for key, row in RAW_MATERIALS.items() if key.lower() == lowered),
+                    None,
+                )
+            if spec and spec.get("smiles"):
+                m.smiles = spec["smiles"]
+            else:
+                resolved = name_to_smiles(name)
+                if resolved:
+                    m.smiles = resolved
+        smiles = getattr(m, "smiles", None)
+        if smiles and controlled_check(smiles) is True:
+            warnings.append(f"{name}: 命中管制化学品清单，采购/使用需合规确认")
+    return warnings
+
+
 # ── aggregate profile ────────────────────────────────────────────────────────
 
 

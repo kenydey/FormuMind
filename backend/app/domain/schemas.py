@@ -520,6 +520,7 @@ class IntentResult(BaseModel):
     confidence: float  # 0..1 heuristic confidence
     extracted_fields: list[str]  # which Requirement fields were populated
     engine: str  # "llm" | "offline-heuristic"
+    warnings: list[str] = Field(default_factory=list)  # e.g. controlled-chemical hits
 
 
 # ── v0.8: Hierarchical multi-agent review ────────────────────────────────────

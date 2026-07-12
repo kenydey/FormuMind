@@ -735,6 +735,57 @@ def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:
         return degrade_return(logger, exc, "ChemCrow WebSearch failed", [])
 
 
+_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+")
+
+
+def split_chemcrow_answer(
+    text: str, *, query: str, limit: int = 5, relevance: float = 0.92
+) -> list[Evidence]:
+    """Split a ChemCrow LitSearch answer into per-citation Evidence rows.
+
+    paper-qa answers embed DOIs in their citation lines.  One Evidence per
+    unique DOI (identifier ``doi:...``) lets the rows participate in dedup,
+    re-ranking and citation chips like any other literature hit.  The full
+    answer is always kept as the first row; when no DOI is present the output
+    degrades to exactly the legacy single-blob shape.
+    """
+    body = str(text).strip()
+    if not body:
+        return []
+    out = [
+        Evidence(
+            source="ChemCrow-Lit",
+            identifier=f"chemlit:{abs(hash(query)) % 0xFFFF:04x}",
+            title=f"LitSearch: {query[:80]}",
+            snippet=body[:600],
+            relevance=relevance,
+        )
+    ]
+    seen: set[str] = set()
+    for match in _DOI_RE.finditer(body):
+        doi = match.group(0).rstrip(".,;)")
+        if doi in seen:
+            continue
+        seen.add(doi)
+        # Use the line containing the DOI as the citation title/snippet.
+        line_start = body.rfind("\n", 0, match.start()) + 1
+        line_end = body.find("\n", match.end())
+        line = body[line_start : line_end if line_end >= 0 else len(body)].strip()
+        title = line.replace(doi, "").strip(" -–—:.,;()[]") or f"DOI {doi}"
+        out.append(
+            Evidence(
+                source="ChemCrow-Lit",
+                identifier=f"doi:{doi}",
+                title=title[:160],
+                snippet=line[:600] or body[:600],
+                relevance=max(0.0, min(1.0, relevance - 0.03)),
+            )
+        )
+        if len(out) >= limit + 1:
+            break
+    return out
+
+
 def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
     """Chemical literature search via ChemCrow's LiteratureSearch tool.
 
@@ -751,15 +802,7 @@ def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
         result_text = tool._run(query) if hasattr(tool, "_run") else tool.run(query)  # type: ignore
         if not result_text:
             return []
-        return [
-            Evidence(
-                source="ChemCrow-Lit",
-                identifier=f"chemlit:{abs(hash(query)) % 0xFFFF:04x}",
-                title=f"LitSearch: {query[:80]}",
-                snippet=str(result_text)[:600],
-                relevance=0.92,
-            )
-        ]
+        return split_chemcrow_answer(str(result_text), query=query, limit=limit)
     except Exception as exc:
         return degrade_return(logger, exc, "ChemCrow LiteratureSearch failed", [])
 

@@ -214,8 +214,19 @@ def parse_intent(text: str) -> IntentResult:
     """Parse a free-text brief into a structured Requirement.
 
     Tries the configured LLM first; always falls back to the offline heuristic.
+    Parsed materials get SMILES gap-fill + a controlled-chemical screen via the
+    ChemCrow gateway (no-op offline).
     """
     result = _llm_parse(text)
-    if result is not None:
-        return result
-    return _offline_parse(text)
+    if result is None:
+        result = _offline_parse(text)
+    if result.requirement.materials:
+        from . import chemtools
+
+        try:
+            result.warnings.extend(
+                chemtools.enrich_material_specs(result.requirement.materials)
+            )
+        except Exception as exc:
+            log_handled_exception(logger, exc, "material enrichment failed")
+    return result

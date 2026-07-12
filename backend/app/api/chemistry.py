@@ -2,11 +2,22 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 
+from ..domain.schemas import MaterialSpec
 from ..services.chemical_lookup import lookup_chemical
-from ..services.chemtools import availability, chemical_profile
+from ..services.chemtools import availability, chemical_profile, enrich_material_specs
 
 router = APIRouter(prefix="/api", tags=["chemistry"])
+
+
+class EnrichMaterialsRequest(BaseModel):
+    materials: list[MaterialSpec] = Field(default_factory=list)
+
+
+class EnrichMaterialsResponse(BaseModel):
+    materials: list[MaterialSpec]
+    warnings: list[str] = Field(default_factory=list)
 
 
 @router.get("/chemical/lookup")
@@ -32,3 +43,11 @@ def chemical_profile_endpoint(
 def chemical_tools_status() -> dict:
     """Availability report for the ChemCrow tool gateway (per capability)."""
     return availability()
+
+
+@router.post("/chemical/enrich-materials", response_model=EnrichMaterialsResponse)
+def enrich_materials_endpoint(req: EnrichMaterialsRequest) -> EnrichMaterialsResponse:
+    """Fill missing SMILES on a material list (catalog → ChemCrow) and run a
+    controlled-chemical screen. Warnings are advisory — never hard blocks."""
+    warnings = enrich_material_specs(req.materials)
+    return EnrichMaterialsResponse(materials=req.materials, warnings=warnings)
