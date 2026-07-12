@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     enrich_compounds: bool = False
     # 化学类问题路由到 ChemCrow 智能体（需 intel extra + 有效 LLM key）。
     use_chemcrow: bool = True
+    # ChemCrow 工具网关（services/chemtools.py）：工具级化学能力
+    # （名称→SMILES/CAS、官能团、分子专利预筛、管制/爆炸性筛查）。
+    # 缺 chemcrow/rdkit 或关闭开关时所有调用返回中性值，管线行为不变。
+    chemtools_enabled: bool = True
+    chemtools_timeout_s: float = 10.0
 
     # NotebookLM 作为检索 Source（notebooklm-py 直连库；浏览器会话认证）。
     # 需 `notebooklm` extra + 一次性 `notebooklm login` 生成会话文件。

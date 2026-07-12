@@ -129,6 +129,30 @@ def _lookup_offline_compounds(q: str) -> dict[str, Any] | None:
     }
 
 
+def _lookup_chemtools(q: str) -> dict[str, Any] | None:
+    """Tier 4: ChemCrow Query2SMILES/Query2CAS (chem-space + PubChem under the
+    hood) — reached only when catalog, PubChem REST and PubChemPy all miss."""
+    from . import chemtools
+
+    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+        return None
+    smiles = chemtools.name_to_smiles(q)
+    cas = chemtools.name_to_cas(q)
+    if not smiles and not cas:
+        return None
+    return {
+        "query": q,
+        "cas": cas or "",
+        "iupac_name": q,
+        "zh_name": _zh_from_query(q),
+        "formula": "",
+        "smiles": smiles,
+        "molar_mass": None,
+        "found": True,
+        "source": "chemcrow",
+    }
+
+
 def lookup_chemical(q: str) -> dict[str, Any]:
     """Resolve a chemical query (CN/EN name or CAS) to structured metadata."""
     key = (q or "").strip().lower()
@@ -147,7 +171,7 @@ def lookup_chemical(q: str) -> dict[str, Any]:
     cached = _cache_get(key)
     if cached:
         return cached
-    for resolver in (_lookup_catalog, _lookup_pubchem, _lookup_offline_compounds):
+    for resolver in (_lookup_catalog, _lookup_pubchem, _lookup_offline_compounds, _lookup_chemtools):
         hit = resolver(q.strip())
         if hit:
             return _cache_put(key, hit)
