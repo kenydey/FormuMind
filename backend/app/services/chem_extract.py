@@ -99,6 +99,14 @@ _SMILES_CAND_RE = re.compile(r"(?<![\w/])[A-Za-z0-9@+\-\[\]()=#$/\\%:.]{5,120}(?
 _SMILES_HINT_RE = re.compile(r"[=#\[\]]|[a-z]\d|\d\(")
 
 
+def _has_ring_closure(token: str) -> bool:
+    """A repeated bare digit (e.g. the two '1's in C1CO1) marks a SMILES ring
+    bond pair — formulas never reuse a subscript digit, so this disambiguates
+    aliphatic ring SMILES (no brackets/bonds) from stoichiometric formulas."""
+    digits = [ch for ch in token if ch.isdigit()]
+    return len(digits) != len(set(digits))
+
+
 def extract_smiles(text: str) -> list[dict]:
     """SMILES tokens verified by RDKit; [] when RDKit is absent (too noisy)."""
     try:
@@ -112,12 +120,16 @@ def extract_smiles(text: str) -> list[dict]:
     seen: set[str] = set()
     for m in _SMILES_CAND_RE.finditer(text or ""):
         token = m.group(0).strip(".,;:")
-        if len(token) < 5 or " " in token or not _SMILES_HINT_RE.search(token):
+        if len(token) < 5 or " " in token:
+            continue
+        ring_closure = _has_ring_closure(token)
+        if not (_SMILES_HINT_RE.search(token) or ring_closure):
             continue
         if token in seen or any(ch.isdigit() for ch in token[:1]):
             continue
-        # Skip things already recognised as formulas (Zn3(PO4)2 etc.).
-        if _FORMULA_CAND_RE.fullmatch(token):
+        # Skip things already recognised as formulas (Zn3(PO4)2 etc.), unless
+        # a ring-closure digit pair makes SMILES the more plausible reading.
+        if not ring_closure and _FORMULA_CAND_RE.fullmatch(token):
             continue
         try:
             mol = Chem.MolFromSmiles(token, sanitize=True)
