@@ -1,4 +1,11 @@
-import { api, awaitTaskStream, formatApiError, parseSearchStreamData, sanitizeEvidenceForApi } from "../../api";
+import {
+  api,
+  awaitTaskStream,
+  formatApiError,
+  parseKbIngestData,
+  parseSearchStreamData,
+  sanitizeEvidenceForApi,
+} from "../../api";
 import type { Evidence, SourceStatus } from "../../api";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
@@ -140,9 +147,13 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               evidence?: Evidence[];
               source_status?: Record<string, SourceStatus>;
               used_seed_fallback?: boolean;
+              kb_ingest_task_id?: string;
             }
           | undefined;
         if (r?.evidence?.length) get().addSources(r.evidence);
+        // Background KB build runs server-side; track it without blocking —
+        // the search UI is already done at this point.
+        if (r?.kb_ingest_task_id) void get().trackKbIngest(r.kb_ingest_task_id);
         if (r?.source_status) {
           set((draft) => {
             draft.sourceStatus = r.source_status!;
@@ -172,6 +183,66 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           draft.searchProgress = null;
         });
       }
+    },
+
+    trackKbIngest: async (taskId) => {
+      set((draft) => {
+        draft.kbIngest = {
+          taskId,
+          docs: [],
+          done: 0,
+          total: 0,
+          indexed: 0,
+          failed: 0,
+          message: "知识库后台构建中…",
+          active: true,
+        };
+      });
+      try {
+        const final = await awaitTaskStream(
+          taskId,
+          (ev) => {
+            const progress = parseKbIngestData(ev.data as Record<string, unknown> | undefined);
+            set((draft) => {
+              if (!draft.kbIngest || draft.kbIngest.taskId !== taskId) return;
+              if (progress) {
+                draft.kbIngest.docs = progress.docs;
+                draft.kbIngest.done = progress.done;
+                draft.kbIngest.total = progress.total;
+                draft.kbIngest.indexed = progress.indexed;
+                draft.kbIngest.failed = progress.failed;
+              }
+              if (ev.message) draft.kbIngest.message = ev.message;
+            });
+          },
+          600_000
+        );
+        const progress = parseKbIngestData(final.data as Record<string, unknown> | undefined);
+        set((draft) => {
+          if (!draft.kbIngest || draft.kbIngest.taskId !== taskId) return;
+          if (progress) {
+            draft.kbIngest.docs = progress.docs;
+            draft.kbIngest.done = progress.done;
+            draft.kbIngest.total = progress.total;
+            draft.kbIngest.indexed = progress.indexed;
+            draft.kbIngest.failed = progress.failed;
+          }
+          draft.kbIngest.message = final.message || "知识库构建完成";
+          draft.kbIngest.active = false;
+        });
+      } catch (e) {
+        set((draft) => {
+          if (!draft.kbIngest || draft.kbIngest.taskId !== taskId) return;
+          draft.kbIngest.message = `知识库构建中断：${formatApiError(e)}`;
+          draft.kbIngest.active = false;
+        });
+      }
+    },
+
+    dismissKbIngest: () => {
+      set((draft) => {
+        draft.kbIngest = null;
+      });
     },
 
     loadSourceStatus: async () => {
@@ -263,5 +334,5 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'setSearchQuery' | 'setSourceTypes' | 'setRecommendSourceTypes' | 'addSources' | 'removeSource' | 'clearSources' | 'toggleSourceSelected' | 'selectAllSources' | 'deselectAllSources' | 'searchSources' | 'loadSourceStatus' | 'hydrateLlmSettings' | 'uploadFiles' | 'sendChat'>;
+  } as Pick<AppState, 'setSearchQuery' | 'setSourceTypes' | 'setRecommendSourceTypes' | 'addSources' | 'removeSource' | 'clearSources' | 'toggleSourceSelected' | 'selectAllSources' | 'deselectAllSources' | 'searchSources' | 'trackKbIngest' | 'dismissKbIngest' | 'loadSourceStatus' | 'hydrateLlmSettings' | 'uploadFiles' | 'sendChat'>;
 }

@@ -197,6 +197,12 @@ class Settings(BaseSettings):
     fulltext_max_docs: int = 8
     fulltext_timeout_s: float = 20.0
 
+    # 异步入库队列（KB stream P0）：检索/深度研究/推荐收尾后，后台任务逐篇
+    # 获取全文 → 解析 → 切块 → 入持久知识库，前台经 SSE 实时看到每篇状态，
+    # 检索结果展示不等待解析。按 origin_url / 内容哈希双重去重。
+    kb_ingest_auto: bool = True
+    kb_ingest_max_docs: int = 12
+
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），
     # 问答检索覆盖整个累计语料而非单次请求携带的 sources。纯本地无网络。

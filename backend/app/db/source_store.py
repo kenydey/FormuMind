@@ -30,6 +30,7 @@ class SourceStore:
         source_guide: SourceGuideSchema | None = None,
         extraction_status: str = "skipped",
         extraction_error: str | None = None,
+        origin_url: str | None = None,
     ) -> str:
         source_id = str(uuid.uuid4())
         guide_payload = source_guide.model_dump(mode="json") if source_guide else None
@@ -39,6 +40,7 @@ class SourceStore:
             title=title,
             source_kind=source_kind,
             content_hash=content_hash,
+            origin_url=(origin_url or None),
             full_text=full_text,
             raw_text_chars=len(full_text),
             source_guide=guide_payload,
@@ -59,6 +61,19 @@ class SourceStore:
             return (
                 session.query(SourceDocument)
                 .filter(SourceDocument.content_hash == content_hash)
+                .order_by(SourceDocument.created_at.desc())
+                .first()
+            )
+
+    def find_by_origin_url(self, origin_url: str) -> SourceDocument | None:
+        """Async-ingest dedup: has this URL / patent id / DOI been acquired?"""
+        key = (origin_url or "").strip()
+        if not key:
+            return None
+        with self._session_factory() as session:
+            return (
+                session.query(SourceDocument)
+                .filter(SourceDocument.origin_url == key)
                 .order_by(SourceDocument.created_at.desc())
                 .first()
             )

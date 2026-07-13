@@ -1033,6 +1033,44 @@ export function parseSearchStreamData(
   };
 }
 
+/** Per-document status of the background KB ingest task (SSE data.docs). */
+export interface KbIngestDoc {
+  identifier: string;
+  title: string;
+  kind: string;
+  status: "queued" | "fetching" | "indexing" | "indexed" | "skipped" | "failed" | "unsupported";
+  source_id?: string | null;
+  error?: string | null;
+}
+
+export interface KbIngestProgress {
+  docs: KbIngestDoc[];
+  done: number;
+  total: number;
+  indexed: number;
+  failed: number;
+}
+
+export function parseKbIngestData(
+  data: Record<string, unknown> | null | undefined
+): KbIngestProgress | null {
+  if (!data || !Array.isArray(data.docs)) return null;
+  const docs = data.docs as KbIngestDoc[];
+  return {
+    docs,
+    done: typeof data.done === "number" ? data.done : 0,
+    total: typeof data.total === "number" ? data.total : docs.length,
+    indexed:
+      typeof data.indexed === "number"
+        ? data.indexed
+        : docs.filter((d) => d.status === "indexed").length,
+    failed:
+      typeof data.failed === "number"
+        ? data.failed
+        : docs.filter((d) => d.status === "failed").length,
+  };
+}
+
 export interface IngestResponse {
   filename: string;
   evidence: Evidence[];

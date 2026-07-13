@@ -55,6 +55,7 @@ export const useStore = create<AppState>()(
       chatHistory: [],
       searchBusy: false,
       searchProgress: null,
+      kbIngest: null,
       deepResearchBusy: false,
       deepResearchStage: "",
       deepResearchMessage: "",

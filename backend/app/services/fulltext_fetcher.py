@@ -172,26 +172,36 @@ def _dispatch_fetch(kind: str, ev: Evidence, timeout: float) -> str | None:
 
 
 def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
-    """Split fetched full text into chunk Evidence rows preserving provenance."""
-    from .ingestion import _chunk_text
+    """Split fetched full text into chunk Evidence rows preserving provenance.
+
+    Structure-aware: fetched text is Markdown (trafilatura / PDF parsers), so
+    heading paths survive into chunk titles and tables stay atomic — the same
+    chunker every other ingest path uses.
+    """
+    from .chunking import chunk_markdown
 
     settings = get_settings()
-    chunks = _chunk_text(
+    chunks = chunk_markdown(
         text,
         max_chars=settings.ingest_chunk_max_chars,
         overlap=settings.ingest_chunk_overlap,
     )
-    chunks = [c for c in chunks if len(c.strip()) > 30][: settings.ingest_max_chunks]
-    return [
-        Evidence(
-            source=ev.source,
-            identifier=f"{ev.identifier}#p{i}",
-            title=ev.title if i == 0 else f"{ev.title} (p.{i + 1})",
-            snippet=chunk[:600],
-            relevance=max(0.2, round(ev.relevance - i * 0.01, 3)),
+    chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.ingest_max_chunks]
+    out: list[Evidence] = []
+    for i, chunk in enumerate(chunks):
+        title = ev.title if i == 0 else f"{ev.title} (p.{i + 1})"
+        if chunk.heading_path:
+            title = f"{title} · {chunk.heading_path}"
+        out.append(
+            Evidence(
+                source=ev.source,
+                identifier=f"{ev.identifier}#p{i}",
+                title=title,
+                snippet=chunk.text[:600],
+                relevance=max(0.2, round(ev.relevance - i * 0.01, 3)),
+            )
         )
-        for i, chunk in enumerate(chunks)
-    ]
+    return out
 
 
 def _persist_fulltext(text: str, ev: Evidence, kind: str) -> str | None:
@@ -211,6 +221,7 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str) -> str | None:
             full_text=text,
             content_hash=content_hash,
             extraction_status="fulltext",
+            origin_url=(ev.identifier or "").strip()[:1024] or None,
         )
         from .kb_index import index_source
 

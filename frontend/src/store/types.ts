@@ -4,6 +4,7 @@ import type {
   DOEPlan,
   Evidence,
   Formulation,
+  KbIngestDoc,
   LeverSpec,
   LLMConfig,
   LoopReport,
@@ -20,6 +21,18 @@ import type {
 } from "../api";
 import type { ConstraintKey } from "../constants/constraints";
 import type { ProjectSummary, StoreWorkspaceSlice } from "../projectWorkspace";
+
+/** Background KB build (async ingest after search/research) tracking state. */
+export interface KbIngestState {
+  taskId: string;
+  docs: KbIngestDoc[];
+  done: number;
+  total: number;
+  indexed: number;
+  failed: number;
+  message: string;
+  active: boolean;
+}
 
 export const DOMAIN_OBJECTIVES: Record<ProductDomain, ObjectiveSpec[]> = {
   anticorrosion_coating: [
@@ -99,6 +112,7 @@ export interface AppState {
   chatHistory: ChatMessage[];
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;
+  kbIngest: KbIngestState | null;
   deepResearchBusy: boolean;
   deepResearchStage: string;
   deepResearchMessage: string;
@@ -177,6 +191,8 @@ export interface AppState {
   selectAllSources: () => void;
   deselectAllSources: () => void;
   searchSources: (queryOverride?: string) => Promise<void>;
+  trackKbIngest: (taskId: string) => Promise<void>;
+  dismissKbIngest: () => void;
   loadSourceStatus: () => Promise<void>;
   hydrateLlmSettings: () => Promise<void>;
   uploadFiles: (files: File[]) => Promise<void>;

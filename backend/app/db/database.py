@@ -35,6 +35,7 @@ def make_engine(db_url: str) -> Engine:
     _drop_legacy_workbench_table(engine)
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
+    _ensure_source_document_columns(engine)
     return engine
 
 
@@ -70,6 +71,18 @@ def _ensure_campaign_columns(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE campaigns ADD COLUMN lever_snapshot JSON"))
         if "sample_refs" not in cols:
             conn.execute(text("ALTER TABLE campaigns ADD COLUMN sample_refs JSON DEFAULT '[]'"))
+
+
+def _ensure_source_document_columns(engine: Engine) -> None:
+    """Add async-ingest provenance columns to legacy source_documents tables."""
+    from sqlalchemy import inspect, text
+
+    if "source_documents" not in inspect(engine).get_table_names():
+        return
+    cols = {c["name"] for c in inspect(engine).get_columns("source_documents")}
+    with engine.begin() as conn:
+        if "origin_url" not in cols:
+            conn.execute(text("ALTER TABLE source_documents ADD COLUMN origin_url VARCHAR(1024)"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:

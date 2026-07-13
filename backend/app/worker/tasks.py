@@ -10,6 +10,8 @@ from ..services.errors import degrade_return, log_handled_exception, optional_im
 import json
 import logging
 import os
+import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -277,6 +279,9 @@ def run_deep_research_task(self, payload: dict) -> dict:
             "report": report.model_dump(),
             "grounded_evidence": [e.model_dump() for e in grounded],
         }
+        kb_task_id = dispatch_kb_ingest(result["grounded_evidence"])
+        if kb_task_id:
+            result["kb_ingest_task_id"] = kb_task_id
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "deep_research", result)
         return result
@@ -340,6 +345,12 @@ def run_recommend_task(self, payload: dict) -> dict:
         )
         research = graph_state_to_research_result(state, req)
         result = {"research": research.model_dump()}
+        grounded = state.get("grounded_evidence") or []
+        kb_task_id = dispatch_kb_ingest(
+            [e.model_dump() if hasattr(e, "model_dump") else e for e in grounded]
+        )
+        if kb_task_id:
+            result["kb_ingest_task_id"] = kb_task_id
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "recommend", result)
         return result
@@ -384,6 +395,115 @@ def run_optimize_task(self, payload: dict) -> dict:
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "optimize", err, failed=True, message=str(exc))
         raise
+
+
+# ── async KB ingest (search → fulltext → knowledge base, in background) ──────
+
+
+def _kb_ingest_impl(task_id: str, payload: dict) -> dict:
+    """Shared body for the Celery task and the eager-mode background thread."""
+    from ..domain.schemas import Evidence
+    from ..services import kb_ingest
+
+    evidence = [Evidence.model_validate(e) for e in payload.get("evidence") or []]
+    docs_state: dict[str, dict] = {}
+    order: list[str] = []
+
+    def status_cb(meta: dict) -> None:
+        ident = meta["identifier"]
+        if ident not in docs_state:
+            order.append(ident)
+        docs_state[ident] = dict(meta)
+        docs = [docs_state[i] for i in order]
+        done = sum(1 for d in docs if d["status"] in kb_ingest.TERMINAL_STATES)
+        total = len(docs)
+        active = next((d for d in docs if d["status"] in ("fetching", "indexing")), None)
+        if active:
+            verb = "获取全文" if active["status"] == "fetching" else "解析入库"
+            msg = f"知识库构建 {done}/{total} · 正在{verb}：{active['title'][:60]}"
+        else:
+            msg = f"知识库构建 {done}/{total}"
+        publish_progress(
+            task_id,
+            TaskProgressStatus.RUNNING,
+            stage="kb_ingest",
+            message=msg,
+            progress=(done / total) if total else 0.0,
+            data={
+                "docs": docs,
+                "done": done,
+                "total": total,
+                "indexed": sum(1 for d in docs if d["status"] == "indexed"),
+                "failed": sum(1 for d in docs if d["status"] == "failed"),
+            },
+        )
+
+    try:
+        result = kb_ingest.ingest_evidence_docs(evidence, status_cb=status_cb)
+        summary = (
+            f"知识库构建完成：入库 {result['indexed']} 篇"
+            + (f"，已在库 {result['skipped']} 篇" if result["skipped"] else "")
+            + (f"，失败 {result['failed']} 篇" if result["failed"] else "")
+        )
+        persist_result(task_id, result, failed=False)
+        _persist_terminal(task_id, "kb_ingest", result, message=summary)
+        return result
+    except Exception as exc:
+        logger.exception("kb_ingest task failed")
+        err = {"error": str(exc)}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "kb_ingest", err, failed=True, message=str(exc))
+        raise
+
+
+@celery_app.task(bind=True, name="formumind.kb_ingest")
+def run_kb_ingest_task(self, payload: dict) -> dict:
+    return _kb_ingest_impl(self.request.id, payload)
+
+
+def dispatch_kb_ingest(evidence_dicts: list[dict]) -> str | None:
+    """Fire-and-forget background KB build for freshly searched evidence.
+
+    Returns the ingest task id (for the frontend to stream), or None when the
+    feature is off / nothing in the list is fetchable.  With a real broker the
+    job goes through Celery; in eager mode ``.delay()`` would run inline and
+    stall the parent task, so a daemon thread provides the same non-blocking
+    behaviour for single-process deployments.
+    """
+    from ..config import get_settings
+    from ..domain.schemas import Evidence
+    from ..services import kb_ingest
+
+    if not kb_ingest.ingest_enabled() or not evidence_dicts:
+        return None
+    try:
+        rows = [Evidence.model_validate(e) for e in evidence_dicts]
+        targets = kb_ingest.select_ingest_targets(rows)
+    except Exception as exc:
+        return degrade_return(logger, exc, "kb_ingest target selection failed", None)
+    if not targets:
+        return None
+
+    payload = {"evidence": [ev.model_dump() for ev, _ in targets]}
+    if get_settings().celery_eager:
+        task_id = f"kbingest-{uuid.uuid4().hex[:16]}"
+        task_manager.register_celery_task(task_id, "kb_ingest")
+        threading.Thread(
+            target=lambda: _safe_kb_ingest(task_id, payload),
+            name="kb-ingest",
+            daemon=True,
+        ).start()
+        return task_id
+    async_result = run_kb_ingest_task.delay(payload)
+    task_manager.register_celery_task(async_result.id, "kb_ingest")
+    return async_result.id
+
+
+def _safe_kb_ingest(task_id: str, payload: dict) -> None:
+    try:
+        _kb_ingest_impl(task_id, payload)
+    except Exception as exc:  # already persisted as failed inside the impl
+        log_handled_exception(logger, exc, "kb_ingest background thread")
 
 
 @celery_app.task(bind=True, name="formumind.search")
@@ -439,6 +559,11 @@ def run_search_task(self, payload: dict) -> dict:
             "source_status": status,
             "used_seed_fallback": any(e.is_seed_corpus for e in final),
         }
+        # Background KB build: enqueue is non-blocking, so the search stream
+        # terminates immediately below and the frontend keeps its results.
+        kb_task_id = dispatch_kb_ingest(data["evidence"])
+        if kb_task_id:
+            data["kb_ingest_task_id"] = kb_task_id
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "search", data)
         return data

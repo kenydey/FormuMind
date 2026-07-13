@@ -33,6 +33,31 @@ function iconForSource(source: string): string {
   return "📎";
 }
 
+/** Per-document badge for the background KB build (async ingest). */
+const KB_STATUS_BADGES: Record<string, { label: string; cls: string; pulse?: boolean }> = {
+  queued: { label: "待入库", cls: "text-slate-500 border-edge/60" },
+  fetching: { label: "获取全文", cls: "text-amber-300 border-amber-500/40", pulse: true },
+  indexing: { label: "入库中", cls: "text-amber-300 border-amber-500/40", pulse: true },
+  indexed: { label: "已入库", cls: "text-teal-300 border-teal-500/40" },
+  skipped: { label: "已在库", cls: "text-teal-500/80 border-teal-500/25" },
+  failed: { label: "入库失败", cls: "text-rose-400 border-rose-500/40" },
+};
+
+function KbDocBadge({ status, error }: { status: string; error?: string | null }) {
+  const badge = KB_STATUS_BADGES[status];
+  if (!badge) return null;
+  return (
+    <span
+      title={error || undefined}
+      className={`shrink-0 text-[9px] border rounded px-1 ${badge.cls} ${
+        badge.pulse ? "animate-pulse" : ""
+      }`}
+    >
+      {badge.label}
+    </span>
+  );
+}
+
 export default function SourcesPanel() {
   const {
     searchQuery,
@@ -59,6 +84,8 @@ export default function SourcesPanel() {
     refreshKnowledgeBase,
     error,
     usedSeedFallback,
+    kbIngest,
+    dismissKbIngest,
   } = useStore(
     useShallow((s) => ({
       searchQuery: s.searchQuery,
@@ -85,6 +112,8 @@ export default function SourcesPanel() {
       refreshKnowledgeBase: s.refreshKnowledgeBase,
       error: s.error,
       usedSeedFallback: s.usedSeedFallback,
+      kbIngest: s.kbIngest,
+      dismissKbIngest: s.dismissKbIngest,
     }))
   );
   const fileInput = useRef<HTMLInputElement>(null);
@@ -102,6 +131,13 @@ export default function SourcesPanel() {
   const showChemcrowBadge =
     chemcrowStatus !== undefined &&
     (sourceTypes.includes("literature") || sourceTypes.includes("internet"));
+
+  const kbDocByIdentifier: Record<string, { status: string; error?: string | null }> = {};
+  if (kbIngest) {
+    for (const d of kbIngest.docs) {
+      kbDocByIdentifier[d.identifier] = { status: d.status, error: d.error };
+    }
+  }
 
   return (
     <aside className="glass rounded-xl p-4 flex flex-col gap-3 h-full overflow-hidden">
@@ -255,6 +291,43 @@ export default function SourcesPanel() {
         </div>
       )}
 
+      {kbIngest && (
+        <div className="shrink-0 rounded-lg border border-teal-500/25 bg-teal-500/5 px-3 py-2 text-[11px]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-teal-300 uppercase tracking-widest shrink-0">
+              📚 知识库构建
+            </span>
+            <span
+              className={`text-slate-400 truncate ${kbIngest.active ? "animate-pulse" : ""}`}
+              title={kbIngest.message}
+            >
+              {kbIngest.message}
+            </span>
+            {!kbIngest.active && (
+              <button
+                onClick={dismissKbIngest}
+                className="shrink-0 text-slate-600 hover:text-slate-300"
+                title="关闭"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {kbIngest.total > 0 && (
+            <div className="mt-1.5 h-1 bg-edge rounded overflow-hidden">
+              <div
+                className={`h-full transition-all duration-300 ${
+                  kbIngest.active ? "bg-teal-400/80 animate-pulse" : "bg-teal-500/70"
+                }`}
+                style={{
+                  width: `${Math.min(100, Math.max(6, (kbIngest.done / kbIngest.total) * 100))}%`,
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={() => void runDeepResearch()}
@@ -373,6 +446,12 @@ export default function SourcesPanel() {
                       </span>
                     )}
                     <span className="truncate">{e.title}</span>
+                    {kbDocByIdentifier[e.identifier] && (
+                      <KbDocBadge
+                        status={kbDocByIdentifier[e.identifier].status}
+                        error={kbDocByIdentifier[e.identifier].error}
+                      />
+                    )}
                   </div>
                   <div className="text-slate-600 truncate">{e.source}</div>
                 </div>
