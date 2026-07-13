@@ -56,7 +56,11 @@ def gateway_enabled() -> bool:
 
 
 def chemcrow_available() -> bool:
-    return optional_import("chemcrow")
+    try:
+        __import__("chemcrow")
+        return True
+    except Exception:
+        return False
 
 
 def rdkit_available() -> bool:

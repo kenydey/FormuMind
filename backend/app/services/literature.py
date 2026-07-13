@@ -863,6 +863,14 @@ def get_source_availability() -> dict[str, dict]:
     def _ok(*pkgs: str) -> bool:
         return any(optional_import(pkg) for pkg in pkgs)
 
+    def _pip_installed(pkg: str) -> bool:
+        try:
+            from importlib.metadata import distribution
+            distribution(pkg)
+            return True
+        except Exception:
+            return False
+
     from .notebooklm import get_setup_status
     from ..config import get_settings
 
@@ -882,7 +890,8 @@ def get_source_availability() -> dict[str, dict]:
         or serpapi_ok
     )
     web_ok = _ok("ddgs") or _ok("duckduckgo_search")
-    chemcrow_ok = _ok("chemcrow")
+    chemcrow_import_ok = _ok("chemcrow")
+    chemcrow_installed = chemcrow_import_ok or _pip_installed("chemcrow")
 
     return {
         "patents": {
@@ -900,7 +909,7 @@ def get_source_availability() -> dict[str, dict]:
             "offline_fallback": False,
             "reason": None if lit_ok else "library_missing",
             "hint": (
-                (None if chemcrow_ok else "pip install -e '.[intel]' 启用 ChemCrow LitSearch")
+                (None if chemcrow_import_ok else "chemcrow 已安装但存在兼容性问题" if chemcrow_installed else "pip install -e '.[intel]' 启用 ChemCrow LitSearch")
                 if lit_ok
                 else "pip install -e '.[intel]' 或配置 OpenAlex mailto / SerpAPI 启用学术检索"
             ),
@@ -956,12 +965,14 @@ def get_source_availability() -> dict[str, dict]:
             "hint": None if (tavily_ok or serpapi_ok) else "CNIPA 并行路需 Tavily 或 SerpAPI",
         },
         "chemcrow": {
-            "available": chemcrow_ok,
-            "offline_fallback": False,
-            "reason": None if chemcrow_ok else "library_missing",
+            "available": chemcrow_installed,
+            "offline_fallback": chemcrow_import_ok,
+            "reason": None if chemcrow_import_ok else ("compat_issue" if chemcrow_installed else "library_missing"),
             "hint": (
                 None
-                if chemcrow_ok
+                if chemcrow_import_ok
+                else "chemcrow 0.3.7 已安装但与 Pydantic v2 不兼容，WebSearch/LitSearch 将通过其他引擎降级运行"
+                if chemcrow_installed
                 else "pip install -e '.[intel]' 启用 ChemCrow WebSearch (SerpAPI) + LitSearch (paper-qa) 化学增强检索"
             ),
         },
