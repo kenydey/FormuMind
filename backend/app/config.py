@@ -189,6 +189,11 @@ class Settings(BaseSettings):
     # 逐级回退；指定名称则固定首选（仍向下回退）。marker/MinerU 为重型可选
     # 依赖（版面感知、表格保真的真 Markdown 输出）。
     pdf_parser: str = "auto"
+    # 扫描件 OCR（MinerU 管线；需 OCR 依赖，慢但能读图片型 PDF）。
+    pdf_ocr: bool = False
+    # 公式增强（Docling）：显示公式转 LaTeX $$…$$，化学反应方程式保真。
+    # 首次使用会额外下载公式识别模型。
+    pdf_formula_enrichment: bool = True
 
     # 检索结果全文获取（KB P0）：把摘要级命中升级为全文分块并持久化原文。
     # 专利 PDF（USPTO/EPO/Google）+ OA 文献 PDF（OpenAlex/arXiv）+ 网页正文

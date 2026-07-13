@@ -33,11 +33,11 @@ def test_parse_empty_returns_none_parser():
 
 def test_pdf_tier_order_auto_and_pinned():
     names = [n for n, _ in parsing._pdf_tier_order("auto")]
-    assert names == ["marker", "mineru", "markitdown", "pypdf"]
+    assert names == ["docling", "marker", "mineru", "markitdown", "pypdf"]
     names = [n for n, _ in parsing._pdf_tier_order("markitdown")]
     assert names == ["markitdown", "pypdf"]  # pinned + lighter fallbacks only
     names = [n for n, _ in parsing._pdf_tier_order("nonsense")]
-    assert names[0] == "marker"  # unknown → auto
+    assert names[0] == "docling"  # unknown → auto
 
 
 def test_pdf_cascade_falls_through_to_working_tier(monkeypatch):
@@ -63,7 +63,7 @@ def test_pdf_parser_setting_pins_tier(monkeypatch):
 
 def test_parser_availability_reports_installed_tiers():
     avail = parsing.parser_availability()
-    assert set(avail) == {"marker", "mineru", "markitdown", "pypdf", "trafilatura"}
+    assert set(avail) == {"docling", "marker", "mineru", "markitdown", "pypdf", "trafilatura"}
     assert isinstance(avail["pypdf"], bool)
 
 

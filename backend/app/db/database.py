@@ -83,6 +83,19 @@ def _ensure_source_document_columns(engine: Engine) -> None:
     with engine.begin() as conn:
         if "origin_url" not in cols:
             conn.execute(text("ALTER TABLE source_documents ADD COLUMN origin_url VARCHAR(1024)"))
+    _ensure_document_chunk_columns(engine)
+
+
+def _ensure_document_chunk_columns(engine: Engine) -> None:
+    """Add page-provenance column to legacy document_chunks tables."""
+    from sqlalchemy import inspect, text
+
+    if "document_chunks" not in inspect(engine).get_table_names():
+        return
+    cols = {c["name"] for c in inspect(engine).get_columns("document_chunks")}
+    with engine.begin() as conn:
+        if "page_no" not in cols:
+            conn.execute(text("ALTER TABLE document_chunks ADD COLUMN page_no INTEGER"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:

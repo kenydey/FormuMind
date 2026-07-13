@@ -80,7 +80,8 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
         )
         chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
         rows: list[dict] = [
-            {"text": c.text, "heading_path": c.heading_path} for c in chunks
+            {"text": c.text, "heading_path": c.heading_path, "page_no": c.page_no}
+            for c in chunks
         ]
         if embed and rows:
             vectors = _embed_texts([r["text"] for r in rows])
@@ -140,6 +141,8 @@ def _chunk_to_evidence(chunk, source_meta: dict, score: float) -> Evidence:
     title = meta.get("title") or "知识库文档"
     if chunk.heading_path:
         title = f"{title} · {chunk.heading_path}"
+    if getattr(chunk, "page_no", None):
+        title = f"{title} · P{chunk.page_no}"
     return Evidence(
         source=meta.get("source_kind") or "kb",
         identifier=f"kb:{chunk.source_id}#c{chunk.ord}",

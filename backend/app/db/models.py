@@ -102,6 +102,9 @@ class DocumentChunk(Base):
     ord: Mapped[int] = mapped_column(Integer, default=0)
     text: Mapped[str] = mapped_column(Text, default="")
     heading_path: Mapped[str] = mapped_column(String(120), default="")
+    # Source-page provenance (from <!-- page:N --> parser markers); citations
+    # can point at the exact page of the original PDF.
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding: Mapped[list | None] = mapped_column(
         # none_as_null: Python None must become SQL NULL (not JSON 'null'),
         # so the embedded-rows count can filter with IS NOT NULL.

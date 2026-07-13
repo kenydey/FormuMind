@@ -59,8 +59,8 @@ intel = [
 ]
 file_ingest = ["markitdown>=0.0.1", "pypdf>=4.0", "python-docx>=1.1", "trafilatura>=1.8"]
 # Layout-aware PDF → Markdown parsers (heavy; pulls torch). FORMUMIND_PDF_PARSER
-# picks the tier: marker → MinerU → MarkItDown → pypdf.
-parse_pro = ["marker-pdf>=1.0"]
+# picks the tier: docling → marker → MinerU → MarkItDown → pypdf.
+parse_pro = ["docling>=2.0", "marker-pdf>=1.0"]
 export = ["openpyxl>=3.1"]
 # Semantic-embedding RAG upgrade: sentence-transformers + optional chromadb.
 # CPU-only; no GPU required. Activates EmbeddingStore in rag.py automatically.

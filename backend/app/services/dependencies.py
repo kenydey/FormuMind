@@ -80,6 +80,10 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("python-docx", "docx", "file_ingest", "DOCX 解析回退"),
     Dependency("trafilatura", "trafilatura", "file_ingest", "网页正文抽取（去导航/广告 → Markdown）"),
     Dependency(
+        "docling", "docling", "parse_pro",
+        "Docling 版面/表格感知 PDF → Markdown（IBM，公式→LaTeX，CPU 友好）",
+    ),
+    Dependency(
         "marker-pdf", "marker", "parse_pro",
         "marker 版面感知 PDF → Markdown（表格保真，重型）",
     ),

@@ -4,13 +4,16 @@ Single entry point (``parse_document``) used by file upload, URL ingestion and
 the full-text fetcher, replacing the per-caller parser cascades.  Parsers are
 pluggable and probed at call time:
 
-* **PDF**: marker → MinerU → MarkItDown → pypdf, order controlled by
+* **PDF**: Docling → marker → MinerU → MarkItDown → pypdf, order controlled by
   ``FORMUMIND_PDF_PARSER`` (``auto`` tries best-first; naming a parser pins it
-  with fallback to the tiers below it).  marker / MinerU produce real Markdown
-  (layout-aware, tables preserved) and are optional heavy extras; MarkItDown
-  is the light default; pypdf is the last-resort plain-text tier.
+  with fallback to the tiers below it).  Docling / marker / MinerU produce
+  real Markdown (layout-aware, tables preserved; Docling and MinerU can emit
+  equations as LaTeX) and are optional heavy extras; MarkItDown is the light
+  default; pypdf is the last-resort plain-text tier.
 * **Other formats** (DOCX/XLSX/PPTX/HTML/…): MarkItDown → format-specific
   fallbacks (python-docx, plain text decode).
+* **Page provenance**: Docling and pypdf interleave ``<!-- page:N -->``
+  markers; the chunker consumes them into ``Chunk.page_no`` and strips them.
 
 Every parser is optional; the layer degrades tier by tier and reports which
 parser produced the output so provenance can be persisted.
@@ -31,7 +34,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ParseResult:
     markdown: str
-    parser: str  # marker | mineru | markitdown | pypdf | docx | text | none
+    parser: str  # docling | marker | mineru | markitdown | pypdf | docx | text | none
 
     @property
     def ok(self) -> bool:
@@ -39,6 +42,77 @@ class ParseResult:
 
 
 # ── individual parsers (return markdown/text or None) ────────────────────────
+
+_DOCLING_CONVERTERS: dict[str, object] = {}
+_DOCLING_PAGE_BREAK = "<!-- docling-page-break -->"
+
+
+def _parse_docling(content: bytes) -> str | None:
+    """Docling (IBM): layout/table-aware PDF → Markdown; formulas → LaTeX.
+
+    The converter (layout + TableFormer models) is cached per process.  When
+    the installed docling supports formula enrichment and
+    ``FORMUMIND_PDF_FORMULA_ENRICHMENT`` is on, display equations come back as
+    LaTeX ``$$…$$`` blocks — which the chunker keeps atomic.
+    """
+    try:
+        import io as _io
+
+        from docling.datamodel.base_models import DocumentStream, InputFormat  # type: ignore
+        from docling.document_converter import DocumentConverter, PdfFormatOption  # type: ignore
+
+        key = "conv"
+        if key not in _DOCLING_CONVERTERS:
+            format_options = {}
+            try:
+                from docling.datamodel.pipeline_options import PdfPipelineOptions  # type: ignore
+
+                opts = PdfPipelineOptions()
+                if hasattr(opts, "do_formula_enrichment"):
+                    opts.do_formula_enrichment = bool(
+                        get_settings().pdf_formula_enrichment
+                    )
+                format_options[InputFormat.PDF] = PdfFormatOption(pipeline_options=opts)
+            except Exception:  # options API drift — plain defaults still work
+                format_options = {}
+            _DOCLING_CONVERTERS[key] = (
+                DocumentConverter(format_options=format_options)
+                if format_options
+                else DocumentConverter()
+            )
+        converter = _DOCLING_CONVERTERS[key]
+        result = converter.convert(
+            DocumentStream(name="document.pdf", stream=_io.BytesIO(content))
+        )
+        doc = result.document
+        try:
+            md = doc.export_to_markdown(
+                page_break_placeholder=f"\n\n{_DOCLING_PAGE_BREAK}\n\n"
+            )
+        except TypeError:  # older docling without the placeholder kwarg
+            md = doc.export_to_markdown()
+        if not md or not md.strip():
+            return None
+        return _number_page_breaks(md)
+    except ImportError:
+        return None
+    except Exception as exc:
+        log_handled_exception(logger, exc, "docling parse failed")
+        return None
+
+
+def _number_page_breaks(md: str) -> str:
+    """Turn docling's uniform page-break placeholder into numbered markers."""
+    from .chunking import page_marker
+
+    parts = md.split(_DOCLING_PAGE_BREAK)
+    if len(parts) <= 1:
+        return md
+    out = [f"{page_marker(1)}\n\n{parts[0].strip()}"]
+    for i, part in enumerate(parts[1:], start=2):
+        out.append(f"{page_marker(i)}\n\n{part.strip()}")
+    return "\n\n".join(out)
+
 
 _MARKER_MODELS: dict[str, object] = {}
 
@@ -69,7 +143,12 @@ def _parse_marker(content: bytes) -> str | None:
 
 
 def _parse_mineru(content: bytes) -> str | None:
-    """MinerU (magic-pdf): highest-fidelity PDF → Markdown (optional, GPU-friendly)."""
+    """MinerU (magic-pdf): highest-fidelity PDF → Markdown (optional, GPU-friendly).
+
+    Chemistry-aware knobs: ``FORMUMIND_PDF_OCR`` routes scanned documents
+    through the OCR pipeline; formula/table recognition is requested when the
+    installed magic-pdf supports it (equations come back as LaTeX).
+    """
     try:
         import tempfile
         from pathlib import Path
@@ -78,11 +157,16 @@ def _parse_mineru(content: bytes) -> str | None:
         from magic_pdf.data.dataset import PymuDocDataset  # type: ignore
         from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze  # type: ignore
 
+        ocr = bool(get_settings().pdf_ocr)
         with tempfile.TemporaryDirectory() as tmpdir:
             ds = PymuDocDataset(content)
-            infer = doc_analyze(ds, ocr=False)
+            try:
+                infer = doc_analyze(ds, ocr=ocr, formula_enable=True, table_enable=True)
+            except TypeError:  # older magic-pdf without the enable kwargs
+                infer = doc_analyze(ds, ocr=ocr)
             writer = FileBasedDataWriter(tmpdir)
-            result = infer.pipe_txt_mode(writer)
+            pipe = getattr(infer, "pipe_ocr_mode", None) if ocr else None
+            result = pipe(writer) if pipe else infer.pipe_txt_mode(writer)
             md = result.get_markdown(str(Path(tmpdir)))
         return md or None
     except ImportError:
@@ -109,9 +193,19 @@ def _parse_pypdf(content: bytes) -> str | None:
     try:
         import pypdf  # type: ignore
 
+        from .chunking import page_marker
+
         reader = pypdf.PdfReader(io.BytesIO(content))
-        text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-        return text if text.strip() else None
+        parts = [
+            f"{page_marker(i + 1)}\n\n{page.extract_text() or ''}"
+            for i, page in enumerate(reader.pages)
+        ]
+        text = "\n\n".join(parts)
+        # Marker-only output means no extractable text at all.
+        stripped = "\n".join(
+            l for l in text.split("\n") if not l.strip().startswith("<!-- page:")
+        )
+        return text if stripped.strip() else None
     except ImportError:
         return None
     except BaseException as exc:
@@ -148,6 +242,7 @@ def _parse_plain(content: bytes) -> str | None:
 # ── registry ─────────────────────────────────────────────────────────────────
 
 _PDF_TIERS: tuple[tuple[str, object], ...] = (
+    ("docling", lambda c, e: _parse_docling(c)),
     ("marker", lambda c, e: _parse_marker(c)),
     ("mineru", lambda c, e: _parse_mineru(c)),
     ("markitdown", _parse_markitdown),
@@ -227,6 +322,7 @@ def html_to_markdown(html: str) -> str:
 def parser_availability() -> dict[str, bool]:
     """Which parser tiers are importable (for the dependencies UI)."""
     return {
+        "docling": optional_import("docling"),
         "marker": optional_import("marker"),
         "mineru": optional_import("magic_pdf"),
         "markitdown": optional_import("markitdown"),
