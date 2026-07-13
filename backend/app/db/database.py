@@ -87,7 +87,7 @@ def _ensure_source_document_columns(engine: Engine) -> None:
 
 
 def _ensure_document_chunk_columns(engine: Engine) -> None:
-    """Add page-provenance column to legacy document_chunks tables."""
+    """Add provenance / entity-meta columns to legacy document_chunks tables."""
     from sqlalchemy import inspect, text
 
     if "document_chunks" not in inspect(engine).get_table_names():
@@ -96,6 +96,8 @@ def _ensure_document_chunk_columns(engine: Engine) -> None:
     with engine.begin() as conn:
         if "page_no" not in cols:
             conn.execute(text("ALTER TABLE document_chunks ADD COLUMN page_no INTEGER"))
+        if "meta" not in cols:
+            conn.execute(text("ALTER TABLE document_chunks ADD COLUMN meta JSON"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:

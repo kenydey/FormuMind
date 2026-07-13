@@ -58,3 +58,50 @@ def reindex(embed: bool = True) -> ReindexResult:
 @router.get("/search", response_model=KBSearchResponse)
 def search(q: str = Query(min_length=1), k: int = Query(default=6, ge=1, le=50)) -> KBSearchResponse:
     return KBSearchResponse(results=kb_index.search_chunks(q, k=k))
+
+
+class KBProductItem(BaseModel):
+    trade_name: str
+    grade: str = ""
+    supplier: str = ""
+    generic_name: str = ""
+    cas: str = ""
+    smiles: str | None = None
+    role: str = ""
+    mention_count: int = 0
+    sources: int = 0
+
+
+class KBProductsResponse(BaseModel):
+    products: list[KBProductItem]
+    total: int
+
+
+@router.get("/products", response_model=KBProductsResponse)
+def products(
+    q: str = Query(default=""),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> KBProductsResponse:
+    """Corpus-derived commercial product registry (牌号/供应商/通用名)."""
+    from ..db.product_store import get_product_store
+
+    store = get_product_store()
+    rows = store.search(q, limit=limit, offset=offset)
+    return KBProductsResponse(
+        products=[
+            KBProductItem(
+                trade_name=r.trade_name,
+                grade=r.grade or "",
+                supplier=r.supplier or "",
+                generic_name=r.generic_name or "",
+                cas=r.cas or "",
+                smiles=r.smiles,
+                role=r.role or "",
+                mention_count=int(r.mention_count or 0),
+                sources=len(r.source_ids or []),
+            )
+            for r in rows
+        ],
+        total=store.count(),
+    )

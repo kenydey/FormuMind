@@ -113,7 +113,41 @@ class DocumentChunk(Base):
         comment="归一化句向量（JSON 数组）",
     )
     embedding_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Extracted entities: {"chem": [{type, value, ...}], "products": [...]}.
+    meta: Mapped[dict | None] = mapped_column(
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="化学/产品实体元数据",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class KBProduct(Base):
+    """Corpus-level registry of commercial chemical products (trade names).
+
+    Aggregated across every ingested document: rule-tier chunk extraction and
+    the LLM source-guide products both upsert here.  Feeds retrieval expansion
+    (牌号 ↔ 通用名 ↔ CAS) and recommendation grounding.
+    """
+
+    __tablename__ = "kb_products"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # Normalized "trade|grade" key for idempotent upserts.
+    norm_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    trade_name: Mapped[str] = mapped_column(String(120), default="")
+    grade: Mapped[str] = mapped_column(String(60), default="")
+    supplier: Mapped[str] = mapped_column(String(120), default="")
+    generic_name: Mapped[str] = mapped_column(String(200), default="")
+    cas: Mapped[str] = mapped_column(String(32), default="")
+    smiles: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(String(60), default="")
+    mention_count: Mapped[int] = mapped_column(Integer, default=1)
+    source_ids: Mapped[list] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), default=list
+    )
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class ProjectRow(Base):

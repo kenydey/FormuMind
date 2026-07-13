@@ -83,6 +83,7 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
             {"text": c.text, "heading_path": c.heading_path, "page_no": c.page_no}
             for c in chunks
         ]
+        _attach_entities(source_id, rows)
         if embed and rows:
             vectors = _embed_texts([r["text"] for r in rows])
             if vectors:
@@ -93,6 +94,28 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
         return get_chunk_store().replace_for_source(source_id, rows)
     except Exception as exc:
         return degrade_return(logger, exc, "kb index_source failed", 0)
+
+
+def _attach_entities(source_id: str, rows: list[dict]) -> None:
+    """Chunk-level chemistry/product entity extraction → row meta + registry."""
+    settings = get_settings()
+    if not settings.chem_extract_enabled or not rows:
+        return
+    try:
+        from .chem_extract import extract_entities
+
+        all_products: list[dict] = []
+        for row in rows:
+            meta = extract_entities(row["text"])
+            if meta:
+                row["meta"] = meta
+                all_products.extend(meta.get("products") or [])
+        if all_products and settings.product_extract_enabled:
+            from ..db.product_store import get_product_store
+
+            get_product_store().upsert_mentions(source_id, all_products)
+    except Exception as exc:
+        degrade_return(logger, exc, "kb entity extraction failed", None)
 
 
 def reindex_all(*, embed: bool = True) -> dict:

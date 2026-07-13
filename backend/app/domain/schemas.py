@@ -251,11 +251,22 @@ class ParameterBoundary(BaseModel):
         return self
 
 
+class ProductMention(BaseModel):
+    """A commercial chemical product mentioned in a document."""
+
+    trade_name: str = Field(..., max_length=120)
+    grade: str = Field(default="", max_length=60)
+    supplier: str = Field(default="", max_length=120)
+    generic_name: str = Field(default="", max_length=200, description="对应通用化学名")
+    role: str = Field(default="", max_length=60, description="树脂/固化剂/颜料/助剂…")
+
+
 class SourceGuideSchema(BaseModel):
     summary: str = Field(..., max_length=600, description="300字内核心化学机理与工艺摘要")
     key_entities: list[str] = Field(..., min_length=1, max_length=30)
     parameter_space: dict[str, ParameterBoundary] = Field(default_factory=dict)
     faqs: list[str] = Field(..., min_length=1, max_length=5)
+    products: list[ProductMention] = Field(default_factory=list, max_length=30)
     status: Literal["verified", "degraded"] = "verified"
 
     @model_validator(mode="after")

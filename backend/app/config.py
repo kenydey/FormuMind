@@ -218,6 +218,16 @@ class Settings(BaseSettings):
     # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
     kb_recommend_top_k: int = 4
 
+    # 化学/产品实体抽取（KB stream P2）：入库切块时识别 CAS/分子式/SMILES/反应式
+    # 与商业牌号（规则层离线；LLM 层搭 source_guide 便车），写入 chunk 元数据与
+    # kb_products 产品登记簿。
+    chem_extract_enabled: bool = True
+    product_extract_enabled: bool = True
+    # 图片结构化解析（VLM）：上传图片→表格 Markdown / 分子结构图→SMILES（RDKit 验证）。
+    # 复用当前激活的 LLM 供应商；vision_model 为空时用当前模型（需具备视觉能力）。
+    vision_extract_enabled: bool = True
+    vision_model: str = ""
+
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
     source_guide_max_chars: int = 12000

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from ..config import get_settings
 from ..db.source_store import get_source_store
 from ..domain.schemas import Evidence, SourceGuideSchema
+from .errors import log_handled_exception
 from .source_guide import extract_source_guide
 
 logger = logging.getLogger(__name__)
@@ -137,8 +138,25 @@ def _ingest_parsed_text(
         from .kb_index import index_source
 
         index_source(source_id, text)
+        _register_guide_products(source_id, guide)
 
     return IngestOutcome(evidence, source_id, guide, status)
+
+
+def _register_guide_products(source_id: str | None, guide: SourceGuideSchema | None) -> None:
+    """LLM-extracted commercial products → corpus product registry."""
+    if guide is None or not getattr(guide, "products", None):
+        return
+    if not get_settings().product_extract_enabled:
+        return
+    try:
+        from ..db.product_store import get_product_store
+
+        get_product_store().upsert_mentions(
+            source_id, [p.model_dump() for p in guide.products]
+        )
+    except Exception as exc:
+        log_handled_exception(logger, exc, "guide product registration failed")
 
 
 def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> IngestOutcome:
@@ -146,6 +164,10 @@ def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> Inges
     from .parsing import parse_document
 
     ext = Path(filename).suffix.lower().lstrip(".")
+
+    if ext in _IMAGE_EXTS:
+        return _ingest_image(filename, content, persist=persist)
+
     text = parse_document(content, ext).markdown
 
     if not text or not text.strip():
@@ -159,6 +181,29 @@ def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> Inges
         return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
 
     return _ingest_parsed_text(text, filename=filename, source_kind="local", persist=persist)
+
+
+_IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "webp", "gif", "bmp"})
+
+
+def _ingest_image(filename: str, content: bytes, *, persist: bool = True) -> IngestOutcome:
+    """Image upload → VLM structured extraction → standard ingest pipeline."""
+    from .vision_extract import extract_image, image_markdown
+
+    extraction, err = extract_image(content, filename)
+    if extraction is not None and (extraction.markdown.strip() or extraction.molecules):
+        text = image_markdown(extraction, filename)
+        return _ingest_parsed_text(
+            text, filename=filename, source_kind="image", persist=persist
+        )
+    placeholder = Evidence(
+        source="local",
+        identifier=filename,
+        title=filename,
+        snippet=f"图片未能结构化解析：{err or '视觉模型无输出'}",
+        relevance=0.4,
+    )
+    return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
 
 
 def _normalize_host(host: str) -> str:
