@@ -97,6 +97,14 @@ function KnowledgeBaseCard({
         >
           向量 {stats.embedded_chunks}/{stats.chunks}
         </span>
+        {(stats.products ?? 0) > 0 && (
+          <span
+            className="px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300"
+            title="从文献/专利中自动识别的商业化学品牌号登记簿（牌号/供应商/通用名）"
+          >
+            商业产品 {stats.products}
+          </span>
+        )}
         {Object.entries(stats.sources_by_kind || {}).map(([kind, n]) => (
           <span
             key={kind}

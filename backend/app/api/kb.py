@@ -26,6 +26,7 @@ class KBStats(BaseModel):
     chunks: int
     embedded_chunks: int
     embedding_available: bool
+    products: int = 0
 
 
 class ReindexResult(BaseModel):

@@ -1100,6 +1100,7 @@ export interface KBStats {
   chunks: number;
   embedded_chunks: number;
   embedding_available: boolean;
+  products?: number;
 }
 
 /** Boolean feature flag backed by a FORMUMIND_* environment variable. */

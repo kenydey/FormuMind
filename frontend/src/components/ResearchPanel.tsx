@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { Evidence } from "../api";
+import MarkdownMessage from "./MarkdownMessage";
 
 const CRAG_STAGES = [
   { id: "retrieve", label: "检索" },
@@ -168,7 +169,11 @@ export default function ResearchPanel() {
                     : "bg-ink/60 border border-edge text-slate-300"
                 }`}
               >
-                <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                {m.role === "assistant" ? (
+                  <MarkdownMessage content={m.content} />
+                ) : (
+                  <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                )}
                 {m.role === "assistant" && (m.kbChunksUsed ?? 0) > 0 && (
                   <div className="mt-1.5">
                     <span

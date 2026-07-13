@@ -670,6 +670,25 @@ def _func_groups_prompt_block(req: Requirement, base_formulas: list | None) -> s
     return f"\nKnown material functional groups (ground your chemistry in these):\n{summary}\n"
 
 
+def _product_hints_prompt_block(req: Requirement) -> str:
+    """Corpus-derived commercial grades for the project materials ("" offline).
+
+    Literature/patents ingested into the KB frequently name real trade
+    products (Epon 828, Aerosil 200…); surfacing them lets the LLM anchor its
+    ingredient list to purchasable grades and known suppliers.
+    """
+    from .kb_index import product_hints
+
+    lines = product_hints(req.materials or [])
+    if not lines:
+        return ""
+    return (
+        "\n文献语料中该体系的常用商业牌号（可在 ingredient 备注中引用，不强制）：\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
 def _recommend_user_prompt(
     req: Requirement,
     objectives: list[ObjectiveSpec],
@@ -700,6 +719,7 @@ def _recommend_user_prompt(
         f"Process constraints (must respect):\n{_constraints_prompt_block(req)}\n"
         f"{_levers_prompt_block(req)}"
         f"{_func_groups_prompt_block(req, base_formulas)}"
+        f"{_product_hints_prompt_block(req)}"
         f"{_base_formulas_prompt_block(base_formulas or [])}"
         f"{modify_block}\n\n"
         f"Evidence:\n{citations}\n\n"
@@ -778,10 +798,15 @@ def _chat_prompt(question: str, evidence: list[Evidence], domain: str | None) ->
     return (
         f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
         f"Cite sources by number [1], [2], etc.\n"
+        f"Chemistry notation rules: keep reaction equations as LaTeX inside $$…$$; "
+        f"keep molecular formulas as plain text with digits (Zn3(PO4)2); when giving a "
+        f"molecular structure, put its SMILES in a fenced code block tagged `smiles`; "
+        f"keep Markdown tables intact; preserve commercial trade names / grades / "
+        f"suppliers exactly as the sources write them.\n"
         f"{domain_hint}\n"
         f"Sources:\n{context}\n\n"
         f"Question: {question}\n\n"
-        f"Answer concisely in the same language as the question:"
+        f"Answer concisely in the same language as the question (Markdown allowed):"
     )
 
 

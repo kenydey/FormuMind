@@ -186,11 +186,94 @@ def _source_meta() -> dict:
     return {rid: {"title": title, "source_kind": kind} for rid, title, kind in rows}
 
 
-def search_chunks(query: str, k: int = 6) -> list[Evidence]:
-    """Retrieve the top-k KB chunks for a query.
+def _query_chem_context(query: str) -> dict:
+    """Chemical entities + product expansion terms extracted from the query.
 
-    Cosine over stored embeddings when both sides can embed; token-overlap
-    otherwise.  Empty list when disabled, empty KB, or on any failure.
+    * CAS / formulas / SMILES in the question → exact-entity boost targets;
+    * trade names known to the product registry → the linked generic name /
+      CAS / supplier become extra query terms (牌号 ↔ 通用名 双向打通);
+    * generic material names that map to registry products → trade names
+      become extra terms (reverse direction).
+    """
+    ctx: dict = {"cas": set(), "formulas": set(), "smiles": [], "products": set(), "terms": []}
+    if not (query or "").strip():
+        return ctx
+    try:
+        from .chem_extract import extract_cas, extract_formulas, extract_products, extract_smiles
+
+        ctx["cas"] = set(extract_cas(query))
+        ctx["formulas"] = set(extract_formulas(query))
+        ctx["smiles"] = [s["canonical"] for s in extract_smiles(query)]
+
+        from ..db.product_store import get_product_store, norm_key
+
+        store = get_product_store()
+        for p in extract_products(query):
+            ctx["products"].add(norm_key(p["trade_name"], p.get("grade", "")))
+            for row in store.search(p["trade_name"], limit=3):
+                for term in (row.generic_name, row.cas, row.supplier):
+                    if term:
+                        ctx["terms"].append(term)
+                if row.cas:
+                    ctx["cas"].add(row.cas)
+    except Exception as exc:
+        degrade_return(logger, exc, "query chem context failed", None)
+    return ctx
+
+
+def _entity_boost(chunk, qctx: dict) -> float:
+    """Additive score boost when chunk metadata shares entities with the query."""
+    meta = getattr(chunk, "meta", None) or {}
+    chem = meta.get("chem") or []
+    if not chem and not meta.get("products"):
+        return 0.0
+    values = {e.get("value") for e in chem}
+    boost = 0.0
+    if qctx["cas"] & values:
+        boost += 0.3
+    if qctx["formulas"] & values:
+        boost += 0.2
+    if qctx["products"]:
+        try:
+            from ..db.product_store import norm_key
+
+            chunk_products = {
+                norm_key(p.get("trade_name", ""), p.get("grade", ""))
+                for p in meta.get("products") or []
+            }
+            if qctx["products"] & chunk_products:
+                boost += 0.25
+        except Exception:
+            pass
+    if qctx["smiles"]:
+        chunk_smiles = [e.get("value") for e in chem if e.get("type") == "smiles"]
+        if chunk_smiles:
+            try:
+                from . import chemtools
+
+                best = max(
+                    (
+                        chemtools.mol_similarity(q, c) or 0.0
+                        for q in qctx["smiles"][:2]
+                        for c in chunk_smiles[:4]
+                    ),
+                    default=0.0,
+                )
+                boost += 0.25 * best
+            except Exception:
+                pass
+    return min(boost, 0.6)
+
+
+def search_chunks(query: str, k: int = 6) -> list[Evidence]:
+    """Retrieve the top-k KB chunks for a query (chemistry-aware hybrid).
+
+    Base score: cosine over stored embeddings when both sides can embed,
+    token-overlap otherwise.  On top of that, chunks sharing chemical
+    entities with the question (CAS / formula / 牌号 / structure similarity
+    via Tanimoto) get an additive boost, and trade names in the question are
+    expanded with their registry-linked generic names.  Empty list when
+    disabled, empty KB, or on any failure.
     """
     if not kb_enabled() or not (query or "").strip() or k <= 0:
         return []
@@ -201,11 +284,16 @@ def search_chunks(query: str, k: int = 6) -> list[Evidence]:
         if not chunks:
             return []
 
+        qctx = _query_chem_context(query)
+        expanded_query = query
+        if qctx["terms"]:
+            expanded_query = f"{query} {' '.join(qctx['terms'][:8])}"
+
         scored: list[tuple[float, object]] = []
         embedded = [c for c in chunks if c.embedding]
         query_vec = None
         if embedded:
-            vecs = _embed_texts([query])
+            vecs = _embed_texts([expanded_query])
             query_vec = vecs[0] if vecs else None
 
         if query_vec is not None and embedded:
@@ -213,14 +301,20 @@ def search_chunks(query: str, k: int = 6) -> list[Evidence]:
                 score = sum(a * b for a, b in zip(query_vec, c.embedding))
                 scored.append((score, c))
             # Text-only rows still compete via keywords, rescaled below cosine range.
-            qt = _tokens(query)
+            qt = _tokens(expanded_query)
             for c in chunks:
                 if not c.embedding:
                     scored.append((_keyword_score(qt, c.text) * 0.5, c))
         else:
-            qt = _tokens(query)
+            qt = _tokens(expanded_query)
             for c in chunks:
                 scored.append((_keyword_score(qt, f"{c.heading_path} {c.text}"), c))
+
+        has_chem_query = bool(
+            qctx["cas"] or qctx["formulas"] or qctx["smiles"] or qctx["products"]
+        )
+        if has_chem_query:
+            scored = [(s + _entity_boost(c, qctx), c) for s, c in scored]
 
         scored = [(s, c) for s, c in scored if s > 0.05]
         scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -277,6 +371,41 @@ def aggregate_parameter_space() -> dict[str, dict]:
         return degrade_return(logger, exc, "kb parameter-space aggregation failed", {})
 
 
+def product_hints(materials: list) -> list[str]:
+    """Corpus-derived commercial product lines for recommend prompts.
+
+    For each requirement material, look up registry products whose generic
+    name (or CAS) matches — the LLM then recommends against real purchasable
+    grades instead of abstract chemistries.  Advisory; [] offline/empty.
+    """
+    if not kb_enabled() or not get_settings().product_extract_enabled:
+        return []
+    try:
+        from ..db.product_store import get_product_store
+
+        store = get_product_store()
+        lines: list[str] = []
+        seen: set[str] = set()
+        for m in materials or []:
+            name = (getattr(m, "name", "") or "").strip()
+            if not name:
+                continue
+            for row in store.find_for_material(name):
+                key = row.norm_key
+                if key in seen or len(lines) >= 8:
+                    continue
+                seen.add(key)
+                label = f"{row.trade_name} {row.grade}".strip()
+                detail = "，".join(
+                    x for x in (row.supplier, row.generic_name, row.role) if x
+                )
+                line = f"- {label}（{detail}）" if detail else f"- {label}"
+                lines.append(f"{line} — 语料提及 {row.mention_count} 次")
+        return lines
+    except Exception as exc:
+        return degrade_return(logger, exc, "kb product hints failed", [])
+
+
 def doe_parameter_hints(factor_names: list[str]) -> list[str]:
     """Literature-envelope notes for DOE factors whose names match KB parameters.
 
@@ -323,6 +452,12 @@ def kb_stats() -> dict:
                 .group_by(SourceDocument.source_kind)
                 .all()
             )
+        try:
+            from ..db.product_store import get_product_store
+
+            products = get_product_store().count()
+        except Exception:
+            products = 0
         return {
             "enabled": kb_enabled(),
             "sources": int(sources),
@@ -330,10 +465,12 @@ def kb_stats() -> dict:
             "chunks": total,
             "embedded_chunks": embedded,
             "embedding_available": _embedding_probe(),
+            "products": products,
         }
     except Exception as exc:
         return degrade_return(
             logger, exc, "kb stats failed",
             {"enabled": kb_enabled(), "sources": 0, "sources_by_kind": {},
-             "chunks": 0, "embedded_chunks": 0, "embedding_available": False},
+             "chunks": 0, "embedded_chunks": 0, "embedding_available": False,
+             "products": 0},
         )
