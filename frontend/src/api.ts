@@ -107,6 +107,8 @@ export interface Ingredient {
   mmol?: number | null;
   amount_display?: string;
   notes?: string;
+  evidence_refs?: string[];
+  grounding_confidence?: "high" | "low";
 }
 
 export interface Formulation {
@@ -304,6 +306,32 @@ export interface BatchUpdateRequest {
 export interface WorkbenchSyncResponse {
   updated: number;
   rows: WorkbenchRow[];
+  training_ingested?: number;
+  training_message?: string;
+}
+
+export interface FactorCandidate {
+  name: string;
+  low: number;
+  high: number;
+  unit: string;
+  rationale: string;
+  evidence_ids: string[];
+  source: string;
+}
+
+export interface KBSourcesResponse {
+  sources: Array<{
+    id: string;
+    title: string;
+    filename: string;
+    source_kind: string;
+    origin_url?: string | null;
+    project_id?: string | null;
+    raw_text_chars: number;
+    extraction_status: string;
+  }>;
+  total: number;
 }
 
 // Objective metric collected per domain (mirrors backend OBJECTIVE map).
@@ -500,6 +528,12 @@ export const api = {
     }),
   doe: (req: Requirement, design: string, engine = "auto") =>
     post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
+  suggestFactors: (req: Requirement) =>
+    post<{ factors: FactorCandidate[]; count: number }>("/api/doe/suggest-factors", req),
+  kbSources: (projectId?: string | null, limit = 100) =>
+    get<KBSourcesResponse>(
+      `/api/kb/sources?limit=${limit}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ""}`
+    ),
   activeDoe: (
     req: Requirement,
     opts: {

@@ -257,9 +257,15 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
             base_formulas=state.get("base_formulas") or None,
         )
         recommend_engine = rec_resp.engine
+        from ..services.grounded_recommend import ground_recommended_formulas
+
+        grounded_formulas, ground_warnings = ground_recommended_formulas(
+            rec_resp.formulas, grounded
+        )
+        rec_resp.warnings.extend(ground_warnings)
         process = process_for(req)
         forms = []
-        for rec in rec_resp.formulas:
+        for rec in grounded_formulas:
             try:
                 forms.append(recommended_to_formulation(rec))
             except ValueError as exc:
@@ -319,9 +325,15 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
     if req:
         rec_resp = llm.recommend_formulations(req, normalize_objectives(req), grounded, n=3)
         recommend_engine = rec_resp.engine
+        from ..services.grounded_recommend import ground_recommended_formulas
+
+        grounded_formulas, ground_warnings = ground_recommended_formulas(
+            rec_resp.formulas, grounded
+        )
+        rec_resp.warnings.extend(ground_warnings)
         process = process_for(req)
         forms = []
-        for rec in rec_resp.formulas:
+        for rec in grounded_formulas:
             try:
                 forms.append(recommended_to_formulation(rec))
             except ValueError as exc:

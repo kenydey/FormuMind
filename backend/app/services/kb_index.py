@@ -265,7 +265,7 @@ def _entity_boost(chunk, qctx: dict) -> float:
     return min(boost, 0.6)
 
 
-def search_chunks(query: str, k: int = 6) -> list[Evidence]:
+def search_chunks(query: str, k: int = 6, *, project_id: str | None = None) -> list[Evidence]:
     """Retrieve the top-k KB chunks for a query (chemistry-aware hybrid).
 
     Base score: cosine over stored embeddings when both sides can embed,
@@ -280,7 +280,9 @@ def search_chunks(query: str, k: int = 6) -> list[Evidence]:
     try:
         from ..db.chunk_store import get_chunk_store
 
-        chunks = get_chunk_store().all_chunks(limit=get_settings().kb_search_scan_limit)
+        chunks = get_chunk_store().all_chunks(
+            limit=get_settings().kb_search_scan_limit, project_id=project_id
+        )
         if not chunks:
             return []
 

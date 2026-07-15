@@ -57,8 +57,54 @@ def reindex(embed: bool = True) -> ReindexResult:
 
 
 @router.get("/search", response_model=KBSearchResponse)
-def search(q: str = Query(min_length=1), k: int = Query(default=6, ge=1, le=50)) -> KBSearchResponse:
-    return KBSearchResponse(results=kb_index.search_chunks(q, k=k))
+def search(
+    q: str = Query(min_length=1),
+    k: int = Query(default=6, ge=1, le=50),
+    project_id: str | None = Query(default=None),
+) -> KBSearchResponse:
+    return KBSearchResponse(results=kb_index.search_chunks(q, k=k, project_id=project_id))
+
+
+class KBSourceItem(BaseModel):
+    id: str
+    title: str
+    filename: str
+    source_kind: str
+    origin_url: str | None = None
+    project_id: str | None = None
+    raw_text_chars: int = 0
+    extraction_status: str = ""
+
+
+class KBSourcesResponse(BaseModel):
+    sources: list[KBSourceItem]
+    total: int
+
+
+@router.get("/sources", response_model=KBSourcesResponse)
+def list_sources(
+    project_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> KBSourcesResponse:
+    from ..db.source_store import get_source_store
+
+    rows = get_source_store().list_for_project(project_id, limit=limit)
+    return KBSourcesResponse(
+        sources=[
+            KBSourceItem(
+                id=r.id,
+                title=r.title or r.filename,
+                filename=r.filename,
+                source_kind=r.source_kind,
+                origin_url=r.origin_url,
+                project_id=r.project_id,
+                raw_text_chars=int(r.raw_text_chars or 0),
+                extraction_status=r.extraction_status or "",
+            )
+            for r in rows
+        ],
+        total=len(rows),
+    )
 
 
 class KBProductItem(BaseModel):

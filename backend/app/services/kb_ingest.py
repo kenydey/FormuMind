@@ -58,11 +58,14 @@ def select_ingest_targets(
     from . import fulltext_fetcher as ff
 
     limit = max_docs if max_docs is not None else get_settings().kb_ingest_max_docs
+    min_rel = get_settings().kb_ingest_min_relevance
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
     for ev in evidence:
         if len(targets) >= limit:
             break
+        if min_rel > 0 and (ev.relevance or 0) < min_rel:
+            continue
         ident = (ev.identifier or "").strip()
         if not ident or ident in seen:
             continue
@@ -73,7 +76,7 @@ def select_ingest_targets(
     return targets
 
 
-def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any]) -> None:
+def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *, project_id: str | None = None) -> None:
     """Advance one document through the state machine (mutates *doc*)."""
     from ..db.source_store import get_source_store
     from . import fulltext_fetcher as ff
@@ -103,7 +106,7 @@ def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: di
 
     doc["status"] = "indexing"
     emit(doc)
-    source_id = ff._persist_fulltext(text, ev, kind)  # hash-dedup + chunk + embed inside
+    source_id = ff._persist_fulltext(text, ev, kind, project_id=project_id)  # hash-dedup + chunk + embed inside
     if source_id:
         doc.update(status="indexed", source_id=source_id)
     else:
@@ -116,6 +119,7 @@ def ingest_evidence_docs(
     *,
     max_docs: int | None = None,
     status_cb: StatusCb | None = None,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """Sequentially acquire + index the fetchable subset of *evidence*.
 
@@ -133,7 +137,7 @@ def ingest_evidence_docs(
 
     for (ev, kind), doc in zip(targets, docs):
         try:
-            _ingest_one(ev, kind, timeout, emit, doc)
+            _ingest_one(ev, kind, timeout, emit, doc, project_id=project_id)
         except Exception as exc:  # defensive: emit() itself must not kill the queue
             degrade_return(logger, exc, "kb_ingest document failed", None)
             doc.update(status="failed", error=str(exc)[:200])

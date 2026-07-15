@@ -31,6 +31,7 @@ class SourceStore:
         extraction_status: str = "skipped",
         extraction_error: str | None = None,
         origin_url: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         source_id = str(uuid.uuid4())
         guide_payload = source_guide.model_dump(mode="json") if source_guide else None
@@ -41,6 +42,7 @@ class SourceStore:
             source_kind=source_kind,
             content_hash=content_hash,
             origin_url=(origin_url or None),
+            project_id=(project_id or None),
             full_text=full_text,
             raw_text_chars=len(full_text),
             source_guide=guide_payload,
@@ -83,6 +85,16 @@ class SourceStore:
         if row is None or not row.source_guide:
             return None
         return SourceGuideSchema.model_validate(row.source_guide)
+
+    def list_for_project(self, project_id: str | None, *, limit: int = 100) -> list[SourceDocument]:
+        with self._session_factory() as session:
+            q = session.query(SourceDocument).order_by(SourceDocument.created_at.desc())
+            if project_id:
+                q = q.filter(
+                    (SourceDocument.project_id == project_id)
+                    | (SourceDocument.project_id.is_(None))
+                )
+            return q.limit(limit).all()
 
 
 _store: SourceStore | None = None

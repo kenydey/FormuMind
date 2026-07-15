@@ -158,6 +158,8 @@ class Ingredient(BaseModel):
     mmol: float | None = None
     amount_display: str = ""
     notes: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    grounding_confidence: Literal["high", "low"] = "high"
 
     @model_validator(mode="after")
     def _sync_formula_fields(self) -> Ingredient:
@@ -201,6 +203,8 @@ class RecommendedFormulaComponent(BaseModel):
     amount_display: str = ""
     weight_pct: float | None = Field(default=None, ge=0, le=100)
     notes: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    grounding_confidence: Literal["high", "low"] = "high"
 
 
 class RecommendedFormula(BaseModel):
@@ -335,6 +339,18 @@ class DeepResearchRequest(Requirement):
         default_factory=lambda: ["patents", "literature", "internet"],
         description="与 /api/search 相同的信息源类别",
     )
+
+
+class FactorCandidate(BaseModel):
+    """Suggested DOE factor with literature/KB rationale."""
+
+    name: str
+    low: float
+    high: float
+    unit: str = "wt%"
+    rationale: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    source: str = "kb+levers"
 
 
 class DOEFactor(BaseModel):

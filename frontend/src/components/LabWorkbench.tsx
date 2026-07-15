@@ -52,6 +52,7 @@ export default function LabWorkbench({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveHint, setSaveHint] = useState<string | null>(null);
   const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
@@ -125,6 +126,7 @@ export default function LabWorkbench({
     }
     setSaving(true);
     setError(null);
+    setSaveHint(null);
     try {
       const syncMetrics = objectives.map((o) => o.metric);
       const res = await api.syncWorkbench({
@@ -146,6 +148,11 @@ export default function LabWorkbench({
         }),
       });
       setRows(res.rows);
+      if (res.training_message) {
+        setError(null);
+        // Brief success hint (reuse error banner styling as info)
+        setSaveHint(res.training_message);
+      }
       onSaved?.(res.rows);
     } catch (e) {
       setError(String(e));
@@ -173,6 +180,9 @@ export default function LabWorkbench({
         </div>
       )}
       {error && <p className="text-[11px] text-red-400 px-2 py-1 border-b border-edge/30">{error}</p>}
+      {saveHint && !error && (
+        <p className="text-[11px] text-emerald-400 px-2 py-1 border-b border-edge/30">{saveHint}</p>
+      )}
       <div className="ag-theme-alpine-dark w-full" style={{ height: 280 }}>
         <AgGridReact<WorkbenchRow>
           ref={gridRef}

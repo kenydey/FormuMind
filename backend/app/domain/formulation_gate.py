@@ -116,6 +116,8 @@ def component_to_ingredient(comp: RecommendedFormulaComponent) -> Ingredient:
         mmol=enriched.mmol,
         amount_display=enriched.amount_display or (f"{weight:.2f}%" if weight else ""),
         notes=enriched.notes,
+        evidence_refs=list(enriched.evidence_refs or []),
+        grounding_confidence=enriched.grounding_confidence,
     )
 
 
@@ -134,6 +136,8 @@ def ingredient_to_component(ing: Ingredient) -> RecommendedFormulaComponent:
         amount_display=enriched.amount_display or f"{enriched.weight_pct:.2f}%",
         weight_pct=enriched.weight_pct,
         notes=enriched.notes,
+        evidence_refs=list(enriched.evidence_refs or []),
+        grounding_confidence=enriched.grounding_confidence,
     )
 
 

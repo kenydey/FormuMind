@@ -279,7 +279,10 @@ def run_deep_research_task(self, payload: dict) -> dict:
             "report": report.model_dump(),
             "grounded_evidence": [e.model_dump() for e in grounded],
         }
-        kb_task_id = dispatch_kb_ingest(result["grounded_evidence"])
+        kb_task_id = dispatch_kb_ingest(
+            result["grounded_evidence"],
+            project_id=(req.project_id if req else None),
+        )
         if kb_task_id:
             result["kb_ingest_task_id"] = kb_task_id
         persist_result(task_id, result, failed=False)
@@ -347,7 +350,8 @@ def run_recommend_task(self, payload: dict) -> dict:
         result = {"research": research.model_dump()}
         grounded = state.get("grounded_evidence") or []
         kb_task_id = dispatch_kb_ingest(
-            [e.model_dump() if hasattr(e, "model_dump") else e for e in grounded]
+            [e.model_dump() if hasattr(e, "model_dump") else e for e in grounded],
+            project_id=(req.project_id if req else None),
         )
         if kb_task_id:
             result["kb_ingest_task_id"] = kb_task_id
@@ -400,6 +404,16 @@ def run_optimize_task(self, payload: dict) -> dict:
 # ── async KB ingest (search → fulltext → knowledge base, in background) ──────
 
 
+def _kb_ingest_project_id(payload: dict) -> str | None:
+    pid = (payload.get("project_id") or "").strip()
+    if pid:
+        return pid
+    req = payload.get("requirement")
+    if isinstance(req, dict):
+        return (req.get("project_id") or "").strip() or None
+    return None
+
+
 def _kb_ingest_impl(task_id: str, payload: dict) -> dict:
     """Shared body for the Celery task and the eager-mode background thread."""
     from ..domain.schemas import Evidence
@@ -439,7 +453,11 @@ def _kb_ingest_impl(task_id: str, payload: dict) -> dict:
         )
 
     try:
-        result = kb_ingest.ingest_evidence_docs(evidence, status_cb=status_cb)
+        result = kb_ingest.ingest_evidence_docs(
+            evidence,
+            status_cb=status_cb,
+            project_id=_kb_ingest_project_id(payload),
+        )
         summary = (
             f"知识库构建完成：入库 {result['indexed']} 篇"
             + (f"，已在库 {result['skipped']} 篇" if result["skipped"] else "")
@@ -461,7 +479,9 @@ def run_kb_ingest_task(self, payload: dict) -> dict:
     return _kb_ingest_impl(self.request.id, payload)
 
 
-def dispatch_kb_ingest(evidence_dicts: list[dict]) -> str | None:
+def dispatch_kb_ingest(
+    evidence_dicts: list[dict], *, project_id: str | None = None
+) -> str | None:
     """Fire-and-forget background KB build for freshly searched evidence.
 
     Returns the ingest task id (for the frontend to stream), or None when the
@@ -484,7 +504,10 @@ def dispatch_kb_ingest(evidence_dicts: list[dict]) -> str | None:
     if not targets:
         return None
 
-    payload = {"evidence": [ev.model_dump() for ev, _ in targets]}
+    payload = {
+        "evidence": [ev.model_dump() for ev, _ in targets],
+        "project_id": project_id,
+    }
     if get_settings().celery_eager:
         task_id = f"kbingest-{uuid.uuid4().hex[:16]}"
         task_manager.register_celery_task(task_id, "kb_ingest")
@@ -561,7 +584,10 @@ def run_search_task(self, payload: dict) -> dict:
         }
         # Background KB build: enqueue is non-blocking, so the search stream
         # terminates immediately below and the frontend keeps its results.
-        kb_task_id = dispatch_kb_ingest(data["evidence"])
+        kb_task_id = dispatch_kb_ingest(
+            data["evidence"],
+            project_id=(req.project_id if req else None),
+        )
         if kb_task_id:
             data["kb_ingest_task_id"] = kb_task_id
         persist_result(task_id, data, failed=False)

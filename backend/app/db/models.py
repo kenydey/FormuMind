@@ -77,6 +77,8 @@ class SourceDocument(Base):
     # Provenance: the URL / patent number / DOI the document was fetched from.
     # Doubles as the async-ingest dedup key (don't re-download what we have).
     origin_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    # Optional project scope — NULL = global corpus shared across projects.
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     full_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_text_chars: Mapped[int] = mapped_column(Integer, default=0)
     source_guide: Mapped[dict | None] = mapped_column(

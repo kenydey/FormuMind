@@ -1,12 +1,15 @@
+import { useState } from "react";
 import {
   LineChart,
   Line,
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  XAxis,
+  YAxis,
 } from "recharts";
-import type { ModelInfo } from "../api";
-import { primaryObjectiveMetric } from "../api";
+import type { ModelInfo, FactorCandidate } from "../api";
+import { api, primaryObjectiveMetric } from "../api";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 
@@ -107,11 +110,13 @@ const PYDOE_DESIGNS = [
 const AI_DESIGN = { value: "ai_active", label: "🧠 AI 主动选点" };
 
 export default function DoeResultsPanel() {
+  const [factorHints, setFactorHints] = useState<FactorCandidate[] | null>(null);
+  const [factorBusy, setFactorBusy] = useState(false);
   const {
     requirement, doePlan, models, modelHistory, trainMessage,
     busy, generateDoe, exportDoe, importCsv, error,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
-    workbenchCampaignId, setOpenModal,
+    workbenchCampaignId, workbenchStats, optimizationHistory, setOpenModal,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -131,6 +136,8 @@ export default function DoeResultsPanel() {
       lastAlEngine: s.lastAlEngine,
       campaignState: s.campaignState,
       workbenchCampaignId: s.workbenchCampaignId,
+      workbenchStats: s.workbenchStats,
+      optimizationHistory: s.optimizationHistory,
       setOpenModal: s.setOpenModal,
     }))
   );
@@ -149,6 +156,20 @@ export default function DoeResultsPanel() {
         snapshot.filter((s) => s.domain === m.domain && s.metric === m.metric).map((s) => s.r2)
       );
   }
+
+  async function loadFactorHints() {
+    setFactorBusy(true);
+    try {
+      const res = await api.suggestFactors(requirement);
+      setFactorHints(res.factors);
+    } catch {
+      setFactorHints([]);
+    } finally {
+      setFactorBusy(false);
+    }
+  }
+
+  const optChartData = optimizationHistory.map((v, i) => ({ iter: i + 1, score: v }));
 
   return (
     <section className="glass rounded-xl p-4 overflow-y-auto">
@@ -198,6 +219,14 @@ export default function DoeResultsPanel() {
           >
             {busy === "doe" ? "生成中…" : "生成 DOE"}
           </button>
+          <button
+            type="button"
+            disabled={factorBusy}
+            onClick={() => void loadFactorHints()}
+            className="text-xs border border-teal-500/50 text-teal-300 rounded px-2 py-1 hover:bg-teal-500/10 disabled:opacity-40"
+          >
+            {factorBusy ? "分析中…" : "AI 建议因子"}
+          </button>
           <label className="text-xs border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50 cursor-pointer">
             导入 CSV
             <input
@@ -214,6 +243,43 @@ export default function DoeResultsPanel() {
           </label>
         </div>
       </div>
+
+      {factorHints && factorHints.length > 0 && (
+        <div className="mb-3 rounded border border-teal-500/30 bg-teal-500/5 p-2 text-[11px] text-slate-300">
+          <div className="text-teal-300/90 mb-1 font-medium">KB + 需求 levers 因子建议</div>
+          <ul className="space-y-1 max-h-32 overflow-y-auto">
+            {factorHints.map((f) => (
+              <li key={f.name}>
+                <span className="font-mono text-accent2">{f.name}</span>{" "}
+                [{f.low}–{f.high} {f.unit}] — {f.rationale.slice(0, 120)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {optChartData.length > 1 && (
+        <div className="mb-3 h-24 rounded border border-edge/40 bg-ink/40 p-2">
+          <div className="text-[10px] text-slate-500 mb-1">优化收敛曲线（最佳得分）</div>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={optChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <XAxis dataKey="iter" hide />
+              <YAxis hide domain={["auto", "auto"]} />
+              <Tooltip
+                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", fontSize: 10 }}
+                formatter={(v: number) => [v.toFixed(3), metric]}
+              />
+              <Line type="monotone" dataKey="score" stroke="#34d399" strokeWidth={1.5} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {workbenchStats && workbenchStats.completed > 0 && (
+        <div className="mb-3 text-[11px] text-slate-400">
+          实验台账进度：{workbenchStats.completed}/{workbenchStats.total} 已完成（{workbenchStats.strategy}）
+        </div>
+      )}
 
       {models.length > 0 && (
         <div className="mb-3 grid grid-cols-2 gap-1.5">

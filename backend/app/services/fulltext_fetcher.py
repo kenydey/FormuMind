@@ -204,7 +204,7 @@ def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
     return out
 
 
-def _persist_fulltext(text: str, ev: Evidence, kind: str) -> str | None:
+def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | None = None) -> str | None:
     """Store the raw full text as a SourceDocument (dedup by content hash)."""
     from ..db.source_store import get_source_store
 
@@ -222,6 +222,7 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str) -> str | None:
             content_hash=content_hash,
             extraction_status="fulltext",
             origin_url=(ev.identifier or "").strip()[:1024] or None,
+            project_id=(project_id or None),
         )
         from .kb_index import index_source
 

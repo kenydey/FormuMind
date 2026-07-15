@@ -61,6 +61,8 @@ class WorkbenchCampaignResponse(BaseModel):
 class WorkbenchSyncResponse(BaseModel):
     updated: int
     rows: list[WorkbenchRowResponse]
+    training_ingested: int = 0
+    training_message: str = ""
 
 
 class CreateWorkbenchCampaignRequest(BaseModel):
@@ -199,4 +201,12 @@ async def sync_workbench(
         payload.campaign_id,
         [row.model_dump() for row in payload.rows],
     )
-    return WorkbenchSyncResponse(updated=updated, rows=[_row_response(r) for r in rows])
+    from ..services.workbench_training import ingest_workbench_rows
+
+    train_result = ingest_workbench_rows(payload.campaign_id, rows)
+    return WorkbenchSyncResponse(
+        updated=updated,
+        rows=[_row_response(r) for r in rows],
+        training_ingested=int(train_result.get("ingested") or 0),
+        training_message=str(train_result.get("message") or ""),
+    )

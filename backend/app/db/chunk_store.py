@@ -58,11 +58,21 @@ class ChunkStore:
                 .all()
             )
 
-    def all_chunks(self, limit: int | None = None) -> list[DocumentChunk]:
+    def all_chunks(self, limit: int | None = None, project_id: str | None = None) -> list[DocumentChunk]:
         with self._session_factory() as session:
             q = session.query(DocumentChunk).order_by(
                 DocumentChunk.created_at.desc(), DocumentChunk.ord
             )
+            if project_id:
+                from .models import SourceDocument
+
+                q = (
+                    q.join(SourceDocument, DocumentChunk.source_id == SourceDocument.id)
+                    .filter(
+                        (SourceDocument.project_id == project_id)
+                        | (SourceDocument.project_id.is_(None))
+                    )
+                )
             if limit:
                 q = q.limit(limit)
             return q.all()

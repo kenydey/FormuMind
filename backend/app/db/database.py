@@ -83,6 +83,8 @@ def _ensure_source_document_columns(engine: Engine) -> None:
     with engine.begin() as conn:
         if "origin_url" not in cols:
             conn.execute(text("ALTER TABLE source_documents ADD COLUMN origin_url VARCHAR(1024)"))
+        if "project_id" not in cols:
+            conn.execute(text("ALTER TABLE source_documents ADD COLUMN project_id VARCHAR(64)"))
     _ensure_document_chunk_columns(engine)
 
 

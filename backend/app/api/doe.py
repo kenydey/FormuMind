@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 import uuid
 
@@ -34,6 +35,20 @@ def generate_doe(
     if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
     return workflow.build_doe(requirement, design=design, engine=engine, n=n)
+
+
+class FactorSuggestResponse(BaseModel):
+    factors: list
+    count: int
+
+
+@router.post("/doe/suggest-factors", response_model=FactorSuggestResponse)
+def suggest_doe_factors(requirement: Requirement) -> FactorSuggestResponse:
+    """AI/KB-assisted DOE factor suggestions from requirement levers + KB parameter space."""
+    from ..services.factor_suggest import suggest_factors
+
+    candidates = suggest_factors(requirement)
+    return FactorSuggestResponse(factors=[c.model_dump() for c in candidates], count=len(candidates))
 
 
 class ActiveDoeRequest(Requirement):

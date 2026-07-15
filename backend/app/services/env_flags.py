@@ -84,6 +84,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("kb_ingest_auto", "检索后台自动入库",
             "检索/深度研究/推荐结束后，后台任务逐篇获取全文并构建知识库，前台实时显示每篇状态。",
             "kb", "需网络；受 kb_ingest_max_docs 限制（默认 12 篇/次）"),
+    EnvFlag("workbench_auto_train", "台账自动回灌训练",
+            "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("kb_v2_enabled", "持久知识库 v2",
             "导入/检索的文档结构感知切块入库，问答与推荐检索覆盖全部累计语料。", "kb"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",

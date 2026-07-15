@@ -207,6 +207,8 @@ class Settings(BaseSettings):
     # 检索结果展示不等待解析。按 origin_url / 内容哈希双重去重。
     kb_ingest_auto: bool = True
     kb_ingest_max_docs: int = 12
+    kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
+    workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
 
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），

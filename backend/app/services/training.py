@@ -165,6 +165,10 @@ class ModelRegistry:
             if retrain:
                 self._retrain_all()
 
+    def known_labels(self) -> set[str]:
+        with self._lock:
+            return {r.label for r in self._records if r.label}
+
     @property
     def total_records(self) -> int:
         with self._lock:

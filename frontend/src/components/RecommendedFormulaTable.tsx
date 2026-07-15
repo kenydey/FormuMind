@@ -172,7 +172,19 @@ export default function RecommendedFormulaTable({
               <td className="py-1 px-2 text-right font-mono text-accent2">
                 {ing.amount_display || `${ing.weight_pct}%`}
               </td>
-              <td className="py-1 px-2 text-slate-400 max-w-[140px]">{ing.notes || "—"}</td>
+              <td className="py-1 px-2 text-slate-400 text-[10px] max-w-[140px]">
+                {ing.notes || "—"}
+                {ing.grounding_confidence === "low" && (
+                  <span className="ml-1 text-amber-400 border border-amber-500/40 rounded px-1" title="缺少文献/专利依据">
+                    低可信
+                  </span>
+                )}
+                {(ing.evidence_refs?.length ?? 0) > 0 && (
+                  <div className="text-[9px] text-teal-400/90 mt-0.5 truncate" title={ing.evidence_refs?.join(", ")}>
+                    引用: {ing.evidence_refs?.slice(0, 2).join(", ")}
+                  </div>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
