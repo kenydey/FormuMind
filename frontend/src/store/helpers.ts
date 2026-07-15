@@ -72,6 +72,7 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
     draft.recommendSourceTypes = patch.recommendSourceTypes;
   }
   if (patch.lastAlEngine !== undefined) draft.lastAlEngine = patch.lastAlEngine;
+  if (patch.autoLoopOnSync !== undefined) draft.autoLoopOnSync = patch.autoLoopOnSync;
 }
 
 export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
@@ -104,5 +105,6 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     loopDoeEngine: state.loopDoeEngine,
     recommendSourceTypes: state.recommendSourceTypes,
     lastAlEngine: state.lastAlEngine,
+    autoLoopOnSync: state.autoLoopOnSync,
   };
 }

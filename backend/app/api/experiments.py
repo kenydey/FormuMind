@@ -35,6 +35,11 @@ class GridRowUpdate(BaseModel):
 class BatchUpdateRequest(BaseModel):
     campaign_id: int
     rows: list[GridRowUpdate]
+    trigger_loop: bool | None = None
+    requirement: Requirement | None = None
+    optimize_engine: str | None = None
+    doe_engine: str | None = None
+    campaign_state: str | None = None
 
 
 class WorkbenchRowResponse(BaseModel):
@@ -63,6 +68,8 @@ class WorkbenchSyncResponse(BaseModel):
     rows: list[WorkbenchRowResponse]
     training_ingested: int = 0
     training_message: str = ""
+    loop_task_id: str | None = None
+    loop_message: str = ""
 
 
 class CreateWorkbenchCampaignRequest(BaseModel):
@@ -204,9 +211,26 @@ async def sync_workbench(
     from ..services.workbench_training import ingest_workbench_rows
 
     train_result = ingest_workbench_rows(payload.campaign_id, rows)
+    training_ingested = int(train_result.get("ingested") or 0)
+    training_message = str(train_result.get("message") or "")
+
+    from ..services.workbench_loop import dispatch_loop_after_sync
+
+    loop_task_id, loop_message = dispatch_loop_after_sync(
+        training_ingested=training_ingested,
+        workbench_campaign_id=payload.campaign_id,
+        requirement=payload.requirement,
+        trigger_loop=payload.trigger_loop,
+        optimize_engine=payload.optimize_engine or "auto",
+        doe_engine=payload.doe_engine or "auto",
+        campaign_state=payload.campaign_state,
+    )
+
     return WorkbenchSyncResponse(
         updated=updated,
         rows=[_row_response(r) for r in rows],
-        training_ingested=int(train_result.get("ingested") or 0),
-        training_message=str(train_result.get("message") or ""),
+        training_ingested=training_ingested,
+        training_message=training_message,
+        loop_task_id=loop_task_id,
+        loop_message=loop_message,
     )

@@ -37,6 +37,8 @@ def loop_iterate(
     *,
     optimize_engine: str = "auto",
     doe_engine: str = "auto",
+    workbench_campaign_id: int | None = None,
+    campaign_state: str | None = None,
 ) -> LoopReport:
     """Run one full turn of the self-driving loop and bundle the result."""
     from . import active_learning
@@ -61,6 +63,8 @@ def loop_iterate(
         progress_cb=_opt_progress,
         engine=optimize_engine,
         existing_records=records,
+        campaign_state=campaign_state,
+        workbench_campaign_id=workbench_campaign_id,
     )
 
     if progress_cb:
@@ -72,6 +76,8 @@ def loop_iterate(
         design="lhs",
         engine=doe_engine,
         doe_engine=doe_engine,
+        campaign_state=campaign_state,
+        workbench_campaign_id=workbench_campaign_id,
     )
 
     if progress_cb:
@@ -85,4 +91,5 @@ def loop_iterate(
         optimization=optimization,
         next_doe=next_result.plan,
         engine=optimization.engine,
+        campaign_state=getattr(next_result, "campaign_state", None) or campaign_state,
     )

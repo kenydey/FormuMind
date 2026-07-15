@@ -59,6 +59,7 @@ class ProjectWorkspace(BaseModel):
     loop_doe_engine: str = "auto"
     recommend_source_types: list[str] = Field(default_factory=lambda: ["patents", "literature", "internet"])
     last_al_engine: str | None = None
+    auto_loop_on_sync: bool = False
 
 
 class ProjectSummary(BaseModel):

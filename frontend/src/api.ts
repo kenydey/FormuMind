@@ -301,6 +301,11 @@ export interface BatchUpdateRequest {
     actual_params: Record<string, number>;
     measurements: Record<string, number | string>;
   }>;
+  trigger_loop?: boolean | null;
+  requirement?: Requirement;
+  optimize_engine?: string;
+  doe_engine?: string;
+  campaign_state?: string | null;
 }
 
 export interface WorkbenchSyncResponse {
@@ -308,6 +313,8 @@ export interface WorkbenchSyncResponse {
   rows: WorkbenchRow[];
   training_ingested?: number;
   training_message?: string;
+  loop_task_id?: string | null;
+  loop_message?: string;
 }
 
 export interface FactorCandidate {
@@ -776,7 +783,11 @@ export const api = {
     optimize_iterations = 24,
     n_suggest = 4,
     optimize_engine = "auto",
-    doe_engine = "auto"
+    doe_engine = "auto",
+    opts: {
+      workbench_campaign_id?: number | null;
+      campaign_state?: string | null;
+    } = {}
   ) =>
     postAccepted("/api/loop/iterate", {
       ...req,
@@ -784,6 +795,8 @@ export const api = {
       n_suggest,
       optimize_engine,
       doe_engine,
+      workbench_campaign_id: opts.workbench_campaign_id ?? null,
+      campaign_state: opts.campaign_state ?? null,
     }),
 
   parseIntent: (text: string) =>
@@ -1220,6 +1233,7 @@ export interface LoopReport {
   optimization: OptimizationResult;
   next_doe: DOEPlan;
   engine: string;
+  campaign_state?: string | null;
 }
 
 export interface IntentResult {

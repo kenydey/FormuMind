@@ -79,6 +79,7 @@ export interface ProjectWorkspacePayload {
   loop_doe_engine: string;
   recommend_source_types: SearchSourceType[];
   last_al_engine: string | null;
+  auto_loop_on_sync?: boolean;
 }
 
 export interface StoreWorkspaceSlice {
@@ -110,6 +111,7 @@ export interface StoreWorkspaceSlice {
   loopDoeEngine: "auto" | "legacy" | "baybe";
   recommendSourceTypes: SearchSourceType[];
   lastAlEngine: string | null;
+  autoLoopOnSync: boolean;
 }
 
 export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorkspacePayload {
@@ -146,6 +148,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     loop_doe_engine: slice.loopDoeEngine,
     recommend_source_types: slice.recommendSourceTypes,
     last_al_engine: slice.lastAlEngine,
+    auto_loop_on_sync: slice.autoLoopOnSync,
   };
 }
 
@@ -194,6 +197,7 @@ export function applyWorkspacePayload(
       ? ws.recommend_source_types
       : ["patents", "literature", "internet"]) as SearchSourceType[],
     lastAlEngine: ws.last_al_engine ?? null,
+    autoLoopOnSync: ws.auto_loop_on_sync ?? false,
   };
 }
 

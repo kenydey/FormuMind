@@ -531,6 +531,8 @@ class LoopRequest(Requirement):
     n_suggest: int = 4
     optimize_engine: str = "auto"
     doe_engine: str = "auto"
+    workbench_campaign_id: int | None = None
+    campaign_state: str | None = None
 
 
 class LoopReport(BaseModel):
@@ -542,7 +544,8 @@ class LoopReport(BaseModel):
     rmse_by_metric: dict[str, float] = Field(default_factory=dict)
     optimization: OptimizationResult
     next_doe: DOEPlan
-    engine: str
+    engine: str = "offline"
+    campaign_state: str | None = None
 
 
 # ── v0.6: Natural-language intent parsing ────────────────────────────────────

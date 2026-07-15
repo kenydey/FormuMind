@@ -32,6 +32,7 @@ export const useStore = create<AppState>()(
       alEngine: "auto",
       optimizeEngine: "auto",
       loopDoeEngine: "auto",
+      autoLoopOnSync: false,
       campaignState: null,
       workbenchCampaignId: null,
       workbenchObjectivesSnapshot: null,

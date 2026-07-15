@@ -170,6 +170,8 @@ class TaskManager:
             "n_suggest": kwargs.get("n_suggest", 4),
             "optimize_engine": kwargs.get("optimize_engine", "auto"),
             "doe_engine": kwargs.get("doe_engine", "auto"),
+            "workbench_campaign_id": kwargs.get("workbench_campaign_id"),
+            "campaign_state": kwargs.get("campaign_state"),
         }
         async_result = run_loop_task.delay(payload)
         self.register_celery_task(async_result.id, "loop")
@@ -602,9 +604,12 @@ def run_search_task(self, payload: dict) -> dict:
 
 @celery_app.task(bind=True, name="formumind.loop")
 def run_loop_task(self, payload: dict) -> dict:
+    return run_loop_iterate_impl(self.request.id, payload)
+
+
+def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
     from ..services import auto_loop
 
-    task_id = self.request.id
     publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting loop")
     req = Requirement(**payload["requirement"])
 
@@ -624,6 +629,8 @@ def run_loop_task(self, payload: dict) -> dict:
             progress_cb=progress,
             optimize_engine=payload.get("optimize_engine", "auto"),
             doe_engine=payload.get("doe_engine", "auto"),
+            workbench_campaign_id=payload.get("workbench_campaign_id"),
+            campaign_state=payload.get("campaign_state"),
         )
         data = result.model_dump()
         persist_result(task_id, data, failed=False)

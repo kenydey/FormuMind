@@ -87,6 +87,7 @@ export interface AppState {
   alEngine: "auto" | "legacy" | "baybe";
   optimizeEngine: "auto" | "baybe" | "legacy";
   loopDoeEngine: "auto" | "legacy" | "baybe";
+  autoLoopOnSync: boolean;
   campaignState: string | null;
   workbenchCampaignId: number | null;
   workbenchObjectivesSnapshot: ObjectiveSpec[] | null;
@@ -203,6 +204,9 @@ export interface AppState {
   openSettings: (tab?: "llm" | "deps" | "api" | "env") => void;
   setSettingsTab: (tab: "llm" | "deps" | "api" | "env") => void;
   runLoop: () => Promise<void>;
+  followLoopTask: (taskId: string) => Promise<void>;
+  runNextRoundDoe: () => Promise<void>;
+  setAutoLoopOnSync: (enabled: boolean) => void;
   applyIntent: (text: string) => Promise<string[]>;
 }
 

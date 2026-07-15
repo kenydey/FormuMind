@@ -56,6 +56,13 @@ export default function LabWorkbench({
   const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
+  const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
+  const setAutoLoopOnSync = useStore((s) => s.setAutoLoopOnSync);
+  const optimizeEngine = useStore((s) => s.optimizeEngine);
+  const loopDoeEngine = useStore((s) => s.loopDoeEngine);
+  const campaignState = useStore((s) => s.campaignState);
+  const followLoopTask = useStore((s) => s.followLoopTask);
+  const refreshWorkbenchStats = useStore((s) => s.refreshWorkbenchStats);
 
   const objectives = useMemo(
     () =>
@@ -146,14 +153,24 @@ export default function LabWorkbench({
             measurements,
           };
         }),
+        trigger_loop: autoLoopOnSync ? true : null,
+        requirement,
+        optimize_engine: optimizeEngine,
+        doe_engine: loopDoeEngine,
+        campaign_state: campaignState,
       });
       setRows(res.rows);
-      if (res.training_message) {
-        setError(null);
-        // Brief success hint (reuse error banner styling as info)
-        setSaveHint(res.training_message);
+      const hints: string[] = [];
+      if (res.training_message) hints.push(res.training_message);
+      if (res.loop_message) hints.push(res.loop_message);
+      if (hints.length) {
+        setSaveHint(hints.join(" · "));
       }
       onSaved?.(res.rows);
+      void refreshWorkbenchStats();
+      if (res.loop_task_id) {
+        void followLoopTask(res.loop_task_id);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -198,16 +215,27 @@ export default function LabWorkbench({
           stopEditingWhenCellsLoseFocus={true}
         />
       </div>
-      <div className="flex items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">
-        <span className="text-[10px] text-slate-500">
-          {rows.filter((r) => r.status === "Completed").length}/{rows.length} 已完成 ·{" "}
-          {objectives.length} 项指标 · 支持 Excel 粘贴
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">
+        <div className="flex flex-col gap-1 min-w-0">
+          <span className="text-[10px] text-slate-500">
+            {rows.filter((r) => r.status === "Completed").length}/{rows.length} 已完成 ·{" "}
+            {objectives.length} 项指标 · 支持 Excel 粘贴
+          </span>
+          <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoLoopOnSync}
+              onChange={(e) => setAutoLoopOnSync(e.target.checked)}
+              className="rounded border-edge"
+            />
+            保存后自动分析收敛并建议下一轮
+          </label>
+        </div>
         <button
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="text-xs bg-accent2/90 hover:bg-accent2 text-ink font-semibold rounded px-3 py-1.5 disabled:opacity-40"
+          className="text-xs bg-accent2/90 hover:bg-accent2 text-ink font-semibold rounded px-3 py-1.5 disabled:opacity-40 shrink-0"
         >
           {saving ? "同步中…" : "保存台账并同步"}
         </button>

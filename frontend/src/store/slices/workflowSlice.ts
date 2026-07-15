@@ -4,6 +4,20 @@ import { extractMeasuredValues, objectiveMetrics } from "../../utils/objectiveCo
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
+function applyLoopReportToDraft(draft: AppState, report: LoopReport): void {
+  draft.loopReport = report;
+  draft.leaderboard = report.optimization.top_formulations;
+  draft.optimizationHistory = report.optimization.history;
+  draft.doePlan = report.next_doe;
+  draft.measured = {};
+  draft.models = report.model_info;
+  draft.rmseHistory.push(report.rmse_by_metric);
+  draft.lastAlEngine = report.engine;
+  if (report.campaign_state) {
+    draft.campaignState = report.campaign_state;
+  }
+}
+
 export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
   return {
     runOptimize: async () => {
@@ -50,24 +64,44 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         draft.error = null;
       });
       try {
-        const { requirement, optimizeEngine, loopDoeEngine } = get();
-        const { task_id } = await api.loopIterate(requirement, 24, 4, optimizeEngine, loopDoeEngine);
-        const final = await awaitTaskStream(task_id, (ev) =>
+        const {
+          requirement,
+          optimizeEngine,
+          loopDoeEngine,
+          workbenchCampaignId,
+          campaignState,
+        } = get();
+        const { task_id } = await api.loopIterate(requirement, 24, 4, optimizeEngine, loopDoeEngine, {
+          workbench_campaign_id: workbenchCampaignId,
+          campaign_state: campaignState,
+        });
+        await get().followLoopTask(task_id);
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      } finally {
+        set((draft) => {
+          draft.busy = "idle";
+        });
+      }
+    },
+
+    followLoopTask: async (taskId: string) => {
+      set((draft) => {
+        draft.busy = "looping";
+        draft.error = null;
+      });
+      try {
+        const final = await awaitTaskStream(taskId, (ev) =>
           set((draft) => {
-            draft.task = progressToTaskStatus(task_id, "loop", ev);
+            draft.task = progressToTaskStatus(taskId, "loop", ev);
           })
         );
         const report = final.data as unknown as LoopReport | null;
         if (report) {
           set((draft) => {
-            draft.loopReport = report;
-            draft.leaderboard = report.optimization.top_formulations;
-            draft.optimizationHistory = report.optimization.history;
-            draft.doePlan = report.next_doe;
-            draft.measured = {};
-            draft.models = report.model_info;
-            draft.rmseHistory.push(report.rmse_by_metric);
-            draft.lastAlEngine = report.engine;
+            applyLoopReportToDraft(draft, report);
           });
           get().scheduleAutosave();
         }
@@ -80,6 +114,62 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.busy = "idle";
         });
       }
+    },
+
+    runNextRoundDoe: async () => {
+      set((draft) => {
+        draft.busy = "doe";
+        draft.error = null;
+      });
+      try {
+        const {
+          requirement,
+          alEngine,
+          loopDoeEngine,
+          campaignState,
+          workbenchCampaignId,
+          activeProjectId,
+        } = get();
+        const result = await api.activeDoe(requirement, {
+          engine: alEngine,
+          doe_engine: loopDoeEngine,
+          campaign_state: campaignState,
+          workbench_campaign_id: workbenchCampaignId,
+        });
+        const plan = result.plan;
+        const wb = await api.createWorkbenchCampaign(
+          plan,
+          undefined,
+          `BayBE-${alEngine}-next`,
+          requirement,
+          activeProjectId ?? undefined
+        );
+        set((draft) => {
+          draft.doePlan = plan;
+          draft.measured = {};
+          draft.campaignState = result.campaign_state ?? draft.campaignState;
+          draft.lastAlEngine = result.engine;
+          draft.workbenchCampaignId = wb.campaign_id;
+          draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
+        });
+        await get().refreshWorkbenchStats();
+        get().scheduleAutosave();
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      } finally {
+        set((draft) => {
+          draft.busy = "idle";
+        });
+      }
+    },
+
+    setAutoLoopOnSync: (enabled: boolean) => {
+      set((draft) => {
+        draft.autoLoopOnSync = enabled;
+      });
+      get().scheduleAutosave();
     },
 
     applyIntent: async (text) => {
@@ -405,5 +495,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'runNextRoundDoe' | 'setAutoLoopOnSync' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
 }

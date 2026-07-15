@@ -86,6 +86,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "kb", "需网络；受 kb_ingest_max_docs 限制（默认 12 篇/次）"),
     EnvFlag("workbench_auto_train", "台账自动回灌训练",
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
+    EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",
+            "Completed 行回灌训练后，后台触发 optimize + 下一轮 DOE（/api/loop/iterate）。", "data"),
     EnvFlag("kb_v2_enabled", "持久知识库 v2",
             "导入/检索的文档结构感知切块入库，问答与推荐检索覆盖全部累计语料。", "kb"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",

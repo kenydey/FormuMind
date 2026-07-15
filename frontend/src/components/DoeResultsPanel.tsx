@@ -117,6 +117,7 @@ export default function DoeResultsPanel() {
     busy, generateDoe, exportDoe, importCsv, error,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, optimizationHistory, setOpenModal,
+    runNextRoundDoe,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -139,6 +140,7 @@ export default function DoeResultsPanel() {
       workbenchStats: s.workbenchStats,
       optimizationHistory: s.optimizationHistory,
       setOpenModal: s.setOpenModal,
+      runNextRoundDoe: s.runNextRoundDoe,
     }))
   );
   const metric = primaryObjectiveMetric(requirement);
@@ -276,8 +278,18 @@ export default function DoeResultsPanel() {
       )}
 
       {workbenchStats && workbenchStats.completed > 0 && (
-        <div className="mb-3 text-[11px] text-slate-400">
-          实验台账进度：{workbenchStats.completed}/{workbenchStats.total} 已完成（{workbenchStats.strategy}）
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] text-slate-400">
+            实验台账进度：{workbenchStats.completed}/{workbenchStats.total} 已完成（{workbenchStats.strategy}）
+          </span>
+          <button
+            type="button"
+            disabled={busy !== "idle"}
+            onClick={() => void runNextRoundDoe()}
+            className="text-[10px] border border-violet-500/50 text-violet-300 rounded px-2 py-1 hover:bg-violet-500/10 disabled:opacity-40"
+          >
+            下一轮 AI 实验 →
+          </button>
         </div>
       )}
 

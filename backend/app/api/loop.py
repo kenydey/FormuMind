@@ -15,7 +15,14 @@ router = APIRouter(prefix="/api", tags=["loop"])
 def iterate_loop(payload: LoopRequest) -> JSONResponse:
     req = Requirement(
         **payload.model_dump(
-            exclude={"optimize_iterations", "n_suggest", "optimize_engine", "doe_engine"}
+            exclude={
+                "optimize_iterations",
+                "n_suggest",
+                "optimize_engine",
+                "doe_engine",
+                "workbench_campaign_id",
+                "campaign_state",
+            }
         )
     )
     async_result = run_loop_task.delay({
@@ -24,5 +31,7 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
         "n_suggest": payload.n_suggest,
         "optimize_engine": payload.optimize_engine,
         "doe_engine": payload.doe_engine,
+        "workbench_campaign_id": payload.workbench_campaign_id,
+        "campaign_state": payload.campaign_state,
     })
     return accepted_response(async_result.id, "loop")
