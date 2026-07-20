@@ -135,6 +135,7 @@ class BaybeCampaignEngine:
         design: str = "baybe_active",
         workbench_campaign_id: int | None = None,
         store=None,
+        budget_remaining: int | None = None,
     ) -> BaybeRecommendResult:
         if not self.available():
             raise RuntimeError("baybe is not installed (pip install -e '.[baybe,bo,science]')")
@@ -197,11 +198,32 @@ class BaybeCampaignEngine:
 
         rec_df = campaign.recommend(batch_size=batch_size)
         plan = dataframe_to_doe_plan(rec_df, factor_list, design, engine="baybe", ai_suggested=True)
-        return BaybeRecommendResult(
+        result = BaybeRecommendResult(
             plan=plan,
             campaign_state=campaign.to_json(),
             engine="baybe",
         )
+        from ..doe_adaptive import enrich_baybe_result
+
+        all_records = list(measurements)
+        if workbench_campaign_id is not None:
+            wb_rows = campaign_store.get_experiments_sync(workbench_campaign_id)
+            for row in wb_rows:
+                if row.measurements:
+                    all_records.append(
+                        ExperimentRecord(
+                            domain=req.domain,
+                            factors=dict(row.actual_params or row.planned_params or {}),
+                            measured={
+                                k: float(v)
+                                for k, v in row.measurements.items()
+                                if v is not None and v != ""
+                            },
+                            source="workbench",
+                            label=f"wb-{row.id}",
+                        )
+                    )
+        return enrich_baybe_result(result, req, all_records, budget_remaining=budget_remaining)
 
     def run_optimization(
         self,

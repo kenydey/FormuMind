@@ -396,7 +396,41 @@ class DOEPlan(BaseModel):
     domain: ProductDomain | None = None  # carried so exported runs round-trip on import
 
 
-class BaybeRecommendResult(BaseModel):
+class RunExplanation(BaseModel):
+    """Why a recommended DOE run was selected (P1 adaptive DOE)."""
+
+    run_id: int
+    strategy: Literal["exploration", "exploitation", "balanced", "constraint_fill"] = "exploration"
+    summary: str
+    nearest_experiment_ids: list[str] = Field(default_factory=list)
+    predicted_delta_pct: float | None = None
+    acquisition_score: float | None = None
+    constraint_warnings: list[str] = Field(default_factory=list)
+
+
+class AnomalyFlag(BaseModel):
+    """Flagged historical experiment that may need review or re-test."""
+
+    experiment_id: str
+    type: Literal["high_residual", "physical_limit", "outlier_in_factor_space"]
+    severity: Literal["info", "warning", "critical"] = "warning"
+    note: str
+    predicted: float | None = None
+    actual: float | None = None
+
+
+class AdaptiveDOEMetadata(BaseModel):
+    """Shared adaptive-DOE fields attached to active-learning responses."""
+
+    strategy_label: Literal["exploration", "balanced", "exploitation"] = "exploration"
+    strategy_rationale: str = ""
+    run_explanations: list[RunExplanation] = Field(default_factory=list)
+    anomalies: list[AnomalyFlag] = Field(default_factory=list)
+    recommended_next_action: str = ""
+    budget_remaining: int | None = None
+
+
+class BaybeRecommendResult(AdaptiveDOEMetadata):
     """Stateless baybe roundtrip payload (not persisted to DB)."""
 
     plan: DOEPlan
@@ -404,7 +438,7 @@ class BaybeRecommendResult(BaseModel):
     engine: str = "baybe"
 
 
-class ActiveDoeResult(BaseModel):
+class ActiveDoeResult(AdaptiveDOEMetadata):
     """Active-learning DOE response — plan plus optional baybe campaign state."""
 
     plan: DOEPlan
