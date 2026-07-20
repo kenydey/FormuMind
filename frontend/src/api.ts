@@ -124,6 +124,14 @@ export interface Formulation {
   source?: string;
 }
 
+export interface EvidenceEntityRef {
+  entity_id: string;
+  kind: "chemical" | "trade_product" | "element" | "parameter";
+  display_name: string;
+  composition_status?: "resolved" | "partial" | "mixture" | "proprietary" | "unknown";
+  surface_form?: string | null;
+}
+
 export interface Evidence {
   source: string;
   identifier: string;
@@ -132,6 +140,7 @@ export interface Evidence {
   relevance: number;
   /** True when this row is from the offline seed corpus, not a live API hit. */
   is_seed_corpus?: boolean;
+  entity_refs?: EvidenceEntityRef[];
 }
 
 export interface ResearchResult {

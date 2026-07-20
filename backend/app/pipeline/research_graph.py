@@ -165,11 +165,17 @@ def retrieve_node(state: ResearchGraphState, settings: Settings | None = None) -
         ]
     evidence = llm_rerank(query, evidence, k=settings.colbert_top_k)
 
-    # Persistent-KB grounding: append top chunks from the accumulated corpus
-    # (full-text patents/literature/web persisted by ingest + fulltext fetch)
-    # after the rerank cut, so recommendations always see the durable KB and
-    # the per-request index keeps its ranking.
-    if settings.kb_v2_enabled and settings.kb_recommend_top_k > 0:
+    if settings.kg_enabled:
+        from ..services.kg import retrieve as kg_retrieve
+
+        kg_result = kg_retrieve(
+            query,
+            pre_evidence=evidence,
+            llm_cap=settings.kg_enumerative_llm_cap,
+            k_semantic=settings.kb_recommend_top_k,
+        )
+        evidence = kg_result.evidence
+    elif settings.kb_v2_enabled and settings.kb_recommend_top_k > 0:
         from ..services import kb_index
 
         kb_hits = kb_index.search_chunks(query, k=settings.kb_recommend_top_k)

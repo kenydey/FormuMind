@@ -91,7 +91,15 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
                 for row, vec in zip(rows, vectors):
                     row["embedding"] = vec
                     row["embedding_model"] = model_name
-        return get_chunk_store().replace_for_source(source_id, rows)
+        n = get_chunk_store().replace_for_source(source_id, rows)
+        if n and settings.kg_enabled and settings.kg_link_on_ingest:
+            try:
+                from .kg.entity_linker import link_source
+
+                link_source(source_id, settings=settings)
+            except Exception as link_exc:
+                degrade_return(logger, link_exc, "kg link_on_ingest failed", None)
+        return n
     except Exception as exc:
         return degrade_return(logger, exc, "kb index_source failed", 0)
 

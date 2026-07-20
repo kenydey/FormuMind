@@ -151,7 +151,67 @@ class KBProduct(Base):
         JSON().with_variant(JSONB(), "postgresql"), default=list
     )
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class KGEntity(Base):
+    """Normalized knowledge-graph entity (chemical, trade product, element)."""
+
+    __tablename__ = "kb_entities"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    canonical_name: Mapped[str] = mapped_column(String(512), default="")
+    zh_name: Mapped[str] = mapped_column(String(256), default="")
+    cas_no: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    smiles: Mapped[str | None] = mapped_column(Text, nullable=True)
+    formula: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    role: Mapped[str] = mapped_column(String(64), default="")
+    supplier: Mapped[str] = mapped_column(String(120), default="")
+    grade: Mapped[str] = mapped_column(String(60), default="")
+    composition_status: Mapped[str] = mapped_column(String(32), default="unknown")
+    proprietary: Mapped[bool] = mapped_column(default=False)
+    generic_name_hint: Mapped[str] = mapped_column(String(256), default="")
+    linked_catalog_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    linked_product_key: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    element_symbols: Mapped[list] = mapped_column(JSON, default=list)
+    aliases: Mapped[list] = mapped_column(JSON, default=list)
+    mention_count: Mapped[int] = mapped_column(Integer, default=0)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class KGMention(Base):
+    """Entity occurrence in a document chunk."""
+
+    __tablename__ = "kb_mentions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    chunk_id: Mapped[str] = mapped_column(String(36), index=True)
+    surface_form: Mapped[str] = mapped_column(String(256), default="")
+    char_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    extractor: Mapped[str] = mapped_column(String(32), default="chem_extract")
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class KGEntityLink(Base):
+    """Optional link between entities (e.g. trade name → catalog chemical)."""
+
+    __tablename__ = "kb_entity_links"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    src_entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    dst_entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    link_type: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class ProjectRow(Base):
