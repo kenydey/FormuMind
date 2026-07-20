@@ -1044,6 +1044,15 @@ export interface SearchResponse {
   total: number;
   source_status?: Record<string, SourceStatus>;
   used_seed_fallback?: boolean;
+  filter_report?: FilterReport | null;
+}
+
+/** Aggregated content-filter outcome from search (rule tier + optional LLM judge). */
+export interface FilterReport {
+  kept: number;
+  dropped: number;
+  dropped_by_reason: Record<string, number>;
+  dropped_examples: string[];
 }
 
 /** Incremental search progress payload (SSE task data). */
@@ -1062,14 +1071,23 @@ export function parseSearchStreamData(
   evidence: Evidence[];
   progress: Partial<SearchStreamProgress>;
   usedSeedFallback: boolean;
+  filterReport: FilterReport | null;
 } {
-  if (!data) return { evidence: [], progress: {}, usedSeedFallback: false };
+  if (!data) {
+    return { evidence: [], progress: {}, usedSeedFallback: false, filterReport: null };
+  }
   const evidence = Array.isArray(data.evidence) ? (data.evidence as Evidence[]) : [];
   const usedSeedFallback =
     data.used_seed_fallback === true || evidence.some((e) => e.is_seed_corpus);
+  const rawReport = data.filter_report;
+  const filterReport =
+    rawReport && typeof rawReport === "object" && !Array.isArray(rawReport)
+      ? (rawReport as FilterReport)
+      : null;
   return {
     evidence,
     usedSeedFallback,
+    filterReport,
     progress: {
       total: typeof data.total === "number" ? data.total : evidence.length,
       source: typeof data.source === "string" ? data.source : null,

@@ -65,6 +65,16 @@ class FilterReport:
         if len(self.dropped_examples) < 8:
             self.dropped_examples.append(f"[{reason}] {ev.title[:60]}")
 
+    def merge(self, other: "FilterReport") -> None:
+        """Combine drop stats from another pass (rule tier + LLM judge)."""
+        self.dropped += other.dropped
+        for reason, count in other.dropped_by_reason.items():
+            self.dropped_by_reason[reason] = self.dropped_by_reason.get(reason, 0) + count
+        for example in other.dropped_examples:
+            if len(self.dropped_examples) >= 8:
+                break
+            self.dropped_examples.append(example)
+
     def as_dict(self) -> dict:
         return {
             "kept": self.kept,

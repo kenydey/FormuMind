@@ -113,7 +113,7 @@ class DeepResearchEngine:
             total_limit=limit,
             per_source_cap=cap,
             progress_cb=progress_cb,
-        )
+        )[0]
 
         # Full-text acquisition: upgrade the top fetchable hits (patent PDF /
         # OA literature PDF / web page body) to full-document chunks and

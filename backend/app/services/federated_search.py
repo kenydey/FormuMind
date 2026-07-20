@@ -59,7 +59,7 @@ class FederatedSearchEngine:
                 total_limit=limit,
                 per_source_cap=cap,
                 progress_cb=progress_cb,
-            )
+            )[0]
         except Exception as exc:
             logger.exception("FederatedSearch failed: %s", exc)
             evidence = []

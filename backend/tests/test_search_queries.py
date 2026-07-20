@@ -69,7 +69,7 @@ def test_merge_filter_drops_irrelevant_literature():
         snippet="unrelated physics",
         relevance=0.9,
     )
-    merged = literature._merge_filter_rank([junk, relevant], q, 10)
+    merged, _ = literature._merge_filter_rank([junk, relevant], q, 10)
     ids = {e.identifier for e in merged}
     assert "arxiv:1" in ids
     assert "arxiv:2" not in ids

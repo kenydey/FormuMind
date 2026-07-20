@@ -211,14 +211,14 @@ def fallback_node(
 
         fed = FederatedSearchEngine(settings)
         types = fed.effective_sources()
-        evidence = literature.iter_search(
-            query,
-            types,
-            req=req,
-            total_limit=30,
-            per_source_cap=10,
-            max_rounds=1,
-        )
+            evidence = literature.iter_search(
+                query,
+                types,
+                req=req,
+                total_limit=30,
+                per_source_cap=10,
+                max_rounds=1,
+            )[0]
     else:
         fed = FederatedSearchEngine(settings)
         result = fed.search(query, req=req)
