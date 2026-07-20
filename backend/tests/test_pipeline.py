@@ -97,6 +97,22 @@ def test_optimization_multi_objective_returns_objectives():
         assert isinstance(form.predicted_std, dict)
 
 
+def test_optimization_enriches_cas_and_zh_name():
+    req = Requirement(
+        domain=ProductDomain.surface_treatment,
+        substrate=Substrate.aluminum,
+        salt_spray_hours=500,
+    )
+    result = workflow.run_optimization(req, iterations=12)
+    assert result.top_formulations
+    top = result.top_formulations[0]
+    by_name = {i.name: i for i in top.ingredients}
+    assert by_name["Hexafluorozirconic acid"].cas_no == "12021-95-3"
+    assert by_name["Hexafluorozirconic acid"].zh_name == "六氟锆酸"
+    assert by_name["Cerium nitrate"].cas_no == "7789-18-6"
+    assert by_name["Cerium nitrate"].zh_name == "硝酸铈"
+
+
 def test_all_domains_run_end_to_end():
     for domain in ProductDomain:
         req = Requirement(domain=domain, substrate=Substrate.aluminum)

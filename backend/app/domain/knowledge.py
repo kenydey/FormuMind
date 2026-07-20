@@ -110,6 +110,8 @@ RAW_MATERIALS: dict[str, dict] = {
     },
     "Cerium nitrate": {
         "role": "inhibitor", "formula": "Ce(NO3)3", "smiles": None, "molar_mass": 326.13,
+        "cas_no": "7789-18-6",
+        "zh_name": "硝酸铈",
         "price_cny_per_kg": 120.0, "voc_contrib": 0.0,
         "svhc": True,
     },
@@ -193,11 +195,15 @@ RAW_MATERIALS: dict[str, dict] = {
     },
     "Hexafluorozirconic acid": {
         "role": "active", "formula": "H2ZrF6", "smiles": None, "molar_mass": 208.23,
+        "cas_no": "12021-95-3",
+        "zh_name": "六氟锆酸",
         "price_cny_per_kg": 95.0, "voc_contrib": 0.0,
     },
     "(3-Aminopropyl)triethoxysilane (APTES)": {
         "role": "active", "formula": "C9H23NO3Si",
         "smiles": "CCO[Si](OCC)(OCC)CCCN", "molar_mass": 221.37,
+        "cas_no": "919-30-2",
+        "zh_name": "(3-氨丙基)三乙氧基硅烷",
         "price_cny_per_kg": 85.0, "voc_contrib": 0.55,
     },
 }
@@ -208,6 +214,7 @@ def ingredient(name: str, weight_pct: float) -> Ingredient:
     formula = spec.get("formula")
     return Ingredient(
         name=name,
+        zh_name=spec.get("zh_name"),
         role=spec.get("role", "additive"),
         smiles=spec.get("smiles"),
         formula=formula,

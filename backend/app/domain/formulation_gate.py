@@ -41,11 +41,38 @@ def _chemtools_gap_fill(name: str, has_smiles: bool, has_cas: bool) -> dict:
     return updates
 
 
+def _lookup_enrich(name: str, ing: Ingredient, updates: dict) -> None:
+    """Fill missing CAS / 中文名 / structure fields via chemical_lookup cascade."""
+    need_cas = not (ing.cas_no or updates.get("cas_no"))
+    need_zh = not (ing.zh_name or updates.get("zh_name"))
+    need_smiles = not (ing.smiles or updates.get("smiles"))
+    need_formula = not (ing.formula or ing.mf_structure or updates.get("formula"))
+    need_mm = ing.molar_mass is None and updates.get("molar_mass") is None
+    if not any((need_cas, need_zh, need_smiles, need_formula, need_mm)):
+        return
+    from ..services.chemical_lookup import lookup_chemical
+
+    hit = lookup_chemical(name)
+    if need_cas and hit.get("cas"):
+        updates["cas_no"] = hit["cas"]
+    if need_zh and hit.get("zh_name"):
+        updates["zh_name"] = hit["zh_name"]
+    if need_smiles and hit.get("smiles"):
+        updates["smiles"] = hit["smiles"]
+    if need_formula and hit.get("formula"):
+        updates["formula"] = hit["formula"]
+        updates["mf_structure"] = hit["formula"]
+    if need_mm and hit.get("molar_mass") is not None:
+        updates["molar_mass"] = hit["molar_mass"]
+
+
 def enrich_ingredient(ing: Ingredient) -> Ingredient:
     spec = RAW_MATERIALS.get(ing.name, {})
     updates: dict = {}
     if not ing.cas_no and spec.get("cas_no"):
         updates["cas_no"] = spec["cas_no"]
+    if not ing.zh_name and spec.get("zh_name"):
+        updates["zh_name"] = spec["zh_name"]
     if not ing.smiles and spec.get("smiles"):
         updates["smiles"] = spec["smiles"]
     if not ing.formula and spec.get("formula"):
@@ -64,6 +91,7 @@ def enrich_ingredient(ing: Ingredient) -> Ingredient:
             has_cas=bool(ing.cas_no or updates.get("cas_no")),
         )
     )
+    _lookup_enrich(ing.name, ing, updates)
     return ing.model_copy(update=updates) if updates else ing
 
 
@@ -72,6 +100,8 @@ def enrich_component(comp: RecommendedFormulaComponent) -> RecommendedFormulaCom
     updates: dict = {}
     if not comp.cas_no and spec.get("cas_no"):
         updates["cas_no"] = spec["cas_no"]
+    if not comp.zh_name and spec.get("zh_name"):
+        updates["zh_name"] = spec["zh_name"]
     if not comp.smiles and spec.get("smiles"):
         updates["smiles"] = spec["smiles"]
     if not comp.mf and spec.get("formula"):
@@ -87,6 +117,14 @@ def enrich_component(comp: RecommendedFormulaComponent) -> RecommendedFormulaCom
             has_cas=bool(comp.cas_no or updates.get("cas_no")),
         )
     )
+    if not comp.zh_name and not updates.get("zh_name"):
+        from ..services.chemical_lookup import lookup_chemical
+
+        hit = lookup_chemical(comp.name)
+        if hit.get("zh_name"):
+            updates["zh_name"] = hit["zh_name"]
+        if not comp.cas_no and not updates.get("cas_no") and hit.get("cas"):
+            updates["cas_no"] = hit["cas"]
     return comp.model_copy(update=updates) if updates else comp
 
 

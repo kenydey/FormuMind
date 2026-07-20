@@ -1,7 +1,9 @@
 """Tests for formulation validation gate."""
 from __future__ import annotations
 
-from app.domain.formulation_gate import parse_llm_formulations, validate_formulations
+from unittest.mock import patch
+
+from app.domain.formulation_gate import enrich_ingredient, parse_llm_formulations, validate_formulations
 from app.domain.schemas import Formulation, Ingredient, ProductDomain
 
 
@@ -44,3 +46,30 @@ def test_parse_llm_valid_list():
     forms, warnings = parse_llm_formulations(payload)
     assert len(forms) == 1
     assert forms[0].ingredients[0].cas_no == "7779-90-0"
+
+
+def test_enrich_ingredient_fills_zh_from_catalog():
+    ing = enrich_ingredient(
+        Ingredient(name="Hexafluorozirconic acid", role="active", weight_pct=1.0)
+    )
+    assert ing.cas_no == "12021-95-3"
+    assert ing.zh_name == "六氟锆酸"
+
+
+def test_enrich_ingredient_lookup_chemical_fallback():
+    ing = Ingredient(name="Unknown chemical XYZ", role="additive", weight_pct=1.0)
+    fake = {
+        "query": "Unknown chemical XYZ",
+        "cas": "123-45-6",
+        "zh_name": "未知化学品",
+        "formula": "C2H6",
+        "smiles": "CC",
+        "molar_mass": 30.0,
+        "found": True,
+        "source": "mock",
+    }
+    with patch("app.services.chemical_lookup.lookup_chemical", return_value=fake):
+        out = enrich_ingredient(ing)
+    assert out.cas_no == "123-45-6"
+    assert out.zh_name == "未知化学品"
+    assert out.smiles == "CC"

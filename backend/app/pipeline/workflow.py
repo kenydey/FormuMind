@@ -101,7 +101,9 @@ def _score_and_validate(
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
         form.score = float(form.predicted.get(metric, 0.0))
-    return form
+    from ..domain.formulation_gate import enrich_formulation
+
+    return enrich_formulation(form)
 
 
 def _evidence_matches_type(evidence, source_type: str) -> bool:
