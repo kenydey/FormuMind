@@ -99,6 +99,7 @@ def loop_iterate(
     prior_rmse_history: list[dict[str, float]] | None = None,
     prior_optimization: OptimizationResult | None = None,
     prior_next_doe: DOEPlan | None = None,
+    budget_remaining: int | None = None,
 ) -> LoopReport:
     """Run one full turn of the self-driving loop and bundle the result."""
     from . import active_learning
@@ -140,6 +141,7 @@ def loop_iterate(
             campaign_state=campaign_state,
             converged=True,
             loop_message="模型 RMSE 已进入平台期，建议停止闭环迭代",
+            recommended_next_action="模型 RMSE 已收敛，建议汇总结果并停止新增实验。",
         )
 
     if progress_cb:
@@ -170,6 +172,7 @@ def loop_iterate(
         doe_engine=doe_engine,
         campaign_state=campaign_state,
         workbench_campaign_id=workbench_campaign_id,
+        budget_remaining=budget_remaining,
     )
 
     if progress_cb:
@@ -186,4 +189,10 @@ def loop_iterate(
         campaign_state=getattr(next_result, "campaign_state", None) or campaign_state,
         converged=False,
         loop_message="",
+        strategy_label=next_result.strategy_label,
+        strategy_rationale=next_result.strategy_rationale,
+        run_explanations=next_result.run_explanations,
+        anomalies=next_result.anomalies,
+        recommended_next_action=next_result.recommended_next_action,
+        budget_remaining=next_result.budget_remaining,
     )

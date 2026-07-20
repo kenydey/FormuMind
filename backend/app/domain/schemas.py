@@ -590,9 +590,10 @@ class LoopRequest(Requirement):
     prior_rmse_history: list[dict[str, float]] = Field(default_factory=list)
     prior_optimization: OptimizationResult | None = None
     prior_next_doe: DOEPlan | None = None
+    budget_remaining: int | None = None
 
 
-class LoopReport(BaseModel):
+class LoopReport(AdaptiveDOEMetadata):
     """One turn of the experiment → retrain → optimize → next-DOE loop."""
 
     domain: str

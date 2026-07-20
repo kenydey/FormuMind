@@ -25,6 +25,7 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
                 "prior_rmse_history",
                 "prior_optimization",
                 "prior_next_doe",
+                "budget_remaining",
             }
         )
     )
@@ -41,5 +42,6 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
         if payload.prior_optimization
         else None,
         "prior_next_doe": payload.prior_next_doe.model_dump() if payload.prior_next_doe else None,
+        "budget_remaining": payload.budget_remaining,
     })
     return accepted_response(async_result.id, "loop")

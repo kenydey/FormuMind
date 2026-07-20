@@ -1,6 +1,7 @@
 """Build baybe SearchSpace from FormuMind requirement + DOE factors."""
 from __future__ import annotations
 
+from ....domain.project_spec import normalize_constraints
 from ....domain.schemas import DOEFactor, Requirement
 
 
@@ -12,16 +13,42 @@ def _max_lever_sum(factors: list[DOEFactor]) -> float:
     return min(100.0, sum(f.high for f in lever_factors))
 
 
+def apply_requirement_bounds(req: Requirement, factors: list[DOEFactor]) -> list[DOEFactor]:
+    """Tighten factor bounds from Requirement constraints before BayBE search."""
+    constraints = normalize_constraints(req)
+    adjusted: list[DOEFactor] = []
+    for factor in factors:
+        low, high = float(factor.low), float(factor.high)
+        name_lower = factor.name.lower()
+
+        if req.cure_temperature_c is not None and "cure" in name_lower and "temp" in name_lower:
+            high = min(high, float(req.cure_temperature_c))
+        if req.ph_target is not None and "ph" in name_lower:
+            target = float(req.ph_target)
+            low = max(low, target - 1.5)
+            high = min(high, target + 1.5)
+
+        voc_label = constraints.get("VOC 上限")
+        if voc_label is not None and "voc" in name_lower:
+            high = min(high, float(voc_label))
+
+        if high <= low:
+            high = low + 1e-3
+        adjusted.append(factor.model_copy(update={"low": round(low, 4), "high": round(high, 4)}))
+    return adjusted
+
+
 def build_searchspace(req: Requirement, factors: list[DOEFactor]):
     from baybe.constraints import ContinuousLinearConstraint
     from baybe.parameters import NumericalContinuousParameter
     from baybe.searchspace import SearchSpace
 
+    bounded = apply_requirement_bounds(req, factors)
     parameters = [
         NumericalContinuousParameter(name=f.name, bounds=(float(f.low), float(f.high)))
-        for f in factors
+        for f in bounded
     ]
-    lever_names = [f.name for f in factors if f.unit == "wt%"]
+    lever_names = [f.name for f in bounded if f.unit == "wt%"]
     constraints = []
     if len(lever_names) >= 2:
         constraints.append(
@@ -29,7 +56,7 @@ def build_searchspace(req: Requirement, factors: list[DOEFactor]):
                 parameters=lever_names,
                 operator="<=",
                 coefficients=tuple(1.0 for _ in lever_names),
-                rhs=_max_lever_sum(factors),
+                rhs=_max_lever_sum(bounded),
             )
         )
     return SearchSpace.from_product(parameters=parameters, constraints=constraints or None)

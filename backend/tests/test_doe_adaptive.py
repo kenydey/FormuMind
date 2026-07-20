@@ -177,6 +177,27 @@ class TestAdaptiveMetadata:
         assert len(enriched.run_explanations) == 3
 
 
+def test_resample_plan_swaps_constraint_violations():
+    from app.domain.schemas import DOEFactor, DOEPlan, DOERun
+    from app.services.doe_adaptive import resample_plan_for_constraints
+
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+    factors = [
+        DOEFactor(name="Zinc phosphate", low=2.0, high=14.0, unit="wt%"),
+    ]
+    plan = DOEPlan(
+        design="lhs",
+        factors=factors,
+        runs=[
+            DOERun(run_id=1, coded={}, natural={"Zinc phosphate": 5.0}, ai_suggested=True),
+            DOERun(run_id=2, coded={}, natural={"Zinc phosphate": 8.0}, ai_suggested=False),
+        ],
+        domain=ProductDomain.anticorrosion_coating,
+    )
+    resampled = resample_plan_for_constraints(req, plan)
+    assert len(resampled.runs) == 2
+
+
 def test_active_doe_api_returns_adaptive_fields():
     from fastapi.testclient import TestClient
     from app.main import app

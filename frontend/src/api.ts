@@ -216,13 +216,41 @@ export interface OptimizationResult {
   engine?: string;
 }
 
-export interface ActiveDoeResult {
+export interface RunExplanation {
+  run_id: number;
+  strategy: "exploration" | "exploitation" | "balanced" | "constraint_fill";
+  summary: string;
+  nearest_experiment_ids: string[];
+  predicted_delta_pct?: number | null;
+  acquisition_score?: number | null;
+  constraint_warnings?: string[];
+}
+
+export interface AnomalyFlag {
+  experiment_id: string;
+  type: "high_residual" | "physical_limit" | "outlier_in_factor_space";
+  severity: "info" | "warning" | "critical";
+  note: string;
+  predicted?: number | null;
+  actual?: number | null;
+}
+
+export interface AdaptiveDOEMetadata {
+  strategy_label: "exploration" | "balanced" | "exploitation";
+  strategy_rationale: string;
+  run_explanations: RunExplanation[];
+  anomalies: AnomalyFlag[];
+  recommended_next_action: string;
+  budget_remaining?: number | null;
+}
+
+export interface ActiveDoeResult extends AdaptiveDOEMetadata {
   plan: DOEPlan;
   campaign_state: string | null;
   engine: string;
 }
 
-export interface BaybeRecommendResult {
+export interface BaybeRecommendResult extends AdaptiveDOEMetadata {
   plan: DOEPlan;
   campaign_state: string;
   engine: string;
@@ -588,6 +616,7 @@ export const api = {
       campaign_state?: string | null;
       workbench_campaign_id?: number | null;
       existing_records?: ExperimentRecord[];
+      budget_remaining?: number | null;
     } = {}
   ) =>
     post<ActiveDoeResult>("/api/doe/active", {
@@ -599,6 +628,7 @@ export const api = {
       doe_engine: opts.doe_engine ?? "auto",
       campaign_state: opts.campaign_state ?? null,
       workbench_campaign_id: opts.workbench_campaign_id ?? null,
+      budget_remaining: opts.budget_remaining ?? null,
     }),
   baybeRecommend: (
     req: Requirement,
@@ -827,6 +857,7 @@ export const api = {
       prior_rmse_history?: Record<string, number>[];
       prior_optimization?: OptimizationResult | null;
       prior_next_doe?: DOEPlan | null;
+      budget_remaining?: number | null;
     } = {}
   ) =>
     postAccepted("/api/loop/iterate", {
@@ -840,6 +871,7 @@ export const api = {
       prior_rmse_history: opts.prior_rmse_history ?? [],
       prior_optimization: opts.prior_optimization ?? null,
       prior_next_doe: opts.prior_next_doe ?? null,
+      budget_remaining: opts.budget_remaining ?? null,
     }),
 
   parseIntent: (text: string) =>
@@ -1340,7 +1372,7 @@ export interface ProcessOptResult {
 
 // ── v0.6 新增类型 ────────────────────────────────────────────────────────────
 
-export interface LoopReport {
+export interface LoopReport extends AdaptiveDOEMetadata {
   domain: string;
   total_records: number;
   model_info: ModelInfo[];

@@ -673,6 +673,7 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
                 payload.get("prior_optimization"), OptimizationResult
             ),
             prior_next_doe=_parse_optional_model(payload.get("prior_next_doe"), DOEPlan),
+            budget_remaining=payload.get("budget_remaining"),
         )
         data = result.model_dump()
         _persist_loop_history(payload.get("workbench_campaign_id"), result)
