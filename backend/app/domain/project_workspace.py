@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .schemas import (
+    AdaptiveDOEMetadata,
     ComprehensiveReport,
     DOEPlan,
     Evidence,
@@ -42,6 +43,7 @@ class ProjectWorkspace(BaseModel):
     research: ResearchResult | None = None
     leaderboard: list[Formulation] = Field(default_factory=list)
     doe_plan: DOEPlan | None = None
+    adaptive_doe: AdaptiveDOEMetadata | None = None
     measured: dict[str, float] = Field(default_factory=dict)
     models: list[ModelInfo] = Field(default_factory=list)
     model_history: list[list[ModelInfo]] = Field(default_factory=list)

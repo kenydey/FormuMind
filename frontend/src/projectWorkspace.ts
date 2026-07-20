@@ -3,6 +3,7 @@
  */
 import type { ConstraintKey } from "./constants/constraints";
 import type {
+  AdaptiveDOEMetadata,
   ChatMessage,
   ComprehensiveReport,
   DOEPlan,
@@ -62,6 +63,7 @@ export interface ProjectWorkspacePayload {
   research: ResearchResult | null;
   leaderboard: Formulation[];
   doe_plan: DOEPlan | null;
+  adaptive_doe: AdaptiveDOEMetadata | null;
   measured: Record<string, number>;
   models: ModelInfo[];
   model_history: ModelInfo[][];
@@ -95,6 +97,7 @@ export interface StoreWorkspaceSlice {
   research: ResearchResult | null;
   leaderboard: Formulation[];
   doePlan: DOEPlan | null;
+  adaptiveDoe: AdaptiveDOEMetadata | null;
   measured: Record<number, number>;
   models: ModelInfo[];
   modelHistory: ModelInfo[][];
@@ -116,6 +119,27 @@ export interface StoreWorkspaceSlice {
   autoLoopOnSync: boolean;
 }
 
+function adaptiveFromLoopReport(loop: LoopReport | null | undefined): AdaptiveDOEMetadata | null {
+  if (!loop) return null;
+  if (
+    !loop.strategy_label &&
+    !loop.strategy_rationale &&
+    !loop.run_explanations?.length &&
+    !loop.anomalies?.length &&
+    !loop.recommended_next_action
+  ) {
+    return null;
+  }
+  return {
+    strategy_label: loop.strategy_label ?? "exploration",
+    strategy_rationale: loop.strategy_rationale ?? "",
+    run_explanations: loop.run_explanations ?? [],
+    anomalies: loop.anomalies ?? [],
+    recommended_next_action: loop.recommended_next_action ?? "",
+    budget_remaining: loop.budget_remaining ?? null,
+  };
+}
+
 export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorkspacePayload {
   const measured: Record<string, number> = {};
   for (const [k, v] of Object.entries(slice.measured)) {
@@ -133,6 +157,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     research: slice.research,
     leaderboard: slice.leaderboard,
     doe_plan: slice.doePlan,
+    adaptive_doe: slice.adaptiveDoe,
     measured,
     models: slice.models,
     model_history: slice.modelHistory,
@@ -179,6 +204,7 @@ export function applyWorkspacePayload(
     research: ws.research ?? null,
     leaderboard: ws.leaderboard ?? [],
     doePlan: ws.doe_plan ?? null,
+    adaptiveDoe: ws.adaptive_doe ?? adaptiveFromLoopReport(ws.loop_report ?? null),
     measured,
     models: ws.models ?? [],
     modelHistory: ws.model_history ?? [],

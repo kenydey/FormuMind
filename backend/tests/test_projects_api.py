@@ -73,6 +73,32 @@ def test_update_project(client):
     assert match["source_count"] == 1
 
 
+def test_project_workspace_persists_adaptive_doe(client):
+    r = client.post("/api/projects", json={})
+    pid = r.json()["id"]
+    ws = r.json()["workspace"]
+    ws["adaptive_doe"] = {
+        "strategy_label": "exploration",
+        "strategy_rationale": "已完成 2 次实验",
+        "run_explanations": [
+            {
+                "run_id": 1,
+                "strategy": "exploration",
+                "summary": "探索低 Zn 区域",
+                "nearest_experiment_ids": [],
+            }
+        ],
+        "anomalies": [],
+        "recommended_next_action": "继续执行推荐批次",
+        "budget_remaining": 10,
+    }
+    assert client.put(f"/api/projects/{pid}", json={"workspace": ws}).status_code == 200
+    loaded = client.get(f"/api/projects/{pid}").json()["workspace"]
+    assert loaded["adaptive_doe"]["strategy_label"] == "exploration"
+    assert loaded["adaptive_doe"]["run_explanations"][0]["summary"] == "探索低 Zn 区域"
+    assert loaded["adaptive_doe"]["budget_remaining"] == 10
+
+
 def test_delete_project(client):
     pid = client.post("/api/projects", json={}).json()["id"]
     assert client.delete(f"/api/projects/{pid}").status_code == 200

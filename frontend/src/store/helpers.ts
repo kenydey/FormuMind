@@ -47,6 +47,7 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   if (patch.research !== undefined) draft.research = patch.research;
   if (patch.leaderboard !== undefined) draft.leaderboard = patch.leaderboard;
   if (patch.doePlan !== undefined) draft.doePlan = patch.doePlan;
+  if (patch.adaptiveDoe !== undefined) draft.adaptiveDoe = patch.adaptiveDoe;
   if (patch.measured !== undefined) draft.measured = patch.measured;
   if (patch.models !== undefined) draft.models = patch.models;
   if (patch.modelHistory !== undefined) draft.modelHistory = patch.modelHistory;
@@ -91,6 +92,7 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     research: state.research,
     leaderboard: state.leaderboard,
     doePlan: state.doePlan,
+    adaptiveDoe: state.adaptiveDoe,
     measured: state.measured,
     models: state.models,
     modelHistory: state.modelHistory,
