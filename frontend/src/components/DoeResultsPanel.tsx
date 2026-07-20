@@ -116,8 +116,8 @@ export default function DoeResultsPanel() {
     requirement, doePlan, models, modelHistory, trainMessage,
     busy, generateDoe, exportDoe, importCsv, error,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
-    workbenchCampaignId, workbenchStats, optimizationHistory, setOpenModal,
-    runNextRoundDoe,
+    workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
+    runNextRoundDoe, adoptDoePlanToWorkbench,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -138,12 +138,16 @@ export default function DoeResultsPanel() {
       campaignState: s.campaignState,
       workbenchCampaignId: s.workbenchCampaignId,
       workbenchStats: s.workbenchStats,
+      workbenchAdoptedPlanId: s.workbenchAdoptedPlanId,
       optimizationHistory: s.optimizationHistory,
       setOpenModal: s.setOpenModal,
       runNextRoundDoe: s.runNextRoundDoe,
+      adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
     }))
   );
   const metric = primaryObjectiveMetric(requirement);
+  const pendingAdopt =
+    !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
 
   const designs =
     doeEngine === "pydoe"
@@ -277,6 +281,26 @@ export default function DoeResultsPanel() {
         </div>
       )}
 
+      {pendingAdopt && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-accent/30 bg-accent/5 px-2.5 py-2">
+          <span className="text-[11px] text-slate-300">
+            闭环已生成下一批 DOE，尚未写入实验台账
+          </span>
+          <button
+            type="button"
+            disabled={busy !== "idle"}
+            onClick={() => {
+              void adoptDoePlanToWorkbench().then((id) => {
+                if (id != null) setOpenModal("workbench");
+              });
+            }}
+            className="text-[10px] border border-accent text-accent rounded px-2 py-1 hover:bg-accent/10 disabled:opacity-40"
+          >
+            {busy === "doe" ? "创建中…" : "创建实验台账 →"}
+          </button>
+        </div>
+      )}
+
       {workbenchStats && workbenchStats.completed > 0 && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <span className="text-[11px] text-slate-400">
@@ -285,10 +309,22 @@ export default function DoeResultsPanel() {
           <button
             type="button"
             disabled={busy !== "idle"}
-            onClick={() => void runNextRoundDoe()}
+            onClick={() => {
+              if (pendingAdopt) {
+                void adoptDoePlanToWorkbench().then((id) => {
+                  if (id != null) setOpenModal("workbench");
+                });
+              } else {
+                void runNextRoundDoe();
+              }
+            }}
             className="text-[10px] border border-violet-500/50 text-violet-300 rounded px-2 py-1 hover:bg-violet-500/10 disabled:opacity-40"
           >
-            下一轮 AI 实验 →
+            {busy === "doe"
+              ? "处理中…"
+              : pendingAdopt
+                ? "采用下一批 DOE →"
+                : "下一轮 AI 实验 →"}
           </button>
         </div>
       )}

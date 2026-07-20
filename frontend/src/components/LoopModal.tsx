@@ -23,10 +23,13 @@ export default function LoopModal() {
     loopReport,
     rmseHistory,
     doePlan,
+    workbenchAdoptedPlanId,
     optimizeEngine,
     loopDoeEngine,
     setOptimizeEngine,
     setLoopDoeEngine,
+    adoptDoePlanToWorkbench,
+    setOpenModal,
   } = useStore(
     useShallow((s) => ({
       runLoop: s.runLoop,
@@ -34,12 +37,18 @@ export default function LoopModal() {
       loopReport: s.loopReport,
       rmseHistory: s.rmseHistory,
       doePlan: s.doePlan,
+      workbenchAdoptedPlanId: s.workbenchAdoptedPlanId,
       optimizeEngine: s.optimizeEngine,
       loopDoeEngine: s.loopDoeEngine,
       setOptimizeEngine: s.setOptimizeEngine,
       setLoopDoeEngine: s.setLoopDoeEngine,
+      adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
+      setOpenModal: s.setOpenModal,
     }))
   );
+
+  const pendingAdopt =
+    !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
 
   return (
     <div className="space-y-4">
@@ -120,12 +129,28 @@ export default function LoopModal() {
                 <h4 className="text-xs uppercase tracking-widest text-slate-400">
                   下一批推荐实验 · Next DOE（紫色 = AI 主动选点）
                 </h4>
-                <button
-                  onClick={() => useStore.getState().exportDoe("csv")}
-                  className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
-                >
-                  导出下一批 DOE
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {pendingAdopt && (
+                    <button
+                      type="button"
+                      disabled={busy !== "idle"}
+                      onClick={() => {
+                        void adoptDoePlanToWorkbench().then((id) => {
+                          if (id != null) setOpenModal("workbench");
+                        });
+                      }}
+                      className="text-[10px] border border-accent text-accent rounded px-1.5 py-0.5 hover:bg-accent/10 disabled:opacity-40"
+                    >
+                      {busy === "doe" ? "创建中…" : "创建实验台账 →"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => useStore.getState().exportDoe("csv")}
+                    className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                  >
+                    导出下一批 DOE
+                  </button>
+                </div>
               </div>
               <div className="max-h-48 overflow-y-auto border border-edge rounded">
                 <table className="w-full text-[11px]">
