@@ -83,3 +83,40 @@ FORMUMIND_REDIS_URL=redis://redis:6379/0
 自定义 JSON 存放在 comment block 的 `data` 字段（`formumind_params` / `formumind_measurements`）。
 
 开发/CI 仍可使用 `FORMUMIND_CAMPAIGN_BACKEND=sqlite`。
+
+## 检索全文获取（生产）
+
+`FORMUMIND_FULLTEXT_ENRICH=true` 时，检索/深度研究会把排名靠前的专利、OA 文献与网页命中升级为**全文分块**并持久化入知识库（`source_documents` + `document_chunks`），供后续问答与推荐 grounding 使用。
+
+### 推荐生产配置
+
+```bash
+FORMUMIND_FULLTEXT_ENRICH=true
+FORMUMIND_FULLTEXT_MAX_DOCS=8          # 单次深度研究最多拉取全文篇数
+FORMUMIND_FULLTEXT_TIMEOUT_S=20        # 单篇下载超时（秒）
+FORMUMIND_KB_INGEST_AUTO=true          # 检索结束后后台异步入库（SSE 可见进度）
+FORMUMIND_KB_V2_ENABLED=true           # 持久 KB v2 切块 + 向量（可选）
+FORMUMIND_PDF_OCR=false                # 扫描件 PDF 才开启（显著变慢）
+```
+
+### 运行前检查
+
+1. **网络 egress**：Pod/主机需能访问专利局、OpenAlex、arXiv、目标网页域名。
+2. **磁盘**：全文 PDF + 切块会写入 `FORMUMIND_DB_URL` 对应库与本地 `./data/` 缓存；Postgres 生产环境请预留 GB 级空间。
+3. **Celery**：生产务必 `FORMUMIND_CELERY_EAGER=false` + Redis，全文获取与入库在 worker 中执行，避免阻塞 API。
+4. **LLM key**：全文入库后的 Source Guide / 实体抽取依赖 LLM 时，需配置有效 `FORMUMIND_*_API_KEY`。
+
+### 运维 Runbook
+
+| 步骤 | 操作 |
+|------|------|
+| 启用 | Settings UI 打开「检索全文获取」，或写入 `.env` 后重启 API/worker |
+| 验证 | 发起一次深度研究 → 观察 SSE `kb_ingest` 事件 → `GET /health` 中 database 正常 |
+| 限流 | 调低 `FORMUMIND_FULLTEXT_MAX_DOCS` / `FORMUMIND_KB_INGEST_MAX_DOCS` 控制带宽 |
+| 故障 | 单篇超时跳过，不影响检索主路径；检查 worker 日志中 `fulltext` / `ingest` 关键字 |
+| 去重 | 同一 `origin_url` / 内容哈希不会重复下载；可安全重复运行 |
+
+### 与闭环 / 台账的关系
+
+- 台账保存触发的 `auto_loop_on_sync` 与全文获取**独立**；全文 enrich 只增强 KB，不阻塞实验回灌。
+- Campaign `loop_history`（闭环轮次）存于 FormuMind Postgres/SQLite，与 Datalab ELN 样品数据分离。

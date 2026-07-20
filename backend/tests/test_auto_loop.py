@@ -1,8 +1,75 @@
 """Tests for the self-driving loop orchestration (v0.6, P0)."""
-from app.domain.schemas import LoopReport, ProductDomain, Requirement
-from app.services.auto_loop import loop_iterate
+from app.domain.schemas import DOEPlan, LoopReport, OptimizationResult, ProductDomain, Requirement
+from app.services.auto_loop import loop_iterate, rmse_plateau_detected
 
 _REQ = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+
+
+def test_rmse_plateau_detected_when_flat():
+    history = [
+        {"salt_spray_hours": 0.50, "cost_cny_per_kg": 0.20},
+        {"salt_spray_hours": 0.505, "cost_cny_per_kg": 0.201},
+        {"salt_spray_hours": 0.504, "cost_cny_per_kg": 0.199},
+    ]
+    assert rmse_plateau_detected(history, eps=0.01, patience=2)
+
+
+def test_rmse_plateau_not_detected_when_improving():
+    history = [
+        {"salt_spray_hours": 0.50},
+        {"salt_spray_hours": 0.40},
+        {"salt_spray_hours": 0.30},
+    ]
+    assert not rmse_plateau_detected(history, eps=0.01, patience=2)
+
+
+def test_loop_iterate_skips_optimize_when_plateau(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_LOOP_CONVERGENCE_ENABLED", "true")
+    monkeypatch.setenv("FORMUMIND_LOOP_CONVERGENCE_EPS", "0.01")
+    monkeypatch.setenv("FORMUMIND_LOOP_CONVERGENCE_PATIENCE", "2")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    prior = [
+        {"salt_spray_hours": 0.50, "cost_cny_per_kg": 0.20},
+        {"salt_spray_hours": 0.505, "cost_cny_per_kg": 0.201},
+    ]
+
+    def fake_rmse(domain):
+        from app.domain.schemas import ModelInfo
+
+        infos = [
+            ModelInfo(domain=domain, metric="salt_spray_hours", rmse=0.504, r2=0.9, n_samples=8, backend="test"),
+            ModelInfo(domain=domain, metric="cost_cny_per_kg", rmse=0.199, r2=0.8, n_samples=8, backend="test"),
+        ]
+        rmse = {m.metric: m.rmse for m in infos}
+        return infos, rmse
+
+    monkeypatch.setattr("app.services.auto_loop._rmse_by_metric", fake_rmse)
+
+    stub_opt = OptimizationResult(
+        iterations=1,
+        objective="salt_spray_hours",
+        history=[1.0],
+        top_formulations=[],
+        engine="test-prior",
+    )
+    stub_doe = DOEPlan(design="lhs", factors=[], runs=[], plan_id="prior")
+
+    rep = loop_iterate(
+        _REQ,
+        optimize_iterations=6,
+        n_suggest=3,
+        prior_rmse_history=prior,
+        prior_optimization=stub_opt,
+        prior_next_doe=stub_doe,
+    )
+    assert rep.converged is True
+    assert rep.loop_message
+    assert rep.optimization.engine == "test-prior"
+    assert rep.next_doe.plan_id == "prior"
+    get_settings.cache_clear()
 
 
 def test_loop_iterate_returns_loop_report():

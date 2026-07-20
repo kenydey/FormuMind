@@ -213,6 +213,22 @@ class _CampaignMetaMixin:
                 campaign.sample_refs = refs
                 campaign.updated_at = _utcnow()
 
+    def _append_loop_history(self, campaign_id: int, entry: dict) -> None:
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = session.get(Campaign, campaign_id)
+                if campaign is None:
+                    return
+                history = list(campaign.loop_history or [])
+                entry = dict(entry)
+                entry["round"] = len(history) + 1
+                history.append(entry)
+                campaign.loop_history = history
+                campaign.updated_at = _utcnow()
+
+    def append_loop_history_sync(self, campaign_id: int, entry: dict) -> None:
+        self._append_loop_history(campaign_id, entry)
+
     def _delete_campaign_meta(self, campaign_id: int) -> None:
         with self._write_lock:
             with commit_session(self._session_factory) as session:

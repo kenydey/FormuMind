@@ -6,6 +6,65 @@ import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
 
+const FILTER_REASON_LABELS: Record<string, string> = {
+  blocked_domain: "屏蔽域名",
+  garbage_snippet: "无效摘要",
+  near_duplicate: "近似重复",
+  llm_judge: "LLM 质检",
+};
+
+function FilterReportBanner({
+  report,
+}: {
+  report: {
+    kept: number;
+    dropped: number;
+    dropped_by_reason: Record<string, number>;
+    dropped_examples: string[];
+  };
+}) {
+  const [open, setOpen] = useState(false);
+  if (report.dropped <= 0) return null;
+  return (
+    <div className="shrink-0 text-[11px] text-slate-300 border border-slate-600/40 bg-slate-800/40 rounded px-2 py-1.5 leading-relaxed">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full text-left flex items-center justify-between gap-2"
+      >
+        <span>
+          质量过滤：保留 <span className="font-mono text-teal-300">{report.kept}</span> 条，剔除{" "}
+          <span className="font-mono text-amber-300">{report.dropped}</span> 条低质量结果
+        </span>
+        <span className="text-slate-500 shrink-0">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1 text-[10px] text-slate-400 border-t border-edge/40 pt-1.5">
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(report.dropped_by_reason).map(([reason, count]) => (
+              <span
+                key={reason}
+                className="px-1 py-0.5 rounded border border-edge/60 bg-ink/50"
+              >
+                {FILTER_REASON_LABELS[reason] ?? reason}: {count}
+              </span>
+            ))}
+          </div>
+          {report.dropped_examples.length > 0 && (
+            <ul className="list-disc list-inside text-slate-500 max-h-20 overflow-y-auto">
+              {report.dropped_examples.map((ex, i) => (
+                <li key={i} className="truncate" title={ex}>
+                  {ex}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SOURCE_LABELS: Record<string, string> = {
   patents: "专利",
   serpapi_lit: "Scholar",
@@ -84,6 +143,7 @@ export default function SourcesPanel() {
     refreshKnowledgeBase,
     error,
     usedSeedFallback,
+    filterReport,
     kbIngest,
     dismissKbIngest,
   } = useStore(
@@ -112,6 +172,7 @@ export default function SourcesPanel() {
       refreshKnowledgeBase: s.refreshKnowledgeBase,
       error: s.error,
       usedSeedFallback: s.usedSeedFallback,
+      filterReport: s.filterReport,
       kbIngest: s.kbIngest,
       dismissKbIngest: s.dismissKbIngest,
     }))
@@ -210,6 +271,10 @@ export default function SourcesPanel() {
         <div className="shrink-0 text-[11px] text-amber-200/90 border border-amber-500/30 bg-amber-500/10 rounded px-2 py-1.5 leading-relaxed">
           当前结果含<strong className="font-semibold">离线示例摘要</strong>（非实时专利数据）。配置在线检索后可获取真实文献。
         </div>
+      )}
+
+      {filterReport && sources.length > 0 && !searchBusy && (
+        <FilterReportBanner report={filterReport} />
       )}
 
       <input

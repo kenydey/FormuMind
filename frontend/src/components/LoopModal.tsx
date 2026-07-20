@@ -23,10 +23,13 @@ export default function LoopModal() {
     loopReport,
     rmseHistory,
     doePlan,
+    workbenchAdoptedPlanId,
     optimizeEngine,
     loopDoeEngine,
     setOptimizeEngine,
     setLoopDoeEngine,
+    adoptDoePlanToWorkbench,
+    setOpenModal,
   } = useStore(
     useShallow((s) => ({
       runLoop: s.runLoop,
@@ -34,12 +37,19 @@ export default function LoopModal() {
       loopReport: s.loopReport,
       rmseHistory: s.rmseHistory,
       doePlan: s.doePlan,
+      workbenchAdoptedPlanId: s.workbenchAdoptedPlanId,
       optimizeEngine: s.optimizeEngine,
       loopDoeEngine: s.loopDoeEngine,
       setOptimizeEngine: s.setOptimizeEngine,
       setLoopDoeEngine: s.setLoopDoeEngine,
+      adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
+      setOpenModal: s.setOpenModal,
     }))
   );
+
+  const loopConverged = Boolean(loopReport?.converged);
+  const pendingAdopt =
+    !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
 
   return (
     <div className="space-y-4">
@@ -70,17 +80,23 @@ export default function LoopModal() {
             <option value="baybe">DOE：baybe</option>
           </select>
           <button
-            disabled={busy !== "idle"}
+            disabled={busy !== "idle" || loopConverged}
             onClick={runLoop}
             className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-1.5 text-xs disabled:opacity-40"
+            title={loopConverged ? "模型 RMSE 已收敛，建议停止迭代" : undefined}
           >
-            {busy === "looping" ? "迭代中…" : "🔄 迭代一轮闭环"}
+            {busy === "looping" ? "迭代中…" : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
           </button>
         </div>
       </div>
 
       {loopReport && (
         <div className="space-y-4">
+          {loopConverged && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              {loopReport.loop_message || "模型 RMSE 已进入平台期，建议停止闭环迭代。"}
+            </div>
+          )}
           {/* Loop status row */}
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <span>引擎：<span className="font-mono text-accent2">{loopReport.engine}</span></span>
@@ -120,12 +136,28 @@ export default function LoopModal() {
                 <h4 className="text-xs uppercase tracking-widest text-slate-400">
                   下一批推荐实验 · Next DOE（紫色 = AI 主动选点）
                 </h4>
-                <button
-                  onClick={() => useStore.getState().exportDoe("csv")}
-                  className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
-                >
-                  导出下一批 DOE
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {pendingAdopt && (
+                    <button
+                      type="button"
+                      disabled={busy !== "idle"}
+                      onClick={() => {
+                        void adoptDoePlanToWorkbench().then((id) => {
+                          if (id != null) setOpenModal("workbench");
+                        });
+                      }}
+                      className="text-[10px] border border-accent text-accent rounded px-1.5 py-0.5 hover:bg-accent/10 disabled:opacity-40"
+                    >
+                      {busy === "doe" ? "创建中…" : "创建实验台账 →"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => useStore.getState().exportDoe("csv")}
+                    className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                  >
+                    导出下一批 DOE
+                  </button>
+                </div>
               </div>
               <div className="max-h-48 overflow-y-auto border border-edge rounded">
                 <table className="w-full text-[11px]">

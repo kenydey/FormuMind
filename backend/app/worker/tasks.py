@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..domain.schemas import Requirement, TaskState, TaskStatus
+from ..domain.schemas import DOEPlan, OptimizationResult, Requirement, TaskState, TaskStatus
 from ..pipeline import workflow
 from .celery_app import celery_app
 from .task_progress import (
@@ -554,22 +554,26 @@ def run_search_task(self, payload: dict) -> dict:
                 msg = f"检索完成，共 {len(partial)} 条"
             else:
                 msg = f"已找到 {len(partial)} 条，继续搜索…"
+            data = {
+                "evidence": [e.model_dump() for e in partial],
+                "total": len(partial),
+                "source": source,
+                "new_count": new_count,
+                "sources_done": done,
+                "sources_pending": pending,
+            }
+            filter_report = meta.get("filter_report") or meta.get("filter")
+            if filter_report:
+                data["filter_report"] = filter_report
             publish_progress(
                 task_id,
                 TaskProgressStatus.RUNNING,
                 stage=f"search:{source}" if source else "search",
                 message=msg,
-                data={
-                    "evidence": [e.model_dump() for e in partial],
-                    "total": len(partial),
-                    "source": source,
-                    "new_count": new_count,
-                    "sources_done": done,
-                    "sources_pending": pending,
-                },
+                data=data,
             )
 
-        final = literature.iter_search(
+        final, filter_report = literature.iter_search(
             query,
             source_types,
             req=req,
@@ -583,6 +587,7 @@ def run_search_task(self, payload: dict) -> dict:
             "total": len(final),
             "source_status": status,
             "used_seed_fallback": any(e.is_seed_corpus for e in final),
+            "filter_report": filter_report,
         }
         # Background KB build: enqueue is non-blocking, so the search stream
         # terminates immediately below and the frontend keeps its results.
@@ -605,6 +610,38 @@ def run_search_task(self, payload: dict) -> dict:
 @celery_app.task(bind=True, name="formumind.loop")
 def run_loop_task(self, payload: dict) -> dict:
     return run_loop_iterate_impl(self.request.id, payload)
+
+
+def _parse_optional_model(raw: Any, model_cls: type):
+    if not raw:
+        return None
+    try:
+        return model_cls.model_validate(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _persist_loop_history(campaign_id: int | None, report) -> None:
+    if not campaign_id:
+        return
+    from datetime import UTC, datetime
+
+    from ..db.campaign_store import get_campaign_store
+
+    entry = {
+        "round": 0,
+        "at": datetime.now(UTC).isoformat(),
+        "converged": report.converged,
+        "rmse_by_metric": report.rmse_by_metric,
+        "engine": report.engine,
+        "loop_message": report.loop_message,
+    }
+    try:
+        store = get_campaign_store()
+        if hasattr(store, "append_loop_history_sync"):
+            store.append_loop_history_sync(campaign_id, entry)
+    except Exception as exc:
+        log_handled_exception(logger, exc, "persist loop_history")
 
 
 def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
@@ -631,8 +668,14 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
             doe_engine=payload.get("doe_engine", "auto"),
             workbench_campaign_id=payload.get("workbench_campaign_id"),
             campaign_state=payload.get("campaign_state"),
+            prior_rmse_history=payload.get("prior_rmse_history") or [],
+            prior_optimization=_parse_optional_model(
+                payload.get("prior_optimization"), OptimizationResult
+            ),
+            prior_next_doe=_parse_optional_model(payload.get("prior_next_doe"), DOEPlan),
         )
         data = result.model_dump()
+        _persist_loop_history(payload.get("workbench_campaign_id"), result)
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "loop", data)
         return data

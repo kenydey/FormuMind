@@ -463,6 +463,13 @@ def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
     return (overlap_norm * 0.7 + e.relevance * 0.3, e.relevance)
 
 
+def _rank_score_with_boost(e: Evidence, q_kw: set[str], qctx: dict) -> tuple[float, float]:
+    base0, base1 = _rank_score(e, q_kw)
+    from .search_scoring import evidence_entity_boost
+
+    return (base0 + evidence_entity_boost(e, qctx), base1)
+
+
 def _is_weblike(e: Evidence) -> bool:
     """Internet/web sources are the junk-prone ones worth filtering hard."""
     s = (e.source or "").lower()
@@ -477,7 +484,7 @@ def _is_weblike(e: Evidence) -> bool:
 
 def _merge_filter_rank(
     results: list[Evidence], query: str, total_limit: int
-) -> list[Evidence]:
+) -> tuple[list[Evidence], "FilterReport"]:
     """Filter junk, dedupe, rank by relevance, and cap to ``total_limit``.
 
     Relevance/junk rules:
@@ -487,6 +494,9 @@ def _merge_filter_rank(
     * Patents / literature require at least one keyword overlap (unless empty query).
     """
     q_kw = _keywords(query)
+    from .search_scoring import query_chem_context
+
+    qctx = query_chem_context(query)
     seeds = [e for e in results if e.identifier in _SEED_IDENTIFIERS]
     online = [e for e in results if e.identifier not in _SEED_IDENTIFIERS]
 
@@ -505,7 +515,7 @@ def _merge_filter_rank(
 
     seen: set[str] = set()
     deduped: list[Evidence] = []
-    for e in sorted(merged, key=lambda x: _rank_score(x, q_kw), reverse=True):
+    for e in sorted(merged, key=lambda x: _rank_score_with_boost(x, q_kw, qctx), reverse=True):
         key = e.identifier or e.title
         if key not in seen:
             seen.add(key)
@@ -516,7 +526,7 @@ def _merge_filter_rank(
     from .content_filter import filter_evidence
 
     deduped, _report = filter_evidence(deduped, query)
-    return deduped[:total_limit]
+    return deduped[:total_limit], _report
 
 
 def _build_streams(
@@ -595,7 +605,7 @@ def iter_search(
     per_source_cap: int = 50,
     max_rounds: int = 20,
     progress_cb=None,
-) -> list[Evidence]:
+) -> tuple[list[Evidence], dict]:
     """Incremental multi-source retrieval — fetch in rounds until no source turns
     up new related results (no fixed time budget).
 
@@ -627,7 +637,7 @@ def iter_search(
     def _notify(*, source: str | None = None, new_count: int = 0) -> None:
         if progress_cb is None:
             return
-        ranked = _merge_filter_rank(raw, rank_q, total_limit)
+        ranked, _ = _merge_filter_rank(raw, rank_q, total_limit)
         meta = {
             "source": source,
             "new_count": new_count,
@@ -674,12 +684,32 @@ def iter_search(
                     _notify(source=st["name"], new_count=0)
         ex.shutdown(wait=False)
 
-    final = _merge_filter_rank(raw, rank_q, total_limit)
+    final, rule_report = _merge_filter_rank(raw, rank_q, total_limit)
 
     # Optional batched LLM quality judge — one call on the final ranked list.
-    from .content_filter import llm_quality_judge
+    from .content_filter import FilterReport, llm_quality_judge
 
     final, judge_report = llm_quality_judge(final, rank_q)
+
+    filter_report = FilterReport()
+    filter_report.merge(rule_report)
+    filter_report.merge(judge_report)
+
+    from ..config import get_settings
+
+    settings = get_settings()
+    if settings.search_rerank_enabled and len(final) > 1:
+        from .rag import llm_rerank
+
+        final = llm_rerank(
+            rank_q,
+            final,
+            k=min(len(final), settings.search_rerank_top_k),
+            req=req,
+        )
+
+    filter_report.kept = len(final)
+    filter_payload = filter_report.as_dict()
     if progress_cb is not None:
         try:
             progress_cb(
@@ -690,12 +720,12 @@ def iter_search(
                     "sources_done": [s["name"] for s in streams],
                     "sources_pending": [],
                     "final": True,
-                    "filter": judge_report.as_dict(),
+                    "filter_report": filter_payload,
                 },
             )
         except TypeError:
             progress_cb(final)
-    return final
+    return final, filter_payload
 
 
 def search_by_types(
@@ -716,7 +746,7 @@ def search_by_types(
         req=req,
         total_limit=total_limit,
         per_source_cap=limit_per_source,
-    )
+    )[0]
 
 
 def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:

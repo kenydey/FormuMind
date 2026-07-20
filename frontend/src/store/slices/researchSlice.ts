@@ -1,15 +1,13 @@
 import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
 import type { ChatMessage, ComprehensiveReport, Formulation, ResearchResult } from "../../api";
+import { applyEnrichedLeaderboard } from "../formulationEnrich";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
 export function createResearchSlice(set: SliceSet, get: SliceGet) {
   return {
     setLeaderboard: (forms) => {
-      set((draft) => {
-        draft.leaderboard = forms;
-      });
-      get().scheduleAutosave();
+      void applyEnrichedLeaderboard(set, get, forms);
     },
 
     addManualFormula: async () => {
@@ -90,15 +88,13 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           ...f,
           source: "ai_modify",
         }));
-        set((draft) => {
-          draft.leaderboard = [...draft.leaderboard, ...scored];
+        await applyEnrichedLeaderboard(set, get, [...leaderboard, ...scored], (draft) => {
           draft.research = {
             ...research,
-            recommended: [...draft.leaderboard],
+            recommended: draft.leaderboard,
             chat_markdown: `AI 修改：${prompt}`,
           };
         });
-        get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
@@ -121,6 +117,16 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       });
       try {
         const { requirement, sources, selectedSources, searchQuery } = get();
+        const flags = await api.getEnvFlags().catch(() => null);
+        const autoKbRefresh = flags?.flags?.some(
+          (f) => f.attr === "auto_kb_refresh_before_recommend" && f.value
+        );
+        if (autoKbRefresh && searchQuery.trim()) {
+          set((draft) => {
+            draft.recommendMessage = "推荐前刷新知识库…";
+          });
+          await api.refreshKnowledgeBase(searchQuery.trim());
+        }
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
@@ -140,11 +146,9 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         const wrapped = final.data as { research?: ResearchResult } | undefined;
         const research = wrapped?.research;
         if (!research) throw new Error("推荐未返回结果");
-        set((draft) => {
-          draft.research = research;
-          draft.leaderboard = research.recommended;
+        await applyEnrichedLeaderboard(set, get, research.recommended, (draft) => {
+          draft.research = { ...research, recommended: draft.leaderboard };
         });
-        get().scheduleAutosave();
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
@@ -188,9 +192,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         });
         if (report.citations?.length) get().addSources(report.citations);
         if (report.candidates?.length) {
-          set((draft) => {
-            draft.leaderboard = report.candidates!;
-          });
+          await applyEnrichedLeaderboard(set, get, report.candidates);
         }
         const msg: ChatMessage = {
           role: "assistant",

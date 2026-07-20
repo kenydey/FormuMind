@@ -79,6 +79,7 @@ def template(domain: ProductDomain) -> Formulation:
 
 class FormulationValidateRequest(BaseModel):
     formulations: list[Formulation]
+    requirement: Requirement | None = None
 
 
 class FormulationValidateResponse(BaseModel):
@@ -89,7 +90,7 @@ class FormulationValidateResponse(BaseModel):
 @router.post("/formulations/validate", response_model=FormulationValidateResponse)
 def validate_formulation_list(body: FormulationValidateRequest) -> FormulationValidateResponse:
     """Validate and enrich leaderboard / LLM formulations (CAS, structure)."""
-    forms, warnings = validate_formulations(body.formulations)
+    forms, warnings = validate_formulations(body.formulations, req=body.requirement)
     return FormulationValidateResponse(formulations=forms, warnings=warnings)
 
 

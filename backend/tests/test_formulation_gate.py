@@ -10,7 +10,7 @@ from app.domain.formulation_gate import (
     validate_formulations,
 )
 from app.domain.knowledge import resolve_material_name
-from app.domain.schemas import Formulation, Ingredient, ProductDomain, RecommendedFormulaComponent
+from app.domain.schemas import Formulation, Ingredient, ProductDomain, RecommendedFormulaComponent, Requirement
 
 
 def test_enrich_cas_from_knowledge():
@@ -112,6 +112,21 @@ def test_enrich_rejects_invalid_cas_checksum():
         )
     assert enriched[0].ingredients[0].cas_no == "123-45-6"
     assert any("校验失败" in w for w in warnings)
+
+
+def test_validate_formulations_requirement_voc_warning():
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, voc_limit_gpl=250.0)
+    form = Formulation(
+        name="high voc",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(name="Bisphenol-A epoxy (DGEBA)", role="resin", weight_pct=50),
+            Ingredient(name="Zinc phosphate", role="inhibitor", weight_pct=50),
+        ],
+        predicted={"voc_gpl": 400.0},
+    )
+    _, warnings = validate_formulations([form], req=req)
+    assert any("VOC" in w for w in warnings)
 
 
 def test_enrich_component_full_lookup_fallback():

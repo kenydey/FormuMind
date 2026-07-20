@@ -185,6 +185,14 @@ class Settings(BaseSettings):
     content_filter_blocked_domains: list[str] = Field(default_factory=list)
     content_filter_llm_judge: bool = False
 
+    # Search-stream LLM rerank (Phase B R-2a): one batched relevance pass on the
+    # final ranked list before returning to the client. Degrades to rank order.
+    search_rerank_enabled: bool = True
+    search_rerank_top_k: int = 20
+
+    # Recommend path: federated refresh → ColBERT index before CRAG recommend.
+    auto_kb_refresh_before_recommend: bool = False
+
     # PDF 解析器层级（KB P1）："auto" = marker → MinerU → MarkItDown → pypdf
     # 逐级回退；指定名称则固定首选（仍向下回退）。marker/MinerU 为重型可选
     # 依赖（版面感知、表格保真的真 Markdown 输出）。
@@ -210,6 +218,10 @@ class Settings(BaseSettings):
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task
+    # Closed-loop RMSE plateau detection (Phase C L-2): skip optimize+DOE when flat.
+    loop_convergence_enabled: bool = True
+    loop_convergence_eps: float = 0.01
+    loop_convergence_patience: int = 2
 
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），

@@ -37,8 +37,8 @@ def test_iter_search_offline_terminates_and_filters_seed():
     """iter_search must terminate offline (no source turns up new results) and
     return only query-relevant seed evidence."""
     req = literature.Requirement(**_REQUIREMENT)
-    zinc = literature.iter_search("zinc phosphate", ["patents"], req=req, total_limit=300)
-    cerium = literature.iter_search("cerium inhibitor", ["patents"], req=req, total_limit=300)
+    zinc, _ = literature.iter_search("zinc phosphate", ["patents"], req=req, total_limit=300)
+    cerium, _ = literature.iter_search("cerium inhibitor", ["patents"], req=req, total_limit=300)
     zinc_ids = {e.identifier for e in zinc}
     cerium_ids = {e.identifier for e in cerium}
     assert "US9982145B2" in zinc_ids       # zinc phosphate primer
@@ -90,7 +90,7 @@ def test_search_total_limit_caps_results():
         )
         for i in range(500)
     ]
-    ranked = literature._merge_filter_rank(flood, "epoxy anticorrosion zinc phosphate", 300)
+    ranked, _ = literature._merge_filter_rank(flood, "epoxy anticorrosion zinc phosphate", 300)
     assert len(ranked) == 300
     ids = [e.identifier for e in ranked]
     assert len(ids) == len(set(ids))
@@ -104,7 +104,7 @@ def test_merge_filter_drops_irrelevant_web_junk():
         literature.Evidence(source="Internet", identifier="u2", title="Epoxy zinc phosphate primer",
                              snippet="waterborne anticorrosion coating", relevance=0.5),
     ]
-    out = literature._merge_filter_rank(items, "epoxy zinc phosphate anticorrosion", 300)
+    out, _ = literature._merge_filter_rank(items, "epoxy zinc phosphate anticorrosion", 300)
     ids = {e.identifier for e in out}
     assert "u2" in ids
     assert "u1" not in ids  # junk web hit with no query overlap is filtered
@@ -131,6 +131,31 @@ def test_search_stream_endpoint_returns_task_handle():
     assert t["state"] == "completed"
     assert t["result"]["total"] >= 1
     assert "source_status" in t["result"]
+    assert "filter_report" in t["result"]
+    assert isinstance(t["result"]["filter_report"], dict)
+    assert "kept" in t["result"]["filter_report"]
+
+
+def test_iter_search_final_progress_includes_filter_report():
+    req = literature.Requirement(**_REQUIREMENT)
+    reports: list[dict] = []
+    literature.iter_search(
+        "zinc phosphate",
+        ["patents"],
+        req=req,
+        total_limit=300,
+        progress_cb=lambda partial, meta=None: (
+            reports.append(meta.get("filter_report"))
+            if meta and meta.get("final")
+            else None
+        ),
+    )
+    assert reports, "final progress tick expected"
+    report = reports[-1]
+    assert isinstance(report, dict)
+    assert report["kept"] >= 1
+    assert "dropped" in report
+    assert "dropped_by_reason" in report
 
 
 def test_search_default_includes_internet():

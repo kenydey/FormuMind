@@ -533,6 +533,9 @@ class LoopRequest(Requirement):
     doe_engine: str = "auto"
     workbench_campaign_id: int | None = None
     campaign_state: str | None = None
+    prior_rmse_history: list[dict[str, float]] = Field(default_factory=list)
+    prior_optimization: OptimizationResult | None = None
+    prior_next_doe: DOEPlan | None = None
 
 
 class LoopReport(BaseModel):
@@ -546,6 +549,8 @@ class LoopReport(BaseModel):
     next_doe: DOEPlan
     engine: str = "offline"
     campaign_state: str | None = None
+    converged: bool = False
+    loop_message: str = ""
 
 
 # ── v0.6: Natural-language intent parsing ────────────────────────────────────

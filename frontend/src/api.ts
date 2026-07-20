@@ -290,6 +290,7 @@ export interface WorkbenchCampaignResponse {
   project_id?: string | null;
   primary_metric?: string | null;
   objectives_snapshot?: ObjectiveSpec[];
+  loop_history?: Array<Record<string, unknown>>;
   rows: WorkbenchRow[];
 }
 
@@ -511,6 +512,11 @@ export const api = {
   addManualFormulation: (formulation: Formulation, requirement?: Requirement) =>
     post<{ formulation: Formulation; warnings: string[] }>("/api/formulations/manual", {
       formulation,
+      requirement: requirement ?? null,
+    }),
+  validateFormulations: (formulations: Formulation[], requirement?: Requirement | null) =>
+    post<{ formulations: Formulation[]; warnings: string[] }>("/api/formulations/validate", {
+      formulations,
       requirement: requirement ?? null,
     }),
   modifyFormulations: (
@@ -787,6 +793,9 @@ export const api = {
     opts: {
       workbench_campaign_id?: number | null;
       campaign_state?: string | null;
+      prior_rmse_history?: Record<string, number>[];
+      prior_optimization?: OptimizationResult | null;
+      prior_next_doe?: DOEPlan | null;
     } = {}
   ) =>
     postAccepted("/api/loop/iterate", {
@@ -797,6 +806,9 @@ export const api = {
       doe_engine,
       workbench_campaign_id: opts.workbench_campaign_id ?? null,
       campaign_state: opts.campaign_state ?? null,
+      prior_rmse_history: opts.prior_rmse_history ?? [],
+      prior_optimization: opts.prior_optimization ?? null,
+      prior_next_doe: opts.prior_next_doe ?? null,
     }),
 
   parseIntent: (text: string) =>
@@ -1044,6 +1056,15 @@ export interface SearchResponse {
   total: number;
   source_status?: Record<string, SourceStatus>;
   used_seed_fallback?: boolean;
+  filter_report?: FilterReport | null;
+}
+
+/** Aggregated content-filter outcome from search (rule tier + optional LLM judge). */
+export interface FilterReport {
+  kept: number;
+  dropped: number;
+  dropped_by_reason: Record<string, number>;
+  dropped_examples: string[];
 }
 
 /** Incremental search progress payload (SSE task data). */
@@ -1062,14 +1083,23 @@ export function parseSearchStreamData(
   evidence: Evidence[];
   progress: Partial<SearchStreamProgress>;
   usedSeedFallback: boolean;
+  filterReport: FilterReport | null;
 } {
-  if (!data) return { evidence: [], progress: {}, usedSeedFallback: false };
+  if (!data) {
+    return { evidence: [], progress: {}, usedSeedFallback: false, filterReport: null };
+  }
   const evidence = Array.isArray(data.evidence) ? (data.evidence as Evidence[]) : [];
   const usedSeedFallback =
     data.used_seed_fallback === true || evidence.some((e) => e.is_seed_corpus);
+  const rawReport = data.filter_report;
+  const filterReport =
+    rawReport && typeof rawReport === "object" && !Array.isArray(rawReport)
+      ? (rawReport as FilterReport)
+      : null;
   return {
     evidence,
     usedSeedFallback,
+    filterReport,
     progress: {
       total: typeof data.total === "number" ? data.total : evidence.length,
       source: typeof data.source === "string" ? data.source : null,
@@ -1234,6 +1264,8 @@ export interface LoopReport {
   next_doe: DOEPlan;
   engine: string;
   campaign_state?: string | null;
+  converged?: boolean;
+  loop_message?: string;
 }
 
 export interface IntentResult {

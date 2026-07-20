@@ -211,14 +211,14 @@ def fallback_node(
 
         fed = FederatedSearchEngine(settings)
         types = fed.effective_sources()
-        evidence = literature.iter_search(
-            query,
-            types,
-            req=req,
-            total_limit=30,
-            per_source_cap=10,
-            max_rounds=1,
-        )
+            evidence = literature.iter_search(
+                query,
+                types,
+                req=req,
+                total_limit=30,
+                per_source_cap=10,
+                max_rounds=1,
+            )[0]
     else:
         fed = FederatedSearchEngine(settings)
         result = fed.search(query, req=req)
@@ -271,7 +271,11 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
             except ValueError as exc:
                 rec_resp.warnings.append(str(exc))
         recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
-        recommended, gate_warnings = validate_formulations(recommended)
+        recommended, gate_warnings = validate_formulations(recommended, req=req)
+        from .claim_checker import check_formulation_predictions
+
+        for form in recommended:
+            gate_warnings.extend(check_formulation_predictions(form, grounded))
         recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
         recommended, dedup_notes = chemtools.dedupe_similar_formulations(recommended)
         gate_warnings.extend(dedup_notes)
@@ -339,7 +343,11 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
             except ValueError as exc:
                 rec_resp.warnings.append(str(exc))
         recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
-        recommended, gate_warnings = validate_formulations(recommended)
+        recommended, gate_warnings = validate_formulations(recommended, req=req)
+        from .claim_checker import check_formulation_predictions
+
+        for form in recommended:
+            gate_warnings.extend(check_formulation_predictions(form, grounded))
         recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
         recommended, dedup_notes = chemtools.dedupe_similar_formulations(recommended)
         gate_warnings.extend(dedup_notes)

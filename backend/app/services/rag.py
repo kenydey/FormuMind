@@ -20,7 +20,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from ..domain.schemas import Evidence
+from ..domain.schemas import Evidence, Requirement
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,27 @@ def hyde_expand(query: str, domain: str | None = None) -> str:
     return f"{query}\n\n{hint}" if hint else query
 
 
-def _rerank_prompt(query: str, candidates: list[Evidence]) -> str:
+def _rerank_query(query: str, req: Requirement | None = None) -> str:
+    if req is None:
+        return query
+    parts = [query.strip()]
+    if req.product_type:
+        parts.append(f"产品: {req.product_type}")
+    if req.substrate:
+        parts.append(f"基材: {req.substrate}")
+    objs = ", ".join(
+        f"{o.metric}({o.direction})" for o in (req.objectives or [])[:4]
+    )
+    if objs:
+        parts.append(f"目标: {objs}")
+    mats = ", ".join(m.name for m in (req.materials or [])[:6] if m.name)
+    if mats:
+        parts.append(f"材料: {mats}")
+    return " | ".join(p for p in parts if p)
+
+
+def _rerank_prompt(query: str, candidates: list[Evidence], req: Requirement | None = None) -> str:
+    topic = _rerank_query(query, req)
     lines = "\n".join(
         f"[{i}] ({e.source}) {e.title}: {e.snippet[:200]}"
         for i, e in enumerate(candidates)
@@ -209,12 +229,17 @@ def _rerank_prompt(query: str, candidates: list[Evidence]) -> str:
     return (
         "你是检索相关性评审。给定研究主题与若干候选证据，为每条证据按其与主题的"
         "语义相关性打分（0.0 完全无关 … 1.0 高度相关）。\n"
-        f"研究主题：{query}\n\n候选证据：\n{lines}\n\n"
+        f"研究主题：{topic}\n\n候选证据：\n{lines}\n\n"
         '仅返回 JSON：{"scores": [{"i": 0, "score": 0.9}, ...]}（i 为方括号内编号）。'
     )
 
 
-def llm_rerank(query: str, candidates: list[Evidence], k: int = 6) -> list[Evidence]:
+def llm_rerank(
+    query: str,
+    candidates: list[Evidence],
+    k: int = 6,
+    req: Requirement | None = None,
+) -> list[Evidence]:
     """Re-rank retrieved candidates by LLM-judged semantic relevance, return top-k.
 
     Filters off-topic evidence *before* synthesis so the answer engine is
@@ -230,7 +255,7 @@ def llm_rerank(query: str, candidates: list[Evidence], k: int = 6) -> list[Evide
     from . import llm as _llm
 
     try:
-        data = _llm.complete_json(_rerank_prompt(query, candidates))
+        data = _llm.complete_json(_rerank_prompt(query, candidates, req))
     except Exception:
         data = None
 

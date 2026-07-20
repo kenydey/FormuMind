@@ -102,6 +102,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.research = null;
           draft.deepReport = null;
           draft.leaderboard = [];
+          draft.formulationValidateWarnings = [];
           draft.chatHistory = [];
           draft.sources = [];
           draft.selectedSources = [];
@@ -115,6 +116,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.trainMessage = "";
           draft.campaignState = null;
           draft.workbenchCampaignId = null;
+          draft.workbenchAdoptedPlanId = null;
           draft.workbenchObjectivesSnapshot = null;
           draft.workbenchStats = null;
           draft.error = null;

@@ -9,7 +9,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
-from ..domain.schemas import Evidence
+from ..domain.schemas import Evidence, Formulation
 from ..services import llm
 
 _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
@@ -249,3 +249,56 @@ def regenerate_prompt(topic: str, answer: str, failed_claims: list[VerifiedClaim
         "请基于可引用证据重写上述报告，对无法证实的部分必须标注「证据不足」。"
         f"研究主题：{topic}"
     )
+
+
+_NUMERIC_IN_TEXT = re.compile(r"(\d+(?:\.\d+)?)")
+
+
+def _evidence_supports_value(evidence: list[Evidence], metric: str, value: float) -> bool:
+    """Heuristic: evidence snippets mention a numeric value within ±25% of prediction."""
+    if not evidence or value <= 0:
+        return bool(evidence)
+    lo, hi = value * 0.75, value * 1.25
+    metric_tokens = _token_set(metric.replace("_", " "))
+    for ev in evidence[:12]:
+        blob = f"{ev.title} {ev.snippet}".lower()
+        if metric_tokens and not (metric_tokens & _token_set(blob)):
+            continue
+        for match in _NUMERIC_IN_TEXT.findall(blob):
+            try:
+                num = float(match)
+            except ValueError:
+                continue
+            if lo <= num <= hi:
+                return True
+    return False
+
+
+def check_formulation_predictions(
+    form: Formulation,
+    evidence: list[Evidence],
+) -> list[str]:
+    """Lightweight numeric claim check for recommend-path formulations."""
+    warnings: list[str] = []
+    if not form.predicted:
+        return warnings
+
+    rationale = form.rationale or ""
+    for metric, predicted in form.predicted.items():
+        if not isinstance(predicted, (int, float)):
+            continue
+        val = float(predicted)
+        if val <= 0:
+            continue
+        if metric.replace("_", " ") in rationale.lower() or metric in rationale:
+            nums = [float(m) for m in _NUMERIC_IN_TEXT.findall(rationale) if float(m) > 0]
+            if nums and not any(abs(val - n) / max(val, n) <= 0.2 for n in nums):
+                warnings.append(
+                    f"{form.name}: rationale numbers disagree with predicted {metric}={val:.2g}"
+                )
+        if not _evidence_supports_value(evidence, metric, val):
+            warnings.append(
+                f"{form.name}: predicted {metric}={val:.2g} lacks supporting evidence"
+            )
+    return warnings
+

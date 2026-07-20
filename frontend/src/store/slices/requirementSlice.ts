@@ -64,7 +64,9 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
           draft.activeConstraints = defaultConstraintsForDomain(req.domain);
           draft.research = null;
           draft.leaderboard = [];
+          draft.formulationValidateWarnings = [];
           draft.doePlan = null;
+          draft.workbenchAdoptedPlanId = null;
           draft.measured = {};
         });
         get().scheduleAutosave();
