@@ -3,8 +3,14 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from app.domain.formulation_gate import enrich_ingredient, parse_llm_formulations, validate_formulations
-from app.domain.schemas import Formulation, Ingredient, ProductDomain
+from app.domain.formulation_gate import (
+    enrich_component,
+    enrich_ingredient,
+    parse_llm_formulations,
+    validate_formulations,
+)
+from app.domain.knowledge import resolve_material_name
+from app.domain.schemas import Formulation, Ingredient, ProductDomain, RecommendedFormulaComponent
 
 
 def test_enrich_cas_from_knowledge():
@@ -73,3 +79,63 @@ def test_enrich_ingredient_lookup_chemical_fallback():
     assert out.cas_no == "123-45-6"
     assert out.zh_name == "未知化学品"
     assert out.smiles == "CC"
+
+
+def test_resolve_trade_alias_epon_828():
+    assert resolve_material_name("Epon 828") == "Bisphenol-A epoxy (DGEBA)"
+    ing = enrich_ingredient(Ingredient(name="Epon 828", role="resin", weight_pct=50))
+    assert ing.cas_no == "1675-54-3"
+    assert ing.zh_name == "双酚A型环氧树脂"
+
+
+def test_enrich_rejects_invalid_cas_checksum():
+    ing = Ingredient(name="Unknown chemical XYZ", role="additive", weight_pct=1.0, cas_no="12-34-5")
+    fake = {
+        "query": "Unknown chemical XYZ",
+        "cas": "123-45-6",
+        "zh_name": "未知化学品",
+        "formula": "C2H6",
+        "smiles": "CC",
+        "molar_mass": 30.0,
+        "found": True,
+        "source": "mock",
+    }
+    with patch("app.services.chemical_lookup.lookup_chemical", return_value=fake):
+        enriched, warnings = validate_formulations(
+            [
+                Formulation(
+                    name="t",
+                    domain=ProductDomain.anticorrosion_coating,
+                    ingredients=[ing],
+                )
+            ]
+        )
+    assert enriched[0].ingredients[0].cas_no == "123-45-6"
+    assert any("校验失败" in w for w in warnings)
+
+
+def test_enrich_component_full_lookup_fallback():
+    comp = RecommendedFormulaComponent(name="Unknown chemical XYZ", weight_pct=1.0)
+    fake = {
+        "query": "Unknown chemical XYZ",
+        "cas": "123-45-6",
+        "zh_name": "未知化学品",
+        "formula": "C2H6",
+        "smiles": "CC",
+        "molar_mass": 30.0,
+        "found": True,
+        "source": "mock",
+    }
+    with patch("app.services.chemical_lookup.lookup_chemical", return_value=fake):
+        out = enrich_component(comp)
+    assert out.cas_no == "123-45-6"
+    assert out.zh_name == "未知化学品"
+    assert out.smiles == "CC"
+    assert out.mf == "C2H6"
+    assert out.molar_mass == 30.0
+
+
+def test_ipda_cas_from_catalog_without_gateway():
+    ing = enrich_ingredient(Ingredient(name="Isophorone diamine (IPDA)", role="hardener", weight_pct=20))
+    assert ing.cas_no == "2855-13-2"
+    assert ing.zh_name == "异佛尔酮二胺"

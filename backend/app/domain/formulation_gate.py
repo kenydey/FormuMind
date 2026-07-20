@@ -1,9 +1,11 @@
 """Validate and enrich Formulation / RecommendedFormula objects."""
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field, ValidationError
 
-from .knowledge import RAW_MATERIALS
+from .knowledge import RAW_MATERIALS, resolve_material_name
 from .schemas import (
     Formulation,
     Ingredient,
@@ -13,12 +15,36 @@ from .schemas import (
     RecommendedFormulaListResponse,
 )
 
+_CAS_RE = re.compile(r"^(\d{2,7})-(\d{2})-(\d)$")
+
 
 class FormulationListResponse(BaseModel):
     """Legacy LLM structured output shape."""
 
     formulations: list[Formulation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+def _cas_checksum_ok(cas: str) -> bool:
+    m = _CAS_RE.fullmatch((cas or "").strip())
+    if not m:
+        return False
+    digits = f"{m.group(1)}{m.group(2)}"
+    total = sum(int(d) * w for d, w in zip(reversed(digits), range(1, len(digits) + 1)))
+    return total % 10 == int(m.group(3))
+
+
+def _catalog_spec(name: str) -> tuple[str, dict]:
+    """Return (canonical catalog key, spec dict) for *name*."""
+    canon = resolve_material_name(name)
+    spec = RAW_MATERIALS.get(canon)
+    if spec is not None:
+        return canon, spec
+    lowered = canon.lower()
+    for catalog_name, row in RAW_MATERIALS.items():
+        if catalog_name.lower() == lowered:
+            return catalog_name, row
+    return canon, {}
 
 
 def _chemtools_gap_fill(name: str, has_smiles: bool, has_cas: bool) -> dict:
@@ -41,18 +67,7 @@ def _chemtools_gap_fill(name: str, has_smiles: bool, has_cas: bool) -> dict:
     return updates
 
 
-def _lookup_enrich(name: str, ing: Ingredient, updates: dict) -> None:
-    """Fill missing CAS / 中文名 / structure fields via chemical_lookup cascade."""
-    need_cas = not (ing.cas_no or updates.get("cas_no"))
-    need_zh = not (ing.zh_name or updates.get("zh_name"))
-    need_smiles = not (ing.smiles or updates.get("smiles"))
-    need_formula = not (ing.formula or ing.mf_structure or updates.get("formula"))
-    need_mm = ing.molar_mass is None and updates.get("molar_mass") is None
-    if not any((need_cas, need_zh, need_smiles, need_formula, need_mm)):
-        return
-    from ..services.chemical_lookup import lookup_chemical
-
-    hit = lookup_chemical(name)
+def _apply_lookup_hit(updates: dict, hit: dict, *, need_cas: bool, need_zh: bool, need_smiles: bool, need_formula: bool, need_mm: bool) -> None:
     if need_cas and hit.get("cas"):
         updates["cas_no"] = hit["cas"]
     if need_zh and hit.get("zh_name"):
@@ -62,69 +77,148 @@ def _lookup_enrich(name: str, ing: Ingredient, updates: dict) -> None:
     if need_formula and hit.get("formula"):
         updates["formula"] = hit["formula"]
         updates["mf_structure"] = hit["formula"]
+        updates["mf"] = hit["formula"]
     if need_mm and hit.get("molar_mass") is not None:
         updates["molar_mass"] = hit["molar_mass"]
 
 
-def enrich_ingredient(ing: Ingredient) -> Ingredient:
-    spec = RAW_MATERIALS.get(ing.name, {})
+def _resolve_fields(
+    name: str,
+    *,
+    cas_no: str | None = None,
+    zh_name: str | None = None,
+    smiles: str | None = None,
+    formula: str | None = None,
+    mf: str | None = None,
+    molar_mass: float | None = None,
+    role: str | None = None,
+    component_type: str | None = None,
+) -> tuple[dict, list[str]]:
+    """Unified ingredient/component enrich — catalog → lookup → chemtools."""
+    warnings: list[str] = []
     updates: dict = {}
-    if not ing.cas_no and spec.get("cas_no"):
-        updates["cas_no"] = spec["cas_no"]
-    if not ing.zh_name and spec.get("zh_name"):
-        updates["zh_name"] = spec["zh_name"]
-    if not ing.smiles and spec.get("smiles"):
-        updates["smiles"] = spec["smiles"]
-    if not ing.formula and spec.get("formula"):
-        updates["formula"] = spec["formula"]
-        updates["mf_structure"] = spec["formula"]
-    if ing.molar_mass is None and spec.get("molar_mass") is not None:
-        updates["molar_mass"] = spec["molar_mass"]
-    if not ing.role and spec.get("role"):
-        updates["role"] = spec["role"]
-    if not ing.component_type and (ing.role or spec.get("role")):
-        updates["component_type"] = ing.role or spec.get("role", "")
+    display_name = (name or "").strip()
+    canon_name, spec = _catalog_spec(display_name)
+
+    effective_formula = formula or mf or ""
+    effective_cas = cas_no or ""
+    effective_zh = zh_name or ""
+    effective_smiles = smiles
+    effective_mm = molar_mass
+
+    if spec:
+        if not effective_cas and spec.get("cas_no"):
+            updates["cas_no"] = spec["cas_no"]
+        if not effective_zh and spec.get("zh_name"):
+            updates["zh_name"] = spec["zh_name"]
+        if not effective_smiles and spec.get("smiles"):
+            updates["smiles"] = spec["smiles"]
+        if not effective_formula and spec.get("formula"):
+            updates["formula"] = spec["formula"]
+            updates["mf_structure"] = spec["formula"]
+            updates["mf"] = spec["formula"]
+        if effective_mm is None and spec.get("molar_mass") is not None:
+            updates["molar_mass"] = spec["molar_mass"]
+        if not role and spec.get("role"):
+            updates["role"] = spec["role"]
+        if not component_type and spec.get("role"):
+            updates["component_type"] = spec["role"]
+
+    merged_cas = str(updates.get("cas_no") or effective_cas or "").strip()
+    if merged_cas and not _cas_checksum_ok(merged_cas):
+        warnings.append(f"{display_name}: CAS {merged_cas!r} 校验失败，已忽略")
+        merged_cas = ""
+        updates.pop("cas_no", None)
+
+    merged_zh = updates.get("zh_name") or effective_zh
+    merged_smiles = updates.get("smiles") or effective_smiles
+    merged_formula = updates.get("formula") or effective_formula
+    merged_mm = updates.get("molar_mass", effective_mm)
+
+    need_cas = not (merged_cas or updates.get("cas_no"))
+    need_zh = not merged_zh
+    need_smiles = not merged_smiles
+    need_formula = not merged_formula
+    need_mm = merged_mm is None
+
+    if any((need_cas, need_zh, need_smiles, need_formula, need_mm)):
+        from ..services.chemical_lookup import lookup_chemical
+
+        lookup_name = canon_name if canon_name != display_name else display_name
+        _apply_lookup_hit(
+            updates,
+            lookup_chemical(lookup_name),
+            need_cas=need_cas,
+            need_zh=need_zh,
+            need_smiles=need_smiles,
+            need_formula=need_formula,
+            need_mm=need_mm,
+        )
+
+    if merged_cas and _cas_checksum_ok(merged_cas):
+        from ..services.chemical_lookup import lookup_chemical
+
+        by_cas = lookup_chemical(merged_cas)
+        resolved_cas = str(by_cas.get("cas") or "").strip()
+        if resolved_cas and resolved_cas != merged_cas:
+            warnings.append(
+                f"{display_name}: CAS {merged_cas} 与检索结果 {resolved_cas} 不一致，已采用 {resolved_cas}"
+            )
+            updates["cas_no"] = resolved_cas
+        elif resolved_cas:
+            updates.setdefault("cas_no", resolved_cas)
+        if not (updates.get("zh_name") or merged_zh) and by_cas.get("zh_name"):
+            updates["zh_name"] = by_cas["zh_name"]
+        if not (updates.get("smiles") or merged_smiles) and by_cas.get("smiles"):
+            updates["smiles"] = by_cas["smiles"]
+        if not (updates.get("formula") or merged_formula) and by_cas.get("formula"):
+            updates["formula"] = by_cas["formula"]
+            updates["mf_structure"] = by_cas["formula"]
+            updates["mf"] = by_cas["formula"]
+        if updates.get("molar_mass") is None and merged_mm is None and by_cas.get("molar_mass") is not None:
+            updates["molar_mass"] = by_cas["molar_mass"]
+
+    gap_name = canon_name if spec else display_name
     updates.update(
         _chemtools_gap_fill(
-            ing.name,
-            has_smiles=bool(ing.smiles or updates.get("smiles")),
-            has_cas=bool(ing.cas_no or updates.get("cas_no")),
+            gap_name,
+            has_smiles=bool(updates.get("smiles") or merged_smiles),
+            has_cas=bool(updates.get("cas_no") or merged_cas),
         )
     )
-    _lookup_enrich(ing.name, ing, updates)
+
+    if not component_type and not updates.get("component_type") and (role or updates.get("role")):
+        updates["component_type"] = role or updates.get("role")
+
+    return updates, warnings
+
+
+def enrich_ingredient(ing: Ingredient) -> Ingredient:
+    updates, _ = _resolve_fields(
+        ing.name,
+        cas_no=ing.cas_no,
+        zh_name=ing.zh_name,
+        smiles=ing.smiles,
+        formula=ing.formula or ing.mf_structure,
+        molar_mass=ing.molar_mass,
+        role=ing.role,
+        component_type=ing.component_type,
+    )
+    if not ing.component_type and (ing.role or updates.get("role")):
+        updates.setdefault("component_type", ing.role or updates.get("role", ""))
     return ing.model_copy(update=updates) if updates else ing
 
 
 def enrich_component(comp: RecommendedFormulaComponent) -> RecommendedFormulaComponent:
-    spec = RAW_MATERIALS.get(comp.name, {})
-    updates: dict = {}
-    if not comp.cas_no and spec.get("cas_no"):
-        updates["cas_no"] = spec["cas_no"]
-    if not comp.zh_name and spec.get("zh_name"):
-        updates["zh_name"] = spec["zh_name"]
-    if not comp.smiles and spec.get("smiles"):
-        updates["smiles"] = spec["smiles"]
-    if not comp.mf and spec.get("formula"):
-        updates["mf"] = spec["formula"]
-    if comp.molar_mass is None and spec.get("molar_mass") is not None:
-        updates["molar_mass"] = spec["molar_mass"]
-    if not comp.component_type and spec.get("role"):
-        updates["component_type"] = spec["role"]
-    updates.update(
-        _chemtools_gap_fill(
-            comp.name,
-            has_smiles=bool(comp.smiles or updates.get("smiles")),
-            has_cas=bool(comp.cas_no or updates.get("cas_no")),
-        )
+    updates, _ = _resolve_fields(
+        comp.name,
+        cas_no=comp.cas_no or None,
+        zh_name=comp.zh_name or None,
+        smiles=comp.smiles,
+        mf=comp.mf,
+        molar_mass=comp.molar_mass,
+        component_type=comp.component_type,
     )
-    if not comp.zh_name and not updates.get("zh_name"):
-        from ..services.chemical_lookup import lookup_chemical
-
-        hit = lookup_chemical(comp.name)
-        if hit.get("zh_name"):
-            updates["zh_name"] = hit["zh_name"]
-        if not comp.cas_no and not updates.get("cas_no") and hit.get("cas"):
-            updates["cas_no"] = hit["cas"]
     return comp.model_copy(update=updates) if updates else comp
 
 
@@ -236,10 +330,27 @@ def validate_formulations(forms: list[Formulation]) -> tuple[list[Formulation], 
         total_wt = sum(i.weight_pct for i in form.ingredients)
         if abs(total_wt - 100.0) > 5.0:
             warnings.append(f"{form.name}: ingredient weights sum to {total_wt:.1f}% (expected ~100%)")
-        missing_cas = [i.name for i in form.ingredients if not enrich_ingredient(i).cas_no]
-        if missing_cas and len(missing_cas) == len(form.ingredients):
+        enriched_ings: list[Ingredient] = []
+        for ing in form.ingredients:
+            updates, ing_warnings = _resolve_fields(
+                ing.name,
+                cas_no=ing.cas_no,
+                zh_name=ing.zh_name,
+                smiles=ing.smiles,
+                formula=ing.formula or ing.mf_structure,
+                molar_mass=ing.molar_mass,
+                role=ing.role,
+                component_type=ing.component_type,
+            )
+            warnings.extend(ing_warnings)
+            if not ing.component_type and (ing.role or updates.get("role")):
+                updates.setdefault("component_type", ing.role or updates.get("role", ""))
+            enriched_ings.append(ing.model_copy(update=updates) if updates else ing)
+        enriched = form.model_copy(update={"ingredients": enriched_ings})
+        missing_cas = [i.name for i in enriched.ingredients if not i.cas_no]
+        if missing_cas and len(missing_cas) == len(enriched.ingredients):
             warnings.append(f"{form.name}: no CAS numbers resolved for ingredients")
-        out.append(enrich_formulation(form))
+        out.append(enriched)
     return out, warnings
 
 
@@ -252,7 +363,19 @@ def validate_recommended_formulas(
         if not rec.components:
             warnings.append(f"{rec.name}: no components; skipped")
             continue
-        enriched_comps = [enrich_component(c) for c in rec.components]
+        enriched_comps: list[RecommendedFormulaComponent] = []
+        for comp in rec.components:
+            updates, comp_warnings = _resolve_fields(
+                comp.name,
+                cas_no=comp.cas_no or None,
+                zh_name=comp.zh_name or None,
+                smiles=comp.smiles,
+                mf=comp.mf,
+                molar_mass=comp.molar_mass,
+                component_type=comp.component_type,
+            )
+            warnings.extend(comp_warnings)
+            enriched_comps.append(comp.model_copy(update=updates) if updates else comp)
         missing_cas = [c.name for c in enriched_comps if not c.cas_no]
         if missing_cas:
             warnings.append(f"{rec.name}: missing CAS for {', '.join(missing_cas[:3])}")

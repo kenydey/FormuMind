@@ -34,6 +34,7 @@ RAW_MATERIALS: dict[str, dict] = {
         "role": "resin", "formula": "C21H24O4",
         "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", "molar_mass": 340.41,
         "cas_no": "1675-54-3",
+        "zh_name": "双酚A型环氧树脂",
         "price_cny_per_kg": 28.0, "voc_contrib": 0.0,
         "tg_k": 253.0,  # uncured DGEBA Tg ≈ −20 °C
     },
@@ -64,6 +65,8 @@ RAW_MATERIALS: dict[str, dict] = {
     "Isophorone diamine (IPDA)": {
         "role": "hardener", "formula": "C10H22N2",
         "smiles": "CC1(C)CC(N)CC(C)(CN)C1", "molar_mass": 170.30,
+        "cas_no": "2855-13-2",
+        "zh_name": "异佛尔酮二胺",
         "price_cny_per_kg": 55.0, "voc_contrib": 0.08,
     },
     "Blocked isocyanate (IPDI)": {
@@ -78,6 +81,8 @@ RAW_MATERIALS: dict[str, dict] = {
         # reacts with water in aqueous systems (foaming, poor film). Capped NCO
         # means no free-isocyanate SMARTS match → caught via the carrier rule.
         "role": "hardener", "formula": None, "smiles": None, "molar_mass": None,
+        "cas_no": "28182-81-2",
+        "zh_name": "封闭型HDI三聚体（Desmodur BL 3175）",
         "price_cny_per_kg": 78.0, "voc_contrib": 0.30,
         "carrier": "solvent", "water_compatible": False,
     },
@@ -99,6 +104,7 @@ RAW_MATERIALS: dict[str, dict] = {
     "Zinc phosphate": {
         "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11,
         "cas_no": "7779-90-0",
+        "zh_name": "磷酸锌",
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
         "density_gcm3": 3.1, "oil_absorption": 25.0, "lab": [92.0, -0.5, 2.0],
     },
@@ -207,6 +213,45 @@ RAW_MATERIALS: dict[str, dict] = {
         "price_cny_per_kg": 85.0, "voc_contrib": 0.55,
     },
 }
+
+# Trade-name / grade aliases → canonical RAW_MATERIALS key (case-insensitive lookup).
+TRADE_ALIASES: dict[str, str] = {
+    "epon 828": "Bisphenol-A epoxy (DGEBA)",
+    "epikote 828": "Bisphenol-A epoxy (DGEBA)",
+    "der 331": "Bisphenol-A epoxy (DGEBA)",
+    "双酚a环氧树脂": "Bisphenol-A epoxy (DGEBA)",
+    "ipda": "Isophorone diamine (IPDA)",
+    "异佛尔酮二胺": "Isophorone diamine (IPDA)",
+    "desmodur bl 3175": "Desmodur BL 3175",
+    "desmodur bl3175": "Desmodur BL 3175",
+    "磷酸锌": "Zinc phosphate",
+    "zinc phosphate": "Zinc phosphate",
+    "六氟锆酸": "Hexafluorozirconic acid",
+    "硝酸铈": "Cerium nitrate",
+    "aptes": "(3-Aminopropyl)triethoxysilane (APTES)",
+    "(3-氨丙基)三乙氧基硅烷": "(3-Aminopropyl)triethoxysilane (APTES)",
+    "aerosil 200": "Fumed silica",
+    "气相二氧化硅": "Fumed silica",
+    "钛白粉": "Titanium dioxide",
+    "tio2": "Titanium dioxide",
+}
+
+
+def resolve_material_name(name: str) -> str:
+    """Map trade names / aliases to a RAW_MATERIALS canonical key when known."""
+    key = (name or "").strip()
+    if not key:
+        return key
+    alias = TRADE_ALIASES.get(key.lower())
+    if alias:
+        return alias
+    if key in RAW_MATERIALS:
+        return key
+    lowered = key.lower()
+    for catalog_name in RAW_MATERIALS:
+        if catalog_name.lower() == lowered:
+            return catalog_name
+    return key
 
 
 def ingredient(name: str, weight_pct: float) -> Ingredient:
