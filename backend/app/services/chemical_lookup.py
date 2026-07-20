@@ -110,6 +110,28 @@ def _lookup_pubchem(q: str) -> dict[str, Any] | None:
         return degrade_return(logger, exc, "operation failed", None)
 
 
+def _lookup_compound_synonyms(q: str) -> dict[str, Any] | None:
+    """PubChemPy compound lookup with synonym zh_name / CAS / SMILES (PR-2C)."""
+    from .compounds import lookup_compound
+
+    data = lookup_compound(q.strip())
+    if not data:
+        return None
+    if not any(data.get(k) for k in ("cas", "smiles", "zh_name", "formula", "molar_mass")):
+        return None
+    return {
+        "query": q,
+        "cas": data.get("cas") or "",
+        "iupac_name": data.get("iupac_name") or q,
+        "zh_name": data.get("zh_name") or _zh_from_query(q),
+        "formula": data.get("formula") or "",
+        "smiles": data.get("smiles"),
+        "molar_mass": data.get("molar_mass"),
+        "found": True,
+        "source": "pubchempy_compound",
+    }
+
+
 def _lookup_offline_compounds(q: str) -> dict[str, Any] | None:
     from .compounds import lookup
 
@@ -171,7 +193,13 @@ def lookup_chemical(q: str) -> dict[str, Any]:
     cached = _cache_get(key)
     if cached:
         return cached
-    for resolver in (_lookup_catalog, _lookup_pubchem, _lookup_offline_compounds, _lookup_chemtools):
+    for resolver in (
+        _lookup_catalog,
+        _lookup_pubchem,
+        _lookup_compound_synonyms,
+        _lookup_offline_compounds,
+        _lookup_chemtools,
+    ):
         hit = resolver(q.strip())
         if hit:
             return _cache_put(key, hit)

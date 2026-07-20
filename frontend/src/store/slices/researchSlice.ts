@@ -121,6 +121,16 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       });
       try {
         const { requirement, sources, selectedSources, searchQuery } = get();
+        const flags = await api.getEnvFlags().catch(() => null);
+        const autoKbRefresh = flags?.flags?.some(
+          (f) => f.attr === "auto_kb_refresh_before_recommend" && f.value
+        );
+        if (autoKbRefresh && searchQuery.trim()) {
+          set((draft) => {
+            draft.recommendMessage = "推荐前刷新知识库…";
+          });
+          await api.refreshKnowledgeBase(searchQuery.trim());
+        }
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );

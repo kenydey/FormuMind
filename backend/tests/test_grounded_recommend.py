@@ -45,3 +45,40 @@ def test_catalog_ingredient_gets_high_confidence_without_evidence():
     ]
     out, _ = ground_recommended_formulas(formulas, [])
     assert out[0].components[0].grounding_confidence == "high"
+
+
+def test_cas_in_evidence_yields_high_confidence():
+    formulas = [
+        RecommendedFormula(
+            name="Test C",
+            domain=ProductDomain.anticorrosion_coating,
+            components=[
+                RecommendedFormulaComponent(
+                    name="Zinc phosphate",
+                    cas_no="7779-90-0",
+                    weight_pct=10.0,
+                ),
+            ],
+        )
+    ]
+    evidence = [
+        _ev("US9982145B2", "Zinc rich primer formulation with CAS 7779-90-0 inhibitor"),
+    ]
+    out, _ = ground_recommended_formulas(formulas, evidence)
+    assert out[0].components[0].grounding_confidence == "high"
+
+
+def test_weak_name_overlap_without_cas_is_low():
+    formulas = [
+        RecommendedFormula(
+            name="Test D",
+            domain=ProductDomain.anticorrosion_coating,
+            components=[
+                RecommendedFormulaComponent(name="Obscure additive QZX-42", weight_pct=1.0),
+            ],
+        )
+    ]
+    evidence = [_ev("US999", "General polymer coatings market report overview")]
+    out, warnings = ground_recommended_formulas(formulas, evidence)
+    assert out[0].components[0].grounding_confidence == "low"
+    assert warnings

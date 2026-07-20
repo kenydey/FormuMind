@@ -463,6 +463,13 @@ def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
     return (overlap_norm * 0.7 + e.relevance * 0.3, e.relevance)
 
 
+def _rank_score_with_boost(e: Evidence, q_kw: set[str], qctx: dict) -> tuple[float, float]:
+    base0, base1 = _rank_score(e, q_kw)
+    from .search_scoring import evidence_entity_boost
+
+    return (base0 + evidence_entity_boost(e, qctx), base1)
+
+
 def _is_weblike(e: Evidence) -> bool:
     """Internet/web sources are the junk-prone ones worth filtering hard."""
     s = (e.source or "").lower()
@@ -487,6 +494,9 @@ def _merge_filter_rank(
     * Patents / literature require at least one keyword overlap (unless empty query).
     """
     q_kw = _keywords(query)
+    from .search_scoring import query_chem_context
+
+    qctx = query_chem_context(query)
     seeds = [e for e in results if e.identifier in _SEED_IDENTIFIERS]
     online = [e for e in results if e.identifier not in _SEED_IDENTIFIERS]
 
@@ -505,7 +515,7 @@ def _merge_filter_rank(
 
     seen: set[str] = set()
     deduped: list[Evidence] = []
-    for e in sorted(merged, key=lambda x: _rank_score(x, q_kw), reverse=True):
+    for e in sorted(merged, key=lambda x: _rank_score_with_boost(x, q_kw, qctx), reverse=True):
         key = e.identifier or e.title
         if key not in seen:
             seen.add(key)
@@ -680,6 +690,20 @@ def iter_search(
     from .content_filter import llm_quality_judge
 
     final, judge_report = llm_quality_judge(final, rank_q)
+
+    from ..config import get_settings
+
+    settings = get_settings()
+    if settings.search_rerank_enabled and len(final) > 1:
+        from .rag import llm_rerank
+
+        final = llm_rerank(
+            rank_q,
+            final,
+            k=min(len(final), settings.search_rerank_top_k),
+            req=req,
+        )
+
     if progress_cb is not None:
         try:
             progress_cb(
