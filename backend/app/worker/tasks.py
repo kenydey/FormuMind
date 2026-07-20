@@ -554,22 +554,26 @@ def run_search_task(self, payload: dict) -> dict:
                 msg = f"检索完成，共 {len(partial)} 条"
             else:
                 msg = f"已找到 {len(partial)} 条，继续搜索…"
+            data = {
+                "evidence": [e.model_dump() for e in partial],
+                "total": len(partial),
+                "source": source,
+                "new_count": new_count,
+                "sources_done": done,
+                "sources_pending": pending,
+            }
+            filter_report = meta.get("filter_report") or meta.get("filter")
+            if filter_report:
+                data["filter_report"] = filter_report
             publish_progress(
                 task_id,
                 TaskProgressStatus.RUNNING,
                 stage=f"search:{source}" if source else "search",
                 message=msg,
-                data={
-                    "evidence": [e.model_dump() for e in partial],
-                    "total": len(partial),
-                    "source": source,
-                    "new_count": new_count,
-                    "sources_done": done,
-                    "sources_pending": pending,
-                },
+                data=data,
             )
 
-        final = literature.iter_search(
+        final, filter_report = literature.iter_search(
             query,
             source_types,
             req=req,
@@ -583,6 +587,7 @@ def run_search_task(self, payload: dict) -> dict:
             "total": len(final),
             "source_status": status,
             "used_seed_fallback": any(e.is_seed_corpus for e in final),
+            "filter_report": filter_report,
         }
         # Background KB build: enqueue is non-blocking, so the search stream
         # terminates immediately below and the frontend keeps its results.

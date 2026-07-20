@@ -120,7 +120,7 @@ def test_merge_filter_rank_integration():
         _ev("https://journal.example/paper", title="epoxy coating salt spray study",
             snippet="epoxy coating salt spray corrosion resistance study on steel"),
     ]
-    ranked = _merge_filter_rank(rows, "epoxy coating salt spray", 10)
+    ranked, _ = _merge_filter_rank(rows, "epoxy coating salt spray", 10)
     ids = [e.identifier for e in ranked]
     assert "https://journal.example/paper" in ids
     assert "https://www.pinterest.com/pin/1" not in ids

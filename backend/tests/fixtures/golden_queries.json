@@ -1,0 +1,44 @@
+[
+  {
+    "id": "zinc_phosphate_patents",
+    "query": "zinc phosphate",
+    "source_types": ["patents"],
+    "expect_ids": ["US9982145B2"],
+    "must_not_include": ["EP3211048A1"],
+    "min_kept": 1
+  },
+  {
+    "id": "cerium_inhibitor_patents",
+    "query": "cerium inhibitor",
+    "source_types": ["patents"],
+    "expect_ids": ["EP3211048A1"],
+    "must_not_include": ["US9982145B2"],
+    "min_kept": 1
+  },
+  {
+    "id": "blocked_domain_filter",
+    "query": "epoxy coating salt spray",
+    "source_types": ["internet"],
+    "inline_evidence": [
+      {
+        "source": "Internet",
+        "identifier": "https://www.pinterest.com/pin/golden-test",
+        "title": "epoxy coating salt spray pin board",
+        "snippet": "epoxy coating salt spray corrosion resistance data table summary",
+        "relevance": 0.9
+      },
+      {
+        "source": "Internet",
+        "identifier": "https://journal.example/golden-paper",
+        "title": "epoxy coating salt spray study",
+        "snippet": "epoxy coating salt spray corrosion resistance study on steel substrates",
+        "relevance": 0.85
+      }
+    ],
+    "expect_ids": ["https://journal.example/golden-paper"],
+    "must_not_include": ["https://www.pinterest.com/pin/golden-test"],
+    "expect_drop_reasons": ["blocked_domain"],
+    "min_kept": 1,
+    "use_merge_only": true
+  }
+]

@@ -53,6 +53,7 @@ export const useStore = create<AppState>()(
       selectedSources: [],
       sourceStatus: {} as Record<string, SourceStatus>,
       usedSeedFallback: false,
+      filterReport: null,
       chatHistory: [],
       searchBusy: false,
       searchProgress: null,

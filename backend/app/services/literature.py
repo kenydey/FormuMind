@@ -484,7 +484,7 @@ def _is_weblike(e: Evidence) -> bool:
 
 def _merge_filter_rank(
     results: list[Evidence], query: str, total_limit: int
-) -> list[Evidence]:
+) -> tuple[list[Evidence], "FilterReport"]:
     """Filter junk, dedupe, rank by relevance, and cap to ``total_limit``.
 
     Relevance/junk rules:
@@ -526,7 +526,7 @@ def _merge_filter_rank(
     from .content_filter import filter_evidence
 
     deduped, _report = filter_evidence(deduped, query)
-    return deduped[:total_limit]
+    return deduped[:total_limit], _report
 
 
 def _build_streams(
@@ -605,7 +605,7 @@ def iter_search(
     per_source_cap: int = 50,
     max_rounds: int = 20,
     progress_cb=None,
-) -> list[Evidence]:
+) -> tuple[list[Evidence], dict]:
     """Incremental multi-source retrieval — fetch in rounds until no source turns
     up new related results (no fixed time budget).
 
@@ -637,7 +637,7 @@ def iter_search(
     def _notify(*, source: str | None = None, new_count: int = 0) -> None:
         if progress_cb is None:
             return
-        ranked = _merge_filter_rank(raw, rank_q, total_limit)
+        ranked, _ = _merge_filter_rank(raw, rank_q, total_limit)
         meta = {
             "source": source,
             "new_count": new_count,
@@ -684,12 +684,13 @@ def iter_search(
                     _notify(source=st["name"], new_count=0)
         ex.shutdown(wait=False)
 
-    final = _merge_filter_rank(raw, rank_q, total_limit)
+    final, rule_report = _merge_filter_rank(raw, rank_q, total_limit)
 
     # Optional batched LLM quality judge — one call on the final ranked list.
-    from .content_filter import llm_quality_judge
+    from .content_filter import FilterReport, llm_quality_judge
 
     final, judge_report = llm_quality_judge(final, rank_q)
+<<<<<<< HEAD
 
     from ..config import get_settings
 
@@ -704,6 +705,13 @@ def iter_search(
             req=req,
         )
 
+=======
+    filter_report = FilterReport()
+    filter_report.merge(rule_report)
+    filter_report.merge(judge_report)
+    filter_report.kept = len(final)
+    filter_payload = filter_report.as_dict()
+>>>>>>> origin/cursor/search-filter-report-bfee
     if progress_cb is not None:
         try:
             progress_cb(
@@ -714,12 +722,12 @@ def iter_search(
                     "sources_done": [s["name"] for s in streams],
                     "sources_pending": [],
                     "final": True,
-                    "filter": judge_report.as_dict(),
+                    "filter_report": filter_payload,
                 },
             )
         except TypeError:
             progress_cb(final)
-    return final
+    return final, filter_payload
 
 
 def search_by_types(
@@ -740,7 +748,7 @@ def search_by_types(
         req=req,
         total_limit=total_limit,
         per_source_cap=limit_per_source,
-    )
+    )[0]
 
 
 def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:

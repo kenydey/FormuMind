@@ -65,6 +65,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         draft.sources = [];
         draft.selectedSources = [];
         draft.chatHistory = [];
+        draft.filterReport = null;
       });
       get().scheduleAutosave();
     },
@@ -104,6 +105,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         draft.sources = [];
         draft.selectedSources = [];
         draft.usedSeedFallback = false;
+        draft.filterReport = null;
         draft.searchProgress = {
           message: "正在排队…",
           total: 0,
@@ -124,11 +126,12 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         const final = await awaitTaskStream(
           task_id,
           (ev) => {
-            const { evidence, progress, usedSeedFallback } = parseSearchStreamData(
+            const { evidence, progress, usedSeedFallback, filterReport } = parseSearchStreamData(
               ev.data as Record<string, unknown> | undefined
             );
             set((draft) => {
               if (usedSeedFallback) draft.usedSeedFallback = true;
+              if (filterReport) draft.filterReport = filterReport;
               draft.searchProgress = {
                 message: ev.message || draft.searchProgress?.message || "检索中…",
                 total: progress.total ?? draft.searchProgress?.total ?? 0,
@@ -147,10 +150,16 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               evidence?: Evidence[];
               source_status?: Record<string, SourceStatus>;
               used_seed_fallback?: boolean;
+              filter_report?: import("../../api").FilterReport;
               kb_ingest_task_id?: string;
             }
           | undefined;
         if (r?.evidence?.length) get().addSources(r.evidence);
+        if (r?.filter_report) {
+          set((draft) => {
+            draft.filterReport = r.filter_report!;
+          });
+        }
         // Background KB build runs server-side; track it without blocking —
         // the search UI is already done at this point.
         if (r?.kb_ingest_task_id) void get().trackKbIngest(r.kb_ingest_task_id);

@@ -110,6 +110,7 @@ export interface AppState {
   selectedSources: string[];
   sourceStatus: Record<string, SourceStatus>;
   usedSeedFallback: boolean;
+  filterReport: import("../api").FilterReport | null;
   chatHistory: ChatMessage[];
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;

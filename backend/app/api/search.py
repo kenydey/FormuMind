@@ -50,6 +50,7 @@ class SearchResponse(BaseModel):
     total: int
     source_status: dict[str, SourceStatus] = {}
     used_seed_fallback: bool = False
+    filter_report: dict | None = None
 
 
 def _used_seed_fallback(evidence: list[Evidence]) -> bool:
@@ -75,18 +76,19 @@ def source_status() -> dict[str, SourceStatus]:
 def search_sources(req: SearchRequest):
     """同步一次性检索（legacy）。前端请使用 ``POST /api/search/stream`` 增量检索。"""
     types = _effective_source_types(req.source_types)
-    evidence = literature.search_by_types(
+    evidence, filter_report = literature.iter_search(
         query=req.query,
         source_types=types,
         req=req.requirement,
-        limit_per_source=req.limit_per_source,
         total_limit=req.total_limit,
+        per_source_cap=req.limit_per_source,
     )
     return SearchResponse(
         evidence=evidence,
         total=len(evidence),
         source_status=_build_status(),
         used_seed_fallback=_used_seed_fallback(evidence),
+        filter_report=filter_report,
     )
 
 
