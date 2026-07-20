@@ -791,11 +791,27 @@ def _evidence_prompt(req: Requirement, evidence: list[Evidence], recommended: li
     )
 
 
-def _chat_prompt(question: str, evidence: list[Evidence], domain: str | None) -> str:
+def _chat_prompt(
+    question: str,
+    evidence: list[Evidence],
+    domain: str | None,
+    *,
+    history: list | None = None,
+) -> str:
     context = "\n".join(
         f"[{i+1}] ({e.source}) {e.title}: {e.snippet[:400]}" for i, e in enumerate(evidence[:8])
     )
     domain_hint = f"Domain context: {domain}\n" if domain else ""
+    hist_block = ""
+    if history:
+        lines = []
+        for turn in history[-4:]:
+            role = getattr(turn, "role", None) or (turn.get("role") if isinstance(turn, dict) else "")
+            content = getattr(turn, "content", None) or (turn.get("content") if isinstance(turn, dict) else "")
+            if content:
+                lines.append(f"{role}: {str(content)[:400]}")
+        if lines:
+            hist_block = "Recent dialogue:\n" + "\n".join(lines) + "\n\n"
     trade_suffix = ""
     try:
         from .kg.retrieval import trade_product_prompt_suffix
@@ -811,7 +827,8 @@ def _chat_prompt(question: str, evidence: list[Evidence], domain: str | None) ->
         f"molecular structure, put its SMILES in a fenced code block tagged `smiles`; "
         f"keep Markdown tables intact; preserve commercial trade names / grades / "
         f"suppliers exactly as the sources write them.\n"
-        f"{domain_hint}\n"
+        f"{domain_hint}"
+        f"{hist_block}"
         f"Sources:\n{context}\n\n"
         f"Question: {question}\n\n"
         f"Answer concisely in the same language as the question (Markdown allowed):"
@@ -975,6 +992,8 @@ def answer_question(
     question: str,
     sources: list[Evidence],
     domain: str | None = None,
+    *,
+    history: list | None = None,
 ) -> tuple[str, list[Evidence]]:
     """Answer a user question grounded in the provided sources.
 
@@ -1017,7 +1036,7 @@ def answer_question(
             return pq
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
-    prompt = _chat_prompt(question, relevant, domain)
+    prompt = _chat_prompt(question, relevant, domain, history=history)
     answer = _call_llm(prompt)
     if not answer:
         # Tier 4 — offline fallback: return the most relevant snippet.

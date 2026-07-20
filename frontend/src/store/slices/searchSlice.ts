@@ -313,10 +313,17 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         draft.chatHistory.push({ role: "user", content: question });
       });
       try {
+        const { chatHistory, activeProjectId } = get();
         const res = await api.chat({
           question,
           sources: active,
           domain: requirement.domain,
+          project_id: activeProjectId ?? undefined,
+          history: chatHistory.slice(-6).map((m) => ({
+            role: m.role,
+            content: m.content,
+            citations: m.citations,
+          })),
         });
         set((draft) => {
           draft.chatHistory.push({
