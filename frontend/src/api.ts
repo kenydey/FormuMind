@@ -183,6 +183,28 @@ export interface RecommendFormulationsResponse {
   engine: string;
   warnings: string[];
   scored: Formulation[];
+  requested_n?: number;
+  returned_n?: number;
+  diversity_applied?: boolean;
+  tradeoff?: TradeOffAnalysis | null;
+}
+
+export interface TradeOffAnalysis {
+  objectives?: ObjectiveSpec[];
+  metric_columns?: string[];
+  pareto_frontier_ids?: string[];
+  comparison_table?: Record<string, unknown>[];
+  scenario_picks?: ScenarioPick[];
+  dominance_notes?: string[];
+}
+
+export interface ScenarioPick {
+  scenario: string;
+  candidate_id: string;
+  candidate_name: string;
+  rationale: string;
+  primary_metric?: string;
+  primary_value?: number | null;
 }
 
 export interface OptimizationResult {

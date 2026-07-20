@@ -20,6 +20,7 @@ from ..domain.schemas import (
     Requirement,
     Substrate,
 )
+from ..domain.tradeoff_schemas import TradeOffAnalysis
 from ..pipeline import workflow
 from ..services import llm
 
@@ -98,7 +99,9 @@ class RecommendFormulationsRequest(BaseModel):
     requirement: Requirement
     objectives: list[ObjectiveSpec] = Field(default_factory=list)
     sources: list[Evidence] = Field(default_factory=list)
-    n: int = Field(default=3, ge=1, le=8)
+    n: int | None = Field(default=None, ge=1, le=12)
+    include_tradeoff: bool = True
+    scenario_kinds: list[str] = Field(default_factory=list)
 
 
 class RecommendFormulationsResponse(BaseModel):
@@ -106,14 +109,24 @@ class RecommendFormulationsResponse(BaseModel):
     engine: str
     warnings: list[str] = Field(default_factory=list)
     scored: list[Formulation] = Field(default_factory=list)
+    requested_n: int | None = None
+    returned_n: int | None = None
+    diversity_applied: bool = False
+    tradeoff: TradeOffAnalysis | None = None
 
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
 def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormulationsResponse:
     """LLM structured formulation recommend grounded on ColBERT + CRAG evidence."""
+    from ..config import get_settings
     from ..pipeline.research_graph import resolve_grounded_evidence
+    from ..services.grounded_recommend import ground_recommended_formulas
+    from ..services.recommend_pipeline import finalize_recommendation_bundle, llm_candidate_count, resolve_recommend_n
 
+    settings = get_settings()
     objectives = body.objectives or normalize_objectives(body.requirement)
+    requested_n = resolve_recommend_n(body.n, settings=settings)
+    llm_n = llm_candidate_count(requested_n, settings=settings)
     query = body.requirement.headline()
     try:
         grounded_result = resolve_grounded_evidence(
@@ -126,7 +139,7 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
             body.requirement,
             objectives,
             evidence,
-            n=body.n,
+            n=llm_n,
         )
     except Exception as exc:
         log.exception("recommend_formulations failed")
@@ -135,22 +148,30 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     if not rec_resp.formulas:
         raise HTTPException(status_code=503, detail="No formulations produced")
 
-    process = workflow.process_for(body.requirement)
-    scored: list[Formulation] = []
-    for rec in rec_resp.formulas:
-        try:
-            form = recommended_to_formulation(rec)
-            scored.append(workflow._score_and_validate(form, process, body.requirement, chem_screen=True))
-        except Exception as exc:
-            log.warning("Skip scoring formula %s: %s", rec.name, exc)
-            rec_resp.warnings.append(f"Scoring skipped for {rec.name}: {exc}")
+    grounded_formulas, ground_warnings = ground_recommended_formulas(rec_resp.formulas, evidence)
+    rec_resp.warnings.extend(ground_warnings)
 
-    scored.sort(key=lambda f: (f.score or 0.0), reverse=True)
+    aligned, scored, extra_warnings, _, diversity_applied, tradeoff = finalize_recommendation_bundle(
+        grounded_formulas,
+        body.requirement,
+        evidence,
+        requested_n=requested_n,
+        objectives=objectives,
+        include_tradeoff=body.include_tradeoff,
+        scenario_kinds=body.scenario_kinds or None,
+        settings=settings,
+    )
+    rec_resp.warnings.extend(extra_warnings)
+
     return RecommendFormulationsResponse(
-        formulas=rec_resp.formulas,
+        formulas=aligned,
         engine=rec_resp.engine,
         warnings=rec_resp.warnings,
         scored=scored,
+        requested_n=requested_n,
+        returned_n=len(scored),
+        diversity_applied=diversity_applied,
+        tradeoff=tradeoff,
     )
 
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from ..config import Settings, get_settings
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
+from ..domain.tradeoff_schemas import TradeOffAnalysis
 from ..services import chemtools, colbert_store, llm
 from ..services.federated_search import FederatedSearchEngine
 from ..services.rag import llm_rerank
@@ -240,9 +241,9 @@ def fallback_node(
 
 def recommend_generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
     """Lightweight recommend path — skip answer/report/synthesize LLM calls."""
-    from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
     from ..domain.objective_contract import normalize_objectives
-    from ..pipeline.workflow import _score_and_validate, process_for
+    from ..services.grounded_recommend import ground_recommended_formulas
+    from ..services.recommend_pipeline import finalize_recommendation_bundle, llm_candidate_count, resolve_recommend_n
 
     settings = settings or get_settings()
     req = state.get("req")
@@ -252,39 +253,39 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
     chat = ""
     recommended: list[Formulation] = []
     recommend_engine = "offline"
+    tradeoff = None
+    recommend_meta = None
 
     if req:
+        objectives = normalize_objectives(req)
+        requested_n = resolve_recommend_n(None, settings=settings)
+        llm_n = llm_candidate_count(requested_n, settings=settings)
         rec_resp = llm.recommend_formulations(
             req,
-            normalize_objectives(req),
+            objectives,
             grounded,
-            n=3,
+            n=llm_n,
             modify_prompt=state.get("modify_prompt") or "",
             base_formulas=state.get("base_formulas") or None,
         )
         recommend_engine = rec_resp.engine
-        from ..services.grounded_recommend import ground_recommended_formulas
-
         grounded_formulas, ground_warnings = ground_recommended_formulas(
             rec_resp.formulas, grounded
         )
         rec_resp.warnings.extend(ground_warnings)
-        process = process_for(req)
-        forms = []
-        for rec in grounded_formulas:
-            try:
-                forms.append(recommended_to_formulation(rec))
-            except ValueError as exc:
-                rec_resp.warnings.append(str(exc))
-        recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
-        recommended, gate_warnings = validate_formulations(recommended, req=req)
-        from .claim_checker import check_formulation_predictions
-
-        for form in recommended:
-            gate_warnings.extend(check_formulation_predictions(form, grounded))
-        recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
-        recommended, dedup_notes = chemtools.dedupe_similar_formulations(recommended)
-        gate_warnings.extend(dedup_notes)
+        _, recommended, gate_warnings, _, diversity_applied, tradeoff = finalize_recommendation_bundle(
+            grounded_formulas,
+            req,
+            grounded,
+            requested_n=requested_n,
+            objectives=objectives,
+            settings=settings,
+        )
+        recommend_meta = {
+            "requested_n": requested_n,
+            "returned_n": len(recommended),
+            "diversity_applied": diversity_applied,
+        }
         if recommended:
             mechanism = recommended[0].rationale or ""
             chat = f"已推荐 {len(recommended)} 条配方。"
@@ -299,15 +300,17 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
     state["chat_markdown"] = chat
     state["recommended"] = recommended
     state["recommend_engine"] = "llm" if recommend_engine == "llm" else "offline"
+    state["tradeoff"] = tradeoff.model_dump() if tradeoff else None
+    state["recommend_meta"] = recommend_meta
     state["stage"] = "recommend"
     return state
 
 
 def generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
-    from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
     from ..domain.objective_contract import normalize_objectives
-    from ..pipeline.workflow import _score_and_validate, process_for
     from ..services.deep_research.engine import DeepResearchEngine
+    from ..services.grounded_recommend import ground_recommended_formulas
+    from ..services.recommend_pipeline import finalize_recommendation_bundle, llm_candidate_count, resolve_recommend_n
 
     settings = settings or get_settings()
     topic = state.get("topic") or state.get("query") or ""
@@ -333,30 +336,30 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
     recommend_engine = "offline"
 
     if req:
-        rec_resp = llm.recommend_formulations(req, normalize_objectives(req), grounded, n=3)
-        recommend_engine = rec_resp.engine
-        from ..services.grounded_recommend import ground_recommended_formulas
+        objectives = normalize_objectives(req)
+        requested_n = resolve_recommend_n(None, settings=settings)
+        llm_n = llm_candidate_count(requested_n, settings=settings)
 
+        rec_resp = llm.recommend_formulations(req, objectives, grounded, n=llm_n)
+        recommend_engine = rec_resp.engine
         grounded_formulas, ground_warnings = ground_recommended_formulas(
             rec_resp.formulas, grounded
         )
         rec_resp.warnings.extend(ground_warnings)
-        process = process_for(req)
-        forms = []
-        for rec in grounded_formulas:
-            try:
-                forms.append(recommended_to_formulation(rec))
-            except ValueError as exc:
-                rec_resp.warnings.append(str(exc))
-        recommended = [_score_and_validate(f, process, req, chem_screen=True) for f in forms]
-        recommended, gate_warnings = validate_formulations(recommended, req=req)
-        from .claim_checker import check_formulation_predictions
-
-        for form in recommended:
-            gate_warnings.extend(check_formulation_predictions(form, grounded))
-        recommended.sort(key=lambda f: (f.score or 0.0), reverse=True)
-        recommended, dedup_notes = chemtools.dedupe_similar_formulations(recommended)
-        gate_warnings.extend(dedup_notes)
+        _, recommended, gate_warnings, _, diversity_applied, tradeoff_obj = finalize_recommendation_bundle(
+            grounded_formulas,
+            req,
+            grounded,
+            requested_n=requested_n,
+            objectives=objectives,
+            settings=settings,
+        )
+        state["tradeoff"] = tradeoff_obj.model_dump() if tradeoff_obj else None
+        state["recommend_meta"] = {
+            "requested_n": requested_n,
+            "returned_n": len(recommended),
+            "diversity_applied": diversity_applied,
+        }
         mechanism, chat = llm.synthesize_research(req, grounded, recommended)
         if gate_warnings:
             chat += "\n\n**Formulation validation:**\n" + "\n".join(
@@ -566,6 +569,8 @@ def resolve_grounded_evidence(
 
 def graph_state_to_research_result(state: ResearchGraphState, req: Requirement) -> ResearchResult:
     grounded = state.get("grounded_evidence") or []
+    tradeoff_raw = state.get("tradeoff")
+    tradeoff = TradeOffAnalysis.model_validate(tradeoff_raw) if tradeoff_raw else None
     return ResearchResult(
         requirement_headline=req.headline(),
         evidence=grounded,
@@ -573,6 +578,8 @@ def graph_state_to_research_result(state: ResearchGraphState, req: Requirement) 
         recommended=state.get("recommended") or [],
         chat_markdown=state.get("chat_markdown") or state.get("answer") or "",
         recommend_engine=state.get("recommend_engine") or "offline",
+        tradeoff=tradeoff,
+        recommend_meta=state.get("recommend_meta"),
     )
 
 

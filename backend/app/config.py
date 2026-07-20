@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     optimize_iterations: int = 24
     top_n_formulas: int = 5
 
+    # Multi-formulation recommend P1 — Top-N diversity + trade-off analysis.
+    recommend_default_n: int = 6
+    recommend_max_n: int = 12
+    recommend_diversity_enabled: bool = True
+    recommend_diversity_lambda: float = 0.7
+    recommend_tradeoff_enabled: bool = True
+    recommend_uncertainty_flag: bool = True
+
     # Experiment feedback / model training.
     # Measured DOE results are persisted in a SQL database (SQLite by default;
     # point db_url at Postgres etc. for multi-process deployments). Trained
