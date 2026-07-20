@@ -22,6 +22,9 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
                 "doe_engine",
                 "workbench_campaign_id",
                 "campaign_state",
+                "prior_rmse_history",
+                "prior_optimization",
+                "prior_next_doe",
             }
         )
     )
@@ -33,5 +36,10 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
         "doe_engine": payload.doe_engine,
         "workbench_campaign_id": payload.workbench_campaign_id,
         "campaign_state": payload.campaign_state,
+        "prior_rmse_history": payload.prior_rmse_history,
+        "prior_optimization": payload.prior_optimization.model_dump()
+        if payload.prior_optimization
+        else None,
+        "prior_next_doe": payload.prior_next_doe.model_dump() if payload.prior_next_doe else None,
     })
     return accepted_response(async_result.id, "loop")

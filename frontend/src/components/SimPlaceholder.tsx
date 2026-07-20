@@ -6,8 +6,12 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Legend,
 } from "recharts";
+import { useMemo } from "react";
 import { useStore } from "../store";
+
+const RMSE_COLORS = ["#38bdf8", "#a78bfa", "#34d399", "#fb923c", "#f472b6"];
 
 function ConvergenceChart({ history }: { history: number[] }) {
   const data = history.map((v, i) => ({ iter: i + 1, score: v }));
@@ -48,8 +52,76 @@ function ConvergenceChart({ history }: { history: number[] }) {
   );
 }
 
+function RmseHistoryChart({ history }: { history: Record<string, number>[] }) {
+  const metrics = useMemo(() => {
+    const keys = new Set<string>();
+    history.forEach((snap) => Object.keys(snap).forEach((k) => keys.add(k)));
+    return [...keys];
+  }, [history]);
+
+  const data = useMemo(
+    () =>
+      history.map((snap, i) => ({
+        round: i + 1,
+        ...snap,
+      })),
+    [history]
+  );
+
+  if (metrics.length === 0) return null;
+
+  return (
+    <div className="w-full h-full flex flex-col">
+      <div className="text-[11px] text-slate-400 mb-1 flex justify-between">
+        <span>模型 RMSE 时序（闭环轮次）</span>
+        <span className="font-mono text-slate-500">{history.length} 轮</span>
+      </div>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: -8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis dataKey="round" tick={{ fill: "#64748b", fontSize: 10 }} />
+            <YAxis tick={{ fill: "#64748b", fontSize: 10 }} domain={["auto", "auto"]} />
+            <Tooltip
+              contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, fontSize: 11 }}
+              labelStyle={{ color: "#94a3b8" }}
+            />
+            <Legend wrapperStyle={{ fontSize: 10 }} />
+            {metrics.map((metric, idx) => (
+              <Line
+                key={metric}
+                type="monotone"
+                dataKey={metric}
+                name={metric}
+                stroke={RMSE_COLORS[idx % RMSE_COLORS.length]}
+                strokeWidth={1.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 export default function SimPlaceholder() {
   const history = useStore((s) => s.optimizationHistory);
+  const rmseHistory = useStore((s) => s.rmseHistory);
+
+  if (rmseHistory.length > 1) {
+    return (
+      <div className="glass rounded-xl p-4 flex flex-col h-full">
+        <h2 className="text-sm uppercase tracking-widest text-accent2 mb-2">
+          模型 RMSE · Loop RMSE
+        </h2>
+        <div className="flex-1 min-h-0">
+          <RmseHistoryChart history={rmseHistory} />
+        </div>
+      </div>
+    );
+  }
 
   if (history.length > 0) {
     return (
@@ -75,7 +147,7 @@ export default function SimPlaceholder() {
           ))}
         </div>
         <p className="text-xs text-slate-500 max-w-xs">
-          运行贝叶斯寻优后，此处展示最优目标得分收敛曲线。
+          运行贝叶斯寻优或闭环迭代后，此处展示收敛曲线；多轮闭环后展示 RMSE 时序图。
         </p>
       </div>
     </div>

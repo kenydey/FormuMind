@@ -44,6 +44,30 @@ def requirement_from_campaign(campaign: Any) -> Requirement:
     )
 
 
+def _campaign_loop_context(campaign_id: int) -> tuple[list[dict[str, float]], bool, str]:
+    """Return (prior_rmse_history, converged, message) from campaign loop_history."""
+    from ..db.campaign_store import get_campaign_store
+
+    settings = get_settings()
+    if not settings.loop_convergence_enabled:
+        return [], False, ""
+
+    campaign = get_campaign_store().get_campaign_sync(campaign_id)
+    if campaign is None:
+        return [], False, ""
+
+    history = list(campaign.loop_history or [])
+    prior_rmse = [
+        dict(entry.get("rmse_by_metric") or {})
+        for entry in history
+        if entry.get("rmse_by_metric")
+    ]
+    if history and history[-1].get("converged"):
+        msg = str(history[-1].get("loop_message") or "闭环已收敛，建议停止迭代")
+        return prior_rmse, True, msg
+    return prior_rmse, False, ""
+
+
 def dispatch_loop_after_sync(
     *,
     training_ingested: int,
@@ -58,6 +82,10 @@ def dispatch_loop_after_sync(
     """Optionally fire closed-loop after sync; returns (task_id, user message)."""
     if not should_trigger_loop_after_sync(training_ingested, trigger_loop=trigger_loop):
         return None, ""
+
+    prior_rmse, converged, conv_msg = _campaign_loop_context(workbench_campaign_id)
+    if converged:
+        return None, conv_msg
 
     req = requirement
     if req is None:
@@ -75,6 +103,7 @@ def dispatch_loop_after_sync(
         optimize_engine=optimize_engine,
         doe_engine=doe_engine,
         n_suggest=n_suggest,
+        prior_rmse_history=prior_rmse,
     )
     return task_id, "已启动闭环：优化收敛分析 + 下一轮 DOE 建议"
 
@@ -87,6 +116,7 @@ def _start_loop_task(
     optimize_engine: str = "auto",
     doe_engine: str = "auto",
     n_suggest: int = 4,
+    prior_rmse_history: list[dict[str, float]] | None = None,
 ) -> str | None:
     """Fire-and-forget closed-loop task; returns task_id for SSE tracking."""
     from ..worker.tasks import run_loop_iterate_impl, task_manager
@@ -100,6 +130,7 @@ def _start_loop_task(
         "doe_engine": doe_engine,
         "workbench_campaign_id": workbench_campaign_id,
         "campaign_state": campaign_state,
+        "prior_rmse_history": prior_rmse_history or [],
     }
 
     if settings.celery_eager:

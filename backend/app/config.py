@@ -218,6 +218,10 @@ class Settings(BaseSettings):
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task
+    # Closed-loop RMSE plateau detection (Phase C L-2): skip optimize+DOE when flat.
+    loop_convergence_enabled: bool = True
+    loop_convergence_eps: float = 0.01
+    loop_convergence_patience: int = 2
 
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），

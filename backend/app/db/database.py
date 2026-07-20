@@ -71,6 +71,8 @@ def _ensure_campaign_columns(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE campaigns ADD COLUMN lever_snapshot JSON"))
         if "sample_refs" not in cols:
             conn.execute(text("ALTER TABLE campaigns ADD COLUMN sample_refs JSON DEFAULT '[]'"))
+        if "loop_history" not in cols:
+            conn.execute(text("ALTER TABLE campaigns ADD COLUMN loop_history JSON DEFAULT '[]'"))
 
 
 def _ensure_source_document_columns(engine: Engine) -> None:

@@ -41,6 +41,8 @@ export default function LoopModal() {
     }))
   );
 
+  const loopConverged = Boolean(loopReport?.converged);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -70,17 +72,23 @@ export default function LoopModal() {
             <option value="baybe">DOE：baybe</option>
           </select>
           <button
-            disabled={busy !== "idle"}
+            disabled={busy !== "idle" || loopConverged}
             onClick={runLoop}
             className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-1.5 text-xs disabled:opacity-40"
+            title={loopConverged ? "模型 RMSE 已收敛，建议停止迭代" : undefined}
           >
-            {busy === "looping" ? "迭代中…" : "🔄 迭代一轮闭环"}
+            {busy === "looping" ? "迭代中…" : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
           </button>
         </div>
       </div>
 
       {loopReport && (
         <div className="space-y-4">
+          {loopConverged && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              {loopReport.loop_message || "模型 RMSE 已进入平台期，建议停止闭环迭代。"}
+            </div>
+          )}
           {/* Loop status row */}
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <span>引擎：<span className="font-mono text-accent2">{loopReport.engine}</span></span>

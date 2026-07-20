@@ -71,3 +71,18 @@ def test_append_verification_footer_adds_section():
     out = append_verification_footer("# Report\n\nbody", result)
     assert "论断核验" in out
     assert "unsupported" in out
+
+
+def test_check_formulation_predictions_flags_missing_evidence():
+    from app.domain.schemas import Formulation, Ingredient, ProductDomain
+    from app.pipeline.claim_checker import check_formulation_predictions
+
+    form = Formulation(
+        name="rec A",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[Ingredient(name="Zinc phosphate", role="inhibitor", weight_pct=100)],
+        predicted={"salt_spray_hours": 9999.0},
+    )
+    evidence = [_evidence("Degreaser pH adjustment for aluminum cleaning only.")]
+    warnings = check_formulation_predictions(form, evidence)
+    assert any("salt_spray_hours" in w for w in warnings)

@@ -13,6 +13,7 @@ from .schemas import (
     RecommendedFormula,
     RecommendedFormulaComponent,
     RecommendedFormulaListResponse,
+    Requirement,
 )
 
 _CAS_RE = re.compile(r"^(\d{2,7})-(\d{2})-(\d)$")
@@ -320,7 +321,44 @@ def formulations_to_recommended(
     return [formulation_to_recommended(f, engine=engine) for f in forms]
 
 
-def validate_formulations(forms: list[Formulation]) -> tuple[list[Formulation], list[str]]:
+def _requirement_constraint_warnings(form: Formulation, req: Requirement) -> list[str]:
+    """Advisory warnings when predicted properties conflict with Requirement limits."""
+    from ..domain.chemistry import full_safety_check, validate_formulation
+
+    warnings: list[str] = []
+    voc_limit = req.voc_limit_gpl
+    voc_gpl = form.predicted.get("voc_gpl") if form.predicted else None
+    warnings.extend(validate_formulation(form, voc_limit_gpl=voc_limit))
+    warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
+
+    if req.cure_temperature_c is not None:
+        cure = form.predicted.get("cure_temperature_c")
+        if cure is not None and cure > req.cure_temperature_c:
+            warnings.append(
+                f"{form.name}: predicted cure {cure:.0f}°C exceeds limit {req.cure_temperature_c:.0f}°C"
+            )
+
+    if req.ph_target is not None:
+        ph = form.predicted.get("ph")
+        if ph is not None and abs(ph - req.ph_target) > 1.0:
+            warnings.append(
+                f"{form.name}: predicted pH {ph:.1f} deviates from target {req.ph_target:.1f}"
+            )
+
+    if req.salt_spray_hours and req.salt_spray_hours > 0:
+        ss = form.predicted.get("salt_spray_hours")
+        if ss is not None and ss < req.salt_spray_hours * 0.85:
+            warnings.append(
+                f"{form.name}: predicted salt spray {ss:.0f}h below target {req.salt_spray_hours:.0f}h"
+            )
+
+    return warnings
+
+
+def validate_formulations(
+    forms: list[Formulation],
+    req: Requirement | None = None,
+) -> tuple[list[Formulation], list[str]]:
     warnings: list[str] = []
     out: list[Formulation] = []
     for form in forms:
@@ -350,6 +388,8 @@ def validate_formulations(forms: list[Formulation]) -> tuple[list[Formulation], 
         missing_cas = [i.name for i in enriched.ingredients if not i.cas_no]
         if missing_cas and len(missing_cas) == len(enriched.ingredients):
             warnings.append(f"{form.name}: no CAS numbers resolved for ingredients")
+        if req is not None:
+            warnings.extend(_requirement_constraint_warnings(enriched, req))
         out.append(enriched)
     return out, warnings
 

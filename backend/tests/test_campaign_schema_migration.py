@@ -42,6 +42,7 @@ def test_legacy_campaigns_table_gets_sample_refs_column(tmp_path, monkeypatch):
     make_engine(url)
     cols = {c["name"] for c in inspect(legacy_engine).get_columns("campaigns")}
     assert "sample_refs" in cols
+    assert "loop_history" in cols
 
     factory = make_session_factory(legacy_engine)
     reset_campaign_store(SqliteCampaignStore(factory))

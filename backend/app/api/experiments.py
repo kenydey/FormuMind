@@ -60,6 +60,7 @@ class WorkbenchCampaignResponse(BaseModel):
     project_id: str | None = None
     primary_metric: str | None = None
     objectives_snapshot: list[dict[str, Any]] = Field(default_factory=list)
+    loop_history: list[dict[str, Any]] = Field(default_factory=list)
     rows: list[WorkbenchRowResponse]
 
 
@@ -89,6 +90,7 @@ def _campaign_response(campaign: Campaign, rows: list[WorkbenchRow]) -> Workbenc
         project_id=campaign.project_id,
         primary_metric=campaign.primary_metric,
         objectives_snapshot=campaign.objectives_snapshot or [],
+        loop_history=campaign.loop_history or [],
         rows=[_row_response(r) for r in rows],
     )
 

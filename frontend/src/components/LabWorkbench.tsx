@@ -53,6 +53,8 @@ export default function LabWorkbench({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveHint, setSaveHint] = useState<string | null>(null);
+  const [loopRoundCount, setLoopRoundCount] = useState(0);
+  const [loopConverged, setLoopConverged] = useState(false);
   const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
@@ -87,6 +89,9 @@ export default function LabWorkbench({
           if (data.objectives_snapshot?.length) {
             setApiSnapshot(data.objectives_snapshot);
           }
+          const history = data.loop_history ?? [];
+          setLoopRoundCount(history.length);
+          setLoopConverged(Boolean(history.length && history[history.length - 1]?.converged));
         }
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -220,6 +225,17 @@ export default function LabWorkbench({
           <span className="text-[10px] text-slate-500">
             {rows.filter((r) => r.status === "Completed").length}/{rows.length} 已完成 ·{" "}
             {objectives.length} 项指标 · 支持 Excel 粘贴
+            {loopRoundCount > 0 && (
+              <span
+                className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-medium ${
+                  loopConverged
+                    ? "border-amber-500/40 text-amber-300 bg-amber-500/10"
+                    : "border-violet-500/40 text-violet-300 bg-violet-500/10"
+                }`}
+              >
+                闭环 {loopRoundCount} 轮{loopConverged ? " · 已收敛" : ""}
+              </span>
+            )}
           </span>
           <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
             <input

@@ -6,15 +6,18 @@ import type { AppState } from "../types";
 
 function applyLoopReportToDraft(draft: AppState, report: LoopReport): void {
   draft.loopReport = report;
-  draft.leaderboard = report.optimization.top_formulations;
-  draft.optimizationHistory = report.optimization.history;
-  draft.doePlan = report.next_doe;
-  draft.measured = {};
-  draft.models = report.model_info;
   draft.rmseHistory.push(report.rmse_by_metric);
+  draft.models = report.model_info;
   draft.lastAlEngine = report.engine;
   if (report.campaign_state) {
     draft.campaignState = report.campaign_state;
+  }
+  const skipReplace = report.converged && report.optimization.top_formulations.length === 0;
+  if (!skipReplace) {
+    draft.leaderboard = report.optimization.top_formulations;
+    draft.optimizationHistory = report.optimization.history;
+    draft.doePlan = report.next_doe;
+    draft.measured = {};
   }
 }
 
@@ -70,10 +73,16 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           loopDoeEngine,
           workbenchCampaignId,
           campaignState,
+          rmseHistory,
+          loopReport,
+          doePlan,
         } = get();
         const { task_id } = await api.loopIterate(requirement, 24, 4, optimizeEngine, loopDoeEngine, {
           workbench_campaign_id: workbenchCampaignId,
           campaign_state: campaignState,
+          prior_rmse_history: rmseHistory,
+          prior_optimization: loopReport?.optimization ?? null,
+          prior_next_doe: loopReport?.next_doe ?? doePlan ?? null,
         });
         await get().followLoopTask(task_id);
       } catch (e) {

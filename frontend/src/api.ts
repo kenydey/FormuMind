@@ -290,6 +290,7 @@ export interface WorkbenchCampaignResponse {
   project_id?: string | null;
   primary_metric?: string | null;
   objectives_snapshot?: ObjectiveSpec[];
+  loop_history?: Array<Record<string, unknown>>;
   rows: WorkbenchRow[];
 }
 
@@ -787,6 +788,9 @@ export const api = {
     opts: {
       workbench_campaign_id?: number | null;
       campaign_state?: string | null;
+      prior_rmse_history?: Record<string, number>[];
+      prior_optimization?: OptimizationResult | null;
+      prior_next_doe?: DOEPlan | null;
     } = {}
   ) =>
     postAccepted("/api/loop/iterate", {
@@ -797,6 +801,9 @@ export const api = {
       doe_engine,
       workbench_campaign_id: opts.workbench_campaign_id ?? null,
       campaign_state: opts.campaign_state ?? null,
+      prior_rmse_history: opts.prior_rmse_history ?? [],
+      prior_optimization: opts.prior_optimization ?? null,
+      prior_next_doe: opts.prior_next_doe ?? null,
     }),
 
   parseIntent: (text: string) =>
@@ -1234,6 +1241,8 @@ export interface LoopReport {
   next_doe: DOEPlan;
   engine: string;
   campaign_state?: string | null;
+  converged?: boolean;
+  loop_message?: string;
 }
 
 export interface IntentResult {

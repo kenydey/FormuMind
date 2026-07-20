@@ -93,6 +93,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",
             "Completed 行回灌训练后，后台触发 optimize + 下一轮 DOE（/api/loop/iterate）。", "data"),
+    EnvFlag("loop_convergence_enabled", "闭环 RMSE 收敛判停",
+            "RMSE 连续多轮变化低于阈值时跳过寻优/DOE 并提示停止迭代。", "data"),
     EnvFlag("kb_v2_enabled", "持久知识库 v2",
             "导入/检索的文档结构感知切块入库，问答与推荐检索覆盖全部累计语料。", "kb"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",
