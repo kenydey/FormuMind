@@ -65,6 +65,7 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
           draft.research = null;
           draft.leaderboard = [];
           draft.doePlan = null;
+          draft.workbenchAdoptedPlanId = null;
           draft.measured = {};
         });
         get().scheduleAutosave();

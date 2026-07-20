@@ -55,6 +55,9 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   if (patch.workbenchCampaignId !== undefined) {
     draft.workbenchCampaignId = patch.workbenchCampaignId;
   }
+  if (patch.workbenchAdoptedPlanId !== undefined) {
+    draft.workbenchAdoptedPlanId = patch.workbenchAdoptedPlanId;
+  }
   if (patch.workbenchObjectivesSnapshot !== undefined) {
     draft.workbenchObjectivesSnapshot = patch.workbenchObjectivesSnapshot;
   }
@@ -94,6 +97,7 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     trainMessage: state.trainMessage,
     campaignState: state.campaignState,
     workbenchCampaignId: state.workbenchCampaignId,
+    workbenchAdoptedPlanId: state.workbenchAdoptedPlanId,
     workbenchObjectivesSnapshot: state.workbenchObjectivesSnapshot,
     optimizationHistory: state.optimizationHistory,
     loopReport: state.loopReport,

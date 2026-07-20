@@ -115,6 +115,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.trainMessage = "";
           draft.campaignState = null;
           draft.workbenchCampaignId = null;
+          draft.workbenchAdoptedPlanId = null;
           draft.workbenchObjectivesSnapshot = null;
           draft.workbenchStats = null;
           draft.error = null;

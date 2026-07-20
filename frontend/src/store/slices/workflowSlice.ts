@@ -21,6 +21,13 @@ function applyLoopReportToDraft(draft: AppState, report: LoopReport): void {
   }
 }
 
+function workbenchStrategyForPlan(plan: DOEPlan, engineHint: string | null): string {
+  if (plan.design === "ai_active") {
+    return `BayBE-${engineHint ?? "loop"}-next`;
+  }
+  return `DOE-${plan.design}`;
+}
+
 export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
   return {
     runOptimize: async () => {
@@ -126,6 +133,12 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     },
 
     runNextRoundDoe: async () => {
+      const { doePlan, workbenchAdoptedPlanId } = get();
+      if (doePlan && doePlan.plan_id !== workbenchAdoptedPlanId) {
+        await get().adoptDoePlanToWorkbench(doePlan);
+        return;
+      }
+
       set((draft) => {
         draft.busy = "doe";
         draft.error = null;
@@ -137,7 +150,6 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           loopDoeEngine,
           campaignState,
           workbenchCampaignId,
-          activeProjectId,
         } = get();
         const result = await api.activeDoe(requirement, {
           engine: alEngine,
@@ -145,28 +157,55 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           campaign_state: campaignState,
           workbench_campaign_id: workbenchCampaignId,
         });
-        const plan = result.plan;
-        const wb = await api.createWorkbenchCampaign(
-          plan,
-          undefined,
-          `BayBE-${alEngine}-next`,
-          requirement,
-          activeProjectId ?? undefined
-        );
         set((draft) => {
-          draft.doePlan = plan;
-          draft.measured = {};
           draft.campaignState = result.campaign_state ?? draft.campaignState;
           draft.lastAlEngine = result.engine;
-          draft.workbenchCampaignId = wb.campaign_id;
-          draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
         });
-        await get().refreshWorkbenchStats();
-        get().scheduleAutosave();
+        await get().adoptDoePlanToWorkbench(result.plan);
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
         });
+      } finally {
+        set((draft) => {
+          draft.busy = "idle";
+        });
+      }
+    },
+
+    adoptDoePlanToWorkbench: async (plan?: DOEPlan) => {
+      const p = plan ?? get().doePlan;
+      if (!p) return null;
+
+      set((draft) => {
+        draft.busy = "doe";
+        draft.error = null;
+      });
+      try {
+        const { requirement, activeProjectId, lastAlEngine, loopReport } = get();
+        const strategy = workbenchStrategyForPlan(p, lastAlEngine ?? loopReport?.engine ?? null);
+        const wb = await api.createWorkbenchCampaign(
+          p,
+          undefined,
+          strategy,
+          requirement,
+          activeProjectId ?? undefined
+        );
+        set((draft) => {
+          draft.doePlan = p;
+          draft.measured = {};
+          draft.workbenchCampaignId = wb.campaign_id;
+          draft.workbenchAdoptedPlanId = p.plan_id || draft.workbenchAdoptedPlanId;
+          draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
+        });
+        await get().refreshWorkbenchStats();
+        get().scheduleAutosave();
+        return wb.campaign_id;
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+        return null;
       } finally {
         set((draft) => {
           draft.busy = "idle";
@@ -255,24 +294,11 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         } else {
           plan = await api.doe(requirement, design, doeEngine);
         }
-        const strategy = design === "ai_active" ? `BayBE-${alEngine}` : `DOE-${design}`;
-        const { activeProjectId } = get();
-        const wb = await api.createWorkbenchCampaign(
-          plan,
-          undefined,
-          strategy,
-          requirement,
-          activeProjectId ?? undefined
-        );
         set((draft) => {
-          draft.doePlan = plan;
-          draft.measured = {};
           draft.campaignState = nextCampaignState;
           draft.lastAlEngine = nextAlEngine;
-          draft.workbenchCampaignId = wb.campaign_id;
-          draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
         });
-        await get().refreshWorkbenchStats();
+        await get().adoptDoePlanToWorkbench(plan);
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
@@ -349,39 +375,17 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     },
 
     ensureWorkbenchCampaign: async () => {
-      const { doePlan, workbenchCampaignId, requirement, activeProjectId } = get();
-      if (workbenchCampaignId != null) {
+      const { doePlan, workbenchCampaignId, workbenchAdoptedPlanId } = get();
+      if (
+        workbenchCampaignId != null &&
+        doePlan?.plan_id &&
+        doePlan.plan_id === workbenchAdoptedPlanId
+      ) {
         await get().refreshWorkbenchStats();
         return workbenchCampaignId;
       }
-      if (!doePlan) return null;
-      try {
-        const strategy = doePlan.design === "ai_active" ? "BayBE-restore" : `DOE-${doePlan.design}`;
-        const wb = await api.createWorkbenchCampaign(
-          doePlan,
-          undefined,
-          strategy,
-          requirement,
-          activeProjectId ?? undefined
-        );
-        set((draft) => {
-          draft.workbenchCampaignId = wb.campaign_id;
-          draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
-          draft.workbenchStats = {
-            completed: 0,
-            total: wb.rows.length,
-            name: wb.name,
-            strategy: wb.strategy,
-          };
-        });
-        get().scheduleAutosave();
-        return wb.campaign_id;
-      } catch (e) {
-        set((draft) => {
-          draft.error = formatApiError(e);
-        });
-        return null;
-      }
+      if (!doePlan) return workbenchCampaignId;
+      return get().adoptDoePlanToWorkbench(doePlan);
     },
 
     submitResults: async () => {
@@ -504,5 +508,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'runNextRoundDoe' | 'setAutoLoopOnSync' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
 }

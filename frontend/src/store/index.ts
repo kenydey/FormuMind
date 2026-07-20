@@ -35,6 +35,7 @@ export const useStore = create<AppState>()(
       autoLoopOnSync: false,
       campaignState: null,
       workbenchCampaignId: null,
+      workbenchAdoptedPlanId: null,
       workbenchObjectivesSnapshot: null,
       workbenchStats: null,
       lastAlEngine: null,

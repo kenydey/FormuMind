@@ -90,6 +90,8 @@ export interface AppState {
   autoLoopOnSync: boolean;
   campaignState: string | null;
   workbenchCampaignId: number | null;
+  /** plan_id last written to workbench via createWorkbenchCampaign */
+  workbenchAdoptedPlanId: string | null;
   workbenchObjectivesSnapshot: ObjectiveSpec[] | null;
   workbenchStats: { completed: number; total: number; name: string; strategy: string } | null;
   lastAlEngine: string | null;
@@ -171,6 +173,7 @@ export interface AppState {
   submitResults: () => Promise<void>;
   refreshWorkbenchStats: () => Promise<void>;
   ensureWorkbenchCampaign: () => Promise<number | null>;
+  adoptDoePlanToWorkbench: (plan?: DOEPlan) => Promise<number | null>;
   refreshModels: () => Promise<void>;
   exportDoe: (format: "csv" | "xlsx") => void;
   importCsv: (file: File) => Promise<void>;
