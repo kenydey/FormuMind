@@ -161,3 +161,27 @@ def test_experiment_below_threshold_reports_no_model():
         assert "Need" in report["message"]
     finally:
         registry.reset(persist=True)
+
+
+def test_validate_formulations_with_requirement_voc():
+    payload = {
+        "formulations": [
+            {
+                "name": "high voc",
+                "domain": "anticorrosion_coating",
+                "ingredients": [
+                    {"name": "Bisphenol-A epoxy (DGEBA)", "role": "resin", "weight_pct": 50},
+                    {"name": "Zinc phosphate", "role": "inhibitor", "weight_pct": 50},
+                ],
+                "predicted": {"voc_gpl": 400.0},
+            }
+        ],
+        "requirement": {
+            "domain": "anticorrosion_coating",
+            "voc_limit_gpl": 250.0,
+        },
+    }
+    r = client.post("/api/formulations/validate", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert any("VOC" in w for w in body.get("warnings", []))

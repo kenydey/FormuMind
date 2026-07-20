@@ -73,6 +73,8 @@ export interface AppState {
   deepReport: ComprehensiveReport | null;
   task: TaskStatus | null;
   leaderboard: Formulation[];
+  /** Latest warnings from POST /api/formulations/validate (CAS/zh enrich). */
+  formulationValidateWarnings: string[];
   optimizationHistory: number[];
   busy: "idle" | "researching" | "optimizing" | "doe" | "training" | "looping";
   error: string | null;

@@ -690,7 +690,10 @@ def iter_search(
     from .content_filter import FilterReport, llm_quality_judge
 
     final, judge_report = llm_quality_judge(final, rank_q)
-<<<<<<< HEAD
+
+    filter_report = FilterReport()
+    filter_report.merge(rule_report)
+    filter_report.merge(judge_report)
 
     from ..config import get_settings
 
@@ -705,13 +708,8 @@ def iter_search(
             req=req,
         )
 
-=======
-    filter_report = FilterReport()
-    filter_report.merge(rule_report)
-    filter_report.merge(judge_report)
     filter_report.kept = len(final)
     filter_payload = filter_report.as_dict()
->>>>>>> origin/cursor/search-filter-report-bfee
     if progress_cb is not None:
         try:
             progress_cb(

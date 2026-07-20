@@ -2,6 +2,66 @@ import { useState } from "react";
 import type { ChemicalProfile, Ingredient } from "../api";
 import { api } from "../api";
 
+const CAS_RE = /^(\d{2,7})-(\d{2})-(\d)$/;
+
+function casChecksumOk(cas: string): boolean {
+  const m = CAS_RE.exec((cas || "").trim());
+  if (!m) return false;
+  const digits = `${m[1]}${m[2]}`;
+  const total = [...digits].reverse().reduce((sum, d, i) => sum + Number(d) * (i + 1), 0);
+  return total % 10 === Number(m[3]);
+}
+
+function ingredientLabels(ing: Ingredient): string[] {
+  return [ing.zh_name, ing.name].filter(Boolean) as string[];
+}
+
+function casEnrichStatus(
+  ing: Ingredient,
+  validateWarnings: string[]
+): "missing" | "invalid" | "corrected" | "ok" {
+  const labels = ingredientLabels(ing);
+  const ingWarnings = validateWarnings.filter((w) =>
+    labels.some((label) => w.startsWith(`${label}:`))
+  );
+  if (ingWarnings.some((w) => w.includes("校验失败"))) return "invalid";
+  if (ingWarnings.some((w) => w.includes("不一致") || w.includes("已采用"))) return "corrected";
+  const cas = (ing.cas_no || "").trim();
+  if (!cas) return "missing";
+  if (!casChecksumOk(cas)) return "invalid";
+  return "ok";
+}
+
+function CasBadge({ status }: { status: ReturnType<typeof casEnrichStatus> }) {
+  if (status === "ok") return null;
+  const cfg =
+    status === "missing"
+      ? {
+          label: "缺 CAS",
+          cls: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+          title: "未识别 CAS，可在编辑模式下手动查询补全",
+        }
+      : status === "invalid"
+        ? {
+            label: "CAS 无效",
+            cls: "border-red-500/40 bg-red-500/10 text-red-300",
+            title: "CAS 校验失败，后端 enrich 已忽略该值",
+          }
+        : {
+            label: "已校正",
+            cls: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+            title: "CAS 已与目录/检索结果对齐",
+          };
+  return (
+    <span
+      title={cfg.title}
+      className={`ml-1 text-[9px] px-1 py-0.5 rounded border whitespace-nowrap ${cfg.cls}`}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
 const ROLE_LABELS: Record<string, string> = {
   resin: "树脂",
   hardener: "固化剂",
@@ -67,10 +127,12 @@ export default function RecommendedFormulaTable({
   ingredients,
   editable,
   onIngredientChange,
+  validateWarnings = [],
 }: {
   ingredients: Ingredient[];
   editable?: boolean;
   onIngredientChange?: (idx: number, patch: Partial<Ingredient>) => void;
+  validateWarnings?: string[];
 }) {
   const [lookupBusy, setLookupBusy] = useState<number | null>(null);
   const [profiles, setProfiles] = useState<Record<number, ChemicalProfile>>({});
@@ -116,8 +178,16 @@ export default function RecommendedFormulaTable({
           </tr>
         </thead>
         <tbody>
-          {ingredients.map((ing, idx) => (
-            <tr key={`${ing.name}-${idx}`} className="border-b border-edge/40 align-top">
+          {ingredients.map((ing, idx) => {
+            const casStatus = casEnrichStatus(ing, validateWarnings);
+            const lowGrounding = ing.grounding_confidence === "low";
+            return (
+            <tr
+              key={`${ing.name}-${idx}`}
+              className={`border-b border-edge/40 align-top ${
+                lowGrounding ? "bg-amber-500/[0.06] ring-1 ring-inset ring-amber-500/15" : ""
+              }`}
+            >
               <td className="py-1 px-2 text-slate-400 whitespace-nowrap">{componentTypeLabel(ing)}</td>
               <td className="py-1 px-2">
                 {editable && onIngredientChange ? (
@@ -152,7 +222,10 @@ export default function RecommendedFormulaTable({
                     placeholder={lookupBusy === idx ? "查询中…" : "CAS"}
                   />
                 ) : (
-                  <span className="font-mono text-slate-400">{ing.cas_no || "—"}</span>
+                  <span className="font-mono text-slate-400">
+                    {ing.cas_no || "—"}
+                    <CasBadge status={casStatus} />
+                  </span>
                 )}
               </td>
               <td className="py-1 px-2 min-w-[88px]">
@@ -174,8 +247,11 @@ export default function RecommendedFormulaTable({
               </td>
               <td className="py-1 px-2 text-slate-400 text-[10px] max-w-[140px]">
                 {ing.notes || "—"}
-                {ing.grounding_confidence === "low" && (
-                  <span className="ml-1 text-amber-400 border border-amber-500/40 rounded px-1" title="缺少文献/专利依据">
+                {lowGrounding && (
+                  <span
+                    className="ml-1 text-amber-400 border border-amber-500/40 bg-amber-500/10 rounded px-1"
+                    title="缺少文献/专利依据，建议补充检索或手动核对"
+                  >
                     低可信
                   </span>
                 )}
@@ -186,7 +262,8 @@ export default function RecommendedFormulaTable({
                 )}
               </td>
             </tr>
-          ))}
+          );
+          })}
         </tbody>
       </table>
     </div>

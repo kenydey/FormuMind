@@ -23,6 +23,7 @@ export const useStore = create<AppState>()(
       deepReport: null,
       task: null,
       leaderboard: [],
+      formulationValidateWarnings: [],
       optimizationHistory: [],
       busy: "idle",
       error: null,

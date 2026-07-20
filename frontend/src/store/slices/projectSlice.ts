@@ -102,6 +102,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.research = null;
           draft.deepReport = null;
           draft.leaderboard = [];
+          draft.formulationValidateWarnings = [];
           draft.chatHistory = [];
           draft.sources = [];
           draft.selectedSources = [];

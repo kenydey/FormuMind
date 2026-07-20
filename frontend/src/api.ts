@@ -514,6 +514,11 @@ export const api = {
       formulation,
       requirement: requirement ?? null,
     }),
+  validateFormulations: (formulations: Formulation[], requirement?: Requirement | null) =>
+    post<{ formulations: Formulation[]; warnings: string[] }>("/api/formulations/validate", {
+      formulations,
+      requirement: requirement ?? null,
+    }),
   modifyFormulations: (
     req: Requirement,
     modifyPrompt: string,
