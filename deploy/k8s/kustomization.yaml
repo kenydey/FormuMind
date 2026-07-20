@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: formumind
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  # Apply secret separately: cp secret.example.yaml secret.yaml && edit && kubectl apply -f secret.yaml
+  - pvc.yaml
+  - postgres.yaml
+  - redis.yaml
+  - backend-deployment.yaml
+  - worker-deployment.yaml
+  - frontend-deployment.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+# Build and push images before deploy:
+#   docker build -f deploy/production/Dockerfile.backend -t YOUR_REGISTRY/formumind-backend:prod ./backend
+#   docker build -t YOUR_REGISTRY/formumind-frontend:prod ./frontend
+images:
+  - name: formumind-backend
+    newName: YOUR_REGISTRY/formumind-backend
+    newTag: prod
+  - name: formumind-frontend
+    newName: YOUR_REGISTRY/formumind-frontend
+    newTag: prod
+
+# Scale defaults (override with kubectl scale or patch)
+replicas:
+  - name: formumind-backend
+    count: 2
+  - name: formumind-worker
+    count: 3
+  - name: formumind-frontend
+    count: 2

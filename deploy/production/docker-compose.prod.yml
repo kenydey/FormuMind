@@ -1,0 +1,184 @@
+# FormuMind production Compose (Datalab ELN + Postgres + Redis + horizontal scale)
+#
+# Prerequisites:
+#   docker network create formumind-eln
+#   Start official Datalab stack on formumind-eln (see deploy/eln/README.md)
+#
+# Usage:
+#   cp deploy/production/.env.example .env   # edit secrets
+#   docker compose -f deploy/production/docker-compose.prod.yml up -d --build
+#   docker compose -f deploy/production/docker-compose.prod.yml up -d \
+#     --scale backend=3 --scale worker=4
+#
+# Traffic enters via nginx:80 → frontend (SPA) + /api → backend (load-balanced by Docker DNS)
+
+name: formumind-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${FORMUMIND_PG_USER:-formumind}
+      POSTGRES_PASSWORD: ${FORMUMIND_PG_PASSWORD:?set FORMUMIND_PG_PASSWORD}
+      POSTGRES_DB: ${FORMUMIND_PG_DB:-formumind}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FORMUMIND_PG_USER:-formumind} -d ${FORMUMIND_PG_DB:-formumind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - formumind-eln
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - formumind-eln
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: ../deploy/production/Dockerfile.backend
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_DB_URL: postgresql+psycopg2://${FORMUMIND_PG_USER:-formumind}:${FORMUMIND_PG_PASSWORD}@postgres:5432/${FORMUMIND_PG_DB:-formumind}
+      FORMUMIND_REDIS_URL: redis://redis:6379/0
+      FORMUMIND_CELERY_EAGER: "false"
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
+      FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+      FORMUMIND_TASK_DIR: /app/data/tasks
+      FORMUMIND_TASK_PROGRESS_DIR: /app/data/tasks/progress
+    volumes:
+      - formumind_shared_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json,urllib.request,sys; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); ok=r.get('database',{}).get('ok') and (not r.get('datalab',{}).get('required') or r.get('datalab',{}).get('reachable')); sys.exit(0 if ok else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    networks:
+      - formumind-eln
+    # Do not publish backend directly in production — use nginx edge
+    expose:
+      - "8000"
+    # Scale: docker compose ... up -d --scale backend=3
+    # (deploy.replicas below is Swarm-only; ignored by plain Compose)
+
+  worker:
+    build:
+      context: ../../backend
+      dockerfile: ../deploy/production/Dockerfile.backend
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - ../../.env
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_DB_URL: postgresql+psycopg2://${FORMUMIND_PG_USER:-formumind}:${FORMUMIND_PG_PASSWORD}@postgres:5432/${FORMUMIND_PG_DB:-formumind}
+      FORMUMIND_REDIS_URL: redis://redis:6379/0
+      FORMUMIND_CELERY_EAGER: "false"
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
+      FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+      FORMUMIND_TASK_DIR: /app/data/tasks
+      FORMUMIND_TASK_PROGRESS_DIR: /app/data/tasks/progress
+    volumes:
+      - formumind_shared_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import redis,os; redis.Redis.from_url(os.environ['FORMUMIND_REDIS_URL']).ping()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - formumind-eln
+    # Scale: docker compose ... up -d --scale worker=4
+
+  frontend:
+    build:
+      context: ../../frontend
+      args:
+        VITE_API_TOKEN: ${VITE_API_TOKEN:-}
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - formumind-eln
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${FORMUMIND_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./nginx/formumind.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - formumind-eln
+
+networks:
+  formumind-eln:
+    external: true
+    name: formumind-eln
+
+volumes:
+  postgres_data:
+  redis_data:
+  formumind_shared_data:
+    name: formumind_shared_data

@@ -1,0 +1,40 @@
+# Shared read-write-many volume for ColBERT index + task disk fallback.
+# Requires a storage class that supports ReadWriteMany (NFS, EFS, Azure Files, etc.).
+# If your cloud only offers RWO, run a single worker replica OR use managed Redis-only
+# progress (recommended) and disable ColBERT shared index (use embedding/tfidf backend).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: formumind-shared-data
+  namespace: formumind
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: nfs-client   # uncomment and set for your cluster
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: formumind
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: formumind
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

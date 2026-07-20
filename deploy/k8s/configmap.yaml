@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: formumind-config
+  namespace: formumind
+data:
+  FORMUMIND_ENVIRONMENT: "production"
+  FORMUMIND_CELERY_EAGER: "false"
+  FORMUMIND_CAMPAIGN_BACKEND: "datalab"
+  FORMUMIND_EXPERIMENT_BACKEND: "datalab"
+  FORMUMIND_DATALAB_REQUIRED: "true"
+  # In-cluster Datalab Service DNS — adjust to your ELN namespace/service
+  FORMUMIND_DATALAB_API_URL: "http://datalab-api.datalab.svc.cluster.local:5001"
+  FORMUMIND_API_AUTH_ENABLED: "true"
+  FORMUMIND_COLBERT_INDEX_DIR: "/app/data/colbert_index"
+  FORMUMIND_TASK_DIR: "/app/data/tasks"
+  FORMUMIND_TASK_PROGRESS_DIR: "/app/data/tasks/progress"
+  # Built from Secret + in-cluster service names (see backend/worker env refs)
+  FORMUMIND_PG_USER: "formumind"
+  FORMUMIND_PG_DB: "formumind"
+  FORMUMIND_PG_HOST: "postgres.formumind.svc.cluster.local"
+  FORMUMIND_REDIS_HOST: "redis.formumind.svc.cluster.local"
