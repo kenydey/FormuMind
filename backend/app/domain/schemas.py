@@ -314,6 +314,9 @@ class IngestResult(BaseModel):
     extraction_status: Literal["ok", "skipped", "failed", "degraded"] = "skipped"
 
 
+from .tradeoff_schemas import TradeOffAnalysis  # noqa: E402
+
+
 class ResearchResult(BaseModel):
     requirement_headline: str
     evidence: list[Evidence]
@@ -321,6 +324,8 @@ class ResearchResult(BaseModel):
     recommended: list[Formulation]
     chat_markdown: str
     recommend_engine: Literal["llm", "offline"] = "offline"
+    tradeoff: TradeOffAnalysis | None = None
+    recommend_meta: dict | None = None
 
 
 class ComprehensiveReport(BaseModel):
