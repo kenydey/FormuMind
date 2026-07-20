@@ -229,6 +229,20 @@ class RecommendedFormulaListResponse(BaseModel):
     engine: Literal["llm", "offline"] = "offline"
 
 
+EntityKind = Literal["chemical", "trade_product", "element", "parameter"]
+CompositionStatus = Literal["resolved", "partial", "mixture", "proprietary", "unknown"]
+
+
+class EvidenceEntityRef(BaseModel):
+    """KG entity linked to a retrieved evidence chunk."""
+
+    entity_id: str
+    kind: EntityKind
+    display_name: str
+    composition_status: CompositionStatus = "unknown"
+    surface_form: str | None = None
+
+
 class Evidence(BaseModel):
     """A retrieved patent or literature snippet with a citation."""
 
@@ -238,6 +252,7 @@ class Evidence(BaseModel):
     snippet: str
     relevance: float = Field(ge=0, le=1)
     is_seed_corpus: bool = False
+    entity_refs: list[EvidenceEntityRef] = Field(default_factory=list)
 
 
 class ParameterBoundary(BaseModel):

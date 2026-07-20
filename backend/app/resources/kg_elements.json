@@ -1,0 +1,30 @@
+{
+  "Zr": {
+    "cas": ["7440-67-7"],
+    "catalog_keys": []
+  },
+  "P": {
+    "cas": ["7723-14-0"],
+    "catalog_keys": ["Phosphoric acid"]
+  },
+  "Zn": {
+    "cas": ["7440-66-6"],
+    "catalog_keys": ["Zinc phosphate"]
+  },
+  "Si": {
+    "cas": ["7440-21-3"],
+    "catalog_keys": []
+  },
+  "Al": {
+    "cas": ["7429-90-5"],
+    "catalog_keys": []
+  },
+  "Cr": {
+    "cas": ["7440-47-3"],
+    "catalog_keys": ["chromic_acid"]
+  },
+  "Ni": {
+    "cas": ["7440-02-0"],
+    "catalog_keys": []
+  }
+}

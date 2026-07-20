@@ -26,6 +26,7 @@ from .api import intent as intent_router
 from .api import agents as agents_router
 from .api import dependencies as dependencies_router
 from .api import kb as kb_router
+from .api import kg as kg_router
 from .api import notebooklm as notebooklm_router
 from .api import meta as meta_router
 from .api import projects as projects_router
@@ -110,6 +111,7 @@ app.include_router(search_router.router, prefix="/api")
 app.include_router(ingest_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(kb_router.router, prefix="/api")
+app.include_router(kg_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(qc_router.router, prefix="/api")
 app.include_router(ip_router.router)

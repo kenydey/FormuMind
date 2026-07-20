@@ -223,6 +223,20 @@ class Settings(BaseSettings):
     loop_convergence_eps: float = 0.01
     loop_convergence_patience: int = 2
 
+    # Knowledge graph P0 — entity index + enumerative RAG (default off for CI).
+    kg_enabled: bool = False
+    kg_link_on_ingest: bool = True
+    kg_enumerative_scan_limit: int = 500
+    kg_enumerative_chunk_cap: int = 200
+    kg_enumerative_llm_cap: int = 32
+    kg_enumerative_max_sources: int = 8
+    kg_hybrid_semantic_k: int = 12
+    kg_hybrid_enumerative_k: int = 12
+    kg_trade_product_link_min_conf: float = 0.85
+    kg_llm_product_hint: bool = False
+    kg_chat_entity_refs_on_evidence: bool = True
+    kg_element_map_path: str = "app/resources/kg_elements.json"
+
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），
     # 问答检索覆盖整个累计语料而非单次请求携带的 sources。纯本地无网络。

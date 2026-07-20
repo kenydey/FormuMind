@@ -796,6 +796,13 @@ def _chat_prompt(question: str, evidence: list[Evidence], domain: str | None) ->
         f"[{i+1}] ({e.source}) {e.title}: {e.snippet[:400]}" for i, e in enumerate(evidence[:8])
     )
     domain_hint = f"Domain context: {domain}\n" if domain else ""
+    trade_suffix = ""
+    try:
+        from .kg.retrieval import trade_product_prompt_suffix
+
+        trade_suffix = trade_product_prompt_suffix(evidence)
+    except Exception:
+        pass
     return (
         f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
         f"Cite sources by number [1], [2], etc.\n"
@@ -808,6 +815,7 @@ def _chat_prompt(question: str, evidence: list[Evidence], domain: str | None) ->
         f"Sources:\n{context}\n\n"
         f"Question: {question}\n\n"
         f"Answer concisely in the same language as the question (Markdown allowed):"
+        f"{trade_suffix}"
     )
 
 

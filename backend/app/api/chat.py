@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from ..domain.kg_schemas import EntityResolutionSummary, KGRetrieveStats
 from ..domain.schemas import Evidence
 from ..services.llm import answer_question
 from ..services.rag import active_rag_backend
@@ -45,6 +46,8 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1)
     sources: list[Evidence] = []
     domain: str | None = None
+    project_id: str | None = None
+    include_entity_resolution: bool = False
 
     @field_validator("sources", mode="before")
     @classmethod
@@ -73,32 +76,61 @@ class ChatResponse(BaseModel):
     citations: list[Evidence]
     rag_backend: str = "tfidf"  # which retrieval backend served the citations
     kb_chunks_used: int = 0  # persistent-KB chunks merged into the grounding set
+    entity_resolution: EntityResolutionSummary | None = None
+    kg_retrieval_stats: KGRetrieveStats | None = None
 
 
-def _augment_with_kb(question: str, sources: list[Evidence]) -> tuple[list[Evidence], int]:
-    """Merge top persistent-KB chunks into the grounding set (KB v2).
-
-    The client's sources keep priority; KB hits already present (same
-    identifier) are skipped. Empty KB / disabled flag → unchanged."""
+def _augment_with_kb(
+    question: str,
+    sources: list[Evidence],
+    *,
+    project_id: str | None = None,
+    include_entity_resolution: bool = False,
+) -> tuple[list[Evidence], int, EntityResolutionSummary | None, KGRetrieveStats | None]:
+    """Merge persistent-KB / KG retrieval into the grounding set."""
     from ..config import get_settings
     from ..services import kb_index
 
     settings = get_settings()
+    resolution: EntityResolutionSummary | None = None
+    kg_stats: KGRetrieveStats | None = None
+
+    if settings.kg_enabled:
+        from ..services.kg import retrieve as kg_retrieve
+        from ..services.kg.retrieval import build_resolution_summary
+
+        result = kg_retrieve(
+            question,
+            project_id=project_id,
+            pre_evidence=sources,
+            k_semantic=settings.kb_chat_top_k,
+        )
+        if include_entity_resolution:
+            resolution = build_resolution_summary(question)
+        kg_stats = result.stats
+        added = max(0, len(result.evidence) - len(sources))
+        return result.evidence, added, resolution, kg_stats
+
     if not settings.kb_v2_enabled:
-        return sources, 0
-    hits = kb_index.search_chunks(question, k=settings.kb_chat_top_k)
+        return sources, 0, resolution, kg_stats
+    hits = kb_index.search_chunks(question, k=settings.kb_chat_top_k, project_id=project_id)
     if not hits:
-        return sources, 0
+        return sources, 0, resolution, kg_stats
     seen = {ev.identifier for ev in sources}
     added = [h for h in hits if h.identifier not in seen]
-    return sources + added, len(added)
+    return sources + added, len(added), resolution, kg_stats
 
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     try:
         sources = [_sanitize_evidence(ev) for ev in req.sources]
-        sources, kb_used = _augment_with_kb(req.question.strip(), sources)
+        sources, kb_used, entity_resolution, kg_stats = _augment_with_kb(
+            req.question.strip(),
+            sources,
+            project_id=req.project_id,
+            include_entity_resolution=req.include_entity_resolution,
+        )
         answer, citations = answer_question(
             question=req.question.strip(),
             sources=sources,
@@ -109,6 +141,8 @@ def chat(req: ChatRequest):
             citations=citations,
             rag_backend=active_rag_backend(),
             kb_chunks_used=kb_used,
+            entity_resolution=entity_resolution,
+            kg_retrieval_stats=kg_stats,
         )
     except HTTPException:
         raise

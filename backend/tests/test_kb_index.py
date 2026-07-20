@@ -182,7 +182,7 @@ def test_chat_merges_kb_chunks(monkeypatch, stores):
     kb_hit = Evidence(source="patent", identifier="kb:s#c0",
                       title="专利 · 实施例 1", snippet="磷酸锌十五份，盐雾七百二十小时。",
                       relevance=0.9)
-    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=6: [kb_hit])
+    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=6, **_: [kb_hit])
     resp = _client().post("/api/chat", json={"question": "磷酸锌用量多少？", "sources": []})
     assert resp.status_code == 200
     data = resp.json()
@@ -192,7 +192,7 @@ def test_chat_merges_kb_chunks(monkeypatch, stores):
 
 def test_chat_skips_duplicate_kb_identifiers(monkeypatch, stores):
     kb_hit = Evidence(source="patent", identifier="dup#0", title="t", snippet="s", relevance=0.9)
-    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=6: [kb_hit])
+    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=6, **_: [kb_hit])
     resp = _client().post("/api/chat", json={
         "question": "q",
         "sources": [{"source": "local", "identifier": "dup#0", "title": "t",
