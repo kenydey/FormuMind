@@ -237,6 +237,14 @@ class Settings(BaseSettings):
     kg_chat_entity_refs_on_evidence: bool = True
     kg_element_map_path: str = "app/resources/kg_elements.json"
 
+    # Chat P0 — multi-turn, structured answers, soft clarification.
+    chat_multi_turn_enabled: bool = True
+    chat_structured_enabled: bool = True
+    chat_clarification_enabled: bool = True
+    chat_claim_check_enabled: bool = False
+    chat_history_max_turns: int = 12
+    chat_rewrite_context_turns: int = 6
+
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），
     # 问答检索覆盖整个累计语料而非单次请求携带的 sources。纯本地无网络。

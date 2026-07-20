@@ -1163,19 +1163,73 @@ export interface IngestResponse {
   total: number;
 }
 
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+  citations?: Evidence[];
+}
+
+export interface ClarifiedEntity {
+  term: string;
+  resolved: string;
+  entity_id?: string;
+}
+
+export type ChatResponseFormat = "markdown" | "structured";
+
+export interface FormulationHint {
+  ingredient: string;
+  role?: string;
+  typical_range?: string;
+  evidence_ref: string;
+}
+
+export interface StructuredAnswer {
+  summary: string;
+  key_findings?: string[];
+  formulation_hints?: FormulationHint[];
+  data_conflicts?: string[];
+  uncertainty_notes?: string[];
+  assumptions?: string[];
+}
+
+export interface ClarificationOption {
+  ambiguous_term: string;
+  possible_meanings: string[];
+  question: string;
+  candidate_entity_ids?: string[];
+}
+
+export interface SourcedClaim {
+  text: string;
+  chunk_ids: string[];
+  confidence: number;
+  status: "supported" | "weak" | "unsupported";
+}
+
 export interface ChatRequest {
   question: string;
-  sources: Evidence[];
+  sources?: Evidence[];
   domain?: string;
+  project_id?: string;
+  include_entity_resolution?: boolean;
+  history?: ChatTurn[];
+  clarified_entities?: ClarifiedEntity[];
+  response_format?: ChatResponseFormat;
+  attachment_source_ids?: string[];
 }
 
 export interface ChatResponse {
   answer: string;
   citations: Evidence[];
-  /** Retrieval backend that served the citations (tfidf | embedding | colbert). */
   rag_backend?: string;
-  /** Persistent-KB chunks merged into the grounding set for this answer. */
   kb_chunks_used?: number;
+  entity_resolution?: object | null;
+  kg_retrieval_stats?: object | null;
+  structured?: StructuredAnswer | null;
+  clarification?: ClarificationOption | null;
+  rewritten_query?: string | null;
+  sourced_claims?: SourcedClaim[] | null;
 }
 
 /** Persistent knowledge base counters (GET /api/kb/stats). */
