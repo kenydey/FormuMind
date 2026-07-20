@@ -72,6 +72,13 @@ def test_loop_iterate_skips_optimize_when_plateau(monkeypatch):
     get_settings.cache_clear()
 
 
+def test_loop_iterate_includes_adaptive_fields():
+    rep = loop_iterate(_REQ, optimize_iterations=6, n_suggest=3)
+    assert rep.strategy_label in {"exploration", "balanced", "exploitation"}
+    assert rep.recommended_next_action
+    assert len(rep.run_explanations) >= 1
+
+
 def test_loop_iterate_returns_loop_report():
     rep = loop_iterate(_REQ, optimize_iterations=6, n_suggest=3)
     assert isinstance(rep, LoopReport)

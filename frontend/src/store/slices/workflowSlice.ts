@@ -1,15 +1,36 @@
 import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
-import type { DOEPlan, ExperimentRecord, LoopReport, OptimizationResult } from "../../api";
+import type {
+  AdaptiveDOEMetadata,
+  DOEPlan,
+  ExperimentRecord,
+  LoopReport,
+  OptimizationResult,
+} from "../../api";
 import { extractMeasuredValues, objectiveMetrics } from "../../utils/objectiveContract";
 import { applyEnrichedLeaderboard } from "../formulationEnrich";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
+
+function adaptiveMetaFrom(
+  source: Partial<AdaptiveDOEMetadata> | null | undefined
+): AdaptiveDOEMetadata | null {
+  if (!source) return null;
+  return {
+    strategy_label: source.strategy_label ?? "exploration",
+    strategy_rationale: source.strategy_rationale ?? "",
+    run_explanations: source.run_explanations ?? [],
+    anomalies: source.anomalies ?? [],
+    recommended_next_action: source.recommended_next_action ?? "",
+    budget_remaining: source.budget_remaining ?? null,
+  };
+}
 
 function applyLoopReportToDraft(draft: AppState, report: LoopReport): void {
   draft.loopReport = report;
   draft.rmseHistory.push(report.rmse_by_metric);
   draft.models = report.model_info;
   draft.lastAlEngine = report.engine;
+  draft.adaptiveDoe = adaptiveMetaFrom(report);
   if (report.campaign_state) {
     draft.campaignState = report.campaign_state;
   }
@@ -158,6 +179,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         set((draft) => {
           draft.campaignState = result.campaign_state ?? draft.campaignState;
           draft.lastAlEngine = result.engine;
+          draft.adaptiveDoe = adaptiveMetaFrom(result);
         });
         await get().adoptDoePlanToWorkbench(result.plan);
       } catch (e) {
@@ -279,6 +301,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         let plan: DOEPlan;
         let nextCampaignState = campaignState;
         let nextAlEngine: string | null = get().lastAlEngine;
+        let adaptiveMeta: AdaptiveDOEMetadata | null = null;
         if (design === "ai_active") {
           const result = await api.activeDoe(requirement, {
             engine: alEngine,
@@ -289,12 +312,14 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           plan = result.plan;
           nextCampaignState = result.campaign_state ?? campaignState;
           nextAlEngine = result.engine;
+          adaptiveMeta = adaptiveMetaFrom(result);
         } else {
           plan = await api.doe(requirement, design, doeEngine);
         }
         set((draft) => {
           draft.campaignState = nextCampaignState;
           draft.lastAlEngine = nextAlEngine;
+          draft.adaptiveDoe = design === "ai_active" ? adaptiveMeta : null;
         });
         await get().adoptDoePlanToWorkbench(plan);
       } catch (e) {

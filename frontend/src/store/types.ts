@@ -18,6 +18,7 @@ import type {
   SearchStreamProgress,
   SourceStatus,
   TaskStatus,
+  AdaptiveDOEMetadata,
 } from "../api";
 import type { ConstraintKey } from "../constants/constraints";
 import type { ProjectSummary, StoreWorkspaceSlice } from "../projectWorkspace";
@@ -84,6 +85,8 @@ export interface AppState {
   intentBusy: boolean;
 
   doePlan: DOEPlan | null;
+  /** Adaptive DOE metadata from /api/doe/active or loop report. */
+  adaptiveDoe: AdaptiveDOEMetadata | null;
   measured: Record<number, number>;
   doeEngine: "auto" | "native" | "pydoe";
   alEngine: "auto" | "legacy" | "baybe";

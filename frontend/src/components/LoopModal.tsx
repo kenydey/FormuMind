@@ -1,6 +1,7 @@
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import SimPlaceholder from "./SimPlaceholder";
+import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
 
 function RmseTrend({ history, metric }: { history: Record<string, number>[]; metric: string }) {
   const series = history.map((snap) => snap[metric]).filter((v) => v != null);
@@ -23,6 +24,7 @@ export default function LoopModal() {
     loopReport,
     rmseHistory,
     doePlan,
+    adaptiveDoe,
     workbenchAdoptedPlanId,
     optimizeEngine,
     loopDoeEngine,
@@ -37,6 +39,7 @@ export default function LoopModal() {
       loopReport: s.loopReport,
       rmseHistory: s.rmseHistory,
       doePlan: s.doePlan,
+      adaptiveDoe: s.adaptiveDoe,
       workbenchAdoptedPlanId: s.workbenchAdoptedPlanId,
       optimizeEngine: s.optimizeEngine,
       loopDoeEngine: s.loopDoeEngine,
@@ -132,7 +135,9 @@ export default function LoopModal() {
           {/* Next DOE batch */}
           {doePlan && (
             <div>
-              <div className="flex items-center justify-between mb-1.5">
+              <AdaptiveDoeInsights meta={adaptiveDoe ?? loopReport ?? null} doePlan={doePlan} compact />
+
+              <div className="flex items-center justify-between mb-1.5 mt-3">
                 <h4 className="text-xs uppercase tracking-widest text-slate-400">
                   下一批推荐实验 · Next DOE（紫色 = AI 主动选点）
                 </h4>

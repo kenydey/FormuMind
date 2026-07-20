@@ -28,6 +28,7 @@ export const useStore = create<AppState>()(
       busy: "idle",
       error: null,
       doePlan: null,
+      adaptiveDoe: null,
       measured: {},
       doeEngine: "auto",
       alEngine: "auto",

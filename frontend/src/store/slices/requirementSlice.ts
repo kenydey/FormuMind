@@ -66,6 +66,7 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
           draft.leaderboard = [];
           draft.formulationValidateWarnings = [];
           draft.doePlan = null;
+          draft.adaptiveDoe = null;
           draft.workbenchAdoptedPlanId = null;
           draft.measured = {};
         });

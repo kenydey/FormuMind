@@ -61,6 +61,7 @@ class ActiveDoeRequest(Requirement):
     doe_engine: str = "auto"
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None
+    budget_remaining: int | None = None
 
 
 class BaybeRecommendRequest(Requirement):
@@ -70,6 +71,7 @@ class BaybeRecommendRequest(Requirement):
     batch_size: int = 4
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None
+    budget_remaining: int | None = None
 
 
 @router.post("/doe/active", response_model=ActiveDoeResult)
@@ -85,6 +87,7 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
                 "doe_engine",
                 "campaign_state",
                 "workbench_campaign_id",
+                "budget_remaining",
             }
         )
     )
@@ -97,6 +100,7 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
         campaign_state=req.campaign_state,
         doe_engine=req.doe_engine,
         workbench_campaign_id=req.workbench_campaign_id,
+        budget_remaining=req.budget_remaining,
     )
 
 
@@ -110,6 +114,7 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
                 "batch_size",
                 "campaign_state",
                 "workbench_campaign_id",
+                "budget_remaining",
             }
         )
     )
@@ -122,6 +127,7 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
         measurements=req.existing_records,
         batch_size=req.batch_size,
         workbench_campaign_id=req.workbench_campaign_id,
+        budget_remaining=req.budget_remaining,
     )
     result.plan.plan_id = uuid.uuid4().hex
     result.plan.domain = base_req.domain

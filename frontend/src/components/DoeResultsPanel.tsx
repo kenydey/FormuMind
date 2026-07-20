@@ -12,6 +12,7 @@ import type { ModelInfo, FactorCandidate } from "../api";
 import { api, primaryObjectiveMetric } from "../api";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
+import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
 
 function R2Gauge({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(1, value));
@@ -117,11 +118,12 @@ export default function DoeResultsPanel() {
     busy, generateDoe, exportDoe, importCsv, error,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
-    runNextRoundDoe, adoptDoePlanToWorkbench,
+    runNextRoundDoe, adoptDoePlanToWorkbench, adaptiveDoe,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
       doePlan: s.doePlan,
+      adaptiveDoe: s.adaptiveDoe,
       models: s.models,
       modelHistory: s.modelHistory,
       trainMessage: s.trainMessage,
@@ -387,6 +389,8 @@ export default function DoeResultsPanel() {
               打开实验台账 →
             </button>
           </div>
+
+          <AdaptiveDoeInsights meta={adaptiveDoe} doePlan={doePlan} />
 
           <div className="max-h-40 overflow-y-auto border border-edge rounded">
             <table className="w-full text-[11px]">

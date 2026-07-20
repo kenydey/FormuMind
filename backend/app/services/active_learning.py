@@ -155,6 +155,7 @@ def active_learning_doe(
     campaign_state: str | None = None,
     doe_engine: str = "auto",
     workbench_campaign_id: int | None = None,
+    budget_remaining: int | None = None,
 ) -> ActiveDoeResult:
     """Generate a DOE plan and annotate the most informative runs."""
     eng = (engine or "auto").lower()
@@ -179,6 +180,7 @@ def active_learning_doe(
                         batch_size=n_suggest,
                         design=f"baybe_{design}",
                         workbench_campaign_id=workbench_campaign_id,
+                        budget_remaining=budget_remaining,
                     )
                     result.plan.plan_id = uuid.uuid4().hex
                     result.plan.domain = req.domain
@@ -189,6 +191,12 @@ def active_learning_doe(
                         plan=result.plan,
                         campaign_state=result.campaign_state,
                         engine="baybe",
+                        strategy_label=result.strategy_label,
+                        strategy_rationale=result.strategy_rationale,
+                        run_explanations=result.run_explanations,
+                        anomalies=result.anomalies,
+                        recommended_next_action=result.recommended_next_action,
+                        budget_remaining=result.budget_remaining,
                     )
             except Exception:
                 if eng == "baybe":
@@ -196,6 +204,8 @@ def active_learning_doe(
 
     plan = _legacy_active_learning_doe(req, existing, n_suggest, design, doe_engine=doe_engine)
     from ..pipeline.workflow import _cache_plan
+    from ..services.doe_adaptive import enrich_active_doe_result
 
     _cache_plan(plan)
-    return ActiveDoeResult(plan=plan, campaign_state=None, engine="legacy")
+    base = ActiveDoeResult(plan=plan, campaign_state=None, engine="legacy")
+    return enrich_active_doe_result(base, req, existing, budget_remaining=budget_remaining)

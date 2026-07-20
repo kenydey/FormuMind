@@ -107,6 +107,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.sources = [];
           draft.selectedSources = [];
           draft.doePlan = null;
+          draft.adaptiveDoe = null;
           draft.measured = {};
           draft.loopReport = null;
           draft.rmseHistory = [];
