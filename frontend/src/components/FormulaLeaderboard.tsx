@@ -71,6 +71,7 @@ function FormulaCard({
   forceOpen,
   objectiveMetrics,
   onIngredientChange,
+  validateWarnings,
 }: {
   form: Formulation;
   rank: number;
@@ -83,6 +84,7 @@ function FormulaCard({
     ingIdx: number,
     patch: Partial<import("../api").Ingredient>
   ) => void;
+  validateWarnings?: string[];
 }) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
@@ -194,6 +196,7 @@ function FormulaCard({
             ingredients={form.ingredients}
             editable={!!onIngredientChange}
             onIngredientChange={(ingIdx, patch) => onIngredientChange?.(formulaIdx, ingIdx, patch)}
+            validateWarnings={validateWarnings}
           />
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
@@ -277,6 +280,7 @@ export default function FormulaLeaderboard() {
     runAiModifyFormula,
     updateFormulaIngredient,
     formulationBusy,
+    formulationValidateWarnings,
   } = useStore(
     useShallow((s) => ({
       leaderboard: s.leaderboard,
@@ -286,6 +290,7 @@ export default function FormulaLeaderboard() {
       runAiModifyFormula: s.runAiModifyFormula,
       updateFormulaIngredient: s.updateFormulaIngredient,
       formulationBusy: s.formulationBusy,
+      formulationValidateWarnings: s.formulationValidateWarnings,
     }))
   );
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
@@ -338,6 +343,16 @@ export default function FormulaLeaderboard() {
         </div>
         <ListExportMenu forms={leaderboard} />
       </div>
+      {formulationValidateWarnings.length > 0 && (
+        <div className="mb-3 text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2 space-y-1">
+          <div className="font-medium text-amber-300">配方校验 / 目录补全提示</div>
+          <ul className="list-disc list-inside text-[10px] text-amber-300/90 max-h-28 overflow-y-auto">
+            {formulationValidateWarnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {leaderboard.length === 0 ? (
         <p className="text-slate-500 text-sm">尚无配方。先运行检索推荐或寻优。</p>
       ) : viewMode === "table" ? (
@@ -360,6 +375,7 @@ export default function FormulaLeaderboard() {
               forceOpen={highlightIndex === i}
               objectiveMetrics={objectiveMetrics}
               onIngredientChange={updateFormulaIngredient}
+              validateWarnings={formulationValidateWarnings}
             />
           ))}
         </div>

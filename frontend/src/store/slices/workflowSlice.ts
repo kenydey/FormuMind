@@ -1,12 +1,12 @@
 import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
 import type { DOEPlan, ExperimentRecord, LoopReport, OptimizationResult } from "../../api";
 import { extractMeasuredValues, objectiveMetrics } from "../../utils/objectiveContract";
+import { applyEnrichedLeaderboard } from "../formulationEnrich";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
 function applyLoopReportToDraft(draft: AppState, report: LoopReport): void {
   draft.loopReport = report;
-  draft.leaderboard = report.optimization.top_formulations;
   draft.optimizationHistory = report.optimization.history;
   draft.doePlan = report.next_doe;
   draft.measured = {};
@@ -41,11 +41,9 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         );
         const opt = final.data as unknown as OptimizationResult | null;
         if (opt?.top_formulations) {
-          set((draft) => {
-            draft.leaderboard = opt.top_formulations;
+          await applyEnrichedLeaderboard(set, get, opt.top_formulations, (draft) => {
             draft.optimizationHistory = opt.history;
           });
-          get().scheduleAutosave();
         }
       } catch (e) {
         set((draft) => {
@@ -100,10 +98,9 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         );
         const report = final.data as unknown as LoopReport | null;
         if (report) {
-          set((draft) => {
+          await applyEnrichedLeaderboard(set, get, report.optimization.top_formulations, (draft) => {
             applyLoopReportToDraft(draft, report);
           });
-          get().scheduleAutosave();
         }
       } catch (e) {
         set((draft) => {
