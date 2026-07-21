@@ -1,6 +1,7 @@
 """Knowledge graph P0 — API and retrieval schemas."""
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -8,6 +9,40 @@ from pydantic import BaseModel, Field
 from .schemas import CompositionStatus, EntityKind, Evidence, EvidenceEntityRef
 
 RetrievalMode = Literal["auto", "semantic", "enumerative", "hybrid"]
+
+
+class RelationType(str, Enum):
+    """Semantic relations extracted from literature/patent text."""
+
+    SUBSTITUTES = "substitutes"
+    SYNERGIZES = "synergizes"
+    INHIBITS = "inhibits"
+    CORRELATES_POS = "correlates_pos"
+    CORRELATES_NEG = "correlates_neg"
+    REQUIRES = "requires"
+
+
+SEMANTIC_RELATION_TYPES = frozenset(m.value for m in RelationType)
+
+
+class RelationEvidence(BaseModel):
+    source_id: str
+    chunk_id: str | None = None
+    sentence: str = ""
+    confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    extraction_method: str = "rule"
+
+
+class KGRelationView(BaseModel):
+    id: str
+    source_entity_id: str
+    target_entity_id: str
+    relation_type: RelationType
+    confidence: float = 0.5
+    evidence: list[RelationEvidence] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    is_valid: bool = True
+    extraction_method: str = "rule"
 
 
 class KGChemicalEntity(BaseModel):
@@ -90,6 +125,7 @@ class KGStats(BaseModel):
     mentions: int = 0
     links: int = 0
     entities_by_kind: dict[str, int] = Field(default_factory=dict)
+    links_by_type: dict[str, int] = Field(default_factory=dict)
 
 
 class KGRebuildReport(BaseModel):
@@ -97,6 +133,7 @@ class KGRebuildReport(BaseModel):
     entities_upserted: int = 0
     mentions_upserted: int = 0
     links_created: int = 0
+    relations_upserted: int = 0
 
 
 class KGLinkReport(BaseModel):
@@ -104,3 +141,4 @@ class KGLinkReport(BaseModel):
     entities_upserted: int = 0
     mentions_upserted: int = 0
     links_created: int = 0
+    relations_upserted: int = 0

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -201,17 +201,25 @@ class KGMention(Base):
 
 
 class KGEntityLink(Base):
-    """Optional link between entities (e.g. trade name → catalog chemical)."""
+    """Optional link between entities (e.g. trade name → catalog chemical, semantic relations)."""
 
     __tablename__ = "kb_entity_links"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     src_entity_id: Mapped[str] = mapped_column(String(64), index=True)
     dst_entity_id: Mapped[str] = mapped_column(String(64), index=True)
-    link_type: Mapped[str] = mapped_column(String(32))
+    link_type: Mapped[str] = mapped_column(String(32), index=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_valid: Mapped[bool] = mapped_column(default=True)
+    extraction_method: Mapped[str] = mapped_column(String(16), default="rule")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("idx_kb_link_triplet", "src_entity_id", "dst_entity_id", "link_type"),
+    )
 
 
 class ProjectRow(Base):

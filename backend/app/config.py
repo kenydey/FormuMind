@@ -244,6 +244,9 @@ class Settings(BaseSettings):
     kg_llm_product_hint: bool = False
     kg_chat_entity_refs_on_evidence: bool = True
     kg_element_map_path: str = "app/resources/kg_elements.json"
+    kg_relation_extract_enabled: bool = False
+    kg_llm_relation_extract: bool = False
+    kg_relation_min_confidence: float = 0.55
 
     # Chat P0 — multi-turn, structured answers, soft clarification.
     chat_multi_turn_enabled: bool = True

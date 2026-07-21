@@ -45,11 +45,14 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
     try:
         store = get_entity_store()
         store.delete_mentions_for_source(source_id)
+        if settings.kg_relation_extract_enabled:
+            store.delete_links_for_source(source_id)
         chunks = get_chunk_store().get_by_source(source_id)
         touched: set[str] = set()
         links = 0
         mentions = 0
         entities = 0
+        relations_upserted = 0
 
         with store._session_factory() as session:
             for chunk in chunks:
@@ -57,6 +60,10 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
                 mentions += n
                 links += ln
                 touched.update(eids)
+                if settings.kg_relation_extract_enabled:
+                    relations_upserted += _extract_relations_for_chunk(
+                        session, chunk, source_id, settings
+                    )
             session.commit()
 
         entities = len(touched)
@@ -70,6 +77,7 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
             entities_upserted=entities,
             mentions_upserted=mentions,
             links_created=links,
+            relations_upserted=relations_upserted,
         )
     except Exception as exc:
         degrade_return(logger, exc, f"kg link_source failed for {source_id}", None)
@@ -97,6 +105,7 @@ def rebuild_all(*, project_id: str | None = None, settings: Settings | None = No
             report.entities_upserted += lr.entities_upserted
             report.mentions_upserted += lr.mentions_upserted
             report.links_created += lr.links_created
+            report.relations_upserted += lr.relations_upserted
         return report
     except Exception as exc:
         degrade_return(logger, exc, "kg rebuild_all failed", None)
@@ -222,6 +231,54 @@ def _link_chunk(session: Session, chunk, source_id: str, settings: Settings) -> 
     )
 
     return mention_count, touched, link_count
+
+
+def _extract_relations_for_chunk(session: Session, chunk, source_id: str, settings: Settings) -> int:
+    from .relation_extractor import extract_relations_from_chunk
+
+    mentions = (
+        session.query(KGMention)
+        .filter(KGMention.chunk_id == chunk.id, KGMention.source_id == source_id)
+        .all()
+    )
+    if len(mentions) < 2:
+        return 0
+    entities: dict[str, KGEntity] = {}
+    for mention in mentions:
+        ent = session.get(KGEntity, mention.entity_id)
+        if ent is not None:
+            entities[mention.entity_id] = ent
+    extracted = extract_relations_from_chunk(
+        chunk.text or "",
+        mentions,
+        entities,
+        source_id=source_id,
+        chunk_id=chunk.id,
+        settings=settings,
+    )
+    store = get_entity_store()
+    saved = 0
+    for rel in extracted:
+        if rel.confidence < settings.kg_relation_min_confidence:
+            continue
+        evidence_ref = {
+            "source_id": source_id,
+            "chunk_id": chunk.id,
+            "sentence": rel.sentence,
+            "confidence": rel.confidence,
+            "extraction_method": rel.extraction_method,
+        }
+        if store.merge_semantic_link(
+            session,
+            src_entity_id=rel.source_entity_id,
+            dst_entity_id=rel.target_entity_id,
+            link_type=rel.relation_type.value,
+            confidence=rel.confidence,
+            evidence_ref=evidence_ref,
+            extraction_method=rel.extraction_method,
+        ):
+            saved += 1
+    return saved
 
 
 def _element_symbols_from_formula(formula: str) -> list[str]:

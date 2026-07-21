@@ -36,6 +36,7 @@ def make_engine(db_url: str) -> Engine:
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
     _ensure_source_document_columns(engine)
+    _ensure_kb_entity_link_columns(engine)
     return engine
 
 
@@ -102,6 +103,26 @@ def _ensure_document_chunk_columns(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE document_chunks ADD COLUMN page_no INTEGER"))
         if "meta" not in cols:
             conn.execute(text("ALTER TABLE document_chunks ADD COLUMN meta JSON"))
+
+
+def _ensure_kb_entity_link_columns(engine: Engine) -> None:
+    """Add semantic-relation columns to legacy kb_entity_links tables."""
+    from sqlalchemy import inspect, text
+
+    if "kb_entity_links" not in inspect(engine).get_table_names():
+        return
+    cols = {c["name"] for c in inspect(engine).get_columns("kb_entity_links")}
+    with engine.begin() as conn:
+        if "metadata_json" not in cols:
+            conn.execute(text("ALTER TABLE kb_entity_links ADD COLUMN metadata_json JSON DEFAULT '{}'"))
+        if "is_valid" not in cols:
+            conn.execute(text("ALTER TABLE kb_entity_links ADD COLUMN is_valid BOOLEAN DEFAULT 1"))
+        if "extraction_method" not in cols:
+            conn.execute(
+                text("ALTER TABLE kb_entity_links ADD COLUMN extraction_method VARCHAR(16) DEFAULT 'rule'")
+            )
+        if "updated_at" not in cols:
+            conn.execute(text("ALTER TABLE kb_entity_links ADD COLUMN updated_at DATETIME"))
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:
