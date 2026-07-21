@@ -79,15 +79,46 @@ class EntityResolveResponse(BaseModel):
     chemicals: list[KGChemicalEntity] = Field(default_factory=list)
     trade_products: list[KGTradeProductEntity] = Field(default_factory=list)
     expanded_entity_ids: list[str] = Field(default_factory=list)
+    top_relations: list[KGRelationView] = Field(default_factory=list)
     mode: RetrievalMode = "semantic"
     trade_only: bool = False
     interpretation: str = ""
+
+
+class KGPathStep(BaseModel):
+    relation: KGRelationView
+    entity_id: str
+    entity_name: str = ""
+
+
+class KGPathResponse(BaseModel):
+    src_entity_id: str
+    dst_entity_id: str
+    found: bool = False
+    hops: int = 0
+    steps: list[KGPathStep] = Field(default_factory=list)
+
+
+class KGSubstituteCandidate(BaseModel):
+    entity_id: str
+    entity_name: str = ""
+    relation_type: RelationType = RelationType.SUBSTITUTES
+    confidence: float = 0.5
+    hops: int = 1
+    path: list[KGPathStep] = Field(default_factory=list)
+
+
+class KGSubstituteDiscoverResponse(BaseModel):
+    query_entity_id: str
+    query_entity_name: str = ""
+    substitutes: list[KGSubstituteCandidate] = Field(default_factory=list)
 
 
 class EntityResolutionSummary(BaseModel):
     query: str
     chemicals: list[KGChemicalEntity] = Field(default_factory=list)
     trade_products: list[KGTradeProductEntity] = Field(default_factory=list)
+    top_relations: list[KGRelationView] = Field(default_factory=list)
     mode: RetrievalMode = "semantic"
     truncated: bool = False
 

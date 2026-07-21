@@ -165,6 +165,112 @@ def _split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+_LLM_RELATION_TYPES = {t.value for t in RelationType}
+
+
+def _entity_labels(mentions: list[KGMention], entities: dict[str, KGEntity]) -> list[dict[str, str]]:
+    labels: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for mention in mentions:
+        eid = mention.entity_id
+        if eid in seen:
+            continue
+        seen.add(eid)
+        ent = entities.get(eid)
+        surfaces = [mention.surface_form] if mention.surface_form else []
+        if ent:
+            for candidate in (ent.zh_name, ent.canonical_name, ent.cas_no or ""):
+                if candidate and candidate not in surfaces:
+                    surfaces.append(candidate)
+        labels.append(
+            {
+                "entity_id": eid,
+                "labels": ", ".join(s for s in surfaces if s)[:200],
+            }
+        )
+    return labels
+
+
+def _build_llm_prompt(chunk_text: str, entity_labels: list[dict[str, str]]) -> str:
+    entities_json = "\n".join(
+        f'- id={item["entity_id"]} labels="{item["labels"]}"' for item in entity_labels
+    )
+    types = ", ".join(sorted(_LLM_RELATION_TYPES))
+    text = (chunk_text or "")[:3000]
+    return f"""Extract chemical/material semantic relations from the passage below.
+
+Known entities in this chunk (use entity_id values exactly):
+{entities_json}
+
+Allowed relation_type values: {types}
+
+Return JSON:
+{{"relations": [
+  {{"source_entity_id": "...", "target_entity_id": "...", "relation_type": "substitutes",
+    "sentence": "verbatim supporting phrase", "confidence": 0.0-1.0}}
+]}}
+
+Rules:
+- Only relations explicitly supported by the text.
+- source_entity_id/target_entity_id must be from the entity list.
+- Skip negated statements (not a substitute, cannot replace).
+- Prefer fewer high-confidence relations over guesses.
+
+Passage:
+{text}
+"""
+
+
+def _extract_relations_llm(
+    chunk_text: str,
+    mentions: list[KGMention],
+    entities: dict[str, KGEntity],
+) -> list[ExtractedRelation]:
+    from .. import llm
+
+    labels = _entity_labels(mentions, entities)
+    if len(labels) < 2:
+        return []
+    data = llm.complete_json(_build_llm_prompt(chunk_text, labels))
+    if not data:
+        return []
+    raw_items = data.get("relations") or []
+    if not isinstance(raw_items, list):
+        return []
+
+    valid_ids = {item["entity_id"] for item in labels}
+    found: list[ExtractedRelation] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        src_id = str(item.get("source_entity_id") or "").strip()
+        dst_id = str(item.get("target_entity_id") or "").strip()
+        rel_raw = str(item.get("relation_type") or "").strip()
+        if src_id not in valid_ids or dst_id not in valid_ids or src_id == dst_id:
+            continue
+        if rel_raw not in _LLM_RELATION_TYPES:
+            continue
+        sentence = str(item.get("sentence") or "")[:500]
+        if sentence and _NEGATION_RE.search(sentence):
+            continue
+        try:
+            confidence = float(item.get("confidence", 0.58))
+        except (TypeError, ValueError):
+            confidence = 0.58
+        confidence = max(0.0, min(1.0, confidence))
+        found.append(
+            ExtractedRelation(
+                source_entity_id=src_id,
+                target_entity_id=dst_id,
+                relation_type=RelationType(rel_raw),
+                sentence=sentence or chunk_text[:200],
+                confidence=confidence,
+                extraction_method="llm",
+            )
+        )
+    return found
+
+
 def extract_relations_from_chunk(
     chunk_text: str,
     mentions: list[KGMention],
@@ -174,7 +280,7 @@ def extract_relations_from_chunk(
     chunk_id: str,
     settings: Settings | None = None,
 ) -> list[ExtractedRelation]:
-    """Extract semantic relations using rule patterns aligned to chunk mentions."""
+    """Extract semantic relations using rules and optional LLM fallback."""
     settings = settings or get_settings()
     if not settings.kg_relation_extract_enabled:
         return []
@@ -204,7 +310,12 @@ def extract_relations_from_chunk(
                     )
                 )
 
-    return _dedupe_relations(found)
+    deduped = _dedupe_relations(found)
+    if settings.kg_llm_relation_extract:
+        llm_rels = _extract_relations_llm(chunk_text, mentions, entities)
+        if llm_rels:
+            deduped = _dedupe_relations(deduped + llm_rels)
+    return deduped
 
 
 def _dedupe_relations(relations: list[ExtractedRelation]) -> list[ExtractedRelation]:
