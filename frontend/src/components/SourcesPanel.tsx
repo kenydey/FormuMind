@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
+import KgRelationPanel from "./KgRelationPanel";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
@@ -216,6 +217,8 @@ export default function SourcesPanel() {
           className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm resize-none focus:border-accent/50 outline-none"
         />
       </label>
+
+      <KgRelationPanel query={searchQuery} />
 
       <div className="shrink-0">
         <span className="text-xs text-slate-400 block mb-1.5">信息类别 · Sources</span>

@@ -9,6 +9,7 @@ from ...db.product_store import norm_key
 from ...domain.kg_schemas import (
     EntityResolveResponse,
     KGChemicalEntity,
+    KGRelationView,
     KGTradeProductEntity,
     RetrievalMode,
 )
@@ -128,11 +129,21 @@ def resolve_query(query: str, *, settings: Settings | None = None) -> EntityReso
     if trade_only:
         interpretation += "; trade_only"
 
+    top_relations: list[KGRelationView] = []
+    primary_id = (chemicals[0].id if chemicals else None) or (
+        trade_products[0].id if trade_products else None
+    )
+    if primary_id:
+        from .graph_query import get_entity_relations
+
+        top_relations = get_entity_relations(primary_id, limit=8)
+
     return EntityResolveResponse(
         query=q,
         chemicals=chemicals,
         trade_products=trade_products,
         expanded_entity_ids=expanded_ids,
+        top_relations=top_relations,
         mode=mode,
         trade_only=trade_only,
         interpretation=interpretation,

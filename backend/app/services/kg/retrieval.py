@@ -134,6 +134,7 @@ def build_resolution_summary(query: str, resolved=None) -> EntityResolutionSumma
         query=query,
         chemicals=resolved.chemicals,
         trade_products=resolved.trade_products,
+        top_relations=resolved.top_relations,
         mode=resolved.mode,
         truncated=False,
     )

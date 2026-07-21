@@ -13,6 +13,17 @@ from .session_utils import commit_session
 
 logger = logging.getLogger(__name__)
 
+SEMANTIC_LINK_TYPES = frozenset(
+    {
+        "substitutes",
+        "synergizes",
+        "inhibits",
+        "correlates_pos",
+        "correlates_neg",
+        "requires",
+    }
+)
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -29,6 +40,28 @@ class EntityStore:
                 .filter(KGMention.source_id == source_id)
                 .delete()
             )
+
+    def delete_links_for_source(self, source_id: str) -> int:
+        """Remove semantic links whose evidence cites *source_id* (preserve catalog_alias)."""
+        removed = 0
+        with commit_session(self._session_factory) as session:
+            links = (
+                session.query(KGEntityLink)
+                .filter(KGEntityLink.link_type.in_(tuple(SEMANTIC_LINK_TYPES)))
+                .all()
+            )
+            for link in links:
+                refs = list(link.evidence_refs or [])
+                kept = [r for r in refs if r.get("source_id") != source_id]
+                if len(kept) == len(refs):
+                    continue
+                if not kept:
+                    session.delete(link)
+                    removed += 1
+                else:
+                    link.evidence_refs = kept
+                    link.updated_at = _utcnow()
+            return removed
 
     def upsert_entity(self, session: Session, **fields) -> KGEntity:
         eid = fields["id"]
@@ -122,9 +155,99 @@ class EntityStore:
                 link_type=link_type,
                 confidence=confidence,
                 evidence_refs=evidence_refs or [],
+                extraction_method="manual",
                 created_at=_utcnow(),
+                updated_at=_utcnow(),
             )
         )
+
+    def merge_semantic_link(
+        self,
+        session: Session,
+        *,
+        src_entity_id: str,
+        dst_entity_id: str,
+        link_type: str,
+        confidence: float,
+        evidence_ref: dict,
+        metadata: dict | None = None,
+        extraction_method: str = "rule",
+    ) -> bool:
+        if src_entity_id == dst_entity_id or link_type not in SEMANTIC_LINK_TYPES:
+            return False
+        existing = (
+            session.query(KGEntityLink)
+            .filter(
+                KGEntityLink.src_entity_id == src_entity_id,
+                KGEntityLink.dst_entity_id == dst_entity_id,
+                KGEntityLink.link_type == link_type,
+            )
+            .first()
+        )
+        if existing:
+            refs = list(existing.evidence_refs or [])
+            key = (
+                evidence_ref.get("source_id"),
+                evidence_ref.get("chunk_id"),
+                evidence_ref.get("sentence"),
+            )
+            if not any(
+                (r.get("source_id"), r.get("chunk_id"), r.get("sentence")) == key for r in refs
+            ):
+                refs.append(evidence_ref)
+            existing.evidence_refs = refs[:20]
+            existing.confidence = max(float(existing.confidence or 0), confidence)
+            existing.extraction_method = extraction_method
+            existing.is_valid = True
+            existing.updated_at = _utcnow()
+            if metadata:
+                merged = dict(existing.metadata_json or {})
+                merged.update(metadata)
+                existing.metadata_json = merged
+            return True
+        session.add(
+            KGEntityLink(
+                id=str(uuid.uuid4()),
+                src_entity_id=src_entity_id,
+                dst_entity_id=dst_entity_id,
+                link_type=link_type,
+                confidence=confidence,
+                evidence_refs=[evidence_ref],
+                metadata_json=metadata or {},
+                extraction_method=extraction_method,
+                is_valid=True,
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+        )
+        return True
+
+    def get_links_for_entity(
+        self,
+        entity_id: str,
+        *,
+        direction: str = "both",
+        link_types: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[KGEntityLink]:
+        with self._session_factory() as session:
+            q = session.query(KGEntityLink).filter(KGEntityLink.is_valid.is_(True))
+            if direction == "outgoing":
+                q = q.filter(KGEntityLink.src_entity_id == entity_id)
+            elif direction == "incoming":
+                q = q.filter(KGEntityLink.dst_entity_id == entity_id)
+            else:
+                from sqlalchemy import or_
+
+                q = q.filter(
+                    or_(
+                        KGEntityLink.src_entity_id == entity_id,
+                        KGEntityLink.dst_entity_id == entity_id,
+                    )
+                )
+            if link_types:
+                q = q.filter(KGEntityLink.link_type.in_(link_types))
+            return q.order_by(KGEntityLink.confidence.desc()).limit(limit).all()
 
     def refresh_counts(self, entity_ids: list[str] | None = None) -> None:
         with commit_session(self._session_factory) as session:
@@ -219,11 +342,17 @@ class EntityStore:
                 .group_by(KGEntity.kind)
                 .all()
             )
+            by_link_type = dict(
+                session.query(KGEntityLink.link_type, func.count(KGEntityLink.id))
+                .group_by(KGEntityLink.link_type)
+                .all()
+            )
             return {
                 "entities": int(entities),
                 "mentions": int(mentions),
                 "links": int(links),
                 "entities_by_kind": {k: int(v) for k, v in by_kind.items()},
+                "links_by_type": {k: int(v) for k, v in by_link_type.items()},
             }
 
     def linked_dst_ids(self, src_entity_id: str) -> list[str]:

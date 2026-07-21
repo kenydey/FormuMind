@@ -802,6 +802,22 @@ export const api = {
 
   kbReindex: () => post<KBReindexResult>("/api/kb/reindex", {}),
 
+  kgResolve: (q: string) =>
+    get<KGEntityResolveResponse>(`/api/kg/resolve?q=${encodeURIComponent(q)}`),
+
+  kgRelations: (entityId: string, direction = "both", limit = 20) =>
+    get<KGRelationView[]>(
+      `/api/kg/relations/${encodeURIComponent(entityId)}?direction=${direction}&limit=${limit}`
+    ),
+
+  kgSubstitutes: (opts: { entityId?: string; q?: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (opts.entityId) params.set("entity_id", opts.entityId);
+    if (opts.q) params.set("q", opts.q);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    return get<KGSubstituteDiscoverResponse>(`/api/kg/discover/substitutes?${params}`);
+  },
+
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 
   postEnvFlags: (updates: Record<string, boolean>) =>
@@ -1278,12 +1294,97 @@ export interface ChatResponse {
   citations: Evidence[];
   rag_backend?: string;
   kb_chunks_used?: number;
-  entity_resolution?: object | null;
+  entity_resolution?: KGEntityResolutionSummary | null;
   kg_retrieval_stats?: object | null;
   structured?: StructuredAnswer | null;
   clarification?: ClarificationOption | null;
   rewritten_query?: string | null;
   sourced_claims?: SourcedClaim[] | null;
+}
+
+export type KGRelationType =
+  | "substitutes"
+  | "synergizes"
+  | "inhibits"
+  | "correlates_pos"
+  | "correlates_neg"
+  | "requires";
+
+export interface KGRelationEvidence {
+  source_id: string;
+  chunk_id?: string | null;
+  sentence: string;
+  confidence: number;
+  extraction_method: string;
+}
+
+export interface KGRelationView {
+  id: string;
+  source_entity_id: string;
+  target_entity_id: string;
+  relation_type: KGRelationType;
+  confidence: number;
+  evidence: KGRelationEvidence[];
+  metadata: Record<string, unknown>;
+  is_valid: boolean;
+  extraction_method: string;
+}
+
+export interface KGChemicalEntity {
+  id: string;
+  canonical_name: string;
+  cas_no?: string | null;
+  formula?: string | null;
+  linked_catalog_key?: string | null;
+  composition_status: string;
+  mention_count: number;
+}
+
+export interface KGTradeProductEntity {
+  id: string;
+  trade_name: string;
+  grade: string;
+  supplier: string;
+  composition_status: string;
+  proprietary: boolean;
+  generic_name_hint: string;
+  linked_chemical_ids: string[];
+  mention_count: number;
+}
+
+export interface KGEntityResolveResponse {
+  query: string;
+  chemicals: KGChemicalEntity[];
+  trade_products: KGTradeProductEntity[];
+  expanded_entity_ids: string[];
+  top_relations: KGRelationView[];
+  mode: string;
+  trade_only: boolean;
+  interpretation: string;
+}
+
+export interface KGEntityResolutionSummary {
+  query: string;
+  chemicals: KGChemicalEntity[];
+  trade_products: KGTradeProductEntity[];
+  top_relations: KGRelationView[];
+  mode: string;
+  truncated: boolean;
+}
+
+export interface KGSubstituteCandidate {
+  entity_id: string;
+  entity_name: string;
+  relation_type: KGRelationType;
+  confidence: number;
+  hops: number;
+  path: { relation: KGRelationView; entity_id: string; entity_name: string }[];
+}
+
+export interface KGSubstituteDiscoverResponse {
+  query_entity_id: string;
+  query_entity_name: string;
+  substitutes: KGSubstituteCandidate[];
 }
 
 /** Persistent knowledge base counters (GET /api/kb/stats). */
