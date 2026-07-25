@@ -199,7 +199,7 @@ class TaskManager:
         self.register_celery_task(async_result.id, "recommend")
         return async_result.id
 
-    def submit_search(self, query, source_types, req=None, total_limit=300, per_source_cap=50) -> str:
+    def submit_search(self, query, source_types, req=None, total_limit=300, per_source_cap=30) -> str:
         payload = {
             "query": query,
             "source_types": source_types,
@@ -578,7 +578,7 @@ def run_search_task(self, payload: dict) -> dict:
             source_types,
             req=req,
             total_limit=payload.get("total_limit", 300),
-            per_source_cap=payload.get("per_source_cap", 50),
+            per_source_cap=payload.get("per_source_cap", 30),
             progress_cb=progress,
         )
         status = {k: v for k, v in literature.get_source_availability().items()}

@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     xai_api_key: str | None = None           # Grok
 
     # 检索设置
-    search_limit_per_source: int = 50    # 每源单页大小（增量翻页，实际不设硬上限）
+    search_limit_per_source: int = 30     # 每个来源最多保留条数（符合过滤规则的结果）
     search_total_limit: int = 300        # 全部来源合并后的总量上限（按相关性排序截断）
     # RAG 检索后端：auto（ColBERT > sentence-transformers > TF-IDF）/
     # colbert / embedding / tfidf。缺库时一律回退 TF-IDF。
@@ -193,10 +193,11 @@ class Settings(BaseSettings):
     content_filter_blocked_domains: list[str] = Field(default_factory=list)
     content_filter_llm_judge: bool = False
 
-    # Search-stream LLM rerank (Phase B R-2a): one batched relevance pass on the
-    # final ranked list before returning to the client. Degrades to rank order.
+    # Search-stream LLM rerank (Phase B R-2a): reorder the head of the ranked list;
+    # remaining slots up to search_total_limit are kept in rule-rank order.
     search_rerank_enabled: bool = True
-    search_rerank_top_k: int = 20
+    search_rerank_top_k: int = 100       # 精排后至少保留条数（有足够结果时）
+    search_rerank_llm_batch: int = 50    # 送入 LLM 评分的候选数（控制成本）
 
     # Recommend path: federated refresh → ColBERT index before CRAG recommend.
     auto_kb_refresh_before_recommend: bool = False
