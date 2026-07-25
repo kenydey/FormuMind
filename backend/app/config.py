@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     xai_api_key: str | None = None           # Grok
 
     # 检索设置
-    search_limit_per_source: int = 30     # 每个来源最多保留条数（符合过滤规则的结果）
+    search_limit_per_source: int = 50    # 每源单页大小（增量翻页）；不设单源总量上限
     search_total_limit: int = 300        # 全部来源合并后的总量上限（按相关性排序截断）
     # RAG 检索后端：auto（ColBERT > sentence-transformers > TF-IDF）/
     # colbert / embedding / tfidf。缺库时一律回退 TF-IDF。

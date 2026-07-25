@@ -47,7 +47,7 @@ class FederatedSearchEngine:
     ) -> FederatedSearchResult:
         types = source_types or self.effective_sources()
         limit = total_limit or min(120, self._settings.search_total_limit)
-        cap = per_source_cap or min(30, self._settings.search_limit_per_source)
+        cap = per_source_cap or self._settings.search_limit_per_source
         t0 = time.perf_counter()
 
         logger.info("FederatedSearch query={!r} sources=%s", query[:80], types)

@@ -70,7 +70,7 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "检索结束后对最终榜单做一次 LLM 批量质量审查（每次检索一次调用）。",
             "kb", "需有效 LLM key"),
     EnvFlag("search_rerank_enabled", "检索 LLM 精排",
-            "对合并结果前若干条做 LLM 语义重排，其余按规则排序保留（总量上限 300、每源 30）。",
+            "对合并结果前若干条做 LLM 语义重排，其余按规则排序保留（总量上限 300）。",
             "retrieval", "需有效 LLM key"),
     EnvFlag("auto_kb_refresh_before_recommend", "推荐前刷新 KB",
             "运行配方推荐前先联邦检索并写入 ColBERT 索引。", "kb", "需网络"),
