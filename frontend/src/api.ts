@@ -842,6 +842,13 @@ export const api = {
       }
     ),
 
+  refreshLlmModels: (opts?: { provider?: string; baseUrl?: string; model?: string }) =>
+    post<LlmModelsRefreshResponse>("/api/settings/models/refresh", {
+      provider: opts?.provider,
+      baseUrl: opts?.baseUrl,
+      model: opts?.model,
+    }),
+
   testConnection: () =>
     post<{ ok: boolean; provider: string; model: string; message: string }>(
       "/api/settings/test", {}
@@ -1424,6 +1431,15 @@ export interface LLMSettingsResponse {
   key_set: boolean;
   base_url?: string;
   providers: LLMProviderInfo[];
+}
+
+export interface LlmModelsRefreshResponse {
+  ok: boolean;
+  provider: string;
+  base_url?: string | null;
+  source: "remote" | "static";
+  models: LLMModelOption[];
+  message: string;
 }
 
 // ── v0.5 新增类型 ────────────────────────────────────────────────────────────
