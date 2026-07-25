@@ -20,7 +20,7 @@ class SearchRequest(BaseModel):
     query: str = ""
     source_types: list[str] = Field(default_factory=list)
     requirement: Requirement | None = None
-    limit_per_source: int = 30
+    limit_per_source: int = 50
     total_limit: int = 300
 
 

@@ -1,4 +1,4 @@
-"""Search result count limits — per-source cap and rerank head+tail merge."""
+"""Search result count limits — rerank head+tail merge without per-source cap."""
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -28,30 +28,24 @@ def _ev(source: str, i: int) -> Evidence:
     )
 
 
-def test_iter_search_respects_per_source_cap(monkeypatch):
+def test_iter_search_no_per_source_total_cap(monkeypatch):
+    """Single source may contribute more than a former per-source cap."""
     monkeypatch.setenv("FORMUMIND_SEARCH_RERANK_ENABLED", "false")
     get_settings.cache_clear()
 
     def fake_patents(_off, _q=""):
-        return [_ev("patents", 1), _ev("patents", 2)]
+        return [_ev("patents", i) for i in range(40)] if _off == 0 else []
 
-    def fake_lit(_off, _q=""):
-        return [_ev("openalex", 10)]
-
-    with patch.object(literature, "search_patents", side_effect=fake_patents), patch.object(
-        literature, "search_openalex", side_effect=fake_lit
-    ):
+    with patch.object(literature, "search_patents", side_effect=fake_patents):
         evidence, _ = literature.iter_search(
             "zinc phosphate coating",
-            ["patents", "literature"],
+            ["patents"],
             total_limit=300,
-            per_source_cap=30,
-            max_rounds=1,
+            per_source_cap=50,
+            max_rounds=2,
         )
 
-    patent_hits = [e for e in evidence if e.source == "patents"]
-    assert len(patent_hits) <= 30
-    assert len(evidence) <= 60
+    assert len(evidence) == 40
 
 
 def test_rerank_keeps_tail_beyond_llm_batch(monkeypatch):

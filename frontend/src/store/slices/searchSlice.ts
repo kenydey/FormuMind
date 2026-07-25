@@ -122,7 +122,6 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           requirement,
           source_types: types.length ? types : undefined,
           total_limit: 300,
-          limit_per_source: 30,
         });
         const final = await awaitTaskStream(
           task_id,
