@@ -129,6 +129,189 @@ PROVIDERS: list[dict] = [
 
 _PROVIDER_INDEX: dict[str, dict] = {p["id"]: p for p in PROVIDERS}
 
+_OPENAI_COMPAT_PROVIDERS = frozenset(
+    {"openai", "xai", "groq", "deepseek", "qwen", "moonshot", "minimax"}
+)
+
+_EXCLUDE_MODEL_SUBSTR = (
+    "embed",
+    "embedding",
+    "whisper",
+    "tts",
+    "dall-e",
+    "moderation",
+    "audio",
+    "transcribe",
+    "realtime",
+    "sora",
+    "text-embedding",
+    "image",
+    "omni-moderation",
+)
+
+
+def static_models_for_provider(provider: str) -> list[dict]:
+    return [dict(m) for m in _PROVIDER_INDEX.get(provider, {}).get("models") or []]
+
+
+def _is_listable_chat_model(model_id: str) -> bool:
+    mid = (model_id or "").strip().lower()
+    if not mid or mid in {"models", "model"}:
+        return False
+    return not any(token in mid for token in _EXCLUDE_MODEL_SUBSTR)
+
+
+def _merge_model_catalog(
+    static: list[dict],
+    remote_ids: list[str],
+    current_model: str | None,
+) -> list[dict]:
+    static_by_id = {m["id"]: dict(m) for m in static}
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for mid in remote_ids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        if mid in static_by_id:
+            merged.append(static_by_id[mid])
+        else:
+            merged.append({"id": mid, "label": mid})
+    if current_model and current_model not in seen:
+        if current_model in static_by_id:
+            merged.insert(0, static_by_id[current_model])
+        else:
+            merged.insert(0, {"id": current_model, "label": f"{current_model} (当前)"})
+    for item in merged:
+        item.pop("recommended", None)
+    rec_id = current_model if current_model and any(m["id"] == current_model for m in merged) else (
+        merged[0]["id"] if merged else None
+    )
+    if rec_id:
+        for item in merged:
+            if item["id"] == rec_id:
+                item["recommended"] = True
+                break
+    return merged
+
+
+def fetch_openai_compatible_model_ids(
+    base_url: str,
+    api_key: str,
+    *,
+    timeout: float = 30.0,
+) -> list[str]:
+    import httpx
+
+    root = (base_url or "").strip().rstrip("/") or "https://api.openai.com/v1"
+    url = f"{root}/models"
+    with httpx.Client(timeout=timeout) as client:
+        resp = client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        resp.raise_for_status()
+        payload = resp.json()
+    items = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        return []
+    ids: list[str] = []
+    for item in items:
+        mid = item.get("id") if isinstance(item, dict) else str(item)
+        if mid and _is_listable_chat_model(str(mid)):
+            ids.append(str(mid))
+    return sorted(set(ids))
+
+
+def list_remote_models(
+    provider: str | None = None,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    current_model: str | None = None,
+) -> dict:
+    """Fetch provider model catalog from remote API when supported."""
+    settings = get_settings()
+    provider = str(provider or effective_setting(settings, "llm_provider"))
+    current_model = current_model or str(effective_setting(settings, "llm_model"))
+    static = static_models_for_provider(provider)
+    effective_base = _resolve_openai_base_url(
+        provider,
+        base_url if base_url is not None else effective_setting(settings, "llm_base_url"),
+    )
+    key = api_key or settings.get_active_api_key()
+
+    if provider == "anthropic":
+        return {
+            "ok": True,
+            "provider": provider,
+            "base_url": None,
+            "source": "static",
+            "models": _merge_model_catalog(static, [], current_model),
+            "message": "Anthropic 暂无 OpenAI 兼容 models 列表，已使用内置目录",
+        }
+
+    if provider == "gemini":
+        return {
+            "ok": True,
+            "provider": provider,
+            "base_url": None,
+            "source": "static",
+            "models": _merge_model_catalog(static, [], current_model),
+            "message": "Gemini 请使用内置模型目录（远端 list 暂未接入）",
+        }
+
+    if not key:
+        return {
+            "ok": False,
+            "provider": provider,
+            "base_url": effective_base,
+            "source": "static",
+            "models": _merge_model_catalog(static, [], current_model),
+            "message": f"未配置 {provider} 的 API Key，无法从远端刷新",
+        }
+
+    if provider not in _OPENAI_COMPAT_PROVIDERS and not effective_base:
+        return {
+            "ok": False,
+            "provider": provider,
+            "base_url": effective_base,
+            "source": "static",
+            "models": _merge_model_catalog(static, [], current_model),
+            "message": "当前供应商不支持远端 models 列表，已回退内置目录",
+        }
+
+    try:
+        remote_ids = fetch_openai_compatible_model_ids(
+            effective_base or "https://api.openai.com/v1",
+            key,
+            timeout=float(settings.llm_timeout_seconds),
+        )
+        if not remote_ids:
+            return {
+                "ok": False,
+                "provider": provider,
+                "base_url": effective_base,
+                "source": "static",
+                "models": _merge_model_catalog(static, [], current_model),
+                "message": "远端未返回可用 chat 模型，已回退内置目录",
+            }
+        return {
+            "ok": True,
+            "provider": provider,
+            "base_url": effective_base,
+            "source": "remote",
+            "models": _merge_model_catalog(static, remote_ids, current_model),
+            "message": f"已从远端加载 {len(remote_ids)} 个模型",
+        }
+    except Exception as exc:
+        degrade_return(log, exc, "list_remote_models failed", None)
+        return {
+            "ok": False,
+            "provider": provider,
+            "base_url": effective_base,
+            "source": "static",
+            "models": _merge_model_catalog(static, [], current_model),
+            "message": f"远端模型列表获取失败：{str(exc)[:200]}",
+        }
+
 
 def _provider_default_base_url(provider: str) -> str | None:
     """Return the catalog default base URL for OpenAI-compatible providers."""

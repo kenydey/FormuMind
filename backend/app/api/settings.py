@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
-from ..services.llm import PROVIDERS, _provider_default_base_url, test_connection
+from ..services.llm import PROVIDERS, _provider_default_base_url, list_remote_models, test_connection
 from ..services.runtime_secrets import effective_setting, get_runtime_secrets
 from ..services.secrets_store import (
     SECRET_REGISTRY,
@@ -25,6 +25,14 @@ class LLMSettingsUpdate(BaseModel):
     model: str | None = None
     api_key: str | None = None
     base_url: str | None = Field(default=None, alias="baseUrl")
+
+
+class LLMModelsRefreshRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    provider: str | None = None
+    base_url: str | None = Field(default=None, alias="baseUrl")
+    model: str | None = None
 
 
 class SecretsUpdate(BaseModel):
@@ -94,6 +102,19 @@ def update_llm_settings(update: LLMSettingsUpdate):
 @router.post("/settings/test")
 def test_llm_connection():
     return test_connection()
+
+
+@router.post("/settings/models/refresh")
+def refresh_llm_models(body: LLMModelsRefreshRequest | None = None):
+    body = body or LLMModelsRefreshRequest()
+    s = get_settings()
+    provider = body.provider or effective_setting(s, "llm_provider")
+    current_model = body.model or effective_setting(s, "llm_model")
+    return list_remote_models(
+        provider,
+        base_url=body.base_url,
+        current_model=current_model,
+    )
 
 
 @router.get("/settings/secrets")

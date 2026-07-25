@@ -6,7 +6,7 @@ import ApiSettingsPanel from "./ApiSettingsPanel";
 import EnvFlagsPanel from "./EnvFlagsPanel";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import { useStore } from "../store";
-import { api, formatApiError, type LLMProviderInfo } from "../api";
+import { api, formatApiError, type LLMModelOption, type LLMProviderInfo } from "../api";
 
 export default function SettingsModal() {
   const { settingsOpen, toggleSettings, llmConfig, setLlmConfig, settingsTab, setSettingsTab } =
@@ -28,6 +28,9 @@ export default function SettingsModal() {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [modelOptions, setModelOptions] = useState<LLMModelOption[]>([]);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [modelsRefreshHint, setModelsRefreshHint] = useState<string | null>(null);
 
   const loadLlmSettings = useCallback(() => {
     setLoadError(null);
@@ -52,16 +55,23 @@ export default function SettingsModal() {
     if (!settingsOpen) return;
     setResult(null);
     setApiKeyDraft("");
+    setModelsRefreshHint(null);
     void loadLlmSettings();
   }, [settingsOpen, reloadKey, loadLlmSettings]);
 
   const current = providers.find((p) => p.id === llmConfig.provider);
-  const models = current?.models ?? [];
+
+  useEffect(() => {
+    setModelOptions(current?.models ?? []);
+    setModelsRefreshHint(null);
+  }, [current?.models, llmConfig.provider]);
   const showBaseUrl = !!current?.base_url || llmConfig.provider === "openai";
 
   function onProviderChange(provider: string) {
     const p = providers.find((x) => x.id === provider);
     const recommended = p?.models.find((m) => m.recommended) ?? p?.models[0];
+    setModelOptions(p?.models ?? []);
+    setModelsRefreshHint(null);
     setLlmConfig({
       provider,
       model: recommended?.id ?? "",
@@ -69,6 +79,38 @@ export default function SettingsModal() {
     });
     setResult(null);
   }
+
+  async function onRefreshModels() {
+    setRefreshingModels(true);
+    setModelsRefreshHint(null);
+    try {
+      const res = await api.refreshLlmModels({
+        provider: llmConfig.provider,
+        baseUrl: llmConfig.baseUrl,
+        model: llmConfig.model,
+      });
+      setModelOptions(res.models);
+      setModelsRefreshHint(res.message);
+      if (
+        res.models.length > 0 &&
+        !res.models.some((m) => m.id === llmConfig.model)
+      ) {
+        const next = res.models.find((m) => m.recommended) ?? res.models[0];
+        setLlmConfig({ model: next.id });
+      }
+    } catch (e) {
+      setModelsRefreshHint(formatApiError(e));
+    } finally {
+      setRefreshingModels(false);
+    }
+  }
+
+  const models =
+    modelOptions.length > 0
+      ? modelOptions
+      : llmConfig.model
+        ? [{ id: llmConfig.model, label: llmConfig.model }]
+        : [];
 
   async function onSave() {
     setTesting(true);
@@ -163,7 +205,17 @@ export default function SettingsModal() {
           </label>
 
           <label className="block">
-            <span className="text-xs text-slate-400">模型 · Model</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-slate-400">模型 · Model</span>
+              <button
+                type="button"
+                onClick={() => void onRefreshModels()}
+                disabled={refreshingModels || providers.length === 0}
+                className="text-[10px] border border-edge text-slate-400 rounded px-2 py-0.5 hover:text-accent hover:border-accent/40 disabled:opacity-40"
+              >
+                {refreshingModels ? "更新中…" : "更新列表 ↻"}
+              </button>
+            </div>
             <select
               value={llmConfig.model}
               onChange={(e) => setLlmConfig({ model: e.target.value })}
@@ -181,6 +233,16 @@ export default function SettingsModal() {
                 ))
               )}
             </select>
+            {modelsRefreshHint && (
+              <p className={`text-[10px] mt-1 ${modelsRefreshHint.includes("失败") || modelsRefreshHint.includes("未配置") ? "text-amber-300/90" : "text-slate-500"}`}>
+                {modelsRefreshHint}
+              </p>
+            )}
+            {showBaseUrl && (
+              <p className="text-[10px] text-slate-600 mt-1">
+                修改 Base URL 后请点击「更新列表」同步远端可用模型。
+              </p>
+            )}
           </label>
 
           <label className="block">
