@@ -190,12 +190,35 @@ def _ingest_image(filename: str, content: bytes, *, persist: bool = True) -> Ing
     """Image upload → VLM structured extraction → standard ingest pipeline."""
     from .vision_extract import extract_image, image_markdown
 
+    settings = get_settings()
     extraction, err = extract_image(content, filename)
     if extraction is not None and (extraction.markdown.strip() or extraction.molecules):
         text = image_markdown(extraction, filename)
-        return _ingest_parsed_text(
+        outcome = _ingest_parsed_text(
             text, filename=filename, source_kind="image", persist=persist
         )
+        if (
+            persist
+            and outcome.source_id
+            and settings.kg_enabled
+            and settings.kg_multimodal_fusion_enabled
+        ):
+            from ..pipeline.multimodal_fusion import run_multimodal_kg_fusion_bytes
+
+            fusion = run_multimodal_kg_fusion_bytes(
+                content,
+                filename,
+                context=text[:4000],
+                source_id=outcome.source_id,
+                persist=True,
+            )
+            if fusion.warnings and fusion.vision_error:
+                logger.info(
+                    "multimodal fusion for %s: %s",
+                    filename,
+                    fusion.vision_error or fusion.warnings[0],
+                )
+        return outcome
     placeholder = Evidence(
         source="local",
         identifier=filename,

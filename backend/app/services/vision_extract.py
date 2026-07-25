@@ -23,7 +23,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
+from ..domain.multimodal_schemas import VisionTableExtraction
 from .errors import degrade_return
+from .kg.prompts import build_multimodal_table_prompt
 from .runtime_secrets import effective_setting
 
 logger = logging.getLogger(__name__)
@@ -215,6 +217,62 @@ def extract_image(content: bytes, filename: str) -> tuple[VisionExtraction | Non
         return extraction, None
     except Exception as exc:
         return None, degrade_return(logger, exc, "vision extraction failed", str(exc)[:200])
+
+
+def extract_structured_table_from_image(
+    image_bytes: bytes,
+    filename: str = "table.png",
+    context_text: str = "",
+) -> tuple[VisionTableExtraction | None, str | None]:
+    """Patent comparison-table extraction → structured formulation JSON.
+
+    Synchronous API (matches the rest of vision_extract / ingestion). FastAPI
+    routes may wrap this in ``run_in_threadpool`` when needed.
+    """
+    ok, hint = vision_available()
+    if not ok:
+        return None, hint
+    settings = get_settings()
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "png").lower()
+    mime = _MIME_BY_EXT.get(ext, "image/png")
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    provider = str(effective_setting(settings, "llm_provider"))
+    api_key = settings.get_active_api_key() or ""
+    model = _vision_model(settings)
+    timeout = float(settings.llm_timeout_seconds)
+    max_tokens = int(settings.llm_max_tokens)
+    prompt = build_multimodal_table_prompt(context_text)
+    if filename:
+        prompt = f"{prompt}\n\n文件名：{filename}"
+
+    try:
+        if provider == "anthropic":
+            raw = _call_anthropic_vision(
+                prompt, image_b64, mime,
+                api_key=api_key, model=model, max_tokens=max_tokens, timeout=timeout,
+            )
+        else:
+            from .llm import _resolve_openai_base_url
+
+            base_url = _resolve_openai_base_url(
+                provider, effective_setting(settings, "llm_base_url")
+            )
+            raw = _call_openai_vision(
+                prompt, image_b64, mime,
+                api_key=api_key, model=model, base_url=base_url,
+                max_tokens=max_tokens, timeout=timeout,
+            )
+        data = json.loads(_strip_json_fences(raw))
+        if not isinstance(data, dict):
+            return None, "视觉模型返回非对象 JSON"
+        extraction = VisionTableExtraction.model_validate(data)
+        if not extraction.formulations:
+            return extraction, "未识别到配方行（formulations 为空）"
+        return extraction, None
+    except json.JSONDecodeError as exc:
+        return None, degrade_return(logger, exc, "vision table JSON parse failed", str(exc)[:200])
+    except Exception as exc:
+        return None, degrade_return(logger, exc, "vision table extraction failed", str(exc)[:200])
 
 
 def image_markdown(extraction: VisionExtraction, filename: str) -> str:

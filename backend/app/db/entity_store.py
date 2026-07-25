@@ -24,6 +24,16 @@ SEMANTIC_LINK_TYPES = frozenset(
     }
 )
 
+STRUCTURAL_LINK_TYPES = frozenset(
+    {
+        "has_ingredient",
+        "has_performance",
+        "tested_on_substrate",
+    }
+)
+
+EXTRACTED_LINK_TYPES = SEMANTIC_LINK_TYPES | STRUCTURAL_LINK_TYPES
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -42,12 +52,12 @@ class EntityStore:
             )
 
     def delete_links_for_source(self, source_id: str) -> int:
-        """Remove semantic links whose evidence cites *source_id* (preserve catalog_alias)."""
+        """Remove extracted links whose evidence cites *source_id* (preserve catalog_alias)."""
         removed = 0
         with commit_session(self._session_factory) as session:
             links = (
                 session.query(KGEntityLink)
-                .filter(KGEntityLink.link_type.in_(tuple(SEMANTIC_LINK_TYPES)))
+                .filter(KGEntityLink.link_type.in_(tuple(EXTRACTED_LINK_TYPES)))
                 .all()
             )
             for link in links:
@@ -174,6 +184,67 @@ class EntityStore:
         extraction_method: str = "rule",
     ) -> bool:
         if src_entity_id == dst_entity_id or link_type not in SEMANTIC_LINK_TYPES:
+            return False
+        existing = (
+            session.query(KGEntityLink)
+            .filter(
+                KGEntityLink.src_entity_id == src_entity_id,
+                KGEntityLink.dst_entity_id == dst_entity_id,
+                KGEntityLink.link_type == link_type,
+            )
+            .first()
+        )
+        if existing:
+            refs = list(existing.evidence_refs or [])
+            key = (
+                evidence_ref.get("source_id"),
+                evidence_ref.get("chunk_id"),
+                evidence_ref.get("sentence"),
+            )
+            if not any(
+                (r.get("source_id"), r.get("chunk_id"), r.get("sentence")) == key for r in refs
+            ):
+                refs.append(evidence_ref)
+            existing.evidence_refs = refs[:20]
+            existing.confidence = max(float(existing.confidence or 0), confidence)
+            existing.extraction_method = extraction_method
+            existing.is_valid = True
+            existing.updated_at = _utcnow()
+            if metadata:
+                merged = dict(existing.metadata_json or {})
+                merged.update(metadata)
+                existing.metadata_json = merged
+            return True
+        session.add(
+            KGEntityLink(
+                id=str(uuid.uuid4()),
+                src_entity_id=src_entity_id,
+                dst_entity_id=dst_entity_id,
+                link_type=link_type,
+                confidence=confidence,
+                evidence_refs=[evidence_ref],
+                metadata_json=metadata or {},
+                extraction_method=extraction_method,
+                is_valid=True,
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+        )
+        return True
+
+    def merge_structural_link(
+        self,
+        session: Session,
+        *,
+        src_entity_id: str,
+        dst_entity_id: str,
+        link_type: str,
+        confidence: float,
+        evidence_ref: dict,
+        metadata: dict | None = None,
+        extraction_method: str = "vision_table",
+    ) -> bool:
+        if src_entity_id == dst_entity_id or link_type not in STRUCTURAL_LINK_TYPES:
             return False
         existing = (
             session.query(KGEntityLink)

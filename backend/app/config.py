@@ -247,6 +247,7 @@ class Settings(BaseSettings):
     kg_relation_extract_enabled: bool = False
     kg_llm_relation_extract: bool = False
     kg_relation_min_confidence: float = 0.55
+    kg_multimodal_fusion_enabled: bool = False
 
     # Chat P0 — multi-turn, structured answers, soft clarification.
     chat_multi_turn_enabled: bool = True
