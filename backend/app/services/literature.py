@@ -632,6 +632,7 @@ def iter_search(
 
     raw: list[Evidence] = []
     seen_ids: set[str] = set()
+    source_counts: dict[str, int] = {st["name"]: 0 for st in streams}
     rounds = 0
 
     def _notify(*, source: str | None = None, new_count: int = 0) -> None:
@@ -669,10 +670,17 @@ def iter_search(
                     page = []
                 st["cursor"] += page_size
                 new = [e for e in page if (e.identifier or e.title) not in seen_ids]
+                if source_counts.get(st["name"], 0) >= per_source_cap:
+                    st["done"] = True
+                    new = []
+                elif new:
+                    room = per_source_cap - source_counts.get(st["name"], 0)
+                    new = new[: max(0, room)]
                 for e in new:
                     seen_ids.add(e.identifier or e.title)
+                    source_counts[st["name"]] = source_counts.get(st["name"], 0) + 1
                 raw.extend(new)
-                if not st["paged"] or not new:
+                if not st["paged"] or not new or source_counts.get(st["name"], 0) >= per_source_cap:
                     st["done"] = True
                 _notify(source=st["name"], new_count=len(new))
         except TimeoutError:
@@ -701,12 +709,17 @@ def iter_search(
     if settings.search_rerank_enabled and len(final) > 1:
         from .rag import llm_rerank
 
-        final = llm_rerank(
-            rank_q,
-            final,
-            k=min(len(final), settings.search_rerank_top_k),
-            req=req,
-        )
+        batch = min(len(final), settings.search_rerank_llm_batch, total_limit)
+        head = llm_rerank(rank_q, final[:batch], k=batch, req=req)
+        head_keys = {e.identifier or e.title for e in head}
+        tail = [
+            e
+            for e in final[batch:]
+            if (e.identifier or e.title) not in head_keys
+        ]
+        final = (head + tail)[:total_limit]
+    else:
+        final = final[:total_limit]
 
     filter_report.kept = len(final)
     filter_payload = filter_report.as_dict()
