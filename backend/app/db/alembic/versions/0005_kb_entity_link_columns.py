@@ -8,6 +8,12 @@ Idempotent: fresh databases already get these columns from the 0001 baseline
 (which reflects the current ORM models), so each ``op.add_column`` is guarded
 by an ``sqlalchemy.inspect`` column-existence check. Legacy databases stamped
 at 0001 receive the missing columns here.
+
+Known compromise on ``updated_at``: the ORM declares it ``NOT NULL`` with
+Python-side ``default``/``onupdate``, but SQLite ``ADD COLUMN`` rejects
+non-constant default expressions, so the migration can only add it as
+``nullable=True``. Existing rows are backfilled from ``created_at`` below;
+every write path afterwards is populated by the ORM's Python defaults.
 """
 from __future__ import annotations
 
@@ -23,6 +29,9 @@ _NEW_COLUMNS: tuple[sa.Column, ...] = (
     sa.Column("metadata_json", sa.JSON, nullable=False, server_default="{}"),
     sa.Column("is_valid", sa.Boolean, nullable=False, server_default=sa.true()),
     sa.Column("extraction_method", sa.String(16), nullable=False, server_default="rule"),
+    # Intentionally nullable at the migration layer: SQLite ADD COLUMN cannot
+    # take a non-constant default, so NOT NULL must be enforced by the ORM
+    # (Python default/onupdate) plus the backfill in ``upgrade()`` below.
     sa.Column("updated_at", sa.DateTime, nullable=True),
 )
 
@@ -41,6 +50,15 @@ def upgrade() -> None:
     for column in _NEW_COLUMNS:
         if column.name not in existing:
             op.add_column("kb_entity_links", column)
+
+    # Backfill rows that predate the column so none are left NULL; fresh
+    # databases already enforce NOT NULL via the 0001 baseline, so this only
+    # runs when the column was just added by this migration.
+    if "updated_at" not in existing:
+        op.execute(
+            "UPDATE kb_entity_links SET updated_at = created_at"
+            " WHERE updated_at IS NULL"
+        )
 
 
 def downgrade() -> None:

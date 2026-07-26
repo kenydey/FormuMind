@@ -11,6 +11,8 @@ check and is a silent no-op there.
 """
 from __future__ import annotations
 
+import logging
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -19,11 +21,18 @@ down_revision: str | None = "0005"
 branch_labels: tuple[str, ...] | None = None
 depends_on: str | None = None
 
+logger = logging.getLogger(__name__)
+
 
 def upgrade() -> None:
     """Drop ``experiment_records`` if it exists; no-op on fresh databases."""
-    inspector = sa.inspect(op.get_bind())
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
     if "experiment_records" in inspector.get_table_names():
+        row_count = bind.execute(
+            sa.text("SELECT COUNT(*) FROM experiment_records")
+        ).scalar_one()
+        logger.warning("dropping experiment_records with %d rows", row_count)
         op.drop_table("experiment_records")
 
 

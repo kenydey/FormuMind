@@ -14,6 +14,7 @@ small duplication is intentional to keep the suites independent.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,44 @@ def _table_names(db_url: str) -> set[str]:
     engine = create_engine(db_url)
     try:
         return set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def _index_names(db_url: str, table: str) -> set[str]:
+    """Return the set of index names for ``table`` in the target database."""
+    engine = create_engine(db_url)
+    try:
+        return {ix["name"] for ix in inspect(engine).get_indexes(table)}
+    finally:
+        engine.dispose()
+
+
+def _column_types(db_url: str, table: str) -> dict[str, str]:
+    """Return ``{column_name: type_string}`` for ``table`` in the target database."""
+    engine = create_engine(db_url)
+    try:
+        return {c["name"]: str(c["type"]).upper() for c in inspect(engine).get_columns(table)}
+    finally:
+        engine.dispose()
+
+
+def _fetch_all(db_url: str, sql: str) -> list[tuple]:
+    """Execute ``sql`` against the target database and return all rows."""
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as conn:
+            return [tuple(row) for row in conn.execute(text(sql))]
+    finally:
+        engine.dispose()
+
+
+def _exec(db_url: str, sql: str) -> None:
+    """Execute a write statement against the target database."""
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(sql))
     finally:
         engine.dispose()
 
@@ -155,6 +194,13 @@ def test_legacy_db_gets_columns_via_migration(tmp_db_url: str) -> None:
     from alembic import command
 
     _create_legacy_schema(tmp_db_url)
+    # Seed rows so the updated_at backfill (0005) has data to repair.
+    _exec(
+        tmp_db_url,
+        "INSERT INTO kb_entity_links (id, src_entity_id, dst_entity_id, link_type,"
+        " confidence, evidence_refs, created_at) VALUES"
+        " ('link-1', 'e1', 'e2', 'cites', 0.9, '[]', '2026-01-01 00:00:00')",
+    )
 
     cfg = _make_config(tmp_db_url)
     command.upgrade(cfg, "head")
@@ -178,6 +224,37 @@ def test_legacy_db_gets_columns_via_migration(tmp_db_url: str) -> None:
     } <= _column_names(tmp_db_url, "kb_entity_links")
 
     assert "experiment_records" not in _table_names(tmp_db_url)
+
+    # Migrations 0002-0004 must also backfill the ORM ``index=True`` indexes
+    # that the 0001 baseline only creates for fresh databases.
+    assert {"ix_experiments_item_id", "ix_experiments_project_id"} <= _index_names(
+        tmp_db_url, "experiments"
+    )
+    assert "ix_campaigns_project_id" in _index_names(tmp_db_url, "campaigns")
+    assert {
+        "ix_source_documents_origin_url",
+        "ix_source_documents_project_id",
+    } <= _index_names(tmp_db_url, "source_documents")
+
+    # The 0005 backfill must leave no NULL updated_at rows behind.
+    rows = _fetch_all(tmp_db_url, "SELECT updated_at FROM kb_entity_links")
+    assert rows and all(row[0] is not None for row in rows)
+
+    # Pin down the migrated column types so silent type drift fails loudly.
+    experiments_types = _column_types(tmp_db_url, "experiments")
+    assert "VARCHAR" in experiments_types["item_id"]
+    assert "VARCHAR" in experiments_types["project_id"]
+    campaigns_types = _column_types(tmp_db_url, "campaigns")
+    assert "JSON" in campaigns_types["objectives_snapshot"]
+    assert "JSON" in campaigns_types["lever_snapshot"]
+    chunks_types = _column_types(tmp_db_url, "document_chunks")
+    assert "INTEGER" in chunks_types["page_no"]
+    assert "JSON" in chunks_types["meta"]
+    links_types = _column_types(tmp_db_url, "kb_entity_links")
+    assert "JSON" in links_types["metadata_json"]
+    assert "BOOLEAN" in links_types["is_valid"]
+    assert "VARCHAR" in links_types["extraction_method"]
+    assert "DATETIME" in links_types["updated_at"]
 
 
 def test_migrations_idempotent_on_fresh_db(tmp_db_url: str) -> None:
@@ -220,3 +297,73 @@ def test_revision_chain_head_is_0006(tmp_db_url: str) -> None:
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
     assert heads[0] == "0006"
+
+
+def test_migrations_partial_columns_branch(tmp_db_url: str) -> None:
+    """A legacy DB that already has *some* new columns upgrades cleanly.
+
+    Simulates a database where ``experiments.item_id`` was added by hand
+    before Alembic adoption: the guard must skip the existing column while
+    still adding every remaining column and index.
+    """
+    from alembic import command
+
+    _create_legacy_schema(tmp_db_url)
+    _exec(tmp_db_url, "ALTER TABLE experiments ADD COLUMN item_id VARCHAR(128)")
+
+    cfg = _make_config(tmp_db_url)
+    command.upgrade(cfg, "head")  # must not raise on the pre-existing column
+
+    assert {"item_id", "project_id"} <= _column_names(tmp_db_url, "experiments")
+    assert {
+        "project_id",
+        "primary_metric",
+        "objectives_snapshot",
+        "lever_snapshot",
+        "sample_refs",
+        "loop_history",
+    } <= _column_names(tmp_db_url, "campaigns")
+    assert {"origin_url", "project_id"} <= _column_names(tmp_db_url, "source_documents")
+    assert {"page_no", "meta"} <= _column_names(tmp_db_url, "document_chunks")
+    assert {
+        "metadata_json",
+        "is_valid",
+        "extraction_method",
+        "updated_at",
+    } <= _column_names(tmp_db_url, "kb_entity_links")
+
+    assert {"ix_experiments_item_id", "ix_experiments_project_id"} <= _index_names(
+        tmp_db_url, "experiments"
+    )
+    assert "ix_campaigns_project_id" in _index_names(tmp_db_url, "campaigns")
+    assert {
+        "ix_source_documents_origin_url",
+        "ix_source_documents_project_id",
+    } <= _index_names(tmp_db_url, "source_documents")
+    assert "experiment_records" not in _table_names(tmp_db_url)
+
+
+def test_migration_0006_logs_row_count(
+    tmp_db_url: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Dropping ``experiment_records`` logs a warning including the row count."""
+    from alembic import command
+
+    _create_legacy_schema(tmp_db_url)
+    _exec(tmp_db_url, "INSERT INTO experiment_records (id) VALUES (1)")
+    _exec(tmp_db_url, "INSERT INTO experiment_records (id) VALUES (2)")
+
+    cfg = _make_config(tmp_db_url)
+    with caplog.at_level(logging.WARNING):
+        command.upgrade(cfg, "head")
+
+    assert "experiment_records" not in _table_names(tmp_db_url)
+    drop_warnings = [
+        record
+        for record in caplog.records
+        if "experiment_records" in record.getMessage() and "2" in record.getMessage()
+    ]
+    assert drop_warnings, (
+        "expected a warning mentioning dropping experiment_records with 2 rows, "
+        f"got: {[r.getMessage() for r in caplog.records]}"
+    )

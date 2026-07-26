@@ -39,13 +39,33 @@ def _existing_columns(table: str) -> set[str]:
     return {c["name"] for c in inspector.get_columns(table)}
 
 
+def _existing_indexes(table: str) -> set[str]:
+    """Return the index names currently present on ``table`` (empty if absent)."""
+    inspector = sa.inspect(op.get_bind())
+    if table not in inspector.get_table_names():
+        return set()
+    return {ix["name"] for ix in inspector.get_indexes(table)}
+
+
 def upgrade() -> None:
-    """Add missing columns to both tables, skipping any that already exist."""
+    """Add missing columns and indexes to both tables, skipping existing ones."""
     for table, columns in _NEW_COLUMNS.items():
         existing = _existing_columns(table)
         for column in columns:
             if column.name not in existing:
                 op.add_column(table, column)
+
+    # The 0001 baseline only creates the ORM ``index=True`` indexes on fresh
+    # databases; backfill them here for legacy databases to eliminate drift.
+    existing_indexes = _existing_indexes("source_documents")
+    if "ix_source_documents_origin_url" not in existing_indexes:
+        op.create_index(
+            "ix_source_documents_origin_url", "source_documents", ["origin_url"]
+        )
+    if "ix_source_documents_project_id" not in existing_indexes:
+        op.create_index(
+            "ix_source_documents_project_id", "source_documents", ["project_id"]
+        )
 
 
 def downgrade() -> None:

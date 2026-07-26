@@ -37,12 +37,25 @@ def _existing_columns(table: str) -> set[str]:
     return {c["name"] for c in inspector.get_columns(table)}
 
 
+def _existing_indexes(table: str) -> set[str]:
+    """Return the index names currently present on ``table`` (empty if absent)."""
+    inspector = sa.inspect(op.get_bind())
+    if table not in inspector.get_table_names():
+        return set()
+    return {ix["name"] for ix in inspector.get_indexes(table)}
+
+
 def upgrade() -> None:
-    """Add the missing ``campaigns`` columns, skipping any that exist."""
+    """Add the missing ``campaigns`` columns and indexes, skipping existing ones."""
     existing = _existing_columns("campaigns")
     for column in _NEW_COLUMNS:
         if column.name not in existing:
             op.add_column("campaigns", column)
+
+    # The 0001 baseline only creates the ORM ``index=True`` index on fresh
+    # databases; backfill it here for legacy databases to eliminate drift.
+    if "ix_campaigns_project_id" not in _existing_indexes("campaigns"):
+        op.create_index("ix_campaigns_project_id", "campaigns", ["project_id"])
 
 
 def downgrade() -> None:
