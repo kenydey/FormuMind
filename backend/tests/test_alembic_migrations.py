@@ -367,3 +367,70 @@ def test_migration_0006_logs_row_count(
         "expected a warning mentioning dropping experiment_records with 2 rows, "
         f"got: {[r.getMessage() for r in caplog.records]}"
     )
+
+
+def test_make_engine_emits_no_alter_after_upgrade(tmp_db_url: str) -> None:
+    """After `alembic upgrade head`, make_engine must not emit any runtime ALTER.
+
+    Schema drift repair is owned by Alembic migrations; make_engine is a
+    read-only validator and must issue zero ALTER statements.
+    """
+    from alembic import command
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    cfg = _make_config(tmp_db_url)
+    command.upgrade(cfg, "head")
+
+    from app.db.database import make_engine
+
+    statements: list[str] = []
+
+    @event.listens_for(Engine, "before_cursor_execute")
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    try:
+        engine = make_engine(tmp_db_url)
+    finally:
+        event.remove(Engine, "before_cursor_execute", _capture)
+    try:
+        alter_count = sum(1 for s in statements if "ALTER" in s.upper())
+        assert alter_count == 0, (
+            f"make_engine emitted {alter_count} ALTER statement(s): "
+            f"{[s for s in statements if 'ALTER' in s.upper()]}"
+        )
+    finally:
+        engine.dispose()
+
+
+def test_validator_raises_actionable_on_legacy_db(tmp_db_url: str) -> None:
+    """A legacy DB (missing item_id/project_id) must fail loudly with a
+    pointer to `alembic upgrade head` instead of being silently ALTERed."""
+    from app.db.database import make_engine
+
+    engine = create_engine(tmp_db_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE experiments (
+                        id INTEGER PRIMARY KEY,
+                        domain VARCHAR(64),
+                        factors JSON,
+                        cure_temperature_c FLOAT,
+                        measured JSON,
+                        source VARCHAR(64),
+                        label VARCHAR(255),
+                        created_at DATETIME
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="alembic upgrade head") as exc_info:
+        make_engine(tmp_db_url)
+    assert "experiments.item_id" in str(exc_info.value)

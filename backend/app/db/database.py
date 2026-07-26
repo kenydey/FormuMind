@@ -32,7 +32,6 @@ def make_engine(db_url: str) -> Engine:
         connect_args = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(db_url, future=True, connect_args=connect_args)
     Base.metadata.create_all(engine)
-    _drop_legacy_workbench_table(engine)
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
     _ensure_source_document_columns(engine)
@@ -40,99 +39,64 @@ def make_engine(db_url: str) -> Engine:
     return engine
 
 
-def _ensure_experiment_columns(engine: Engine) -> None:
-    """Add Phase 2 index columns to legacy experiments tables."""
-    from sqlalchemy import inspect, text
+def _require_columns(engine: Engine, table: str, columns: tuple[str, ...]) -> None:
+    """只读守护：表存在但缺列时给出可操作错误（不再运行时 ALTER）。"""
+    from sqlalchemy import inspect
 
-    if "experiments" not in inspect(engine).get_table_names():
+    if table not in inspect(engine).get_table_names():
         return
-    cols = {c["name"] for c in inspect(engine).get_columns("experiments")}
-    with engine.begin() as conn:
-        if "item_id" not in cols:
-            conn.execute(text("ALTER TABLE experiments ADD COLUMN item_id VARCHAR(128)"))
-        if "project_id" not in cols:
-            conn.execute(text("ALTER TABLE experiments ADD COLUMN project_id VARCHAR(36) DEFAULT ''"))
+    existing = {c["name"] for c in inspect(engine).get_columns(table)}
+    for col in columns:
+        if col not in existing:
+            raise RuntimeError(
+                f"schema drift: {table}.{col} 缺失，请先运行: alembic upgrade head"
+            )
+
+
+def _ensure_experiment_columns(engine: Engine) -> None:
+    """只读守护：experiments 表必须具备 Phase 2 索引列。"""
+    _require_columns(engine, "experiments", ("item_id", "project_id"))
 
 
 def _ensure_campaign_columns(engine: Engine) -> None:
-    """Add workbench / Datalab columns to legacy campaigns tables."""
-    from sqlalchemy import inspect, text
-
-    if "campaigns" not in inspect(engine).get_table_names():
-        return
-    cols = {c["name"] for c in inspect(engine).get_columns("campaigns")}
-    with engine.begin() as conn:
-        if "project_id" not in cols:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN project_id VARCHAR(36)"))
-        if "primary_metric" not in cols:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN primary_metric VARCHAR(64)"))
-        if "objectives_snapshot" not in cols:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN objectives_snapshot JSON"))
-        if "lever_snapshot" not in cols:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN lever_snapshot JSON"))
-        if "sample_refs" not in cols:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN sample_refs JSON DEFAULT '[]'"))
-        if "loop_history" not in cols:
-            conn.execute(text("ALTER TABLE campaigns ADD COLUMN loop_history JSON DEFAULT '[]'"))
+    """只读守护：campaigns 表必须具备 workbench / Datalab 列。"""
+    _require_columns(
+        engine,
+        "campaigns",
+        (
+            "project_id",
+            "primary_metric",
+            "objectives_snapshot",
+            "lever_snapshot",
+            "sample_refs",
+            "loop_history",
+        ),
+    )
 
 
 def _ensure_source_document_columns(engine: Engine) -> None:
-    """Add async-ingest provenance columns to legacy source_documents tables."""
-    from sqlalchemy import inspect, text
-
-    if "source_documents" not in inspect(engine).get_table_names():
-        return
-    cols = {c["name"] for c in inspect(engine).get_columns("source_documents")}
-    with engine.begin() as conn:
-        if "origin_url" not in cols:
-            conn.execute(text("ALTER TABLE source_documents ADD COLUMN origin_url VARCHAR(1024)"))
-        if "project_id" not in cols:
-            conn.execute(text("ALTER TABLE source_documents ADD COLUMN project_id VARCHAR(64)"))
+    """只读守护：source_documents 表必须具备 async-ingest 溯源列。"""
+    _require_columns(engine, "source_documents", ("origin_url", "project_id"))
     _ensure_document_chunk_columns(engine)
 
 
 def _ensure_document_chunk_columns(engine: Engine) -> None:
-    """Add provenance / entity-meta columns to legacy document_chunks tables."""
-    from sqlalchemy import inspect, text
-
-    if "document_chunks" not in inspect(engine).get_table_names():
-        return
-    cols = {c["name"] for c in inspect(engine).get_columns("document_chunks")}
-    with engine.begin() as conn:
-        if "page_no" not in cols:
-            conn.execute(text("ALTER TABLE document_chunks ADD COLUMN page_no INTEGER"))
-        if "meta" not in cols:
-            conn.execute(text("ALTER TABLE document_chunks ADD COLUMN meta JSON"))
+    """只读守护：document_chunks 表必须具备溯源 / 实体元数据列。"""
+    _require_columns(engine, "document_chunks", ("page_no", "meta"))
 
 
 def _ensure_kb_entity_link_columns(engine: Engine) -> None:
-    """Add semantic-relation columns to legacy kb_entity_links tables."""
-    from sqlalchemy import inspect, text
-
-    if "kb_entity_links" not in inspect(engine).get_table_names():
-        return
-    cols = {c["name"] for c in inspect(engine).get_columns("kb_entity_links")}
-    with engine.begin() as conn:
-        if "metadata_json" not in cols:
-            conn.execute(text("ALTER TABLE kb_entity_links ADD COLUMN metadata_json JSON DEFAULT '{}'"))
-        if "is_valid" not in cols:
-            conn.execute(text("ALTER TABLE kb_entity_links ADD COLUMN is_valid BOOLEAN DEFAULT 1"))
-        if "extraction_method" not in cols:
-            conn.execute(
-                text("ALTER TABLE kb_entity_links ADD COLUMN extraction_method VARCHAR(16) DEFAULT 'rule'")
-            )
-        if "updated_at" not in cols:
-            conn.execute(text("ALTER TABLE kb_entity_links ADD COLUMN updated_at DATETIME"))
+    """只读守护：kb_entity_links 表必须具备语义关系列。"""
+    _require_columns(
+        engine,
+        "kb_entity_links",
+        ("metadata_json", "is_valid", "extraction_method", "updated_at"),
+    )
 
 
 def _drop_legacy_workbench_table(engine: Engine) -> None:
-    """Remove deprecated experiment_records table (workbench SSOT → Datalab)."""
-    from sqlalchemy import inspect, text
-
-    if "experiment_records" not in inspect(engine).get_table_names():
-        return
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS experiment_records"))
+    """已由 migration 0006 接管（删除 experiment_records），保留仅兼容引用。"""
+    return None
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
