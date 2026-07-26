@@ -15,6 +15,7 @@ dependencies = [
     "pydantic-settings>=2.5",
     "python-multipart>=0.0.18",
     "sqlalchemy>=2.0",
+    "alembic>=1.13",
     "celery>=5.4",
     "redis>=5.2",
     "numpy>=1.26",
