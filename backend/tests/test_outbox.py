@@ -1,15 +1,20 @@
-"""Tests for the task_outbox idempotency foundation (Task 1.1).
+"""Tests for the task_outbox idempotency foundation (Task 1.1) and
+stall recovery (Task 1.3).
 
 The ``task_outbox`` table is the durable outbox for async task dispatch:
 ``enqueue`` must be idempotent on ``(operation, idempotency_key)`` so that
 retried submissions never duplicate work, and ``select_pending`` feeds the
 dispatcher in FIFO (created_at) order. Rows survive rollback cleanly — a
 failed enqueue must not leak a partially-written row.
+
+Task 1.3 adds ``recover_stalled`` which scans for PENDING/CLAIMED rows
+older than the cutoff and re-dispatches them via Celery ``.delay()``.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -17,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.database import make_engine, make_session_factory
+from app.db.dispatcher import recover_stalled
 from app.db.models import TaskOutbox
 from app.db.outbox_store import enqueue, select_pending
 from tests.alembic_helpers import run_upgrade
@@ -32,6 +38,18 @@ def session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     with factory() as s:
         yield s
     engine.dispose()
+
+
+@pytest.fixture()
+def _stub_dispatch(monkeypatch: pytest.MonkeyPatch):
+    """Replace app.db.dispatcher._dispatch with a mock for stall-recovery tests.
+
+    autouse=False — only the Task 1.3 tests request this fixture so other
+    tests' Celery imports are never affected.
+    """
+    mock = MagicMock()
+    monkeypatch.setattr("app.db.dispatcher._dispatch", mock)
+    return mock
 
 
 def _row_count(session: Session) -> int:
@@ -123,7 +141,7 @@ def test_unique_constraint_enforced(session: Session) -> None:
 
 
 def test_enqueue_caller_rollback_then_reenqueue(session: Session) -> None:
-    """Caller rollback after enqueue → re-enqueue with the same key creates a fresh row."""
+    """Caller rollback after enqueue → re-enqueue with same key = fresh row."""
     fid, _ = enqueue(session, "ingest", "key-rb", {"x": 1})
     session.rollback()
     assert _row_count(session) == 0  # rollback wiped the flushed row
@@ -133,3 +151,98 @@ def test_enqueue_caller_rollback_then_reenqueue(session: Session) -> None:
     sid, _ = enqueue(session, "ingest", "key-rb", {"x": 1})
     assert sid != fid, "re-enqueue after rollback must produce a fresh row"
     assert _row_count(session) == 1
+
+
+# ── Task 1.3: startup stall recovery ────────────────────────────────────────
+
+
+def test_recover_stalled_resubmits_pending(
+    session: Session, _stub_dispatch: MagicMock
+) -> None:
+    """Stalled PENDING row (1 h old) → re-dispatched, status stays PENDING."""
+    import uuid
+
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    row = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key="stall-key-1",
+        payload={"topic": "test", "requirement": {}, "sources": [], "query": "test"},
+        status="PENDING",
+        created_at=old,
+        updated_at=old,
+    )
+    session.add(row)
+    session.commit()
+
+    count = recover_stalled(session, cutoff_minutes=30)
+    session.commit()
+
+    assert count == 1
+    _stub_dispatch.assert_called_once_with("research_recommend", row.payload)
+
+    # Verify row was updated in DB
+    reloaded = session.get(TaskOutbox, row.id)
+    assert reloaded is not None
+    assert reloaded.status == "PENDING"
+    assert reloaded.attempt_count == 1
+    assert reloaded.claimed_by is None
+    assert reloaded.claimed_at is None
+
+
+def test_recover_stalled_skips_recent(
+    session: Session, _stub_dispatch: MagicMock
+) -> None:
+    """PENDING row only 5 min old → not re-dispatched."""
+    import uuid
+
+    recent = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
+    row = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key="stall-key-2",
+        payload={"topic": "test"},
+        status="PENDING",
+        created_at=recent,
+        updated_at=recent,
+    )
+    session.add(row)
+    session.commit()
+
+    count = recover_stalled(session, cutoff_minutes=30)
+    session.commit()
+
+    assert count == 0
+    _stub_dispatch.assert_not_called()
+
+    # Row still PENDING, attempt_count unchanged
+    reloaded = session.get(TaskOutbox, row.id)
+    assert reloaded is not None
+    assert reloaded.status == "PENDING"
+    assert reloaded.attempt_count == 0
+
+
+def test_recover_stalled_skips_confirmed(
+    session: Session, _stub_dispatch: MagicMock
+) -> None:
+    """CONFIRMED row (1 h old) → not re-dispatched."""
+    import uuid
+
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    row = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key="stall-key-3",
+        payload={"topic": "test"},
+        status="CONFIRMED",
+        created_at=old,
+        updated_at=old,
+    )
+    session.add(row)
+    session.commit()
+
+    count = recover_stalled(session, cutoff_minutes=30)
+    session.commit()
+
+    assert count == 0
+    _stub_dispatch.assert_not_called()
