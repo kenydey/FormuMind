@@ -30,12 +30,13 @@ router = APIRouter(prefix="/api", tags=["tasks"])
 _TERMINAL = (TaskProgressStatus.COMPLETED, TaskProgressStatus.FAILED)
 
 
-def accepted_response(task_id: str, kind: str) -> JSONResponse:
+def accepted_response(task_id: str, kind: str, outbox_id: str | None = None) -> JSONResponse:
     task_manager.register_celery_task(task_id, kind)
     body = AsyncTaskAccepted(
         task_id=task_id,
         stream_url=f"/api/tasks/{task_id}/stream",
         status_url=f"/api/tasks/{task_id}",
+        outbox_id=outbox_id,
     )
     return JSONResponse(status_code=202, content=body.model_dump())
 

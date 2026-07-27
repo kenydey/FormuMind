@@ -185,3 +185,85 @@ def test_validate_formulations_with_requirement_voc():
     assert r.status_code == 200, r.text
     body = r.json()
     assert any("VOC" in w for w in body.get("warnings", []))
+
+
+# ── Task 1.2: outbox durability for /api/research/recommend ────────────────
+
+
+def test_research_recommend_writes_outbox_row(tmp_path, monkeypatch):
+    """POST /api/research/recommend → task_outbox row with correct operation."""
+    from sqlalchemy import select
+
+    from app.db import database as db_mod
+    from app.db.models import TaskOutbox
+    from app.worker.celery_app import celery_app
+    from tests.alembic_helpers import run_upgrade
+
+    # Disable eager mode so delay() returns immediately without running the task.
+    monkeypatch.setitem(celery_app.conf, "task_always_eager", False)
+
+    db_url = f"sqlite:///{tmp_path}/research.db"
+    run_upgrade(db_url, monkeypatch)
+    monkeypatch.setenv("FORMUMIND_DB_URL", db_url)
+    db_mod._default.clear()
+
+    with TestClient(app) as client:
+        payload = {
+            "domain": "degreaser",
+            "substrate": "carbon_steel",
+            "cleaning_efficiency": 95,
+            "ph_target": 12.5,
+        }
+        r = client.post("/api/research/recommend", json=payload)
+        assert r.status_code == 202, r.text
+        body = r.json()
+        assert body.get("outbox_id"), f"missing outbox_id in {body}"
+
+        factory = db_mod.default_session_factory()
+        with factory() as s:
+            row = s.execute(
+                select(TaskOutbox).filter_by(id=body["outbox_id"])
+            ).scalar_one_or_none()
+            assert row is not None, f"no outbox row for {body['outbox_id']}"
+            assert row.operation == "research_recommend"
+            assert row.status == "PENDING"
+            assert row.idempotency_key
+            assert row.payload
+
+
+def test_research_recommend_idempotent(tmp_path, monkeypatch):
+    """Same payload enqueued twice → 202 both times, single outbox row."""
+    from sqlalchemy import select
+
+    from app.db import database as db_mod
+    from app.db.models import TaskOutbox
+    from app.worker.celery_app import celery_app
+    from tests.alembic_helpers import run_upgrade
+
+    # Disable eager mode so delay() returns immediately without running the task.
+    monkeypatch.setitem(celery_app.conf, "task_always_eager", False)
+
+    db_url = f"sqlite:///{tmp_path}/research2.db"
+    run_upgrade(db_url, monkeypatch)
+    monkeypatch.setenv("FORMUMIND_DB_URL", db_url)
+    db_mod._default.clear()
+
+    with TestClient(app) as client:
+        payload = {
+            "domain": "degreaser",
+            "substrate": "carbon_steel",
+            "cleaning_efficiency": 90,
+        }
+        r1 = client.post("/api/research/recommend", json=payload)
+        r2 = client.post("/api/research/recommend", json=payload)
+        assert r1.status_code == 202
+        assert r2.status_code == 202
+
+        # Same outbox_id returned both times
+        assert r1.json()["outbox_id"] == r2.json()["outbox_id"]
+
+        # Only 1 row in task_outbox
+        factory = db_mod.default_session_factory()
+        with factory() as s:
+            rows = s.execute(select(TaskOutbox)).scalars().all()
+            assert len(rows) == 1, f"expected 1 outbox row, got {len(rows)}"

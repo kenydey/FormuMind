@@ -1,11 +1,16 @@
 """Research endpoint: CRAG graph via Celery + SSE task stream."""
 from __future__ import annotations
 
+import hashlib
+import json
+
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from ..db import outbox_store
+from ..db.database import default_session_factory
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..pipeline import workflow
 from ..services.deep_research import ExpandedQuery, QueryExpander
@@ -39,6 +44,27 @@ class ModifyRequest(BaseModel):
     n: int = Field(default=3, ge=1, le=8)
 
 
+def _idempotency_key(operation: str, payload: dict) -> str:
+    """Content-addressed idempotency key from operation + payload."""
+    data = {"op": operation, "payload": payload}
+    raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _enqueue_outbox(operation: str, payload: dict) -> str | None:
+    """Enqueue to durable outbox and return task_id (None on failure)."""
+    try:
+        key = _idempotency_key(operation, payload)
+        factory = default_session_factory()
+        with factory() as session:
+            task_id, _ = outbox_store.enqueue(session, operation, key, payload)
+            session.commit()
+        return task_id
+    except Exception:
+        logger.exception("outbox enqueue failed (non-fatal)")
+        return None
+
+
 @router.post("/research", response_model=ResearchResult)
 def start_research(body: ResearchRequest) -> ResearchResult:
     """同步配方推荐：CRAG graph → grounded evidence → 推荐。"""
@@ -65,8 +91,9 @@ def start_recommend_research(body: ResearchRequest) -> JSONResponse:
         "sources": [s.model_dump() for s in body.sources],
         "query": body.query or req.headline(),
     }
+    outbox_id = _enqueue_outbox("research_recommend", payload)
     async_result = run_recommend_task.delay(payload)
-    return accepted_response(async_result.id, "recommend")
+    return accepted_response(async_result.id, "recommend", outbox_id=outbox_id)
 
 
 @router.post("/research/deep", status_code=202)
@@ -78,8 +105,9 @@ def start_deep_research(body: DeepResearchRequest) -> JSONResponse:
         "sources": [s.model_dump() for s in body.sources],
         "query": body.query or body.topic,
     }
+    outbox_id = _enqueue_outbox("research_deep", payload)
     async_result = run_deep_research_task.delay(payload)
-    return accepted_response(async_result.id, "deep_research")
+    return accepted_response(async_result.id, "deep_research", outbox_id=outbox_id)
 
 
 @router.post("/research/modify", status_code=202)

@@ -481,6 +481,7 @@ class AsyncTaskAccepted(BaseModel):
     task_id: str
     stream_url: str
     status_url: str
+    outbox_id: str | None = None
 
 
 # Backward-compatible alias used by some API modules
