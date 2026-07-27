@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -235,3 +235,35 @@ class ProjectRow(Base):
     is_archived: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class TaskOutbox(Base):
+    """Durable outbox row for async task dispatch (idempotency foundation).
+
+    One row per logical task submission. ``(operation, idempotency_key)`` is
+    unique so retried submissions collapse onto the same row instead of
+    enqueueing duplicate work; the dispatcher claims PENDING rows FIFO by
+    ``created_at`` and flips ``status``/``claimed_by``/``attempt_count`` as it
+    processes them.
+    """
+
+    __tablename__ = "task_outbox"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", nullable=False)
+    claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("operation", "idempotency_key", name="uq_task_outbox_op_key"),
+        Index("ix_task_outbox_status_created", "status", "created_at"),
+        Index("ix_task_outbox_claim", "claimed_by", "claimed_at"),
+    )
