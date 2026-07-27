@@ -16,10 +16,11 @@ from app.db import database as db_mod
 from app.db.models import TaskOutbox
 from tests.alembic_helpers import run_upgrade
 
-
 # FastAPI app (imported once per module)
 from app.main import app  # noqa: E402
 
+# Guard: baybe/botorch may not be installed in all environments.
+pytest.importorskip("baybe", reason="baybe not installed")
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -34,15 +35,17 @@ BAYBE_PAYLOAD = {
 }
 
 
-def _outbox_rows(factory) -> list[TaskOutbox]:
+def _outbox_rows(factory):
     with factory() as s:
         return list(s.execute(select(TaskOutbox)).scalars().all())
 
 
-# ── test: baybe_recommend writes run record ──────────────────────────────────
+# ── tests ──────────────────────────────────────────────────────────────────
 
 
-def test_optimize_writes_run_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_optimize_writes_run_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """POST /baybe/recommend → task_outbox has operation='baybe_recommend' row."""
     db_url = f"sqlite:///{tmp_path}/run_outbox_1.db"
     run_upgrade(db_url, monkeypatch)
@@ -60,7 +63,10 @@ def test_optimize_writes_run_record(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         factory = db_mod.default_session_factory()
         rows = _outbox_rows(factory)
         matching = [row for row in rows if row.operation == "baybe_recommend"]
-        assert len(matching) >= 1, f"no baybe_recommend row, got: {[(r.operation, r.idempotency_key) for r in rows]}"
+        assert len(matching) >= 1, (
+            f"no baybe_recommend row, got: "
+            f"{[(r.operation, r.idempotency_key) for r in rows]}"
+        )
 
         row = matching[0]
         assert row.status == "PENDING"
@@ -71,12 +77,9 @@ def test_optimize_writes_run_record(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         assert payload.get("engine") == "baybe"
 
 
-def test_recommend_writes_run_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Same as test_optimize — verifies /baybe/recommend write-path."""
-    test_optimize_writes_run_record(tmp_path, monkeypatch)
-
-
-def test_run_record_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_record_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Same payload enqueued twice → 200 both times, only 1 outbox row."""
     db_url = f"sqlite:///{tmp_path}/run_outbox_2.db"
     run_upgrade(db_url, monkeypatch)
