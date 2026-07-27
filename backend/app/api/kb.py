@@ -219,7 +219,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
     from ..db.database import default_session_factory
     from ..db.models import SourceDocument
     from ..db.outbox_store import enqueue
-    from ..db.session_utils import commit_session
+    # NOTE: metadata parameter accepted for future expansion (Task 2.4).
 
     text = (body.text or "").strip()
     if not text:
