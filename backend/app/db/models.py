@@ -279,10 +279,10 @@ class DOEPlanRow(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     experiment_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True, index=True
+        String(36), nullable=True
     )
     campaign_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True, index=True
+        String(36), nullable=True
     )
     design_type: Mapped[str] = mapped_column(String(32), nullable=False)
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

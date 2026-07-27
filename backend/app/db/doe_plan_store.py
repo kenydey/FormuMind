@@ -58,14 +58,15 @@ def save(session: Session, plan: DOEPlan) -> str:
 
     Returns the plan's ``id`` (``plan.plan_id`` if set, otherwise a fresh
     UUID).  If a row with that id already exists the ``IntegrityError``
-    is caught and the call is a no-op (idempotent replay).
+    is caught inside a savepoint so the caller's pending changes survive.
     """
     row = _plan_to_row(plan)
-    session.add(row)
+    sp = session.begin_nested()
     try:
+        session.add(row)
         session.flush()
     except IntegrityError:
-        session.rollback()
+        sp.rollback()
     return row.id
 
 
