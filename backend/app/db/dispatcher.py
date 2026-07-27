@@ -8,7 +8,7 @@ crash / redeploy while jobs are in-flight.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -51,10 +51,13 @@ def recover_stalled(session: Session, cutoff_minutes: int = 30) -> int:
 
     Returns:
         Number of rows that were re-enqueued.
-    """
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None)
-    from datetime import timedelta
 
+    Raises:
+        ValueError: If *cutoff_minutes* is less than 1.
+    """
+    if cutoff_minutes < 1:
+        raise ValueError("cutoff_minutes must be >= 1")
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff -= timedelta(minutes=cutoff_minutes)
 
     stalled = (

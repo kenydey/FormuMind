@@ -246,3 +246,94 @@ def test_recover_stalled_skips_confirmed(
 
     assert count == 0
     _stub_dispatch.assert_not_called()
+
+
+def test_recover_stalled_resubmits_claimed(
+    session: Session, _stub_dispatch: MagicMock
+) -> None:
+    """Stalled CLAIMED row (1 h old) → re-dispatched, claimed_* cleared."""
+    import uuid
+
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    row = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_deep",
+        idempotency_key="stall-key-4",
+        payload={"query": "test"},
+        status="CLAIMED",
+        claimed_by="worker-1",
+        claimed_at=old,
+        created_at=old,
+        updated_at=old,
+    )
+    session.add(row)
+    session.commit()
+
+    count = recover_stalled(session, cutoff_minutes=30)
+    session.commit()
+
+    assert count == 1
+    _stub_dispatch.assert_called_once_with("research_deep", row.payload)
+
+    reloaded = session.get(TaskOutbox, row.id)
+    assert reloaded is not None
+    assert reloaded.status == "PENDING"
+    assert reloaded.attempt_count == 1
+    assert reloaded.claimed_by is None
+    assert reloaded.claimed_at is None
+
+
+def test_recover_stalled_skips_dispatch_error(
+    session: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When _dispatch raises, the failing row is skipped (left as-is)."""
+    import uuid
+
+    import app.db.dispatcher as _dispatch_module
+
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    row_a = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key="stall-key-err",
+        payload={"_test": "should-fail"},
+        status="PENDING",
+        created_at=old,
+        updated_at=old,
+    )
+    row_b = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key="stall-key-ok",
+        payload={"_test": "ok"},
+        status="PENDING",
+        created_at=old + timedelta(seconds=1),
+        updated_at=old,
+    )
+    session.add_all([row_a, row_b])
+    session.commit()
+
+    # Make _dispatch fail only for the first row (keyed by idempotency_key).
+    def _failing(operation: str, payload: dict) -> None:
+        if payload.get("_test") == "should-fail":
+            raise RuntimeError("simulated dispatch failure")
+
+    monkeypatch.setattr(_dispatch_module, "_dispatch", _failing)
+
+    count = recover_stalled(session, cutoff_minutes=30)
+    session.commit()
+
+    # Only row_b should have been re-dispatched.
+    assert count == 1
+
+    # row_a: status still PENDING, attempt_count unchanged (skipped).
+    a = session.get(TaskOutbox, row_a.id)
+    assert a is not None
+    assert a.status == "PENDING"
+    assert a.attempt_count == 0
+
+    # row_b: re-dispatched.
+    b = session.get(TaskOutbox, row_b.id)
+    assert b is not None
+    assert b.status == "PENDING"
+    assert b.attempt_count == 1
