@@ -700,4 +700,25 @@ class DatalabDeleteResponse(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class DocumentChunkResponse(BaseModel):
+    """A single document chunk with page/paragraph/offset provenance."""
+
+    id: str
+    source_id: str
+    ord: int
+    text: str
+    heading_path: str = ""
+    page: int | None = None
+    paragraph: int | None = None
+    offset_start: int | None = None
+    offset_end: int | None = None
+    meta: dict | None = None
+
+
+class ChunkListResponse(BaseModel):
+    """Wrapper for chunk retrieval responses."""
+
+    chunks: list[DocumentChunkResponse]
+
+
 Requirement.model_rebuild()

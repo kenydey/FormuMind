@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from ..domain.schemas import Evidence
+from ..domain.schemas import ChunkListResponse, DocumentChunkResponse, Evidence
 from ..services import kb_index
 
 logger = logging.getLogger(__name__)
@@ -151,4 +151,34 @@ def products(
             for r in rows
         ],
         total=store.count(),
+    )
+
+
+@router.get(
+    "/chunks/by-source/{source_id}",
+    response_model=ChunkListResponse,
+    tags=["kb"],
+)
+def chunks_by_source(source_id: str) -> ChunkListResponse:
+    """Retrieve all chunks for a source document with page/paragraph/offset info."""
+    from ..db.chunk_store import get_chunk_store
+
+    store = get_chunk_store()
+    rows = store.get_by_source(source_id)
+    return ChunkListResponse(
+        chunks=[
+            DocumentChunkResponse(
+                id=row.id,
+                source_id=row.source_id,
+                ord=row.ord,
+                text=row.text,
+                heading_path=row.heading_path or "",
+                page=row.page_no,
+                paragraph=(row.meta or {}).get("paragraph_idx"),
+                offset_start=(row.meta or {}).get("offset_start"),
+                offset_end=(row.meta or {}).get("offset_end"),
+                meta=row.meta,
+            )
+            for row in rows
+        ]
     )

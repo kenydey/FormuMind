@@ -24,14 +24,22 @@ class ChunkStore:
     def replace_for_source(self, source_id: str, chunks: list[dict]) -> int:
         """Idempotently (re)write the chunk rows of one source document.
 
-        Each chunk dict: {text, heading_path?, page_no?, meta?, embedding?,
-        embedding_model?}.
+        Each chunk dict: {text, heading_path?, page_no?, paragraph_idx?,
+        offset_start?, offset_end?, meta?, embedding?, embedding_model?}.
         """
         with commit_session(self._session_factory) as session:
             session.query(DocumentChunk).filter(
                 DocumentChunk.source_id == source_id
             ).delete()
             for i, chunk in enumerate(chunks):
+                # Merge paragraph/offset provenance into meta dict
+                meta = dict(chunk.get("meta") or {})
+                for key in ("paragraph_idx", "offset_start", "offset_end"):
+                    val = chunk.get(key)
+                    if val is not None:
+                        meta.setdefault(key, val)
+                if not meta:
+                    meta = None
                 session.add(
                     DocumentChunk(
                         id=str(uuid.uuid4()),
@@ -40,7 +48,7 @@ class ChunkStore:
                         text=chunk.get("text", ""),
                         heading_path=(chunk.get("heading_path") or "")[:120],
                         page_no=chunk.get("page_no"),
-                        meta=chunk.get("meta"),
+                        meta=meta,
                         embedding=chunk.get("embedding"),
                         embedding_model=chunk.get("embedding_model"),
                         created_at=_utcnow(),

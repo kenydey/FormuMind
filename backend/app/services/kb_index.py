@@ -80,7 +80,14 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
         )
         chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
         rows: list[dict] = [
-            {"text": c.text, "heading_path": c.heading_path, "page_no": c.page_no}
+            {
+                "text": c.text,
+                "heading_path": c.heading_path,
+                "page_no": c.page_no,
+                "paragraph_idx": c.paragraph_idx,
+                "offset_start": c.offset_start,
+                "offset_end": c.offset_end,
+            }
             for c in chunks
         ]
         _attach_entities(source_id, rows)

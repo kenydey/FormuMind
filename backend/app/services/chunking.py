@@ -38,6 +38,9 @@ class Chunk:
     text: str
     heading_path: str = ""
     page_no: int | None = None
+    paragraph_idx: int | None = None
+    offset_start: int | None = None
+    offset_end: int | None = None
 
 
 # ── legacy plain-text splitter (moved verbatim from ingestion) ───────────────
@@ -270,18 +273,40 @@ def chunk_markdown(
         if len(pages) > 1 or (pages and pages[0][0] is not None):
             # Page-marked plain text (pypdf): split page-wise so provenance
             # survives even without headings.
-            return [
-                Chunk(c, "", page_no)
-                for page_no, seg in pages
-                for c in chunk_plain_text(seg, max_chars=max_chars, overlap=overlap)
-            ]
-        return [Chunk(c) for c in chunk_plain_text(md, max_chars=max_chars, overlap=overlap)]
+            chunks: list[Chunk] = []
+            char_pos = 0
+            para_idx = 0
+            for page_no, seg in pages:
+                for c in chunk_plain_text(seg, max_chars=max_chars, overlap=overlap):
+                    chunks.append(Chunk(
+                        c, "", page_no,
+                        paragraph_idx=para_idx,
+                        offset_start=char_pos,
+                        offset_end=char_pos + len(c),
+                    ))
+                    para_idx += 1
+                    char_pos += len(c)
+            return chunks
+        chunks: list[Chunk] = []
+        char_pos = 0
+        for i, c in enumerate(chunk_plain_text(md, max_chars=max_chars, overlap=overlap)):
+            chunks.append(Chunk(
+                c,
+                paragraph_idx=i,
+                offset_start=char_pos,
+                offset_end=char_pos + len(c),
+            ))
+            char_pos += len(c)
+        return chunks
 
     chunks: list[Chunk] = []
     page: int | None = None
+    para_counter = 0
+    char_pos = 0
     for path, body in sections:
         current = ""
         current_page = page
+        current_para = para_counter
         for block in _split_blocks(body):
             m = PAGE_MARKER_RE.match(block)
             if m:
@@ -291,28 +316,65 @@ def chunk_markdown(
                 continue
             if _is_atomic(block):
                 if current.strip():
-                    chunks.append(Chunk(current.strip(), path, current_page))
+                    clen = len(current.strip())
+                    chunks.append(Chunk(
+                        current.strip(), path, current_page,
+                        paragraph_idx=current_para,
+                        offset_start=char_pos,
+                        offset_end=char_pos + clen,
+                    ))
+                    char_pos += clen
                     current = ""
-                # Tables/fences/math are never split — oversized ones ship whole.
-                chunks.append(Chunk(block, path, page))
+                alen = len(block)
+                chunks.append(Chunk(
+                    block, path, page,
+                    paragraph_idx=para_counter,
+                    offset_start=char_pos,
+                    offset_end=char_pos + alen,
+                ))
+                para_counter += 1
+                char_pos += alen
                 current_page = page
                 continue
             if not current.strip():
                 current_page = page
+                current_para = para_counter
             if len(current) + len(block) + 2 <= max_chars:
                 current = f"{current}\n\n{block}" if current else block
+                para_counter += 1
                 continue
             if current.strip():
-                chunks.append(Chunk(current.strip(), path, current_page))
+                clen = len(current.strip())
+                chunks.append(Chunk(
+                    current.strip(), path, current_page,
+                    paragraph_idx=current_para,
+                    offset_start=char_pos,
+                    offset_end=char_pos + clen,
+                ))
+                char_pos += clen
             current_page = page
+            current_para = para_counter
             if len(block) > max_chars:
-                chunks.extend(
-                    Chunk(c, path, page)
-                    for c in chunk_plain_text(block, max_chars=max_chars, overlap=overlap)
-                )
+                for c in chunk_plain_text(block, max_chars=max_chars, overlap=overlap):
+                    chunks.append(Chunk(
+                        c, path, page,
+                        paragraph_idx=para_counter,
+                        offset_start=char_pos,
+                        offset_end=char_pos + len(c),
+                    ))
+                    char_pos += len(c)
+                para_counter += 1
                 current = ""
             else:
                 current = block
+            para_counter += 1
         if current.strip():
-            chunks.append(Chunk(current.strip(), path, current_page))
+            clen = len(current.strip())
+            chunks.append(Chunk(
+                current.strip(), path, current_page,
+                paragraph_idx=current_para,
+                offset_start=char_pos,
+                offset_end=char_pos + clen,
+            ))
+            char_pos += clen
     return chunks
