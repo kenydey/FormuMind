@@ -6,6 +6,9 @@ import tempfile
 
 os.environ.setdefault("FORMUMIND_API_AUTH_ENABLED", "false")
 os.environ.setdefault("FORMUMIND_ENVIRONMENT", "test")
+# Test speed-up: skip heavy lifespan bootstrap (ColBERT seed corpus, settings
+# reload, PubChem enrichment). Default/production behaviour is unchanged.
+os.environ.setdefault("FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP", "1")
 # Async KB ingest spawns background fetch threads after search tasks; keep the
 # suite offline/deterministic — tests that exercise it enable it explicitly
 # with stubbed fetchers.

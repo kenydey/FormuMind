@@ -37,30 +37,53 @@ from .middleware.rate_limit import RateLimitMiddleware
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+_SKIP_BOOTSTRAP_ENV = "FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP"
+
+
+def _skip_lifespan_bootstrap() -> bool:
+    """Return True when FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP is truthy.
+
+    Test-speedup flag ONLY: when set ("1"/"true"/"yes", case-insensitive),
+    the lifespan manager skips the heavy bootstrap steps (secrets
+    reload_settings, ColBERT seed-corpus bootstrap, PubChem enrichment).
+    Default (unset/falsy) behaviour is completely unchanged — never set this
+    in production.
+    """
+    import os
+
+    return os.environ.get(_SKIP_BOOTSTRAP_ENV, "").strip().lower() in {"1", "true", "yes"}
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Bootstrap ColBERT seed corpus and optional PubChem enrichment."""
-    try:
-        from .services.secrets_store import reload_settings
+    """Bootstrap ColBERT seed corpus and optional PubChem enrichment.
 
-        reload_settings()
-    except Exception as exc:
-        log_handled_exception(logger, exc, "lifespan: reload_settings failed")
-    try:
-        from .services import colbert_store
+    Honours FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP (test-only fast path, see
+    _skip_lifespan_bootstrap) to skip the heavy bootstrap steps while keeping
+    the lightweight ELN store branch and shutdown semantics intact.
+    """
+    skip_bootstrap = _skip_lifespan_bootstrap()
+    if not skip_bootstrap:
+        try:
+            from .services.secrets_store import reload_settings
 
-        colbert_store.bootstrap_seed_corpus()
-    except Exception as exc:
-        log_handled_exception(logger, exc, "lifespan: ColBERT bootstrap failed")
-    if settings.enrich_compounds:
-        try:  # pragma: no cover - opt-in network path
-            from .domain.knowledge import RAW_MATERIALS
-            from .services.compounds import enrich_materials
-
-            enrich_materials(RAW_MATERIALS)
+            reload_settings()
         except Exception as exc:
-            log_handled_exception(logger, exc, "lifespan: PubChem enrichment failed")
+            log_handled_exception(logger, exc, "lifespan: reload_settings failed")
+        try:
+            from .services import colbert_store
+
+            colbert_store.bootstrap_seed_corpus()
+        except Exception as exc:
+            log_handled_exception(logger, exc, "lifespan: ColBERT bootstrap failed")
+        if settings.enrich_compounds:
+            try:  # pragma: no cover - opt-in network path
+                from .domain.knowledge import RAW_MATERIALS
+                from .services.compounds import enrich_materials
+
+                enrich_materials(RAW_MATERIALS)
+            except Exception as exc:
+                log_handled_exception(logger, exc, "lifespan: PubChem enrichment failed")
     try:
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store
@@ -74,9 +97,11 @@ async def lifespan(_app: FastAPI):
     try:
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store
-        from .services.secrets_store import reload_settings
 
-        reload_settings()
+        if not skip_bootstrap:
+            from .services.secrets_store import reload_settings
+
+            reload_settings()
         await get_campaign_store().close()
         get_experiment_store().close()
     except Exception as exc:
@@ -142,6 +167,11 @@ def health() -> dict:
     def _ok(pkg: str) -> bool:
         return optional_import(pkg)
 
+    # Test-only fast path: probing optional extras imports heavy packages
+    # (sentence_transformers/torch, paperqa, chemcrow ≈ 20+ s). Under the
+    # FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP flag, report them as unprobed instead.
+    skip_probe = _skip_lifespan_bootstrap()
+
     llm_key = cfg.get_active_api_key()
     datalab_ok, datalab_reason = check_datalab_reachable(cfg.datalab_api_url)
     datalab_required = (
@@ -191,12 +221,16 @@ def health() -> dict:
             "campaign_backend": cfg.campaign_backend,
             "experiment_backend": cfg.experiment_backend,
         },
-        "installed_extras": {
-            "chemcrow": _ok("chemcrow"),
-            "paperqa": _ok("paperqa"),
-            "patent_client": _ok("patent_client"),
-            "sentence_transformers": _ok("sentence_transformers"),
-            "rdkit": _ok("rdkit"),
-            "psycopg2": _ok("psycopg2"),
-        },
+        "installed_extras": (
+            {pkg: None for pkg in ("chemcrow", "paperqa", "patent_client", "sentence_transformers", "rdkit", "psycopg2")}
+            if skip_probe
+            else {
+                "chemcrow": _ok("chemcrow"),
+                "paperqa": _ok("paperqa"),
+                "patent_client": _ok("patent_client"),
+                "sentence_transformers": _ok("sentence_transformers"),
+                "rdkit": _ok("rdkit"),
+                "psycopg2": _ok("psycopg2"),
+            }
+        ),
     }
