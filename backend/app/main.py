@@ -6,6 +6,7 @@ CORS for the Vite frontend.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -49,8 +50,6 @@ def _skip_lifespan_bootstrap() -> bool:
     Default (unset/falsy) behaviour is completely unchanged — never set this
     in production.
     """
-    import os
-
     return os.environ.get(_SKIP_BOOTSTRAP_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
