@@ -365,6 +365,7 @@ def chunk_markdown(
                     char_pos += len(c)
                 para_counter += 1
                 current = ""
+                continue
             else:
                 current = block
             para_counter += 1

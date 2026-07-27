@@ -37,7 +37,7 @@ class ChunkStore:
                 for key in ("paragraph_idx", "offset_start", "offset_end"):
                     val = chunk.get(key)
                     if val is not None:
-                        meta.setdefault(key, val)
+                        meta[key] = val
                 if not meta:
                     meta = None
                 session.add(
