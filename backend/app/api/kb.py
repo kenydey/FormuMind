@@ -237,15 +237,13 @@ def ingest(body: IngestRequest) -> IngestResponse:
     """Full-document ingest → chunk + index + store + outbox record.
 
     Idempotent: repeating the same ``source_id`` returns the same result
-    without re-indexing.
+    without re-indexing.  All writes happen in a single transaction
+    (Task 3.3 — TOCTOU + single-commit fix).
     """
-    import hashlib
     import uuid as _uuid
 
     from ..db.database import default_session_factory
-    from ..db.models import SourceDocument
-    from ..db.outbox_store import enqueue
-    # NOTE: metadata parameter accepted for future expansion (Task 2.4).
+    from ..services.ingest_tx import ingest_document_tx
 
     text = (body.text or "").strip()
     if not text:
@@ -253,44 +251,16 @@ def ingest(body: IngestRequest) -> IngestResponse:
 
     source_id = body.source_id or str(_uuid.uuid4())
 
-    # Ensure a SourceDocument row exists for this source_id
-    factory = default_session_factory()
-    with factory() as session:
-        doc = session.get(SourceDocument, source_id)
-        if doc is None:
-            session.add(
-                SourceDocument(
-                    id=source_id,
-                    filename=body.title or "api_ingest",
-                    title=body.title or "API Ingest",
-                    source_kind="api",
-                    full_text=text,
-                    content_hash=hashlib.sha256(
-                        text.encode("utf-8", errors="replace")
-                    ).hexdigest(),
-                    raw_text_chars=len(text),
-                )
-            )
-            session.commit()
-
-    chunk_count = kb_index.ingest_full_document(source_id, text, body.metadata)
-
-    # Outbox record: idempotent (keyed on source_id)
-    with factory() as session:
-        enqueue(
-            session,
-            operation="ingest_complete",
-            idempotency_key=source_id,
-            payload={
-                "source_id": source_id,
-                "chunk_count": chunk_count,
-                "status": "ok",
-            },
-        )
-        session.commit()
+    result = ingest_document_tx(
+        default_session_factory(),
+        source_id=source_id,
+        text=text,
+        title=body.title,
+        metadata=body.metadata,
+    )
 
     return IngestResponse(
-        source_id=source_id,
-        chunk_count=chunk_count,
+        source_id=result.source_id,
+        chunk_count=result.chunk_count,
         status="ok",
     )
