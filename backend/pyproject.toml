@@ -22,6 +22,8 @@ dependencies = [
     "httpx>=0.27",
     "tenacity>=8.2.0",
     "loguru>=0.7",
+    "rank-bm25>=0.2",
+    "jieba>=0.42",
 ]
 
 # Heavy / optional scientific engines. These are declared but NOT required to
@@ -107,3 +109,6 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "golden_eval: golden QA dataset evaluation — slower, use -m 'not golden_eval' to skip in fast local runs",
+]
