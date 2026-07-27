@@ -31,37 +31,50 @@ class ChunkStore:
         values and inside ``meta`` (for back-compat until all consumers migrate).
         """
         with commit_session(self._session_factory) as session:
-            session.query(DocumentChunk).filter(
-                DocumentChunk.source_id == source_id
-            ).delete()
-            for i, chunk in enumerate(chunks):
-                # Merge paragraph/offset provenance into meta dict
-                meta = dict(chunk.get("meta") or {})
-                for key in ("paragraph_idx", "offset_start", "offset_end"):
-                    val = chunk.get(key)
-                    if val is not None:
-                        meta[key] = val
-                if not meta:
-                    meta = None
-                session.add(
-                    DocumentChunk(
-                        id=str(uuid.uuid4()),
-                        source_id=source_id,
-                        ord=i,
-                        text=chunk.get("text", ""),
-                        heading_path=(chunk.get("heading_path") or "")[:120],
-                        page_no=chunk.get("page_no"),
-                        offset_start=chunk.get("offset_start"),
-                        offset_end=chunk.get("offset_end"),
-                        paragraph_idx=chunk.get("paragraph_idx"),
-                        meta=meta,
-                        embedding=chunk.get("embedding"),
-                        embedding_model=chunk.get("embedding_model"),
-                        created_at=_utcnow(),
-                    )
-                )
+            n = self.replace_for_source_in(session, source_id, chunks)
         self.generation += 1
+        return n
+
+    def replace_for_source_in(self, session: Session, source_id: str, chunks: list[dict]) -> int:
+        """Write chunks within the *caller's* session — no commit, no new transaction.
+
+        The caller owns the transaction boundary.  Call ``bump_generation()``
+        after committing the session to invalidate cached indexes.
+        """
+        session.query(DocumentChunk).filter(
+            DocumentChunk.source_id == source_id
+        ).delete()
+        for i, chunk in enumerate(chunks):
+            meta = dict(chunk.get("meta") or {})
+            for key in ("paragraph_idx", "offset_start", "offset_end"):
+                val = chunk.get(key)
+                if val is not None:
+                    meta[key] = val
+            if not meta:
+                meta = None
+            session.add(
+                DocumentChunk(
+                    id=str(uuid.uuid4()),
+                    source_id=source_id,
+                    ord=i,
+                    text=chunk.get("text", ""),
+                    heading_path=(chunk.get("heading_path") or "")[:120],
+                    page_no=chunk.get("page_no"),
+                    offset_start=chunk.get("offset_start"),
+                    offset_end=chunk.get("offset_end"),
+                    paragraph_idx=chunk.get("paragraph_idx"),
+                    meta=meta,
+                    embedding=chunk.get("embedding"),
+                    embedding_model=chunk.get("embedding_model"),
+                    created_at=_utcnow(),
+                )
+            )
         return len(chunks)
+
+    def bump_generation(self) -> None:
+        """Increment the generation counter — call after committing a session
+        that wrote chunks via ``replace_for_source_in``."""
+        self.generation += 1
 
     def get_by_source(self, source_id: str) -> list[DocumentChunk]:
         with self._session_factory() as session:
