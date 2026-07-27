@@ -33,6 +33,9 @@ export FORMUMIND_DB_URL="sqlite:///$GOLDEN_DB"
 if [ -f "$BACKEND_DIR/.venv/bin/activate" ]; then
     # shellcheck source=/dev/null
     source "$BACKEND_DIR/.venv/bin/activate"
+else
+    echo "ERROR: .venv not found at $BACKEND_DIR/.venv — run 'uv sync' first"
+    exit 1
 fi
 
 echo "=== [1/3] alembic upgrade head (fresh DB) ==="
@@ -44,7 +47,7 @@ echo "OK: migrations applied cleanly"
 echo ""
 echo "=== [2/3] ingest sample documents ==="
 python3 -c "
-import os, json
+import json
 from fastapi.testclient import TestClient
 from app.main import app
 
