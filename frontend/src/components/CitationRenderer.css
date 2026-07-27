@@ -1,0 +1,48 @@
+/* CitationRenderer — footnote styles and highlight animations */
+
+.citation-renderer {
+  @apply text-slate-200;
+}
+
+/* Superscript citation links */
+.citation-sup {
+  @apply text-[10px] leading-none;
+}
+
+.citation-link {
+  @apply text-accent no-underline hover:underline cursor-pointer;
+  @apply px-0.5;
+}
+
+/* Footnote highlight on hover */
+.citation-footnote {
+  @apply transition-colors duration-150 p-1 -mx-1;
+}
+
+.citation-footnote-highlight {
+  @apply bg-accent/10 rounded;
+}
+
+/* Flash animation when scrolled to */
+.citation-flash {
+  animation: citation-flash-anim 0.6s ease-in-out 2;
+}
+
+@keyframes citation-flash-anim {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(56, 189, 248, 0.2); /* sky-400/20 */
+  }
+}
+
+/* Footnote anchor card */
+.citation-anchor-card {
+  @apply border-l-2 border-accent/40;
+}
+
+/* Divider */
+.citation-divider {
+  @apply opacity-40;
+}
