@@ -117,6 +117,12 @@ class DocumentChunk(Base):
     """
 
     __tablename__ = "document_chunks"
+    # Mirrors migration 0010. Declared here too so create_all() databases
+    # (dev/test) carry the same invariant as migrated ones — ingest_tx relies
+    # on the IntegrityError to detect a concurrent re-ingest of one source.
+    __table_args__ = (
+        UniqueConstraint("source_id", "ord", name="uq_document_chunks_source_ord"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     source_id: Mapped[str] = mapped_column(String(36), index=True)

@@ -403,6 +403,10 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 refs.append({"id": idx, "item_id": item_id})
 
             self._save_sample_refs(campaign.id, refs)
+            # expire_on_commit=False keeps the detached instance on its loaded
+            # value, so mirror the write onto the object we hand back — callers
+            # use the return value directly instead of re-fetching.
+            campaign.sample_refs = refs
             return campaign
 
         except Exception as exc:
@@ -413,12 +417,15 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 exc,
             )
             await self._rollback_created_samples(created_item_ids)
+            # Compensating transaction: the campaign never came into existence,
+            # so drop the local row too. Marking it FAILED instead would leave a
+            # sample-less shell that nothing reads — the failure is already on
+            # the logger above, and unreachable orphans go to the outbox.
             with self._write_lock:
                 with commit_session(self._session_factory) as session:
                     failed_campaign = session.get(Campaign, campaign.id)
                     if failed_campaign is not None:
-                        failed_campaign.status = "FAILED"
-                        failed_campaign.updated_at = _utcnow()
+                        session.delete(failed_campaign)
             raise DatalabUnavailableError(self._api_url, str(exc)) from exc
 
     async def get_campaign(self, campaign_id: int) -> Campaign | None:
