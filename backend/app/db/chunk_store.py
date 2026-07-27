@@ -26,6 +26,9 @@ class ChunkStore:
 
         Each chunk dict: {text, heading_path?, page_no?, paragraph_idx?,
         offset_start?, offset_end?, meta?, embedding?, embedding_model?}.
+
+        offset_start/offset_end/paragraph_idx are persisted both as column-level
+        values and inside ``meta`` (for back-compat until all consumers migrate).
         """
         with commit_session(self._session_factory) as session:
             session.query(DocumentChunk).filter(
@@ -48,6 +51,9 @@ class ChunkStore:
                         text=chunk.get("text", ""),
                         heading_path=(chunk.get("heading_path") or "")[:120],
                         page_no=chunk.get("page_no"),
+                        offset_start=chunk.get("offset_start"),
+                        offset_end=chunk.get("offset_end"),
+                        paragraph_idx=chunk.get("paragraph_idx"),
                         meta=meta,
                         embedding=chunk.get("embedding"),
                         embedding_model=chunk.get("embedding_model"),

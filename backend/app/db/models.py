@@ -109,6 +109,12 @@ class DocumentChunk(Base):
     # Source-page provenance (from <!-- page:N --> parser markers); citations
     # can point at the exact page of the original PDF.
     page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Anchor columns: promoted from meta JSON for efficient SQL range/grouping queries.
+    # offset_start/end give the raw byte range of this chunk's text in source order;
+    # paragraph_idx orders multi-paragraph sections.
+    offset_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    offset_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    paragraph_idx: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding: Mapped[list | None] = mapped_column(
         # none_as_null: Python None must become SQL NULL (not JSON 'null'),
         # so the embedded-rows count can filter with IS NOT NULL.

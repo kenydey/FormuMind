@@ -174,9 +174,15 @@ def chunks_by_source(source_id: str) -> ChunkListResponse:
                 text=row.text,
                 heading_path=row.heading_path or "",
                 page=row.page_no,
-                paragraph=(row.meta or {}).get("paragraph_idx"),
-                offset_start=(row.meta or {}).get("offset_start"),
-                offset_end=(row.meta or {}).get("offset_end"),
+                paragraph=row.paragraph_idx
+                if row.paragraph_idx is not None
+                else (row.meta or {}).get("paragraph_idx"),
+                offset_start=row.offset_start
+                if row.offset_start is not None
+                else (row.meta or {}).get("offset_start"),
+                offset_end=row.offset_end
+                if row.offset_end is not None
+                else (row.meta or {}).get("offset_end"),
                 meta=row.meta,
             )
             for row in rows

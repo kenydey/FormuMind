@@ -179,3 +179,61 @@ def test_chunk_response_schema_structure(stores):
         # text is always present
         assert isinstance(c["text"], str)
         assert len(c["text"]) > 0
+
+
+# ── Task 2.2: anchor column tests ─────────────────────────────────────────────
+
+def test_anchor_columns_populated(stores):
+    """index_source → raw SQL query must show offset_start/end and paragraph_idx columns populated."""
+    from sqlalchemy import create_engine, text
+
+    src, chk = stores
+    source_id = _ingest_and_get_source_id(stores, MULTI_PARA_MD, "anchor_test")
+
+    # Go directly to the DB to verify column-level values
+    from app.db.database import make_engine, make_session_factory
+
+    engine = stores[0]._session_factory.kw["bind"]
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT offset_start, offset_end, paragraph_idx FROM document_chunks "
+                "WHERE source_id = :sid ORDER BY ord"
+            ),
+            {"sid": source_id},
+        ).fetchall()
+
+    assert len(rows) >= 3, f"expected >= 3 chunks, got {len(rows)}"
+    populated = 0
+    for row in rows:
+        os_val, oe_val, pi_val = row
+        if os_val is not None and oe_val is not None:
+            assert os_val >= 0, f"offset_start must be >= 0, got {os_val}"
+            assert oe_val >= os_val, f"offset_end ({oe_val}) >= offset_start ({os_val})"
+            populated += 1
+        if pi_val is not None:
+            assert isinstance(pi_val, int)
+    assert populated >= 2, f"expected >= 2 chunks with offset columns populated, got {populated}"
+
+
+def test_anchor_columns_index_exists(tmp_path, monkeypatch):
+    """After running Alembic migrations, ix_document_chunks_source_offset index exists."""
+    from pathlib import Path
+    from sqlalchemy import create_engine, inspect
+
+    db_url = f"sqlite:///{tmp_path}/anchor_index_test.db"
+    monkeypatch.setenv("FORMUMIND_DB_URL", db_url)
+
+    from tests.alembic_helpers import run_upgrade
+
+    run_upgrade(db_url, monkeypatch)
+
+    engine = create_engine(db_url)
+    try:
+        inspector = inspect(engine)
+        indexes = {ix["name"] for ix in inspector.get_indexes("document_chunks")}
+        assert "ix_document_chunks_source_offset" in indexes, (
+            f"expected ix_document_chunks_source_offset in document_chunks indexes, got {indexes}"
+        )
+    finally:
+        engine.dispose()
