@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/kb", tags=["kb"])
 
 
+class HybridSearchRequest(BaseModel):
+    query: str
+    top_k: int = 10
+    alpha: float = 0.3
+
+
 class KBStats(BaseModel):
     enabled: bool
     sources: int
@@ -188,6 +194,19 @@ def chunks_by_source(source_id: str) -> ChunkListResponse:
             for row in rows
         ]
     )
+
+
+# ── ingest ────────────────────────────────────────────────────────────────────
+
+
+@router.post("/hybrid-search", response_model=list[DocumentChunkResponse])
+def hybrid_search(body: HybridSearchRequest) -> list[DocumentChunkResponse]:
+    """BM25 + vector hybrid retrieval over the persistent KB chunk store."""
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用")
+    from ..services.hybrid_search import hybrid_search as _hs
+
+    return _hs(body.query, top_k=body.top_k, alpha=body.alpha)
 
 
 # ── ingest ────────────────────────────────────────────────────────────────────
