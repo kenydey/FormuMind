@@ -60,6 +60,34 @@ def _embedding_probe() -> bool:
 # ── indexing ─────────────────────────────────────────────────────────────────
 
 
+def ingest_full_document(source_id: str, text: str, metadata: dict | None = None) -> int:
+    """Full ingest: chunk + index + store offset info into document_chunks.
+
+    Idempotent: if ``document_chunks`` already contains rows for *source_id*,
+    skip and return 0.  Otherwise delegates to ``index_source`` for the full
+    chunking + embedding + store pipeline and returns the chunk count.
+
+    Never raises — ingest must not break callers.
+    """
+    if not kb_enabled() or not (text or "").strip():
+        return 0
+    try:
+        from ..db.chunk_store import get_chunk_store
+
+        # Idempotency guard: already ingested → skip
+        existing = get_chunk_store().get_by_source(source_id)
+        if existing:
+            logger.info(
+                "ingest_full_document: source %s already has %d chunks, skipping",
+                source_id, len(existing),
+            )
+            return 0
+
+        return index_source(source_id, text)
+    except Exception as exc:
+        return degrade_return(logger, exc, "ingest_full_document failed", 0)
+
+
 def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
     """(Re)chunk one source document into persistent KB rows.
 

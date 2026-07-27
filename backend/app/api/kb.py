@@ -188,3 +188,83 @@ def chunks_by_source(source_id: str) -> ChunkListResponse:
             for row in rows
         ]
     )
+
+
+# ── ingest ────────────────────────────────────────────────────────────────────
+
+
+class IngestRequest(BaseModel):
+    text: str
+    source_id: str | None = None
+    title: str = ""
+    metadata: dict | None = None
+
+
+class IngestResponse(BaseModel):
+    source_id: str
+    chunk_count: int
+    status: str
+
+
+@router.post("/ingest", response_model=IngestResponse, summary="全文入库（幂等）")
+def ingest(body: IngestRequest) -> IngestResponse:
+    """Full-document ingest → chunk + index + store + outbox record.
+
+    Idempotent: repeating the same ``source_id`` returns the same result
+    without re-indexing.
+    """
+    import hashlib
+    import uuid as _uuid
+
+    from ..db.database import default_session_factory
+    from ..db.models import SourceDocument
+    from ..db.outbox_store import enqueue
+    from ..db.session_utils import commit_session
+
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    source_id = body.source_id or str(_uuid.uuid4())
+
+    # Ensure a SourceDocument row exists for this source_id
+    factory = default_session_factory()
+    with factory() as session:
+        doc = session.get(SourceDocument, source_id)
+        if doc is None:
+            session.add(
+                SourceDocument(
+                    id=source_id,
+                    filename=body.title or "api_ingest",
+                    title=body.title or "API Ingest",
+                    source_kind="api",
+                    full_text=text,
+                    content_hash=hashlib.sha256(
+                        text.encode("utf-8", errors="replace")
+                    ).hexdigest(),
+                    raw_text_chars=len(text),
+                )
+            )
+            session.commit()
+
+    chunk_count = kb_index.ingest_full_document(source_id, text, body.metadata)
+
+    # Outbox record: idempotent (keyed on source_id)
+    with factory() as session:
+        enqueue(
+            session,
+            operation="ingest_complete",
+            idempotency_key=source_id,
+            payload={
+                "source_id": source_id,
+                "chunk_count": chunk_count,
+                "status": "ok",
+            },
+        )
+        session.commit()
+
+    return IngestResponse(
+        source_id=source_id,
+        chunk_count=chunk_count,
+        status="ok",
+    )
