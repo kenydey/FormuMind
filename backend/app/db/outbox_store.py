@@ -51,10 +51,13 @@ def enqueue(
         payload=payload,
     )
     session.add(row)
+    # Use a savepoint so that a concurrent-duplicate IntegrityError only
+    # rolls back the INSERT, not other pending changes the caller owns.
+    sp = session.begin_nested()
     try:
         session.flush()
     except IntegrityError:
-        session.rollback()
+        sp.rollback()
         existing = session.execute(
             select(TaskOutbox).filter_by(
                 operation=operation, idempotency_key=idempotency_key,
@@ -63,6 +66,8 @@ def enqueue(
         if existing is not None:
             return existing.id, existing.status
         raise
+    else:
+        sp.commit()
     return row.id, "PENDING"
 
 

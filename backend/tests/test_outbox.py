@@ -120,3 +120,16 @@ def test_unique_constraint_enforced(session: Session) -> None:
     with pytest.raises(IntegrityError):
         session.commit()
     session.rollback()
+
+
+def test_enqueue_caller_rollback_then_reenqueue(session: Session) -> None:
+    """Caller rollback after enqueue → re-enqueue with the same key creates a fresh row."""
+    fid, _ = enqueue(session, "ingest", "key-rb", {"x": 1})
+    session.rollback()
+    assert _row_count(session) == 0  # rollback wiped the flushed row
+
+    # Re-enqueue with the same idempotency key should create a NEW row
+    # (not return the old id, which is gone after rollback).
+    sid, _ = enqueue(session, "ingest", "key-rb", {"x": 1})
+    assert sid != fid, "re-enqueue after rollback must produce a fresh row"
+    assert _row_count(session) == 1
