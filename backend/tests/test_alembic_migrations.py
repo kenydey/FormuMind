@@ -9,8 +9,8 @@ Covers three guarantees:
    same upgrade chain silently — every post-baseline migration is a no-op.
 3. The revision chain is linear and ends at head ``0006``.
 
-The Alembic-invocation helper mirrors ``tests/test_alembic_baseline.py``;
-small duplication is intentional to keep the suites independent.
+The Alembic-invocation helper lives in ``tests/alembic_helpers.py`` (Task
+0.2b-2) and is shared with the other migration-oriented suites.
 """
 from __future__ import annotations
 
@@ -20,26 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
-SCRIPT_LOCATION = BACKEND_ROOT / "app" / "db" / "alembic"
-
-
-def _make_config(db_url: str):
-    """Build an Alembic Config bound to the repo's migration environment.
-
-    Args:
-        db_url: SQLAlchemy URL for the throwaway target database.
-
-    Returns:
-        A configured ``alembic.config.Config`` instance.
-    """
-    from alembic.config import Config
-
-    cfg = Config(str(ALEMBIC_INI))
-    cfg.set_main_option("script_location", str(SCRIPT_LOCATION))
-    cfg.set_main_option("sqlalchemy.url", db_url)
-    return cfg
+from tests.alembic_helpers import ALEMBIC_INI, run_upgrade
 
 
 def _column_names(db_url: str, table: str) -> set[str]:
@@ -189,10 +170,10 @@ def _create_legacy_schema(db_url: str) -> None:
         engine.dispose()
 
 
-def test_legacy_db_gets_columns_via_migration(tmp_db_url: str) -> None:
+def test_legacy_db_gets_columns_via_migration(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A legacy DB stamped at 0001 gains all new columns; legacy table is dropped."""
-    from alembic import command
-
     _create_legacy_schema(tmp_db_url)
     # Seed rows so the updated_at backfill (0005) has data to repair.
     _exec(
@@ -202,8 +183,7 @@ def test_legacy_db_gets_columns_via_migration(tmp_db_url: str) -> None:
         " ('link-1', 'e1', 'e2', 'cites', 0.9, '[]', '2026-01-01 00:00:00')",
     )
 
-    cfg = _make_config(tmp_db_url)
-    command.upgrade(cfg, "head")
+    run_upgrade(tmp_db_url, monkeypatch)
 
     assert {"item_id", "project_id"} <= _column_names(tmp_db_url, "experiments")
     assert {
@@ -257,12 +237,11 @@ def test_legacy_db_gets_columns_via_migration(tmp_db_url: str) -> None:
     assert "DATETIME" in links_types["updated_at"]
 
 
-def test_migrations_idempotent_on_fresh_db(tmp_db_url: str) -> None:
+def test_migrations_idempotent_on_fresh_db(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`upgrade head` on an empty DB runs 0002-0006 as silent no-ops."""
-    from alembic import command
-
-    cfg = _make_config(tmp_db_url)
-    command.upgrade(cfg, "head")
+    run_upgrade(tmp_db_url, monkeypatch)
 
     # Baseline 0001 already creates every column; the post-baseline
     # migrations must not raise and the full column set must be present.
@@ -299,20 +278,19 @@ def test_revision_chain_head_is_0006(tmp_db_url: str) -> None:
     assert heads[0] == "0006"
 
 
-def test_migrations_partial_columns_branch(tmp_db_url: str) -> None:
+def test_migrations_partial_columns_branch(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A legacy DB that already has *some* new columns upgrades cleanly.
 
     Simulates a database where ``experiments.item_id`` was added by hand
     before Alembic adoption: the guard must skip the existing column while
     still adding every remaining column and index.
     """
-    from alembic import command
-
     _create_legacy_schema(tmp_db_url)
     _exec(tmp_db_url, "ALTER TABLE experiments ADD COLUMN item_id VARCHAR(128)")
 
-    cfg = _make_config(tmp_db_url)
-    command.upgrade(cfg, "head")  # must not raise on the pre-existing column
+    run_upgrade(tmp_db_url, monkeypatch)  # must not raise on the pre-existing column
 
     assert {"item_id", "project_id"} <= _column_names(tmp_db_url, "experiments")
     assert {
@@ -344,18 +322,17 @@ def test_migrations_partial_columns_branch(tmp_db_url: str) -> None:
 
 
 def test_migration_0006_logs_row_count(
-    tmp_db_url: str, caplog: pytest.LogCaptureFixture
+    tmp_db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Dropping ``experiment_records`` logs a warning including the row count."""
-    from alembic import command
-
     _create_legacy_schema(tmp_db_url)
     _exec(tmp_db_url, "INSERT INTO experiment_records (id) VALUES (1)")
     _exec(tmp_db_url, "INSERT INTO experiment_records (id) VALUES (2)")
 
-    cfg = _make_config(tmp_db_url)
     with caplog.at_level(logging.WARNING):
-        command.upgrade(cfg, "head")
+        run_upgrade(tmp_db_url, monkeypatch)
 
     assert "experiment_records" not in _table_names(tmp_db_url)
     drop_warnings = [
@@ -369,18 +346,18 @@ def test_migration_0006_logs_row_count(
     )
 
 
-def test_make_engine_emits_no_alter_after_upgrade(tmp_db_url: str) -> None:
+def test_make_engine_emits_no_alter_after_upgrade(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """After `alembic upgrade head`, make_engine must not emit any runtime ALTER.
 
     Schema drift repair is owned by Alembic migrations; make_engine is a
     read-only validator and must issue zero ALTER statements.
     """
-    from alembic import command
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
 
-    cfg = _make_config(tmp_db_url)
-    command.upgrade(cfg, "head")
+    run_upgrade(tmp_db_url, monkeypatch)
 
     from app.db.database import make_engine
 

@@ -9,6 +9,8 @@ from app.domain.schemas import DOEPlan, DOERun, ProductDomain
 from app.main import app
 from fastapi.testclient import TestClient
 
+from tests.alembic_helpers import run_upgrade
+
 
 def test_legacy_campaigns_table_gets_sample_refs_column(tmp_path, monkeypatch):
     monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "sqlite")
@@ -36,6 +38,10 @@ def test_legacy_campaigns_table_gets_sample_refs_column(tmp_path, monkeypatch):
         )
 
     monkeypatch.setenv("FORMUMIND_DB_URL", url)
+    # Runtime ALTER is gone (Task 0.2b-1): upgrade the legacy schema via
+    # Alembic before make_engine's read-only guard validates it.
+    run_upgrade(url, monkeypatch)
+
     from app.db import database as db_mod
 
     db_mod._default.clear()
