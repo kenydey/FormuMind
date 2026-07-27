@@ -39,6 +39,50 @@ def _persist_doe_plan(plan: DOEPlan) -> None:
         pass
 
 
+def _persist_run_record(
+    operation: str, request_data: dict, result: BaybeRecommendResult,
+) -> None:
+    """Best-effort: enqueue baybe run record to task_outbox (idempotent audit).
+
+    Uses content-addressed idempotency derived from the request parameters so
+    retries with the same payload collapse onto a single outbox row.
+    """
+    try:
+        import hashlib
+        import json
+
+        from ..db import outbox_store
+        from ..db.database import default_session_factory
+
+        raw = json.dumps(request_data, sort_keys=True, ensure_ascii=False)
+        idempotency_key = hashlib.sha256(raw.encode()).hexdigest()
+
+        plan = result.plan
+        payload: dict = {
+            "plan_id": plan.plan_id,
+            "domain": plan.domain.value if plan.domain else None,
+            "design": plan.design,
+            "suggestions_count": len(plan.runs),
+            "factors": [f.name for f in plan.factors],
+            "engine": getattr(result, "engine", "baybe"),
+            "campaign_state": (
+                result.campaign_state[:100] if result.campaign_state else ""
+            ),
+        }
+
+        factory = default_session_factory()
+        with factory() as session:
+            outbox_store.enqueue(
+                session,
+                operation=operation,
+                idempotency_key=idempotency_key,
+                payload=payload,
+            )
+            session.commit()
+    except Exception:
+        pass
+
+
 @router.post("/doe", response_model=DOEPlan)
 def generate_doe(
     requirement: Requirement,
@@ -151,6 +195,7 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
     result.plan.domain = base_req.domain
     workflow._cache_plan(result.plan)
     _persist_doe_plan(result.plan)
+    _persist_run_record("baybe_recommend", req.model_dump(), result)
     return result
 
 
