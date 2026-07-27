@@ -267,3 +267,28 @@ class TaskOutbox(Base):
         Index("ix_task_outbox_status_created", "status", "created_at"),
         Index("ix_task_outbox_claim", "claimed_by", "claimed_at"),
     )
+
+
+class DOEPlanRow(Base):
+    """Persisted DOE experimental design — one row per plan so recommendations
+    from /baybe/recommend, /doe, and /doe/active are recorded idempotently
+    for audit / reconciliation.
+    """
+
+    __tablename__ = "doe_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    experiment_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    campaign_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    design_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_doe_plans_experiment", "experiment_id"),
+        Index("ix_doe_plans_campaign", "campaign_id"),
+    )

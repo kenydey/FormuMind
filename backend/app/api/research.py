@@ -65,6 +65,27 @@ def _enqueue_outbox(operation: str, payload: dict) -> str | None:
         return None
 
 
+def _persist_doe_plans(result: object) -> None:
+    """Best-effort: persist any DOEPlan objects reachable from *result*."""
+    try:
+        from ..db import doe_plan_store
+        from ..db.database import default_session_factory
+
+        factory = default_session_factory()
+        with factory() as session:
+            plans = getattr(result, "doe_plans", None) or []
+            if isinstance(plans, list):
+                for plan in plans:
+                    doe_plan_store.save(session, plan)
+            else:
+                plan = getattr(result, "plan", None)
+                if plan is not None:
+                    doe_plan_store.save(session, plan)
+            session.commit()
+    except Exception:
+        logger.debug("doe_plan_store best-effort save skipped")
+
+
 @router.post("/research", response_model=ResearchResult)
 def start_research(body: ResearchRequest) -> ResearchResult:
     """同步配方推荐：CRAG graph → grounded evidence → 推荐。"""
@@ -75,7 +96,9 @@ def start_research(body: ResearchRequest) -> ResearchResult:
         if k not in ("sources", "source_types", "query")
     })
     pre_sources = body.sources if body.sources else None
-    return workflow.run_research(req, pre_sources=pre_sources, query=body.query)
+    result = workflow.run_research(req, pre_sources=pre_sources, query=body.query)
+    _persist_doe_plans(result)
+    return result
 
 
 @router.post("/research/recommend", status_code=202)

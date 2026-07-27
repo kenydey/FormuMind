@@ -25,6 +25,20 @@ DOE_ENGINES = ["auto", "native", "pydoe"]
 AL_ENGINES = ["auto", "legacy", "baybe"]
 
 
+def _persist_doe_plan(plan: DOEPlan) -> None:
+    """Best-effort: persist a single DOEPlan to the doe_plans table."""
+    try:
+        from ..db import doe_plan_store
+        from ..db.database import default_session_factory
+
+        factory = default_session_factory()
+        with factory() as session:
+            doe_plan_store.save(session, plan)
+            session.commit()
+    except Exception:
+        pass
+
+
 @router.post("/doe", response_model=DOEPlan)
 def generate_doe(
     requirement: Requirement,
@@ -34,7 +48,9 @@ def generate_doe(
 ) -> DOEPlan:
     if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
-    return workflow.build_doe(requirement, design=design, engine=engine, n=n)
+    plan = workflow.build_doe(requirement, design=design, engine=engine, n=n)
+    _persist_doe_plan(plan)
+    return plan
 
 
 class FactorSuggestResponse(BaseModel):
@@ -91,7 +107,7 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
             }
         )
     )
-    return active_learning_doe(
+    result = active_learning_doe(
         req=base_req,
         existing=req.existing_records,
         n_suggest=req.n_suggest,
@@ -102,6 +118,8 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
         workbench_campaign_id=req.workbench_campaign_id,
         budget_remaining=req.budget_remaining,
     )
+    _persist_doe_plan(result.plan)
+    return result
 
 
 @router.post("/baybe/recommend", response_model=BaybeRecommendResult)
@@ -132,6 +150,7 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
     result.plan.plan_id = uuid.uuid4().hex
     result.plan.domain = base_req.domain
     workflow._cache_plan(result.plan)
+    _persist_doe_plan(result.plan)
     return result
 
 
