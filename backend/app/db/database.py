@@ -40,17 +40,21 @@ def make_engine(db_url: str) -> Engine:
 
 
 def _require_columns(engine: Engine, table: str, columns: tuple[str, ...]) -> None:
-    """只读守护：表存在但缺列时给出可操作错误（不再运行时 ALTER）。"""
+    """只读守护：表存在但缺列时给出可操作错误（不再运行时 ALTER）。
+
+    一次性报出全部缺失列，避免用户多轮运行才发现完整 drift。
+    """
     from sqlalchemy import inspect
 
-    if table not in inspect(engine).get_table_names():
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
         return
-    existing = {c["name"] for c in inspect(engine).get_columns(table)}
-    for col in columns:
-        if col not in existing:
-            raise RuntimeError(
-                f"schema drift: {table}.{col} 缺失，请先运行: alembic upgrade head"
-            )
+    existing = {c["name"] for c in inspector.get_columns(table)}
+    missing = [f"{table}.{col}" for col in columns if col not in existing]
+    if missing:
+        raise RuntimeError(
+            f"schema drift: 缺失列 {', '.join(missing)}，请先运行: alembic upgrade head"
+        )
 
 
 def _ensure_experiment_columns(engine: Engine) -> None:
@@ -92,11 +96,6 @@ def _ensure_kb_entity_link_columns(engine: Engine) -> None:
         "kb_entity_links",
         ("metadata_json", "is_valid", "extraction_method", "updated_at"),
     )
-
-
-def _drop_legacy_workbench_table(engine: Engine) -> None:
-    """已由 migration 0006 接管（删除 experiment_records），保留仅兼容引用。"""
-    return None
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

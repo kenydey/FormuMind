@@ -7,15 +7,19 @@ schema guard in ``app.db.database`` now raises instead of ALTERing.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from alembic.config import Config
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 SCRIPT_LOCATION = BACKEND_ROOT / "app" / "db" / "alembic"
 
 
-def make_config(db_url: str):
+def make_config(db_url: str) -> Config:
     """Build an Alembic Config bound to the repo's migration environment.
 
     Args:
