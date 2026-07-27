@@ -1,10 +1,13 @@
 """SQLAlchemy write-session helpers with explicit rollback on failure."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy.orm import Session, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -15,5 +18,8 @@ def commit_session(session_factory: sessionmaker[Session]) -> Iterator[Session]:
             yield session
             session.commit()
         except Exception:
-            session.rollback()
+            try:
+                session.rollback()
+            except Exception:
+                logger.exception("rollback also failed")
             raise

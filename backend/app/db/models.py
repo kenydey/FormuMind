@@ -9,7 +9,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -21,7 +31,7 @@ class Base(DeclarativeBase):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ExperimentRow(Base):
@@ -64,6 +74,13 @@ class Campaign(Base):
     sample_refs: Mapped[list] = mapped_column(JSON, default=list)
     # Closed-loop round snapshots: [{round, at, rmse_by_metric, converged, ...}]
     loop_history: Mapped[list] = mapped_column(JSON, default=list)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('IN_PROGRESS', 'COMPLETED', 'FAILED', 'ABORTED')",
+            name="ck_campaign_status",
+        ),
+    )
 
 
 class SourceDocument(Base):
@@ -130,10 +147,6 @@ class DocumentChunk(Base):
         comment="化学/产品实体元数据",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-
-    __table_args__ = (
-        UniqueConstraint("source_id", "ord", name="uq_document_chunks_source_ord"),
-    )
 
 
 class KBProduct(Base):
@@ -209,6 +222,10 @@ class KGMention(Base):
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
+    __table_args__ = (
+        UniqueConstraint("entity_id", "chunk_id", "surface_form", name="uq_kb_mention_triple"),
+    )
+
 
 class KGEntityLink(Base):
     """Optional link between entities (e.g. trade name → catalog chemical, semantic relations)."""
@@ -228,7 +245,7 @@ class KGEntityLink(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     __table_args__ = (
-        Index("idx_kb_link_triplet", "src_entity_id", "dst_entity_id", "link_type"),
+        UniqueConstraint("src_entity_id", "dst_entity_id", "link_type", name="uq_kb_link_triplet"),
     )
 
 

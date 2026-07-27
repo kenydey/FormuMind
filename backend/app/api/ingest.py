@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from datetime import datetime
+import logging
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -12,6 +13,8 @@ from ..domain.schemas import Evidence, SourceGuideSchema
 from ..services import colbert_store
 from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
 from ..db.source_store import get_source_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -88,6 +91,8 @@ async def ingest_document(file: UploadFile = File(...)):
 async def ingest_batch(files: list[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
+    if len(files) > 20:
+        raise HTTPException(status_code=413, detail="最多同时上传20个文件")
     pairs: list[tuple[str, bytes]] = []
     for f in files:
         content = await f.read()
@@ -112,7 +117,8 @@ def ingest_from_url(req: IngestUrlRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {exc}") from exc
+        logger.exception("ingest_url failed")
+        raise HTTPException(status_code=502, detail="文件处理失败") from exc
     colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(req.url, outcome)
 

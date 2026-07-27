@@ -43,8 +43,8 @@ def migrate_inline_sql_to_datalab(legacy_store, datalab_store) -> int:
         return 0
     if datalab_store.count() > 0:
         return 0
-    legacy_store.clear()
     datalab_store.add(records)
+    legacy_store.clear()
     log.info("Migrated %d inline SQL experiment record(s) to Datalab.", len(records))
     return len(records)
 
@@ -52,9 +52,12 @@ def migrate_inline_sql_to_datalab(legacy_store, datalab_store) -> int:
 def migrate_experiments_if_needed() -> int:
     """Migrate legacy JSON and inline SQL experiment data into the active store.
 
-    Never raises — failures are logged and swallowed so a missing/corrupt JSON
-    file never prevents the server from starting.
+    DatalabUnavailableError is degraded (logged) so a missing Datalab service
+    never prevents the server from starting; other unexpected exceptions
+    propagate so real bugs are not silently swallowed.
     """
+    from .datalab_client import DatalabUnavailableError
+
     total = 0
     try:
         from ..config import get_settings
@@ -68,8 +71,8 @@ def migrate_experiments_if_needed() -> int:
         if settings.experiment_backend == "datalab":
             legacy = SqlExperimentStore(default_session_factory())
             total += migrate_inline_sql_to_datalab(legacy, target)
-    except Exception as exc:
-        log.warning("Experiment migration skipped: %s", exc)
+    except DatalabUnavailableError as exc:
+        log.warning("Experiment migration skipped (Datalab unavailable): %s", exc)
     return total
 
 

@@ -269,14 +269,30 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             max_keepalive_connections=max_keepalive_connections,
         )
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     async def _ensure_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        loop = asyncio.get_running_loop()
+        if self._client is not None and self._client_loop is None:
+            # Client injected externally (e.g. tests) — bind to current loop.
+            self._client_loop = loop
+        if (
+            self._client is None
+            or self._client.is_closed
+            or self._client_loop is not loop
+        ):
+            if self._client is not None and not self._client.is_closed:
+                try:
+                    await self._client.aclose()
+                except Exception:
+                    pass
             self._client = httpx.AsyncClient(
                 base_url=self._api_url,
                 timeout=self._timeout,
                 limits=self._limits,
+                transport=httpx.AsyncHTTPTransport(retries=2),
             )
+            self._client_loop = loop
         return self._client
 
     async def close(self) -> None:
@@ -317,12 +333,34 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         parse_delete_response(resp.json(), item_id)
 
     async def _rollback_created_samples(self, item_ids: list[str]) -> None:
+        failed: list[str] = []
         for item_id in reversed(item_ids):
             try:
                 await self._delete_sample(item_id)
                 logger.info("Saga rollback: deleted sample %s", item_id)
             except Exception as exc:
                 logger.error("Saga rollback failed for %s: %s", item_id, exc)
+                failed.append(item_id)
+        if failed:
+            try:
+                from .outbox_store import enqueue
+
+                with commit_session(self._session_factory) as session:
+                    for orphan_id in failed:
+                        enqueue(
+                            session,
+                            operation="datalab_orphan_cleanup",
+                            idempotency_key=f"orphan:{orphan_id}",
+                            payload={"item_id": orphan_id, "kind": "campaign"},
+                        )
+                logger.info("Recorded %d orphan sample(s) for cleanup", len(failed))
+            except Exception as exc:
+                logger.error(
+                    "Failed to record orphan samples for cleanup: %s; "
+                    "orphan item_ids=%s",
+                    exc,
+                    failed,
+                )
 
     async def create_from_plan(
         self,
@@ -365,7 +403,6 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 refs.append({"id": idx, "item_id": item_id})
 
             self._save_sample_refs(campaign.id, refs)
-            campaign.sample_refs = refs
             return campaign
 
         except Exception as exc:
@@ -376,7 +413,12 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 exc,
             )
             await self._rollback_created_samples(created_item_ids)
-            self._delete_campaign_meta(campaign.id)
+            with self._write_lock:
+                with commit_session(self._session_factory) as session:
+                    failed_campaign = session.get(Campaign, campaign.id)
+                    if failed_campaign is not None:
+                        failed_campaign.status = "FAILED"
+                        failed_campaign.updated_at = _utcnow()
             raise DatalabUnavailableError(self._api_url, str(exc)) from exc
 
     async def get_campaign(self, campaign_id: int) -> Campaign | None:
@@ -525,6 +567,7 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
 
         domain = ProductDomain.anticorrosion_coating
         objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
+
         refs = list(campaign.sample_refs or [])
         ref_by_id = {int(r["id"]): r for r in refs}
         updated = 0
@@ -547,6 +590,7 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             updated += 1
 
         self._save_sample_refs(campaign_id, refs)
+        campaign.sample_refs = refs
         refreshed = self._refs_to_rows(campaign)
         self._update_campaign_status(campaign_id, refreshed)
         return updated, refreshed

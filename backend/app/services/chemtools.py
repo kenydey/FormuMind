@@ -40,6 +40,7 @@ T = TypeVar("T")
 _CACHE: dict[tuple[str, str], tuple[float, Any]] = {}
 _CACHE_TTL_SEC = 86400  # 24h — same policy as chemical_lookup / compounds
 _CACHE_LOCK = threading.Lock()
+_CACHE_WRITE_COUNT = 0
 
 _EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = threading.Lock()
@@ -169,6 +170,7 @@ def _run_with_timeout(fn: Callable[[], T], default: T) -> T:
 
 
 def _cached(tool: str, arg: str, compute: Callable[[], T]) -> T:
+    global _CACHE_WRITE_COUNT
     key = (tool, arg.strip().lower())
     with _CACHE_LOCK:
         entry = _CACHE.get(key)
@@ -179,6 +181,12 @@ def _cached(tool: str, arg: str, compute: Callable[[], T]) -> T:
     if value is not None:
         with _CACHE_LOCK:
             _CACHE[key] = (time.time(), value)
+            _CACHE_WRITE_COUNT += 1
+            if _CACHE_WRITE_COUNT % 100 == 0:
+                now = time.time()
+                expired = [k for k, (ts, _) in _CACHE.items() if now - ts > _CACHE_TTL_SEC]
+                for k in expired:
+                    del _CACHE[k]
     return value
 
 

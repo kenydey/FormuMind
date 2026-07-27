@@ -76,10 +76,17 @@ def hybrid_search(
         if not chunks:
             return []
 
+        # ── BM25 sparse scores ──────────────────────────────────────────
+        # Filter out chunks whose text tokenizes to nothing — BM25Okapi
+        # raises when given empty token lists, and downstream cosine alignment
+        # requires chunks and corpus_tokens to stay in sync.
+        tokenized = [(c, t) for c, t in zip(chunks, (_tokenize(c.text) for c in chunks)) if t]
+        if not tokenized:
+            return []
+        chunks = [c for c, _ in tokenized]
+        corpus_tokens = [t for _, t in tokenized]
         n = len(chunks)
 
-        # ── BM25 sparse scores ──────────────────────────────────────────
-        corpus_tokens = [_tokenize(c.text) for c in chunks]
         bm25 = BM25Okapi(corpus_tokens)
         bm25_scores: np.ndarray = bm25.get_scores(_tokenize(query))
 
@@ -114,6 +121,21 @@ def hybrid_search(
         ]
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         ranked = ranked[:top_k]
+
+        # Fallback for small corpora: BM25Okapi's IDF can go negative when a
+        # query term appears in all (or nearly all) documents, making every
+        # combined score ≤ 0 even for chunks that share tokens with the query.
+        # In that case, return the top matching chunks by raw combined score
+        # so single-chunk and small-corpus searches still produce results.
+        if not ranked:
+            qtoks = set(_tokenize(query))
+            fallback = [
+                (float(combined[i]), chunks[i])
+                for i in range(n)
+                if qtoks & set(corpus_tokens[i])
+            ]
+            fallback.sort(key=lambda pair: pair[0], reverse=True)
+            ranked = fallback[:top_k]
 
         # ── convert to response objects ──────────────────────────────────
         results: list[DocumentChunkResponse] = []

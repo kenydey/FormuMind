@@ -57,10 +57,10 @@ def _predict_anticorrosion(params: dict[str, float]) -> dict[str, float]:
     rpm = params.get("dispersion_rpm", 1600.0)
     thickness_um = params.get("film_thickness_um", 80.0)
 
-    # Arrhenius cure conversion (Ea ≈ 45 kJ/mol, k0 = 1e10 min^-1)
-    Ea_R = 45000.0 / 8.314  # K
+    # Arrhenius cure conversion (Ea ≈ 55 kJ/mol, k0 = 1e6 min^-1, typical epoxy-amine)
+    Ea_R = 55000.0 / 8.314  # K
     T_k = T_c + 273.15
-    k = 1e10 * math.exp(-Ea_R / T_k)
+    k = 1e6 * math.exp(-Ea_R / T_k)
     conversion = 1.0 - math.exp(-k * t_min)  # fraction
 
     # Dispersion uniformity index (penalise too low or too high rpm)
@@ -170,8 +170,13 @@ def _composite_score(
         lo, hi = bounds.get(obj.metric, (0.0, 1.0))
         rng = hi - lo
         norm = (val - lo) / rng if rng > 1e-9 else 0.5
+        norm = max(0.0, min(1.0, norm))
         if obj.direction == "minimize":
             norm = 1.0 - norm
+        elif obj.direction == "match_target" and obj.target_value is not None:
+            target_norm = (obj.target_value - lo) / rng if rng > 1e-9 else 0.5
+            target_norm = max(0.0, min(1.0, target_norm))
+            norm = 1.0 - abs(norm - target_norm)
         total += obj.weight * norm
         weight_sum += obj.weight
     return total / weight_sum if weight_sum > 0 else 0.0
@@ -191,8 +196,12 @@ def run_process_optimization(req: ProcessOptRequest) -> ProcessOptResult:
     mid_params = {pf.name: (pf.low + pf.high) / 2 for pf in levers}
     mid_outcome = predict_process_outcome(domain, mid_params)
     bounds: dict[str, tuple[float, float]] = {}
-    for metric, val in mid_outcome.items():
-        bounds[metric] = (val * 0.3, val * 1.8) if val > 0 else (0.0, 1.0)
+    for obj in objectives:
+        if obj.ref_min is not None and obj.ref_max is not None:
+            bounds[obj.metric] = (float(obj.ref_min), float(obj.ref_max))
+        else:
+            val = mid_outcome.get(obj.metric, 0.0)
+            bounds[obj.metric] = (0.0, max(val * 2.0, 1.0))
 
     history: list[float] = []
     best_score = float("-inf")

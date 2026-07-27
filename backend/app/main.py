@@ -63,6 +63,15 @@ async def lifespan(_app: FastAPI):
     """
     skip_bootstrap = _skip_lifespan_bootstrap()
     # ------------------------------------------------------------------
+    # Fail-fast: ensure the API token is resolvable at startup so a missing
+    # FORMUMIND_API_TOKEN surfaces immediately in production instead of on
+    # the first authenticated request.
+    # ------------------------------------------------------------------
+    if settings.api_auth_enabled:
+        from .middleware.api_auth import resolve_api_token
+
+        resolve_api_token(settings)
+    # ------------------------------------------------------------------
     # Recover stalled outbox rows (best-effort, must not block startup).
     # ------------------------------------------------------------------
     try:
@@ -135,8 +144,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
@@ -178,6 +187,61 @@ async def datalab_unavailable_handler(_request: Request, exc: DatalabUnavailable
 
 @app.get("/health", tags=["meta"])
 def health() -> dict:
+    """Minimal liveness probe — no sensitive infrastructure details leaked.
+
+    Only exposes status + coarse booleans needed for monitoring; URLs,
+    error messages, and installed-extras inventory live in /health/detailed
+    (which requires auth).
+    """
+    cfg = get_settings()
+
+    datalab_ok, _ = check_datalab_reachable(cfg.datalab_api_url)
+    datalab_required = (
+        cfg.campaign_backend.lower() == "datalab"
+        or cfg.experiment_backend.lower() == "datalab"
+        or cfg.datalab_required
+    )
+
+    db_ok = True
+    db_scheme = "postgresql" if cfg.db_url.startswith("postgresql") else "sqlite"
+    try:
+        from sqlalchemy import text
+
+        from .db.database import default_session_factory
+
+        with default_session_factory()() as session:
+            session.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+
+    overall = "ok"
+    if not db_ok or (datalab_required and not datalab_ok):
+        overall = "degraded"
+
+    return {
+        "status": overall,
+        "database": {"ok": db_ok, "scheme": db_scheme},
+        "datalab": {"required": datalab_required, "reachable": datalab_ok},
+    }
+
+
+def _mask_db_url(db_url: str) -> str:
+    """Return scheme://host (password stripped) — safe to expose."""
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(db_url)
+        host = parsed.hostname or ""
+        if not host:
+            return parsed.scheme or "db"
+        return f"{parsed.scheme}://{host}"
+    except Exception:
+        return "db"
+
+
+@app.get("/health/detailed", tags=["meta"])
+def health_detailed() -> dict:
+    """Detailed infra snapshot — behind auth (not in public paths)."""
     cfg = get_settings()
 
     def _ok(pkg: str) -> bool:
@@ -226,7 +290,7 @@ def health() -> dict:
         "database": {
             "ok": db_ok,
             "scheme": db_scheme,
-            "url": cfg.db_url.split("@")[-1] if "@" in cfg.db_url else cfg.db_url,
+            "url": _mask_db_url(cfg.db_url),
             "error": db_error,
         },
         "datalab": {

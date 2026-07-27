@@ -62,7 +62,7 @@ class SourcedClaim(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
-    sources: list[Evidence] = Field(default_factory=list)
+    sources: list[Evidence] = Field(default_factory=list, max_length=50)
     domain: str | None = None
     project_id: str | None = None
     include_entity_resolution: bool = False

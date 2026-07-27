@@ -26,10 +26,10 @@ def full_factorial(k: int, levels: int = 2) -> np.ndarray:
 
 
 def fractional_factorial(k: int) -> np.ndarray:
-    """A resolution-aware 2^(k-p) fraction.
+    """A 2^(k-1) half-fraction.
 
-    Uses the largest base 2^m with m < k and defines the extra factors as
-    products of base columns (standard generator construction).
+    Builds the 2^(k-1) full factorial on the first k-1 factors and defines the
+    last factor as the product of all base columns (generator I = ABC...).
     """
     if k <= 3:
         return full_factorial(k)
@@ -71,7 +71,7 @@ def central_composite(k: int, alpha: str = "rotatable") -> np.ndarray:
             pt = [0.0] * k
             pt[i] = sign
             axial.append(pt)
-    centre = [[0.0] * k] * 3
+    centre = [[0.0] * k for _ in range(3)]
     return np.vstack([factorial, np.array(axial), np.array(centre)])
 
 

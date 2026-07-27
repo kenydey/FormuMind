@@ -1,5 +1,5 @@
 """GET/POST /api/settings — Runtime LLM + API secrets configuration."""
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
@@ -14,6 +14,55 @@ from ..services.secrets_store import (
 )
 
 router = APIRouter()
+
+# Known LLM provider hostnames (and their API subdomains). A user-supplied
+# base_url whose host matches one of these is always accepted; otherwise the
+# URL must at least pass the SSRF safety check (_is_safe_url).
+_KNOWN_LLM_HOSTS: frozenset[str] = frozenset({
+    "anthropic.com",
+    "api.anthropic.com",
+    "openai.com",
+    "api.openai.com",
+    "googleapis.com",
+    "generativelanguage.googleapis.com",
+    "x.ai",
+    "api.x.ai",
+    "groq.com",
+    "api.groq.com",
+    "deepseek.com",
+    "api.deepseek.com",
+    "dashscope.aliyuncs.com",
+    "moonshot.cn",
+    "api.moonshot.cn",
+    "api.minimax.chat",
+})
+
+
+def _validate_base_url(url: str | None) -> None:
+    """Reject unsafe / non-LLM base_urls that could exfiltrate API keys.
+
+    Accepts None (no override). Otherwise the host must either be a known LLM
+    provider domain or at least pass the SSRF safety check.
+    """
+    if not url:
+        return
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=422, detail="base_url must use http(s) scheme")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise HTTPException(status_code=422, detail="base_url is missing a hostname")
+    if any(host == h or host.endswith(f".{h}") for h in _KNOWN_LLM_HOSTS):
+        return
+    from ..services.ingestion import _is_safe_url
+
+    if not _is_safe_url(url):
+        raise HTTPException(
+            status_code=422,
+            detail="base_url hostname is not a recognised LLM provider and is not a safe public address",
+        )
 
 
 class LLMSettingsUpdate(BaseModel):
@@ -52,6 +101,7 @@ _SECRET_ATTR_IDS = {item[0] for item in SECRET_REGISTRY}
 
 
 def _apply_llm_update(update: LLMSettingsUpdate) -> None:
+    _validate_base_url(update.base_url)
     s = get_settings()
     rs = get_runtime_secrets()
     current_provider = effective_setting(s, "llm_provider")
@@ -107,6 +157,7 @@ def test_llm_connection():
 @router.post("/settings/models/refresh")
 def refresh_llm_models(body: LLMModelsRefreshRequest | None = None):
     body = body or LLMModelsRefreshRequest()
+    _validate_base_url(body.base_url)
     s = get_settings()
     provider = body.provider or effective_setting(s, "llm_provider")
     current_model = body.model or effective_setting(s, "llm_model")

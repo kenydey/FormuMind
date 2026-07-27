@@ -140,10 +140,27 @@ def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:
     url = (ev.identifier or "").strip()
     if not _is_safe_url(url):
         return None
+    # follow_redirects=False + manual loop: re-check _is_safe_url on every
+    # redirect target so an SSRF cannot pivot to an internal host via a 3xx.
+    current_url = url
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True, headers=_HEADERS) as client:
-            r = client.get(url)
-            if r.status_code != 200:
+        with httpx.Client(timeout=timeout, follow_redirects=False, headers=_HEADERS) as client:
+            r = None
+            for _hop in range(4):  # initial + up to 3 redirects
+                r = client.get(current_url)
+                # Treat any 3xx as a redirect (works with real httpx.Response
+                # and simple fakes that only set status_code).
+                if 300 <= int(getattr(r, "status_code", 0)) < 400:
+                    location = r.headers.get("location")
+                    if not location:
+                        break
+                    current_url = str(httpx.URL(current_url).join(location))
+                    if not _is_safe_url(current_url):
+                        logger.warning("web fulltext redirect blocked (SSRF guard): %s", current_url)
+                        return None
+                    continue
+                break
+            if r is None or r.status_code != 200:
                 return None
             ctype = (r.headers.get("content-type") or "").lower()
             if "pdf" in ctype:

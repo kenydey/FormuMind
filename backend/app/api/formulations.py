@@ -143,7 +143,7 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         )
     except Exception as exc:
         log.exception("recommend_formulations failed")
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="配方推荐失败") from exc
 
     if not rec_resp.formulas:
         raise HTTPException(status_code=503, detail="No formulations produced")

@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..services.errors import degrade_return
@@ -33,6 +34,38 @@ _MAX_LINK_ATTEMPTS_PER_UPSERT = 5
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _escape_like(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _apply_mention(row: KBProduct, m: dict, source_id: str | None) -> None:
+    """Fill blank product fields, bump mention_count, track source_ids."""
+    if not row.supplier and m.get("supplier"):
+        row.supplier = str(m["supplier"])[:120]
+    if not row.generic_name and m.get("generic_name"):
+        row.generic_name = str(m["generic_name"])[:200]
+    if not row.cas and m.get("cas"):
+        row.cas = str(m["cas"])[:32]
+    if not row.smiles and m.get("smiles"):
+        row.smiles = str(m["smiles"])
+    if not row.role and m.get("role"):
+        row.role = str(m["role"])[:60]
+    row.mention_count = (row.mention_count or 0) + 1
+    ids = list(row.source_ids or [])
+    if source_id and source_id not in ids:
+        if len(ids) < _MAX_SOURCE_IDS:
+            ids.append(source_id)
+            row.source_ids = ids
+        else:
+            logger.warning(
+                "product %s exceeded max source_ids (%d), dropping source %s",
+                row.norm_key,
+                _MAX_SOURCE_IDS,
+                source_id,
+            )
+    row.updated_at = _utcnow()
 
 
 def norm_key(trade_name: str, grade: str = "") -> str:
@@ -73,28 +106,20 @@ class ProductStore:
                             first_seen=_utcnow(),
                         )
                         session.add(row)
-                    # Fill blanks — never overwrite curated values.
-                    if not row.supplier and m.get("supplier"):
-                        row.supplier = str(m["supplier"])[:120]
-                    if not row.generic_name and m.get("generic_name"):
-                        row.generic_name = str(m["generic_name"])[:200]
-                    if not row.cas and m.get("cas"):
-                        row.cas = str(m["cas"])[:32]
-                    if not row.smiles and m.get("smiles"):
-                        row.smiles = str(m["smiles"])
-                    if not row.role and m.get("role"):
-                        row.role = str(m["role"])[:60]
-                    row.mention_count = (row.mention_count or 0) + 1
-                    ids = list(row.source_ids or [])
-                    if source_id and source_id not in ids and len(ids) < _MAX_SOURCE_IDS:
-                        ids.append(source_id)
-                        row.source_ids = ids
-                    row.last_seen = _utcnow()
+                    _apply_mention(row, m, source_id)
                     needs_link = not row.cas and not row.smiles
                 touched += 1
                 if needs_link and link_budget > 0:
                     link_budget -= 1
                     self._link_structure(key, trade, grade, m.get("generic_name") or "")
+            except IntegrityError:
+                with commit_session(self._session_factory) as session:
+                    row = (
+                        session.query(KBProduct).filter(KBProduct.norm_key == key).first()
+                    )
+                    if row is not None:
+                        _apply_mention(row, m, source_id)
+                touched += 1
             except Exception as exc:
                 degrade_return(logger, exc, f"product upsert failed: {trade}", None)
         return touched
@@ -133,13 +158,13 @@ class ProductStore:
             query = session.query(KBProduct)
             term = (q or "").strip()
             if term:
-                like = f"%{term}%"
+                like = f"%{_escape_like(term)}%"
                 query = query.filter(
                     or_(
-                        KBProduct.trade_name.ilike(like),
-                        KBProduct.supplier.ilike(like),
-                        KBProduct.generic_name.ilike(like),
-                        KBProduct.cas.ilike(like),
+                        KBProduct.trade_name.ilike(like, escape="\\"),
+                        KBProduct.supplier.ilike(like, escape="\\"),
+                        KBProduct.generic_name.ilike(like, escape="\\"),
+                        KBProduct.cas.ilike(like, escape="\\"),
                     )
                 )
             return (
@@ -158,7 +183,9 @@ class ProductStore:
             if cas:
                 conds.append(KBProduct.cas == cas)
             if term:
-                conds.append(KBProduct.generic_name.ilike(f"%{term}%"))
+                conds.append(
+                    KBProduct.generic_name.ilike(f"%{_escape_like(term)}%", escape="\\")
+                )
             if not conds:
                 return []
             return (

@@ -8,6 +8,8 @@ crash / redeploy while jobs are in-flight.
 from __future__ import annotations
 
 import logging
+import os
+import socket
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -16,6 +18,15 @@ from sqlalchemy.orm import Session
 from .models import TaskOutbox
 
 logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 5
+
+_worker_id = f"{socket.gethostname()}-{os.getpid()}"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 # ── operation → Celery task mapping ─────────────────────────────────────────
 
@@ -29,6 +40,8 @@ def _dispatch(operation: str, payload: dict) -> None:
         from ..worker.tasks import run_deep_research_task
 
         run_deep_research_task.delay(payload)
+    elif operation == "ingest_complete":
+        logger.info("ingest_complete task acknowledged (payload=%s)", payload)
     else:
         logger.warning(
             "recover_stalled: unknown operation %s — skipped", operation
@@ -74,6 +87,21 @@ def recover_stalled(session: Session, cutoff_minutes: int = 30) -> int:
 
     count = 0
     for row in stalled:
+        if (row.attempt_count or 0) >= MAX_ATTEMPTS:
+            row.status = "DEAD"
+            logger.error(
+                "task %s exceeded max attempts (%d), marking DEAD",
+                row.id,
+                MAX_ATTEMPTS,
+            )
+            session.commit()
+            continue
+
+        row.status = "CLAIMED"
+        row.claimed_by = _worker_id
+        row.claimed_at = _utcnow()
+        session.commit()
+
         try:
             _dispatch(row.operation, row.payload)
         except Exception:
@@ -83,12 +111,26 @@ def recover_stalled(session: Session, cutoff_minutes: int = 30) -> int:
                 row.id,
                 row.operation,
             )
+            try:
+                session.rollback()
+            except Exception:
+                logger.exception("recover_stalled: rollback failed")
+            row = session.get(TaskOutbox, row.id)
+            if row is None:
+                continue
+            # Skipped: reset claim metadata without bumping attempt_count —
+            # only successful dispatches are counted toward MAX_ATTEMPTS.
+            row.status = "PENDING"
+            row.claimed_by = None
+            row.claimed_at = None
+            session.commit()
             continue
 
         row.status = "PENDING"
         row.attempt_count = (row.attempt_count or 0) + 1
         row.claimed_by = None
         row.claimed_at = None
+        session.commit()
         count += 1
 
     if count:

@@ -158,3 +158,10 @@ def _safe_loop(task_id: str, payload: dict) -> None:
         run_loop_iterate_impl(task_id, payload)
     except Exception as exc:
         log_handled_exception(logger, exc, "workbench loop background thread")
+        try:
+            from ..worker.tasks import _persist_terminal, persist_result
+            err = {"error": str(exc)}
+            persist_result(task_id, err, failed=True)
+            _persist_terminal(task_id, "loop", err, failed=True, message=str(exc))
+        except Exception:
+            logger.exception("failed to mark task as failed")

@@ -88,11 +88,8 @@ def _lookup_pubchem(q: str) -> dict[str, Any] | None:
             cas_resp = client.get(cas_url)
             if cas_resp.status_code == 200:
                 cas_data = cas_resp.json()
-                nums = (
-                    (cas_data.get("InformationList") or {})
-                    .get("Information", [{}])[0]
-                    .get("RegistryNumber", [])
-                )
+                info_list = (cas_data.get("InformationList") or {}).get("Information") or [{}]
+                nums = info_list[0].get("RegistryNumber", [])
                 if nums:
                     cas = str(nums[0])
             return {

@@ -31,4 +31,7 @@ STATUS_RANK = {"pass": 0, "warn": 1, "intercept": 2}
 
 def worst_status(statuses: list[str]) -> str:
     """Return the most severe status in the list (defaults to 'pass')."""
-    return max(statuses, key=lambda s: STATUS_RANK.get(s, 0)) if statuses else "pass"
+    if not statuses:
+        return "pass"
+    worst = max(statuses, key=lambda s: STATUS_RANK.get(s, 99))
+    return worst if worst in STATUS_RANK else "intercept"

@@ -294,8 +294,22 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
         raise ValueError("URL must be a public http(s) address")
     import httpx
 
-    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-        resp = client.get(url, headers={"User-Agent": "FormuMind/0.1 (research platform)"})
+    # follow_redirects=False + manual loop: every redirect target is re-checked
+    # with _is_safe_url so an SSRF cannot pivot to an internal host via a 3xx.
+    current_url = url
+    headers = {"User-Agent": "FormuMind/0.1 (research platform)"}
+    with httpx.Client(timeout=20.0, follow_redirects=False) as client:
+        for _hop in range(4):  # initial + up to 3 redirects
+            resp = client.get(current_url, headers=headers)
+            if resp.is_redirect:
+                location = resp.headers.get("location")
+                if not location:
+                    break
+                current_url = str(httpx.URL(current_url).join(location))
+                if not _is_safe_url(current_url):
+                    raise ValueError(f"Redirect target not allowed: {current_url}")
+                continue
+            break
         resp.raise_for_status()
         content_type = (resp.headers.get("content-type") or "").lower()
         body = resp.content

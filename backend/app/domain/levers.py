@@ -4,10 +4,13 @@ from __future__ import annotations
 from .schemas import LeverSpec, ProductDomain, Requirement, Substrate
 
 # Surface-treatment levers for light metals: concentration (g/L) + process parameters.
+# g/L ranges are scaled so that, after the ×0.1 wt% conversion in reconstruct,
+# they span the baseline template values (Hexafluorozirconic acid 1.2 wt%,
+# APTES 0.8 wt%, Cerium nitrate 0.5 wt%) with room to explore either side.
 _LIGHT_METAL_ST_LEVERS: list[tuple[str, float, float, str]] = [
-    ("Hexafluorozirconic acid", 0.5, 3.0, "g/L"),
-    ("(3-Aminopropyl)triethoxysilane (APTES)", 0.2, 2.0, "g/L"),
-    ("Cerium nitrate", 0.1, 1.5, "g/L"),
+    ("Hexafluorozirconic acid", 5.0, 30.0, "g/L"),
+    ("(3-Aminopropyl)triethoxysilane (APTES)", 2.0, 20.0, "g/L"),
+    ("Cerium nitrate", 1.0, 15.0, "g/L"),
     ("immersion_time_min", 30.0, 300.0, "min"),
     ("bath_temperature_c", 20.0, 70.0, "C"),
 ]

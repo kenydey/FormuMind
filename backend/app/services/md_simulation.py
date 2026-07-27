@@ -133,10 +133,17 @@ def fetch_simulation_result(job_id: str, job_dir: str | None = None) -> dict[str
             last_thermo = parts
             break
 
+    temp = None
+    if last_thermo and len(last_thermo) > 1:
+        try:
+            temp = float(last_thermo[1])
+        except (ValueError, TypeError):
+            temp = None
+
     return {
         "job_id": job_id,
         "status": "completed" if last_thermo else "running",
         "last_step": int(last_thermo[0]) if last_thermo else None,
-        "temperature_k": float(last_thermo[1]) if last_thermo and len(last_thermo) > 1 else None,
+        "temperature_k": temp,
         "engine": "lammps-htpolynet",
     }

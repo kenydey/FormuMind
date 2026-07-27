@@ -25,7 +25,7 @@ import numpy as np
 
 from ..config import get_settings
 from ..domain import features
-from ..domain.schemas import ExperimentRecord, ModelInfo, ProductDomain
+from ..domain.schemas import ExperimentRecord, ModelInfo, ProductDomain, Requirement, Substrate
 from ..pipeline import reconstruct  # lightweight: form-from-factors, no cycle
 
 
@@ -197,7 +197,14 @@ class ModelRegistry:
             rec_pid = rec.project_id or rec.domain.value
             if project_id and rec_pid not in (pid, domain.value, ""):
                 continue
-            form = reconstruct.formulation_from_factors(rec.domain, rec.factors)
+            req = Requirement(domain=rec.domain)
+            sub_raw = rec.factors.get("substrate")
+            if sub_raw is not None:
+                try:
+                    req.substrate = Substrate(str(sub_raw))
+                except Exception:
+                    pass
+            form = reconstruct.formulation_from_factors(req, rec.factors)
             process = {"cure_temperature_c": rec.cure_temperature_c or 0.0}
             rows.append(features.vector(form, process))
             ys.append(rec.measured[metric])

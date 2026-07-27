@@ -19,7 +19,7 @@ def _physical_limit_checks(
     flags: list[AnomalyFlag] = []
 
     if metric == "salt_spray_hours" and req.domain == ProductDomain.anticorrosion_coating:
-        target = float(req.salt_spray_hours or 500)
+        target = float(req.salt_spray_hours) if req.salt_spray_hours is not None else 500.0
         upper = max(2500.0, target * 4.0)
         if actual > upper:
             flags.append(

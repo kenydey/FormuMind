@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..domain.schemas import Requirement
 from ..worker.tasks import run_optimize_task
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api", tags=["optimize"])
 
 class OptimizeRequest(BaseModel):
     requirement: Requirement
-    iterations: int | None = None
+    iterations: int | None = Field(default=None, ge=1, le=1000)
     engine: str = "auto"
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None

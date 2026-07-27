@@ -206,7 +206,7 @@ def _build_scenario_picks(
 
     if "best_performance" in kinds and objectives:
         metric = objectives[0].metric
-        best = max(frontier, key=lambda c: c.predicted.get(metric, float("-inf")))
+        best = max(frontier, key=lambda c: (c.predicted.get(metric) if c.predicted.get(metric) is not None else float("-inf")))
         val = best.predicted.get(metric)
         picks.append(
             ScenarioPick(

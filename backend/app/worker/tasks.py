@@ -573,7 +573,7 @@ def run_search_task(self, payload: dict) -> dict:
                 data=data,
             )
 
-        final, filter_report = literature.iter_search(
+        iter_result = literature.iter_search(
             query,
             source_types,
             req=req,
@@ -581,6 +581,12 @@ def run_search_task(self, payload: dict) -> dict:
             per_source_cap=payload.get("per_source_cap", 50),
             progress_cb=progress,
         )
+        # iter_search returns (evidence_list, filter_report); accept a bare
+        # list too for backward compatibility with mocks / older callers.
+        if isinstance(iter_result, tuple):
+            final, filter_report = iter_result
+        else:
+            final, filter_report = list(iter_result), {}
         status = {k: v for k, v in literature.get_source_availability().items()}
         data = {
             "evidence": [e.model_dump() for e in final],

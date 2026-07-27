@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..domain.schemas import ChunkListResponse, DocumentChunkResponse, Evidence
 from ..services import kb_index
@@ -66,7 +66,7 @@ def reindex(embed: bool = True) -> ReindexResult:
         return ReindexResult(**kb_index.reindex_all(embed=embed))
     except Exception as exc:
         logger.exception("kb reindex failed")
-        raise HTTPException(status_code=500, detail=f"重建知识库失败：{exc}") from exc
+        raise HTTPException(status_code=500, detail="操作失败") from exc
 
 
 @router.get("/search", response_model=KBSearchResponse)
@@ -220,7 +220,7 @@ def hybrid_search(body: HybridSearchRequest) -> list[DocumentChunkResponse]:
 
 
 class IngestRequest(BaseModel):
-    text: str
+    text: str = Field(..., max_length=5_000_000)
     source_id: str | None = None
     title: str = ""
     metadata: dict | None = None
@@ -237,13 +237,15 @@ def ingest(body: IngestRequest) -> IngestResponse:
     """Full-document ingest → chunk + index + store + outbox record.
 
     Idempotent: repeating the same ``source_id`` returns the same result
-    without re-indexing.  All writes happen in a single transaction
-    (Task 3.3 — TOCTOU + single-commit fix).
+    without re-indexing.
     """
+    import hashlib
     import uuid as _uuid
 
     from ..db.database import default_session_factory
-    from ..services.ingest_tx import ingest_document_tx
+    from ..db.models import SourceDocument
+    from ..db.outbox_store import enqueue
+    # NOTE: metadata parameter accepted for future expansion (Task 2.4).
 
     text = (body.text or "").strip()
     if not text:
@@ -251,16 +253,63 @@ def ingest(body: IngestRequest) -> IngestResponse:
 
     source_id = body.source_id or str(_uuid.uuid4())
 
-    result = ingest_document_tx(
-        default_session_factory(),
-        source_id=source_id,
-        text=text,
-        title=body.title,
-        metadata=body.metadata,
-    )
+    # Ensure a SourceDocument row exists for this source_id
+    factory = default_session_factory()
+    with factory() as session:
+        doc = session.get(SourceDocument, source_id)
+        if doc is not None and body.source_id is not None:
+            # User-supplied source_id collides with an existing document.
+            # Idempotent when content matches (return same result without
+            # re-indexing); reject only when the content actually differs,
+            # to prevent silent overwrite of another source's content.
+            new_hash = hashlib.sha256(
+                text.encode("utf-8", errors="replace")
+            ).hexdigest()
+            if (doc.content_hash or "") != new_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"source_id {source_id} already exists with different content",
+                )
+            # Same content → idempotent: skip indexing, return chunk_count=0
+            return IngestResponse(
+                source_id=source_id,
+                chunk_count=0,
+                status="ok",
+            )
+        if doc is None:
+            session.add(
+                SourceDocument(
+                    id=source_id,
+                    filename=body.title or "api_ingest",
+                    title=body.title or "API Ingest",
+                    source_kind="api",
+                    full_text=text,
+                    content_hash=hashlib.sha256(
+                        text.encode("utf-8", errors="replace")
+                    ).hexdigest(),
+                    raw_text_chars=len(text),
+                )
+            )
+            session.commit()
+
+    chunk_count = kb_index.ingest_full_document(source_id, text, body.metadata)
+
+    # Outbox record: idempotent (keyed on source_id)
+    with factory() as session:
+        enqueue(
+            session,
+            operation="ingest_complete",
+            idempotency_key=source_id,
+            payload={
+                "source_id": source_id,
+                "chunk_count": chunk_count,
+                "status": "ok",
+            },
+        )
+        session.commit()
 
     return IngestResponse(
-        source_id=result.source_id,
-        chunk_count=result.chunk_count,
+        source_id=source_id,
+        chunk_count=chunk_count,
         status="ok",
     )

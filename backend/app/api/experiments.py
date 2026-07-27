@@ -129,27 +129,32 @@ async def import_experiments_csv(
 ) -> TrainingReport:
     """Import a filled-in DOE/experiment CSV (the worksheet produced by
     ``GET /api/doe/{plan_id}/export``) and (optionally) retrain models."""
-    raw = await file.read()
     try:
-        text = raw.decode("utf-8-sig")  # tolerate Excel's UTF-8 BOM
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1")
-    try:
-        records = io_export.csv_to_records(text, default_domain=domain)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if not records:
-        raise HTTPException(status_code=422, detail="No rows with measured values found in the CSV.")
+        raw = await file.read()
+        if len(raw) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+        try:
+            text = raw.decode("utf-8-sig")  # tolerate Excel's UTF-8 BOM
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1")
+        try:
+            records = io_export.csv_to_records(text, default_domain=domain)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not records:
+            raise HTTPException(status_code=422, detail="No rows with measured values found in the CSV.")
 
-    registry.add(records, retrain=retrain)
-    trained = registry.info()
-    msg = (
-        f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
-        f"{len(trained)} model(s) active."
-    )
-    if not trained:
-        msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
-    return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
+        registry.add(records, retrain=retrain)
+        trained = registry.info()
+        msg = (
+            f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
+            f"{len(trained)} model(s) active."
+        )
+        if not trained:
+            msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
+        return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
+    finally:
+        await file.close()
 
 
 @router.post("/train", response_model=TrainingReport)
@@ -173,6 +178,8 @@ async def create_workbench_campaign(
     payload: CreateWorkbenchCampaignRequest,
 ) -> WorkbenchCampaignResponse:
     """Seed a campaign + pending rows from a generated DOE plan (Datalab samples)."""
+    # TODO: 添加 owner 校验 — 单 token 模式下暂无法实现，迁移到多用户后需校验
+    # payload.project_id 归属当前调用者。
     store = get_campaign_store()
     campaign = await store.create_from_plan(
         payload.plan,
@@ -189,6 +196,7 @@ async def create_workbench_campaign(
 async def get_workbench_campaign(
     campaign_id: int,
 ) -> WorkbenchCampaignResponse:
+    # TODO: 添加 owner 校验 — 校验 campaign_id 归属当前调用者。
     store = get_campaign_store()
     campaign = await store.get_campaign(campaign_id)
     if campaign is None:
@@ -202,6 +210,7 @@ async def sync_workbench(
     payload: BatchUpdateRequest,
 ) -> WorkbenchSyncResponse:
     """Batch-update workbench rows from AG Grid edits (forwarded to Datalab)."""
+    # TODO: 添加 owner 校验 — 校验 payload.campaign_id 归属当前调用者。
     store = get_campaign_store()
     if await store.get_campaign(payload.campaign_id) is None:
         raise HTTPException(status_code=404, detail="Campaign not found")

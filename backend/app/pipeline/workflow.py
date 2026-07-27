@@ -94,9 +94,7 @@ def _score_and_validate(
             form.score = float(form.predicted.get(metric, 0.0))
         else:
             objectives = req.objectives
-            bounds: dict[str, tuple[float, float]] = {}
-            for metric, val in form.predicted.items():
-                bounds[metric] = (val * 0.5, val * 1.5) if val > 0 else (0.0, 1.0)
+            bounds = predictor.default_bounds(objectives, form)
             form.score = float(predictor.multi_objective_score(form, objectives, process, bounds))
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
@@ -298,22 +296,24 @@ def run_optimization(
     process = process_for(req)
     history: list[float] = []
     best_so_far = float("-inf")
-    # Dynamic bounds for multi-objective normalisation: seeded from the baseline.
-    bounds: dict[str, tuple[float, float]] = {}
-    base_props = predictor.predict(base, process)
-    for metric, val in base_props.items():
-        bounds[metric] = (val * 0.5, val * 1.5) if val > 0 else (0.0, 1.0)
+    # Bounds seeded from objective ref ranges (or sensible defaults), not from a
+    # single formulation's predicted values (which would collapse scores to ~0.5).
+    bounds = predictor.default_bounds(objectives, base)
 
     for it in range(iterations):
         x = opt.suggest()
         values = {f.name: v for f, v in zip(factors, x)}
         form = _apply_levers(req, values)
-        props = predictor.predict(form, process)
+        process_it = dict(process)
+        for k, v in values.items():
+            if k in ("cure_temperature_c", "cure_time_min"):
+                process_it[k] = v
+        props = predictor.predict(form, process_it)
         # Expand running bounds.
         for metric, val in props.items():
             lo, hi = bounds.get(metric, (val, val))
             bounds[metric] = (min(lo, val), max(hi, val))
-        score = predictor.multi_objective_score(form, objectives, process, bounds)
+        score = predictor.multi_objective_score(form, objectives, process_it, bounds)
         opt.observe(x, score)
         best_so_far = max(best_so_far, score)
         history.append(round(best_so_far, 3))
@@ -323,7 +323,11 @@ def run_optimization(
     top: list[Formulation] = []
     for x, score in opt.ranked(settings.top_n_formulas):
         values = {f.name: v for f, v in zip(factors, x)}
-        form = _score_and_validate(_apply_levers(req, values), process, req)
+        top_process = dict(process)
+        for k, v in values.items():
+            if k in ("cure_temperature_c", "cure_time_min"):
+                top_process[k] = v
+        form = _score_and_validate(_apply_levers(req, values), top_process, req)
         form.name = f"Optimized {req.domain.value} (score {score:.3f})"
         top.append(form)
     return OptimizationResult(

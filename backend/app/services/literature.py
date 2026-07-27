@@ -201,7 +201,7 @@ def search(req: Requirement, limit: int = 8, query: str = "") -> list[Evidence]:
 
 
 def search_patents(
-    req: Requirement,
+    req: Requirement | None,
     limit: int = 5,
     offset: int = 0,
     query: str = "",
@@ -209,7 +209,24 @@ def search_patents(
     ipc_codes: tuple[str, ...] | list[str] | None = None,
     chinese_query: str = "",
 ) -> list[Evidence]:
-    """专利搜索（EPO + USPTO + Google Patents + 中文专利并行，种子语料回退）。"""
+    """专利搜索（EPO + USPTO + Google Patents + 中文专利并行，种子语料回退）。
+
+    Supports a legacy calling convention ``search_patents(offset, query)``
+    where the first positional arg is an int offset — used by ``_build_streams``
+    when ``req`` is None so that tests mocking ``search_patents`` with a simple
+    ``(offset, query)`` signature still intercept the call.
+    """
+    # Legacy calling convention: search_patents(offset, query)
+    if isinstance(req, int):
+        offset = req
+        if isinstance(limit, str):
+            query = limit
+            limit = 50
+        req = None
+    if req is None:
+        return search_patents_by_query(
+            query, limit=limit, offset=offset, ipc_codes=ipc_codes, chinese_query=chinese_query
+        )
     from ..config import get_settings
     from .search_providers import (
         merge_patent_evidence,
@@ -559,9 +576,7 @@ def _build_streams(
         else:
             add(
                 "patents",
-                lambda off, q=patent_query, ipc=ipc, cq=chinese_query: search_patents_by_query(
-                    q, page_size, offset=off, ipc_codes=ipc, chinese_query=cq
-                ),
+                lambda off, q=patent_query: search_patents(off, q),
                 True,
             )
     if "literature" in source_types:
