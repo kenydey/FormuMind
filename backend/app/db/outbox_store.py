@@ -10,6 +10,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import TaskOutbox
@@ -21,8 +22,13 @@ def enqueue(
     """Ensure one outbox row for *operation* × *idempotency_key*.
 
     If a matching row already exists, return ``(id, existing_status)``
-    without inserting.  Otherwise insert a new ``PENDING`` row and
+    without inserting.  Otherwise insert a new ``PENDING`` row, flush
+    (not commit — the caller owns the transaction boundary), and
     return ``(id, "PENDING")``.
+
+    Concurrent enqueues for the same key are resolved by the DB unique
+    constraint: the loser rolls back the failed INSERT and re-selects the
+    now-existing row to preserve idempotency.
 
     Returns:
         ``(task_id: str, status: str)`` — status may differ from
@@ -45,7 +51,18 @@ def enqueue(
         payload=payload,
     )
     session.add(row)
-    session.commit()
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        existing = session.execute(
+            select(TaskOutbox).filter_by(
+                operation=operation, idempotency_key=idempotency_key,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.id, existing.status
+        raise
     return row.id, "PENDING"
 
 
