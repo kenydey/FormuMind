@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ..domain.schemas import ChunkListResponse, DocumentChunkResponse, Evidence
 from ..services import kb_index
@@ -23,6 +23,13 @@ class HybridSearchRequest(BaseModel):
     query: str
     top_k: int = 10
     alpha: float = 0.3
+
+    @field_validator("alpha")
+    @classmethod
+    def _validate_alpha(cls, v: float) -> float:
+        if v < 0.0 or v > 1.0:
+            raise ValueError(f"alpha must be in [0, 1], got {v}")
+        return v
 
 
 class KBStats(BaseModel):

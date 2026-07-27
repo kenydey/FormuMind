@@ -13,6 +13,7 @@ import logging
 import numpy as np
 from rank_bm25 import BM25Okapi
 
+from ..config import get_settings
 from ..domain.schemas import DocumentChunkResponse
 from . import kb_index
 from .errors import degrade_return
@@ -21,7 +22,21 @@ logger = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> list[str]:
-    return (text or "").lower().split()
+    """Tokenize text for BM25, using jieba for Chinese when available."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    # Detect if text contains CJK characters
+    has_cjk = any("\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf" for c in text)
+    if has_cjk:
+        try:
+            import jieba
+
+            return list(jieba.cut(text))
+        except ImportError:
+            logger.warning("jieba not installed; falling back to character-level tokenization for Chinese")
+            return list(text)
+    return text.lower().split()
 
 
 def hybrid_search(
@@ -46,13 +61,18 @@ def hybrid_search(
     list[DocumentChunkResponse]
         Ranked chunks, or [] when the corpus is empty / KB is disabled.
     """
+    if alpha < 0.0 or alpha > 1.0:
+        raise ValueError(f"alpha must be in [0, 1], got {alpha}")
+
     if not kb_index.kb_enabled() or not (query or "").strip() or top_k <= 0:
         return []
 
     try:
         from ..db.chunk_store import get_chunk_store
 
-        chunks = get_chunk_store().all_chunks()
+        chunks = get_chunk_store().all_chunks(
+            limit=get_settings().kb_search_scan_limit,
+        )
         if not chunks:
             return []
 
