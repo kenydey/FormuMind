@@ -40,6 +40,7 @@ def make_engine(db_url: str) -> Engine:
     _ensure_campaign_columns(engine)
     _ensure_source_document_columns(engine)
     _ensure_kb_entity_link_columns(engine)
+    _ensure_material_columns(engine)
     return engine
 
 
@@ -99,6 +100,15 @@ def _ensure_kb_entity_link_columns(engine: Engine) -> None:
         engine,
         "kb_entity_links",
         ("metadata_json", "is_valid", "extraction_method", "updated_at"),
+    )
+
+
+def _ensure_material_columns(engine: Engine) -> None:
+    """只读守护：materials 表必须具备替代/采购元数据列。"""
+    _require_columns(
+        engine,
+        "materials",
+        ("norm_key", "name", "origin", "availability", "functional_class"),
     )
 
 

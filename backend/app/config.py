@@ -275,6 +275,11 @@ class Settings(BaseSettings):
     # kb_products 产品登记簿。
     chem_extract_enabled: bool = True
     product_extract_enabled: bool = True
+
+    # 材料空间：把 RAW_MATERIALS 从模块字面量升级为 materials 表，使成分选择
+    # 可在运行时扩展（手工录入 / 从 kb_products 提升），并为逆向设计与材料替代
+    # 提供候选池。关闭时 RAW_MATERIALS 退回纯种子字面量，行为与升级前一致。
+    material_store_enabled: bool = True
     # 图片结构化解析（VLM）：上传图片→表格 Markdown / 分子结构图→SMILES（RDKit 验证）。
     # 复用当前激活的 LLM 供应商；vision_model 为空时用当前模型（需具备视觉能力）。
     vision_extract_enabled: bool = True

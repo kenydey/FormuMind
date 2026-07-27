@@ -136,6 +136,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("product_extract_enabled", "商业产品识别",
             "识别商品牌号/供应商（规则+LLM 源摘要），聚合入产品登记簿反哺问答与推荐。",
             "chem"),
+    EnvFlag("material_store_enabled", "材料空间（可扩展原料库）",
+            "原料库从内置字面量升级为可增长的 materials 表：支持手工录入、"
+            "从文献产品登记簿提升，并为逆向设计与材料替代提供候选池。",
+            "chem", "关闭后退回内置 32 种原料，行为与升级前一致"),
     EnvFlag("vision_extract_enabled", "图片视觉解析",
             "上传图片经视觉大模型结构化：表格→Markdown、分子结构图→SMILES（RDKit 验证）。",
             "chem", "需具备视觉能力的 LLM（FORMUMIND_VISION_MODEL 可指定专用模型）"),

@@ -155,6 +155,72 @@ class DocumentChunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class MaterialRow(Base):
+    """A raw material available to formulation search.
+
+    Persists the curated ``knowledge.RAW_MATERIALS`` catalog and everything
+    added on top of it at runtime — manual entries and trade products promoted
+    out of ``kb_products``. Making the catalog data rather than a module literal
+    is what lets ingredient *choice* become a search variable: inverse design
+    and substitution both need a candidate pool that can grow.
+
+    ``origin`` records provenance (``seed`` / ``user`` / ``kb_promoted``) so the
+    curated 32 can always be told apart from harvested ones.
+
+    NULL columns are omitted when converting back to a spec dict — absence is
+    semantically distinct from None for several consumers (e.g. ``carrier``
+    defaults to "both" via ``.get(k, default)``, which a stored None would break).
+    """
+
+    __tablename__ = "materials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # Normalized name, for idempotent upserts and case-insensitive lookup.
+    norm_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    # Display name — the catalog key callers index RAW_MATERIALS by.
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    role: Mapped[str] = mapped_column(String(60), default="")
+    origin: Mapped[str] = mapped_column(String(16), default="seed", index=True)
+
+    # ── curated chemistry (mirrors the seed literal) ──
+    formula: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    smiles: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cas_no: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    zh_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    molar_mass: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_cny_per_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    voc_contrib: Mapped[float | None] = mapped_column(Float, nullable=True)
+    density_gcm3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    oil_absorption: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tg_k: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lab: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    svhc: Mapped[bool | None] = mapped_column(nullable=True)
+    carrier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    water_compatible: Mapped[bool | None] = mapped_column(nullable=True)
+
+    # ── substitution / sourcing metadata (new in the material space) ──
+    # Chemical family within a role ("epoxy", "isocyanate", "amine", "phosphate",
+    # "silane"…) — the first filter when looking for a drop-in replacement.
+    functional_class: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    # Epoxy equivalent weight / amine value: needed to re-balance a swap.
+    equivalent_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Hansen solubility parameters (MPa^0.5) — compatibility distance.
+    hansen_d: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hansen_p: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hansen_h: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hlb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    supplier: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # in_stock | restricted | discontinued — drives supply-disruption alerts.
+    availability: Mapped[str] = mapped_column(String(16), default="in_stock", index=True)
+    regulatory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Hand-tagged interchangeable group; members are drop-in for one another.
+    substitute_group: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class KBProduct(Base):
     """Corpus-level registry of commercial chemical products (trade names).
 

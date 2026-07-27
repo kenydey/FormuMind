@@ -11,6 +11,7 @@ production specifications.
 """
 from __future__ import annotations
 
+from .material_catalog import MaterialCatalog
 from .schemas import Formulation, Ingredient, ProductDomain, Requirement, Substrate
 
 # --- Raw material library ------------------------------------------------
@@ -28,7 +29,12 @@ from .schemas import Formulation, Ingredient, ProductDomain, Requirement, Substr
 #         carrier ("aqueous" | "solvent" | "both") — solvent-carrier components
 #         (e.g. water-insoluble blocked isocyanates) are intercepted by the
 #         Chemist Agent when used in a waterborne system. Absent → "both".
-RAW_MATERIALS: dict[str, dict] = {
+#
+# This literal is the *seed*. ``RAW_MATERIALS`` below wraps it in a
+# MaterialCatalog so runtime additions (manual entries, trade products promoted
+# out of the KB) join the same mapping. Seed entries keep this declaration order
+# and stay in front — several call sites scan first-match-wins or slice.
+_SEED_MATERIALS: dict[str, dict] = {
     # Resins / film formers (anti-corrosion)
     "Bisphenol-A epoxy (DGEBA)": {
         "role": "resin", "formula": "C21H24O4",
@@ -213,6 +219,12 @@ RAW_MATERIALS: dict[str, dict] = {
         "price_cny_per_kg": 85.0, "voc_contrib": 0.55,
     },
 }
+
+# The catalog callers actually use: seed materials (in the order above) plus
+# anything persisted in the ``materials`` table. Behaves as a plain dict — see
+# material_catalog.MaterialCatalog for the compatibility contract. With the
+# store disabled or unavailable this *is* _SEED_MATERIALS.
+RAW_MATERIALS: MaterialCatalog = MaterialCatalog(_SEED_MATERIALS)
 
 # Trade-name / grade aliases → canonical RAW_MATERIALS key (case-insensitive lookup).
 TRADE_ALIASES: dict[str, str] = {

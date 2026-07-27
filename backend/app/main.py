@@ -27,6 +27,7 @@ from .api import intent as intent_router
 from .api import agents as agents_router
 from .api import dependencies as dependencies_router
 from .api import kb as kb_router
+from .api import materials as materials_router
 from .api import kg as kg_router
 from .api import notebooklm as notebooklm_router
 from .api import meta as meta_router
@@ -101,12 +102,26 @@ async def lifespan(_app: FastAPI):
             colbert_store.bootstrap_seed_corpus()
         except Exception as exc:
             log_handled_exception(logger, exc, "lifespan: ColBERT bootstrap failed")
+        if settings.material_store_enabled:
+            try:
+                from .db.material_store import get_material_store
+                from .domain.knowledge import RAW_MATERIALS, _SEED_MATERIALS
+
+                get_material_store().seed_missing(_SEED_MATERIALS)
+                RAW_MATERIALS.refresh()
+            except Exception as exc:
+                log_handled_exception(logger, exc, "lifespan: material seed failed")
         if settings.enrich_compounds:
             try:  # pragma: no cover - opt-in network path
                 from .domain.knowledge import RAW_MATERIALS
                 from .services.compounds import enrich_materials
 
-                enrich_materials(RAW_MATERIALS)
+                enriched = enrich_materials(RAW_MATERIALS)
+                # enrich_materials mutates the spec dicts in place; persist so
+                # the backfilled SMILES survive a restart instead of costing a
+                # PubChem round-trip on every boot.
+                if enriched and settings.material_store_enabled:
+                    RAW_MATERIALS.persist_all()
             except Exception as exc:
                 log_handled_exception(logger, exc, "lifespan: PubChem enrichment failed")
     try:
@@ -161,6 +176,7 @@ app.include_router(search_router.router, prefix="/api")
 app.include_router(ingest_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(kb_router.router, prefix="/api")
+app.include_router(materials_router.router, prefix="/api")
 app.include_router(kg_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(qc_router.router, prefix="/api")
