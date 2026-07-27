@@ -190,3 +190,29 @@ def test_reconcile_skips_claimed(session: Session, monkeypatch: pytest.MonkeyPat
     assert result["missing"] == 0
     assert result["errors"] == 0
     assert result["skipped"] == 0
+
+
+def test_reconcile_httpx_error_increments_errors(
+    session: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """httpx.RequestError (timeout/connect) → errors count, not an exception."""
+    def _raise(*args, **kwargs):
+        raise httpx.ConnectError("simulated connection failure")
+
+    _mock_client(monkeypatch, _raise)
+
+    row = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key=str(uuid.uuid4()),
+        payload={"experiment_id": "exp-err"},
+        status="CONFIRMED",
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    session.add(row)
+    session.commit()
+
+    result = rec_mod.reconcile(session, "http://datalab.test")
+    assert result["matched"] == 0
+    assert result["errors"] == 1

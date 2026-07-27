@@ -6,6 +6,14 @@ Headless ELN (``GET /get-item-data/formumind_exp_{experiment_id}`` → 200).
 
 This is a lightweight detection-only script; it does not auto-repair.
 PENDING / CLAIMED rows are ignored — they represent in-flight work.
+
+.. note::
+
+   **Scaffolding notice.**  The ``CONFIRMED`` status transition and
+   ``experiment_id`` payload field are not yet populated by any production
+   code — those are scheduled for a follow-up phase.  Until then this
+   script is only exercised by its own test suite and will return all‑zero
+   results against a production database.
 """
 
 from __future__ import annotations
