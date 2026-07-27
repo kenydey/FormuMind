@@ -237,7 +237,7 @@ class DeepResearchEngine:
             engine=state.get("recommend_engine") or "offline",
             verified_claims=state.get("verified_claims") or [],
             claim_check_engine="offline",
-            claim_check_pass_rate=float(state.get("claim_check_pass_rate") or 1.0),
+            claim_check_pass_rate=float((_rate if (_rate := state.get("claim_check_pass_rate")) is not None else 1.0)),
         )
 
 

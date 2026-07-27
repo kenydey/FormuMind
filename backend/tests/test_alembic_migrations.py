@@ -7,7 +7,7 @@ Covers three guarantees:
    every new column and loses the legacy table after ``alembic upgrade head``.
 2. A *fresh* database (baseline 0001 already contains all columns) runs the
    same upgrade chain silently — every post-baseline migration is a no-op.
-3. The revision chain is linear and ends at head ``0006``.
+3. The revision chain is linear and ends at head ``0009``.
 
 The Alembic-invocation helper lives in ``tests/alembic_helpers.py`` (Task
 0.2b-2) and is shared with the other migration-oriented suites.
@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0007(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head at revision ``0007``."""
+def test_revision_chain_head_is_0009(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head at revision ``0009``."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0007(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0007"
+    assert heads[0] == "0009"
 
 
 def test_migrations_partial_columns_branch(

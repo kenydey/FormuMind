@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import tempfile
 
+import pytest
+
 os.environ.setdefault("FORMUMIND_API_AUTH_ENABLED", "false")
 os.environ.setdefault("FORMUMIND_ENVIRONMENT", "test")
 # Test speed-up: skip heavy lifespan bootstrap (ColBERT seed corpus, settings
@@ -19,3 +21,16 @@ os.environ.setdefault(
     "FORMUMIND_ENV_FILE",
     os.path.join(tempfile.mkdtemp(prefix="formumind-test-env-"), ".env"),
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits_before_test():
+    """Clear in-memory rate-limit buckets so tests start from a clean state."""
+    try:
+        from app.middleware.rate_limit import reset_rate_limits
+
+        reset_rate_limits()
+    except Exception:
+        pass
+    yield
+

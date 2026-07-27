@@ -79,8 +79,9 @@ def _offline_parse(text: str) -> IntentResult:
     low = text.lower()
     extracted: list[str] = []
 
-    domain = _detect_domain(text) or ProductDomain.anticorrosion_coating
-    if _detect_domain(text) is not None:
+    detected = _detect_domain(text)
+    domain = detected or ProductDomain.anticorrosion_coating
+    if detected is not None:
         extracted.append("domain")
 
     substrate = _detect_substrate(text)
@@ -157,7 +158,7 @@ def _build_intent_prompt(text: str) -> str:
     return f"""You convert a coating / surface-treatment R&D brief into structured fields.
 
 Brief:
-{text}
+<user_input>{text}</user_input>
 
 Return ONLY a JSON object with these keys (omit a key if not stated):
 {{

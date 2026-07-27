@@ -6,8 +6,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+import logging
+import re
 import uuid
 
 from ..domain.schemas import ActiveDoeResult, BaybeRecommendResult, DOEPlan, ExperimentRecord, Requirement
@@ -15,6 +17,8 @@ from ..pipeline import workflow
 from ..services import io_export
 from ..services.active_learning import active_learning_doe
 from ..services.engines.baybe_engine import BaybeCampaignEngine
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["doe"])
 
@@ -35,8 +39,8 @@ def _persist_doe_plan(plan: DOEPlan) -> None:
         with factory() as session:
             doe_plan_store.save(session, plan)
             session.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("persist doe plan failed: %s", exc, exc_info=True)
 
 
 def _persist_run_record(
@@ -79,8 +83,8 @@ def _persist_run_record(
                 payload=payload,
             )
             session.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("persist run record failed: %s", exc, exc_info=True)
 
 
 @router.post("/doe", response_model=DOEPlan)
@@ -115,7 +119,7 @@ class ActiveDoeRequest(Requirement):
     """Request body for active-learning DOE: extends Requirement with optional fields."""
 
     existing_records: list[ExperimentRecord] = []
-    n_suggest: int = 4
+    n_suggest: int = Field(default=4, ge=1, le=50)
     doe_design: str = "lhs"
     engine: str = "auto"
     doe_engine: str = "auto"
@@ -128,7 +132,7 @@ class BaybeRecommendRequest(Requirement):
     """Stateless baybe recommend roundtrip."""
 
     existing_records: list[ExperimentRecord] = []
-    batch_size: int = 4
+    batch_size: int = Field(default=4, ge=1, le=50)
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None
     budget_remaining: int | None = None
@@ -207,7 +211,8 @@ def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -
         raise HTTPException(status_code=404, detail=f"DOE plan {plan_id} not found (regenerate it).")
 
     metrics = [workflow.OBJECTIVE[plan.domain]] if plan.domain else []
-    filename = f"doe_{plan.design}_{plan_id[:8]}"
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", plan_id)[:8]
+    filename = f"doe_{plan.design}_{safe_id}"
 
     if format == "csv":
         body = io_export.plan_to_csv(plan, metrics)
@@ -220,7 +225,8 @@ def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -
     try:
         data = io_export.plan_to_xlsx(plan, metrics)
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        logger.exception("doe export xlsx failed")
+        raise HTTPException(status_code=503, detail="DOE操作失败") from exc
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

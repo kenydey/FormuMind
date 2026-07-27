@@ -114,7 +114,7 @@ def loop_iterate(
     model_info, rmse = _rmse_by_metric(req.domain)
 
     history = list(prior_rmse_history or [])
-    full_history = history + [rmse] if rmse else history
+    full_history = history + [rmse] if rmse is not None else history
     converged = (
         settings.loop_convergence_enabled
         and rmse

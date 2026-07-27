@@ -103,8 +103,11 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
 
 
 def amine_epoxy_ratio(form: Formulation) -> float | None:
-    """Crude resin:hardener equivalent ratio used as a cross-link-density proxy
-    for two-component anti-corrosion systems. Returns None when not applicable.
+    """Resin:hardener mass ratio (NOT an equivalent/amine-epoxy ratio) used as a
+    cross-link-density proxy for two-component anti-corrosion systems. Returns
+    None when not applicable. The name is kept for backward compatibility with
+    callers and trained-model feature vectors; see ``resin_hardener_ratio`` in
+    ``features.py`` for the canonical feature key.
     """
     resin = sum(i.weight_pct for i in form.ingredients if i.role == "resin")
     hardener = sum(i.weight_pct for i in form.ingredients if i.role == "hardener")
@@ -180,7 +183,7 @@ def cpvc(form: Formulation) -> float | None:
     """
     from .knowledge import RAW_MATERIALS
 
-    oa_w = rho_w = mass = 0.0
+    oa_w = vol_inv = mass = 0.0
     for ing in form.ingredients:
         if ing.role not in _PIGMENT_ROLES:
             continue
@@ -188,11 +191,13 @@ def cpvc(form: Formulation) -> float | None:
         if oa is None:
             return None
         oa_w += oa * ing.weight_pct
-        rho_w += _density_gcm3(ing.name, ing.role) * ing.weight_pct
+        rho = _density_gcm3(ing.name, ing.role)
+        vol_inv += ing.weight_pct / rho if rho > 0 else 0.0
         mass += ing.weight_pct
-    if mass <= 0:
+    if mass <= 0 or vol_inv <= 0:
         return None
-    oa_avg, rho_avg = oa_w / mass, rho_w / mass
+    oa_avg = oa_w / mass
+    rho_avg = mass / vol_inv  # harmonic mean: total mass / total volume
     cpvc_frac = 1.0 / (1.0 + oa_avg * rho_avg / 93.5)
     return round(100.0 * cpvc_frac, 2)
 

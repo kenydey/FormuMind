@@ -51,7 +51,7 @@ def rebuild(body: KGRebuildBody | None = None) -> KGRebuildReport:
         return rebuild_all(project_id=pid)
     except Exception as exc:
         logger.exception("kg rebuild failed")
-        raise HTTPException(status_code=500, detail=f"重建知识图谱失败：{exc}") from exc
+        raise HTTPException(status_code=500, detail="操作失败") from exc
 
 
 @router.post("/link-source/{source_id}", response_model=KGLinkReport)
@@ -62,7 +62,7 @@ def link_one_source(source_id: str) -> KGLinkReport:
         return link_source(source_id)
     except Exception as exc:
         logger.exception("kg link-source failed")
-        raise HTTPException(status_code=500, detail=f"实体链接失败：{exc}") from exc
+        raise HTTPException(status_code=500, detail="操作失败") from exc
 
 
 @router.get("/resolve", response_model=EntityResolveResponse)

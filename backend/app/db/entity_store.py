@@ -5,7 +5,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func
+from sqlalchemy import Text, cast, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import KGEntity, KGEntityLink, KGMention
@@ -39,6 +40,10 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _escape_like(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class EntityStore:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
@@ -54,10 +59,12 @@ class EntityStore:
     def delete_links_for_source(self, source_id: str) -> int:
         """Remove extracted links whose evidence cites *source_id* (preserve catalog_alias)."""
         removed = 0
+        pattern = f"%{source_id}%"
         with commit_session(self._session_factory) as session:
             links = (
                 session.query(KGEntityLink)
                 .filter(KGEntityLink.link_type.in_(tuple(EXTRACTED_LINK_TYPES)))
+                .filter(cast(KGEntityLink.evidence_refs, Text).like(pattern))
                 .all()
             )
             for link in links:
@@ -82,6 +89,8 @@ class EntityStore:
             })
             session.add(row)
         else:
+            # Merge semantics: None values are skipped by design so callers
+            # never accidentally clobber curated fields with blanks.
             for key, val in fields.items():
                 if key == "id":
                     continue
@@ -133,7 +142,22 @@ class EntityStore:
             meta=meta,
             created_at=_utcnow(),
         )
-        session.add(mention)
+        sp = session.begin_nested()
+        try:
+            session.add(mention)
+            session.flush()
+        except IntegrityError:
+            sp.rollback()
+            existing = (
+                session.query(KGMention)
+                .filter(
+                    KGMention.entity_id == entity_id,
+                    KGMention.chunk_id == chunk_id,
+                    KGMention.surface_form == surface,
+                )
+                .first()
+            )
+            return existing
         return mention
 
     def add_link(
@@ -145,6 +169,7 @@ class EntityStore:
         link_type: str,
         confidence: float,
         evidence_refs: list[dict] | None = None,
+        extraction_method: str = "manual",
     ) -> None:
         dup = (
             session.query(KGEntityLink)
@@ -157,19 +182,24 @@ class EntityStore:
         )
         if dup:
             return
-        session.add(
-            KGEntityLink(
-                id=str(uuid.uuid4()),
-                src_entity_id=src_entity_id,
-                dst_entity_id=dst_entity_id,
-                link_type=link_type,
-                confidence=confidence,
-                evidence_refs=evidence_refs or [],
-                extraction_method="manual",
-                created_at=_utcnow(),
-                updated_at=_utcnow(),
+        sp = session.begin_nested()
+        try:
+            session.add(
+                KGEntityLink(
+                    id=str(uuid.uuid4()),
+                    src_entity_id=src_entity_id,
+                    dst_entity_id=dst_entity_id,
+                    link_type=link_type,
+                    confidence=confidence,
+                    evidence_refs=evidence_refs or [],
+                    extraction_method=extraction_method,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
             )
-        )
+            session.flush()
+        except IntegrityError:
+            sp.rollback()
 
     def merge_semantic_link(
         self,
@@ -185,16 +215,8 @@ class EntityStore:
     ) -> bool:
         if src_entity_id == dst_entity_id or link_type not in SEMANTIC_LINK_TYPES:
             return False
-        existing = (
-            session.query(KGEntityLink)
-            .filter(
-                KGEntityLink.src_entity_id == src_entity_id,
-                KGEntityLink.dst_entity_id == dst_entity_id,
-                KGEntityLink.link_type == link_type,
-            )
-            .first()
-        )
-        if existing:
+
+        def _merge(existing: KGEntityLink) -> bool:
             refs = list(existing.evidence_refs or [])
             key = (
                 evidence_ref.get("source_id"),
@@ -215,21 +237,49 @@ class EntityStore:
                 merged.update(metadata)
                 existing.metadata_json = merged
             return True
-        session.add(
-            KGEntityLink(
-                id=str(uuid.uuid4()),
-                src_entity_id=src_entity_id,
-                dst_entity_id=dst_entity_id,
-                link_type=link_type,
-                confidence=confidence,
-                evidence_refs=[evidence_ref],
-                metadata_json=metadata or {},
-                extraction_method=extraction_method,
-                is_valid=True,
-                created_at=_utcnow(),
-                updated_at=_utcnow(),
+
+        existing = (
+            session.query(KGEntityLink)
+            .filter(
+                KGEntityLink.src_entity_id == src_entity_id,
+                KGEntityLink.dst_entity_id == dst_entity_id,
+                KGEntityLink.link_type == link_type,
             )
+            .first()
         )
+        if existing:
+            return _merge(existing)
+        sp = session.begin_nested()
+        try:
+            session.add(
+                KGEntityLink(
+                    id=str(uuid.uuid4()),
+                    src_entity_id=src_entity_id,
+                    dst_entity_id=dst_entity_id,
+                    link_type=link_type,
+                    confidence=confidence,
+                    evidence_refs=[evidence_ref],
+                    metadata_json=metadata or {},
+                    extraction_method=extraction_method,
+                    is_valid=True,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+            )
+            session.flush()
+        except IntegrityError:
+            sp.rollback()
+            existing = (
+                session.query(KGEntityLink)
+                .filter(
+                    KGEntityLink.src_entity_id == src_entity_id,
+                    KGEntityLink.dst_entity_id == dst_entity_id,
+                    KGEntityLink.link_type == link_type,
+                )
+                .first()
+            )
+            if existing:
+                return _merge(existing)
         return True
 
     def merge_structural_link(
@@ -246,16 +296,8 @@ class EntityStore:
     ) -> bool:
         if src_entity_id == dst_entity_id or link_type not in STRUCTURAL_LINK_TYPES:
             return False
-        existing = (
-            session.query(KGEntityLink)
-            .filter(
-                KGEntityLink.src_entity_id == src_entity_id,
-                KGEntityLink.dst_entity_id == dst_entity_id,
-                KGEntityLink.link_type == link_type,
-            )
-            .first()
-        )
-        if existing:
+
+        def _merge(existing: KGEntityLink) -> bool:
             refs = list(existing.evidence_refs or [])
             key = (
                 evidence_ref.get("source_id"),
@@ -276,21 +318,49 @@ class EntityStore:
                 merged.update(metadata)
                 existing.metadata_json = merged
             return True
-        session.add(
-            KGEntityLink(
-                id=str(uuid.uuid4()),
-                src_entity_id=src_entity_id,
-                dst_entity_id=dst_entity_id,
-                link_type=link_type,
-                confidence=confidence,
-                evidence_refs=[evidence_ref],
-                metadata_json=metadata or {},
-                extraction_method=extraction_method,
-                is_valid=True,
-                created_at=_utcnow(),
-                updated_at=_utcnow(),
+
+        existing = (
+            session.query(KGEntityLink)
+            .filter(
+                KGEntityLink.src_entity_id == src_entity_id,
+                KGEntityLink.dst_entity_id == dst_entity_id,
+                KGEntityLink.link_type == link_type,
             )
+            .first()
         )
+        if existing:
+            return _merge(existing)
+        sp = session.begin_nested()
+        try:
+            session.add(
+                KGEntityLink(
+                    id=str(uuid.uuid4()),
+                    src_entity_id=src_entity_id,
+                    dst_entity_id=dst_entity_id,
+                    link_type=link_type,
+                    confidence=confidence,
+                    evidence_refs=[evidence_ref],
+                    metadata_json=metadata or {},
+                    extraction_method=extraction_method,
+                    is_valid=True,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+            )
+            session.flush()
+        except IntegrityError:
+            sp.rollback()
+            existing = (
+                session.query(KGEntityLink)
+                .filter(
+                    KGEntityLink.src_entity_id == src_entity_id,
+                    KGEntityLink.dst_entity_id == dst_entity_id,
+                    KGEntityLink.link_type == link_type,
+                )
+                .first()
+            )
+            if existing:
+                return _merge(existing)
         return True
 
     def get_links_for_entity(
@@ -325,21 +395,24 @@ class EntityStore:
             q = session.query(KGEntity)
             if entity_ids:
                 q = q.filter(KGEntity.id.in_(entity_ids))
-            for ent in q.all():
-                mention_count = (
-                    session.query(func.count(KGMention.id))
-                    .filter(KGMention.entity_id == ent.id)
-                    .scalar()
-                    or 0
+            entities = q.all()
+            if not entities:
+                return
+            ids = [e.id for e in entities]
+            rows = session.execute(
+                select(
+                    KGMention.entity_id,
+                    func.count(),
+                    func.count(func.distinct(KGMention.source_id)),
                 )
-                source_count = (
-                    session.query(func.count(func.distinct(KGMention.source_id)))
-                    .filter(KGMention.entity_id == ent.id)
-                    .scalar()
-                    or 0
-                )
-                ent.mention_count = int(mention_count)
-                ent.source_count = int(source_count)
+                .where(KGMention.entity_id.in_(ids))
+                .group_by(KGMention.entity_id)
+            ).all()
+            counts = {r[0]: (int(r[1]), int(r[2])) for r in rows}
+            for ent in entities:
+                mc, sc = counts.get(ent.id, (0, 0))
+                ent.mention_count = mc
+                ent.source_count = sc
                 ent.updated_at = _utcnow()
 
     def get_entity(self, entity_id: str) -> KGEntity | None:
@@ -358,13 +431,13 @@ class EntityStore:
         term = (q or "").strip()
         if not term:
             return []
-        like = f"%{term.lower()}%"
+        like = f"%{_escape_like(term.lower())}%"
         with self._session_factory() as session:
             query = session.query(KGEntity).filter(
                 or_(
-                    func.lower(KGEntity.canonical_name).like(like),
+                    func.lower(KGEntity.canonical_name).like(like, escape="\\"),
                     KGEntity.cas_no == term,
-                    func.lower(KGEntity.linked_product_key).like(like),
+                    func.lower(KGEntity.linked_product_key).like(like, escape="\\"),
                     KGEntity.formula == term,
                 )
             )

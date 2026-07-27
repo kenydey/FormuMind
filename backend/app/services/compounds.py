@@ -89,7 +89,8 @@ def _compound_to_result(q: str, c: Any, synonyms: list[str] | None = None) -> di
             break
     smiles = getattr(c, "canonical_smiles", None) or getattr(c, "isomeric_smiles", None)
     formula = getattr(c, "molecular_formula", None) or ""
-    iupac = getattr(c, "iupac_name", None) or getattr(c, "synonyms", [""])[0] if hasattr(c, "synonyms") else q
+    synonyms = getattr(c, "synonyms", None)
+    iupac = getattr(c, "iupac_name", None) or (synonyms[0] if synonyms else "") or q
     zh = _extract_zh_name(syns)
     out: dict[str, Any] = {
         "query": q,

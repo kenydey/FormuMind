@@ -256,7 +256,7 @@ def search(
             for rank, item in enumerate(results or []):
                 doc_id = str(item.get("document_id") or item.get("doc_id") or rank)
                 content = str(item.get("content") or item.get("text") or "")
-                score = float(item.get("score", 1.0 - rank * 0.05))
+                score = float(item.get("score", max(0.0, 1.0 - rank * 0.05)))
                 ev = registry.get(doc_id)
                 if ev is None:
                     ev = Evidence(

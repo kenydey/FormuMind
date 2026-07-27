@@ -173,8 +173,13 @@ class OptunaOptimizer:
 
     def observe(self, x: list[float], y: float) -> None:
         trial = self._pending.pop(self._key(x), None)
-        if trial is not None:
-            self._study.tell(trial, float(y))
+        if trial is None:
+            # Miss (e.g. x not from suggest()): register a fresh trial so the
+            # study still learns from this observation instead of dropping it.
+            trial = self._study.ask()
+            for f, v in zip(self.factors, x):
+                trial.suggest_float(f.name, f.low, f.high)
+        self._study.tell(trial, float(y))
         self._X.append(list(x))
         self._y.append(float(y))
 

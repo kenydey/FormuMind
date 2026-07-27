@@ -8,6 +8,7 @@ TaskManager / in-process workers can share one connection safely; point
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -31,7 +32,10 @@ def make_engine(db_url: str) -> Engine:
     if db_url.startswith("sqlite"):
         connect_args = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(db_url, future=True, connect_args=connect_args)
-    Base.metadata.create_all(engine)
+    from ..config import get_settings
+
+    if get_settings().environment not in ("production", "prod"):
+        Base.metadata.create_all(engine)
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
     _ensure_source_document_columns(engine)
@@ -105,14 +109,22 @@ def make_session_factory(engine: Engine) -> sessionmaker[Session]:
 # Lazily-built default engine/session factory (built on first use so importing
 # this module never touches the filesystem at import time).
 _default: dict[str, object] = {}
+_default_lock = threading.Lock()
 
 
 def default_session_factory() -> sessionmaker[Session]:
     from ..config import get_settings
 
     db_url = os.environ.get("FORMUMIND_DB_URL") or get_settings().db_url
-    if _default.get("url") != db_url:
-        engine = make_engine(db_url)
-        _default["url"] = db_url
-        _default["factory"] = make_session_factory(engine)
+    with _default_lock:
+        if _default.get("url") != db_url:
+            if _default.get("engine"):
+                try:
+                    _default["engine"].dispose()  # type: ignore[union-attr]
+                except Exception:
+                    pass
+            engine = make_engine(db_url)
+            _default["url"] = db_url
+            _default["engine"] = engine
+            _default["factory"] = make_session_factory(engine)
     return _default["factory"]  # type: ignore[return-value]

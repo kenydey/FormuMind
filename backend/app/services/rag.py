@@ -192,7 +192,7 @@ def hyde_expand(query: str, domain: str | None = None) -> str:
     prompt = (
         f"针对以下研究主题{ctx}，写一段约 80 词的假设性技术摘要，"
         f"描述理想文献/专利中会出现的关键配方参数、机理与材料。仅输出摘要正文，不要前缀。\n\n"
-        f"研究主题：{query}"
+        f"研究主题：\n<user_query>{query}</user_query>"
     )
     try:
         hint = _llm._call_llm(prompt)
@@ -229,7 +229,7 @@ def _rerank_prompt(query: str, candidates: list[Evidence], req: Requirement | No
     return (
         "你是检索相关性评审。给定研究主题与若干候选证据，为每条证据按其与主题的"
         "语义相关性打分（0.0 完全无关 … 1.0 高度相关）。\n"
-        f"研究主题：{topic}\n\n候选证据：\n{lines}\n\n"
+        f"研究主题：\n<user_query>{topic}</user_query>\n\n候选证据：\n<candidate_items>{lines}</candidate_items>\n\n"
         '仅返回 JSON：{"scores": [{"i": 0, "score": 0.9}, ...]}（i 为方括号内编号）。'
     )
 

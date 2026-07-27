@@ -54,8 +54,11 @@ def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, s
         return False, "FORMUMIND_DATALAB_API_URL 未配置"
     try:
         with httpx.Client(base_url=url, timeout=timeout) as client:
-            client.get("/")
+            resp = client.get("/")
+            resp.raise_for_status()
         return True, None
+    except httpx.HTTPStatusError as exc:
+        return False, f"HTTP {exc.response.status_code}"
     except Exception as exc:
         return False, str(exc)
 

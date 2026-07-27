@@ -97,7 +97,7 @@ def _domain_of(ev: Evidence) -> str:
         host = urlparse(ident).hostname or ""
     except ValueError:
         return ""
-    return host.lower().lstrip("www.")
+    return host.lower().removeprefix("www.")
 
 
 def _is_blocked_domain(ev: Evidence) -> bool:
@@ -224,10 +224,11 @@ _JUDGE_PROMPT = """你是检索质量审查员。给定研究主题与候选检�
 丢弃标准：与主题无关、纯商品售卖页、目录/聚合页、内容空洞无技术信息。
 保留标准：专利、论文、技术文章、包含配方/工艺/性能数据的页面（宁可保留，不确定时保留）。
 
-研究主题：{query}
+研究主题：
+<user_query>{query}</user_query>
 
 候选结果：
-{items}
+<candidate_items>{items}</candidate_items>
 
 仅返回 JSON：{{"drop": [编号, ...]}}（要丢弃的方括号编号列表；全部保留则返回空列表）。"""
 

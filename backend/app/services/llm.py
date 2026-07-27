@@ -400,9 +400,14 @@ def _anthropic_request(prompt: str, api_key: str, model: str, max_tokens: int) -
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = msg.content[0].text
+        if not msg.content:
+            raise LLMValidationError("Anthropic returned empty content")
+        first = msg.content[0]
+        if not hasattr(first, "text"):
+            raise LLMValidationError(f"Unexpected content block type: {type(first).__name__}")
+        text = first.text
         if not text:
-            raise LLMTransientError("Anthropic API 返回空响应")
+            raise LLMValidationError("Anthropic API 返回空响应")
         return text
     except LLMConfigError:
         raise
@@ -576,7 +581,7 @@ def complete_json(prompt: str) -> dict | None:
     text = raw.strip()
     if "```" in text:
         # Take the content of the first fenced block.
-        text = text.split("```", 2)[1] if text.count("```") >= 2 else text.split("```")[1]
+        text = text.split("```", 2)[1] if text.count("```") >= 2 else text
         if text.startswith("json"):
             text = text[4:]
         text = text.strip()
@@ -887,7 +892,7 @@ def _recommend_user_prompt(
     ) or "(no external evidence — use domain knowledge)"
     modify_block = ""
     if modify_prompt:
-        modify_block = f"\n\n用户修改要求:\n{modify_prompt.strip()}"
+        modify_block = f"\n\n<user_modify_request>\n{modify_prompt.strip()}\n</user_modify_request>"
     return (
         f"Domain: {req.domain.value}\n"
         f"Substrate: {req.substrate.value}\n"
@@ -1013,7 +1018,7 @@ def _chat_prompt(
         f"{domain_hint}"
         f"{hist_block}"
         f"Sources:\n{context}\n\n"
-        f"Question: {question}\n\n"
+        f"<user_question>\n{question}\n</user_question>\n\n"
         f"Answer concisely in the same language as the question (Markdown allowed):"
         f"{trade_suffix}"
     )

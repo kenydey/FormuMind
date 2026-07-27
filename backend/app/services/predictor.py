@@ -173,7 +173,7 @@ def _cost_and_sustainability(form: Formulation, voc_limit: float = 420.0) -> dic
     voc_gpl = round(voc_mass_frac * density_kgL * 1000, 1)
     # Sustainability index (0=bad, 100=best): penalise high VOC and high cost.
     voc_penalty = min(50.0, (voc_gpl / max(voc_limit, 1)) * 50.0)
-    cost_penalty = min(50.0, (cost / 50.0) * 50.0)  # 50 CNY/kg = full penalty
+    cost_penalty = min(50.0, cost)  # 50 CNY/kg = full penalty
     sustainability_idx = round(max(0.0, 100.0 - voc_penalty - cost_penalty), 1)
     return {
         "cost_cny_per_kg": round(cost, 2),
@@ -213,9 +213,10 @@ def _blend_trained(
             continue
         model_pred, model_std, n = out
         w = n / (n + K)
+        empirical_pred = props[metric]
         props[metric] = round(w * model_pred + (1.0 - w) * props[metric], 3)
         # Propagate uncertainty: blend model std with a nominal empirical std.
-        empirical_std = abs(props[metric]) * 0.15  # 15% relative empirical uncertainty
+        empirical_std = abs(empirical_pred) * 0.15  # 15% relative empirical uncertainty
         out_std[metric] = round(w * model_std + (1.0 - w) * empirical_std, 3)
     return props, out_std
 
@@ -238,7 +239,7 @@ def _predict_mechanistic(
         binder = _sum_role(form, "resin") + _sum_role(form, "hardener")
         filler = _sum_role(form, "filler") + _sum_role(form, "pigment")
         ratio = amine_epoxy_ratio(form) or 2.5
-        crosslink = max(0.0, 1.0 - abs(ratio - 2.0) / 3.0)
+        crosslink = max(0.0, 1.0 - abs(ratio - 3.0) / 3.0)
         salt_spray = (
             120.0 + inhibitor * 48.0 + binder * 6.5 + crosslink * 240.0
             - max(0.0, filler - 25.0) * 8.0
@@ -305,7 +306,31 @@ def predict_full(
 def objective_value(form: Formulation, objective: str, process: dict | None = None) -> float:
     """Scalar objective (higher is better) used by the single-objective optimizer."""
     props = predict(form, process)
-    return float(props.get(objective, next(iter(props.values()), 0.0)))
+    return float(props.get(objective, 0.0))
+
+
+def default_bounds(
+    objectives: list,
+    form: Formulation | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Build normalization bounds from objective ref ranges or sensible defaults.
+
+    Never derives bounds from a single formulation's predicted values, which
+    would collapse every candidate's normalized score toward 0.5.
+    """
+    bounds: dict[str, tuple[float, float]] = {}
+    for obj in objectives:
+        if obj.ref_min is not None and obj.ref_max is not None:
+            bounds[obj.metric] = (float(obj.ref_min), float(obj.ref_max))
+            continue
+        val = form.predicted.get(obj.metric, 0.0) if form is not None else 0.0
+        if obj.metric in ("cost_cny_per_kg", "voc_gpl"):
+            bounds[obj.metric] = (0.0, max(val * 2.0, 100.0))
+        elif obj.metric == "salt_spray_hours":
+            bounds[obj.metric] = (0.0, max(val * 2.0, 2000.0))
+        else:
+            bounds[obj.metric] = (0.0, max(val * 2.0, 1.0))
+    return bounds
 
 
 def multi_objective_score(
@@ -323,8 +348,13 @@ def multi_objective_score(
         lo, hi = bounds.get(obj.metric, (0.0, 1.0))
         rng = hi - lo
         norm = (val - lo) / rng if rng > 1e-9 else 0.5
+        norm = max(0.0, min(1.0, norm))
         if obj.direction == "minimize":
             norm = 1.0 - norm
+        elif obj.direction == "match_target" and obj.target_value is not None:
+            target_norm = (obj.target_value - lo) / rng if rng > 1e-9 else 0.5
+            target_norm = max(0.0, min(1.0, target_norm))
+            norm = 1.0 - abs(norm - target_norm)
         total += obj.weight * norm
         total_weight += obj.weight
     return total / total_weight if total_weight > 0 else 0.0

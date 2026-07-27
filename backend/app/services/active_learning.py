@@ -51,6 +51,8 @@ def _surrogate_score(
             return float(mean), float(std)
 
     # Empirical uncertainty: 20% relative
+    if objective_metric not in props:
+        return 0.0, 0.0
     std = abs(mean) * 0.20 + 1e-3
     return float(mean), float(std)
 

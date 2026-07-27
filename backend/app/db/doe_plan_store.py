@@ -15,7 +15,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..domain.schemas import DOEPlan, DOEFactor, DOERun
+from ..domain.schemas import DOEPlan, DOEFactor, DOERun, ProductDomain
 from .models import DOEPlanRow
 
 
@@ -23,13 +23,18 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _plan_to_row(plan: DOEPlan) -> DOEPlanRow:
+def _plan_to_row(
+    plan: DOEPlan,
+    *,
+    campaign_id: str | None = None,
+    experiment_id: str | None = None,
+) -> DOEPlanRow:
     """Serialize a domain ``DOEPlan`` to an ORM row."""
     plan_id = plan.plan_id or uuid.uuid4().hex
     return DOEPlanRow(
         id=plan_id,
-        experiment_id=None,
-        campaign_id=None,
+        experiment_id=experiment_id,
+        campaign_id=campaign_id,
         design_type=plan.design,
         parameters={
             "factors": [f.model_dump() for f in plan.factors],
@@ -50,17 +55,25 @@ def _row_to_plan(row: DOEPlanRow) -> DOEPlan:
         runs=[DOERun(**r) for r in params.get("runs", [])],
         notes=params.get("notes", ""),
         plan_id=row.id,
+        domain=ProductDomain(params["domain"]) if params.get("domain") else None,
     )
 
 
-def save(session: Session, plan: DOEPlan) -> str:
+def save(
+    session: Session,
+    plan: DOEPlan,
+    *,
+    campaign_id: str | None = None,
+    experiment_id: str | None = None,
+) -> str:
     """Persist *plan* to the ``doe_plans`` table.
 
     Returns the plan's ``id`` (``plan.plan_id`` if set, otherwise a fresh
     UUID).  If a row with that id already exists the ``IntegrityError``
-    is caught inside a savepoint so the caller's pending changes survive.
+    is caught inside a savepoint so the caller's pending changes survive
+    (idempotent — existing row is left untouched).
     """
-    row = _plan_to_row(plan)
+    row = _plan_to_row(plan, campaign_id=campaign_id, experiment_id=experiment_id)
     sp = session.begin_nested()
     try:
         session.add(row)

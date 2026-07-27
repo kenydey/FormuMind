@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..domain.schemas import ChunkListResponse, DocumentChunkResponse, Evidence
 from ..services import kb_index
@@ -66,7 +66,7 @@ def reindex(embed: bool = True) -> ReindexResult:
         return ReindexResult(**kb_index.reindex_all(embed=embed))
     except Exception as exc:
         logger.exception("kb reindex failed")
-        raise HTTPException(status_code=500, detail=f"重建知识库失败：{exc}") from exc
+        raise HTTPException(status_code=500, detail="操作失败") from exc
 
 
 @router.get("/search", response_model=KBSearchResponse)
@@ -220,7 +220,7 @@ def hybrid_search(body: HybridSearchRequest) -> list[DocumentChunkResponse]:
 
 
 class IngestRequest(BaseModel):
-    text: str
+    text: str = Field(..., max_length=5_000_000)
     source_id: str | None = None
     title: str = ""
     metadata: dict | None = None
@@ -257,6 +257,25 @@ def ingest(body: IngestRequest) -> IngestResponse:
     factory = default_session_factory()
     with factory() as session:
         doc = session.get(SourceDocument, source_id)
+        if doc is not None and body.source_id is not None:
+            # User-supplied source_id collides with an existing document.
+            # Idempotent when content matches (return same result without
+            # re-indexing); reject only when the content actually differs,
+            # to prevent silent overwrite of another source's content.
+            new_hash = hashlib.sha256(
+                text.encode("utf-8", errors="replace")
+            ).hexdigest()
+            if (doc.content_hash or "") != new_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"source_id {source_id} already exists with different content",
+                )
+            # Same content → idempotent: skip indexing, return chunk_count=0
+            return IngestResponse(
+                source_id=source_id,
+                chunk_count=0,
+                status="ok",
+            )
         if doc is None:
             session.add(
                 SourceDocument(

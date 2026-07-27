@@ -127,11 +127,11 @@ class KGRetrieveRequest(BaseModel):
     query: str
     mode: RetrievalMode = "auto"
     project_id: str | None = None
-    scan_limit: int | None = None
-    chunk_cap: int | None = None
-    llm_cap: int | None = None
-    max_sources: int | None = None
-    k_semantic: int | None = None
+    scan_limit: int | None = Field(default=None, ge=1, le=10000)
+    chunk_cap: int | None = Field(default=None, ge=1, le=500)
+    llm_cap: int | None = Field(default=None, ge=1, le=100)
+    max_sources: int | None = Field(default=None, ge=1, le=50)
+    k_semantic: int | None = Field(default=None, ge=1, le=50)
 
 
 class KGRetrieveStats(BaseModel):

@@ -282,7 +282,7 @@ def _extract_relations_for_chunk(session: Session, chunk, source_id: str, settin
 
 
 def _element_symbols_from_formula(formula: str) -> list[str]:
-    return list({m.group(1) for m in re.finditer(r"([A-Z][a-z]?)", formula or "") if m.group(1) != "V"})
+    return list({m.group(1) for m in re.finditer(r"([A-Z][a-z]?)", formula or "")})
 
 
 def _link_catalog_in_text(session: Session, chunk, source_id: str, touched: set[str], store) -> None:
@@ -341,8 +341,8 @@ def _maybe_catalog_alias_link(
         linked_catalog_key=catalog,
         composition_status="resolved",
     )
-    if settings.kg_trade_product_link_min_conf <= 0.85:
-        pass
+    if settings.kg_trade_product_link_min_conf > 0.95:
+        return 0
     store.add_link(
         session,
         src_entity_id=trade_eid,

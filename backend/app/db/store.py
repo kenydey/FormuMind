@@ -62,7 +62,7 @@ def _training_block_data(rec: ExperimentRecord) -> dict[str, Any]:
         "domain": rec.domain.value,
         "project_id": rec.project_id,
         "factors": rec.factors,
-        "cure_temperature_c": rec.cure_temperature_c,
+        "cure_temperature_c": rec.cure_temperature_c if rec.cure_temperature_c is not None else 0.0,
         "measured": rec.measured,
         "source": rec.source,
         "label": rec.label,
@@ -79,7 +79,7 @@ def _record_from_item_data(item_data: dict[str, Any]) -> ExperimentRecord:
     validate_blocks(item_data, _TRAINING_BLOCKS)
     data = (item_data.get("blocks_obj") or {}).get(_TRAINING_BLOCK, {}).get("data") or {}
     return ExperimentRecord(
-        domain=ProductDomain(data["domain"]),
+        domain=ProductDomain(data.get("domain", "anticorrosion_coating")),
         project_id=str(data.get("project_id") or ""),
         factors=dict(data.get("factors") or {}),
         cure_temperature_c=data.get("cure_temperature_c"),
@@ -100,12 +100,29 @@ class JsonExperimentStore:
         with self._lock:
             if not self.path.exists():
                 return []
-            raw = json.loads(self.path.read_text() or "[]")
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8") or "[]")
+            except (json.JSONDecodeError, FileNotFoundError) as exc:
+                logger.warning("JSON store corrupted, resetting: %s", exc)
+                return []
             return [ExperimentRecord(**r) for r in raw]
 
     def _write(self, records: list[ExperimentRecord]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps([r.model_dump() for r in records], indent=2))
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(self.path.parent),
+            prefix=self.path.name,
+            suffix=".tmp",
+            delete=False,
+        ) as fh:
+            fh.write(json.dumps([r.model_dump() for r in records], indent=2, ensure_ascii=False))
+            tmp_path = fh.name
+        os.replace(tmp_path, str(self.path))
 
     def add(self, records: list[ExperimentRecord]) -> None:
         with self._lock:
@@ -209,6 +226,7 @@ class DatalabExperimentStore:
                 base_url=self._api_url,
                 timeout=self._timeout,
                 limits=self._limits,
+                transport=httpx.HTTPTransport(retries=2),
             )
         return self._client
 
@@ -239,12 +257,34 @@ class DatalabExperimentStore:
         parse_delete_response(resp.json(), item_id)
 
     def _rollback_created_samples(self, item_ids: list[str]) -> None:
+        failed: list[str] = []
         for item_id in reversed(item_ids):
             try:
                 self._delete_sample(item_id)
                 logger.info("Saga rollback: deleted training sample %s", item_id)
             except Exception as exc:
                 logger.error("Saga rollback failed for %s: %s", item_id, exc)
+                failed.append(item_id)
+        if failed:
+            try:
+                from .outbox_store import enqueue
+
+                with commit_session(self._session_factory) as session:
+                    for orphan_id in failed:
+                        enqueue(
+                            session,
+                            operation="datalab_orphan_cleanup",
+                            idempotency_key=f"orphan:{orphan_id}",
+                            payload={"item_id": orphan_id, "kind": "training"},
+                        )
+                logger.info("Recorded %d orphan sample(s) for cleanup", len(failed))
+            except Exception as exc:
+                logger.error(
+                    "Failed to record orphan samples for cleanup: %s; "
+                    "orphan item_ids=%s",
+                    exc,
+                    failed,
+                )
 
     def all(self) -> list[ExperimentRecord]:
         with self._session_factory() as session:
@@ -282,8 +322,8 @@ class DatalabExperimentStore:
                             item_id=item_id,
                             domain=rec.domain.value,
                             project_id=rec.project_id,
-                            factors={},
-                            measured={},
+                            factors=rec.factors,
+                            measured=rec.measured,
                             source=rec.source,
                             label=rec.label,
                         )
@@ -300,17 +340,18 @@ class DatalabExperimentStore:
             raise
 
     def clear(self) -> None:
-        with self._session_factory() as session:
-            item_ids = [
-                str(row.item_id)
-                for row in session.scalars(
-                    select(ExperimentRow).where(ExperimentRow.item_id.isnot(None))
-                ).all()
-                if row.item_id
-            ]
-        self._rollback_created_samples(item_ids)
-        with self._write_lock, commit_session(self._session_factory) as session:
-            session.execute(delete(ExperimentRow).where(ExperimentRow.item_id.isnot(None)))
+        with self._write_lock:
+            with self._session_factory() as session:
+                item_ids = [
+                    str(row.item_id)
+                    for row in session.scalars(
+                        select(ExperimentRow).where(ExperimentRow.item_id.isnot(None))
+                    ).all()
+                    if row.item_id
+                ]
+            self._rollback_created_samples(item_ids)
+            with commit_session(self._session_factory) as session:
+                session.execute(delete(ExperimentRow).where(ExperimentRow.item_id.isnot(None)))
 
     def count(self) -> int:
         with self._session_factory() as session:

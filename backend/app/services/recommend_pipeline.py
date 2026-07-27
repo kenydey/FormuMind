@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict, deque
 
 from ..config import Settings, get_settings
 from ..domain.schemas import Formulation, RecommendedFormula
@@ -47,10 +48,14 @@ def finalize_scored_formulations(
     else:
         scored = scored[:n]
 
-    selected_names = {f.name for f in scored}
-    formulas = [r for r in rec_formulas if r.name in selected_names]
-    name_order = {f.name: i for i, f in enumerate(scored)}
-    formulas.sort(key=lambda r: name_order.get(r.name, 999))
+    name_to_recs: dict[str, deque] = defaultdict(deque)
+    for r in rec_formulas:
+        name_to_recs[r.name].append(r)
+    formulas = []
+    for f in scored:
+        queue = name_to_recs.get(f.name)
+        if queue:
+            formulas.append(queue.popleft())
 
     return scored, formulas, dedup_notes, diversity_applied
 

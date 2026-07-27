@@ -44,9 +44,26 @@ class ModifyRequest(BaseModel):
     n: int = Field(default=3, ge=1, le=8)
 
 
+def _canonicalize(obj):
+    """Recursively sort lists so list order does not affect the hash."""
+    if isinstance(obj, dict):
+        return {k: _canonicalize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        items = [_canonicalize(i) for i in obj]
+        try:
+            return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, ensure_ascii=False))
+        except TypeError:
+            return items
+    return obj
+
+
 def _idempotency_key(operation: str, payload: dict) -> str:
-    """Content-addressed idempotency key from operation + payload."""
-    data = {"op": operation, "payload": payload}
+    """Content-addressed idempotency key from operation + payload.
+
+    Lists (e.g. ``sources``) are canonicalised by sorting so that the same
+    evidence set in a different request order collapses onto one key.
+    """
+    data = {"op": operation, "payload": _canonicalize(payload)}
     raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode()).hexdigest()
 

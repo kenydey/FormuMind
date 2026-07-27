@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 from pathlib import Path
 
@@ -19,15 +20,21 @@ _DEV_TOKEN_CACHE: str | None = None
 
 # Paths reachable without a token (health probes, OpenAPI docs).
 _PUBLIC_PREFIXES: tuple[str, ...] = (
-    "/health",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/api/auth/status",
 )
+# Public paths matched exactly only (sub-paths still require auth), so that
+# /health/detailed (which exposes infra details) stays behind auth.
+_PUBLIC_EXACT: tuple[str, ...] = (
+    "/health",
+)
 
 
 def _is_public_path(path: str) -> bool:
+    if path in _PUBLIC_EXACT:
+        return True
     return any(path == prefix or path.startswith(f"{prefix}/") for prefix in _PUBLIC_PREFIXES)
 
 
@@ -46,23 +53,38 @@ def resolve_api_token(settings: Settings) -> str | None:
     if _DEV_TOKEN_CACHE:
         return _DEV_TOKEN_CACHE
     _TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if _TOKEN_PATH.is_file():
-        token = _TOKEN_PATH.read_text(encoding="utf-8").strip()
-        if token:
-            _DEV_TOKEN_CACHE = token
+    # Atomic create-with-O_EXCL avoids the race where two workers both write a
+    # new token and clobber each other. If the file already exists, reuse it.
+    token = secrets.token_urlsafe(32)
+    try:
+        fd = os.open(
+            str(_TOKEN_PATH),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            os.write(fd, (token + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+        os.chmod(_TOKEN_PATH, 0o600)
+        _DEV_TOKEN_CACHE = token
+        logger.warning(
+            "API auth: generated development token at %s — set FORMUMIND_API_TOKEN to override",
+            _TOKEN_PATH,
+        )
+        return token
+    except FileExistsError:
+        existing = _TOKEN_PATH.read_text(encoding="utf-8").strip()
+        if existing:
+            os.chmod(_TOKEN_PATH, 0o600)
+            _DEV_TOKEN_CACHE = existing
             logger.warning(
                 "API auth: using dev token from %s (set FORMUMIND_API_TOKEN for a stable secret)",
                 _TOKEN_PATH,
             )
-            return token
-    token = secrets.token_urlsafe(32)
-    _TOKEN_PATH.write_text(token + "\n", encoding="utf-8")
-    _DEV_TOKEN_CACHE = token
-    logger.warning(
-        "API auth: generated development token at %s — set FORMUMIND_API_TOKEN to override",
-        _TOKEN_PATH,
-    )
-    return token
+            return existing
+        # Empty file from a failed write: fall through and retry next call.
+        return None
 
 
 def reset_dev_token_cache() -> None:
@@ -82,11 +104,19 @@ def _extract_bearer(request: Request) -> str | None:
 
 
 def _extract_token(request: Request) -> str | None:
-    """Bearer header, or ?token= on GET stream endpoints (EventSource cannot set headers)."""
+    """Bearer header, or ?token= on GET task stream endpoints (EventSource cannot set headers)."""
     bearer = _extract_bearer(request)
     if bearer:
         return bearer
-    if request.method == "GET" and request.url.path.endswith("/stream"):
+    # EventSource (browser SSE) cannot set Authorization headers, so the task
+    # progress stream accepts ?token=. Restrict to the known task stream path
+    # to avoid leaking the token to unrelated /stream endpoints.
+    path = request.url.path
+    if (
+        request.method == "GET"
+        and path.startswith("/api/tasks/")
+        and path.endswith("/stream")
+    ):
         query_token = request.query_params.get("token")
         if query_token:
             return query_token.strip()
@@ -97,6 +127,9 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        # CORS preflight must reach CORSMiddleware (outer layer); never 401.
+        if request.method == "OPTIONS":
+            return await call_next(request)
         settings = get_settings()
         if not settings.api_auth_enabled or _is_public_path(request.url.path):
             return await call_next(request)

@@ -52,7 +52,15 @@ class ChatRequestValidated(ChatRequest):
     def _coerce_sources(cls, raw: object) -> object:
         if not isinstance(raw, list):
             return raw
+        # Cap the number of supplied sources to bound prompt size / cost.
+        # NOTE: ChatRequest.sources lives in domain/chat_schemas.py (outside
+        # this agent's file list); the hard Field(max_length=50) constraint
+        # should be added there when that file is touched.
+        if len(raw) > 50:
+            logger.warning("chat sources truncated: %d -> 50", len(raw))
+            raw = raw[:50]
         out: list[dict] = []
+        dropped = 0
         for item in raw:
             if isinstance(item, Evidence):
                 out.append(_sanitize_evidence(item).model_dump())
@@ -63,7 +71,10 @@ class ChatRequestValidated(ChatRequest):
                 try:
                     out.append(_sanitize_evidence(Evidence.model_validate(data)).model_dump())
                 except Exception:
+                    dropped += 1
                     continue
+        if dropped:
+            logger.warning("chat sources: %d invalid item(s) discarded", dropped)
         return out
 
     @field_validator("history", mode="before")
@@ -224,4 +235,4 @@ def chat(req: ChatRequestValidated):
         raise
     except Exception as exc:
         logger.exception("chat failed")
-        raise HTTPException(status_code=500, detail=f"问答处理失败：{exc}") from exc
+        raise HTTPException(status_code=500, detail="问答处理失败") from exc

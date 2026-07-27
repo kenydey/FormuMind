@@ -269,17 +269,21 @@ class BaybeCampaignEngine:
             state = result.campaign_state
 
             for run in result.plan.runs:
+                run_process = dict(process)
+                for k in ("cure_temperature_c", "cure_time_min"):
+                    if k in run.natural:
+                        run_process[k] = run.natural[k]
                 form = _score_and_validate(
                     reconstruct.formulation_from_factors(req, run.natural),
-                    process,
+                    run_process,
                     req,
                 )
                 score = float(form.score or 0.0)
                 for m, val in form.predicted.items():
                     lo, hi = bounds.get(m, (val, val))
                     bounds[m] = (min(lo, val), max(hi, val))
-                mo_score = predictor.multi_objective_score(form, objectives, process, bounds)
-                combined = max(mo_score, score)
+                mo_score = predictor.multi_objective_score(form, objectives, run_process, bounds)
+                combined = mo_score
                 best_so_far = max(best_so_far, combined)
                 history.append(round(best_so_far, 3))
                 ranked.append((combined, form))

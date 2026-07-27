@@ -29,6 +29,9 @@ router = APIRouter(prefix="/api", tags=["tasks"])
 
 _TERMINAL = (TaskProgressStatus.COMPLETED, TaskProgressStatus.FAILED)
 
+# Cap concurrent SSE progress streams to prevent unbounded resource usage.
+_SSE_SEMAPHORE = asyncio.Semaphore(50)
+
 
 def accepted_response(task_id: str, kind: str, outbox_id: str | None = None) -> JSONResponse:
     task_manager.register_celery_task(task_id, kind)
@@ -72,7 +75,14 @@ def _event_from_meta(meta: dict[str, str]) -> TaskProgressEvent | None:
     try:
         return TaskProgressEvent.model_validate_json(raw)
     except Exception as exc:
-        return degrade_return(logger, exc, "operation failed", None)
+        # Degrade to a RUNNING event instead of going silent so the SSE client
+        # still receives a heartbeat when the persisted meta is malformed.
+        logger.warning("event parse failed: %s", exc)
+        return TaskProgressEvent(
+            status=TaskProgressStatus.RUNNING,
+            message="operation failed",
+            progress=0.0,
+        )
 
 
 def _sse_frame(event: TaskProgressEvent) -> str:
@@ -105,77 +115,87 @@ async def _poll_until_terminal(
             return
 
         await asyncio.sleep(0.2)
+    # Deadline elapsed without a terminal event — notify the client so the
+    # SSE stream does not close silently.
+    yield TaskProgressEvent(
+        status=TaskProgressStatus.FAILED,
+        message="polling timed out",
+        progress=0.0,
+    )
 
 
 @router.get("/tasks/{task_id}/stream")
 async def stream_task_progress(task_id: str) -> StreamingResponse:
+    # TODO: 添加 owner 校验 — 单 token 模式下暂无法实现，迁移到多用户后需校验
+    # task_id 归属当前调用者。
     if not task_exists(task_id):
         raise HTTPException(status_code=404, detail="Unknown task id")
 
     async def event_generator() -> AsyncIterator[str]:
-        meta = get_task_meta(task_id)
-        if meta:
-            event = _event_from_meta(meta)
-            if event:
-                yield _sse_frame(event)
-                if event.status in _TERMINAL:
-                    return
-
-        disk_event = _terminal_event_from_disk(task_id)
-        if disk_event:
-            yield _sse_frame(disk_event)
-            return
-
-        settings = get_settings()
-        try:
-            import redis.asyncio as aioredis
-
-            client = aioredis.from_url(settings.redis_url, decode_responses=True)
-            await client.ping()
-            pubsub = client.pubsub()
-            await pubsub.subscribe(channel_name(task_id))
-            try:
-                deadline = time.monotonic() + 3600
-                while time.monotonic() < deadline:
-                    message = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
-                    if message is None:
-                        terminal = _terminal_event_from_disk(task_id)
-                        if terminal:
-                            yield _sse_frame(terminal)
-                            return
-                        await asyncio.sleep(0.05)
-                        continue
-                    if message.get("type") != "message":
-                        continue
-                    data_raw = message.get("data")
-                    if not data_raw:
-                        continue
-                    try:
-                        event = TaskProgressEvent.model_validate_json(data_raw)
-                    except Exception:
-                        yield f"data: {json.dumps({'status': 'RUNNING', 'message': str(data_raw)}, ensure_ascii=False)}\n\n"
-                        continue
+        async with _SSE_SEMAPHORE:
+            meta = get_task_meta(task_id)
+            if meta:
+                event = _event_from_meta(meta)
+                if event:
                     yield _sse_frame(event)
                     if event.status in _TERMINAL:
-                        break
-            except asyncio.CancelledError:
-                logger.debug("SSE client disconnected for task %s", task_id)
-                raise
-            finally:
+                        return
+
+            disk_event = _terminal_event_from_disk(task_id)
+            if disk_event:
+                yield _sse_frame(disk_event)
+                return
+
+            settings = get_settings()
+            try:
+                import redis.asyncio as aioredis
+
+                client = aioredis.from_url(settings.redis_url, decode_responses=True)
+                await client.ping()
+                pubsub = client.pubsub()
+                await pubsub.subscribe(channel_name(task_id))
                 try:
-                    await pubsub.unsubscribe(channel_name(task_id))
-                    await pubsub.aclose()
-                    await client.aclose()
-                except Exception as exc:
-                    log_handled_exception(logger, exc, "handled exception")
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("SSE Redis unavailable for {}: %s", task_id, exc)
-            async for event in _poll_until_terminal(task_id):
-                yield _sse_frame(event)
+                    deadline = time.monotonic() + 3600
+                    while time.monotonic() < deadline:
+                        message = await pubsub.get_message(
+                            ignore_subscribe_messages=True, timeout=1.0
+                        )
+                        if message is None:
+                            terminal = _terminal_event_from_disk(task_id)
+                            if terminal:
+                                yield _sse_frame(terminal)
+                                return
+                            await asyncio.sleep(0.05)
+                            continue
+                        if message.get("type") != "message":
+                            continue
+                        data_raw = message.get("data")
+                        if not data_raw:
+                            continue
+                        try:
+                            event = TaskProgressEvent.model_validate_json(data_raw)
+                        except Exception:
+                            yield f"data: {json.dumps({'status': 'RUNNING', 'message': str(data_raw)}, ensure_ascii=False)}\n\n"
+                            continue
+                        yield _sse_frame(event)
+                        if event.status in _TERMINAL:
+                            break
+                except asyncio.CancelledError:
+                    logger.debug("SSE client disconnected for task %s", task_id)
+                    raise
+                finally:
+                    try:
+                        await pubsub.unsubscribe(channel_name(task_id))
+                        await pubsub.aclose()
+                        await client.aclose()
+                    except Exception as exc:
+                        log_handled_exception(logger, exc, "handled exception")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("SSE Redis unavailable for {}: %s", task_id, exc)
+                async for event in _poll_until_terminal(task_id):
+                    yield _sse_frame(event)
 
     return StreamingResponse(
         event_generator(),

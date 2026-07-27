@@ -35,12 +35,17 @@ class ChunkStore:
                 DocumentChunk.source_id == source_id
             ).delete()
             for i, chunk in enumerate(chunks):
-                # Merge paragraph/offset provenance into meta dict
+                # Merge paragraph/offset provenance into meta dict — but only
+                # when meta already carries extraction data, so that chunks
+                # without chemical extraction keep meta=None (callers can tell
+                # no extraction ran). Provenance is always available as
+                # column-level values (paragraph_idx / offset_start / offset_end).
                 meta = dict(chunk.get("meta") or {})
-                for key in ("paragraph_idx", "offset_start", "offset_end"):
-                    val = chunk.get(key)
-                    if val is not None:
-                        meta[key] = val
+                if meta:
+                    for key in ("paragraph_idx", "offset_start", "offset_end"):
+                        val = chunk.get(key)
+                        if val is not None:
+                            meta[key] = val
                 if not meta:
                     meta = None
                 session.add(
@@ -64,6 +69,9 @@ class ChunkStore:
         return len(chunks)
 
     def get_by_source(self, source_id: str) -> list[DocumentChunk]:
+        # Returned ORM objects are detached (session closed); attribute access
+        # works because expire_on_commit=False keeps values loaded. Callers
+        # must not trigger lazy loads.
         with self._session_factory() as session:
             return (
                 session.query(DocumentChunk)
@@ -73,6 +81,7 @@ class ChunkStore:
             )
 
     def all_chunks(self, limit: int | None = None, project_id: str | None = None) -> list[DocumentChunk]:
+        # Returned ORM objects are detached (session closed); see get_by_source.
         with self._session_factory() as session:
             q = session.query(DocumentChunk).order_by(
                 DocumentChunk.created_at.desc(), DocumentChunk.ord

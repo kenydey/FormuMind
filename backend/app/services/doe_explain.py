@@ -77,7 +77,6 @@ def _describe_region(natural: dict[str, float], plan: DOEPlan) -> str:
         val = natural.get(factor.name)
         if val is None:
             continue
-        mid = (factor.low + factor.high) / 2.0
         if val <= factor.low + (factor.high - factor.low) * 0.33:
             band = "低"
         elif val >= factor.low + (factor.high - factor.low) * 0.67:
@@ -97,7 +96,7 @@ def _y_best(existing: list[ExperimentRecord], metric: str) -> float:
 
 def _estimate_improvement_pct(mean: float, y_best: float) -> float:
     if y_best <= 0:
-        return max(0.0, mean)
+        return 0.0
     return max(0.0, (mean - y_best) / y_best * 100.0)
 
 
