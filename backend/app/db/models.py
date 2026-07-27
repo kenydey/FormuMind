@@ -131,6 +131,10 @@ class DocumentChunk(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
+    __table_args__ = (
+        UniqueConstraint("source_id", "ord", name="uq_document_chunks_source_ord"),
+    )
+
 
 class KBProduct(Base):
     """Corpus-level registry of commercial chemical products (trade names).
