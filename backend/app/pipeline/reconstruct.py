@@ -41,3 +41,31 @@ def formulation_from_factors(
             new.weight_pct = round(raw, 4)
         ings.append(new)
     return knowledge._balanced(base.name, base.domain, ings, base.rationale)
+
+
+def genome_from_requirement(req: Requirement | ProductDomain):
+    """Baseline formulation as a genome — the starting point for genome search.
+
+    Carries the lever units across so a g/L surface-treatment slot survives the
+    round trip; the factor path recovers those by ingredient-name lookup, which
+    stops working the moment a slot's material can change.
+    """
+    from ..domain.genome import genome_from_formulation
+
+    requirement = req if isinstance(req, Requirement) else Requirement(domain=req)
+    requirement = normalize_requirement(requirement)
+    base = knowledge.baseline_formulation(requirement)
+    units = {lev.name: lev.unit for lev in resolve_levers(requirement, base)}
+    return genome_from_formulation(base, units=units)
+
+
+def formulation_from_genome(req: Requirement | ProductDomain, genome):
+    """Genome → Formulation. Sibling of ``formulation_from_factors``.
+
+    The factor path can only rescale ingredients already present in the
+    hardcoded baseline template; this one lets the composition itself vary,
+    which is what inverse design and material substitution both need.
+    """
+    from ..domain.genome import formulation_from_genome as _from_genome
+
+    return _from_genome(req, genome)

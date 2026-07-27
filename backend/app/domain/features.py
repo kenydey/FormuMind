@@ -15,7 +15,7 @@ aligned within a process; models must be retrained after toggling the flag
 """
 from __future__ import annotations
 
-from .chemistry import amine_epoxy_ratio
+from .chemistry import amine_epoxy_ratio, is_waterborne
 from .schemas import Formulation
 
 ROLE_KEYS = [
@@ -89,9 +89,7 @@ def featurize(form: Formulation, process: dict | None = None) -> dict[str, float
         roles[key] += ing.weight_pct
 
     ratio = amine_epoxy_ratio(form) or 0.0
-    waterborne = 1.0 if any(
-        i.name == "Deionized water" and i.weight_pct > 30 for i in form.ingredients
-    ) else 0.0
+    waterborne = 1.0 if is_waterborne(form) else 0.0
     total_solids = max(0.0, 100.0 - roles["solvent"])
 
     feats: dict[str, float] = dict(roles)

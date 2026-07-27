@@ -38,10 +38,10 @@ def _rdkit_chem():
 
 
 def _is_waterborne(form: Formulation) -> bool:
-    """Waterborne system heuristic — matches predictor's >30 wt% water rule."""
-    return any(
-        i.name == "Deionized water" and i.weight_pct > 30 for i in form.ingredients
-    )
+    """Waterborne system heuristic — shared >30 wt% aqueous-carrier rule."""
+    from ..domain.chemistry import is_waterborne
+
+    return is_waterborne(form)
 
 
 def _carrier_of(name: str) -> str:

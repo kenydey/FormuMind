@@ -156,6 +156,7 @@ _SEED_MATERIALS: dict[str, dict] = {
     "Deionized water": {
         "role": "solvent", "formula": "H2O", "smiles": "O", "molar_mass": 18.02,
         "price_cny_per_kg": 0.01, "voc_contrib": 0.0,
+        "carrier": "aqueous",
     },
     "Butyl glycol": {
         "role": "solvent", "formula": "C6H14O2", "smiles": "CCCCOCCO", "molar_mass": 118.17,

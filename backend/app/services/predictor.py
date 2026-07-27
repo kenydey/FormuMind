@@ -24,7 +24,9 @@ def _sum_role(form: Formulation, role: str) -> float:
 
 
 def _has_waterborne(form: Formulation) -> bool:
-    return any(i.name == "Deionized water" and i.weight_pct > 30 for i in form.ingredients)
+    from ..domain.chemistry import is_waterborne
+
+    return is_waterborne(form)
 
 
 _RDKIT_DESCRIPTORS = [

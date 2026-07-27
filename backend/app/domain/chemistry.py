@@ -133,6 +133,43 @@ _ROLE_DENSITY_GCM3: dict[str, float] = {
 }
 
 
+# Water content above which a system behaves as waterborne. Shared by the
+# predictor, the feature vector, and the chemist agent so they cannot drift.
+WATERBORNE_MIN_PCT = 30.0
+
+
+def aqueous_content_pct(form: Formulation) -> float:
+    """Total wt% of components carried in water (any role)."""
+    from .knowledge import RAW_MATERIALS
+
+    return sum(
+        ing.weight_pct
+        for ing in form.ingredients
+        if (RAW_MATERIALS.get(ing.name) or {}).get("carrier") == "aqueous"
+    )
+
+
+def is_waterborne(form: Formulation) -> bool:
+    """True when the system is water-carried.
+
+    Two changes from the rule this replaces, both required for the chemist
+    agent's incompatibility interception to fire on real formulations:
+
+    - Keyed on the material's ``carrier`` metadata, not the literal name
+      "Deionized water". Once search can swap a slot's material, a name test
+      reports every alternative aqueous carrier as solvent-borne.
+    - Sums aqueous content across all roles instead of demanding one component
+      clear the threshold alone. A waterborne acrylic primer is 38% emulsion
+      plus 20% water — genuinely water-carried, but no single component
+      exceeded 30%, so it was classified solvent-borne and the gate stayed
+      silent on the exact system it exists to protect.
+
+    Measured separation on the baseline templates is wide: 58% waterborne
+    acrylic, 75% degreaser, 0% solvent-borne epoxy.
+    """
+    return aqueous_content_pct(form) > WATERBORNE_MIN_PCT
+
+
 def _density_gcm3(name: str, role: str) -> float:
     """Component density (g/cm³): knowledge-base value, then role nominal."""
     from .knowledge import RAW_MATERIALS
