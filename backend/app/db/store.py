@@ -244,9 +244,11 @@ class DatalabExperimentStore:
         resp.raise_for_status()
         parse_create_sample_response(resp.json(), expected_id)
 
-    def _get_item(self, item_id: str) -> dict[str, Any]:
+    def _get_item(self, item_id: str) -> dict[str, Any] | None:
         client = self._ensure_client()
         resp = client.get(f"/get-item-data/{item_id}")
+        if resp.status_code == 404:
+            return None  # item deleted from Datalab, skip gracefully
         resp.raise_for_status()
         return parse_item_envelope(resp.json(), required_blocks=_TRAINING_BLOCKS)
 
@@ -296,6 +298,8 @@ class DatalabExperimentStore:
         out: list[ExperimentRecord] = []
         for row in rows:
             item_data = self._get_item(str(row.item_id))
+            if item_data is None:
+                continue
             out.append(_record_from_item_data(item_data))
         return out
 
