@@ -5,7 +5,8 @@ CitationAnchor provides a standardised representation and conversion helpers.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
 
 
 # Number of leading characters used as a chunk text summary.
@@ -29,7 +30,7 @@ class CitationAnchor:
     offset_end: int | None = None
 
     @classmethod
-    def from_chunk_row(cls, row) -> CitationAnchor:
+    def from_chunk_row(cls, row: Any) -> CitationAnchor:
         """Construct a CitationAnchor from an ORM ``DocumentChunk`` row or
         a Pydantic ``DocumentChunkResponse``.
 
