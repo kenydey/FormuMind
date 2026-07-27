@@ -30,29 +30,16 @@ class CitationBinding(TypedDict):
     """Result of binding citations into an LLM answer."""
 
     answer: str
-    """The LLM-generated answer text with in-text [^n] markers."""
+    """The cleaned answer text (original footnotes stripped)."""
 
     footnotes: str
-    """Markdown footnote definitions section (one [^n]: ... per cited reference)."""
+    """Markdown footnotes section generated from the anchors used in the answer."""
 
     used_citations: list[tuple[int, CitationAnchor]]
     """(index, anchor) pairs for every citation referenced in the answer."""
 
 
-class PromptParts(TypedDict):
-    """Components produced by the citation-aware prompt builder."""
-
-    system_instruction: str
-    """System-level instructions: role, rules, citation protocol."""
-
-    citation_context: str
-    """Numbered citation list for injection into the user prompt."""
-
-    full_prompt: str
-    """Complete prompt combining system instructions, citations, and question."""
-
-
-# ── Formatting: CitationAnchor → [^n] markdown ────────────────────────────────
+# ── Formatting ────────────────────────────────────────────────────────────────
 
 
 def format_citation_list(
@@ -173,7 +160,7 @@ def build_citation_prompt(
             "请严格遵循以下引用协议回答用户问题：",
             "",
             "**引用规则**",
-            f"1. 每条技术论断后插入对应的引用标记 [^n]（n 为下方引用列表中方括号内的编号）。",
+            "1. 每条技术论断后插入对应的引用标记 [^n]（n 为下方引用列表中方括号内的编号）。",
             "2. 只能引用下方提供的文献——不得编造、假设或引用不存在的证据。",
             "3. 一个论断如果有多条文献支持，可写 [^1][^3]。",
             "4. 来源数据冲突时必须指出冲突，并说明取舍理由。",
@@ -182,7 +169,16 @@ def build_citation_prompt(
         ]
         system = "\n".join(system_lines)
     else:
-        system = system_instruction
+        system = (
+            f"{system_instruction}\n\n"
+            "**引用规则**\n"
+            "1. 每条技术论断后插入对应的引用标记 [^n]（n 为下方引用列表中方括号内的编号）。\n"
+            "2. 只能引用下方提供的文献——不得编造、假设或引用不存在的证据。\n"
+            "3. 一个论断如果有多条文献支持，可写 [^1][^3]。\n"
+            "4. 来源数据冲突时必须指出冲突，并说明取舍理由。\n"
+            "5. 缺乏证据支撑的地方务必写「证据不足」——宁可保守，不可编造。\n"
+            "6. 用简体中文回答，Markdown 格式，保持表格、化学式、平衡式完整。"
+        )
 
     domain_hint = f"\n领域：{domain}\n" if domain else ""
 
@@ -317,7 +313,6 @@ def format_answer_with_citations(
 
 __all__ = [
     "CitationBinding",
-    "PromptParts",
     "build_citation_prompt",
     "build_footnotes_section",
     "format_citation_list",
