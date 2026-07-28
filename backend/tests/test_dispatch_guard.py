@@ -146,24 +146,39 @@ def test_unparseable_broker_url_is_not_treated_as_down(
 
 
 def test_recorded_work_survives_the_outage(
-    client: TestClient, broker_down: None
+    broker_down: None, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The outbox row is written before dispatch, so a refused submission is
     delayed work rather than lost work — dispatcher.recover_stalled re-enqueues
-    it once the broker returns."""
-    from app.db.database import default_session_factory
+    it once the broker returns.
+
+    Runs against its own database. Against the shared one this asserts on rows
+    other tests wrote, and the idempotency key can match an earlier submission
+    whose row has since moved past PENDING — a pass or fail decided by test
+    ordering rather than by the behaviour under test.
+    """
+    from sqlalchemy import select
+
+    from app.db import database as db_mod
     from app.db.models import TaskOutbox
+    from tests.alembic_helpers import run_upgrade
 
-    client.post("/api/research/recommend", json=REQUIREMENT)
+    db_url = f"sqlite:///{tmp_path}/dispatch_outbox.db"
+    run_upgrade(db_url, monkeypatch)
+    monkeypatch.setenv("FORMUMIND_DB_URL", db_url)
+    db_mod._default.clear()
 
-    with default_session_factory()() as session:
-        rows = (
-            session.query(TaskOutbox)
-            .filter(TaskOutbox.operation == "research_recommend")
-            .all()
-        )
-    assert rows, "submission must leave a durable row behind"
-    assert any(r.status == "PENDING" for r in rows)
+    with TestClient(app) as client:
+        assert client.post("/api/research/recommend", json=REQUIREMENT).status_code == 503
+
+    with db_mod.default_session_factory()() as session:
+        rows = session.execute(
+            select(TaskOutbox).filter_by(operation="research_recommend")
+        ).scalars().all()
+
+    assert len(rows) == 1, "the refused submission must leave exactly one durable row"
+    assert rows[0].status == "PENDING", "the row must stay claimable by recover_stalled"
+    assert rows[0].payload, "an empty payload could not be re-dispatched"
 
 
 def test_every_outbox_operation_can_be_recovered() -> None:

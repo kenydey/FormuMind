@@ -76,3 +76,40 @@ def test_alembic_config_points_at_a_path_that_ships(dockerfile: str) -> None:
     assert relative.startswith("app/"), (
         f"script_location {relative!r} lives outside the COPYed app/ tree"
     )
+
+
+# ── compose ──────────────────────────────────────────────────────────────────
+
+
+COMPOSE = DOCKERFILE.resolve().parents[1] / "docker-compose.yml"
+
+
+@pytest.fixture(scope="module")
+def compose() -> dict:
+    yaml = pytest.importorskip("yaml")
+    return yaml.safe_load(COMPOSE.read_text())
+
+
+def test_worker_does_not_inherit_the_api_healthcheck(compose: dict) -> None:
+    """The worker runs Celery from the backend image, so without an override it
+    inherits that image's HEALTHCHECK — an HTTP probe against uvicorn on :8000,
+    a server this container never starts. It then reports "unhealthy" forever,
+    and a status that is always wrong is worse than no status: it teaches you
+    to skip the one column of `docker compose ps` that would have told you the
+    broker was unreachable.
+    """
+    worker = compose["services"]["worker"]
+    assert "healthcheck" in worker, (
+        "worker must override the image HEALTHCHECK or it is unhealthy by construction"
+    )
+    probe = " ".join(worker["healthcheck"]["test"])
+    assert "8000" not in probe, f"worker healthcheck still probes the API port: {probe}"
+    assert "celery" in probe
+
+
+def test_worker_healthcheck_proves_the_broker_connection(compose: dict) -> None:
+    """`inspect ping` round-trips through the broker, so a passing worker also
+    means Redis is reachable — the failure mode this deployment actually hit."""
+    probe = " ".join(compose["services"]["worker"]["healthcheck"]["test"])
+    assert "inspect ping" in probe
+    assert "--timeout" in probe, "an unbounded probe can hang the healthcheck"

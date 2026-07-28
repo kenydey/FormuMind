@@ -78,6 +78,19 @@ services:
     volumes:
       - ./data/colbert_index:/app/data/colbert_index
       - ./data:/app/data
+    # The worker shares the backend image, and so inherits its HEALTHCHECK —
+    # which probes uvicorn on :8000, a server this container does not run. Left
+    # alone it reports "unhealthy" forever, and a status that is always wrong
+    # is worse than none: `docker compose ps` stops being worth reading at
+    # exactly the moment you need it. Ask Celery instead. A worker that answers
+    # ping has also proved its broker connection, which is the thing most
+    # likely to be broken here.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       redis:
         condition: service_healthy
