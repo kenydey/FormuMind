@@ -76,6 +76,40 @@ def compute_pareto_mask(
     return is_pareto.tolist()
 
 
+def compute_pareto_ranks(
+    values: list[list[float]],
+    objectives: list[ObjectiveSpec],
+) -> list[int | None]:
+    """Non-dominated sorting: 0 = frontier, 1 = frontier once 0 is removed, …
+
+    Peels successive frontiers off the remaining set. Needed both to report
+    runner-up tiers to the user and as the selection primitive for
+    evolutionary search, where ranking the *whole* population matters — a
+    boolean frontier mask cannot order the individuals it excludes.
+
+    Rows carrying NaN (a metric the predictor did not produce) never compare
+    as dominated *or* dominating, so they occupy front 0 forever; the
+    empty-front guard stops that from looping.
+    """
+    n = len(values)
+    if n == 0:
+        return []
+    ranks: list[int | None] = [None] * n
+    remaining = list(range(n))
+    rank = 0
+    while remaining:
+        mask = compute_pareto_mask([values[i] for i in remaining], objectives)
+        front = [i for i, keep in zip(remaining, mask) if keep]
+        if not front:
+            break
+        for i in front:
+            ranks[i] = rank
+        front_set = set(front)
+        remaining = [i for i in remaining if i not in front_set]
+        rank += 1
+    return ranks
+
+
 def _confidence(form: Formulation, grounding: GroundingSummary) -> ConfidenceLevel:
     settings = get_settings()
     if not settings.recommend_uncertainty_flag:
@@ -147,12 +181,18 @@ def analyze_tradeoffs(
         )
 
     obj_for_pareto = objectives or []
-    pareto_mask = compute_pareto_mask(values, obj_for_pareto) if obj_for_pareto else [True] * len(candidates)
+    if obj_for_pareto:
+        ranks = compute_pareto_ranks(values, obj_for_pareto)
+    else:
+        ranks = [0] * len(candidates)
     frontier_ids: list[str] = []
-    for cand, is_pf in zip(candidates, pareto_mask):
-        cand.pareto = bool(is_pf)
-        cand.pareto_rank = 0 if is_pf else None
-        if is_pf:
+    for cand, rank in zip(candidates, ranks):
+        # `pareto` and `pareto_frontier_ids` keep their old meaning (front 0
+        # only); `pareto_rank` now also tiers the runners-up instead of being
+        # None for everything that missed the frontier.
+        cand.pareto = rank == 0
+        cand.pareto_rank = rank
+        if cand.pareto:
             frontier_ids.append(cand.id)
 
     comparison_table: list[dict[str, object]] = []

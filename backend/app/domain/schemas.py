@@ -721,4 +721,80 @@ class ChunkListResponse(BaseModel):
     chunks: list[DocumentChunkResponse]
 
 
+# ── Inverse design: target properties → composition ──────────────────────────
+
+class HardConstraint(BaseModel):
+    """A requirement the formulation must satisfy, not merely trade against.
+
+    ObjectiveSpec cannot express this: its weight only tilts a score, so a
+    candidate violating a VOC ceiling still competes on the strength of its
+    other metrics. A hard constraint removes it from consideration instead.
+    """
+
+    metric: str
+    op: Literal["le", "ge", "between"] = "le"
+    value: float
+    value_max: float | None = None  # upper bound when op == "between"
+    label: str = ""
+
+    def violation(self, actual: float | None) -> float:
+        """How far outside the constraint, in metric units. 0.0 = satisfied.
+
+        A missing metric counts as satisfied — the predictor emits a
+        domain-dependent, conditionally sparse key set, and treating absence as
+        an infinite violation would reject every candidate on an unrelated
+        metric the model simply does not produce.
+        """
+        if actual is None:
+            return 0.0
+        if self.op == "le":
+            return max(0.0, float(actual) - self.value)
+        if self.op == "ge":
+            return max(0.0, self.value - float(actual))
+        high = self.value_max if self.value_max is not None else self.value
+        return max(0.0, self.value - float(actual), float(actual) - high)
+
+
+class TargetSpec(BaseModel):
+    """What the design must achieve (hard) and what it should optimise (soft)."""
+
+    hard: list[HardConstraint] = Field(default_factory=list)
+    soft: list[ObjectiveSpec] = Field(default_factory=list)
+
+
+class InverseDesignRequest(Requirement):
+    """Requirement extended with inverse-design search controls."""
+
+    targets: TargetSpec = Field(default_factory=TargetSpec)
+    population: int = Field(default=48, ge=8, le=400)
+    generations: int = Field(default=30, ge=1, le=300)
+    seed_with_llm: bool = True
+    seed: int = 42
+
+
+class DesignCandidate(BaseModel):
+    """One formulation on (or near) the frontier."""
+
+    formulation: Formulation
+    pareto_rank: int | None = None
+    feasible: bool = True
+    violation: float = 0.0
+    materials: list[str] = Field(default_factory=list)
+
+
+class InverseDesignResult(BaseModel):
+    topic: str = ""
+    domain: str
+    candidates: list[DesignCandidate] = Field(default_factory=list)
+    pareto_frontier_ids: list[str] = Field(default_factory=list)
+    tradeoff: TradeOffAnalysis | None = None
+    generations: int = 0
+    evaluations: int = 0
+    rejected_infeasible: int = 0
+    seeded_from: dict[str, int] = Field(default_factory=dict)
+    engine: str = "nsga2-numpy"
+    warnings: list[str] = Field(default_factory=list)
+
+
 Requirement.model_rebuild()
+InverseDesignRequest.model_rebuild()

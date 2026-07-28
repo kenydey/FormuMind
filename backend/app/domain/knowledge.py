@@ -366,7 +366,19 @@ def _balanced(name: str, domain: ProductDomain, ings: list[Ingredient], rational
             range(len(ings)),
             key=lambda k: (ings[k].role in ("solvent",), ings[k].weight_pct),
         )
-        ings[solvent_idx].weight_pct = round(ings[solvent_idx].weight_pct + (100.0 - total), 4)
+        absorbed = ings[solvent_idx].weight_pct + (100.0 - total)
+        if absorbed < 0.0:
+            # The non-solvent components already exceed 100 wt%, so no amount of
+            # solvent can close the gap. Assigning the negative remainder here
+            # would stick: weight_pct is written as an attribute, which skips the
+            # pydantic ge=0 bound, and a negative weight then propagates into
+            # every downstream sum — cost, VOC (which can go negative), PVC.
+            # Scale the whole recipe to 100 instead, preserving all ratios.
+            scale = 100.0 / total if total > 0 else 0.0
+            for ing in ings:
+                ing.weight_pct = round(ing.weight_pct * scale, 4)
+        else:
+            ings[solvent_idx].weight_pct = round(absorbed, 4)
     return Formulation(name=name, domain=domain, ingredients=ings, rationale=rationale)
 
 

@@ -693,6 +693,48 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
         raise
 
 
+@celery_app.task(bind=True, name="formumind.inverse_design")
+def run_inverse_design_task(self, payload: dict) -> dict:
+    return run_inverse_design_impl(self.request.id, payload)
+
+
+def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
+    from ..domain.schemas import TargetSpec
+    from ..services import inverse_design
+
+    publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting inverse design")
+    req = Requirement(**payload["requirement"])
+    targets = TargetSpec.model_validate(payload.get("targets") or {})
+
+    try:
+        def progress(p: float, msg: str) -> None:
+            publish_progress(
+                task_id,
+                TaskProgressStatus.RUNNING,
+                message=msg,
+                progress=round(p, 3),
+            )
+
+        result = inverse_design.design(
+            req,
+            targets,
+            population=payload.get("population") or 48,
+            generations=payload.get("generations") or 30,
+            seed_with_llm=payload.get("seed_with_llm", True),
+            seed=payload.get("seed", 42),
+            progress_cb=progress,
+        )
+        data = result.model_dump()
+        persist_result(task_id, data, failed=False)
+        _persist_terminal(task_id, "inverse_design", data)
+        return data
+    except Exception as exc:
+        err = {"error": str(exc)}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "inverse_design", err, failed=True, message=str(exc))
+        raise
+
+
 @celery_app.task(bind=True, name="formumind.deps_install")
 def run_deps_install_task(self, payload: dict) -> dict:
     from ..services import dependencies as deps

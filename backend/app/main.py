@@ -23,6 +23,7 @@ from .api import qc as qc_router
 from .api import ip_analysis as ip_router
 from .api import process_optimize as process_router
 from .api import loop as loop_router
+from .api import design as design_router
 from .api import intent as intent_router
 from .api import agents as agents_router
 from .api import dependencies as dependencies_router
@@ -183,6 +184,7 @@ app.include_router(qc_router.router, prefix="/api")
 app.include_router(ip_router.router)
 app.include_router(process_router.router)
 app.include_router(loop_router.router)
+app.include_router(design_router.router)
 app.include_router(intent_router.router)
 app.include_router(agents_router.router)
 app.include_router(dependencies_router.router)

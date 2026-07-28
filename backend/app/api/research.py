@@ -1,21 +1,17 @@
 """Research endpoint: CRAG graph via Celery + SSE task stream."""
 from __future__ import annotations
 
-import hashlib
-import json
-
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from ..db import outbox_store
-from ..db.database import default_session_factory
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..pipeline import workflow
 from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..services.federated_search import FederatedSearchEngine
 from ..worker.tasks import run_deep_research_task, run_recommend_task
+from ._idempotency import enqueue_outbox, idempotency_key
 from .tasks import accepted_response
 
 router = APIRouter(prefix="/api", tags=["research"])
@@ -44,42 +40,10 @@ class ModifyRequest(BaseModel):
     n: int = Field(default=3, ge=1, le=8)
 
 
-def _canonicalize(obj):
-    """Recursively sort lists so list order does not affect the hash."""
-    if isinstance(obj, dict):
-        return {k: _canonicalize(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        items = [_canonicalize(i) for i in obj]
-        try:
-            return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, ensure_ascii=False))
-        except TypeError:
-            return items
-    return obj
-
-
-def _idempotency_key(operation: str, payload: dict) -> str:
-    """Content-addressed idempotency key from operation + payload.
-
-    Lists (e.g. ``sources``) are canonicalised by sorting so that the same
-    evidence set in a different request order collapses onto one key.
-    """
-    data = {"op": operation, "payload": _canonicalize(payload)}
-    raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def _enqueue_outbox(operation: str, payload: dict) -> str | None:
-    """Enqueue to durable outbox and return task_id (None on failure)."""
-    try:
-        key = _idempotency_key(operation, payload)
-        factory = default_session_factory()
-        with factory() as session:
-            task_id, _ = outbox_store.enqueue(session, operation, key, payload)
-            session.commit()
-        return task_id
-    except Exception:
-        logger.exception("outbox enqueue failed (non-fatal)")
-        return None
+# Idempotency helpers live in _idempotency.py — shared with the other
+# async-submission endpoints.
+_idempotency_key = idempotency_key
+_enqueue_outbox = enqueue_outbox
 
 
 @router.post("/research", response_model=ResearchResult)
