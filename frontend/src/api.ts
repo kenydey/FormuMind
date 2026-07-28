@@ -402,6 +402,122 @@ export interface KBSourcesResponse {
 }
 
 // Objective metric collected per domain (mirrors backend OBJECTIVE map).
+
+// ── Inverse design: target properties -> Pareto set of formulations ─────────
+
+export interface HardConstraint {
+  metric: string;
+  op: "le" | "ge" | "between";
+  value: number;
+  value_max?: number | null;
+  label?: string;
+}
+
+export interface TargetSpec {
+  hard: HardConstraint[];
+  soft: ObjectiveSpec[];
+}
+
+export interface DesignCandidate {
+  formulation: Formulation;
+  pareto_rank: number | null;
+  feasible: boolean;
+  violation: number;
+  materials: string[];
+}
+
+export interface InverseDesignResult {
+  topic: string;
+  domain: string;
+  candidates: DesignCandidate[];
+  pareto_frontier_ids: string[];
+  generations: number;
+  evaluations: number;
+  rejected_infeasible: number;
+  seeded_from: Record<string, number>;
+  engine: string;
+  warnings: string[];
+}
+
+// ── Material substitution ──────────────────────────────────────────────────
+
+export interface MetricDelta {
+  before: number | null;
+  after: number | null;
+  delta: number | null;
+  pct: number | null;
+}
+
+export interface SubstituteCandidate {
+  material: string;
+  zh_name?: string | null;
+  role?: string | null;
+  functional_class?: string | null;
+  substitute_group?: string | null;
+  availability: string;
+  supplier?: string | null;
+  structural_score: number;
+  structural_breakdown: Record<string, number>;
+  deltas: Record<string, MetricDelta>;
+  /** How much resolution the predicted delta has — see the backend note. */
+  delta_confidence: "high" | "low" | "cost_only";
+  feasible: boolean;
+  blocking_reasons: string[];
+  score_after: number | null;
+}
+
+export interface SubstitutionReport {
+  original: string;
+  slot_index: number;
+  role: string;
+  substitute_group: string | null;
+  base_metrics: Record<string, number>;
+  candidates: SubstituteCandidate[];
+  total_considered: number;
+}
+
+export interface SupplyRiskReport {
+  at_risk: Record<string, string>;
+  affected: {
+    formulation: string;
+    affected_slots: { slot_index: number; material: string; availability: string }[];
+    suggestions: Record<string, { material: string; structural_score: number; feasible: boolean }[]>;
+  }[];
+}
+
+// ── Formulation revision history ───────────────────────────────────────────
+
+export interface FormulationVersionView {
+  id: string;
+  lineage_id: string;
+  version: number;
+  parent_version_id: string | null;
+  name: string;
+  domain: string;
+  change_summary: string;
+  created_by: string;
+  created_at: string | null;
+}
+
+export interface IngredientChangeView {
+  name: string;
+  change: "added" | "removed" | "adjusted";
+  role: string;
+  before_pct: number | null;
+  after_pct: number | null;
+  delta_pct: number | null;
+}
+
+export interface VersionDiffResult {
+  from_version: number;
+  to_version: number;
+  change_summary: string;
+  topology_changed: boolean;
+  renamed: string[] | null;
+  ingredient_changes: IngredientChangeView[];
+  metric_deltas: Record<string, MetricDelta>;
+}
+
 export const OBJECTIVE_METRIC: Record<ProductDomain, string> = {
   anticorrosion_coating: "salt_spray_hours",
   degreaser: "cleaning_efficiency",
@@ -646,6 +762,54 @@ export const api = {
       campaign_state: opts.campaign_state ?? null,
       workbench_campaign_id: opts.workbench_campaign_id ?? null,
     }),
+  // ── Inverse design ──
+  startInverseDesign: (
+    req: Requirement,
+    targets: TargetSpec,
+    opts: { population?: number; generations?: number; seed_with_llm?: boolean } = {}
+  ) =>
+    postAccepted("/api/design/inverse", {
+      requirement: req,
+      targets,
+      population: opts.population ?? 48,
+      generations: opts.generations ?? 30,
+      seed_with_llm: opts.seed_with_llm ?? true,
+    }),
+
+  // ── Material substitution ──
+  findSubstitutes: (body: {
+    requirement?: Requirement;
+    formulation?: Formulation;
+    material?: string;
+    slot_index?: number;
+    limit?: number;
+    include_unavailable?: boolean;
+  }) => post<SubstitutionReport>("/api/materials/substitutes", body),
+
+  supplyRisk: () => get<SupplyRiskReport>("/api/materials/supply-risk"),
+
+  setMaterialAvailability: (name: string, availability: string) =>
+    post<unknown>("/api/materials/availability", { name, availability }),
+
+  // ── Formulation revision history ──
+  saveFormulationVersion: (body: {
+    formulation: Formulation;
+    lineage_id?: string | null;
+    parent_version_id?: string | null;
+    change_summary?: string;
+    created_by?: string;
+  }) => post<FormulationVersionView>("/api/formulations/versions", body),
+
+  formulationLineage: (lineageId: string) =>
+    get<{ lineage_id: string; versions: FormulationVersionView[] }>(
+      `/api/formulations/versions/${encodeURIComponent(lineageId)}`
+    ),
+
+  diffFormulationVersions: (fromId: string, toId: string) =>
+    get<VersionDiffResult>(
+      `/api/formulations/versions/${encodeURIComponent(fromId)}/diff/${encodeURIComponent(toId)}`
+    ),
+
   startOptimize: (
     req: Requirement,
     iterations: number,
