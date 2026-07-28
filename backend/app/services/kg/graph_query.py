@@ -194,7 +194,14 @@ def discover_substitutes(
         if len(candidates) >= limit:
             break
 
-    # One-hop via synergizes/requires to reach another substitute edge
+    # One more substitutes hop: a substitute of a substitute is a candidate.
+    #
+    # This used to request ``["substitutes", "synergizes"]`` and then discard
+    # every non-substitutes row. That was not merely dead code: the store
+    # applies ``ORDER BY confidence DESC LIMIT 20`` *before* this filter runs,
+    # so high-confidence synergy edges consumed the budget and pushed real
+    # substitutes edges out — an entity with 20 strong synergy links returned
+    # no second-hop candidates at all.
     if len(candidates) < limit and max_depth > 1:
         frontier = list(candidates)
         for cand in frontier:
@@ -203,7 +210,7 @@ def discover_substitutes(
             bridge_links = store.get_links_for_entity(
                 cand.entity_id,
                 direction="both",
-                link_types=["substitutes", "synergizes"],
+                link_types=["substitutes"],
                 limit=20,
             )
             for link in bridge_links:

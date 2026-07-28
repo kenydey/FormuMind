@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from ..config import get_settings
 from ..db.material_store import get_material_store
 from ..domain.knowledge import RAW_MATERIALS
+from ..domain.schemas import Formulation, Requirement
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,78 @@ def promote_products(body: PromoteRequest) -> PromoteResult:
     if promoted:
         RAW_MATERIALS.refresh()
     return PromoteResult(promoted=len(promoted), skipped=skipped, names=promoted)
+
+
+class SubstituteRequest(BaseModel):
+    """Ask what could replace one component of a formulation."""
+
+    requirement: Requirement | None = None
+    formulation: Formulation | None = None
+    domain: str = ""
+    # Either the slot position or the material name; the name is friendlier
+    # for callers that did not build the genome themselves.
+    slot_index: int | None = None
+    material: str = ""
+    limit: int = Field(default=10, ge=1, le=50)
+    include_unavailable: bool = False
+
+
+@router.post("/substitutes")
+def substitutes(body: SubstituteRequest) -> dict:
+    """Rank replacements for one component, each with its predicted deltas."""
+    from ..domain.genome import genome_from_formulation
+    from ..pipeline import reconstruct
+    from ..services.substitution import find_substitutes
+
+    req = body.requirement
+    if body.formulation is not None:
+        genome = genome_from_formulation(body.formulation)
+    elif req is not None:
+        genome = reconstruct.genome_from_requirement(req)
+    else:
+        raise HTTPException(status_code=400, detail="需提供 formulation 或 requirement")
+
+    index = body.slot_index
+    if index is None:
+        if not body.material:
+            raise HTTPException(status_code=400, detail="需提供 slot_index 或 material")
+        index = next(
+            (i for i, s in enumerate(genome.slots) if s.material == body.material), None
+        )
+        if index is None:
+            raise HTTPException(
+                status_code=404, detail=f"配方中不含材料：{body.material}"
+            )
+    if not 0 <= index < len(genome.slots):
+        raise HTTPException(status_code=400, detail="slot_index 超出范围")
+
+    return find_substitutes(
+        genome,
+        index,
+        req,
+        limit=body.limit,
+        include_unavailable=body.include_unavailable,
+    )
+
+
+@router.get("/supply-risk")
+def supply_risk(domain: str = Query(default="")) -> dict:
+    """Materials flagged discontinued/restricted, and the baselines they hit."""
+    from ..domain.schemas import ProductDomain
+    from ..pipeline import reconstruct
+    from ..services.substitution import scan_supply_risk
+
+    domains = [d for d in ProductDomain if not domain or d.value == domain]
+    if domain and not domains:
+        raise HTTPException(status_code=400, detail=f"未知产品域：{domain}")
+    genomes = {}
+    for product in domains:
+        try:
+            req = Requirement(domain=product)
+            genomes[product.value] = reconstruct.genome_from_requirement(req)
+        except Exception as exc:
+            logger.debug("supply-risk: baseline for %s failed: %s", product, exc)
+    return scan_supply_risk(genomes)
 
 
 @router.post("/availability", response_model=MaterialView)

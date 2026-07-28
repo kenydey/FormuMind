@@ -163,6 +163,51 @@ def test_discover_substitutes(entity_store):
     assert any(c.entity_id == zinc for c in result.substitutes)
 
 
+def test_synergy_neighbours_are_not_substitutes(entity_store):
+    """A synergist is not a replacement. chem:c synergises with chem:b; it must
+    never surface as something you could swap chem:a for."""
+    chromate, _, epoxy = _seed_substitute_chain(entity_store)
+    result = discover_substitutes(chromate, limit=10)
+    assert epoxy not in {c.entity_id for c in result.substitutes}
+
+
+def test_synergy_edges_do_not_crowd_out_real_substitutes(entity_store):
+    """The second hop fetches ORDER BY confidence DESC LIMIT 20 and filters
+    afterwards. While synergy edges were included in that request they ate the
+    budget at higher confidence, so genuine substitutes fell off the end."""
+    with entity_store._session_factory() as session:
+        for i in range(20):
+            entity_store.upsert_entity(
+                session, id=f"chem:syn{i}", kind="chemical",
+                canonical_name=f"Synergist {i}", composition_status="resolved",
+            )
+            entity_store.merge_semantic_link(
+                session, src_entity_id="chem:b", dst_entity_id=f"chem:syn{i}",
+                link_type="synergizes", confidence=0.99,
+                evidence_ref={"source_id": "s", "chunk_id": "c",
+                              "sentence": "synergy", "confidence": 0.99,
+                              "extraction_method": "rule"},
+            )
+        entity_store.upsert_entity(
+            session, id="chem:deep", kind="chemical",
+            canonical_name="Deep substitute", composition_status="resolved",
+        )
+        # Low confidence on purpose: it must still be reachable.
+        entity_store.merge_semantic_link(
+            session, src_entity_id="chem:b", dst_entity_id="chem:deep",
+            link_type="substitutes", confidence=0.2,
+            evidence_ref={"source_id": "s", "chunk_id": "c",
+                          "sentence": "b can be replaced by deep", "confidence": 0.2,
+                          "extraction_method": "rule"},
+        )
+        session.commit()
+
+    chromate, _, _ = _seed_substitute_chain(entity_store)
+    found = {c.entity_id for c in discover_substitutes(chromate, limit=10).substitutes}
+    assert "chem:deep" in found
+    assert not any(eid.startswith("chem:syn") for eid in found)
+
+
 def test_kg_graph_api(entity_store, monkeypatch):
     monkeypatch.setenv("FORMUMIND_KG_ENABLED", "true")
     get_settings.cache_clear()

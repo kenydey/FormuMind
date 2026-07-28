@@ -225,6 +225,141 @@ _SEED_MATERIALS: dict[str, dict] = {
 # anything persisted in the ``materials`` table. Behaves as a plain dict — see
 # material_catalog.MaterialCatalog for the compatibility contract. With the
 # store disabled or unavailable this *is* _SEED_MATERIALS.
+# --- Substitution metadata ----------------------------------------------
+# Kept as a separate table rather than inlined above so the curated chemistry
+# stays readable and this layer can be reviewed as a unit.
+#
+#   functional_class — chemistry family, for "how similar is this?"
+#   substitute_group — hand-tagged interchangeable set, for "what could replace
+#                      this?". Deliberately *not* the same as the role: talc
+#                      and fumed silica are both fillers but one is a platy
+#                      extender and the other a thixotrope, so swapping them is
+#                      not a substitution.
+#   hansen_d/p/h     — Hansen solubility parameters (MPa^0.5), published
+#                      values; drives compatibility distance for solvents.
+#   equivalent_weight — EEW / amine value, needed to re-balance a swap.
+_SUBSTITUTION_META: dict[str, dict] = {
+    # Resins / binders
+    "Bisphenol-A epoxy (DGEBA)": {
+        "functional_class": "epoxy", "substitute_group": "coating_binder",
+        "equivalent_weight": 190.0,
+    },
+    "Waterborne acrylic emulsion": {
+        "functional_class": "acrylic", "substitute_group": "coating_binder",
+    },
+    "Polyurethane dispersion": {
+        "functional_class": "polyurethane", "substitute_group": "coating_binder",
+    },
+    "Zinc-rich epoxy binder": {
+        "functional_class": "epoxy", "substitute_group": "coating_binder",
+        "equivalent_weight": 200.0,
+    },
+    # Hardeners / crosslinkers
+    "Polyamide hardener": {
+        "functional_class": "polyamide", "substitute_group": "epoxy_hardener",
+        "equivalent_weight": 95.0,
+    },
+    "Isophorone diamine (IPDA)": {
+        "functional_class": "cycloaliphatic_amine", "substitute_group": "epoxy_hardener",
+        "equivalent_weight": 42.6,
+    },
+    "Blocked isocyanate (IPDI)": {
+        "functional_class": "blocked_isocyanate", "substitute_group": "pu_crosslinker",
+    },
+    "Desmodur BL 3175": {
+        "functional_class": "blocked_isocyanate", "substitute_group": "pu_crosslinker",
+    },
+    "Waterborne polyisocyanate (hydrophilic HDI)": {
+        "functional_class": "polyisocyanate", "substitute_group": "pu_crosslinker",
+    },
+    # Accelerators
+    "Bismuth neodecanoate": {
+        "functional_class": "bismuth_carboxylate", "substitute_group": "pu_catalyst",
+    },
+    "Sodium nitrite": {
+        "functional_class": "nitrite", "substitute_group": "phosphating_accelerator",
+    },
+    # Corrosion inhibitors
+    "Zinc phosphate": {
+        "functional_class": "phosphate", "substitute_group": "anticorrosive_pigment",
+    },
+    "Zinc molybdate": {
+        "functional_class": "molybdate", "substitute_group": "anticorrosive_pigment",
+    },
+    "Cerium nitrate": {
+        "functional_class": "rare_earth_salt", "substitute_group": "anticorrosive_pigment",
+    },
+    "2-Mercaptobenzothiazole": {
+        "functional_class": "azole", "substitute_group": "anticorrosive_pigment",
+    },
+    # Pigments / fillers
+    "Titanium dioxide": {
+        "functional_class": "titanium_dioxide", "substitute_group": "white_pigment",
+    },
+    "Talc": {
+        "functional_class": "magnesium_silicate", "substitute_group": "extender",
+    },
+    "Fumed silica": {
+        "functional_class": "silica", "substitute_group": "thixotrope",
+    },
+    # Solvents (Hansen values from the published tables)
+    "Xylene": {
+        "functional_class": "aromatic_hydrocarbon", "substitute_group": "organic_solvent",
+        "hansen_d": 17.6, "hansen_p": 1.0, "hansen_h": 3.1,
+    },
+    "Deionized water": {
+        "functional_class": "water", "substitute_group": "aqueous_carrier",
+        "hansen_d": 15.5, "hansen_p": 16.0, "hansen_h": 42.3,
+    },
+    "Butyl glycol": {
+        "functional_class": "glycol_ether", "substitute_group": "coalescent",
+        "hansen_d": 16.0, "hansen_p": 5.1, "hansen_h": 12.3,
+    },
+    "D-Limonene": {
+        "functional_class": "terpene", "substitute_group": "organic_solvent",
+        "hansen_d": 17.2, "hansen_p": 1.8, "hansen_h": 4.3,
+    },
+    # Alkaline builders
+    "Sodium hydroxide": {
+        "functional_class": "alkali_hydroxide", "substitute_group": "alkaline_builder",
+    },
+    "Sodium metasilicate": {
+        "functional_class": "silicate", "substitute_group": "alkaline_builder",
+    },
+    "Sodium tripolyphosphate": {
+        "functional_class": "phosphate", "substitute_group": "alkaline_builder",
+    },
+    # Surfactant / chelant
+    "Nonionic surfactant (C12-14 EO7)": {
+        "functional_class": "nonionic_ethoxylate", "substitute_group": "nonionic_surfactant",
+        "hlb": 12.1,
+    },
+    "Sodium gluconate": {
+        "functional_class": "hydroxycarboxylate", "substitute_group": "chelant",
+    },
+    # Surface-treatment actives
+    "Phosphoric acid": {
+        "functional_class": "mineral_acid", "substitute_group": "phosphating_acid",
+    },
+    "Zinc oxide": {
+        "functional_class": "metal_oxide", "substitute_group": "phosphating_cation",
+    },
+    "Manganese dihydrogen phosphate": {
+        "functional_class": "phosphate", "substitute_group": "phosphating_cation",
+    },
+    "Hexafluorozirconic acid": {
+        "functional_class": "fluorozirconate", "substitute_group": "conversion_former",
+    },
+    "(3-Aminopropyl)triethoxysilane (APTES)": {
+        "functional_class": "silane", "substitute_group": "conversion_former",
+    },
+}
+
+for _name, _meta in _SUBSTITUTION_META.items():
+    if _name in _SEED_MATERIALS:
+        _SEED_MATERIALS[_name].update(_meta)
+del _name, _meta
+
 RAW_MATERIALS: MaterialCatalog = MaterialCatalog(_SEED_MATERIALS)
 
 # Trade-name / grade aliases → canonical RAW_MATERIALS key (case-insensitive lookup).

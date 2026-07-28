@@ -169,9 +169,19 @@ def _run_with_timeout(fn: Callable[[], T], default: T) -> T:
         return degrade_return(logger, exc, "chemtools call failed", default)
 
 
+# Tools whose argument is a SMILES string. SMILES are case-sensitive — `c1ccccc1`
+# is benzene, `C1CCCCC1` is cyclohexane — so these keys must not be lowercased,
+# or the two collide and the second lookup silently returns the first molecule's
+# result for the whole TTL.
+_CASE_SENSITIVE_TOOLS = frozenset(
+    {"mol_similarity", "mol_descriptors", "func_groups", "patent_check"}
+)
+
+
 def _cached(tool: str, arg: str, compute: Callable[[], T]) -> T:
     global _CACHE_WRITE_COUNT
-    key = (tool, arg.strip().lower())
+    normalized = arg.strip() if tool in _CASE_SENSITIVE_TOOLS else arg.strip().lower()
+    key = (tool, normalized)
     with _CACHE_LOCK:
         entry = _CACHE.get(key)
         if entry and time.time() - entry[0] <= _CACHE_TTL_SEC:
@@ -522,7 +532,10 @@ def mol_similarity(smiles_a: str, smiles_b: str) -> float | None:
         except Exception as exc:
             return degrade_return(logger, exc, "rdkit similarity failed", None)
 
-    return _cached("mol_similarity", f"{a}|{b}", compute)
+    # Sort the pair: similarity is symmetric, so (A,B) and (B,A) must share one
+    # cache entry rather than each computing and storing its own.
+    lo, hi = sorted((a, b))
+    return _cached("mol_similarity", f"{lo}|{hi}", compute)
 
 
 # ── patent / safety screens (ChemCrow only) ──────────────────────────────────
