@@ -26,12 +26,33 @@ def _ensure_sqlite_dir(db_url: str) -> None:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
+def _enable_sqlite_foreign_keys(engine: Engine) -> None:
+    """Turn on SQLite's foreign-key enforcement.
+
+    SQLite ships with ``PRAGMA foreign_keys=OFF`` and applies it per
+    connection, so a declared ForeignKey is decorative until this runs —
+    dev and the whole test suite would happily accept orphan rows that
+    PostgreSQL rejects in production, which is the worst way to find out.
+    """
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _set_pragma(dbapi_connection, _record):  # pragma: no cover - driver hook
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+
 def make_engine(db_url: str) -> Engine:
     _ensure_sqlite_dir(db_url)
     connect_args: dict = {}
     if db_url.startswith("sqlite"):
         connect_args = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(db_url, future=True, connect_args=connect_args)
+    if db_url.startswith("sqlite"):
+        _enable_sqlite_foreign_keys(engine)
     from ..config import get_settings
 
     if get_settings().environment not in ("production", "prod"):

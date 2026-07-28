@@ -14,6 +14,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -52,6 +53,76 @@ class ExperimentRow(Base):
     measured: Mapped[dict] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(64), default="lab")
     label: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class MeasurementRow(Base):
+    """One typed lab result belonging to an experiment.
+
+    The experiment's ``measured`` JSON column stays as the flat mirror every
+    consumer already reads; this table is where the context that makes a number
+    comparable lives — unit, test method, instrument, operator, and the
+    acceptance window it was judged against.
+
+    Carries real foreign keys, unlike the rest of this schema: both parents are
+    local tables (never Datalab-authoritative), so the constraint can be
+    enforced rather than merely documented.
+    """
+
+    __tablename__ = "measurements"
+    __table_args__ = (
+        Index("ix_measurements_experiment_metric", "experiment_id", "metric"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(
+        ForeignKey("experiments.id", ondelete="CASCADE"), index=True
+    )
+    metric: Mapped[str] = mapped_column(String(80), index=True)
+    value: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(32), default="")
+    # ASTM B117 / ISO 9227 / GB/T 1771 — salt-spray hours are not comparable
+    # across standards, so a value without one is not a result.
+    test_method: Mapped[str] = mapped_column(String(80), default="")
+    instrument: Mapped[str] = mapped_column(String(120), default="")
+    operator: Mapped[str] = mapped_column(String(80), default="")
+    measured_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    spec_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spec_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    passed: Mapped[bool | None] = mapped_column(nullable=True)
+    # The QC report this value was read out of. SET NULL rather than CASCADE:
+    # losing the report should not silently delete the measurement.
+    source_document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ExperimentAttachment(Base):
+    """Binds an ingested document to the experiment it reports on.
+
+    This link did not exist. QC reports were ingested into the knowledge base
+    as generic corpus documents with no way back to the run they measured, so
+    "show me the salt-spray certificate for this batch" had no answer.
+    """
+
+    __tablename__ = "experiment_attachments"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_id", "source_document_id", name="uq_experiment_attachment"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(
+        ForeignKey("experiments.id", ondelete="CASCADE"), index=True
+    )
+    source_document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), default="qc_report")
+    note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

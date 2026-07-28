@@ -3,11 +3,12 @@ research → recommend → DOE → simulate → optimize pipeline.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
 class ProductDomain(str, Enum):
@@ -488,21 +489,102 @@ class AsyncTaskAccepted(BaseModel):
 TaskHandle = AsyncTaskAccepted
 
 
+class Measurement(BaseModel):
+    """One lab-observed value, with the context that makes it comparable.
+
+    A bare number is not a result. 720 hours of salt spray under ASTM B117 and
+    under ISO 9227 are different experiments, and a value with no spec limit
+    cannot be judged pass or fail. Everything beyond ``metric``/``value`` is
+    optional so existing callers keep working, but the fields exist so a QC
+    report can land here without losing what makes it auditable.
+    """
+
+    metric: str
+    value: float
+    unit: str = ""
+    # Standard the measurement was taken under: ASTM B117 / ISO 9227 / GB/T 1771.
+    test_method: str = ""
+    instrument: str = ""
+    operator: str = ""
+    measured_at: datetime | None = None
+    # Acceptance window. ``passed`` is derived when limits are known.
+    spec_min: float | None = None
+    spec_max: float | None = None
+    passed: bool | None = None
+    # Provenance: the ingested QC report this value was read from.
+    source_document_id: str | None = None
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _derive_passed(self) -> Measurement:
+        if self.passed is None and (self.spec_min is not None or self.spec_max is not None):
+            ok = True
+            if self.spec_min is not None and self.value < self.spec_min:
+                ok = False
+            if self.spec_max is not None and self.value > self.spec_max:
+                ok = False
+            object.__setattr__(self, "passed", ok)
+        return self
+
+
 class ExperimentRecord(BaseModel):
     """A single measured DOE/lab result fed back into the platform.
 
     ``factors`` are the formulation levers in natural units (matching a DOE
-    run's ``natural`` values, e.g. ingredient wt% and cure temperature), and
-    ``measured`` holds the lab-observed property values keyed by metric name.
+    run's ``natural`` values, e.g. ingredient wt% and cure temperature).
+
+    Results live in ``measurements`` as typed rows. ``measured`` remains the
+    flat ``{metric: value}`` view every consumer already reads — training, the
+    BayBE adapter, active learning, DOE explain/anomaly — and is accepted as
+    input so legacy payloads, stored JSON files, SQLite rows and Datalab blocks
+    all still load unchanged.
     """
 
     domain: ProductDomain
     project_id: str = ""
     factors: dict[str, float] = Field(default_factory=dict)
     cure_temperature_c: float | None = None
-    measured: dict[str, float]
+    measurements: list[Measurement] = Field(default_factory=list)
     source: str = "lab"
     label: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_measured(cls, data):
+        """Accept ``measured={metric: value}`` and store it as typed rows.
+
+        This is the whole backward-compatibility story: every existing caller,
+        every JSON file on disk, and every Datalab ``formumind_training`` block
+        passes ``measured``, and none of them need to change.
+        """
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("measured")
+        if not raw or data.get("measurements"):
+            return data
+        if isinstance(raw, dict):
+            data = dict(data)
+            data["measurements"] = [
+                {"metric": k, "value": v}
+                for k, v in raw.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            ]
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def measured(self) -> dict[str, float]:
+        """Flat metric → value view.
+
+        A computed field rather than a plain property so it survives
+        ``model_dump()`` — the JSON store and the Datalab block writer both
+        serialize records, and a rolled-back binary must still be able to read
+        what a newer one wrote.
+        """
+        return {m.metric: m.value for m in self.measurements}
+
+    def measurement_for(self, metric: str) -> Measurement | None:
+        return next((m for m in self.measurements if m.metric == metric), None)
 
 
 class ExperimentSubmission(BaseModel):

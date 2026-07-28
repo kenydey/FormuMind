@@ -27,6 +27,8 @@ EXPECTED_TABLES = {
     "kb_entity_links",
     "projects",
     "materials",
+    "measurements",
+    "experiment_attachments",
 }
 
 
