@@ -51,6 +51,18 @@ _LLM_RUNTIME_ENV: dict[str, str] = {
     "llm_base_url": "FORMUMIND_LLM_BASE_URL",
 }
 
+# Flags that decide deployment topology rather than product behaviour, and so
+# belong to the operator even though they are toggleable in the Settings UI.
+#
+# FORMUMIND_CELERY_EAGER decides whether tasks run in the API process or go to
+# the broker — that is, whether the worker container does anything at all.
+# Promoted like an ordinary feature flag, a value saved once in the UI outranks
+# `environment: FORMUMIND_CELERY_EAGER: "false"` in docker-compose.yml forever,
+# and a multi-container deployment silently degrades to a single process with
+# an idle worker beside it. The symptom is remote: long research runs now
+# execute inside the HTTP request, so they can outlast an nginx read timeout.
+_TOPOLOGY_FLAGS = frozenset({"FORMUMIND_CELERY_EAGER"})
+
 
 def _mask(value: str | None) -> str:
     if not value:
@@ -135,7 +147,8 @@ def apply_persisted_ui_settings() -> None:
     promote exactly the managed keys — API secrets, LLM provider/model/base
     URL, and boolean feature flags — from the runtime env file into the
     process environment. Operator-level keys (DB / Redis / auth) are never
-    touched.
+    touched, and neither are the topology flags below when the deployment has
+    already set them.
     """
     from .env_flags import FLAG_REGISTRY
 
@@ -147,9 +160,18 @@ def apply_persisted_ui_settings() -> None:
     except Exception as exc:
         log_handled_exception(logger, exc, "apply_persisted_ui_settings: read failed")
         return
-    applied = sorted(k for k in saved if k in managed)
-    for key in applied:
+
+    applied: list[str] = []
+    for key in sorted(k for k in saved if k in managed):
+        if key in _TOPOLOGY_FLAGS and key in os.environ:
+            # The operator said otherwise, out loud, in the deployment config.
+            logger.warning(
+                "%s=%s saved in the UI is ignored: the deployment sets it to %s",
+                key, saved[key], os.environ[key],
+            )
+            continue
         os.environ[key] = saved[key]
+        applied.append(key)
     if applied:
         get_settings.cache_clear()
         logger.info(

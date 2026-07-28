@@ -240,3 +240,68 @@ def test_degraded_health_still_answers_200(
     """The container healthcheck asserts HTTP 200, and restarting the API
     would not bring Redis back — degraded must stay reportable, not fatal."""
     assert client.get("/health").status_code == 200
+
+
+# ── a UI toggle must not overrule the deployment ─────────────────────────────
+
+
+def test_ui_saved_eager_flag_cannot_override_the_deployment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """docker-compose sets FORMUMIND_CELERY_EAGER=false and runs a worker.
+
+    The flag is toggleable in the Settings UI, and persisted UI values are
+    promoted into os.environ so they outrank compose. For product flags that
+    is the point; for this one it silently disables the worker container and
+    moves every async job back inside the HTTP request, where a long research
+    run can outlast an nginx read timeout.
+    """
+    from app.services import secrets_store
+
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("FORMUMIND_CELERY_EAGER=true\n")
+    monkeypatch.setattr(secrets_store, "read_env_file", lambda: {"FORMUMIND_CELERY_EAGER": "true"})
+    monkeypatch.setenv("FORMUMIND_CELERY_EAGER", "false")
+
+    secrets_store.apply_persisted_ui_settings()
+
+    import os
+
+    assert os.environ["FORMUMIND_CELERY_EAGER"] == "false"
+
+
+def test_ui_saved_eager_flag_still_applies_when_nobody_set_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a deployment value there is nothing to overrule, so the UI
+    toggle keeps working — a single-process install can still choose eager."""
+    from app.services import secrets_store
+
+    monkeypatch.setattr(secrets_store, "read_env_file", lambda: {"FORMUMIND_CELERY_EAGER": "true"})
+    monkeypatch.delenv("FORMUMIND_CELERY_EAGER", raising=False)
+
+    secrets_store.apply_persisted_ui_settings()
+
+    import os
+
+    assert os.environ["FORMUMIND_CELERY_EAGER"] == "true"
+
+
+def test_ordinary_feature_flags_still_win_over_a_stale_container_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The promotion exists because compose injects env at container creation,
+    so a stale key would beat what the user last saved. Only topology flags are
+    exempt — narrowing it further would restore the original bug."""
+    from app.services import secrets_store
+
+    monkeypatch.setattr(
+        secrets_store, "read_env_file", lambda: {"FORMUMIND_ARXIV_SEARCH_ENABLED": "true"}
+    )
+    monkeypatch.setenv("FORMUMIND_ARXIV_SEARCH_ENABLED", "false")
+
+    secrets_store.apply_persisted_ui_settings()
+
+    import os
+
+    assert os.environ["FORMUMIND_ARXIV_SEARCH_ENABLED"] == "true"
