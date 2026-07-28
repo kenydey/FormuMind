@@ -2,6 +2,11 @@
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
+    "target": "ES2020",
+    // Without an explicit lib this config falls back to the ES5 library, where
+    // String.prototype.includes does not exist — build-config code could only
+    // use ES5 APIs, which is not what the Node that runs it supports.
+    "lib": ["ES2020"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,

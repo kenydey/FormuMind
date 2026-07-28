@@ -1,13 +1,27 @@
+import { Suspense, lazy } from "react";
 import Modal from "./Modal";
 import RequirementPanel from "./RequirementPanel";
 import FormulaLeaderboard from "./FormulaLeaderboard";
-import DoeResultsPanel from "./DoeResultsPanel";
-import WorkbenchModal from "./WorkbenchModal";
-import SimPlaceholder from "./SimPlaceholder";
-import ProcessOptModal from "./ProcessOptModal";
-import LoopModal from "./LoopModal";
 import { useStore } from "../store";
 import { useShallow } from "zustand/react/shallow";
+
+// Deferred: the lab workbench pulls AG Grid (~1.1 MB) and the process-optimization
+// modal pulls Recharts (~0.5 MB). Both are modal-only, and most sessions never open
+// either, so loading them up front costs every user for a feature few reach. This
+// matters more than usual here — the deployment target is corporate intranets
+// where first load is not on a fast link.
+const WorkbenchModal = lazy(() => import("./WorkbenchModal"));
+// Every Recharts consumer (DoeResultsPanel, SimPlaceholder, LoopModal via
+// SimPlaceholder) is modal-only too, so deferring these keeps the chart bundle
+// off the critical path entirely rather than merely in its own file.
+const DoeResultsPanel = lazy(() => import("./DoeResultsPanel"));
+const SimPlaceholder = lazy(() => import("./SimPlaceholder"));
+const LoopModal = lazy(() => import("./LoopModal"));
+const ProcessOptModal = lazy(() => import("./ProcessOptModal"));
+
+function ModalFallback() {
+  return <div className="p-6 text-sm text-slate-400">加载中…</div>;
+}
 
 type ModalName = "requirements" | "recommend" | "doe" | "workbench" | "optimize" | "process" | "loop";
 
@@ -220,7 +234,9 @@ export default function ActionsPanel() {
         onClose={() => setOpenModal(null)}
         size="lg"
       >
-        <DoeResultsPanel />
+        <Suspense fallback={<ModalFallback />}>
+          <DoeResultsPanel />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -229,7 +245,9 @@ export default function ActionsPanel() {
         onClose={() => setOpenModal(null)}
         size="xl"
       >
-        <WorkbenchModal />
+        <Suspense fallback={<ModalFallback />}>
+          <WorkbenchModal />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -247,7 +265,9 @@ export default function ActionsPanel() {
         </button>
         {optimizationHistory.length > 0 ? (
           <div className="h-80 [&>div]:h-full">
-            <SimPlaceholder />
+            <Suspense fallback={<ModalFallback />}>
+              <SimPlaceholder />
+            </Suspense>
           </div>
         ) : (
           <p className="text-slate-500 text-sm">运行寻优后，此处显示收敛折线图与最优配方。</p>
@@ -260,7 +280,9 @@ export default function ActionsPanel() {
         onClose={() => setOpenModal(null)}
         size="lg"
       >
-        <ProcessOptModal />
+        <Suspense fallback={<ModalFallback />}>
+          <ProcessOptModal />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -269,7 +291,9 @@ export default function ActionsPanel() {
         onClose={() => setOpenModal(null)}
         size="lg"
       >
-        <LoopModal />
+        <Suspense fallback={<ModalFallback />}>
+          <LoopModal />
+        </Suspense>
       </Modal>
     </aside>
   );
