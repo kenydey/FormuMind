@@ -236,6 +236,40 @@ class FormulationHistoryStore:
         versions = self.lineage(lineage_id)
         return versions[-1] if versions else None
 
+    def find_lineages(
+        self,
+        *,
+        name: str = "",
+        domain: str = "",
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[str]:
+        """Lineage ids whose *root* revision matches, most recent first.
+
+        Lets a caller reconnect a formulation on screen to its stored history
+        without having to carry a lineage id around in client state — the id
+        would then have to be persisted through save/load like every other
+        workspace field, and would be lost for anything created before.
+        Matching on the root keeps a lineage findable after later revisions
+        rename it.
+        """
+        from ..db.models import FormulationVersion
+
+        with self._session_factory() as session:
+            query = session.query(FormulationVersion).filter(
+                FormulationVersion.version == 1
+            )
+            if name:
+                query = query.filter(FormulationVersion.name == name)
+            if domain:
+                query = query.filter(FormulationVersion.domain == domain)
+            if project_id:
+                query = query.filter(FormulationVersion.project_id == project_id)
+            rows = (
+                query.order_by(FormulationVersion.created_at.desc()).limit(limit).all()
+            )
+            return [r.lineage_id for r in rows]
+
     def ancestry(self, version_id: str) -> list:
         """Walk parent links back to the root — the path this revision took.
 

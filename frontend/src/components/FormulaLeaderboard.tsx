@@ -13,6 +13,7 @@ import {
 import MolViewer from "./MolViewer";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
+import VersionHistoryModal from "./VersionHistoryModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
 
@@ -88,6 +89,7 @@ function FormulaCard({
 }) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const expanded = open || forceOpen;
 
   // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
@@ -202,12 +204,20 @@ function FormulaCard({
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
           <MolViewer entries={form.ingredients.map((i) => ({ name: i.name, smiles: i.smiles }))} />
-          <button
-            onClick={(e) => { e.stopPropagation(); setIpOpen(true); }}
-            className="w-full mt-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent2 hover:border-accent2/50"
-          >
-            🔍 IP 合规分析
-          </button>
+          <div className="flex gap-1 mt-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); setIpOpen(true); }}
+              className="flex-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent2 hover:border-accent2/50"
+            >
+              🔍 IP 合规分析
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setHistoryOpen(true); }}
+              className="flex-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50"
+            >
+              🕘 修订历史
+            </button>
+          </div>
         </div>
       )}
       <Modal
@@ -218,6 +228,15 @@ function FormulaCard({
         nested
       >
         <IPReportModal form={form} />
+      </Modal>
+      <Modal
+        title={`修订历史 · ${form.name}`}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        size="lg"
+        nested
+      >
+        <VersionHistoryModal form={form} />
       </Modal>
     </div>
   );

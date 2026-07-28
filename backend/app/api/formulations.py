@@ -286,6 +286,27 @@ def save_formulation_version(body: SaveVersionRequest) -> VersionView:
     return _to_view(row)
 
 
+@router.get("/formulations/versions", response_model=list[LineageResponse])
+def find_formulation_lineages(
+    name: str = "",
+    domain: str = "",
+    limit: int = 10,
+) -> list[LineageResponse]:
+    """Stored histories whose first revision matches — used to reconnect a
+    formulation on screen to its lineage without carrying an id in the client."""
+    from ..services.formulation_history import get_history_store
+
+    store = get_history_store()
+    out: list[LineageResponse] = []
+    for lineage_id in store.find_lineages(name=name, domain=domain, limit=limit):
+        rows = store.lineage(lineage_id)
+        if rows:
+            out.append(
+                LineageResponse(lineage_id=lineage_id, versions=[_to_view(r) for r in rows])
+            )
+    return out
+
+
 @router.get("/formulations/versions/{lineage_id}", response_model=LineageResponse)
 def formulation_lineage(lineage_id: str) -> LineageResponse:
     """Every revision of one formulation, oldest first."""

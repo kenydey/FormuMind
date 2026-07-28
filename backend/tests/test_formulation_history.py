@@ -272,3 +272,46 @@ def test_unknown_lineage_and_diff_are_404(store):
     assert client.get("/api/formulations/versions/does-not-exist").status_code == 404
     assert client.get("/api/formulations/versions/a/diff/b").status_code == 404
     assert client.get("/api/formulations/versions/detail/nope").status_code == 404
+
+
+# ── lineage lookup by name ───────────────────────────────────────────────────
+
+
+def test_find_lineages_matches_the_root_revision(store):
+    """Matching on v1 keeps a lineage findable after a later revision renames
+    it — otherwise history would disappear the moment someone retitled."""
+    root = store.save_version(_form(name="Primer A"))
+    store.save_version(_form(name="Primer A v2"), parent_version_id=root.id)
+
+    assert store.find_lineages(name="Primer A") == [root.lineage_id]
+    assert store.find_lineages(name="Primer A v2") == []
+
+
+def test_find_lineages_filters_by_domain(store):
+    store.save_version(_form(name="Shared"))
+    assert store.find_lineages(name="Shared", domain="anticorrosion_coating")
+    assert store.find_lineages(name="Shared", domain="degreaser") == []
+
+
+def test_find_lineages_unknown_name_is_empty(store):
+    assert store.find_lineages(name="nope") == []
+
+
+def test_lineage_lookup_endpoint(store):
+    client.post(
+        "/api/formulations/versions",
+        json={"formulation": _form(name="Findable").model_dump(mode="json")},
+    )
+    response = client.get("/api/formulations/versions?name=Findable")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 1
+    assert [v["version"] for v in body[0]["versions"]] == [1]
+
+
+def test_lineage_lookup_returns_empty_list_not_404(store):
+    """An unmatched name means "no history yet", which the UI renders as a
+    prompt to save one — a 404 would read as an error instead."""
+    response = client.get("/api/formulations/versions?name=does-not-exist")
+    assert response.status_code == 200
+    assert response.json() == []

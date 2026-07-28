@@ -871,6 +871,13 @@ export const api = {
     created_by?: string;
   }) => post<FormulationVersionView>("/api/formulations/versions", body),
 
+  findFormulationLineages: (name: string, domain: string, limit = 10) => {
+    const params = new URLSearchParams({ name, domain, limit: String(limit) });
+    return get<{ lineage_id: string; versions: FormulationVersionView[] }[]>(
+      `/api/formulations/versions?${params}`
+    );
+  },
+
   formulationLineage: (lineageId: string) =>
     get<{ lineage_id: string; versions: FormulationVersionView[] }>(
       `/api/formulations/versions/${encodeURIComponent(lineageId)}`
