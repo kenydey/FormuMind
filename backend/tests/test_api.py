@@ -190,6 +190,28 @@ def test_validate_formulations_with_requirement_voc():
 # ── Task 1.2: outbox durability for /api/research/recommend ────────────────
 
 
+def _stub_celery_dispatch(monkeypatch):
+    """Make ``.delay()`` deterministic and broker-free.
+
+    These tests are about the durable outbox row, not about Celery. Turning off
+    eager mode alone does not free them from Redis — a non-eager ``.delay()``
+    with no broker spends ~19s retrying the result backend and then raises, so
+    the suite quietly depended on a running redis-server. Stubbing dispatch
+    tests what the names claim and nothing else.
+    """
+    import uuid
+
+    from app.api import _dispatch
+    from app.worker import tasks
+
+    class _Dispatched:
+        def __init__(self) -> None:
+            self.id = str(uuid.uuid4())
+
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
+    monkeypatch.setattr(tasks.run_recommend_task, "delay", lambda _payload: _Dispatched())
+
+
 def test_research_recommend_writes_outbox_row(tmp_path, monkeypatch):
     """POST /api/research/recommend → task_outbox row with correct operation."""
     from sqlalchemy import select
@@ -199,8 +221,10 @@ def test_research_recommend_writes_outbox_row(tmp_path, monkeypatch):
     from app.worker.celery_app import celery_app
     from tests.alembic_helpers import run_upgrade
 
-    # Disable eager mode so delay() returns immediately without running the task.
+    # Non-eager so the endpoint takes the dispatch path, with dispatch stubbed
+    # so no broker is required.
     monkeypatch.setitem(celery_app.conf, "task_always_eager", False)
+    _stub_celery_dispatch(monkeypatch)
 
     db_url = f"sqlite:///{tmp_path}/research.db"
     run_upgrade(db_url, monkeypatch)
@@ -240,8 +264,10 @@ def test_research_recommend_idempotent(tmp_path, monkeypatch):
     from app.worker.celery_app import celery_app
     from tests.alembic_helpers import run_upgrade
 
-    # Disable eager mode so delay() returns immediately without running the task.
+    # Non-eager so the endpoint takes the dispatch path, with dispatch stubbed
+    # so no broker is required.
     monkeypatch.setitem(celery_app.conf, "task_always_eager", False)
+    _stub_celery_dispatch(monkeypatch)
 
     db_url = f"sqlite:///{tmp_path}/research2.db"
     run_upgrade(db_url, monkeypatch)
