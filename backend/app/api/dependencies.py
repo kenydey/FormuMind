@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from ..services import dependencies as deps
 from ..worker.tasks import run_deps_install_task
-from .tasks import accepted_response
+from ._dispatch import submit
 
 router = APIRouter(prefix="/api", tags=["dependencies"])
 
@@ -33,8 +33,7 @@ def install_dependencies(action: DependencyAction) -> JSONResponse:
         deps.validate_names(action.names)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    async_result = run_deps_install_task.delay({
+    return submit(run_deps_install_task, {
         "names": action.names,
         "upgrade": action.upgrade,
-    })
-    return accepted_response(async_result.id, "deps")
+    }, "deps")

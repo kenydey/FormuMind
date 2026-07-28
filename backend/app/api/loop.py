@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from ..domain.schemas import LoopRequest, Requirement
 from ..worker.tasks import run_loop_task
-from .tasks import accepted_response
+from ._dispatch import submit
 
 router = APIRouter(prefix="/api", tags=["loop"])
 
@@ -29,7 +29,7 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
             }
         )
     )
-    async_result = run_loop_task.delay({
+    return submit(run_loop_task, {
         "requirement": req.model_dump(),
         "iterations": payload.optimize_iterations,
         "n_suggest": payload.n_suggest,
@@ -43,5 +43,4 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
         else None,
         "prior_next_doe": payload.prior_next_doe.model_dump() if payload.prior_next_doe else None,
         "budget_remaining": payload.budget_remaining,
-    })
-    return accepted_response(async_result.id, "loop")
+    }, "loop")

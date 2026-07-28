@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 
 from ..domain.schemas import Requirement, TargetSpec
 from ..worker.tasks import run_inverse_design_task
+from ._dispatch import submit
 from ._idempotency import enqueue_outbox
-from .tasks import accepted_response
 
 router = APIRouter(prefix="/api", tags=["design"])
 
@@ -41,5 +41,4 @@ def start_inverse_design(body: InverseDesignBody) -> JSONResponse:
         "seed": body.seed,
     }
     outbox_id = enqueue_outbox("inverse_design", payload)
-    async_result = run_inverse_design_task.delay(payload)
-    return accepted_response(async_result.id, "inverse_design", outbox_id=outbox_id)
+    return submit(run_inverse_design_task, payload, "inverse_design", outbox_id=outbox_id)

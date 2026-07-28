@@ -11,8 +11,8 @@ from ..pipeline import workflow
 from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..services.federated_search import FederatedSearchEngine
 from ..worker.tasks import run_deep_research_task, run_recommend_task
+from ._dispatch import submit
 from ._idempotency import enqueue_outbox, idempotency_key
-from .tasks import accepted_response
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -74,8 +74,7 @@ def start_recommend_research(body: ResearchRequest) -> JSONResponse:
         "query": body.query or req.headline(),
     }
     outbox_id = _enqueue_outbox("research_recommend", payload)
-    async_result = run_recommend_task.delay(payload)
-    return accepted_response(async_result.id, "recommend", outbox_id=outbox_id)
+    return submit(run_recommend_task, payload, "recommend", outbox_id=outbox_id)
 
 
 @router.post("/research/deep", status_code=202)
@@ -88,8 +87,7 @@ def start_deep_research(body: DeepResearchRequest) -> JSONResponse:
         "query": body.query or body.topic,
     }
     outbox_id = _enqueue_outbox("research_deep", payload)
-    async_result = run_deep_research_task.delay(payload)
-    return accepted_response(async_result.id, "deep_research", outbox_id=outbox_id)
+    return submit(run_deep_research_task, payload, "deep_research", outbox_id=outbox_id)
 
 
 @router.post("/research/modify", status_code=202)
@@ -120,8 +118,7 @@ def modify_recommendation(body: ModifyRequest) -> JSONResponse:
         "base_formulas": [f.model_dump() for f in base_formulas],
         "n": body.n,
     }
-    async_result = run_recommend_task.delay(payload)
-    return accepted_response(async_result.id, "recommend")
+    return submit(run_recommend_task, payload, "recommend")
 
 
 @router.post("/research/kb/refresh")

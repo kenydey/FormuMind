@@ -40,6 +40,10 @@ def _dispatch(operation: str, payload: dict) -> None:
         from ..worker.tasks import run_deep_research_task
 
         run_deep_research_task.delay(payload)
+    elif operation == "inverse_design":
+        from ..worker.tasks import run_inverse_design_task
+
+        run_inverse_design_task.delay(payload)
     elif operation == "ingest_complete":
         logger.info("ingest_complete task acknowledged (payload=%s)", payload)
     else:

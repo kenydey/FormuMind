@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from ..domain.schemas import Requirement
 from ..worker.tasks import run_optimize_task
-from .tasks import accepted_response
+from ._dispatch import submit
 
 router = APIRouter(prefix="/api", tags=["optimize"])
 
@@ -22,11 +22,10 @@ class OptimizeRequest(BaseModel):
 
 @router.post("/optimize", status_code=202)
 def start_optimization(payload: OptimizeRequest) -> JSONResponse:
-    async_result = run_optimize_task.delay({
+    return submit(run_optimize_task, {
         "requirement": payload.requirement.model_dump(),
         "iterations": payload.iterations,
         "engine": payload.engine,
         "campaign_state": payload.campaign_state,
         "workbench_campaign_id": payload.workbench_campaign_id,
-    })
-    return accepted_response(async_result.id, "optimize")
+    }, "optimize")

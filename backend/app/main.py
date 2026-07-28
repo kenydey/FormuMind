@@ -232,13 +232,23 @@ def health() -> dict:
     except Exception:
         db_ok = False
 
+    # Every async feature — research, optimize, inverse design, search — is
+    # submitted through Celery, so an unreachable broker breaks all of them
+    # while the process keeps answering requests. Reporting only the database
+    # let that outage look healthy from the outside.
+    from .api._dispatch import broker_reachable
+
+    broker_ok = broker_reachable()
+
     overall = "ok"
-    if not db_ok or (datalab_required and not datalab_ok):
+    if not db_ok or not broker_ok or (datalab_required and not datalab_ok):
         overall = "degraded"
 
     return {
         "status": overall,
         "database": {"ok": db_ok, "scheme": db_scheme},
+        # "required" is False in eager mode, where tasks run in-process.
+        "task_broker": {"required": not cfg.celery_eager, "reachable": broker_ok},
         "datalab": {"required": datalab_required, "reachable": datalab_ok},
     }
 

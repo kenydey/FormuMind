@@ -1,0 +1,227 @@
+"""Async submission when the task broker is unreachable.
+
+Reproduces the outage this guard exists for: with Redis down, ``.delay()``
+spends ~19 seconds retrying the Celery *result backend* and then raises
+``RuntimeError: Retry limit exceeded ...``, which reaches the browser as a
+plain-text 500. The frontend parses error bodies as JSON, so an unparseable
+body collapses to ``"<path> -> <status>"`` — no cause, no next step. Behind
+nginx the same outage reads as a 502 instead.
+"""
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api import _dispatch
+from app.main import app
+
+
+@pytest.fixture()
+def client() -> TestClient:
+    return TestClient(app)
+
+
+@pytest.fixture()
+def broker_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: False)
+
+
+REQUIREMENT = {"domain": "anticorrosion_coating", "substrate": "carbon_steel"}
+
+# Every endpoint that hands work to Celery, with a minimal valid body.
+SUBMISSIONS = [
+    ("/api/research/recommend", REQUIREMENT),
+    ("/api/research/deep", {"topic": "环氧防腐", "requirement": REQUIREMENT}),
+    ("/api/optimize", {"requirement": REQUIREMENT, "iterations": 2}),
+    ("/api/design/inverse", {"requirement": REQUIREMENT}),
+    ("/api/search/stream", {"query": "环氧防腐涂料"}),
+    ("/api/loop/iterate", {"domain": "anticorrosion_coating", "substrate": "carbon_steel"}),
+]
+
+
+@pytest.mark.parametrize("path,body", SUBMISSIONS, ids=[p for p, _ in SUBMISSIONS])
+def test_unreachable_broker_returns_503_not_500(
+    client: TestClient, broker_down: None, path: str, body: dict
+) -> None:
+    """503 says "temporarily unavailable, the work is recorded". 500 says
+    "this endpoint is broken", which sends the user to the wrong place."""
+    response = client.post(path, json=body)
+    assert response.status_code == 503, path
+
+
+@pytest.mark.parametrize("path,body", SUBMISSIONS, ids=[p for p, _ in SUBMISSIONS])
+def test_error_body_is_json_the_frontend_can_read(
+    client: TestClient, broker_down: None, path: str, body: dict
+) -> None:
+    """The UI falls back to a bare "<path> -> <status>" for any body it cannot
+    parse as JSON with a string ``detail`` — which is precisely the useless
+    message this fix removes."""
+    detail = client.post(path, json=body).json()["detail"]
+    assert isinstance(detail, str)
+    # Actionable: names what is down and what to do about it.
+    assert "Redis" in detail
+    assert "worker" in detail
+
+
+def test_submission_does_not_wait_for_celery_to_exhaust_its_retries(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The probe replaces ~19s of Celery retries, so the caller is not left
+    holding a request long enough for a proxy to time out on its own."""
+    calls: list[str] = []
+
+    def explode(_payload):
+        calls.append("delay")
+        raise RuntimeError("Retry limit exceeded while trying to reconnect")
+
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: False)
+    from app.worker import tasks
+
+    monkeypatch.setattr(tasks.run_recommend_task, "delay", explode)
+
+    assert client.post("/api/research/recommend", json=REQUIREMENT).status_code == 503
+    assert calls == [], "delay() must not be reached once the probe says the broker is down"
+
+
+def test_dispatch_failure_after_a_passing_probe_is_still_503(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broker that dies between the probe and the publish, or a payload
+    Celery cannot serialise, must not fall through to a raw 500."""
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
+    from app.worker import tasks
+
+    def explode(_payload):
+        raise RuntimeError("Retry limit exceeded while trying to reconnect")
+
+    monkeypatch.setattr(tasks.run_recommend_task, "delay", explode)
+
+    response = client.post("/api/research/recommend", json=REQUIREMENT)
+    assert response.status_code == 503
+    assert isinstance(response.json()["detail"], str)
+
+
+# ── the probe itself ─────────────────────────────────────────────────────────
+
+
+def test_eager_mode_needs_no_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Eager runs tasks in-process; refusing to submit would break the default
+    single-process deployment, which has no Redis at all."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", True, raising=False)
+    monkeypatch.setattr(settings, "redis_url", "redis://127.0.0.1:1/0", raising=False)
+    assert _dispatch.broker_reachable() is True
+
+
+def test_closed_port_is_reported_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]  # bound, never listening
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", False, raising=False)
+    monkeypatch.setattr(
+        settings, "redis_url", f"redis://127.0.0.1:{closed_port}/0", raising=False
+    )
+    assert _dispatch.broker_reachable() is False
+
+
+def test_unparseable_broker_url_is_not_treated_as_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A unix socket has no host/port to probe. Blocking submission on a check
+    that could not run would turn a working deployment into a broken one."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", False, raising=False)
+    monkeypatch.setattr(settings, "redis_url", "redis+socket:///var/run/redis.sock", raising=False)
+    assert _dispatch.broker_reachable() is True
+
+
+def test_recorded_work_survives_the_outage(
+    client: TestClient, broker_down: None
+) -> None:
+    """The outbox row is written before dispatch, so a refused submission is
+    delayed work rather than lost work — dispatcher.recover_stalled re-enqueues
+    it once the broker returns."""
+    from app.db.database import default_session_factory
+    from app.db.models import TaskOutbox
+
+    client.post("/api/research/recommend", json=REQUIREMENT)
+
+    with default_session_factory()() as session:
+        rows = (
+            session.query(TaskOutbox)
+            .filter(TaskOutbox.operation == "research_recommend")
+            .all()
+        )
+    assert rows, "submission must leave a durable row behind"
+    assert any(r.status == "PENDING" for r in rows)
+
+
+def test_every_outbox_operation_can_be_recovered() -> None:
+    """A row the dispatcher cannot map is a job that silently never runs.
+    ``inverse_design`` was exactly that until it was added to the mapping."""
+    from app.db import dispatcher
+
+    dispatched: list[str] = []
+
+    class _Recorder:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def delay(self, _payload):
+            dispatched.append(self.name)
+
+    import app.worker.tasks as tasks
+
+    originals = {}
+    for attr in ("run_recommend_task", "run_deep_research_task", "run_inverse_design_task"):
+        originals[attr] = getattr(tasks, attr)
+        setattr(tasks, attr, _Recorder(attr))
+    try:
+        for operation in ("research_recommend", "research_deep", "inverse_design"):
+            dispatcher._dispatch(operation, {})
+    finally:
+        for attr, original in originals.items():
+            setattr(tasks, attr, original)
+
+    assert dispatched == [
+        "run_recommend_task",
+        "run_deep_research_task",
+        "run_inverse_design_task",
+    ]
+
+
+# ── health ───────────────────────────────────────────────────────────────────
+
+
+def test_health_reports_the_task_broker(client: TestClient) -> None:
+    """A broker outage breaks every async feature while the process keeps
+    answering requests, so /health must not report ``ok`` through it."""
+    body = client.get("/health").json()
+    assert "task_broker" in body
+    assert set(body["task_broker"]) == {"required", "reachable"}
+
+
+def test_health_is_degraded_when_the_broker_is_unreachable(
+    client: TestClient, broker_down: None
+) -> None:
+    body = client.get("/health").json()
+    assert body["task_broker"]["reachable"] is False
+    assert body["status"] == "degraded"
+
+
+def test_degraded_health_still_answers_200(
+    client: TestClient, broker_down: None
+) -> None:
+    """The container healthcheck asserts HTTP 200, and restarting the API
+    would not bring Redis back — degraded must stay reportable, not fatal."""
+    assert client.get("/health").status_code == 200

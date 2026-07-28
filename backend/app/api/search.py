@@ -11,7 +11,7 @@ from ..domain.schemas import Evidence, Requirement
 from ..services import literature
 from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..worker.tasks import run_search_task
-from .tasks import accepted_response
+from ._dispatch import submit
 
 router = APIRouter()
 
@@ -94,14 +94,13 @@ def search_sources(req: SearchRequest):
 
 @router.post("/search/stream", status_code=202)
 def search_stream(req: SearchRequest) -> JSONResponse:
-    async_result = run_search_task.delay({
+    return submit(run_search_task, {
         "query": req.query,
         "source_types": _effective_source_types(req.source_types),
         "requirement": req.requirement.model_dump() if req.requirement else None,
         "total_limit": req.total_limit,
         "per_source_cap": req.limit_per_source,
-    })
-    return accepted_response(async_result.id, "search")
+    }, "search")
 
 
 @router.get("/search/expand")
