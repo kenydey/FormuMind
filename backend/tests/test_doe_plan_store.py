@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import make_engine, make_session_factory
 from app.db.doe_plan_store import load_for_campaign, save
-from app.db.models import DOEPlanRow
+from app.db.models import Campaign, DOEPlanRow
 from app.domain.schemas import DOEFactor, DOEPlan, DOERun
 from tests.alembic_helpers import run_upgrade
 
@@ -101,48 +101,78 @@ def test_save_idempotent(session: Session) -> None:
 
 def test_load_empty(session: Session) -> None:
     """load_for_campaign on empty table → []."""
-    assert load_for_campaign(session, "no-campaign") == []
+    assert load_for_campaign(session, 999) == []
 
 
 # ── test_load_for_campaign_filters ───────────────────────────────────────────
 
 
+def _campaign(session: Session, name: str) -> int:
+    """Persist a campaign and return its integer primary key.
+
+    ``doe_plans.campaign_id`` carries a real foreign key since migration 0014,
+    so a fabricated id would (correctly) be rejected as an orphan.
+    """
+    campaign = Campaign(name=name)
+    session.add(campaign)
+    session.flush()
+    return campaign.id
+
+
 def test_load_for_campaign_filters(session: Session) -> None:
     """Two campaigns → each load_for_campaign returns only its own plans."""
-    # Direct ORM insert with campaign_id (bypassing save which sets None)
-    import uuid
-    from app.db.models import DOEPlanRow
+    campaign_a = _campaign(session, "campaign-a")
+    campaign_b = _campaign(session, "campaign-b")
 
+    # Direct ORM insert with campaign_id (bypassing save which sets None)
     r1 = DOEPlanRow(
         id="ca-1-a",
-        campaign_id="c-a",
+        campaign_id=campaign_a,
         design_type="lhs",
         parameters={"factors": [], "runs": []},
     )
     r2 = DOEPlanRow(
         id="ca-1-b",
-        campaign_id="c-a",
+        campaign_id=campaign_a,
         design_type="ccd",
         parameters={"factors": [], "runs": []},
     )
     r3 = DOEPlanRow(
         id="cb-1-a",
-        campaign_id="c-b",
+        campaign_id=campaign_b,
         design_type="full_factorial",
         parameters={"factors": [], "runs": []},
     )
     session.add_all([r1, r2, r3])
     session.commit()
 
-    plans_a = load_for_campaign(session, "c-a")
+    plans_a = load_for_campaign(session, campaign_a)
     assert len(plans_a) == 2
     assert {p.plan_id for p in plans_a} == {"ca-1-b", "ca-1-a"}  # newest first
     assert plans_a[0].plan_id == "ca-1-b"  # newest created_at first
     assert plans_a[0].design == "ccd"
 
-    plans_b = load_for_campaign(session, "c-b")
+    plans_b = load_for_campaign(session, campaign_b)
     assert len(plans_b) == 1
     assert plans_b[0].plan_id == "cb-1-a"
 
-    plans_x = load_for_campaign(session, "c-x")
-    assert plans_x == []
+    assert load_for_campaign(session, campaign_b + 1000) == []
+
+
+def test_plan_referencing_a_missing_campaign_is_rejected(session: Session) -> None:
+    """The foreign key added in 0014 is enforced, not decorative.
+
+    SQLite only honours foreign keys when ``PRAGMA foreign_keys=ON`` is set per
+    connection; ``make_engine`` does that, and this asserts it stays that way.
+    """
+    session.add(
+        DOEPlanRow(
+            id="orphan-1",
+            campaign_id=424242,
+            design_type="lhs",
+            parameters={"factors": [], "runs": []},
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()

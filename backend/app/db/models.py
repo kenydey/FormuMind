@@ -491,11 +491,19 @@ class DOEPlanRow(Base):
     __tablename__ = "doe_plans"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    experiment_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True
+    # Integer, matching the autoincrement primary keys these point at. They
+    # were declared String(36), so neither column could ever join its parent —
+    # a plan's experiment and campaign were unreachable by query. Nothing ever
+    # populated them, which is why it went unnoticed.
+    #
+    # SET NULL rather than CASCADE: these rows exist for audit and
+    # reconciliation, so a plan should outlive the campaign it was generated
+    # for rather than disappear with it.
+    experiment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("experiments.id", ondelete="SET NULL"), nullable=True
     )
-    campaign_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True
+    campaign_id: Mapped[int | None] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True
     )
     design_type: Mapped[str] = mapped_column(String(32), nullable=False)
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

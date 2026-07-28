@@ -105,13 +105,15 @@ def test_total_orphans_sums_only_joinable_references(factory):
 # ── things that are not orphans ──────────────────────────────────────────────
 
 
-def test_type_mismatched_reference_is_reported_as_unjoinable(factory):
-    """doe_plans.experiment_id is String(36) against an integer primary key, so
-    it can never join. That is a schema bug, not drift — counting orphans would
-    imply it is fixable by cleanup."""
-    check = _ref(check_integrity(factory), "doe_plans.experiment_id")
-    assert check.unjoinable
-    assert "类型不匹配" in check.note
+def test_doe_plan_references_are_joinable_after_the_type_fix(factory):
+    """These were String(36) against integer primary keys and could never join.
+    Migration 0014 corrected the types, so they are ordinary checked
+    references now rather than a permanent warning."""
+    report = check_integrity(factory)
+    for name in ("doe_plans.experiment_id", "doe_plans.campaign_id"):
+        check = _ref(report, name)
+        assert not check.unjoinable, name
+        assert check.orphans == 0
 
 
 def test_datalab_backed_reference_is_not_treated_as_an_orphan(factory):

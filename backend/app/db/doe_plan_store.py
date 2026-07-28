@@ -26,8 +26,8 @@ def _utcnow() -> datetime:
 def _plan_to_row(
     plan: DOEPlan,
     *,
-    campaign_id: str | None = None,
-    experiment_id: str | None = None,
+    campaign_id: int | None = None,
+    experiment_id: int | None = None,
 ) -> DOEPlanRow:
     """Serialize a domain ``DOEPlan`` to an ORM row."""
     plan_id = plan.plan_id or uuid.uuid4().hex
@@ -63,8 +63,8 @@ def save(
     session: Session,
     plan: DOEPlan,
     *,
-    campaign_id: str | None = None,
-    experiment_id: str | None = None,
+    campaign_id: int | None = None,
+    experiment_id: int | None = None,
 ) -> str:
     """Persist *plan* to the ``doe_plans`` table.
 
@@ -84,7 +84,7 @@ def save(
 
 
 def load_for_campaign(
-    session: Session, campaign_id: str
+    session: Session, campaign_id: int
 ) -> list[DOEPlan]:
     """Return every ``DOEPlan`` attached to *campaign_id*, newest first."""
     stmt = (

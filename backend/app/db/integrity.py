@@ -8,10 +8,11 @@ data. The honest alternative to a constraint you cannot enforce is a check you
 run — otherwise orphans accumulate silently and the first symptom is a
 retrieval that quietly returns less than it should.
 
-``doe_plans.experiment_id`` is called out separately: it is declared
-``String(36)`` while ``experiments.id`` is an autoincrement integer, so the
-two can never join. That is a schema bug, not drift, and no amount of
-reconciliation fixes it — it is reported so it stops being invisible.
+``doe_plans.experiment_id`` and ``campaign_id`` used to be reported here as
+structurally unjoinable — declared ``String(36)`` against autoincrement
+integer primary keys, so no reconciliation could ever have fixed them.
+Migration 0014 corrected the types and added real foreign keys, so they are
+now ordinary checked references.
 """
 from __future__ import annotations
 
@@ -117,6 +118,9 @@ def check_integrity(session_factory: sessionmaker[Session] | None = None) -> Int
         ("doe_plans.campaign_id -> campaigns.id",
          DOEPlanRow, DOEPlanRow.campaign_id, Campaign, Campaign.id,
          "campaign rows are local even under the Datalab backend"),
+        ("doe_plans.experiment_id -> experiments.id",
+         DOEPlanRow, DOEPlanRow.experiment_id, ExperimentRow, ExperimentRow.id,
+         "migration 0014 corrected this from String(36) to Integer"),
     ]
 
     with factory() as session:
@@ -133,31 +137,6 @@ def check_integrity(session_factory: sessionmaker[Session] | None = None) -> Int
                 report.references.append(
                     OrphanReport(reference=reference, note=f"check failed: {exc}", unjoinable=True)
                 )
-
-        # Declared String(36) against an Integer primary key — these columns
-        # cannot be compared, so counting orphans would be meaningless.
-        try:
-            with_ref = int(
-                session.execute(
-                    select(func.count())
-                    .select_from(DOEPlanRow)
-                    .where(DOEPlanRow.experiment_id.is_not(None), DOEPlanRow.experiment_id != "")
-                ).scalar()
-                or 0
-            )
-        except Exception:
-            with_ref = 0
-        report.references.append(
-            OrphanReport(
-                reference="doe_plans.experiment_id -> experiments.id",
-                checked=with_ref,
-                unjoinable=True,
-                note=(
-                    "类型不匹配：doe_plans.experiment_id 声明为 String(36)，"
-                    "而 experiments.id 是自增整数，两者无法关联"
-                ),
-            )
-        )
 
         # Datalab-authoritative: sample_refs point at rows in an external ELN,
         # so a missing local row is expected rather than an orphan.

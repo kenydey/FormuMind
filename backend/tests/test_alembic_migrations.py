@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0013(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head at revision ``0013``."""
+def test_revision_chain_head_is_0014(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head at revision ``0014``."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0013(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0013"
+    assert heads[0] == "0014"
 
 
 def test_migrations_partial_columns_branch(
@@ -411,3 +411,101 @@ def test_validator_raises_actionable_on_legacy_db(tmp_db_url: str) -> None:
     with pytest.raises(RuntimeError, match="alembic upgrade head") as exc_info:
         make_engine(tmp_db_url)
     assert "experiments.item_id" in str(exc_info.value)
+
+
+# ── migration 0014: doe_plans reference types ────────────────────────────────
+
+
+def _create_legacy_doe_plans(db_url: str) -> None:
+    """Build ``doe_plans`` in its pre-0014 shape: String reference columns.
+
+    The 0001 baseline runs ``Base.metadata.create_all`` against the *current*
+    ORM, so a database built by the migration chain already has the corrected
+    integer columns and 0014 short-circuits. Only a hand-built legacy table
+    exercises the conversion, which is the shape every deployed database is in.
+    """
+    _exec(
+        db_url,
+        """
+        CREATE TABLE doe_plans (
+            id VARCHAR(36) PRIMARY KEY,
+            experiment_id VARCHAR(36),
+            campaign_id VARCHAR(36),
+            design_type VARCHAR(32) NOT NULL,
+            parameters JSON NOT NULL,
+            created_at DATETIME NOT NULL
+        )
+        """,
+    )
+
+
+def _foreign_keys(db_url: str, table: str) -> set[tuple[str, str]]:
+    """Return ``{(constrained_column, referred_table)}`` for ``table``."""
+    engine = create_engine(db_url)
+    try:
+        return {
+            (fk["constrained_columns"][0], fk["referred_table"])
+            for fk in inspect(engine).get_foreign_keys(table)
+        }
+    finally:
+        engine.dispose()
+
+
+def test_0014_converts_legacy_string_references_to_integers(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real deployed database converts, keeps valid ids, and drops garbage."""
+    _create_legacy_schema(tmp_db_url)
+    _create_legacy_doe_plans(tmp_db_url)
+    _exec(
+        tmp_db_url,
+        "INSERT INTO campaigns (id, name, strategy, status, created_at, updated_at)"
+        " VALUES (7, 'c', 's', 'IN_PROGRESS', '2026-01-01 00:00:00',"
+        " '2026-01-01 00:00:00')",
+    )
+    for plan_id, experiment_id, campaign_id in (
+        ("p-uuid", "'8b4f-1c2d-dead-beef'", "'8b4f-1c2d-dead-beef'"),
+        ("p-valid", "NULL", "'7'"),
+        # Integer-shaped but pointing at a row that does not exist.
+        ("p-dangling", "NULL", "'999'"),
+        # A UUID whose leading digits collide with a real campaign id. On
+        # SQLite the orphan sweep already rejects it (the column is still TEXT
+        # when the sweep runs, and TEXT never compares equal to an integer id),
+        # so this row does not discriminate between the two cleanup passes —
+        # it is here because it is the input most likely to produce a *wrong*
+        # link rather than a detectable orphan if either pass regresses.
+        ("p-prefix-collision", "NULL", "'7f3a-1c2d-dead-beef'"),
+    ):
+        _exec(
+            tmp_db_url,
+            "INSERT INTO doe_plans VALUES"
+            f" ('{plan_id}', {experiment_id}, {campaign_id}, 'lhs', '{{}}',"
+            " '2026-01-01 00:00:00')",
+        )
+
+    run_upgrade(tmp_db_url, monkeypatch)
+
+    types = _column_types(tmp_db_url, "doe_plans")
+    assert "INTEGER" in types["experiment_id"]
+    assert "INTEGER" in types["campaign_id"]
+    assert _foreign_keys(tmp_db_url, "doe_plans") == {
+        ("experiment_id", "experiments"),
+        ("campaign_id", "campaigns"),
+    }
+    # 0008's indexes must survive the table rebuild.
+    assert {"ix_doe_plans_experiment", "ix_doe_plans_campaign"} <= _index_names(
+        tmp_db_url, "doe_plans"
+    )
+
+    rows = dict(
+        _fetch_all(tmp_db_url, "SELECT id, campaign_id FROM doe_plans ORDER BY id")
+    )
+    assert rows == {
+        "p-uuid": None,
+        "p-valid": 7,
+        "p-dangling": None,
+        "p-prefix-collision": None,
+    }
+    # SQLite rebuilds a table without re-checking foreign keys, so the only
+    # proof the result is consistent is to ask it explicitly.
+    assert _fetch_all(tmp_db_url, "PRAGMA foreign_key_check(doe_plans)") == []
