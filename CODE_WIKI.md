@@ -47,7 +47,7 @@ backend/
 │   ├── services/         # 核心服务层
 │   └── worker/           # Celery异步任务
 ├── scripts/              # CI和工具脚本
-├── tests/                # 测试套件（430+测试用例）
+├── tests/                # 测试套件（1010+测试用例）
 └── Dockerfile            # 后端Docker镜像
 
 frontend/
@@ -130,12 +130,28 @@ class ProductDomain(str, Enum):
 | `projects` | 项目工作空间 |
 | `task_outbox` | 异步任务持久化队列 |
 | `doe_plans` | DOE计划持久化 |
+| `materials` | 可编辑原材料库（种子库的持久化叠加层，见第21章） |
+| `measurements` | 逐条实测值（指标、数值、单位、方法、时间戳） |
+| `experiment_attachments` | 实验附件（QC报告原件，按内容哈希去重） |
+| `formulation_versions` | 配方版本谱系（父子链 + 快照 + 变更摘要） |
 
 ### ORM设计特点
 
 - **JSON列存储**：`factors`、`measured` 使用JSON列，支持动态指标扩展
 - **PostgreSQL兼容**：JSON类型自动切换为JSONB
 - **双向支持**：实验数据可存储在SQLite或Datalab（企业ELN）
+
+### 外键与完整性
+
+SQLite 默认**不**执行外键约束，且该开关是**每连接**生效的——不打开的话
+所有 `ForeignKey` 声明都只是装饰。`db/database.py` 用 connect 监听器对每个
+新连接执行 `PRAGMA foreign_keys=ON`。
+
+但并非所有跨表引用都能变成外键：当 `FORMUMIND_CAMPAIGN_BACKEND=datalab`
+时，被引用的行存在于外部 ELN 中，本地建约束会拒绝完全合法的数据。对这类
+引用的替代方案是**真的去跑一遍检查**（`db/integrity.py` /
+`GET /api/kb/integrity`），否则孤儿行会静默累积，第一个症状是检索悄悄少返回
+了一些结果。
 
 ---
 
@@ -155,11 +171,20 @@ class ProductDomain(str, Enum):
 | `/api/formulations/recommend` | LLM配方推荐 |
 | `/api/doe` | DOE实验设计生成 |
 | `/api/optimize` | 多目标闭环优化 |
-| `/api/experiments` | 实验结果回灌 |
+| `/api/experiments` | 实验结果回灌；`GET` 列出实验供按 id 引用 |
 | `/api/tasks/{id}` | 任务进度查询 |
 | `/api/models` | 训练模型列表 |
 | `/api/chemical/lookup` | 化学成分查询 |
 | `/api/intent/parse` | 自然语言需求解析 |
+| `/api/design/inverse` | **逆向设计**：给定目标性能反解配方（异步，202） |
+| `/api/materials` | 原材料库读写（`GET` 检索 / `POST` 新增） |
+| `/api/materials/substitutes` | **材料替代**：给定配方的某个位点求替代品 |
+| `/api/materials/supply-risk` | 断供扫描：列出受停产料影响的配方 |
+| `/api/materials/availability` | 标记某材料为 `discontinued` / `restricted` |
+| `/api/qc/report` | QC报告上传 → LLM抽取 → 落库为实测值 |
+| `/api/qc/experiments/{id}/measurements` | 某实验的逐条实测值 |
+| `/api/formulations/versions` | 配方版本谱系：保存 / 检索 / 详情 / 差异 |
+| `/api/kb/integrity` | 引用完整性巡检（孤儿行报告） |
 
 ### 6.2 认证与安全
 
@@ -675,7 +700,8 @@ def build_optimizer(factors):
 
 | 测试类型 | 数量 | 说明 |
 |----------|------|------|
-| 单元测试 | 430+ | 核心功能测试 |
+| 后端测试 | 1010+ | 核心功能测试 |
+| 前端测试 | 106 | vitest + @testing-library/react |
 | 集成测试 | 多模块交互 | API/数据库集成 |
 | Golden评估 | 黄金数据集 | QA质量评估（较慢） |
 
@@ -696,6 +722,132 @@ pytest --timeout=60                 # 设置超时
 
 ---
 
+## 21. 逆向设计子系统
+
+这是继知识库之后规模最大的一块新增能力。它解决的是一个**结构性**问题，而不是
+补三个独立功能，所以值得先讲清楚原来卡在哪里。
+
+### 21.1 原来的瓶颈：拓扑锁死
+
+`reconstruct.formulation_from_factors` 只能对一份**硬编码的基线模板**按 wt%
+缩放。也就是说，配方里**有哪些料**是常量，只有**各占多少**是变量。
+
+这一条限制同时解释了三个看起来无关的现象：
+
+| 表面症状 | 实际原因 |
+|---|---|
+| 没有逆向设计 | 搜索空间里根本没有"选料"这个维度 |
+| 不能做材料替代 | 换料就是换拓扑，而拓扑不可变 |
+| 帕累托前沿只是展示 | 候选集本就来自同一个模板，前沿上没有真正的多样性 |
+
+所以先解锁拓扑，上面三件事才在同一个地基上变得可做。
+
+### 21.2 地基：材料空间 + 基因组
+
+**`domain/material_catalog.py` — `MaterialCatalog`**
+
+`RAW_MATERIALS` 原本是一个模块级 dict 字面量，全仓有几十处直接读它。为了让
+材料库可编辑又不改动所有调用点，`MaterialCatalog` 实现了 `MutableMapping`：
+对读者来说它仍然是个 dict，实际内容是**种子库 + 数据库叠加层**的合并快照，
+按 `store.generation` 失效缓存。
+
+⚠️ 合并时**必须逐条 `dict(spec)` 复制**。直接引用种子 spec 会让数据库里的值
+写进模块字面量——测试之间会互相污染，且污染只在特定执行顺序下出现。
+
+**`domain/genome.py` — `FormulationGenome`**
+
+配方的可搜索表示：一组 `Slot(role, material, weight_pct, unit, locked)`。
+
+- `swappable()` 返回可换料的位点，是**搜索**约束（刻意排除颜料/填料）
+- `candidates_for_role()` 按角色 + 载体相容性（水性/溶剂型）召回候选
+- `Slot.from_wt_pct` / `to_wt_pct` 必须成对：两者不对称会产生 10× 的单位错误，
+  而只断言总和的往返测试**看不出来**
+
+### 21.3 搜索：NSGA-II（`services/inverse_design.py`）
+
+选型依据是三条实测约束，不是偏好：
+
+1. **环境里只有 numpy/pandas** — `baybe / optuna / botorch / torch / rdkit /
+   scipy / sklearn` 全部未安装。纯 numpy 实现必须是主力，不是兜底。
+2. **仓库里原本没有多目标搜索** — 四个优化器全是单目标标量，多目标一律被
+   `multi_objective_score` 加权标量化掉。
+3. **评估足够快** — 单候选约 1.1 ms（≈900 次/秒），种群 60 × 40 代 ≈ 2.7 秒。
+   预测器本身就是代理模型，不需要再套一层 GP。
+
+**约束支配（constraint-domination）**：可行解永远优于不可行解；两个都不可行时
+比违反量总和；都可行时比非支配等级，同级比拥挤度。这是 NSGA-II 处理约束的
+标准做法，**避免了任意的惩罚权重**。
+
+**硬约束 vs 软目标**的区分是这一版才有的语义。此前两者混在
+`ObjectiveSpec.weight` 里只当评分权重，从不作为搜索必须满足的条件。
+
+⚠️ 两个只有**真跑一遍**才会暴露、任何单元测试都抓不到的问题：
+
+- **搜索会薅代理模型的羊毛**：不加界限时它找出了 5110 小时耐盐雾的"配方"。
+  修法是用 DOE lever 的取值范围给每个位点定界（`_slot_bounds`）。
+- **种群会塌缩到单一成分集**：拥挤度只作用于**目标空间**，成分完全不同但性能
+  相近的个体会被判为"拥挤"而淘汰。加了按拓扑分桶的小生境
+  （`_select(per_topology=...)`）之后从 1 个成分集变成 12 个。
+
+### 21.4 材料替代（`services/substitution.py`）
+
+三路信号融合：
+
+1. **结构相似** — `substitute_group` 精确命中最高分，`functional_class` 次之，
+   Hansen 距离 `Ra = sqrt(4Δd² + Δp² + Δh²)`，RDKit 可用时再加 Tanimoto
+2. **预测性能偏离** — 换料后重建基因组重新预测，输出**每个指标的 Δ**
+3. **文献证据** — 知识图谱 `substitutes` 边，附 `{source_id, chunk_id, sentence}`
+
+**必须如实标注的限制**：本环境无 RDKit，`_molecular_features` 返回 `{}`，同角色
+换料的性能差异只能通过用量、当量比和查表价格产生。实测换三种环氧硬化剂，
+`salt_spray_hours` 三者**完全相同**，只有成本有区分度。所以报告里带
+`delta_confidence` 字段（如 `cost_only`），不能让用户误以为性能预测有分辨力。
+装上 RDKit 并开启描述符特征后此项才完整。
+
+**召回范围**用 `role + substitute_group`，**不**用 `genome.swappable()`——后者是
+搜索约束（排除了颜料/填料），而替代是用户指定的，任何位点都应可查。
+
+### 21.5 顺带修掉的两个隐藏缺陷
+
+- **`kg/graph_query.py` 的 synergizes 死代码比"无用"更糟**：
+  `get_links_for_entity` 是 `order_by(confidence.desc()).limit(20)`，
+  **SQL LIMIT 先于 Python 的 link_type 过滤**执行。高置信度的 synergy 边会占满
+  top-20 名额，把真正的 `substitutes` 边挤出去——一个有 20 条强 synergy 边的
+  节点会返回**零个** 2-hop 候选。
+- **`chemtools._cached` 把 SMILES 缓存键小写化**：`c1ccccc1`（苯，芳香）与
+  `C1CCCCC1`（环己烷，脂环）折叠成同一个键。现在因 RDKit 缺失、`None` 不入缓存
+  而处于休眠状态，**装上 RDKit 会立即触发**。
+
+---
+
+## 22. 实测数据与配方谱系
+
+### 22.1 逐条实测值
+
+`measured` 原本是实验行上的一个 JSON 字典，没有单位、方法和时间戳。新增的
+`measurements` 表把每个观测拆成一行。`ExperimentRecord.measured` 保留为
+`computed_field`，由 `measurements` 派生，因此**所有既有读者不受影响**；
+`model_validator(mode="before")` 负责把历史 payload 里的 `measured` 提升成
+`Measurement` 列表。
+
+### 22.2 QC报告入库
+
+`POST /api/qc/report` 一条链路：上传原件 → LLM 抽取（`services/qc_report.py`）
+→ 落库（`services/qc_ingest.py`）。
+
+`ingest_qc_report_tx` 在**单个事务**里完成，按内容哈希去重，且**先挂附件再写
+实测值**——顺序反了的话中途失败会留下一批无出处的数值。
+
+### 22.3 配方版本谱系
+
+`services/formulation_history.py` 提供 `save_version` / `lineage` / `ancestry` /
+`diff_versions` / `find_lineages`。`diff_snapshots` 产出结构化差异
+（`added` / `removed` / `adjusted` 三类成分变化 + 重命名），`describe_diff` 在
+作者没写备注时兜底生成一行摘要，形如
+"移除 1 项（聚酰胺固化剂）；新增 1 项（异佛尔酮二胺）；调整 2 项（环氧树脂、二甲苯）"。
+
+---
+
 ## 附录：关键文件索引
 
 | 文件/目录 | 路径 | 说明 |
@@ -705,6 +857,12 @@ pytest --timeout=60                 # 设置超时
 | 领域模型 | [domain/schemas.py](file:///workspace/backend/app/domain/schemas.py) | Pydantic模式定义 |
 | 化学计量 | [domain/chemistry.py](file:///workspace/backend/app/domain/chemistry.py) | 化学式解析、涂料参数 |
 | 知识库 | [domain/knowledge.py](file:///workspace/backend/app/domain/knowledge.py) | 原材料库、机理库 |
+| 材料空间 | [domain/material_catalog.py](file:///workspace/backend/app/domain/material_catalog.py) | 种子库+数据库叠加的可编辑材料表 |
+| 配方基因组 | [domain/genome.py](file:///workspace/backend/app/domain/genome.py) | 配方的可搜索表示（解锁选料维度） |
+| 逆向设计 | [services/inverse_design.py](file:///workspace/backend/app/services/inverse_design.py) | NSGA-II 多目标反解 |
+| 材料替代 | [services/substitution.py](file:///workspace/backend/app/services/substitution.py) | 三路信号融合的替代品排序 |
+| 配方谱系 | [services/formulation_history.py](file:///workspace/backend/app/services/formulation_history.py) | 版本快照、差异与血缘 |
+| 完整性巡检 | [db/integrity.py](file:///workspace/backend/app/db/integrity.py) | 软引用孤儿行检测 |
 | 工作流 | [pipeline/workflow.py](file:///workspace/backend/app/pipeline/workflow.py) | 端到端编排 |
 | LLM服务 | [services/llm.py](file:///workspace/backend/app/services/llm.py) | 多供应商LLM调用 |
 | 预测服务 | [services/predictor.py](file:///workspace/backend/app/services/predictor.py) | 性能预测 |
