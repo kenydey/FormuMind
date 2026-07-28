@@ -173,6 +173,66 @@ def list_models() -> list[ModelInfo]:
     return registry.info()
 
 
+class ExperimentSummary(BaseModel):
+    """One stored experiment, identified by row id.
+
+    ``ExperimentRecord`` carries no id — it is the training-facing shape — so
+    anything that needs to *reference* an experiment (attaching a QC report,
+    reading back its typed measurements) has to go through this.
+    """
+
+    id: int
+    domain: str
+    label: str = ""
+    source: str = ""
+    project_id: str = ""
+    measured: dict[str, float] = Field(default_factory=dict)
+    measurement_count: int = 0
+    created_at: str | None = None
+
+
+@router.get("/experiments", response_model=list[ExperimentSummary])
+def list_experiments(
+    domain: ProductDomain | None = Query(default=None),
+    project_id: str = Query(default=""),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> list[ExperimentSummary]:
+    """Stored experiments, newest first."""
+    from sqlalchemy import func
+
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow, MeasurementRow
+
+    with default_session_factory()() as session:
+        query = session.query(ExperimentRow)
+        if domain is not None:
+            query = query.filter(ExperimentRow.domain == domain.value)
+        if project_id:
+            query = query.filter(ExperimentRow.project_id == project_id)
+        rows = query.order_by(ExperimentRow.id.desc()).limit(limit).all()
+
+        counts = dict(
+            session.query(MeasurementRow.experiment_id, func.count(MeasurementRow.id))
+            .filter(MeasurementRow.experiment_id.in_([r.id for r in rows] or [0]))
+            .group_by(MeasurementRow.experiment_id)
+            .all()
+        )
+
+    return [
+        ExperimentSummary(
+            id=row.id,
+            domain=row.domain,
+            label=row.label or "",
+            source=row.source or "",
+            project_id=row.project_id or "",
+            measured=dict(row.measured or {}),
+            measurement_count=int(counts.get(row.id, 0)),
+            created_at=row.created_at.isoformat() if row.created_at else None,
+        )
+        for row in rows
+    ]
+
+
 @router.post("/experiments/workbench/campaigns", response_model=WorkbenchCampaignResponse)
 async def create_workbench_campaign(
     payload: CreateWorkbenchCampaignRequest,

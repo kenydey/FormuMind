@@ -20,6 +20,7 @@ const LoopModal = lazy(() => import("./LoopModal"));
 const ProcessOptModal = lazy(() => import("./ProcessOptModal"));
 const InverseDesignModal = lazy(() => import("./InverseDesignModal"));
 const MaterialSubstitutionModal = lazy(() => import("./MaterialSubstitutionModal"));
+const QCReportModal = lazy(() => import("./QCReportModal"));
 
 function ModalFallback() {
   return <div className="p-6 text-sm text-slate-400">加载中…</div>;
@@ -32,6 +33,7 @@ type ModalName =
   | "substitute"
   | "doe"
   | "workbench"
+  | "qc"
   | "optimize"
   | "process"
   | "loop";
@@ -43,6 +45,7 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "substitute", icon: "🔁", title: "材料替代", desc: "断供或降本时，查替代料及其预测性能偏离" },
   { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并导出记录表" },
   { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实际参数与实测值，同步至 BayBE 闭环" },
+  { id: "qc", icon: "📄", title: "检测报告", desc: "上传检测报告，提取带方法与规格限的计量项并绑定实验" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "process", icon: "⚙️", title: "工艺优化", desc: "固化/分散/膜厚等工艺参数优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
@@ -282,6 +285,17 @@ export default function ActionsPanel() {
       >
         <Suspense fallback={<ModalFallback />}>
           <WorkbenchModal />
+        </Suspense>
+      </Modal>
+
+      <Modal
+        title="📄 检测报告 · QC Report"
+        open={openModal === "qc"}
+        onClose={() => setOpenModal(null)}
+        size="xl"
+      >
+        <Suspense fallback={<ModalFallback />}>
+          <QCReportModal />
         </Suspense>
       </Modal>
 

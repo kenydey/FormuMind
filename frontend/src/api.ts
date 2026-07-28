@@ -485,6 +485,43 @@ export interface SupplyRiskReport {
   }[];
 }
 
+// ── Experiments and QC reports ─────────────────────────────────────────────
+
+export interface ExperimentSummary {
+  id: number;
+  domain: string;
+  label: string;
+  source: string;
+  project_id: string;
+  measured: Record<string, number>;
+  measurement_count: number;
+  created_at: string | null;
+}
+
+export interface QCMeasurementView {
+  metric: string;
+  value: number;
+  unit: string;
+  test_method: string;
+  spec_min: number | null;
+  spec_max: number | null;
+  passed: boolean | null;
+}
+
+export interface QCReportResult {
+  experiment_id: number;
+  source_id: string;
+  measurements: QCMeasurementView[];
+  measurement_count: number;
+  attached: boolean;
+  already_attached: boolean;
+  synced_measured: Record<string, number>;
+  report_meta: Record<string, unknown>;
+  parser: string;
+  extraction_error: string | null;
+  message: string;
+}
+
 // ── Formulation revision history ───────────────────────────────────────────
 
 export interface FormulationVersionView {
@@ -790,6 +827,40 @@ export const api = {
 
   setMaterialAvailability: (name: string, availability: string) =>
     post<unknown>("/api/materials/availability", { name, availability }),
+
+  // ── Experiments and QC reports ──
+  listExperiments: (opts: { domain?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.domain) params.set("domain", opts.domain);
+    params.set("limit", String(opts.limit ?? 100));
+    return get<ExperimentSummary[]>(`/api/experiments?${params}`);
+  },
+
+  uploadQcReport: async (
+    file: File,
+    experimentId: number,
+    opts: { project_id?: string; sync_measured?: boolean } = {}
+  ): Promise<QCReportResult> => {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("experiment_id", String(experimentId));
+    if (opts.project_id) body.append("project_id", opts.project_id);
+    body.append("sync_measured", String(opts.sync_measured ?? true));
+    const res = await fetch("/api/qc/report", {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body,
+    });
+    if (!res.ok) throw new ApiError(await readApiError(res, "/api/qc/report"));
+    return res.json();
+  },
+
+  experimentMeasurements: (experimentId: number) =>
+    get<{
+      experiment_id: number;
+      measurements: QCMeasurementView[];
+      attachments: { id: string; source_document_id: string; kind: string }[];
+    }>(`/api/qc/experiments/${experimentId}/measurements`),
 
   // ── Formulation revision history ──
   saveFormulationVersion: (body: {
