@@ -106,3 +106,48 @@ def test_baybe_unavailable_raises():
         pytest.skip("baybe is installed")
     with pytest.raises(RuntimeError, match="not installed"):
         engine.recommend(REQ, batch_size=1)
+
+
+def test_pareto_ranking_puts_non_dominated_candidates_first():
+    """BayBE optimises a real ParetoObjective and the result was being sorted
+    purely by weighted sum, so a candidate nothing dominates could rank below
+    one that a third candidate beats outright."""
+    from app.domain.schemas import Formulation, Ingredient, ObjectiveSpec, ProductDomain
+    from app.services.engines.baybe_engine import _rank_by_pareto_then_score
+
+    def _form(name, salt, cost):
+        return Formulation(
+            name=name, domain=ProductDomain.anticorrosion_coating,
+            ingredients=[Ingredient(name="Epoxy", role="resin", weight_pct=100.0)],
+            predicted={"salt_spray_hours": salt, "cost_cny_per_kg": cost},
+        )
+
+    objectives = [
+        ObjectiveSpec(metric="salt_spray_hours", direction="maximize", weight=0.9),
+        ObjectiveSpec(metric="cost_cny_per_kg", direction="minimize", weight=0.1),
+    ]
+    # "cheap" is on the frontier (nothing dominates it) but the lopsided
+    # weights score it last. "dominated" is beaten by "strong" on both axes.
+    ranked = [
+        (0.90, _form("strong", 1200, 30)),
+        (0.70, _form("dominated", 900, 35)),
+        (0.40, _form("cheap", 700, 8)),
+    ]
+    names = [f.name for _, f in _rank_by_pareto_then_score(ranked, objectives, 3)]
+    assert names.index("cheap") < names.index("dominated")
+
+
+def test_pareto_ranking_falls_back_to_scalar_for_one_objective():
+    from app.domain.schemas import Formulation, Ingredient, ObjectiveSpec, ProductDomain
+    from app.services.engines.baybe_engine import _rank_by_pareto_then_score
+
+    def _form(name, salt):
+        return Formulation(
+            name=name, domain=ProductDomain.anticorrosion_coating,
+            ingredients=[Ingredient(name="Epoxy", role="resin", weight_pct=100.0)],
+            predicted={"salt_spray_hours": salt},
+        )
+
+    objectives = [ObjectiveSpec(metric="salt_spray_hours", direction="maximize")]
+    ranked = [(0.4, _form("low", 700)), (0.9, _form("high", 1200))]
+    assert [f.name for _, f in _rank_by_pareto_then_score(ranked, objectives, 2)] == ["high", "low"]

@@ -12,7 +12,10 @@ from __future__ import annotations
 from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import uuid
 
+from loguru import logger
+
 from ..domain.schemas import ActiveDoeResult, DOEPlan, DOERun, ExperimentRecord, ProductDomain, Requirement
+from . import failure_memory
 
 
 _MIN_TRAIN_SAMPLES = 3  # minimum records needed before surrogate-guided selection
@@ -73,6 +76,15 @@ def _ei_acquisition(mean: float, std: float, y_best: float, kappa: float = 1.0) 
         return float(mean + kappa * std)
 
 
+def _known_failures(domain) -> list:
+    """Out-of-spec experiments for this domain. Empty when nothing has limits."""
+    try:
+        return failure_memory.failed_records(domain)
+    except Exception as exc:
+        logger.debug("active learning: failure memory unavailable ({})", exc)
+        return []
+
+
 def suggest_next_experiments(
     plan: DOEPlan,
     existing: list[ExperimentRecord],
@@ -99,10 +111,18 @@ def suggest_next_experiments(
     if existing:
         y_best = max(rec.measured.get(obj_metric, 0.0) for rec in existing)
 
+    # Runs that breached a spec are negative evidence. Expected improvement
+    # cannot see them — a low value and a failed acceptance test look the same
+    # to it — so without this the loop keeps proposing neighbours of a
+    # composition already known not to work.
+    failures = _known_failures(plan.domain)
+
     scored: list[tuple[float, DOERun]] = []
     for run in plan.runs:
         mean, std = _surrogate_score(run.natural, plan.domain, existing, obj_metric)
         acq = _ei_acquisition(mean, std, y_best)
+        if failures:
+            acq *= failure_memory.penalty_for(run.natural, failures)
         scored.append((acq, run))
 
     scored.sort(key=lambda t: t[0], reverse=True)

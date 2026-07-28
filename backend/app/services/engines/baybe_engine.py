@@ -106,6 +106,40 @@ def _prepare_measurement_dataframe(df, metrics: list[str]):
     return aligned
 
 
+def _rank_by_pareto_then_score(
+    ranked: list[tuple[float, object]],
+    objectives: list,
+    top_n: int,
+) -> list[tuple[float, object]]:
+    """Order candidates by Pareto front first, weighted score only within a front.
+
+    BayBE optimises a genuine ParetoObjective when there is more than one
+    target, and that structure was thrown away here: results were sorted purely
+    by the weighted sum, so a candidate that no other dominates could be ranked
+    below one that a third candidate beats outright, purely because the weights
+    happened to favour it. Sorting by front first keeps the non-dominated set at
+    the top and uses the scalar only to break ties inside a front.
+
+    Degrades to the previous scalar ordering when there is one objective or
+    fewer than two candidates, where fronts carry no information.
+    """
+    if len(ranked) < 2 or len(objectives) < 2:
+        return sorted(ranked, key=lambda t: t[0], reverse=True)[:top_n]
+
+    from ..tradeoff_analysis import compute_pareto_ranks
+
+    values = [
+        [float(getattr(form, "predicted", {}).get(obj.metric, float("nan"))) for obj in objectives]
+        for _, form in ranked
+    ]
+    fronts = compute_pareto_ranks(values, objectives)
+    order = sorted(
+        range(len(ranked)),
+        key=lambda i: (fronts[i] if fronts[i] is not None else 10**6, -ranked[i][0]),
+    )
+    return [ranked[i] for i in order[:top_n]]
+
+
 class BaybeCampaignEngine:
     """Recommend next experiments using baybe Campaign + JSON state roundtrip."""
 
@@ -249,7 +283,14 @@ class BaybeCampaignEngine:
         if not objectives:
             objectives = req.objectives or default_objectives(req.domain)
         process = process_for(req)
-        bounds: dict[str, tuple[float, float]] = {}
+        # Seed the normalisation bounds instead of starting empty. With an
+        # empty dict the first batch normalises every metric against a
+        # zero-width range, which multi_objective_score reports as the 0.5
+        # fallback — so every candidate in round one scored identically
+        # regardless of quality, corrupting both the history curve and the
+        # initial ranking. The scalar optimiser in workflow.py already seeds
+        # this way.
+        bounds: dict[str, tuple[float, float]] = predictor.default_bounds(objectives)
         ranked: list[tuple[float, object]] = []
         state = campaign_state
         metric = primary_metric(req)
@@ -278,12 +319,12 @@ class BaybeCampaignEngine:
                     run_process,
                     req,
                 )
-                score = float(form.score or 0.0)
                 for m, val in form.predicted.items():
                     lo, hi = bounds.get(m, (val, val))
                     bounds[m] = (min(lo, val), max(hi, val))
-                mo_score = predictor.multi_objective_score(form, objectives, run_process, bounds)
-                combined = mo_score
+                combined = predictor.multi_objective_score(
+                    form, objectives, run_process, bounds
+                )
                 best_so_far = max(best_so_far, combined)
                 history.append(round(best_so_far, 3))
                 ranked.append((combined, form))
@@ -304,11 +345,10 @@ class BaybeCampaignEngine:
             if progress_cb:
                 progress_cb((r + 1) / rounds, f"baybe batch {r + 1}/{rounds}: best={best_so_far:.3f}")
 
-        ranked.sort(key=lambda t: t[0], reverse=True)
-        top = []
-        for score, form in ranked[: settings.top_n_formulas]:
+        top = _rank_by_pareto_then_score(ranked, objectives, settings.top_n_formulas)
+        for score, form in top:
             form.name = f"BayBE {req.domain.value} (score {score:.3f})"
-            top.append(form)
+        top = [form for _, form in top]
 
         return OptimizationResult(
             iterations=iterations,
