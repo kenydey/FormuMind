@@ -313,3 +313,44 @@ def ingest(body: IngestRequest) -> IngestResponse:
         chunk_count=chunk_count,
         status="ok",
     )
+
+
+class OrphanReportView(BaseModel):
+    reference: str
+    orphans: int = 0
+    checked: int = 0
+    healthy: bool = True
+    unjoinable: bool = False
+    note: str = ""
+
+
+class IntegrityResponse(BaseModel):
+    healthy: bool
+    total_orphans: int
+    external_backend: bool
+    references: list[OrphanReportView] = Field(default_factory=list)
+
+
+@router.get("/integrity", response_model=IntegrityResponse)
+def integrity() -> IntegrityResponse:
+    """Orphan scan over the references that carry no database constraint.
+
+    Several of them cannot take one — under the Datalab backend the target row
+    lives in an external ELN — so the alternative to a constraint that cannot
+    be enforced is a check that is actually run.
+    """
+    from ..db.integrity import check_integrity
+
+    report = check_integrity()
+    return IntegrityResponse(
+        healthy=report.healthy,
+        total_orphans=report.total_orphans,
+        external_backend=report.external_backend,
+        references=[
+            OrphanReportView(
+                reference=r.reference, orphans=r.orphans, checked=r.checked,
+                healthy=r.healthy, unjoinable=r.unjoinable, note=r.note,
+            )
+            for r in report.references
+        ],
+    )

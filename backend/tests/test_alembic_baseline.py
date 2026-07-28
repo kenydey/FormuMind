@@ -29,6 +29,7 @@ EXPECTED_TABLES = {
     "materials",
     "measurements",
     "experiment_attachments",
+    "formulation_versions",
 }
 
 

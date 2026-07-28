@@ -194,3 +194,139 @@ def add_manual_formulation(body: ManualFormulationRequest) -> ManualFormulationR
         process = workflow.process_for(body.requirement)
         form = workflow._score_and_validate(form, process, body.requirement, chem_screen=True)
     return ManualFormulationResponse(formulation=form, warnings=warnings)
+
+
+# ── Revision history ─────────────────────────────────────────────────────────
+# Formulations were overwritten in place inside a project payload, so the
+# reasoning behind each revision was lost as soon as the next one was saved.
+
+
+class SaveVersionRequest(BaseModel):
+    formulation: Formulation
+    lineage_id: str | None = None
+    parent_version_id: str | None = None
+    change_summary: str = ""
+    created_by: str = ""
+    project_id: str | None = None
+
+
+class VersionView(BaseModel):
+    id: str
+    lineage_id: str
+    version: int
+    parent_version_id: str | None = None
+    name: str
+    domain: str
+    change_summary: str = ""
+    created_by: str = ""
+    created_at: str | None = None
+    project_id: str | None = None
+
+
+class VersionDetail(VersionView):
+    snapshot: dict = Field(default_factory=dict)
+
+
+class LineageResponse(BaseModel):
+    lineage_id: str
+    versions: list[VersionView] = Field(default_factory=list)
+
+
+class IngredientChangeView(BaseModel):
+    name: str
+    change: str
+    role: str = ""
+    before_pct: float | None = None
+    after_pct: float | None = None
+    delta_pct: float | None = None
+
+
+class DiffResponse(BaseModel):
+    from_version: int
+    to_version: int
+    change_summary: str = ""
+    topology_changed: bool = False
+    renamed: list[str] | None = None
+    ingredient_changes: list[IngredientChangeView] = Field(default_factory=list)
+    metric_deltas: dict = Field(default_factory=dict)
+
+
+def _to_view(row) -> VersionView:
+    return VersionView(
+        id=row.id,
+        lineage_id=row.lineage_id,
+        version=row.version,
+        parent_version_id=row.parent_version_id,
+        name=row.name,
+        domain=row.domain,
+        change_summary=row.change_summary or "",
+        created_by=row.created_by or "",
+        created_at=row.created_at.isoformat() if row.created_at else None,
+        project_id=row.project_id,
+    )
+
+
+@router.post("/formulations/versions", response_model=VersionView)
+def save_formulation_version(body: SaveVersionRequest) -> VersionView:
+    """Append an immutable revision. Summarises the change when none is given."""
+    from ..services.formulation_history import get_history_store
+
+    try:
+        row = get_history_store().save_version(
+            body.formulation,
+            lineage_id=body.lineage_id,
+            parent_version_id=body.parent_version_id,
+            change_summary=body.change_summary,
+            created_by=body.created_by,
+            project_id=body.project_id,
+        )
+    except Exception as exc:
+        log.exception("save formulation version failed")
+        raise HTTPException(status_code=500, detail="配方版本保存失败") from exc
+    return _to_view(row)
+
+
+@router.get("/formulations/versions/{lineage_id}", response_model=LineageResponse)
+def formulation_lineage(lineage_id: str) -> LineageResponse:
+    """Every revision of one formulation, oldest first."""
+    from ..services.formulation_history import get_history_store
+
+    rows = get_history_store().lineage(lineage_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"未找到配方谱系：{lineage_id}")
+    return LineageResponse(lineage_id=lineage_id, versions=[_to_view(r) for r in rows])
+
+
+@router.get("/formulations/versions/detail/{version_id}", response_model=VersionDetail)
+def formulation_version_detail(version_id: str) -> VersionDetail:
+    from ..services.formulation_history import get_history_store
+
+    row = get_history_store().get(version_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"未找到版本：{version_id}")
+    return VersionDetail(**_to_view(row).model_dump(), snapshot=row.snapshot or {})
+
+
+@router.get("/formulations/versions/{from_id}/diff/{to_id}", response_model=DiffResponse)
+def diff_formulation_versions(from_id: str, to_id: str) -> DiffResponse:
+    """What changed between two revisions — the question history exists to answer."""
+    from ..services.formulation_history import get_history_store
+
+    diff = get_history_store().diff_versions(from_id, to_id)
+    if diff is None:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    return DiffResponse(
+        from_version=diff.from_version,
+        to_version=diff.to_version,
+        change_summary=diff.change_summary,
+        topology_changed=diff.topology_changed,
+        renamed=list(diff.renamed) if diff.renamed else None,
+        ingredient_changes=[
+            IngredientChangeView(
+                name=c.name, change=c.change, role=c.role,
+                before_pct=c.before_pct, after_pct=c.after_pct, delta_pct=c.delta_pct,
+            )
+            for c in diff.ingredient_changes
+        ],
+        metric_deltas=diff.metric_deltas,
+    )

@@ -126,6 +126,49 @@ class ExperimentAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class FormulationVersion(Base):
+    """An immutable snapshot of a formulation, linked to what it came from.
+
+    Formulation development is version-controlled work — a recipe is revised
+    dozens of times and the interesting question is almost never "what is it
+    now" but "what changed between v3 and v4, and why". Nothing recorded that:
+    formulations lived in a project's JSON payload and were overwritten in
+    place, so the reasoning behind every revision was lost as soon as the next
+    one was saved.
+
+    ``lineage_id`` groups the versions of one formulation; ``parent_version_id``
+    records which revision this one was derived from, so branching (two people
+    exploring different directions from the same v3) stays representable rather
+    than being flattened into a single line.
+    """
+
+    __tablename__ = "formulation_versions"
+    __table_args__ = (
+        UniqueConstraint("lineage_id", "version", name="uq_formulation_version"),
+        Index("ix_formulation_versions_lineage_version", "lineage_id", "version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    lineage_id: Mapped[str] = mapped_column(String(36), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    # Self-referential: NULL marks the root of a lineage. SET NULL rather than
+    # CASCADE — deleting one revision must not silently erase its descendants.
+    parent_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("formulation_versions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    domain: Mapped[str] = mapped_column(String(64), index=True)
+    # Frozen Formulation dump. Immutable by contract: a revision is a new row,
+    # never an edit, or the history stops being a history.
+    snapshot: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), default=dict
+    )
+    change_summary: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class Campaign(Base):
     """One AI optimization campaign (BayBE / active-learning round)."""
 
