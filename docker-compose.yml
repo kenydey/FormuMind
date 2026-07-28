@@ -14,6 +14,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --stop-writes-on-bgsave-error no --save ""
     ports:
       - "6379:6379"
     healthcheck:
@@ -35,6 +36,12 @@ services:
       # Platform bearer auth (distinct from LLM vendor keys in Settings).
       # Intranet: set FORMUMIND_API_AUTH_ENABLED=false in .env
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data/colbert_index:/app/data/colbert_index
       - ./data:/app/data
@@ -62,6 +69,12 @@ services:
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data/colbert_index:/app/data/colbert_index
       - ./data:/app/data
