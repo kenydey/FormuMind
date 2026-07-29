@@ -427,3 +427,28 @@ def test_headings_reach_heading_path_after_escalation(
 
     chunks = chunk_markdown(hybrid_parse.parse(b"%PDF"))
     assert any("Composition" in c.heading_path for c in chunks)
+
+
+def test_a_provider_error_does_not_reach_the_knowledge_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider errors carry account identifiers. A real 429 read "Your
+    account org-a752… <ak-fbkd…> is suspended", and whatever this function
+    returns becomes an indexed, searchable chunk — so the reason belongs in
+    the log, not the document."""
+    from app.services import vision_extract
+
+    leaky = (
+        "Error code: 429 - {'error': {'message': 'Your account "
+        "org-a752e5b8ef89448884320309f69c90d4 <ak-fbkdnhefxa7i11f4b541> is suspended'}}"
+    )
+    monkeypatch.setattr(vision_extract, "vision_available", lambda: (True, ""))
+    monkeypatch.setattr(vision_extract, "extract_image", lambda c, f: (None, leaky))
+
+    out = hybrid_parse._render_blocks(
+        [_block("image", image=b"PNG", caption="Figure 1")], page_label="p.3"
+    )
+    assert "Figure 1" in out                 # the figure is still not lost
+    assert "org-" not in out                 # but the account id is gone
+    assert "ak-" not in out
+    assert len(out) < 200                    # and so is the wall of noise

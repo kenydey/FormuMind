@@ -278,3 +278,44 @@ def test_layout_switch_is_applied_once(monkeypatch: pytest.MonkeyPatch) -> None:
     pdf_local._configure_layout()
     pdf_local._configure_layout()
     assert calls == [True]
+
+
+# ── vision availability must not over-promise ────────────────────────────────
+
+
+def test_vision_reports_unavailable_without_its_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This returned (True, "") on a machine with no `openai` package, so
+    callers were told vision worked and every image came back "No module named
+    'openai'" — the same "installed but cannot work" gap that let uploads index
+    nothing. A probe that answers yes when the next call cannot succeed is
+    worse than no probe.
+    """
+    from app.config import get_settings
+    from app.services import errors, vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "moonshot", raising=False)
+    monkeypatch.setattr(settings, "moonshot_api_key", "sk-test", raising=False)
+    monkeypatch.setattr(errors, "optional_import", lambda mod: False)
+
+    ok, hint = vision_extract.vision_available()
+    assert ok is False
+    assert "openai" in hint
+
+
+def test_anthropic_needs_its_own_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import get_settings
+    from app.services import errors, vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "anthropic", raising=False)
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-test", raising=False)
+    monkeypatch.setattr(errors, "optional_import", lambda mod: mod == "openai")
+
+    ok, hint = vision_extract.vision_available()
+    assert ok is False
+    assert "anthropic" in hint

@@ -110,10 +110,14 @@ PROVIDERS: list[dict] = [
         "id": "moonshot",
         "label": "Kimi (Moonshot)",
         "base_url": "https://api.moonshot.cn/v1",
+        # Verified against GET https://api.moonshot.cn/v1/models: the
+        # moonshot-v1-* generation this list used to offer is gone, so every
+        # option it presented would have 404'd on selection.
         "models": [
-            {"id": "moonshot-v1-8k", "label": "Moonshot 8K (极速)"},
-            {"id": "moonshot-v1-32k", "label": "Moonshot 32K"},
-            {"id": "moonshot-v1-128k", "label": "Moonshot 128K (推荐)", "recommended": True},
+            {"id": "kimi-k3", "label": "Kimi K3 (推荐)", "recommended": True},
+            {"id": "kimi-k2.6", "label": "Kimi K2.6"},
+            {"id": "kimi-k2.7-code", "label": "Kimi K2.7 Code (代码)"},
+            {"id": "kimi-k2.7-code-highspeed", "label": "Kimi K2.7 Code 高速"},
         ],
     },
     {

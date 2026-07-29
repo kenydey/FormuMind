@@ -385,7 +385,7 @@ with a per-provider `base_url`; Claude uses `anthropic` and Gemini uses
 | Meta (via Groq) | `llama-3.3-70b-versatile` | `openai` · `https://api.groq.com/openai/v1` |
 | DeepSeek | `deepseek-v4-pro` (flagship, recommended) / `deepseek-v4-flash` (fast, economical) | `openai` · `https://api.deepseek.com` |
 | Qwen (通义千问) | `qwen-plus` | `openai` · `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| Kimi (Moonshot) | `moonshot-v1-128k` | `openai` · `https://api.moonshot.cn/v1` |
+| Kimi (Moonshot) | `kimi-k3` | `openai` · `https://api.moonshot.cn/v1` |
 | MiniMax | `abab6.5s-chat` | `openai` · `https://api.minimax.chat/v1` |
 
 In Settings, pick a provider and model, paste an API key (with show/hide), set a

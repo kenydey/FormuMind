@@ -148,7 +148,15 @@ def _visual_markdown(
         )
 
     if extraction is None:
-        return f"{fallback}\n>\n> _（视觉解析未返回结果：{error or '无输出'}）_"
+        # The reason goes to the log, not into the document. Provider errors
+        # carry account identifiers — a real 429 read "Your account
+        # org-a752… <ak-fbkd…> is suspended" — and whatever lands here becomes
+        # an indexed, searchable chunk. Embedding a vendor's account id in the
+        # knowledge base is bad on its own; doing it on every failed figure
+        # also fills the index with a few hundred characters of noise that
+        # retrieval then has to compete with.
+        logger.warning("hybrid: vision returned nothing for %s (%s)", page_label, error)
+        return f"{fallback}\n>\n> _（视觉解析未返回结果，详见服务端日志）_"
 
     rendered = image_markdown(extraction, page_label)
     return f"{caption}\n\n{rendered}" if caption else rendered

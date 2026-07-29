@@ -66,7 +66,18 @@ class VisionExtraction(BaseModel):
 
 
 def vision_available() -> tuple[bool, str]:
-    """(usable, hint) — key present + provider reachable by this module."""
+    """(usable, hint) — key present, provider supported, and its SDK installed.
+
+    The SDK check is not a formality. Without it this returned ``(True, "")``
+    on a machine with no ``openai`` package, so callers were told vision was
+    available and every image came back as ``No module named 'openai'`` — the
+    same "installed but cannot work" gap that made uploads silently index
+    nothing. An availability probe that answers yes when the next call cannot
+    succeed is worse than no probe, because the caller stops planning for the
+    failure.
+    """
+    from .errors import optional_import
+
     settings = get_settings()
     if not settings.vision_extract_enabled:
         return False, "图片视觉解析已禁用（FORMUMIND_VISION_EXTRACT_ENABLED）"
@@ -75,6 +86,17 @@ def vision_available() -> tuple[bool, str]:
     provider = str(effective_setting(settings, "llm_provider"))
     if provider == "gemini":
         return False, "Gemini 原生接口暂不支持图片解析——请切换 OpenAI 兼容供应商或 Anthropic"
+
+    # Anthropic has its own client; every other supported provider is reached
+    # through the OpenAI-compatible one.
+    if provider == "anthropic":
+        if not optional_import("anthropic"):
+            return False, "未安装 anthropic SDK（pip install anthropic 或安装 llm extra）"
+    elif not optional_import("openai"):
+        return False, (
+            f"未安装 openai SDK，无法调用 {provider} 的视觉接口"
+            "（pip install openai 或安装 llm extra）"
+        )
     return True, ""
 
 
