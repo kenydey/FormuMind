@@ -380,3 +380,50 @@ def test_the_hybrid_tier_routes_through_the_fusion_pipeline(
     assert result.parser == "hybrid"
     assert result.markdown == "FUSED OUTPUT"
     assert [name for name, _ in parsing._PDF_TIERS][0] == "hybrid"
+
+
+# ── shapes the live API actually returns ─────────────────────────────────────
+
+
+def test_a_text_block_carrying_a_level_becomes_a_heading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MinerU emits headings as {"type": "text", "text_level": 2} and never
+    emits a "title" type at all — verified against the live API. Keying the
+    heading branch on the type demoted every heading to prose, which cost
+    heading_path on every escalated page.
+    """
+    out, _ = _render(
+        [_block("text", text="Epoxy Anticorrosion Primer", text_level=2)], monkeypatch
+    )
+    assert out.startswith("## Epoxy Anticorrosion Primer")
+
+
+def test_a_text_block_without_a_level_stays_prose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out, _ = _render([_block("text", text="ordinary body text")], monkeypatch)
+    assert not out.lstrip().startswith("#")
+    assert "ordinary body text" in out
+
+
+def test_headings_reach_heading_path_after_escalation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The consequence that matters: a heading MinerU found has to survive all
+    the way into the chunk metadata the retriever ranks on."""
+    from app.services.chunking import chunk_markdown
+
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [_page(1, image_ratio=0.5)])
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(pdf_local, "page_as_pdf", lambda c, n: b"%PDF")
+    monkeypatch.setattr(
+        mineru_cloud, "parse_bytes",
+        lambda c, **kw: mineru_cloud.MinerUDocument(blocks=[
+            _block("text", text="Composition", text_level=2),
+            _block("text", text="Zinc phosphate 12.5 wt%"),
+        ]),
+    )
+
+    chunks = chunk_markdown(hybrid_parse.parse(b"%PDF"))
+    assert any("Composition" in c.heading_path for c in chunks)

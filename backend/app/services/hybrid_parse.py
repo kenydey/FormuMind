@@ -73,10 +73,15 @@ def _render_blocks(blocks: list[mineru_cloud.MinerUBlock], *, page_label: str) -
         if kind in _DISCARD:
             continue
 
-        if kind == "title":
-            level = min(max(block.text_level or 1, 1), 6)
-            if block.text.strip():
-                parts.append(f"{'#' * level} {block.text.strip()}")
+        # Headings come back as `text` blocks carrying a `text_level`, not as a
+        # `title` type — verified against the live API, which returns
+        # {"type": "text", "text": "…", "text_level": 2} for a document title
+        # and never emits "title" at all. Keying on the type alone silently
+        # demoted every heading to prose, which cost `heading_path` on every
+        # escalated page.
+        if block.text_level and block.text.strip():
+            level = min(max(block.text_level, 1), 6)
+            parts.append(f"{'#' * level} {block.text.strip()}")
             continue
 
         if kind == "equation":

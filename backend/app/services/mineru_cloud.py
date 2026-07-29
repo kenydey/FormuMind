@@ -90,6 +90,19 @@ def mineru_available() -> tuple[bool, str]:
 # ── content-hash cache ───────────────────────────────────────────────────────
 
 
+def _is_auth_failure(exc: Exception) -> bool:
+    """Whether *exc* is really "your token was rejected".
+
+    The SDK defines `AuthError` for codes A0202/A0211, but a rejected token
+    does not reach it: the request 401s first and `httpx.HTTPStatusError`
+    comes out raw. Verified against the live API on both `extract` and
+    `get_task`. Without this, a wrong token is reported as a connection
+    failure and sends the operator to check the network instead of the key.
+    """
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in (401, 403)
+
+
 def _cache_root() -> Path:
     return Path(get_settings().mineru_cache_dir).expanduser()
 
@@ -268,6 +281,9 @@ def _extract(content: bytes, *, ext: str, ocr: bool) -> MinerUDocument | None:
     except mineru.MinerUError as exc:
         return degrade_return(logger, exc, "mineru extract failed", None)
     except Exception as exc:
+        if _is_auth_failure(exc):
+            logger.error("mineru: token rejected (HTTP 401/403) — check 设置 → API 配置")
+            return None
         return degrade_return(logger, exc, "mineru call failed", None)
     finally:
         # The uploaded file is proprietary formulation data. Delete it whatever
@@ -306,4 +322,6 @@ def probe_token() -> tuple[bool, str]:
     except mineru.MinerUError as exc:
         return True, f"Token 已接受（服务返回：{exc}）"
     except Exception as exc:
+        if _is_auth_failure(exc):
+            return False, "Token 无效或已过期（服务返回 401）"
         return False, f"连接失败：{exc}"

@@ -400,3 +400,71 @@ def test_the_sdk_is_installable_from_the_dependencies_ui() -> None:
 
     entry = next(d for d in CATALOG if d.pip_name == "mineru-open-sdk")
     assert entry.import_name == "mineru"
+
+
+# ── the SDK does not type every auth failure ─────────────────────────────────
+
+
+class _Response:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+def _http_error(status: int) -> Exception:
+    """What httpx raises, in the shape the adapter inspects."""
+    exc = Exception(f"Client error '{status}' for url ...")
+    exc.response = _Response(status)
+    return exc
+
+
+@pytest.mark.parametrize("status,expected", [(401, True), (403, True), (500, False), (404, False)])
+def test_auth_failures_are_recognised_by_status(status: int, expected: bool) -> None:
+    """The SDK defines AuthError for A0202/A0211, but a rejected token never
+    reaches it — the request 401s first and httpx.HTTPStatusError comes out
+    raw. Verified against the live API on both extract and get_task."""
+    assert mineru_cloud._is_auth_failure(_http_error(status)) is expected
+
+
+def test_a_non_http_exception_is_not_an_auth_failure() -> None:
+    assert mineru_cloud._is_auth_failure(ValueError("something else")) is False
+
+
+def test_a_rejected_token_is_reported_as_a_token_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reporting a 401 as '连接失败' sends the operator to check the network
+    instead of the key — the wrong half of the system."""
+    module = _make_sdk()
+
+    class _Client:
+        def __init__(self, **kw): ...
+        def get_task(self, task_id):
+            raise _http_error(401)
+
+    module.MinerU = _Client
+    _install(monkeypatch, module)
+    monkeypatch.setattr(get_settings(), "mineru_api_key", "bad", raising=False)
+
+    ok, message = mineru_cloud.probe_token()
+    assert ok is False
+    assert "Token" in message and "401" in message
+    assert "连接失败" not in message
+
+
+def test_a_rejected_token_during_a_parse_still_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _make_sdk()
+
+    class _Client:
+        def __init__(self, **kw): ...
+        def extract(self, source, **kw):
+            raise _http_error(401)
+
+    module.MinerU = _Client
+    _install(monkeypatch, module)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "bad", raising=False)
+
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
