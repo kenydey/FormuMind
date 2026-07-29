@@ -30,6 +30,36 @@ Open **http://localhost:5173**. No LLM API key is required for full offline use.
 If platform bearer auth is enabled, enter the **API access token** in Settings first
 (matching `FORMUMIND_API_TOKEN`), or set `FORMUMIND_API_AUTH_ENABLED=false`.
 
+### Or with Docker
+
+```bash
+cp .env.example .env
+docker compose up -d --build       # redis + backend + worker + frontend
+docker compose exec backend alembic upgrade head   # bring an existing DB up to date
+curl -s localhost:8000/health
+```
+
+**Check `/health` before anything else** — it is the one place that tells you
+whether the platform can actually do work:
+
+```json
+{"status":"ok",
+ "database":  {"ok":true,"scheme":"sqlite"},
+ "task_broker":{"required":true,"reachable":true},
+ "datalab":   {"required":false,"reachable":false}}
+```
+
+`task_broker.reachable:false` means Redis is unreachable and **every async
+feature is refused** — research, recommend, inverse design, optimization. See
+[Troubleshooting](#troubleshooting) below.
+
+> Pick one compose invocation and keep it. `docker compose up` uses the bridge
+> network; `-f docker-compose.yml -f docker-compose.host.yml` uses the host
+> network. Switching mid-life recreates only some services and strands the rest
+> on the old network — the symptom is `task_broker.reachable:false` with redis
+> apparently "Up". `docker compose down && docker compose up -d` realigns
+> everything.
+
 ---
 
 ## Step 0 · Overview
@@ -51,9 +81,22 @@ the center, and the **Actions** toolbar on the right. The header holds
   and the loaded-sources list.
 - **Center (Research)**: chat that answers questions grounded in the loaded
   sources, with citations.
-- **Right (Actions)**: six buttons — 🧪 Requirements, ⭐ Recommend,
-  🔬 DOE Design, 📈 Optimization, ⚙️ Process Optimization, 🔄 Self-Driving Loop
-  — each opening a focused modal.
+- **Right (Actions)**: ten buttons, each opening a focused modal:
+
+  | | Button | What it does |
+  |---|---|---|
+  | 🧪 | Requirements | product domain, substrate, objectives |
+  | ⭐ | Recommend | AI-retrieved Top-N formulations |
+  | 🎯 | **Inverse Design** | target properties → Pareto front of formulations |
+  | 🔁 | **Material Substitution** | replacements for a discontinued or costly ingredient |
+  | 🔬 | DOE Design | generate a run table, export a worksheet |
+  | 📋 | Workbench | record actual parameters and measured values |
+  | 📄 | **QC Report** | upload a test report → extracted measurements bound to an experiment |
+  | 📈 | Optimization | Bayesian multi-objective loop |
+  | ⚙️ | Process Optimization | cure / dispersion / film-thickness parameters |
+  | 🔄 | Self-Driving Loop | data → retrain → optimize → next DOE, one click |
+
+  The three in bold are covered in steps 5b, 5c and 6b below.
 
 ---
 
@@ -155,6 +198,64 @@ the SMILES-bearing components to be rendered via 3Dmol.js.
 
 ---
 
+## Step 5b · Inverse design — start from the target, not from a template
+
+**⭐ Recommend** answers "what should I try?". **🎯 Inverse Design** answers the
+harder question: *"salt spray ≥ 1000 h, VOC ≤ 250, cost ≤ ¥40/kg — what
+formulations satisfy all of that at once, and what do I give up between them?"*
+
+Open **🎯 Inverse Design**, state the targets as **hard constraints** (must be
+satisfied) and **soft objectives** (optimized, traded off), and run the search.
+
+The important part is what makes this different from rescaling a template:
+**the ingredients themselves are variables.** The search picks materials per
+role from the catalogue, not just percentages of a fixed recipe, so the results
+on the Pareto front are **structurally different formulations** — different
+hardeners, different anticorrosive pigments, different carriers — rather than
+one recipe with the dials nudged.
+
+- **Hard constraints** are enforced by constraint-domination: a feasible
+  candidate always beats an infeasible one, so what comes back satisfies the
+  constraints or the run reports that nothing could.
+- **Soft objectives** produce the front. Each returned candidate is
+  non-dominated: nothing else is better on every objective at once.
+- `rejected_infeasible` tells you how many candidates were discarded, which is
+  the honest signal that your constraints may be too tight.
+
+Runs asynchronously (`POST /api/design/inverse`), with progress over SSE.
+
+---
+
+## Step 5c · Material substitution & supply risk
+
+Open **🔁 Material Substitution**, pick a formulation and the ingredient at
+risk. You get a ranked list of replacements, each with **the predicted change
+to every metric** — not just "these are chemically similar".
+
+Ranking fuses three signals:
+
+1. **Structural similarity** — interchangeable-group match first, then chemical
+   family, then Hansen solubility distance `Ra = √(4Δd² + Δp² + Δh²)`, plus
+   Tanimoto fingerprint similarity when RDKit is installed.
+2. **Predicted deviation** — the genome is rebuilt with the replacement and
+   re-predicted, giving a per-metric Δ.
+3. **Literature evidence** — `substitutes` edges from the knowledge graph, each
+   carrying the source and sentence it came from.
+
+> **Read `delta_confidence` before trusting the Δ.** Without RDKit the predictor
+> distinguishes same-role materials only through role loading, amine/epoxy
+> equivalent ratio and table lookups for price and VOC. Swapping three epoxy
+> hardeners moves cost (¥13.2 / 17.8 / 20.2 per kg) and leaves `salt_spray_hours`
+> **identical at 867 h** — that is the model having no resolution, not evidence
+> that the swap is performance-neutral. The report says so with
+> `delta_confidence: cost_only`; install the `science` extra to raise it.
+
+**Supply risk**: mark a material `discontinued` (`POST /api/materials/availability`),
+then `GET /api/materials/supply-risk` lists every affected formulation with
+substitution suggestions attached.
+
+---
+
 ## Step 6 · Generate a DOE and feed results back
 
 Open **🔬 DOE Design**, choose a design (e.g. **central composite CCD** or
@@ -175,6 +276,29 @@ Two feedback paths:
 Once a metric reaches ≥ 4 samples, a data-driven model is trained automatically;
 the model-quality dashboard shows an R² half-gauge + RMSE, and subsequent
 recommendations/optimization switch to the "empirical + measured" blend.
+
+---
+
+## Step 6b · Feed back from a QC report instead of by hand
+
+Typing numbers out of a PDF is where measured data usually stops arriving. Open
+**📄 QC Report**, pick the experiment the report belongs to, and upload the file.
+
+The extractor pulls each measurement as a **row of its own** — metric, value,
+**unit, method and specification limit** — instead of the bare `{metric: value}`
+dictionary that experiment records used to carry. A salt-spray figure now
+records that it came from ASTM B117 with a ≥1000 h spec, so a later reading is
+comparable rather than merely numeric.
+
+The whole ingest is one transaction, deduplicated by content hash, and the
+original file is attached **before** the values are written — so a failure
+part-way through cannot leave you with numbers whose source is gone.
+
+Read them back with `GET /api/qc/experiments/{id}/measurements`.
+
+> Backward compatible: `ExperimentRecord.measured` still exists and still reads
+> as the same flat dictionary. It is now derived from the measurement rows, so
+> nothing that consumed it needs to change.
 
 ---
 
@@ -210,15 +334,52 @@ salt-spray, cost and sustainability simultaneously.
 
 ---
 
+## Step 9 · Formulation revision history
+
+Every formula card can be saved as a **version**, and versions form a lineage —
+a parent/child chain you can walk. Given any two, the diff is structured
+(ingredients added, removed, adjusted, plus renames) rather than a text blob,
+and a one-line summary is generated when nobody wrote a note:
+
+> 移除 1 项（聚酰胺固化剂）；新增 1 项（异佛尔酮二胺）；调整 2 项（环氧树脂、二甲苯）
+
+Endpoints: `POST /api/formulations/versions` to save,
+`GET /api/formulations/versions?name=` to find a lineage,
+`GET /api/formulations/versions/{from}/diff/{to}` to compare.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A feature returns **503** naming Redis | Broker unreachable; the submission was recorded, not lost | `docker compose ps`; start redis + worker. Recorded jobs are re-enqueued automatically |
+| `/health` shows `task_broker.reachable:false` while redis looks "Up" | Services on different networks — usually from mixing compose files | `docker compose down && docker compose up -d` |
+| `/health` shows `task_broker.required:false` but you run a worker | A UI-saved "run tasks synchronously" toggle used to override the deployment | Fixed: the deployment now wins and logs the ignored value. Turn the toggle off in Settings to clear it |
+| Image build fails at `apt-get` | The apt layer is optional and off by default | `git pull`. Only add `--build-arg INSTALL_BUILD_TOOLCHAIN=true` if you need a compiler in the image |
+| Image build fails at `npm ci` | Incomplete lockfile | `cd frontend && npm install --package-lock-only`, commit the result |
+| `alembic: No config file 'alembic.ini' found` | Older image | `git pull` and rebuild; `alembic.ini` now ships in the image |
+
+An unexpected error message that is **not** plain `path -> status` is working as
+intended — the API returns a JSON `detail` the UI shows verbatim. A bare
+`path -> 502` means the response never came from the API at all; check the
+reverse proxy and whether the backend is reachable.
+
+---
+
 ## Next steps
 
 - Custom objectives, `constraint_values`, manual / AI formula edits, multi-LLM and
   search API setup? See the **[full User Guide](./USER_GUIDE.md)**.
-- `pytest -q` runs **430+** offline tests; `pip install -e ".[dev]"` for dev tooling.
+- `pytest -q` runs **1040+** offline backend tests; `cd frontend && npm test`
+  runs **106** frontend tests. `pip install -e ".[dev]"` for dev tooling.
 - Stronger engines auto-detect on install — `".[optimize]"`, `".[bo]"`, `".[intel]"`,
   `".[science]"`, `".[embedding]"`, `".[colbert,crag]"`, `".[color]"`, `".[notebooklm]"`.
+  Installing `".[science]"` (RDKit) is what raises substitution's
+  `delta_confidence` above `cost_only`.
 - Interactive API docs: start the backend and visit
   **http://localhost:8000/docs**.
+- Check referential integrity any time: `GET /api/kb/integrity`.
 
 > The offline performance numbers are engineering-reasonable screening
 > estimates, not lab-validated specs. Feed real DOE data back and predictions

@@ -19,7 +19,7 @@ every feature and the end-to-end workflow.
 5. [Feature reference](#5-feature-reference)
 6. [DOE feedback & model training](#6-doe-feedback--model-training)
 7. [Import & export](#7-import--export)
-8. [Session history](#8-session-history)
+8. [Session history](#8-session-history-f5)
 9. [API reference](#9-api-reference)
 10. [Install & run](#10-install--run)
 11. [Configuration](#11-configuration)
@@ -112,13 +112,15 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 │                  │                            │                       │
 │ · research topic │  RAG-grounded Q&A:         │ 🧪 Requirements       │
 │   (prompt box)   │  · chat with the loaded    │ ⭐ Recommend          │
-│ · source types:  │    sources                 │ 🔬 DOE Design         │
-│   ☑ patents      │  · citation chips per      │ 📈 Optimization       │
-│   ☑ literature   │    answer                  │ ⚙️ Process Optimization│
-│   ☑ internet     │                            │ 🔄 Self-Driving Loop  │
-│   ☑ local files  │  [ask the sources… ][send] │                       │
-│   ☐ 📓 NotebookLM│                            │  (each opens a modal) │
-│ [⬆ upload][search]│                            │                       │
+│ · source types:  │    sources                 │ 🎯 Inverse Design     │
+│   ☑ patents      │  · citation chips per      │ 🔁 Material Substitute│
+│   ☑ literature   │    answer                  │ 🔬 DOE Design         │
+│   ☑ internet     │                            │ 📋 Workbench          │
+│   ☑ local files  │  [ask the sources… ][send] │ 📄 QC Report          │
+│   ☐ 📓 NotebookLM│                            │ 📈 Optimization       │
+│ [⬆ upload][search]│                           │ ⚙️ Process Optimization│
+│                  │                            │ 🔄 Self-Driving Loop  │
+│                  │                            │  (each opens a modal) │
 │ ── loaded (N) ── │                            │                       │
 │ 📄 patent · ✕    │                            │                       │
 │ 📚 arxiv  · ✕    │                            │                       │
@@ -146,11 +148,15 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 - **Center (Research)**: a chat interface that answers questions **grounded in
   the loaded sources** (semantic embedding or TF-IDF re-rank → LLM answer), with
   citation chips linking back to the evidence used.
-- **Right (Actions)**: six buttons that each open a focused **modal** —
+- **Right (Actions)**: ten buttons that each open a focused **modal** —
   🧪 Requirements (with the **✨ NL Intent** parser at the top),
   ⭐ Recommend (AI-recommended Top-N + per-card 🔍 **IP analysis**),
+  🎯 **Inverse Design** (target properties → Pareto front, §5.15),
+  🔁 **Material Substitution** (replacements with predicted deviation, §5.16),
   🔬 DOE Design (5 designs + 🧠 AI active selection, fill measured values,
   retrain, model gauges),
+  📋 Workbench (record actual parameters and measured values),
+  📄 **QC Report** (upload a test report → per-measurement rows, §5.17),
   📈 Optimization (Bayesian loop, convergence chart),
   ⚙️ Process Optimization (cure temperature/time, dispersion RPM, film
   thickness, bath temperature, pH, …),
@@ -307,7 +313,7 @@ directions via the API's `objectives` field.
 
 ### 5.2 Cost, sustainability & PVC / CPVC scoring
 
-All 26 raw materials in the knowledge base carry `price_cny_per_kg` and
+All 32 seed materials in the knowledge base carry `price_cny_per_kg` and
 `voc_contrib` (volatile fraction, 0–1). Every prediction computes:
 
 - `cost_cny_per_kg` — mass-fraction-weighted formulation cost;
@@ -535,6 +541,171 @@ ball-and-stick models via **3Dmol.js**. The full WebGL viewer (and the reserved
 **MoLFormer** embedding path for richer property prediction) ships in a later
 upgrade; the placeholder keeps the bundle lightweight today.
 
+### 5.15 Inverse design (🎯)
+
+**⭐ Recommend** proposes candidates. **🎯 Inverse Design** starts from the
+specification instead: given targets, return a set of formulations that satisfy
+them and show what each trades away.
+
+**What makes it different from optimization.** Until this shipped, the
+reconstruction step could only rescale the weight percentages of a hardcoded
+baseline template. Which materials appear was a constant; only how much of each
+was a variable. That single constraint is why three separate things were out of
+reach at once — there was no inverse design (no "choose ingredients" dimension
+in the search space), no material substitution (swapping a material *is*
+changing the topology), and the Pareto view was decorative (candidates all came
+from the same template, so the front held no real diversity). Unlocking the
+topology made all three reachable from one foundation.
+
+**Request** — hard constraints and soft objectives are now distinct, which they
+previously were not (both were folded into `ObjectiveSpec.weight` and used only
+for scoring, never as conditions a search had to satisfy):
+
+| Field | Meaning |
+|---|---|
+| `targets.hard[]` | `(metric, op: le\|ge\|between, value[, value_max])` — must hold |
+| `targets.soft[]` | `ObjectiveSpec` — optimized and traded off against each other |
+| `population`, `generations` | search budget (default 48 × 30) |
+| `seed_with_llm` | seed the initial population with LLM proposals (falls back to baseline + randomised variants) |
+
+**Engine** — NSGA-II, pure numpy. That choice follows from measurement, not
+preference: the environment ships numpy only (baybe / optuna / botorch / torch /
+rdkit / scipy / sklearn are all optional and absent by default), the repository's
+four optimizers are single-objective scalarisers, and a single candidate costs
+about 1.1 ms to evaluate — so 60 × 40 ≈ 2.7 s of direct evolutionary search
+beats wrapping the predictor in another surrogate. Constraints are handled by
+**constraint-domination** (feasible always beats infeasible; between two
+infeasible candidates the smaller total violation wins), which avoids inventing
+penalty weights.
+
+**Response**: `candidates`, `pareto_frontier_ids`, `tradeoff` (the existing
+`TradeOffAnalysis`, so scenario picks and confidence come along for free),
+`generations`, `evaluations`, `engine`, `rejected_infeasible`, `seeded_from`.
+
+Two behaviours are worth knowing because they were only visible when the search
+was actually run end-to-end, and no unit test would have caught either:
+
+- **It will exploit the surrogate if you let it.** Unbounded, it found a
+  "formulation" claiming 5110 hours of salt spray. Each slot is now bounded by
+  the DOE lever ranges.
+- **Crowding distance measures objective space only**, so two candidates built
+  from entirely different materials look interchangeable once their predicted
+  metrics are close, and selection collapses onto a single composition.
+  Structural niching caps how many individuals may share an ingredient set,
+  which took one distinct composition to twelve.
+
+Async: `POST /api/design/inverse` → 202 + SSE progress.
+
+### 5.16 Material substitution & supply risk (🔁)
+
+`POST /api/materials/substitutes` ranks replacements for one slot of a
+formulation by fusing three signals:
+
+1. **Structural similarity** — exact `substitute_group` match scores highest,
+   then shared `functional_class`, then Hansen distance
+   `Ra = √(4Δd² + Δp² + Δh²)`; Tanimoto fingerprint similarity is added when
+   RDKit is available (detected via `chemtools.availability()`, not try/except).
+2. **Predicted deviation** — the genome is rebuilt with the candidate and
+   re-predicted, yielding a per-metric Δ. This is the differentiator: the answer
+   is not "these are similar" but "this is what changes".
+3. **Literature evidence** — knowledge-graph `substitutes` edges, each carrying
+   `{source_id, chunk_id, sentence}`.
+
+All 32 seed materials carry `functional_class` and `substitute_group` (18
+interchangeable groups: `epoxy_hardener`, `anticorrosive_pigment`,
+`pu_crosslinker`, `organic_solvent`, `thixotrope`, …). Note that `extender` and
+`thixotrope` are deliberately separate groups — talc and fumed silica are not
+interchangeable despite both being fillers.
+
+> **`delta_confidence` is not decoration — read it.** Without RDKit,
+> `_molecular_features` returns `{}` and the predictor can only distinguish
+> same-role materials through role loading, the amine/epoxy equivalent ratio,
+> and price/VOC lookups. Measured: swapping three epoxy hardeners changes cost
+> (¥13.2 / 17.8 / 20.2 per kg) and leaves `salt_spray_hours` **identical at
+> 867 h** for all three. The report reports `delta_confidence: cost_only` so an
+> unchanged salt-spray figure is not mistaken for evidence that the swap is
+> performance-neutral. Install `".[science]"` to raise it.
+
+**Candidate recall** uses `role` + `substitute_group`, deliberately *not*
+`genome.swappable()` — that is a *search* constraint which excludes pigments and
+fillers, whereas substitution is user-directed and any slot should be queryable.
+
+**Supply risk**: `POST /api/materials/availability` marks a material
+`discontinued` or `restricted`; `GET /api/materials/supply-risk` then lists
+every affected formulation with substitution suggestions.
+
+### 5.17 Per-measurement results & QC report ingestion (📄)
+
+`measured` used to be a single JSON dictionary on the experiment row — values
+with no unit, no method and no timestamp. The `measurements` table now stores
+one row per observation (metric, value, **unit, method, spec limit**,
+timestamp), so a salt-spray number records that it came from ASTM B117 against a
+≥1000 h spec and is therefore comparable to the next one.
+
+**This is backward compatible by construction.** `ExperimentRecord.measured`
+survives as a Pydantic `computed_field` derived from `measurements`, so every
+existing reader is untouched, and a `model_validator(mode="before")` lifts
+`measured` out of legacy payloads into `Measurement` objects.
+
+**QC report upload** (`POST /api/qc/report`): upload → LLM extraction → ingest.
+The ingest runs in a **single transaction**, deduplicates by content hash, and
+attaches the original file **before** writing the measurements — reversing that
+order would let a mid-way failure leave behind numbers with no provenance.
+
+Read back with `GET /api/qc/experiments/{experiment_id}/measurements`.
+
+### 5.18 Formulation revision history
+
+`POST /api/formulations/versions` snapshots a formulation into a **lineage** — a
+parent/child chain. Diffs are structured (ingredients added / removed /
+adjusted, plus renames) rather than text, and `describe_diff` generates a
+one-line summary when no author note was supplied:
+
+> 移除 1 项（聚酰胺固化剂）；新增 1 项（异佛尔酮二胺）；调整 2 项（环氧树脂、二甲苯）
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/formulations/versions` | save a version (optionally under a parent) |
+| `GET /api/formulations/versions?name=` | find lineages by formulation name |
+| `GET /api/formulations/versions/{lineage_id}` | walk one lineage |
+| `GET /api/formulations/versions/detail/{version_id}` | one version's full snapshot |
+| `GET /api/formulations/versions/{from_id}/diff/{to_id}` | structured diff |
+
+### 5.19 Editable material catalogue
+
+The raw-material library used to be a module-level dict literal read from dozens
+of call sites. It is now a **seed library plus a database overlay**, exposed as
+an ordinary mapping so none of those call sites changed: curated seed chemistry
+always wins, and fields the seed never carries — `availability`, `supplier`,
+`functional_class`, `hansen_*`, `substitute_group` — are filled in from the
+database.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/materials` | search the catalogue (filter by role, functional class, substitute group) |
+| `POST /api/materials` | add or update a material |
+| `POST /api/materials/promote` | promote an ad-hoc ingredient into the catalogue |
+| `POST /api/materials/availability` | mark `available` / `restricted` / `discontinued` |
+
+### 5.20 Referential integrity check
+
+Most cross-table references in this schema are plain string columns, and several
+**cannot** become foreign keys: under `FORMUMIND_CAMPAIGN_BACKEND=datalab` the
+row a reference points at lives in an external ELN, so a database constraint
+would reject perfectly valid data. The honest alternative to a constraint you
+cannot enforce is a check you actually run — otherwise orphans accumulate
+silently and the first symptom is a retrieval quietly returning less than it
+should.
+
+`GET /api/kb/integrity` reports every soft reference with its orphan count.
+References that are structurally unjoinable (Datalab-backed) are flagged
+`unjoinable` and excluded from the orphan total rather than reported as a bogus
+count.
+
+> SQLite does not enforce foreign keys unless `PRAGMA foreign_keys=ON` is set,
+> **per connection** — without it every `ForeignKey` declaration is decorative.
+> The engine sets it on every new connection.
+
 ---
 
 ## 6. DOE feedback & model training
@@ -641,17 +812,104 @@ The **Export ▾** menu on each leaderboard card offers:
 | POST | `/api/optimize` | start the async multi-objective optimizer → returns `task_id` |
 | POST | `/api/process-optimize` | optimize manufacturing process parameters (Arrhenius / empirical outcome models) |
 | POST | `/api/loop/iterate` | one-click self-driving loop: data → retrain → optimize → next active-learning DOE → returns `task_id` |
+| **POST** | **`/api/design/inverse`** | **inverse design: target spec → Pareto set of formulations (async, §5.15)** |
+| **GET/POST** | **`/api/materials`** | **search / add materials in the editable catalogue (§5.19)** |
+| **POST** | **`/api/materials/substitutes`** | **ranked replacements for one slot, with per-metric Δ (§5.16)** |
+| **GET** | **`/api/materials/supply-risk`** | **formulations affected by discontinued materials** |
+| **POST** | **`/api/materials/availability`** | **mark a material `available` / `restricted` / `discontinued`** |
+| **POST** | **`/api/materials/promote`** | **promote an ad-hoc ingredient into the catalogue** |
 | POST | `/api/qc/analyze` | (reserved) computer-vision QC analysis stub |
+| **POST** | **`/api/qc/report`** | **upload a QC report → extracted measurements bound to an experiment (§5.17)** |
+| **GET** | **`/api/qc/experiments/{id}/measurements`** | **per-measurement rows (metric, value, unit, method, spec limit)** |
 | GET | `/api/tasks/{id}` | poll task progress + result (Top-N leaderboard, loop report, …) |
+| GET | `/api/experiments` | list experiments (id + label) so reports and measurements can reference one |
 | POST | `/api/experiments` | feed back measured results → persist + (re)train |
 | POST | `/api/experiments/import-csv` | upload a filled-in worksheet → bulk-ingest + train |
+| **POST/GET** | **`/api/formulations/versions`** | **save a formulation version / find lineages (§5.18)** |
+| **GET** | **`/api/formulations/versions/{from}/diff/{to}`** | **structured diff between two versions** |
 | POST | `/api/train` | force a retrain over all stored experiments |
 | GET | `/api/models` | list trained models with `n_samples`, `R²`, `cv_R²`, `RMSE` |
 | GET | `/api/ingredients` | full raw-material library incl. price & VOC contribution |
+| **GET** | **`/api/kb/integrity`** | **orphan report over the soft references (§5.20)** |
 | GET | `/api/meta`, `/api/templates/{domain}` | metadata & baseline templates |
-| GET | `/health` | service + active-engine status |
+| GET | `/health` | database, **task broker** and Datalab reachability |
 
 Interactive docs: after starting the backend, visit `http://localhost:8000/docs`.
+
+### Async submission and the 503 contract
+
+Every async endpoint (`/api/research/recommend`, `/api/research/deep`,
+`/api/optimize`, `/api/design/inverse`, `/api/search/stream`,
+`/api/loop/iterate`, `/api/dependencies/install`) returns **202** with
+`task_id` + `stream_url`, or **503** with a JSON `detail` when the task broker
+is unreachable.
+
+503 rather than 500 is deliberate, and so is the speed. Celery's `.delay()` does
+not fail cleanly with Redis down: it retries the *result backend* for roughly 19
+seconds and then raises `RuntimeError: Retry limit exceeded … The Celery
+application must be restarted`, which reaches the browser as a plain-text 500
+that no JSON error handler can read. The API now probes the broker with a
+one-second TCP connect first, so the caller gets an actionable reason in ~30 ms.
+
+**A refused submission is delayed work, not lost work.** The durable outbox row
+is written *before* dispatch, so `dispatcher.recover_stalled` re-enqueues the
+job once the broker returns.
+
+### Health check
+
+```bash
+curl -s localhost:8000/health
+```
+
+```json
+{"status": "ok",
+ "database":    {"ok": true,  "scheme": "sqlite"},
+ "task_broker": {"required": true, "reachable": true},
+ "datalab":     {"required": false, "reachable": false}}
+```
+
+- `status` is `degraded` — not failed — when a dependency is unreachable, and
+  the endpoint still answers **200**. The container healthcheck asserts 200, and
+  restarting the API would not bring Redis back.
+- `task_broker.required` is `false` in eager mode, where tasks run in-process.
+  **If you run a worker container and see `required: false`, tasks are not
+  reaching it** — see §11.
+
+### Inverse design example
+
+```bash
+curl -X POST localhost:8000/api/design/inverse -H 'content-type: application/json' -d '{
+  "requirement": {"domain": "anticorrosion_coating", "substrate": "carbon_steel"},
+  "targets": {
+    "hard": [
+      {"metric": "salt_spray_hours", "op": "ge", "value": 1000},
+      {"metric": "voc_gpl",          "op": "le", "value": 250}
+    ],
+    "soft": [
+      {"metric": "cost_cny_per_kg",  "weight": 0.5, "direction": "minimize"},
+      {"metric": "salt_spray_hours", "weight": 0.5, "direction": "maximize"}
+    ]
+  },
+  "population": 48, "generations": 30
+}'
+# → 202 {"task_id": "...", "stream_url": "/api/tasks/.../stream"}
+# Result: candidates (structurally distinct), pareto_frontier_ids, tradeoff,
+#         rejected_infeasible — check that last one if the front comes back thin.
+```
+
+### Substitution example
+
+```bash
+curl -X POST localhost:8000/api/materials/substitutes -H 'content-type: application/json' -d '{
+  "formulation": { "...": "a Formulation object" },
+  "slot_index": 1,
+  "requirement": {"domain": "anticorrosion_coating"},
+  "limit": 5
+}'
+# Each candidate carries metric_deltas AND delta_confidence.
+# delta_confidence: "cost_only" means performance metrics have no resolution
+# here — install ".[science]" before reading anything into an unchanged number.
+```
 
 ### Self-driving loop request example
 
@@ -720,7 +978,7 @@ cd backend
 python3 -m venv .venv              # create once (required on Debian/Ubuntu with PEP 668)
 source .venv/bin/activate          # Linux/macOS  (.venv\Scripts\activate on Windows)
 pip install -e ".[dev]"
-pytest -q                          # 430+ tests, all offline
+pytest -q                          # 1040+ tests, all offline
 uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
 # Frontend (separate shell)
@@ -740,7 +998,9 @@ pip install -e . --no-deps
 
 ```bash
 cp .env.example .env               # LLM keys, FORMUMIND_API_TOKEN, Tavily/SerpAPI, …
-docker compose up                  # redis + backend + worker + frontend
+docker compose up -d --build       # redis + backend + worker + frontend
+docker compose exec backend alembic upgrade head    # migrate an existing database
+curl -s localhost:8000/health      # verify before using the UI
 docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 ```
 
@@ -752,6 +1012,51 @@ without a platform bearer token. **Public:** keep default `true`, set
 Host-network overlay: `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`
 
 Enterprise ELN: `docker compose -f docker-compose.yml -f docker-compose.eln.yml up` — see `deploy/eln/README.md`.
+
+> **Do not mix compose invocations.** The base file puts services on a bridge
+> network; the host overlay uses `network_mode: host`. Switching between them
+> recreates only the services whose definition changed and leaves the rest on
+> the old network, so the backend stops resolving `redis` and any
+> `localhost:`-style URL starts pointing at the container itself. The symptom is
+> `task_broker.reachable:false` and `datalab.reachable:false` **at the same
+> time**, with `docker compose ps` showing everything "Up" — and a redis row
+> with no published ports, which is the tell. `docker compose down` then `up -d`
+> realigns everything.
+
+### Migrations
+
+Migrations are Alembic, and `alembic.ini` ships inside the image, so a deployed
+database can be migrated in place:
+
+```bash
+docker compose exec backend alembic upgrade head
+curl -s localhost:8000/api/kb/integrity     # confirm afterwards
+```
+
+Outside production, `Base.metadata.create_all` creates any **missing tables** at
+startup — but it never alters an existing one. A database created before a
+column-type change therefore needs the migration; `create_all` will not do it
+for you.
+
+### Image build notes
+
+The image installs no apt packages by default. Every package it installs
+resolves to a prebuilt wheel on linux/x86_64/cp311; the one sdist-only
+dependency (jieba) is pure Python and builds with no compiler present. If you
+need a toolchain in the image — installing an sdist-only optional extra at
+runtime through the dependency installer — opt in:
+
+```bash
+docker compose build --build-arg INSTALL_BUILD_TOOLCHAIN=true backend
+```
+
+The frontend image runs `npm ci`, which refuses an incomplete lockfile where
+`npm install` would silently repair one. If it fails with
+`Missing: … from lock file`, regenerate and commit:
+
+```bash
+cd frontend && npm install --package-lock-only
+```
 
 ---
 
@@ -779,13 +1084,32 @@ defaults.
 | `FORMUMIND_NOTEBOOKLM_STORAGE_PATH` | `./data/notebooklm_auth.json` | session file written by `notebooklm login` |
 | `FORMUMIND_DB_URL` | `sqlite:///./data/formumind.db` | experiment database; can point at Postgres |
 | `FORMUMIND_REDIS_URL` | `redis://localhost:6379/0` | Celery broker |
-| `FORMUMIND_CELERY_EAGER` | `true` | run tasks in-process without a broker |
+| `FORMUMIND_CELERY_EAGER` | `true` | run tasks in-process without a broker. **Operator-owned** — see below |
 | `FORMUMIND_OPTIMIZE_ITERATIONS` | `24` | optimization iterations |
 | `FORMUMIND_TOP_N_FORMULAS` | `5` | leaderboard size |
 | `FORMUMIND_MIN_TRAIN_SAMPLES` | `4` | min samples before training a metric's model |
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
 | `FORMUMIND_PDF_DOWNLOAD` | `false` | Download patent PDFs for full-text extraction during deep research (requires network + USPTO/EPO access; false by default to keep tests offline) |
 | `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |
+
+### Settings saved in the UI vs. settings set by the deployment
+
+Most flags in the Settings dialog are promoted into the process environment at
+startup, deliberately outranking whatever the container was created with — a
+value the user saved last is the most recent explicit intent, and a stale
+`env_file` key should not beat it.
+
+**`FORMUMIND_CELERY_EAGER` is the exception.** It decides whether tasks go to
+the broker or run inside the API process — that is, whether the worker container
+does anything at all — so it belongs to the operator, not to a UI toggle. When
+the deployment sets it, a UI-saved value is ignored and the mismatch is logged
+rather than applied silently. With no deployment value there is nothing to
+overrule, so a single-process install can still choose eager mode from the UI.
+
+If `/health` reports `task_broker.required:false` while you are running a worker
+container, that is exactly this situation: check the backend logs for the
+ignored-value warning, and turn "run tasks synchronously" off in Settings to
+clear the stored value.
 
 ### Data persistence (B5)
 
@@ -893,18 +1217,69 @@ should be treated as an R&D aid rather than a production crawl.
 Browser localStorage (up to 20 entries), never uploaded to the server.
 Experiment data is persisted in the backend SQLite/Postgres database.
 
+**Q: Inverse design returned very few candidates, or none.**
+Check `rejected_infeasible` in the response. A large count against a thin front
+means the hard constraints are close to (or past) what the search space can
+satisfy — relax one, or move it to a soft objective. A front that is non-empty
+but structurally uniform usually means the swappable roles are over-constrained.
+
+**Q: A substitution shows an identical salt-spray number for every candidate.
+Does that mean the swap is safe?**
+No — and this is the failure mode most worth understanding. Check
+`delta_confidence`. When it reads `cost_only`, RDKit is absent, molecular
+features are empty, and the predictor genuinely cannot distinguish same-role
+materials on performance; identical numbers are the model having no resolution,
+not evidence of equivalence. Cost, VOC and PVC-class deltas remain meaningful.
+Install `".[science]"` to make performance deltas informative.
+
+**Q: A feature returned 503 mentioning Redis. Did I lose the job?**
+No. The outbox row is written before dispatch, so the submission is recorded and
+re-enqueued once the broker is reachable. Start redis and the worker
+(`docker compose ps` to see which is down).
+
+**Q: The UI shows a bare `/api/... -> 502` with no explanation.**
+That response did not come from the API — FastAPI errors carry a JSON `detail`
+that the UI renders verbatim. A bare `path -> status` means the body was not
+JSON, which points at the reverse proxy: nginx returns 502 when it cannot reach
+the backend at all. Check `docker compose ps` and `curl localhost:8000/health`
+directly, bypassing the proxy.
+
+**Q: `docker compose ps` shows the worker as `unhealthy`.**
+On current versions it should not. The worker shares the backend image and used
+to inherit its HTTP healthcheck against `:8000`, a server the worker never runs,
+so it reported unhealthy permanently. It now answers `celery inspect ping` —
+which also proves the broker connection. If you still see it, rebuild.
+
 ---
 
-> This document corresponds to the current FormuMind branch:
-> a NotebookLM-style three-pane redesign (Sources / Research / Actions) with a
-> six-button Actions toolbar (🧪 Requirements, ⭐ Recommend, 🔬 DOE Design,
-> 📈 Optimization, ⚙️ Process Optimization, 🔄 Self-Driving Loop), multi-LLM
-> support across nine providers with an in-app Settings dialog, multi-source
-> research (patents / literature / internet / **NotebookLM** / local files),
-> RAG-grounded Q&A with semantic-embedding upgrade — plus auto-detected
-> intelligence engines (BoTorch/Summit/Optuna optimization, active-learning DOE,
-> ChemCrow/paper-qa Q&A, PubChem enrichment, thermo-grounded VOC, Fox/Mooney
-> rheology, CIELAB/ΔE₀₀ color, PVC/CPVC, IP novelty analysis, ✨ NL intent
-> parser) — on top of the multi-objective optimization, cost/sustainability,
-> confidence intervals, DOE import/export, SQL persistence, formula export,
-> convergence chart, model dashboard and session history shipped earlier.
+> This document corresponds to the current FormuMind branch.
+>
+> The largest recent change is not a feature but the removal of a constraint.
+> Formulation reconstruction could only rescale the weight percentages of a
+> hardcoded template, so which materials appeared was fixed and only their
+> proportions varied. That one limitation is why inverse design, material
+> substitution and a meaningful Pareto front were all out of reach at the same
+> time. Making composition searchable — an editable material catalogue plus a
+> formulation genome — put all three within reach of the same foundation, and
+> **🎯 Inverse Design** (§5.15), **🔁 Material Substitution** (§5.16) and true
+> multi-front Pareto ranking followed from it.
+>
+> Alongside them: per-measurement results with unit, method and specification
+> limit, fed by **📄 QC report** ingestion (§5.17); formulation revision
+> lineage with structured diffs (§5.18); an editable material catalogue
+> (§5.19); and a referential-integrity check for the references that cannot
+> carry a database constraint (§5.20).
+>
+> All of it sits on the earlier platform: a NotebookLM-style three-pane layout
+> (Sources / Research / Actions) with a ten-button Actions toolbar, multi-LLM
+> support across nine providers, multi-source research (patents / literature /
+> internet / **NotebookLM** / local files), RAG-grounded Q&A with
+> semantic-embedding upgrade, auto-detected intelligence engines
+> (BoTorch/Summit/Optuna optimization, active-learning DOE, ChemCrow/paper-qa
+> Q&A, PubChem enrichment, thermo-grounded VOC, Fox/Mooney rheology,
+> CIELAB/ΔE₀₀ color, PVC/CPVC, IP novelty analysis, ✨ NL intent parser),
+> multi-objective optimization, cost/sustainability scoring, confidence
+> intervals, DOE import/export, SQL persistence, convergence chart, model
+> dashboard and session history.
+>
+> Verified at **1040+ backend tests** and **106 frontend tests**, all offline.
