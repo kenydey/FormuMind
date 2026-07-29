@@ -25,6 +25,11 @@ numpy==2.4.6
 httpx==0.28.1
 tenacity>=8.2.0
 loguru>=0.7
+# The last-resort PDF tier. Pure Python, no dependencies, a few hundred KB —
+# and without it the image ships with *no* PDF parser at all, so an upload
+# returns 200 having extracted nothing. The richer parsers stay optional
+# extras; this one is the floor.
+pypdf==6.14.2
 # Lightweight online retrieval (no API keys required for arXiv / DDG; S2 uses httpx).
 arxiv==4.0.0
 ddgs==9.14.4

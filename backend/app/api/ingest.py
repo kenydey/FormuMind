@@ -6,12 +6,14 @@ from datetime import datetime
 import logging
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..domain.schemas import Evidence, SourceGuideSchema
 from ..services import colbert_store
 from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
+from ..services.parsing import ParserUnavailable
 from ..db.source_store import get_source_store
 
 logger = logging.getLogger(__name__)
@@ -82,7 +84,12 @@ async def ingest_document(file: UploadFile = File(...)):
     content = await file.read()
     filename = file.filename or "upload"
     _enforce_upload_size(content, filename)
-    outcome = ingest_file(filename, content)
+    # Parsing is synchronous and can run for seconds (docling) to minutes
+    # (cloud escalation). On the event loop that stalls every other request.
+    try:
+        outcome = await run_in_threadpool(ingest_file, filename, content)
+    except ParserUnavailable as exc:
+        raise HTTPException(status_code=422, detail=exc.hint) from exc
     colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(filename, outcome)
 
@@ -99,7 +106,10 @@ async def ingest_batch(files: list[UploadFile] = File(...)):
         name = f.filename or "upload"
         _enforce_upload_size(content, name)
         pairs.append((name, content))
-    outcome = ingest_files_batch(pairs)
+    try:
+        outcome = await run_in_threadpool(ingest_files_batch, pairs)
+    except ParserUnavailable as exc:
+        raise HTTPException(status_code=422, detail=exc.hint) from exc
     colbert_store.index_evidence(outcome.evidence)
     return BatchIngestResponse(
         evidence=outcome.evidence,

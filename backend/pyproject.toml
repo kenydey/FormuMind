@@ -60,7 +60,16 @@ intel = [
     "semanticscholar>=0.8",
     "ddgs>=6.0",            # renamed from duckduckgo-search
 ]
-file_ingest = ["markitdown>=0.0.1", "pypdf>=4.0", "python-docx>=1.1", "trafilatura>=1.8"]
+# MarkItDown keeps every format backend behind an extra — a bare install parses
+# nothing but plain text, so .pptx/.xlsx silently yield an empty document and
+# .docx falls back to python-docx, which drops tables. The extras are the whole
+# point of depending on it.
+file_ingest = [
+    "markitdown[pdf,docx,pptx,xlsx]>=0.1",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+    "trafilatura>=1.8",
+]
 # Layout-aware PDF → Markdown parsers (heavy; pulls torch). FORMUMIND_PDF_PARSER
 # picks the tier: docling → marker → MinerU → MarkItDown → pypdf.
 parse_pro = ["docling>=2.0", "marker-pdf>=1.0"]

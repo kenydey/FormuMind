@@ -75,7 +75,13 @@ CATALOG: tuple[Dependency, ...] = (
     # ── Color ──────────────────────────────────────────────────────────────
     Dependency("colour-science", "colour", "color", "CIELAB / ΔE₀₀ 色差计算"),
     # ── File ingestion ─────────────────────────────────────────────────────
-    Dependency("markitdown", "markitdown", "file_ingest", "通用文档解析（PDF/DOCX/XLSX/PPTX…）"),
+    Dependency(
+        "markitdown", "markitdown", "file_ingest", "通用文档解析（PDF/DOCX/XLSX/PPTX…）",
+        # Without the extras MarkItDown installs no format backend at all: the
+        # description above would be false, .pptx/.xlsx would parse to nothing,
+        # and .docx would fall through to python-docx and lose its tables.
+        spec="markitdown[pdf,docx,pptx,xlsx]>=0.1",
+    ),
     Dependency("pypdf", "pypdf", "file_ingest", "PDF 解析回退"),
     Dependency("python-docx", "docx", "file_ingest", "DOCX 解析回退"),
     Dependency("trafilatura", "trafilatura", "file_ingest", "网页正文抽取（去导航/广告 → Markdown）"),

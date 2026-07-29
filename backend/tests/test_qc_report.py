@@ -326,7 +326,11 @@ def test_report_endpoint_stores_and_binds(db, experiment):
     body = response.json()
     assert body["experiment_id"] == experiment
     assert body["source_id"]
-    assert body["parser"] == "text"
+    # Which tier wins depends on what is installed — markitdown handles .md
+    # when present, the plain decoder otherwise. Pinning one name made this
+    # assert the environment rather than the behaviour; what matters is that
+    # a real parser ran and recorded itself.
+    assert body["parser"] in {"markitdown", "text"}
 
     listing = client.get(f"/api/qc/experiments/{experiment}/measurements")
     assert listing.status_code == 200

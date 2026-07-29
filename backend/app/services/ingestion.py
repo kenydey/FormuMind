@@ -171,11 +171,20 @@ def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> Inges
     text = parse_document(content, ext).markdown
 
     if not text or not text.strip():
+        # Two very different failures used to look identical here. A missing
+        # parser is a deployment problem the operator can fix in a minute; an
+        # empty extraction from a working parser means the document itself
+        # carries no text layer. Reporting both as a bland placeholder is why
+        # an install with no parsers at all still answered 200.
+        from .parsing import ParserUnavailable, can_parse, install_hint
+
+        if not can_parse(ext):
+            raise ParserUnavailable(ext, install_hint(ext))
         placeholder = Evidence(
             source="local",
             identifier=filename,
             title=filename,
-            snippet=f"无法提取文本内容（格式：{ext}）",
+            snippet=f"未能提取到文本（格式：{ext}）——可能是扫描件或纯图片文档。",
             relevance=0.5,
         )
         return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
@@ -369,10 +378,27 @@ def ingest_text(text: str, title: str = "Pasted text", *, persist: bool = True) 
 
 
 def ingest_files_batch(files: list[tuple[str, bytes]], *, persist: bool = True) -> IngestOutcome:
+    from .parsing import ParserUnavailable
+
     all_evidence: list[Evidence] = []
     last_outcome: IngestOutcome | None = None
     for name, content in files:
-        outcome = ingest_file(name, content, persist=persist)
+        try:
+            outcome = ingest_file(name, content, persist=persist)
+        except ParserUnavailable as exc:
+            # One unsupported file must not discard the other nineteen. Name
+            # the file and the reason so it is obvious which one to fix.
+            logger.warning("batch ingest: %s unparseable (%s)", name, exc.hint)
+            all_evidence.append(
+                Evidence(
+                    source="local",
+                    identifier=name,
+                    title=name,
+                    snippet=f"未解析：{exc.hint}",
+                    relevance=0.5,
+                )
+            )
+            continue
         all_evidence.extend(outcome.evidence)
         last_outcome = outcome
     return IngestOutcome(

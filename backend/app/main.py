@@ -240,8 +240,20 @@ def health() -> dict:
 
     broker_ok = broker_reachable()
 
+    # Which formats can actually be parsed. The image ships no optional
+    # parsers, so a deployment can run for weeks accepting uploads and
+    # indexing nothing at all — the same class of invisible outage as an
+    # unreachable broker, and just as worth reporting here.
+    from .services.parsing import format_availability
+
+    try:
+        formats = format_availability()
+    except Exception:
+        formats = {}
+    pdf_ok = bool(formats.get("pdf"))
+
     overall = "ok"
-    if not db_ok or not broker_ok or (datalab_required and not datalab_ok):
+    if not db_ok or not broker_ok or not pdf_ok or (datalab_required and not datalab_ok):
         overall = "degraded"
 
     return {
@@ -249,6 +261,7 @@ def health() -> dict:
         "database": {"ok": db_ok, "scheme": db_scheme},
         # "required" is False in eager mode, where tasks run in-process.
         "task_broker": {"required": not cfg.celery_eager, "reachable": broker_ok},
+        "parsers": formats,
         "datalab": {"required": datalab_required, "reachable": datalab_ok},
     }
 
