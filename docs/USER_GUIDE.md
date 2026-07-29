@@ -594,6 +594,8 @@ was actually run end-to-end, and no unit test would have caught either:
   Structural niching caps how many individuals may share an ingredient set,
   which took one distinct composition to twelve.
 
+![Inverse design · Pareto front](./images/10-inverse-design.png)
+
 Async: `POST /api/design/inverse` → 202 + SSE progress.
 
 ### 5.16 Material substitution & supply risk (🔁)
@@ -630,6 +632,8 @@ interchangeable despite both being fillers.
 `genome.swappable()` — that is a *search* constraint which excludes pigments and
 fillers, whereas substitution is user-directed and any slot should be queryable.
 
+![Material substitution · per-metric deltas](./images/11-substitution.png)
+
 **Supply risk**: `POST /api/materials/availability` marks a material
 `discontinued` or `restricted`; `GET /api/materials/supply-risk` then lists
 every affected formulation with substitution suggestions.
@@ -652,6 +656,8 @@ The ingest runs in a **single transaction**, deduplicates by content hash, and
 attaches the original file **before** writing the measurements — reversing that
 order would let a mid-way failure leave behind numbers with no provenance.
 
+![QC report upload](./images/12-qc-report.png)
+
 Read back with `GET /api/qc/experiments/{experiment_id}/measurements`.
 
 ### 5.18 Formulation revision history
@@ -662,6 +668,8 @@ adjusted, plus renames) rather than text, and `describe_diff` generates a
 one-line summary when no author note was supplied:
 
 > 移除 1 项（聚酰胺固化剂）；新增 1 项（异佛尔酮二胺）；调整 2 项（环氧树脂、二甲苯）
+
+![Formulation revision history](./images/13-version-history.png)
 
 | Endpoint | Purpose |
 |---|---|

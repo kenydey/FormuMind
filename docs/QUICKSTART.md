@@ -222,6 +222,12 @@ one recipe with the dials nudged.
 - `rejected_infeasible` tells you how many candidates were discarded, which is
   the honest signal that your constraints may be too tight.
 
+![Inverse design · Pareto front](./images/10-inverse-design.png)
+
+The run banner is the honest summary of what happened: engine, generations,
+evaluations, how many candidates were rejected as infeasible, and — the number
+worth checking — **how many distinct ingredient sets** came back.
+
 Runs asynchronously (`POST /api/design/inverse`), with progress over SSE.
 
 ---
@@ -249,6 +255,12 @@ Ranking fuses three signals:
 > **identical at 867 h** — that is the model having no resolution, not evidence
 > that the swap is performance-neutral. The report says so with
 > `delta_confidence: cost_only`; install the `science` extra to raise it.
+
+![Material substitution · per-metric deltas](./images/11-substitution.png)
+
+Note the amber line under the table. That is `delta_confidence` surfacing in
+the UI: without RDKit it says so, rather than letting three identical
+salt-spray figures read as evidence.
 
 **Supply risk**: mark a material `discontinued` (`POST /api/materials/availability`),
 then `GET /api/materials/supply-risk` lists every affected formulation with
@@ -293,6 +305,8 @@ comparable rather than merely numeric.
 The whole ingest is one transaction, deduplicated by content hash, and the
 original file is attached **before** the values are written — so a failure
 part-way through cannot leave you with numbers whose source is gone.
+
+![QC report upload](./images/12-qc-report.png)
 
 Read them back with `GET /api/qc/experiments/{id}/measurements`.
 
@@ -342,6 +356,8 @@ a parent/child chain you can walk. Given any two, the diff is structured
 and a one-line summary is generated when nobody wrote a note:
 
 > 移除 1 项（聚酰胺固化剂）；新增 1 项（异佛尔酮二胺）；调整 2 项（环氧树脂、二甲苯）
+
+![Formulation revision history](./images/13-version-history.png)
 
 Endpoints: `POST /api/formulations/versions` to save,
 `GET /api/formulations/versions?name=` to find a lineage,
