@@ -80,7 +80,12 @@ file_ingest = [
 # docling and marker-pdf pull torch and are impractical on a small CPU-only
 # host (marker measures ~54 s/page without a GPU); they stay declared for
 # machines that can afford them.
-parse_pro = ["pymupdf4llm>=0.0.17", "docling>=2.0", "marker-pdf>=1.0"]
+parse_pro = [
+    "pymupdf4llm>=0.0.17",
+    "mineru-open-sdk>=0.2.5",
+    "docling>=2.0",
+    "marker-pdf>=1.0",
+]
 export = ["openpyxl>=3.1"]
 # Semantic-embedding RAG upgrade: sentence-transformers + optional chromadb.
 # CPU-only; no GPU required. Activates EmbeddingStore in rag.py automatically.

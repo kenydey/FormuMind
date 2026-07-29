@@ -83,6 +83,12 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("pdf_ocr", "扫描件 OCR 解析",
             "PDF 解析（MinerU 层）启用 OCR 管线，可读取扫描/图片型 PDF。", "kb",
             "需 magic-pdf OCR 依赖；解析显著变慢"),
+    EnvFlag("mineru_enabled", "MinerU 云端解析",
+            "本地解析不好的单页（密集表格/公式/图表）升级到 MinerU 云端。", "kb",
+            "需 MinerU Token；被升级的页面会上传至 mineru.net（第三方）"),
+    EnvFlag("pdf_layout_analysis", "PDF 版面分析",
+            "双栏页面按栏读取，避免左右文字交错。关闭可省约一半内存、快 25 倍，"
+            "但双栏论文/专利会被读串。", "kb"),
     EnvFlag("pdf_formula_enrichment", "公式转 LaTeX",
             "PDF 解析（Docling 层）把显示公式/反应方程式识别为 LaTeX，切块与渲染保真。",
             "kb", "需 docling；首次使用下载公式模型"),

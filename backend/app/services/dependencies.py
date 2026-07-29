@@ -86,6 +86,10 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("python-docx", "docx", "file_ingest", "DOCX 解析回退"),
     Dependency("trafilatura", "trafilatura", "file_ingest", "网页正文抽取（去导航/广告 → Markdown）"),
     Dependency(
+        "mineru-open-sdk", "mineru", "parse_pro",
+        "MinerU 云端解析（难页升级：密集表格/公式/图表；需 Token）",
+    ),
+    Dependency(
         "pymupdf4llm", "pymupdf4llm", "parse_pro",
         "本地版面感知 PDF → Markdown（极快、无模型权重，CPU 首选；⚠️ AGPL-3.0）",
     ),

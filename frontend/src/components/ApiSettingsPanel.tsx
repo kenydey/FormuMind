@@ -6,6 +6,7 @@ const GROUP_LABELS: Record<string, string> = {
   search: "检索增强",
   patent: "专利数据源",
   research: "学术 / 研究",
+  parse: "文档解析",
   infra: "基础设施",
 };
 
@@ -157,7 +158,7 @@ export default function ApiSettingsPanel({ reloadKey = 0 }: { reloadKey?: number
                         {busy === s.id ? "保存中…" : "保存"}
                       </button>
                     )}
-                    {(s.group === "search" || s.group === "patent") && s.set && (
+                    {(s.group === "search" || s.group === "patent" || s.group === "parse") && s.set && (
                       <button
                         type="button"
                         onClick={() => testOne(s.id)}

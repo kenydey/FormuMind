@@ -1,0 +1,402 @@
+"""The MinerU cloud adapter, driven against a faked SDK.
+
+Two properties matter more than any individual behaviour here, because both
+are ways this could quietly cost money or lose data:
+
+* it never raises — a cloud parser that can take down an upload is worse than
+  no cloud parser at all;
+* it never sends what it does not have to — disabled, unconfigured, oversized
+  and cached inputs must not reach the network.
+
+The fake mirrors `mineru-open-sdk` 0.2.5: `extract(source: str, ...)` takes a
+path (not bytes), returns an `ExtractResult` with `state`/`markdown`/
+`content_list`/`images`, and signals failure with typed exceptions.
+"""
+from __future__ import annotations
+
+import sys
+import types
+from dataclasses import dataclass, field
+
+import pytest
+
+from app.config import get_settings
+from app.services import mineru_cloud
+
+
+# ── a fake SDK ───────────────────────────────────────────────────────────────
+
+
+@dataclass
+class _FakeImage:
+    name: str
+    data: bytes
+    path: str
+
+
+@dataclass
+class _FakeResult:
+    state: str = "done"
+    markdown: str | None = "# Parsed\n\nbody"
+    content_list: list[dict] | None = None
+    images: list[_FakeImage] = field(default_factory=list)
+    error: str | None = None
+    task_id: str = "t-1"
+
+
+def _make_sdk(*, result=None, raise_name: str | None = None) -> types.ModuleType:
+    """A stand-in `mineru` module with the real exception taxonomy.
+
+    Failures are named rather than passed in as instances: each call mints a
+    fresh set of exception classes, so an instance built from one module would
+    not be caught by `except mineru.AuthError` in another — the adapter would
+    fall through to its generic handler and the test would pass for the wrong
+    reason.
+    """
+    module = types.ModuleType("mineru")
+
+    class MinerUError(Exception): ...
+    class AuthError(MinerUError): ...
+    class QuotaExceededError(MinerUError): ...
+    class FileTooLargeError(MinerUError): ...
+    class PageLimitError(MinerUError): ...
+    class TimeoutError_(MinerUError): ...
+    class TaskNotFoundError(MinerUError): ...
+
+    module.MinerUError = MinerUError
+    module.AuthError = AuthError
+    module.QuotaExceededError = QuotaExceededError
+    module.FileTooLargeError = FileTooLargeError
+    module.PageLimitError = PageLimitError
+    module.TimeoutError = TimeoutError_
+    module.TaskNotFoundError = TaskNotFoundError
+    module._Unexpected = ValueError          # not a MinerUError at all
+    module.calls = []
+    module.sources_existed = []
+
+    class _Client:
+        def __init__(self, token=None, base_url=None):
+            module.calls.append({"token": token, "base_url": base_url})
+
+        def extract(self, source, **kwargs):
+            import os
+
+            # The SDK takes a path; assert the file is actually there when it
+            # is handed over, since the caller deletes it in a finally block.
+            module.sources_existed.append(os.path.isfile(source))
+            module.last_kwargs = kwargs
+            module.last_source = source
+            if raise_name is not None:
+                raise getattr(module, raise_name)("simulated failure")
+            return result if result is not None else _FakeResult()
+
+        def get_task(self, task_id):
+            if raise_name is not None:
+                raise getattr(module, raise_name)("simulated failure")
+            return _FakeResult()
+
+    module.MinerU = _Client
+    return module
+
+
+@pytest.fixture()
+def sdk(monkeypatch: pytest.MonkeyPatch):
+    """Install the fake SDK and enable the feature with a token."""
+    module = _make_sdk()
+    monkeypatch.setitem(sys.modules, "mineru", module)
+    monkeypatch.setattr(mineru_cloud, "optional_import", lambda name: name == "mineru")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "test-token", raising=False)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def isolated_cache(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        get_settings(), "mineru_cache_dir", str(tmp_path / "cache"), raising=False
+    )
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, module) -> None:
+    monkeypatch.setitem(sys.modules, "mineru", module)
+    monkeypatch.setattr(mineru_cloud, "optional_import", lambda name: name == "mineru")
+
+
+# ── gating: nothing reaches the network unless it should ─────────────────────
+
+
+def test_disabled_by_default() -> None:
+    """Pages are uploaded to a third party, so this is opt-in."""
+    assert get_settings().mineru_enabled is False
+
+
+def test_flag_off_means_no_call(sdk, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "mineru_enabled", False, raising=False)
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+    assert sdk.calls == []
+
+
+def test_missing_token_means_no_call(sdk, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "mineru_api_key", None, raising=False)
+    ok, hint = mineru_cloud.mineru_available()
+    assert ok is False and "Token" in hint
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+    assert sdk.calls == []
+
+
+def test_missing_sdk_means_no_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mineru_cloud, "optional_import", lambda name: False)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+    ok, hint = mineru_cloud.mineru_available()
+    assert ok is False and "mineru-open-sdk" in hint
+
+
+def test_unsupported_format_is_refused_locally(sdk) -> None:
+    assert mineru_cloud.parse_bytes(b"x", ext="txt") is None
+    assert sdk.calls == []
+
+
+def test_oversized_input_is_refused_before_the_round_trip(
+    sdk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file the server will reject should not cost a round trip, and on a
+    metered API it should not risk costing quota."""
+    monkeypatch.setattr(get_settings(), "mineru_max_upload_mb", 1, raising=False)
+    assert mineru_cloud.parse_bytes(b"x" * (2 * 1024 * 1024), ext="pdf") is None
+    assert sdk.calls == []
+
+
+def test_office_and_image_formats_are_accepted() -> None:
+    """MinerU takes Office documents and images too — that is what lets a
+    legacy .doc and a rendered scan page use the same adapter."""
+    for ext in ("pdf", "doc", "docx", "pptx", "xlsx", "png", "jpg"):
+        assert ext in mineru_cloud.SUPPORTED_EXTS
+
+
+# ── the happy path ───────────────────────────────────────────────────────────
+
+
+def test_blocks_are_normalised(sdk, monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _FakeResult(
+        markdown="# Doc",
+        content_list=[
+            {"type": "text", "page_idx": 0, "text": "body"},
+            {"type": "title", "page_idx": 0, "text": "Heading", "text_level": 1},
+            {"type": "equation", "page_idx": 1, "text": r"E = mc^2", "text_format": "latex"},
+            {"type": "table", "page_idx": 1, "table_body": "<table></table>",
+             "table_caption": ["Table 1"]},
+            {"type": "image", "page_idx": 2, "img_path": "images/a.png",
+             "image_caption": ["Figure 1"]},
+        ],
+        images=[_FakeImage(name="a.png", data=b"PNGDATA", path="images/a.png")],
+    )
+    _install(monkeypatch, _make_sdk(result=result))
+
+    doc = mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf")
+    assert doc is not None
+    assert [b.type for b in doc.blocks] == ["text", "title", "equation", "table", "image"]
+    assert doc.blocks[1].text_level == 1
+    assert doc.blocks[2].text == "E = mc^2"          # LaTeX arrives as text
+    assert doc.blocks[3].html == "<table></table>"   # table arrives as HTML
+    assert doc.blocks[3].caption == "Table 1"        # list captions are joined
+    assert doc.blocks[4].image == b"PNGDATA"         # image bytes are attached
+
+
+def test_the_temp_file_exists_when_the_sdk_reads_it(sdk) -> None:
+    """The SDK takes a path, not bytes, and the caller deletes the file in a
+    finally block — so the ordering has to be right."""
+    mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf")
+    assert sdk.sources_existed == [True]
+
+
+def test_the_temp_file_is_deleted_afterwards(sdk) -> None:
+    """Uploaded content is proprietary formulation data; it must not be left
+    lying on disk."""
+    import os
+
+    mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf")
+    assert not os.path.exists(sdk.last_source)
+
+
+def test_the_temp_file_is_deleted_even_when_the_call_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    module_with_error = _make_sdk(raise_name="MinerUError")
+    _install(monkeypatch, module_with_error)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+    assert not os.path.exists(module_with_error.last_source)
+
+
+def test_ocr_flag_is_forwarded(sdk) -> None:
+    mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf", ocr=True)
+    assert sdk.last_kwargs["ocr"] is True
+
+
+def test_unfinished_task_is_not_treated_as_a_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _make_sdk(result=_FakeResult(state="failed", error="nope")))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+
+
+# ── failure taxonomy: every one degrades, none raises ────────────────────────
+
+
+@pytest.mark.parametrize(
+    "error_name",
+    ["AuthError", "QuotaExceededError", "FileTooLargeError",
+     "PageLimitError", "TimeoutError", "MinerUError"],
+)
+def test_every_sdk_failure_degrades_to_none(
+    error_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install(monkeypatch, _make_sdk(raise_name=error_name))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+
+
+def test_an_unexpected_exception_also_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, _make_sdk(raise_name="_Unexpected"))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+
+
+# ── cache: quota is per day, so this is money ────────────────────────────────
+
+
+def test_second_call_is_served_from_cache(sdk) -> None:
+    first = mineru_cloud.parse_bytes(b"%PDF-1.4 unique", ext="pdf")
+    second = mineru_cloud.parse_bytes(b"%PDF-1.4 unique", ext="pdf")
+    assert first is not None and second is not None
+    assert second.cached is True
+    assert len(sdk.calls) == 1, "the same bytes must not be parsed twice"
+
+
+def test_cached_images_survive_the_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _FakeResult(
+        content_list=[{"type": "image", "page_idx": 0, "img_path": "images/a.png"}],
+        images=[_FakeImage(name="a.png", data=b"PNGDATA", path="images/a.png")],
+    )
+    module = _make_sdk(result=result)
+    _install(monkeypatch, module)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+
+    mineru_cloud.parse_bytes(b"%PDF img", ext="pdf")
+    cached = mineru_cloud.parse_bytes(b"%PDF img", ext="pdf")
+    assert cached.cached is True
+    assert cached.blocks[0].image == b"PNGDATA"
+    assert len(module.calls) == 1
+
+
+def test_failures_are_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caching a failure turns one network blip into a permanently broken
+    document — the same rule chemtools._cached follows."""
+    _install(monkeypatch, _make_sdk(raise_name="MinerUError"))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+    assert mineru_cloud.parse_bytes(b"%PDF flaky", ext="pdf") is None
+
+    working = _make_sdk()
+    _install(monkeypatch, working)
+    assert mineru_cloud.parse_bytes(b"%PDF flaky", ext="pdf") is not None
+    assert len(working.calls) == 1, "the retry must actually reach the SDK"
+
+
+def test_ocr_and_non_ocr_are_cached_separately(sdk) -> None:
+    """The same page parsed with OCR on is a different result; serving one for
+    the other would be silently wrong."""
+    mineru_cloud.parse_bytes(b"%PDF same", ext="pdf", ocr=False)
+    mineru_cloud.parse_bytes(b"%PDF same", ext="pdf", ocr=True)
+    assert len(sdk.calls) == 2
+
+
+def test_unwritable_cache_does_not_break_parsing(
+    sdk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "mineru_cache_dir", "/proc/nope", raising=False)
+    assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is not None
+
+
+# ── token probe (the Settings test button) ───────────────────────────────────
+
+
+def test_probe_reports_a_valid_token(sdk) -> None:
+    ok, message = mineru_cloud.probe_token()
+    assert ok is True and message
+
+
+def test_probe_reports_a_rejected_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, _make_sdk(raise_name="AuthError"))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_api_key", "bad", raising=False)
+    ok, message = mineru_cloud.probe_token()
+    assert ok is False
+    assert "无效" in message or "过期" in message
+
+
+def test_task_not_found_means_the_token_worked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MinerU has no validation endpoint, so the probe asks for a task that
+    cannot exist. 'No such task' is the success signal."""
+    _install(monkeypatch, _make_sdk(raise_name="TaskNotFoundError"))
+    monkeypatch.setattr(get_settings(), "mineru_api_key", "good", raising=False)
+    ok, _ = mineru_cloud.probe_token()
+    assert ok is True
+
+
+def test_probe_without_a_token_is_not_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "mineru_api_key", None, raising=False)
+    ok, message = mineru_cloud.probe_token()
+    assert ok is False and "Token" in message
+
+
+# ── registry wiring ──────────────────────────────────────────────────────────
+
+
+def test_the_key_appears_in_the_settings_ui() -> None:
+    from app.services.secrets_store import list_secret_status
+
+    entry = next(s for s in list_secret_status() if s["id"] == "mineru_api_key")
+    assert entry["env_key"] == "FORMUMIND_MINERU_API_KEY"
+    assert entry["group"] == "parse"
+
+
+def test_probe_secret_routes_to_the_mineru_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import secrets_store
+
+    monkeypatch.setattr(mineru_cloud, "probe_token", lambda: (True, "ok"))
+    assert secrets_store.probe_secret("mineru_api_key") == {"ok": True, "message": "ok"}
+
+
+def test_the_feature_flag_is_registered() -> None:
+    from app.services.env_flags import FLAG_REGISTRY
+
+    flag = next(f for f in FLAG_REGISTRY if f.attr == "mineru_enabled")
+    assert flag.env_key == "FORMUMIND_MINERU_ENABLED"
+    assert "mineru.net" in flag.hint      # the third-party upload is disclosed
+
+
+def test_the_sdk_is_installable_from_the_dependencies_ui() -> None:
+    from app.services.dependencies import CATALOG
+
+    entry = next(d for d in CATALOG if d.pip_name == "mineru-open-sdk")
+    assert entry.import_name == "mineru"

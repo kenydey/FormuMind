@@ -35,6 +35,7 @@ SECRET_REGISTRY: list[tuple[str, str, str, str]] = [
     ("epo_consumer_secret", "FORMUMIND_EPO_CONSUMER_SECRET", "EPO OPS Consumer Secret", "patent"),
     ("uspto_api_key", "FORMUMIND_USPTO_API_KEY", "USPTO Open Data", "patent"),
     ("openalex_mailto", "FORMUMIND_OPENALEX_MAILTO", "OpenAlex mailto", "research"),
+    ("mineru_api_key", "FORMUMIND_MINERU_API_KEY", "MinerU 文档解析", "parse"),
     ("datalab_api_url", "FORMUMIND_DATALAB_API_URL", "Datalab API URL", "infra"),
 ]
 
@@ -251,6 +252,14 @@ def probe_secret(secret_id: str) -> dict:
     import httpx
 
     s = get_settings()
+    if secret_id == "mineru_api_key":
+        # MinerU publishes no token-validation or quota endpoint, so the probe
+        # asks for a task that cannot exist and reads the answer.
+        from .mineru_cloud import probe_token
+
+        ok, message = probe_token()
+        return {"ok": ok, "message": message}
+
     if secret_id == "serpapi_api_key":
         key = effective_setting(s, "serpapi_api_key")
         if not key:

@@ -220,6 +220,24 @@ class Settings(BaseSettings):
     # 首次使用会额外下载公式识别模型。
     pdf_formula_enrichment: bool = True
 
+    # ── MinerU 云端解析 ──────────────────────────────────────────────────
+    # 把本地解析不好的**单页**（密集表格、公式、图表）升级到 MinerU 云端。
+    # ⚠️ 被升级的页面会上传至 mineru.net（第三方），故默认关闭，必须显式开启。
+    mineru_enabled: bool = False
+    mineru_api_key: str | None = None
+    mineru_base_url: str = "https://mineru.net/api/v4"
+    # SDK 侧等待任务完成的上限。解析在线程池里跑，不会阻塞事件循环。
+    mineru_timeout_s: float = 300.0
+    # 单文档最多升级多少页——防止一份 200 页扫描件一次吃掉大半日配额。
+    # 超出部分保留本地解析结果并记警告。
+    mineru_max_pages_per_doc: int = 20
+    # 本地预检体积上限（服务端为 200MB）。超限直接不发，省一次往返与配额。
+    mineru_max_upload_mb: int = 200
+    # 内容哈希缓存目录：同一份文件重复解析既费钱又费时。
+    mineru_cache_dir: str = "./data/mineru_cache"
+    # 一页图片面积占比超过此值即视为"有值得看的图"，触发升级。
+    hybrid_image_area_threshold: float = 0.12
+
     # 检索结果全文获取（KB P0）：把摘要级命中升级为全文分块并持久化原文。
     # 专利 PDF（USPTO/EPO/Google）+ OA 文献 PDF（OpenAlex/arXiv）+ 网页正文
     # （trafilatura 优先）。默认关闭以保证测试离线；生产建议开启。
