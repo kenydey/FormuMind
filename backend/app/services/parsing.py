@@ -301,9 +301,9 @@ def _parse_hybrid(content: bytes) -> str | None:
     pymupdf4llm is absent this returns None and the cascade continues, so the
     default install behaves exactly as before.
     """
-    from . import pdf_local
+    from . import hybrid_parse
 
-    return pdf_local.to_markdown(content)
+    return hybrid_parse.parse(content)
 
 
 # Every entry wraps its parser in a lambda so the name resolves at call time.

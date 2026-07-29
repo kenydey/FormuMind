@@ -1,0 +1,382 @@
+"""Triage and fusion: what gets escalated, what gets looked at, what survives.
+
+Three claims carry this design, and each is asserted by counting calls rather
+than by inspecting output — a routing decision is only observable as a call
+that did or did not happen:
+
+* pages the local parser handled well are **never** sent to a metered API;
+* `equation` and `table` blocks are **never** sent to a vision model, because
+  they already arrive as LaTeX and HTML and a guess would be a downgrade;
+* no block is ever dropped, however badly its processing went.
+"""
+from __future__ import annotations
+
+import pytest
+
+from app.config import get_settings
+from app.services import hybrid_parse, mineru_cloud, pdf_local
+
+
+def _page(
+    page_no: int,
+    *,
+    markdown: str = "body text",
+    tables: int = 0,
+    md_table: bool = False,
+    image_ratio: float = 0.0,
+    chars: int = 500,
+) -> pdf_local.LocalPage:
+    return pdf_local.LocalPage(
+        page_no=page_no,
+        markdown=markdown,
+        char_count=chars,
+        n_tables=tables,
+        n_images=1 if image_ratio else 0,
+        image_area_ratio=image_ratio,
+        has_markdown_table=md_table,
+    )
+
+
+def _block(kind: str, **kw) -> mineru_cloud.MinerUBlock:
+    return mineru_cloud.MinerUBlock(type=kind, **kw)
+
+
+@pytest.fixture()
+def cloud_on(monkeypatch: pytest.MonkeyPatch):
+    """MinerU reachable, and every escalation recorded."""
+    sent: list[int] = []
+
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(
+        pdf_local, "page_as_pdf",
+        lambda content, page_no: sent.append(page_no) or b"%PDF one page",
+    )
+    monkeypatch.setattr(
+        mineru_cloud, "parse_bytes",
+        lambda content, **kw: mineru_cloud.MinerUDocument(
+            blocks=[_block("text", text="CLOUD TEXT")], markdown="cloud"
+        ),
+    )
+    return sent
+
+
+@pytest.fixture()
+def no_vision(monkeypatch: pytest.MonkeyPatch):
+    from app.services import vision_extract
+
+    monkeypatch.setattr(vision_extract, "vision_available", lambda: (False, "未配置"))
+
+
+# ── triage: what is worth paying for ─────────────────────────────────────────
+
+
+def test_a_plain_text_page_is_not_escalated() -> None:
+    assert hybrid_parse._needs_escalation(_page(1)) is False
+
+
+def test_a_table_the_local_parser_rendered_is_not_escalated() -> None:
+    """The check that keeps the bill proportional to the hard pages. A ruled
+    table comes back as a perfectly good pipe table locally; paying a cloud
+    parser to redo it is pure waste."""
+    assert hybrid_parse._needs_escalation(
+        _page(1, tables=1, md_table=True)
+    ) is False
+
+
+def test_a_table_the_local_parser_missed_is_escalated() -> None:
+    assert hybrid_parse._needs_escalation(
+        _page(1, tables=1, md_table=False)
+    ) is True
+
+
+def test_a_page_with_a_large_figure_is_escalated() -> None:
+    """Chemical structures and reaction schemes are figures, not tables —
+    routing on tables alone would miss every one of them."""
+    assert hybrid_parse._needs_escalation(_page(1, image_ratio=0.30)) is True
+
+
+def test_a_tiny_logo_is_not_escalated() -> None:
+    assert hybrid_parse._needs_escalation(_page(1, image_ratio=0.01)) is False
+
+
+def test_only_the_qualifying_pages_reach_the_cloud(
+    cloud_on, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The economic claim, measured: a report with one hard page costs one
+    page of quota, not the whole document."""
+    pages = [
+        _page(1),
+        _page(2, tables=1, md_table=True),      # locally fine
+        _page(3, image_ratio=0.4),              # a figure
+        _page(4),
+    ]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+
+    hybrid_parse.parse(b"%PDF")
+    assert cloud_on == [3], "only the figure page should have been sent"
+
+
+def test_nothing_is_sent_when_the_document_is_all_prose(
+    cloud_on, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [_page(1), _page(2)])
+    hybrid_parse.parse(b"%PDF")
+    assert cloud_on == []
+
+
+def test_escalation_is_capped_per_document(
+    cloud_on, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 200-page scan must not be able to swallow the day's quota by
+    accident; the pages beyond the cap keep their local text."""
+    monkeypatch.setattr(get_settings(), "mineru_max_pages_per_doc", 2, raising=False)
+    pages = [_page(n, image_ratio=0.5) for n in range(1, 11)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+
+    output = hybrid_parse.parse(b"%PDF")
+    assert len(cloud_on) == 2
+    assert output.count("<!-- page:") == 10        # every page still present
+    assert "body text" in output                   # the uncapped ones kept theirs
+
+
+# ── degradation: the upload must never depend on the cloud ───────────────────
+
+
+def test_cloud_unavailable_gives_exactly_the_local_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = [_page(1, image_ratio=0.5), _page(2)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "未启用"))
+
+    assert hybrid_parse.parse(b"%PDF") == pdf_local.assemble(
+        [(p.page_no, p.markdown) for p in pages]
+    )
+
+
+def test_a_failed_escalation_keeps_the_local_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [_page(1, markdown="LOCAL", image_ratio=0.5)])
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(pdf_local, "page_as_pdf", lambda c, n: b"%PDF")
+    monkeypatch.setattr(mineru_cloud, "parse_bytes", lambda c, **kw: None)
+
+    assert "LOCAL" in hybrid_parse.parse(b"%PDF")
+
+
+def test_no_local_extraction_means_the_cascade_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: None)
+    assert hybrid_parse.parse(b"%PDF") is None
+
+
+# ── block routing: only what benefits from being looked at ───────────────────
+
+
+def _render(blocks, monkeypatch, *, vision_result=None) -> tuple[str, list]:
+    """Render blocks, recording every vision call."""
+    from app.services import vision_extract
+
+    seen: list[bytes] = []
+
+    def fake_extract(content, filename):
+        seen.append(content)
+        return vision_result, None if vision_result else "no output"
+
+    monkeypatch.setattr(vision_extract, "vision_available", lambda: (True, ""))
+    monkeypatch.setattr(vision_extract, "extract_image", fake_extract)
+    return hybrid_parse._render_blocks(blocks, page_label="p.1"), seen
+
+
+def test_latex_equations_never_reach_the_vision_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MinerU returns equations already in LaTeX. Asking a vision model to
+    look at the picture instead replaces an exact answer with a guess."""
+    out, seen = _render([_block("equation", text=r"E = mc^2")], monkeypatch)
+    assert seen == []
+    assert "$$" in out and "E = mc^2" in out
+
+
+def test_structured_tables_never_reach_the_vision_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out, seen = _render(
+        [_block("table", html="<table><tr><td>12.5</td></tr></table>",
+                caption="Table 1", image=b"PNG")],
+        monkeypatch,
+    )
+    assert seen == []
+    assert "<table>" in out and "12.5" in out
+    assert "Table 1" in out
+
+
+def test_a_table_mineru_could_not_render_does_reach_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one table worth a second look: no HTML came back."""
+    _, seen = _render([_block("table", html="", image=b"PNGDATA")], monkeypatch)
+    assert seen == [b"PNGDATA"]
+
+
+@pytest.mark.parametrize("kind", ["image", "chart"])
+def test_figures_do_reach_the_vision_model(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, seen = _render([_block(kind, image=b"FIGURE")], monkeypatch)
+    assert seen == [b"FIGURE"]
+
+
+def test_page_furniture_is_discarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Headers and footers repeat on every page; keeping them dilutes every
+    chunk they land in."""
+    out, _ = _render(
+        [_block("header", text="CONFIDENTIAL"),
+         _block("text", text="real content"),
+         _block("page_number", text="7")],
+        monkeypatch,
+    )
+    assert "real content" in out
+    assert "CONFIDENTIAL" not in out and "7" not in out
+
+
+def test_titles_become_headings_at_their_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Headings are what the chunker turns into heading_path."""
+    out, _ = _render(
+        [_block("title", text="Composition", text_level=2)], monkeypatch
+    )
+    assert "## Composition" in out
+
+
+def test_an_unknown_block_type_keeps_its_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MinerU may add block types. Dropping one silently is the failure mode
+    with no symptom."""
+    out, _ = _render([_block("some_future_type", text="still useful")], monkeypatch)
+    assert "still useful" in out
+
+
+# ── figures are never lost, however badly it goes ────────────────────────────
+
+
+def test_a_figure_survives_when_vision_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, no_vision
+) -> None:
+    out = hybrid_parse._render_blocks(
+        [_block("image", image=b"PNG", caption="Figure 1. Reaction scheme")],
+        page_label="p.3",
+    )
+    assert "Figure 1. Reaction scheme" in out
+    assert "p.3" in out
+
+
+def test_a_figure_survives_when_vision_returns_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out, seen = _render([_block("image", image=b"PNG", caption="Fig 2")], monkeypatch)
+    assert seen == [b"PNG"]
+    assert "Fig 2" in out
+
+
+def test_a_figure_survives_when_its_bytes_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out, seen = _render([_block("image", image=None, caption="Fig 3")], monkeypatch)
+    assert seen == []
+    assert "Fig 3" in out
+
+
+def test_vision_output_including_smiles_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The chemical-structure path end to end: MinerU gives the picture, the
+    vision model gives the SMILES, RDKit's verdict rides along."""
+    from app.services.vision_extract import VisionExtraction, VisionMolecule
+
+    extraction = VisionExtraction(
+        kind="structure",
+        markdown="环氧树脂结构式",
+        molecules=[VisionMolecule(smiles="CC(C)(c1ccccc1)", name="DGEBA",
+                                  confidence=0.9, verified=True)],
+    )
+    out, seen = _render(
+        [_block("image", image=b"STRUCT", caption="Figure 1")],
+        monkeypatch, vision_result=extraction,
+    )
+    assert seen == [b"STRUCT"]
+    assert "CC(C)(c1ccccc1)" in out
+    assert "DGEBA" in out
+    assert "✓" in out              # the RDKit verification column
+
+
+# ── scanned documents ────────────────────────────────────────────────────────
+
+
+def test_a_scan_goes_through_whole_with_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per-page triage is pointless when every page would qualify."""
+    calls: list[dict] = []
+    pages = [_page(n, markdown="", chars=3) for n in (1, 2)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+
+    def fake_parse(content, **kw):
+        calls.append(kw)
+        return mineru_cloud.MinerUDocument(
+            blocks=[_block("text", page_idx=0, text="OCR page one"),
+                    _block("text", page_idx=1, text="OCR page two")]
+        )
+
+    monkeypatch.setattr(mineru_cloud, "parse_bytes", fake_parse)
+    output = hybrid_parse.parse(b"%PDF scan")
+
+    assert len(calls) == 1, "one call for the document, not one per page"
+    assert calls[0]["ocr"] is True
+    assert "OCR page one" in output and "OCR page two" in output
+    assert output.count("<!-- page:") == 2
+
+
+def test_an_oversized_scan_is_refused_rather_than_billed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list = []
+    monkeypatch.setattr(get_settings(), "mineru_max_pages_per_doc", 3, raising=False)
+    monkeypatch.setattr(
+        pdf_local, "extract_pages",
+        lambda c: [_page(n, markdown="", chars=2) for n in range(1, 21)],
+    )
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(
+        mineru_cloud, "parse_bytes", lambda c, **kw: sent.append(kw) or None
+    )
+
+    hybrid_parse.parse(b"%PDF big scan")
+    assert sent == [], "a 20-page scan past a 3-page cap must not be sent"
+
+
+# ── assembly: downstream still must not change ───────────────────────────────
+
+
+def test_escalated_pages_keep_their_page_numbers(
+    cloud_on, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pages = [_page(1), _page(2, image_ratio=0.5), _page(3)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+
+    from app.services.chunking import chunk_markdown
+
+    chunks = chunk_markdown(hybrid_parse.parse(b"%PDF"))
+    assert [c.page_no for c in chunks] == [1, 2, 3]
+    assert any("CLOUD TEXT" in c.text for c in chunks)
+
+
+def test_the_hybrid_tier_routes_through_the_fusion_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tier must call the fusion layer, not the local extractor directly —
+    otherwise escalation is wired up but never reached."""
+    from app.services import parsing
+
+    monkeypatch.setattr(hybrid_parse, "parse", lambda content: "FUSED OUTPUT")
+    result = parsing.parse_document(b"%PDF-1.4", "pdf")
+    assert result.parser == "hybrid"
+    assert result.markdown == "FUSED OUTPUT"
+    assert [name for name, _ in parsing._PDF_TIERS][0] == "hybrid"
