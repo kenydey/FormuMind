@@ -65,6 +65,19 @@ class VisionExtraction(BaseModel):
     notes: str = ""
 
 
+# Providers verified to reject image input outright, as opposed to merely
+# needing a particular model. DeepSeek answers an `image_url` content part
+# with `unknown variant 'image_url', expected 'text'` — being
+# OpenAI-compatible for chat says nothing about accepting images, and without
+# this the UI reported vision as available and every figure failed on a 400
+# that named a JSON deserialisation error rather than the real cause.
+#
+# Deliberately a list of what has been *checked*, not a capability matrix:
+# qwen and moonshot depend on which model is selected, so they are left to
+# fail at the call with the provider's own message rather than be guessed at.
+_NO_VISION_PROVIDERS = frozenset({"deepseek"})
+
+
 def vision_available() -> tuple[bool, str]:
     """(usable, hint) — key present, provider supported, and its SDK installed.
 
@@ -86,6 +99,11 @@ def vision_available() -> tuple[bool, str]:
     provider = str(effective_setting(settings, "llm_provider"))
     if provider == "gemini":
         return False, "Gemini 原生接口暂不支持图片解析——请切换 OpenAI 兼容供应商或 Anthropic"
+    if provider in _NO_VISION_PROVIDERS:
+        return False, (
+            f"{provider} 不支持图片输入，无法解析化学结构图/图表。"
+            "请在「设置 → 大模型」切换到 Claude 或 OpenAI。"
+        )
 
     # Anthropic has its own client; every other supported provider is reached
     # through the OpenAI-compatible one.

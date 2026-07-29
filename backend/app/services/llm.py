@@ -624,6 +624,33 @@ def _validate_structured(raw: str | None, model_type: type[TModel]) -> TModel:
         raise LLMValidationError(f"JSON validation failed: {exc}") from exc
 
 
+class LLMStructuredUnsupported(Exception):
+    """The provider does not implement `response_format` json_schema.
+
+    Not a transient failure and not a config error: the request is fine, the
+    endpoint just cannot do native structured output. DeepSeek answers
+    "This response_format type is unavailable now" with a 400, which the
+    generic handler classified as transient — so every structured call was
+    retried three times before failing, spending three requests and ~6s on an
+    outcome that could never change.
+    """
+
+
+# Substrings that mean "structured output is not implemented here", as opposed
+# to "your request was malformed".
+_STRUCTURED_UNSUPPORTED_MARKERS = (
+    "response_format",
+    "json_schema",
+)
+
+
+def _is_structured_unsupported(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if "unavailable" not in message and "not support" not in message and "unknown" not in message:
+        return False
+    return any(marker in message for marker in _STRUCTURED_UNSUPPORTED_MARKERS)
+
+
 def _openai_structured_request(
     system: str,
     user: str,
@@ -671,6 +698,62 @@ def _openai_structured_request(
         reraise_if_fatal(exc)
         if _is_auth_error(exc):
             raise LLMConfigError(str(exc)) from exc
+        if _is_structured_unsupported(exc):
+            raise LLMStructuredUnsupported(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
+def _openai_prompt_structured_request(
+    system: str,
+    user: str,
+    model_type: type[TModel],
+    *,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None,
+    schema: dict,
+) -> TModel:
+    """Structured output by asking for JSON in the prompt, then validating.
+
+    Exactly what the Anthropic and Gemini paths already do. Reused here for
+    OpenAI-compatible providers that accept the chat API but not
+    `response_format` — DeepSeek among them — so a provider without native
+    structured output degrades to a working extraction rather than to nothing.
+    """
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
+    try:
+        kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
+        create_kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{system}\n\nRespond with ONLY valid JSON matching this "
+                        f"schema (no markdown, no commentary):\n{schema}"
+                    ),
+                },
+                {"role": "user", "content": user},
+            ],
+        }
+        if _is_deepseek_model(model):
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        resp = client.chat.completions.create(**create_kwargs)
+        return _validate_structured(_openai_message_text(resp.choices[0].message), model_type)
+    except (LLMValidationError, LLMConfigError):
+        raise
+    except Exception as exc:
+        reraise_if_fatal(exc)
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
         raise LLMTransientError(str(exc)) from exc
 
 
@@ -687,16 +770,33 @@ def _invoke_structured_once(
     schema: dict,
 ) -> TModel:
     if provider not in ("anthropic", "gemini"):
-        return _openai_structured_request(
-            system,
-            user,
-            model_type,
-            api_key=api_key,
-            model=model,
-            max_tokens=max_tokens,
-            base_url=base_url,
-            schema=schema,
-        )
+        try:
+            return _openai_structured_request(
+                system,
+                user,
+                model_type,
+                api_key=api_key,
+                model=model,
+                max_tokens=max_tokens,
+                base_url=base_url,
+                schema=schema,
+            )
+        except LLMStructuredUnsupported as exc:
+            # Fall back rather than retry: the endpoint will keep saying no.
+            log.info(
+                "%s has no native structured output (%s) — using prompt-based JSON",
+                provider, exc,
+            )
+            return _openai_prompt_structured_request(
+                system,
+                user,
+                model_type,
+                api_key=api_key,
+                model=model,
+                max_tokens=max_tokens,
+                base_url=base_url,
+                schema=schema,
+            )
 
     combined = (
         f"{system}\n\n"

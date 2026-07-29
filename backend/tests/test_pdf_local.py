@@ -319,3 +319,42 @@ def test_anthropic_needs_its_own_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     ok, hint = vision_extract.vision_available()
     assert ok is False
     assert "anthropic" in hint
+
+
+def test_a_provider_without_image_support_is_reported_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DeepSeek is OpenAI-compatible for chat and rejects images outright:
+    an image_url content part comes back as "unknown variant 'image_url',
+    expected 'text'". Being compatible for chat says nothing about images, and
+    without this the UI called vision available and every figure failed on a
+    400 naming a JSON deserialisation error rather than the real cause.
+    """
+    from app.config import get_settings
+    from app.services import vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "deepseek", raising=False)
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-test", raising=False)
+
+    ok, hint = vision_extract.vision_available()
+    assert ok is False
+    assert "deepseek" in hint
+    assert "Claude" in hint or "OpenAI" in hint     # says what to switch to
+
+
+def test_a_vision_capable_provider_is_still_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The block list is what has been checked, not a guess at every
+    provider — vision-capable ones must keep working."""
+    from app.config import get_settings
+    from app.services import vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "openai", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test", raising=False)
+
+    assert vision_extract.vision_available() == (True, "")

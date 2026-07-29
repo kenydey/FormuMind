@@ -222,8 +222,12 @@ def test_vision_extracts_and_verifies_molecules(monkeypatch):
     from app.services import runtime_secrets, vision_extract
 
     rs = runtime_secrets.get_runtime_secrets()
-    rs.set("llm_provider", "deepseek")
-    rs.set("deepseek_api_key", "sk-test")
+    # Any OpenAI-compatible provider would do here, but it has to be one that
+    # actually accepts images. DeepSeek — the original stand-in — rejects an
+    # image_url content part outright ("unknown variant 'image_url'"), so
+    # vision_available now declines it and this scenario cannot occur.
+    rs.set("llm_provider", "openai")
+    rs.set("openai_api_key", "sk-test")
     _fake_openai(
         monkeypatch,
         {
