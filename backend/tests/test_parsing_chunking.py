@@ -33,14 +33,16 @@ def test_parse_empty_returns_none_parser():
 
 def test_pdf_tier_order_auto_and_pinned():
     names = [n for n, _ in parsing._pdf_tier_order("auto")]
-    assert names == ["docling", "marker", "mineru", "markitdown", "pypdf"]
+    assert names == ["hybrid", "docling", "marker", "mineru", "markitdown", "pypdf"]
     names = [n for n, _ in parsing._pdf_tier_order("markitdown")]
     assert names == ["markitdown", "pypdf"]  # pinned + lighter fallbacks only
     names = [n for n, _ in parsing._pdf_tier_order("nonsense")]
-    assert names[0] == "docling"  # unknown → auto
+    assert names[0] == "hybrid"  # unknown → auto
 
 
 def test_pdf_cascade_falls_through_to_working_tier(monkeypatch):
+    monkeypatch.setattr(parsing, "_parse_hybrid", lambda c: None)
+    monkeypatch.setattr(parsing, "_parse_docling", lambda c: None)
     monkeypatch.setattr(parsing, "_parse_marker", lambda c: None)
     monkeypatch.setattr(parsing, "_parse_mineru", lambda c: None)
     monkeypatch.setattr(parsing, "_parse_markitdown", lambda c, e: None)
@@ -54,6 +56,7 @@ def test_pdf_parser_setting_pins_tier(monkeypatch):
     monkeypatch.setenv("FORMUMIND_PDF_PARSER", "pypdf")
     get_settings.cache_clear()
     calls = []
+    monkeypatch.setattr(parsing, "_parse_hybrid", lambda c: calls.append("hybrid"))
     monkeypatch.setattr(parsing, "_parse_marker", lambda c: calls.append("marker"))
     monkeypatch.setattr(parsing, "_parse_pypdf", lambda c: calls.append("pypdf") or "text out")
     result = parsing.parse_document(b"%PDF fake", "pdf")
@@ -63,7 +66,9 @@ def test_pdf_parser_setting_pins_tier(monkeypatch):
 
 def test_parser_availability_reports_installed_tiers():
     avail = parsing.parser_availability()
-    assert set(avail) == {"docling", "marker", "mineru", "markitdown", "pypdf", "trafilatura"}
+    assert set(avail) == {
+        "hybrid", "docling", "marker", "mineru", "markitdown", "pypdf", "trafilatura",
+    }
     assert isinstance(avail["pypdf"], bool)
 
 

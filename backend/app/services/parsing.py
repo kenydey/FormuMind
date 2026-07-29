@@ -4,7 +4,8 @@ Single entry point (``parse_document``) used by file upload, URL ingestion and
 the full-text fetcher, replacing the per-caller parser cascades.  Parsers are
 pluggable and probed at call time:
 
-* **PDF**: Docling → marker → MinerU → MarkItDown → pypdf, order controlled by
+* **PDF**: hybrid (pymupdf4llm, layout-aware, CPU-cheap) → Docling → marker →
+  MinerU → MarkItDown → pypdf, order controlled by
   ``FORMUMIND_PDF_PARSER`` (``auto`` tries best-first; naming a parser pins it
   with fallback to the tiers below it).  Docling / marker / MinerU produce
   real Markdown (layout-aware, tables preserved; Docling and MinerU can emit
@@ -291,10 +292,25 @@ def _parse_plain(content: bytes) -> str | None:
 
 # ── registry ─────────────────────────────────────────────────────────────────
 
+def _parse_hybrid(content: bytes) -> str | None:
+    """Local layout-aware extraction, with optional per-page cloud escalation.
+
+    First tier because it is both the fastest and, on a CPU-only host, the
+    best: docling and marker need weights this deployment cannot afford
+    (marker measures ~54 s/page on CPU), and local MinerU needs a GPU. When
+    pymupdf4llm is absent this returns None and the cascade continues, so the
+    default install behaves exactly as before.
+    """
+    from . import pdf_local
+
+    return pdf_local.to_markdown(content)
+
+
 # Every entry wraps its parser in a lambda so the name resolves at call time.
 # markitdown used to be held by direct reference, which made it the one tier a
 # test could not monkeypatch — the patch was accepted and silently ignored.
 _PDF_TIERS: tuple[tuple[str, object], ...] = (
+    ("hybrid", lambda c, e: _parse_hybrid(c)),
     ("docling", lambda c, e: _parse_docling(c)),
     ("marker", lambda c, e: _parse_marker(c)),
     ("mineru", lambda c, e: _parse_mineru(c)),
@@ -378,6 +394,7 @@ def html_to_markdown(html: str) -> str:
 def parser_availability() -> dict[str, bool]:
     """Which parser tiers are importable (for the dependencies UI)."""
     return {
+        "hybrid": optional_import("pymupdf4llm"),
         "docling": optional_import("docling"),
         "marker": optional_import("marker"),
         "mineru": optional_import("magic_pdf"),
@@ -416,6 +433,7 @@ def format_availability() -> dict[str, bool]:
     return {
         "pdf": any(
             (
+                optional_import("pymupdf4llm"),
                 optional_import("docling"),
                 optional_import("marker"),
                 optional_import("magic_pdf"),

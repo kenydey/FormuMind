@@ -204,10 +204,16 @@ class Settings(BaseSettings):
     # Recommend path: federated refresh → ColBERT index before CRAG recommend.
     auto_kb_refresh_before_recommend: bool = False
 
-    # PDF 解析器层级（KB P1）："auto" = marker → MinerU → MarkItDown → pypdf
-    # 逐级回退；指定名称则固定首选（仍向下回退）。marker/MinerU 为重型可选
-    # 依赖（版面感知、表格保真的真 Markdown 输出）。
+    # PDF 解析器层级（KB P1）："auto" = hybrid → Docling → marker → MinerU →
+    # MarkItDown → pypdf 逐级回退；指定名称则固定首选（仍向下回退）。
     pdf_parser: str = "auto"
+    # 版面分析（pymupdf4llm 的 hybrid 层）。实测代价与收益：
+    #   开：~350MB 峰值、~176ms/页；关：~150MB、~12ms/页
+    # 关掉快 25 倍且省一半内存，单栏页面输出完全一致——但**双栏页面会左右
+    # 交错**（"Left column line one about Right column line one about"），两句
+    # 无关的话被合成一个 chunk、一个向量。论文与专利多为双栏，所以默认开启，
+    # 正确性优先；内存实在紧张的机器可关掉，代价如上。
+    pdf_layout_analysis: bool = True
     # 扫描件 OCR（MinerU 管线；需 OCR 依赖，慢但能读图片型 PDF）。
     pdf_ocr: bool = False
     # 公式增强（Docling）：显示公式转 LaTeX $$…$$，化学反应方程式保真。

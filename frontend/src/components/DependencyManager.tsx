@@ -130,6 +130,9 @@ const EXTRA_LABELS: Record<string, string> = {
   baybe: "贝叶斯主动学习 · BayBE",
   color: "色差 · Color",
   file_ingest: "文件解析 · Ingest",
+  // Without an entry here the group is filtered out of the UI entirely by
+  // EXTRA_ORDER, so every parse_pro package was installable only from a shell.
+  parse_pro: "版面感知解析 · Layout",
   export: "导出 · Export",
   notebooklm: "NotebookLM",
 };

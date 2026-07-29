@@ -70,9 +70,17 @@ file_ingest = [
     "python-docx>=1.1",
     "trafilatura>=1.8",
 ]
-# Layout-aware PDF → Markdown parsers (heavy; pulls torch). FORMUMIND_PDF_PARSER
-# picks the tier: docling → marker → MinerU → MarkItDown → pypdf.
-parse_pro = ["docling>=2.0", "marker-pdf>=1.0"]
+# Layout-aware PDF → Markdown parsers. FORMUMIND_PDF_PARSER picks the tier:
+# hybrid → docling → marker → MinerU → MarkItDown → pypdf.
+#
+# ⚠️ LICENSING: pymupdf4llm and its PyMuPDF backend are AGPL-3.0, or a paid
+# Artifex commercial licence. Every call to them is confined to
+# app/services/pdf_local.py so this can be swapped without an audit.
+#
+# docling and marker-pdf pull torch and are impractical on a small CPU-only
+# host (marker measures ~54 s/page without a GPU); they stay declared for
+# machines that can afford them.
+parse_pro = ["pymupdf4llm>=0.0.17", "docling>=2.0", "marker-pdf>=1.0"]
 export = ["openpyxl>=3.1"]
 # Semantic-embedding RAG upgrade: sentence-transformers + optional chromadb.
 # CPU-only; no GPU required. Activates EmbeddingStore in rag.py automatically.
