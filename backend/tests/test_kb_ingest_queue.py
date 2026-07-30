@@ -427,3 +427,53 @@ def test_poll_fallback_does_not_report_failure_on_deadline(monkeypatch):
         return [ev async for ev in tasks_api._poll_until_terminal("t-1")]
 
     assert asyncio.run(drain()) == [], "deadline must close the stream, not fail it"
+
+
+# ── timing instrumentation is actually wired in ──────────────────────────────
+
+
+def test_ingest_emits_per_document_and_batch_timing(stores, monkeypatch, caplog):
+    """The instrumentation must fire from a real ingest, not just in isolation.
+
+    Every previous performance question about this pipeline was answered by
+    guessing, and guessing was wrong twice: the patent tier looked like a slow
+    parser and was three dead endpoints, the arXiv tier looked like a slow
+    parser and was OCR on figure pages.
+    """
+    import logging
+
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    caplog.set_level(logging.INFO, logger="app.services.ingest_timing")
+
+    kb_ingest.ingest_evidence_docs([_ev("US1234567"), _ev("US7654321")])
+
+    messages = [r.getMessage() for r in caplog.records]
+    docs = [m for m in messages if "kb_ingest doc" in m]
+    batches = [m for m in messages if "kb_ingest batch" in m]
+
+    assert len(docs) == 2, messages
+    assert all("indexed" in m for m in docs)
+    assert any("[patent]" in m for m in docs)
+    # The phases that matter for attribution are present.
+    assert all("download=" in m for m in docs)
+    assert any("chunk=" in m for m in docs)
+    assert len(batches) == 1
+    assert "2 docs" in batches[0] and "indexed=2" in batches[0]
+
+
+def test_failed_documents_are_timed_too(stores, monkeypatch, caplog):
+    """A batch that is mostly failures is the case worth measuring.
+
+    That was literally the patent situation: every document burned two
+    timeouts and produced nothing, so the time was all in the failures.
+    """
+    import logging
+
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: None)
+    caplog.set_level(logging.INFO, logger="app.services.ingest_timing")
+
+    kb_ingest.ingest_evidence_docs([_ev("US1234567")])
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("kb_ingest doc US1234567" in m and "failed" in m for m in messages), messages
+    assert any("failed=1" in m for m in messages if "batch" in m)

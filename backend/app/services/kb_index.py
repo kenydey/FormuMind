@@ -137,13 +137,16 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
         from ..db.chunk_store import get_chunk_store
         from .chunking import chunk_markdown
 
+        from . import ingest_timing as timing
+
         settings = get_settings()
-        chunks = chunk_markdown(
-            full_text,
-            max_chars=settings.ingest_chunk_max_chars,
-            overlap=settings.ingest_chunk_overlap,
-        )
-        chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
+        with timing.span("chunk"):
+            chunks = chunk_markdown(
+                full_text,
+                max_chars=settings.ingest_chunk_max_chars,
+                overlap=settings.ingest_chunk_overlap,
+            )
+            chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
         rows: list[dict] = [
             {
                 "text": c.text,
@@ -155,9 +158,11 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
             }
             for c in chunks
         ]
-        _attach_entities(source_id, rows)
+        with timing.span("entities"):
+            _attach_entities(source_id, rows)
         if embed and rows:
-            vectors = _embed_texts([r["text"] for r in rows])
+            with timing.span("embed"):
+                vectors = _embed_texts([r["text"] for r in rows])
             if vectors:
                 model_name = _embed_model_name()
                 for row, vec in zip(rows, vectors):

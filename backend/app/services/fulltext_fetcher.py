@@ -26,6 +26,7 @@ import httpx
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
+from . import ingest_timing as _timing
 from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,13 @@ logger = logging.getLogger(__name__)
 # Two letters plus at least four digits is the standard publication-number shape
 # (CN102345678A, WO2020123456A1, JP2001234567A). The trailing kind code is
 # optional and not matched, since it does not affect fetchability.
-_PATENT_RE = re.compile(r"^[A-Z]{2}\d{4,}", re.IGNORECASE)
+#
+# The optional third letter is the Japanese era marker: pre-2000 JP numbers are
+# written JPH… (Heisei) or JPS… (Showa). Without it, JPH0925455A did not
+# classify as a patent at all — searched, shown in the UI, never queued for
+# ingest. Found by running a real mixed batch, which is also how the CN case
+# surfaced; a shape nobody happened to test simply disappears.
+_PATENT_RE = re.compile(r"^[A-Z]{2}[A-Z]?\d{4,}", re.IGNORECASE)
 _DOI_RE = re.compile(r"(?:doi:)?\s*(10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+)", re.IGNORECASE)
 _ARXIV_RE = re.compile(r"(?:arxiv[:/]|abs/)(\d{4}\.\d{4,5})(v\d+)?", re.IGNORECASE)
 
@@ -196,7 +203,13 @@ def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:
                         return None
                     continue
                 break
-            if r is None or r.status_code != 200:
+            status = int(getattr(r, "status_code", 0)) if r is not None else 0
+            # Recorded so the batch summary can tell "the server refused us"
+            # apart from "the page came back nearly empty". Collapsing them
+            # would let a wall of 403s argue for a JavaScript-rendering tier
+            # that cannot fix a 403.
+            _timing.note(http=status)
+            if r is None or status != 200:
                 return None
             ctype = (r.headers.get("content-type") or "").lower()
             if "pdf" in ctype:

@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
+from . import ingest_timing as timing
 from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
@@ -105,9 +106,13 @@ def _fetch_one(
     doc["status"] = "fetching"
     emit(doc)
     try:
-        text = ff._dispatch_fetch(kind, ev, timeout)
+        with timing.span("fetch"):
+            text = ff._dispatch_fetch(kind, ev, timeout)
     except Exception as exc:
         text = degrade_return(logger, exc, f"kb_ingest fetch failed ({kind})", None)
+    # Recorded even when empty: "how much did the web channel actually return"
+    # is the question, and a zero is as much of an answer as a large number.
+    timing.note(chars=len(text or ""))
     if not text:
         doc.update(status="failed", error="全文获取失败（无 OA 版本 / 下载超时 / 解析为空）")
         emit(doc)
@@ -179,27 +184,32 @@ def ingest_evidence_docs(
     def _fetch(i: int) -> tuple[int, str | None]:
         ev, kind = targets[i]
         try:
-            return i, _fetch_one(ev, kind, timeout, emit, docs[i])
+            # `track` spans threads: this runs in a worker, the matching index
+            # phase runs on the main thread, and both land in one record.
+            with timing.track(ev.identifier or "", kind):
+                return i, _fetch_one(ev, kind, timeout, emit, docs[i])
         except Exception as exc:
             degrade_return(logger, exc, "kb_ingest fetch failed", None)
             docs[i].update(status="failed", error=str(exc)[:200])
             return i, None
 
-    if workers == 1 or len(targets) <= 1:
-        pairs = [_fetch(i) for i in range(len(targets))]
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-            pairs = list(ex.map(_fetch, range(len(targets))))
+    with timing.batch("kb_ingest"):
+        if workers == 1 or len(targets) <= 1:
+            pairs = [_fetch(i) for i in range(len(targets))]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+                pairs = list(ex.map(_fetch, range(len(targets))))
 
-    for i, text in pairs:
-        if not text:
-            continue
-        ev, kind = targets[i]
-        try:
-            _index_one(text, ev, kind, emit, docs[i], project_id=project_id)
-        except Exception as exc:  # one bad document must not kill the queue
-            degrade_return(logger, exc, "kb_ingest document failed", None)
-            docs[i].update(status="failed", error=str(exc)[:200])
+        for i, text in pairs:
+            ev, kind = targets[i]
+            if text:
+                try:
+                    with timing.track(ev.identifier or "", kind):
+                        _index_one(text, ev, kind, emit, docs[i], project_id=project_id)
+                except Exception as exc:  # one bad document must not kill the queue
+                    degrade_return(logger, exc, "kb_ingest document failed", None)
+                    docs[i].update(status="failed", error=str(exc)[:200])
+            timing.finish(ev.identifier or "", docs[i]["status"])
 
     summary = {
         "docs": docs,

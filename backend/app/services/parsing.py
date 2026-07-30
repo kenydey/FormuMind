@@ -359,24 +359,37 @@ def _pdf_tier_order(prefer: str) -> list[tuple[str, object]]:
 
 
 def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> ParseResult:
-    """Parse *content* (with file extension *ext*, no dot) into Markdown/text."""
+    """Parse *content* (with file extension *ext*, no dot) into Markdown/text.
+
+    Timed here rather than at each call site: this is the one entry point every
+    format goes through, and it is the only place that knows which tier
+    actually won — a fact ``ParseResult.parser`` returns and callers discard.
+    Attributing a slow ingest needs both numbers together.
+    """
+    from . import ingest_timing as timing
+
     ext = (ext or "").lower().lstrip(".")
     if not content:
         return ParseResult("", "none")
 
-    if ext == "pdf":
-        order = _pdf_tier_order(prefer if prefer is not None else get_settings().pdf_parser)
-        for name, fn in order:
+    with timing.span("parse"):
+        if ext == "pdf":
+            order = _pdf_tier_order(prefer if prefer is not None else get_settings().pdf_parser)
+            for name, fn in order:
+                text = fn(content, ext)
+                if text and text.strip():
+                    timing.note(parser=name)
+                    return ParseResult(text, name)
+            timing.note(parser="none")
+            return ParseResult("", "none")
+
+        for name, fn in _DOC_TIERS:
             text = fn(content, ext)
             if text and text.strip():
+                timing.note(parser=name)
                 return ParseResult(text, name)
+        timing.note(parser="none")
         return ParseResult("", "none")
-
-    for name, fn in _DOC_TIERS:
-        text = fn(content, ext)
-        if text and text.strip():
-            return ParseResult(text, name)
-    return ParseResult("", "none")
 
 
 def html_to_markdown(html: str) -> str:
