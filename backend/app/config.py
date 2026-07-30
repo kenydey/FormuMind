@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     moonshot_api_key: str | None = None      # Kimi
     minimax_api_key: str | None = None
     xai_api_key: str | None = None           # Grok
+    # 通用 OpenAI 兼容自定义端点（HF Inference Endpoints / vLLM / TGI）。base_url
+    # 与 llm_base_url 分开保存，这样在供应商之间来回切换不会互相覆盖。
+    custom_api_key: str | None = None
+    custom_base_url: str | None = None
 
     # 检索设置
     search_limit_per_source: int = 50    # 每源单页大小（增量翻页）；不设单源总量上限
@@ -305,9 +309,24 @@ class Settings(BaseSettings):
     # 提供候选池。关闭时 RAW_MATERIALS 退回纯种子字面量，行为与升级前一致。
     material_store_enabled: bool = True
     # 图片结构化解析（VLM）：上传图片→表格 Markdown / 分子结构图→SMILES（RDKit 验证）。
-    # 复用当前激活的 LLM 供应商；vision_model 为空时用当前模型（需具备视觉能力）。
+    #
+    # 视觉是一个独立的「角色」，可以配到与文本完全不同的供应商上——因为「最好的
+    # 文本模型」与「能看图的模型」经常不是同一家：DeepSeek 直接拒绝 image_url，
+    # 而它可能正是你想用的文本模型。vision_provider 留空 = 完整跟随文本角色
+    # （历史行为）。解析逻辑见 services/llm_roles.py。
     vision_extract_enabled: bool = True
-    vision_model: str = ""
+    vision_provider: str = ""                 # 空 = 跟随 llm_provider
+    vision_model: str = ""                    # 空 = 跟随该角色的供应商默认/文本模型
+    vision_base_url: str | None = None
+    vision_api_key: str | None = None         # 空则回落到 {vision_provider}_api_key
+    # 视觉超时与文本分开：租用端点的冷启动是分钟级，文本的 60s 必然第一次就失败。
+    vision_timeout_seconds: float = 300.0
+    # 0 = 跟随 llm_max_tokens。整页表格转录很可能需要更多（截断会让 JSON 解析失败，
+    # 表现为整图降级），但我还没有真实专利页的实测数据，所以这里只留旋钮不改默认。
+    vision_max_tokens: int = 0
+    # 自定义端点 scale-to-zero 冷启动：HF 代理在副本启动期间返回 503，带上
+    # X-Scale-Up-Timeout 它会改为挂住请求直到就绪。0 = 不发该头。
+    vision_scale_up_timeout: int = 600
 
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
@@ -342,25 +361,33 @@ class Settings(BaseSettings):
 
     def get_active_api_key(self) -> str | None:
         """根据 llm_provider 返回对应的 API key（读取 runtime overlay）。"""
-        from .services.runtime_secrets import effective_setting, get_runtime_secrets
+        from .services.runtime_secrets import effective_setting
 
-        rs = get_runtime_secrets()
-        provider = effective_setting(self, "llm_provider")
-        mapping = {
-            "anthropic": "anthropic_api_key",
-            "openai": "openai_api_key",
-            "gemini": "gemini_api_key",
-            "groq": "groq_api_key",
-            "deepseek": "deepseek_api_key",
-            "qwen": "qwen_api_key",
-            "moonshot": "moonshot_api_key",
-            "minimax": "minimax_api_key",
-            "xai": "xai_api_key",
-        }
-        attr = mapping.get(str(provider))
+        attr = PROVIDER_KEY_ATTR.get(str(effective_setting(self, "llm_provider")))
         if not attr:
             return None
         return effective_setting(self, attr)
+
+
+#: provider id → the ``Settings`` attribute holding its API key.
+#:
+#: Shared by :meth:`Settings.get_active_api_key` and the role resolver
+#: (``services/llm_roles.py``) so the two cannot drift apart. A provider missing
+#: from this map reads as "no key configured" — which is why ``custom`` has to be
+#: here: without it, selecting the custom endpoint for the text role silently
+#: looked like a missing key rather than a missing mapping.
+PROVIDER_KEY_ATTR: dict[str, str] = {
+    "anthropic": "anthropic_api_key",
+    "openai": "openai_api_key",
+    "gemini": "gemini_api_key",
+    "groq": "groq_api_key",
+    "deepseek": "deepseek_api_key",
+    "qwen": "qwen_api_key",
+    "moonshot": "moonshot_api_key",
+    "minimax": "minimax_api_key",
+    "xai": "xai_api_key",
+    "custom": "custom_api_key",
+}
 
 
 def _audit_formumind_env() -> None:

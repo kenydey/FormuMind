@@ -283,6 +283,23 @@ def test_layout_switch_is_applied_once(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── vision availability must not over-promise ────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _no_runtime_overlay():
+    """Clear the runtime-secret overlay around every test in this module.
+
+    These tests monkeypatch attributes on the cached ``Settings`` object, but the
+    overlay *wins* over ``Settings`` (``runtime_secrets.effective``). Any earlier
+    test that left `llm_provider` in the overlay — `test_v03.py` does — silently
+    overrode the monkeypatch and made these fail depending on collection order.
+    """
+    from app.services.runtime_secrets import get_runtime_secrets
+
+    rs = get_runtime_secrets()
+    rs.clear()
+    yield
+    rs.clear()
+
+
 def test_vision_reports_unavailable_without_its_sdk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -358,3 +375,97 @@ def test_a_vision_capable_provider_is_still_allowed(
     monkeypatch.setattr(settings, "openai_api_key", "sk-test", raising=False)
 
     assert vision_extract.vision_available() == (True, "")
+
+
+def test_vision_role_rescues_a_text_provider_that_cannot_see(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of separating the roles.
+
+    DeepSeek for text is a perfectly reasonable choice, and before roles existed
+    it took the chemical-figure path down with it. Naming a vision provider must
+    make vision available again *without* touching the text configuration.
+    """
+    from app.config import get_settings
+    from app.services import vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "deepseek", raising=False)
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-text", raising=False)
+    # Same state that used to report unavailable:
+    assert vision_extract.vision_available()[0] is False
+
+    monkeypatch.setattr(settings, "vision_provider", "openai", raising=False)
+    monkeypatch.setattr(settings, "vision_model", "gpt-4o", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-vision", raising=False)
+    assert vision_extract.vision_available() == (True, "")
+
+
+def test_custom_endpoint_is_reported_configured_not_capable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rented endpoint runs weights we cannot inspect.
+
+    Blocking it would break a working deployment; claiming it can see would be
+    the fifth repeat of the lying-probe bug. So it reports *configured* and is
+    left to fail at the call with the provider's own message — the policy
+    already documented for qwen/moonshot.
+    """
+    from app.config import get_settings
+    from app.services import vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "vision_provider", "custom", raising=False)
+    monkeypatch.setattr(settings, "vision_model", "tgi", raising=False)
+    monkeypatch.setattr(settings, "vision_api_key", "hf_token", raising=False)
+    monkeypatch.setattr(
+        settings, "vision_base_url", "https://x.endpoints.huggingface.cloud/v1", raising=False
+    )
+
+    ok, hint = vision_extract.vision_available()
+    assert ok is True
+    # "Configured" is all it may assert — no capability claim in the hint.
+    assert hint == ""
+
+
+def test_vision_unavailable_without_a_model_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An endpoint with no model name cannot be called; say so up front rather
+    than sending an empty `model` and reading back a vendor parse error."""
+    from app.config import get_settings
+    from app.services import vision_extract
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "vision_provider", "custom", raising=False)
+    monkeypatch.setattr(settings, "vision_model", "", raising=False)
+    monkeypatch.setattr(settings, "vision_api_key", "hf_token", raising=False)
+
+    ok, hint = vision_extract.vision_available()
+    assert ok is False
+    assert "模型" in hint
+
+
+def test_disabling_vision_via_the_overlay_takes_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The env-flags panel writes this switch through the runtime overlay, and
+    the gate used to read it straight off Settings — so turning it off in the UI
+    did nothing until restart."""
+    from app.config import get_settings
+    from app.services import vision_extract
+    from app.services.runtime_secrets import get_runtime_secrets
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "vision_extract_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "openai", raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test", raising=False)
+    assert vision_extract.vision_available()[0] is True
+
+    get_runtime_secrets().set("vision_extract_enabled", False)
+    ok, hint = vision_extract.vision_available()
+    assert ok is False
+    assert "禁用" in hint
