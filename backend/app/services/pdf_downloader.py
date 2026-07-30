@@ -1,9 +1,30 @@
-"""Patent PDF full-text downloader.
+"""Patent full-text acquisition.
 
-Downloads PDFs from public patent offices (USPTO, EPO) and parses them into
-chunked Evidence items using markitdown (preferred) or pypdf (fallback).
-Integrates with DeepResearchEngine to enrich abstract snippets with full text
-when ``FORMUMIND_PDF_DOWNLOAD=true`` is set.
+Everything goes through the **Google Patents landing page**, which is both the
+index and — usefully — the full text:
+
+    patents.google.com/patent/{id}/en
+      ├─ <section itemprop="abstract|description|claims">  → full text, already
+      │    plain (and machine-translated to English alongside the original for
+      │    CN/JP/KR publications), no OCR needed
+      └─ <meta name="citation_pdf_url">                    → the real PDF, on
+           patentimages.storage.googleapis.com
+
+HTML is preferred (``FORMUMIND_PATENT_PREFER_HTML``, default on): it is one
+request instead of two, it never needs OCR — a scanned patent costs ~2 s/page
+through RapidOCR and nothing through the landing page — and ``itemprop``
+sectioning is cleaner than layout reconstruction from a PDF. The PDF tier is
+kept for callers that want the original document (figures, chemical structure
+drawings) and is the fallback when a publication has no HTML body.
+
+Three older direct-PDF URLs were removed after measuring them against live
+endpoints; each one cost a full timeout and returned nothing:
+
+* ``pdfpiw.uspto.gov`` — connection reset by peer;
+* ``patents.google.com/patent/{id}/pdf`` — HTTP 200 with ``text/html``
+  (it is the landing page, not a PDF);
+* ``data.epo.org/publication-server`` — HTTP 200 with a 2.4 KB error page,
+  even for a valid EP publication number.
 
 Gated by the config flag so tests run offline without network requests.
 """
@@ -24,6 +45,10 @@ logger = logging.getLogger(__name__)
 _USPTO_NUM_RE = re.compile(r"US(\d+)", re.IGNORECASE)
 _EPO_RE = re.compile(r"EP(\d+)([A-Z0-9]*)", re.IGNORECASE)
 
+# Any two-letter office code plus digits — Google Patents serves CN/JP/WO/KR/DE
+# as readily as US/EP, so the landing-page path is not office-specific.
+_PUBNUM_RE = re.compile(r"^[A-Z]{2}[A-Z]?\d{3,}[A-Z0-9]*$")
+
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (compatible; FormuMind/0.9; patent-research) "
@@ -32,23 +57,130 @@ _HEADERS = {
     "Accept": "application/pdf,*/*;q=0.8",
 }
 
+# The landing page is HTML; asking for PDF first makes some caches unhappy.
+_HTML_HEADERS = {**_HEADERS, "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"}
 
-def _patent_pdf_url(patent_id: str) -> str | None:
-    """Construct a PDF download URL for a known patent identifier."""
-    pid = patent_id.strip().upper()
-    m = _USPTO_NUM_RE.match(pid)
-    if m:
-        num = m.group(1).lstrip("0") or "0"
-        return f"https://pdfpiw.uspto.gov/.pdf?Docid={num.zfill(8)}"
-    m = _EPO_RE.match(pid)
-    if m:
-        num, kind = m.group(1), (m.group(2) or "A1")
-        return f"https://data.epo.org/publication-server/pdf-document?CC=EP&NR={num}&KD={kind}"
-    return None
+# `citation_pdf_url` comes out of a third-party page, so it is untrusted input.
+# Google serves every patent PDF from this one bucket; pinning the host means a
+# tampered or redirected page cannot turn this into a request to somewhere else.
+_PDF_HOST = "patentimages.storage.googleapis.com"
+
+_CITATION_PDF_RE = re.compile(
+    r"""<meta\s[^>]*name=["']citation_pdf_url["'][^>]*content=["']([^"']+)["']""",
+    re.IGNORECASE,
+)
+# Attribute order is not guaranteed; accept content-before-name too.
+_CITATION_PDF_ALT_RE = re.compile(
+    r"""<meta\s[^>]*content=["']([^"']+)["'][^>]*name=["']citation_pdf_url["']""",
+    re.IGNORECASE,
+)
+
+# Sections in the order they should read in the extracted Markdown. Claims last
+# mirrors the printed document and keeps the abstract — the highest-signal
+# paragraph — at the top where chunk 0 will pick it up.
+_PATENT_SECTIONS = (("abstract", "Abstract"), ("description", "Description"), ("claims", "Claims"))
+
+
+def _landing_url(patent_id: str) -> str:
+    """Google Patents landing page for a publication number.
+
+    ``/en`` asks for the English rendering, which is what makes a CN or JP
+    publication readable: Google emits the machine translation *alongside* the
+    original, so the extracted text carries both.
+    """
+    return f"https://patents.google.com/patent/{patent_id.strip().upper()}/en"
 
 
 def _google_patents_url(patent_id: str) -> str:
-    return f"https://patents.google.com/patent/{patent_id}/pdf"
+    """Deprecated alias — the ``/pdf`` suffix serves HTML, not a PDF."""
+    return _landing_url(patent_id)
+
+
+# ── Landing page → text / PDF url ────────────────────────────────────────────
+
+
+def _strip_tags(html: str) -> str:
+    """Tags out, entities decoded, whitespace collapsed."""
+    import html as html_mod
+
+    text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)
+    # Block-level tags become newlines so paragraphs survive the strip.
+    text = re.sub(r"(?i)</(p|div|li|tr|h[1-6]|section)>", "\n", text)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html_mod.unescape(text)
+    text = re.sub(r"[ \t ]+", " ", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _section_text(html: str, itemprop: str) -> str:
+    """Body of ``<section itemprop="...">``, tags stripped.
+
+    Regex rather than a parser because these sections nest ``<div>``s but never
+    another ``<section>``, so a non-greedy match to the first ``</section>``
+    is exact — and it keeps this path dependency-free.
+    """
+    m = re.search(
+        rf"""<section[^>]*itemprop=["']{itemprop}["'].*?</section>""", html, re.IGNORECASE | re.DOTALL
+    )
+    return _strip_tags(m.group(0)) if m else ""
+
+
+def patent_text_from_html(html: str) -> str:
+    """Landing page → Markdown with ``## Abstract / ## Description / ## Claims``.
+
+    Returns "" when none of the sections are present (a not-found page, or a
+    publication Google holds only as bibliographic data).
+    """
+    parts: list[str] = []
+    for itemprop, heading in _PATENT_SECTIONS:
+        body = _section_text(html, itemprop)
+        # The section's own <h2> is inside the match, so drop a leading repeat
+        # of the heading rather than printing it twice.
+        body = re.sub(rf"^{heading}\s*(\(\s*\d+\s*\))?\s*", "", body, flags=re.IGNORECASE).strip()
+        if len(body) > 40:
+            parts.append(f"## {heading}\n\n{body}")
+    return "\n\n".join(parts)
+
+
+def _pdf_url_from_landing(html: str) -> str | None:
+    """``citation_pdf_url`` from the landing page, host-pinned.
+
+    A URL lifted out of a remote page is attacker-influenceable in principle;
+    it is checked against the SSRF guard *and* the known bucket before use.
+    """
+    m = _CITATION_PDF_RE.search(html) or _CITATION_PDF_ALT_RE.search(html)
+    if not m:
+        return None
+    url = m.group(1).strip()
+    if url.startswith("//"):
+        url = f"https:{url}"
+    try:
+        host = (httpx.URL(url).host or "").lower()
+    except Exception as exc:
+        return degrade_return(logger, exc, f"unparseable citation_pdf_url: {url[:120]}", None)
+    if host != _PDF_HOST:
+        logger.warning("citation_pdf_url host rejected (expected %s): %s", _PDF_HOST, host)
+        return None
+    from .ingestion import _is_safe_url
+
+    if not _is_safe_url(url):
+        logger.warning("citation_pdf_url blocked by SSRF guard: %s", url[:200])
+        return None
+    return url
+
+
+def fetch_patent_landing(patent_id: str, timeout: float = 20.0) -> str | None:
+    """GET the Google Patents landing page HTML, or None on failure."""
+    url = _landing_url(patent_id)
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True, headers=_HTML_HEADERS) as client:
+            r = client.get(url)
+        if int(getattr(r, "status_code", 0)) != 200:
+            return None
+        return r.text or None
+    except Exception as exc:
+        return degrade_return(logger, exc, f"patent landing fetch failed: {url}", None)
 
 
 # ── Download ─────────────────────────────────────────────────────────────────
@@ -70,13 +202,51 @@ def fetch_pdf(url: str, timeout: float = 20.0) -> bytes | None:
 
 
 def fetch_patent_pdf(patent_id: str, timeout: float = 20.0) -> bytes | None:
-    """Try primary office URL then Google Patents fallback; return bytes or None."""
-    primary = _patent_pdf_url(patent_id)
-    if primary:
-        pdf = fetch_pdf(primary, timeout)
-        if pdf:
-            return pdf
-    return fetch_pdf(_google_patents_url(patent_id), timeout)
+    """Resolve the real PDF via the landing page and download it.
+
+    Two requests, both fast (~0.7 s + ~0.5 s measured), replacing three
+    direct-URL guesses that each burned a timeout and returned nothing.
+    """
+    html = fetch_patent_landing(patent_id, timeout)
+    if not html:
+        return None
+    pdf_url = _pdf_url_from_landing(html)
+    if not pdf_url:
+        # Normal, not an error: JP publications and some EP ones have no PDF on
+        # Google Patents at all. The HTML body is the answer for those.
+        logger.info("no citation_pdf_url for %s — HTML body is the only full text", patent_id)
+        return None
+    return fetch_pdf(pdf_url, timeout)
+
+
+def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: bool | None = None) -> str | None:
+    """Full text for a publication number, from HTML or PDF.
+
+    One landing-page request serves both tiers, so choosing HTML costs nothing
+    extra and choosing PDF costs one more request rather than a fresh lookup.
+    """
+    from ..config import get_settings
+
+    if prefer_html is None:
+        prefer_html = bool(getattr(get_settings(), "patent_prefer_html", True))
+
+    html = fetch_patent_landing(patent_id, timeout)
+    if not html:
+        return None
+
+    if not prefer_html:
+        pdf_url = _pdf_url_from_landing(html)
+        if pdf_url:
+            pdf = fetch_pdf(pdf_url, timeout)
+            if pdf:
+                text = _extract_text(pdf)
+                if text and len(text.strip()) > 200:
+                    return text
+        # Fall through: a missing or unparseable PDF is not a reason to discard
+        # a landing page that already holds the description and claims.
+
+    text = patent_text_from_html(html)
+    return text or None
 
 
 # ── Text extraction ──────────────────────────────────────────────────────────

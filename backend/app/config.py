@@ -279,6 +279,18 @@ class Settings(BaseSettings):
     fulltext_max_docs: int = 8
     fulltext_timeout_s: float = 20.0
 
+    # 专利全文优先用 Google Patents 落地页的 HTML 正文，而不是 PDF。
+    # 三条理由，都实测过：
+    #   1. 一次请求（~0.7 s）而不是两次；
+    #   2. **完全不需要 OCR** —— 扫描版专利走 RapidOCR 是 ~2 s/页、上限 30 页，
+    #      落地页是现成文本，0 秒；
+    #   3. `itemprop="abstract|description|claims"` 是结构化分段，比从 PDF 版面
+    #      重建的 Markdown 干净；中日文专利还白拿一份英文机器翻译对照。
+    # PDF 唯一的优势是图表/化学结构图，而那要靠 MinerU 才能送进视觉模型
+    # （`mineru_enabled` 默认关），所以今天从 PDF 拿不到 HTML 拿不到的东西。
+    # 设为 false 则优先下载 PDF，落地页无 PDF 时仍回落到 HTML 正文。
+    patent_prefer_html: bool = True
+
     # 异步入库队列（KB stream P0）：检索/深度研究/推荐收尾后，后台任务逐篇
     # 获取全文 → 解析 → 切块 → 入持久知识库，前台经 SSE 实时看到每篇状态，
     # 检索结果展示不等待解析。按 origin_url / 内容哈希双重去重。

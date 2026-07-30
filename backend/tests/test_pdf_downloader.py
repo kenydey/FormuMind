@@ -12,33 +12,81 @@ import pytest
 from app.domain.schemas import Evidence
 from app.services import pdf_downloader as pd
 
+# Shaped like a real Google Patents landing page: the `citation_pdf_url` meta
+# tag plus the three `itemprop` sections that carry the full text.
+_LANDING_HTML = """<html><head>
+<meta name="citation_patent_number" content="CN102345678A"/>
+<meta name="citation_pdf_url" content="https://patentimages.storage.googleapis.com/1d/a5/CN102345678A.pdf"/>
+</head><body>
+<section itemprop="abstract"><h2>Abstract</h2><div>A waterborne epoxy primer
+containing zinc phosphate for corrosion protection of carbon steel substrates
+in marine atmospheric service conditions.</div></section>
+<section itemprop="description"><h2>Description</h2>
+<div>Translated from Chinese</div>
+<div>The present invention relates to a two-component waterborne coating in
+which the curing agent is an amine adduct. Pigment volume concentration is
+held between 30 and 40 percent to balance barrier properties.</div>
+</section>
+<section itemprop="claims"><h2>Claims (12)</h2>
+<div>1. A waterborne epoxy coating composition comprising zinc phosphate in an
+amount of 5 to 15 weight percent based on total solids.</div>
+</section>
+<section itemprop="similarDocuments"><div>US1234567A</div></section>
+</body></html>"""
+
 
 # ── URL construction ──────────────────────────────────────────────────────────
 
 
-def test_patent_pdf_url_uspto():
-    url = pd._patent_pdf_url("US9982145B2")
-    assert url is not None
-    assert "pdfpiw.uspto.gov" in url
-    assert "09982145" in url
+def test_landing_url_uses_english_rendering():
+    url = pd._landing_url("us9982145b2")
+    assert url == "https://patents.google.com/patent/US9982145B2/en"
 
 
-def test_patent_pdf_url_epo():
-    url = pd._patent_pdf_url("EP3211048A1")
-    assert url is not None
-    assert "epo.org" in url
-    assert "3211048" in url
+def test_dead_endpoints_are_never_requested(monkeypatch):
+    """The three direct-PDF URLs this module used to guess are all dead.
 
+    Measured against the live endpoints: pdfpiw resets the connection,
+    ``/patent/{id}/pdf`` answers 200 with ``text/html``, and the EPO
+    publication server answers 200 with a 2.4 KB error page even for a valid
+    publication number. Each cost a full timeout per patent and returned
+    nothing, so this asserts on the URLs actually requested — a US and an EP
+    number are the two that used to take the office-specific branches.
+    """
+    requested: list[str] = []
 
-def test_patent_pdf_url_unknown_returns_none():
-    assert pd._patent_pdf_url("DOI:10.1016/j.foo.2020") is None
-    assert pd._patent_pdf_url("") is None
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "text/html"}
+        text = _LANDING_HTML
 
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
 
-def test_google_patents_url_format():
-    url = pd._google_patents_url("US9982145B2")
-    assert "patents.google.com" in url
-    assert "US9982145B2" in url
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, *a, **kw):
+            requested.append(str(url))
+            return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", _Client)
+    pd.fetch_patent_pdf("US9982145B2")
+    pd.fetch_patent_pdf("EP3211048A1")
+
+    assert requested, "expected at least the landing-page requests"
+    joined = " ".join(requested)
+    assert "pdfpiw" not in joined
+    assert "data.epo.org" not in joined
+    # The `/pdf` suffix on patents.google.com serves HTML, not a PDF.
+    assert not any(u.startswith("https://patents.google.com") and u.endswith("/pdf") for u in requested)
+    assert requested[0] == "https://patents.google.com/patent/US9982145B2/en"
 
 
 # ── fetch_pdf — network stubbed to None ─────────────────────────────────────
@@ -55,10 +103,155 @@ def test_fetch_pdf_returns_none_on_error(monkeypatch):
     assert result is None
 
 
-def test_fetch_patent_pdf_returns_none_when_all_fail(monkeypatch):
+def test_fetch_patent_pdf_returns_none_when_landing_fails(monkeypatch):
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: None)
+    assert pd.fetch_patent_pdf("US9982145B2") is None
+
+
+def test_fetch_patent_pdf_does_not_download_when_page_has_no_pdf(monkeypatch):
+    """No ``citation_pdf_url`` must mean no download attempt, not a guess.
+
+    JP publications (and some EP ones) genuinely have no PDF on Google Patents.
+    Falling back to a constructed URL is what burned the timeouts.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: "<html>no meta here</html>")
+    monkeypatch.setattr(pd, "fetch_pdf", lambda url, *a, **kw: calls.append(url) or None)
+    assert pd.fetch_patent_pdf("JPH0925455A") is None
+    assert calls == []
+
+
+# ── landing page → text ──────────────────────────────────────────────────────
+
+
+def test_patent_text_from_html_keeps_all_three_sections_in_order():
+    md = pd.patent_text_from_html(_LANDING_HTML)
+    assert md.index("## Abstract") < md.index("## Description") < md.index("## Claims")
+    assert "zinc phosphate" in md
+    assert "amine adduct" in md  # description body
+    assert "5 to 15 weight percent" in md  # claims body
+    # Unrelated sections must not leak in.
+    assert "US1234567A" not in md
+    # The section's own <h2> must not be duplicated under our heading.
+    assert md.count("Abstract") == 1
+
+
+def test_patent_text_from_html_empty_when_no_sections():
+    assert pd.patent_text_from_html("<html><body>Not found</body></html>") == ""
+
+
+def test_patent_text_from_html_decodes_entities():
+    html = (
+        '<section itemprop="abstract"><div>'
+        "Cure at 25&#176;C with &lt;5% VOC &amp; high gloss retention over "
+        "extended weathering exposure trials.</div></section>"
+    )
+    md = pd.patent_text_from_html(html)
+    assert "25°C" in md
+    assert "<5% VOC & high gloss" in md
+
+
+# ── citation_pdf_url extraction is host-pinned ───────────────────────────────
+
+
+def test_pdf_url_from_landing_accepts_the_google_bucket():
+    url = pd._pdf_url_from_landing(_LANDING_HTML)
+    assert url == "https://patentimages.storage.googleapis.com/1d/a5/CN102345678A.pdf"
+
+
+def test_pdf_url_from_landing_handles_attribute_order():
+    html = '<meta content="https://patentimages.storage.googleapis.com/x/y.pdf" name="citation_pdf_url"/>'
+    assert pd._pdf_url_from_landing(html) == "https://patentimages.storage.googleapis.com/x/y.pdf"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "http://169.254.169.254/latest/meta-data/",  # cloud metadata
+        "http://localhost:8000/admin",
+        "https://evil.example.com/patent.pdf",
+        "file:///etc/passwd",
+    ],
+)
+def test_pdf_url_from_landing_rejects_foreign_hosts(bad):
+    """The meta tag comes off a third-party page, so it is untrusted input.
+
+    Without the host pin, a tampered or man-in-the-middled landing page would
+    turn every patent fetch into a request of the attacker's choosing.
+    """
+    html = f'<meta name="citation_pdf_url" content="{bad}"/>'
+    assert pd._pdf_url_from_landing(html) is None
+
+
+def test_pdf_url_from_landing_none_when_absent():
+    assert pd._pdf_url_from_landing("<html><head></head></html>") is None
+
+
+# ── fetch_patent_text: HTML preferred, PDF on request ────────────────────────
+
+
+def test_fetch_patent_text_prefers_html_and_makes_one_request(monkeypatch):
+    """HTML-first must not download the PDF at all — that is the speed win."""
+    downloads: list[str] = []
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: _LANDING_HTML)
+    monkeypatch.setattr(pd, "fetch_pdf", lambda url, *a, **kw: downloads.append(url) or b"X")
+
+    text = pd.fetch_patent_text("CN102345678A", prefer_html=True)
+    assert text and "## Description" in text
+    assert downloads == []
+
+
+def test_fetch_patent_text_uses_pdf_when_html_not_preferred(monkeypatch):
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: _LANDING_HTML)
+    monkeypatch.setattr(pd, "fetch_pdf", lambda *a, **kw: b"%PDF-1.4 fake")
+    monkeypatch.setattr(pd, "_extract_text", lambda _: "PARSED PDF BODY " * 30)
+
+    text = pd.fetch_patent_text("CN102345678A", prefer_html=False)
+    assert text is not None
+    assert text.startswith("PARSED PDF BODY")
+
+
+def test_fetch_patent_text_falls_back_to_html_when_pdf_unusable(monkeypatch):
+    """A dead PDF link is no reason to discard a page that holds the full text.
+
+    This is the case that used to produce `failed`: the PDF tier came up empty
+    and nothing looked at the description sitting in the same response.
+    """
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: _LANDING_HTML)
     monkeypatch.setattr(pd, "fetch_pdf", lambda *a, **kw: None)
-    result = pd.fetch_patent_pdf("US9982145B2")
-    assert result is None
+
+    text = pd.fetch_patent_text("CN102345678A", prefer_html=False)
+    assert text is not None
+    assert "amine adduct" in text
+
+
+def test_fetch_patent_text_none_when_landing_unreachable(monkeypatch):
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: None)
+    assert pd.fetch_patent_text("CN102345678A") is None
+
+
+def test_fetch_patent_landing_returns_none_on_non_200(monkeypatch):
+    class _Resp:
+        status_code = 404
+        text = "nope"
+
+    class _Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, *a, **kw):
+            return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", _Client)
+    assert pd.fetch_patent_landing("US9982145B2") is None
 
 
 # ── pdf_to_evidence ───────────────────────────────────────────────────────────

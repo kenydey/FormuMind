@@ -89,12 +89,15 @@ def classify(ev: Evidence) -> str | None:
 
 
 def _fetch_patent_text(ev: Evidence, timeout: float) -> str | None:
-    from .pdf_downloader import _extract_text, fetch_patent_pdf
+    """Full text via the Google Patents landing page (HTML body or its PDF).
 
-    pdf = fetch_patent_pdf(ev.identifier.strip().upper(), timeout=timeout)
-    if not pdf:
-        return None
-    text = _extract_text(pdf)
+    See ``pdf_downloader`` for why this is one lookup and not three direct-URL
+    guesses: all three of those endpoints are dead, so every patent used to
+    burn two timeouts and yield nothing.
+    """
+    from .pdf_downloader import fetch_patent_text
+
+    text = fetch_patent_text(ev.identifier.strip().upper(), timeout=timeout)
     return text if text and len(text.strip()) > 200 else None
 
 
