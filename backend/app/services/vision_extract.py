@@ -26,7 +26,7 @@ from ..config import get_settings
 from ..domain.multimodal_schemas import VisionTableExtraction
 from .errors import degrade_return
 from .kg.prompts import build_multimodal_table_prompt
-from .llm_roles import VISION, RoleConfig, resolve_role
+from .llm_roles import CUSTOM_PROVIDER, VISION, RoleConfig, is_warming, resolve_role
 from .runtime_secrets import effective_setting
 
 logger = logging.getLogger(__name__)
@@ -226,6 +226,70 @@ def _call_vision(cfg: RoleConfig, prompt: str, content: bytes, filename: str) ->
     )
 
 
+def _failure_hint(exc: Exception) -> str:
+    """Turn a provider exception into something worth reading.
+
+    A 503 from a scale-to-zero endpoint means "not running yet", not "broken" —
+    saying so is the difference between waiting a minute and going to hunt for a
+    bad API key.
+    """
+    if is_warming(exc):
+        return "视觉端点正在冷启动（503），副本就绪后重试即可"
+    return str(exc)[:200]
+
+
+def prewarm() -> tuple[bool, float, str]:
+    """Wake a scale-to-zero endpoint once, before a batch of figures.
+
+    Returns ``(ok, seconds, hint)``. A no-op returning ``(True, 0.0, "")`` for
+    every provider except a custom endpoint, so callers need no knowledge of who
+    is serving vision.
+
+    Why bother: with an endpoint scaled to zero the first real call absorbs a
+    multi-minute boot. Paying that inside the per-page loop makes the wait look
+    like "page 3 is mysteriously slow"; paying it here attributes it correctly in
+    the log and keeps the per-page timings meaningful. It costs one tiny request.
+
+    Best-effort by contract — a failure here is not a reason to skip the figures,
+    because the per-page calls will each try anyway and may well succeed.
+    """
+    import time
+
+    ok, hint = vision_available()
+    if not ok:
+        return False, 0.0, hint
+    cfg = resolve_role(VISION)
+    if cfg.provider != CUSTOM_PROVIDER:
+        return True, 0.0, ""
+
+    started = time.monotonic()
+    try:
+        from openai import OpenAI  # type: ignore
+
+        kwargs: dict = {"api_key": cfg.api_key, "timeout": cfg.timeout}
+        if cfg.base_url:
+            kwargs["base_url"] = cfg.base_url
+        if cfg.extra_headers:
+            kwargs["default_headers"] = dict(cfg.extra_headers)
+        OpenAI(**kwargs).chat.completions.create(
+            model=cfg.model,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ok"}],
+        )
+    except Exception as exc:
+        elapsed = time.monotonic() - started
+        if is_warming(exc):
+            hint = "视觉端点仍在冷启动中（副本尚未就绪）"
+        else:
+            hint = str(exc)[:200]
+        logger.warning("vision prewarm failed after %.1fs: %s", elapsed, hint)
+        return False, elapsed, hint
+
+    elapsed = time.monotonic() - started
+    logger.info("vision endpoint warm after %.1fs (%s)", elapsed, cfg.model)
+    return True, elapsed, ""
+
+
 def _verify_molecules(molecules: list[VisionMolecule]) -> list[VisionMolecule]:
     """RDKit validation loop: parse → canonicalize → flag; drop empty claims."""
     try:
@@ -272,7 +336,7 @@ def extract_image(content: bytes, filename: str) -> tuple[VisionExtraction | Non
         extraction.molecules = _verify_molecules(extraction.molecules)
         return extraction, None
     except Exception as exc:
-        return None, degrade_return(logger, exc, "vision extraction failed", str(exc)[:200])
+        return None, degrade_return(logger, exc, "vision extraction failed", _failure_hint(exc))
 
 
 def extract_structured_table_from_image(
@@ -305,7 +369,9 @@ def extract_structured_table_from_image(
     except json.JSONDecodeError as exc:
         return None, degrade_return(logger, exc, "vision table JSON parse failed", str(exc)[:200])
     except Exception as exc:
-        return None, degrade_return(logger, exc, "vision table extraction failed", str(exc)[:200])
+        return None, degrade_return(
+            logger, exc, "vision table extraction failed", _failure_hint(exc)
+        )
 
 
 def image_markdown(extraction: VisionExtraction, filename: str) -> str:

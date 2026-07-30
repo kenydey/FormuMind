@@ -129,12 +129,25 @@ PROVIDERS: list[dict] = [
             {"id": "abab5.5-chat", "label": "abab5.5 (快速)"},
         ],
     },
+    {
+        # Bring-your-own endpoint: HuggingFace Inference Endpoints (TGI or
+        # vLLM), a self-hosted vLLM, anything speaking OpenAI's chat API. No
+        # base_url default and an empty model catalog on purpose — both are
+        # whatever the user deployed. TGI wants the literal placeholder "tgi"
+        # while vLLM wants the repo id, so the UI offers a free-text field, and
+        # "更新列表 ↻" discovers the right answer via GET {base_url}/models,
+        # which both engines expose.
+        "id": "custom",
+        "label": "OpenAI 兼容自定义端点（HF Endpoints / vLLM / TGI）",
+        "base_url": None,
+        "models": [],
+    },
 ]
 
 _PROVIDER_INDEX: dict[str, dict] = {p["id"]: p for p in PROVIDERS}
 
 _OPENAI_COMPAT_PROVIDERS = frozenset(
-    {"openai", "xai", "groq", "deepseek", "qwen", "moonshot", "minimax"}
+    {"openai", "xai", "groq", "deepseek", "qwen", "moonshot", "minimax", "custom"}
 )
 
 _EXCLUDE_MODEL_SUBSTR = (

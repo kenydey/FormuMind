@@ -29,6 +29,8 @@ SECRET_REGISTRY: list[tuple[str, str, str, str]] = [
     ("moonshot_api_key", "FORMUMIND_MOONSHOT_API_KEY", "Moonshot (Kimi)", "llm"),
     ("minimax_api_key", "FORMUMIND_MINIMAX_API_KEY", "MiniMax", "llm"),
     ("xai_api_key", "FORMUMIND_XAI_API_KEY", "xAI (Grok)", "llm"),
+    ("custom_api_key", "FORMUMIND_CUSTOM_API_KEY", "自定义端点（HF Endpoints 等）", "llm"),
+    ("vision_api_key", "FORMUMIND_VISION_API_KEY", "视觉模型（独立于文本时）", "llm"),
     ("serpapi_api_key", "FORMUMIND_SERPAPI_API_KEY", "SerpAPI", "search"),
     ("tavily_api_key", "FORMUMIND_TAVILY_API_KEY", "Tavily", "search"),
     ("epo_consumer_key", "FORMUMIND_EPO_CONSUMER_KEY", "EPO OPS Consumer Key", "patent"),
@@ -50,6 +52,12 @@ _LLM_RUNTIME_ENV: dict[str, str] = {
     "llm_provider": "FORMUMIND_LLM_PROVIDER",
     "llm_model": "FORMUMIND_LLM_MODEL",
     "llm_base_url": "FORMUMIND_LLM_BASE_URL",
+    "custom_base_url": "FORMUMIND_CUSTOM_BASE_URL",
+    # The vision role, same treatment. vision_model used to live here only as an
+    # env var, so a value chosen anywhere but .env vanished on restart.
+    "vision_provider": "FORMUMIND_VISION_PROVIDER",
+    "vision_model": "FORMUMIND_VISION_MODEL",
+    "vision_base_url": "FORMUMIND_VISION_BASE_URL",
 }
 
 # Flags that decide deployment topology rather than product behaviour, and so

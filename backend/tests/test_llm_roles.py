@@ -22,8 +22,32 @@ from app.services.llm_roles import TEXT, VISION, normalize_base_url, resolve_rol
 from app.services.runtime_secrets import get_runtime_secrets
 
 
+#: Env keys that decide a role's connection. Other test modules persist these to
+#: a temp `.env` and lift them into `os.environ`, and because this module clears
+#: the settings cache a fresh `Settings` would then read *their* values — making
+#: these assertions depend on collection order. Neutralize them explicitly.
+_ROLE_ENV_KEYS = (
+    "FORMUMIND_LLM_PROVIDER",
+    "FORMUMIND_LLM_MODEL",
+    "FORMUMIND_LLM_BASE_URL",
+    "FORMUMIND_VISION_PROVIDER",
+    "FORMUMIND_VISION_MODEL",
+    "FORMUMIND_VISION_BASE_URL",
+    "FORMUMIND_VISION_API_KEY",
+    "FORMUMIND_CUSTOM_API_KEY",
+    "FORMUMIND_CUSTOM_BASE_URL",
+)
+
+
 @pytest.fixture(autouse=True)
-def _clean_overlay():
+def _clean_overlay(monkeypatch, tmp_path):
+    for key in _ROLE_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    # Point at an empty env file so a repo-root .env cannot supply a provider.
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FORMUMIND_ENV_FILE", str(env_file))
+
     rs = get_runtime_secrets()
     rs.clear()
     get_settings.cache_clear()
@@ -210,6 +234,31 @@ def test_scale_up_header_disabled_by_zero(monkeypatch):
 
 
 # ── base_url normalization ───────────────────────────────────────────────────
+
+
+def test_catalog_base_urls_are_never_normalized():
+    """The /v1 convention belongs to custom endpoints only.
+
+    DeepSeek serves from the domain root, so appending /v1 to its catalog URL
+    turns a working provider into a 404 — which is exactly what an unscoped
+    normalizer did on the first attempt at this.
+    """
+    _set(llm_provider="deepseek", deepseek_api_key="sk-test")
+    assert resolve_role(TEXT).base_url == "https://api.deepseek.com"
+
+    _set(llm_provider="qwen", qwen_api_key="sk-test")
+    assert resolve_role(TEXT).base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+def test_custom_base_url_gets_v1_filled_in():
+    _set(
+        vision_provider="custom",
+        vision_model="tgi",
+        vision_api_key="hf_token",
+        # The URL HF shows you, without the OpenAI-compatible route.
+        vision_base_url="https://abc.endpoints.huggingface.cloud",
+    )
+    assert resolve_role(VISION).base_url == "https://abc.endpoints.huggingface.cloud/v1"
 
 
 @pytest.mark.parametrize(

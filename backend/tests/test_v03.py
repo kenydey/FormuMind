@@ -26,13 +26,21 @@ def test_settings_lists_all_providers():
     assert r.status_code == 200
     body = r.json()
     ids = {p["id"] for p in body["providers"]}
-    # All nine supported providers must be present.
+    # All nine hosted providers must be present.
     assert {
         "anthropic", "openai", "gemini", "xai", "groq",
         "deepseek", "qwen", "moonshot", "minimax",
     } <= ids
-    # Each provider exposes at least one model, exactly one marked recommended.
+    # Plus the bring-your-own endpoint, whose catalog is empty by design: the
+    # model name is whatever the user deployed (TGI's literal "tgi", or a repo
+    # id), so there is nothing for us to recommend.
+    assert "custom" in ids
     for p in body["providers"]:
+        if p["id"] == "custom":
+            assert p["models"] == []
+            assert p["base_url"] is None
+            continue
+        # Every catalogued provider exposes models, exactly one recommended.
         assert p["models"]
         assert sum(1 for m in p["models"] if m.get("recommended")) == 1
 

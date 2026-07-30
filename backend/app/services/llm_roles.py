@@ -73,6 +73,11 @@ def normalize_base_url(url: str | None) -> str | None:
     filled in: a URL that already names a path may well be a deliberate prefix
     route, and rewriting it would break a working configuration to fix a
     hypothetical one.
+
+    Only ever apply this to :data:`CUSTOM_PROVIDER` — see
+    :func:`_provider_base_url`. It is emphatically *not* a general rule: DeepSeek
+    serves from the domain root, so normalizing its catalog URL turns a working
+    provider into a 404.
     """
     raw = (url or "").strip()
     if not raw:
@@ -87,10 +92,19 @@ def normalize_base_url(url: str | None) -> str | None:
 
 
 def _provider_base_url(provider: str, override: str | None) -> str | None:
-    """Catalog default unless overridden, then normalized."""
+    """Catalog default unless overridden; ``/v1`` filled in for custom endpoints.
+
+    Normalization is scoped to the custom provider on purpose. Every catalog
+    entry already carries the URL its vendor actually serves — DeepSeek's is
+    ``https://api.deepseek.com`` with no ``/v1`` — so applying the HF convention
+    across the board breaks them.
+    """
     from .llm import _resolve_openai_base_url
 
-    return normalize_base_url(_resolve_openai_base_url(provider, override))
+    resolved = _resolve_openai_base_url(provider, override)
+    if provider == CUSTOM_PROVIDER:
+        return normalize_base_url(resolved)
+    return resolved
 
 
 def _key_for_provider(settings, provider: str) -> str:
@@ -178,6 +192,20 @@ def _vision_config(settings) -> RoleConfig:
         max_tokens=max_tokens,
         extra_headers=_scale_up_headers(settings, provider, timeout),
     )
+
+
+def is_warming(exc: Exception) -> bool:
+    """True when the provider is booting a replica rather than actually broken.
+
+    A scale-to-zero endpoint answers **503** while it scales up. That is not the
+    same failure as a bad key or a wrong model name, and reporting it as a
+    generic error sends the user looking in the wrong place — the endpoint is
+    fine, it just was not running yet. Mirrors ``llm._is_auth_error``.
+    """
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is None:
+        status = getattr(exc, "status_code", None)
+    return status == 503
 
 
 def resolve_role(role: str) -> RoleConfig:

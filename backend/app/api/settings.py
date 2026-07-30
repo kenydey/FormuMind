@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
 from ..services.llm import PROVIDERS, _provider_default_base_url, list_remote_models, test_connection
+from ..services.llm_roles import CUSTOM_PROVIDER, normalize_base_url
 from ..services.runtime_secrets import effective_setting, get_runtime_secrets
 from ..services.secrets_store import (
     SECRET_REGISTRY,
@@ -35,6 +36,9 @@ _KNOWN_LLM_HOSTS: frozenset[str] = frozenset({
     "moonshot.cn",
     "api.moonshot.cn",
     "api.minimax.chat",
+    # HuggingFace Inference Endpoints. The suffix match below covers every
+    # `<name>.<region>.endpoints.huggingface.cloud`, so one entry is enough.
+    "huggingface.cloud",
 })
 
 
@@ -101,10 +105,19 @@ _SECRET_ATTR_IDS = {item[0] for item in SECRET_REGISTRY}
 
 
 def _apply_llm_update(update: LLMSettingsUpdate) -> None:
-    _validate_base_url(update.base_url)
     s = get_settings()
     rs = get_runtime_secrets()
     current_provider = effective_setting(s, "llm_provider")
+    # Fill in /v1 for a custom endpoint before validating and storing, so the
+    # overlay holds the URL we would actually call — a bare HF endpoint host
+    # would otherwise 404 later for no visible reason. Scoped to the custom
+    # provider: the catalog URLs are already right, and DeepSeek serves from the
+    # domain root, so normalizing it would break a working provider.
+    if update.base_url and str(update.provider or current_provider) == CUSTOM_PROVIDER:
+        update = update.model_copy(
+            update={"base_url": normalize_base_url(update.base_url) or ""}
+        )
+    _validate_base_url(update.base_url)
     provider_changed = update.provider is not None and update.provider != current_provider
     if update.provider is not None:
         rs.set("llm_provider", update.provider)
@@ -118,12 +131,18 @@ def _apply_llm_update(update: LLMSettingsUpdate) -> None:
             str(update.provider or current_provider)
         ))
 
+    effective_provider = str(update.provider or current_provider)
+    if effective_provider == CUSTOM_PROVIDER and update.base_url:
+        # Mirror it: the catalog has no default to restore a custom endpoint
+        # from, so switching to another provider and back would otherwise lose
+        # the URL entirely.
+        rs.set("custom_base_url", update.base_url.strip())
+
     if update.api_key is not None:
-        provider = str(update.provider or effective_setting(s, "llm_provider"))
-        key_field = f"{provider}_api_key"
+        key_field = f"{effective_provider}_api_key"
         if key_field in _SECRET_ATTR_IDS:
             update_secrets({key_field: update.api_key})
-        elif provider == "anthropic":
+        elif effective_provider == "anthropic":
             update_secrets({"anthropic_api_key": update.api_key})
 
     # Overlay changes apply immediately; persist them so a restart reloads
