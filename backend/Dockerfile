@@ -45,6 +45,21 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
     pymupdf4llm docling marker-pdf mineru-open-sdk \
     && pip uninstall -y surya-ocr 2>/dev/null; echo "surya-ocr removed (CPU VPS)"
 
+# 3) Local OCR for scanned pages. No build-time model download step is needed:
+# rapidocr-onnxruntime ships the Chinese PP-OCRv4 weights inside the wheel
+# (16 MB — det + rec + cls), so the container OCRs offline the moment it starts.
+# Verified by blocking the network and running a page through it.
+#
+# opencv-python-headless is installed explicitly and the GUI build removed:
+# rapidocr depends on plain opencv-python, which pulls libGL and friends that a
+# headless image does not have.
+RUN pip install "rapidocr-onnxruntime>=1.4.4" opencv-python-headless \
+    && pip uninstall -y opencv-python 2>/dev/null; \
+    python -c "import rapidocr_onnxruntime, pathlib, sys; \
+m = pathlib.Path(rapidocr_onnxruntime.__file__).parent / 'models'; \
+n = len(list(m.glob('*.onnx'))); print(f'rapidocr models bundled: {n}'); \
+sys.exit(0 if n >= 3 else 1)"
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

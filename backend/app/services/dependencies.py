@@ -90,6 +90,11 @@ CATALOG: tuple[Dependency, ...] = (
         "MinerU 云端解析（难页升级：密集表格/公式/图表；需 Token）",
     ),
     Dependency(
+        "rapidocr-onnxruntime", "rapidocr_onnxruntime", "parse_pro",
+        "本地 OCR 扫描件（ONNX Runtime，纯 CPU；中文 PP-OCRv4 模型随包分发，无需下载）",
+        spec="rapidocr-onnxruntime>=1.4.4",
+    ),
+    Dependency(
         "pymupdf4llm", "pymupdf4llm", "parse_pro",
         "本地版面感知 PDF → Markdown（极快、无模型权重，CPU 首选；⚠️ AGPL-3.0）",
     ),

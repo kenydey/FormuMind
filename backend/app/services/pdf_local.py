@@ -246,6 +246,21 @@ def page_as_pdf(content: bytes, page_no: int) -> bytes | None:
         return degrade_return(logger, exc, f"pdf_local page_as_pdf({page_no}) failed", None)
 
 
+def page_count(content: bytes) -> int:
+    """How many pages, without the layout-analysis pass.
+
+    ``extract_pages`` is the obvious way to learn this and the wrong one: it runs
+    pymupdf4llm over the whole document (~350 MB peak, and with an OCR engine
+    installed pymupdf4llm will additionally OCR every page). A caller that only
+    needs a page loop should not pay for any of that.
+    """
+    try:
+        with _open(content) as doc:
+            return int(doc.page_count)
+    except Exception as exc:
+        return degrade_return(logger, exc, "pdf_local page_count failed", 0)
+
+
 def page_as_png(content: bytes, page_no: int, dpi: int = 150) -> bytes | None:
     """One page rendered to PNG — for scans, where there is no text to keep."""
     try:

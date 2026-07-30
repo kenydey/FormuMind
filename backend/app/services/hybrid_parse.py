@@ -221,13 +221,29 @@ def parse(content: bytes) -> str | None:
         return None
 
     local_only = pdf_local.assemble([(p.page_no, p.markdown) for p in pages])
+    scanned = pdf_local.looks_scanned(pages)
 
     available, hint = mineru_cloud.mineru_available()
     if not available:
+        # A scan has no text layer, so `local_only` here is empty and returning
+        # it means the whole document is lost — every tier below this one also
+        # reads text layers. Local OCR is the only thing that can read it, and it
+        # costs no quota, so try it before giving up.
+        if scanned:
+            from . import rapidocr_local
+
+            ocr = rapidocr_local.ocr_pdf(content)
+            if ocr:
+                logger.info("hybrid: scanned document read by local OCR (no cloud)")
+                return ocr
         logger.debug("hybrid: local only (%s)", hint)
         return local_only or None
 
-    if pdf_local.looks_scanned(pages):
+    if scanned:
+        # Local first, cloud only where it earns its keep. OCR gets the text of
+        # every page for free; MinerU is then worth a call only for pages whose
+        # value is structural — a table or figure it can render and OCR cannot,
+        # since RapidOCR returns text and boxes with no HTML or LaTeX.
         return _parse_scanned(content, pages) or local_only or None
 
     cap = int(get_settings().mineru_max_pages_per_doc)

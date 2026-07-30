@@ -306,6 +306,21 @@ def _parse_hybrid(content: bytes) -> str | None:
     return hybrid_parse.parse(content)
 
 
+def _parse_rapidocr(content: bytes) -> str | None:
+    """Local OCR for a scanned PDF — the last resort that actually reads pixels.
+
+    Sits below the cloud tier and above the text-layer ones. That position is
+    deliberate: everything above it either reads an existing text layer (which a
+    scan does not have) or gives real layout structure, and everything below it
+    returns nothing at all on a scan. Before this, a scanned PDF on a deployment
+    without a MinerU token fell through the entire cascade to the "可能是扫描件"
+    placeholder and nothing was indexed.
+    """
+    from . import rapidocr_local
+
+    return rapidocr_local.ocr_pdf(content)
+
+
 # Every entry wraps its parser in a lambda so the name resolves at call time.
 # markitdown used to be held by direct reference, which made it the one tier a
 # test could not monkeypatch — the patch was accepted and silently ignored.
@@ -314,6 +329,7 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
     ("docling", lambda c, e: _parse_docling(c)),
     ("marker", lambda c, e: _parse_marker(c)),
     ("mineru", lambda c, e: _parse_mineru(c)),
+    ("rapidocr", lambda c, e: _parse_rapidocr(c)),
     ("markitdown", lambda c, e: _parse_markitdown(c, e)),
     ("pypdf", lambda c, e: _parse_pypdf(c)),
 )
@@ -398,6 +414,7 @@ def parser_availability() -> dict[str, bool]:
         "docling": optional_import("docling"),
         "marker": optional_import("marker"),
         "mineru": optional_import("magic_pdf"),
+        "rapidocr": optional_import("rapidocr_onnxruntime"),
         "markitdown": optional_import("markitdown"),
         "pypdf": optional_import("pypdf"),
         "trafilatura": optional_import("trafilatura"),
@@ -437,6 +454,8 @@ def format_availability() -> dict[str, bool]:
                 optional_import("docling"),
                 optional_import("marker"),
                 optional_import("magic_pdf"),
+                # Local OCR reads scans, which none of the text-layer parsers can.
+                optional_import("rapidocr_onnxruntime"),
                 _markitdown_can("pdf"),
                 optional_import("pypdf"),
             )

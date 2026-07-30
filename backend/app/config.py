@@ -231,6 +231,18 @@ class Settings(BaseSettings):
     # ── MinerU 云端解析 ──────────────────────────────────────────────────
     # 把本地解析不好的**单页**（密集表格、公式、图表）升级到 MinerU 云端。
     # ⚠️ 被升级的页面会上传至 mineru.net（第三方），故默认关闭，必须显式开启。
+    # 本地 OCR（RapidOCR / ONNX Runtime，纯 CPU，模型随 wheel 分发无需下载）。
+    # 扫描件没有文字层，此前只能靠 MinerU 云端 OCR；未配置 MinerU 时整篇无法入库。
+    rapidocr_enabled: bool = True
+    # 实测：峰值内存随像素数走（120dpi 372MB / 150dpi 557MB / 200dpi 659MB），
+    # 而更高 DPI 并没有更准——只是把一行切成更多段。150 是留给真实噪声扫描件的
+    # 折中值。
+    rapidocr_dpi: int = 150
+    rapidocr_max_pages: int = 30
+    # ORT 默认用满所有核心，会在 OCR 期间把 web worker 饿死。线程数不影响峰值
+    # 内存（实测 4/1/2 线程都是 ~656MB），只影响单页耗时。
+    rapidocr_threads: int = 2
+
     mineru_enabled: bool = False
     mineru_api_key: str | None = None
     mineru_base_url: str = "https://mineru.net/api/v4"
