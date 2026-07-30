@@ -39,6 +39,14 @@ T = TypeVar("T")
 
 _CACHE: dict[tuple[str, str], tuple[float, Any]] = {}
 _CACHE_TTL_SEC = 86400  # 24h — same policy as chemical_lookup / compounds
+# Negative results expire far sooner. They have to be cached at all because
+# supplier trade names ("Epikote 828", "Tinuvin 1130") are the common case in a
+# coatings corpus and PubChem will never resolve them: without this, every
+# document containing a product paid the round trips again. Measured on one
+# coating patent — 7 product mentions, 6537 ms, all of it name resolution.
+# The short TTL preserves the reason failures were not cached before: a
+# transient outage should cost minutes of stale misses, not a day of them.
+_NEGATIVE_CACHE_TTL_SEC = 900  # 15 min
 _CACHE_LOCK = threading.Lock()
 _CACHE_WRITE_COUNT = 0
 
@@ -178,25 +186,28 @@ _CASE_SENSITIVE_TOOLS = frozenset(
 )
 
 
+def _ttl_for(value: object) -> int:
+    return _CACHE_TTL_SEC if value is not None else _NEGATIVE_CACHE_TTL_SEC
+
+
 def _cached(tool: str, arg: str, compute: Callable[[], T]) -> T:
     global _CACHE_WRITE_COUNT
     normalized = arg.strip() if tool in _CASE_SENSITIVE_TOOLS else arg.strip().lower()
     key = (tool, normalized)
+    now = time.time()
     with _CACHE_LOCK:
         entry = _CACHE.get(key)
-        if entry and time.time() - entry[0] <= _CACHE_TTL_SEC:
+        if entry and now - entry[0] <= _ttl_for(entry[1]):
             return entry[1]
     value = compute()
-    # Don't cache failures — a transient outage shouldn't poison 24h of lookups.
-    if value is not None:
-        with _CACHE_LOCK:
-            _CACHE[key] = (time.time(), value)
-            _CACHE_WRITE_COUNT += 1
-            if _CACHE_WRITE_COUNT % 100 == 0:
-                now = time.time()
-                expired = [k for k, (ts, _) in _CACHE.items() if now - ts > _CACHE_TTL_SEC]
-                for k in expired:
-                    del _CACHE[k]
+    with _CACHE_LOCK:
+        _CACHE[key] = (time.time(), value)
+        _CACHE_WRITE_COUNT += 1
+        if _CACHE_WRITE_COUNT % 100 == 0:
+            now = time.time()
+            expired = [k for k, (ts, v) in _CACHE.items() if now - ts > _ttl_for(v)]
+            for k in expired:
+                del _CACHE[k]
     return value
 
 

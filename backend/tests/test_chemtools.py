@@ -207,15 +207,65 @@ def test_timeout_returns_neutral(monkeypatch):
     assert chemtools.name_to_smiles("ethanol") is None
 
 
-def test_failures_are_not_cached(monkeypatch):
+def test_failures_are_cached_briefly(monkeypatch):
+    """A miss is cached, but for minutes rather than a day.
+
+    Misses have to be cached at all because supplier trade names are the common
+    case in a coatings corpus and will never resolve: without this, every
+    document mentioning a product paid the round trips again. Measured on one
+    coating patent — 7 mentions, 6537 ms, all of it name resolution, which made
+    this the single largest cost in the KB build.
+    """
     monkeypatch.setattr(chemtools, "_pubchem_get", lambda path: None)  # no PubChem fallback
+    calls: list[str] = []
+
+    def missing(arg):
+        calls.append(arg)
+        return "Could not find a molecule matching the text."
+
+    _install_fake_chemcrow(monkeypatch, Query2SMILES=missing)
+    assert chemtools.name_to_smiles("obscurine") is None
+    assert chemtools.name_to_smiles("obscurine") is None
+    assert len(calls) == 1, "the second lookup must be served from cache"
+
+
+def test_cached_failures_expire_far_sooner_than_hits(monkeypatch):
+    """The short TTL is what preserves the original reason for not caching.
+
+    A transient outage should cost minutes of stale misses, not the 24 hours a
+    successful lookup is held for.
+    """
+    assert chemtools._NEGATIVE_CACHE_TTL_SEC < chemtools._CACHE_TTL_SEC / 10
+
+    monkeypatch.setattr(chemtools, "_pubchem_get", lambda path: None)
     _install_fake_chemcrow(
         monkeypatch, Query2SMILES="Could not find a molecule matching the text."
     )
     assert chemtools.name_to_smiles("obscurine") is None
-    # Second attempt with a working tool must not be poisoned by the miss.
+
+    # Age the cached miss past its TTL; a working tool must then be reached.
+    with chemtools._CACHE_LOCK:
+        for key in list(chemtools._CACHE):
+            ts, value = chemtools._CACHE[key]
+            chemtools._CACHE[key] = (ts - chemtools._NEGATIVE_CACHE_TTL_SEC - 1, value)
+
     _install_fake_chemcrow(monkeypatch, Query2SMILES="C1CC1")
     assert chemtools.name_to_smiles("obscurine") == "C1CC1"
+
+
+def test_a_cached_hit_outlives_the_negative_ttl(monkeypatch):
+    """Successes must keep the full 24 h — the short TTL is for misses only."""
+    _install_fake_chemcrow(monkeypatch, Query2SMILES="C1CC1")
+    assert chemtools.name_to_smiles("cyclopropane") == "C1CC1"
+
+    with chemtools._CACHE_LOCK:
+        for key in list(chemtools._CACHE):
+            ts, value = chemtools._CACHE[key]
+            chemtools._CACHE[key] = (ts - chemtools._NEGATIVE_CACHE_TTL_SEC - 1, value)
+
+    monkeypatch.setattr(chemtools, "_pubchem_get", lambda path: None)
+    _install_fake_chemcrow(monkeypatch, Query2SMILES="Could not find a molecule.")
+    assert chemtools.name_to_smiles("cyclopropane") == "C1CC1"
 
 
 # ── chemical_profile aggregation ─────────────────────────────────────────────

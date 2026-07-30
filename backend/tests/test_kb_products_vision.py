@@ -1,6 +1,7 @@
 """KB stream P2 — product registry, chunk meta wiring, vision extraction."""
 from __future__ import annotations
 
+import threading
 import json
 import sys
 import types
@@ -337,3 +338,94 @@ def test_image_upload_placeholder_when_vision_off(monkeypatch, stores):
     assert outcome.source_id is None
     assert outcome.extraction_status == "skipped"
     assert "未配置视觉模型" in outcome.evidence[0].snippet
+
+
+# ── structure linking: concurrent lookups, serial writes ─────────────────────
+
+
+def test_structure_lookups_run_concurrently(stores, monkeypatch):
+    """Name resolution is a network round trip per product, and they overlap.
+
+    Measured before this change: 7 mentions on one coating patent cost 6537 ms
+    of serial lookups — the single largest cost in the whole KB build. The
+    lookups are independent, so the only reason it was slow was that they ran
+    one after another.
+    """
+    import time as _time
+
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+    in_flight, peak = [], [0]
+    lock = threading.Lock()
+
+    def slow_lookup(name):
+        with lock:
+            in_flight.append(name)
+            peak[0] = max(peak[0], len(in_flight))
+        _time.sleep(0.2)
+        with lock:
+            in_flight.remove(name)
+        return None
+
+    monkeypatch.setattr(chemtools, "name_to_cas", slow_lookup)
+    monkeypatch.setattr(chemtools, "name_to_smiles", slow_lookup)
+
+    mentions = [{"trade_name": f"Product{i}", "grade": "A"} for i in range(4)]
+    started = _time.perf_counter()
+    products.upsert_mentions("s1", mentions)
+    elapsed = _time.perf_counter() - started
+
+    assert peak[0] > 1, "lookups ran one at a time"
+    # Serial would be 4 products x 0.2 s = 0.8 s at minimum.
+    assert elapsed < 0.7, f"lookups did not overlap: {elapsed:.2f}s"
+
+
+def test_structure_results_are_written_back(stores, monkeypatch):
+    """Concurrency must not lose the results it was gathering."""
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+    monkeypatch.setattr(chemtools, "name_to_cas", lambda n: "64-17-5")
+    monkeypatch.setattr(chemtools, "name_to_smiles", lambda n: "CCO")
+
+    products.upsert_mentions("s1", [{"trade_name": "Solvent X", "grade": "1"}])
+    row = products.search("solvent x")[0]
+    assert row.cas == "64-17-5"
+    assert row.smiles == "CCO"
+
+
+def test_structure_linking_is_skipped_when_the_gateway_is_off(stores, monkeypatch):
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: False)
+    calls: list[str] = []
+    monkeypatch.setattr(chemtools, "name_to_cas", lambda n: calls.append(n) or None)
+    monkeypatch.setattr(chemtools, "name_to_smiles", lambda n: calls.append(n) or None)
+
+    products.upsert_mentions("s1", [{"trade_name": "Epon", "grade": "828"}])
+    assert calls == []
+
+
+def test_a_failing_lookup_does_not_lose_the_other_products(stores, monkeypatch):
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+
+    def flaky(name):
+        if "Bad" in name:
+            raise RuntimeError("upstream exploded")
+        return "CCO"
+
+    monkeypatch.setattr(chemtools, "name_to_cas", lambda n: None)
+    monkeypatch.setattr(chemtools, "name_to_smiles", flaky)
+
+    products.upsert_mentions(
+        "s1", [{"trade_name": "Bad", "grade": "1"}, {"trade_name": "Good", "grade": "2"}]
+    )
+    assert products.search("good")[0].smiles == "CCO"
+    assert products.search("bad")[0].smiles in (None, "")
