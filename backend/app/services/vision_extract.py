@@ -26,6 +26,7 @@ from ..config import get_settings
 from ..domain.multimodal_schemas import VisionTableExtraction
 from .errors import degrade_return
 from .kg.prompts import build_multimodal_table_prompt
+from .llm_roles import CUSTOM_PROVIDER, VISION, RoleConfig, is_warming, resolve_role
 from .runtime_secrets import effective_setting
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,16 @@ _NO_VISION_PROVIDERS = frozenset({"deepseek"})
 
 
 def vision_available() -> tuple[bool, str]:
-    """(usable, hint) — key present, provider supported, and its SDK installed.
+    """(configured, hint) — key present, provider not known-hostile, SDK installed.
+
+    Note what this does **not** claim: that the configured model can actually
+    read a picture. For a self-hosted or rented endpoint that is unknowable from
+    here — we have no way to tell which weights the user deployed — and a
+    capability table we cannot keep accurate is exactly the lying probe this
+    codebase has been bitten by four times. So ``custom`` follows the policy
+    already documented for qwen/moonshot below: don't guess, let the call fail
+    carrying the provider's own message. ``POST /api/settings/vision/test`` is
+    the way to actually *know*.
 
     The SDK check is not a formality. Without it this returned ``(True, "")``
     on a machine with no ``openai`` package, so callers were told vision was
@@ -92,36 +102,36 @@ def vision_available() -> tuple[bool, str]:
     from .errors import optional_import
 
     settings = get_settings()
-    if not settings.vision_extract_enabled:
+    if not effective_setting(settings, "vision_extract_enabled"):
         return False, "图片视觉解析已禁用（FORMUMIND_VISION_EXTRACT_ENABLED）"
-    if not settings.get_active_api_key():
-        return False, "未配置 LLM API key，无法调用视觉模型"
-    provider = str(effective_setting(settings, "llm_provider"))
-    if provider == "gemini":
+
+    cfg = resolve_role(VISION)
+    if not cfg.configured:
+        where = "文本模型" if cfg.inherited else "视觉模型"
+        return False, f"未配置「设置 → 大模型 → {where}」的 API key，无法调用视觉模型"
+    if not cfg.model:
+        return False, "未指定视觉模型名称（设置 → 大模型 → 视觉模型）"
+    if cfg.provider == "gemini":
         return False, "Gemini 原生接口暂不支持图片解析——请切换 OpenAI 兼容供应商或 Anthropic"
-    if provider in _NO_VISION_PROVIDERS:
-        return False, (
-            f"{provider} 不支持图片输入，无法解析化学结构图/图表。"
-            "请在「设置 → 大模型」切换到 Claude 或 OpenAI。"
+    if cfg.provider in _NO_VISION_PROVIDERS:
+        hint = (
+            f"{cfg.provider} 不支持图片输入，无法解析化学结构图/图表。"
+            "请在「设置 → 大模型 → 视觉模型」单独指定一个支持视觉的供应商"
+            "（Claude / OpenAI / 自定义端点），文本模型可以保持不变。"
         )
+        return False, hint
 
     # Anthropic has its own client; every other supported provider is reached
     # through the OpenAI-compatible one.
-    if provider == "anthropic":
+    if cfg.provider == "anthropic":
         if not optional_import("anthropic"):
             return False, "未安装 anthropic SDK（pip install anthropic 或安装 llm extra）"
     elif not optional_import("openai"):
         return False, (
-            f"未安装 openai SDK，无法调用 {provider} 的视觉接口"
+            f"未安装 openai SDK，无法调用 {cfg.provider} 的视觉接口"
             "（pip install openai 或安装 llm extra）"
         )
     return True, ""
-
-
-def _vision_model(settings) -> str:
-    return (settings.vision_model or "").strip() or str(
-        effective_setting(settings, "llm_model")
-    )
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -135,12 +145,15 @@ def _strip_json_fences(raw: str) -> str:
 def _call_openai_vision(
     prompt: str, image_b64: str, mime: str, *, api_key: str, model: str,
     base_url: str | None, max_tokens: int, timeout: float,
+    extra_headers: dict[str, str] | None = None,
 ) -> str:
     from openai import OpenAI  # type: ignore
 
     kwargs: dict = {"api_key": api_key, "timeout": timeout}
     if base_url:
         kwargs["base_url"] = base_url
+    if extra_headers:
+        kwargs["default_headers"] = dict(extra_headers)
     client = OpenAI(**kwargs)
     resp = client.chat.completions.create(
         model=model,
@@ -187,6 +200,173 @@ def _call_anthropic_vision(
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
 
+def _call_vision(cfg: RoleConfig, prompt: str, content: bytes, filename: str) -> str:
+    """Send one image + prompt to the resolved vision role, return raw text.
+
+    The two public entry points used to each carry their own copy of the
+    provider/key/model/base_url/timeout resolution and the anthropic-vs-OpenAI
+    branch. Both now share this, so a change to how vision is reached cannot
+    apply to one caller and miss the other.
+    """
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "png").lower()
+    mime = _MIME_BY_EXT.get(ext, "image/png")
+    image_b64 = base64.b64encode(content).decode("ascii")
+
+    if cfg.provider == "anthropic":
+        return _call_anthropic_vision(
+            prompt, image_b64, mime,
+            api_key=cfg.api_key, model=cfg.model,
+            max_tokens=cfg.max_tokens, timeout=cfg.timeout,
+        )
+    return _call_openai_vision(
+        prompt, image_b64, mime,
+        api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url,
+        max_tokens=cfg.max_tokens, timeout=cfg.timeout,
+        extra_headers=cfg.extra_headers,
+    )
+
+
+def _failure_hint(exc: Exception) -> str:
+    """Turn a provider exception into something worth reading.
+
+    A 503 from a scale-to-zero endpoint means "not running yet", not "broken" —
+    saying so is the difference between waiting a minute and going to hunt for a
+    bad API key.
+    """
+    if is_warming(exc):
+        return "视觉端点正在冷启动（503），副本就绪后重试即可"
+    return str(exc)[:200]
+
+
+def prewarm() -> tuple[bool, float, str]:
+    """Wake a scale-to-zero endpoint once, before a batch of figures.
+
+    Returns ``(ok, seconds, hint)``. A no-op returning ``(True, 0.0, "")`` for
+    every provider except a custom endpoint, so callers need no knowledge of who
+    is serving vision.
+
+    Why bother: with an endpoint scaled to zero the first real call absorbs a
+    multi-minute boot. Paying that inside the per-page loop makes the wait look
+    like "page 3 is mysteriously slow"; paying it here attributes it correctly in
+    the log and keeps the per-page timings meaningful. It costs one tiny request.
+
+    Best-effort by contract — a failure here is not a reason to skip the figures,
+    because the per-page calls will each try anyway and may well succeed.
+    """
+    import time
+
+    ok, hint = vision_available()
+    if not ok:
+        return False, 0.0, hint
+    cfg = resolve_role(VISION)
+    if cfg.provider != CUSTOM_PROVIDER:
+        return True, 0.0, ""
+
+    started = time.monotonic()
+    try:
+        from openai import OpenAI  # type: ignore
+
+        kwargs: dict = {"api_key": cfg.api_key, "timeout": cfg.timeout}
+        if cfg.base_url:
+            kwargs["base_url"] = cfg.base_url
+        if cfg.extra_headers:
+            kwargs["default_headers"] = dict(cfg.extra_headers)
+        OpenAI(**kwargs).chat.completions.create(
+            model=cfg.model,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ok"}],
+        )
+    except Exception as exc:
+        elapsed = time.monotonic() - started
+        if is_warming(exc):
+            hint = "视觉端点仍在冷启动中（副本尚未就绪）"
+        else:
+            hint = str(exc)[:200]
+        logger.warning("vision prewarm failed after %.1fs: %s", elapsed, hint)
+        return False, elapsed, hint
+
+    elapsed = time.monotonic() - started
+    logger.info("vision endpoint warm after %.1fs (%s)", elapsed, cfg.model)
+    return True, elapsed, ""
+
+
+def _tiny_png(side: int = 8) -> bytes:
+    """A valid solid-grey PNG, built without Pillow.
+
+    Hand-rolled rather than a hardcoded base64 blob so it stays readable, and
+    8×8 rather than 1×1 because some vision stacks reject degenerate images —
+    a probe that fails for its own reasons teaches nothing about the endpoint.
+    """
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    # 8-bit greyscale, no interlace. Each row is prefixed with its filter byte.
+    ihdr = struct.pack(">IIBBBBB", side, side, 8, 0, 0, 0, 0)
+    raw = b"".join(b"\x00" + bytes([0x80] * side) for _ in range(side))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def probe_vision() -> dict:
+    """Actually call the vision model and report what happened.
+
+    ``vision_available()`` answers "is it configured"; this answers "does it
+    work", which for a bring-your-own endpoint is the only honest way to know.
+    """
+    import time
+
+    ok, hint = vision_available()
+    if not ok:
+        return {"ok": False, "provider": "", "model": "", "message": hint}
+
+    cfg = resolve_role(VISION)
+    base = {
+        "provider": cfg.provider,
+        "model": cfg.model,
+        "base_url": cfg.base_url,
+        "inherits": cfg.inherited,
+    }
+    started = time.monotonic()
+    try:
+        raw = _call_vision(
+            cfg,
+            "这是一张纯色测试图。只回复两个字符：OK",
+            _tiny_png(),
+            "probe.png",
+        )
+    except Exception as exc:
+        logger.warning("vision probe failed (%s/%s): %s", cfg.provider, cfg.model, exc)
+        return {**base, "ok": False, "message": _failure_hint(exc)}
+
+    elapsed = time.monotonic() - started
+    text = (raw or "").strip()
+    if not text:
+        # Reached the model but got nothing usable — the endpoint is up and the
+        # credentials work, so say that rather than implying a config error.
+        return {
+            **base,
+            "ok": False,
+            "message": f"端点已响应但未返回文本（{elapsed:.1f}s），请确认模型具备视觉能力",
+        }
+    return {
+        **base,
+        "ok": True,
+        "message": f"视觉模型可用（{elapsed:.1f}s）：{text[:80]}",
+    }
+
+
 def _verify_molecules(molecules: list[VisionMolecule]) -> list[VisionMolecule]:
     """RDKit validation loop: parse → canonicalize → flag; drop empty claims."""
     try:
@@ -223,40 +403,17 @@ def extract_image(content: bytes, filename: str) -> tuple[VisionExtraction | Non
     ok, hint = vision_available()
     if not ok:
         return None, hint
-    settings = get_settings()
-    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "png").lower()
-    mime = _MIME_BY_EXT.get(ext, "image/png")
-    image_b64 = base64.b64encode(content).decode("ascii")
-    provider = str(effective_setting(settings, "llm_provider"))
-    api_key = settings.get_active_api_key() or ""
-    model = _vision_model(settings)
-    timeout = float(settings.llm_timeout_seconds)
-    max_tokens = int(settings.llm_max_tokens)
+    cfg = resolve_role(VISION)
     prompt = f"{_VISION_SYSTEM}\n\n文件名：{filename}"
 
     try:
-        if provider == "anthropic":
-            raw = _call_anthropic_vision(
-                prompt, image_b64, mime,
-                api_key=api_key, model=model, max_tokens=max_tokens, timeout=timeout,
-            )
-        else:
-            from .llm import _resolve_openai_base_url
-
-            base_url = _resolve_openai_base_url(
-                provider, effective_setting(settings, "llm_base_url")
-            )
-            raw = _call_openai_vision(
-                prompt, image_b64, mime,
-                api_key=api_key, model=model, base_url=base_url,
-                max_tokens=max_tokens, timeout=timeout,
-            )
+        raw = _call_vision(cfg, prompt, content, filename)
         data = json.loads(_strip_json_fences(raw))
         extraction = VisionExtraction.model_validate(data)
         extraction.molecules = _verify_molecules(extraction.molecules)
         return extraction, None
     except Exception as exc:
-        return None, degrade_return(logger, exc, "vision extraction failed", str(exc)[:200])
+        return None, degrade_return(logger, exc, "vision extraction failed", _failure_hint(exc))
 
 
 def extract_structured_table_from_image(
@@ -272,36 +429,13 @@ def extract_structured_table_from_image(
     ok, hint = vision_available()
     if not ok:
         return None, hint
-    settings = get_settings()
-    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "png").lower()
-    mime = _MIME_BY_EXT.get(ext, "image/png")
-    image_b64 = base64.b64encode(image_bytes).decode("ascii")
-    provider = str(effective_setting(settings, "llm_provider"))
-    api_key = settings.get_active_api_key() or ""
-    model = _vision_model(settings)
-    timeout = float(settings.llm_timeout_seconds)
-    max_tokens = int(settings.llm_max_tokens)
+    cfg = resolve_role(VISION)
     prompt = build_multimodal_table_prompt(context_text)
     if filename:
         prompt = f"{prompt}\n\n文件名：{filename}"
 
     try:
-        if provider == "anthropic":
-            raw = _call_anthropic_vision(
-                prompt, image_b64, mime,
-                api_key=api_key, model=model, max_tokens=max_tokens, timeout=timeout,
-            )
-        else:
-            from .llm import _resolve_openai_base_url
-
-            base_url = _resolve_openai_base_url(
-                provider, effective_setting(settings, "llm_base_url")
-            )
-            raw = _call_openai_vision(
-                prompt, image_b64, mime,
-                api_key=api_key, model=model, base_url=base_url,
-                max_tokens=max_tokens, timeout=timeout,
-            )
+        raw = _call_vision(cfg, prompt, image_bytes, filename)
         data = json.loads(_strip_json_fences(raw))
         if not isinstance(data, dict):
             return None, "视觉模型返回非对象 JSON"
@@ -312,7 +446,9 @@ def extract_structured_table_from_image(
     except json.JSONDecodeError as exc:
         return None, degrade_return(logger, exc, "vision table JSON parse failed", str(exc)[:200])
     except Exception as exc:
-        return None, degrade_return(logger, exc, "vision table extraction failed", str(exc)[:200])
+        return None, degrade_return(
+            logger, exc, "vision table extraction failed", _failure_hint(exc)
+        )
 
 
 def image_markdown(extraction: VisionExtraction, filename: str) -> str:

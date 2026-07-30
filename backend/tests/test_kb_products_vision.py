@@ -259,6 +259,58 @@ def test_vision_extracts_and_verifies_molecules(monkeypatch):
         rs.clear()
 
 
+def test_vision_role_uses_its_own_key_and_base_url(monkeypatch):
+    """Text on DeepSeek, vision on a custom endpoint — the call must carry the
+    *vision* credentials.
+
+    This is the defect the roles exist to fix, and the one most likely to
+    reappear silently: if the vision call kept resolving the text provider's key
+    it would still look configured in the UI and fail at the vendor. The fake
+    OpenAI client records the kwargs it was constructed with, so the assertion
+    is on what actually reached the transport.
+    """
+    from app.services import runtime_secrets, vision_extract
+
+    rs = runtime_secrets.get_runtime_secrets()
+    rs.set("llm_provider", "deepseek")
+    rs.set("llm_model", "deepseek-v4-pro")
+    rs.set("deepseek_api_key", "sk-text-only")
+    rs.set("vision_provider", "custom")
+    rs.set("vision_model", "tgi")
+    rs.set("vision_api_key", "hf_vision_token")
+    rs.set("vision_base_url", "https://vlm.endpoints.huggingface.cloud/v1")
+    fake = _fake_openai(monkeypatch, {"kind": "table", "markdown": "| a |", "molecules": []})
+    try:
+        extraction, err = vision_extract.extract_image(b"\x89PNG fake", "table.png")
+        assert err is None and extraction is not None
+        assert fake.last_kwargs["api_key"] == "hf_vision_token"
+        assert fake.last_kwargs["api_key"] != "sk-text-only"
+        assert fake.last_kwargs["base_url"] == "https://vlm.endpoints.huggingface.cloud/v1"
+        # Cold-start hold, and only for the custom endpoint.
+        assert "X-Scale-Up-Timeout" in fake.last_kwargs["default_headers"]
+    finally:
+        rs.clear()
+
+
+def test_inherited_vision_role_sends_no_scale_up_header(monkeypatch):
+    """A role merely riding the chat provider must look exactly like before —
+    no extra headers aimed at an endpoint that isn't there."""
+    from app.services import runtime_secrets, vision_extract
+
+    rs = runtime_secrets.get_runtime_secrets()
+    rs.set("llm_provider", "openai")
+    rs.set("llm_model", "gpt-4o")
+    rs.set("openai_api_key", "sk-text")
+    fake = _fake_openai(monkeypatch, {"kind": "table", "markdown": "| a |", "molecules": []})
+    try:
+        _, err = vision_extract.extract_image(b"\x89PNG fake", "table.png")
+        assert err is None
+        assert fake.last_kwargs["api_key"] == "sk-text"
+        assert "default_headers" not in fake.last_kwargs
+    finally:
+        rs.clear()
+
+
 def test_image_upload_routes_to_vision(monkeypatch, stores):
     from app.services import ingestion, vision_extract
 

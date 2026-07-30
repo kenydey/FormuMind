@@ -4,6 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
 from ..services.llm import PROVIDERS, _provider_default_base_url, list_remote_models, test_connection
+from ..services.llm_roles import CUSTOM_PROVIDER, VISION, normalize_base_url, resolve_role
+from ..services.vision_extract import probe_vision, vision_available
 from ..services.runtime_secrets import effective_setting, get_runtime_secrets
 from ..services.secrets_store import (
     SECRET_REGISTRY,
@@ -35,6 +37,9 @@ _KNOWN_LLM_HOSTS: frozenset[str] = frozenset({
     "moonshot.cn",
     "api.moonshot.cn",
     "api.minimax.chat",
+    # HuggingFace Inference Endpoints. The suffix match below covers every
+    # `<name>.<region>.endpoints.huggingface.cloud`, so one entry is enough.
+    "huggingface.cloud",
 })
 
 
@@ -76,6 +81,17 @@ class LLMSettingsUpdate(BaseModel):
     base_url: str | None = Field(default=None, alias="baseUrl")
 
 
+class VisionSettingsUpdate(BaseModel):
+    """The vision role. An empty ``provider`` means "follow the text model"."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    provider: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    base_url: str | None = Field(default=None, alias="baseUrl")
+
+
 class LLMModelsRefreshRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -101,10 +117,19 @@ _SECRET_ATTR_IDS = {item[0] for item in SECRET_REGISTRY}
 
 
 def _apply_llm_update(update: LLMSettingsUpdate) -> None:
-    _validate_base_url(update.base_url)
     s = get_settings()
     rs = get_runtime_secrets()
     current_provider = effective_setting(s, "llm_provider")
+    # Fill in /v1 for a custom endpoint before validating and storing, so the
+    # overlay holds the URL we would actually call — a bare HF endpoint host
+    # would otherwise 404 later for no visible reason. Scoped to the custom
+    # provider: the catalog URLs are already right, and DeepSeek serves from the
+    # domain root, so normalizing it would break a working provider.
+    if update.base_url and str(update.provider or current_provider) == CUSTOM_PROVIDER:
+        update = update.model_copy(
+            update={"base_url": normalize_base_url(update.base_url) or ""}
+        )
+    _validate_base_url(update.base_url)
     provider_changed = update.provider is not None and update.provider != current_provider
     if update.provider is not None:
         rs.set("llm_provider", update.provider)
@@ -118,17 +143,73 @@ def _apply_llm_update(update: LLMSettingsUpdate) -> None:
             str(update.provider or current_provider)
         ))
 
+    effective_provider = str(update.provider or current_provider)
+    if effective_provider == CUSTOM_PROVIDER and update.base_url:
+        # Mirror it: the catalog has no default to restore a custom endpoint
+        # from, so switching to another provider and back would otherwise lose
+        # the URL entirely.
+        rs.set("custom_base_url", update.base_url.strip())
+
     if update.api_key is not None:
-        provider = str(update.provider or effective_setting(s, "llm_provider"))
-        key_field = f"{provider}_api_key"
+        key_field = f"{effective_provider}_api_key"
         if key_field in _SECRET_ATTR_IDS:
             update_secrets({key_field: update.api_key})
-        elif provider == "anthropic":
+        elif effective_provider == "anthropic":
             update_secrets({"anthropic_api_key": update.api_key})
 
     # Overlay changes apply immediately; persist them so a restart reloads
     # the same provider / model / base URL instead of the compiled defaults.
     persist_llm_runtime()
+
+
+def _apply_vision_update(update: VisionSettingsUpdate) -> None:
+    """The vision role, same shape as the text one with two differences.
+
+    An empty provider is meaningful — it means "follow the text model" — and the
+    key always goes to ``vision_api_key`` rather than a per-provider secret,
+    because a key typed into the vision section is the vision key. The read path
+    still falls back to ``{provider}_api_key`` when it is blank, so pointing
+    vision at a provider you already have a key for needs no retyping.
+    """
+    s = get_settings()
+    rs = get_runtime_secrets()
+    current_provider = effective_setting(s, "vision_provider")
+    if update.base_url and str(update.provider or current_provider) == CUSTOM_PROVIDER:
+        update = update.model_copy(
+            update={"base_url": normalize_base_url(update.base_url) or ""}
+        )
+    _validate_base_url(update.base_url)
+
+    provider_changed = update.provider is not None and update.provider != current_provider
+    if update.provider is not None:
+        rs.set("vision_provider", update.provider.strip())
+    if update.model is not None:
+        rs.set("vision_model", update.model.strip())
+    if provider_changed and update.base_url is None:
+        rs.set("vision_base_url", _provider_default_base_url(str(update.provider or "")))
+    if update.base_url is not None:
+        rs.set("vision_base_url", update.base_url.strip() or None)
+    if update.api_key is not None:
+        update_secrets({"vision_api_key": update.api_key})
+
+    persist_llm_runtime()
+
+
+def _vision_state() -> dict:
+    """What the settings page needs to render the vision section."""
+    cfg = resolve_role(VISION)
+    configured, hint = vision_available()
+    return {
+        # Empty provider == inheriting; the UI shows "follow the text model".
+        "provider": effective_setting(get_settings(), "vision_provider") or "",
+        "model": cfg.model,
+        "base_url": cfg.base_url,
+        "key_set": bool(cfg.api_key),
+        "inherits": cfg.inherited,
+        # "configured", never "can read a picture" — see vision_available().
+        "configured": configured,
+        "hint": hint,
+    }
 
 
 @router.get("/settings")
@@ -140,6 +221,7 @@ def get_llm_settings():
         "key_set": bool(s.get_active_api_key()),
         "base_url": effective_setting(s, "llm_base_url"),
         "providers": PROVIDERS,
+        "vision": _vision_state(),
     }
 
 
@@ -147,6 +229,25 @@ def get_llm_settings():
 def update_llm_settings(update: LLMSettingsUpdate):
     _apply_llm_update(update)
     return test_connection()
+
+
+@router.post("/settings/vision")
+def update_vision_settings(update: VisionSettingsUpdate):
+    _apply_vision_update(update)
+    return {"ok": True, **_vision_state()}
+
+
+@router.post("/settings/vision/test")
+def test_vision_connection():
+    """Send a real image through the real path.
+
+    This exists because ``vision_available()`` deliberately refuses to guess
+    whether the configured model can read a picture — for a rented endpoint we
+    cannot know which weights were deployed, and a capability table we cannot
+    keep accurate is the lying-probe bug this codebase keeps relearning. So
+    instead of guessing, offer a button that finds out.
+    """
+    return probe_vision()
 
 
 @router.post("/settings/test")

@@ -240,6 +240,16 @@ def parse(content: bytes) -> str | None:
             len(candidates), cap,
         )
 
+    if selected:
+        # Wake a scale-to-zero vision endpoint once, up front. The loop below is
+        # sequential, so only the first call would pay the boot anyway — but
+        # paying it here means the log attributes minutes of waiting to a cold
+        # start instead of to whichever page happened to go first. A no-op for
+        # every provider that is not a rented endpoint.
+        from .vision_extract import prewarm
+
+        prewarm()
+
     upgraded: dict[int, str] = {}
     for page in selected:
         rendered = _escalate_page(content, page)
