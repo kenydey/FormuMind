@@ -33,3 +33,9 @@ pypdf==6.14.2
 # Lightweight online retrieval (no API keys required for arXiv / DDG; S2 uses httpx).
 arxiv==4.0.0
 ddgs==9.14.4
+# LaTeX → text for arXiv source ingest. Zero dependencies (pure Python), which
+# is why it is a hard requirement rather than an optional extra. It does crash
+# on real papers — measured 1 in 4, an IndexError on a single-argument \href —
+# so `arxiv_source` converts section by section and falls back to a regex
+# stripper, keeping a crash to one section instead of the whole document.
+pylatexenc==2.11

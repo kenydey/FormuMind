@@ -126,8 +126,32 @@ def _resolve_oa_pdf_url(ev: Evidence, timeout: float) -> str | None:
         return degrade_return(logger, exc, "OpenAlex OA resolution failed", None)
 
 
+def _arxiv_id(ev: Evidence) -> str | None:
+    m = _ARXIV_RE.search(ev.identifier or "")
+    return m.group(1) if m else None
+
+
 def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
+    """OA full text: arXiv LaTeX source when available, else the PDF.
+
+    Source is tried first because the PDF path is where the time goes — a
+    100-page arXiv paper measured ~53 s, of which ~50 s was RapidOCR firing on
+    figure-heavy pages that look like scans to the triage heuristic, against
+    ~1.2 s for the source. It also keeps equations as LaTeX and section
+    structure as headings. PDF-only submissions fall through unchanged.
+    """
     from .pdf_downloader import _extract_text, fetch_pdf
+
+    arxiv_id = _arxiv_id(ev)
+    if arxiv_id and getattr(get_settings(), "arxiv_prefer_source", True):
+        from .arxiv_source import fetch_arxiv_markdown
+
+        try:
+            md = fetch_arxiv_markdown(arxiv_id, timeout)
+        except Exception as exc:
+            md = degrade_return(logger, exc, f"arxiv source fetch failed: {arxiv_id}", None)
+        if md and len(md.strip()) > 200:
+            return md
 
     pdf_url = _resolve_oa_pdf_url(ev, timeout)
     if not pdf_url:

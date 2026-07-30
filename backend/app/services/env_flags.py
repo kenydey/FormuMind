@@ -84,6 +84,15 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("fulltext_enrich", "检索全文获取",
             "把排名靠前的专利/OA 文献/网页命中升级为全文分块并持久化入知识库。",
             "kb", "需网络；每次深度研究会下载最多 8 篇全文"),
+    EnvFlag("patent_prefer_html", "专利用落地页正文",
+            "专利全文取 Google Patents 落地页的 abstract/description/claims，而不是先下 PDF。"
+            "一次请求约 0.7 秒且完全不需要 OCR；中日文专利还附带英文机器翻译对照。"
+            "关闭则优先下 PDF（能拿到图表原件，但慢得多，扫描件还要 OCR）。",
+            "kb", "需网络；关闭后扫描版专利每页约 2 秒 OCR"),
+    EnvFlag("arxiv_prefer_source", "arXiv 用 LaTeX 源码",
+            "arXiv 文献下载 LaTeX 源码而不是 PDF：实测同一篇 100 页论文 53 秒 → 1.2 秒，"
+            "公式以 LaTeX 保留、章节结构直接变成标题。无源码的投稿自动回落到 PDF。",
+            "kb", "需网络"),
     EnvFlag("pdf_download", "旧版专利 PDF 下载",
             "深度研究后下载专利 PDF 替换摘要（已被「检索全文获取」取代，保留兼容）。",
             "kb", "需网络"),
