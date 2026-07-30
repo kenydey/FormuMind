@@ -290,6 +290,83 @@ def prewarm() -> tuple[bool, float, str]:
     return True, elapsed, ""
 
 
+def _tiny_png(side: int = 8) -> bytes:
+    """A valid solid-grey PNG, built without Pillow.
+
+    Hand-rolled rather than a hardcoded base64 blob so it stays readable, and
+    8×8 rather than 1×1 because some vision stacks reject degenerate images —
+    a probe that fails for its own reasons teaches nothing about the endpoint.
+    """
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    # 8-bit greyscale, no interlace. Each row is prefixed with its filter byte.
+    ihdr = struct.pack(">IIBBBBB", side, side, 8, 0, 0, 0, 0)
+    raw = b"".join(b"\x00" + bytes([0x80] * side) for _ in range(side))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def probe_vision() -> dict:
+    """Actually call the vision model and report what happened.
+
+    ``vision_available()`` answers "is it configured"; this answers "does it
+    work", which for a bring-your-own endpoint is the only honest way to know.
+    """
+    import time
+
+    ok, hint = vision_available()
+    if not ok:
+        return {"ok": False, "provider": "", "model": "", "message": hint}
+
+    cfg = resolve_role(VISION)
+    base = {
+        "provider": cfg.provider,
+        "model": cfg.model,
+        "base_url": cfg.base_url,
+        "inherits": cfg.inherited,
+    }
+    started = time.monotonic()
+    try:
+        raw = _call_vision(
+            cfg,
+            "这是一张纯色测试图。只回复两个字符：OK",
+            _tiny_png(),
+            "probe.png",
+        )
+    except Exception as exc:
+        logger.warning("vision probe failed (%s/%s): %s", cfg.provider, cfg.model, exc)
+        return {**base, "ok": False, "message": _failure_hint(exc)}
+
+    elapsed = time.monotonic() - started
+    text = (raw or "").strip()
+    if not text:
+        # Reached the model but got nothing usable — the endpoint is up and the
+        # credentials work, so say that rather than implying a config error.
+        return {
+            **base,
+            "ok": False,
+            "message": f"端点已响应但未返回文本（{elapsed:.1f}s），请确认模型具备视觉能力",
+        }
+    return {
+        **base,
+        "ok": True,
+        "message": f"视觉模型可用（{elapsed:.1f}s）：{text[:80]}",
+    }
+
+
 def _verify_molecules(molecules: list[VisionMolecule]) -> list[VisionMolecule]:
     """RDKit validation loop: parse → canonicalize → flag; drop empty claims."""
     try:

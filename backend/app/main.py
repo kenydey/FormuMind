@@ -280,6 +280,36 @@ def _mask_db_url(db_url: str) -> str:
         return "db"
 
 
+def _effective_provider() -> str:
+    from .services.runtime_secrets import effective_setting
+
+    return str(effective_setting(get_settings(), "llm_provider") or "")
+
+
+def _vision_health() -> dict:
+    """Which model would read a figure, and is it configured at all.
+
+    ``vision_available()`` was unreachable over HTTP, so when a figure came back
+    as a degraded placeholder there was no way to ask the server why. Reports
+    *configured*, never *capable* — see that function's own docstring.
+    """
+    try:
+        from .services.llm_roles import VISION, resolve_role
+        from .services.vision_extract import vision_available
+
+        cfg = resolve_role(VISION)
+        configured, hint = vision_available()
+        return {
+            "provider": cfg.provider,
+            "model": cfg.model,
+            "inherits": cfg.inherited,
+            "configured": configured,
+            "hint": hint,
+        }
+    except Exception as exc:  # a diagnostic endpoint must not become the failure
+        return {"configured": False, "hint": f"探测失败：{str(exc)[:120]}"}
+
+
 @app.get("/health/detailed", tags=["meta"])
 def health_detailed() -> dict:
     """Detailed infra snapshot — behind auth (not in public paths)."""
@@ -323,8 +353,13 @@ def health_detailed() -> dict:
         "status": overall,
         "app": cfg.app_name,
         "environment": cfg.environment,
-        "llm": cfg.llm_provider if llm_key else "offline-fallback",
+        # Through the overlay, not off Settings: a provider switched in the UI
+        # lives there, so reading the raw field reported the stale compiled
+        # default and made this endpoint useless for the one question people ask
+        # it — "which model am I actually talking to".
+        "llm": _effective_provider() if llm_key else "offline-fallback",
         "llm_key_set": bool(llm_key),
+        "vision": _vision_health(),
         "api_auth_enabled": cfg.api_auth_enabled,
         "celery_eager": cfg.celery_eager,
         "agent_bus": cfg.agent_bus_enabled,

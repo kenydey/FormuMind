@@ -9,8 +9,6 @@ from typing import Any
 
 from ..config import Settings
 
-_LLM_RUNTIME_ATTRS = frozenset({"llm_provider", "llm_model", "llm_base_url"})
-
 
 class RuntimeSecrets:
     """Process-wide, thread-safe store for secrets and runtime LLM config."""
