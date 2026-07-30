@@ -230,3 +230,171 @@ def test_search_task_without_ingest_when_disabled(monkeypatch):
         args=[{"query": "锌系磷化", "source_types": ["patents"]}]
     ).get()
     assert "kb_ingest_task_id" not in result
+
+
+# ── every searched source gets ingested ──────────────────────────────────────
+
+
+def _many(n: int) -> list[Evidence]:
+    return [
+        Evidence(
+            title=f"文献 {i}", snippet="摘要" * 20, source="patents",
+            identifier=f"CN10{i:05d}A", url=f"https://patents.example.com/CN10{i:05d}A",
+            relevance=0.9,
+        )
+        for i in range(n)
+    ]
+
+
+def test_no_doc_cap_by_default(monkeypatch):
+    """The reported symptom: 340 search hits produced 24 ingested documents.
+
+    "Searched but not stored" reads as data loss to whoever ran the search, so
+    the default must be to take everything fetchable.
+    """
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    targets = kb_ingest.select_ingest_targets(_many(340))
+    assert len(targets) == 340
+
+
+def test_an_explicit_cap_is_still_honoured(monkeypatch):
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 24, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    assert len(kb_ingest.select_ingest_targets(_many(340))) == 24
+    # An explicit argument still wins over the setting.
+    assert len(kb_ingest.select_ingest_targets(_many(340), max_docs=5)) == 5
+
+
+def test_fetches_run_concurrently_but_indexing_stays_serial(monkeypatch):
+    """Fetching 340 documents one at a time at a 20 s timeout is over an hour.
+    Indexing must not be parallelised with it: it writes SQLite, and each fetch
+    already ran the PDF parser cascade whose peak is what bounds a small host.
+    """
+    import threading
+
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_workers", 4, raising=False)
+
+    fetch_threads: set[int] = set()
+    index_threads: set[int] = set()
+    index_concurrent = []
+    index_lock = threading.Lock()
+    inside = {"n": 0}
+
+    def fake_fetch(ev, kind, timeout, emit, doc):
+        fetch_threads.add(threading.get_ident())
+        return "全文内容"
+
+    def fake_index(text, ev, kind, emit, doc, project_id=None):
+        index_threads.add(threading.get_ident())
+        with index_lock:
+            inside["n"] += 1
+            index_concurrent.append(inside["n"])
+        doc.update(status="indexed", source_id=f"src-{ev.identifier}")
+        with index_lock:
+            inside["n"] -= 1
+
+    monkeypatch.setattr(kb_ingest, "_fetch_one", fake_fetch)
+    monkeypatch.setattr(kb_ingest, "_index_one", fake_index)
+
+    summary = kb_ingest.ingest_evidence_docs(_many(12))
+
+    assert summary["total"] == 12
+    assert summary["indexed"] == 12
+    assert len(fetch_threads) > 1, "fetching must use the pool"
+    assert max(index_concurrent) == 1, "indexing must never overlap"
+
+
+def test_a_single_worker_still_works(monkeypatch):
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_workers", 1, raising=False)
+    monkeypatch.setattr(kb_ingest, "_fetch_one", lambda *a: "全文")
+    monkeypatch.setattr(
+        kb_ingest, "_index_one",
+        lambda text, ev, kind, emit, doc, project_id=None: doc.update(
+            status="indexed", source_id="s"
+        ),
+    )
+    assert kb_ingest.ingest_evidence_docs(_many(3))["indexed"] == 3
+
+
+def test_one_failing_fetch_does_not_stop_the_queue(monkeypatch):
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_workers", 3, raising=False)
+
+    def flaky(ev, kind, timeout, emit, doc):
+        if ev.identifier.endswith("00002A"):
+            raise RuntimeError("network exploded")
+        return "全文"
+
+    monkeypatch.setattr(kb_ingest, "_fetch_one", flaky)
+    monkeypatch.setattr(
+        kb_ingest, "_index_one",
+        lambda text, ev, kind, emit, doc, project_id=None: doc.update(
+            status="indexed", source_id="s"
+        ),
+    )
+    summary = kb_ingest.ingest_evidence_docs(_many(5))
+    assert summary["indexed"] == 4
+    assert summary["failed"] == 1
+
+
+def test_the_whole_queue_is_announced_before_any_fetch(monkeypatch):
+    """The progress bar shows N/M from the start, so M must be the real total —
+    not something that grows as documents are discovered."""
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_workers", 2, raising=False)
+    announced: list[str] = []
+    fetched: list[str] = []
+
+    def fake_fetch(ev, kind, timeout, emit, doc):
+        fetched.append(ev.identifier)
+        return None
+
+    monkeypatch.setattr(kb_ingest, "_fetch_one", fake_fetch)
+    kb_ingest.ingest_evidence_docs(
+        _many(6), status_cb=lambda meta: announced.append(meta["identifier"])
+    )
+    assert len(set(announced)) == 6
+    assert len(announced[:6]) == 6, "all six announced before work started"
+
+
+def test_chinese_patents_are_fetchable(monkeypatch):
+    """The second cause of "searched but not stored", and the worse one.
+
+    `_PATENT_RE` was `^(US|EP)\\d+`, so a CN/JP/WO publication classified as
+    un-fetchable and never entered the ingest queue at all — no cap involved, no
+    failed row in the UI, just absent. `fetch_patent_pdf` falls back to Google
+    Patents, which serves those offices, so the restriction never matched what
+    was actually retrievable.
+    """
+    monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
+    monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
+    rows = [
+        Evidence(title=t, snippet="摘要", source="patents", identifier=i, relevance=0.9)
+        for i, t in [
+            ("CN102345678A", "中国专利"),
+            ("JP2001234567A", "日本专利"),
+            ("WO2020123456A1", "PCT 申请"),
+            ("US1234567B2", "美国专利"),
+        ]
+    ]
+    targets = kb_ingest.select_ingest_targets(rows)
+    assert [ev.identifier for ev, _ in targets] == [r.identifier for r in rows]
+    assert all(kind == "patent" for _, kind in targets)
+
+
+def test_synthetic_and_chunk_level_ids_are_still_rejected():
+    """Widening the patent match must not start fetching things that are not
+    documents — chunk fragments and hash-derived placeholders have nothing behind
+    them."""
+    for ident in ("chemlit:ab12", "chemweb:00ff", "CN102345678A#p3", "P1", ""):
+        ev = Evidence(
+            title="t", snippet="s", source="patents", identifier=ident, relevance=0.9
+        )
+        assert ff.classify(ev) is None, ident

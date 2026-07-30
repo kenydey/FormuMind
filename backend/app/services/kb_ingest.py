@@ -57,12 +57,15 @@ def select_ingest_targets(
     """The top fetchable rows in rank order, as (evidence, kind) pairs."""
     from . import fulltext_fetcher as ff
 
+    # 0 (or None) means no cap: every fetchable hit is ingested. "Searched but
+    # not stored" reads as data loss to whoever ran the search, so the default
+    # is to store everything and let the operator opt into a limit.
     limit = max_docs if max_docs is not None else get_settings().kb_ingest_max_docs
     min_rel = get_settings().kb_ingest_min_relevance
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
     for ev in evidence:
-        if len(targets) >= limit:
+        if limit and len(targets) >= limit:
             break
         if min_rel > 0 and (ev.relevance or 0) < min_rel:
             continue
@@ -76,8 +79,14 @@ def select_ingest_targets(
     return targets
 
 
-def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *, project_id: str | None = None) -> None:
-    """Advance one document through the state machine (mutates *doc*)."""
+def _fetch_one(
+    ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any]
+) -> str | None:
+    """Acquire one document's full text. Network-bound; safe to run in parallel.
+
+    Returns the text, or None when the document is already known (status
+    ``skipped``) or unobtainable (status ``failed``). Mutates *doc*.
+    """
     from ..db.source_store import get_source_store
     from . import fulltext_fetcher as ff
 
@@ -91,7 +100,7 @@ def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: di
     if existing is not None:
         doc.update(status="skipped", source_id=existing.id)
         emit(doc)
-        return
+        return None
 
     doc["status"] = "fetching"
     emit(doc)
@@ -102,7 +111,21 @@ def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: di
     if not text:
         doc.update(status="failed", error="全文获取失败（无 OA 版本 / 下载超时 / 解析为空）")
         emit(doc)
-        return
+        return None
+    return text
+
+
+def _index_one(
+    text: str,
+    ev: Evidence,
+    kind: str,
+    emit: StatusCb,
+    doc: dict[str, Any],
+    *,
+    project_id: str | None = None,
+) -> None:
+    """Chunk, embed and persist one document. Kept serial — SQLite writers."""
+    from . import fulltext_fetcher as ff
 
     doc["status"] = "indexing"
     emit(doc)
@@ -112,6 +135,13 @@ def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: di
     else:
         doc.update(status="failed", error="入库失败（存储或索引异常）")
     emit(doc)
+
+
+def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *, project_id: str | None = None) -> None:
+    """Advance one document through the state machine (mutates *doc*)."""
+    text = _fetch_one(ev, kind, timeout, emit, doc)
+    if text:
+        _index_one(text, ev, kind, emit, doc, project_id=project_id)
 
 
 def ingest_evidence_docs(
@@ -127,20 +157,49 @@ def ingest_evidence_docs(
     ``{"docs": [...], "total", "indexed", "skipped", "failed"}``.
     Never raises — one bad document must not kill the rest of the queue.
     """
+    import concurrent.futures
+
+    settings = get_settings()
     emit: StatusCb = status_cb or (lambda meta: None)
-    timeout = float(get_settings().fulltext_timeout_s)
+    timeout = float(settings.fulltext_timeout_s)
     targets = select_ingest_targets(evidence, max_docs=max_docs)
 
     docs = [_doc_meta(ev, kind) for ev, kind in targets]
     for doc in docs:  # announce the full queue up front
         emit(doc)
 
-    for (ev, kind), doc in zip(targets, docs):
+    # Fetch concurrently, index serially. Fetching is network-bound and is the
+    # whole cost of a large batch — 340 documents one at a time, at a 20 s
+    # timeout each, is over an hour. Indexing stays on one thread because it
+    # writes SQLite and because each fetch already ran the PDF parser cascade,
+    # whose peak (~350 MB, or ~557 MB when a scan goes through OCR) is what
+    # actually bounds the worker count on a small host — not the sockets.
+    workers = max(1, int(getattr(settings, "kb_ingest_workers", 3)))
+
+    def _fetch(i: int) -> tuple[int, str | None]:
+        ev, kind = targets[i]
         try:
-            _ingest_one(ev, kind, timeout, emit, doc, project_id=project_id)
-        except Exception as exc:  # defensive: emit() itself must not kill the queue
+            return i, _fetch_one(ev, kind, timeout, emit, docs[i])
+        except Exception as exc:
+            degrade_return(logger, exc, "kb_ingest fetch failed", None)
+            docs[i].update(status="failed", error=str(exc)[:200])
+            return i, None
+
+    if workers == 1 or len(targets) <= 1:
+        pairs = [_fetch(i) for i in range(len(targets))]
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            pairs = list(ex.map(_fetch, range(len(targets))))
+
+    for i, text in pairs:
+        if not text:
+            continue
+        ev, kind = targets[i]
+        try:
+            _index_one(text, ev, kind, emit, docs[i], project_id=project_id)
+        except Exception as exc:  # one bad document must not kill the queue
             degrade_return(logger, exc, "kb_ingest document failed", None)
-            doc.update(status="failed", error=str(exc)[:200])
+            docs[i].update(status="failed", error=str(exc)[:200])
 
     summary = {
         "docs": docs,

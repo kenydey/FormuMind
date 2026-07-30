@@ -283,9 +283,15 @@ class Settings(BaseSettings):
     # 获取全文 → 解析 → 切块 → 入持久知识库，前台经 SSE 实时看到每篇状态，
     # 检索结果展示不等待解析。按 origin_url / 内容哈希双重去重。
     kb_ingest_auto: bool = True
-    # 每批后台入库最多下载多少篇全文。提高会增加单次耗时与外部请求量，
-    # 但直接决定知识库的覆盖广度。
-    kb_ingest_max_docs: int = 24
+    # 每批后台入库最多下载多少篇全文。**0 = 不限制**，即检索到的每一条可获取
+    # 全文的资料都入库——这是默认值，因为「搜到了但没入库」对使用者来说就是
+    # 数据丢失。设成正数只在需要控制外部请求量/磁盘时才有意义。
+    kb_ingest_max_docs: int = 0
+    # 并发获取全文的线程数。**瓶颈是解析内存而不是网络**：每篇 PDF 都会走完整
+    # 解析级联，pymupdf4llm 峰值约 350 MB、扫描件走 OCR 约 557 MB，所以在
+    # 2.2 GB 的机器上 3 路并发已经接近上限。入库（切块+向量+写库）保持串行，
+    # 避免 SQLite 写冲突。
+    kb_ingest_workers: int = 3
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task

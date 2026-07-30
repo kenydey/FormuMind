@@ -113,10 +113,10 @@ def test_max_docs_cap(monkeypatch):
         return LONG_TEXT
 
     monkeypatch.setattr(ff, "_fetch_patent_text", fake_fetch)
-    rows = [_ev("US111"), _ev("US222"), _ev("US333")]
+    rows = [_ev("US1110001"), _ev("US2220002"), _ev("US3330003")]
     out, report = ff.enrich_search_results(rows, persist=False)
-    assert calls == ["US111"]  # only the top-ranked row attempted
-    assert any(e.identifier == "US222" for e in out)  # others pass through
+    assert calls == ["US1110001"]  # only the top-ranked row attempted
+    assert any(e.identifier == "US2220002" for e in out)  # others pass through
     assert report.attempted == 1
 
 
@@ -179,7 +179,7 @@ def test_literature_oa_flow(monkeypatch):
 def test_chunks_carry_provenance_and_relevance_decay(monkeypatch):
     _enable(monkeypatch)
     monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
-    out, _ = ff.enrich_search_results([_ev("US777", relevance=0.9)], persist=False)
+    out, _ = ff.enrich_search_results([_ev("US7770007", relevance=0.9)], persist=False)
     assert out[0].source == "USPTO"
     assert out[0].relevance == pytest.approx(0.9)
     assert out[1].relevance < out[0].relevance

@@ -30,7 +30,16 @@ from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
 
-_PATENT_RE = re.compile(r"^(US|EP)\d+", re.IGNORECASE)
+# Any patent office, not just US/EP. `fetch_patent_pdf` falls back to Google
+# Patents, which serves CN/JP/WO/KR/DE publications too — so restricting this to
+# US|EP did not reflect what could be fetched, it just declined to try. On a
+# Chinese-language corpus that silently dropped most patent hits from the ingest
+# queue entirely: searched, listed in the UI, never stored.
+#
+# Two letters plus at least four digits is the standard publication-number shape
+# (CN102345678A, WO2020123456A1, JP2001234567A). The trailing kind code is
+# optional and not matched, since it does not affect fetchability.
+_PATENT_RE = re.compile(r"^[A-Z]{2}\d{4,}", re.IGNORECASE)
 _DOI_RE = re.compile(r"(?:doi:)?\s*(10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+)", re.IGNORECASE)
 _ARXIV_RE = re.compile(r"(?:arxiv[:/]|abs/)(\d{4}\.\d{4,5})(v\d+)?", re.IGNORECASE)
 

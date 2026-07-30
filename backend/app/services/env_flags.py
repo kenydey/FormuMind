@@ -100,7 +100,7 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "kb", "需 docling；首次使用下载公式模型"),
     EnvFlag("kb_ingest_auto", "检索后台自动入库",
             "检索/深度研究/推荐结束后，后台任务逐篇获取全文并构建知识库，前台实时显示每篇状态。",
-            "kb", "需网络；受 kb_ingest_max_docs 限制（默认 12 篇/次）"),
+            "kb", "需网络；默认入库全部可获取全文的命中（FORMUMIND_KB_INGEST_MAX_DOCS=0 不限制）"),
     EnvFlag("workbench_auto_train", "台账自动回灌训练",
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",
