@@ -152,8 +152,9 @@ export default function VisionModelPanel({ providers, vision, onSaved }: Props) 
       <div>
         <h3 className="text-xs uppercase tracking-widest text-accent2">视觉模型 · Vision</h3>
         <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-          解析化学结构图、图表与扫描页时使用。可与文本模型不同——很多强文本模型
-          （如 DeepSeek）不接受图片输入，届时图表会降级为占位说明。
+          化学结构图、图表、PDF 中未能渲染的表格、以及上传的图片。可与文本模型选不同的
+          供应商——很多强文本模型（如 DeepSeek）不接受图片输入，用它做视觉会让图表降级为
+          占位说明。
         </p>
       </div>
 

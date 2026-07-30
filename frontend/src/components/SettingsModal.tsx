@@ -192,9 +192,16 @@ export default function SettingsModal() {
       ) : (
         <div className="space-y-4">
           <p className="text-xs text-slate-500">
-            配置用于研究问答与配方综述的大语言模型。API Key 保存在服务器{" "}
+            文本任务与视觉任务分开配置，系统按任务类型自动调用对应模型。API Key 保存在服务器{" "}
             <code className="text-slate-400">.env</code> 中，也可在「API 配置」Tab 统一管理。
           </p>
+
+          <div>
+            <h3 className="text-xs uppercase tracking-widest text-accent2">文本模型 · Text</h3>
+            <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              研究问答、配方推荐、深度研究、意图解析等所有纯文本任务。
+            </p>
+          </div>
 
           <label className="block">
             <span className="text-xs text-slate-400">供应商 · Provider</span>
@@ -305,13 +312,10 @@ export default function SettingsModal() {
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              onClick={toggleSettings}
-              className="text-sm border border-edge text-slate-400 rounded px-4 py-1.5 hover:text-slate-200"
-            >
-              关闭
-            </button>
+          {/* Each section saves to its own endpoint, so its button lives inside
+              it. A shared save row between the two made the vision block read as
+              an afterthought rather than the peer choice it is. */}
+          <div className="flex justify-end pt-1">
             <button
               onClick={onSave}
               disabled={testing || providers.length === 0}
@@ -326,6 +330,15 @@ export default function SettingsModal() {
             vision={vision}
             onSaved={() => void loadLlmSettings()}
           />
+
+          <div className="flex justify-end border-t border-edge pt-3">
+            <button
+              onClick={toggleSettings}
+              className="text-sm border border-edge text-slate-400 rounded px-4 py-1.5 hover:text-slate-200"
+            >
+              关闭
+            </button>
+          </div>
         </div>
       )}
     </Modal>
