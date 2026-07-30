@@ -115,7 +115,7 @@ export default function DoeResultsPanel() {
   const [factorBusy, setFactorBusy] = useState(false);
   const {
     requirement, doePlan, models, modelHistory, trainMessage,
-    busy, generateDoe, exportDoe, importCsv, error,
+    busy, generateDoe, exportDoe, importCsv, error, clearError,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
     runNextRoundDoe, adoptDoePlanToWorkbench, adaptiveDoe,
@@ -132,6 +132,7 @@ export default function DoeResultsPanel() {
       exportDoe: s.exportDoe,
       importCsv: s.importCsv,
       error: s.error,
+      clearError: s.clearError,
       doeEngine: s.doeEngine,
       alEngine: s.alEngine,
       setDoeEngine: s.setDoeEngine,
@@ -181,9 +182,21 @@ export default function DoeResultsPanel() {
 
   return (
     <section className="glass rounded-xl p-4 overflow-y-auto">
+      {/* Kept alongside the centre-column notification stack: a DOE error is
+          contextual to the panel the user is looking at, and the stack may be
+          scrolled or collapsed at that moment. */}
       {error && (
-        <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-          {error}
+        <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 flex items-start justify-between gap-2">
+          <span className="min-w-0">{error}</span>
+          <button
+            type="button"
+            onClick={clearError}
+            className="shrink-0 text-slate-500 hover:text-rose-400 leading-none w-5 h-5 flex items-center justify-center rounded hover:bg-rose-500/10"
+            title="关闭"
+            aria-label="关闭"
+          >
+            ×
+          </button>
         </div>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
