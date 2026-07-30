@@ -32,16 +32,18 @@ COPY requirements.txt ./
 RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements.txt
 
-# 2) Install application + LLM extras (DeepSeek/OpenAI-compatible providers).
+# 2) Install application + ALL extras (LLM, science, optimization, RAG, etc.).
+# Excludes parse-pro (docling conflicts with intel's chemcrow via beautifulsoup4).
+# Torch pinned to CPU-only wheels to keep the image small on GPU-less hosts.
 # alembic.ini rides along so migrations are runnable *inside* the container:
 #   docker compose exec backend alembic upgrade head
-# Without it Alembic exits with "No config file 'alembic.ini' found", and a
-# deployed database can only be migrated from a checkout — which is exactly
-# when you least want to need one. The migration scripts themselves live under
-# app/db/alembic and arrive with the COPY below.
 COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
-RUN pip install -e ".[llm]"
+RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+    -e ".[llm,science,optimize,embedding,bo,pydoe,baybe,file_ingest,intel,export,colbert,color,dev,postgres,heavy,crag]" \
+    && pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+    pymupdf4llm docling marker-pdf mineru-open-sdk \
+    && pip uninstall -y surya-ocr 2>/dev/null; echo "surya-ocr removed (CPU VPS)"
 
 EXPOSE 8000
 

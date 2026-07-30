@@ -47,7 +47,7 @@ heavy = [
     "torch>=2.2",
     "deepchem>=2.8",
     "transformers>=4.40",   # also the MoLFormer embedding path (reserved)
-    "summit>=0.8",          # Bayesian/TSEMO optimization (auto-detected)
+    # summit>=0.8  pins torch<2.0 — conflicts; skipped
     "ase>=3.22",
 ]
 intel = [
