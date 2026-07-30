@@ -205,7 +205,11 @@ class Settings(BaseSettings):
     search_rerank_top_k: int = 100       # 精排后至少保留条数（有足够结果时）
     search_rerank_llm_batch: int = 50    # 送入 LLM 评分的候选数（控制成本）
 
-    # Recommend path: federated refresh → ColBERT index before CRAG recommend.
+    # Recommend path: federated refresh before CRAG recommend. The ColBERT
+    # registry write is synchronous; the full-text ingest it also triggers is a
+    # background task, so this run does not see the fetched documents — the
+    # alternative would be blocking a recommend request on a dozen PDF
+    # downloads. The benefit lands on subsequent runs.
     auto_kb_refresh_before_recommend: bool = False
 
     # PDF 解析器层级（KB P1）："auto" = hybrid → Docling → marker → MinerU →
@@ -253,7 +257,9 @@ class Settings(BaseSettings):
     # 获取全文 → 解析 → 切块 → 入持久知识库，前台经 SSE 实时看到每篇状态，
     # 检索结果展示不等待解析。按 origin_url / 内容哈希双重去重。
     kb_ingest_auto: bool = True
-    kb_ingest_max_docs: int = 12
+    # 每批后台入库最多下载多少篇全文。提高会增加单次耗时与外部请求量，
+    # 但直接决定知识库的覆盖广度。
+    kb_ingest_max_docs: int = 24
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task
@@ -292,9 +298,15 @@ class Settings(BaseSettings):
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），
     # 问答检索覆盖整个累计语料而非单次请求携带的 sources。纯本地无网络。
     kb_v2_enabled: bool = True
-    kb_max_chunks_per_source: int = 200
+    # 每篇文档最多持久化多少切块。这是全文成功抓取之后**唯一**还会静默丢内容
+    # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
+    kb_max_chunks_per_source: int = 600
     kb_search_scan_limit: int = 5000
     kb_chat_top_k: int = 6
+    # 检索命中的切块交给 LLM 之前保留多少字符。切块本身是 1600
+    # （ingest_chunk_max_chars），此前这里硬编码 600，等于把已经入库的全文
+    # 又砍掉三分之二才给模型看。0 = 不截断，完整交出切块。
+    kb_snippet_max_chars: int = 0
     # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
     kb_recommend_top_k: int = 4
 

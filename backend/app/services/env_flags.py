@@ -73,7 +73,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "对合并结果前若干条做 LLM 语义重排，其余按规则排序保留（总量上限 300）。",
             "retrieval", "需有效 LLM key"),
     EnvFlag("auto_kb_refresh_before_recommend", "推荐前刷新 KB",
-            "运行配方推荐前先联邦检索并写入 ColBERT 索引。", "kb", "需网络"),
+            "运行配方推荐前先联邦检索一次；全文下载入库在后台进行，"
+            "所以本次推荐用不上它，收益体现在之后的问答与推荐上。",
+            "kb", "需网络"),
     EnvFlag("fulltext_enrich", "检索全文获取",
             "把排名靠前的专利/OA 文献/网页命中升级为全文分块并持久化入知识库。",
             "kb", "需网络；每次深度研究会下载最多 8 篇全文"),

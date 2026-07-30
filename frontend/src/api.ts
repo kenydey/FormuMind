@@ -1159,11 +1159,23 @@ export const api = {
   getSourceStatus: () =>
     get<Record<string, SourceStatus>>("/api/search/status"),
 
+  /**
+   * Federated search → full-text KB build.
+   *
+   * `found` is how many hits the search returned; `ingestable` how many of
+   * those can actually be fetched as full documents (the rest have no URL, DOI
+   * or patent id to download). The download itself runs as a background task —
+   * stream `ingest_task_id` to watch it.
+   */
   refreshKnowledgeBase: (query: string) =>
-    post<{ query: string; fetched: number; indexed_total: number; source_counts: Record<string, number> }>(
-      `/api/research/kb/refresh?query=${encodeURIComponent(query)}`,
-      {}
-    ),
+    post<{
+      query: string;
+      found: number;
+      ingestable: number;
+      ingest_task_id: string | null;
+      registry_total: number;
+      source_counts: Record<string, number>;
+    }>(`/api/research/kb/refresh?query=${encodeURIComponent(query)}`, {}),
 
   listDependencies: () =>
     get<DependencyListResponse>("/api/dependencies"),
@@ -1655,7 +1667,17 @@ export interface KBStats {
   sources_by_kind: Record<string, number>;
   chunks: number;
   embedded_chunks: number;
+  /** Import-only probe: the library is present, NOT that anything got embedded. */
   embedding_available: boolean;
+  /**
+   * Whether retrieval really is vector-based. `degraded` is the one to warn
+   * about — library installed, zero vectors, so it looks healthy while
+   * retrieval has silently fallen back to keyword overlap.
+   */
+  vector_mode?: "semantic" | "degraded" | "keyword" | "empty";
+  vector_hint?: string;
+  /** The backend actually in effect, not the configured value. */
+  rag_backend?: string;
   products?: number;
 }
 

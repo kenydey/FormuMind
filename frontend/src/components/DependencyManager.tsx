@@ -83,18 +83,27 @@ function KnowledgeBaseCard({
         <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-400">
           切块 {stats.chunks}
         </span>
+        {/* Keyed on vector_mode, not embedding_available. The library being
+            importable says nothing about whether any chunk actually carries a
+            vector — the model download can fail and every embedding silently
+            becomes NULL — so a badge driven by the import probe would show
+            green over a corpus doing keyword matching. */}
         <span
           className={`px-1.5 py-0.5 rounded border ${
-            stats.embedding_available
+            stats.vector_mode === "semantic"
               ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
-              : "border-edge bg-ink/60 text-slate-500"
+              : stats.vector_mode === "degraded"
+                ? "border-amber-500/50 bg-amber-500/10 text-amber-300"
+                : "border-edge bg-ink/60 text-slate-500"
           }`}
           title={
-            stats.embedding_available
-              ? "sentence-transformers 已安装，检索为语义向量模式"
-              : "未安装 sentence-transformers，检索为关键词模式（可在下方一键安装 Embedding）"
+            stats.vector_hint ||
+            (stats.vector_mode === "semantic"
+              ? `检索为语义向量模式（${stats.rag_backend ?? "embedding"}）`
+              : "尚无切块，入库后再看")
           }
         >
+          {stats.vector_mode === "degraded" ? "⚠ " : ""}
           向量 {stats.embedded_chunks}/{stats.chunks}
         </span>
         {(stats.products ?? 0) > 0 && (

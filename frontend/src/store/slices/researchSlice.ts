@@ -236,9 +236,19 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         // This used to be written to `deepResearchMessage`, whose two readers
         // are both gated on `deepResearchBusy` — false on this path. So the
         // result was rendered nowhere and the button gave no feedback at all.
+        //
+        // The counts are deliberately both shown: "found 20, fetching 12" is
+        // the honest description, and the gap is not data loss — the other 8
+        // have no URL/DOI/patent id to download a full document from.
         set((draft) => {
-          draft.kbRefreshNotice = `已入库 ${res.fetched} 条（索引共 ${res.indexed_total}）`;
+          draft.kbRefreshNotice = res.ingest_task_id
+            ? `检索到 ${res.found} 条，正在下载全文并入库 ${res.ingestable} 篇…`
+            : `检索到 ${res.found} 条，其中没有可下载全文的条目`;
         });
+        // The full-text download takes minutes, so it streams through the same
+        // channel a search-triggered ingest uses — including the per-source
+        // badges in the left column.
+        if (res.ingest_task_id) void get().trackKbIngest(res.ingest_task_id);
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);

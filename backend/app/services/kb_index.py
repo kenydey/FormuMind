@@ -57,6 +57,43 @@ def _embedding_probe() -> bool:
     return _embedding_available()
 
 
+def _vector_health(total: int, embedded: int) -> dict:
+    """Whether retrieval is *actually* semantic, plus what to do if it is not.
+
+    ``embedding_available`` is import-only by design (loading weights inside a
+    stats call would be absurd), but that makes it a promise the corpus may not
+    keep: the library imports, the model download fails, ``_embed_texts``
+    swallows it and returns None, and every chunk lands with a NULL vector while
+    the flag still says yes. Retrieval silently becomes token-set overlap.
+
+    So the honest signal is not "is the library installed" but "are there
+    vectors". ``vector_mode`` answers that:
+
+    ``semantic``  — vectors exist, retrieval is embedding-based
+    ``degraded``  — the library is installed but nothing got embedded; this is
+                    the case worth shouting about, because it looks fine
+    ``keyword``   — no embedding library; expected, not a fault
+    ``empty``     — nothing indexed yet, so there is nothing to say
+    """
+    from .rag import active_rag_backend
+
+    available = _embedding_probe()
+    if total <= 0:
+        mode, hint = "empty", ""
+    elif embedded > 0:
+        mode, hint = "semantic", ""
+    elif available:
+        mode = "degraded"
+        hint = (
+            "已安装向量库但没有任何切块被向量化——通常是模型权重未能下载。"
+            "检索当前退化为关键词匹配。请检查服务端网络后点「重建索引」。"
+        )
+    else:
+        mode = "keyword"
+        hint = "未安装 sentence-transformers，检索为关键词匹配。可在下方一键安装 Embedding 后点「重建索引」。"
+    return {"vector_mode": mode, "vector_hint": hint, "rag_backend": active_rag_backend()}
+
+
 # ── indexing ─────────────────────────────────────────────────────────────────
 
 
@@ -213,9 +250,21 @@ def _chunk_to_evidence(chunk, source_meta: dict, score: float) -> Evidence:
         source=meta.get("source_kind") or "kb",
         identifier=f"kb:{chunk.source_id}#c{chunk.ord}",
         title=title[:200],
-        snippet=chunk.text[:600],
+        snippet=chunk_snippet(chunk.text),
         relevance=max(0.05, min(1.0, round(score, 4))),
     )
+
+
+def chunk_snippet(text: str) -> str:
+    """A retrieved chunk as the LLM will see it.
+
+    Chunks are stored at ``ingest_chunk_max_chars`` (1600). This used to clip
+    them to a hardcoded 600 on the way out, which threw away two thirds of text
+    that had already been fetched, parsed, chunked and persisted — the expensive
+    part was done and the cheap part discarded it. 0 means no clip.
+    """
+    limit = int(get_settings().kb_snippet_max_chars or 0)
+    return text[:limit] if limit > 0 else text
 
 
 def _source_meta() -> dict:
@@ -511,6 +560,7 @@ def kb_stats() -> dict:
             "embedded_chunks": embedded,
             "embedding_available": _embedding_probe(),
             "products": products,
+            **_vector_health(total, embedded),
         }
     except Exception as exc:
         return degrade_return(

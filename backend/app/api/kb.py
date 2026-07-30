@@ -38,7 +38,16 @@ class KBStats(BaseModel):
     sources_by_kind: dict[str, int]
     chunks: int
     embedded_chunks: int
+    #: Import-only probe. Says the library is present, NOT that anything got
+    #: embedded — see `vector_mode` for that.
     embedding_available: bool
+    #: "semantic" | "degraded" | "keyword" | "empty" — whether retrieval really
+    #: is vector-based. `degraded` is the dangerous one: library installed, zero
+    #: vectors, looks healthy.
+    vector_mode: str = "empty"
+    vector_hint: str = ""
+    #: The backend `build_store` would actually pick, not the configured value.
+    rag_backend: str = "tfidf"
     products: int = 0
 
 

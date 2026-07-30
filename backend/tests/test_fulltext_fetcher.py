@@ -183,4 +183,10 @@ def test_chunks_carry_provenance_and_relevance_decay(monkeypatch):
     assert out[0].source == "USPTO"
     assert out[0].relevance == pytest.approx(0.9)
     assert out[1].relevance < out[0].relevance
-    assert all(len(e.snippet) <= 600 for e in out)
+    # Snippets used to be clipped to a hardcoded 600 characters, which discarded
+    # most of a chunk that had just been downloaded and parsed. The bound that
+    # actually means something is the configured chunk size — the fetched text
+    # reaches the model whole, not at a third of its length.
+    limit = get_settings().ingest_chunk_max_chars
+    assert all(len(e.snippet) <= limit for e in out)
+    assert any(len(e.snippet) > 600 for e in out), "full chunks must survive"

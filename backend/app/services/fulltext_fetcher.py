@@ -196,6 +196,7 @@ def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
     chunker every other ingest path uses.
     """
     from .chunking import chunk_markdown
+    from .kb_index import chunk_snippet
 
     settings = get_settings()
     chunks = chunk_markdown(
@@ -214,7 +215,7 @@ def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
                 source=ev.source,
                 identifier=f"{ev.identifier}#p{i}",
                 title=title,
-                snippet=chunk.text[:600],
+                snippet=chunk_snippet(chunk.text),
                 relevance=max(0.2, round(ev.relevance - i * 0.01, 3)),
             )
         )
