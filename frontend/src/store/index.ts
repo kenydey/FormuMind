@@ -4,6 +4,8 @@ import { immer } from "zustand/middleware/immer";
 import type { SearchSourceType, SourceStatus } from "../api";
 import { defaultConstraintsForDomain } from "../constants/constraints";
 import { defaultRequirement } from "./helpers";
+import { noNotificationsDismissed } from "./notifications";
+import { createNotificationSlice } from "./slices/notificationSlice";
 import { createProjectSlice } from "./slices/projectSlice";
 import { createRequirementSlice } from "./slices/requirementSlice";
 import { createResearchSlice } from "./slices/researchSlice";
@@ -61,6 +63,8 @@ export const useStore = create<AppState>()(
       searchBusy: false,
       searchProgress: null,
       kbIngest: null,
+      kbRefreshNotice: null,
+      notificationsDismissed: noNotificationsDismissed(),
       deepResearchBusy: false,
       deepResearchStage: "",
       deepResearchMessage: "",
@@ -85,6 +89,7 @@ export const useStore = create<AppState>()(
       ...createProjectSlice(set, get),
       ...createSearchSlice(set, get),
       ...createUiSlice(set, get),
+      ...createNotificationSlice(set, get),
     })),
     {
       name: "formumind-history",

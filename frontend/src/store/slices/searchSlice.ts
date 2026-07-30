@@ -7,6 +7,7 @@ import {
   sanitizeEvidenceForApi,
 } from "../../api";
 import type { Evidence, SourceStatus } from "../../api";
+import { undismiss } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -106,6 +107,9 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         draft.selectedSources = [];
         draft.usedSeedFallback = false;
         draft.filterReport = null;
+        undismiss(draft.notificationsDismissed, [
+          "search", "filter-report", "seed-fallback", "deep-report",
+        ]);
         draft.searchProgress = {
           message: "正在排队…",
           total: 0,
@@ -196,6 +200,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
 
     trackKbIngest: async (taskId) => {
       set((draft) => {
+        undismiss(draft.notificationsDismissed, ["kb-ingest"]);
         draft.kbIngest = {
           taskId,
           docs: [],
@@ -246,12 +251,6 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           draft.kbIngest.active = false;
         });
       }
-    },
-
-    dismissKbIngest: () => {
-      set((draft) => {
-        draft.kbIngest = null;
-      });
     },
 
     loadSourceStatus: async () => {
@@ -350,5 +349,5 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'setSearchQuery' | 'setSourceTypes' | 'setRecommendSourceTypes' | 'addSources' | 'removeSource' | 'clearSources' | 'toggleSourceSelected' | 'selectAllSources' | 'deselectAllSources' | 'searchSources' | 'trackKbIngest' | 'dismissKbIngest' | 'loadSourceStatus' | 'hydrateLlmSettings' | 'uploadFiles' | 'sendChat'>;
+  } as Pick<AppState, 'setSearchQuery' | 'setSourceTypes' | 'setRecommendSourceTypes' | 'addSources' | 'removeSource' | 'clearSources' | 'toggleSourceSelected' | 'selectAllSources' | 'deselectAllSources' | 'searchSources' | 'trackKbIngest' | 'loadSourceStatus' | 'hydrateLlmSettings' | 'uploadFiles' | 'sendChat'>;
 }

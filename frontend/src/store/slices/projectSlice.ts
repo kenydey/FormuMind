@@ -2,6 +2,7 @@ import { api, formatApiError } from "../../api";
 import { applyWorkspacePayload, buildWorkspacePayload, isLegacyMigrated, legacySnapshotsFromStorage, markLegacyMigrated } from "../../projectWorkspace";
 import { defaultConstraintsForDomain } from "../../constants/constraints";
 import { applyPatchToDraft, AUTOSAVE_MS, workspaceSlice, defaultRequirement } from "../helpers";
+import { noNotificationsDismissed } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -71,6 +72,11 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.error = null;
           draft.task = null;
           draft.busy = "idle";
+          // Run-status notices belong to the project that produced them.
+          draft.kbIngest = null;
+          draft.searchProgress = null;
+          draft.kbRefreshNotice = null;
+          draft.notificationsDismissed = noNotificationsDismissed();
         });
         if (!get().requirement.levers?.length) {
           await get().syncDefaultLevers();
@@ -121,6 +127,10 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.workbenchObjectivesSnapshot = null;
           draft.workbenchStats = null;
           draft.error = null;
+          draft.kbIngest = null;
+          draft.searchProgress = null;
+          draft.kbRefreshNotice = null;
+          draft.notificationsDismissed = noNotificationsDismissed();
         });
         if (!get().requirement.levers?.length) {
           await get().syncDefaultLevers();

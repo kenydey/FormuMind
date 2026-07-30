@@ -7,81 +7,6 @@ import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
 
-const FILTER_REASON_LABELS: Record<string, string> = {
-  blocked_domain: "屏蔽域名",
-  garbage_snippet: "无效摘要",
-  near_duplicate: "近似重复",
-  llm_judge: "LLM 质检",
-};
-
-function FilterReportBanner({
-  report,
-}: {
-  report: {
-    kept: number;
-    dropped: number;
-    dropped_by_reason: Record<string, number>;
-    dropped_examples: string[];
-  };
-}) {
-  const [open, setOpen] = useState(false);
-  if (report.dropped <= 0) return null;
-  return (
-    <div className="shrink-0 text-[11px] text-slate-300 border border-slate-600/40 bg-slate-800/40 rounded px-2 py-1.5 leading-relaxed">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full text-left flex items-center justify-between gap-2"
-      >
-        <span>
-          质量过滤：保留 <span className="font-mono text-teal-300">{report.kept}</span> 条，剔除{" "}
-          <span className="font-mono text-amber-300">{report.dropped}</span> 条低质量结果
-        </span>
-        <span className="text-slate-500 shrink-0">{open ? "▴" : "▾"}</span>
-      </button>
-      {open && (
-        <div className="mt-1.5 space-y-1 text-[10px] text-slate-400 border-t border-edge/40 pt-1.5">
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(report.dropped_by_reason).map(([reason, count]) => (
-              <span
-                key={reason}
-                className="px-1 py-0.5 rounded border border-edge/60 bg-ink/50"
-              >
-                {FILTER_REASON_LABELS[reason] ?? reason}: {count}
-              </span>
-            ))}
-          </div>
-          {report.dropped_examples.length > 0 && (
-            <ul className="list-disc list-inside text-slate-500 max-h-20 overflow-y-auto">
-              {report.dropped_examples.map((ex, i) => (
-                <li key={i} className="truncate" title={ex}>
-                  {ex}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const SOURCE_LABELS: Record<string, string> = {
-  patents: "专利",
-  serpapi_lit: "Scholar",
-  openalex: "OpenAlex",
-  arxiv: "arXiv",
-  s2: "Semantic Scholar",
-  chemlit: "ChemCrow 文献",
-  internet: "互联网",
-  chemweb: "ChemCrow 网页",
-  notebooklm: "NotebookLM",
-};
-
-function sourceLabel(name: string): string {
-  return SOURCE_LABELS[name] || name;
-}
-
 function iconForSource(source: string): string {
   const s = source.toLowerCase();
   if (s.includes("patent")) return "📄";
@@ -142,11 +67,7 @@ export default function SourcesPanel() {
     deepResearchBusy,
     deepResearchMessage,
     refreshKnowledgeBase,
-    error,
-    usedSeedFallback,
-    filterReport,
     kbIngest,
-    dismissKbIngest,
   } = useStore(
     useShallow((s) => ({
       searchQuery: s.searchQuery,
@@ -171,11 +92,7 @@ export default function SourcesPanel() {
       deepResearchBusy: s.deepResearchBusy,
       deepResearchMessage: s.deepResearchMessage,
       refreshKnowledgeBase: s.refreshKnowledgeBase,
-      error: s.error,
-      usedSeedFallback: s.usedSeedFallback,
-      filterReport: s.filterReport,
       kbIngest: s.kbIngest,
-      dismissKbIngest: s.dismissKbIngest,
     }))
   );
   const fileInput = useRef<HTMLInputElement>(null);
@@ -188,11 +105,6 @@ export default function SourcesPanel() {
   const searchableTypes = searchSourceTypes(sourceTypes);
   const canSearch =
     searchQuery.trim().length > 0 && searchableTypes.length > 0 && !searchBusy;
-
-  const chemcrowStatus = sourceStatus["chemcrow"];
-  const showChemcrowBadge =
-    chemcrowStatus !== undefined &&
-    (sourceTypes.includes("literature") || sourceTypes.includes("internet"));
 
   const kbDocByIdentifier: Record<string, { status: string; error?: string | null }> = {};
   if (kbIngest) {
@@ -229,57 +141,6 @@ export default function SourcesPanel() {
         />
       </div>
 
-      {showChemcrowBadge && chemcrowStatus && (
-        <div
-          className={`shrink-0 text-xs rounded p-2 border flex flex-col gap-0.5 ${
-            chemcrowStatus.available
-              ? "bg-teal-500/10 border-teal-500/20"
-              : "bg-slate-800/60 border-edge"
-          }`}
-        >
-          <span
-            className={`font-medium flex items-center gap-1 ${
-              chemcrowStatus.available ? "text-teal-300" : "text-slate-400"
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                chemcrowStatus.available ? "bg-teal-400" : "bg-slate-600"
-              }`}
-            />
-            🧪 ChemCrow 化学增强检索
-            {chemcrowStatus.available ? " · 已启用" : " · 未安装"}
-          </span>
-          {!chemcrowStatus.available && chemcrowStatus.hint && (
-            <span className="text-slate-500 leading-relaxed">{chemcrowStatus.hint}</span>
-          )}
-        </div>
-      )}
-
-      {!searchBusy && error && (
-        <div className="shrink-0 text-xs bg-red-500/10 border border-red-500/20 rounded p-2 text-red-300 leading-relaxed">
-          ⚠ 检索失败：{error.replace(/^Error:\s*/, "")}
-          {(error.includes("Failed to fetch") || error.includes("fetch")) && (
-            <div className="mt-0.5 text-red-400/70">
-              请确认后端已启动：
-              <code className="text-red-300 bg-ink/60 rounded px-1">
-                uvicorn app.main:app --port 8000
-              </code>
-            </div>
-          )}
-        </div>
-      )}
-
-      {usedSeedFallback && sources.length > 0 && !searchBusy && (
-        <div className="shrink-0 text-[11px] text-amber-200/90 border border-amber-500/30 bg-amber-500/10 rounded px-2 py-1.5 leading-relaxed">
-          当前结果含<strong className="font-semibold">离线示例摘要</strong>（非实时专利数据）。配置在线检索后可获取真实文献。
-        </div>
-      )}
-
-      {filterReport && sources.length > 0 && !searchBusy && (
-        <FilterReportBanner report={filterReport} />
-      )}
-
       <input
         ref={fileInput}
         type="file"
@@ -314,87 +175,6 @@ export default function SourcesPanel() {
             : "检索中…"
           : "开始检索"}
       </button>
-
-      {searchBusy && searchProgress && (
-        <div className="shrink-0 rounded-lg border border-accent/25 bg-accent/5 px-3 py-2.5 text-[11px]">
-          <div className="flex items-center justify-between text-slate-400 mb-1.5">
-            <span className="text-accent2 uppercase tracking-widest">实时检索</span>
-            <span className="text-slate-300">{searchProgress.message}</span>
-          </div>
-          <div className="h-1.5 bg-edge rounded overflow-hidden mb-2">
-            <div
-              className="h-full bg-accent/80 transition-all duration-300 animate-pulse"
-              style={{
-                width: `${Math.min(100, Math.max(8, (searchProgress.total / 300) * 100))}%`,
-              }}
-            />
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {searchProgress.sourcesDone.map((s) => (
-              <span
-                key={`done-${s}`}
-                className="px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-300 border border-teal-500/20"
-              >
-                ✓ {sourceLabel(s)}
-              </span>
-            ))}
-            {searchProgress.source &&
-              !searchProgress.sourcesDone.includes(searchProgress.source) && (
-                <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent border border-accent/30 animate-pulse">
-                  … {sourceLabel(searchProgress.source)}
-                </span>
-              )}
-            {searchProgress.sourcesPending
-              .filter((s) => s !== searchProgress.source)
-              .slice(0, 6)
-              .map((s) => (
-                <span
-                  key={`pending-${s}`}
-                  className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500 border border-edge/60"
-                >
-                  {sourceLabel(s)}
-                </span>
-              ))}
-          </div>
-        </div>
-      )}
-
-      {kbIngest && (
-        <div className="shrink-0 rounded-lg border border-teal-500/25 bg-teal-500/5 px-3 py-2 text-[11px]">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-teal-300 uppercase tracking-widest shrink-0">
-              📚 知识库构建
-            </span>
-            <span
-              className={`text-slate-400 truncate ${kbIngest.active ? "animate-pulse" : ""}`}
-              title={kbIngest.message}
-            >
-              {kbIngest.message}
-            </span>
-            {!kbIngest.active && (
-              <button
-                onClick={dismissKbIngest}
-                className="shrink-0 text-slate-600 hover:text-slate-300"
-                title="关闭"
-              >
-                ×
-              </button>
-            )}
-          </div>
-          {kbIngest.total > 0 && (
-            <div className="mt-1.5 h-1 bg-edge rounded overflow-hidden">
-              <div
-                className={`h-full transition-all duration-300 ${
-                  kbIngest.active ? "bg-teal-400/80 animate-pulse" : "bg-teal-500/70"
-                }`}
-                style={{
-                  width: `${Math.min(100, Math.max(6, (kbIngest.done / kbIngest.total) * 100))}%`,
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
 
       <button
         type="button"

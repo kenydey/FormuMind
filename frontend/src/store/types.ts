@@ -21,6 +21,7 @@ import type {
   AdaptiveDOEMetadata,
 } from "../api";
 import type { ConstraintKey } from "../constants/constraints";
+import type { NotificationKind } from "./notifications";
 import type { ProjectSummary, StoreWorkspaceSlice } from "../projectWorkspace";
 
 /** Background KB build (async ingest after search/research) tracking state. */
@@ -122,6 +123,13 @@ export interface AppState {
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;
   kbIngest: KbIngestState | null;
+  /** Success notice from refreshKnowledgeBase — display-only, no other consumer. */
+  kbRefreshNotice: string | null;
+  /**
+   * Which run-status notifications the user has manually closed. A flag rather
+   * than a deleted source field — see store/notifications.ts for why.
+   */
+  notificationsDismissed: Record<NotificationKind, boolean>;
   deepResearchBusy: boolean;
   deepResearchStage: string;
   deepResearchMessage: string;
@@ -202,7 +210,8 @@ export interface AppState {
   deselectAllSources: () => void;
   searchSources: (queryOverride?: string) => Promise<void>;
   trackKbIngest: (taskId: string) => Promise<void>;
-  dismissKbIngest: () => void;
+  clearError: () => void;
+  dismissNotification: (kind: NotificationKind) => void;
   loadSourceStatus: () => Promise<void>;
   hydrateLlmSettings: () => Promise<void>;
   uploadFiles: (files: File[]) => Promise<void>;

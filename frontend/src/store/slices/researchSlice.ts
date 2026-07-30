@@ -1,6 +1,7 @@
 import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
 import type { ChatMessage, ComprehensiveReport, Formulation, ResearchResult } from "../../api";
 import { applyEnrichedLeaderboard } from "../formulationEnrich";
+import { undismiss } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -169,6 +170,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.deepResearchStage = "retrieve";
         draft.deepResearchMessage = "正在检索";
         draft.error = null;
+        undismiss(draft.notificationsDismissed, ["deep-research", "deep-report"]);
       });
       try {
         const { task_id } = await api.submitDeepResearch(
@@ -227,11 +229,15 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       set((draft) => {
         draft.searchBusy = true;
         draft.error = null;
+        draft.kbRefreshNotice = null;
       });
       try {
         const res = await api.refreshKnowledgeBase(query);
+        // This used to be written to `deepResearchMessage`, whose two readers
+        // are both gated on `deepResearchBusy` — false on this path. So the
+        // result was rendered nowhere and the button gave no feedback at all.
         set((draft) => {
-          draft.deepResearchMessage = `已入库 ${res.fetched} 条（索引共 ${res.indexed_total}）`;
+          draft.kbRefreshNotice = `已入库 ${res.fetched} 条（索引共 ${res.indexed_total}）`;
         });
       } catch (e) {
         set((draft) => {
