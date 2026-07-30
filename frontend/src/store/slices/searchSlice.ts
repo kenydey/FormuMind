@@ -11,6 +11,16 @@ import { undismiss } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
+/**
+ * How long silence is allowed before the KB build is presumed dead.
+ *
+ * Generous on purpose: a single document can spend `fulltext_timeout_s` (20 s)
+ * downloading and then minutes in the PDF parser, and with a scanned patent going
+ * through OCR at seconds per page a quiet stretch is normal. This only needs to be
+ * shorter than "forever".
+ */
+const KB_INGEST_STALL_MS = 15 * 60 * 1000;
+
 export function createSearchSlice(set: SliceSet, get: SliceGet) {
   return {
     setSearchQuery: (q) => {
@@ -229,7 +239,18 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               if (ev.message) draft.kbIngest.message = ev.message;
             });
           },
-          600_000
+          // No wall-clock limit. Building a knowledge base from several hundred
+          // documents takes as long as the downloads take, and any fixed number
+          // is arbitrary — the old 600 s cut a healthy job off at roughly the
+          // point it got going. The limit never stopped the server anyway; it
+          // only stopped this client watching, so the "中断" it reported was not
+          // true.
+          0,
+          undefined,
+          // What makes an unlimited wait safe: the clock resets on every progress
+          // event, so a slow job never trips it, but a worker that died stops
+          // emitting and gets reported instead of spinning forever.
+          KB_INGEST_STALL_MS
         );
         const progress = parseKbIngestData(final.data as Record<string, unknown> | undefined);
         set((draft) => {
@@ -247,7 +268,10 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       } catch (e) {
         set((draft) => {
           if (!draft.kbIngest || draft.kbIngest.taskId !== taskId) return;
-          draft.kbIngest.message = `知识库构建中断：${formatApiError(e)}`;
+          // "停止跟踪" rather than "中断": losing the stream does not stop the
+          // server-side ingest, and telling the user their build was aborted when
+          // it is still running sends them to re-run work already in progress.
+          draft.kbIngest.message = `知识库构建：已停止跟踪进度（${formatApiError(e)}）——后台任务可能仍在继续`;
           draft.kbIngest.active = false;
         });
       }

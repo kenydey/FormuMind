@@ -292,6 +292,11 @@ class Settings(BaseSettings):
     # 2.2 GB 的机器上 3 路并发已经接近上限。入库（切块+向量+写库）保持串行，
     # 避免 SQLite 写冲突。
     kb_ingest_workers: int = 3
+    # SSE 进度流的最大保持时长。构建一个几百篇文档的知识库需要几十分钟，原本
+    # Redis 路径 1 小时、无 Redis 回退 120 秒都可能在任务健康运行时切断。
+    # 客户端在流关闭后会自动改用轮询，所以这个值只决定「连接保持多久」，
+    # 不决定「任务能跑多久」。
+    task_stream_timeout_s: float = 21600.0  # 6 小时
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task

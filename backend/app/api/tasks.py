@@ -92,9 +92,11 @@ def _sse_frame(event: TaskProgressEvent) -> str:
 async def _poll_until_terminal(
     task_id: str,
     *,
-    timeout_s: float = 120.0,
+    timeout_s: float | None = None,
 ) -> AsyncIterator[TaskProgressEvent]:
     """Poll file/meta/disk snapshots when Redis Pub/Sub is unavailable."""
+    if timeout_s is None:
+        timeout_s = float(get_settings().task_stream_timeout_s)
     deadline = time.monotonic() + timeout_s
     last_payload: str | None = None
     while time.monotonic() < deadline:
@@ -115,12 +117,15 @@ async def _poll_until_terminal(
             return
 
         await asyncio.sleep(0.2)
-    # Deadline elapsed without a terminal event — notify the client so the
-    # SSE stream does not close silently.
-    yield TaskProgressEvent(
-        status=TaskProgressStatus.FAILED,
-        message="polling timed out",
-        progress=0.0,
+    # Deadline elapsed with the task still running. Deliberately *not* a FAILED
+    # event: the task has not failed, this connection has simply been open long
+    # enough. Claiming failure told the UI a healthy multi-hour ingest had died.
+    # Closing the stream instead makes the client's EventSource fall back to
+    # polling, which reports the real state.
+    logger.info(
+        "SSE poll deadline reached for task %s after %.0fs — closing stream, "
+        "client will fall back to polling",
+        task_id, timeout_s,
     )
 
 
@@ -155,7 +160,9 @@ async def stream_task_progress(task_id: str) -> StreamingResponse:
                 pubsub = client.pubsub()
                 await pubsub.subscribe(channel_name(task_id))
                 try:
-                    deadline = time.monotonic() + 3600
+                    deadline = time.monotonic() + float(
+                        get_settings().task_stream_timeout_s
+                    )
                     while time.monotonic() < deadline:
                         message = await pubsub.get_message(
                             ignore_subscribe_messages=True, timeout=1.0

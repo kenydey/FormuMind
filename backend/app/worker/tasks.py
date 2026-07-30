@@ -424,13 +424,19 @@ def _kb_ingest_impl(task_id: str, payload: dict) -> dict:
     evidence = [Evidence.model_validate(e) for e in payload.get("evidence") or []]
     docs_state: dict[str, dict] = {}
     order: list[str] = []
+    # Fetching runs on a thread pool, so this callback is now re-entrant. Without
+    # the lock, `order.append` landing before `docs_state[ident]` is set lets
+    # another thread's comprehension below raise KeyError on the id it just saw
+    # appended — which would surface as random documents "failing" for no reason.
+    state_lock = threading.Lock()
 
     def status_cb(meta: dict) -> None:
         ident = meta["identifier"]
-        if ident not in docs_state:
-            order.append(ident)
-        docs_state[ident] = dict(meta)
-        docs = [docs_state[i] for i in order]
+        with state_lock:
+            docs_state[ident] = dict(meta)   # visible before it is announced
+            if ident not in order:
+                order.append(ident)
+            docs = [docs_state[i] for i in order]
         done = sum(1 for d in docs if d["status"] in kb_ingest.TERMINAL_STATES)
         total = len(docs)
         active = next((d for d in docs if d["status"] in ("fetching", "indexing")), None)

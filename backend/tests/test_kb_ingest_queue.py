@@ -398,3 +398,32 @@ def test_synthetic_and_chunk_level_ids_are_still_rejected():
             title="t", snippet="s", source="patents", identifier=ident, relevance=0.9
         )
         assert ff.classify(ev) is None, ident
+
+
+# ── no time limit on a long build ────────────────────────────────────────────
+
+
+def test_stream_deadline_is_configurable_and_generous():
+    """A 340-document ingest runs for tens of minutes. The Redis path's hardcoded
+    one hour and the fallback's 120 s could both cut a healthy job off."""
+    assert get_settings().task_stream_timeout_s >= 3600
+
+
+def test_poll_fallback_does_not_report_failure_on_deadline(monkeypatch):
+    """It used to yield a FAILED event saying "polling timed out", which told the
+    UI a running task had died. The task has not failed — the connection has just
+    been open long enough — so the stream closes and the client falls back to
+    polling for the real state.
+    """
+    import asyncio
+
+    from app.api import tasks as tasks_api
+
+    monkeypatch.setattr(get_settings(), "task_stream_timeout_s", 0.05, raising=False)
+    monkeypatch.setattr(tasks_api, "get_task_meta", lambda tid: None)
+    monkeypatch.setattr(tasks_api, "_terminal_event_from_disk", lambda tid: None)
+
+    async def drain():
+        return [ev async for ev in tasks_api._poll_until_terminal("t-1")]
+
+    assert asyncio.run(drain()) == [], "deadline must close the stream, not fail it"

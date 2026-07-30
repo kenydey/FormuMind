@@ -1234,20 +1234,58 @@ export function subscribeTaskStream(
 }
 
 /** Await task completion via EventSource; resolves with terminal COMPLETED event. */
+/**
+ * Wait for a background task, streaming its progress.
+ *
+ * `timeoutMs = 0` disables the wall-clock limit, for jobs whose duration is
+ * genuinely unbounded — building a knowledge base from several hundred documents
+ * takes as long as the downloads take, and cutting it off at a fixed number is
+ * arbitrary. Note that this timeout only ever stopped the *client* watching; the
+ * server-side task carries on regardless, which is why the old copy claiming the
+ * build had been "interrupted" was wrong.
+ *
+ * `idleTimeoutMs` is what makes an unlimited wait safe. It resets on every
+ * progress event, so a slow job never trips it, but a worker that has died — OOM
+ * killed, container restarted — stops emitting and is reported instead of
+ * spinning forever. Total duration unlimited, silence bounded.
+ */
 export function awaitTaskStream(
   taskId: string,
   onEvent?: (ev: TaskProgressEvent) => void,
   timeoutMs = 120_000,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  idleTimeoutMs = 0
 ): Promise<TaskProgressEvent> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let es: EventSource;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = null;
+    };
+
+    const armIdle = () => {
+      if (idleTimeoutMs <= 0) return;
+      clearIdle();
+      idleTimer = setTimeout(() => {
+        es?.close();
+        finish(() =>
+          reject(
+            new Error(
+              `已 ${Math.round(idleTimeoutMs / 1000)}s 没有进度更新 — 任务可能已中止（请查看服务端日志）`
+            )
+          )
+        );
+      }, idleTimeoutMs);
+    };
 
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      clearIdle();
       signal?.removeEventListener("abort", onAbort);
       fn();
     };
@@ -1281,10 +1319,12 @@ export function awaitTaskStream(
         : null;
 
     signal?.addEventListener("abort", onAbort, { once: true });
+    armIdle();
 
     es = subscribeTaskStream(
       taskId,
       (ev) => {
+        armIdle();  // progress means alive — restart the silence clock
         onEvent?.(ev);
         if (ev.status === "COMPLETED" || ev.status === "FAILED") {
           es.close();
@@ -1297,15 +1337,24 @@ export function awaitTaskStream(
       },
       () => {
         es.close();
-        pollTask(taskId, (s) => {
-          if (s.state === "running" || s.state === "pending") {
-            onEvent?.({
-              status: s.state === "running" ? "RUNNING" : "PENDING",
-              message: s.message,
-              progress: s.progress,
-            });
-          }
-        })
+        // An unlimited wall clock has to mean the fallback is unlimited too,
+        // otherwise a dropped SSE connection reintroduces a 120 s ceiling by the
+        // back door — which is exactly how a long job "times out" while healthy.
+        pollTask(
+          taskId,
+          (s) => {
+            armIdle();
+            if (s.state === "running" || s.state === "pending") {
+              onEvent?.({
+                status: s.state === "running" ? "RUNNING" : "PENDING",
+                message: s.message,
+                progress: s.progress,
+              });
+            }
+          },
+          400,
+          timeoutMs > 0 ? undefined : 0,
+        )
           .then(resolveFromStatus)
           .catch(() => {
             finish(() =>
@@ -1861,9 +1910,10 @@ export async function pollTask(
   id: string,
   onUpdate: (s: TaskStatus) => void,
   intervalMs = 400,
+  /** 0 = poll until the task finishes, for jobs with no meaningful deadline. */
   maxAttempts = 300
 ): Promise<TaskStatus> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; !maxAttempts || attempt < maxAttempts; attempt++) {
     const s = await api.task(id);
     onUpdate(s);
     if (s.state === "completed" || s.state === "failed") return s;
