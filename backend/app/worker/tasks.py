@@ -274,7 +274,7 @@ def run_deep_research_task(self, payload: dict) -> dict:
             kb_count=len(grounded),
             engine=state.get("recommend_engine") or "offline",
             verified_claims=state.get("verified_claims") or [],
-            claim_check_engine="offline",
+            claim_check_engine=state.get("claim_check_engine") or "offline",
             claim_check_pass_rate=float(state.get("claim_check_pass_rate") or 1.0),
         )
         result = {

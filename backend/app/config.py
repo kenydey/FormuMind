@@ -137,7 +137,9 @@ class Settings(BaseSettings):
     colbert_index_dir: str = "./data/colbert_index"
     colbert_model: str = "colbert-ir/colbertv2.0"
     colbert_collection: str = "default"
-    colbert_top_k: int = 12
+    # 单次检索返回的候选数。深度研究把主题拆成子问题后各自检索再合并，所以
+    # 总候选量约为 colbert_top_k × deep_subquestions。
+    colbert_top_k: int = 16
     colbert_min_score: float = 0.35
 
     # CRAG Fallback 默认联邦检索源（逗号分隔 env: FORMUMIND_FEDERATED_SOURCES）
@@ -204,6 +206,18 @@ class Settings(BaseSettings):
     search_rerank_enabled: bool = True
     search_rerank_top_k: int = 100       # 精排后至少保留条数（有足够结果时）
     search_rerank_llm_batch: int = 50    # 送入 LLM 评分的候选数（控制成本）
+
+    # 深度研究：写报告的 LLM 能看到多少证据。原本硬编码 12 条 × 每条 300 字符
+    # ≈ 3.6 KB，是「深度研究不够深」最大的单点原因——全文抓回来、切好块、入了
+    # 库，到提示词这里又被砍成三分之一。0 = 不限制每条长度。
+    deep_report_evidence_count: int = 24
+    deep_report_snippet_chars: int = 1200
+    # 主题拆解成几个子问题分别检索（1 = 关闭，退回单轮检索）。这是唯一能产生
+    # 新检索角度的机制：QueryExpander 只产同义词与 IPC 号，且只在条件性的
+    # fallback 里才跑，正常成功路径从不扩展查询。
+    deep_subquestions: int = 4
+    # 用假设性答案改进检索（HyDE）。生成内容只用于检索，绝不进入报告正文。
+    deep_hyde_enabled: bool = True
 
     # Recommend path: federated refresh before CRAG recommend. The ColBERT
     # registry write is synchronous; the full-text ingest it also triggers is a

@@ -68,6 +68,8 @@ class ResearchGraphState(TypedDict, total=False):
     claim_check_passed: bool
     claim_check_attempts: int
     claim_check_pass_rate: float
+    claim_check_engine: str
+    retrieval_queries: list[str]
 
 
 ProgressCallback = Callable[[str, str, dict[str, Any] | None], None]
@@ -79,9 +81,14 @@ def _emit(cb: ProgressCallback | None, stage: str, message: str, partial: dict |
 
 
 def _grade_prompt(topic: str, evidence: list[Evidence]) -> str:
+    # Bounded by the same setting as the report, because this is the real
+    # ceiling: `apply_grade` can only mark documents the grader was shown, so a
+    # hardcoded 12 here silently capped everything downstream — raising the
+    # report budget alone would have changed nothing.
+    limit = max(1, int(get_settings().deep_report_evidence_count))
     lines = "\n".join(
         f"[{i}] ({e.source}) {e.title}: {e.snippet[:200]}"
-        for i, e in enumerate(evidence[:12])
+        for i, e in enumerate(evidence[:limit])
     )
     return (
         "你是 CRAG 知识评估器。判断检索结果是否足以回答研究主题。\n"
@@ -147,7 +154,53 @@ def apply_grade(
     return [e for e in evidence if e.relevance >= min_score][: settings.colbert_top_k]
 
 
-def retrieve_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
+def _retrieval_queries(
+    state: ResearchGraphState, settings: Settings, mode: str
+) -> list[str]:
+    """The queries this retrieval round will actually run.
+
+    Only deep research decomposes. ``recommend`` is a latency-sensitive path with
+    its own test asserting it stays under five seconds offline, and extra LLM
+    round trips there would buy breadth nobody asked for.
+    """
+    query = state.get("query") or state.get("topic") or ""
+    if mode != "deep" or int(settings.deep_subquestions) <= 1:
+        return [query]
+    from . import subquestions
+
+    req = state.get("req")
+    domain = getattr(req, "domain", "") or ""
+    topic = state.get("topic") or query
+    questions = subquestions.decompose(topic, settings.deep_subquestions, domain)
+    # The built query carries requirement context the raw topic lacks, so keep it
+    # as the first entry rather than replacing it with the topic string.
+    return [query] + [q for q in questions if q != topic]
+
+
+def _search_one(query: str, settings: Settings, *, hyde: bool = False) -> list[Evidence]:
+    """One retrieval, optionally through a hypothetical-answer expansion.
+
+    HyDE is applied to the primary query only, not to every sub-question. Its
+    value is turning a short bare question into document-shaped text so that
+    embedding and lexical matching have something comparable to match against —
+    real but not worth one extra LLM round trip per angle, which with four
+    sub-questions and a fallback round would be ten calls instead of two.
+    """
+    if hyde and settings.deep_hyde_enabled:
+        # The legitimate use of an ungrounded LLM call: the generated text steers
+        # retrieval and never reaches the report. Already implemented, no callers.
+        from ..services.rag import hyde_expand
+
+        query = hyde_expand(query)
+    return [h.evidence for h in colbert_store.search(query, settings=settings)]
+
+
+def retrieve_node(
+    state: ResearchGraphState,
+    settings: Settings | None = None,
+    *,
+    mode: str = "deep",
+) -> ResearchGraphState:
     settings = settings or get_settings()
     query = state.get("query") or state.get("topic") or ""
     pre = state.get("pre_index") or []
@@ -155,8 +208,17 @@ def retrieve_node(state: ResearchGraphState, settings: Settings | None = None) -
         colbert_store.index_evidence(pre, settings=settings)
 
     colbert_store.bootstrap_seed_corpus(settings)
-    hits = colbert_store.search(query, settings=settings)
-    evidence = [h.evidence for h in hits]
+    queries = _retrieval_queries(state, settings, mode)
+    state["retrieval_queries"] = queries
+    if len(queries) > 1:
+        from . import subquestions
+
+        # Primary query gets HyDE; the sub-questions are already distinct angles.
+        evidence = subquestions.merge_evidence(
+            [_search_one(q, settings, hyde=(i == 0)) for i, q in enumerate(queries)]
+        )
+    else:
+        evidence = _search_one(queries[0], settings, hyde=True)
     # User-supplied sources are high-trust: keep them as candidates ahead of
     # the retrieved hits (deduped) so an explicit pre-load always surfaces.
     if pre:
@@ -164,7 +226,14 @@ def retrieve_node(state: ResearchGraphState, settings: Settings | None = None) -
         evidence = list(pre) + [
             e for e in evidence if (e.identifier or e.title) not in pre_keys
         ]
-    evidence = llm_rerank(query, evidence, k=settings.colbert_top_k)
+    # Reranking to colbert_top_k would throw the extra angles away again: four
+    # sub-questions can merge to ~64 candidates and cutting back to one query's
+    # worth would make decomposition pointless. Keep as many as the pipeline is
+    # willing to grade.
+    rerank_k = settings.colbert_top_k
+    if len(queries) > 1:
+        rerank_k = max(rerank_k, int(settings.deep_report_evidence_count))
+    evidence = llm_rerank(query, evidence, k=rerank_k)
 
     if settings.kg_enabled:
         from ..services.kg import retrieve as kg_retrieve
@@ -386,6 +455,9 @@ def claim_check_node(state: ResearchGraphState, settings: Settings | None = None
     state["verified_claims"] = [v.model_dump() for v in result.claims]
     state["claim_check_pass_rate"] = result.pass_rate
     state["claim_check_passed"] = result.claim_check_passed
+    # Was dropped here, so both report builders hardcoded "offline" and an
+    # LLM-verified report claimed to have been checked by token overlap.
+    state["claim_check_engine"] = result.engine
     state["claim_check_attempts"] = int(state.get("claim_check_attempts") or 0) + 1
 
     if not result.claim_check_passed:
@@ -474,12 +546,17 @@ def _run_crag_retrieval(
     progress_cb: ProgressCallback | None,
 ) -> ResearchGraphState:
     _emit(progress_cb, "retrieve", "正在检索")
-    state = retrieve_node(state, settings)
+    state = retrieve_node(state, settings, mode=mode)
+    queries = state.get("retrieval_queries") or []
+    detail = f"（{len(queries)} 个检索角度）" if len(queries) > 1 else ""
     _emit(
         progress_cb,
         "retrieve",
-        f"已召回 {len(state.get('evidence') or [])} 条",
-        {"evidence_count": len(state.get("evidence") or [])},
+        f"已召回 {len(state.get('evidence') or [])} 条{detail}",
+        {
+            "evidence_count": len(state.get("evidence") or []),
+            "query_count": len(queries),
+        },
     )
 
     _emit(progress_cb, "grade", "评估质量")
@@ -488,7 +565,7 @@ def _run_crag_retrieval(
     if _needs_fallback(state, mode):
         _emit(progress_cb, "fallback", "重试搜索")
         state = fallback_node(state, settings, mode=mode)
-        state = retrieve_node(state, settings)
+        state = retrieve_node(state, settings, mode=mode)
         state = grade_node(state, settings)
 
     return state
@@ -535,7 +612,6 @@ def run_research_graph(
         _emit(progress_cb, "generate", "生成答案")
         state = generate_node(state, settings)
         state = _run_claim_check_loop(state, settings, progress_cb)
-        _emit(progress_cb, "recommend", "推荐配方")
     return state
 
 

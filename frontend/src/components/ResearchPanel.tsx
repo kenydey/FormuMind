@@ -6,17 +6,30 @@ import type { NotificationKind } from "../store/notifications";
 import MarkdownMessage from "./MarkdownMessage";
 import NotificationStack from "./NotificationStack";
 
+/**
+ * Must stay in step with the stages `research_graph._emit` actually sends.
+ * `regenerate` was missing, so `stageIndex` fell through to 0 and the progress
+ * bar jumped back to 检索 every time a report was rewritten — the run looked
+ * like it had restarted. `recommend` is emitted only by the recommend-mode
+ * pipeline, so deep research legitimately ends at 核验/修正.
+ */
 const CRAG_STAGES = [
   { id: "retrieve", label: "检索" },
   { id: "grade", label: "评估" },
   { id: "fallback", label: "补搜" },
   { id: "generate", label: "生成" },
   { id: "claim_check", label: "核验" },
-  { id: "recommend", label: "推荐" },
+  { id: "regenerate", label: "修正" },
 ] as const;
 
+export const CRAG_STAGE_IDS: readonly string[] = CRAG_STAGES.map((s) => s.id);
+
 function stageIndex(stage: string): number {
-  const idx = CRAG_STAGES.findIndex((s) => s.id === stage);
+  const idx = CRAG_STAGE_IDS.indexOf(stage);
+  // 0 covers the pre-start case, where `deepResearchStage` is "". It is also
+  // what an unrecognised stage falls back to, which is why the list above being
+  // complete is the actual guarantee — `backend deep-mode stages ⊆ CRAG_STAGE_IDS`
+  // is asserted on both sides of the boundary.
   return idx >= 0 ? idx : 0;
 }
 

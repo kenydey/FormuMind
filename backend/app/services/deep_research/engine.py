@@ -31,8 +31,18 @@ def _dedupe(evidence: list[Evidence]) -> list[Evidence]:
 
 
 def _cross_validate_prompt(topic: str, kb_answer: str, evidence: list[Evidence]) -> str:
+    # The budget here decides how deep the report can be. It used to be a
+    # hardcoded 12 x 300 chars ≈ 3.6 KB, so a document that had been downloaded,
+    # parsed, chunked and persisted in full was cut to a third of one chunk
+    # before the model ever saw it.
+    from ...config import get_settings
+
+    settings = get_settings()
+    count = max(1, int(settings.deep_report_evidence_count))
+    per = int(settings.deep_report_snippet_chars or 0)
     citations = "\n".join(
-        f"[{e.source}] {e.title}: {e.snippet[:300]}" for e in evidence[:12]
+        f"[{e.source}] {e.title}: {e.snippet[:per] if per > 0 else e.snippet}"
+        for e in evidence[:count]
     )
     return (
         "你是资深材料信息学研究员，需要把多源检索结果融合成一份带严格引用的研究报告。\n"
@@ -236,7 +246,7 @@ class DeepResearchEngine:
             kb_count=len(grounded),
             engine=state.get("recommend_engine") or "offline",
             verified_claims=state.get("verified_claims") or [],
-            claim_check_engine="offline",
+            claim_check_engine=state.get("claim_check_engine") or "offline",
             claim_check_pass_rate=float((_rate if (_rate := state.get("claim_check_pass_rate")) is not None else 1.0)),
         )
 
