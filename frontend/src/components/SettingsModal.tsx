@@ -5,8 +5,15 @@ import DependencyManager from "./DependencyManager";
 import ApiSettingsPanel from "./ApiSettingsPanel";
 import EnvFlagsPanel from "./EnvFlagsPanel";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
+import VisionModelPanel from "./VisionModelPanel";
 import { useStore } from "../store";
-import { api, formatApiError, type LLMModelOption, type LLMProviderInfo } from "../api";
+import {
+  api,
+  formatApiError,
+  type LLMModelOption,
+  type LLMProviderInfo,
+  type VisionSettings,
+} from "../api";
 
 export default function SettingsModal() {
   const { settingsOpen, toggleSettings, llmConfig, setLlmConfig, settingsTab, setSettingsTab } =
@@ -31,6 +38,7 @@ export default function SettingsModal() {
   const [modelOptions, setModelOptions] = useState<LLMModelOption[]>([]);
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [modelsRefreshHint, setModelsRefreshHint] = useState<string | null>(null);
+  const [vision, setVision] = useState<VisionSettings | null>(null);
 
   const loadLlmSettings = useCallback(() => {
     setLoadError(null);
@@ -39,6 +47,7 @@ export default function SettingsModal() {
       .then((s) => {
         setProviders(s.providers ?? []);
         setKeySet(s.key_set);
+        setVision(s.vision ?? null);
         setLlmConfig({
           provider: s.provider,
           model: s.model,
@@ -47,6 +56,7 @@ export default function SettingsModal() {
       })
       .catch((e) => {
         setProviders([]);
+        setVision(null);
         setLoadError(formatApiError(e));
       });
   }, [setLlmConfig]);
@@ -75,7 +85,9 @@ export default function SettingsModal() {
     setLlmConfig({
       provider,
       model: recommended?.id ?? "",
-      baseUrl: p?.base_url,
+      // A custom endpoint has no catalog default, so clear the field rather
+      // than carrying the previous provider's URL over to it.
+      baseUrl: p?.base_url ?? undefined,
     });
     setResult(null);
   }
@@ -308,6 +320,12 @@ export default function SettingsModal() {
               {testing ? "测试中…" : "保存并测试连接"}
             </button>
           </div>
+
+          <VisionModelPanel
+            providers={providers}
+            vision={vision}
+            onSaved={() => void loadLlmSettings()}
+          />
         </div>
       )}
     </Modal>

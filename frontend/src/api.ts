@@ -1084,6 +1084,17 @@ export const api = {
       }
     ),
 
+  postVisionSettings: (update: VisionSettingsUpdate) =>
+    post<{ ok: boolean } & VisionSettings>("/api/settings/vision", {
+      provider: update.provider,
+      model: update.model,
+      api_key: update.api_key,
+      base_url: update.baseUrl,
+    }),
+
+  /** Send a real image down the real path — the only honest capability check. */
+  testVision: () => post<VisionProbeResult>("/api/settings/vision/test", {}),
+
   refreshLlmModels: (opts?: { provider?: string; baseUrl?: string; model?: string }) =>
     post<LlmModelsRefreshResponse>("/api/settings/models/refresh", {
       provider: opts?.provider,
@@ -1319,7 +1330,8 @@ export interface LLMModelOption {
 export interface LLMProviderInfo {
   id: string;
   label: string;
-  base_url?: string;
+  /** null for a bring-your-own endpoint, which has no default to offer. */
+  base_url?: string | null;
   models: LLMModelOption[];
 }
 
@@ -1667,12 +1679,47 @@ export interface KBReindexResult {
   embedded_chunks: number;
 }
 
+/**
+ * The vision role. `provider: ""` means "follow the text model", which is the
+ * default and what every install did before roles existed.
+ *
+ * `configured` says a key and model are present — deliberately NOT that the
+ * model can read a picture. For a rented endpoint that is unknowable from the
+ * server, so `POST /api/settings/vision/test` is the only way to find out.
+ */
+export interface VisionSettings {
+  provider: string;
+  model: string;
+  base_url?: string | null;
+  key_set: boolean;
+  inherits: boolean;
+  configured: boolean;
+  hint: string;
+}
+
+export interface VisionSettingsUpdate {
+  provider?: string;
+  model?: string;
+  api_key?: string;
+  baseUrl?: string;
+}
+
+export interface VisionProbeResult {
+  ok: boolean;
+  provider?: string;
+  model?: string;
+  base_url?: string | null;
+  inherits?: boolean;
+  message: string;
+}
+
 export interface LLMSettingsResponse {
   provider: string;
   model: string;
   key_set: boolean;
   base_url?: string;
   providers: LLMProviderInfo[];
+  vision: VisionSettings;
 }
 
 export interface LlmModelsRefreshResponse {
