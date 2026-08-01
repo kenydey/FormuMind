@@ -298,3 +298,36 @@ def post_env_flags(body: EnvFlagsUpdate):
 
     updated, rejected = update_env_flags(body.updates)
     return {"updated": updated, "rejected": rejected, "flags": list_env_flags()}
+
+
+# ── Formulation mode selector (non-boolean) ─────────────────────────────
+
+FORMULATION_MODE_CHOICES = [
+    {"value": "hybrid", "label": "Hybrid 叠加", "desc": "知识库证据 + LLM 合成（推荐）"},
+    {"value": "llm_only", "label": "LLM Only", "desc": "纯 LLM 推荐（快速，离线）"},
+    {"value": "kb_only", "label": "KB Only", "desc": "仅知识库检索（LLM 降级/验证时）"},
+]
+
+
+class FormulationModeUpdate(BaseModel):
+    mode: str = Field(default="hybrid", pattern="^(hybrid|llm_only|kb_only)$")
+
+
+@router.get("/settings/formulation-mode")
+def get_formulation_mode() -> dict:
+    s = get_settings()
+    return {"current": s.formulation_mode, "choices": FORMULATION_MODE_CHOICES}
+
+
+@router.post("/settings/formulation-mode")
+def set_formulation_mode(body: FormulationModeUpdate) -> dict:
+    import os
+    from ..services.secrets_store import write_env_updates
+
+    os.environ["FORMUMIND_FORMULATION_MODE"] = body.mode
+    try:
+        write_env_updates({"FORMUMIND_FORMULATION_MODE": body.mode})
+    except OSError:
+        pass  # read-only FS — live process env still applied
+    get_settings.cache_clear()
+    return {"mode": body.mode, "status": "ok"}

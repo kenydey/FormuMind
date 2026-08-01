@@ -18,13 +18,13 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
         draft.settingsOpen = !draft.settingsOpen;
       }),
 
-    openSettings: (tab: "llm" | "deps" | "api" | "env" = "llm") =>
+    openSettings: (tab: "llm" | "deps" | "api" | "env" | "recommend" = "llm") =>
       set((draft) => {
         draft.settingsOpen = true;
         draft.settingsTab = tab;
       }),
 
-    setSettingsTab: (tab: "llm" | "deps" | "api" | "env") =>
+    setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend") =>
       set((draft) => {
         draft.settingsTab = tab;
       }),

@@ -1073,6 +1073,14 @@ export const api = {
       { updates },
     ),
 
+  getFormulationMode: () =>
+    get<{ current: string; choices: { value: string; label: string; desc: string }[] }>(
+      "/api/settings/formulation-mode",
+    ),
+
+  setFormulationMode: (mode: string) =>
+    post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
+
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   getAuthStatus: () =>

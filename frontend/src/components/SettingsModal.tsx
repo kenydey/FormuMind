@@ -6,6 +6,7 @@ import ApiSettingsPanel from "./ApiSettingsPanel";
 import EnvFlagsPanel from "./EnvFlagsPanel";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import VisionModelPanel from "./VisionModelPanel";
+import FormulationModeSelector from "./FormulationModeSelector";
 import { useStore } from "../store";
 import {
   api,
@@ -156,6 +157,7 @@ export default function SettingsModal() {
           ["llm", "大模型"],
           ["api", "API 配置"],
           ["env", "环境变量"],
+          ["recommend", "推荐"],
           ["deps", "依赖管理"],
         ] as const).map(([id, label]) => (
           <button
@@ -187,6 +189,8 @@ export default function SettingsModal() {
         <ApiSettingsPanel reloadKey={reloadKey} />
       ) : settingsTab === "env" ? (
         <EnvFlagsPanel reloadKey={reloadKey} />
+      ) : settingsTab === "recommend" ? (
+        <FormulationModeSelector />
       ) : providers.length === 0 && !loadError ? (
         <p className="text-xs text-slate-500 py-4 text-center">正在加载供应商列表…</p>
       ) : (

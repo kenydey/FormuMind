@@ -51,6 +51,11 @@ CATEGORY_LABELS: dict[str, str] = {
 
 FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     # ── 检索 ──────────────────────────────────────────────────────────────
+    EnvFlag("gpu_enabled", "GPU 加速 ColBERT 检索",
+            "启用后使用 PyLate ColBERT 作为知识库检索后端（需 CUDA GPU ≥ 4GB VRAM）。"
+            "关闭时使用 BM25 + FAISS 混合检索（纯 CPU，不限硬件，零 AVX2 要求）。",
+            "retrieval",
+            "切换后需重启生效；GPU/CUDA 不可用时自动退回 CPU 模式"),
     EnvFlag("arxiv_search_enabled", "arXiv 检索",
             "文献检索包含 arXiv 来源。", "retrieval", "需安装 intel extra + 网络"),
     EnvFlag("arxiv_domain_filter", "arXiv 领域过滤",

@@ -143,7 +143,7 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api" | "env";
+  settingsTab: "llm" | "deps" | "api" | "env" | "recommend";
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -220,7 +220,7 @@ export interface AppState {
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
   openSettings: (tab?: "llm" | "deps" | "api" | "env") => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api" | "env") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend") => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   runNextRoundDoe: () => Promise<void>;
