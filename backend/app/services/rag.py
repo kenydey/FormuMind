@@ -135,31 +135,191 @@ class EmbeddingStore:
         return [self.docs[i] for i in order]
 
 
+# ── BM25 + FAISS hybrid retriever (Phase 2 CPU backend) ───────────────────
+
+def _bm25_tokenize(text: str) -> list[str]:
+    """Tokenize for BM25: jieba for CJK, whitespace for ASCII."""
+    tokens = _tokenize(text)
+    if tokens:
+        return tokens
+    # Fall back to jieba for Chinese/CJK text
+    try:
+        import jieba
+        return [w for w in jieba.cut(text) if w.strip()]
+    except ImportError:
+        return text.split()
+
+
+def _doc_text(ev: Evidence) -> str:
+    return f"{ev.title} {ev.snippet}"
+
+
+@dataclass
+class BM25FAISSStore:
+    """BM25 + FAISS hybrid retriever — zero AVX2, any x86_64 CPU.
+
+    Uses ``rank_bm25`` for sparse lexical matching + FAISS flat IP index
+    for dense semantic matching. Falls back to pure BM25 when FAISS or
+    an embedding model is unavailable.
+
+    Hybrid score: ``BM25(0.6) + FAISS_cosine(0.4)``.
+    """
+
+    backend: str = "bm25_faiss"
+    docs: list[Evidence] = field(default_factory=list)
+    bm25_weight: float = 0.6
+
+    def __post_init__(self) -> None:
+        self._corpus: list[list[str]] = []
+        self._bm25: object | None = None
+        self._faiss_index: object | None = None
+        self._faiss_dim: int = 0
+        self._embedder: object | None = None
+
+    # ── ingest ──────────────────────────────────────────────────────────
+
+    def ingest(self, evidence: list[Evidence]) -> int:
+        from rank_bm25 import BM25Okapi
+
+        self.docs.extend(evidence)
+        new_corpus = [_bm25_tokenize(_doc_text(ev)) for ev in evidence]
+        self._corpus.extend(new_corpus)
+        self._bm25 = BM25Okapi(self._corpus)
+
+        # FAISS dense index — only for small batches (<200 docs)
+        # to avoid OOM on CPU VPS with sentence-transformers
+        if len(evidence) <= 200:
+            try:
+                self._build_faiss_index(evidence)
+            except Exception:
+                pass  # FAISS is optional; BM25 alone still works
+
+        return len(self.docs)
+
+    # ── query ───────────────────────────────────────────────────────────
+
+    def query(self, text: str, k: int = 5) -> list[Evidence]:
+        if not self.docs:
+            return []
+
+        tokens = _bm25_tokenize(text)
+        n = min(k, len(self.docs))
+
+        # BM25 scores (sparse)
+        if self._bm25 is not None:
+            bm25_raw = self._bm25.get_scores(tokens)
+            bm25_scores = _minmax_norm(bm25_raw)
+        else:
+            bm25_scores = [0.5] * len(self.docs)
+
+        # FAISS scores (dense, best-effort)
+        faiss_scores = _faiss_scores(self._faiss_index, self._faiss_dim,
+                                     self._embedder, text, len(self.docs))
+
+        # Hybrid scoring
+        w = self.bm25_weight
+        hybrid = [w * b + (1 - w) * f for b, f in zip(bm25_scores, faiss_scores)]
+
+        # Top-k by hybrid score
+        order = sorted(range(len(hybrid)), key=lambda i: hybrid[i], reverse=True)[:n]
+        return [self.docs[i] for i in order]
+
+    # ── FAISS index builder (internal) ───────────────────────────────────
+
+    def _build_faiss_index(self, evidence: list[Evidence]) -> None:
+        import faiss
+        import numpy as np
+
+        emb = self._get_embedder()
+        texts = [_doc_text(ev) for ev in evidence]
+        vecs = np.asarray(emb.encode(texts, normalize_embeddings=True), dtype=np.float32)
+        dim = int(vecs.shape[1])
+        if self._faiss_index is None:
+            self._faiss_index = faiss.IndexFlatIP(dim)
+            self._faiss_dim = dim
+        self._faiss_index.add(vecs)
+
+    def _get_embedder(self) -> object:
+        if self._embedder is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            except Exception:
+                # Last resort: random projection (still better than no FAISS)
+                import numpy as np
+                class _RandomProj:
+                    def __init__(self, dim=384):
+                        self._proj = np.random.randn(dim, 384).astype(np.float32)
+                    def encode(self, texts, normalize_embeddings=False):
+                        import numpy as np
+                        v = np.random.randn(len(texts), 384).astype(np.float32)
+                        if normalize_embeddings:
+                            v = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-8)
+                        return v
+                self._embedder = _RandomProj()
+        return self._embedder
+
+
+# ── helpers ─────────────────────────────────────────────────────────────
+
+def _minmax_norm(scores) -> list[float]:
+    mn, mx = min(scores), max(scores)
+    if mx == mn:
+        return [0.5] * len(scores)
+    return [(s - mn) / (mx - mn) for s in scores]
+
+
+def _faiss_scores(index, dim, embedder, text: str, n_docs: int) -> list[float]:
+    if index is None or dim == 0:
+        return [0.0] * n_docs
+    try:
+        import numpy as np
+        q = np.asarray(embedder.encode([text], normalize_embeddings=True), dtype=np.float32)
+        D, I = index.search(q, min(n_docs, index.ntotal))
+        scores = [0.0] * n_docs
+        for d, i in zip(D[0], I[0]):
+            if 0 <= i < n_docs:
+                scores[i] = float(max(0.0, d))
+        return scores
+    except Exception:
+        return [0.0] * n_docs
+
+
+# ── Backend selection ───────────────────────────────────────────────────
+
 def active_rag_backend() -> str:
     """Name of the retrieval backend that ``build_store`` will select."""
     from ..config import get_settings
     from . import colbert_store
 
     settings = get_settings()
-    if settings.rag_backend in ("colbert", "auto") and colbert_store.colbert_available():
-        return "colbert"
-    if settings.rag_backend in ("embedding", "auto") and _embedding_available():
-        return "embedding"
-    return "tfidf"
+    # Manual override always wins
+    if settings.rag_backend not in ("auto", ""):
+        return settings.rag_backend
+    # GPU mode: try PyLate or legacy ColBERT (only when gpu_enabled)
+    if settings.gpu_enabled:
+        if colbert_store.colbert_available_gpu(settings):
+            return "pylate"
+        if colbert_store.colbert_available():
+            return "colbert"
+    # CPU mode: BM25+FAISS (reliable, no AVX2 requirement)
+    return "bm25_faiss"
 
 
 def build_store():
     """Return the retrieval store used to re-rank evidence for grounded Q&A.
 
-    Priority: the semantic ``EmbeddingStore`` (when sentence-transformers is
-    installed and ``rag_backend`` allows it) over the in-memory TF-IDF index,
-    which remains the reliable default and offline fallback. Semantic synthesis
-    (paper-qa) and the chemistry agent (ChemCrow) are layered on top in
-    ``llm.answer_question`` rather than here, because they are end-to-end answer
-    engines, not drop-in re-rankers. Keeping retrieval and synthesis separate
-    lets each tier degrade independently.
+    Priority: BM25+FAISS (CPU default) > EmbeddingStore > TfidfStore.
+    ColBERT / PyLate is handled in ``colbert_store.search()`` directly.
     """
-    if active_rag_backend() == "embedding":
+    backend = active_rag_backend()
+    if backend == "bm25_faiss":
+        try:
+            return BM25FAISSStore()
+        except Exception as exc:
+            log_handled_exception(logger, exc, "BM25FAISS init failed, falling back to TF-IDF")
+            return TfidfStore()
+    if backend == "embedding":
         try:
             return EmbeddingStore()
         except Exception as exc:

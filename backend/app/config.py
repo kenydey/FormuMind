@@ -129,8 +129,20 @@ class Settings(BaseSettings):
     # 检索设置
     search_limit_per_source: int = 50    # 每源单页大小（增量翻页）；不设单源总量上限
     search_total_limit: int = 300        # 全部来源合并后的总量上限（按相关性排序截断）
-    # RAG 检索后端：auto（ColBERT > sentence-transformers > TF-IDF）/
-    # colbert / embedding / tfidf。缺库时一律回退 TF-IDF。
+    # RAG 检索 + 配方推荐配置
+    # GPU 加速 ColBERT 检索开关（需 PyLate + CUDA torch）。
+    # True  → PyLate ColBERT (GPU ≥ 4GB VRAM)
+    # False → BM25 + FAISS 混合检索 (纯 CPU，零 AVX2 要求)
+    gpu_enabled: bool = Field(default=False, description="Enable GPU-accelerated ColBERT retrieval")
+
+    # 配方推荐生成模式
+    # "hybrid"   → KB 证据 + LLM 合成（叠加，推荐）
+    # "llm_only" → 纯 LLM 推荐（快速，离线，当前回退）
+    # "kb_only"  → 仅 KB 检索（无 LLM，降级验证）
+    formulation_mode: str = Field(default="hybrid", description="Formulation recommendation mode")
+
+    # 检索后端显式覆盖（覆盖 gpu_enabled 自动检测）
+    # "auto" | "pylate" | "bm25_faiss" | "embedding" | "tfidf"
     rag_backend: str = "auto"
 
     # ColBERT 持久知识库

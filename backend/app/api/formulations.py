@@ -117,7 +117,13 @@ class RecommendFormulationsResponse(BaseModel):
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
 def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormulationsResponse:
-    """LLM structured formulation recommend grounded on ColBERT + CRAG evidence."""
+    """LLM structured formulation recommend grounded on KB evidence.
+
+    Mode selectable via ``FORMUMIND_FORMULATION_MODE``:
+    - ``hybrid`` (default): KB retrieval → LLM synthesis (叠加)
+    - ``llm_only``: pure LLM, no KB lookup (fast / offline fallback)
+    - ``kb_only``: KB retrieval only, no LLM (degraded / validation)
+    """
     from ..config import get_settings
     from ..pipeline.research_graph import resolve_grounded_evidence
     from ..services.grounded_recommend import ground_recommended_formulas
@@ -128,26 +134,54 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     requested_n = resolve_recommend_n(body.n, settings=settings)
     llm_n = llm_candidate_count(requested_n, settings=settings)
     query = body.requirement.headline()
+    mode = settings.formulation_mode
 
-    # CRAG retrieval is skipped in Docker (ColBERT SIGILL on CPU-only VPS).
-    # The LLM has enough domain knowledge to recommend formulations directly.
-    evidence = body.sources or []
-    try:
-        rec_resp = llm.recommend_formulations(
-            body.requirement,
-            objectives,
-            evidence,
-            n=llm_n,
-        )
-    except Exception as exc:
-        log.exception("recommend_formulations failed")
-        raise HTTPException(status_code=503, detail="配方推荐失败") from exc
+    # ── Step 1: KB retrieval (hybrid / kb_only modes) ──
+    evidence: list = body.sources or []
+    retrieve_ok = False
+    if mode in ("hybrid", "kb_only"):
+        try:
+            grounded = resolve_grounded_evidence(
+                body.requirement, query, pre_index=body.sources or None)
+            evidence = grounded.grounded_evidence or evidence
+            retrieve_ok = bool(grounded.grounded_evidence)
+            if retrieve_ok:
+                log.info("KB retrieval OK: %d evidence items (mode=%s)",
+                         len(evidence), mode)
+        except Exception as exc:
+            log.warning("KB retrieval failed (mode=%s): %s", mode, exc)
+            if mode == "kb_only":
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"知识库检索失败（mode=kb_only）：{exc}"
+                ) from exc
+            # hybrid → fall through to LLM-only
+            evidence = body.sources or []
+            retrieve_ok = False
+
+    # ── Step 2: LLM synthesis (hybrid / llm_only) ──
+    if mode in ("hybrid", "llm_only"):
+        try:
+            rec_resp = llm.recommend_formulations(
+                body.requirement, objectives, evidence, n=llm_n)
+        except Exception as exc:
+            log.exception("recommend_formulations LLM failed")
+            raise HTTPException(status_code=503, detail="配方推荐失败") from exc
+    else:
+        # kb_only: return evidence as lightweight recommendations
+        rec_resp = _evidence_as_recommendation_response(
+            evidence, body.requirement, objectives)
 
     if not rec_resp.formulas:
         raise HTTPException(status_code=503, detail="No formulations produced")
 
-    grounded_formulas, ground_warnings = ground_recommended_formulas(rec_resp.formulas, evidence)
+    grounded_formulas, ground_warnings = ground_recommended_formulas(
+        rec_resp.formulas, evidence)
     rec_resp.warnings.extend(ground_warnings)
+
+    if retrieve_ok:
+        rec_resp.warnings.append(
+            f"已从知识库检索 {len(evidence)} 条证据辅助推荐")
 
     aligned, scored, extra_warnings, _, diversity_applied, tradeoff = finalize_recommendation_bundle(
         grounded_formulas,
@@ -170,6 +204,30 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         returned_n=len(scored),
         diversity_applied=diversity_applied,
         tradeoff=tradeoff,
+    )
+
+
+def _evidence_as_recommendation_response(
+    evidence: list,
+    requirement: Requirement,
+    objectives: list[ObjectiveSpec],
+) -> RecommendedFormulaListResponse:
+    """Convert KB evidence into a basic recommendation response (kb_only mode)."""
+    from ..domain.schemas import ProductDomain
+    formulas: list[RecommendedFormula] = []
+    for i, ev in enumerate(evidence[:5]):
+        formulas.append(RecommendedFormula(
+            name=ev.title or f"KB 候选 #{i+1}",
+            domain=requirement.domain,
+            rationale=f"知识库检索结果：{ev.snippet[:200]}" if ev.snippet else "无详细描述",
+            objectives_summary="; ".join(
+                f"{o.metric}: {o.direction}" for o in objectives),
+            predicted={"salt_spray_hours": 0},
+            score=ev.relevance or 0.5,
+        ))
+    return RecommendedFormulaListResponse(
+        formulas=formulas, engine="kb_only",
+        warnings=["kb_only 模式：仅返回知识库检索结果，未经 LLM 合成"],
     )
 
 

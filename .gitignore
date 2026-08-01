@@ -21,3 +21,4 @@ frontend/vite.config.js
 shared_data/
 data/
 *.log
+data.bak/

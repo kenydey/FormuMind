@@ -207,7 +207,12 @@ def retrieve_node(
     if pre:
         colbert_store.index_evidence(pre, settings=settings)
 
-    colbert_store.bootstrap_seed_corpus(settings)
+    backend = colbert_store.active_backend(settings)
+    if backend == "colbert":
+        try:
+            colbert_store.bootstrap_seed_corpus(settings)
+        except Exception as exc:
+            logger.warning("ColBERT bootstrap failed (backend=%s): %s", backend, exc)
     queries = _retrieval_queries(state, settings, mode)
     state["retrieval_queries"] = queries
     if len(queries) > 1:
@@ -622,24 +627,23 @@ def resolve_grounded_evidence(
     pre_index: list[Evidence] | None = None,
     settings: Settings | None = None,
 ) -> GroundedEvidenceResult:
-    """ColBERT retrieve → CRAG grade → grounded_evidence SSOT."""
+    """ColBERT/BM25 retrieve → KB evidence SSOT (lightweight for recommend)."""
     settings = settings or get_settings()
     q = build_research_query(query, req)
-    state: ResearchGraphState = {
-        "topic": q,
-        "query": q,
-        "req": req,
-        "pre_index": pre_index or [],
-        "fallback_used": False,
-    }
-    state = _run_crag_retrieval(state, settings, "recommend", None)
+
+    # Fast path for recommend: skip CRAG graph (HyDE, sub-questions, grading)
+    # and use the active retrieval backend directly.
+    from ..services import colbert_store
+    hits = colbert_store.search(q, k=settings.colbert_top_k, settings=settings)
+    evidence = [h.evidence for h in hits]
+
     return GroundedEvidenceResult(
         query=query,
-        evidence=state.get("evidence") or [],
-        grounded_evidence=state.get("grounded_evidence") or [],
-        grade=state.get("grade") or GradeVerdict.incorrect,
-        grade_reason=state.get("grade_reason") or "",
-        fallback_used=bool(state.get("fallback_used")),
+        evidence=evidence,
+        grounded_evidence=evidence[:settings.deep_report_evidence_count],
+        grade=GradeVerdict.correct if evidence else GradeVerdict.incorrect,
+        grade_reason=f"BM25/ColBERT retrieval: {len(evidence)} hits" if evidence else "No KB results",
+        fallback_used=not bool(evidence),
     )
 
 

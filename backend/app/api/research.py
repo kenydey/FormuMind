@@ -173,3 +173,21 @@ def refresh_knowledge_base(query: str = Query(..., min_length=1)) -> dict:
 @router.get("/research/expand", response_model=ExpandedQuery, deprecated=True)
 def expand_research_query(topic: str = Query(..., min_length=1)) -> ExpandedQuery:
     return QueryExpander().expand(topic)
+
+
+# ── RAG backend status ──────────────────────────────────────────────────
+
+@router.get("/research/rag/status")
+def rag_status() -> dict:
+    """Return current RAG retrieval backend and formulation mode."""
+    from ..config import get_settings
+    from ..services.colbert_store import active_backend, colbert_available_gpu
+
+    s = get_settings()
+    return {
+        "backend": active_backend(s),
+        "formulation_mode": s.formulation_mode,
+        "gpu_enabled": s.gpu_enabled,
+        "gpu_available": colbert_available_gpu(s),
+        "rag_backend_setting": s.rag_backend,
+    }

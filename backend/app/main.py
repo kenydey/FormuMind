@@ -100,7 +100,11 @@ async def lifespan(_app: FastAPI):
         try:
             from .services import colbert_store
 
-            colbert_store.bootstrap_seed_corpus()
+            backend = colbert_store.active_backend()
+            if backend == "colbert" or backend == "pylate":
+                colbert_store.bootstrap_seed_corpus()
+            else:
+                logger.info("lifespan: skipping ColBERT bootstrap (backend=%s)", backend)
         except Exception as exc:
             log_handled_exception(logger, exc, "lifespan: ColBERT bootstrap failed")
         if settings.material_store_enabled:

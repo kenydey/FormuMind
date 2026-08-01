@@ -67,6 +67,25 @@ def colbert_available() -> bool:
         return False
 
 
+def colbert_available_gpu(settings: Settings | None = None) -> bool:
+    """Check if PyLate + CUDA torch are available for GPU ColBERT retrieval."""
+    from ..config import get_settings
+    settings = settings or get_settings()
+    if not settings.gpu_enabled:
+        return False
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return False
+        import pylate  # noqa: F401
+        return True
+    except ImportError:
+        return False
+    except Exception as exc:
+        log_handled_exception(logger, exc, "GPU ColBERT availability check")
+        return False
+
+
 def _infer_source_type(ev: Evidence) -> SourceType:
     src = (ev.source or "").lower()
     ident = (ev.identifier or "").lower()
@@ -300,15 +319,17 @@ def search(
 
 def active_backend(settings: Settings | None = None) -> str:
     settings = settings or get_settings()
-    if settings.rag_backend == "colbert" and colbert_available():
+    # Explicit override always wins
+    if settings.rag_backend not in ("auto", ""):
+        return settings.rag_backend
+    # GPU: PyLate ColBERT (only when gpu_enabled AND CUDA available)
+    if settings.gpu_enabled and colbert_available_gpu(settings):
+        return "pylate"
+    # Legacy ColBERT only when gpu_enabled AND colbert_available
+    if settings.gpu_enabled and colbert_available():
         return "colbert"
-    if settings.rag_backend in ("auto", "colbert") and colbert_available():
-        return "colbert"
-    if settings.rag_backend == "embedding" or (
-        settings.rag_backend == "auto" and rag.active_rag_backend() == "embedding"
-    ):
-        return "embedding"
-    return "fallback"
+    # CPU default: BM25+FAISS (reliable, zero AVX2 requirement)
+    return "bm25_faiss"
 
 
 def bootstrap_seed_corpus(settings: Settings | None = None) -> int:
