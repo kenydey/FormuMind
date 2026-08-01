@@ -330,10 +330,23 @@ def run_recommend_task(self, payload: dict) -> dict:
             sources=sources,
         )
         resp = _sync_recommend(body)
-        result = resp.model_dump()
+        result_raw = resp.model_dump()
 
-        # Also dispatch KB ingest for retrieved evidence
-        grounded = result.get("grounded_evidence") or []
+        # Convert sync response to ResearchResult format expected by frontend
+        research = {
+            "requirement_headline": "",
+            "evidence": result_raw.get("grounded_evidence") or [],
+            "mechanism": "",
+            "recommended": result_raw.get("formulas") or [],
+            "chat_markdown": "",
+            "recommend_engine": result_raw.get("engine", "llm"),
+            "tradeoff": result_raw.get("tradeoff"),
+            "recommend_meta": result_raw.get("warnings") or [],
+        }
+        result = {"research": research}
+
+        # KB ingest
+        grounded = result_raw.get("grounded_evidence") or []
         if grounded:
             dispatch_kb_ingest(grounded)
 
