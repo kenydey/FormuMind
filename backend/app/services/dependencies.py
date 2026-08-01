@@ -44,11 +44,10 @@ CATALOG: tuple[Dependency, ...] = (
     # ── LLM providers ──────────────────────────────────────────────────────
     Dependency("anthropic", "anthropic", "llm", "Claude 大模型问答 / 综述"),
     Dependency("openai", "openai", "llm", "OpenAI 及兼容供应商（DeepSeek/Qwen/Grok/Kimi…）"),
-    Dependency("google-genai", "google.genai", "llm", "Google Gemini 大模型"),
+    Dependency("google-generativeai", "google.generativeai", "llm", "Google Gemini 大模型"),
     # ── Online retrieval (the offline-mode pain point) ─────────────────────
     Dependency("patent-client", "patent_client", "intel", "USPTO/EPO 真实专利检索"),
     Dependency("arxiv", "arxiv", "intel", "arXiv 学术文献检索"),
-    Dependency("semanticscholar", "semanticscholar", "intel", "Semantic Scholar 文献检索"),
     Dependency("ddgs", "ddgs", "intel", "DuckDuckGo 互联网检索"),
     Dependency("paper-qa", "paperqa", "intel", "paper-qa 语义 RAG 文献综合"),
     Dependency(

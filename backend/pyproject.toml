@@ -31,8 +31,7 @@ dependencies = [
 # with `pip install -e .[heavy]` on a machine that can support them, or run the
 # corresponding Docker images (see docker-compose.yml).
 [project.optional-dependencies]
-llm = ["anthropic>=0.25", "openai>=1.30", "google-genai>=0.7",
-       "langchain-core>=0.3", "langchain-openai>=0.2", "langchain-anthropic>=0.3"]
+llm = ["anthropic>=0.25", "openai>=1.30", "google-generativeai>=0.7"]
 science = [
     "scipy>=1.11",
     "scikit-learn>=1.4",
@@ -45,8 +44,6 @@ science = [
 optimize = ["optuna>=3.4"]
 heavy = [
     "torch>=2.2",
-    "deepchem>=2.8",
-    "transformers>=4.40",   # also the MoLFormer embedding path (reserved)
     # summit>=0.8  pins torch<2.0 — conflicts; skipped
     "ase>=3.22",
 ]
@@ -57,7 +54,6 @@ intel = [
     "molbloom>=2.0",        # standalone SureChEMBL patent pre-screen (no ChemCrow needed)
     "pubchempy>=1.0.4",     # enrich raw-material SMILES/molar-mass from PubChem
     "arxiv>=2.1",
-    "semanticscholar>=0.8",
     "ddgs>=6.0",            # renamed from duckduckgo-search
 ]
 # MarkItDown keeps every format backend behind an extra — a bare install parses
@@ -120,7 +116,6 @@ intel-colbert = [
     "sentence-transformers>=2.6",
     "patent-client>=5.0",
     "arxiv>=2.1",
-    "semanticscholar>=0.8",
     "ddgs>=6.0",
 ]
 dev = [
