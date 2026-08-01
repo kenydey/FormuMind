@@ -310,6 +310,49 @@ def _stage_progress(stage: str) -> float:
     }.get(stage, 0.5)
 
 
+def _convert_formulas(formulas: list, scored: list) -> list[dict]:
+    """Convert RecommendedFormula (components) → Formulation (ingredients)."""
+    from ..domain.schemas import Formulation as _F, Ingredient, ProductDomain
+
+    result = []
+    for raw in formulas:
+        domain = raw.get("domain", "anticorrosion_coating")
+        if isinstance(domain, str):
+            try:
+                domain = ProductDomain(domain)
+            except ValueError:
+                domain = ProductDomain.anticorrosion_coating
+        result.append(_F(
+            name=raw.get("name", ""),
+            domain=domain,
+            ingredients=[
+                Ingredient(
+                    name=c.get("name", ""),
+                    zh_name=c.get("zh_name"),
+                    role=c.get("component_type", ""),
+                    weight_pct=c.get("weight_pct", 0),
+                    cas_no=c.get("cas_no"),
+                    formula=c.get("mf"),
+                    smiles=c.get("smiles"),
+                    molar_mass=c.get("molar_mass"),
+                    equivalents=c.get("equivalents"),
+                    mmol=c.get("mmol"),
+                    notes=c.get("notes"),
+                    evidence_refs=c.get("evidence_refs") or [],
+                    grounding_confidence=c.get("grounding_confidence"),
+                )
+                for c in raw.get("components") or []
+            ],
+            rationale=raw.get("rationale", ""),
+            source="recommend",
+            predicted=raw.get("predicted") or {},
+            predicted_std=raw.get("predicted_std") or {},
+            score=raw.get("score"),
+            warnings=raw.get("warnings") or [],
+        ).model_dump())
+    return result
+
+
 @celery_app.task(bind=True, name="formumind.recommend")
 def run_recommend_task(self, payload: dict) -> dict:
     from ..api.formulations import recommend_formulations as _sync_recommend
@@ -332,12 +375,16 @@ def run_recommend_task(self, payload: dict) -> dict:
         resp = _sync_recommend(body)
         result_raw = resp.model_dump()
 
-        # Convert sync response to ResearchResult format expected by frontend
+        # Convert RecommendedFormula → Formulation for frontend compat
+        recommended = _convert_formulas(result_raw.get("formulas") or [],
+                                         result_raw.get("scored") or [])
+
+        # Build ResearchResult-format response expected by frontend
         research = {
             "requirement_headline": "",
             "evidence": result_raw.get("grounded_evidence") or [],
             "mechanism": "",
-            "recommended": result_raw.get("formulas") or [],
+            "recommended": recommended,
             "chat_markdown": "",
             "recommend_engine": result_raw.get("engine", "llm"),
             "tradeoff": result_raw.get("tradeoff"),
