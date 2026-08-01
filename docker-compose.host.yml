@@ -7,7 +7,7 @@ services:
   redis:
     network_mode: host
     ports: !reset []
-    command: redis-server --port 6379 --bind 127.0.0.1
+    command: redis-server --port 6379 --bind 127.0.0.1 --save "" --stop-writes-on-bgsave-error no
 
   backend:
     network_mode: host

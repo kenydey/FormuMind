@@ -312,51 +312,31 @@ def _stage_progress(stage: str) -> float:
 
 @celery_app.task(bind=True, name="formumind.recommend")
 def run_recommend_task(self, payload: dict) -> dict:
-    from ..domain.schemas import Evidence, Formulation, Requirement
-    from ..pipeline.research_graph import graph_state_to_research_result, run_research_graph
+    from ..api.formulations import recommend_formulations as _sync_recommend
+    from ..api.formulations import RecommendFormulationsRequest as SyncRequest
 
     task_id = self.request.id
-    publish_progress(task_id, TaskProgressStatus.RUNNING, stage="retrieve", message="正在检索")
+    publish_progress(task_id, TaskProgressStatus.RUNNING, stage="recommend", message="推荐配方")
     try:
-        req = Requirement(**payload["requirement"]) if payload.get("requirement") else None
-        if not req:
+        req_data = payload.get("requirement") or {}
+        if not req_data:
             raise ValueError("requirement is required")
-        topic = payload.get("topic") or req.headline()
-        query = payload.get("query") or topic
-        sources = [Evidence.model_validate(s) for s in payload.get("sources") or []]
-        base_formulas = [
-            Formulation.model_validate(f) for f in (payload.get("base_formulas") or [])
-        ] or None
+        n = payload.get("n") or 3
+        sources = payload.get("sources") or []
 
-        def graph_progress(stage: str, message: str, partial: dict | None = None) -> None:
-            publish_progress(
-                task_id,
-                TaskProgressStatus.RUNNING,
-                stage=stage,
-                message=message,
-                progress=_stage_progress(stage),
-                data=partial,
-            )
+        body = SyncRequest(
+            requirement=req_data,
+            n=n,
+            sources=sources,
+        )
+        resp = _sync_recommend(body)
+        result = resp.model_dump()
 
-        state = run_research_graph(
-            topic=topic,
-            req=req,
-            query=query,
-            pre_index=sources or None,
-            progress_cb=graph_progress,
-            mode="recommend",
-            modify_prompt=payload.get("modify_prompt") or "",
-            base_formulas=base_formulas,
-        )
-        research = graph_state_to_research_result(state, req)
-        result = {"research": research.model_dump()}
-        grounded = state.get("grounded_evidence") or []
-        kb_task_id = dispatch_kb_ingest(
-            [e.model_dump() if hasattr(e, "model_dump") else e for e in grounded],
-            project_id=(req.project_id if req else None),
-        )
-        if kb_task_id:
-            result["kb_ingest_task_id"] = kb_task_id
+        # Also dispatch KB ingest for retrieved evidence
+        grounded = result.get("grounded_evidence") or []
+        if grounded:
+            dispatch_kb_ingest(grounded)
+
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "recommend", result)
         return result

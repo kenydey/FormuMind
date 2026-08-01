@@ -22,3 +22,5 @@ shared_data/
 data/
 *.log
 data.bak/
+backend/=0.1.0
+frontend/dump.rdb
