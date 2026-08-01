@@ -339,6 +339,11 @@ export interface WorkbenchRow {
   planned_params: Record<string, number>;
   actual_params: Record<string, number>;
   measurements: Record<string, number | string>;
+  // Phase 2
+  note?: string | null;
+  tags?: string[];
+  parent_sample_id?: string | null;
+  parent_campaign_id?: number | null;
 }
 
 export interface WorkbenchCampaignResponse {

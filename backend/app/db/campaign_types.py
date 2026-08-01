@@ -16,3 +16,8 @@ class WorkbenchRow:
     planned_params: dict[str, Any] = field(default_factory=dict)
     actual_params: dict[str, float] = field(default_factory=dict)
     measurements: dict[str, Any] = field(default_factory=dict)
+    # ── Phase 2 additions ──
+    note: str | None = None
+    tags: list[str] = field(default_factory=list)
+    parent_sample_id: str | None = None
+    parent_campaign_id: int | None = None

@@ -74,8 +74,8 @@ class Settings(BaseSettings):
     # deterministic rule-based synthesiser built on the domain knowledge base.
     anthropic_api_key: str | None = None
     llm_model: str = "claude-sonnet-4-6"
-    llm_max_tokens: int = 2048
-    llm_timeout_seconds: float = 60.0
+    llm_max_tokens: int = 8192
+    llm_timeout_seconds: float = 120.0
 
     # Celery / Redis. Without a reachable broker the worker runs eagerly
     # (synchronously, in-process) which keeps the API usable everywhere.
@@ -397,7 +397,7 @@ class Settings(BaseSettings):
     ingest_chunk_overlap: int = 200
 
     # DOE workbench / campaign persistence (Headless ELN)
-    campaign_backend: str = "sqlite"  # sqlite (dev/CI) | datalab (enterprise ELN SSOT) | auto (dev probe)
+    campaign_backend: str = "auto"  # auto (probe Datalab → fallback sqlite) | sqlite | datalab
     datalab_api_url: str = "http://localhost:5001"
     datalab_timeout_seconds: float = 30.0
     datalab_max_connections: int = 10
@@ -405,7 +405,7 @@ class Settings(BaseSettings):
     datalab_required: bool = False  # when True with datalab backends, unreachable → hard fail
 
     # Experiment training persistence (Headless ELN)
-    experiment_backend: str = "sqlite"  # datalab | sqlite (dev/CI)
+    experiment_backend: str = "auto"  # auto → 探测 Datalab → 回退 sqlite; 也可显式: datalab | sqlite
 
     # API security — unset env defers to environment: off in dev/test, on in production.
     api_auth_enabled: bool | None = None

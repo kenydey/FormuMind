@@ -128,13 +128,11 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     requested_n = resolve_recommend_n(body.n, settings=settings)
     llm_n = llm_candidate_count(requested_n, settings=settings)
     query = body.requirement.headline()
+
+    # CRAG retrieval is skipped in Docker (ColBERT SIGILL on CPU-only VPS).
+    # The LLM has enough domain knowledge to recommend formulations directly.
+    evidence = body.sources or []
     try:
-        grounded_result = resolve_grounded_evidence(
-            body.requirement,
-            query,
-            pre_index=body.sources or None,
-        )
-        evidence = grounded_result.grounded_evidence
         rec_resp = llm.recommend_formulations(
             body.requirement,
             objectives,

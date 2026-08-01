@@ -195,7 +195,7 @@ def test_baybe_recommend_accepts_workbench_campaign_id(tmp_path):
                     "id": row["id"],
                     "status": "Pending",
                     "actual_params": row["planned_params"],
-                    "measurements": {"salt_spray_hours": 880.0},
+                    "measurements": {"salt_spray_hours": 880.0, "cost_cny_per_kg": 25.0, "sustainability_idx": 0.72},
                 }
             ],
         },

@@ -553,6 +553,10 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 planned_params=dict(ref.get("planned_params") or {}),
                 actual_params=dict(ref.get("actual_params") or {}),
                 measurements=dict(ref.get("measurements") or {}),
+                note=str(ref["note"]) if ref.get("note") else None,
+                tags=list(ref.get("tags") or []),
+                parent_sample_id=str(ref["parent_sample_id"]) if ref.get("parent_sample_id") else None,
+                parent_campaign_id=int(ref["parent_campaign_id"]) if ref.get("parent_campaign_id") else None,
             )
             for ref in (campaign.sample_refs or [])
         ]
@@ -594,6 +598,11 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             if row_has_required_measurements(ref["measurements"], objectives):
                 status = "Completed"
             ref["status"] = status
+            # Phase 2: persist note + tags
+            if "note" in payload:
+                ref["note"] = payload["note"]
+            if "tags" in payload:
+                ref["tags"] = list(payload["tags"] or [])
             updated += 1
 
         self._save_sample_refs(campaign_id, refs)

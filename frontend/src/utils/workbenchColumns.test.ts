@@ -101,9 +101,10 @@ describe("buildWorkbenchColumnDefs", () => {
       ["Zinc phosphate"],
       [objective(), objective({ metric: "cost_cny_per_kg" })]
     );
-    const fields = cols.map((c) => c.field ?? c.headerName);
+    const fields = cols.map((c) => ("field" in c ? c.field : c.headerName));
     expect(fields[0]).toBe("id");
-    expect(cols[0].pinned).toBe("left");
+    const idCol = cols[0];
+    expect("pinned" in idCol ? idCol.pinned : undefined).toBe("left");
     expect(JSON.stringify(cols)).toContain("Zinc phosphate");
     expect(JSON.stringify(cols)).toContain("salt_spray_hours");
     expect(JSON.stringify(cols)).toContain("cost_cny_per_kg");
@@ -111,10 +112,10 @@ describe("buildWorkbenchColumnDefs", () => {
 
   it("keeps identity columns read-only", () => {
     const cols = buildWorkbenchColumnDefs([], [objective()]);
-    const id = cols.find((c) => c.field === "id");
-    const status = cols.find((c) => c.field === "status");
-    expect(id?.editable).toBe(false);
-    expect(status?.editable).toBe(false);
+    const id = cols.find((c) => "field" in c && c.field === "id");
+    const status = cols.find((c) => "field" in c && c.field === "status");
+    expect((id as Record<string, unknown>)?.editable).toBe(false);
+    expect((status as Record<string, unknown>)?.editable).toBe(false);
   });
 
   it("builds a usable grid with no factors at all", () => {

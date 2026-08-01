@@ -30,6 +30,8 @@ class GridRowUpdate(BaseModel):
     status: str = "Pending"
     actual_params: dict[str, float] = Field(default_factory=dict)
     measurements: dict[str, Any] = Field(default_factory=dict)
+    note: str | None = None          # Phase 2.2
+    tags: list[str] = Field(default_factory=list)  # Phase 2.4
 
 
 class BatchUpdateRequest(BaseModel):
@@ -50,6 +52,11 @@ class WorkbenchRowResponse(BaseModel):
     planned_params: dict[str, Any]
     actual_params: dict[str, float]
     measurements: dict[str, Any]
+    # Phase 2
+    note: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    parent_sample_id: str | None = None
+    parent_campaign_id: int | None = None
 
 
 class WorkbenchCampaignResponse(BaseModel):
@@ -104,6 +111,10 @@ def _row_response(row: WorkbenchRow) -> WorkbenchRowResponse:
         planned_params=row.planned_params or {},
         actual_params=row.actual_params or {},
         measurements=row.measurements or {},
+        note=row.note,
+        tags=row.tags or [],
+        parent_sample_id=row.parent_sample_id,
+        parent_campaign_id=row.parent_campaign_id,
     )
 
 
@@ -305,3 +316,281 @@ async def sync_workbench(
         loop_task_id=loop_task_id,
         loop_message=loop_message,
     )
+
+
+# ── Experiment attachments (Phase 0.2) ────────────────────────────────────────
+
+class AttachmentResponse(BaseModel):
+    id: str
+    experiment_id: int
+    source_document_id: str
+    kind: str = "qc_report"
+    filename: str = ""
+    note: str = ""
+    created_at: str | None = None
+
+
+@router.get("/experiments/{experiment_id}/attachments",
+            response_model=list[AttachmentResponse])
+def get_experiment_attachments(
+    experiment_id: int,
+) -> list[AttachmentResponse]:
+    """List attachments (QC reports, spectra, images) linked to an experiment."""
+    from ..db.measurement_store import get_measurement_store
+
+    store = get_measurement_store()
+    attachments = store.attachments_for(experiment_id)
+    return [
+        AttachmentResponse(
+            id=a.id,
+            experiment_id=a.experiment_id,
+            source_document_id=a.source_document_id,
+            kind=a.kind,
+            filename="",
+            note=a.note or "",
+            created_at=a.created_at.isoformat() if a.created_at else None,
+        )
+        for a in attachments
+    ]
+
+
+@router.post("/experiments/{experiment_id}/attachments",
+             response_model=AttachmentResponse)
+async def upload_experiment_attachment(
+    experiment_id: int,
+    file: UploadFile = File(...),
+    kind: str = Query(default="qc_report"),
+    note: str = Query(default=""),
+) -> AttachmentResponse:
+    """Upload a file attachment (QC report, microscope image, etc.)
+    and link it to an experiment.
+
+    The file is forwarded to Datalab ELN as the document store;
+    a local ``ExperimentAttachment`` row keeps the reference.
+    """
+    from ..db.measurement_store import get_measurement_store
+    from ..db.database import default_session_factory
+    from ..db.datalab_client import check_datalab_reachable
+
+    settings = get_settings()
+    filename = file.filename or "upload"
+
+    # Upload to Datalab ELN (best-effort; falls back to local-only)
+    source_document_id = ""
+    datalab_ok, _ = check_datalab_reachable(settings.datalab_api_url, timeout=2.0)
+    if datalab_ok:
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(
+                base_url=settings.datalab_api_url.rstrip("/"),
+                timeout=30.0,
+            ) as client:
+                content = await file.read()
+                files_upload = {"file": (filename, content)}
+                upload_resp = await client.post("/upload/", files=files_upload)
+                if upload_resp.status_code < 400:
+                    body = upload_resp.json()
+                    source_document_id = body.get("source_document_id", "")
+        except Exception:
+            pass  # Datalab upload degraded — store reference only
+
+    # If Datalab upload failed, generate a local reference
+    if not source_document_id:
+        import uuid as _uuid
+
+        source_document_id = f"local-{_uuid.uuid4().hex[:12]}"
+
+    # Create local attachment link
+    store = get_measurement_store()
+    attachment_id = store.attach(
+        experiment_id, source_document_id, kind=kind, note=note
+    )
+    if attachment_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Attachment already exists for experiment={experiment_id} "
+            f"and document={source_document_id}",
+        )
+
+    return AttachmentResponse(
+        id=attachment_id,
+        experiment_id=experiment_id,
+        source_document_id=source_document_id,
+        kind=kind,
+        filename=filename,
+        note=note,
+        created_at=None,
+    )
+
+
+# ── Phase 2.4: tag management ──────────────────────────────────────────────
+
+class TagUpdateRequest(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+
+
+@router.put("/experiments/workbench/{campaign_id}/rows/{row_id}/tags")
+async def update_row_tags(
+    campaign_id: int,
+    row_id: int,
+    body: TagUpdateRequest,
+) -> WorkbenchRowResponse:
+    """Set tags on a workbench row."""
+    store = get_campaign_store()
+    rows = await store.list_rows(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Row not found")
+    match.tags = body.tags
+    updated, refreshed = await store.batch_sync(
+        campaign_id,
+        [{"id": row_id, "tags": body.tags, "actual_params": match.actual_params,
+          "measurements": match.measurements, "status": match.status, "note": match.note}],
+    )
+    fresh = next((r for r in refreshed if r.id == row_id), match)
+    return _row_response(fresh)
+
+
+# ── Phase 2.3: sample lineage ─────────────────────────────────────────────
+
+@router.get("/experiments/workbench/{campaign_id}/rows/{row_id}/lineage")
+async def get_row_lineage(
+    campaign_id: int,
+    row_id: int,
+) -> list[WorkbenchRowResponse]:
+    """Walk parent chain for a workbench row."""
+    store = get_campaign_store()
+    rows = await store.list_rows(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Row not found")
+
+    lineage: list[WorkbenchRowResponse] = []
+    current = match
+    visited: set[str] = set()
+    while current:
+        key = f"{current.campaign_id}:{current.id}"
+        if key in visited:
+            break
+        visited.add(key)
+        lineage.append(_row_response(current))
+        if current.parent_sample_id and current.parent_campaign_id:
+            parent_rows = await store.list_rows(current.parent_campaign_id)
+            parent = next(
+                (r for r in parent_rows if r.item_id == current.parent_sample_id), None
+            )
+            current = parent
+        else:
+            break
+    return lineage
+
+
+# ── Phase 2.5: cross-campaign search ──────────────────────────────────────
+
+class ExperimentSearchResult(BaseModel):
+    row_id: int
+    campaign_id: int
+    campaign_name: str
+    item_id: str
+    status: str
+    planned_params: dict[str, Any]
+    measurements: dict[str, Any]
+
+
+@router.get("/experiments/search", response_model=list[ExperimentSearchResult])
+async def search_experiments(
+    q: str = Query(default="", description="搜索关键词"),
+) -> list[ExperimentSearchResult]:
+    """Search across all campaigns by keyword (tags, params, measurements)."""
+    store = get_campaign_store()
+    # In Datalab mode: delegate to Datalab search API
+    settings = get_settings()
+    backend = (settings.campaign_backend or "sqlite").lower()
+
+    if backend in ("datalab", "auto"):
+        from ..db.datalab_client import check_datalab_reachable
+        ok, _ = check_datalab_reachable(settings.datalab_api_url, timeout=2.0)
+        if ok:
+            import httpx
+            try:
+                async with httpx.AsyncClient(
+                    base_url=settings.datalab_api_url.rstrip("/"),
+                    timeout=10.0,
+                ) as client:
+                    resp = await client.get("/search/", params={"q": q})
+                    if resp.status_code < 400:
+                        return _parse_datalab_search(resp.json())
+            except Exception:
+                pass  # fall through to local scan
+
+    # Local SQLite scan
+    results: list[ExperimentSearchResult] = []
+    from .database import default_session_factory
+    with default_session_factory()() as session:
+        campaigns = session.query(Campaign).all()
+        for camp in campaigns:
+            refs = camp.sample_refs or []
+            for ref in refs:
+                if not q:
+                    continue
+                # Simple substring match across tags + note
+                tags = " ".join(ref.get("tags") or [])
+                note = str(ref.get("note") or "")
+                text = f"{tags} {note}".lower()
+                if q.lower() in text:
+                    results.append(ExperimentSearchResult(
+                        row_id=int(ref["id"]),
+                        campaign_id=camp.id,
+                        campaign_name=camp.name,
+                        item_id=str(ref.get("item_id", "")),
+                        status=str(ref.get("status", "Pending")),
+                        planned_params=ref.get("planned_params", {}),
+                        measurements=ref.get("measurements", {}),
+                    ))
+    return results
+
+
+def _parse_datalab_search(body: list[dict]) -> list[ExperimentSearchResult]:
+    results: list[ExperimentSearchResult] = []
+    for sample in body:
+        blocks = sample.get("blocks_obj", {})
+        params_block = blocks.get("formumind_params", {})
+        meas_block = blocks.get("formumind_measurements", {})
+        results.append(ExperimentSearchResult(
+            row_id=0,
+            campaign_id=0,
+            campaign_name="",
+            item_id=sample.get("item_id", ""),
+            status=str(sample.get("status", "Pending")),
+            planned_params=params_block.get("data", {}),
+            measurements=meas_block.get("data", {}),
+        ))
+    return results
+
+
+# ── Phase 3.3: convergence webhook receiver ───────────────────────────────
+
+class ConvergenceWebhookPayload(BaseModel):
+    campaign_id: int
+    converged: bool = True
+    round_count: int = 0
+    message: str = ""
+
+
+@router.post("/experiments/hooks/convergence")
+async def convergence_webhook(
+    payload: ConvergenceWebhookPayload,
+) -> dict[str, str]:
+    """Receive convergence notification from Datalab or loop engine."""
+    logger = __import__("logging").getLogger(__name__)
+    logger.info(
+        "Convergence webhook: campaign=%d converged=%s round=%d msg=%s",
+        payload.campaign_id,
+        payload.converged,
+        payload.round_count,
+        payload.message,
+    )
+    # Forward to WebSocket / SSE notification system
+    # (handled by existing notification pipeline)
+    return {"status": "received", "campaign_id": str(payload.campaign_id)}
