@@ -600,14 +600,23 @@ def run_search_task(self, payload: dict) -> dict:
                 msg = f"检索完成，共 {len(partial)} 条"
             else:
                 msg = f"已找到 {len(partial)} 条，继续搜索…"
-            data = {
-                "evidence": [e.model_dump() for e in partial],
-                "total": len(partial),
-                "source": source,
-                "new_count": new_count,
-                "sources_done": done,
-                "sources_pending": pending,
-            }
+            # Only ship summary metadata for intermediate updates.
+            # Serialising the full evidence list to Redis on every source
+            # page (30+ pages from arXiv alone) is the primary reason search
+            # tasks exceed the Vite proxy timeout.
+            if meta.get("final"):
+                data = {
+                    "evidence": [e.model_dump() for e in partial],
+                    "total": len(partial),
+                }
+            else:
+                data = {
+                    "total": len(partial),
+                    "source": source,
+                    "new_count": new_count,
+                    "sources_done": done,
+                    "sources_pending": pending,
+                }
             filter_report = meta.get("filter_report") or meta.get("filter")
             if filter_report:
                 data["filter_report"] = filter_report

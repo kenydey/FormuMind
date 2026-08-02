@@ -125,7 +125,9 @@ def _redis_client():
 
     settings = get_settings()
     client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
-    client.ping()
+    # Don't ping on every call — the first operation will fail gracefully
+    # if Redis is down, and the result-store / progress-store already have
+    # disk fallbacks.
     return client
 
 

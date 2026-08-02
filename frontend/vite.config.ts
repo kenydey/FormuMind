@@ -51,7 +51,20 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:8000", changeOrigin: true },
+      // SSE streams use a long timeout (30 min) to survive long-running
+      // multi-source searches that do PDF downloads + OCR + translation.
+      "/api/tasks": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        proxyTimeout: 1_800_000, // 30 min
+        timeout: 1_800_000,
+      },
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        proxyTimeout: 600_000, // 10 min for regular API calls
+        timeout: 600_000,
+      },
       "/health": { target: "http://localhost:8000", changeOrigin: true },
     },
   },

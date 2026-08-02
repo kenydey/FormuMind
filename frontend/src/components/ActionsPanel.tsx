@@ -92,6 +92,8 @@ export default function ActionsPanel() {
     loopReport,
     workbenchStats,
     refreshWorkbenchStats,
+    saveProject,
+    projectSaveBusy,
   } = useStore(
     useShallow((s) => ({
       openModal: s.openModal,
@@ -110,6 +112,8 @@ export default function ActionsPanel() {
       loopReport: s.loopReport,
       workbenchStats: s.workbenchStats,
       refreshWorkbenchStats: s.refreshWorkbenchStats,
+      saveProject: s.saveProject,
+      projectSaveBusy: s.projectSaveBusy,
     }))
   );
 
@@ -147,6 +151,12 @@ export default function ActionsPanel() {
     void refreshWorkbenchStats();
   }
 
+  function handleSave() {
+    void saveProject();
+  }
+
+  const saveBtnLabel = projectSaveBusy ? "保存中…" : "💾 保存";
+
   return (
     <aside className="glass rounded-xl p-4 flex flex-col gap-2.5 h-full overflow-y-auto">
       <h2 className="text-sm uppercase tracking-widest text-accent2 shrink-0">操作 · Actions</h2>
@@ -174,6 +184,8 @@ export default function ActionsPanel() {
         open={openModal === "requirements"}
         onClose={() => setOpenModal(null)}
         size="md"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <RequirementPanel embedded />
       </Modal>
@@ -183,6 +195,8 @@ export default function ActionsPanel() {
         open={openModal === "recommend"}
         onClose={() => setOpenModal(null)}
         size="xl"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <div className="mb-4 space-y-3">
           <p className="text-[11px] text-slate-500">
@@ -249,6 +263,8 @@ export default function ActionsPanel() {
         open={openModal === "doe"}
         onClose={() => setOpenModal(null)}
         size="lg"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <DoeResultsPanel />
@@ -260,6 +276,8 @@ export default function ActionsPanel() {
         open={openModal === "design"}
         onClose={() => setOpenModal(null)}
         size="xl"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <InverseDesignModal />
@@ -271,6 +289,8 @@ export default function ActionsPanel() {
         open={openModal === "substitute"}
         onClose={() => setOpenModal(null)}
         size="xl"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <MaterialSubstitutionModal />
@@ -282,6 +302,8 @@ export default function ActionsPanel() {
         open={openModal === "workbench"}
         onClose={() => setOpenModal(null)}
         size="xl"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <WorkbenchModal />
@@ -293,6 +315,8 @@ export default function ActionsPanel() {
         open={openModal === "qc"}
         onClose={() => setOpenModal(null)}
         size="xl"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <QCReportModal />
@@ -304,6 +328,8 @@ export default function ActionsPanel() {
         open={openModal === "optimize"}
         onClose={() => setOpenModal(null)}
         size="lg"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <button
           disabled={busy !== "idle"}
@@ -328,6 +354,8 @@ export default function ActionsPanel() {
         open={openModal === "process"}
         onClose={() => setOpenModal(null)}
         size="lg"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <ProcessOptModal />
@@ -339,6 +367,8 @@ export default function ActionsPanel() {
         open={openModal === "loop"}
         onClose={() => setOpenModal(null)}
         size="lg"
+        onSave={handleSave}
+        saveLabel={saveBtnLabel}
       >
         <Suspense fallback={<ModalFallback />}>
           <LoopModal />

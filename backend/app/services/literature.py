@@ -10,7 +10,8 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import re
-
+import time
+from typing import Any
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
@@ -591,7 +592,13 @@ def _build_streams(
         if lit_settings.openalex_enabled:
             add("openalex", lambda off, q=western_query: search_openalex(q, page_size, offset=off), True)
         if lit_settings.arxiv_search_enabled:
-            add("arxiv", lambda off, q=western_query: search_arxiv(q, page_size, offset=off), True)
+            add(
+                "arxiv",
+                lambda off, q=western_query: search_arxiv(
+                    q, min(page_size, 15), offset=off
+                ),
+                True,
+            )
         add(
             "s2",
             lambda off, q=western_query: search_semantic_scholar(q, page_size, offset=off),
@@ -618,7 +625,7 @@ def iter_search(
     req: Requirement | None = None,
     total_limit: int = 300,
     per_source_cap: int = 50,
-    max_rounds: int = 20,
+    max_rounds: int = 5,
     progress_cb=None,
 ) -> tuple[list[Evidence], dict]:
     """Incremental multi-source retrieval — fetch in rounds until no source turns
@@ -645,6 +652,12 @@ def iter_search(
         ipc_codes=ipc_codes, chinese_query=chinese_q,
     )
 
+    from ..config import get_settings
+
+    settings = get_settings()
+    search_deadline_s = float(getattr(settings, 'search_round_deadline_s', 240) or 240)
+    search_deadline = time.monotonic() + search_deadline_s
+
     raw: list[Evidence] = []
     seen_ids: set[str] = set()
     rounds = 0
@@ -666,9 +679,16 @@ def iter_search(
 
     while (
         any(not st["done"] for st in streams)
-        and len(raw) < total_limit * 2
         and rounds < max_rounds
+        and time.monotonic() < search_deadline
     ):
+        # Early exit: stop paging when we already gathered enough results
+        # for ranking (total_limit * 2), even if some sources are still
+        # yielding. Each extra round costs _SOURCE_TIMEOUT_SEC per source.
+        if len(raw) >= total_limit * 2:
+            for st in streams:
+                st["done"] = True
+            break
         rounds += 1
         active = [st for st in streams if not st["done"]]
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(active)))

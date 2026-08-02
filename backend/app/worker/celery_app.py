@@ -36,6 +36,8 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     task_track_started=True,
+    task_soft_time_limit=600,   # 10 min warning
+    task_time_limit=900,        # 15 min hard kill
     result_expires=86400,
 )
 
