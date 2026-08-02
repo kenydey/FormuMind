@@ -48,6 +48,7 @@ export interface Requirement {
   constraint_values?: Record<string, number>;
   /** @deprecated migrated to constraint_values on load */
   constraints?: Record<string, number | null>;
+  active_formulation?: Formulation | null;
 }
 
 export interface ChemicalLookupResult {

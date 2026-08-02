@@ -147,17 +147,21 @@ def default_levers_for(
 
 
 def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[LeverSpec]:
-    """Resolve DOE levers: explicit > substrate defaults > formulation > legacy domain table."""
-    if req.levers:
-        return list(req.levers)
-    substrate_levers = substrate_default_levers(req)
-    if substrate_levers:
-        return substrate_levers
+    """Resolve DOE levers: formulation > explicit > substrate defaults > legacy."""
+    # Priority 1: derive from active formulation ingredients (most context-aware)
     source = form or req.active_formulation
     if source and source.ingredients:
         derived = derive_levers_from_formulation(source)
         if derived:
             return derived + derive_process_levers(req)
+    # Priority 2: explicit user-specified levers
+    if req.levers:
+        return list(req.levers)
+    # Priority 3: substrate-aware defaults
+    substrate_levers = substrate_default_levers(req)
+    if substrate_levers:
+        return substrate_levers
+    # Priority 4: legacy domain table
     legacy = _LEGACY_LEVERS.get(req.domain, [])
     levers = [LeverSpec(name=n, low=lo, high=hi, unit="wt%") for n, lo, hi in legacy]
     return levers + derive_process_levers(req)

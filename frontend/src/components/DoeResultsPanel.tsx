@@ -169,7 +169,13 @@ export default function DoeResultsPanel() {
   async function loadFactorHints() {
     setFactorBusy(true);
     try {
-      const res = await api.suggestFactors(requirement);
+      // Inject leaderboard formulation so DOE factors match recommendation
+      const req = { ...requirement };
+      const lb = useStore.getState().leaderboard;
+      if (lb?.length && !req.active_formulation) {
+        req.active_formulation = lb[0];
+      }
+      const res = await api.suggestFactors(req);
       setFactorHints(res.factors);
     } catch {
       setFactorHints([]);
