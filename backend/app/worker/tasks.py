@@ -379,9 +379,12 @@ def run_recommend_task(self, payload: dict) -> dict:
         recommended = _convert_formulas(result_raw.get("formulas") or [],
                                          result_raw.get("scored") or [])
 
-        # Build ResearchResult-format response expected by frontend
+        # Build ResearchResult-format response expected by frontend.
+        # The headline is derived from the requirement, not produced by the
+        # engine, so the lightweight path has no reason to return it empty —
+        # doing so left the UI showing a blank title for a completed run.
         research = {
-            "requirement_headline": "",
+            "requirement_headline": body.requirement.headline(),
             "evidence": result_raw.get("grounded_evidence") or [],
             "mechanism": "",
             "recommended": recommended,

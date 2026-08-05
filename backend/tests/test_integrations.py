@@ -12,7 +12,7 @@ from app.domain.schemas import (
 )
 from app.services import compounds, llm, optimizer, predictor
 from app.services.optimizer import BayesianOptimizer, Factor, build_optimizer
-from app.services.rag import TfidfStore, build_store
+from app.services.rag import BM25FAISSStore, TfidfStore, build_store
 
 _REQ = Requirement(
     domain=ProductDomain.anticorrosion_coating,
@@ -53,9 +53,32 @@ def test_optimization_result_reports_engine():
 
 # ── RAG retrieval store ─────────────────────────────────────────────────────────
 
-def test_build_store_returns_tfidf_fallback():
+def test_build_store_returns_the_cpu_default():
+    """BM25+FAISS is the CPU default; TF-IDF is no longer what you get first.
+
+    (Was `test_build_store_returns_tfidf_fallback` — the CPU path moved to
+    BM25+FAISS, so the old name described the last resort, not the default.
+    The last resort is still covered, by the test below.)
+    """
+    store = build_store()
+    assert isinstance(store, BM25FAISSStore)
+
+
+def test_build_store_falls_back_to_tfidf_when_bm25_unavailable(monkeypatch):
+    """The point of the original test: there is always a working store.
+
+    rank_bm25 is an optional dependency, so a deployment without it must still
+    get something that answers `query`, not an exception out of build_store.
+    """
+    import app.services.rag as rag_mod
+
+    def boom(*a, **kw):
+        raise RuntimeError("rank_bm25 missing")
+
+    monkeypatch.setattr(rag_mod, "BM25FAISSStore", boom)
     store = build_store()
     assert isinstance(store, TfidfStore)
+    assert store.query("anything") == []
 
 
 # ── Chat routing (paper-qa / ChemCrow absent) ──────────────────────────────────
@@ -181,7 +204,9 @@ def test_embedding_probe_safe_without_lib():
 
     assert isinstance(_embedding_available(), bool)
     backend = active_rag_backend()
-    assert backend in ("embedding", "tfidf")
+    # Kept in step with `rag.active_rag_backend`: "bm25_faiss" is the CPU
+    # default, "pylate"/"colbert" the GPU path.
+    assert backend in ("pylate", "colbert", "bm25_faiss", "embedding", "tfidf")
 
 
 def test_build_store_always_returns_store_with_query():

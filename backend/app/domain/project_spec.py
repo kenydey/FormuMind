@@ -94,24 +94,55 @@ def default_objectives_for(req: Requirement) -> list[ObjectiveSpec]:
     return default_objectives(req.domain)
 
 
-def _bounds_from_pct(current: float, *, margin: float = 0.3) -> tuple[float, float]:
+def _bounds_from_pct(
+    current: float, *, margin: float = 0.3, cap: float | None = 100.0
+) -> tuple[float, float]:
+    """Bounds around *current*, clamped to *cap*.
+
+    The 100 ceiling is a percent ceiling, so it only applies to wt%/%. A g/L
+    bath concentration legitimately exceeds 100, and clamping it there would
+    silently narrow the search range.
+    """
     lo = max(0.0, current * (1.0 - margin))
-    hi = min(100.0, current * (1.0 + margin))
+    hi = current * (1.0 + margin)
+    if cap is not None:
+        hi = min(cap, hi)
     if hi - lo < 1.0:
-        hi = min(100.0, lo + 1.0)
+        hi = lo + 1.0
+        if cap is not None:
+            hi = min(cap, hi)
     return round(lo, 4), round(hi, 4)
 
 
-def derive_levers_from_formulation(form: Formulation) -> list[LeverSpec]:
-    """Pick adjustable ingredients from a formulation (exclude fixed roles)."""
+def derive_levers_from_formulation(
+    form: Formulation, *, defaults: list[LeverSpec] | None = None
+) -> list[LeverSpec]:
+    """Pick adjustable ingredients from a formulation (exclude fixed roles).
+
+    *defaults* is the substrate SSOT (``levers.py``). An ingredient it names
+    keeps that lever's unit, and its amount is expressed in that unit.
+
+    That is not a labelling detail. Surface-treatment baths are specified in
+    g/L — 5–30 g/L for hexafluorozirconic acid — while a Formulation stores
+    wt%. Emitting the wt% number under a g/L label (or vice versa) is a **10×
+    error** in a real formulation, which is why ``test_g_per_litre_slot_does_
+    not_shift_by_ten`` exists. Deriving levers from the formulation without
+    consulting the SSOT reintroduced exactly that.
+    """
+    from .genome import Slot  # local: genome imports knowledge, project_spec does not need it eagerly
+
+    by_name = {d.name: d for d in (defaults or [])}
     levers: list[LeverSpec] = []
     for ing in form.ingredients:
         if ing.role in _FIXED_ROLES:
             continue
         if ing.weight_pct <= 0:
             continue
-        lo, hi = _bounds_from_pct(ing.weight_pct)
-        levers.append(LeverSpec(name=ing.name, low=lo, high=hi, unit="wt%"))
+        spec = by_name.get(ing.name)
+        unit = spec.unit if spec else "wt%"
+        amount = Slot.from_wt_pct(ing.weight_pct, unit)
+        lo, hi = _bounds_from_pct(amount, cap=100.0 if unit in ("wt%", "%") else None)
+        levers.append(LeverSpec(name=ing.name, low=lo, high=hi, unit=unit))
     return levers[:6]
 
 
@@ -148,17 +179,21 @@ def default_levers_for(
 
 def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[LeverSpec]:
     """Resolve DOE levers: formulation > explicit > substrate defaults > legacy."""
+    # Substrate defaults are the SSOT for units and natural ranges. They are
+    # resolved first so the formulation-derived path below can honour them:
+    # deriving levers from ingredient weights alone loses the g/L unit and
+    # lands every bath formulation 10x off.
+    substrate_levers = substrate_default_levers(req)
     # Priority 1: derive from active formulation ingredients (most context-aware)
     source = form or req.active_formulation
     if source and source.ingredients:
-        derived = derive_levers_from_formulation(source)
+        derived = derive_levers_from_formulation(source, defaults=substrate_levers)
         if derived:
             return derived + derive_process_levers(req)
     # Priority 2: explicit user-specified levers
     if req.levers:
         return list(req.levers)
     # Priority 3: substrate-aware defaults
-    substrate_levers = substrate_default_levers(req)
     if substrate_levers:
         return substrate_levers
     # Priority 4: legacy domain table

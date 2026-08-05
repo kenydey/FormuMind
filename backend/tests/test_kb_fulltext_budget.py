@@ -123,5 +123,7 @@ def test_stats_endpoint_exposes_the_mode(monkeypatch):
     body = TestClient(app).get("/api/kb/stats").json()
     assert body["vector_mode"] in {"semantic", "degraded", "keyword", "empty"}
     assert "rag_backend" in body
-    # The effective backend, not the configured string.
-    assert body["rag_backend"] in {"colbert", "embedding", "tfidf"}
+    # The effective backend, not the configured string. Must stay in step with
+    # `rag.active_rag_backend`, which gained "bm25_faiss" as the CPU default and
+    # "pylate" for the GPU path.
+    assert body["rag_backend"] in {"pylate", "colbert", "bm25_faiss", "embedding", "tfidf"}

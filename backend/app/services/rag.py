@@ -184,7 +184,12 @@ class BM25FAISSStore:
         self.docs.extend(evidence)
         new_corpus = [_bm25_tokenize(_doc_text(ev)) for ev in evidence]
         self._corpus.extend(new_corpus)
-        self._bm25 = BM25Okapi(self._corpus)
+        # BM25Okapi divides by the corpus size, so an empty corpus raises
+        # ZeroDivisionError rather than building an empty index. Asking a
+        # question with no sources attached is an ordinary request, not an
+        # error, and it was returning HTTP 500. `query` already treats an
+        # empty store as "no hits"; this keeps ingest consistent with it.
+        self._bm25 = BM25Okapi(self._corpus) if self._corpus else None
 
         # FAISS dense index — only for small batches (<200 docs)
         # to avoid OOM on CPU VPS with sentence-transformers
