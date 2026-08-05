@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from app.db.campaign_store import SqliteCampaignStore
 from app.db.database import make_engine, make_session_factory
 from app.domain.objective_contract import objective_metrics
@@ -61,6 +63,10 @@ def test_build_objective_from_specs_target_names_match_metrics():
 
 
 def test_fetch_columns_match_snapshot_metrics():
+    # fetch_campaign_data_for_baybe returns DataFrames, so this needs pandas —
+    # which ships with the `baybe` extra, not the offline baseline.
+    pytest.importorskip("pandas", reason="pandas is in the baybe extra")
+
     engine = make_engine("sqlite:///:memory:")
     factory = make_session_factory(engine)
     store = SqliteCampaignStore(factory)

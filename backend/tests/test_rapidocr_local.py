@@ -152,9 +152,14 @@ def test_cjk_punctuation_is_left_alone():
 
 
 def _real_png() -> bytes:
-    """A decodable PNG — cv2.imdecode rightly rejects made-up bytes."""
-    import cv2
-    import numpy as np
+    """A decodable PNG — cv2.imdecode rightly rejects made-up bytes.
+
+    cv2 arrives with the ``parse_pro`` extra, not the offline baseline, so this
+    skips rather than errors when it is absent. Every test that needs a real
+    image goes through here, which makes this the one place to guard.
+    """
+    cv2 = pytest.importorskip("cv2", reason="opencv-python-headless is in the parse_pro extra")
+    np = pytest.importorskip("numpy")
 
     ok, buf = cv2.imencode(".png", np.full((40, 120, 3), 255, np.uint8))
     assert ok

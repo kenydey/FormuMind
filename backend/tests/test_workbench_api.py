@@ -107,7 +107,8 @@ def test_sync_workbench_marks_completed(tmp_path):
 
 
 def test_fetch_campaign_data_for_baybe_multi_metric(tmp_path):
-    import pandas as pd
+    # pandas ships with the `baybe` extra, not the offline baseline.
+    pd = pytest.importorskip("pandas", reason="pandas is in the baybe extra")
 
     from app.services.engines.baybe_engine import fetch_campaign_data_for_baybe
 
@@ -147,7 +148,7 @@ def test_fetch_campaign_data_for_baybe_multi_metric(tmp_path):
 
 
 def test_fetch_campaign_data_for_baybe(tmp_path):
-    import pandas as pd
+    pd = pytest.importorskip("pandas", reason="pandas is in the baybe extra")
 
     from app.services.engines.baybe_engine import fetch_campaign_data_for_baybe
     from app.db.campaign_store import get_campaign_store

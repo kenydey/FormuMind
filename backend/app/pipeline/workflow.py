@@ -157,7 +157,19 @@ def run_research(
         pre_index=pre_index,
         mode="recommend",
     )
-    return graph_state_to_research_result(state, req)
+    result = graph_state_to_research_result(state, req)
+    # The CRAG fallback runs a federated search whose sources come from
+    # `federated_sources`, not from this argument, so patents and web hits could
+    # arrive even when the caller asked for literature only. Whether that
+    # happened depended on whether retrieval graded well enough to skip the
+    # fallback — which in turn depended on which optional extras were installed,
+    # so the same call returned different source types on different machines.
+    # An explicit filter is a constraint on the answer, not just on the inputs.
+    if source_types and result.evidence:
+        filtered = _filter_evidence_by_types(result.evidence, source_types)
+        if filtered:
+            result.evidence = filtered
+    return result
 
 
 def run_research_graph_stream(
