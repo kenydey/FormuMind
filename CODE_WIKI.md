@@ -716,9 +716,17 @@ pytest --timeout=60                 # 设置超时
 
 ### 20.3 CI/CD
 
-- GitHub Actions自动运行测试
-- 黄金评估标记为可选（耗时较长）
-- 支持Docker构建和部署
+`.github/workflows/ci.yml`，push 与 pull request 均触发：
+
+| Job | 内容 |
+|---|---|
+| `backend` | Python 3.11（对齐 `backend/Dockerfile`）→ `pip install -r requirements.txt` + `-e '.[dev]'` → `pytest -m "not golden_eval"` |
+| `frontend` | Node 22 → `npm ci` → `tsc --noEmit` → `vitest run` → `npm run build` |
+
+- 黄金评估（`golden_eval`）耗时较长，CI 中跳过，本地按需 `pytest -m golden_eval`。
+- **`requirements.txt` 是手工维护的**（注释说明了每条 pin 的理由），也是 Dockerfile 的安装来源；
+  **不要用 `pip freeze` 重新生成**，那会冲掉注释并钉死当前环境的全部传递依赖。
+- 支持 Docker 构建和部署。
 
 ---
 
