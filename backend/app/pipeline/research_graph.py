@@ -287,23 +287,32 @@ def fallback_node(
     query = state.get("query") or state.get("topic") or ""
     req = state.get("req")
 
-    if mode == "recommend":
-        from ..services import literature
+    # The fallback is itself a network call, and CRAG only gets here because
+    # local retrieval was already judged insufficient. Letting an upstream
+    # outage raise would turn "the web search is down" into a failed research
+    # run, discarding the evidence already retrieved. Degrade to no extra
+    # evidence and let the graph continue with what it has.
+    evidence: list[Evidence] = []
+    try:
+        if mode == "recommend":
+            from ..services import literature
 
-        fed = FederatedSearchEngine(settings)
-        types = fed.effective_sources()
-        evidence = literature.iter_search(
-            query,
-            types,
-            req=req,
-            total_limit=30,
-            per_source_cap=10,
-            max_rounds=1,
-        )[0]
-    else:
-        fed = FederatedSearchEngine(settings)
-        result = fed.search(query, req=req)
-        evidence = result.evidence
+            fed = FederatedSearchEngine(settings)
+            types = fed.effective_sources()
+            evidence = literature.iter_search(
+                query,
+                types,
+                req=req,
+                total_limit=30,
+                per_source_cap=10,
+                max_rounds=1,
+            )[0]
+        else:
+            fed = FederatedSearchEngine(settings)
+            result = fed.search(query, req=req)
+            evidence = result.evidence
+    except Exception as exc:
+        evidence = degrade_return(logger, exc, "CRAG fallback search failed", [])
 
     if evidence:
         colbert_store.index_evidence(evidence, settings=settings)

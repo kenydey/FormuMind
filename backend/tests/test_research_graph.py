@@ -132,3 +132,115 @@ def test_build_langgraph_invoke_offline(settings):
         )
     assert result.get("stage") in ("claim_check", "regenerate")
     assert result.get("verified_claims") is not None
+
+
+# ── CRAG degradation: the grader and the fallback under failure ──────────────
+#
+# These run offline by design and must NOT be marked golden_eval — that marker
+# means "slow QA-dataset suite" and is deselected by CI (`-m "not golden_eval"`),
+# which would leave the degradation paths untested where it matters most.
+#
+# The LLM is faked by monkeypatching `app.services.llm.complete_json`, the
+# convention already used in test_deep_research_depth.py:61,69. Intercepting
+# HTTP instead (respx) would pin the tests to whichever provider base_url is
+# configured, and could not touch the search path at all — `ddgs` is a library
+# call, not an httpx request.
+
+
+def _evidence(n: int, relevance: float) -> list[Evidence]:
+    return [
+        Evidence(
+            source="seed",
+            identifier=f"e{i}",
+            title=f"t{i}",
+            snippet="锌系磷化膜耐蚀性",
+            relevance=relevance,
+        )
+        for i in range(n)
+    ]
+
+
+def test_grade_falls_back_when_the_llm_raises(monkeypatch, settings):
+    """A provider outage must degrade the grade, not abort the research run."""
+
+    def boom(prompt):
+        raise RuntimeError("provider returned 429")
+
+    monkeypatch.setattr("app.services.llm.complete_json", boom)
+
+    grade = grade_evidence("水性环氧防腐涂料", _evidence(3, 0.9), settings)
+
+    assert isinstance(grade, GradeResult)
+    assert grade.verdict in (GradeVerdict.correct, GradeVerdict.incorrect)
+    # The field is `reason`; `grade_reason` belongs to the outer result model.
+    assert "offline heuristic" in grade.reason
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,                      # provider unreachable / empty completion
+        "not json at all",         # prose instead of an object
+        {},                        # object with nothing in it
+        {"verdict": "banana"},     # a verdict outside the enum
+        {"doc_grades": []},        # right shape, no verdict
+    ],
+    ids=["none", "prose", "empty", "bad-verdict", "no-verdict"],
+)
+def test_grade_falls_back_on_malformed_llm_output(monkeypatch, settings, payload):
+    """Anything the parser cannot trust falls through to the heuristic.
+
+    A model that answers in prose, or invents a verdict, is far more common
+    than one that errors outright, and it must not reach the caller as a
+    half-parsed grade.
+    """
+    monkeypatch.setattr("app.services.llm.complete_json", lambda prompt: payload)
+
+    grade = grade_evidence("水性环氧防腐涂料", _evidence(3, 0.9), settings)
+
+    assert grade.verdict in (GradeVerdict.correct, GradeVerdict.incorrect)
+    assert "offline heuristic" in grade.reason
+
+
+def test_grade_says_incorrect_without_evidence(settings):
+    """The empty case is distinct from a failed grade and keeps its own reason."""
+    grade = grade_evidence("主题", [], settings)
+    assert grade.verdict == GradeVerdict.incorrect
+    assert "offline heuristic" not in grade.reason
+
+
+def test_graph_survives_a_failing_federated_search(monkeypatch, settings):
+    """The fallback is itself a network call, and it can fail too.
+
+    CRAG reaches the fallback precisely when local retrieval was judged
+    insufficient, so a search outage lands on the path that was already the
+    last resort — and it used to propagate, turning "the web search is down"
+    into a failed research run.
+
+    Note `pre_index=None`: `_needs_fallback` short-circuits in recommend mode
+    when pre-loaded sources exist, so passing any would skip the very node
+    under test and the assertion would hold vacuously.
+    """
+    from app.services import literature
+
+    called: list[int] = []
+
+    def boom(*args, **kwargs):
+        called.append(1)
+        raise RuntimeError("upstream search returned 502")
+
+    monkeypatch.setattr(literature, "iter_search", boom)
+    monkeypatch.setattr("app.services.llm.complete_json", lambda prompt: None)
+
+    state = run_research_graph(
+        topic="水性环氧防腐涂料",
+        req=Requirement(domain=ProductDomain.anticorrosion_coating),
+        query="水性环氧防腐涂料",
+        pre_index=None,
+        mode="recommend",
+        settings=settings,
+    )
+
+    assert called, "the fallback never ran — this test would prove nothing"
+    assert state.get("fallback_used") is True
+    assert isinstance(state, dict) and state.get("stage")
