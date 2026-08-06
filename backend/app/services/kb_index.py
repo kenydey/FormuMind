@@ -35,9 +35,9 @@ def _embed_texts(texts: list[str]) -> list[list[float]] | None:
     if not texts:
         return []
     try:
-        from .rag import _EMBED_MODEL, _load_model
+        from .rag import _load_model, embed_model_name
 
-        model = _load_model(_EMBED_MODEL)
+        model = _load_model(embed_model_name())
         vectors = model.encode(texts, normalize_embeddings=True)
         return [[float(x) for x in v] for v in vectors]
     except Exception as exc:
@@ -45,9 +45,9 @@ def _embed_texts(texts: list[str]) -> list[list[float]] | None:
 
 
 def _embed_model_name() -> str:
-    from .rag import _EMBED_MODEL
+    from .rag import embed_model_name
 
-    return _EMBED_MODEL
+    return embed_model_name()
 
 
 def _dot(a: list[float], b: list[float]) -> float:

@@ -73,7 +73,33 @@ class TfidfStore:
 # (all-MiniLM-L6-v2, ~22 MB) runs CPU-only; embeddings are cosine-compared with
 # numpy, so no vector database is needed for the ephemeral per-request store.
 
+# Default only. `embed_model_name()` is the accessor everything should use —
+# reading this constant directly ignores the operator's setting.
 _EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def embed_model_name() -> str:
+    """The sentence-transformer to embed with.
+
+    Configurable because the default is English-first, and this platform
+    retrieves Chinese patents — `all-MiniLM-L6-v2` is a poor fit for the
+    corpus it is actually pointed at. Chinese-capable alternatives worth
+    setting via ``FORMUMIND_EMBEDDING_MODEL``:
+
+        BAAI/bge-small-zh-v1.5      small, Chinese-first
+        BAAI/bge-m3                 multilingual, much larger
+        moka-ai/m3e-base            Chinese, mid-sized
+
+    The default is deliberately unchanged. Switching models invalidates every
+    stored vector — they live in a different semantic space and are no longer
+    comparable — so it is an operator decision, made once, followed by a
+    rebuild. `kb_stats` reports ``vector_mode == "stale"`` with the count and
+    the instruction when that happens, rather than letting retrieval quietly
+    fall back to keywords.
+    """
+    from ..config import get_settings
+
+    return (get_settings().embedding_model or "").strip() or _EMBED_MODEL
 
 
 def _embedding_available() -> bool:
@@ -103,7 +129,9 @@ class EmbeddingStore:
     """Semantic retrieval over sentence-transformer embeddings (cosine sim)."""
 
     backend: str = "embedding"
-    model_name: str = _EMBED_MODEL
+    # Resolved per instance rather than pinned at class-definition time, so a
+    # store built after the setting changes uses the configured model.
+    model_name: str = field(default_factory=embed_model_name)
     docs: list[Evidence] = field(default_factory=list)
 
     def __post_init__(self) -> None:

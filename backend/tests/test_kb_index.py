@@ -381,3 +381,59 @@ def test_stats_reports_stale_when_vectors_belong_to_another_model(stores, monkey
     assert stats["stale_chunks"] == 2
     assert stats["vector_mode"] == "stale"
     assert "重建索引" in stats["vector_hint"]
+
+
+# ── configurable embedding model ─────────────────────────────────────────────
+
+
+def test_embedding_model_defaults_to_the_shipped_one(monkeypatch):
+    """Empty setting must behave exactly as before this became configurable."""
+    from app.services import rag
+
+    monkeypatch.delenv("FORMUMIND_EMBEDDING_MODEL", raising=False)
+    get_settings.cache_clear()
+    assert rag.embed_model_name() == rag._EMBED_MODEL
+    assert kb_index._embed_model_name() == rag._EMBED_MODEL
+
+
+def test_embedding_model_setting_is_honoured(monkeypatch):
+    from app.services import rag
+
+    monkeypatch.setenv("FORMUMIND_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+    get_settings.cache_clear()
+    assert rag.embed_model_name() == "BAAI/bge-small-zh-v1.5"
+    # kb_index stamps rows with this name, which is what makes vectors from a
+    # previous model detectable instead of silently incomparable.
+    assert kb_index._embed_model_name() == "BAAI/bge-small-zh-v1.5"
+
+
+def test_blank_or_whitespace_setting_falls_back(monkeypatch):
+    from app.services import rag
+
+    monkeypatch.setenv("FORMUMIND_EMBEDDING_MODEL", "   ")
+    get_settings.cache_clear()
+    assert rag.embed_model_name() == rag._EMBED_MODEL
+
+
+def test_switching_the_model_marks_the_existing_corpus_stale(stores, monkeypatch):
+    """The whole point of making this configurable safely.
+
+    Rows embedded by the old model must be reported as needing a rebuild, not
+    counted towards a green `semantic` badge.
+    """
+    from app.services import rag
+
+    src, chk = stores
+    sid = src.create(filename="p.md", title="T", source_kind="patent",
+                     full_text="x", content_hash="hswitch")
+    chk.replace_for_source(sid, [
+        {"text": "旧模型向量", "embedding": [1.0, 0.0], "embedding_model": rag._EMBED_MODEL},
+    ])
+
+    monkeypatch.setenv("FORMUMIND_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+    get_settings.cache_clear()
+
+    stats = kb_index.kb_stats()
+    assert stats["vector_mode"] == "stale"
+    assert stats["stale_chunks"] == 1
+    assert "重建索引" in stats["vector_hint"]

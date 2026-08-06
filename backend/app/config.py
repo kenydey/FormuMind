@@ -145,6 +145,23 @@ class Settings(BaseSettings):
     # "auto" | "pylate" | "bm25_faiss" | "embedding" | "tfidf"
     rag_backend: str = "auto"
 
+    # 语义向量化所用的 sentence-transformer。空 = 用默认值
+    # （`sentence-transformers/all-MiniLM-L6-v2`）。
+    #
+    # 默认值是**英文为主**的模型，而本平台检索的是中文专利 —— 这是当前检索质量
+    # 的一个真实短板。中文可选项：
+    #     BAAI/bge-small-zh-v1.5   体积小，中文优先
+    #     BAAI/bge-m3              多语种，但大得多
+    #     moka-ai/m3e-base         中文，中等体积
+    #
+    # ⚠️ 换模型会让**已有的全部向量作废**（不同模型的向量在不同语义空间，不可比较）。
+    # 换完之后必须点「重建索引」；在那之前 `/api/kb/stats` 会报
+    # `vector_mode == "stale"` 并给出待重建的切块数，而不是让检索悄悄退回关键词。
+    #
+    # 默认值故意没有改动：这台机器上没装 sentence-transformers，无法实测中文模型
+    # 能否加载、维度是多少，所以不把一个未经验证的默认值推给已有部署。
+    embedding_model: str = ""
+
     # ColBERT 持久知识库
     colbert_index_dir: str = "./data/colbert_index"
     colbert_model: str = "colbert-ir/colbertv2.0"
