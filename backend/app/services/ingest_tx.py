@@ -119,6 +119,19 @@ def ingest_document_tx(
             if rows and _embedding_probe():
                 vectors = _embed_texts([r["text"] for r in rows])
                 if vectors:
+                    if len(vectors) != len(rows):
+                        # A short or long response would bind vectors to the wrong
+                        # text from the mismatch onward — every later chunk carries
+                        # its neighbour's meaning, and nothing about the result
+                        # looks wrong. Drop the batch instead; the rows stay
+                        # keyword-searchable and a rebuild can retry.
+                        logger.error(
+                            "kb embedding count mismatch: %d vectors for %d chunks — "
+                            "skipping embeddings for this source",
+                            len(vectors), len(rows),
+                        )
+                        vectors = None
+                if vectors:
                     model_name = _embed_model_name()
                     for row, vec in zip(rows, vectors):
                         row["embedding"] = vec

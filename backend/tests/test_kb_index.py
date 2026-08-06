@@ -145,6 +145,9 @@ def test_search_chunks_embedding_mode(stores, monkeypatch):
         {"text": "polyurethane topcoat gloss", "embedding": [0.0, 1.0], "embedding_model": "m"},
     ])
     monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[0.9, 0.1]])
+    # The stored rows claim model "m", so the query has to come from "m" too —
+    # otherwise `comparable_embedding` rightly refuses to score them together.
+    monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "m")
     hits = kb_index.search_chunks("防腐", k=1)
     assert len(hits) == 1
     assert "epoxy" in hits[0].snippet
@@ -239,3 +242,142 @@ def test_kb_reindex_conflict_when_disabled(monkeypatch, stores):
     get_settings.cache_clear()
     resp = _client().post("/api/kb/reindex")
     assert resp.status_code == 409
+
+
+# ── embedding comparability guards ───────────────────────────────────────────
+#
+# The scoring loops used to say `zip(query_vec, c.embedding)`, which truncates
+# to the shorter vector instead of refusing to compare. A 384-dim query against
+# 1536-dim rows produced confident-looking scores over a prefix of two
+# unrelated spaces — no exception, no log line, just wrong ordering. These pin
+# the refusal.
+#
+# Note the existing fakes here return fixed 2-dim vectors and ignore their
+# input, so they would happily "pass" against a remote 1536-dim API. That is
+# why the correspondence test below asserts on the arguments, not just the
+# result.
+
+
+def _multi_chunk_text() -> str:
+    """Text that reliably survives the >30-char filter as several chunks.
+
+    Short paragraphs get merged into one chunk, which would make a
+    count-mismatch fixture silently self-consistent and the test vacuous.
+    """
+    body = "环氧树脂与磷酸锌协同防腐蚀机理研究，颜料体积浓度控制在百分之三十五。" * 3
+    return "\n\n".join(f"## 段落 {i}\n\n{body}" for i in range(4))
+
+
+def test_mixed_dimensions_are_not_scored_by_truncation(stores, monkeypatch):
+    """A row of another dimension must not out-rank a genuinely similar one."""
+    src, chk = stores
+    sid = src.create(filename="p.md", title="T", source_kind="literature",
+                     full_text="x", content_hash="hdim")
+    chk.replace_for_source(sid, [
+        # Truncated to 2 dims this scores 1.0 — higher than the real match —
+        # purely because its first component happens to be large.
+        {"text": "unrelated filler text about packaging logistics",
+         "embedding": [1.0, 0.0, 0.5, 0.5], "embedding_model": "m"},
+        {"text": "epoxy anticorrosion primer", "embedding": [0.9, 0.1],
+         "embedding_model": "m"},
+    ])
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[1.0, 0.0]])
+    monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "m")
+
+    hits = kb_index.search_chunks("防腐", k=2)
+    assert hits, "the corpus must still be searchable"
+    # The 4-dim row is keyword-scored, so it cannot win on a bogus cosine.
+    assert "epoxy" in hits[0].snippet
+
+
+def test_vectors_from_another_model_are_not_compared(stores, monkeypatch):
+    """Same dimension, different model — equal length is not comparability."""
+    src, chk = stores
+    sid = src.create(filename="p.md", title="T", source_kind="literature",
+                     full_text="x", content_hash="hmodel")
+    chk.replace_for_source(sid, [
+        {"text": "alpha", "embedding": [1.0, 0.0], "embedding_model": "old-model"},
+    ])
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[1.0, 0.0]])
+    monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "new-model")
+
+    chunk = chk.get_by_source(sid)[0]
+    assert kb_index.comparable_embedding(chunk, 2, "new-model") is False
+    assert kb_index.comparable_embedding(chunk, 2, "old-model") is True
+
+
+def test_legacy_rows_without_a_model_name_stay_searchable(stores):
+    """NULL predates the column; excluding those rows would gut old corpora."""
+    src, chk = stores
+    sid = src.create(filename="p.md", title="T", source_kind="literature",
+                     full_text="x", content_hash="hnull")
+    chk.replace_for_source(sid, [{"text": "legacy", "embedding": [1.0, 0.0]}])
+
+    chunk = chk.get_by_source(sid)[0]
+    assert kb_index.comparable_embedding(chunk, 2, "any-model") is True
+    # ...but a dimension mismatch still disqualifies them.
+    assert kb_index.comparable_embedding(chunk, 3, "any-model") is False
+
+
+def test_embedding_count_mismatch_drops_the_batch(stores, monkeypatch):
+    """Binding N vectors to M rows would give chunks their neighbour's meaning.
+
+    Silently zipping to the shorter list is worse than having no vectors: the
+    rows still look embedded, and every row after the mismatch is wrong.
+    """
+    src, chk = stores
+    text = _multi_chunk_text()
+    sid = src.create(filename="p.md", title="T", source_kind="literature",
+                     full_text=text, content_hash="hcount")
+    # One vector back for several chunks.
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[1.0, 0.0]])
+
+    kb_index.index_source(sid, text)
+    assert len(chk.get_by_source(sid)) > 1, "fixture must produce a real mismatch"
+
+    rows = chk.get_by_source(sid)
+    assert rows, "chunks must still be written"
+    assert all(r.embedding is None for r in rows), "no row may carry a guessed vector"
+
+
+def test_embed_texts_receives_every_chunk_it_is_asked_about(stores, monkeypatch):
+    """The correspondence the other fakes never check.
+
+    Existing fakes return a constant and ignore their input, so a real API
+    returning a different count or order would not be caught by them.
+    """
+    src, chk = stores
+    text = _multi_chunk_text()
+    sid = src.create(filename="p.md", title="T", source_kind="literature",
+                     full_text=text, content_hash="hcorr")
+    seen: list[list[str]] = []
+
+    def fake_embed(texts):
+        seen.append(list(texts))
+        return [[float(i), 0.0] for i in range(len(texts))]
+
+    monkeypatch.setattr(kb_index, "_embed_texts", fake_embed)
+    kb_index.index_source(sid, text)
+
+    assert seen, "_embed_texts was never called"
+    rows = chk.get_by_source(sid)
+    assert len(seen[0]) == len(rows)
+    # Every stored row's text was actually submitted, in the same order.
+    assert seen[0] == [r.text for r in rows]
+
+
+def test_stats_reports_stale_when_vectors_belong_to_another_model(stores, monkeypatch):
+    """`semantic` over an uncomparable corpus was the last green-over-broken."""
+    src, chk = stores
+    sid = src.create(filename="p.md", title="T", source_kind="literature",
+                     full_text="x", content_hash="hstale")
+    chk.replace_for_source(sid, [
+        {"text": "alpha", "embedding": [1.0, 0.0], "embedding_model": "old-model"},
+        {"text": "beta", "embedding": [0.0, 1.0], "embedding_model": "old-model"},
+    ])
+    monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "new-model")
+
+    stats = kb_index.kb_stats()
+    assert stats["stale_chunks"] == 2
+    assert stats["vector_mode"] == "stale"
+    assert "重建索引" in stats["vector_hint"]

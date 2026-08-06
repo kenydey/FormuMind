@@ -95,11 +95,16 @@ def hybrid_search(
         query_vecs = kb_index._embed_texts([query])
         query_vec = query_vecs[0] if query_vecs else None
         if query_vec is not None:
+            # Same guard as `kb_index.search_chunks`: `zip` truncates rather
+            # than compares, so a chunk embedded by a different model would
+            # contribute a plausible-looking cosine score computed over a
+            # prefix of two unrelated spaces. Leaving it at 0.0 lets BM25
+            # decide that row instead.
+            model_name = kb_index._embed_model_name()
+            dim = len(query_vec)
             for i, c in enumerate(chunks):
-                if c.embedding:
-                    cosine_scores[i] = sum(
-                        a * b for a, b in zip(query_vec, c.embedding)
-                    )
+                if kb_index.comparable_embedding(c, dim, model_name):
+                    cosine_scores[i] = kb_index._dot(query_vec, c.embedding)
 
         # ── normalise each score vector to [0, 1] ────────────────────────
         bm25_max = float(bm25_scores.max()) if bm25_scores.size else 0.0

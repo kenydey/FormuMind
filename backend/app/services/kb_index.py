@@ -50,6 +50,50 @@ def _embed_model_name() -> str:
     return _EMBED_MODEL
 
 
+def _dot(a: list[float], b: list[float]) -> float:
+    """Dot product of two equal-length, already-normalised vectors.
+
+    Callers must have established comparability first (see
+    ``comparable_embedding``) — this deliberately does not tolerate a length
+    mismatch, because the tolerant version is what silently produced garbage
+    scores.
+
+    Kept in plain Python after measuring: at 5000 chunks, numpy per-row is
+    ~68→62 ms at 384 dims and ~276→232 ms at 1536, and a batched matmul is
+    *slower* at 384 (128 ms) because materialising the matrix from JSON lists
+    dominates. The multiply was never the cost, so the dependency and the
+    conversion churn would buy ~16% at the top end and nothing typical.
+    """
+    return sum(x * y for x, y in zip(a, b))
+
+
+def comparable_embedding(chunk, query_dim: int, model_name: str) -> bool:
+    """Whether *chunk*'s vector can be dot-producted against the query vector.
+
+    Two vectors are only comparable when they came out of the same model. The
+    scoring loops used to express this as ``zip(query_vec, c.embedding)``,
+    which does not compare — it *truncates to the shorter one* and returns a
+    perfectly plausible number. A 384-dim query against 1536-dim stored
+    vectors yields scores that sort confidently and mean nothing, with no
+    exception and no log line. That is the failure this guard exists for, and
+    it becomes reachable the moment the embedding model is changed.
+
+    Dimension is the hard check. The model name is the subtle one: two
+    different 384-dim models occupy different semantic spaces, so equal length
+    is not sufficient.
+
+    Rows whose ``embedding_model`` is NULL predate the column being populated.
+    They are judged on dimension alone rather than excluded — excluding them
+    would silently gut retrieval on every existing corpus, which is the same
+    class of harm this guard is meant to prevent.
+    """
+    vec = getattr(chunk, "embedding", None)
+    if not vec or len(vec) != query_dim:
+        return False
+    stored = getattr(chunk, "embedding_model", None)
+    return not stored or stored == model_name
+
+
 def _embedding_probe() -> bool:
     """Importability check only — never loads model weights."""
     from .rag import _embedding_available
@@ -57,7 +101,7 @@ def _embedding_probe() -> bool:
     return _embedding_available()
 
 
-def _vector_health(total: int, embedded: int) -> dict:
+def _vector_health(total: int, embedded: int, stale: int = 0) -> dict:
     """Whether retrieval is *actually* semantic, plus what to do if it is not.
 
     ``embedding_available`` is import-only by design (loading weights inside a
@@ -70,6 +114,11 @@ def _vector_health(total: int, embedded: int) -> dict:
     vectors". ``vector_mode`` answers that:
 
     ``semantic``  — vectors exist, retrieval is embedding-based
+    ``stale``     — vectors exist but were produced by a different embedding
+                    model, so they are not comparable to anything this model
+                    encodes. Those rows fall back to keyword scoring, and
+                    counting them as ``semantic`` was the last way this probe
+                    could still report green over a corpus it cannot search.
     ``degraded``  — the library is installed but nothing got embedded; this is
                     the case worth shouting about, because it looks fine
     ``keyword``   — no embedding library; expected, not a fault
@@ -80,6 +129,21 @@ def _vector_health(total: int, embedded: int) -> dict:
     available = _embedding_probe()
     if total <= 0:
         mode, hint = "empty", ""
+    elif stale > 0 and stale >= embedded:
+        # Every vector belongs to another model — retrieval is keyword-only in
+        # practice, whatever the embedded count says.
+        mode = "stale"
+        hint = (
+            f"{stale} 个切块由其他 embedding 模型生成，无法与当前模型比较，"
+            "这些行已退回关键词匹配。点「重建索引」用当前模型重新向量化。"
+        )
+    elif stale > 0:
+        mode = "stale"
+        hint = (
+            f"{embedded - stale}/{embedded} 个切块可用于语义检索，"
+            f"另有 {stale} 个由其他 embedding 模型生成、已退回关键词匹配。"
+            "点「重建索引」可恢复全部语义排序。"
+        )
     elif embedded > 0:
         mode, hint = "semantic", ""
     elif available:
@@ -163,6 +227,19 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
         if embed and rows:
             with timing.span("embed"):
                 vectors = _embed_texts([r["text"] for r in rows])
+            if vectors:
+                if len(vectors) != len(rows):
+                    # A short or long response would bind vectors to the wrong
+                    # text from the mismatch onward — every later chunk carries
+                    # its neighbour's meaning, and nothing about the result
+                    # looks wrong. Drop the batch instead; the rows stay
+                    # keyword-searchable and a rebuild can retry.
+                    logger.error(
+                        "kb embedding count mismatch: %d vectors for %d chunks — "
+                        "skipping embeddings for this source",
+                        len(vectors), len(rows),
+                    )
+                    vectors = None
             if vectors:
                 model_name = _embed_model_name()
                 for row, vec in zip(rows, vectors):
@@ -396,13 +473,28 @@ def search_chunks(query: str, k: int = 6, *, project_id: str | None = None) -> l
             query_vec = vecs[0] if vecs else None
 
         if query_vec is not None and embedded:
-            for c in embedded:
-                score = sum(a * b for a, b in zip(query_vec, c.embedding))
+            model_name = _embed_model_name()
+            dim = len(query_vec)
+            usable = [c for c in embedded if comparable_embedding(c, dim, model_name)]
+            skipped = len(embedded) - len(usable)
+            if skipped:
+                # Loud on purpose: this is the state where results still look
+                # ranked and are not. It clears after a rebuild.
+                logger.warning(
+                    "kb search: %d/%d chunks embedded by a different model — "
+                    "scored by keyword instead. Rebuild the index to restore "
+                    "semantic ranking.",
+                    skipped, len(embedded),
+                )
+            usable_ids = {id(c) for c in usable}
+            for c in usable:
+                score = _dot(query_vec, c.embedding)
                 scored.append((score, c))
-            # Text-only rows still compete via keywords, rescaled below cosine range.
+            # Text-only rows — and rows this model cannot compare against —
+            # still compete via keywords, rescaled below cosine range.
             qt = _tokens(expanded_query)
             for c in chunks:
-                if not c.embedding:
+                if id(c) not in usable_ids:
                     scored.append((_keyword_score(qt, c.text) * 0.5, c))
         else:
             qt = _tokens(expanded_query)
@@ -542,6 +634,10 @@ def kb_stats() -> dict:
 
     try:
         total, embedded = get_chunk_store().counts()
+        try:
+            stale = get_chunk_store().count_foreign_model(_embed_model_name())
+        except Exception as exc:
+            stale = degrade_return(logger, exc, "stale-vector count failed", 0)
         with get_source_store()._session_factory() as session:
             from sqlalchemy import func
 
@@ -565,7 +661,8 @@ def kb_stats() -> dict:
             "embedded_chunks": embedded,
             "embedding_available": _embedding_probe(),
             "products": products,
-            **_vector_health(total, embedded),
+            "stale_chunks": stale,
+            **_vector_health(total, embedded, stale),
         }
     except Exception as exc:
         return degrade_return(

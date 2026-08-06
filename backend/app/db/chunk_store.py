@@ -136,6 +136,28 @@ class ChunkStore:
             )
             return int(total), int(embedded)
 
+    def count_foreign_model(self, model_name: str) -> int:
+        """Embedded chunks produced by some *other* embedding model.
+
+        These are the rows retrieval has to skip: their vectors live in a
+        different semantic space, so scoring them against the current model
+        would compare two unrelated things. Counting them is what lets the
+        stats endpoint say so instead of reporting the corpus as fully
+        semantic.
+
+        NULL is not counted — those rows predate the column being populated and
+        are judged on dimension alone (see ``kb_index.comparable_embedding``).
+        """
+        with self._session_factory() as session:
+            return int(
+                session.query(func.count(DocumentChunk.id))
+                .filter(DocumentChunk.embedding.isnot(None))
+                .filter(DocumentChunk.embedding_model.isnot(None))
+                .filter(DocumentChunk.embedding_model != model_name)
+                .scalar()
+                or 0
+            )
+
     def delete_for_source(self, source_id: str) -> int:
         with commit_session(self._session_factory) as session:
             n = (
