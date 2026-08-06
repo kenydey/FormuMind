@@ -421,15 +421,41 @@ def search_serpapi_literature(query: str, limit: int = 5, offset: int = 0) -> li
 
 
 def search_internet(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
-    """互联网检索：Tavily 优先，DuckDuckGo 回退。"""
+    """互联网检索：Tavily → SerpAPI → DuckDuckGo。
+
+    每一档都把**自己的名字**写进 ``Evidence.source``（`Tavily` / `SerpAPI` /
+    `DuckDuckGo`），因为"某档结果质量差"这种判断，只有在能看出是哪一档给的
+    结果时才可验证。此前 DuckDuckGo 那档统一标成 `Internet`，于是它的结果和别的
+    来源混在一起、无法归因。
+
+    DuckDuckGo 是**唯一不需要 API key** 的一档，所以保留为兜底而不是删掉——
+    没有任何密钥也能用是这个项目的设计属性（整个测试套件依赖它）。
+    嫌它质量差就把 ``FORMUMIND_WEB_SEARCH_ALLOW_DDGS`` 关掉，此时没有可用密钥
+    就诚实地返回空，而不是塞一堆低质量结果冒充检索成功。
+    """
     from ..config import get_settings
-    from .search_providers import search_tavily
+    from .search_providers import search_serpapi_web, search_tavily
 
     settings = get_settings()
+
     if effective_setting(settings, "tavily_api_key"):
         hits = search_tavily(query, limit, offset, settings=settings)
         if hits:
             return hits
+        logger.info("internet search: Tavily returned nothing, trying next provider")
+
+    if effective_setting(settings, "serpapi_api_key"):
+        hits = search_serpapi_web(query, limit, offset, settings=settings)
+        if hits:
+            return hits
+        logger.info("internet search: SerpAPI returned nothing, trying next provider")
+
+    if not getattr(settings, "web_search_allow_ddgs", True):
+        logger.info(
+            "internet search: no keyed provider produced results and the "
+            "DuckDuckGo fallback is disabled — returning nothing"
+        )
+        return []
     return search_web(query, limit, offset)
 
 
@@ -443,7 +469,11 @@ def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
         results = list(DDGS().text(query, max_results=limit + offset))[offset : offset + limit]
         return [
             Evidence(
-                source="Internet",
+                # Named, not the generic "Internet": a result you cannot
+                # attribute to a provider is a result whose quality you cannot
+                # argue about. Both `_is_weblike` checks match on substrings,
+                # so web-specific filtering still applies.
+                source="DuckDuckGo",
                 identifier=r.get("href") or r.get("url") or "",  # ddgs 新版可能用 url
                 title=r.get("title", ""),
                 snippet=(r.get("body") or "")[:500],

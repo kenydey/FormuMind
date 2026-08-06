@@ -60,6 +60,12 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "文献检索包含 arXiv 来源。", "retrieval", "需安装 intel extra + 网络"),
     EnvFlag("arxiv_domain_filter", "arXiv 领域过滤",
             "对 arXiv 结果按材料/化学领域分类过滤，减少无关命中。", "retrieval"),
+    EnvFlag("web_search_allow_ddgs", "DuckDuckGo 兜底检索",
+            "互联网检索的顺序是 Tavily → SerpAPI → DuckDuckGo。DuckDuckGo 是唯一"
+            "不需要 API key 的一档，但结果质量明显弱于前两档。关闭后若没有可用密钥，"
+            "互联网检索会诚实地返回空，而不是塞一批低质量结果。"
+            "每条结果的来源都标着是哪一档给的，可据此判断要不要关。",
+            "retrieval", "关闭后需配置 Tavily 或 SerpAPI 密钥，否则互联网源无结果"),
     EnvFlag("openalex_enabled", "OpenAlex 检索",
             "文献检索包含 OpenAlex（2.5 亿条学术元数据）。", "retrieval", "需网络"),
     EnvFlag("federated_sources_notebooklm", "联邦检索含 NotebookLM",

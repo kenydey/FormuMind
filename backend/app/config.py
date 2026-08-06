@@ -219,6 +219,15 @@ class Settings(BaseSettings):
     # 检索增强 API（Phase 0+）
     serpapi_api_key: str | None = None
     tavily_api_key: str | None = None
+
+    # 互联网检索的兜底档：Tavily → SerpAPI → DuckDuckGo。
+    # DuckDuckGo 是唯一**不需要 API key** 的一档，所以默认保留——没有任何密钥也
+    # 能用是本项目的设计属性（测试套件依赖它离线运行）。
+    # 但它的结果质量明显弱于前两档；关掉之后，若没有可用密钥就**诚实地返回空**，
+    # 而不是塞一批低质量结果冒充检索成功。
+    # 每一档都会把自己的名字写进 `Evidence.source`，所以关它之前可以先看看到底
+    # 有多少结果是它给的。
+    web_search_allow_ddgs: bool = True
     arxiv_domain_filter: bool = True
     arxiv_search_enabled: bool = True
     openalex_enabled: bool = True

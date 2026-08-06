@@ -277,6 +277,49 @@ def search_tavily(
         return degrade_return(logger, exc, "Tavily search failed", [])
 
 
+def search_serpapi_web(
+    query: str,
+    limit: int = 5,
+    offset: int = 0,
+    *,
+    settings: Settings | None = None,
+) -> list[Evidence]:
+    """General web search via SerpAPI's Google engine.
+
+    SerpAPI was already wired for scholar and patents but not for plain web, so
+    a deployment holding a SerpAPI key still dropped to the keyless DuckDuckGo
+    tier for general queries — the tier whose result quality prompted this.
+    """
+    settings = settings or get_settings()
+    key = effective_setting(settings, "serpapi_api_key")
+    q = (query or "").strip()
+    if not key or not q:
+        return []
+    try:
+        payload = _serpapi_search("google", q, key, limit, offset)
+        results = (payload.get("organic_results") or [])[offset : offset + limit]
+        return [
+            Evidence(
+                # "(web)" is load-bearing, following the existing `CNIPA (web)`
+                # convention: a bare "SerpAPI" is already classified as
+                # patent/literature (SerpAPI also backs scholar and patent
+                # search), and `_is_patent_or_literature` returns False for
+                # anything `_is_weblike` claims first. Without the suffix these
+                # general-web hits would be treated as authoritative literature
+                # and skip web-specific near-dup filtering.
+                source="SerpAPI (web)",
+                identifier=r.get("link") or "",
+                title=r.get("title") or "Untitled",
+                snippet=(r.get("snippet") or "")[:600],
+                relevance=_ranked(i, offset),
+            )
+            for i, r in enumerate(results)
+            if r.get("link")
+        ]
+    except Exception as exc:
+        return degrade_return(logger, exc, "SerpAPI web search failed", [])
+
+
 def search_google_patents_cn(
     chinese_query: str,
     limit: int = 5,
