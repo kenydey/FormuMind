@@ -349,6 +349,19 @@ class Settings(BaseSettings):
     # 客户端在流关闭后会自动改用轮询，所以这个值只决定「连接保持多久」，
     # 不决定「任务能跑多久」。
     task_stream_timeout_s: float = 21600.0  # 6 小时
+
+    # Celery 单任务时限。此前硬编码为 600 / 900 秒（10 / 15 分钟），这与
+    # 「取消超时限制」的其余三层直接矛盾：前端已无墙钟上限、SSE 截止 6 小时、
+    # `kb_ingest_max_docs=0` 不限篇数——然后 Celery 在第 15 分钟把任务杀掉。
+    # 几百篇的知识库构建必然超过 15 分钟，于是前端安静地盯着一个早已被杀死的任务。
+    #
+    # 这两个值**必须小于 `task_stream_timeout_s`**：流要比任务活得久，才能把
+    # 任务的失败状态报出来。反过来（流先断）就是之前那个「构建中断」的假象。
+    #
+    # 注意：`soft_time_limit` 是**每个任务**的，与 `celery -c` 并发数无关——
+    # 并发只决定一个卡死的任务会占住几个 worker 槽位，不决定单个任务能跑多久。
+    celery_soft_time_limit_s: int = 7200   # 2 小时：抛 SoftTimeLimitExceeded，任务可自报
+    celery_hard_time_limit_s: int = 10800  # 3 小时：强杀，防止卡死的任务永久占槽
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task

@@ -276,6 +276,14 @@ def parse(content: bytes) -> str | None:
         "hybrid: %d/%d pages escalated (%d succeeded)",
         len(selected), len(pages), len(upgraded),
     )
+    # Surfaced on the per-document ingest line too. The parser tier is recorded
+    # as "hybrid" whether or not MinerU was called, so without this there is no
+    # per-document way to tell whether the quota bought anything — which is the
+    # first question anyone asks after paying to turn it on.
+    if upgraded:
+        from . import ingest_timing as timing
+
+        timing.note(mineru_pages=len(upgraded))
     return pdf_local.assemble(
         [(p.page_no, upgraded.get(p.page_no, p.markdown)) for p in pages]
     ) or None

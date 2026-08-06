@@ -133,7 +133,11 @@ def finish(identifier: str, status: str) -> None:
         if value:
             label = f"{name}={value:.0f}"
             if name == "parse" and parser:
-                label += f"({parser})"
+                # `hybrid+mineru:3` rather than a bare `hybrid`: MinerU costs
+                # quota per page, so which documents actually used it is the
+                # thing worth being able to read off a batch log.
+                pages = notes.get("mineru_pages")
+                label += f"({parser}+mineru:{pages})" if pages else f"({parser})"
             parts.append(label)
     if notes.get("chars") is not None:
         parts.append(f"chars={notes['chars']}")

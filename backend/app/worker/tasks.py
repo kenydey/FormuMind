@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from ..domain.schemas import DOEPlan, OptimizationResult, Requirement, TaskState, TaskStatus
 from ..pipeline import workflow
 from .celery_app import celery_app
@@ -517,6 +519,26 @@ def _kb_ingest_impl(task_id: str, payload: dict) -> dict:
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "kb_ingest", result, message=summary)
         return result
+    except SoftTimeLimitExceeded:
+        # The soft limit exists so the task can say what happened instead of
+        # being killed mid-sentence. Without this it surfaced as a bare
+        # exception name, which tells the operator nothing about which knob to
+        # turn — and the knob is the point, since a large corpus legitimately
+        # takes longer than any default.
+        from ..config import get_settings
+
+        limit = int(get_settings().celery_soft_time_limit_s)
+        msg = (
+            f"知识库构建超过单任务时限（{limit // 60} 分钟）已被中止。"
+            "已入库的部分保留，可再次运行继续；"
+            "若语料确实很大，请调高 FORMUMIND_CELERY_SOFT_TIME_LIMIT_S "
+            "（同时调高 FORMUMIND_CELERY_HARD_TIME_LIMIT_S）。"
+        )
+        logger.error("kb_ingest hit the %ds soft time limit", limit)
+        err = {"error": msg, "soft_time_limit_s": limit}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "kb_ingest", err, failed=True, message=msg)
+        raise
     except Exception as exc:
         logger.exception("kb_ingest task failed")
         err = {"error": str(exc)}

@@ -545,3 +545,48 @@ def test_pipelining_preserves_per_document_status(stores, monkeypatch):
     assert by_id["US1234567"] == "failed"
     assert by_id["US7654321"] == "indexed"
     assert by_id["US9999999"] == "indexed"
+
+
+# ── the executor must not enforce a limit the rest of the stack disowned ─────
+
+
+def test_celery_time_limits_leave_room_for_a_large_build():
+    """These were 600 / 900 s while everything else had been told a build takes
+    as long as it takes — no client wall clock, a 6 h SSE deadline, and
+    kb_ingest_max_docs=0. Celery was the one layer still killing the job."""
+    from app.worker.celery_app import celery_app
+
+    s = get_settings()
+    soft = celery_app.conf.task_soft_time_limit
+    hard = celery_app.conf.task_time_limit
+
+    assert soft == s.celery_soft_time_limit_s
+    assert hard == s.celery_hard_time_limit_s
+    assert soft > 1800, "a few hundred documents does not fit in half an hour"
+    assert soft < hard, "the soft limit must fire first so the task can report"
+    # The stream has to outlive the task, or the client stops watching a task
+    # that is still running — the false "构建中断" this whole area suffered from.
+    assert hard < s.task_stream_timeout_s
+
+
+def test_soft_time_limit_reports_which_knob_to_turn(stores, monkeypatch):
+    """A bare exception name tells the operator nothing actionable."""
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from app.services import kb_ingest as kb_ingest_mod
+    from app.worker import tasks as tasks_mod
+
+    def boom(*a, **kw):
+        raise SoftTimeLimitExceeded()
+
+    # `tasks` imports kb_ingest inside the function, so patch it at the source.
+    monkeypatch.setattr(kb_ingest_mod, "ingest_evidence_docs", boom)
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        tasks_mod._kb_ingest_impl("t-soft", {"evidence": [_ev("US1234567").model_dump()]})
+
+    from app.worker.task_progress import get_task_result
+
+    result = get_task_result("t-soft") or {}
+    assert "FORMUMIND_CELERY_SOFT_TIME_LIMIT_S" in result.get("error", "")
+    assert result.get("soft_time_limit_s") == get_settings().celery_soft_time_limit_s

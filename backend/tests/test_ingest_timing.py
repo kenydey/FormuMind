@@ -258,3 +258,29 @@ def test_http_errors_are_not_counted_as_thin_content(caplog):
     assert "n=2" in line, line               # only the served pages
     assert "thin(<200)=100%" in line, line   # both served pages were thin
     assert "http_errors=403:3" in line, line
+
+
+def test_mineru_pages_are_reported_on_the_document_line(caplog):
+    """The parser tier is "hybrid" whether or not MinerU ran, so the escalation
+    count is the only per-document signal that the quota bought anything."""
+    caplog.set_level(logging.INFO, logger="app.services.ingest_timing")
+    with timing.track("DOC1", "literature"):
+        with timing.span("parse"):
+            pass
+        timing.note(parser="hybrid", mineru_pages=3)
+    timing.finish("DOC1", "indexed")
+
+    line = _lines(caplog, "doc DOC1")[0]
+    assert "(hybrid+mineru:3)" in line, line
+
+
+def test_parser_tier_stays_plain_when_mineru_did_not_run(caplog):
+    caplog.set_level(logging.INFO, logger="app.services.ingest_timing")
+    with timing.track("DOC2", "literature"):
+        with timing.span("parse"):
+            pass
+        timing.note(parser="hybrid")
+    timing.finish("DOC2", "indexed")
+
+    line = _lines(caplog, "doc DOC2")[0]
+    assert "(hybrid)" in line and "mineru" not in line, line

@@ -36,8 +36,14 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     task_track_started=True,
-    task_soft_time_limit=600,   # 10 min warning
-    task_time_limit=900,        # 15 min hard kill
+    # Was 600 / 900 (10 / 15 min), which killed every large knowledge-base
+    # build. The rest of the stack had already been told these runs may take as
+    # long as they take — no client wall-clock limit, a 6 h SSE deadline,
+    # kb_ingest_max_docs=0 — so the executor was the one layer still enforcing
+    # a limit nobody else believed in, and the UI sat watching a task Celery had
+    # already killed. See config.celery_soft_time_limit_s for the ordering rule.
+    task_soft_time_limit=settings.celery_soft_time_limit_s,
+    task_time_limit=settings.celery_hard_time_limit_s,
     result_expires=86400,
 )
 
