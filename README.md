@@ -194,7 +194,7 @@ pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), su
 pip install -e ".[export]"       # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
 
-> ⚠️ **`patent-client` downgrades two base dependencies.** It requires `httpx<0.28` and `pypdf<5.0` while this project pins `httpx==0.28.1` / `pypdf==6.14.2`, and `pip install -e ".[intel]"` does not error — it **silently downgrades** them. You do not need it for patent retrieval; patent full text now comes from Google Patents landing pages.
+> ⚠️ **`.[intel]` silently downgrades four pinned dependencies.** `patent-client` requires `httpx<0.28` and `pypdf<5.0`, and the resolution also pulls older `arxiv` and `ddgs`. Measured: `httpx 0.28.1→0.27.2`, `pypdf 6.14.2→4.3.1`, `arxiv 4.0.0→3.0.0`, `ddgs 9.14.4→9.14.3`. pip does not error and `pip check` reports nothing wrong. Install it only if you need **online USPTO/EPO patent search** — patent *full text* comes from Google Patents landing pages and needs none of this. CI enforces the exact accepted versions (`.github/workflows/ci-deps.yml`).
 
 
 Or use **Settings → 依赖管理** in the UI to install catalogued packages asynchronously

@@ -1,0 +1,79 @@
+# Catches optional extras that silently downgrade a pinned base dependency.
+#
+# `pip install -e ".[intel]"` — recommended in the README and both user guides —
+# resolves its conflict with requirements.txt by downgrading rather than by
+# failing. Measured: httpx 0.28.1 -> 0.27.2, pypdf 6.14.2 -> 4.3.1,
+# arxiv 4.0.0 -> 3.0.0, ddgs 9.14.4 -> 9.14.3. httpx is used across the whole
+# codebase, pypdf sits in the parse cascade, and arxiv is the literature search
+# client, so this is not cosmetic.
+#
+# `pip check` does NOT find it: after the downgrade the environment is
+# internally consistent, just not the one requirements.txt describes.
+#
+# Deliberately resolution-only (`--dry-run --report`) — pip decides the
+# downgrade while resolving, so nothing needs downloading or building and the
+# job finishes in seconds. No torch: the `intel` extra resolves to 105 packages
+# with no torch, nvidia-* or transformers among them.
+name: Dependency pins
+
+on:
+  push:
+    # Conflicts appear when dependencies change, so gate on those files rather
+    # than running this on every commit.
+    paths:
+      - "backend/pyproject.toml"
+      - "backend/requirements.txt"
+      - "scripts/check_pins.py"
+      - ".github/workflows/ci-deps.yml"
+  pull_request:
+    paths:
+      - "backend/pyproject.toml"
+      - "backend/requirements.txt"
+      - "scripts/check_pins.py"
+      - ".github/workflows/ci-deps.yml"
+  # Upstream can introduce a conflict without this repository changing at all,
+  # so also check on a schedule.
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  extras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # Report every offending extra in one run, not one per fix cycle.
+      fail-fast: false
+      matrix:
+        include:
+          # `intel` pulls patent-client, which requires httpx<0.28 and
+          # pypdf<5.0. That is a known, reviewed trade-off rather than an
+          # oversight: literature.py uses patent_client for online USPTO/EPO
+          # patent search, so the dependency is real. It is recorded here with
+          # exact versions, so this stays green while the drift is the one that
+          # was reviewed — and fails again the moment it changes or a new
+          # package joins it.
+          - extra: intel
+            allow: "arxiv:3.0.0,ddgs:9.14.3,httpx:0.27.2,pypdf:4.3.1"
+          - { extra: science,     allow: "" }
+          - { extra: optimize,    allow: "" }
+          - { extra: pydoe,       allow: "" }
+          - { extra: export,      allow: "" }
+          - { extra: file_ingest, allow: "" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # matches backend/Dockerfile
+
+      - name: Resolve ${{ matrix.extra }} against the pinned base
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install --dry-run --report /tmp/report.json -e '.[${{ matrix.extra }}]'
+
+      - name: Assert no pinned dependency was downgraded
+        run: |
+          python scripts/check_pins.py backend/requirements.txt \
+            --report=/tmp/report.json --allow='${{ matrix.allow }}'

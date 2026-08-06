@@ -745,11 +745,25 @@ dependencies = [
 | 企业优化 | `pip install -e ".[baybe]"` | BayBE约束贝叶斯学习 |
 | 文献检索 | `pip install -e ".[intel]"` | patent_client, arxiv, semanticscholar ⚠️ |
 
-> ⚠️ **`.[intel]` 里的 `patent-client` 会静默降级基础依赖**：它要求
-> `httpx<0.28` + `pypdf<5.0`，而本项目钉的是 `httpx==0.28.1` / `pypdf==6.14.2`。
-> `pip install` 不会报错，而是直接把这两个包降下去（实测 httpx 0.28.1 → 0.27.2、
-> pypdf 6.14.2 → 4.3.1），而 httpx 是全代码库在用的、pypdf 在解析级联里。
-> **专利检索不需要它**——专利全文现在走 Google Patents 落地页（见 §7.6）。
+> ⚠️ **`.[intel]` 会静默降级四个钉住的依赖**。`patent-client` 要求
+> `httpx<0.28` + `pypdf<5.0`，解析结果还会带下 `arxiv` 与 `ddgs`。实测：
+>
+> | 包 | 钉住 | 装 `.[intel]` 后 | 影响面 |
+> |---|---|---|---|
+> | `httpx` | 0.28.1 | 0.27.2 | **全代码库** |
+> | `pypdf` | 6.14.2 | 4.3.1 | 解析级联最后一层 |
+> | `arxiv` | 4.0.0 | 3.0.0 | 文献检索客户端 |
+> | `ddgs` | 9.14.4 | 9.14.3 | 互联网检索 |
+>
+> **pip 不报错，`pip check` 也说「No broken requirements found」**——降级之后环境
+> 内部是自洽的，只是不再是 requirements.txt 描述的那一个。唯一可靠的信号是拿实际
+> 版本和 pin 对比，这就是 `scripts/check_pins.py` 做的事。
+>
+> 这不是疏漏而是**已评审的取舍**：`literature.py` 用 `patent_client` 做**在线
+> USPTO/EPO 专利检索**，依赖是真实的。所以只在需要那个功能时才装；
+> 专利**全文**走 Google Patents 落地页（见 §7.6），完全不需要它。
+> `.github/workflows/ci-deps.yml` 把上表四个版本写成允许清单——**变了就会重新报错**，
+> 新增的冲突也一样。
 | 文件解析 | `pip install -e ".[file_ingest]"` | PDF/DOCX/XLSX解析 |
 | 语义检索 | `pip install -e ".[embedding]"` | sentence-transformers |
 | ColBERT | `pip install -e ".[colbert]"` | 精排检索 |
