@@ -23,12 +23,16 @@ existing lineage rather than start a fresh one. Point ``FORMUMIND_DB_URL`` at a
 throwaway database for a clean capture.
 """
 import asyncio
+import sys
 import glob
 import os
 import urllib.request
 from pathlib import Path
 
 from playwright.async_api import async_playwright
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _ui import in_any_modal  # noqa: E402
 
 IMAGES = Path(__file__).parent.parent / "docs" / "images"
 BASE = "http://localhost:5173"
@@ -162,7 +166,8 @@ async def close_modal(page) -> None:
 
 
 def modal_button(page, text: str):
-    return page.locator(".fixed.inset-0.z-50 button").filter(has_text=text)
+    """A button inside whichever dialog is open, located by its visible text."""
+    return in_any_modal(page, "button").filter(has_text=text)
 
 
 async def main() -> None:
@@ -246,7 +251,7 @@ async def main() -> None:
             await asyncio.sleep(1.5)
             save = modal_button(page, "保存为新版本")
             if await save.count():
-                note = page.locator('.fixed.inset-0 input[placeholder*="修改说明"]')
+                note = in_any_modal(page, 'input[placeholder*="修改说明"]')
                 if await note.count():
                     await note.first.fill("基线配方")
                 await save.first.click()

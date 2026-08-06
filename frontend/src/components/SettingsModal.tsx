@@ -151,7 +151,7 @@ export default function SettingsModal() {
   }
 
   return (
-    <Modal title="设置 · Settings" open={settingsOpen} onClose={toggleSettings}>
+    <Modal title="设置 · Settings" open={settingsOpen} onClose={toggleSettings} testId="modal-settings">
       <div className="flex gap-1 mb-4 border-b border-edge">
         {([
           ["llm", "大模型"],

@@ -166,6 +166,10 @@ export default function ActionsPanel() {
           key={a.id}
           onClick={() => (a.id === "workbench" ? openWorkbench() : setOpenModal(a.id))}
           className="text-left border border-edge rounded-lg px-3 py-2.5 hover:border-accent/50 hover:bg-accent/5 transition-colors group"
+          // Derived from the same id that drives `openModal`, so the tile and
+          // the dialog it opens are `open-doe` / `modal-doe` — one vocabulary,
+          // no second list to keep in step.
+          data-testid={`open-${a.id}`}
         >
           <div className="flex items-center gap-2">
             <span className="text-lg">{a.icon}</span>
@@ -182,6 +186,7 @@ export default function ActionsPanel() {
       <Modal
         title="技术需求 · Requirements"
         open={openModal === "requirements"}
+        testId="modal-requirements"
         onClose={() => setOpenModal(null)}
         size="md"
         onSave={handleSave}
@@ -193,6 +198,7 @@ export default function ActionsPanel() {
       <Modal
         title="推荐配方 · Recommended Formulations"
         open={openModal === "recommend"}
+        testId="modal-recommend"
         onClose={() => setOpenModal(null)}
         size="xl"
         onSave={handleSave}
@@ -261,6 +267,7 @@ export default function ActionsPanel() {
       <Modal
         title="DOE 设计 · Design of Experiments"
         open={openModal === "doe"}
+        testId="modal-doe"
         onClose={() => setOpenModal(null)}
         size="lg"
         onSave={handleSave}
@@ -274,6 +281,7 @@ export default function ActionsPanel() {
       <Modal
         title="🎯 逆向设计 · Inverse Design"
         open={openModal === "design"}
+        testId="modal-design"
         onClose={() => setOpenModal(null)}
         size="xl"
         onSave={handleSave}
@@ -287,6 +295,7 @@ export default function ActionsPanel() {
       <Modal
         title="🔁 材料替代 · Substitution"
         open={openModal === "substitute"}
+        testId="modal-substitute"
         onClose={() => setOpenModal(null)}
         size="xl"
         onSave={handleSave}
@@ -300,6 +309,7 @@ export default function ActionsPanel() {
       <Modal
         title="实验台账 · Lab Workbench"
         open={openModal === "workbench"}
+        testId="modal-workbench"
         onClose={() => setOpenModal(null)}
         size="xl"
         onSave={handleSave}
@@ -313,6 +323,7 @@ export default function ActionsPanel() {
       <Modal
         title="📄 检测报告 · QC Report"
         open={openModal === "qc"}
+        testId="modal-qc"
         onClose={() => setOpenModal(null)}
         size="xl"
         onSave={handleSave}
@@ -326,6 +337,7 @@ export default function ActionsPanel() {
       <Modal
         title="寻优收敛 · Optimization"
         open={openModal === "optimize"}
+        testId="modal-optimize"
         onClose={() => setOpenModal(null)}
         size="lg"
         onSave={handleSave}
@@ -352,6 +364,7 @@ export default function ActionsPanel() {
       <Modal
         title="⚙️ 工艺参数优化 · Process Optimization"
         open={openModal === "process"}
+        testId="modal-process"
         onClose={() => setOpenModal(null)}
         size="lg"
         onSave={handleSave}
@@ -365,6 +378,7 @@ export default function ActionsPanel() {
       <Modal
         title="🔄 自驱动研发闭环 · Self-Driving Loop"
         open={openModal === "loop"}
+        testId="modal-loop"
         onClose={() => setOpenModal(null)}
         size="lg"
         onSave={handleSave}

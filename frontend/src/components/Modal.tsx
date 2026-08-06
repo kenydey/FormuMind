@@ -20,6 +20,7 @@ export default function Modal({
   nested,
   onSave,
   saveLabel,
+  testId,
 }: {
   title: string;
   open: boolean;
@@ -32,7 +33,23 @@ export default function Modal({
   /** Optional save button — shown in header alongside window controls */
   onSave?: () => void;
   saveLabel?: string;
+  /**
+   * Stable hook for out-of-process drivers (the Playwright scripts in
+   * `scripts/`). Emits `modal-<id>` on the dialog plus `-close`, `-minimize`,
+   * `-maximize` and `-save` on the window controls.
+   *
+   * Those scripts used to locate things with `.fixed.inset-0.z-50 button`,
+   * which broke the moment this title bar grew from one button to four:
+   * `.first` started resolving to minimize, and maximize/restore share the
+   * glyph `□` so text filters cannot separate them.
+   *
+   * Deliberately NOT for the vitest suite — that queries by role and text
+   * (`getByRole` / `getByText` / `getByLabelText`), which stays the better
+   * default because it tests what a user can actually perceive.
+   */
+  testId?: string;
 }) {
+  const tid = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
   const resolvedSize: ModalSize = size ?? (wide ? "lg" : "md");
   const zClass = nested ? "z-[60]" : "z-50";
 
@@ -77,6 +94,7 @@ export default function Modal({
         className={`fixed bottom-4 right-4 ${zClass} glass rounded-lg border border-edge shadow-xl px-4 py-2 flex items-center gap-3 cursor-pointer hover:border-accent/50 transition-colors`}
         onClick={() => setMinimized(false)}
         title="点击恢复窗口"
+        data-testid={tid("minimized")}
       >
         <span className="text-xs text-accent2 truncate max-w-[240px]">{title}</span>
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -84,6 +102,7 @@ export default function Modal({
             onClick={() => setMinimized(false)}
             className="text-slate-500 hover:text-accent text-sm leading-none w-5 h-5 flex items-center justify-center rounded hover:bg-accent/10"
             title="恢复"
+            data-testid={tid("restore")}
           >
             □
           </button>
@@ -91,6 +110,7 @@ export default function Modal({
             onClick={(e) => { e.stopPropagation(); onClose(); }}
             className="text-slate-500 hover:text-rose-400 text-sm leading-none w-5 h-5 flex items-center justify-center rounded hover:bg-rose-500/10"
             title="关闭"
+            data-testid={tid("close")}
           >
             ×
           </button>
@@ -109,10 +129,12 @@ export default function Modal({
     <div
       className={`fixed inset-0 ${zClass} flex items-center justify-center bg-black/60 backdrop-blur-sm p-4`}
       onClick={maximized ? undefined : onClose}
+      data-testid={tid("overlay")}
     >
       <div
         className={`glass rounded-xl border border-edge shadow-2xl w-full ${maxClass} flex flex-col transition-all duration-200`}
         onClick={(e) => e.stopPropagation()}
+        data-testid={testId}
       >
         {/* ── Title bar ── */}
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-edge shrink-0">
@@ -126,6 +148,7 @@ export default function Modal({
               onClick={onSave}
               className="text-[11px] border border-accent text-accent rounded px-2.5 py-1 hover:bg-accent/10 transition-colors shrink-0"
               title="保存"
+              data-testid={tid("save")}
             >
               {saveLabel || "💾 保存"}
             </button>
@@ -137,6 +160,7 @@ export default function Modal({
               onClick={() => setMinimized(true)}
               className="text-slate-500 hover:text-slate-300 text-sm leading-none w-6 h-6 flex items-center justify-center rounded hover:bg-slate-500/10"
               title="最小化"
+              data-testid={tid("minimize")}
             >
               _
             </button>
@@ -144,6 +168,7 @@ export default function Modal({
               onClick={() => setMaximized((m) => !m)}
               className="text-slate-500 hover:text-slate-300 text-sm leading-none w-6 h-6 flex items-center justify-center rounded hover:bg-slate-500/10"
               title={maximized ? "还原" : "最大化"}
+              data-testid={tid("maximize")}
             >
               {maximized ? "❐" : "□"}
             </button>
@@ -151,6 +176,7 @@ export default function Modal({
               onClick={onClose}
               className="text-slate-500 hover:text-rose-400 text-lg leading-none w-6 h-6 flex items-center justify-center rounded hover:bg-rose-500/10"
               title="关闭 (Esc)"
+              data-testid={tid("close")}
             >
               ×
             </button>

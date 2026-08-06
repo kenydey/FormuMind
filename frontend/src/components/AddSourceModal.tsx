@@ -100,7 +100,7 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
 
   return (
     <>
-      <Modal title="添加数据源 · Add sources" open={open} onClose={onClose} size="lg">
+      <Modal title="添加数据源 · Add sources" open={open} onClose={onClose} size="lg" testId="modal-add-source">
         <div className="space-y-4">
           <label className="block">
             <span className="text-xs text-slate-400">关键词 · Search the web for new sources</span>
@@ -211,7 +211,7 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
         </div>
       </Modal>
 
-      <Modal title="添加网页 URL" open={urlOpen} onClose={() => setUrlOpen(false)} nested size="md">
+      <Modal title="添加网页 URL" open={urlOpen} onClose={() => setUrlOpen(false)} nested size="md" testId="modal-add-url">
         <div className="space-y-3">
           <input
             value={urlValue}
@@ -230,7 +230,7 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
         </div>
       </Modal>
 
-      <Modal title="粘贴文本" open={textOpen} onClose={() => setTextOpen(false)} nested size="md">
+      <Modal title="粘贴文本" open={textOpen} onClose={() => setTextOpen(false)} nested size="md" testId="modal-add-text">
         <div className="space-y-3">
           <input
             value={textTitle}

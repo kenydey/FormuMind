@@ -50,6 +50,7 @@ export default function App() {
         <span className="ml-auto text-xs text-slate-500 font-mono hidden sm:block">自由 ProjectSpec · 多目标 · DOE 闭环</span>
         <button
           onClick={toggleSettings}
+          data-testid="btn-settings"
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
           title="设置"
         >
@@ -58,6 +59,7 @@ export default function App() {
         </button>
         <button
           onClick={toggleHistory}
+          data-testid="btn-history"
           className="relative flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
           title="项目历史"
         >

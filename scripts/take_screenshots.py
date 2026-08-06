@@ -1,7 +1,12 @@
 """Generate updated screenshots for FormuMind docs (v0.7 state)."""
 import asyncio
+import sys
 from pathlib import Path
+
 from playwright.async_api import async_playwright
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _ui import click_if_present, close_modal, in_modal, open_modal  # noqa: E402
 
 IMAGES = Path(__file__).parent.parent / "docs" / "images"
 BASE = "http://localhost:5173"
@@ -11,28 +16,6 @@ async def shot(page, path: str):
     await asyncio.sleep(0.9)
     await page.screenshot(path=str(IMAGES / path), full_page=False)
     print(f"  ✓ {path}")
-
-
-async def close_modal(page):
-    """Close modal by clicking its × button or clicking the top-left backdrop corner."""
-    # Try the × close button first
-    close_x = page.locator(".fixed.inset-0.z-50 button").filter(has_text="×")
-    if await close_x.count():
-        await close_x.click()
-        await asyncio.sleep(0.5)
-        return
-    # Click backdrop corner (outside the centered modal content)
-    await page.mouse.click(10, 10)
-    await asyncio.sleep(0.5)
-    # Final fallback
-    if await page.locator(".fixed.inset-0.z-50").count():
-        await page.keyboard.press("Escape")
-        await asyncio.sleep(0.5)
-
-
-async def click_inside_modal(page, selector: str):
-    """Click a button inside the open modal."""
-    return await page.locator(f".fixed.inset-0.z-50 {selector}").first.click()
 
 
 async def main():
@@ -62,7 +45,7 @@ async def main():
 
         # ── Trigger search to load some sources ─────────────────────────────────
         print("  searching for sources…")
-        await page.locator("button:has-text('开始检索')").click()
+        await page.locator('[data-testid="btn-search"]').click()
         await asyncio.sleep(6)
 
         # ── 03 Research Q&A ─────────────────────────────────────────────────────
@@ -84,31 +67,27 @@ async def main():
 
         # ── 04 Settings modal ──────────────────────────────────────────────────
         print("04-settings…")
-        await page.locator("button:has-text('设置')").first.click()
+        await page.locator('[data-testid="btn-settings"]').click()
         await asyncio.sleep(1)
         await shot(page, "04-settings.png")
-        await close_modal(page)
+        await close_modal(page, "settings")
 
         # ── 05 Recommend modal ─────────────────────────────────────────────────
         print("05-recommend…")
-        await page.locator("button:has-text('推荐配方')").first.click()
-        await asyncio.sleep(1)
-        # Click the action button inside the modal
-        inner = page.locator(".fixed.inset-0.z-50 button").filter(has_text="检索专利并推荐")
+        await open_modal(page, "recommend")
+        inner = in_modal(page, "recommend", "button").filter(has_text="检索专利并推荐")
         if not await inner.count():
-            inner = page.locator(".fixed.inset-0.z-50 button").filter(has_text="推荐")
-        if await inner.count():
-            await inner.first.click()
-            await asyncio.sleep(8)
+            inner = in_modal(page, "recommend", "button").filter(has_text="推荐")
+        if not await click_if_present(inner, settle=8):
+            print("  ! recommend action button not found — capturing as-is")
         await shot(page, "05-recommend.png")
-        await close_modal(page)
+        await close_modal(page, "recommend")
 
         # ── 06 DOE modal ────────────────────────────────────────────────────────
         print("06-doe…")
-        await page.locator("button:has-text('DOE 设计')").first.click()
-        await asyncio.sleep(1)
+        await open_modal(page, "doe")
         # Select AI active selection
-        sel = page.locator(".fixed.inset-0.z-50 select")
+        sel = in_modal(page, "doe", "select")
         if await sel.count():
             opts = await sel.first.evaluate("el => [...el.options].map(o=>o.value)")
             # Pick the AI option (active/lhs usually last option)
@@ -117,23 +96,20 @@ async def main():
                 await sel.first.select_option(value=ai_opts[-1])
                 await asyncio.sleep(0.3)
         # Click generate button inside modal
-        gen = page.locator(".fixed.inset-0.z-50 button").filter(has_text="生成")
-        if await gen.count():
-            await gen.first.click()
-            await asyncio.sleep(4)
+        gen = in_modal(page, "doe", "button").filter(has_text="生成")
+        if not await click_if_present(gen, settle=4):
+            print("  ! DOE generate button not found — capturing as-is")
         await shot(page, "06-doe.png")
-        await close_modal(page)
+        await close_modal(page, "doe")
 
         # ── 07 Optimize / convergence modal ────────────────────────────────────
         print("07-optimize…")
-        await page.locator("button:has-text('寻优收敛')").first.click()
-        await asyncio.sleep(1)
-        run_btn = page.locator(".fixed.inset-0.z-50 button").filter(has_text="运行")
-        if await run_btn.count():
-            await run_btn.first.click()
-            await asyncio.sleep(9)
+        await open_modal(page, "optimize")
+        run_btn = in_modal(page, "optimize", "button").filter(has_text="运行")
+        if not await click_if_present(run_btn, settle=9):
+            print("  ! optimize run button not found — capturing as-is")
         await shot(page, "07-optimize.png")
-        await close_modal(page)
+        await close_modal(page, "optimize")
 
         await browser.close()
 

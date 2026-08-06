@@ -1,7 +1,12 @@
 """Capture self-driving loop modal screenshot."""
 import asyncio
+import sys
 from pathlib import Path
+
 from playwright.async_api import async_playwright
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _ui import click_if_present, close_modal, in_modal, open_modal  # noqa: E402
 
 IMAGES = Path(__file__).parent.parent / "docs" / "images"
 BASE = "http://localhost:5173"
@@ -14,7 +19,7 @@ async def shot(page, path: str):
 
 
 async def close_modal(page):
-    close_x = page.locator(".fixed.inset-0.z-50 button[title*='关闭']")
+    close_x = page.locator('[data-testid$="-close"]')
     if await close_x.count():
         await close_x.first.click()
     else:
@@ -33,12 +38,11 @@ async def main():
 
         # Open Self-Driving Loop modal
         print("09-loop…")
-        await page.locator("button:has-text('自驱动闭环')").first.click()
-        await asyncio.sleep(1)
+        await open_modal(page, "loop")
 
-        run_btn = page.locator(".fixed.inset-0.z-50 button").filter(has_text="迭代")
+        run_btn = in_modal(page, "loop", "button").filter(has_text="迭代")
         if not await run_btn.count():
-            run_btn = page.locator(".fixed.inset-0.z-50 button").filter(has_text="闭环")
+            run_btn = in_modal(page, "loop", "button").filter(has_text="闭环")
         if await run_btn.count():
             await run_btn.first.click()
             await asyncio.sleep(8)

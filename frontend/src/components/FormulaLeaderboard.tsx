@@ -226,6 +226,7 @@ function FormulaCard({
         onClose={() => setIpOpen(false)}
         size="lg"
         nested
+        testId="modal-ip-report"
       >
         <IPReportModal form={form} />
       </Modal>
@@ -235,6 +236,7 @@ function FormulaCard({
         onClose={() => setHistoryOpen(false)}
         size="lg"
         nested
+        testId="modal-version-history"
       >
         <VersionHistoryModal form={form} />
       </Modal>
@@ -417,7 +419,7 @@ export default function FormulaLeaderboard() {
         </button>
       </div>
       {showAiPrompt && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" data-testid="modal-ai-modify">
           <div className="bg-panel border border-edge rounded-xl p-6 w-[min(500px,92vw)]">
             <h3 className="text-sm mb-3 text-slate-200">AI 配方修改要求</h3>
             <textarea

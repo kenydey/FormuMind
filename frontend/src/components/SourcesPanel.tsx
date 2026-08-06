@@ -167,6 +167,7 @@ export default function SourcesPanel() {
         type="button"
         onClick={() => void searchSources()}
         disabled={!canSearch}
+        data-testid="btn-search"
         className="shrink-0 w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
       >
         {searchBusy
