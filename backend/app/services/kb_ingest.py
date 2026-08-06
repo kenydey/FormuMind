@@ -173,12 +173,12 @@ def ingest_evidence_docs(
     for doc in docs:  # announce the full queue up front
         emit(doc)
 
-    # Fetch concurrently, index serially. Fetching is network-bound and is the
-    # whole cost of a large batch — 340 documents one at a time, at a 20 s
-    # timeout each, is over an hour. Indexing stays on one thread because it
-    # writes SQLite and because each fetch already ran the PDF parser cascade,
-    # whose peak (~350 MB, or ~557 MB when a scan goes through OCR) is what
-    # actually bounds the worker count on a small host — not the sockets.
+    # Fetch concurrently, index serially, and pipeline the two. Fetching is
+    # network-bound and is the whole cost of a large batch — 340 documents one
+    # at a time, at a 20 s timeout each, is over an hour. Indexing stays on one
+    # thread because it writes SQLite and because a fetch may run the PDF
+    # parser cascade, whose peak (~350 MB, or ~557 MB when a scan goes through
+    # OCR) is what bounds the worker count on a small host — not the sockets.
     workers = max(1, int(getattr(settings, "kb_ingest_workers", 3)))
 
     def _fetch(i: int) -> tuple[int, str | None]:
@@ -193,23 +193,44 @@ def ingest_evidence_docs(
             docs[i].update(status="failed", error=str(exc)[:200])
             return i, None
 
+    def _index(i: int, text: str | None) -> None:
+        ev, kind = targets[i]
+        if text:
+            try:
+                with timing.track(ev.identifier or "", kind):
+                    _index_one(text, ev, kind, emit, docs[i], project_id=project_id)
+            except Exception as exc:  # one bad document must not kill the queue
+                degrade_return(logger, exc, "kb_ingest document failed", None)
+                docs[i].update(status="failed", error=str(exc)[:200])
+        timing.finish(ev.identifier or "", docs[i]["status"])
+
     with timing.batch("kb_ingest"):
         if workers == 1 or len(targets) <= 1:
-            pairs = [_fetch(i) for i in range(len(targets))]
+            for i in range(len(targets)):
+                _index(*_fetch(i))
         else:
+            # `as_completed`, not `ex.map`: map returns an iterator that yields
+            # in submission order, so one slow download at the head held back
+            # every document behind it and nothing was indexed until the last
+            # fetch finished. It also meant every fetched full text — up to
+            # several hundred documents — sat in memory at once waiting for
+            # the indexing phase to start.
+            #
+            # Indexing now happens in completion order. Content-hash dedup
+            # therefore resolves to whichever of two byte-identical documents
+            # finished first rather than to the higher-ranked one; the stored
+            # text is the same either way, only the recorded origin_url differs.
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-                pairs = list(ex.map(_fetch, range(len(targets))))
-
-        for i, text in pairs:
-            ev, kind = targets[i]
-            if text:
-                try:
-                    with timing.track(ev.identifier or "", kind):
-                        _index_one(text, ev, kind, emit, docs[i], project_id=project_id)
-                except Exception as exc:  # one bad document must not kill the queue
-                    degrade_return(logger, exc, "kb_ingest document failed", None)
-                    docs[i].update(status="failed", error=str(exc)[:200])
-            timing.finish(ev.identifier or "", docs[i]["status"])
+                futures = {ex.submit(_fetch, i): i for i in range(len(targets))}
+                for fut in concurrent.futures.as_completed(futures):
+                    try:
+                        idx, text = fut.result()
+                    except Exception as exc:  # _fetch catches, but never trust that
+                        idx = futures[fut]
+                        degrade_return(logger, exc, "kb_ingest fetch crashed", None)
+                        docs[idx].update(status="failed", error=str(exc)[:200])
+                        text = None
+                    _index(idx, text)
 
     summary = {
         "docs": docs,

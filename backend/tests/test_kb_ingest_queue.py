@@ -477,3 +477,71 @@ def test_failed_documents_are_timed_too(stores, monkeypatch, caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert any("kb_ingest doc US1234567" in m and "failed" in m for m in messages), messages
     assert any("failed=1" in m for m in messages if "batch" in m)
+
+
+# ── fetch and index are pipelined ────────────────────────────────────────────
+
+
+def test_indexing_starts_before_the_last_fetch_finishes(stores, monkeypatch):
+    """`ex.map` yields in submission order, so one slow head-of-queue download
+    held back every document behind it and nothing was indexed until the final
+    fetch returned. It also kept every fetched full text in memory at once.
+
+    The observable claim is ordering: with the first document deliberately slow,
+    at least one *other* document must reach indexing before it does.
+    """
+    import threading
+    import time as _time
+
+    slow_ident = "US1000001"
+    first_indexed: list[str] = []
+    fetch_done: dict[str, float] = {}
+    lock = threading.Lock()
+
+    def fake_fetch(ev, t):
+        if ev.identifier == slow_ident:
+            _time.sleep(0.6)
+        with lock:
+            fetch_done[ev.identifier] = _time.perf_counter()
+        return LONG_TEXT
+
+    real_index = kb_ingest._index_one
+
+    def spy_index(text, ev, kind, emit, doc, **kw):
+        with lock:
+            first_indexed.append(ev.identifier)
+        return real_index(text, ev, kind, emit, doc, **kw)
+
+    monkeypatch.setattr(ff, "_fetch_patent_text", fake_fetch)
+    monkeypatch.setattr(kb_ingest, "_index_one", spy_index)
+    monkeypatch.setenv("FORMUMIND_KB_INGEST_WORKERS", "3")
+    get_settings.cache_clear()
+
+    evs = [_ev(slow_ident)] + [_ev(f"US200000{i}") for i in range(1, 4)]
+    result = kb_ingest.ingest_evidence_docs(evs)
+
+    assert result["indexed"] == 4
+    assert first_indexed, "nothing was indexed"
+    assert first_indexed[0] != slow_ident, (
+        "the slow head-of-queue document was indexed first — fetches are still "
+        f"being consumed in submission order: {first_indexed}"
+    )
+
+
+def test_pipelining_preserves_per_document_status(stores, monkeypatch):
+    """Out-of-order completion must not scramble which status lands on which doc."""
+    def fake_fetch(ev, t):
+        # Fail exactly one document; its neighbours must stay unaffected.
+        return None if ev.identifier == "US1234567" else LONG_TEXT
+
+    monkeypatch.setattr(ff, "_fetch_patent_text", fake_fetch)
+    monkeypatch.setenv("FORMUMIND_KB_INGEST_WORKERS", "3")
+    get_settings.cache_clear()
+
+    evs = [_ev("US1234567"), _ev("US7654321"), _ev("US9999999")]
+    result = kb_ingest.ingest_evidence_docs(evs)
+
+    by_id = {d["identifier"]: d["status"] for d in result["docs"]}
+    assert by_id["US1234567"] == "failed"
+    assert by_id["US7654321"] == "indexed"
+    assert by_id["US9999999"] == "indexed"
