@@ -53,11 +53,11 @@ toolchain required — and "lights up" the real engine when it is installed:
 | Capability | Real engine (optional) | Built-in fallback |
 |------------|------------------------|-------------------|
 | Research / chat | 9 LLM providers — Claude, OpenAI, Gemini, Grok, Meta (Groq), DeepSeek, Qwen, Kimi, MiniMax | rule-based synthesis over the knowledge base |
-| Patent search | `patent_client` | curated seed corpus per domain |
+| Patent search | Google Patents landing pages (US/CN/EP/WO/JP full text, no OCR) | curated seed corpus per domain |
 | Literature search | `arxiv`, `semanticscholar` | (offline returns no extra hits) |
 | Internet search | `duckduckgo-search` | (offline returns no extra hits) |
-| File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
-| RAG store | OpenNotebook pipeline | in-memory TF-IDF index |
+| File ingestion | pymupdf4llm (layout-aware) → docling → marker → MinerU → RapidOCR → `markitdown` → `pypdf` | plain-text decoder |
+| RAG store | ColBERT/PyLate (GPU) · BM25+FAISS (CPU default) · sentence-transformers | in-memory TF-IDF index |
 | Grounded Q&A | ChemCrow agent (chemistry questions) · paper-qa (semantic synthesis) | TF-IDF re-rank → configured LLM → snippet |
 | Property prediction | RDKit + DeepChem/ChemBERTa · MoLFormer (reserved) | transparent empirical surrogate |
 | VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
@@ -193,6 +193,9 @@ pip install -e ".[notebooklm]"   # notebooklm-py + Playwright (NotebookLM source
 pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
 pip install -e ".[export]"       # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
+
+> ⚠️ **`patent-client` downgrades two base dependencies.** It requires `httpx<0.28` and `pypdf<5.0` while this project pins `httpx==0.28.1` / `pypdf==6.14.2`, and `pip install -e ".[intel]"` does not error — it **silently downgrades** them. You do not need it for patent retrieval; patent full text now comes from Google Patents landing pages.
+
 
 Or use **Settings → 依赖管理** in the UI to install catalogued packages asynchronously
 (`POST /api/dependencies/install`). The `heavy` extra (multi-GB torch stack) is intentionally

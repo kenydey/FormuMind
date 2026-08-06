@@ -1097,7 +1097,10 @@ defaults.
 | `FORMUMIND_TOP_N_FORMULAS` | `5` | leaderboard size |
 | `FORMUMIND_MIN_TRAIN_SAMPLES` | `4` | min samples before training a metric's model |
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
-| `FORMUMIND_PDF_DOWNLOAD` | `false` | Download patent PDFs for full-text extraction during deep research (requires network + USPTO/EPO access; false by default to keep tests offline) |
+| `FORMUMIND_FULLTEXT_ENRICH` | `false` | **The current full-text switch**: upgrade abstract-level hits to full text and index them (requires network; false by default to keep tests offline) |
+| `FORMUMIND_PATENT_PREFER_HTML` | `true` | Take patent text from the Google Patents landing page — one request, ~0.7 s, and no OCR. Set false to prefer the PDF |
+| `FORMUMIND_ARXIV_PREFER_SOURCE` | `true` | Fetch arXiv LaTeX source instead of the PDF: measured 53 s → 1.2 s on the same 100-page paper |
+| `FORMUMIND_PDF_DOWNLOAD` | `false` | **Legacy** patent PDF download, superseded by full-text enrichment; kept for compatibility |
 | `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |
 
 ### Settings saved in the UI vs. settings set by the deployment
@@ -1149,6 +1152,9 @@ pip install -e ".[notebooklm]"   # notebooklm-py[browser] (NotebookLM source; ru
 pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
 pip install -e ".[export]"       # openpyxl (XLSX export; CSV needs nothing)
 ```
+
+> ⚠️ **`patent-client` downgrades two base dependencies.** It requires `httpx<0.28` and `pypdf<5.0` while this project pins `httpx==0.28.1` / `pypdf==6.14.2`, and `pip install -e ".[intel]"` does not error — it **silently downgrades** them. You do not need it for patent retrieval; patent full text now comes from Google Patents landing pages.
+
 
 After installing the `science` extra:
 - property prediction adds **8 RDKit descriptors** (MolWt, MolLogP, TPSA,
@@ -1212,9 +1218,21 @@ optimization convergence chart is shown in the Optimization and Self-Driving
 Loop modals.
 
 **Q: Is patent retrieval a live online crawl?**
-By default it uses an offline seed corpus per domain. Adapters for real
-USPTO/EPO retrieval are in place but need the `intel` extra (`patent_client`,
-etc.) and the corresponding key flow. The IP analyser uses the same retrieval.
+Yes — set `FORMUMIND_FULLTEXT_ENRICH=true`. It falls back to the per-domain
+offline seed corpus when nothing is retrievable.
+
+Patent full text comes from the **Google Patents landing page**
+(`/patent/{number}/en`), reading its `abstract` / `description` / `claims`
+sections. That covers US / CN / EP / WO / JP, and non-English publications
+carry a machine translation alongside the original.
+
+> Earlier versions fetched PDFs directly from USPTO / EPO. **All three of those
+> URLs are now dead** — pdfpiw.uspto.gov resets the connection,
+> `patents.google.com/…/pdf` returns an HTML landing page, and the EPO
+> publication server returns an error page — so that path is gone, and
+> `patent_client` is no longer needed for patent retrieval.
+
+The IP analyser uses the same retrieval.
 
 **Q: Is NotebookLM safe to use in production?**
 `notebooklm-py` uses undocumented Google endpoints that may change at any time.

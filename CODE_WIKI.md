@@ -276,13 +276,123 @@ SQLite 默认**不**执行外键约束，且该开关是**每连接**生效的�
 
 [rag.py](file:///workspace/backend/app/services/rag.py)
 
-**三层检索架构**：
+**检索后端**（`active_rag_backend()` 决定，`build_store()` 构造）：
 
-| 层级 | 引擎 | 触发条件 |
-|------|------|----------|
-| 1 | ColBERT | 安装 `ragatouille` |
-| 2 | Sentence Transformers | 安装 `sentence-transformers` |
-| 3 | TF-IDF | 默认回退 |
+| 后端 | 触发条件 | 说明 |
+|------|----------|------|
+| `pylate` / `colbert` | `gpu_enabled=true` 且 CUDA 可用 | GPU 路径 |
+| `bm25_faiss` | **CPU 默认** | BM25 稀疏 + FAISS 稠密混合，零 AVX2 要求 |
+| `embedding` | 显式指定 `rag_backend` | 纯向量 |
+| `tfidf` | 最后兜底 | `rank_bm25` 缺失时 |
+
+`FORMUMIND_RAG_BACKEND` 可显式覆盖自动检测（`auto` 以外的值优先）。
+
+#### 向量模型与"不可比"护栏
+
+向量模型由 `FORMUMIND_EMBEDDING_MODEL` 指定，留空用默认
+`sentence-transformers/all-MiniLM-L6-v2`。
+
+⚠️ **默认值是英文为主的模型**，而本平台检索中文专利——这是当前检索质量的一个已知
+短板。中文候选：`BAAI/bge-small-zh-v1.5`、`BAAI/bge-m3`、`moka-ai/m3e-base`。
+
+**换模型会让已有向量全部作废**（不同模型的向量在不同语义空间）。这件事被显式护栏
+接住，而不是静默降质：
+
+- `comparable_embedding()` 先校验**维度**再校验 `embedding_model` 名，不可比的切块
+  退回关键词打分。此前两处打分写的是 `zip(query_vec, c.embedding)`——`zip` 不是
+  比较而是**截断到较短者**，384 维查询对 1536 维存量会算出一个看起来正常、排序却
+  全错的数，无异常无日志。
+- `/api/kb/stats` 的 `vector_mode` 增加 `stale` 态，给出待重建切块数与重建指引。
+- 写入端校验向量条数与切块条数一致，不一致直接丢弃整批（错位绑定会让每一行都带着
+  邻居的语义，比没有向量更糟）。
+
+换完模型后需在设置页点**「重建索引」**。
+
+### 7.6 资料获取与入库管线
+
+检索只拿到摘要级命中；把它们升级为全文并持久化，是一条独立的管线。
+由 `FORMUMIND_FULLTEXT_ENRICH` 与 `FORMUMIND_KB_INGEST_AUTO` 控制。
+
+#### 按来源分渠道下载
+
+`fulltext_fetcher.classify()` 先分类，再由 `_dispatch_fetch()` 分派：
+
+| 渠道 | 取法 | 要点 |
+|------|------|------|
+| **专利** | Google Patents 落地页 `/patent/{号}/en` | **HTML 正文优先**（`patent_prefer_html`，默认开） |
+| **文献** | arXiv `/e-print/` LaTeX 源码；否则 OpenAlex/arXiv PDF | **源码优先**（`arxiv_prefer_source`，默认开） |
+| **网页** | httpx + trafilatura | SSRF 白名单，重定向逐跳复检 |
+
+**专利为什么走 HTML 而不是 PDF**（实测结论）：三个直链 PDF 地址全部失效——
+`pdfpiw.uspto.gov` 连接被重置、`patents.google.com/patent/{号}/pdf` 返回的是
+`text/html` 落地页、EPO publication-server 返回 2.4 KB 错误页。落地页本身就带着
+`itemprop="abstract|description|claims"` 全文（实测 CN 18k / US 22k / EP 54k /
+JP 157k 字符），一次请求约 0.7 秒，**完全不需要 OCR**，中日文专利还附带英文机器
+翻译对照。真实 PDF 地址在落地页的 `<meta name="citation_pdf_url">`，主机被钉死在
+`patentimages.storage.googleapis.com` 并仍走 SSRF 检查。
+
+**arXiv 为什么走源码**（实测结论）：同一篇 100 页论文，PDF 路径下载 1.17 s +
+解析 **51.7 s**，源码路径下载 0.94 s + 转换 0.3 s。51.7 秒的大头是 RapidOCR 对
+图表密集页启动了 OCR（图多的版面在 triage 里像扫描件）。源码另有两个好处：公式以
+LaTeX 保留、`\section{}` 直接变成 Markdown 标题供 `chunk_markdown` 的
+`heading_path` 使用。`pylatexenc` 会在真实论文上崩（实测 4 篇崩 1 篇），因此
+**逐 section 转换**——崩一段只损失一段，且回落到正则清洗。
+
+#### 解析级联
+
+`parsing.parse_document()` 是唯一入口，按 `FORMUMIND_PDF_PARSER` 决定顺序：
+
+```
+hybrid(pymupdf4llm，版面感知) → docling → marker → mineru → rapidocr → markitdown → pypdf
+```
+
+（非 PDF 走另一条：`markitdown → docx → text`。）
+
+- **RapidOCR**（`rapidocr_enabled`）：扫描件无文字层时本地读字，约 2 s/页，
+  模型随 wheel 分发、不联网、不耗配额。
+- **MinerU**（`mineru_enabled`，**默认关**）：把本地解析不好的单页（密集表格 /
+  公式 / 图表）升级到云端。
+  ⚠️ **被升级的页面会上传到 mineru.net（第三方）并消耗配额**，所以必须显式开启，
+  需要 Token + `mineru-open-sdk`。
+  开启后图表 block 会路由到**视觉模型**（见 §7.1 的文本/视觉角色分离）；没配视觉
+  模型时降级但不丢内容。
+- 每篇文档的日志会写出实际胜出的层名；MinerU 真正升级过页面时显示
+  `parse=…(hybrid+mineru:3)`——否则无法按文档判断配额买到了什么。
+
+#### 入库
+
+`kb_ingest.ingest_evidence_docs()`：**并发下载、串行入库、两者流水线化**。
+
+- 下载并发由 `kb_ingest_workers`（默认 3）控制，这个数是按**解析内存**
+  （~350 MB，走 OCR 时 ~557 MB）定的，不是按 socket。
+- 入库串行：写 SQLite。
+- 用 `as_completed` 而非 `ex.map`——后者按提交顺序消费，一个慢的队首下载会卡住
+  它后面的每一篇，且几百篇全文会同时堆在内存里。
+- `kb_ingest_max_docs=0` 表示**不限篇数**（「搜到了但没入库」等同数据丢失）。
+
+每篇入库依次经过：切块（`chunk_markdown`）→ 化学实体抽取 → 向量化 → 写库。
+
+#### 计时仪表
+
+`ingest_timing` 给每篇文档打一行、每批打一行：
+
+```
+kb_ingest doc EP2757083A1 [patent] indexed 7400ms
+  download=650 parse=41(hybrid) chunk=1 entities=6748 embed=0 chars=57610
+kb_ingest batch 9 docs in 17.3s  failed=2 indexed=7
+  | download=39% entities=61% chunk=0% embed=0%
+kb_ingest batch web_chars n=12 p50=4180 p90=21903 thin(<200)=8% http_errors=403:2
+```
+
+设计要点：
+- **一篇文档跨线程计时**——下载在 worker 池、入库在主线程，普通的
+  `threading.local` 会把一篇拆成互不相干的两半。
+- `download` = `fetch` 减去嵌套的 `parse`，否则慢解析会被误读成慢网络。
+- 网页渠道的 **HTTP 失败与"内容过薄"分开统计**：一堆 403 不该拿来论证一个
+  修不了 403 的 JS 渲染层。
+
+这套仪表的结论直接推翻过两个假设：**向量化占 0%**（所以"用远程模型加速向量化"
+没有速度可捞），**化学实体抽取占 39–61%**（且随文本的化学密度而非长度增长）。
 
 ---
 
@@ -432,6 +542,23 @@ class ExpertAgent(Protocol):
 - **Eager模式**：Redis不可达时自动同步执行
 - 任务进度跟踪（SSE推送）
 
+**单任务时限**（`celery_soft_time_limit_s` / `celery_hard_time_limit_s`，
+默认 2 小时 / 3 小时）：
+
+必须满足 **软限 < 硬限 < `task_stream_timeout_s`（6 小时）**。
+流要比任务活得久，否则前端会停止观察一个仍在运行的任务——那正是此前反复出现的
+假「构建中断」。
+
+这两个值曾硬编码为 600 / 900 秒，与其余各层直接矛盾：前端已无墙钟上限、SSE 截止
+6 小时、入库不限篇数，然后 Celery 在第 15 分钟把任务杀掉，前端还在盯着一个已经
+不存在的任务。几百篇的知识库构建必然超过 15 分钟。
+
+软限触发时 `SoftTimeLimitExceeded` 被捕获并报出**该调哪个环境变量**，已入库的部分
+保留、可再次运行继续。
+
+> `soft_time_limit` 是**每个任务**的，与 `celery -c` 并发数无关——并发只决定一个
+> 卡死的任务能占住几个 worker 槽位。
+
 ### 12.2 任务类型
 
 [tasks.py](file:///workspace/backend/app/worker/tasks.py)
@@ -506,6 +633,29 @@ def molar_mass(formula: str) -> float:
 | `optimize_iterations` | 24 | 优化迭代次数 |
 | `top_n_formulas` | 5 | Top-N配方数 |
 | `api_auth_enabled` | production时开启 | API认证 |
+
+**资料获取与入库**（见 §7.6）：
+
+| 配置 | 默认值 | 说明 |
+|------|--------|------|
+| `fulltext_enrich` | false | 把摘要级命中升级为全文（生产建议开） |
+| `kb_ingest_auto` | true | 检索后台自动入库 |
+| `kb_ingest_max_docs` | **0** | 入库篇数上限，0 = 不限 |
+| `kb_ingest_workers` | 3 | 下载并发；按解析内存定，非 socket |
+| `patent_prefer_html` | true | 专利用落地页正文，不下 PDF |
+| `arxiv_prefer_source` | true | arXiv 用 LaTeX 源码，不下 PDF |
+| `rapidocr_enabled` | true | 本地 OCR（扫描件），不联网不耗配额 |
+| `mineru_enabled` | **false** | 云端解析，⚠️ 上传第三方 + 耗配额 |
+| `embedding_model` | 空 | 向量模型，空=英文默认；换了要重建索引 |
+| `rag_backend` | auto | 检索后端显式覆盖 |
+
+**任务时限**（见 §12.1，必须软 < 硬 < 流）：
+
+| 配置 | 默认值 | 说明 |
+|------|--------|------|
+| `celery_soft_time_limit_s` | 7200 | 软限，任务可自报并保留已入库部分 |
+| `celery_hard_time_limit_s` | 10800 | 硬限，防止卡死任务永久占槽 |
+| `task_stream_timeout_s` | 21600 | SSE 截止，必须最大 |
 
 ### 14.2 动态密钥管理
 
@@ -593,7 +743,13 @@ dependencies = [
 | 优化 | `pip install -e ".[optimize]"` | Optuna |
 | 贝叶斯优化 | `pip install -e ".[bo]"` | BoTorch |
 | 企业优化 | `pip install -e ".[baybe]"` | BayBE约束贝叶斯学习 |
-| 文献检索 | `pip install -e ".[intel]"` | patent_client, arxiv, semanticscholar |
+| 文献检索 | `pip install -e ".[intel]"` | patent_client, arxiv, semanticscholar ⚠️ |
+
+> ⚠️ **`.[intel]` 里的 `patent-client` 会静默降级基础依赖**：它要求
+> `httpx<0.28` + `pypdf<5.0`，而本项目钉的是 `httpx==0.28.1` / `pypdf==6.14.2`。
+> `pip install` 不会报错，而是直接把这两个包降下去（实测 httpx 0.28.1 → 0.27.2、
+> pypdf 6.14.2 → 4.3.1），而 httpx 是全代码库在用的、pypdf 在解析级联里。
+> **专利检索不需要它**——专利全文现在走 Google Patents 落地页（见 §7.6）。
 | 文件解析 | `pip install -e ".[file_ingest]"` | PDF/DOCX/XLSX解析 |
 | 语义检索 | `pip install -e ".[embedding]"` | sentence-transformers |
 | ColBERT | `pip install -e ".[colbert]"` | 精排检索 |
