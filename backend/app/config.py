@@ -274,6 +274,18 @@ class Settings(BaseSettings):
     # 无关的话被合成一个 chunk、一个向量。论文与专利多为双栏，所以默认开启，
     # 正确性优先；内存实在紧张的机器可关掉，代价如上。
     pdf_layout_analysis: bool = True
+    # pymupdf4llm 版面解析层自带的逐页 OCR。**它的库默认值是 True**，而这一层
+    # 跑在解析级联的最前面、对每一份 PDF 都跑——于是只要机器上装了 Tesseract，
+    # 每篇文档的每一页都会先被 OCR 一遍，不受任何设置约束。VPS 上实测：一次
+    # 51.7s 的 arXiv 解析里约 50s 花在这里，而 kb_ingest 的 7200s 软时限被打满
+    # 时，日志里正在跑的也正是它（`OCR on page.number=…`）。
+    # 关掉之后扫描件并没有失去出路：`looks_scanned` 会把它们交给 `_parse_scanned`
+    # （MinerU OCR）或本地 rapidocr——那才是为扫描件准备的层。
+    # ⚠️ 顺带修好一个探测撒谎：`char_count` 是在 `to_markdown()` 把 OCR 结果写回
+    # 页面**之后**读的，所以开着 OCR 时 `looks_scanned` 实际含义是"连 OCR 之后
+    # 都没有文字"，比"这是扫描件"严格得多，扫描件因此被逐页升级而不是走扫描件
+    # 分支。关掉后该信号才回到它声称的语义。
+    pdf_local_ocr: bool = False
     # 扫描件 OCR（MinerU 管线；需 OCR 依赖，慢但能读图片型 PDF）。
     pdf_ocr: bool = False
     # 公式增强（Docling）：显示公式转 LaTeX $$…$$，化学反应方程式保真。
@@ -299,7 +311,16 @@ class Settings(BaseSettings):
     mineru_api_key: str | None = None
     mineru_base_url: str = "https://mineru.net/api/v4"
     # SDK 侧等待任务完成的上限。解析在线程池里跑，不会阻塞事件循环。
+    # 这是**整份文档**（扫描件走 `_parse_scanned`）的额度。
     mineru_timeout_s: float = 300.0
+    # **单页升级**的额度，独立于上面那个。逐页升级是串行的，所以超时不是"不阻塞"
+    # 而是逐页累加：按 300s × 20 页算，一份文档最坏能空等 6000 秒。网络不通时
+    # 把它调大只会把等待翻倍，所以这里给单页一个短得多的额度；整份扫描件的上传
+    # 体积大得多，仍用上面的 300s。
+    mineru_page_timeout_s: float = 90.0
+    # 连续多少页升级失败就放弃这份文档的升级。没有它，一条不通的网络会被
+    # 逐页原样重试一遍——同一个错误付 20 次超时的钱。0 = 不熔断。
+    mineru_max_page_failures: int = 3
     # 单文档最多升级多少页——防止一份 200 页扫描件一次吃掉大半日配额。
     # 超出部分保留本地解析结果并记警告。
     mineru_max_pages_per_doc: int = 20

@@ -172,7 +172,9 @@ def _escalate_page(content: bytes, page: pdf_local.LocalPage) -> str | None:
     page_pdf = pdf_local.page_as_pdf(content, page.page_no)
     if not page_pdf:
         return None
-    document = mineru_cloud.parse_bytes(page_pdf, ext="pdf")
+    document = mineru_cloud.parse_bytes(
+        page_pdf, ext="pdf", timeout=float(get_settings().mineru_page_timeout_s)
+    )
     if document is None or not document.blocks:
         return None
     return _render_blocks(document.blocks, page_label=f"p.{page.page_no}") or None
@@ -209,6 +211,31 @@ def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | No
     return pdf_local.assemble(rendered) or None
 
 
+def _scanned_without_cloud(content: bytes) -> str | None:
+    """Read a document with no text layer, using only what is on this host.
+
+    Two readers, in cost order. RapidOCR is preferred: it ships its weights in
+    the wheel, needs no system package, and is the tier built for this. The
+    layout parser's own OCR is the backstop — disabled for the general case
+    because it otherwise runs on every document in the corpus, but correct for
+    this one, where there is no text to lose and nothing else can read it.
+    """
+    from . import pdf_local as _local
+    from . import rapidocr_local
+
+    text = rapidocr_local.ocr_pdf(content)
+    if text:
+        logger.info("hybrid: scanned document read by local OCR (no cloud)")
+        return text
+
+    text = _local.ocr_markdown(
+        content, max_pages=int(get_settings().rapidocr_max_pages)
+    )
+    if text:
+        logger.info("hybrid: scanned document read by the layout parser's own OCR")
+    return text
+
+
 def parse(content: bytes) -> str | None:
     """Parse *content*, escalating only the pages that need it.
 
@@ -230,11 +257,8 @@ def parse(content: bytes) -> str | None:
         # reads text layers. Local OCR is the only thing that can read it, and it
         # costs no quota, so try it before giving up.
         if scanned:
-            from . import rapidocr_local
-
-            ocr = rapidocr_local.ocr_pdf(content)
+            ocr = _scanned_without_cloud(content)
             if ocr:
-                logger.info("hybrid: scanned document read by local OCR (no cloud)")
                 return ocr
         logger.debug("hybrid: local only (%s)", hint)
         return local_only or None
@@ -244,7 +268,17 @@ def parse(content: bytes) -> str | None:
         # every page for free; MinerU is then worth a call only for pages whose
         # value is structural — a table or figure it can render and OCR cannot,
         # since RapidOCR returns text and boxes with no HTML or LaTeX.
-        return _parse_scanned(content, pages) or local_only or None
+        #
+        # MinerU can still fail here — a timeout, a page cap, an outage — and
+        # `local_only` on a scan is empty, so without the local readers a
+        # configured-but-unreachable cloud parser would lose the document
+        # outright. That is strictly worse than not configuring one at all.
+        return (
+            _parse_scanned(content, pages)
+            or _scanned_without_cloud(content)
+            or local_only
+            or None
+        )
 
     cap = int(get_settings().mineru_max_pages_per_doc)
     candidates = [p for p in pages if _needs_escalation(p)]
@@ -266,15 +300,37 @@ def parse(content: bytes) -> str | None:
 
         prewarm()
 
+    # Escalation is sequential, so a failure is not free — it costs the full
+    # per-page timeout, and an unreachable MinerU charges that once per page.
+    # The breaker turns "20 pages × one broken network" into three attempts.
+    # Counted *consecutively*: a document where some pages come back keeps
+    # going, because that is a working connection with a few hard pages.
+    budget = int(get_settings().mineru_max_page_failures)
     upgraded: dict[int, str] = {}
+    attempted = 0
+    consecutive_failures = 0
     for page in selected:
+        attempted += 1
         rendered = _escalate_page(content, page)
         if rendered:
             upgraded[page.page_no] = rendered
+            consecutive_failures = 0
+            continue
+        consecutive_failures += 1
+        if budget and consecutive_failures >= budget:
+            logger.warning(
+                "hybrid: %d consecutive MinerU page failures — abandoning "
+                "escalation after %d/%d pages; the rest keep their local text",
+                consecutive_failures, attempted, len(selected),
+            )
+            break
 
+    # `attempted`, not `len(selected)`: once the breaker can cut the loop short,
+    # reporting the plan instead of the work would make this line a lie about
+    # what the quota actually bought.
     logger.info(
         "hybrid: %d/%d pages escalated (%d succeeded)",
-        len(selected), len(pages), len(upgraded),
+        attempted, len(pages), len(upgraded),
     )
     # Surfaced on the per-document ingest line too. The parser tier is recorded
     # as "hybrid" whether or not MinerU was called, so without this there is no

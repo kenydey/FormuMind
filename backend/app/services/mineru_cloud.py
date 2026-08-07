@@ -191,13 +191,19 @@ def _normalise(result, images_by_path: dict[str, bytes]) -> MinerUDocument:
 
 
 def parse_bytes(
-    content: bytes, *, ext: str = "pdf", ocr: bool = False
+    content: bytes, *, ext: str = "pdf", ocr: bool = False,
+    timeout: float | None = None,
 ) -> MinerUDocument | None:
     """Parse *content* through MinerU, or return None and let the caller cope.
 
     None covers every reason a call cannot or should not happen: disabled, no
     token, no SDK, unsupported format, oversized, quota gone, network down.
     The caller keeps whatever it already had.
+
+    *timeout* overrides `mineru_timeout_s` for this call. A single escalated
+    page and a whole scanned document are not the same upload, and a caller that
+    is going to make twenty sequential calls needs a much shorter one than a
+    caller making a single big one.
     """
     ext = (ext or "").lower().lstrip(".")
     available, hint = mineru_available()
@@ -226,7 +232,7 @@ def parse_bytes(
         logger.info("mineru: cache hit (%s)", key[:12])
         return cached
 
-    document = _extract(content, ext=ext, ocr=ocr)
+    document = _extract(content, ext=ext, ocr=ocr, timeout=timeout)
     if document is not None:
         # Only successes are cached. Caching a failure would turn one network
         # blip into a permanently broken document.
@@ -234,11 +240,14 @@ def parse_bytes(
     return document
 
 
-def _extract(content: bytes, *, ext: str, ocr: bool) -> MinerUDocument | None:
+def _extract(
+    content: bytes, *, ext: str, ocr: bool, timeout: float | None = None
+) -> MinerUDocument | None:
     import mineru  # type: ignore
 
     settings = get_settings()
     token = str(effective_setting(settings, "mineru_api_key") or "")
+    wait = float(settings.mineru_timeout_s if timeout is None else timeout)
 
     handle, temp_path = tempfile.mkstemp(suffix=f".{ext}")
     try:
@@ -246,11 +255,7 @@ def _extract(content: bytes, *, ext: str, ocr: bool) -> MinerUDocument | None:
             fh.write(content)
 
         client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
-        result = client.extract(
-            temp_path,
-            ocr=ocr or None,
-            timeout=int(settings.mineru_timeout_s),
-        )
+        result = client.extract(temp_path, ocr=ocr or None, timeout=int(wait))
         if getattr(result, "state", "") != "done":
             logger.warning(
                 "mineru: task finished in state %r (%s)",
@@ -276,7 +281,7 @@ def _extract(content: bytes, *, ext: str, ocr: bool) -> MinerUDocument | None:
         logger.warning("mineru: document rejected by size/page limit (%s)", exc)
         return None
     except mineru.TimeoutError as exc:
-        logger.warning("mineru: timed out after %ss (%s)", settings.mineru_timeout_s, exc)
+        logger.warning("mineru: timed out after %ss (%s)", wait, exc)
         return None
     except mineru.MinerUError as exc:
         return degrade_return(logger, exc, "mineru extract failed", None)

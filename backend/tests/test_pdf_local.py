@@ -469,3 +469,68 @@ def test_disabling_vision_via_the_overlay_takes_effect(
     ok, hint = vision_extract.vision_available()
     assert ok is False
     assert "禁用" in hint
+
+
+# ── the OCR pymupdf4llm runs on its own ──────────────────────────────────────
+
+
+def _captured_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Intercept the real `to_markdown` and report what it was called with.
+
+    Asserted at the library boundary rather than by reading our own source: the
+    defect being pinned is a *default inside pymupdf4llm* (`use_ocr=True` in its
+    layout parser), and only the actual call shows whether we override it.
+    """
+    import pymupdf4llm
+
+    seen: dict = {}
+    real = pymupdf4llm.to_markdown
+
+    def spy(doc, **kwargs):
+        seen.update(kwargs)
+        return real(doc, **kwargs)
+
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", spy)
+    return seen
+
+
+def test_local_extraction_does_not_run_its_own_ocr(
+    three_page_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pymupdf4llm's layout parser OCRs every text-poor page unless told not to.
+
+    It is the first tier of the cascade and runs on every PDF, so with an OCR
+    engine on PATH that cost is paid for the whole corpus before any other tier
+    is consulted — measured at ~50 s of a 51.7 s parse. Scans are not abandoned
+    by turning it off; `looks_scanned` hands those to the tiers built for them.
+    """
+    monkeypatch.setattr(pdf_local.get_settings(), "pdf_local_ocr", False, raising=False)
+    seen = _captured_kwargs(monkeypatch)
+
+    assert pdf_local.extract_pages(three_page_pdf) is not None
+    assert seen.get("use_ocr") is False
+
+
+def test_the_ocr_pass_can_still_be_turned_back_on(
+    three_page_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pdf_local.get_settings(), "pdf_local_ocr", True, raising=False)
+    seen = _captured_kwargs(monkeypatch)
+
+    assert pdf_local.extract_pages(three_page_pdf) is not None
+    assert seen.get("use_ocr") is True
+
+
+def test_legacy_mode_is_not_handed_an_argument_it_would_reject(
+    three_page_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`use_ocr` belongs to the layout parser only.
+
+    The legacy path prints "arguments ignored in legacy mode" for anything it
+    does not recognise and then carries on — so passing it there would produce
+    a warning per document while changing nothing.
+    """
+    monkeypatch.setattr(
+        pdf_local.get_settings(), "pdf_layout_analysis", False, raising=False
+    )
+    assert "use_ocr" not in pdf_local._markdown_kwargs()

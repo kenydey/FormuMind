@@ -1099,6 +1099,10 @@ defaults.
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
 | `FORMUMIND_FULLTEXT_ENRICH` | `false` | **The current full-text switch**: upgrade abstract-level hits to full text and index them (requires network; false by default to keep tests offline) |
 | `FORMUMIND_PATENT_PREFER_HTML` | `true` | Take patent text from the Google Patents landing page — one request, ~0.7 s, and no OCR. Set false to prefer the PDF |
+| `FORMUMIND_PDF_LOCAL_OCR` | `false` | Per-page OCR inside the local layout parser (pymupdf4llm). ⚠️ **The library defaults this on**, and that tier runs on every PDF ahead of everything else — so with Tesseract on the host, every page is OCR-ed first. Measured on a 6-page image-only PDF: 16.7 s on / 0.8 s off. Scans are unaffected: a document with no text layer is detected and handed to RapidOCR or MinerU |
+| `FORMUMIND_MINERU_PAGE_TIMEOUT_S` | `90` | Wait budget for a **single** escalated page. Escalation is sequential, so timeouts accumulate page by page — raising this on a bad connection only doubles the waiting |
+| `FORMUMIND_MINERU_TIMEOUT_S` | `300` | Wait budget for sending a **whole** scanned document to MinerU |
+| `FORMUMIND_MINERU_MAX_PAGE_FAILURES` | `3` | Consecutive page failures before escalation is abandoned for that document (`0` disables). Without it one unreachable network is retried per page, paying the full timeout up to 20 times |
 | `FORMUMIND_ARXIV_PREFER_SOURCE` | `true` | Fetch arXiv LaTeX source instead of the PDF: measured 53 s → 1.2 s on the same 100-page paper |
 | `FORMUMIND_PDF_DOWNLOAD` | `false` | **Legacy** patent PDF download, superseded by full-text enrichment; kept for compatibility |
 | `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |

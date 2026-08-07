@@ -266,7 +266,7 @@ def test_a_scan_is_readable_without_any_cloud_parser(monkeypatch):
         page_no=1, markdown="", char_count=0, n_tables=0, n_images=1,
         image_area_ratio=0.9, has_markdown_table=False,
     )
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [page])
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: [page])
     monkeypatch.setattr(pdf_local, "looks_scanned", lambda pages: True)
     monkeypatch.setattr(pdf_local, "assemble", lambda parts: "")
     # No cloud parser configured — the situation that used to lose the document.
@@ -285,7 +285,7 @@ def test_a_text_pdf_never_pays_for_ocr(monkeypatch):
         page_no=1, markdown="正文", char_count=900, n_tables=0, n_images=0,
         image_area_ratio=0.0, has_markdown_table=False,
     )
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [page])
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: [page])
     monkeypatch.setattr(pdf_local, "looks_scanned", lambda pages: False)
     monkeypatch.setattr(pdf_local, "assemble", lambda parts: "正文")
     monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "未配置"))

@@ -112,6 +112,11 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("mineru_enabled", "MinerU 云端解析",
             "本地解析不好的单页（密集表格/公式/图表）升级到 MinerU 云端。", "kb",
             "需 MinerU Token；被升级的页面会上传至 mineru.net（第三方）"),
+    EnvFlag("pdf_local_ocr", "本地版面解析内置 OCR",
+            "pymupdf4llm 在版面解析时对文字稀疏的页面逐页 OCR。它跑在解析级联最前面、"
+            "对每一份 PDF 都跑，实测是入库耗时的最大来源；扫描件另有专门的层处理，"
+            "所以默认关闭。", "kb",
+            "需机器上装有 Tesseract 才会生效；开启后解析显著变慢"),
     EnvFlag("pdf_layout_analysis", "PDF 版面分析",
             "双栏页面按栏读取，避免左右文字交错。关闭可省约一半内存、快 25 倍，"
             "但双栏论文/专利会被读串。", "kb"),

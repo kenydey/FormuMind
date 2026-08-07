@@ -68,6 +68,13 @@ class LocalPage:
 
     @property
     def looks_scanned(self) -> bool:
+        """No usable text layer on this page.
+
+        Means what it says only while `pdf_local_ocr` is off. `char_count` is
+        read after `to_markdown` has run, and that call writes its own OCR back
+        into the page — so with OCR on, this silently becomes "even after OCR
+        there is no text", and real scans stop being recognised as scans.
+        """
         return self.char_count < _SCANNED_CHARS_PER_PAGE
 
 
@@ -111,6 +118,32 @@ def _configure_layout() -> None:
         _layout_configured = True
 
 
+def _markdown_kwargs(ocr: bool | None = None) -> dict:
+    """Extra `to_markdown` arguments, per configuration.
+
+    Exists for one argument: `use_ocr`. pymupdf4llm's layout parser defaults it
+    to **True**, so with an OCR engine on PATH it OCRs every page it judges
+    text-poor — for every PDF, in the first tier of the cascade, before anything
+    else is consulted. That is where a measured 51.7 s arXiv parse spent ~50 s,
+    and it is what a `kb_ingest` run was doing when it hit the 7200 s soft limit.
+
+    Turning it off does not abandon scans: `looks_scanned` routes those to
+    `_parse_scanned` (MinerU with OCR) or to local RapidOCR, which is the tier
+    built for them and which reports what it did.
+
+    *ocr* overrides the setting, for the one caller that has already established
+    the document has no text layer and so genuinely needs it.
+
+    Passed only in layout mode — the legacy parser prints
+    "Warning - arguments ignored in legacy mode" for anything it does not know,
+    and unknown keywords there are silently dropped rather than honoured.
+    """
+    settings = get_settings()
+    if not settings.pdf_layout_analysis:
+        return {}
+    return {"use_ocr": bool(settings.pdf_local_ocr if ocr is None else ocr)}
+
+
 def _page_signals(page) -> tuple[int, int, float]:
     """(tables, images, image area as a fraction of the page).
 
@@ -139,7 +172,7 @@ def _page_signals(page) -> tuple[int, int, float]:
     return n_tables, n_images, min(image_area / page_area, 1.0)
 
 
-def extract_pages(content: bytes) -> list[LocalPage] | None:
+def extract_pages(content: bytes, *, ocr: bool | None = None) -> list[LocalPage] | None:
     """Per-page Markdown plus triage signals, or None when unavailable.
 
     Returning None rather than raising keeps this usable as a parser tier: the
@@ -156,7 +189,9 @@ def extract_pages(content: bytes) -> list[LocalPage] | None:
 
         doc = _open(content)
         try:
-            chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
+            chunks = pymupdf4llm.to_markdown(
+                doc, page_chunks=True, **_markdown_kwargs(ocr)
+            )
             pages: list[LocalPage] = []
             for index, chunk in enumerate(chunks):
                 markdown = (chunk.get("text") or "").strip()
@@ -188,6 +223,33 @@ def to_markdown(content: bytes) -> str | None:
     if not pages:
         return None
     return assemble([(page.page_no, page.markdown) for page in pages])
+
+
+def ocr_markdown(content: bytes, *, max_pages: int = 0) -> str | None:
+    """The layout parser's own OCR, run deliberately on a document that needs it.
+
+    `pdf_local_ocr` is off because that switch decides whether OCR runs on
+    *every* document; it is a separate question from whether OCR should ever
+    run. A document with no text layer has nothing else to offer, and this is
+    the last reader available without a network or an extra dependency — so on
+    a host with Tesseract but no RapidOCR and no reachable MinerU, this is the
+    difference between a scan being indexed and being silently dropped.
+
+    Bounded by *max_pages* for the same reason every other OCR path is: one
+    200-page scan must not be able to consume an entire ingest run.
+    """
+    if max_pages > 0:
+        pages_in_doc = page_count(content)
+        if pages_in_doc > max_pages:
+            logger.warning(
+                "pdf_local: %d-page scan exceeds the %d-page local-OCR cap — skipping",
+                pages_in_doc, max_pages,
+            )
+            return None
+    pages = extract_pages(content, ocr=True)
+    if not pages:
+        return None
+    return assemble([(page.page_no, page.markdown) for page in pages]) or None
 
 
 def assemble(pages: list[tuple[int, str]]) -> str:

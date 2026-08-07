@@ -110,7 +110,7 @@ def test_only_the_qualifying_pages_reach_the_cloud(
         _page(3, image_ratio=0.4),              # a figure
         _page(4),
     ]
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
 
     hybrid_parse.parse(b"%PDF")
     assert cloud_on == [3], "only the figure page should have been sent"
@@ -119,7 +119,7 @@ def test_only_the_qualifying_pages_reach_the_cloud(
 def test_nothing_is_sent_when_the_document_is_all_prose(
     cloud_on, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [_page(1), _page(2)])
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: [_page(1), _page(2)])
     hybrid_parse.parse(b"%PDF")
     assert cloud_on == []
 
@@ -131,7 +131,7 @@ def test_escalation_is_capped_per_document(
     accident; the pages beyond the cap keep their local text."""
     monkeypatch.setattr(get_settings(), "mineru_max_pages_per_doc", 2, raising=False)
     pages = [_page(n, image_ratio=0.5) for n in range(1, 11)]
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
 
     output = hybrid_parse.parse(b"%PDF")
     assert len(cloud_on) == 2
@@ -146,7 +146,7 @@ def test_cloud_unavailable_gives_exactly_the_local_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pages = [_page(1, image_ratio=0.5), _page(2)]
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
     monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "未启用"))
 
     assert hybrid_parse.parse(b"%PDF") == pdf_local.assemble(
@@ -157,7 +157,7 @@ def test_cloud_unavailable_gives_exactly_the_local_result(
 def test_a_failed_escalation_keeps_the_local_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [_page(1, markdown="LOCAL", image_ratio=0.5)])
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: [_page(1, markdown="LOCAL", image_ratio=0.5)])
     monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
     monkeypatch.setattr(pdf_local, "page_as_pdf", lambda c, n: b"%PDF")
     monkeypatch.setattr(mineru_cloud, "parse_bytes", lambda c, **kw: None)
@@ -168,7 +168,7 @@ def test_a_failed_escalation_keeps_the_local_page(
 def test_no_local_extraction_means_the_cascade_continues(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: None)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: None)
     assert hybrid_parse.parse(b"%PDF") is None
 
 
@@ -315,7 +315,7 @@ def test_a_scan_goes_through_whole_with_ocr(monkeypatch: pytest.MonkeyPatch) -> 
     """Per-page triage is pointless when every page would qualify."""
     calls: list[dict] = []
     pages = [_page(n, markdown="", chars=3) for n in (1, 2)]
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
     monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
 
     def fake_parse(content, **kw):
@@ -341,7 +341,7 @@ def test_an_oversized_scan_is_refused_rather_than_billed(
     monkeypatch.setattr(get_settings(), "mineru_max_pages_per_doc", 3, raising=False)
     monkeypatch.setattr(
         pdf_local, "extract_pages",
-        lambda c: [_page(n, markdown="", chars=2) for n in range(1, 21)],
+        lambda c, **kw: [_page(n, markdown="", chars=2) for n in range(1, 21)],
     )
     monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
     monkeypatch.setattr(
@@ -359,7 +359,7 @@ def test_escalated_pages_keep_their_page_numbers(
     cloud_on, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pages = [_page(1), _page(2, image_ratio=0.5), _page(3)]
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: pages)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
 
     from app.services.chunking import chunk_markdown
 
@@ -414,7 +414,7 @@ def test_headings_reach_heading_path_after_escalation(
     the way into the chunk metadata the retriever ranks on."""
     from app.services.chunking import chunk_markdown
 
-    monkeypatch.setattr(pdf_local, "extract_pages", lambda c: [_page(1, image_ratio=0.5)])
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: [_page(1, image_ratio=0.5)])
     monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
     monkeypatch.setattr(pdf_local, "page_as_pdf", lambda c, n: b"%PDF")
     monkeypatch.setattr(
@@ -452,3 +452,158 @@ def test_a_provider_error_does_not_reach_the_knowledge_base(
     assert "org-" not in out                 # but the account id is gone
     assert "ak-" not in out
     assert len(out) < 200                    # and so is the wall of noise
+
+
+# ── cost control: a broken connection must not be paid for once per page ─────
+
+
+def _failing_cloud(monkeypatch: pytest.MonkeyPatch, results: list) -> list[dict]:
+    """MinerU reachable but answering with *results* in order; records calls."""
+    calls: list[dict] = []
+    outcomes = iter(results)
+
+    def fake_parse(content, **kw):
+        calls.append(kw)
+        try:
+            ok = next(outcomes)
+        except StopIteration:
+            ok = False
+        if not ok:
+            return None
+        return mineru_cloud.MinerUDocument(blocks=[_block("text", text="CLOUD TEXT")])
+
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(pdf_local, "page_as_pdf", lambda c, n: b"%PDF one page")
+    monkeypatch.setattr(mineru_cloud, "parse_bytes", fake_parse)
+    return calls
+
+
+def test_escalation_gives_up_after_consecutive_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ten candidate pages, an unreachable MinerU, three attempts — not ten.
+
+    Escalation is a serial loop and each failure costs the full per-page
+    timeout, so without a breaker one broken network is billed once per page.
+    That is how a document can spend twenty timeouts learning the same fact.
+    """
+    monkeypatch.setattr(get_settings(), "mineru_max_page_failures", 3, raising=False)
+    pages = [_page(n, image_ratio=0.5) for n in range(1, 11)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
+    calls = _failing_cloud(monkeypatch, [False] * 10)
+
+    output = hybrid_parse.parse(b"%PDF ten figures")
+
+    assert len(calls) == 3, "the breaker must stop the loop, not just log it"
+    # Nothing is lost: every page keeps the text local extraction produced.
+    assert output.count("<!-- page:") == 10
+
+
+def test_isolated_failures_do_not_trip_the_breaker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A working connection with a few hard pages must run to the end.
+
+    The counter is consecutive on purpose — counting total failures would
+    abandon a document that is mostly succeeding.
+    """
+    monkeypatch.setattr(get_settings(), "mineru_max_page_failures", 3, raising=False)
+    pages = [_page(n, image_ratio=0.5) for n in range(1, 8)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
+    calls = _failing_cloud(
+        monkeypatch, [False, False, True, False, False, True, False]
+    )
+
+    hybrid_parse.parse(b"%PDF mixed")
+
+    assert len(calls) == 7, "two failures then a success must reset the counter"
+
+
+def test_a_page_is_escalated_on_the_short_per_page_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-page escalation must not inherit the whole-document timeout.
+
+    Twenty pages on the document budget is 6000 s of sequential waiting for a
+    connection that is not going to work.
+    """
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_timeout_s", 300.0, raising=False)
+    monkeypatch.setattr(settings, "mineru_page_timeout_s", 90.0, raising=False)
+    monkeypatch.setattr(
+        pdf_local, "extract_pages", lambda c, **kw: [_page(1, image_ratio=0.5)]
+    )
+    calls = _failing_cloud(monkeypatch, [True])
+
+    hybrid_parse.parse(b"%PDF one figure")
+
+    assert calls and calls[0]["timeout"] == 90.0
+
+
+# ── scans must survive turning the blanket OCR off ───────────────────────────
+
+
+def _scan_pages() -> list:
+    """Four pages with no text layer — what `looks_scanned` is meant to catch."""
+    return [_page(n, markdown="", chars=3) for n in range(1, 5)]
+
+
+def test_a_scan_falls_back_to_the_layout_parser_ocr_when_rapidocr_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The host in question: Tesseract present, RapidOCR missing, MinerU off.
+
+    Blanket OCR is disabled, so local extraction correctly yields nothing for a
+    scan. Without this fallback the document is silently dropped — the one
+    failure mode with no symptom.
+    """
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: _scan_pages())
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "未启用"))
+
+    from app.services import rapidocr_local
+
+    monkeypatch.setattr(rapidocr_local, "ocr_pdf", lambda c: None)
+    monkeypatch.setattr(pdf_local, "ocr_markdown", lambda c, **kw: "OCR RESCUED TEXT")
+
+    assert hybrid_parse.parse(b"%PDF scan") == "OCR RESCUED TEXT"
+
+
+def test_rapidocr_is_preferred_over_the_layout_parser_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It ships its weights in the wheel and reports what it did; try it first."""
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: _scan_pages())
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "未启用"))
+
+    from app.services import rapidocr_local
+
+    called: list[str] = []
+    monkeypatch.setattr(
+        rapidocr_local, "ocr_pdf", lambda c: called.append("rapid") or "RAPID TEXT"
+    )
+    monkeypatch.setattr(
+        pdf_local, "ocr_markdown",
+        lambda c, **kw: called.append("layout") or "LAYOUT TEXT",
+    )
+
+    assert hybrid_parse.parse(b"%PDF scan") == "RAPID TEXT"
+    assert called == ["rapid"], "the backstop must not run once the first tier worked"
+
+
+def test_a_scan_is_not_lost_when_the_cloud_parser_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured-but-unreachable MinerU must not be worse than no MinerU.
+
+    `local_only` is empty for a scan, so returning it would hand the cascade an
+    empty document instead of a readable one.
+    """
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: _scan_pages())
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(mineru_cloud, "parse_bytes", lambda c, **kw: None)  # timeout
+
+    from app.services import rapidocr_local
+
+    monkeypatch.setattr(rapidocr_local, "ocr_pdf", lambda c: "RAPID TEXT")
+
+    assert hybrid_parse.parse(b"%PDF scan") == "RAPID TEXT"

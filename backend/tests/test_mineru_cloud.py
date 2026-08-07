@@ -468,3 +468,45 @@ def test_a_rejected_token_during_a_parse_still_degrades(
     monkeypatch.setattr(settings, "mineru_api_key", "bad", raising=False)
 
     assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is None
+
+
+# ── timeout budget: a page and a document are not the same upload ────────────
+
+
+def test_a_document_uses_the_document_timeout(
+    sdk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "mineru_timeout_s", 300.0, raising=False)
+    mineru_cloud.parse_bytes(b"%PDF whole doc", ext="pdf")
+    assert sdk.last_kwargs["timeout"] == 300
+
+
+def test_an_explicit_timeout_overrides_the_document_default(
+    sdk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The caller escalating twenty pages sequentially needs its own budget.
+
+    Without this the per-page loop inherits the whole-document allowance, and
+    an unreachable service is charged that allowance once per page.
+    """
+    monkeypatch.setattr(get_settings(), "mineru_timeout_s", 300.0, raising=False)
+    mineru_cloud.parse_bytes(b"%PDF one page", ext="pdf", timeout=90.0)
+    assert sdk.last_kwargs["timeout"] == 90
+
+
+def test_a_timeout_is_reported_with_the_budget_that_was_actually_used(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """The log must name the number that expired, not the default it ignored."""
+    import logging
+
+    _install(monkeypatch, _make_sdk(raise_name="TimeoutError"))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "test-token", raising=False)
+    monkeypatch.setattr(settings, "mineru_timeout_s", 300.0, raising=False)
+
+    with caplog.at_level(logging.WARNING):
+        assert mineru_cloud.parse_bytes(b"%PDF slow", ext="pdf", timeout=90.0) is None
+
+    assert "90" in caplog.text and "300" not in caplog.text
