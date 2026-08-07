@@ -185,7 +185,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
             draft.deepResearchMessage = ev.message ?? "";
             draft.task = progressToTaskStatus(task_id, "deep_research", ev);
           });
-        });
+        }, 600_000 /* 10 min — deep research LLM calls can be slow */);
         const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
         const report = wrapped?.report;
         if (!report) throw new Error("深度研究未返回结果");

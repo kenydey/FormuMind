@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # deterministic rule-based synthesiser built on the domain knowledge base.
     anthropic_api_key: str | None = None
     llm_model: str = "claude-sonnet-4-6"
-    llm_max_tokens: int = 8192
+    llm_max_tokens: int = 16384
     llm_timeout_seconds: float = 120.0
 
     # Celery / Redis. Without a reachable broker the worker runs eagerly

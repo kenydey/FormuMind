@@ -329,10 +329,10 @@ def _convert_formulas(formulas: list, scored: list) -> list[dict]:
             domain=domain,
             ingredients=[
                 Ingredient(
-                    name=c.get("name", ""),
+                    name=c.get("name") or "",
                     zh_name=c.get("zh_name"),
-                    role=c.get("component_type", ""),
-                    weight_pct=c.get("weight_pct", 0),
+                    role=c.get("component_type") or "",
+                    weight_pct=c.get("weight_pct") or 0,
                     cas_no=c.get("cas_no"),
                     formula=c.get("mf"),
                     smiles=c.get("smiles"),
