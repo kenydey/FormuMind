@@ -149,6 +149,29 @@ def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: di
         _index_one(text, ev, kind, emit, doc, project_id=project_id)
 
 
+def _backfill_product_structures() -> dict:
+    """Resolve 牌号 → CAS/SMILES for the batch, once per product.
+
+    Never raises and never fails the ingest: every document is already chunked,
+    embedded and searchable by this point. The only thing missing until this
+    finishes is synonym expansion when a *query* names a trade name — a recall
+    enhancement, read at query time, so it starts working the moment this lands
+    without any reindex.
+    """
+    settings = get_settings()
+    if not settings.product_extract_enabled:
+        return {"attempted": 0, "resolved": 0, "mentions_covered": 0}
+    try:
+        from ..db.product_store import get_product_store
+
+        return get_product_store().backfill_structures()
+    except Exception as exc:
+        return degrade_return(
+            logger, exc, "product structure backfill failed",
+            {"attempted": 0, "resolved": 0, "mentions_covered": 0},
+        )
+
+
 def ingest_evidence_docs(
     evidence: list[Evidence],
     *,
@@ -232,12 +255,19 @@ def ingest_evidence_docs(
                         text = None
                     _index(idx, text)
 
+    # Structure linking was deferred out of every document (see
+    # `kb_index._attach_entities`); resolve it once per product now that the
+    # batch is done. Outside `timing.batch` on purpose — it is not part of any
+    # document's cost and folding it in would misattribute it.
+    structures = _backfill_product_structures()
+
     summary = {
         "docs": docs,
         "total": len(docs),
         "indexed": sum(1 for d in docs if d["status"] == "indexed"),
         "skipped": sum(1 for d in docs if d["status"] == "skipped"),
         "failed": sum(1 for d in docs if d["status"] == "failed"),
+        "product_structures": structures,
     }
     logger.info(
         "kb_ingest: %d indexed / %d skipped / %d failed of %d",

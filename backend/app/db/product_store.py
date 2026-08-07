@@ -207,6 +207,78 @@ class ProductStore:
         """Single-product structure link (kept for callers outside the ingest path)."""
         self._link_structures([(key, trade, grade, generic)])
 
+    def products_needing_structure(self, limit: int = 500) -> list[tuple[str, str, str, str]]:
+        """Registered products carrying neither a CAS nor a SMILES.
+
+        Mirrors the per-row `needs_link` test in ``upsert_mentions``. `cas`
+        defaults to "" rather than NULL, so emptiness has to be checked both
+        ways.
+        """
+        with self._session_factory() as session:
+            rows = (
+                session.query(KBProduct)
+                .filter(or_(KBProduct.cas.is_(None), KBProduct.cas == ""))
+                .filter(or_(KBProduct.smiles.is_(None), KBProduct.smiles == ""))
+                .order_by(KBProduct.mention_count.desc())
+                .limit(limit)
+                .all()
+            )
+            return [(r.norm_key, r.trade_name, r.grade, r.generic_name) for r in rows]
+
+    def count_needing_structure(self) -> int:
+        with self._session_factory() as session:
+            return int(
+                session.query(func.count(KBProduct.id))
+                .filter(or_(KBProduct.cas.is_(None), KBProduct.cas == ""))
+                .filter(or_(KBProduct.smiles.is_(None), KBProduct.smiles == ""))
+                .scalar()
+                or 0
+            )
+
+    def backfill_structures(self, *, limit: int = 500) -> dict:
+        """Resolve CAS/SMILES for every product still missing both.
+
+        This exists because doing it per document was the single largest cost in
+        a knowledge-base build — measured at 3.57s vs 0.19s for one coating
+        patent, a 19x difference concentrated entirely on chemistry-rich
+        documents.
+
+        Running it here rather than inline is not just deferral, it is
+        deduplication: `kb_products` is unique by ``norm_key``, so a trade name
+        appearing in eighty documents is one row and one lookup. The per-
+        document path re-attempted it up to five times *per document*.
+
+        Products that genuinely cannot be resolved will be retried by the next
+        batch. That is tolerable because this no longer blocks anything and
+        chemtools caches misses, but it is why the returned stats report
+        `resolved` separately from `attempted` — a persistently low ratio is the
+        signal that a "checked" marker would be worth the schema change.
+        """
+        pending = self.products_needing_structure(limit)
+        if not pending:
+            return {"attempted": 0, "resolved": 0, "mentions_covered": 0}
+
+        before = {key for key, _, _, _ in pending}
+        self._link_structures(pending)
+
+        still = {key for key, _, _, _ in self.products_needing_structure(limit)}
+        resolved = len(before - still)
+        with self._session_factory() as session:
+            covered = int(
+                session.query(func.coalesce(func.sum(KBProduct.mention_count), 0))
+                .filter(KBProduct.norm_key.in_(list(before)))
+                .scalar()
+                or 0
+            )
+        stats = {"attempted": len(pending), "resolved": resolved, "mentions_covered": covered}
+        logger.info(
+            "product structure backfill: %d unique products attempted, %d resolved, "
+            "covering %d mention events (%.1fx dedup)",
+            stats["attempted"], stats["resolved"], stats["mentions_covered"],
+            (covered / len(pending)) if pending else 1.0,
+        )
+        return stats
+
     def search(self, q: str = "", limit: int = 50, offset: int = 0) -> list[KBProduct]:
         with self._session_factory() as session:
             query = session.query(KBProduct)

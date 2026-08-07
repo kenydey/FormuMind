@@ -275,7 +275,18 @@ def _attach_entities(source_id: str, rows: list[dict]) -> None:
         if all_products and settings.product_extract_enabled:
             from ..db.product_store import get_product_store
 
-            get_product_store().upsert_mentions(source_id, all_products)
+            # `link_structures=False`: resolving 牌号 → CAS/SMILES is a network
+            # round trip per product, and this runs inside the serial index
+            # phase, so it dominated the whole build. Measured on one coating
+            # patent: 3.57s with linking, 0.19s without — and a non-chemistry
+            # patent 2.6x longer was unaffected either way, because the cost
+            # tracks chemistry density rather than size.
+            #
+            # The registry itself is still written here; only the lookup moves.
+            # `ProductStore.backfill_structures()` picks it up afterwards, where
+            # `kb_products` being unique by norm_key means one lookup per
+            # product instead of up to five per document.
+            get_product_store().upsert_mentions(source_id, all_products, link_structures=False)
     except Exception as exc:
         degrade_return(logger, exc, "kb entity extraction failed", None)
 
@@ -653,6 +664,14 @@ def kb_stats() -> dict:
             products = get_product_store().count()
         except Exception:
             products = 0
+        try:
+            from ..db.product_store import get_product_store
+
+            pending_products = get_product_store().count_needing_structure()
+        except Exception as exc:
+            pending_products = degrade_return(
+                logger, exc, "pending-structure count failed", 0
+            )
         return {
             "enabled": kb_enabled(),
             "sources": int(sources),
@@ -661,6 +680,10 @@ def kb_stats() -> dict:
             "embedded_chunks": embedded,
             "embedding_available": _embedding_probe(),
             "products": products,
+            # Visible on purpose: the trade-name synonym expansion these feed is
+            # unavailable until they resolve, so a number that never reaches 0
+            # is something to notice rather than something to discover later.
+            "products_pending_structure": pending_products,
             "stale_chunks": stale,
             **_vector_health(total, embedded, stale),
         }

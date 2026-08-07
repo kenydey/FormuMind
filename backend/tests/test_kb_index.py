@@ -437,3 +437,17 @@ def test_switching_the_model_marks_the_existing_corpus_stale(stores, monkeypatch
     assert stats["vector_mode"] == "stale"
     assert stats["stale_chunks"] == 1
     assert "重建索引" in stats["vector_hint"]
+
+
+def test_stats_exposes_the_pending_structure_count(stores):
+    """Pinned directly because `kb_stats` never raises — it degrades to a
+    partial dict, so a bug inside it shows up as a *missing key* rather than an
+    error. Asserting the key exists is what turns that back into a failure."""
+    src, _ = stores
+    sid = src.create(filename="p.md", title="T", source_kind="patent",
+                     full_text=MD, content_hash="hpend")
+    kb_index.index_source(sid, MD, embed=False)
+
+    stats = kb_index.kb_stats()
+    assert "products_pending_structure" in stats
+    assert isinstance(stats["products_pending_structure"], int)

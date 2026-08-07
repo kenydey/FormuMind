@@ -429,3 +429,91 @@ def test_a_failing_lookup_does_not_lose_the_other_products(stores, monkeypatch):
     )
     assert products.search("good")[0].smiles == "CCO"
     assert products.search("bad")[0].smiles in (None, "")
+
+
+# ── structure linking is deferred out of the per-document path ───────────────
+#
+# Measured: one coating patent indexed in 3.57s with inline linking and 0.19s
+# without, while a non-chemistry patent 2.6x longer was unaffected either way.
+# The cost tracks chemistry density, sits in the serial index phase, and is
+# entirely network.
+
+
+def test_indexing_does_not_resolve_structures(stores, monkeypatch):
+    """The whole point: no network lookup may happen while indexing."""
+    from app.services import chemtools, kb_index
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+    calls: list[str] = []
+    monkeypatch.setattr(chemtools, "name_to_cas", lambda n: calls.append(n) or None)
+    monkeypatch.setattr(chemtools, "name_to_smiles", lambda n: calls.append(n) or None)
+
+    text = "\n\n".join(
+        "使用 Epikote 828 环氧树脂与磷酸锌防锈颜料复配，固化剂为胺加成物。" * 3
+        for _ in range(3)
+    )
+    kb_index.index_source("src-defer", text)
+
+    assert calls == [], f"index_source performed {len(calls)} network lookups"
+
+
+def test_backfill_resolves_and_reports_dedup(stores, monkeypatch):
+    """One lookup per product, not one per document that mentions it."""
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+    looked_up: list[str] = []
+    monkeypatch.setattr(chemtools, "name_to_cas", lambda n: looked_up.append(n) or "64-17-5")
+    monkeypatch.setattr(chemtools, "name_to_smiles", lambda n: None)
+
+    # The same product mentioned by three different documents.
+    for src in ("s1", "s2", "s3"):
+        products.upsert_mentions(src, [{"trade_name": "Epikote", "grade": "828"}],
+                                 link_structures=False)
+    assert products.count_needing_structure() == 1, "registry must dedupe by norm_key"
+
+    stats = products.backfill_structures()
+    assert stats["attempted"] == 1
+    assert stats["resolved"] == 1
+    assert stats["mentions_covered"] == 3, "three mention events, one lookup"
+    assert products.search("epikote")[0].cas == "64-17-5"
+    assert products.count_needing_structure() == 0
+
+
+def test_backfill_is_idempotent(stores, monkeypatch):
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+    monkeypatch.setattr(chemtools, "name_to_cas", lambda n: "64-17-5")
+    monkeypatch.setattr(chemtools, "name_to_smiles", lambda n: None)
+
+    products.upsert_mentions("s1", [{"trade_name": "X", "grade": "1"}], link_structures=False)
+    products.backfill_structures()
+    second = products.backfill_structures()
+    assert second["attempted"] == 0, "a resolved product must not be looked up again"
+
+
+def test_unresolvable_products_do_not_block_the_batch(stores, monkeypatch):
+    """A product with no CAS anywhere must not fail the backfill for the rest."""
+    from app.services import chemtools
+
+    _, _, products = stores
+    monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+    monkeypatch.setattr(chemtools, "name_to_cas",
+                        lambda n: None if "Mystery" in n else "64-17-5")
+    monkeypatch.setattr(chemtools, "name_to_smiles", lambda n: None)
+
+    products.upsert_mentions("s1", [
+        {"trade_name": "Mystery", "grade": "9"},
+        {"trade_name": "Known", "grade": "1"},
+    ], link_structures=False)
+
+    stats = products.backfill_structures()
+    assert stats["attempted"] == 2
+    assert stats["resolved"] == 1
+    assert products.search("known")[0].cas == "64-17-5"
+    # The unresolved one stays pending, and is therefore visible in kb_stats.
+    assert products.count_needing_structure() == 1
