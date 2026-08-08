@@ -147,6 +147,17 @@ SQLite 默认**不**执行外键约束，且该开关是**每连接**生效的�
 所有 `ForeignKey` 声明都只是装饰。`db/database.py` 用 connect 监听器对每个
 新连接执行 `PRAGMA foreign_keys=ON`。
 
+同一个监听器还执行 `PRAGMA journal_mode=WAL`。默认的 `delete`（回滚日志）
+模式下**读写互斥**：任何写操作都会对整库加排他锁，所有读者排在后面。而这个
+进程本来就是线程共享一个库文件（TaskManager、进程内 worker、请求线程），
+于是一次长时间的入库事务会把无关的读请求全堵住——生产环境里的
+「database is locked」就是这么来的。WAL 允许任意多个读者与一个写者并发。
+
+按**每连接**设置而非只设一次，是因为该模式存在于**库文件**里，调用方可能指向
+另一个进程以 `delete` 模式建的文件（例如 alembic 自己建的 engine）。失败被容忍：
+`:memory:` 与网络文件系统不支持 WAL，那不是拒绝启动的理由。
+⚠️ 备份要连 `-wal` / `-shm` 一起拷——尚未 checkpoint 的已提交数据在 `-wal` 里。
+
 但并非所有跨表引用都能变成外键：当 `FORMUMIND_CAMPAIGN_BACKEND=datalab`
 时，被引用的行存在于外部 ELN 中，本地建约束会拒绝完全合法的数据。对这类
 引用的替代方案是**真的去跑一遍检查**（`db/integrity.py` /
@@ -758,6 +769,20 @@ dependencies = [
 > **pip 不报错，`pip check` 也说「No broken requirements found」**——降级之后环境
 > 内部是自洽的，只是不再是 requirements.txt 描述的那一个。唯一可靠的信号是拿实际
 > 版本和 pin 对比，这就是 `scripts/check_pins.py` 做的事。
+>
+> ⚠️ **但不能直接和 pin 比。** `pip install --dry-run --report` **不会**把
+> requirements.txt 当约束，于是 pyproject 的 `>=` 下界会解析到 PyPI 上的最新版；
+> 这对每个 extra 都一样，跟装了哪个 extra 无关。照这么比，六个 job 会永远报同样
+> 四条「升级」（alembic / fastapi / pydantic-settings / redis）——**一个从第一天
+> 起就红的门禁等于没有门禁**。
+>
+> 所以脚本比的是**对照组**：先解析一次不带任何 extra 的同一个工程（`--baseline`），
+> 减掉的正好是这类噪声，剩下的才归因于这个 extra，且**两个方向都算**——extra 把
+> 基础包往前拽也会失败，这是「和 pin 比」永远看不到的。
+> 两次解析都必须带 `--ignore-installed`：否则 `--dry-run` 会略过环境里已满足的包，
+> 两份报告被截断的程度不同（实测 1 个 vs 51 个），对照就失效了。脚本自己查不出
+> 这一点（截断的 baseline 和小工程无法区分），所以那个 flag 由
+> `backend/tests/test_ci_deps_workflow.py` 钉在工作流文件上。
 >
 > 这不是疏漏而是**已评审的取舍**：`literature.py` 用 `patent_client` 做**在线
 > USPTO/EPO 专利检索**，依赖是真实的。所以只在需要那个功能时才装；
