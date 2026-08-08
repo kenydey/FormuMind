@@ -262,7 +262,10 @@ def test_a_scan_is_readable_without_any_cloud_parser(monkeypatch):
     """
     from app.services import hybrid_parse, mineru_cloud, pdf_local
 
-    page = types.SimpleNamespace(
+    # The real dataclass, not a look-alike: `LocalPage` carries a `looks_scanned`
+    # property that the routing reads, and a SimpleNamespace with the same fields
+    # silently lacks it.
+    page = pdf_local.LocalPage(
         page_no=1, markdown="", char_count=0, n_tables=0, n_images=1,
         image_area_ratio=0.9, has_markdown_table=False,
     )
@@ -281,7 +284,7 @@ def test_a_text_pdf_never_pays_for_ocr(monkeypatch):
     from app.services import hybrid_parse, mineru_cloud, pdf_local
 
     called: list[int] = []
-    page = types.SimpleNamespace(
+    page = pdf_local.LocalPage(
         page_no=1, markdown="正文", char_count=900, n_tables=0, n_images=0,
         image_area_ratio=0.0, has_markdown_table=False,
     )

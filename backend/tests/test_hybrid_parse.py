@@ -607,3 +607,63 @@ def test_a_scan_is_not_lost_when_the_cloud_parser_times_out(
     monkeypatch.setattr(rapidocr_local, "ocr_pdf", lambda c: "RAPID TEXT")
 
     assert hybrid_parse.parse(b"%PDF scan") == "RAPID TEXT"
+
+
+# ── mixed documents: some pages scanned, some not ────────────────────────────
+
+
+def test_a_page_with_no_text_layer_is_escalated() -> None:
+    """`looks_scanned` is `all()` over pages, so a mixed file never reaches the
+    scanned branch. Escalation is the only route its blank pages have."""
+    assert hybrid_parse._needs_escalation(_page(1, markdown="", chars=3)) is True
+
+
+def test_a_mixed_document_escalates_only_the_pages_with_no_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The good pages must still not cost quota."""
+    pages = [
+        _page(1),                              # ordinary prose
+        _page(2, markdown="", chars=2),        # a scan
+        _page(3, markdown="", chars=2),        # a scan
+        _page(4),                              # ordinary prose
+    ]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
+    sent: list[int] = []
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(
+        pdf_local, "page_as_pdf",
+        lambda content, page_no: sent.append(page_no) or b"%PDF one page",
+    )
+    monkeypatch.setattr(
+        mineru_cloud, "parse_bytes",
+        lambda content, **kw: mineru_cloud.MinerUDocument(
+            blocks=[_block("text", text="RECOVERED")]
+        ),
+    )
+
+    output = hybrid_parse.parse(b"%PDF mixed")
+
+    assert sent == [2, 3], "only the text-layer-less pages"
+    assert output.count("RECOVERED") == 2
+
+
+def test_a_mixed_document_with_no_cloud_parser_reports_what_it_could_not_read(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """Half an empty document must not ship silently.
+
+    The pages are unreadable either way; the difference is whether an operator
+    is given a number they can act on.
+    """
+    import logging
+
+    pages = [_page(1), _page(2, markdown="", chars=2), _page(3, markdown="", chars=2)]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "未启用"))
+
+    with caplog.at_level(logging.WARNING):
+        output = hybrid_parse.parse(b"%PDF mixed")
+
+    assert "2/3 pages have no text layer" in caplog.text
+    assert output, "the readable page is still returned"

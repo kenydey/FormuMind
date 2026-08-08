@@ -186,7 +186,9 @@ def test_failed_prewarm_does_not_stop_the_pages(monkeypatch):
         lambda content, page: seen.append(page.page_no) or "escalated",
     )
 
-    page = types.SimpleNamespace(page_no=1, markdown="local", tables=1, images=0)
+    page = hybrid_parse.pdf_local.LocalPage(
+        page_no=1, markdown="local", char_count=500, n_tables=1, n_images=0
+    )
     monkeypatch.setattr(hybrid_parse.pdf_local, "extract_pages", lambda c, **kw: [page])
     monkeypatch.setattr(hybrid_parse.pdf_local, "looks_scanned", lambda pages: False)
     monkeypatch.setattr(hybrid_parse.pdf_local, "assemble", lambda parts: parts[0][1])
@@ -211,7 +213,9 @@ def test_prewarm_runs_once_for_a_whole_document(monkeypatch):
     monkeypatch.setattr(hybrid_parse, "_escalate_page", lambda content, page: "escalated")
 
     pages = [
-        types.SimpleNamespace(page_no=n, markdown="local", tables=1, images=0)
+        hybrid_parse.pdf_local.LocalPage(
+            page_no=n, markdown="local", char_count=500, n_tables=1, n_images=0
+        )
         for n in (1, 2, 3)
     ]
     monkeypatch.setattr(hybrid_parse.pdf_local, "extract_pages", lambda c, **kw: pages)
@@ -232,7 +236,9 @@ def test_no_prewarm_when_no_page_needs_escalation(monkeypatch):
     monkeypatch.setattr(
         vision_extract, "prewarm", lambda: warmed.append(True) or (True, 0.0, "")
     )
-    page = types.SimpleNamespace(page_no=1, markdown="local", tables=0, images=0)
+    page = hybrid_parse.pdf_local.LocalPage(
+        page_no=1, markdown="local", char_count=500, n_tables=0, n_images=0
+    )
     monkeypatch.setattr(hybrid_parse.pdf_local, "extract_pages", lambda c, **kw: [page])
     monkeypatch.setattr(hybrid_parse.pdf_local, "looks_scanned", lambda p: False)
     monkeypatch.setattr(hybrid_parse.pdf_local, "assemble", lambda parts: parts[0][1])

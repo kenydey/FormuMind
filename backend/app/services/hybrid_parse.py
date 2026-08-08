@@ -52,8 +52,17 @@ def _needs_escalation(page: pdf_local.LocalPage) -> bool:
     A table the local parser already rendered as a pipe table is *not* worth
     re-parsing — that check is what keeps the quota bill proportional to the
     hard pages rather than to the document.
+
+    A page with no text layer at all is the worst-handled page there is, and it
+    only reaches here in a *mixed* document: `looks_scanned` is `all()` over the
+    pages, so a file with one text cover sheet and twenty scans is not "a scan"
+    and never sees the scanned branch. While the layout parser OCR-ed every
+    document those pages were quietly filled in; with that off they would come
+    back empty, which is the failure mode with no symptom.
     """
     settings = get_settings()
+    if page.looks_scanned:
+        return True
     if page.n_tables and not page.has_markdown_table:
         return True
     if page.image_area_ratio >= float(settings.hybrid_image_area_threshold):
@@ -220,7 +229,6 @@ def _scanned_without_cloud(content: bytes) -> str | None:
     because it otherwise runs on every document in the corpus, but correct for
     this one, where there is no text to lose and nothing else can read it.
     """
-    from . import pdf_local as _local
     from . import rapidocr_local
 
     text = rapidocr_local.ocr_pdf(content)
@@ -228,7 +236,10 @@ def _scanned_without_cloud(content: bytes) -> str | None:
         logger.info("hybrid: scanned document read by local OCR (no cloud)")
         return text
 
-    text = _local.ocr_markdown(
+    # Same page cap as RapidOCR on purpose: this is the same job by another
+    # engine, and a 200-page scan must not be able to swallow an ingest run
+    # merely because the first reader was unavailable.
+    text = pdf_local.ocr_markdown(
         content, max_pages=int(get_settings().rapidocr_max_pages)
     )
     if text:
@@ -260,6 +271,20 @@ def parse(content: bytes) -> str | None:
             ocr = _scanned_without_cloud(content)
             if ocr:
                 return ocr
+        else:
+            # Mixed document, no cloud parser: the text-layer-less pages have
+            # nowhere to go. Escalation is what normally rescues them and it
+            # needs MinerU. Say so per document rather than shipping a
+            # half-empty one silently — the pages are gone either way, but an
+            # operator can act on a number.
+            blank = sum(1 for p in pages if p.looks_scanned)
+            if blank:
+                logger.warning(
+                    "hybrid: %d/%d pages have no text layer and no parser can "
+                    "read them (MinerU off: %s; enable it or "
+                    "FORMUMIND_PDF_LOCAL_OCR)",
+                    blank, len(pages), hint,
+                )
         logger.debug("hybrid: local only (%s)", hint)
         return local_only or None
 

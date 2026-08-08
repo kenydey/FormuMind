@@ -198,3 +198,54 @@ def test_migrate_skips_when_json_absent(tmp_path):
     sql_store = SqlExperimentStore(make_session_factory(engine))
     migrated = migrate_from_stores(str(tmp_path / "no_such_file.json"), sql_store)
     assert migrated == 0
+
+
+# ── SQLite journalling ────────────────────────────────────────────────────────
+
+
+def test_file_backed_sqlite_uses_wal(tmp_path):
+    """`delete` journalling makes readers and writers mutually exclusive.
+
+    This process shares one database file across request threads, the
+    TaskManager and the in-process workers, so under the default rollback
+    journal a long ingest transaction blocks every unrelated read until it
+    commits — which is what "database is locked" looked like in production.
+    """
+    from sqlalchemy import text
+
+    engine = make_engine(f"sqlite:///{tmp_path}/wal.db")
+    with engine.connect() as conn:
+        assert conn.execute(text("PRAGMA journal_mode")).scalar().lower() == "wal"
+
+
+def test_foreign_keys_are_still_enforced(tmp_path):
+    """The pragma that WAL was added alongside must not have been displaced."""
+    from sqlalchemy import text
+
+    engine = make_engine(f"sqlite:///{tmp_path}/fk.db")
+    with engine.connect() as conn:
+        assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+
+def test_an_in_memory_database_still_connects_without_wal():
+    """WAL is impossible for `:memory:`; that must cost the mode, not the engine.
+
+    The whole test suite runs on in-memory SQLite, so a pragma that raised here
+    would take everything down with it.
+    """
+    from sqlalchemy import text
+
+    engine = make_engine("sqlite:///:memory:")
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT 1")).scalar() == 1
+        assert conn.execute(text("PRAGMA journal_mode")).scalar().lower() != "wal"
+
+
+# No behavioural reader-vs-writer test here, deliberately. The obvious one —
+# open `BEGIN IMMEDIATE` on one connection and read from another — passes with
+# WAL turned off too: `BEGIN IMMEDIATE` takes a RESERVED lock, and a rollback
+# journal only blocks readers once the writer escalates to EXCLUSIVE during
+# commit, which is not a state a test can hold open deterministically. Verified
+# by reverting the pragma and watching it still pass. `journal_mode` above is
+# the mechanism, and asserting it is honest; a green test that would pass either
+# way is not.

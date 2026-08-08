@@ -26,13 +26,28 @@ def _ensure_sqlite_dir(db_url: str) -> None:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
-def _enable_sqlite_foreign_keys(engine: Engine) -> None:
-    """Turn on SQLite's foreign-key enforcement.
+def _configure_sqlite(engine: Engine) -> None:
+    """Per-connection SQLite pragmas: foreign keys, and WAL journalling.
 
-    SQLite ships with ``PRAGMA foreign_keys=OFF`` and applies it per
-    connection, so a declared ForeignKey is decorative until this runs —
+    **foreign_keys.** SQLite ships with ``PRAGMA foreign_keys=OFF`` and applies
+    it per connection, so a declared ForeignKey is decorative until this runs —
     dev and the whole test suite would happily accept orphan rows that
     PostgreSQL rejects in production, which is the worst way to find out.
+
+    **journal_mode=WAL.** The default is ``delete`` (a rollback journal), under
+    which readers and writers are mutually exclusive: any write takes an
+    exclusive lock on the whole database and every reader blocks behind it.
+    This process is thread-backed by design — the TaskManager, the in-process
+    workers and the request threads all share one file — so a long ingest
+    transaction stalls unrelated reads until it commits, which is what "database
+    is locked" in production looks like. WAL lets any number of readers run
+    concurrently with one writer.
+
+    Set per connection rather than once, because the mode lives in the database
+    file and a caller may point at a file some other process created in
+    ``delete`` mode. Failure is not fatal: WAL is unavailable for ``:memory:``
+    databases and on network filesystems, and neither is a reason to refuse to
+    start — those deployments simply keep the old locking behaviour.
     """
     from sqlalchemy import event
 
@@ -41,6 +56,12 @@ def _enable_sqlite_foreign_keys(engine: Engine) -> None:
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys=ON")
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+            except Exception:
+                # An in-memory or network-hosted database cannot do WAL. Losing
+                # the concurrency win is acceptable; failing to connect is not.
+                pass
         finally:
             cursor.close()
 
@@ -52,7 +73,7 @@ def make_engine(db_url: str) -> Engine:
         connect_args = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(db_url, future=True, connect_args=connect_args)
     if db_url.startswith("sqlite"):
-        _enable_sqlite_foreign_keys(engine)
+        _configure_sqlite(engine)
     from ..config import get_settings
 
     if get_settings().environment not in ("production", "prod"):

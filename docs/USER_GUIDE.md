@@ -1099,7 +1099,7 @@ defaults.
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
 | `FORMUMIND_FULLTEXT_ENRICH` | `false` | **The current full-text switch**: upgrade abstract-level hits to full text and index them (requires network; false by default to keep tests offline) |
 | `FORMUMIND_PATENT_PREFER_HTML` | `true` | Take patent text from the Google Patents landing page — one request, ~0.7 s, and no OCR. Set false to prefer the PDF |
-| `FORMUMIND_PDF_LOCAL_OCR` | `false` | Per-page OCR inside the local layout parser (pymupdf4llm). ⚠️ **The library defaults this on**, and that tier runs on every PDF ahead of everything else — so with Tesseract on the host, every page is OCR-ed first. Measured on a 6-page image-only PDF: 16.7 s on / 0.8 s off. Scans are unaffected: a document with no text layer is detected and handed to RapidOCR or MinerU |
+| `FORMUMIND_PDF_LOCAL_OCR` | `false` | Per-page OCR inside the local layout parser (pymupdf4llm). ⚠️ **The library defaults this on**, and that tier runs on every PDF ahead of everything else — so with Tesseract on the host, every page is OCR-ed first. Measured on a 6-page image-only PDF: 16.7 s on / 0.8 s off. Scans are unaffected: a document with no text layer is detected and handed to RapidOCR or MinerU. A **mixed** document (a few text pages plus scans) is not "a scan" — that test is `all()` over pages — so its text-layer-less pages are escalated to MinerU per page instead; with MinerU off, one warning per document names how many pages could not be read |
 | `FORMUMIND_MINERU_PAGE_TIMEOUT_S` | `90` | Wait budget for a **single** escalated page. Escalation is sequential, so timeouts accumulate page by page — raising this on a bad connection only doubles the waiting |
 | `FORMUMIND_MINERU_TIMEOUT_S` | `300` | Wait budget for sending a **whole** scanned document to MinerU |
 | `FORMUMIND_MINERU_MAX_PAGE_FAILURES` | `3` | Consecutive page failures before escalation is abandoned for that document (`0` disables). Without it one unreachable network is retried per page, paying the full timeout up to 20 times |
@@ -1134,6 +1134,15 @@ clear the stored value.
   SQLite (idempotent; the original file is kept as an audit trail).
 - For multi-process deployments, point `FORMUMIND_DB_URL` at Postgres — no code
   changes required.
+- **SQLite runs in WAL journal mode** (set on every connection). Under the
+  default `delete` mode readers and writers are mutually exclusive, so one long
+  ingest transaction blocks every unrelated read until it commits — that is what
+  "database is locked" looks like in production. WAL allows any number of
+  readers concurrently with one writer.
+  ⚠️ **Back up `formumind.db-wal` and `formumind.db-shm` alongside the `.db`
+  file**: committed data that has not been checkpointed yet lives in `-wal`, so
+  copying the `.db` alone loses it. In-memory and network-hosted databases
+  cannot do WAL and silently keep the old mode rather than failing to start.
 
 ---
 

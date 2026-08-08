@@ -238,6 +238,15 @@ def ocr_markdown(content: bytes, *, max_pages: int = 0) -> str | None:
     Bounded by *max_pages* for the same reason every other OCR path is: one
     200-page scan must not be able to consume an entire ingest run.
     """
+    if not get_settings().pdf_layout_analysis:
+        # `use_ocr` is a layout-parser argument; the legacy path has no OCR at
+        # all and silently discards keywords it does not know. Returning early
+        # says so instead of spending a full parse to produce nothing.
+        logger.info(
+            "pdf_local: local OCR needs layout analysis "
+            "(FORMUMIND_PDF_LAYOUT_ANALYSIS=true) — skipping"
+        )
+        return None
     if max_pages > 0:
         pages_in_doc = page_count(content)
         if pages_in_doc > max_pages:

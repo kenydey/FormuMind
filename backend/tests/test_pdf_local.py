@@ -534,3 +534,38 @@ def test_legacy_mode_is_not_handed_an_argument_it_would_reject(
         pdf_local.get_settings(), "pdf_layout_analysis", False, raising=False
     )
     assert "use_ocr" not in pdf_local._markdown_kwargs()
+
+
+def test_deliberate_ocr_reports_that_legacy_mode_cannot_do_it(
+    three_page_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`use_ocr` is a layout-parser argument; legacy mode drops it silently.
+
+    Without this the scanned-document backstop would run a full parse, get the
+    same empty result it already had, and give no reason why.
+    """
+    monkeypatch.setattr(
+        pdf_local.get_settings(), "pdf_layout_analysis", False, raising=False
+    )
+    assert pdf_local.ocr_markdown(three_page_pdf) is None
+
+
+def test_deliberate_ocr_overrides_the_off_by_default_setting(
+    three_page_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The setting governs *every* document; this call is about one that needs it."""
+    settings = pdf_local.get_settings()
+    monkeypatch.setattr(settings, "pdf_layout_analysis", True, raising=False)
+    monkeypatch.setattr(settings, "pdf_local_ocr", False, raising=False)
+    seen = _captured_kwargs(monkeypatch)
+
+    pdf_local.ocr_markdown(three_page_pdf)
+    assert seen.get("use_ocr") is True
+
+
+def test_deliberate_ocr_refuses_a_document_past_the_page_cap(
+    three_page_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One long scan must not be able to consume a whole ingest run."""
+    assert pdf_local.ocr_markdown(three_page_pdf, max_pages=2) is None
+    assert pdf_local.ocr_markdown(three_page_pdf, max_pages=3) is not None
