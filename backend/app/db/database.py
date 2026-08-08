@@ -56,6 +56,10 @@ def _configure_sqlite(engine: Engine) -> None:
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys=ON")
+            # Wait up to 30 s before raising "database is locked" — Celery
+            # and Uvicorn share the same file; a write arriving during another
+            # write should block briefly instead of failing immediately.
+            cursor.execute("PRAGMA busy_timeout=30000")
             try:
                 cursor.execute("PRAGMA journal_mode=WAL")
             except Exception:
