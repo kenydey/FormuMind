@@ -1281,7 +1281,7 @@ def _paperqa_answer(
             if not text:
                 continue
             key = ev.identifier or ev.title
-            docs.aadd_texts(text, citation=ev.title, docname=key)
+            docs.aadd_texts(text, doc=None)
             by_key[key] = ev
         answer = docs.query(question)
         text = getattr(answer, "answer", None) or str(answer)
