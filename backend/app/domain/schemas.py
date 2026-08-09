@@ -160,8 +160,7 @@ class Ingredient(BaseModel):
     amount_display: str = ""
     notes: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
-    grounding_confidence: Literal["high", "low"] = "high"
-
+    grounding_confidence: Literal["high", "medium", "low"] = "high"
     @model_validator(mode="after")
     def _sync_formula_fields(self) -> Ingredient:
         if self.mf_structure and not self.formula:
@@ -205,8 +204,7 @@ class RecommendedFormulaComponent(BaseModel):
     weight_pct: float | None = Field(default=None, ge=0, le=100)
     notes: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
-    grounding_confidence: Literal["high", "low"] = "high"
-
+    grounding_confidence: Literal["high", "medium", "low"] = "high"
 
 class RecommendedFormula(BaseModel):
     """Structured formulation recommendation from the LLM recommend engine."""
