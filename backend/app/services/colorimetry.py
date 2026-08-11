@@ -9,7 +9,7 @@ values (a screening-level approximation, not a spectral simulation).
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import log_handled_exception
 from ..domain.chemistry import _PIGMENT_ROLES, _density_gcm3
 from ..domain.schemas import Formulation
 

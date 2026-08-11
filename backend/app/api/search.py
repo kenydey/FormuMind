@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from ..domain.schemas import Evidence, Requirement
 from ..services import literature
-from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..worker.tasks import run_search_task
 from ._dispatch import submit
 

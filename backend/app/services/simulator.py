@@ -10,7 +10,7 @@ and 3D-handoff contracts be exercised today.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import log_handled_exception
 from dataclasses import dataclass, field
 
 from ..domain.chemistry import amine_epoxy_ratio

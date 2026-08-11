@@ -28,7 +28,6 @@ def _entity_display_name(entity_id: str, cache: dict[str, str]) -> str:
 
 
 def link_to_view(link: KGEntityLink, *, name_cache: dict[str, str] | None = None) -> KGRelationView:
-    cache = name_cache or {}
     evidence = [
         RelationEvidence(
             source_id=ref.get("source_id", ""),

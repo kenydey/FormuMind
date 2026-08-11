@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .schemas import CompositionStatus, EntityKind, Evidence, EvidenceEntityRef
+from .schemas import CompositionStatus, Evidence
 
 RetrievalMode = Literal["auto", "semantic", "enumerative", "hybrid"]
 

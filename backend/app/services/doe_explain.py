@@ -9,7 +9,7 @@ import math
 from typing import Literal
 
 from ..domain.project_spec import primary_objective
-from ..domain.schemas import DOEPlan, DOERun, ExperimentRecord, Requirement, RunExplanation
+from ..domain.schemas import DOEPlan, ExperimentRecord, Requirement, RunExplanation
 
 
 def experiment_id(exp: ExperimentRecord, idx: int) -> str:

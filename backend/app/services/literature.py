@@ -11,11 +11,14 @@ import concurrent.futures
 import logging
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
-from .errors import degrade_return, log_handled_exception, optional_import
+from .errors import degrade_return, optional_import
+
+if TYPE_CHECKING:
+    from .content_filter import FilterReport
 
 logger = logging.getLogger(__name__)
 

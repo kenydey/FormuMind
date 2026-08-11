@@ -8,7 +8,6 @@ from ..config import Settings, get_settings
 from ..domain.chat_schemas import SourcedClaim, StructuredAnswer
 from ..domain.schemas import Evidence
 from ..pipeline.claim_checker import ClaimVerdict, verify_claim_offline, verify_claims_llm
-from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
 

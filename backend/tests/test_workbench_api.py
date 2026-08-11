@@ -216,3 +216,39 @@ def test_baybe_recommend_accepts_workbench_campaign_id(tmp_path):
         body = res.json()
         assert len(body["plan"]["runs"]) == 2
         assert body["campaign_state"]
+
+
+def test_search_experiments_local_scan(tmp_path, monkeypatch):
+    """Regression: the local-SQLite-scan fallback imported from the
+    nonexistent app.api.database module and crashed with ModuleNotFoundError
+    on every request that reached it (the default config with no live
+    Datalab, or campaign_backend=sqlite as set here)."""
+    from app.db.database import default_session_factory
+    from app.db.models import Campaign
+
+    db_path = tmp_path / "search.db"
+    monkeypatch.setenv("FORMUMIND_DB_URL", f"sqlite:///{db_path}")
+    with default_session_factory()() as session:
+        session.add(
+            Campaign(
+                name="c1",
+                sample_refs=[
+                    {
+                        "id": 1,
+                        "item_id": "fm_c1_r1",
+                        "status": "Pending",
+                        "tags": ["urgent"],
+                        "planned_params": {},
+                        "measurements": {},
+                    }
+                ],
+            )
+        )
+        session.commit()
+
+    client = TestClient(app)
+    res = client.get("/api/experiments/search", params={"q": "urgent"})
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body) == 1
+    assert body[0]["item_id"] == "fm_c1_r1"

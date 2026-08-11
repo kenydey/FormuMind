@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..services.errors import log_handled_exception
 import asyncio
 import json
 import time
@@ -10,7 +10,6 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
-from loguru import logger
 
 from ..config import get_settings
 from ..domain.schemas import AsyncTaskAccepted, TaskState, TaskStatus
@@ -200,7 +199,7 @@ async def stream_task_progress(task_id: str) -> StreamingResponse:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("SSE Redis unavailable for {}: %s", task_id, exc)
+                logger.warning("SSE Redis unavailable for %s: %s", task_id, exc)
                 async for event in _poll_until_terminal(task_id):
                     yield _sse_frame(event)
 

@@ -1,7 +1,7 @@
 """Persist API secrets to the project ``.env`` file and sync runtime overlay."""
 from __future__ import annotations
 
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import log_handled_exception
 import logging
 import os
 import re

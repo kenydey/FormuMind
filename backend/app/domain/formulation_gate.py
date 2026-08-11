@@ -9,7 +9,6 @@ from .knowledge import RAW_MATERIALS, resolve_material_name
 from .schemas import (
     Formulation,
     Ingredient,
-    ProductDomain,
     RecommendedFormula,
     RecommendedFormulaComponent,
     RecommendedFormulaListResponse,

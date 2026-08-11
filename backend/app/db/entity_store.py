@@ -82,13 +82,8 @@ class EntityStore:
 
     def upsert_entity(self, session: Session, **fields) -> KGEntity:
         eid = fields["id"]
-        row = session.get(KGEntity, eid)
-        if row is None:
-            row = KGEntity(id=eid, created_at=_utcnow(), **{
-                k: v for k, v in fields.items() if k != "id"
-            })
-            session.add(row)
-        else:
+
+        def _merge(row: KGEntity) -> KGEntity:
             # Merge semantics: None values are skipped by design so callers
             # never accidentally clobber curated fields with blanks.
             for key, val in fields.items():
@@ -105,7 +100,30 @@ class EntityStore:
                 else:
                     setattr(row, key, val)
             row.updated_at = _utcnow()
-        return row
+            return row
+
+        row = session.get(KGEntity, eid)
+        if row is not None:
+            return _merge(row)
+
+        new_row = KGEntity(id=eid, created_at=_utcnow(), **{
+            k: v for k, v in fields.items() if k != "id"
+        })
+        # Two sessions can race to insert the same new entity id (e.g. two
+        # documents mentioning the same CAS number ingested concurrently);
+        # without this guard the loser's IntegrityError propagates out of
+        # upsert_entity and aborts the whole document's KG extraction.
+        sp = session.begin_nested()
+        try:
+            session.add(new_row)
+            session.flush()
+        except IntegrityError:
+            sp.rollback()
+            row = session.get(KGEntity, eid)
+            if row is not None:
+                return _merge(row)
+            raise
+        return new_row
 
     def add_mention(
         self,

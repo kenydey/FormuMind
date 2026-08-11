@@ -36,6 +36,19 @@ def test_pydoe_lhs_plan():
             assert f.low <= run.natural[f.name] <= f.high
 
 
+@pytest.mark.skipif(not pydoe_available(), reason="pydoe not installed")
+def test_pydoe_lhs_explores_full_factor_range():
+    """LHS/sobol are already unit-scaled ([0, 1]); they must not be run through
+    the coded (v + 1) / 2 remap meant for +-1-scaled designs like ccd/bbdesign,
+    which used to collapse every factor into its upper half."""
+    plan = build_doe_plan(FACTORS, "lhs", engine="pydoe", n=200)
+    for f in FACTORS:
+        span = f.high - f.low
+        naturals = [run.natural[f.name] for run in plan.runs]
+        assert min(naturals) <= f.low + 0.25 * span
+        assert max(naturals) >= f.high - 0.25 * span
+
+
 def test_pydoe_design_falls_back_to_native(monkeypatch):
     monkeypatch.setattr("app.services.engines.pydoe_engine.pydoe_available", lambda: True)
 

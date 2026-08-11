@@ -8,7 +8,6 @@ natural units against the supplied factor ranges.
 from __future__ import annotations
 
 import itertools
-import math
 
 import numpy as np
 

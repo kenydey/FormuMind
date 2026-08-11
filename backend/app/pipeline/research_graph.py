@@ -1,7 +1,7 @@
 """CRAG research graph — ColBERT retrieve → grade → fallback → generate."""
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..services.errors import degrade_return
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, Literal, TypedDict
@@ -13,7 +13,7 @@ from ..config import Settings, get_settings
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..domain.tradeoff_schemas import TradeOffAnalysis
-from ..services import chemtools, colbert_store, llm
+from ..services import colbert_store, llm
 from ..services.federated_search import FederatedSearchEngine
 from ..services.rag import llm_rerank
 
@@ -70,6 +70,8 @@ class ResearchGraphState(TypedDict, total=False):
     claim_check_pass_rate: float
     claim_check_engine: str
     retrieval_queries: list[str]
+    tradeoff: dict[str, Any] | None
+    recommend_meta: dict[str, Any] | None
 
 
 ProgressCallback = Callable[[str, str, dict[str, Any] | None], None]
@@ -108,7 +110,7 @@ def grade_evidence(topic: str, evidence: list[Evidence], settings: Settings | No
     try:
         data = llm.complete_json(_grade_prompt(topic, evidence))
     except Exception as exc:
-        logger.warning("Grade LLM failed: %s", exc)
+        logger.warning("Grade LLM failed: {}", exc)
         data = None
 
     if isinstance(data, dict) and data.get("verdict") in ("correct", "incorrect"):
@@ -169,7 +171,7 @@ def _retrieval_queries(
     from . import subquestions
 
     req = state.get("req")
-    domain = getattr(req, "domain", "") or ""
+    domain = req.domain.value if req else ""
     topic = state.get("topic") or query
     questions = subquestions.decompose(topic, settings.deep_subquestions, domain)
     # The built query carries requirement context the raw topic lacks, so keep it
@@ -212,7 +214,7 @@ def retrieve_node(
         try:
             colbert_store.bootstrap_seed_corpus(settings)
         except Exception as exc:
-            logger.warning("ColBERT bootstrap failed (backend=%s): %s", backend, exc)
+            logger.warning("ColBERT bootstrap failed (backend={}): {}", backend, exc)
     queries = _retrieval_queries(state, settings, mode)
     state["retrieval_queries"] = queries
     if len(queries) > 1:
@@ -374,8 +376,13 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
             chat = f"已推荐 {len(recommended)} 条配方。"
         else:
             chat = "未能生成有效配方。"
-        if gate_warnings:
-            chat += "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in gate_warnings)
+        # rec_resp.warnings carries LLM-synthesis + grounding warnings; without
+        # merging it in here it's computed and then dropped on the floor —
+        # api/formulations.py's near-duplicate path returns it directly, this
+        # graph path had nowhere for it to go.
+        all_warnings = list(rec_resp.warnings) + list(gate_warnings)
+        if all_warnings:
+            chat += "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in all_warnings)
     else:
         chat = "缺少需求参数，无法推荐配方。"
 
@@ -444,9 +451,10 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
             "diversity_applied": diversity_applied,
         }
         mechanism, chat = llm.synthesize_research(req, grounded, recommended)
-        if gate_warnings:
+        all_warnings = list(rec_resp.warnings) + list(gate_warnings)
+        if all_warnings:
             chat += "\n\n**Formulation validation:**\n" + "\n".join(
-                f"- {w}" for w in gate_warnings
+                f"- {w}" for w in all_warnings
             )
 
     state["mechanism"] = mechanism
@@ -643,8 +651,21 @@ def resolve_grounded_evidence(
     # Fast path for recommend: skip CRAG graph (HyDE, sub-questions, grading)
     # and use the active retrieval backend directly.
     from ..services import colbert_store
+    pre = pre_index or []
+    if pre:
+        colbert_store.index_evidence(pre, settings=settings)
     hits = colbert_store.search(q, k=settings.colbert_top_k, settings=settings)
     evidence = [h.evidence for h in hits]
+    # User-supplied sources are high-trust: keep them as candidates ahead of
+    # the retrieved hits (deduped), mirroring retrieve_node's pre_index merge —
+    # otherwise a caller's explicit sources (POST /formulations/recommend's
+    # ``body.sources``) are silently dropped the moment the KB query returns
+    # anything at all.
+    if pre:
+        pre_keys = {e.identifier or e.title for e in pre}
+        evidence = list(pre) + [
+            e for e in evidence if (e.identifier or e.title) not in pre_keys
+        ]
 
     return GroundedEvidenceResult(
         query=query,

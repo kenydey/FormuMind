@@ -104,7 +104,10 @@ export default function SourcesPanel() {
 
   const searchableTypes = searchSourceTypes(sourceTypes);
   const canSearch =
-    searchQuery.trim().length > 0 && searchableTypes.length > 0 && !searchBusy;
+    searchQuery.trim().length > 0 &&
+    searchableTypes.length > 0 &&
+    !searchBusy &&
+    !deepResearchBusy;
 
   const kbDocByIdentifier: Record<string, { status: string; error?: string | null }> = {};
   if (kbIngest) {
@@ -192,7 +195,7 @@ export default function SourcesPanel() {
         <button
           type="button"
           onClick={() => void refreshKnowledgeBase()}
-          disabled={searchBusy || !searchQuery.trim()}
+          disabled={searchBusy || deepResearchBusy || !searchQuery.trim()}
           className="hover:text-accent2 disabled:opacity-40"
         >
           📥 补充知识库

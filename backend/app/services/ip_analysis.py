@@ -7,7 +7,7 @@ back to keyword-matching when no LLM is configured.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return
 import re
 
 from ..domain.schemas import (
@@ -187,13 +187,13 @@ def _llm_analysis(form: Formulation, patents: list) -> IPReport | None:
                 claim_overlap=r.get("claim_overlap", ""),
                 recommendation=r.get("recommendation", ""),
             )
-            for r in data.get("risks", [])
+            for r in (data.get("risks") or [])
         ]
         return IPReport(
             formulation_name=form.name,
             novelty_score=float(data.get("novelty_score", 0.5)),
             risks=risks,
-            whitespace_hints=data.get("whitespace_hints", []),
+            whitespace_hints=data.get("whitespace_hints") or [],
             raw_patents_searched=len(patents),
             engine="llm",
         )

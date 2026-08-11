@@ -25,6 +25,15 @@ numpy==2.4.6
 httpx==0.28.1
 tenacity>=8.2.0
 loguru>=0.7
+# Declared as core (non-extra) deps in pyproject.toml but were missing from this
+# lock file, so a Docker image built from `pip install -r requirements.txt` (per
+# the Dockerfile/CI) never had them installed. rank-bm25 is imported unguarded at
+# module scope in hybrid_search.py and unguarded inside rag.py's BM25FAISSStore —
+# both crash with ModuleNotFoundError on first use, not at boot, since the import
+# is lazy at the API-handler level. jieba degrades gracefully (try/except) but
+# silently loses Chinese tokenization quality without it.
+rank-bm25==0.2.2
+jieba==0.42.1
 # The last-resort PDF tier. Pure Python, no dependencies, a few hundred KB —
 # and without it the image ships with *no* PDF parser at all, so an upload
 # returns 200 having extracted nothing. The richer parsers stay optional

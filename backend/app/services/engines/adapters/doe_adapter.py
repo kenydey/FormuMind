@@ -7,14 +7,25 @@ from ....domain.doe import decode
 from ....domain.schemas import DOEFactor, DOEPlan, DOERun
 
 
-def _row_to_unit_interval(value: float) -> float:
-    """Map assorted pyDOE scales to [0, 1]."""
+#  pyDOE designs whose raw output is already unit-interval-scaled (each cell in
+#  [0, 1]): lhs/sobol sample the unit hypercube directly, and simplex_lattice's
+#  cells are mixture proportions. Every other pydoe design (ccd, bbdesign) is
+#  coded on a [-1, 1]-ish scale (ccd's rotatable axial points legitimately
+#  exceed +-1) and needs the (v + 1) / 2 remap below.
+_UNIT_SCALE_DESIGNS = frozenset({"lhs", "sobol", "simplex_lattice"})
+
+
+def _row_to_unit_interval(value: float, *, already_unit: bool) -> float:
+    """Map a pyDOE raw value to [0, 1], given whether its design is unit-scaled.
+
+    A magnitude-only check can't disambiguate the two scales — a raw value of,
+    say, 0.5 is valid on both — so the caller must say which one `design` uses
+    rather than have this guess from the value's range.
+    """
     v = float(value)
-    if -1.05 <= v <= 1.05:
-        return (v + 1.0) / 2.0
-    if 0.0 <= v <= 1.0:
-        return v
-    return float(np.clip(v, 0.0, 1.0))
+    if already_unit:
+        return float(np.clip(v, 0.0, 1.0))
+    return float(np.clip((v + 1.0) / 2.0, 0.0, 1.0))
 
 
 def unit_to_coded(unit: float) -> float:
@@ -38,12 +49,13 @@ def matrix_to_doe_plan(
             f"Matrix has {matrix.shape[1]} columns but {len(factors)} factors were supplied"
         )
 
+    already_unit = design in _UNIT_SCALE_DESIGNS
     runs: list[DOERun] = []
     for idx, row in enumerate(matrix, start=1):
         coded: dict[str, float] = {}
         natural: dict[str, float] = {}
         for factor, raw in zip(factors, row):
-            unit = _row_to_unit_interval(float(raw))
+            unit = _row_to_unit_interval(float(raw), already_unit=already_unit)
             c = unit_to_coded(unit)
             coded[factor.name] = c
             natural[factor.name] = decode(c, factor)

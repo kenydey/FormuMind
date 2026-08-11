@@ -25,12 +25,15 @@ export async function applyEnrichedLeaderboard(
   set: SliceSet,
   get: SliceGet,
   forms: Formulation[],
-  extra?: (draft: import("./types").AppState) => void
+  extra?: (draft: import("./types").AppState) => void,
+  options?: { skipLeaderboardReplace?: boolean }
 ): Promise<Formulation[]> {
   const { requirement } = get();
   const { formulations, warnings } = await enrichFormulationsViaValidate(forms, requirement);
   set((draft) => {
-    draft.leaderboard = formulations;
+    if (!options?.skipLeaderboardReplace) {
+      draft.leaderboard = formulations;
+    }
     draft.formulationValidateWarnings = warnings;
     extra?.(draft);
   });

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..errors import log_handled_exception
 from ...domain.schemas import DOEFactor, DOEPlan
 from .native_doe_engine import build_native_plan
 from .pydoe_engine import PYDOE_DESIGNS, build_plan_with_fallback, pydoe_available

@@ -99,6 +99,22 @@ def test_add_and_all_round_trip(tmp_path):
         store.close()
 
 
+def test_cure_temperature_c_none_round_trips_as_none(tmp_path):
+    """An experiment with no cure temperature (e.g. an air-dry formulation)
+    must read back as None, not silently become 0.0 (indistinguishable from
+    "cured at 0C") once round-tripped through the Datalab backend."""
+    store = _store_with_mock(tmp_path)
+    try:
+        rec = _record()
+        rec = rec.model_copy(update={"cure_temperature_c": None})
+        store.add([rec])
+        rows = store.all()
+        assert len(rows) == 1
+        assert rows[0].cure_temperature_c is None
+    finally:
+        store.close()
+
+
 def test_add_saga_rollback_on_mid_failure(tmp_path):
     state = MockDatalabState(fail_on_create_call=2)
     store = _store_with_mock(tmp_path, state)

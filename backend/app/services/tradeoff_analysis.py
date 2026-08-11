@@ -5,7 +5,7 @@ import re
 from typing import Iterable
 
 from ..config import Settings, get_settings
-from ..domain.schemas import Formulation, ObjectiveSpec, ProductDomain, RecommendedFormula
+from ..domain.schemas import Formulation, ObjectiveSpec, RecommendedFormula
 from ..domain.tradeoff_schemas import (
     ConfidenceLevel,
     FormulationCandidateView,
@@ -60,6 +60,10 @@ def compute_pareto_mask(
             break
         if obj.direction == "minimize":
             y[:, j] = -y[:, j]
+        elif obj.direction == "match_target" and obj.target_value is not None:
+            # Closer to target is better, so rank by negative distance — the
+            # same "bigger is better" orientation minimize/maximize use below.
+            y[:, j] = -np.abs(y[:, j] - obj.target_value)
 
     is_pareto = np.ones(n, dtype=bool)
     for i in range(n):
@@ -233,6 +237,21 @@ def analyze_tradeoffs(
     )
 
 
+def _best_performance_key(
+    value: float | None, direction: str, target_value: float | None
+) -> float:
+    """Score a raw metric value so max() picks the objective's actual "best",
+    matching the maximize/minimize/match_target orientation compute_pareto_mask
+    uses (bigger transformed value = better)."""
+    if value is None:
+        return float("-inf")
+    if direction == "minimize":
+        return -value
+    if direction == "match_target" and target_value is not None:
+        return -abs(value - target_value)
+    return value
+
+
 def _build_scenario_picks(
     candidates: list[FormulationCandidateView],
     objectives: list[ObjectiveSpec],
@@ -245,15 +264,27 @@ def _build_scenario_picks(
     frontier = [c for c in candidates if c.pareto] or list(candidates)
 
     if "best_performance" in kinds and objectives:
-        metric = objectives[0].metric
-        best = max(frontier, key=lambda c: (c.predicted.get(metric) if c.predicted.get(metric) is not None else float("-inf")))
+        obj0 = objectives[0]
+        metric = obj0.metric
+        best = max(
+            frontier,
+            key=lambda c: _best_performance_key(
+                c.predicted.get(metric), obj0.direction, obj0.target_value
+            ),
+        )
         val = best.predicted.get(metric)
+        if obj0.direction == "minimize":
+            desc = "预测最低"
+        elif obj0.direction == "match_target" and obj0.target_value is not None:
+            desc = f"预测最接近目标值 {obj0.target_value}"
+        else:
+            desc = "预测最高"
         picks.append(
             ScenarioPick(
                 scenario="best_performance",
                 candidate_id=best.id,
                 candidate_name=best.name,
-                rationale=f"Pareto 前沿；{metric} 预测最高。",
+                rationale=f"Pareto 前沿；{metric} {desc}。",
                 primary_metric=metric,
                 primary_value=float(val) if val is not None else None,
             )

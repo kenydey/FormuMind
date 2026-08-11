@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from app.domain.schemas import Ingredient, ObjectiveSpec, ProductDomain, Formulation
-from app.services.tradeoff_analysis import analyze_tradeoffs, compute_pareto_mask
+from app.services.tradeoff_analysis import analyze_tradeoffs, compute_pareto_mask, _build_scenario_picks
+from app.domain.tradeoff_schemas import FormulationCandidateView, GroundingSummary
 
 
 def _form(name: str, salt: float, cost: float, score: float = 0.5) -> Formulation:
@@ -25,6 +26,43 @@ def test_pareto_dominance():
     mask = compute_pareto_mask(values, objectives)
     assert mask[0] is True
     assert mask[1] is False
+
+
+def test_pareto_dominance_match_target():
+    """A candidate exactly on a match_target objective must not be treated as
+    dominated by one far off-target just because its raw value is lower."""
+    objectives = [
+        ObjectiveSpec(metric="ph", direction="match_target", target_value=7.0),
+        ObjectiveSpec(metric="cost_cny_per_kg", direction="minimize"),
+    ]
+    on_target = [7.0, 50.0]
+    off_target = [12.0, 50.0]
+    mask = compute_pareto_mask([on_target, off_target], objectives)
+    assert mask[0] is True
+    assert mask[1] is False
+
+
+def _candidate(id_: str, value: float, pareto: bool = True) -> FormulationCandidateView:
+    return FormulationCandidateView(
+        id=id_,
+        name=id_,
+        score=0.5,
+        predicted={"cost_cny_per_kg": value},
+        pareto=pareto,
+        pareto_rank=0,
+        confidence="medium",
+        grounding=GroundingSummary(),
+    )
+
+
+def test_best_performance_pick_respects_minimize_direction():
+    """objectives[0] minimizing cost must pick the cheapest candidate, not the
+    most expensive one (max() over raw values picks the worst for minimize)."""
+    candidates = [_candidate("cheap", 10.0), _candidate("pricey", 90.0)]
+    objectives = [ObjectiveSpec(metric="cost_cny_per_kg", direction="minimize")]
+    picks = _build_scenario_picks(candidates, objectives, ["best_performance"])
+    pick = next(p for p in picks if p.scenario == "best_performance")
+    assert pick.candidate_id == "cheap"
 
 
 def test_analyze_tradeoffs_nonempty_frontier():

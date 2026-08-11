@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
@@ -155,7 +156,7 @@ async def import_experiments_csv(
         if not records:
             raise HTTPException(status_code=422, detail="No rows with measured values found in the CSV.")
 
-        registry.add(records, retrain=retrain)
+        await run_in_threadpool(registry.add, records, retrain=retrain)
         trained = registry.info()
         msg = (
             f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
@@ -292,7 +293,7 @@ async def sync_workbench(
     )
     from ..services.workbench_training import ingest_workbench_rows
 
-    train_result = ingest_workbench_rows(payload.campaign_id, rows)
+    train_result = await run_in_threadpool(ingest_workbench_rows, payload.campaign_id, rows)
     training_ingested = int(train_result.get("ingested") or 0)
     training_message = str(train_result.get("message") or "")
 
@@ -369,7 +370,6 @@ async def upload_experiment_attachment(
     a local ``ExperimentAttachment`` row keeps the reference.
     """
     from ..db.measurement_store import get_measurement_store
-    from ..db.database import default_session_factory
     from ..db.datalab_client import check_datalab_reachable
 
     settings = get_settings()
@@ -377,7 +377,7 @@ async def upload_experiment_attachment(
 
     # Upload to Datalab ELN (best-effort; falls back to local-only)
     source_document_id = ""
-    datalab_ok, _ = check_datalab_reachable(settings.datalab_api_url, timeout=2.0)
+    datalab_ok, _ = await run_in_threadpool(check_datalab_reachable, settings.datalab_api_url, timeout=2.0)
     if datalab_ok:
         import httpx
 
@@ -503,14 +503,13 @@ async def search_experiments(
     q: str = Query(default="", description="搜索关键词"),
 ) -> list[ExperimentSearchResult]:
     """Search across all campaigns by keyword (tags, params, measurements)."""
-    store = get_campaign_store()
     # In Datalab mode: delegate to Datalab search API
     settings = get_settings()
     backend = (settings.campaign_backend or "sqlite").lower()
 
     if backend in ("datalab", "auto"):
         from ..db.datalab_client import check_datalab_reachable
-        ok, _ = check_datalab_reachable(settings.datalab_api_url, timeout=2.0)
+        ok, _ = await run_in_threadpool(check_datalab_reachable, settings.datalab_api_url, timeout=2.0)
         if ok:
             import httpx
             try:
@@ -526,7 +525,7 @@ async def search_experiments(
 
     # Local SQLite scan
     results: list[ExperimentSearchResult] = []
-    from .database import default_session_factory
+    from ..db.database import default_session_factory
     with default_session_factory()() as session:
         campaigns = session.query(Campaign).all()
         for camp in campaigns:

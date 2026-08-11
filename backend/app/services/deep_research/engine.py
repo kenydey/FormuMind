@@ -1,14 +1,12 @@
 """深度研究引擎 — 查询扩展 → 多源检索 → RAG 融合 → 引用报告。"""
 from __future__ import annotations
 
-from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 from typing import Callable
 
 import httpx
 
 from ...config import Settings, get_settings
-from ...domain import knowledge
 from ...domain.schemas import ComprehensiveReport, Evidence, Requirement
 from .. import literature, llm, rag
 from .models import ExpandedQuery, RetrievalHit, RetrievalReport
@@ -108,8 +106,6 @@ class DeepResearchEngine:
     ) -> tuple[list[Evidence], ExpandedQuery]:
         """QueryExpander + iter_search 多源检索。"""
         expanded = self.expand_query(topic)
-        from .query_expander import prepare_search_queries
-
         sq = prepare_search_queries(topic, self._settings)
         combined_query = sq.rank_q
         types = source_types or _DEFAULT_SOURCE_TYPES

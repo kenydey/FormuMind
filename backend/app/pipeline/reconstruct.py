@@ -26,7 +26,13 @@ def formulation_from_factors(
     """
     requirement = req if isinstance(req, Requirement) else Requirement(domain=req)
     requirement = normalize_requirement(requirement)
-    base = knowledge.baseline_formulation(requirement)
+    # Mirror run_optimization's own lever resolution (`req.active_formulation or
+    # base`): reconstructing from the generic template regardless meant every
+    # override was matched against ingredient names the active formulation
+    # doesn't have, so overrides silently applied to nothing and every
+    # candidate this returned was the same static baseline — the optimizer
+    # search degenerated to repeatedly scoring one unchanging point.
+    base = requirement.active_formulation or knowledge.baseline_formulation(requirement)
     levers = resolve_levers(requirement, base)
     unit_map = {lev.name: lev.unit for lev in levers}
     overrides = dict(factors)

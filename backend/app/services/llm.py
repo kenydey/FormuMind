@@ -16,7 +16,7 @@ the SDK is missing or the API call fails.
 """
 from __future__ import annotations
 
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return, optional_import, reraise_if_fatal
 import logging
 from typing import TypeVar
 

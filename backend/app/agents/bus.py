@@ -9,7 +9,7 @@ offline / Celery-eager behaviour and keeps tests free of external services.
 from __future__ import annotations
 
 import logging
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..services.errors import degrade_return, log_handled_exception
 import json
 
 from ..config import get_settings

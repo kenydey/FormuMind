@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChemicalProfile, Ingredient } from "../api";
 import { api } from "../api";
 
@@ -137,11 +137,21 @@ export default function RecommendedFormulaTable({
   const [lookupBusy, setLookupBusy] = useState<number | null>(null);
   const [profiles, setProfiles] = useState<Record<number, ChemicalProfile>>({});
 
+  // Tracks the *current* ingredients array identity so an in-flight lookup
+  // can tell, once it resolves, whether it's still looking at the same
+  // formulation (leaderboard replaced underneath it → stale, must not write).
+  const ingredientsRef = useRef(ingredients);
+  useEffect(() => {
+    ingredientsRef.current = ingredients;
+  }, [ingredients]);
+
   async function lookupCas(idx: number, query: string) {
     if (!query.trim() || !onIngredientChange) return;
+    const requestIngredients = ingredients;
     setLookupBusy(idx);
     try {
       const hit = await api.chemicalProfile(query.trim());
+      if (ingredientsRef.current !== requestIngredients) return; // stale: formulation changed while awaiting
       onIngredientChange(idx, {
         cas_no: hit.cas || undefined,
         name: hit.iupac_name || query,
@@ -152,6 +162,7 @@ export default function RecommendedFormulaTable({
       });
       setProfiles((prev) => ({ ...prev, [idx]: hit }));
     } catch {
+      if (ingredientsRef.current !== requestIngredients) return;
       onIngredientChange(idx, { cas_no: query });
     } finally {
       setLookupBusy(null);

@@ -14,7 +14,7 @@ numpy and converges reliably for the low-dimensional formulation spaces here.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import log_handled_exception
 from dataclasses import dataclass, field
 
 import numpy as np

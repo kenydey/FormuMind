@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import hashlib
 import ipaddress
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse

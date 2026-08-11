@@ -1,7 +1,7 @@
 """查询扩展引擎 — 将自然语言主题扩展为中英文关键词与 IPC/CPC 建议。"""
 from __future__ import annotations
 
-from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..errors import degrade_return, log_handled_exception
 import logging
 import re
 from dataclasses import dataclass

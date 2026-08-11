@@ -6,17 +6,14 @@ formulation levers are tuned per product family.
 """
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import threading
 import uuid
 from collections.abc import Callable
 
 from ..config import get_settings
-from ..domain import doe as doe_engine
 from ..domain import knowledge
 from ..domain.chemistry import full_safety_check, validate_formulation
 from ..domain.schemas import (
-    DOEFactor,
     DOEPlan,
     Formulation,
     ObjectiveSpec,
@@ -26,7 +23,7 @@ from ..domain.schemas import (
     ResearchResult,
 )
 from ..domain.research_query import build_research_query
-from ..services import llm, predictor
+from ..services import predictor
 from ..services.optimizer import Factor, build_optimizer
 from . import reconstruct
 
@@ -73,6 +70,8 @@ def _score_and_validate(
     req: Requirement | None = None,
     *,
     chem_screen: bool = False,
+    objectives: list[ObjectiveSpec] | None = None,
+    bounds: dict[str, tuple[float, float]] | None = None,
 ) -> Formulation:
     from ..domain.project_spec import normalize_requirement, primary_objective
 
@@ -88,13 +87,27 @@ def _score_and_validate(
         from ..services import chemtools
 
         form.warnings.extend(chemtools.screen_formulation(form))
-    if req and req.objectives:
-        if len(req.objectives) == 1:
-            metric = req.objectives[0].metric
+    # `objectives` defaults to req.objectives for every existing caller. Callers
+    # that already resolved a different objectives list to rank/select
+    # candidates by (e.g. run_optimization falling back to default_objectives()
+    # when req.objectives is empty) must pass it explicitly here too, or the
+    # returned form.score silently reverts to a raw single-metric prediction —
+    # a different number, on a different scale, than the one that actually
+    # drove ranking/selection.
+    if objectives is None:
+        objectives = req.objectives if req else None
+    if objectives:
+        if len(objectives) == 1:
+            metric = objectives[0].metric
             form.score = float(form.predicted.get(metric, 0.0))
         else:
-            objectives = req.objectives
-            bounds = predictor.default_bounds(objectives, form)
+            # Same reasoning as objectives above: multi_objective_score
+            # normalizes each metric against `bounds` before weighting, so
+            # scoring with bounds seeded from this one formulation instead of
+            # the range actually swept during search still leaves form.score
+            # off the ranking score, just less drastically.
+            if bounds is None:
+                bounds = predictor.default_bounds(objectives, form)
             form.score = float(predictor.multi_objective_score(form, objectives, process, bounds))
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
@@ -290,9 +303,17 @@ def run_optimization(
                         progress_cb=progress_cb,
                         workbench_campaign_id=workbench_campaign_id,
                     )
-            except Exception:
+            except Exception as exc:
                 if resolved == "baybe":
                     raise
+                # engine="auto": fall back to the numpy/optuna optimizer below,
+                # but a real bug in the BayBE integration (bad measurement
+                # shape, API mismatch, ...) must not vanish silently — without
+                # this the caller only sees a quietly downgraded engine
+                # ("numpy-ucb"/"optuna-tpe") with no trace BayBE was even tried.
+                from loguru import logger
+
+                logger.warning("BayBE optimization failed, falling back to numpy/optuna: {}", exc)
 
     from ..domain.project_spec import resolve_levers
 
@@ -339,7 +360,9 @@ def run_optimization(
         for k, v in values.items():
             if k in ("cure_temperature_c", "cure_time_min"):
                 top_process[k] = v
-        form = _score_and_validate(_apply_levers(req, values), top_process, req)
+        form = _score_and_validate(
+            _apply_levers(req, values), top_process, req, objectives=objectives, bounds=bounds
+        )
         form.name = f"Optimized {req.domain.value} (score {score:.3f})"
         top.append(form)
     return OptimizationResult(

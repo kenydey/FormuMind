@@ -31,7 +31,7 @@ Gated by the config flag so tests run offline without network requests.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return, log_handled_exception
 import re
 
 import httpx

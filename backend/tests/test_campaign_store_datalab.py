@@ -64,6 +64,8 @@ class MockDatalabState:
     create_calls: int = 0
     fail_on_create_call: int | None = None
     invalid_item_blocks: bool = False
+    missing_item_ids: set[str] = field(default_factory=set)
+    saved_items: dict[str, dict] = field(default_factory=dict)
 
 
 def _mock_handler(state: MockDatalabState):
@@ -82,6 +84,10 @@ def _mock_handler(state: MockDatalabState):
             )
         if path.startswith("/get-item-data/"):
             item_id = path.rsplit("/", 1)[-1]
+            if item_id in state.missing_item_ids:
+                return httpx.Response(404, json={"error": "item not found"})
+            if item_id in state.saved_items:
+                return httpx.Response(200, json={"item_data": state.saved_items[item_id]})
             if state.invalid_item_blocks:
                 return httpx.Response(200, json={"item_data": {"blocks_obj": {}}})
             return httpx.Response(200, json={"item_data": _item_data()})
@@ -90,6 +96,8 @@ def _mock_handler(state: MockDatalabState):
             state.deleted.append(body["item_id"])
             return httpx.Response(200, json={"status": "success"})
         if path == "/save-item/":
+            body = json.loads(request.content)
+            state.saved_items[body["item_id"]] = body["data"]
             return httpx.Response(200, json={"status": "success"})
         return httpx.Response(404, json={"error": f"unmocked {path}"})
 
@@ -188,6 +196,81 @@ async def test_list_rows_raises_on_invalid_blocks(tmp_path):
         campaign = await store.create_from_plan(_plan(runs=1))
         with pytest.raises(DatalabStoreError, match="formumind_params"):
             await store.list_rows(campaign.id)
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_list_rows_skips_item_deleted_from_datalab(tmp_path):
+    """A single sample removed from Datalab (e.g. deleted directly in the ELN
+    UI) must not 500 the whole campaign — the other, still-live rows should
+    still come back."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=2))
+        deleted_item_id = campaign.sample_refs[0]["item_id"]
+        state.missing_item_ids.add(deleted_item_id)
+
+        rows = await store.list_rows(campaign.id)
+
+        assert len(rows) == 1
+        assert rows[0].item_id != deleted_item_id
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_batch_sync_survives_item_deleted_from_datalab(tmp_path):
+    """batch_sync's own careful per-row skip must not be undone by its final
+    unguarded list_rows() call when one referenced item is gone."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=2))
+        deleted_ref = campaign.sample_refs[0]
+        live_ref = campaign.sample_refs[1]
+        state.missing_item_ids.add(deleted_ref["item_id"])
+
+        updated, rows = await store.batch_sync(
+            campaign.id,
+            [
+                {"id": deleted_ref["id"], "status": "Completed", "measurements": {}},
+                {"id": live_ref["id"], "status": "Completed", "measurements": {}},
+            ],
+        )
+
+        assert updated == 1
+        assert len(rows) == 1
+        assert rows[0].item_id == live_ref["item_id"]
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_batch_sync_persists_note_and_tags(tmp_path):
+    """note/tags must round-trip through the Datalab backend the same way
+    they do through SqliteCampaignStore, not silently drop on every sync."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=1))
+        ref = campaign.sample_refs[0]
+
+        _, rows = await store.batch_sync(
+            campaign.id,
+            [{"id": ref["id"], "note": "check viscosity", "tags": ["urgent", "retest"]}],
+        )
+        assert rows[0].note == "check viscosity"
+        assert rows[0].tags == ["urgent", "retest"]
+
+        # A later sync that doesn't mention note/tags must preserve them.
+        _, rows2 = await store.batch_sync(
+            campaign.id,
+            [{"id": ref["id"], "status": "Completed"}],
+        )
+        assert rows2[0].note == "check viscosity"
+        assert rows2[0].tags == ["urgent", "retest"]
     finally:
         await store.close()
 

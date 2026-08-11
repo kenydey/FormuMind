@@ -1,14 +1,13 @@
 """Metadata endpoint: domains, substrates, DOE designs, and baseline templates."""
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import logging
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..domain.examples import BUILTIN_METRICS, EXAMPLE_PROJECTS, ROLE_CATALOG, load_example
-from ..domain.formulation_gate import recommended_to_formulation, validate_formulations
+from ..domain.formulation_gate import validate_formulations
 from ..domain.knowledge import RAW_MATERIALS, baseline_formulation
 from ..domain.objective_contract import normalize_objectives
 from ..domain.schemas import (
@@ -17,6 +16,7 @@ from ..domain.schemas import (
     ObjectiveSpec,
     ProductDomain,
     RecommendedFormula,
+    RecommendedFormulaListResponse,
     Requirement,
     Substrate,
 )
@@ -153,7 +153,7 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
             if mode == "kb_only":
                 raise HTTPException(
                     status_code=503,
-                    detail=f"知识库检索失败（mode=kb_only）：{exc}"
+                    detail="知识库检索失败（mode=kb_only）"
                 ) from exc
             # hybrid → fall through to LLM-only
             evidence = body.sources or []
@@ -213,7 +213,6 @@ def _evidence_as_recommendation_response(
     objectives: list[ObjectiveSpec],
 ) -> RecommendedFormulaListResponse:
     """Convert KB evidence into a basic recommendation response (kb_only mode)."""
-    from ..domain.schemas import ProductDomain
     formulas: list[RecommendedFormula] = []
     for i, ev in enumerate(evidence[:5]):
         formulas.append(RecommendedFormula(
@@ -226,7 +225,7 @@ def _evidence_as_recommendation_response(
             score=ev.relevance or 0.5,
         ))
     return RecommendedFormulaListResponse(
-        formulas=formulas, engine="kb_only",
+        formulas=formulas, engine="offline",
         warnings=["kb_only 模式：仅返回知识库检索结果，未经 LLM 合成"],
     )
 

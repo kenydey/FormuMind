@@ -119,7 +119,7 @@ def _start_loop_task(
     prior_rmse_history: list[dict[str, float]] | None = None,
 ) -> str | None:
     """Fire-and-forget closed-loop task; returns task_id for SSE tracking."""
-    from ..worker.tasks import run_loop_iterate_impl, task_manager
+    from ..worker.tasks import task_manager
 
     settings = get_settings()
     payload = {

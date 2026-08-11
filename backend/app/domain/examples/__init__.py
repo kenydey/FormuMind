@@ -1,7 +1,7 @@
 """Example project templates (legacy three domains as loadable demos)."""
 from __future__ import annotations
 
-from ..schemas import LeverSpec, MaterialSpec, MetricPriorSpec, ObjectiveSpec, ProductDomain, Requirement, Substrate
+from ..schemas import LeverSpec, ObjectiveSpec, ProductDomain, Requirement, Substrate
 
 EXAMPLE_PROJECTS: dict[str, dict] = {
     "anticorrosion_coating": {

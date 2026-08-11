@@ -11,7 +11,7 @@ Each metric is returned together with a ``predicted_std`` uncertainty estimate.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return
 from ..domain import features, knowledge
 from ..domain.chemistry import amine_epoxy_ratio, cpvc, pvc, solids_by_volume
 from ..domain.schemas import Formulation, ProductDomain

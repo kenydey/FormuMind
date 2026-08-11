@@ -13,7 +13,7 @@ tests, so offline behaviour stays deterministic.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return, log_handled_exception
 import re
 import time
 from typing import Any
@@ -63,7 +63,7 @@ def _local_lookup(q: str) -> dict[str, Any] | None:
     spec = RAW_MATERIALS.get(key)
     if not spec:
         for name, props in RAW_MATERIALS.items():
-            if key.lower() in name.lower():
+            if name.lower() == key.lower():
                 spec = props
                 key = name
                 break

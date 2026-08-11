@@ -1,7 +1,6 @@
 """POST /api/ingest — Local file upload, URL fetch, pasted text, and batch upload."""
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 from datetime import datetime
 import logging
 

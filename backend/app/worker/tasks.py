@@ -6,7 +6,7 @@ read-only snapshot compatible with ``GET /api/tasks/{id}``.
 """
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..services.errors import degrade_return, log_handled_exception
 import json
 import logging
 import os

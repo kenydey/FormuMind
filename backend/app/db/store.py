@@ -12,7 +12,6 @@ Interface: ``all() -> list[ExperimentRecord]``, ``add(records)``, ``clear()``.
 """
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import json
 import logging
 import threading
@@ -27,7 +26,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..config import Settings, get_settings
 from ..domain.schemas import ExperimentRecord, ProductDomain
 from .datalab_client import (
-    DatalabStoreError,
     DatalabUnavailableError,
     check_datalab_reachable,
     datalab_block,
@@ -62,7 +60,7 @@ def _training_block_data(rec: ExperimentRecord) -> dict[str, Any]:
         "domain": rec.domain.value,
         "project_id": rec.project_id,
         "factors": rec.factors,
-        "cure_temperature_c": rec.cure_temperature_c if rec.cure_temperature_c is not None else 0.0,
+        "cure_temperature_c": rec.cure_temperature_c,
         "measured": rec.measured,
         "source": rec.source,
         "label": rec.label,

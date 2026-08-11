@@ -108,15 +108,21 @@ def log_handled_exception(
     """Log a handled exception with severity matched to its kind. Returns kind."""
     reraise_if_fatal(exc)
     kind = classify_exception(exc)
+    # Pre-formatted, single-arg calls: a sizeable share of this codebase's
+    # "logger" is actually loguru (str.format()-style, not %-style), and a
+    # good chunk of it doesn't shadow that with logging.getLogger the way
+    # app/api/tasks.py does. %s args would silently render as the literal
+    # text "%s" on those loggers instead of raising, so the exception detail
+    # this function exists to capture would just vanish from the log.
     if level is not None:
-        logger.log(level, "%s: %s", context, exc)
+        logger.log(level, f"{context}: {exc}")
         return kind
     if kind == "transient":
-        logger.warning("%s (transient): %s", context, exc)
+        logger.warning(f"{context} (transient): {exc}")
     elif kind == "permanent":
-        logger.info("%s (permanent): %s", context, exc)
+        logger.info(f"{context} (permanent): {exc}")
     else:
-        logger.warning("%s: %s", context, exc)
+        logger.warning(f"{context}: {exc}")
     return kind
 
 

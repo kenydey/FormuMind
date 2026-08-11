@@ -7,12 +7,11 @@ retrieval. Otherwise persists an Evidence manifest on disk and re-ranks via
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return, log_handled_exception
 import json
 import re
 import threading
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 from typing import Literal
 

@@ -16,7 +16,6 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 

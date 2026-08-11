@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...domain.objective_contract import normalize_objectives, objectives_from_snapshot
 from ...domain.schemas import ObjectiveSpec, Requirement
-from ...db.campaign_store import CampaignStoreInterface, get_campaign_store
+from ...db.campaign_store import CampaignStoreInterface
 
 
 def resolve_campaign_objectives(

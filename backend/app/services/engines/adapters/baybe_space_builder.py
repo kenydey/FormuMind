@@ -107,7 +107,7 @@ def build_genome_searchspace(req: Requirement, genome, candidate_pools: dict[str
     categorical has to remain the fallback.
     """
     from baybe.constraints import ContinuousLinearConstraint
-    from baybe.parameters import CategoricalParameter, NumericalContinuousParameter
+    from baybe.parameters import NumericalContinuousParameter
     from baybe.searchspace import SearchSpace
 
     from ...domain import knowledge

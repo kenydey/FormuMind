@@ -1,3 +1,5 @@
+import pytest
+
 from app.domain.schemas import ObjectiveSpec, ProductDomain, Requirement, Substrate
 from app.pipeline import workflow
 
@@ -83,6 +85,72 @@ def test_optimization_single_objective_improves_over_baseline():
     baseline = knowledge.baseline_formulation(req)
     base_score = predictor.objective_value(baseline, result.objective)
     assert result.top_formulations[0].score >= base_score
+
+
+def test_formulation_from_factors_uses_active_formulation_ingredients():
+    """When req.active_formulation uses different specific materials than the
+    generic domain template, lever overrides must apply to *those* ingredient
+    names. formulation_from_factors used to always rebuild from the generic
+    baseline template regardless, so every override matched nothing and the
+    reconstructed formulation was identical no matter what value the
+    optimizer suggested — an optimization loop over a static point."""
+    from app.domain.schemas import Formulation, Ingredient
+    from app.domain.project_spec import normalize_requirement, resolve_levers
+    from app.pipeline import reconstruct
+
+    active = Formulation(
+        name="custom",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(name="Zinc molybdate", role="inhibitor", weight_pct=10.0),
+            Ingredient(name="Novolac epoxy", role="resin", weight_pct=40.0),
+            Ingredient(name="Amine hardener", role="hardener", weight_pct=15.0),
+        ],
+    )
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        salt_spray_hours=500,
+        active_formulation=active,
+    )
+    levers = resolve_levers(normalize_requirement(req), active)
+    lever_names = {lev.name for lev in levers}
+    assert "Zinc molybdate" in lever_names
+
+    low = reconstruct.formulation_from_factors(req, {"Zinc molybdate": 5.0})
+    high = reconstruct.formulation_from_factors(req, {"Zinc molybdate": 20.0})
+    low_pct = next(i.weight_pct for i in low.ingredients if i.name == "Zinc molybdate")
+    high_pct = next(i.weight_pct for i in high.ingredients if i.name == "Zinc molybdate")
+    assert low_pct != high_pct
+
+
+def test_score_and_validate_uses_passed_objectives_not_empty_req_objectives():
+    """run_optimization ranks candidates with default_objectives() whenever
+    req.objectives is empty (the common case), then re-scores the winners via
+    _score_and_validate — which used to look at req.objectives alone, saw an
+    empty list, and silently fell back to a raw single-metric prediction
+    instead of the multi-objective composite that had actually driven
+    ranking/selection: two incompatible numbers on completely different
+    scales for the same formulation."""
+    from app.domain import knowledge
+    from app.services import predictor
+    from app.pipeline.workflow import _score_and_validate
+
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+    assert req.objectives == []  # the case that used to trigger the fallback
+
+    objectives = [
+        ObjectiveSpec(metric="salt_spray_hours", weight=0.5, direction="maximize"),
+        ObjectiveSpec(metric="cost_cny_per_kg", weight=0.5, direction="minimize"),
+    ]
+    form = knowledge.baseline_formulation(req)
+    scored = _score_and_validate(form, None, req, objectives=objectives)
+
+    bounds = predictor.default_bounds(objectives, scored)
+    expected = predictor.multi_objective_score(scored, objectives, None, bounds)
+    assert scored.score == pytest.approx(expected, abs=1e-6)
+    # Not the old broken behaviour: a raw salt_spray_hours prediction is in
+    # the hundreds, nowhere near a normalized multi-objective composite.
+    assert scored.score != pytest.approx(scored.predicted["salt_spray_hours"], rel=1e-3)
 
 
 def test_optimization_multi_objective_returns_objectives():

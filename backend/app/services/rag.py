@@ -14,7 +14,7 @@ the on-disk manifest is enabled — not in the TF-IDF instance.
 from __future__ import annotations
 
 import logging
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import log_handled_exception
 import math
 import re
 from collections import Counter

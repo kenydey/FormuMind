@@ -57,6 +57,23 @@ def test_check_claims_offline_pass_rate():
     assert 0.0 < result.pass_rate <= 1.0
 
 
+def test_check_claims_fails_when_every_claim_is_insufficient():
+    """A report where nothing rises above weak evidence overlap must not be
+    marked passed: needs_regenerate used to only look at unsupported/
+    conflicting, so an all-insufficient report (pass_rate=0.0) slipped
+    through as claim_check_passed=True with no verification footer."""
+    report = (
+        "## 关键发现\n\n"
+        "- aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj achieves results.\n"
+    )
+    evidence = [_evidence("aaaa bbbb zzzz yyyy xxxx wwww vvvv uuuu")]
+    result = check_claims("unrelated topic", report, evidence, Settings())
+    assert all(c.verdict == ClaimVerdict.insufficient for c in result.claims)
+    assert result.pass_rate == 0.0
+    assert result.needs_regenerate is True
+    assert result.claim_check_passed is False
+
+
 def test_append_verification_footer_adds_section():
     from app.pipeline.claim_checker import ClaimCheckResult, VerifiedClaim
 

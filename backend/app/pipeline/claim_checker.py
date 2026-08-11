@@ -1,7 +1,6 @@
 """Post-generation Claim Checker — verify report claims against grounded evidence."""
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import re
 from enum import Enum
 
@@ -18,6 +17,10 @@ _MAX_CLAIMS = 20
 _PASS_RATE_THRESHOLD = 0.5
 _SUPPORTED_OVERLAP = 0.25
 _WEAK_OVERLAP = 0.12
+# Evidence items actually shown to the LLM in _verify_prompt. Citations must
+# be validated against this same slice — checking against the full evidence
+# list would accept an index the model was never shown as a valid citation.
+_MAX_EVIDENCE_SHOWN = 12
 
 
 class ClaimVerdict(str, Enum):
@@ -134,7 +137,7 @@ def verify_claim_offline(claim: str, evidence: list[Evidence]) -> VerifiedClaim:
 def _verify_prompt(topic: str, claims: list[str], evidence: list[Evidence]) -> str:
     ev_lines = "\n".join(
         f"[{i}] ({e.source}) {e.title}: {e.snippet[:200]}"
-        for i, e in enumerate(evidence[:12])
+        for i, e in enumerate(evidence[:_MAX_EVIDENCE_SHOWN])
     )
     claim_lines = "\n".join(f"{i}. {c}" for i, c in enumerate(claims))
     return (
@@ -157,18 +160,21 @@ def verify_claims_llm(
     if not isinstance(data, dict):
         raise ValueError("invalid claim check JSON")
 
+    shown_evidence = evidence[:_MAX_EVIDENCE_SHOWN]
     out: list[VerifiedClaim] = []
     for item in data.get("claims") or []:
         try:
             idx = int(item["index"])
             verdict = ClaimVerdict(str(item["verdict"]))
-            ev_indices = [int(i) for i in (item.get("evidence_indices") or [])]
+            ev_indices = [
+                int(i) for i in (item.get("evidence_indices") or []) if 0 <= int(i) < len(shown_evidence)
+            ]
             out.append(
                 VerifiedClaim(
                     text=claims[idx] if 0 <= idx < len(claims) else "",
                     verdict=verdict,
                     evidence_indices=ev_indices,
-                    source_tags=_source_tags_for_indices(evidence, ev_indices),
+                    source_tags=_source_tags_for_indices(shown_evidence, ev_indices),
                     reason=str(item.get("reason") or ""),
                 )
             )
@@ -199,15 +205,22 @@ def check_claims(
             verified = verify_claims_llm(topic, claims, evidence)
             engine = "llm"
         except Exception as exc:
-            logger.warning("Claim check LLM failed: %s", exc)
+            logger.warning("Claim check LLM failed: {}", exc)
             verified = [verify_claim_offline(c, evidence) for c in claims]
     else:
         verified = [verify_claim_offline(c, evidence) for c in claims]
 
     supported = sum(1 for v in verified if v.verdict == ClaimVerdict.supported)
     pass_rate = supported / len(verified) if verified else 1.0
+    # `insufficient` belongs here alongside unsupported/conflicting: it is the
+    # same "flagged" set append_verification_footer surfaces to the reader.
+    # Without it, a report where every claim lands on weak token overlap gets
+    # pass_rate=0.0 but needs_regenerate=False, which the `or not
+    # needs_regenerate` below turns into claim_check_passed=True — a 0%
+    # confirmed report marked "verified" with no footer and no regeneration.
     needs_regenerate = any(
-        v.verdict in (ClaimVerdict.unsupported, ClaimVerdict.conflicting) for v in verified
+        v.verdict in (ClaimVerdict.unsupported, ClaimVerdict.conflicting, ClaimVerdict.insufficient)
+        for v in verified
     )
     passed = pass_rate >= _PASS_RATE_THRESHOLD or not needs_regenerate
 

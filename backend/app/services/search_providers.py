@@ -5,7 +5,7 @@ swallows network errors (logs + returns []).
 """
 from __future__ import annotations
 
-from .errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from .errors import degrade_return
 import logging
 import re
 from typing import Any
@@ -121,7 +121,7 @@ def _serpapi_search(
     limit: int,
     offset: int,
     extra_params: dict[str, str] | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     params: dict[str, Any] = {
         "engine": engine,
         "q": query,

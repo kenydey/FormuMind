@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from ..errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
+from ..errors import degrade_return, log_handled_exception
 from ...domain import features
 from ...domain.chemistry import amine_epoxy_ratio
 from ...domain.schemas import Formulation, MetricPriorSpec, Requirement

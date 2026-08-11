@@ -136,9 +136,16 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         );
         const report = final.data as unknown as LoopReport | null;
         if (report) {
-          await applyEnrichedLeaderboard(set, get, report.optimization.top_formulations, (draft) => {
-            applyLoopReportToDraft(draft, report);
-          });
+          const skipReplace = report.converged && report.optimization.top_formulations.length === 0;
+          await applyEnrichedLeaderboard(
+            set,
+            get,
+            report.optimization.top_formulations,
+            (draft) => {
+              applyLoopReportToDraft(draft, report);
+            },
+            { skipLeaderboardReplace: skipReplace }
+          );
         }
       } catch (e) {
         set((draft) => {

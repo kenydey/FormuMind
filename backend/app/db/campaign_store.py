@@ -1,7 +1,6 @@
 """Campaign workbench repository — Datalab Headless ELN (SSOT) with sqlite JSON fallback."""
 from __future__ import annotations
 
-from ..services.errors import degrade_return, log_handled_exception, optional_import, reraise_if_fatal
 import asyncio
 import concurrent.futures
 import logging
@@ -30,7 +29,6 @@ from ..domain.schemas import (
 )
 from .campaign_types import WorkbenchRow
 from .datalab_client import (
-    DatalabStoreError,
     DatalabUnavailableError,
     check_datalab_reachable,
     datalab_block,
@@ -79,6 +77,8 @@ def _blocks_for_row(
     actual_params: dict,
     measurements: dict,
     status: str,
+    note: str | None = None,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         _PARAMS_BLOCK: datalab_block(
@@ -87,6 +87,8 @@ def _blocks_for_row(
                 "planned_params": planned_params,
                 "actual_params": actual_params,
                 "status": status,
+                "note": note,
+                "tags": list(tags or []),
             },
         ),
         _MEASUREMENTS_BLOCK: datalab_block(_MEASUREMENTS_BLOCK, dict(measurements)),
@@ -111,6 +113,8 @@ def _parse_row_from_item(
         planned_params=dict(params_block.get("planned_params") or {}),
         actual_params=dict(params_block.get("actual_params") or {}),
         measurements=dict(meas_block),
+        note=params_block.get("note"),
+        tags=list(params_block.get("tags") or []),
     )
 
 
@@ -311,9 +315,11 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         logger.info("Datalab created sample item_id=%s", sample.item_id)
         return sample
 
-    async def _get_item(self, item_id: str) -> dict[str, Any]:
+    async def _get_item(self, item_id: str) -> dict[str, Any] | None:
         client = await self._ensure_client()
         resp = await client.get(f"/get-item-data/{item_id}")
+        if resp.status_code == 404:
+            return None  # item deleted from Datalab, skip gracefully
         resp.raise_for_status()
         return parse_item_envelope(resp.json(), validate=_validate_campaign_blocks)
 
@@ -440,6 +446,9 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             row_id = int(ref["id"])
             item_id = str(ref["item_id"])
             item_data = await self._get_item(item_id)
+            if item_data is None:
+                logger.warning("list_rows skip %s: item deleted from Datalab", item_id)
+                continue
             out.append(_parse_row_from_item(campaign_id, row_id, item_id, item_data))
         return out
 
@@ -467,6 +476,9 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             except Exception as exc:
                 logger.warning("batch_sync skip %s: %s", item_id, exc)
                 continue
+            if item_data is None:
+                logger.warning("batch_sync skip %s: item deleted from Datalab", item_id)
+                continue
 
             params_block = ((item_data.get("blocks_obj") or {}).get(_PARAMS_BLOCK) or {}).get("data") or {}
             planned = dict(params_block.get("planned_params") or {})
@@ -479,12 +491,20 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             status = payload.get("status") or params_block.get("status") or "Pending"
             if row_has_required_measurements(measurements, objectives):
                 status = "Completed"
+            note = payload["note"] if "note" in payload else params_block.get("note")
+            tags = (
+                list(payload["tags"] or [])
+                if "tags" in payload
+                else list(params_block.get("tags") or [])
+            )
 
             blocks = _blocks_for_row(
                 planned_params=planned,
                 actual_params=actual,
                 measurements=measurements,
                 status=status,
+                note=note,
+                tags=tags,
             )
             item_data["blocks_obj"] = blocks
             item_data["display_order"] = [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK]

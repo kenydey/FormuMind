@@ -8,7 +8,6 @@ attached to a given campaign, newest first.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import uuid
 
 from sqlalchemy import desc, select
