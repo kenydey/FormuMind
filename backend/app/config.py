@@ -330,6 +330,10 @@ class Settings(BaseSettings):
     mineru_cache_dir: str = "./data/mineru_cache"
     # 一页图片面积占比超过此值即视为"有值得看的图"，触发升级。
     hybrid_image_area_threshold: float = 0.12
+    # 视觉解析断路器：连续 N 次永久性失败（端点暂停/鉴权拒绝）后，
+    # 跳过当前文档剩余所有图片的视觉解析，直接降级为占位符。
+    # 0 = 不断路（始终尝试）。建议 3。
+    vision_max_consecutive_failures: int = 3
 
     # 检索结果全文获取（KB P0）：把摘要级命中升级为全文分块并持久化原文。
     # 专利 PDF（USPTO/EPO/Google）+ OA 文献 PDF（OpenAlex/arXiv）+ 网页正文

@@ -45,6 +45,14 @@ _VISUAL = frozenset({"image", "chart"})
 # Page furniture: repeating it in every chunk is noise that dilutes retrieval.
 _DISCARD = frozenset({"header", "footer", "page_number"})
 
+# ── vision circuit breaker ────────────────────────────────────────────────
+# Per-document counter: how many consecutive vision calls have failed with a
+# *permanent* error (endpoint paused, token rejected).  Reset at the start of
+# every ``parse()`` call so a broken endpoint on one document does not leak
+# into the next.  Transient failures (timeout, 503 cold-start) do NOT
+# increment this counter — retrying may succeed.
+_vision_consecutive_failures = 0
+
 
 def _needs_escalation(page: pdf_local.LocalPage) -> bool:
     """Whether the local pass left something on this page worth paying for.
@@ -140,6 +148,8 @@ def _visual_markdown(
     would have no way to tell a page with an unreadable figure from a page with
     no figure at all.
     """
+    global _vision_consecutive_failures
+
     caption = (block.caption or "").strip()
     fallback = f"> [图 · {page_label}]{' ' + caption if caption else ''}"
 
@@ -147,6 +157,20 @@ def _visual_markdown(
         return fallback + "\n>\n> _（图片数据缺失）_"
     if not can_see:
         return f"{fallback}\n>\n> _（未做视觉解析：{vision_hint}）_"
+
+    # ── circuit breaker: skip when the endpoint has been telling us no ──
+    settings = get_settings()
+    budget = int(settings.vision_max_consecutive_failures)
+    if budget and _vision_consecutive_failures >= budget:
+        logger.info(
+            "hybrid: vision breaker open after %d consecutive permanent "
+            "failures — skipping remaining figures in this document",
+            _vision_consecutive_failures,
+        )
+        return (
+            f"{fallback}\n>\n>"
+            f" _（视觉解析已跳过：端点连续 {_vision_consecutive_failures} 次返回不可恢复错误）_"
+        )
 
     try:
         extraction, error = extract_image(block.image, f"{page_label}.png")
@@ -165,8 +189,20 @@ def _visual_markdown(
         # also fills the index with a few hundred characters of noise that
         # retrieval then has to compete with.
         logger.warning("hybrid: vision returned nothing for %s (%s)", page_label, error)
+        # Permanent failures trip the breaker; transient ones keep trying.
+        from .vision_extract import _is_permanent_vision_failure
+
+        if _is_permanent_vision_failure(error):
+            _vision_consecutive_failures += 1
+            logger.info(
+                "hybrid: vision permanent failure #%d for %s — "
+                "breaker at %d; %s",
+                _vision_consecutive_failures, page_label, budget, error,
+            )
         return f"{fallback}\n>\n> _（视觉解析未返回结果，详见服务端日志）_"
 
+    # A successful call resets the counter: the endpoint is reachable again.
+    _vision_consecutive_failures = 0
     rendered = image_markdown(extraction, page_label)
     return f"{caption}\n\n{rendered}" if caption else rendered
 
@@ -254,6 +290,9 @@ def parse(content: bytes) -> str | None:
     cascade moves on. Every other failure degrades to the local result: a
     cloud outage should cost quality, never the upload.
     """
+    global _vision_consecutive_failures
+    _vision_consecutive_failures = 0
+
     pages = pdf_local.extract_pages(content)
     if not pages:
         return None

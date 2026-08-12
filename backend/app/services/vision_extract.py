@@ -238,6 +238,30 @@ def _failure_hint(exc: Exception) -> str:
     return str(exc)[:200]
 
 
+def _is_permanent_vision_failure(error: str | None) -> bool:
+    """Whether *error* describes a condition retrying cannot fix.
+
+    The upstream vision endpoint reports "endpoint is paused" as a 400
+    (not a 503), and a revoked token returns 401/403.  Retrying either is
+    strictly waste — the answer will not change until an operator acts.
+    A transient network error, timeout, or 503 cold-start is NOT permanent
+    and should not trip the breaker.
+    """
+    if not error:
+        return False
+    lower = error.lower()
+    permanent = (
+        "endpoint is paused",
+        "bad request",
+        "bad_request",
+        "account",
+        "suspended",
+        "forbidden",
+        "unauthorized",
+    )
+    return any(marker in lower for marker in permanent)
+
+
 def prewarm() -> tuple[bool, float, str]:
     """Wake a scale-to-zero endpoint once, before a batch of figures.
 
