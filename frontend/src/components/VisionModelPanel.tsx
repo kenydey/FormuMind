@@ -230,21 +230,25 @@ export default function VisionModelPanel({ providers, vision, onSaved }: Props) 
             )}
           </label>
 
-          {isCustom && (
+          {(isCustom || current?.base_url != null) && (
             <label className="block">
-              <span className="text-xs text-slate-400">Base URL</span>
+              <span className="text-xs text-slate-400">
+                Base URL{isCustom ? "" : "（可覆盖默认端点，如百炼 Token Plan 专属地址）"}
+              </span>
               <input
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://xxx.endpoints.huggingface.cloud/v1"
+                placeholder={current?.base_url ?? "https://..."}
                 aria-label="视觉端点 Base URL"
                 className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm font-mono"
               />
-              <p className="text-[10px] text-slate-600 mt-1">
-                HuggingFace Endpoints 需以 <code className="text-slate-400">/v1</code> 结尾——
-                只填到域名时会自动补上。
-              </p>
+              {isCustom && (
+                <p className="text-[10px] text-slate-600 mt-1">
+                  HuggingFace Endpoints 需以 <code className="text-slate-400">/v1</code> 结尾——
+                  只填到域名时会自动补上。
+                </p>
+              )}
             </label>
           )}
 

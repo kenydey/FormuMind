@@ -98,12 +98,13 @@ PROVIDERS: list[dict] = [
     },
     {
         "id": "qwen",
-        "label": "Qwen (通义千问)",
+        "label": "Qwen 通义千问 (阿里云百炼)",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "models": [
-            {"id": "qwen-turbo", "label": "Qwen Turbo (快速)"},
-            {"id": "qwen-plus", "label": "Qwen Plus (推荐)", "recommended": True},
-            {"id": "qwen-max", "label": "Qwen Max (最强)"},
+            {"id": "qwen3.8-max", "label": "Qwen3.8 Max (最强·支持视觉)", "recommended": True},
+            {"id": "qwen3.7-max", "label": "Qwen3.7 Max"},
+            {"id": "qwen3.7-plus", "label": "Qwen3.7 Plus (性价比·支持视觉)"},
+            {"id": "qwen3.6-flash", "label": "Qwen3.6 Flash (快速·支持视觉)"},
         ],
     },
     {
