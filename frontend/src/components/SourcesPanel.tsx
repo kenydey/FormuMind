@@ -59,7 +59,6 @@ export default function SourcesPanel() {
     deselectAllSources,
     searchSources,
     loadSourceStatus,
-    openSettings,
     uploadFiles,
     searchBusy,
     searchProgress,
@@ -83,7 +82,6 @@ export default function SourcesPanel() {
       deselectAllSources: s.deselectAllSources,
       searchSources: s.searchSources,
       loadSourceStatus: s.loadSourceStatus,
-      openSettings: s.openSettings,
       uploadFiles: s.uploadFiles,
       searchBusy: s.searchBusy,
       searchProgress: s.searchProgress,
@@ -196,22 +194,6 @@ export default function SourcesPanel() {
           className="hover:text-accent"
         >
           + 添加数据源
-        </button>
-        <span className="text-slate-700">·</span>
-        <button
-          type="button"
-          onClick={() => openSettings("api")}
-          className="hover:text-accent"
-        >
-          API 配置 →
-        </button>
-        <span className="text-slate-700">·</span>
-        <button
-          type="button"
-          onClick={() => openSettings("deps")}
-          className="hover:text-accent"
-        >
-          NotebookLM / 依赖 →
         </button>
       </div>
 
