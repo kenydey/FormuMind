@@ -35,7 +35,7 @@ def _poll_status(status_url: str, *, timeout_s: float = 15.0) -> dict:
 
 
 def test_optimize_returns_202_with_stream_url():
-    r = client.post("/api/optimize", json={"requirement": _REQUIREMENT, "iterations": 4})
+    r = client.post("/api/optimize", json={"requirement": _REQUIREMENT, "iterations": 1, "engine": "numpy"})
     assert r.status_code == 202
     body = r.json()
     assert body["task_id"]

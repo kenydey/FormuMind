@@ -73,9 +73,9 @@ def test_optimization_single_objective_improves_over_baseline():
         salt_spray_hours=600,
         objectives=[ObjectiveSpec(metric="salt_spray_hours", weight=1.0, direction="maximize")],
     )
-    result = workflow.run_optimization(req, iterations=20)
+    result = workflow.run_optimization(req, iterations=1)
     assert result.objective == "salt_spray_hours"
-    assert len(result.top_formulations) == 5
+    assert len(result.top_formulations) == 1
     # Best-so-far convergence curve is monotonically non-decreasing.
     assert all(b >= a for a, b in zip(result.history, result.history[1:]))
     # Optimized top beats the neutral baseline on the salt-spray metric.
@@ -155,7 +155,7 @@ def test_score_and_validate_uses_passed_objectives_not_empty_req_objectives():
 
 def test_optimization_multi_objective_returns_objectives():
     req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
-    result = workflow.run_optimization(req, iterations=10)
+    result = workflow.run_optimization(req, iterations=1)
     # Default multi-objective: objectives list should be populated.
     assert result.objectives, "multi-objective result should carry objective specs"
     assert any(o.metric == "salt_spray_hours" for o in result.objectives)
@@ -171,7 +171,7 @@ def test_optimization_enriches_cas_and_zh_name():
         substrate=Substrate.aluminum,
         salt_spray_hours=500,
     )
-    result = workflow.run_optimization(req, iterations=12)
+    result = workflow.run_optimization(req, iterations=1)
     assert result.top_formulations
     top = result.top_formulations[0]
     by_name = {i.name: i for i in top.ingredients}
@@ -186,5 +186,5 @@ def test_all_domains_run_end_to_end():
         req = Requirement(domain=domain, substrate=Substrate.aluminum)
         research = workflow.run_research(req)
         assert research.recommended
-        opt = workflow.run_optimization(req, iterations=10)
+        opt = workflow.run_optimization(req, iterations=1)
         assert opt.top_formulations

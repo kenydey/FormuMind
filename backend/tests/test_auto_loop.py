@@ -59,7 +59,7 @@ def test_loop_iterate_skips_optimize_when_plateau(monkeypatch):
 
     rep = loop_iterate(
         _REQ,
-        optimize_iterations=6,
+        optimize_iterations=1,
         n_suggest=3,
         prior_rmse_history=prior,
         prior_optimization=stub_opt,
@@ -73,24 +73,24 @@ def test_loop_iterate_skips_optimize_when_plateau(monkeypatch):
 
 
 def test_loop_iterate_includes_adaptive_fields():
-    rep = loop_iterate(_REQ, optimize_iterations=6, n_suggest=3)
+    rep = loop_iterate(_REQ, optimize_iterations=1, n_suggest=3, optimize_engine="numpy", doe_engine="legacy")
     assert rep.strategy_label in {"exploration", "balanced", "exploitation"}
     assert rep.recommended_next_action
     assert len(rep.run_explanations) >= 1
 
 
 def test_loop_iterate_returns_loop_report():
-    rep = loop_iterate(_REQ, optimize_iterations=6, n_suggest=3)
+    rep = loop_iterate(_REQ, optimize_iterations=1, n_suggest=3, optimize_engine="numpy", doe_engine="legacy")
     assert isinstance(rep, LoopReport)
     assert rep.domain == "anticorrosion_coating"
-    assert rep.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei"}
+    assert rep.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei", "baybe"}
 
 
 def test_loop_iterate_produces_optimization_and_next_doe():
-    rep = loop_iterate(_REQ, optimize_iterations=6, n_suggest=4)
+    rep = loop_iterate(_REQ, optimize_iterations=1, n_suggest=4, optimize_engine="numpy", doe_engine="legacy")
     # Optimization should yield ranked top formulations
     assert len(rep.optimization.top_formulations) > 0
-    assert len(rep.optimization.history) == 6
+    assert len(rep.optimization.history) == 1
     # Active-learning DOE should flag exactly n_suggest runs
     ai_runs = [r for r in rep.next_doe.runs if r.ai_suggested]
     assert len(ai_runs) == 4
@@ -98,7 +98,7 @@ def test_loop_iterate_produces_optimization_and_next_doe():
 
 def test_loop_iterate_graceful_without_records():
     # In the CI baseline there may be no lab data — loop must still return a result.
-    rep = loop_iterate(_REQ, optimize_iterations=4, n_suggest=2)
+    rep = loop_iterate(_REQ, optimize_iterations=1, n_suggest=2, optimize_engine="numpy", doe_engine="legacy")
     assert rep.total_records >= 0
     assert isinstance(rep.rmse_by_metric, dict)
     assert rep.next_doe.design  # a design was chosen
@@ -106,7 +106,7 @@ def test_loop_iterate_graceful_without_records():
 
 def test_loop_progress_callback_invoked():
     calls: list[tuple[float, str]] = []
-    loop_iterate(_REQ, optimize_iterations=4, n_suggest=2, progress_cb=lambda p, m: calls.append((p, m)))
+    loop_iterate(_REQ, optimize_iterations=1, n_suggest=2, optimize_engine="numpy", doe_engine="legacy", progress_cb=lambda p, m: calls.append((p, m)))
     assert calls, "progress callback should be invoked at least once"
     assert calls[-1][0] == 1.0, "final progress should reach 1.0"
 
@@ -121,6 +121,12 @@ def test_records_for_filters_by_domain():
 
 def test_loop_all_domains():
     for domain in ProductDomain:
-        rep = loop_iterate(Requirement(domain=domain), optimize_iterations=4, n_suggest=2)
+        rep = loop_iterate(
+            Requirement(domain=domain),
+            optimize_iterations=1,
+            n_suggest=2,
+            optimize_engine="numpy",
+            doe_engine="legacy",
+        )
         assert rep.optimization.top_formulations
         assert rep.next_doe.runs

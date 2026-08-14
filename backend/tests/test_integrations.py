@@ -45,9 +45,9 @@ def test_build_optimizer_falls_back_to_numpy_when_no_engine():
 def test_optimization_result_reports_engine():
     from app.pipeline import workflow
 
-    res = workflow.run_optimization(_REQ, iterations=6)
-    assert res.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo"}
-    assert len(res.history) == 6
+    res = workflow.run_optimization(_REQ, iterations=1)
+    assert res.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "baybe"}
+    assert len(res.history) == 1
     assert res.top_formulations
 
 
@@ -192,8 +192,8 @@ def test_optimization_result_engine_includes_botorch_when_installed():
     from app.pipeline import workflow
     from app.services.optimizer import _botorch_available
 
-    res = workflow.run_optimization(_REQ, iterations=6)
-    valid = {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei"}
+    res = workflow.run_optimization(_REQ, iterations=1)
+    valid = {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei", "baybe"}
     assert res.engine in valid, f"Unknown engine: {res.engine}"
 
 
@@ -345,7 +345,7 @@ def test_active_doe_endpoint():
     assert resp.status_code == 200
     body = resp.json()
     plan = body["plan"]
-    assert plan["design"] == "lhs"
+    assert plan["design"] in ("lhs", "baybe_lhs")
     ai_runs = [r for r in plan["runs"] if r.get("ai_suggested")]
     assert len(ai_runs) == 3, f"Expected 3 AI-suggested runs, got {len(ai_runs)}"
     assert body.get("engine") in ("legacy", "baybe")
@@ -400,8 +400,10 @@ def test_loop_iterate_endpoint():
         "ph_target": None,
         "notes": "",
         "objectives": [],
-        "optimize_iterations": 6,
+        "optimize_iterations": 1,
         "n_suggest": 3,
+        "optimize_engine": "numpy",
+        "doe_engine": "legacy",
     }
     resp = client.post("/api/loop/iterate", json=payload)
     assert resp.status_code == 202

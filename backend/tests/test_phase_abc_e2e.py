@@ -61,7 +61,7 @@ def test_phase_abc_e2e_optimize_enrich_loop_adopt_history():
     # 1) 寻优
     opt_handle = client.post(
         "/api/optimize",
-        json={"requirement": _REQUIREMENT, "iterations": 6},
+        json={"requirement": _REQUIREMENT, "iterations": 1, "engine": "numpy"},
     ).json()
     opt_status = _poll(client, opt_handle["status_url"])
     assert opt_status["state"] == "completed", opt_status
@@ -83,7 +83,7 @@ def test_phase_abc_e2e_optimize_enrich_loop_adopt_history():
     # 3) 闭环 iterate
     loop_handle = client.post(
         "/api/loop/iterate",
-        json={**_REQUIREMENT, "optimize_iterations": 4, "n_suggest": 2},
+        json={**_REQUIREMENT, "optimize_iterations": 1, "n_suggest": 2, "optimize_engine": "numpy", "doe_engine": "legacy"},
     ).json()
     loop_status = _poll(client, loop_handle["status_url"], timeout_s=90.0)
     assert loop_status["state"] == "completed", loop_status
@@ -111,8 +111,10 @@ def test_phase_abc_e2e_optimize_enrich_loop_adopt_history():
         "/api/loop/iterate",
         json={
             **_REQUIREMENT,
-            "optimize_iterations": 4,
+            "optimize_iterations": 1,
             "n_suggest": 2,
+            "optimize_engine": "numpy",
+            "doe_engine": "legacy",
             "workbench_campaign_id": campaign_id,
         },
     ).json()

@@ -221,7 +221,7 @@ def test_graph_survives_a_failing_federated_search(monkeypatch, settings):
     when pre-loaded sources exist, so passing any would skip the very node
     under test and the assertion would hold vacuously.
     """
-    from app.services import literature
+    from app.services import colbert_store, kb_index, literature
 
     called: list[int] = []
 
@@ -230,6 +230,12 @@ def test_graph_survives_a_failing_federated_search(monkeypatch, settings):
         raise RuntimeError("upstream search returned 502")
 
     monkeypatch.setattr(literature, "iter_search", boom)
+    # Empty local retrieval (BM25 + KB seed hits) so grade is "incorrect" and
+    # CRAG routes to the fallback (whose search we then blow up). Without this
+    # the KB branch appends high-score seed docs, grade comes back "correct",
+    # the fallback never runs and the test proves nothing.
+    monkeypatch.setattr(colbert_store, "search", lambda *a, **k: [])
+    monkeypatch.setattr(kb_index, "search_chunks", lambda *a, **k: [])
     monkeypatch.setattr("app.services.llm.complete_json", lambda prompt: None)
 
     state = run_research_graph(

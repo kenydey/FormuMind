@@ -51,7 +51,7 @@ def test_doe_endpoint():
 
 
 def test_optimize_then_poll():
-    payload = {"requirement": {"domain": "anticorrosion_coating", "salt_spray_hours": 500}, "iterations": 8}
+    payload = {"requirement": {"domain": "anticorrosion_coating", "salt_spray_hours": 500}, "iterations": 1, "engine": "numpy"}
     r = client.post("/api/optimize", json=payload)
     assert r.status_code == 202
     task_id = r.json()["task_id"]

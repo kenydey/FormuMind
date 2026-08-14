@@ -45,7 +45,7 @@ def test_baybe_recommend_roundtrip():
         ExperimentRecord(
             domain=REQ.domain,
             factors=r1.plan.runs[0].natural,
-            measured={"salt_spray_hours": 520.0},
+            measured={"salt_spray_hours": 520.0, "cost_cny_per_kg": 18.5, "sustainability_idx": 0.72},
             source="test",
         )
     ]
