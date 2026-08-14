@@ -62,7 +62,8 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
   async function runSearch() {
     setError(null);
     setSourceTypes(modalTypes);
-    await searchSources(keyword);
+    // 累加模式：在现有数据源基础上追加新关键词的结果，而非清空重搜。
+    await searchSources(keyword, { append: true });
   }
 
   async function addUrl() {

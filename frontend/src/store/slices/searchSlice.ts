@@ -102,10 +102,13 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         draft.selectedSources = [];
       }),
 
-    searchSources: async (queryOverride?: string) => {
+    searchSources: async (queryOverride?: string, opts?: { append?: boolean }) => {
       const { searchQuery, requirement, sourceTypes } = get();
       const query = (queryOverride ?? searchQuery).trim();
-      if (queryOverride !== undefined) {
+      // 「添加数据源」走累加（append=true）：保留现有 sources 与研究主题，
+      // 新关键词结果经 addSources 去重后追加；左栏「开始检索」保持清空重搜。
+      const append = opts?.append === true;
+      if (queryOverride !== undefined && !append) {
         set((draft) => {
           draft.searchQuery = query;
         });
@@ -113,8 +116,10 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       set((draft) => {
         draft.searchBusy = true;
         draft.error = null;
-        draft.sources = [];
-        draft.selectedSources = [];
+        if (!append) {
+          draft.sources = [];
+          draft.selectedSources = [];
+        }
         draft.usedSeedFallback = false;
         draft.filterReport = null;
         undismiss(draft.notificationsDismissed, [

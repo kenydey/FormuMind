@@ -208,7 +208,7 @@ export interface AppState {
   toggleSourceSelected: (id: string) => void;
   selectAllSources: () => void;
   deselectAllSources: () => void;
-  searchSources: (queryOverride?: string) => Promise<void>;
+  searchSources: (queryOverride?: string, opts?: { append?: boolean }) => Promise<void>;
   trackKbIngest: (taskId: string) => Promise<void>;
   clearError: () => void;
   dismissNotification: (kind: NotificationKind) => void;
