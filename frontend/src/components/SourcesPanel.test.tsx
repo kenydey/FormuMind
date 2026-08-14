@@ -31,7 +31,6 @@ function setState(patch: Partial<AppState>) {
     searchBusy: false,
     searchProgress: null,
     kbIngest: null,
-    kbRefreshNotice: null,
     deepResearchBusy: false,
     deepResearchMessage: "",
     error: null,

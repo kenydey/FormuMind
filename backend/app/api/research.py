@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..pipeline import workflow
 from ..services.deep_research import ExpandedQuery, QueryExpander
-from ..services.federated_search import FederatedSearchEngine
 from ..worker.tasks import run_deep_research_task, run_recommend_task
 from ._dispatch import submit
 from ._idempotency import enqueue_outbox, idempotency_key
@@ -119,55 +118,6 @@ def modify_recommendation(body: ModifyRequest) -> JSONResponse:
         "n": body.n,
     }
     return submit(run_recommend_task, payload, "recommend")
-
-
-@router.post("/research/kb/refresh")
-def refresh_knowledge_base(query: str = Query(..., min_length=1)) -> dict:
-    """Federated search → full-text knowledge base build.
-
-    This used to stop at ``colbert_store.index_evidence``, which stores only
-    ``title + snippet`` clipped to 500 characters into an
-    ``evidence_registry.json`` that **chat retrieval never reads** — chat goes
-    through ``kb_index.search_chunks`` against ``document_chunks``. So the
-    button did nothing for question answering, which is the whole reason it
-    exists. It now also runs the same pipeline an ordinary search does: download
-    the PDF or page, chunk it, embed it, persist it.
-
-    The registry write stays. It is not dead code — deep research's retrieve
-    node searches it (``pipeline/research_graph.py:158``), so dropping it would
-    have silently cost that path its recall.
-
-    The ingest is a background task because fetching a dozen PDFs takes minutes;
-    the caller gets a task id and streams progress through the same channel a
-    search-triggered ingest uses.
-    """
-    from ..services import colbert_store, kb_ingest
-    from ..worker.tasks import dispatch_kb_ingest
-
-    fed = FederatedSearchEngine()
-    result = fed.search(query)
-    evidence = list(result.evidence or [])
-
-    registry_total = colbert_store.index_evidence(evidence) if evidence else 0
-
-    # How many of the hits are actually fetchable, so "found 20, ingesting 12"
-    # is visible rather than looking like silent data loss.
-    try:
-        ingestable = len(kb_ingest.select_ingest_targets(evidence)) if evidence else 0
-    except Exception:  # pragma: no cover - selection is best-effort reporting
-        ingestable = 0
-
-    task_id = (
-        dispatch_kb_ingest([e.model_dump() for e in evidence]) if evidence else None
-    )
-    return {
-        "query": query,
-        "found": len(evidence),
-        "ingestable": ingestable,
-        "ingest_task_id": task_id,
-        "registry_total": registry_total,
-        "source_counts": result.source_counts,
-    }
 
 
 @router.get("/research/expand", response_model=ExpandedQuery, deprecated=True)

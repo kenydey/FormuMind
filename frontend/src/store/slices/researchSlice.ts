@@ -118,16 +118,6 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       });
       try {
         const { requirement, sources, selectedSources, searchQuery } = get();
-        const flags = await api.getEnvFlags().catch(() => null);
-        const autoKbRefresh = flags?.flags?.some(
-          (f) => f.attr === "auto_kb_refresh_before_recommend" && f.value
-        );
-        if (autoKbRefresh && searchQuery.trim()) {
-          set((draft) => {
-            draft.recommendMessage = "推荐前刷新知识库…";
-          });
-          await api.refreshKnowledgeBase(searchQuery.trim());
-        }
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
@@ -218,46 +208,5 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    refreshKnowledgeBase: async () => {
-      const query = get().searchQuery.trim();
-      if (!query) {
-        set((draft) => {
-          draft.error = "请先输入研究主题";
-        });
-        return;
-      }
-      set((draft) => {
-        draft.searchBusy = true;
-        draft.error = null;
-        draft.kbRefreshNotice = null;
-      });
-      try {
-        const res = await api.refreshKnowledgeBase(query);
-        // This used to be written to `deepResearchMessage`, whose two readers
-        // are both gated on `deepResearchBusy` — false on this path. So the
-        // result was rendered nowhere and the button gave no feedback at all.
-        //
-        // The counts are deliberately both shown: "found 20, fetching 12" is
-        // the honest description, and the gap is not data loss — the other 8
-        // have no URL/DOI/patent id to download a full document from.
-        set((draft) => {
-          draft.kbRefreshNotice = res.ingest_task_id
-            ? `检索到 ${res.found} 条，正在下载全文并入库 ${res.ingestable} 篇…`
-            : `检索到 ${res.found} 条，其中没有可下载全文的条目`;
-        });
-        // The full-text download takes minutes, so it streams through the same
-        // channel a search-triggered ingest uses — including the per-source
-        // badges in the left column.
-        if (res.ingest_task_id) void get().trackKbIngest(res.ingest_task_id);
-      } catch (e) {
-        set((draft) => {
-          draft.error = formatApiError(e);
-        });
-      } finally {
-        set((draft) => {
-          draft.searchBusy = false;
-        });
-      }
-    },
-  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'runAiModifyFormula' | 'runResearch' | 'runDeepResearch' | 'refreshKnowledgeBase'>;
+  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'runAiModifyFormula' | 'runResearch' | 'runDeepResearch'>;
 }

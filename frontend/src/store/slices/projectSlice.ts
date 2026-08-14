@@ -75,7 +75,6 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           // Run-status notices belong to the project that produced them.
           draft.kbIngest = null;
           draft.searchProgress = null;
-          draft.kbRefreshNotice = null;
           draft.notificationsDismissed = noNotificationsDismissed();
         });
         if (!get().requirement.levers?.length) {
@@ -129,7 +128,6 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.error = null;
           draft.kbIngest = null;
           draft.searchProgress = null;
-          draft.kbRefreshNotice = null;
           draft.notificationsDismissed = noNotificationsDismissed();
         });
         if (!get().requirement.levers?.length) {

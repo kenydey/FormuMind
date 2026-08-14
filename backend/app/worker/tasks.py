@@ -675,6 +675,14 @@ def run_search_task(self, payload: dict) -> dict:
             "used_seed_fallback": any(e.is_seed_corpus for e in final),
             "filter_report": filter_report,
         }
+        # Feed the registry deep research reads, so a search's hits are
+        # retrievable by resolve_grounded_evidence / retrieve_node. This is the
+        # one thing the old /research/kb/refresh did that a search did not; the
+        # registry is keyed by doc id, so re-indexing is idempotent.
+        from ..services import colbert_store
+
+        colbert_store.index_evidence(final)
+
         # Background KB build: enqueue is non-blocking, so the search stream
         # terminates immediately below and the frontend keeps its results.
         kb_task_id = dispatch_kb_ingest(

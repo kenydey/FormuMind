@@ -66,7 +66,6 @@ export default function SourcesPanel() {
     runDeepResearch,
     deepResearchBusy,
     deepResearchMessage,
-    refreshKnowledgeBase,
     kbIngest,
   } = useStore(
     useShallow((s) => ({
@@ -91,7 +90,6 @@ export default function SourcesPanel() {
       runDeepResearch: s.runDeepResearch,
       deepResearchBusy: s.deepResearchBusy,
       deepResearchMessage: s.deepResearchMessage,
-      refreshKnowledgeBase: s.refreshKnowledgeBase,
       kbIngest: s.kbIngest,
     }))
   );
@@ -192,15 +190,6 @@ export default function SourcesPanel() {
       </button>
 
       <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-        <button
-          type="button"
-          onClick={() => void refreshKnowledgeBase()}
-          disabled={searchBusy || deepResearchBusy || !searchQuery.trim()}
-          className="hover:text-accent2 disabled:opacity-40"
-        >
-          📥 补充知识库
-        </button>
-        <span className="text-slate-700">·</span>
         <button
           type="button"
           onClick={() => setAddSourceOpen(true)}

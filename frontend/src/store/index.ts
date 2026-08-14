@@ -63,7 +63,6 @@ export const useStore = create<AppState>()(
       searchBusy: false,
       searchProgress: null,
       kbIngest: null,
-      kbRefreshNotice: null,
       notificationsDismissed: noNotificationsDismissed(),
       deepResearchBusy: false,
       deepResearchStage: "",

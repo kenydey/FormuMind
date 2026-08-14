@@ -25,16 +25,12 @@ export function createNotificationSlice(set: SliceSet, _get: SliceGet) {
      */
     dismissNotification: (kind: NotificationKind) =>
       set((draft) => {
-        // `error` and `kbRefreshNotice` exist only to be displayed and have no
-        // writer loop, so clearing the field IS the dismissal. Every other kind
-        // is driven by a field with other consumers or a per-frame writer, so it
-        // must be flagged instead — see the header of store/notifications.ts.
+        // `error` exists only to be displayed and has no writer loop, so
+        // clearing the field IS the dismissal. Every other kind is driven by
+        // a field with other consumers or a per-frame writer, so it must be
+        // flagged instead — see the header of store/notifications.ts.
         if (kind === "error") {
           draft.error = null;
-          return;
-        }
-        if (kind === "kb-refresh") {
-          draft.kbRefreshNotice = null;
           return;
         }
         draft.notificationsDismissed[kind] = true;

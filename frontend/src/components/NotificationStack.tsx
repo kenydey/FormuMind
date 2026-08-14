@@ -148,7 +148,6 @@ export default function NotificationStack({ renderDetail }: NotificationStackPro
         searchBusy: s.searchBusy,
         searchProgress: s.searchProgress,
         kbIngest: s.kbIngest,
-        kbRefreshNotice: s.kbRefreshNotice,
         filterReport: s.filterReport,
         usedSeedFallback: s.usedSeedFallback,
         sources: s.sources,

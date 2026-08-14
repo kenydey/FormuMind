@@ -196,10 +196,13 @@ def test_dispatch_skips_when_nothing_fetchable():
 
 
 def test_search_task_attaches_kb_ingest_task_id(stores, monkeypatch):
-    from app.services import literature
+    from app.services import colbert_store, literature
     from app.worker import tasks as worker_tasks
 
     monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(
+        colbert_store, "index_evidence", lambda ev, **kw: len(ev)
+    )
     monkeypatch.setattr(
         literature,
         "iter_search",
@@ -217,12 +220,46 @@ def test_search_task_attaches_kb_ingest_task_id(stores, monkeypatch):
     assert status is not None and status["result"]["indexed"] == 1
 
 
+def test_search_task_feeds_registry_deep_research_reads(monkeypatch):
+    """A search must write the registry deep research's retrieve node reads.
+
+    This is the one thing the old /research/kb/refresh did that a plain search
+    did not; merging it means a search's hits are retrievable by
+    resolve_grounded_evidence / retrieve_node without a separate button.
+    """
+    from app.services import colbert_store, literature
+    from app.worker import tasks as worker_tasks
+
+    registry: list[int] = []
+    monkeypatch.setattr(
+        colbert_store, "index_evidence",
+        lambda ev, **kw: registry.append(len(ev)) or len(ev),
+    )
+    monkeypatch.setattr(
+        worker_tasks, "dispatch_kb_ingest",
+        lambda dicts, **kw: "kbingest-test",
+    )
+    monkeypatch.setattr(
+        literature, "iter_search",
+        lambda *a, **k: [_ev("US5555555", title="锌系磷化专利")],
+    )
+
+    worker_tasks.run_search_task.apply(
+        args=[{"query": "锌系磷化", "source_types": ["patents"]}]
+    ).get()
+
+    assert registry == [1], "search must write the registry deep research reads"
+
+
 def test_search_task_without_ingest_when_disabled(monkeypatch):
-    from app.services import literature
+    from app.services import colbert_store, literature
     from app.worker import tasks as worker_tasks
 
     monkeypatch.setenv("FORMUMIND_KB_INGEST_AUTO", "false")
     get_settings.cache_clear()
+    monkeypatch.setattr(
+        colbert_store, "index_evidence", lambda ev, **kw: len(ev)
+    )
     monkeypatch.setattr(
         literature, "iter_search", lambda *a, **k: [_ev("US5555555")]
     )

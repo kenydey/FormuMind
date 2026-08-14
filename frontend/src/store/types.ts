@@ -123,8 +123,6 @@ export interface AppState {
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;
   kbIngest: KbIngestState | null;
-  /** Success notice from refreshKnowledgeBase — display-only, no other consumer. */
-  kbRefreshNotice: string | null;
   /**
    * Which run-status notifications the user has manually closed. A flag rather
    * than a deleted source field — see store/notifications.ts for why.
@@ -175,7 +173,6 @@ export interface AppState {
   runAiModifyFormula: (prompt: string, baseIndex?: number) => Promise<void>;
   runResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
-  refreshKnowledgeBase: () => Promise<void>;
   runOptimize: () => Promise<void>;
   generateDoe: (design: string) => Promise<void>;
   setDoeEngine: (engine: "auto" | "native" | "pydoe") => void;

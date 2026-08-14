@@ -33,7 +33,6 @@ export type NotificationKind =
   | "deep-research"
   | "search"
   | "kb-ingest"
-  | "kb-refresh"
   | "filter-report"
   | "seed-fallback"
   | "deep-report";
@@ -48,7 +47,6 @@ export const NOTIFICATION_ORDER: NotificationKind[] = [
   "deep-research",
   "search",
   "kb-ingest",
-  "kb-refresh",
   "filter-report",
   "seed-fallback",
   "deep-report",
@@ -90,7 +88,6 @@ export function noNotificationsDismissed(): Record<NotificationKind, boolean> {
     "deep-research": false,
     search: false,
     "kb-ingest": false,
-    "kb-refresh": false,
     "filter-report": false,
     "seed-fallback": false,
     "deep-report": false,
@@ -116,7 +113,6 @@ export interface NotificationInputs {
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;
   kbIngest: KbIngestState | null;
-  kbRefreshNotice: string | null;
   filterReport: FilterReport | null;
   usedSeedFallback: boolean;
   sources: Evidence[];
@@ -181,18 +177,6 @@ export function deriveNotifications(s: NotificationInputs): DerivedNotification[
           ? fraction(s.kbIngest.done, s.kbIngest.total, 0.06)
           : null,
       running: s.kbIngest.active,
-      collapsible: true,
-    });
-  }
-
-  if (s.kbRefreshNotice) {
-    push({
-      kind: "kb-refresh",
-      tone: "success",
-      title: "📥 补充知识库",
-      message: s.kbRefreshNotice,
-      progress: null,
-      running: false,
       collapsible: true,
     });
   }

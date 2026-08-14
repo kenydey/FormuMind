@@ -257,13 +257,6 @@ class Settings(BaseSettings):
     # 用假设性答案改进检索（HyDE）。生成内容只用于检索，绝不进入报告正文。
     deep_hyde_enabled: bool = True
 
-    # Recommend path: federated refresh before CRAG recommend. The ColBERT
-    # registry write is synchronous; the full-text ingest it also triggers is a
-    # background task, so this run does not see the fetched documents — the
-    # alternative would be blocking a recommend request on a dozen PDF
-    # downloads. The benefit lands on subsequent runs.
-    auto_kb_refresh_before_recommend: bool = False
-
     # PDF 解析器层级（KB P1）："auto" = hybrid → Docling → marker → MinerU →
     # MarkItDown → pypdf 逐级回退；指定名称则固定首选（仍向下回退）。
     pdf_parser: str = "auto"

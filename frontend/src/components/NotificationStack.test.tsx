@@ -29,7 +29,6 @@ const IDLE = {
   searchBusy: false,
   searchProgress: null,
   kbIngest: null,
-  kbRefreshNotice: null,
   filterReport: null,
   usedSeedFallback: false,
   sources: [],
@@ -171,12 +170,11 @@ describe("NotificationStack", () => {
       searchBusy: true,
       searchProgress: progress() as never,
       kbIngest: kbIngest() as never,
-      kbRefreshNotice: "已入库 5 条",
       deepReport: { citations: [] } as never,
     });
     render(<NotificationStack />);
 
-    expect(screen.getByText(/⋯ 4 条状态/)).toBeTruthy();
+    expect(screen.getByText(/⋯ 3 条状态/)).toBeTruthy();
     expect(screen.queryByText("实时检索")).toBeNull();
 
     await userEvent.click(screen.getByText("▾ 展开全部"));
@@ -185,11 +183,15 @@ describe("NotificationStack", () => {
   });
 
   it("does not collapse two notices", () => {
-    setState({ kbIngest: kbIngest() as never, kbRefreshNotice: "已入库 5 条" });
+    setState({
+      kbIngest: kbIngest() as never,
+      sources: [{ title: "a", identifier: "a" }] as never,
+      filterReport: { kept: 10, dropped: 3, dropped_by_reason: {}, dropped_examples: [] } as never,
+    });
     render(<NotificationStack />);
     expect(screen.queryByText(/条状态/)).toBeNull();
     expect(screen.getByText("📚 知识库构建")).toBeTruthy();
-    expect(screen.getByText("📥 补充知识库")).toBeTruthy();
+    expect(screen.getByText("质量过滤")).toBeTruthy();
   });
 
   it("keeps the error visible alongside a collapsed row", () => {
@@ -198,13 +200,12 @@ describe("NotificationStack", () => {
       searchBusy: true,
       searchProgress: progress() as never,
       kbIngest: kbIngest() as never,
-      kbRefreshNotice: "已入库 5 条",
       deepReport: { citations: [] } as never,
     });
     render(<NotificationStack />);
     expect(screen.getByText("⚠ 出错")).toBeTruthy();
     expect(screen.getByText("boom")).toBeTruthy();
-    expect(screen.getByText(/⋯ 4 条状态/)).toBeTruthy();
+    expect(screen.getByText(/⋯ 3 条状态/)).toBeTruthy();
   });
 
   it("closes every collapsed notice in one click", async () => {
@@ -212,7 +213,6 @@ describe("NotificationStack", () => {
       searchBusy: true,
       searchProgress: progress() as never,
       kbIngest: kbIngest() as never,
-      kbRefreshNotice: "已入库 5 条",
       deepReport: { citations: [] } as never,
     });
     const { container } = render(<NotificationStack />);
@@ -225,7 +225,6 @@ describe("NotificationStack", () => {
       searchBusy: true,
       searchProgress: progress() as never,
       kbIngest: kbIngest({ active: false, message: "完成" }) as never,
-      kbRefreshNotice: "已入库 5 条",
       deepReport: { citations: [] } as never,
     });
     render(<NotificationStack />);
@@ -249,12 +248,5 @@ describe("NotificationStack", () => {
     await userEvent.click(screen.getByRole("button", { name: "展开明细" }));
     expect(screen.getByText(/屏蔽域名: 3/)).toBeTruthy();
     expect(screen.getByText("spam.example.com")).toBeTruthy();
-  });
-
-  it("closes the kb-refresh notice by clearing it", async () => {
-    setState({ kbRefreshNotice: "已入库 5 条（索引共 42）" });
-    render(<NotificationStack />);
-    await userEvent.click(closeButtonFor("📥 补充知识库"));
-    expect(useStore.getState().kbRefreshNotice).toBeNull();
   });
 });
