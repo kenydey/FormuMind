@@ -1,0 +1,122 @@
+[
+  {
+    "name": "ethanol",
+    "smiles": "CCO",
+    "formula": "C2H6O",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/ethanol.png"
+  },
+  {
+    "name": "toluene",
+    "smiles": "Cc1ccccc1",
+    "formula": "C7H8",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/toluene.png"
+  },
+  {
+    "name": "styrene",
+    "smiles": "C=Cc1ccccc1",
+    "formula": "C8H8",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/styrene.png"
+  },
+  {
+    "name": "phenol",
+    "smiles": "Oc1ccccc1",
+    "formula": "C6H6O",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/phenol.png"
+  },
+  {
+    "name": "aniline",
+    "smiles": "Nc1ccccc1",
+    "formula": "C6H7N",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/aniline.png"
+  },
+  {
+    "name": "benzoic_acid",
+    "smiles": "O=C(O)c1ccccc1",
+    "formula": "C7H6O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/benzoic_acid.png"
+  },
+  {
+    "name": "terephthalic_acid",
+    "smiles": "O=C(O)c1ccc(C(=O)O)cc1",
+    "formula": "C8H6O4",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/terephthalic_acid.png"
+  },
+  {
+    "name": "adipic_acid",
+    "smiles": "O=C(O)CCCCC(=O)O",
+    "formula": "C6H10O4",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/adipic_acid.png"
+  },
+  {
+    "name": "cyclohexanone",
+    "smiles": "O=C1CCCCC1",
+    "formula": "C6H10O",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/cyclohexanone.png"
+  },
+  {
+    "name": "caprolactam",
+    "smiles": "O=C1CCCCCN1",
+    "formula": "C6H11NO",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/caprolactam.png"
+  },
+  {
+    "name": "mma",
+    "smiles": "C=C(C)C(=O)OC",
+    "formula": "C5H8O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/mma.png"
+  },
+  {
+    "name": "bisphenol_a",
+    "smiles": "CC(C)(c1ccc(O)cc1)c1ccc(O)cc1",
+    "formula": "C15H16O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/bisphenol_a.png"
+  },
+  {
+    "name": "tdi",
+    "smiles": "Cc1ccc(N=C=O)cc1N=C=O",
+    "formula": "C9H6N2O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/tdi.png"
+  },
+  {
+    "name": "mdi",
+    "smiles": "O=C=Nc1ccc(Cc2ccc(N=C=O)cc2)cc1",
+    "formula": "C15H10N2O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/mdi.png"
+  },
+  {
+    "name": "ipdi",
+    "smiles": "CC1(C)CC(N=C=O)CC(C)(CN=C=O)C1",
+    "formula": "C12H18N2O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/ipdi.png"
+  },
+  {
+    "name": "caffeine",
+    "smiles": "Cn1c(=O)c2c(ncn2C)n(C)c1=O",
+    "formula": "C8H10N4O2",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/caffeine.png"
+  },
+  {
+    "name": "naphthalene",
+    "smiles": "c1ccc2ccccc2c1",
+    "formula": "C10H8",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/naphthalene.png"
+  },
+  {
+    "name": "anthracene",
+    "smiles": "c1ccc2cc3ccccc3cc2c1",
+    "formula": "C14H10",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/anthracene.png"
+  },
+  {
+    "name": "aspirin",
+    "smiles": "CC(=O)Oc1ccccc1C(=O)O",
+    "formula": "C9H8O4",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/aspirin.png"
+  },
+  {
+    "name": "citric_acid",
+    "smiles": "O=C(O)CC(O)(CC(=O)O)C(=O)O",
+    "formula": "C6H8O7",
+    "image": "/root/FormuMind/backend/scripts/vision_benchmark/images/citric_acid.png"
+  }
+]
