@@ -63,6 +63,32 @@ def test_arxiv_pdf_url_resolution_needs_no_network():
     assert url == "https://arxiv.org/pdf/2401.12345"
 
 
+def test_literature_fetch_error_reasons(monkeypatch):
+    """Fetchers must report *why* literature text was unobtainable — the three
+    failure modes (无 OA / 下载超时 / 解析为空) used to be collapsed into one
+    opaque message, hiding that most MDPI (fully-OA) failures were timeouts or
+    empty parses rather than genuinely paywalled papers."""
+    _enable(monkeypatch)
+    ev = _ev("10.3390/coatings14010123", source="OpenAlex")
+
+    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: None)
+    with pytest.raises(ff.FetchError) as e1:
+        ff._fetch_literature_text(ev, timeout=5)
+    assert e1.value.reason == "无 OA 版本"
+
+    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://oa.example/x.pdf")
+    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: None)
+    with pytest.raises(ff.FetchError) as e2:
+        ff._fetch_literature_text(ev, timeout=5)
+    assert e2.value.reason == "下载超时"
+
+    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
+    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: "")
+    with pytest.raises(ff.FetchError) as e3:
+        ff._fetch_literature_text(ev, timeout=5)
+    assert e3.value.reason == "解析为空"
+
+
 # ── enrichment flow ──────────────────────────────────────────────────────────
 
 

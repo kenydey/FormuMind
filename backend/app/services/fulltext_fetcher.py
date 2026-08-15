@@ -31,6 +31,19 @@ from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
 
+
+class FetchError(Exception):
+    """Full-text acquisition failed with a specific, user-facing reason.
+
+    Raised by the fetchers so the ingest state machine can record *why* a
+    document was unobtainable — "无 OA 版本" vs "下载超时" vs "解析为空" —
+    instead of collapsing all three into one opaque message.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
 # Any patent office, not just US/EP. `fetch_patent_pdf` falls back to Google
 # Patents, which serves CN/JP/WO/KR/DE publications too — so restricting this to
 # US|EP did not reflect what could be fetched, it just declined to try. On a
@@ -162,12 +175,14 @@ def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
 
     pdf_url = _resolve_oa_pdf_url(ev, timeout)
     if not pdf_url:
-        return None
+        raise FetchError("无 OA 版本")
     pdf = fetch_pdf(pdf_url, timeout=timeout)
     if not pdf:
-        return None
+        raise FetchError("下载超时")
     text = _extract_text(pdf)
-    return text if text and len(text.strip()) > 200 else None
+    if not text or len(text.strip()) <= 200:
+        raise FetchError("解析为空")
+    return text
 
 
 def _extract_web_text(html: str) -> str:

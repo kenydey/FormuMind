@@ -105,16 +105,25 @@ def _fetch_one(
 
     doc["status"] = "fetching"
     emit(doc)
+    fetch_reason: str | None = None
     try:
         with timing.span("fetch"):
             text = ff._dispatch_fetch(kind, ev, timeout)
+    except ff.FetchError as fe:
+        text = None
+        fetch_reason = fe.reason
     except Exception as exc:
         text = degrade_return(logger, exc, f"kb_ingest fetch failed ({kind})", None)
     # Recorded even when empty: "how much did the web channel actually return"
     # is the question, and a zero is as much of an answer as a large number.
     timing.note(chars=len(text or ""))
     if not text:
-        doc.update(status="failed", error="全文获取失败（无 OA 版本 / 下载超时 / 解析为空）")
+        error = (
+            f"全文获取失败（{fetch_reason}）"
+            if fetch_reason
+            else "全文获取失败（无 OA 版本 / 下载超时 / 解析为空）"
+        )
+        doc.update(status="failed", error=error)
         emit(doc)
         return None
     return text
