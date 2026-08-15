@@ -136,6 +136,7 @@ class MeasurementStore:
                 )
             )
             session.flush()
+            savepoint.commit()
         except IntegrityError:
             savepoint.rollback()
             return None

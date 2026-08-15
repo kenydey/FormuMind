@@ -117,6 +117,7 @@ class EntityStore:
         try:
             session.add(new_row)
             session.flush()
+            sp.commit()
         except IntegrityError:
             sp.rollback()
             row = session.get(KGEntity, eid)
@@ -166,6 +167,7 @@ class EntityStore:
         try:
             session.add(mention)
             session.flush()
+            sp.commit()
         except IntegrityError:
             sp.rollback()
             existing = (
@@ -220,6 +222,7 @@ class EntityStore:
                 )
             )
             session.flush()
+            sp.commit()
         except IntegrityError:
             sp.rollback()
         except OperationalError:
@@ -291,6 +294,7 @@ class EntityStore:
                 )
             )
             session.flush()
+            sp.commit()
         except IntegrityError:
             sp.rollback()
             existing = (
@@ -374,6 +378,7 @@ class EntityStore:
                 )
             )
             session.flush()
+            sp.commit()
         except IntegrityError:
             sp.rollback()
             existing = (

@@ -99,6 +99,7 @@ def ingest_qc_report_tx(
                         )
                     )
                     session.flush()
+                    savepoint.commit()
                 except IntegrityError:
                     savepoint.rollback()
                     if session.get(SourceDocument, doc_id) is None:

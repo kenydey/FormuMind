@@ -77,6 +77,7 @@ def ingest_document_tx(
                         )
                     )
                     session.flush()
+                    sp.commit()
                 except IntegrityError:
                     sp.rollback()
                     doc = session.get(SourceDocument, source_id)

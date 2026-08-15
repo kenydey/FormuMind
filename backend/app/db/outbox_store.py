@@ -56,6 +56,7 @@ def enqueue(
     try:
         session.add(row)
         session.flush()
+        sp.commit()
     except IntegrityError:
         sp.rollback()
         existing = session.execute(
