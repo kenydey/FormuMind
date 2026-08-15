@@ -79,15 +79,17 @@ async def lifespan(_app: FastAPI):
     try:
         from .db import dispatcher
         from .db.database import default_session_factory
+        from .db.sqlite_lock import sqlite_write_lock
 
         factory = default_session_factory()
-        with factory() as session:
-            recovered = dispatcher.recover_stalled(session)
-            if recovered:
-                logger.info(
-                    "lifespan: recovered %d stalled outbox row(s)", recovered
-                )
-            session.commit()
+        with sqlite_write_lock(settings.redis_url):
+            with factory() as session:
+                recovered = dispatcher.recover_stalled(session)
+                if recovered:
+                    logger.info(
+                        "lifespan: recovered %d stalled outbox row(s)", recovered
+                    )
+                session.commit()
     except Exception:
         logger.exception("lifespan: outbox stall recovery failed (non-fatal)")
     if not skip_bootstrap:
