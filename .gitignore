@@ -25,3 +25,10 @@ data.bak/
 backend/=0.1.0
 dump.rdb
 .env
+
+# Vision benchmark runtime output (regenerated on each run)
+backend/scripts/vision_benchmark/results.json
+backend/scripts/vision_benchmark/_preview.png
+
+# venv rebuild notes (local only)
+backend/.venv-backup-notes/
