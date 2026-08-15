@@ -21,6 +21,16 @@ import type { AppState } from "../types";
  */
 const KB_INGEST_STALL_MS = 15 * 60 * 1000;
 
+/**
+ * How long a federated search may sit silent before being presumed dead.
+ *
+ * Search is streamed source-by-source; a quiet stretch means one source is
+ * taking a while (a slow patent API, a paginated crawl), not that the whole
+ * task died. 5 minutes is far beyond any single source's page time while still
+ * catching a worker that has actually gone away.
+ */
+const SEARCH_STALL_MS = 5 * 60 * 1000;
+
 export function createSearchSlice(set: SliceSet, get: SliceGet) {
   return {
     setSearchQuery: (q) => {
@@ -162,7 +172,15 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             });
             if (evidence.length) get().addSources(evidence);
           },
-          300_000
+          // No wall-clock limit. Federated search streams source-by-source and
+          // its total duration depends on how many sources are enabled and how
+          // slow each is — a fixed 300 s cut a healthy search off mid-crawl, and
+          // then the kb_ingest_task_id never reached the client, so the whole
+          // background KB build became invisible. The stall clock (reset on
+          // every progress event) still catches a dead worker.
+          0,
+          undefined,
+          SEARCH_STALL_MS
         );
         const r = final.data as
           | {
