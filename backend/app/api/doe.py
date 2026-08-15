@@ -34,11 +34,11 @@ def _persist_doe_plan(plan: DOEPlan) -> None:
     try:
         from ..db import doe_plan_store
         from ..db.database import default_session_factory
+        from ..db.session_utils import commit_session
 
         factory = default_session_factory()
-        with factory() as session:
+        with commit_session(factory) as session:
             doe_plan_store.save(session, plan)
-            session.commit()
     except Exception as exc:
         logger.warning("persist doe plan failed: %s", exc, exc_info=True)
 
@@ -57,6 +57,7 @@ def _persist_run_record(
 
         from ..db import outbox_store
         from ..db.database import default_session_factory
+        from ..db.session_utils import commit_session
 
         raw = json.dumps(request_data, sort_keys=True, ensure_ascii=False)
         idempotency_key = hashlib.sha256(raw.encode()).hexdigest()
@@ -75,14 +76,13 @@ def _persist_run_record(
         }
 
         factory = default_session_factory()
-        with factory() as session:
+        with commit_session(factory) as session:
             outbox_store.enqueue(
                 session,
                 operation=operation,
                 idempotency_key=idempotency_key,
                 payload=payload,
             )
-            session.commit()
     except Exception as exc:
         logger.warning("persist run record failed: %s", exc, exc_info=True)
 

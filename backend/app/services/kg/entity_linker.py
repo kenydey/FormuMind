@@ -11,6 +11,7 @@ from ...config import Settings, get_settings
 from ...db.chunk_store import get_chunk_store
 from ...db.entity_store import get_entity_store
 from ...db.models import KGEntity, KGMention, SourceDocument
+from ...db.session_utils import commit_session
 from ...db.source_store import get_source_store
 from ...domain.kg_schemas import KGLinkReport, KGRebuildReport
 from ...domain.knowledge import RAW_MATERIALS, TRADE_ALIASES, resolve_material_name
@@ -54,7 +55,7 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
         entities = 0
         relations_upserted = 0
 
-        with store._session_factory() as session:
+        with commit_session(store._session_factory) as session:
             for chunk in chunks:
                 n, eids, ln = _link_chunk(session, chunk, source_id, settings)
                 mentions += n
@@ -64,7 +65,6 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
                     relations_upserted += _extract_relations_for_chunk(
                         session, chunk, source_id, settings
                     )
-            session.commit()
 
         entities = len(touched)
         if touched:
@@ -366,7 +366,7 @@ def _maybe_link_source_guide(source_id: str, settings: Settings) -> None:
                 return
             products = doc.source_guide.get("products") or []
         store = get_entity_store()
-        with store._session_factory() as session:
+        with commit_session(store._session_factory) as session:
             for p in products:
                 trade = (p.get("trade_name") or "").strip()
                 if not trade:
@@ -383,6 +383,5 @@ def _maybe_link_source_guide(source_id: str, settings: Settings) -> None:
                     generic_name_hint=hints[:256],
                     composition_status="partial" if hints else "unknown",
                 )
-            session.commit()
     except Exception as exc:
         degrade_return(logger, exc, "source_guide kg hint failed", None)

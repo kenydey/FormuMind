@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from loguru import logger
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..domain.schemas import Measurement
@@ -52,13 +52,14 @@ def ingest_qc_report_tx(
     """
     from ..db.measurement_store import get_measurement_store
     from ..db.models import ExperimentRow, SourceDocument
+    from ..db.session_utils import commit_session
     from .qc_report import extract_qc_report
 
     extraction, err = extract_qc_report(text, title=title or filename)
     store = get_measurement_store()
     content_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
-    with session_factory() as session:
+    with commit_session(session_factory) as session:
         try:
             if session.get(ExperimentRow, experiment_id) is None:
                 raise ValueError(f"experiment {experiment_id} not found")
@@ -102,6 +103,9 @@ def ingest_qc_report_tx(
                     savepoint.rollback()
                     if session.get(SourceDocument, doc_id) is None:
                         raise
+                except OperationalError:
+                    savepoint.rollback()
+                    raise
 
             # ── 2. the binding that was missing ──
             # Attach first: a None result means this report is already bound to
@@ -120,7 +124,6 @@ def ingest_qc_report_tx(
             if measurements and attachment_id is not None:
                 store.add_in(session, experiment_id, measurements, source_document_id=doc_id)
 
-            session.commit()
         except Exception:
             session.rollback()
             raise

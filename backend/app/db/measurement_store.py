@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..domain.schemas import Measurement
@@ -139,6 +139,9 @@ class MeasurementStore:
         except IntegrityError:
             savepoint.rollback()
             return None
+        except OperationalError:
+            savepoint.rollback()
+            raise
         return attachment_id
 
     def attach(

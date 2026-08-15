@@ -10,7 +10,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .models import TaskOutbox
@@ -65,6 +65,9 @@ def enqueue(
         ).scalar_one_or_none()
         if existing is not None:
             return existing.id, existing.status
+        raise
+    except OperationalError:
+        sp.rollback()
         raise
     return row.id, "PENDING"
 

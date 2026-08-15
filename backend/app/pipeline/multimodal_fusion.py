@@ -7,6 +7,7 @@ from pathlib import Path
 from ..config import Settings, get_settings
 from ..db.chunk_store import get_chunk_store
 from ..db.entity_store import get_entity_store
+from ..db.session_utils import commit_session
 from ..domain.multimodal_schemas import MultimodalFusionResult
 from ..services.errors import degrade_return
 from ..services.kg.structural_extractor import extract_triples_from_vision_data
@@ -32,7 +33,7 @@ def persist_structural_extraction(
         return 0
     store = get_entity_store()
     written = 0
-    with store._session_factory() as session:
+    with commit_session(store._session_factory) as session:
         for fields in extraction.entities.values():
             store.upsert_entity(session, **fields)
         for link in extraction.links:
@@ -64,7 +65,6 @@ def persist_structural_extraction(
                         extractor="vision_table",
                         confidence=link.confidence,
                     )
-        session.commit()
     if extraction.entities:
         store.refresh_counts(list(extraction.entities.keys()))
     return written

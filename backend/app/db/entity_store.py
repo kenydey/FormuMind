@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Text, cast, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import KGEntity, KGEntityLink, KGMention
@@ -123,6 +123,9 @@ class EntityStore:
             if row is not None:
                 return _merge(row)
             raise
+        except OperationalError:
+            sp.rollback()
+            raise
         return new_row
 
     def add_mention(
@@ -176,6 +179,9 @@ class EntityStore:
                 .first()
             )
             return existing
+        except OperationalError:
+            sp.rollback()
+            raise
         return mention
 
     def add_link(
@@ -218,6 +224,9 @@ class EntityStore:
             session.flush()
         except IntegrityError:
             sp.rollback()
+        except OperationalError:
+            sp.rollback()
+            raise
 
     def merge_semantic_link(
         self,
@@ -298,6 +307,9 @@ class EntityStore:
             )
             if existing:
                 return _merge(existing)
+        except OperationalError:
+            sp.rollback()
+            raise
         return True
 
     def merge_structural_link(
@@ -379,6 +391,9 @@ class EntityStore:
             )
             if existing:
                 return _merge(existing)
+        except OperationalError:
+            sp.rollback()
+            raise
         return True
 
     def get_links_for_entity(

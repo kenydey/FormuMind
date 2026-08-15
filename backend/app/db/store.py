@@ -306,7 +306,7 @@ class DatalabExperimentStore:
             return
         created_item_ids: list[str] = []
         try:
-            with self._write_lock, self._session_factory() as session:
+            with self._write_lock, commit_session(self._session_factory) as session:
                 for rec in records:
                     item_id = _new_training_item_id()
                     sample_data = {
@@ -330,7 +330,6 @@ class DatalabExperimentStore:
                             label=rec.label,
                         )
                     )
-                session.commit()
         except Exception as exc:
             logger.error(
                 "DatalabExperimentStore.add failed after %d/%d samples: %s",

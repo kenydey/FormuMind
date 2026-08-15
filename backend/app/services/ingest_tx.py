@@ -11,7 +11,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker, Session
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ def ingest_document_tx(
     from ..db.chunk_store import get_chunk_store
     from ..db.models import DocumentChunk, SourceDocument
     from ..db.outbox_store import enqueue
+    from ..db.session_utils import commit_session
     from .chunking import chunk_markdown
     from .kb_index import _embed_model_name, _embed_texts, _embedding_probe, kb_enabled
 
@@ -55,7 +56,7 @@ def ingest_document_tx(
     chunk_store = get_chunk_store()
     settings = get_settings()
 
-    with session_factory() as session:
+    with commit_session(session_factory) as session:
         try:
             # ── 1. SourceDocument savepoint-upsert ──────────────────────────
             doc = session.get(SourceDocument, source_id)
@@ -81,6 +82,9 @@ def ingest_document_tx(
                     doc = session.get(SourceDocument, source_id)
                     if doc is None:
                         raise
+                except OperationalError:
+                    sp.rollback()
+                    raise
                 # Sp not committed — caller's rollback can undo this INSERT.
                 # See formumind-dev skill §19 for why.
 

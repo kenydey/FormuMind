@@ -21,7 +21,7 @@ _LOCK_KEY = "formumind:sqlite_write"
 
 @contextlib.contextmanager
 def sqlite_write_lock(
-    redis_url: str | None, *, timeout: float = 60.0
+    redis_url: str | None, *, timeout: float = 300.0, blocking_timeout: float = 300.0
 ) -> Iterator[None]:
     """Hold a cross-process lock for the duration of a SQLite write transaction."""
     if not redis_url:
@@ -35,8 +35,8 @@ def sqlite_write_lock(
         import redis
 
         client = redis.from_url(redis_url, decode_responses=True, socket_timeout=5)
-        lock = client.lock(_LOCK_KEY, timeout=timeout, blocking_timeout=timeout)
-        acquired = lock.acquire(blocking=True, blocking_timeout=timeout)
+        lock = client.lock(_LOCK_KEY, timeout=timeout, blocking_timeout=blocking_timeout)
+        acquired = lock.acquire(blocking=True, blocking_timeout=blocking_timeout)
     except Exception as exc:
         logger.warning("Redis write lock unavailable (%s) — proceeding unlocked", exc)
         yield
@@ -44,7 +44,7 @@ def sqlite_write_lock(
 
     if not acquired:
         logger.warning(
-            "SQLite write lock timeout after %.0fs — proceeding unlocked", timeout
+            "SQLite write lock timeout after %.0fs — proceeding unlocked", blocking_timeout
         )
         yield
         return

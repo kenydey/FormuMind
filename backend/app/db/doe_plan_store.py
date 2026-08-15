@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import uuid
 
 from sqlalchemy import desc, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from ..domain.schemas import DOEPlan, DOEFactor, DOERun, ProductDomain
@@ -79,6 +79,9 @@ def save(
         session.flush()
     except IntegrityError:
         sp.rollback()
+    except OperationalError:
+        sp.rollback()
+        raise
     return row.id
 
 

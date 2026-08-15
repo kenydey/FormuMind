@@ -254,17 +254,17 @@ def ingest(body: IngestRequest) -> IngestResponse:
     from ..db.database import default_session_factory
     from ..db.models import SourceDocument
     from ..db.outbox_store import enqueue
+    from ..db.session_utils import commit_session
     # NOTE: metadata parameter accepted for future expansion (Task 2.4).
 
+    source_id = body.source_id or str(_uuid.uuid4())
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    source_id = body.source_id or str(_uuid.uuid4())
-
     # Ensure a SourceDocument row exists for this source_id
     factory = default_session_factory()
-    with factory() as session:
+    with commit_session(factory) as session:
         doc = session.get(SourceDocument, source_id)
         if doc is not None and body.source_id is not None:
             # User-supplied source_id collides with an existing document.
@@ -299,12 +299,11 @@ def ingest(body: IngestRequest) -> IngestResponse:
                     raw_text_chars=len(text),
                 )
             )
-            session.commit()
 
     chunk_count = kb_index.ingest_full_document(source_id, text, body.metadata)
 
     # Outbox record: idempotent (keyed on source_id)
-    with factory() as session:
+    with commit_session(factory) as session:
         enqueue(
             session,
             operation="ingest_complete",
@@ -315,7 +314,6 @@ def ingest(body: IngestRequest) -> IngestResponse:
                 "status": "ok",
             },
         )
-        session.commit()
 
     return IngestResponse(
         source_id=source_id,

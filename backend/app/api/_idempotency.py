@@ -16,6 +16,7 @@ from loguru import logger
 
 from ..db import outbox_store
 from ..db.database import default_session_factory
+from ..db.session_utils import commit_session
 
 
 def canonicalize(obj: Any) -> Any:
@@ -50,9 +51,8 @@ def enqueue_outbox(operation: str, payload: dict) -> str | None:
     try:
         key = idempotency_key(operation, payload)
         factory = default_session_factory()
-        with factory() as session:
+        with commit_session(factory) as session:
             task_id, _ = outbox_store.enqueue(session, operation, key, payload)
-            session.commit()
         return task_id
     except Exception:
         logger.exception("outbox enqueue failed (non-fatal)")
