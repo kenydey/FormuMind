@@ -754,10 +754,17 @@ def iter_search(
 
     final, rule_report = _merge_filter_rank(raw, rank_q, total_limit)
 
+    # LLM 后处理（quality judge + rerank）可能耗时数百秒（DeepSeek 慢 + 长
+    # prompt），期间无 source 完成事件，前端 stall 时钟（300s）会误判任务中止。
+    # 发心跳进度重置时钟——这里走 _merge_filter_rank 是幂等的，且非 final 事件
+    # 只带 summary，不会污染前端 sources。
+    _notify()
+
     # Optional batched LLM quality judge — one call on the final ranked list.
     from .content_filter import FilterReport, llm_quality_judge
 
     final, judge_report = llm_quality_judge(final, rank_q)
+    _notify()
 
     filter_report = FilterReport()
     filter_report.merge(rule_report)
@@ -771,6 +778,7 @@ def iter_search(
 
         batch = min(len(final), settings.search_rerank_llm_batch, total_limit)
         head = llm_rerank(rank_q, final[:batch], k=batch, req=req)
+        _notify()
         head_keys = {e.identifier or e.title for e in head}
         tail = [
             e
