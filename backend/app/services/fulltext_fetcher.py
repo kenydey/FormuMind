@@ -286,32 +286,63 @@ def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
     return out
 
 
+def _is_db_locked(exc: Exception) -> bool:
+    """True when the exception chain carries a SQLite "database is locked".
+
+    SQLAlchemy wraps the original OperationalError in "This Session's
+    transaction has been rolled back due to a previous exception during flush",
+    so a naive str() check on the top-level exception misses the lock. Walk the
+    __cause__/__context__ chain to find it.
+    """
+    cur: BaseException | None = exc
+    while cur is not None:
+        if "database is locked" in str(cur).lower():
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | None = None) -> str | None:
-    """Store the raw full text as a SourceDocument (dedup by content hash)."""
+    """Store the raw full text as a SourceDocument (dedup by content hash).
+
+    Retries the whole persist on SQLite "database is locked": kb_ingest writes
+    into source_documents while uvicorn autosaves the project, and the two
+    processes can exhaust the 60s busy_timeout. A fresh session + content-hash
+    dedup make the retry idempotent — a create that already landed is found by
+    find_by_hash on the next attempt instead of being duplicated.
+    """
+    import time
+
     from ..db.source_store import get_source_store
 
-    try:
-        store = get_source_store()
-        content_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
-        existing = store.find_by_hash(content_hash)
-        if existing is not None:
-            return existing.id
-        source_id = store.create(
-            filename=ev.identifier[:500],
-            title=ev.title[:500],
-            source_kind=kind,
-            full_text=text,
-            content_hash=content_hash,
-            extraction_status="fulltext",
-            origin_url=(ev.identifier or "").strip()[:1024] or None,
-            project_id=(project_id or None),
-        )
-        from .kb_index import index_source
+    content_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    delay = 0.5
+    for attempt in range(6):
+        try:
+            store = get_source_store()
+            existing = store.find_by_hash(content_hash)
+            if existing is not None:
+                return existing.id
+            source_id = store.create(
+                filename=ev.identifier[:500],
+                title=ev.title[:500],
+                source_kind=kind,
+                full_text=text,
+                content_hash=content_hash,
+                extraction_status="fulltext",
+                origin_url=(ev.identifier or "").strip()[:1024] or None,
+                project_id=(project_id or None),
+            )
+            from .kb_index import index_source
 
-        index_source(source_id, text)
-        return source_id
-    except Exception as exc:
-        return degrade_return(logger, exc, "fulltext persistence failed", None)
+            index_source(source_id, text)
+            return source_id
+        except Exception as exc:
+            if _is_db_locked(exc) and attempt < 5:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            return degrade_return(logger, exc, "fulltext persistence failed", None)
 
 
 # ── public API ───────────────────────────────────────────────────────────────

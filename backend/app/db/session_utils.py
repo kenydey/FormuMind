@@ -38,14 +38,22 @@ def _commit_with_retry(session: Session, *, max_attempts: int = 6) -> None:
 
 @contextmanager
 def commit_session(session_factory: sessionmaker[Session]) -> Iterator[Session]:
-    """Yield a session, commit (with lock retry) on success, rollback on failure."""
-    with session_factory() as session:
-        try:
-            yield session
-            _commit_with_retry(session)
-        except Exception:
+    """Yield a session, commit (with lock retry) on success, rollback on failure.
+
+    The whole write runs under a cross-process Redis lock so uvicorn and celery
+    take turns writing SQLite instead of racing to "database is locked".
+    """
+    from .sqlite_lock import sqlite_write_lock
+    from ..config import get_settings
+
+    with sqlite_write_lock(get_settings().redis_url):
+        with session_factory() as session:
             try:
-                session.rollback()
+                yield session
+                _commit_with_retry(session)
             except Exception:
-                logger.exception("rollback also failed")
-            raise
+                try:
+                    session.rollback()
+                except Exception:
+                    logger.exception("rollback also failed")
+                raise

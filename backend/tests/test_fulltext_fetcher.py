@@ -300,3 +300,48 @@ def test_chunks_carry_provenance_and_relevance_decay(monkeypatch):
     limit = get_settings().ingest_chunk_max_chars
     assert all(len(e.snippet) <= limit for e in out)
     assert any(len(e.snippet) > 600 for e in out), "full chunks must survive"
+
+
+def test_is_db_locked_walks_exception_chain():
+    """database is locked 常被 SQLAlchemy 包装成 transaction-rolled-back。"""
+    from sqlalchemy.exc import InvalidRequestError, OperationalError
+
+    lock = OperationalError("stmt", {}, Exception("database is locked"))
+    wrapped = InvalidRequestError("This Session's transaction has been rolled back")
+    wrapped.__cause__ = lock
+    assert ff._is_db_locked(wrapped) is True
+    assert ff._is_db_locked(RuntimeError("boom")) is False
+
+
+def test_persist_fulltext_retries_on_db_locked(monkeypatch):
+    """_persist_fulltext retries the whole persist on database is locked."""
+    from sqlalchemy.exc import OperationalError
+
+    import time as _time
+
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+    calls = {"n": 0}
+
+    class FakeStore:
+        def find_by_hash(self, h):
+            return None
+
+        def create(self, **kw):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                lock = OperationalError("stmt", {}, Exception("database is locked"))
+                wrapped = Exception(
+                    "This Session's transaction has been rolled back due to a previous exception during flush"
+                )
+                wrapped.__cause__ = lock
+                raise wrapped
+            return "src-1"
+
+    monkeypatch.setattr("app.db.source_store.get_source_store", lambda: FakeStore())
+    monkeypatch.setattr("app.services.kb_index.index_source", lambda sid, text: 1)
+
+    ev = Evidence(source="USPTO", identifier="US1", title="t", snippet="s", relevance=0.9)
+    result = ff._persist_fulltext("some full text " * 50, ev, "patent")
+    assert result == "src-1"
+    assert calls["n"] == 3  # 2 次失败 + 1 次成功
