@@ -174,3 +174,37 @@ def test_llm_judge_keeps_all_on_failure(monkeypatch):
     rows = [_ev("https://a.example/1"), _ev("https://b.example/2")]
     kept, _ = content_filter.llm_quality_judge(rows, "epoxy")
     assert kept == rows
+
+
+def test_llm_judge_caps_head_at_max_items(monkeypatch):
+    """Only the head (up to max_items) is judged; the tail is kept untouched so
+    the LLM prompt stays bounded instead of growing with the full result list."""
+    _enable_judge(monkeypatch)
+    monkeypatch.setenv("FORMUMIND_CONTENT_FILTER_LLM_JUDGE_MAX_ITEMS", "3")
+    get_settings.cache_clear()
+
+    seen_prompt: list[str] = []
+
+    def fake_complete_json(prompt):
+        seen_prompt.append(prompt)
+        return {"drop": [1]}  # drop the second head item
+
+    monkeypatch.setattr("app.services.llm.complete_json", fake_complete_json)
+
+    rows = [_ev(f"https://x.example/{i}") for i in range(8)]
+    kept, report = content_filter.llm_quality_judge(rows, "epoxy")
+
+    # head [0,1,2] judged; item 1 dropped; tail [3..7] kept as-is
+    assert [e.identifier for e in kept] == [
+        "https://x.example/0",
+        "https://x.example/2",
+        "https://x.example/3",
+        "https://x.example/4",
+        "https://x.example/5",
+        "https://x.example/6",
+        "https://x.example/7",
+    ]
+    assert report.dropped_by_reason.get("llm_judge") == 1
+    prompt = seen_prompt[0]
+    assert "[2]" in prompt
+    assert "[3]" not in prompt  # tail is never sent to the LLM

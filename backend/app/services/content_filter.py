@@ -251,9 +251,19 @@ def llm_quality_judge(evidence: list[Evidence], query: str) -> tuple[list[Eviden
 
     from . import llm
 
+    # 只对排序靠前的 head 做 LLM 判定，tail（低相关尾部）直接保留。全量判定
+    # 把 N 条拼进一个 prompt（~24K 字符）会让 DeepSeek 单次调用耗时数百秒，
+    # 触发前端 300s stall；限制到 max_items 条（~12K 字符）降到秒级，而尾部
+    # 低相关结果即使被丢弃对最终 top-k 影响也小。
+    max_items = int(getattr(settings, "content_filter_llm_judge_max_items", 0) or 0)
+    if max_items > 0 and len(evidence) > max_items:
+        head, tail = evidence[:max_items], evidence[max_items:]
+    else:
+        head, tail = evidence, []
+
     items = "\n".join(
         f"[{i}] ({ev.source}) {ev.title}: {ev.snippet[:150]}"
-        for i, ev in enumerate(evidence)
+        for i, ev in enumerate(head)
     )
     try:
         data = llm.complete_json(_JUDGE_PROMPT.format(query=query, items=items))
@@ -270,16 +280,17 @@ def llm_quality_judge(evidence: list[Evidence], query: str) -> tuple[list[Eviden
         except (TypeError, ValueError):
             continue
     # Safety valve: an LLM asking to drop most of the list is itself suspect.
-    if len(drop_idx) > len(evidence) // 2:
-        logger.warning("llm quality judge tried to drop %d/%d — ignored", len(drop_idx), len(evidence))
+    if len(drop_idx) > len(head) // 2:
+        logger.warning("llm quality judge tried to drop %d/%d — ignored", len(drop_idx), len(head))
         return evidence, report
 
     kept: list[Evidence] = []
     report = FilterReport()
-    for i, ev in enumerate(evidence):
+    for i, ev in enumerate(head):
         if i in drop_idx and not ev.is_seed_corpus:
             report.record_drop("llm_judge", ev)
         else:
             kept.append(ev)
+    kept.extend(tail)
     report.kept = len(kept)
     return kept, report

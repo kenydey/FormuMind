@@ -238,6 +238,11 @@ class Settings(BaseSettings):
     content_filter_min_snippet_chars: int = 40
     content_filter_blocked_domains: list[str] = Field(default_factory=list)
     content_filter_llm_judge: bool = False
+    # LLM 质量判定只检查排序靠前的 N 条（其余直接保留）。全量判定把 161 条
+    # 拼进一个 prompt（约 24K 字符）会让 DeepSeek 单次调用耗时数百秒，触发
+    # 前端 300s stall；限制到 N 条（约 12K 字符）降到秒级，而尾部低相关结果
+    # 即使被丢弃对最终 top-k 影响也小。
+    content_filter_llm_judge_max_items: int = 60
 
     # Search-stream LLM rerank (Phase B R-2a): reorder the head of the ranked list;
     # remaining slots up to search_total_limit are kept in rule-rank order.
