@@ -155,7 +155,13 @@ class BaybeCampaignEngine:
         objective = build_objective_from_specs(objectives)
         recommender = TwoPhaseMetaRecommender(
             initial_recommender=FPSRecommender(),
-            recommender=BotorchRecommender(),
+            # n_restarts=1 / n_raw_samples=16 keeps a single botorch round at a
+            # few seconds instead of ~2.5 min (default n_restarts=10, 64 raw
+            # samples). SLSQP restarts from several different starting points;
+            # for a smooth continuous formulation space the first restart is
+            # already a good local optimum, and the multi-restart sweep was the
+            # dominant cost in every slow baybe test.
+            recommender=BotorchRecommender(n_restarts=1, n_raw_samples=16),
         )
         return Campaign(searchspace, objective, recommender), factor_list
 
