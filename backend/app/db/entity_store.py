@@ -124,7 +124,6 @@ class EntityStore:
                 return _merge(row)
             raise
         except OperationalError:
-            sp.rollback()
             raise
         return new_row
 
@@ -180,7 +179,6 @@ class EntityStore:
             )
             return existing
         except OperationalError:
-            sp.rollback()
             raise
         return mention
 
@@ -225,7 +223,6 @@ class EntityStore:
         except IntegrityError:
             sp.rollback()
         except OperationalError:
-            sp.rollback()
             raise
 
     def merge_semantic_link(
@@ -308,7 +305,6 @@ class EntityStore:
             if existing:
                 return _merge(existing)
         except OperationalError:
-            sp.rollback()
             raise
         return True
 
@@ -392,7 +388,6 @@ class EntityStore:
             if existing:
                 return _merge(existing)
         except OperationalError:
-            sp.rollback()
             raise
         return True
 

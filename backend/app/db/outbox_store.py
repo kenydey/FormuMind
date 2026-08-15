@@ -67,7 +67,6 @@ def enqueue(
             return existing.id, existing.status
         raise
     except OperationalError:
-        sp.rollback()
         raise
     return row.id, "PENDING"
 

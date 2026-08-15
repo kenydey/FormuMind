@@ -80,7 +80,6 @@ def save(
     except IntegrityError:
         sp.rollback()
     except OperationalError:
-        sp.rollback()
         raise
     return row.id
 

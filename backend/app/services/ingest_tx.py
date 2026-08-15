@@ -83,7 +83,6 @@ def ingest_document_tx(
                     if doc is None:
                         raise
                 except OperationalError:
-                    sp.rollback()
                     raise
                 # Sp not committed — caller's rollback can undo this INSERT.
                 # See formumind-dev skill §19 for why.

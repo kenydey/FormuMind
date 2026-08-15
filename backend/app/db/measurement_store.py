@@ -140,7 +140,6 @@ class MeasurementStore:
             savepoint.rollback()
             return None
         except OperationalError:
-            savepoint.rollback()
             raise
         return attachment_id
 

@@ -104,7 +104,6 @@ def ingest_qc_report_tx(
                     if session.get(SourceDocument, doc_id) is None:
                         raise
                 except OperationalError:
-                    savepoint.rollback()
                     raise
 
             # ── 2. the binding that was missing ──
