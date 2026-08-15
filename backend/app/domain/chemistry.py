@@ -36,6 +36,13 @@ def molar_mass(formula: str) -> float:
     Supports nested parentheses, e.g. ``Zn3(PO4)2`` or ``Mn(H2PO4)2``.
     Raises ``ValueError`` on an unknown element or malformed string.
     """
+    if not formula or not _TOKEN.fullmatch(formula):
+        # chemformula chokes on non-stoichiometric strings — alloy ranges
+        # "(Al,Cr)2O3", hydrates "·xH2O", charges "Mg2+" — where an unknown
+        # "element" makes atomic_weight() return False (0), zeroing
+        # formula_weight and raising ZeroDivisionError inside mass_fraction.
+        # Skip it and go straight to the tolerant fallback parser.
+        return _parse_mass(formula)
     try:
         import chemformula  # type: ignore
 
