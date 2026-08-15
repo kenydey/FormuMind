@@ -1097,6 +1097,35 @@ def _evidence_prompt(req: Requirement, evidence: list[Evidence], recommended: li
     )
 
 
+def _build_context(evidence: list[Evidence], *, max_chars: int | None = None) -> str:
+    """Join full evidence snippets into the LLM context, budget-capped.
+
+    The old prompt truncated each snippet to 400 chars and kept only 8 items,
+    so the model saw at most ~3.2K chars of abstract-level text. Full chunks
+    (up to ``chat_context_max_chars``) let it synthesise across documents the
+    way NotebookLM does — the rerank stage already narrowed to the most relevant.
+    """
+    if max_chars is None:
+        from ..config import get_settings
+
+        max_chars = get_settings().chat_context_max_chars
+    parts: list[str] = []
+    total = 0
+    for i, e in enumerate(evidence):
+        snippet = (e.snippet or "").strip()
+        if not snippet:
+            continue
+        line = f"[{i+1}] ({e.source}) {e.title}: {snippet}"
+        if total + len(line) > max_chars:
+            room = max_chars - total
+            if room > 120:
+                parts.append(line[:room])
+            break
+        parts.append(line)
+        total += len(line)
+    return "\n".join(parts)
+
+
 def _chat_prompt(
     question: str,
     evidence: list[Evidence],
@@ -1104,9 +1133,7 @@ def _chat_prompt(
     *,
     history: list | None = None,
 ) -> str:
-    context = "\n".join(
-        f"[{i+1}] ({e.source}) {e.title}: {e.snippet[:400]}" for i, e in enumerate(evidence[:8])
-    )
+    context = _build_context(evidence)
     domain_hint = f"Domain context: {domain}\n" if domain else ""
     hist_block = ""
     if history:
@@ -1328,10 +1355,18 @@ def answer_question(
             relevant = store.query(question, k=min(6, len(sources))) or sources[:6]
             return cc, relevant
 
-    # Re-rank sources by relevance to the question.
+    # 召回（粗排）→ LLM 精排（无 GPU 时 LLM rerank 替代 ColBERT 语义排序）。
     store = build_store()
     store.ingest(sources)
-    relevant = store.query(question, k=min(6, len(sources))) or sources[:6]
+    candidates_n = min(settings.chat_rerank_candidates, max(1, len(sources)))
+    recalled = store.query(question, k=candidates_n) or sources[:candidates_n]
+
+    if settings.chat_rerank_enabled and len(recalled) > 1:
+        from ..services.rag import llm_rerank
+
+        relevant = llm_rerank(question, recalled, k=settings.chat_rerank_top_k)
+    else:
+        relevant = recalled[:settings.chat_rerank_top_k]
 
     # Tier 2: paper-qa semantic synthesis with citations.
     if _paperqa_available() and sources:

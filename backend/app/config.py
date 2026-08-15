@@ -419,9 +419,15 @@ class Settings(BaseSettings):
     chat_multi_turn_enabled: bool = True
     chat_structured_enabled: bool = True
     chat_clarification_enabled: bool = True
-    chat_claim_check_enabled: bool = False
+    chat_claim_check_enabled: bool = True
     chat_history_max_turns: int = 12
     chat_rewrite_context_turns: int = 6
+    # LLM 精排问答检索候选（无 GPU 时替代 ColBERT 的语义排序）。召回阶段用
+    # bm25_faiss/ColBERT 粗排 top-N，再由 LLM 打分精排到 top-k；失败回退原排序。
+    chat_rerank_enabled: bool = True
+    chat_rerank_candidates: int = 50    # 召回候选数（送入 LLM 打分）
+    chat_rerank_top_k: int = 20         # 精排后保留条数
+    chat_context_max_chars: int = 12000  # 交给 LLM 的全文 chunk 总字符预算
 
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
     # document_chunks 表（装了 sentence-transformers 则带归一化向量），
@@ -431,7 +437,7 @@ class Settings(BaseSettings):
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600
     kb_search_scan_limit: int = 5000
-    kb_chat_top_k: int = 6
+    kb_chat_top_k: int = 20
     # 检索命中的切块交给 LLM 之前保留多少字符。切块本身是 1600
     # （ingest_chunk_max_chars），此前这里硬编码 600，等于把已经入库的全文
     # 又砍掉三分之二才给模型看。0 = 不截断，完整交出切块。

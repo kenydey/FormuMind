@@ -20,6 +20,22 @@ import type {
 
 const SOURCE_LIMIT = 300;
 
+/** Drop non-object entries from an array of serialized models. A stray string
+ *  or null (legacy chat message, malformed source) would otherwise make the
+ *  backend Pydantic model reject the whole PUT /api/projects payload with
+ *  "Input should be a valid dictionary". */
+function sanitizeObjectArray<T>(arr: T[] | undefined | null, limit = SOURCE_LIMIT): T[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((x) => x !== null && x !== undefined && typeof x === "object" && !Array.isArray(x))
+    .slice(0, limit) as T[];
+}
+
+/** Null out a non-object where the backend expects a model or null. */
+function sanitizeObjectOrNull<T>(x: T | null | undefined): T | null {
+  return x !== null && x !== undefined && typeof x === "object" && !Array.isArray(x) ? (x as T) : null;
+}
+
 /** Merge deprecated constraints dict into constraint_values when loading old projects. */
 export function migrateRequirementConstraints(req: Requirement): Requirement {
   const legacy = req.constraints;
@@ -148,28 +164,28 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
   return {
     search_query: slice.searchQuery,
     source_types: slice.sourceTypes,
-    sources: slice.sources,
+    sources: sanitizeObjectArray(slice.sources),
     selected_sources: slice.selectedSources,
-    chat_history: slice.chatHistory,
-    deep_report: slice.deepReport,
-    requirement: slice.requirement,
+    chat_history: sanitizeObjectArray(slice.chatHistory, 100),
+    deep_report: sanitizeObjectOrNull(slice.deepReport),
+    requirement: sanitizeObjectOrNull(slice.requirement),
     active_constraints: slice.activeConstraints,
-    research: slice.research,
-    leaderboard: slice.leaderboard,
-    doe_plan: slice.doePlan,
-    adaptive_doe: slice.adaptiveDoe,
+    research: sanitizeObjectOrNull(slice.research),
+    leaderboard: sanitizeObjectArray(slice.leaderboard),
+    doe_plan: sanitizeObjectOrNull(slice.doePlan),
+    adaptive_doe: sanitizeObjectOrNull(slice.adaptiveDoe),
     measured,
-    models: slice.models,
-    model_history: slice.modelHistory,
+    models: sanitizeObjectArray(slice.models),
+    model_history: slice.modelHistory.map((m) => sanitizeObjectArray(m)),
     train_message: slice.trainMessage,
     campaign_state: slice.campaignState,
     workbench_campaign_id: slice.workbenchCampaignId,
     workbench_adopted_plan_id: slice.workbenchAdoptedPlanId,
     workbench_objectives_snapshot: slice.workbenchObjectivesSnapshot ?? [],
     optimization_history: slice.optimizationHistory,
-    loop_report: slice.loopReport,
+    loop_report: sanitizeObjectOrNull(slice.loopReport),
     rmse_history: slice.rmseHistory,
-    process_opt_result: slice.processOptResult,
+    process_opt_result: sanitizeObjectOrNull(slice.processOptResult),
     doe_engine: slice.doeEngine,
     al_engine: slice.alEngine,
     optimize_engine: slice.optimizeEngine,

@@ -56,10 +56,15 @@ def _configure_sqlite(engine: Engine) -> None:
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys=ON")
-            # Wait up to 30 s before raising "database is locked" — Celery
+            # Wait up to 60 s before raising "database is locked" — Celery
             # and Uvicorn share the same file; a write arriving during another
-            # write should block briefly instead of failing immediately.
-            cursor.execute("PRAGMA busy_timeout=30000")
+            # write should block instead of failing immediately. A flush-level
+            # retry is NOT viable: SQLite's "database is locked" invalidates the
+            # SQLAlchemy connection, so re-flushing raises "transaction is
+            # inactive". 60s is a middle ground: long enough to ride out a
+            # concurrent 261 KB payload write, short enough that a genuinely
+            # stuck lock fails a test quickly instead of hanging it.
+            cursor.execute("PRAGMA busy_timeout=60000")
             try:
                 cursor.execute("PRAGMA journal_mode=WAL")
             except Exception:

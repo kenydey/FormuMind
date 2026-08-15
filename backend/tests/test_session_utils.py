@@ -31,3 +31,27 @@ def test_commit_session_rolls_back_on_error():
             s.add("row")
 
     session.rollback.assert_called_once()
+
+
+def test_commit_session_retries_on_database_locked(monkeypatch):
+    """commit_session retries commit on SQLite 'database is locked' (P0 fix)."""
+    from sqlalchemy.exc import OperationalError
+
+    from app.db.session_utils import commit_session
+
+    monkeypatch.setattr("app.db.session_utils.time.sleep", lambda s: None)
+
+    session = MagicMock()
+    session.commit.side_effect = [
+        OperationalError("stmt", {}, Exception("database is locked")),
+        OperationalError("stmt", {}, Exception("database is locked")),
+        None,
+    ]
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = session
+
+    with commit_session(factory) as s:
+        s.add("row")
+
+    assert session.commit.call_count == 3
+    session.rollback.assert_not_called()
