@@ -1909,8 +1909,22 @@ export async function pollTask(
   /** 0 = poll until the task finishes, for jobs with no meaningful deadline. */
   maxAttempts = 300
 ): Promise<TaskStatus> {
+  let consecutiveFailures = 0;
   for (let attempt = 0; !maxAttempts || attempt < maxAttempts; attempt++) {
-    const s = await api.task(id);
+    let s: TaskStatus;
+    try {
+      s = await api.task(id);
+      consecutiveFailures = 0;
+    } catch (e) {
+      consecutiveFailures += 1;
+      // A transient failure (dev-server reload, a network blip) must not kill
+      // the progress tracking of a multi-hour ingest. The task state lives in
+      // Redis/disk and is still there once the backend comes back, so retry —
+      // give up only after repeated consecutive failures.
+      if (consecutiveFailures >= 5) throw e;
+      await new Promise((r) => setTimeout(r, intervalMs * 5));
+      continue;
+    }
     onUpdate(s);
     if (s.state === "completed" || s.state === "failed") return s;
     await new Promise((r) => setTimeout(r, intervalMs));

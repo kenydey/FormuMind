@@ -56,8 +56,8 @@ export default defineConfig({
       "/api/tasks": {
         target: "http://localhost:8000",
         changeOrigin: true,
-        proxyTimeout: 1_800_000, // 30 min
-        timeout: 1_800_000,
+        proxyTimeout: 10_800_000, // 3 h — KB ingest of hundreds of docs far exceeds 30 min
+        timeout: 10_800_000,
       },
       "/api": {
         target: "http://localhost:8000",
