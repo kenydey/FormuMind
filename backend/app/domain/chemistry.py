@@ -28,6 +28,28 @@ ATOMIC_MASS: dict[str, float] = {
 }
 
 _TOKEN = re.compile(r"([A-Z][a-z]?)(\d*)|(\()|(\))(\d*)")
+_HYDRATE_SPLIT = re.compile(r"[·•・.]")
+_HYDRATE_COEFF = re.compile(r"^(\d+)(?=[A-Z(])")
+
+
+def _parse_hydrate(formula: str) -> float:
+    """Hydrate addition: ``CuSO4·5H2O`` → CuSO4 + 5×H2O; ``NH3·H2O`` → NH3 + H2O.
+
+    ``_TOKEN``/chemformula don't understand the ``·`` separator used for water of
+    crystallisation, so split on it and sum each part independently. A leading
+    integer on a part is the water coefficient (``5H2O`` = 5 water molecules).
+    """
+    total = 0.0
+    for part in _HYDRATE_SPLIT.split(formula):
+        part = part.strip()
+        if not part:
+            continue
+        m = _HYDRATE_COEFF.match(part)
+        if m:
+            total += int(m.group(1)) * _parse_mass(part[m.end():])
+        else:
+            total += _parse_mass(part)
+    return round(total, 4)
 
 
 def molar_mass(formula: str) -> float:
@@ -42,6 +64,8 @@ def molar_mass(formula: str) -> float:
         # "element" makes atomic_weight() return False (0), zeroing
         # formula_weight and raising ZeroDivisionError inside mass_fraction.
         # Skip it and go straight to the tolerant fallback parser.
+        if _HYDRATE_SPLIT.search(formula):
+            return _parse_hydrate(formula)
         return _parse_mass(formula)
     try:
         import chemformula  # type: ignore

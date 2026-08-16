@@ -14,6 +14,16 @@ def test_molar_mass_nested_parentheses():
     assert chemistry.molar_mass("Mn(H2PO4)2") == pytest.approx(248.93, abs=0.1)
 
 
+def test_molar_mass_hydrate_dot_separator():
+    # 水合物「·」分隔符：NH3·H2O = NH3 + H2O；CuSO4·5H2O = CuSO4 + 5×H2O
+    assert chemistry.molar_mass("NH3·H2O") == pytest.approx(
+        chemistry.molar_mass("NH3") + chemistry.molar_mass("H2O"), abs=0.01
+    )
+    assert chemistry.molar_mass("CuSO4·5H2O") == pytest.approx(
+        chemistry.molar_mass("CuSO4") + 5 * chemistry.molar_mass("H2O"), abs=0.05
+    )
+
+
 def test_unknown_element_raises():
     with pytest.raises(ValueError):
         chemistry.molar_mass("Xx2")

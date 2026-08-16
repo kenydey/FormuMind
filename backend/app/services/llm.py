@@ -1295,28 +1295,49 @@ def _chemcrow_answer(question: str) -> str | None:
         return degrade_return(log, exc, "operation failed", None)
 
 
-def _paperqa_answer(
+async def _paperqa_answer(
     question: str, sources: list[Evidence]
 ) -> tuple[str, list[Evidence]] | None:
     """Answer via paper-qa's semantic retrieval + cited synthesis."""
     try:  # pragma: no cover - requires paper-qa + embeddings/LLM
-        from paperqa import Docs
+        from paperqa import Docs, Doc, Text
 
         docs = Docs()
         by_key: dict[str, Evidence] = {}
-        for ev in sources:
+        for i, ev in enumerate(sources):
             text = f"{ev.title}. {ev.snippet}".strip()
             if not text:
                 continue
-            key = ev.identifier or ev.title
-            docs.aadd_texts(text, doc=None)
+            key = ev.identifier or ev.title or str(i)
+            doc = Doc(docname=key, citation=ev.source, dockey=str(i))
+            await docs.aadd_texts([Text(text=text, name=key, doc=doc)], doc)
             by_key[key] = ev
-        answer = docs.query(question)
+        answer = await docs.aquery(question)
         text = getattr(answer, "answer", None) or str(answer)
         cited = [by_key[k] for k in by_key if k in (getattr(answer, "context", "") or "")]
         return text, (cited or sources[:6])
     except Exception as exc:
         return degrade_return(log, exc, "operation failed", None)
+
+
+def _run_paperqa(
+    question: str, sources: list[Evidence]
+) -> tuple[str, list[Evidence]] | None:
+    """Run the async paper-qa tier from the sync ``answer_question``.
+
+    In a plain sync context (tests, research_graph, deep_research engine) there is
+    no running loop, so ``asyncio.run`` is safe. Inside an async endpoint
+    (chat.py) a loop is already running and ``asyncio.run`` would raise — paper-qa
+    is a best-effort tier there, so return None and let the caller fall through to
+    the LLM tier (Tier 3).
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_paperqa_answer(question, sources))
+    return None
 
 
 def answer_question(
@@ -1370,7 +1391,7 @@ def answer_question(
 
     # Tier 2: paper-qa semantic synthesis with citations.
     if _paperqa_available() and sources:
-        pq = _paperqa_answer(question, sources)
+        pq = _run_paperqa(question, sources)
         if pq:
             return pq
 

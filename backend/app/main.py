@@ -10,6 +10,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -207,6 +208,29 @@ from .db.datalab_client import DatalabUnavailableError, check_datalab_reachable
 @app.exception_handler(DatalabUnavailableError)
 async def datalab_unavailable_handler(_request: Request, exc: DatalabUnavailableError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Log 422 validation errors so intermittent autosave failures are traceable.
+
+    The default handler silently returns 422 without logging *which* field failed,
+    which made the project-autosave 422s impossible to diagnose. This keeps the
+    exact same response body but records the field path + type + message for
+    /api/projects (the noisy autosave path); other routes stay quiet.
+    """
+    if request.url.path.startswith("/api/projects"):
+        errs = exc.errors()
+        detail = [
+            {
+                "loc": ".".join(str(x) for x in e.get("loc", [])),
+                "type": e.get("type"),
+                "msg": e.get("msg"),
+            }
+            for e in errs
+        ]
+        logger.warning("PUT %s validation failed (%d errors): %s", request.url.path, len(errs), detail)
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.get("/health", tags=["meta"])
