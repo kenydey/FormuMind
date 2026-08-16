@@ -258,6 +258,8 @@ def _is_permanent_vision_failure(error: str | None) -> bool:
         "suspended",
         "forbidden",
         "unauthorized",
+        "insufficient_quota",
+        "quota has been exhausted",
     )
     return any(marker in lower for marker in permanent)
 

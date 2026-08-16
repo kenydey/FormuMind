@@ -194,6 +194,14 @@ def _visual_markdown(
 
         if _is_permanent_vision_failure(error):
             _vision_consecutive_failures += 1
+            # Quota exhaustion (429 insufficient_quota) is not going to recover
+            # until the vendor resets the weekly quota — skip the "wait N pages"
+            # ramp and open the breaker immediately so every remaining figure in
+            # this document degrades to a placeholder instead of retrying 3× each.
+            lower = (error or "").lower()
+            if "insufficient_quota" in lower or "quota has been exhausted" in lower:
+                _vision_consecutive_failures = max(_vision_consecutive_failures, budget)
+                logger.info("hybrid: vision quota exhausted — breaker opened immediately")
             logger.info(
                 "hybrid: vision permanent failure #%d for %s — "
                 "breaker at %d; %s",
