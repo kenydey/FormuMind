@@ -2,20 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatApiError, type Attachment } from "../api";
 
 interface AttachmentPreviewProps {
-  experimentId: number;
+  campaignId: number;
+  rowId: number;
   onClose: () => void;
   onChanged?: (count: number) => void;
 }
 
 /**
- * Attachment list + upload overlay for one experiment (Phase 2.1).
+ * Attachment list + upload overlay for one workbench row (Phase 2.1).
  *
- * Files are stored in Datalab ELN via POST /experiments/{id}/attachments and
- * surfaced here as a traceable list. Upload is best-effort: on failure the
- * error is shown inline and the list is left untouched.
+ * The backend resolves the row to its training experiment via the ``label``
+ * bridge, so files are bound to the correct experiment — not the raw row id.
+ * Upload is best-effort: on failure the error is shown inline.
  */
 export default function AttachmentPreview({
-  experimentId,
+  campaignId,
+  rowId,
   onClose,
   onChanged,
 }: AttachmentPreviewProps) {
@@ -26,13 +28,13 @@ export default function AttachmentPreview({
 
   const load = useCallback(() => {
     api
-      .getAttachments(experimentId)
+      .getWorkbenchAttachments(campaignId, rowId)
       .then((rows) => {
         setAttachments(rows);
         onChanged?.(rows.length);
       })
       .catch((e) => setError(formatApiError(e)));
-  }, [experimentId, onChanged]);
+  }, [campaignId, rowId, onChanged]);
 
   useEffect(() => {
     load();
@@ -44,7 +46,7 @@ export default function AttachmentPreview({
     setBusy(true);
     setError("");
     try {
-      await api.uploadAttachment(file, experimentId);
+      await api.uploadWorkbenchAttachment(file, campaignId, rowId);
       await load();
       if (fileRef.current) fileRef.current.value = "";
     } catch (e) {
@@ -64,9 +66,7 @@ export default function AttachmentPreview({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-slate-200">
-            实验附件（#{experimentId}）
-          </h3>
+          <h3 className="font-semibold text-slate-200">实验附件（行 #{rowId}）</h3>
           <button
             className="text-slate-400 hover:text-slate-200"
             onClick={onClose}

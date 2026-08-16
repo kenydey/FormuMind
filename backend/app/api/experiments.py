@@ -331,6 +331,33 @@ class AttachmentResponse(BaseModel):
     created_at: str | None = None
 
 
+async def _resolve_workbench_experiment_id(campaign_id: int, row_id: int) -> int | None:
+    """Map a workbench row (campaign_id + row_id) to its training ``ExperimentRow.id``.
+
+    The bridge is the ``label`` column: workbench ingest stamps Completed rows
+    with ``wb:{campaign_id}:{item_id}`` and the training store persists that
+    label on ``ExperimentRow``. If the row has not been ingested yet (not saved
+    or not Completed), there is no ExperimentRow and we return None.
+    """
+    from ..db.campaign_store import get_campaign_store
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow
+    from ..services.workbench_training import workbench_record_label
+
+    rows = await get_campaign_store().list_rows(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None:
+        return None
+    label = workbench_record_label(campaign_id, match.item_id)
+    with default_session_factory()() as session:
+        row = (
+            session.query(ExperimentRow)
+            .filter(ExperimentRow.label == label)
+            .first()
+        )
+        return row.id if row is not None else None
+
+
 @router.get("/experiments/{experiment_id}/attachments",
             response_model=list[AttachmentResponse])
 def get_experiment_attachments(
@@ -388,6 +415,89 @@ async def upload_experiment_attachment(
         source_document_id = f"local-{_uuid.uuid4().hex[:12]}"
 
     # Create local attachment link
+    store = get_measurement_store()
+    attachment_id = store.attach(
+        experiment_id, source_document_id, kind=kind, note=note
+    )
+    if attachment_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Attachment already exists for experiment={experiment_id} "
+            f"and document={source_document_id}",
+        )
+
+    return AttachmentResponse(
+        id=attachment_id,
+        experiment_id=experiment_id,
+        source_document_id=source_document_id,
+        kind=kind,
+        filename=filename,
+        note=note,
+        created_at=None,
+    )
+
+
+@router.get("/experiments/workbench/{campaign_id}/rows/{row_id}/attachments",
+            response_model=list[AttachmentResponse])
+async def get_workbench_row_attachments(
+    campaign_id: int,
+    row_id: int,
+) -> list[AttachmentResponse]:
+    """List attachments for a workbench row, resolved via its training experiment."""
+    experiment_id = await _resolve_workbench_experiment_id(campaign_id, row_id)
+    if experiment_id is None:
+        return []
+    from ..db.measurement_store import get_measurement_store
+
+    store = get_measurement_store()
+    return [
+        AttachmentResponse(
+            id=a.id,
+            experiment_id=a.experiment_id,
+            source_document_id=a.source_document_id,
+            kind=a.kind,
+            filename="",
+            note=a.note or "",
+            created_at=a.created_at.isoformat() if a.created_at else None,
+        )
+        for a in store.attachments_for(experiment_id)
+    ]
+
+
+@router.post("/experiments/workbench/{campaign_id}/rows/{row_id}/attachments",
+             response_model=AttachmentResponse)
+async def upload_workbench_row_attachment(
+    campaign_id: int,
+    row_id: int,
+    file: UploadFile = File(...),
+    kind: str = Query(default="qc_report"),
+    note: str = Query(default=""),
+) -> AttachmentResponse:
+    """Upload an attachment for a workbench row, resolving its training experiment.
+
+    The row must already be ingested as training data (saved + Completed with
+    measurements); otherwise there is no experiment to bind the file to.
+    """
+    experiment_id = await _resolve_workbench_experiment_id(campaign_id, row_id)
+    if experiment_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="该实验行尚未回灌为训练数据——请先保存台账（Completed 且有实测值）",
+        )
+    from ..db.datalab_client import upload_file as datalab_upload_file
+    from ..db.measurement_store import get_measurement_store
+
+    settings = get_settings()
+    filename = file.filename or "upload"
+    content = await file.read()
+    source_document_id = (
+        await datalab_upload_file(settings.datalab_api_url, content, filename) or ""
+    )
+    if not source_document_id:
+        import uuid as _uuid
+
+        source_document_id = f"local-{_uuid.uuid4().hex[:12]}"
+
     store = get_measurement_store()
     attachment_id = store.attach(
         experiment_id, source_document_id, kind=kind, note=note

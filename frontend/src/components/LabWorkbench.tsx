@@ -104,7 +104,9 @@ export default function LabWorkbench({
             await Promise.all(
               data.rows.map(async (r) => {
                 try {
-                  counts[r.id] = (await api.getAttachments(r.id)).length;
+                  counts[r.id] = (
+                    await api.getWorkbenchAttachments(campaignId, r.id)
+                  ).length;
                 } catch {
                   counts[r.id] = 0;
                 }
@@ -308,7 +310,8 @@ export default function LabWorkbench({
       )}
       {attachmentRow && (
         <AttachmentPreview
-          experimentId={attachmentRow.id}
+          campaignId={campaignId}
+          rowId={attachmentRow.id}
           onClose={() => setAttachmentRow(null)}
           onChanged={(count) =>
             setAttachmentCounts((prev) => ({ ...prev, [attachmentRow.id]: count }))

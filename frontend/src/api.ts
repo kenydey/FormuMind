@@ -901,6 +901,32 @@ export const api = {
   getAttachments: (experimentId: number) =>
     get<Attachment[]>(`/api/experiments/${experimentId}/attachments`),
 
+  getWorkbenchAttachments: (campaignId: number, rowId: number) =>
+    get<Attachment[]>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments`
+    ),
+
+  uploadWorkbenchAttachment: async (
+    file: File,
+    campaignId: number,
+    rowId: number,
+    opts: { kind?: string; note?: string } = {}
+  ): Promise<Attachment> => {
+    const body = new FormData();
+    body.append("file", file);
+    if (opts.kind) body.append("kind", opts.kind);
+    if (opts.note) body.append("note", opts.note);
+    const res = await fetch(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments`,
+      { method: "POST", headers: apiAuthHeaders(), body }
+    );
+    if (!res.ok)
+      throw new ApiError(
+        await readApiError(res, "/api/experiments/workbench/attachments")
+      );
+    return res.json();
+  },
+
   // ── Formulation revision history ──
   saveFormulationVersion: (body: {
     formulation: Formulation;
