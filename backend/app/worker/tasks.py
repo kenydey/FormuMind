@@ -393,7 +393,7 @@ def run_recommend_task(self, payload: dict) -> dict:
             "chat_markdown": "",
             "recommend_engine": result_raw.get("engine", "llm"),
             "tradeoff": result_raw.get("tradeoff"),
-            "recommend_meta": result_raw.get("warnings") or [],
+            "recommend_meta": {"warnings": result_raw.get("warnings") or []},
         }
         result = {"research": research}
 
