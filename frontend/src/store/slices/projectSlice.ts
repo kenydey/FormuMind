@@ -42,6 +42,8 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
         const projects = await api.listProjects();
         set((draft) => {
           draft.projects = projects;
+          // 自动保存成功 ⇒ 后端可达，清除历史「后端不可达」错误，避免瞬时错误的永久显示
+          draft.error = null;
         });
       } catch (e) {
         set((draft) => {
