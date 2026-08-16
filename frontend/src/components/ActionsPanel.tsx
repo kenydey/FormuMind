@@ -19,7 +19,6 @@ const SimPlaceholder = lazy(() => import("./SimPlaceholder"));
 const LoopModal = lazy(() => import("./LoopModal"));
 const ProcessOptModal = lazy(() => import("./ProcessOptModal"));
 const InverseDesignModal = lazy(() => import("./InverseDesignModal"));
-const MaterialSubstitutionModal = lazy(() => import("./MaterialSubstitutionModal"));
 
 function ModalFallback() {
   return <div className="p-6 text-sm text-slate-400">加载中…</div>;
@@ -29,7 +28,6 @@ type ModalName =
   | "requirements"
   | "recommend"
   | "design"
-  | "substitute"
   | "doe"
   | "workbench"
   | "optimize"
@@ -40,7 +38,6 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "requirements", icon: "🧪", title: "技术需求", desc: "设置产品域、基材与优化目标" },
   { id: "recommend", icon: "⭐", title: "推荐配方", desc: "AI 检索并推荐 Top-N 配方" },
   { id: "design", icon: "🎯", title: "逆向设计", desc: "给定目标性能，反向搜索帕累托前沿上的配方" },
-  { id: "substitute", icon: "🔁", title: "材料替代", desc: "断供或降本时，查替代料及其预测性能偏离" },
   { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并导出记录表" },
   { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实际参数与实测值，同步至 BayBE 闭环" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
@@ -286,20 +283,6 @@ export default function ActionsPanel() {
       >
         <Suspense fallback={<ModalFallback />}>
           <InverseDesignModal />
-        </Suspense>
-      </Modal>
-
-      <Modal
-        title="🔁 材料替代 · Substitution"
-        open={openModal === "substitute"}
-        testId="modal-substitute"
-        onClose={() => setOpenModal(null)}
-        size="xl"
-        onSave={handleSave}
-        saveLabel={saveBtnLabel}
-      >
-        <Suspense fallback={<ModalFallback />}>
-          <MaterialSubstitutionModal />
         </Suspense>
       </Modal>
 

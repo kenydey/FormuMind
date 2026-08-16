@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChemicalProfile, Ingredient } from "../api";
 import { api } from "../api";
+import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
 
 const CAS_RE = /^(\d{2,7})-(\d{2})-(\d)$/;
 
@@ -136,6 +137,7 @@ export default function RecommendedFormulaTable({
 }) {
   const [lookupBusy, setLookupBusy] = useState<number | null>(null);
   const [profiles, setProfiles] = useState<Record<number, ChemicalProfile>>({});
+  const [substituteMaterial, setSubstituteMaterial] = useState<string | null>(null);
 
   // Tracks the *current* ingredients array identity so an in-flight lookup
   // can tell, once it resolves, whether it's still looking at the same
@@ -174,6 +176,7 @@ export default function RecommendedFormulaTable({
   }
 
   return (
+    <>
     <div className="overflow-x-auto border border-edge/60 rounded">
       <table className="w-full text-[11px]">
         <thead>
@@ -186,6 +189,7 @@ export default function RecommendedFormulaTable({
             <th className="text-right py-1.5 px-2 font-normal whitespace-nowrap">分子量</th>
             <th className="text-right py-1.5 px-2 font-normal whitespace-nowrap">称重/体积</th>
             <th className="text-left py-1.5 px-2 font-normal whitespace-nowrap">备注</th>
+            <th className="text-center py-1.5 px-2 font-normal whitespace-nowrap">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -272,11 +276,28 @@ export default function RecommendedFormulaTable({
                   </div>
                 )}
               </td>
+              <td className="py-1 px-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => setSubstituteMaterial(ing.name)}
+                  className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                  title="查找替代材料"
+                >
+                  🔁
+                </button>
+              </td>
             </tr>
           );
           })}
         </tbody>
       </table>
     </div>
+    {substituteMaterial && (
+      <MaterialSubstitutionModal
+        initialMaterial={substituteMaterial}
+        onClose={() => setSubstituteMaterial(null)}
+      />
+    )}
+    </>
   );
 }
