@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import type { ObjectiveSpec, WorkbenchRow } from "../api";
+import { api } from "../api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 interface ExperimentDetailProps {
@@ -8,18 +10,41 @@ interface ExperimentDetailProps {
 
 const METRIC_COLORS = ["#22d3ee", "#a78bfa", "#fbbf24", "#34d399", "#f472b6", "#60a5fa"];
 
+/**
+ * Expanded workbench row detail (Phase 3.1).
+ *
+ * The multi-round trend is built by walking the lineage chain (parent_sample_id)
+ * and collecting each generation's measurements — so the chart shows the real
+ * closed-loop convergence path, not a single-row snapshot.
+ */
 export default function ExperimentDetail({ data, objectives }: ExperimentDetailProps) {
-  // Build measurement history from row data (multi-round snapshots if available)
-  const historyData = (data as any).measurement_history as Array<Record<string, unknown>> | undefined;
+  const [history, setHistory] = useState<Array<Record<string, unknown>>>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getRowLineage(data.campaign_id, data.id)
+      .then((chain) => {
+        if (cancelled) return;
+        // Backend returns current → root; reverse for root → current.
+        const rows = [...chain].reverse();
+        const hist = rows.map((r, i) => ({ round: i + 1, ...(r.measurements || {}) }));
+        setHistory(hist);
+      })
+      .catch(() => setHistory([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [data.campaign_id, data.id]);
 
   return (
     <div className="flex gap-4 p-3 bg-gray-900/50 min-h-[160px]">
-      {/* Trend chart */}
+      {/* Trend chart along the lineage chain */}
       <div className="flex-1 min-w-0">
-        <h4 className="text-[10px] font-semibold text-slate-400 mb-1">指标趋势</h4>
-        {historyData && historyData.length > 0 ? (
+        <h4 className="text-[10px] font-semibold text-slate-400 mb-1">指标趋势（沿谱系链）</h4>
+        {history.length > 1 ? (
           <ResponsiveContainer width="100%" height={120}>
-            <LineChart data={historyData}>
+            <LineChart data={history}>
               <XAxis dataKey="round" hide />
               <YAxis width={28} tick={{ fontSize: 9, fill: "#94a3b8" }} />
               <Tooltip
@@ -34,12 +59,15 @@ export default function ExperimentDetail({ data, objectives }: ExperimentDetailP
                   stroke={METRIC_COLORS[i % METRIC_COLORS.length]}
                   strokeWidth={1.5}
                   dot={{ r: 2 }}
+                  connectNulls
                 />
               ))}
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <p className="text-[10px] text-slate-500">暂无历史趋势数据</p>
+          <p className="text-[10px] text-slate-500">
+            暂无多轮趋势（随闭环迭代沿谱系自动生成）
+          </p>
         )}
       </div>
 
@@ -80,7 +108,6 @@ export default function ExperimentDetail({ data, objectives }: ExperimentDetailP
 
 // Registry function for AG Grid detailCellRenderer
 export function detailCellRenderer(params: any) {
-  // objectives will be passed via context or hardcoded for now
   const objectives = (params as any).objectives || [];
   return <ExperimentDetail data={params.data} objectives={objectives} />;
 }

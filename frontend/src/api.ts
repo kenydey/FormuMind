@@ -1023,6 +1023,11 @@ export const api = {
     }),
   getWorkbenchCampaign: (campaignId: number) =>
     get<WorkbenchCampaignResponse>(`/api/experiments/workbench/${campaignId}`),
+
+  getRowLineage: (campaignId: number, rowId: number) =>
+    get<WorkbenchRow[]>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/lineage`
+    ),
   syncWorkbench: (body: BatchUpdateRequest) =>
     put<WorkbenchSyncResponse>("/api/experiments/workbench/sync", body),
   models: () => get<ModelInfo[]>("/api/models"),

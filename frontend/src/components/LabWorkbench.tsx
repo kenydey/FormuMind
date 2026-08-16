@@ -18,6 +18,9 @@ import {
 import NoteEditor from "./NoteEditor";
 import TagPicker from "./TagPicker";
 import AttachmentPreview from "./AttachmentPreview";
+import LineageTree from "./LineageTree";
+import ExperimentDiff from "./ExperimentDiff";
+import ExperimentDetail from "./ExperimentDetail";
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -63,6 +66,8 @@ export default function LabWorkbench({
   const [tagPickerRow, setTagPickerRow] = useState<WorkbenchRow | null>(null);
   const [attachmentRow, setAttachmentRow] = useState<WorkbenchRow | null>(null);
   const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({});
+  const [lineageRow, setLineageRow] = useState<WorkbenchRow | null>(null);
+  const [diffPair, setDiffPair] = useState<[WorkbenchRow, WorkbenchRow] | null>(null);
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
@@ -157,6 +162,17 @@ export default function LabWorkbench({
     });
   }, [campaignId]);
 
+  // ── Phase 3.3: side-by-side diff of two selected rows ──────────
+  const handleCompare = useCallback(() => {
+    const selected = gridRef.current?.api.getSelectedRows() ?? [];
+    if (selected.length === 2) {
+      setError(null);
+      setDiffPair([selected[0], selected[1]]);
+    } else {
+      setError("请选中恰好 2 行进行对比");
+    }
+  }, []);
+
   // ── Phase 2: context menu ────────────────────────────────────
   const getContextMenuItems = useCallback(
     (params: GetContextMenuItemsParams) => {
@@ -168,6 +184,10 @@ export default function LabWorkbench({
         items.push({
           name: "📎 查看/上传附件 (" + (attachmentCounts[rowData.id] || 0) + ")",
           action: () => setAttachmentRow(rowData),
+        });
+        items.push({
+          name: "🧬 查看谱系",
+          action: () => setLineageRow(rowData),
         });
         items.push({
           name: "✏️ 添加备注",
@@ -318,6 +338,20 @@ export default function LabWorkbench({
           }
         />
       )}
+      {lineageRow && (
+        <LineageTree
+          campaignId={campaignId}
+          rowId={lineageRow.id}
+          onClose={() => setLineageRow(null)}
+        />
+      )}
+      {diffPair && (
+        <ExperimentDiff
+          a={diffPair[0]}
+          b={diffPair[1]}
+          onClose={() => setDiffPair(null)}
+        />
+      )}
 
       <div className="shadow-sm rounded-lg border border-gray-200 dark:border-edge overflow-hidden bg-panel/30">
         {frozen && frozen.length > 0 && (
@@ -364,42 +398,15 @@ export default function LabWorkbench({
             }}
             // ── Phase 2: right-click menu ──
             getContextMenuItems={getContextMenuItems}
+            // ── Phase 3.3: multi-select for diff ──
+            rowSelection="multiple"
             // ── Phase 3.1: Master / Detail ──
             masterDetail={true}
             detailCellRendererParams={{ objectives }}
             detailRowHeight={200}
-            detailCellRenderer={(params: any) => {
-              const data = params.data as WorkbenchRow;
-              const historyData = (data as any).measurement_history as any[] | undefined;
-              return (
-                <div className="flex gap-4 p-3 bg-gray-900/50 min-h-[160px]">
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-[10px] font-semibold text-slate-400 mb-1">指标趋势</h4>
-                    {historyData?.length ? (
-                      <div className="text-[10px] text-slate-500">
-                        {objectives.map((o) => (
-                          <span key={o.metric} className="mr-3">
-                            {o.display_name || o.metric}: {JSON.stringify(historyData.slice(-3).map((h: any) => h[o.metric]))}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-slate-600">暂无历史趋势（随闭环迭代自动生成）</p>
-                    )}
-                  </div>
-                  <div className="w-40 text-[10px]">
-                    <h4 className="font-semibold text-slate-400 mb-1">标签</h4>
-                    <div className="flex flex-wrap gap-0.5">
-                      {data.tags?.length ? data.tags.map((t) => (
-                        <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-accent2/10 text-accent2 border border-accent2/30">{t}</span>
-                      )) : <span className="text-slate-600">—</span>}
-                    </div>
-                    <h4 className="font-semibold text-slate-400 mb-1 mt-2">备注</h4>
-                    <p className="text-slate-500 leading-relaxed whitespace-pre-wrap">{data.note || "—"}</p>
-                  </div>
-                </div>
-              );
-            }}
+            detailCellRenderer={(params: any) => (
+              <ExperimentDetail data={params.data} objectives={objectives} />
+            )}
           />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">
@@ -423,6 +430,10 @@ export default function LabWorkbench({
             </label>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={handleCompare}
+              className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
+              对比选中
+            </button>
             <button type="button" onClick={handleExportExcel}
               className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
               导出 Excel
