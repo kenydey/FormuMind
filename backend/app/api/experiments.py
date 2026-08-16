@@ -370,30 +370,16 @@ async def upload_experiment_attachment(
     a local ``ExperimentAttachment`` row keeps the reference.
     """
     from ..db.measurement_store import get_measurement_store
-    from ..db.datalab_client import check_datalab_reachable
+    from ..db.datalab_client import upload_file as datalab_upload_file
 
     settings = get_settings()
     filename = file.filename or "upload"
 
     # Upload to Datalab ELN (best-effort; falls back to local-only)
-    source_document_id = ""
-    datalab_ok, _ = await run_in_threadpool(check_datalab_reachable, settings.datalab_api_url, timeout=2.0)
-    if datalab_ok:
-        import httpx
-
-        try:
-            async with httpx.AsyncClient(
-                base_url=settings.datalab_api_url.rstrip("/"),
-                timeout=30.0,
-            ) as client:
-                content = await file.read()
-                files_upload = {"file": (filename, content)}
-                upload_resp = await client.post("/upload/", files=files_upload)
-                if upload_resp.status_code < 400:
-                    body = upload_resp.json()
-                    source_document_id = body.get("source_document_id", "")
-        except Exception:
-            pass  # Datalab upload degraded — store reference only
+    content = await file.read()
+    source_document_id = (
+        await datalab_upload_file(settings.datalab_api_url, content, filename) or ""
+    )
 
     # If Datalab upload failed, generate a local reference
     if not source_document_id:

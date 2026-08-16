@@ -142,6 +142,24 @@ async def ingest_qc_report(
     if sync_measured and result.measurements:
         synced = await run_in_threadpool(sync_measurements_to_experiment, experiment_id)
 
+    # Phase 2.6: mirror the raw report bytes into Datalab ELN (best-effort).
+    # The report text + measurements are already persisted locally; this uploads
+    # the original file so the certificate is traceable in the ELN too, and
+    # records the ELN file id on the attachment.
+    try:
+        from ..db.datalab_client import upload_file as _datalab_upload_file
+        from ..db.measurement_store import get_measurement_store as _get_ms
+
+        _file_id = await _datalab_upload_file(
+            get_settings().datalab_api_url, content, filename
+        )
+        if _file_id:
+            _get_ms().set_attachment_datalab_ref(
+                experiment_id, result.source_id, _file_id
+            )
+    except Exception:
+        logger.warning("qc report Datalab archival failed", exc_info=True)
+
     message = ""
     if not result.measurements:
         message = (

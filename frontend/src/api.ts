@@ -333,6 +333,16 @@ export interface TrainingReport {
   message: string;
 }
 
+export interface Attachment {
+  id: string;
+  experiment_id: number;
+  source_document_id: string;
+  kind: string;
+  filename: string;
+  note: string;
+  created_at: string | null;
+}
+
 export interface WorkbenchRow {
   id: number;
   campaign_id: number;
@@ -345,6 +355,7 @@ export interface WorkbenchRow {
   tags?: string[];
   parent_sample_id?: string | null;
   parent_campaign_id?: number | null;
+  attachments?: Attachment[];
 }
 
 export interface WorkbenchCampaignResponse {
@@ -867,6 +878,28 @@ export const api = {
       measurements: QCMeasurementView[];
       attachments: { id: string; source_document_id: string; kind: string }[];
     }>(`/api/qc/experiments/${experimentId}/measurements`),
+
+  uploadAttachment: async (
+    file: File,
+    experimentId: number,
+    opts: { kind?: string; note?: string } = {}
+  ): Promise<Attachment> => {
+    const body = new FormData();
+    body.append("file", file);
+    if (opts.kind) body.append("kind", opts.kind);
+    if (opts.note) body.append("note", opts.note);
+    const res = await fetch(`/api/experiments/${experimentId}/attachments`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body,
+    });
+    if (!res.ok)
+      throw new ApiError(await readApiError(res, "/api/experiments/attachments"));
+    return res.json();
+  },
+
+  getAttachments: (experimentId: number) =>
+    get<Attachment[]>(`/api/experiments/${experimentId}/attachments`),
 
   // ── Formulation revision history ──
   saveFormulationVersion: (body: {

@@ -20,6 +20,30 @@
 
 ---
 
+## 优先级总览（Datalab + AG-Grid 最大作用，无冗余）
+
+> **核心原则**：单一职责 + 单一数据流 + 不重复造轮子。
+> - **FormuMind** = 计算大脑（配方推荐 / DOE / 贝叶斯优化 / 知识库检索）
+> - **Datalab** = 数据 SSOT + **可追溯性**（实验记录 / 附件 / 检测报告 / 谱系）
+> - **AG-Grid** = 交互层（高效录入 / 校验 / 快速判断）
+
+| 级别 | 功能 | 理由 |
+|------|------|------|
+| **S（核心必做）** | 2.6 检测报告归档、2.1 实验附件 | 打通 ELN 可追溯性命脉，Datalab 存在的根本意义 |
+| **A（高价值低成本）** | 1.1 条件格式、1.3 范围校验、1.6 Undo/Redo、2.2 实验备注 | 数据质量 + 录入效率，改动最小 |
+| **B（中等视规模）** | 1.2 列分组、1.4 Excel 导出、2.3 谱系、3.1 Master/Detail、3.3 历史对比 | 体验提升，实验量增长后再做 |
+| **C（冗余/低价值，建议剔除或延后）** | 1.5 侧边栏过滤、2.4 标签、2.5 跨搜索、3.2 Webhook | 与已有能力重复（见下） |
+
+**C 级冗余根因**：
+- **3.2 Datalab Webhook** — FormuMind 已有 SSE 任务流做闭环通知，Datalab→FormuMind 反向 webhook 是重复的通知机制。
+- **2.4 标签系统** — FormuMind 已有「项目」层级组织，标签是扁平的「第二套组织」，双轨维护成本高。
+- **2.5 跨 Campaign 搜索** — FormuMind 已有 KB 检索（ColBERT/BM25），实验数据的全文搜索需求弱，Datalab 搜索是第三套检索。
+- **1.5 侧边栏过滤** — 实验量 <50 时列显隐/状态过滤用手点即可，AG Grid 侧边栏属过度设计。
+
+> **一句话结论**：Datalab 只做「可追溯性」（附件 + 检测报告 + 谱系），AG-Grid 只做「高效录入 + 快速判断」（条件格式 + 校验 + Undo），其余让 FormuMind 的计算与检索能力承担——不造第二套标签、第二套搜索、第二套通知。
+
+---
+
 ## Phase 0：基础加固（前置，1 天）
 
 ### 目标
@@ -348,7 +372,7 @@ const handleExportExcel = useCallback(() => {
 
 ---
 
-### 1.5 侧边栏过滤器
+### 1.5 侧边栏过滤器（C 级 · 实验量 <50 可延后）
 
 **效果**：AG Grid 右侧增加侧边栏，可：
 - 按状态列过滤（Completed / Pending）
@@ -423,7 +447,7 @@ undoRedoCellEditingLimit: 20,
 
 ---
 
-### 2.1 实验附件 — 文件上传 + 关联
+### 2.1 实验附件 — 文件上传 + 关联 ⭐（S 级核心，与 2.6 共享 upload_file 链路）
 
 **效果**：右击实验行 → 「上传附件」→ 文件上传到 Datalab → 关联到 Sample。
 
@@ -576,7 +600,7 @@ Phase 0.2 的附件上传 API 自动对接 Datalab POST /upload/
 
 ---
 
-### 2.4 标签系统
+### 2.4 标签系统（C 级冗余 · 与「项目」组织重复）
 
 **效果**：右键实验行 → 「标记」→ 选择/自定义标签 → 同步到 Datalab。
 
@@ -598,7 +622,7 @@ Phase 0.2 的附件上传 API 自动对接 Datalab POST /upload/
 
 ---
 
-### 2.5 跨 Campaign 搜索
+### 2.5 跨 Campaign 搜索（C 级冗余 · FormuMind 已有 KB 检索）
 
 **效果**：搜索页增加「实验数据」tab → 输入「盐雾 > 500 环氧」→ 查询 Datalab 全文搜索 → 返回匹配的 Sample 列表。
 
@@ -619,6 +643,56 @@ Phase 0.2 的附件上传 API 自动对接 Datalab POST /upload/
 ```
 GET /search/?q=盐雾+500+环氧  →  [{ "item_id": "EXP-042", "blocks_obj": {...}, ...}, ...]
 ```
+
+---
+
+### 2.6 检测报告 → Datalab 归档 ⭐（Phase 2 最高优先级 · 打通 QC 报告与实验台账）
+
+**现状**：右栏「📄 检测报告」按钮（`QCReportModal.tsx` → `POST /qc/report`）已实现「上传 PDF/Word/图片 → 提取带单位/方法/规格限的计量项 → 绑定实验 → 同步进可训练数据」。但报告原始文件与计量项**只存 FormuMind 自己的 sqlite**（`source_documents` + `measurements` 表），与存 Datalab 的实验台账（campaign）**割裂**——在 Datalab/ELN 侧看不到检测报告，追溯链断裂。
+
+**方案**：在 `POST /qc/report` 入库流程中**追加 Datalab 归档**（复用 2.1 附件链路），让「实验记录 + 检测报告」在 ELN 侧统一可追溯。
+
+**数据流**：
+```
+检测报告文件 → parse_document（解析 + LLM 提取计量项）
+   ├─ 原始文件   → Datalab POST /upload/（media block）→ source_document_id
+   ├─ 计量项     → 写实验 sample 的 formumind_qc comment block（{metric, value, unit, method, spec_min/max, passed}）
+   └─ 关联       → MeasurementStore.attach(experiment_id, source_document_id, kind="qc_report")
+```
+
+**后端变更**：
+
+| 文件 | 变更 | 工作量 |
+|------|------|--------|
+| `api/qc.py` | `ingest_qc_report` 在 `ingest_qc_report_tx` 成功后，追加「上传原始文件到 Datalab + 写计量项 block + attach」；Datalab 不可达时静默降级（保留 sqlite 落库，不阻断报告入库） | ~40 行 |
+| `db/datalab_client.py` | 新增 `upload_file(content, filename)` → `POST /upload/` 返回 `source_document_id` | ~25 行 |
+| `db/measurement_store.py` | 复用已有 `attach()` / `attachments_for()`（2.1 已规划） | 0 行 |
+
+**Datalab 存储**（实验 sample 新增 block + 文件附件）：
+```json
+{
+  "blocks_obj": {
+    "formumind_params": { "..." : "..." },
+    "formumind_measurements": { "..." : "..." },
+    "formumind_qc": {
+      "blocktype": "comment",
+      "data": {
+        "source_document_id": "doc-xxx",
+        "measurements": [
+          {"metric": "盐雾", "value": 720, "unit": "h", "test_method": "GB/T 10125", "spec_min": 500, "spec_max": null, "passed": true}
+        ]
+      }
+    }
+  },
+  "files": [{ "source_document_id": "doc-xxx", "filename": "盐雾报告_042.pdf", "kind": "qc_report" }]
+}
+```
+
+**前端变更**：无（检测报告入口与展示已实现，归档对前端透明）。
+
+**关键设计点**：
+1. **降级优先**：Datalab 归档失败时**不阻断**报告入库——报告仍落 sqlite 并正常解析/绑定，Datalab 归档作为「尽力而为」的后台补充（与现有 `auto` 降级策略一致）。
+2. **复用而非重造**：原始文件走 2.1 的 `upload_file` 链路，附件关联走 `MeasurementStore.attach()`，与「实验附件」共用同一套 `source_document_id` 体系，避免「检测报告」和「通用附件」两套存储割裂。
 
 ---
 
@@ -689,7 +763,7 @@ detailRowHeight={200}
 
 ---
 
-### 3.2 Datalab Webhook — 闭环收敛通知
+### 3.2 Datalab Webhook — 闭环收敛通知（C 级冗余 · SSE 任务流已覆盖）
 
 **效果**：闭环收敛后，Datalab 回调 FormuMind → 前端推送通知「第 N 轮 DOE 已收敛」。
 
@@ -786,6 +860,39 @@ interface WorkbenchRow {
 |-------|------|------|------|---------|
 | Phase 0 | 1 天 | 0 行 | ~60 行 | 0 |
 | Phase 1 | 3-5 天 | ~200 行 | 0 行 | 0 |
-| Phase 2 | 5-7 天 | ~500 行 | ~250 行 | 5 |
+| Phase 2 | 5-7 天 | ~500 行 | ~315 行 | 5 |
 | Phase 3 | 3-5 天 | ~300 行 | ~80 行 | 2 |
 | **合计** | **12-18 天** | **~1000 行** | **~390 行** | **7** |
+
+---
+
+## 精简版执行路线（只保留 S+A 级 · 可直接开工）
+
+> 按「优先级总览」砍掉 B/C 级后的可交付清单。依赖驱动，每步独立可验证。
+
+### 执行顺序
+
+| Step | 功能 | 依赖 | 前端 | 后端 | 工期 |
+|------|------|------|------|------|------|
+| **0 基础设施** | `datalab_client.upload_file()` + 0.2 附件 API（POST/GET `/experiments/{id}/attachments`） | 无 | 0 | ~75 行 | 0.5 天 |
+| **1 S 级核心** | 2.6 检测报告归档 ⭐（复用 upload_file + attach） | Step 0 | 0 | ~65 行 | 0.5 天 |
+| **1 S 级核心** | 2.1 实验附件前端（右键上传 + 列徽章 + 预览浮层） | Step 0 | ~183 行 | ~100 行 | 1 天 |
+| **2 A 级** | 1.1 条件格式 RAG 着色 | 无 | ~20 行 | 0 | 0.25 天 |
+| **2 A 级** | 1.3 数值编辑器 + 范围校验 | 无 | ~30 行 | 0 | 0.25 天 |
+| **2 A 级** | 1.6 Undo/Redo | 无 | 2 行 | 0 | 0.1 天 |
+| **2 A 级** | 2.2 实验备注（右键 + formumind_note block） | 无 | ~54 行 | ~18 行 | 0.5 天 |
+| **合计** | — | — | **~290 行** | **~258 行** | **~3.5 天** |
+
+### 交付里程碑
+
+1. **M1（Step 0+1）**：检测报告与实验台账在 ELN 侧打通——报告文件 + 计量项归档到 Datalab sample，附件可在台账右键上传/预览。**这是可追溯性命脉，完成后即具备 ELN 核心价值。**
+2. **M2（Step 2）**：实验录入体验闭环——条件格式快速判合格、范围校验防录错、Undo 防误操作、备注留痕。
+
+### 与全量方案对比
+
+| 项 | 全量（含 B/C） | 精简（S+A） |
+|----|---------------|-------------|
+| 工期 | 12-18 天 | **~3.5 天** |
+| 代码量 | ~1390 行 | **~550 行** |
+| 新增文件 | 7 个 | **2 个**（AttachmentPreview / NoteEditor） |
+| 覆盖价值 | 100%（含 4 个冗余） | **核心 100%**（可追溯性 + 录入体验） |

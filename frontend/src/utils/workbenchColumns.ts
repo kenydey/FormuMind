@@ -49,11 +49,21 @@ export function buildWorkbenchColumnDefs(
   factorKeys: string[],
   objectives: ObjectiveSpec[],
   doePlan?: DOEPlan,             // ← Phase 1.3: needed for range validation
+  attachmentCounts?: Record<number, number>,  // ← Phase 2.1: attachment badge
 ): (ColDef<WorkbenchRow> | ColGroupDef<WorkbenchRow>)[] {
   const factorMap = new Map((doePlan?.factors ?? []).map((f) => [f.name, f]));
 
   const cols: (ColDef<WorkbenchRow> | ColGroupDef<WorkbenchRow>)[] = [
     { field: "id", headerName: "ID", editable: false, width: 64, pinned: "left" },
+    {
+      colId: "attachments",
+      headerName: "📎",
+      editable: false,
+      width: 52,
+      pinned: "left",
+      valueGetter: (p) => attachmentCounts?.[p.data?.id ?? -1] ?? 0,
+      cellStyle: { textAlign: "center" },
+    },
     {
       field: "status",
       headerName: "状态",

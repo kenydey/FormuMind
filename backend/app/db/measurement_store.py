@@ -178,6 +178,34 @@ class MeasurementStore:
                 .all()
             )
 
+    def set_attachment_datalab_ref(
+        self, experiment_id: int, source_document_id: str, datalab_file_id: str
+    ) -> None:
+        """Record the Datalab ELN file id on an attachment's note.
+
+        The QC-report pipeline stores the report text in sqlite and mirrors the
+        raw bytes into Datalab; this records the ELN copy's id so the two stay
+        traceable. Best-effort: a missing attachment is silently ignored.
+        """
+        try:
+            with commit_session(self._session_factory) as session:
+                row = (
+                    session.query(ExperimentAttachment)
+                    .filter(
+                        ExperimentAttachment.experiment_id == experiment_id,
+                        ExperimentAttachment.source_document_id == source_document_id,
+                    )
+                    .first()
+                )
+                if row is None:
+                    return
+                suffix = f"[datalab:{datalab_file_id}]"
+                row.note = (row.note + " " + suffix).strip() if row.note else suffix
+        except Exception as exc:
+            logger.warning(
+                "datalab ref record failed for experiment {}: {}", experiment_id, exc
+            )
+
     def experiments_for_document(self, source_document_id: str) -> list[int]:
         with self._session_factory() as session:
             rows = (

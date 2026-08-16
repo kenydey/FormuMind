@@ -106,3 +106,33 @@ def parse_delete_response(body: dict[str, Any], item_id: str) -> None:
     parsed = DatalabDeleteResponse.model_validate(body)
     if parsed.status != "success":
         raise DatalabStoreError(f"Datalab delete-sample failed for {item_id}: status={parsed.status}")
+
+
+async def upload_file(
+    api_url: str,
+    content: bytes,
+    filename: str,
+    *,
+    timeout: float = 30.0,
+) -> str | None:
+    """Upload a file to Datalab ELN ``POST /upload/``; return its ``source_document_id``.
+
+    Best-effort: returns ``None`` on any failure (unreachable, non-2xx, bad body)
+    so callers can degrade gracefully to a local-only reference. This is the
+    single upload path shared by experiment attachments (Phase 2.1) and QC-report
+    archival (Phase 2.6) — keep it here, don't inline httpx in callers.
+    """
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url:
+        return None
+    try:
+        async with httpx.AsyncClient(base_url=url, timeout=timeout) as client:
+            resp = await client.post("/upload/", files={"file": (filename, content)})
+            if resp.status_code >= 400:
+                return None
+            body = resp.json()
+            return body.get("source_document_id") or None
+    except Exception:
+        return None

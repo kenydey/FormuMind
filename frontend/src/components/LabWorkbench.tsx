@@ -17,6 +17,7 @@ import {
 } from "../utils/workbenchColumns";
 import NoteEditor from "./NoteEditor";
 import TagPicker from "./TagPicker";
+import AttachmentPreview from "./AttachmentPreview";
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -60,6 +61,8 @@ export default function LabWorkbench({
   // ── Phase 2 modal state ──────────────────────────────────────
   const [noteEditorRow, setNoteEditorRow] = useState<WorkbenchRow | null>(null);
   const [tagPickerRow, setTagPickerRow] = useState<WorkbenchRow | null>(null);
+  const [attachmentRow, setAttachmentRow] = useState<WorkbenchRow | null>(null);
+  const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({});
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
@@ -95,6 +98,20 @@ export default function LabWorkbench({
           const history = data.loop_history ?? [];
           setLoopRoundCount(history.length);
           setLoopConverged(Boolean(history.length && (history[history.length - 1] as any)?.converged));
+          // Phase 2.1: preload attachment counts for the 📎 badge column.
+          void (async () => {
+            const counts: Record<number, number> = {};
+            await Promise.all(
+              data.rows.map(async (r) => {
+                try {
+                  counts[r.id] = (await api.getAttachments(r.id)).length;
+                } catch {
+                  counts[r.id] = 0;
+                }
+              })
+            );
+            if (!cancelled) setAttachmentCounts(counts);
+          })();
         }
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -106,13 +123,13 @@ export default function LabWorkbench({
   }, [campaignId]);
 
   const columnDefs = useMemo<ColDef<WorkbenchRow>[]>(() => {
-    const cols = buildWorkbenchColumnDefs(factorKeys, objectives, doePlan);
+    const cols = buildWorkbenchColumnDefs(factorKeys, objectives, doePlan, attachmentCounts);
     const statusCol = cols.find(
       (c): c is ColDef<WorkbenchRow> => "field" in c && c.field === "status"
     );
     if (statusCol) statusCol.cellRenderer = StatusCellRenderer;
     return cols as ColDef<WorkbenchRow>[];
-  }, [factorKeys, objectives, doePlan]);
+  }, [factorKeys, objectives, doePlan, attachmentCounts]);
 
   const defaultColDef = useMemo<ColDef>(
     () => ({ sortable: false, filter: false, resizable: true, suppressMovable: true }),
@@ -147,6 +164,10 @@ export default function LabWorkbench({
       ];
       if (rowData) {
         items.push({
+          name: "📎 查看/上传附件 (" + (attachmentCounts[rowData.id] || 0) + ")",
+          action: () => setAttachmentRow(rowData),
+        });
+        items.push({
           name: "✏️ 添加备注",
           action: () => setNoteEditorRow(rowData),
         });
@@ -159,7 +180,7 @@ export default function LabWorkbench({
       items.push("export");
       return items;
     },
-    []
+    [attachmentCounts]
   );
 
   // ── Phase 2: note save ────────────────────────────────────
@@ -283,6 +304,15 @@ export default function LabWorkbench({
           initialTags={tagPickerRow.tags || []}
           onSave={handleTagSave}
           onCancel={() => setTagPickerRow(null)}
+        />
+      )}
+      {attachmentRow && (
+        <AttachmentPreview
+          experimentId={attachmentRow.id}
+          onClose={() => setAttachmentRow(null)}
+          onChanged={(count) =>
+            setAttachmentCounts((prev) => ({ ...prev, [attachmentRow.id]: count }))
+          }
         />
       )}
 
