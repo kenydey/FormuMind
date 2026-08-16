@@ -217,3 +217,44 @@ def experiment_measurements(experiment_id: int) -> QCMeasurementListResponse:
             for a in store.attachments_for(experiment_id)
         ],
     )
+
+
+@router.get("/qc/workbench/{campaign_id}/rows/{row_id}/measurements",
+            response_model=QCMeasurementListResponse)
+async def workbench_row_measurements(
+    campaign_id: int,
+    row_id: int,
+) -> QCMeasurementListResponse:
+    """Typed measurements and bound reports for one workbench row.
+
+    Resolves the row to its training experiment via the ``label`` bridge, with
+    no side effects — an un-ingested row yields an empty result rather than a
+    placeholder experiment.
+    """
+    from ..db.measurement_store import get_measurement_store
+    from ..services.workbench_training import resolve_experiment_for_row
+
+    experiment_id = await run_in_threadpool(
+        resolve_experiment_for_row, campaign_id, row_id
+    )
+    if experiment_id is None:
+        return QCMeasurementListResponse(
+            experiment_id=0, measurements=[], attachments=[]
+        )
+
+    store = get_measurement_store()
+    return QCMeasurementListResponse(
+        experiment_id=experiment_id,
+        measurements=[
+            QCMeasurementView(**m.model_dump()) for m in store.for_experiment(experiment_id)
+        ],
+        attachments=[
+            {
+                "id": a.id,
+                "source_document_id": a.source_document_id,
+                "kind": a.kind,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in store.attachments_for(experiment_id)
+        ],
+    )

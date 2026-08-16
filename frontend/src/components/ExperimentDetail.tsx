@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ObjectiveSpec, WorkbenchRow } from "../api";
+import type { ObjectiveSpec, QCMeasurementView, WorkbenchRow } from "../api";
 import { api } from "../api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -19,6 +19,10 @@ const METRIC_COLORS = ["#22d3ee", "#a78bfa", "#fbbf24", "#34d399", "#f472b6", "#
  */
 export default function ExperimentDetail({ data, objectives }: ExperimentDetailProps) {
   const [history, setHistory] = useState<Array<Record<string, unknown>>>([]);
+  const [qcReports, setQcReports] = useState<
+    { id: string; source_document_id: string; kind: string }[]
+  >([]);
+  const [qcMeasurements, setQcMeasurements] = useState<QCMeasurementView[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +39,19 @@ export default function ExperimentDetail({ data, objectives }: ExperimentDetailP
     return () => {
       cancelled = true;
     };
+  }, [data.campaign_id, data.id]);
+
+  useEffect(() => {
+    api
+      .getWorkbenchRowMeasurements(data.campaign_id, data.id)
+      .then((r) => {
+        setQcReports(r.attachments.filter((a) => a.kind === "qc_report"));
+        setQcMeasurements(r.measurements);
+      })
+      .catch(() => {
+        setQcReports([]);
+        setQcMeasurements([]);
+      });
   }, [data.campaign_id, data.id]);
 
   return (
@@ -71,17 +88,29 @@ export default function ExperimentDetail({ data, objectives }: ExperimentDetailP
         )}
       </div>
 
-      {/* Attachments section */}
-      <div className="w-40 text-[10px]">
-        <h4 className="font-semibold text-slate-400 mb-1">附件</h4>
-        {(data as any).attachments?.length ? (
-          (data as any).attachments.map((a: any) => (
+      {/* QC reports + measurements section */}
+      <div className="w-48 text-[10px]">
+        <h4 className="font-semibold text-slate-400 mb-1">检测报告（{qcReports.length}）</h4>
+        {qcReports.length ? (
+          qcReports.map((a) => (
             <div key={a.id} className="text-slate-500 truncate mb-0.5">
-              📎 {a.filename || a.source_document_id?.slice(0, 12)}
+              📄 {a.source_document_id?.slice(0, 16)}
             </div>
           ))
         ) : (
           <p className="text-slate-600">—</p>
+        )}
+        {qcMeasurements.length > 0 && (
+          <div className="mt-1 space-y-0.5">
+            {qcMeasurements.map((m, i) => (
+              <div key={`${m.metric}-${i}`} className="flex items-center gap-1">
+                <span className="text-slate-400">{m.metric.slice(0, 12)}</span>
+                <span className="text-slate-300">{m.value}</span>
+                {m.passed === true && <span className="text-green-400">✓</span>}
+                {m.passed === false && <span className="text-red-400">✗</span>}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

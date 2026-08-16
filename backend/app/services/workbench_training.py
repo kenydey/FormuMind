@@ -125,6 +125,30 @@ def ingest_workbench_rows(
     return {"ingested": len(to_add), "skipped": skipped, "message": msg}
 
 
+def resolve_experiment_for_row(campaign_id: int, row_id: int) -> int | None:
+    """Resolve a workbench row to its ``ExperimentRow.id`` without side effects.
+
+    Returns ``None`` when the row is not ingested yet (or does not exist), so a
+    read-only caller (measurement listing, attachment listing) can degrade to an
+    empty result rather than creating a placeholder.
+    """
+    from ..db.campaign_store import get_campaign_store
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow
+
+    store = get_campaign_store()
+    rows = store.list_rows_sync(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None:
+        return None
+    label = workbench_record_label(campaign_id, match.item_id)
+    with default_session_factory()() as session:
+        row = (
+            session.query(ExperimentRow).filter(ExperimentRow.label == label).first()
+        )
+        return row.id if row is not None else None
+
+
 def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
     """Resolve a workbench row to its ``ExperimentRow.id``, creating a placeholder if absent.
 

@@ -900,6 +900,13 @@ export const api = {
       attachments: { id: string; source_document_id: string; kind: string }[];
     }>(`/api/qc/experiments/${experimentId}/measurements`),
 
+  getWorkbenchRowMeasurements: (campaignId: number, rowId: number) =>
+    get<{
+      experiment_id: number;
+      measurements: QCMeasurementView[];
+      attachments: { id: string; source_document_id: string; kind: string }[];
+    }>(`/api/qc/workbench/${campaignId}/rows/${rowId}/measurements`),
+
   uploadAttachment: async (
     file: File,
     experimentId: number,

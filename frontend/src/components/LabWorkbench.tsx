@@ -21,6 +21,7 @@ import AttachmentPreview from "./AttachmentPreview";
 import LineageTree from "./LineageTree";
 import ExperimentDiff from "./ExperimentDiff";
 import ExperimentDetail from "./ExperimentDetail";
+import QCReportModal from "./QCReportModal";
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -68,6 +69,7 @@ export default function LabWorkbench({
   const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({});
   const [lineageRow, setLineageRow] = useState<WorkbenchRow | null>(null);
   const [diffPair, setDiffPair] = useState<[WorkbenchRow, WorkbenchRow] | null>(null);
+  const [qcReportRow, setQcReportRow] = useState<WorkbenchRow | null>(null);
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
@@ -181,6 +183,10 @@ export default function LabWorkbench({
         "copy", "paste", "separator",
       ];
       if (rowData) {
+        items.push({
+          name: "📄 上传检测报告",
+          action: () => setQcReportRow(rowData),
+        });
         items.push({
           name: "📎 查看/上传附件 (" + (attachmentCounts[rowData.id] || 0) + ")",
           action: () => setAttachmentRow(rowData),
@@ -350,6 +356,13 @@ export default function LabWorkbench({
           a={diffPair[0]}
           b={diffPair[1]}
           onClose={() => setDiffPair(null)}
+        />
+      )}
+      {qcReportRow && (
+        <QCReportModal
+          campaignId={campaignId}
+          rowId={qcReportRow.id}
+          onClose={() => setQcReportRow(null)}
         />
       )}
 
