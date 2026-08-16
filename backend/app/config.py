@@ -392,8 +392,8 @@ class Settings(BaseSettings):
     #
     # 注意：`soft_time_limit` 是**每个任务**的，与 `celery -c` 并发数无关——
     # 并发只决定一个卡死的任务会占住几个 worker 槽位，不决定单个任务能跑多久。
-    celery_soft_time_limit_s: int = 7200   # 2 小时：抛 SoftTimeLimitExceeded，任务可自报
-    celery_hard_time_limit_s: int = 10800  # 3 小时：强杀，防止卡死的任务永久占槽
+    celery_soft_time_limit_s: int = 14400  # 4 小时：抛 SoftTimeLimitExceeded，任务可自报
+    celery_hard_time_limit_s: int = 18000  # 5 小时：强杀，防止卡死的任务永久占槽（须 < task_stream_timeout_s 21600）
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task
