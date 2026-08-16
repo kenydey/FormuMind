@@ -54,18 +54,18 @@ export default defineConfig({
       // SSE streams use a long timeout (30 min) to survive long-running
       // multi-source searches that do PDF downloads + OCR + translation.
       "/api/tasks": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
         proxyTimeout: 10_800_000, // 3 h — KB ingest of hundreds of docs far exceeds 30 min
         timeout: 10_800_000,
       },
       "/api": {
-        target: "http://localhost:8000",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
         proxyTimeout: 600_000, // 10 min for regular API calls
         timeout: 600_000,
       },
-      "/health": { target: "http://localhost:8000", changeOrigin: true },
+      "/health": { target: "http://127.0.0.1:8000", changeOrigin: true },
     },
   },
   test: {
