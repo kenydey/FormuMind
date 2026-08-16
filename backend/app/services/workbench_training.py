@@ -123,3 +123,70 @@ def ingest_workbench_rows(
         else ("无新增 Completed 行" if not skipped else f"{skipped} 条已存在，跳过")
     )
     return {"ingested": len(to_add), "skipped": skipped, "message": msg}
+
+
+def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
+    """Resolve a workbench row to its ``ExperimentRow.id``, creating a placeholder if absent.
+
+    The QC-report pipeline binds measurements to ``MeasurementRow.experiment_id``
+    (FK → experiments.id), so a report can only attach once the row has an
+    ExperimentRow. A row may not be ingested yet (Pending / no measured values);
+    lazily create a placeholder stamped with the workbench label so the report
+    binds immediately, and the next sync skips it (label already known).
+
+    Raises ``ValueError`` when the row does not exist in the campaign.
+    """
+    from ..db.campaign_store import get_campaign_store
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow
+
+    store = get_campaign_store()
+    rows = store.list_rows_sync(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None:
+        raise ValueError(f"workbench row {row_id} not found in campaign {campaign_id}")
+
+    label = workbench_record_label(campaign_id, match.item_id)
+    with default_session_factory()() as session:
+        existing = (
+            session.query(ExperimentRow).filter(ExperimentRow.label == label).first()
+        )
+        if existing is not None:
+            return existing.id
+
+        merged = {**(match.planned_params or {}), **(match.actual_params or {})}
+        factors: dict[str, float] = {}
+        cure_temp: float | None = None
+        for key, val in merged.items():
+            if key == "cure_temperature_c":
+                try:
+                    cure_temp = float(val)
+                except (TypeError, ValueError):
+                    pass
+                continue
+            try:
+                factors[str(key)] = float(val)
+            except (TypeError, ValueError):
+                continue
+
+        campaign = store.get_campaign_sync(campaign_id)
+        domain = (
+            _campaign_domain(campaign)
+            if campaign is not None
+            else ProductDomain.anticorrosion_coating
+        )
+
+        placeholder = ExperimentRow(
+            item_id=None,
+            domain=domain.value,
+            project_id=(campaign.project_id or "") if campaign is not None else "",
+            factors=factors,
+            cure_temperature_c=cure_temp,
+            measured=_numeric_measured(match.measurements or {}),
+            source="workbench",
+            label=label,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        return placeholder.id

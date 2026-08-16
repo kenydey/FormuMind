@@ -370,6 +370,15 @@ export interface WorkbenchCampaignResponse {
   rows: WorkbenchRow[];
 }
 
+export interface WorkbenchCampaignSummary {
+  id: number;
+  name: string;
+  status: string;
+  strategy: string;
+  row_count: number;
+  project_id: string | null;
+}
+
 export interface BatchUpdateRequest {
   campaign_id: number;
   rows: Array<{
@@ -855,12 +864,21 @@ export const api = {
 
   uploadQcReport: async (
     file: File,
-    experimentId: number,
+    target: number | { experiment_id?: number; campaign_id?: number; row_id?: number },
     opts: { project_id?: string; sync_measured?: boolean } = {}
   ): Promise<QCReportResult> => {
     const body = new FormData();
     body.append("file", file);
-    body.append("experiment_id", String(experimentId));
+    if (typeof target === "number") {
+      body.append("experiment_id", String(target));
+    } else {
+      if (target.experiment_id != null)
+        body.append("experiment_id", String(target.experiment_id));
+      if (target.campaign_id != null)
+        body.append("campaign_id", String(target.campaign_id));
+      if (target.row_id != null)
+        body.append("row_id", String(target.row_id));
+    }
     if (opts.project_id) body.append("project_id", opts.project_id);
     body.append("sync_measured", String(opts.sync_measured ?? true));
     const res = await fetch("/api/qc/report", {
@@ -871,6 +889,9 @@ export const api = {
     if (!res.ok) throw new ApiError(await readApiError(res, "/api/qc/report"));
     return res.json();
   },
+
+  listWorkbenchCampaigns: () =>
+    get<WorkbenchCampaignSummary[]>(`/api/experiments/workbench/campaigns`),
 
   experimentMeasurements: (experimentId: number) =>
     get<{

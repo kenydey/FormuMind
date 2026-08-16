@@ -4,27 +4,44 @@
  * A measurement's value is the least interesting thing about it — the method
  * it was run under and the window it was judged against are what make it
  * comparable and auditable. These tests pin that the UI never quietly implies
- * a verdict or a standard it does not have.
+ * a verdict or a standard it does not have, and that it binds reports to the
+ * workbench rows (campaign + row) the lab bench actually shows.
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { ExperimentSummary, QCMeasurementView, QCReportResult } from "../api";
+import type {
+  QCMeasurementView,
+  QCReportResult,
+  WorkbenchCampaignSummary,
+  WorkbenchRow,
+} from "../api";
 import QCReportModal from "./QCReportModal";
 
-const experiment = (over: Partial<ExperimentSummary> = {}): ExperimentSummary =>
+const campaign = (
+  over: Partial<WorkbenchCampaignSummary> = {}
+): WorkbenchCampaignSummary =>
   ({
     id: 1,
-    domain: "anticorrosion_coating",
-    label: "batch-7",
-    source: "lab",
-    project_id: "",
-    measured: {},
-    measurement_count: 0,
-    created_at: null,
+    name: "镁合金 DOE",
+    status: "IN_PROGRESS",
+    strategy: "CCD",
+    row_count: 2,
+    project_id: null,
     ...over,
-  }) as ExperimentSummary;
+  }) as WorkbenchCampaignSummary;
+
+const row = (over: Partial<WorkbenchRow> = {}): WorkbenchRow =>
+  ({
+    id: 1,
+    campaign_id: 1,
+    status: "Completed",
+    planned_params: {},
+    actual_params: {},
+    measurements: { salt_spray_hours: 720 },
+    ...over,
+  }) as WorkbenchRow;
 
 const measurement = (over: Partial<QCMeasurementView> = {}): QCMeasurementView =>
   ({
@@ -38,7 +55,7 @@ const measurement = (over: Partial<QCMeasurementView> = {}): QCMeasurementView =
     ...over,
   }) as QCMeasurementView;
 
-/** The file input only renders once the experiment list resolves. */
+/** The file input only renders once the campaign list resolves. */
 async function uploadFile(name = "r.md") {
   const button = await screen.findByRole("button", { name: /上传并解析/ });
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -46,12 +63,37 @@ async function uploadFile(name = "r.md") {
   await userEvent.click(button);
 }
 
-function mockMeasurements(measurements: QCMeasurementView[]) {
-  vi.spyOn(api, "experimentMeasurements").mockResolvedValue({
+function mockCampaigns(list: WorkbenchCampaignSummary[]) {
+  vi.spyOn(api, "listWorkbenchCampaigns").mockResolvedValue(list);
+}
+
+function mockRows(rows: WorkbenchRow[]) {
+  vi.spyOn(api, "getWorkbenchCampaign").mockResolvedValue({
+    campaign_id: 1,
+    name: "c",
+    strategy: "CCD",
+    status: "IN_PROGRESS",
+    objectives_snapshot: [],
+    loop_history: [],
+    rows,
+  } as any);
+}
+
+function mockUpload(result: Partial<QCReportResult>) {
+  vi.spyOn(api, "uploadQcReport").mockResolvedValue({
     experiment_id: 1,
-    measurements,
-    attachments: [],
-  });
+    source_id: "doc-1",
+    measurements: [],
+    measurement_count: 0,
+    attached: true,
+    already_attached: false,
+    synced_measured: {},
+    report_meta: {},
+    parser: "text",
+    extraction_error: null,
+    message: "",
+    ...result,
+  } as QCReportResult);
 }
 
 beforeEach(() => {
@@ -59,125 +101,109 @@ beforeEach(() => {
 });
 
 describe("QCReportModal", () => {
-  it("offers the stored experiments as binding targets", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([
-      experiment(),
-      experiment({ id: 2, label: "batch-8", measurement_count: 3 }),
-    ]);
-    mockMeasurements([]);
+  it("offers workbench rows as binding targets", async () => {
+    mockCampaigns([campaign(), campaign({ id: 2, name: "另一批", row_count: 3 })]);
+    mockRows([row(), row({ id: 2, status: "Pending", measurements: {} })]);
 
     render(<QCReportModal />);
-    await waitFor(() => expect(api.listExperiments).toHaveBeenCalled());
-    expect(screen.getByRole("option", { name: /batch-7/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /已有 3 项/ })).toBeInTheDocument();
+    await waitFor(() => expect(api.listWorkbenchCampaigns).toHaveBeenCalled());
+    expect(screen.getByRole("option", { name: /镁合金 DOE/ })).toBeInTheDocument();
+    // Rows load async once a campaign is selected.
+    expect(await screen.findByRole("option", { name: /行 #1/ })).toBeInTheDocument();
   });
 
   it("shows the method and spec window alongside each value", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([measurement()]);
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
+    mockUpload({ measurements: [measurement()], measurement_count: 1 });
 
     render(<QCReportModal />);
+    await uploadFile();
     await waitFor(() => expect(screen.getByText("ASTM B117")).toBeInTheDocument());
     expect(screen.getByText("≥ 500")).toBeInTheDocument();
     expect(screen.getByText("合格")).toBeInTheDocument();
   });
 
   it("flags a measurement recorded without a test standard", async () => {
-    // Salt-spray hours under ASTM B117 and ISO 9227 are not comparable, so a
-    // missing method is a caveat, not a blank cell.
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([measurement({ test_method: "" })]);
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
+    mockUpload({ measurements: [measurement({ test_method: "" })], measurement_count: 1 });
 
     render(<QCReportModal />);
+    await uploadFile();
     await waitFor(() => expect(screen.getByText("未注明")).toBeInTheDocument());
   });
 
   it("distinguishes no verdict from a pass", async () => {
-    // No acceptance limits means nothing judged it — rendering that as a pass
-    // would assert something the report never said.
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([
-      measurement({ metric: "film_weight_gsm", spec_min: null, passed: null }),
-    ]);
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
+    mockUpload({
+      measurements: [
+        measurement({ metric: "film_weight_gsm", spec_min: null, passed: null }),
+      ],
+      measurement_count: 1,
+    });
 
     render(<QCReportModal />);
+    await uploadFile();
     await waitFor(() => expect(screen.getByText("未判定")).toBeInTheDocument());
     expect(screen.queryByText("合格")).not.toBeInTheDocument();
   });
 
   it("marks an out-of-spec result", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([
-      measurement({ metric: "adhesion_mpa", value: 3.2, spec_min: 5, passed: false }),
-    ]);
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
+    mockUpload({
+      measurements: [
+        measurement({ metric: "adhesion_mpa", value: 3.2, spec_min: 5, passed: false }),
+      ],
+      measurement_count: 1,
+    });
 
     render(<QCReportModal />);
+    await uploadFile();
     await waitFor(() => expect(screen.getByText("超差")).toBeInTheDocument());
   });
 
   it("reports which metrics became training data", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([]);
-    vi.spyOn(api, "uploadQcReport").mockResolvedValue({
-      experiment_id: 1,
-      source_id: "doc-1",
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
+    mockUpload({
       measurements: [measurement()],
       measurement_count: 1,
-      attached: true,
-      already_attached: false,
       synced_measured: { salt_spray_hours: 720 },
-      report_meta: {},
-      parser: "text",
-      extraction_error: null,
-      message: "",
-    } as QCReportResult);
+    });
 
     render(<QCReportModal />);
-    await uploadFile("r.md");
-
-    await waitFor(() => expect(screen.getByText(/已同步进可训练数据/)).toBeInTheDocument());
+    await uploadFile();
+    await waitFor(() =>
+      expect(screen.getByText(/已同步进可训练数据/)).toBeInTheDocument()
+    );
   });
 
   it("says when a re-upload was recognised as the same report", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([]);
-    vi.spyOn(api, "uploadQcReport").mockResolvedValue({
-      experiment_id: 1,
-      source_id: "doc-1",
-      measurements: [],
-      measurement_count: 0,
-      attached: true,
-      already_attached: true,
-      synced_measured: {},
-      report_meta: {},
-      parser: "text",
-      extraction_error: null,
-      message: "",
-    } as QCReportResult);
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
+    mockUpload({ already_attached: true });
 
     render(<QCReportModal />);
-    await uploadFile("r.md");
-
+    await uploadFile();
     await waitFor(() => expect(screen.getByText(/未重复计入/)).toBeInTheDocument());
   });
 
   it("guides the user when there is nothing to bind to", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([]);
+    mockCampaigns([]);
     render(<QCReportModal />);
-    await waitFor(() => expect(screen.getByText(/暂无实验记录/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/暂无实验台账/)).toBeInTheDocument());
   });
 
   it("surfaces an upload failure", async () => {
-    vi.spyOn(api, "listExperiments").mockResolvedValue([experiment()]);
-    mockMeasurements([]);
+    mockCampaigns([campaign()]);
+    mockRows([row()]);
     vi.spyOn(api, "uploadQcReport").mockRejectedValue(new Error("无法从报告提取文本"));
 
     render(<QCReportModal />);
-    // An accepted file type: the failure comes from the mocked call, and
-    // userEvent honours the input's accept filter, so a rejected extension
-    // would never reach the upload handler at all.
-    await uploadFile("r.md");
-
+    await uploadFile();
     await waitFor(() =>
       expect(screen.getByText("无法从报告提取文本")).toBeInTheDocument()
     );

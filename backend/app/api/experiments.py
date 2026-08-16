@@ -245,6 +245,36 @@ def list_experiments(
     ]
 
 
+class WorkbenchCampaignSummary(BaseModel):
+    id: int
+    name: str
+    status: str
+    strategy: str = ""
+    row_count: int = 0
+    project_id: str | None = None
+
+
+@router.get("/experiments/workbench/campaigns", response_model=list[WorkbenchCampaignSummary])
+def list_workbench_campaigns() -> list[WorkbenchCampaignSummary]:
+    """All workbench campaigns, newest first, with row counts."""
+    from ..db.database import default_session_factory
+    from ..db.models import Campaign
+
+    with default_session_factory()() as session:
+        rows = session.query(Campaign).order_by(Campaign.id.desc()).all()
+        return [
+            WorkbenchCampaignSummary(
+                id=c.id,
+                name=c.name,
+                status=c.status,
+                strategy=c.strategy or "",
+                row_count=len(c.sample_refs or []),
+                project_id=c.project_id,
+            )
+            for c in rows
+        ]
+
+
 @router.post("/experiments/workbench/campaigns", response_model=WorkbenchCampaignResponse)
 async def create_workbench_campaign(
     payload: CreateWorkbenchCampaignRequest,

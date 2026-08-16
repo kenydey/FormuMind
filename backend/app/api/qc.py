@@ -87,7 +87,9 @@ class QCMeasurementListResponse(BaseModel):
 @router.post("/qc/report", response_model=QCReportResponse)
 async def ingest_qc_report(
     file: UploadFile = File(...),
-    experiment_id: int = Form(...),
+    experiment_id: int = Form(default=0),
+    campaign_id: int = Form(default=0),
+    row_id: int = Form(default=0),
     project_id: str = Form(default=""),
     sync_measured: bool = Form(default=True),
 ) -> QCReportResponse:
@@ -113,6 +115,19 @@ async def ingest_qc_report(
         )
     if not content:
         raise HTTPException(status_code=400, detail="空文件")
+
+    # Resolve the binding target: a workbench row (campaign_id + row_id) is the
+    # new source of truth for report binding; fall back to a legacy experiment_id
+    # for backward compatibility.
+    if campaign_id > 0 and row_id > 0:
+        from ..services.workbench_training import ensure_experiment_for_row
+
+        try:
+            experiment_id = await run_in_threadpool(
+                ensure_experiment_for_row, campaign_id, row_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     ext = Path(filename).suffix.lower().lstrip(".")
     # parse_document and the LLM extraction are both blocking.

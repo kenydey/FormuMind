@@ -2,23 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import {
   api,
   formatApiError,
-  type ExperimentSummary,
   type QCMeasurementView,
   type QCReportResult,
+  type WorkbenchCampaignSummary,
+  type WorkbenchRow,
 } from "../api";
 
 /**
- * Upload a test certificate and bind its results to an experiment.
+ * Upload a test certificate and bind its results to a workbench row.
  *
  * The point of the binding is that a measurement stops being a loose number:
  * it arrives with the standard it was run under and the acceptance window it
  * was judged against, and it can be traced back to the document it came from.
- * The table below therefore leads with method and verdict, not just the value.
+ * Binding targets a workbench row (campaign + row) — the same entity the lab
+ * bench shows — not the internal training-experiment table.
  */
 
 function Verdict({ m }: { m: QCMeasurementView }) {
   if (m.passed === null) {
-    // No spec limits in the report — absence of a verdict, not a pass.
     return <span className="text-slate-500" title="报告未给出验收指标">未判定</span>;
   }
   return m.passed ? (
@@ -36,8 +37,10 @@ function specRange(m: QCMeasurementView): string {
 }
 
 export default function QCReportModal() {
-  const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
-  const [experimentId, setExperimentId] = useState<number | null>(null);
+  const [campaigns, setCampaigns] = useState<WorkbenchCampaignSummary[]>([]);
+  const [campaignId, setCampaignId] = useState<number | null>(null);
+  const [rows, setRows] = useState<WorkbenchRow[]>([]);
+  const [rowId, setRowId] = useState<number | null>(null);
   const [result, setResult] = useState<QCReportResult | null>(null);
   const [existing, setExisting] = useState<QCMeasurementView[]>([]);
   const [busy, setBusy] = useState(false);
@@ -46,31 +49,49 @@ export default function QCReportModal() {
 
   useEffect(() => {
     api
-      .listExperiments({ limit: 100 })
-      .then((rows) => {
-        setExperiments(rows);
-        if (rows.length && experimentId === null) setExperimentId(rows[0].id);
+      .listWorkbenchCampaigns()
+      .then((list) => {
+        setCampaigns(list);
+        if (list.length && campaignId === null) setCampaignId(list[0].id);
       })
       .catch((err) => setError(formatApiError(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (experimentId === null) return;
+    if (campaignId === null) return;
     api
-      .experimentMeasurements(experimentId)
+      .getWorkbenchCampaign(campaignId)
+      .then((r) => {
+        setRows(r.rows);
+        setRowId((prev) =>
+          prev != null && r.rows.some((x) => x.id === prev)
+            ? prev
+            : (r.rows[0]?.id ?? null)
+        );
+      })
+      .catch(() => setRows([]));
+  }, [campaignId]);
+
+  // After a successful upload, show the experiment's accumulated measurements.
+  useEffect(() => {
+    if (!result?.experiment_id) return;
+    api
+      .experimentMeasurements(result.experiment_id)
       .then((r) => setExisting(r.measurements))
       .catch(() => setExisting([]));
-  }, [experimentId, result]);
+  }, [result]);
 
   async function upload() {
     const file = fileRef.current?.files?.[0];
-    if (!file || experimentId === null) return;
+    if (!file || campaignId === null || rowId === null) return;
     setBusy(true);
     setError("");
     setResult(null);
     try {
-      setResult(await api.uploadQcReport(file, experimentId));
+      setResult(
+        await api.uploadQcReport(file, { campaign_id: campaignId, row_id: rowId })
+      );
     } catch (err) {
       setError(formatApiError(err));
     } finally {
@@ -85,27 +106,47 @@ export default function QCReportModal() {
       <p className="text-slate-400">
         上传检测报告（PDF / Word / Markdown / 图片），自动提取带
         <span className="text-accent">单位、检测方法、规格限</span>
-        的计量项并绑定到指定实验。同一份报告重复上传不会重复计入。
+        的计量项并绑定到台账实验行。同一份报告重复上传不会重复计入。
       </p>
 
-      {experiments.length === 0 ? (
+      {campaigns.length === 0 ? (
         <div className="text-slate-500">
-          暂无实验记录——先在「实验台账」录入实测值，或通过 DOE 回灌实验数据。
+          暂无实验台账 Campaign——先在「实验台账」生成 DOE 计划。
         </div>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-slate-400">绑定到实验</span>
+            <span className="text-slate-400">Campaign</span>
             <select
-              className="bg-panel border border-edge rounded px-2 py-1 flex-1 min-w-[16rem]"
-              value={experimentId ?? ""}
-              onChange={(e) => setExperimentId(Number(e.target.value))}
+              className="bg-panel border border-edge rounded px-2 py-1 flex-1 min-w-[14rem]"
+              value={campaignId ?? ""}
+              onChange={(e) => {
+                setCampaignId(Number(e.target.value));
+                setRowId(null);
+              }}
             >
-              {experiments.map((exp) => (
-                <option key={exp.id} value={exp.id}>
-                  #{exp.id} · {exp.domain}
-                  {exp.label ? ` · ${exp.label}` : ""}
-                  {exp.measurement_count ? ` · 已有 ${exp.measurement_count} 项` : ""}
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  #{c.id} · {c.name} · {c.row_count} 行 · {c.status}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400">绑定实验行</span>
+            <select
+              className="bg-panel border border-edge rounded px-2 py-1 flex-1 min-w-[14rem]"
+              value={rowId ?? ""}
+              onChange={(e) => setRowId(Number(e.target.value))}
+              disabled={rows.length === 0}
+            >
+              {rows.map((r) => (
+                <option key={r.id} value={r.id}>
+                  行 #{r.id} · {r.status}
+                  {Object.keys(r.measurements || {}).length
+                    ? ` · ${Object.keys(r.measurements).length} 项实测`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -124,7 +165,7 @@ export default function QCReportModal() {
               className="px-3 py-1.5 rounded bg-accent/20 border border-accent/40 text-accent
                          hover:bg-accent/30 disabled:opacity-50"
               onClick={upload}
-              disabled={busy || experimentId === null}
+              disabled={busy || campaignId === null || rowId === null}
             >
               {busy ? "解析中…" : "📄 上传并解析"}
             </button>
@@ -180,8 +221,6 @@ export default function QCReportModal() {
                   <td className="text-right">{m.value}</td>
                   <td className="pl-2 text-slate-400">{m.unit || "—"}</td>
                   <td className={m.test_method ? "text-slate-300" : "text-yellow-400/70"}>
-                    {/* Salt-spray hours under different standards are not
-                        comparable, so a missing method is worth flagging. */}
                     {m.test_method || "未注明"}
                   </td>
                   <td className="text-slate-400">{specRange(m)}</td>
