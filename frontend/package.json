@@ -7,7 +7,7 @@
     "predev": "node scripts/check-deps.mjs",
     "prebuild": "node scripts/check-deps.mjs",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
