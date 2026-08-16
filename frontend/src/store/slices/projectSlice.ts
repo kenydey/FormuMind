@@ -144,13 +144,13 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    deleteProject: async (id) => {
+    deleteProject: async (id, knowledge) => {
       try {
         const { activeProjectId } = get();
         if (activeProjectId && activeProjectId !== id) {
           await get().saveProject();
         }
-        await api.deleteProject(id);
+        await api.deleteProject(id, knowledge ?? "delete");
         const projects = await api.listProjects();
         if (activeProjectId === id) {
           set((draft) => {

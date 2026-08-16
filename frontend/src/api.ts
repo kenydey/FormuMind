@@ -1121,8 +1121,18 @@ export const api = {
   updateProject: (id: string, workspace: import("./projectWorkspace").ProjectWorkspacePayload, title?: string) =>
     put<ProjectDetailResponse>(`/api/projects/${encodeURIComponent(id)}`, { workspace, title }),
 
-  deleteProject: (id: string) =>
-    del<{ ok: boolean }>(`/api/projects/${encodeURIComponent(id)}`),
+  deleteProject: (id: string, knowledge: "delete" | "global" = "delete") =>
+    del<{ ok: boolean }>(
+      `/api/projects/${encodeURIComponent(id)}?knowledge=${knowledge}`
+    ),
+
+  getProjectDbStats: (id: string) =>
+    get<{
+      project_id: string;
+      document_count: number;
+      campaign_count: number;
+      experiment_count: number;
+    }>(`/api/projects/${encodeURIComponent(id)}/db-stats`),
 
   migrateLocalProjects: (snapshots: {
     id: string;

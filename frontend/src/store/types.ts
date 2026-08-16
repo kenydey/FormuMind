@@ -194,7 +194,7 @@ export interface AppState {
   saveProject: () => Promise<void>;
   loadProject: (id: string) => Promise<void>;
   createProject: (title?: string) => Promise<void>;
-  deleteProject: (id: string) => Promise<void>;
+  deleteProject: (id: string, knowledge?: "delete" | "global") => Promise<void>;
   setProcessOptResult: (result: ProcessOptResult | null) => void;
   setSearchQuery: (q: string) => void;
   setSourceTypes: (types: SearchSourceType[]) => void;

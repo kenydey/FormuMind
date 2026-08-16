@@ -1,7 +1,7 @@
 """Project workspace CRUD — NotebookLM-style persistent sessions."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from ..db.project_store import get_project_store
 from ..domain.project_workspace import (
@@ -42,10 +42,21 @@ def update_project(project_id: str, req: ProjectUpdateRequest) -> ProjectDetail:
 
 
 @router.delete("/{project_id}")
-def delete_project(project_id: str) -> dict:
-    if not get_project_store().delete(project_id):
+def delete_project(
+    project_id: str,
+    knowledge: str = Query(default="delete", pattern="^(delete|global)$"),
+) -> dict:
+    """Delete a project. ``knowledge=global`` keeps its KB as global; ``delete`` removes all."""
+    result = get_project_store().delete(project_id, knowledge=knowledge)
+    if result is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    return {"ok": True}
+    return {"ok": True, **result}
+
+
+@router.get("/{project_id}/db-stats")
+def project_db_stats(project_id: str) -> dict:
+    """Real database counts for a project (docs / campaigns / experiments)."""
+    return {"project_id": project_id, **get_project_store().db_stats(project_id)}
 
 
 @router.post("/migrate-local", response_model=list[ProjectSummary])

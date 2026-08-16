@@ -136,14 +136,118 @@ class ProjectStore:
                 workspace=ws,
             )
 
-    def delete(self, project_id: str) -> bool:
+    def db_stats(self, project_id: str) -> dict:
+        """Real database counts for a project (knowledge docs / campaigns / experiments)."""
+        from sqlalchemy import func
+
+        from .models import Campaign, ExperimentRow, SourceDocument
+
+        with self._session_factory() as session:
+            doc_count = int(
+                session.query(func.count(SourceDocument.id))
+                .filter(SourceDocument.project_id == project_id)
+                .scalar() or 0
+            )
+            campaign_count = int(
+                session.query(func.count(Campaign.id))
+                .filter(Campaign.project_id == project_id)
+                .scalar() or 0
+            )
+            experiment_count = int(
+                session.query(func.count(ExperimentRow.id))
+                .filter(ExperimentRow.project_id == project_id)
+                .scalar() or 0
+            )
+            return {
+                "document_count": doc_count,
+                "campaign_count": campaign_count,
+                "experiment_count": experiment_count,
+            }
+
+    def delete(self, project_id: str, *, knowledge: str = "delete") -> dict | None:
+        """Delete a project; ``knowledge`` controls its knowledge base.
+
+        ``knowledge="global"`` keeps the project's source_documents by clearing
+        their project_id (they become global KB, visible to all projects);
+        ``knowledge="delete"`` removes them (plus chunks/mentions). Business
+        data (campaigns / experiments / measurements / attachments) is always
+        removed. Returns counts, or None if the project is missing.
+        """
+        from .models import (
+            Campaign,
+            DocumentChunk,
+            ExperimentAttachment,
+            ExperimentRow,
+            KGMention,
+            MeasurementRow,
+            SourceDocument,
+        )
+
         with commit_session(self._session_factory) as session:
             row = session.get(ProjectRow, project_id)
             if row is None:
-                return False
+                return None
+
+            # 1. knowledge base
+            doc_ids = [
+                r[0]
+                for r in session.query(SourceDocument.id)
+                .filter(SourceDocument.project_id == project_id)
+                .all()
+            ]
+            if knowledge == "global":
+                session.query(SourceDocument).filter(
+                    SourceDocument.project_id == project_id
+                ).update({"project_id": None}, synchronize_session=False)
+            else:
+                if doc_ids:
+                    session.query(KGMention).filter(
+                        KGMention.source_id.in_(doc_ids)
+                    ).delete(synchronize_session=False)
+                    session.query(DocumentChunk).filter(
+                        DocumentChunk.source_id.in_(doc_ids)
+                    ).delete(synchronize_session=False)
+                    session.query(SourceDocument).filter(
+                        SourceDocument.id.in_(doc_ids)
+                    ).delete(synchronize_session=False)
+
+            # 2. business data
+            campaign_ids = [
+                r[0]
+                for r in session.query(Campaign.id)
+                .filter(Campaign.project_id == project_id)
+                .all()
+            ]
+            exp_ids = [
+                r[0]
+                for r in session.query(ExperimentRow.id)
+                .filter(ExperimentRow.project_id == project_id)
+                .all()
+            ]
+            if exp_ids:
+                session.query(MeasurementRow).filter(
+                    MeasurementRow.experiment_id.in_(exp_ids)
+                ).delete(synchronize_session=False)
+                session.query(ExperimentAttachment).filter(
+                    ExperimentAttachment.experiment_id.in_(exp_ids)
+                ).delete(synchronize_session=False)
+                session.query(ExperimentRow).filter(
+                    ExperimentRow.id.in_(exp_ids)
+                ).delete(synchronize_session=False)
+            if campaign_ids:
+                session.query(Campaign).filter(
+                    Campaign.id.in_(campaign_ids)
+                ).delete(synchronize_session=False)
+
+            # 3. soft-delete project
             row.is_archived = True
             row.updated_at = _utcnow()
-            return True
+
+            return {
+                "document_count": len(doc_ids),
+                "campaign_count": len(campaign_ids),
+                "experiment_count": len(exp_ids),
+            }
 
     def migrate_legacy(self, snapshots: list[LegacySnapshotPayload]) -> list[ProjectSummary]:
         created: list[ProjectSummary] = []

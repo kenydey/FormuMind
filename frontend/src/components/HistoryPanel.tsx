@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type ProjectSummary } from "../store";
+import { api } from "../api";
 import { SOURCE_LIMIT } from "../projectWorkspace";
 
 function fmt(iso: string): string {
@@ -98,6 +100,26 @@ export default function HistoryPanel() {
     }))
   );
 
+  const [pendingDelete, setPendingDelete] = useState<
+    { project: ProjectSummary; documentCount: number; busy: boolean } | null
+  >(null);
+
+  async function requestDelete(project: ProjectSummary) {
+    try {
+      const stats = await api.getProjectDbStats(project.id);
+      setPendingDelete({ project, documentCount: stats.document_count, busy: false });
+    } catch {
+      void deleteProject(project.id);
+    }
+  }
+
+  async function confirmDelete(knowledge: "delete" | "global") {
+    if (!pendingDelete) return;
+    setPendingDelete((p) => (p ? { ...p, busy: true } : p));
+    await deleteProject(pendingDelete.project.id, knowledge);
+    setPendingDelete(null);
+  }
+
   if (!historyOpen) return null;
 
   return (
@@ -138,7 +160,7 @@ export default function HistoryPanel() {
                 onOpen={() => void loadProject(p.id)}
                 onDelete={(e) => {
                   e.stopPropagation();
-                  if (confirm(`删除项目「${p.title || p.headline}」？`)) void deleteProject(p.id);
+                  void requestDelete(p);
                 }}
               />
             ))
@@ -163,6 +185,73 @@ export default function HistoryPanel() {
           </div>
         </div>
       </div>
+
+      {pendingDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => !pendingDelete.busy && setPendingDelete(null)}
+        >
+          <div
+            className="bg-panel border border-edge rounded-lg shadow-xl w-[26rem] max-w-[92vw] p-4 text-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-semibold text-slate-200 mb-2">
+              删除项目「{pendingDelete.project.title || pendingDelete.project.headline}」
+            </h3>
+            {pendingDelete.documentCount > 0 ? (
+              <>
+                <p className="text-slate-400 text-xs mb-3">
+                  该项目包含{" "}
+                  <span className="text-accent">{pendingDelete.documentCount} 篇知识文档</span>
+                  。删除时如何处理？
+                </p>
+                <div className="space-y-2">
+                  <button
+                    className="w-full text-left border border-accent/40 bg-accent/10 rounded px-3 py-2 hover:bg-accent/20 disabled:opacity-50"
+                    disabled={pendingDelete.busy}
+                    onClick={() => void confirmDelete("global")}
+                  >
+                    <span className="text-accent font-medium">转入全局知识库</span>
+                    <span className="block text-xs text-slate-400">
+                      文档归属清空，其他项目问答/推荐可调用
+                    </span>
+                  </button>
+                  <button
+                    className="w-full text-left border border-rose-500/40 bg-rose-500/10 rounded px-3 py-2 hover:bg-rose-500/20 disabled:opacity-50"
+                    disabled={pendingDelete.busy}
+                    onClick={() => void confirmDelete("delete")}
+                  >
+                    <span className="text-rose-400 font-medium">一并删除</span>
+                    <span className="block text-xs text-slate-400">
+                      知识库 + 业务数据全部删除，不再保留
+                    </span>
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-slate-400 text-xs mb-3">
+                  该项目无知识文档，删除将清除其业务数据。
+                </p>
+                <button
+                  className="w-full bg-rose-500/90 text-ink rounded px-3 py-2 font-semibold disabled:opacity-50"
+                  disabled={pendingDelete.busy}
+                  onClick={() => void confirmDelete("delete")}
+                >
+                  {pendingDelete.busy ? "删除中…" : "确认删除"}
+                </button>
+              </>
+            )}
+            <button
+              className="w-full mt-2 border border-edge rounded px-3 py-1.5 text-slate-400 hover:text-slate-200 disabled:opacity-50"
+              disabled={pendingDelete.busy}
+              onClick={() => setPendingDelete(null)}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
