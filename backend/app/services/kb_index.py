@@ -246,7 +246,9 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
                     row["embedding"] = vec
                     row["embedding_model"] = model_name
         n = get_chunk_store().replace_for_source(source_id, rows)
-        if n and settings.kg_enabled and settings.kg_link_on_ingest:
+        if n and settings.kg_enabled and (
+            settings.kg_entities_on_ingest or settings.kg_relations_on_ingest
+        ):
             try:
                 from .kg.entity_linker import link_source
 

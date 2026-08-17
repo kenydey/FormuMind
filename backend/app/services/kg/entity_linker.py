@@ -43,12 +43,16 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
     settings = settings or get_settings()
     if not settings.kg_enabled:
         return KGLinkReport(source_id=source_id)
+    # 关系提取依赖实体提及（mentions 是关系的锚点），所以关系开则实体也开。
+    do_relations = settings.kg_relations_on_ingest and settings.kg_relation_extract_enabled
+    do_entities = settings.kg_entities_on_ingest or do_relations
     try:
         store = get_entity_store()
-        store.delete_mentions_for_source(source_id)
-        if settings.kg_relation_extract_enabled:
+        if do_entities:
+            store.delete_mentions_for_source(source_id)
+        if do_relations:
             store.delete_links_for_source(source_id)
-        chunks = get_chunk_store().get_by_source(source_id)
+        chunks = get_chunk_store().get_by_source(source_id) if (do_entities or do_relations) else []
         touched: set[str] = set()
         links = 0
         mentions = 0
@@ -57,11 +61,12 @@ def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkRe
 
         with commit_session(store._session_factory) as session:
             for chunk in chunks:
-                n, eids, ln = _link_chunk(session, chunk, source_id, settings)
-                mentions += n
-                links += ln
-                touched.update(eids)
-                if settings.kg_relation_extract_enabled:
+                if do_entities:
+                    n, eids, ln = _link_chunk(session, chunk, source_id, settings)
+                    mentions += n
+                    links += ln
+                    touched.update(eids)
+                if do_relations:
                     relations_upserted += _extract_relations_for_chunk(
                         session, chunk, source_id, settings
                     )

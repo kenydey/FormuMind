@@ -168,6 +168,7 @@ def test_link_source_relations_integration(tmp_path, monkeypatch):
     monkeypatch.setenv("FORMUMIND_KG_ENABLED", "true")
     monkeypatch.setenv("FORMUMIND_KB_V2_ENABLED", "true")
     monkeypatch.setenv("FORMUMIND_KG_RELATION_EXTRACT_ENABLED", "true")
+    monkeypatch.setenv("FORMUMIND_KG_RELATIONS_ON_INGEST", "true")
     get_settings.cache_clear()
 
     import app.db.chunk_store as chunk_store_mod
