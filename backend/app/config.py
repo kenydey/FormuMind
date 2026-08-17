@@ -299,11 +299,11 @@ class Settings(BaseSettings):
     # 实测：峰值内存随像素数走（120dpi 372MB / 150dpi 557MB / 200dpi 659MB），
     # 而更高 DPI 并没有更准——只是把一行切成更多段。150 是留给真实噪声扫描件的
     # 折中值。
-    rapidocr_dpi: int = 150
+    rapidocr_dpi: int = 120
     rapidocr_max_pages: int = 30
     # ORT 默认用满所有核心，会在 OCR 期间把 web worker 饿死。线程数不影响峰值
     # 内存（实测 4/1/2 线程都是 ~656MB），只影响单页耗时。
-    rapidocr_threads: int = 2
+    rapidocr_threads: int = 4
     # 扫描页本地 OCR 的置信度门槛（0..1）。平均置信度 >= 此值才用本地结果，
     # 否则回退 MinerU 结构化解析。0 = 永远用本地（不校验质量）。
     rapidocr_min_confidence: float = 0.75
