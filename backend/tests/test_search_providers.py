@@ -33,6 +33,8 @@ def test_search_openalex_parses_inverted_index(monkeypatch):
                 "display_name": "Coating study",
                 "doi": "https://doi.org/10.1234/test",
                 "abstract_inverted_index": {"zinc": [0], "phosphate": [1]},
+                "open_access": {"is_oa": True, "oa_status": "gold"},
+                "best_oa_location": {"pdf_url": "https://oa.example/x.pdf"},
             }
         ]
     }
@@ -59,6 +61,49 @@ def test_search_openalex_parses_inverted_index(monkeypatch):
     assert len(hits) == 1
     assert hits[0].source == "OpenAlex"
     assert "zinc" in hits[0].snippet
+    assert hits[0].is_oa is True
+    assert hits[0].oa_pdf_url == "https://oa.example/x.pdf"
+
+
+def test_search_openalex_filters_non_oa(monkeypatch):
+    payload = {
+        "results": [
+            {
+                "id": "https://openalex.org/W1",
+                "display_name": "OA study",
+                "doi": "https://doi.org/10.1234/oa",
+                "open_access": {"is_oa": True, "oa_status": "gold"},
+            },
+            {
+                "id": "https://openalex.org/W2",
+                "display_name": "Closed study",
+                "doi": "https://doi.org/10.1234/closed",
+                "open_access": {"is_oa": False},
+            },
+        ]
+    }
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None):
+            return FakeResp()
+
+    monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
+    hits = search_openalex("zinc coating", limit=5)
+    assert len(hits) == 1
+    assert hits[0].identifier == "10.1234/oa"
 
 
 def test_search_serpapi_chain_falls_back_to_patents(monkeypatch):

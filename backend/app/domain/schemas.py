@@ -252,6 +252,10 @@ class Evidence(BaseModel):
     relevance: float = Field(ge=0, le=1)
     is_seed_corpus: bool = False
     entity_refs: list[EvidenceEntityRef] = Field(default_factory=list)
+    # Open Access metadata carried from the search tier so the full-text fetcher
+    # can skip non-OA literature with zero extra API calls.
+    oa_pdf_url: str | None = None
+    is_oa: bool | None = None
 
 
 class ParameterBoundary(BaseModel):

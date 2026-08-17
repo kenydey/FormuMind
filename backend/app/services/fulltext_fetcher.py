@@ -122,11 +122,20 @@ def _fetch_patent_text(ev: Evidence, timeout: float) -> str | None:
 
 
 def _resolve_oa_pdf_url(ev: Evidence, timeout: float) -> str | None:
-    """Locate an Open Access PDF for a DOI (OpenAlex) or arXiv id."""
+    """Locate an Open Access PDF for a DOI (OpenAlex) or arXiv id.
+
+    Prefers OA metadata carried from the search tier (``ev.oa_pdf_url``) so a
+    non-OA DOI never triggers a second OpenAlex lookup — the search already
+    filtered on ``open_access.is_oa``, so ``is_oa=False`` here means "skip".
+    """
     ident = ev.identifier or ""
     m = _ARXIV_RE.search(ident)
     if m:
         return f"https://arxiv.org/pdf/{m.group(1)}"
+    if ev.oa_pdf_url:
+        return ev.oa_pdf_url
+    if ev.is_oa is False:
+        return None  # search tier already confirmed non-OA
     m = _DOI_RE.search(ident)
     if not m:
         return None
@@ -404,6 +413,8 @@ def enrich_search_results(
                 continue
         if kind:
             report.record(kind, False)
+            # 下载失败（无 OA / 403 / 超时 / 解析为空）→ 移除，不进结果/左栏。
+            continue
         out.append(ev)
 
     logger.info(

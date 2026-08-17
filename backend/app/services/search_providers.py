@@ -57,12 +57,16 @@ def _openalex_work_to_evidence(w: dict[str, Any], rank_index: int, global_offset
             for pos in positions:
                 pairs.append((pos, word))
         abstract = " ".join(w for _, w in sorted(pairs))[:1200]
+    oa = w.get("open_access") or {}
+    best = w.get("best_oa_location") or {}
     return Evidence(
         source="OpenAlex",
         identifier=identifier,
         title=w.get("display_name") or "Untitled",
         snippet=abstract[:1200],
         relevance=_ranked(rank_index, global_offset),
+        is_oa=oa.get("is_oa"),
+        oa_pdf_url=best.get("pdf_url") or None,
     )
 
 
@@ -100,9 +104,13 @@ def search_openalex(
                     break
                 page_added = 0
                 for w in results[skip_in_page:]:
+                    page_added += 1
+                    # 强制过滤无 OA 文献：无法下载全文的资料源不进检索结果。
+                    oa = w.get("open_access") or {}
+                    if not oa.get("is_oa"):
+                        continue
                     out.append(_openalex_work_to_evidence(w, global_idx, offset))
                     global_idx += 1
-                    page_added += 1
                     if len(out) >= limit:
                         break
                 if page_added == 0 or len(results) < 25:

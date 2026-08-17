@@ -120,12 +120,12 @@ def test_patent_hit_replaced_by_fulltext_chunks(monkeypatch):
     assert persisted == [("US1234567", "patent")]
 
 
-def test_failed_fetch_keeps_original(monkeypatch):
+def test_failed_fetch_removes_row(monkeypatch):
     _enable(monkeypatch)
     monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: None)
     rows = [_ev("US1234567")]
     out, report = ff.enrich_search_results(rows, persist=False)
-    assert out == rows
+    assert out == []  # 下载失败 → 移除，不进结果/左栏
     assert report.attempted == 1
     assert report.succeeded == 0
 
@@ -186,7 +186,7 @@ def test_web_fetch_refuses_unsafe_urls(monkeypatch):
     out, report = ff.enrich_search_results(
         [_ev("http://127.0.0.1/internal", source="internet")], persist=False
     )
-    assert out[0].identifier == "http://127.0.0.1/internal"  # untouched
+    assert out == []  # unsafe URL 无法下载全文 → 移除
     assert report.succeeded == 0
 
 
