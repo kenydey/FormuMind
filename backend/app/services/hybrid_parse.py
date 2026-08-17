@@ -336,18 +336,14 @@ def parse(content: bytes) -> str | None:
         return local_only or None
 
     if scanned:
-        # Local first, cloud only where it earns its keep. OCR gets the text of
-        # every page for free; MinerU is then worth a call only for pages whose
-        # value is structural — a table or figure it can render and OCR cannot,
-        # since RapidOCR returns text and boxes with no HTML or LaTeX.
-        #
-        # MinerU can still fail here — a timeout, a page cap, an outage — and
-        # `local_only` on a scan is empty, so without the local readers a
-        # configured-but-unreachable cloud parser would lose the document
-        # outright. That is strictly worse than not configuring one at all.
+        # 本地 OCR 优先：扫描页无文本层，本地 RapidOCR 免费且快（秒级/页），
+        # 而 MinerU OCR 烧配额、耗时长（上传→轮询→下载）且会触发视觉模型调用。
+        # 本地读得出就用本地，读不出才回退 MinerU —— 与混合文档的升级循环一致。
+        ocr = _scanned_without_cloud(content)
+        if ocr:
+            return ocr
         return (
             _parse_scanned(content, pages)
-            or _scanned_without_cloud(content)
             or local_only
             or None
         )
