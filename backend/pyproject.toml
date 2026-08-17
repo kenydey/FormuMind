@@ -77,11 +77,11 @@ file_ingest = [
 # host (marker measures ~54 s/page without a GPU); they stay declared for
 # machines that can afford them.
 parse_pro = [
-    # Local OCR for scanned pages. Ships the Chinese PP-OCRv4 ONNX weights inside
-    # the wheel (16 MB), so no model download at deploy time. opencv-python-headless
-    # is pinned explicitly: the default opencv-python drags in GUI libraries that a
-    # headless VPS does not have.
-    "rapidocr-onnxruntime>=1.4.4",
+    # Local OCR for scanned pages. rapidocr>=3.9 ships the PP-OCRv6 small ONNX
+    # weights inside the wheel, so no model download at deploy time.
+    # opencv-python-headless is pinned explicitly: the default opencv-python drags
+    # in GUI libraries that a headless VPS does not have.
+    "rapidocr>=3.9.0",
     "opencv-python-headless>=4.9",
     "pymupdf4llm>=0.0.17",
     "mineru-open-sdk>=0.2.5",

@@ -37,9 +37,19 @@ def _box(x0: float, y0: float, x1: float, y1: float):
     return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
 
 
+def _make_output(triples):
+    """Fold (box, text, score) triples into the RapidOCROutput object shape."""
+    class Out:
+        boxes = [t[0] for t in triples]
+        txts = tuple(t[1] for t in triples)
+        scores = tuple(t[2] for t in triples)
+
+    return Out()
+
+
 def _fake_engine(monkeypatch, result, *, record: dict | None = None):
     """Inject a fake rapidocr module whose engine returns `result`."""
-    mod = types.ModuleType("rapidocr_onnxruntime")
+    mod = types.ModuleType("rapidocr")
 
     class RapidOCR:
         def __init__(self, **kwargs):
@@ -47,11 +57,11 @@ def _fake_engine(monkeypatch, result, *, record: dict | None = None):
                 record.update(kwargs)
 
         def __call__(self, img):
-            return result, 0.0
+            return _make_output(result)
 
     mod.RapidOCR = RapidOCR
-    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", mod)
-    monkeypatch.setattr(ro, "optional_import", lambda name: name == "rapidocr_onnxruntime")
+    monkeypatch.setitem(sys.modules, "rapidocr", mod)
+    monkeypatch.setattr(ro, "optional_import", lambda name: name == "rapidocr")
     return mod
 
 
@@ -71,7 +81,7 @@ def test_unavailable_without_the_engine(monkeypatch):
     ok, hint = ro.rapidocr_available()
     assert ok is False
     # Actionable: names the package and where to click.
-    assert "rapidocr-onnxruntime" in hint and "依赖管理" in hint
+    assert "rapidocr" in hint and "依赖管理" in hint
 
 
 def test_available_with_the_engine(monkeypatch):
@@ -185,7 +195,7 @@ class _StubEngine:
         self._text = text
 
     def __call__(self, img):
-        return [(_box(60, 100, 400, 130), self._text, 0.9)], 0.0
+        return _make_output([(_box(60, 100, 400, 130), self._text, 0.9)])
 
 
 # ── engine construction ──────────────────────────────────────────────────────
@@ -200,7 +210,7 @@ def test_thread_count_is_pinned(monkeypatch):
     seen: dict = {}
     _fake_engine(monkeypatch, [], record=seen)
     ro._engine()
-    assert seen.get("intra_op_num_threads") == 2
+    assert seen.get("params") == {"EngineConfig.onnxruntime.intra_op_num_threads": 2}
 
 
 def test_engine_is_built_once(monkeypatch):
@@ -208,17 +218,17 @@ def test_engine_is_built_once(monkeypatch):
     N copies of three ONNX sessions."""
     monkeypatch.setattr(get_settings(), "rapidocr_enabled", True, raising=False)
     built: list[int] = []
-    mod = types.ModuleType("rapidocr_onnxruntime")
+    mod = types.ModuleType("rapidocr")
 
     class RapidOCR:
         def __init__(self, **kw):
             built.append(1)
 
         def __call__(self, img):
-            return [], 0.0
+            return _make_output([])
 
     mod.RapidOCR = RapidOCR
-    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", mod)
+    monkeypatch.setitem(sys.modules, "rapidocr", mod)
     monkeypatch.setattr(ro, "optional_import", lambda name: True)
 
     for _ in range(3):
@@ -230,14 +240,14 @@ def test_engine_failure_degrades_to_none(monkeypatch):
     """OCR is one tier of a cascade; a broken engine must fall through, not
     abort an ingest."""
     monkeypatch.setattr(get_settings(), "rapidocr_enabled", True, raising=False)
-    mod = types.ModuleType("rapidocr_onnxruntime")
+    mod = types.ModuleType("rapidocr")
 
     class RapidOCR:
         def __init__(self, **kw):
             raise RuntimeError("onnxruntime missing a provider")
 
     mod.RapidOCR = RapidOCR
-    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", mod)
+    monkeypatch.setitem(sys.modules, "rapidocr", mod)
     monkeypatch.setattr(ro, "optional_import", lambda name: True)
 
     assert ro._engine() is None

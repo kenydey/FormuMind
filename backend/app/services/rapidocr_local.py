@@ -41,8 +41,8 @@ from .errors import degrade_return, optional_import
 
 logger = logging.getLogger(__name__)
 
-_IMPORT_NAME = "rapidocr_onnxruntime"
-_PIP_NAME = "rapidocr-onnxruntime"
+_IMPORT_NAME = "rapidocr"
+_PIP_NAME = "rapidocr"
 
 # The engine costs ~1.2 s to construct and ~125 MB resident. Build it once per
 # process: N concurrent uploads would otherwise mean N copies of three ONNX
@@ -99,7 +99,7 @@ def _engine():
         if _ENGINE is not None:  # another thread won the race
             return _ENGINE
         try:
-            from rapidocr_onnxruntime import RapidOCR  # type: ignore
+            from rapidocr import RapidOCR  # type: ignore
 
             threads = max(1, int(get_settings().rapidocr_threads))
             # ONNX Runtime defaults intra_op threads to *every* core. On a
@@ -107,7 +107,11 @@ def _engine():
             # shares the box with. Thread count does not affect peak memory
             # (measured: 654/657/657 MB at 4/1/2 threads), only latency, so this
             # is purely about not monopolising the CPU.
-            _ENGINE = RapidOCR(intra_op_num_threads=threads)
+            # rapidocr>=3.x takes a params dict (dot-separated keys), not a
+            # positional thread count like rapidocr-onnxruntime 1.x did.
+            _ENGINE = RapidOCR(
+                params={"EngineConfig.onnxruntime.intra_op_num_threads": threads}
+            )
         except Exception as exc:
             return degrade_return(logger, exc, "rapidocr engine init failed", None)
     return _ENGINE
@@ -187,10 +191,21 @@ def ocr_png_scored(png: bytes) -> tuple[str | None, float]:
         img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             return None, 0.0
-        result, _elapsed = engine(img)
-        scores = [float(s) for _, _, s in (result or []) if s is not None]
-        avg = (sum(scores) / len(scores)) if scores else 0.0
-        text = _to_reading_order(result)
+        result = engine(img)  # RapidOCROutput: boxes/txts/scores are parallel arrays
+        txts = getattr(result, "txts", None) or ()
+        scores = getattr(result, "scores", None) or ()
+        boxes = getattr(result, "boxes", None)
+        # Fold the new object shape back into the (box, text, score) triples the
+        # reading-order code already understands, so that logic stays unchanged.
+        triples = []
+        for i in range(len(txts)):
+            box = boxes[i] if boxes is not None and i < len(boxes) else []
+            tolist = getattr(box, "tolist", None)
+            if tolist is not None:
+                box = tolist()
+            triples.append((box, txts[i], float(scores[i])))
+        avg = (sum(float(s) for s in scores) / len(scores)) if scores else 0.0
+        text = _to_reading_order(triples)
         return (text.translate(_FULLWIDTH) or None), avg
     except Exception as exc:
         return degrade_return(logger, exc, "rapidocr page failed", None), 0.0
