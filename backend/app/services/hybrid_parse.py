@@ -267,13 +267,26 @@ def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | No
 def _scanned_without_cloud(content: bytes) -> str | None:
     """Read a document with no text layer, using only what is on this host.
 
-    Two readers, in cost order. RapidOCR is preferred: it ships its weights in
-    the wheel, needs no system package, and is the tier built for this. The
-    layout parser's own OCR is the backstop — disabled for the general case
-    because it otherwise runs on every document in the corpus, but correct for
-    this one, where there is no text to lose and nothing else can read it.
+    Language-routed: English scans go to Tesseract (fast, ~7 s/page), Chinese
+    scans to RapidOCR (accurate, ~12 s/page). Language is judged from the first
+    page's RapidOCR output by its CJK ratio, so the extra cost is one page of
+    RapidOCR (~12 s) against a whole-document saving on English scans. RapidOCR
+    stays the backstop when Tesseract is absent or cannot read the document.
     """
-    from . import rapidocr_local
+    from . import rapidocr_local, tesseract_local
+
+    if tesseract_local.tesseract_available():
+        first_png = pdf_local.page_as_png(
+            content, 1, dpi=int(get_settings().rapidocr_dpi)
+        )
+        if first_png:
+            first_text, _conf = rapidocr_local.ocr_png_scored(first_png)
+            del first_png
+            if first_text and tesseract_local.cjk_ratio(first_text) < 0.1:
+                eng = tesseract_local.ocr_pdf(content, lang="eng")
+                if eng:
+                    logger.info("hybrid: scanned document read by Tesseract (English)")
+                    return eng
 
     text = rapidocr_local.ocr_pdf(content)
     if text:
