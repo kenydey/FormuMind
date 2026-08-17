@@ -304,6 +304,9 @@ class Settings(BaseSettings):
     # ORT 默认用满所有核心，会在 OCR 期间把 web worker 饿死。线程数不影响峰值
     # 内存（实测 4/1/2 线程都是 ~656MB），只影响单页耗时。
     rapidocr_threads: int = 2
+    # 扫描页本地 OCR 的置信度门槛（0..1）。平均置信度 >= 此值才用本地结果，
+    # 否则回退 MinerU 结构化解析。0 = 永远用本地（不校验质量）。
+    rapidocr_min_confidence: float = 0.75
 
     mineru_enabled: bool = False
     mineru_api_key: str | None = None
@@ -321,13 +324,13 @@ class Settings(BaseSettings):
     mineru_max_page_failures: int = 3
     # 单文档最多升级多少页——防止一份 200 页扫描件一次吃掉大半日配额。
     # 超出部分保留本地解析结果并记警告。
-    mineru_max_pages_per_doc: int = 20
+    mineru_max_pages_per_doc: int = 10
     # 本地预检体积上限（服务端为 200MB）。超限直接不发，省一次往返与配额。
     mineru_max_upload_mb: int = 200
     # 内容哈希缓存目录：同一份文件重复解析既费钱又费时。
     mineru_cache_dir: str = "./data/mineru_cache"
     # 一页图片面积占比超过此值即视为"有值得看的图"，触发升级。
-    hybrid_image_area_threshold: float = 0.12
+    hybrid_image_area_threshold: float = 0.20
     # 视觉解析断路器：连续 N 次永久性失败（端点暂停/鉴权拒绝）后，
     # 跳过当前文档剩余所有图片的视觉解析，直接降级为占位符。
     # 0 = 不断路（始终尝试）。建议 3。

@@ -167,30 +167,43 @@ def _to_reading_order(result) -> str:
     return "\n".join(t for t in (_line_text(ln) for ln in lines) if t)
 
 
-def ocr_png(png: bytes) -> str | None:
-    """One rasterised page → plain text in reading order, or None.
+def ocr_png_scored(png: bytes) -> tuple[str | None, float]:
+    """One rasterised page → (text, average confidence 0..1).
 
-    Never raises: OCR is one tier of a cascade, and a failure here must fall
-    through to the next parser rather than abort an ingest.
+    Confidence is the mean of RapidOCR's per-box scores. ``hybrid_parse`` uses it
+    to decide whether a scanned page's local OCR is good enough to keep, or
+    whether the page should fall back to MinerU for structure.
     """
     ok, _hint = rapidocr_available()
     if not ok or not png:
-        return None
+        return None, 0.0
     engine = _engine()
     if engine is None:
-        return None
+        return None, 0.0
     try:
         import cv2  # type: ignore
         import numpy as np  # type: ignore
 
         img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
-            return None
+            return None, 0.0
         result, _elapsed = engine(img)
+        scores = [float(s) for _, _, s in (result or []) if s is not None]
+        avg = (sum(scores) / len(scores)) if scores else 0.0
         text = _to_reading_order(result)
-        return text.translate(_FULLWIDTH) or None
+        return (text.translate(_FULLWIDTH) or None), avg
     except Exception as exc:
-        return degrade_return(logger, exc, "rapidocr page failed", None)
+        return degrade_return(logger, exc, "rapidocr page failed", None), 0.0
+
+
+def ocr_png(png: bytes) -> str | None:
+    """One rasterised page → plain text in reading order, or None.
+
+    Never raises: OCR is one tier of a cascade, and a failure here must fall
+    through to the next parser rather than abort an ingest.
+    """
+    text, _score = ocr_png_scored(png)
+    return text
 
 
 def ocr_pdf(content: bytes) -> str | None:

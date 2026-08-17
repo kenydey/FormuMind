@@ -378,11 +378,31 @@ def parse(content: bytes) -> str | None:
     # Counted *consecutively*: a document where some pages come back keeps
     # going, because that is a working connection with a few hard pages.
     budget = int(get_settings().mineru_max_page_failures)
+    min_conf = float(get_settings().rapidocr_min_confidence)
     upgraded: dict[int, str] = {}
     attempted = 0
     consecutive_failures = 0
     for page in selected:
         attempted += 1
+        # 扫描页先本地 OCR：高置信度直接用本地结果（快、免费、省配额），
+        # 低置信度或读不出才回退 MinerU 结构化解析。
+        if page.looks_scanned:
+            from . import rapidocr_local
+
+            png = pdf_local.page_as_png(
+                content, page.page_no, dpi=int(get_settings().rapidocr_dpi)
+            )
+            if png:
+                text, conf = rapidocr_local.ocr_png_scored(png)
+                del png
+                if text and conf >= min_conf:
+                    upgraded[page.page_no] = text
+                    consecutive_failures = 0
+                    logger.info(
+                        "hybrid: p.%d read by local OCR (conf %.2f ≥ %.2f)",
+                        page.page_no, conf, min_conf,
+                    )
+                    continue
         rendered = _escalate_page(content, page)
         if rendered:
             upgraded[page.page_no] = rendered
