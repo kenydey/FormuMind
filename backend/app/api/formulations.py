@@ -102,6 +102,8 @@ class RecommendFormulationsRequest(BaseModel):
     n: int | None = Field(default=None, ge=1, le=12)
     include_tradeoff: bool = True
     scenario_kinds: list[str] = Field(default_factory=list)
+    # 关系洞察开关：true 时对候选配方成分按需跑替代品/关系（默认关，省 token）
+    relation_insight: bool = False
 
 
 class RecommendFormulationsResponse(BaseModel):
@@ -113,6 +115,7 @@ class RecommendFormulationsResponse(BaseModel):
     returned_n: int | None = None
     diversity_applied: bool = False
     tradeoff: TradeOffAnalysis | None = None
+    relation_insights: list[dict] = Field(default_factory=list)
 
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
@@ -195,6 +198,10 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     )
     rec_resp.warnings.extend(extra_warnings)
 
+    insights: list[dict] = []
+    if body.relation_insight:
+        insights = _relation_insights(aligned, settings)
+
     return RecommendFormulationsResponse(
         formulas=aligned,
         engine=rec_resp.engine,
@@ -204,7 +211,56 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         returned_n=len(scored),
         diversity_applied=diversity_applied,
         tradeoff=tradeoff,
+        relation_insights=insights,
     )
+
+
+def _relation_insights(formulas: list, settings) -> list[dict]:
+    """候选配方成分 → 实体 → 替代品/关系洞察（relation_insight 按需）。
+
+    只对候选成分解析出的实体做关系查询，不做全库关系提取 —— token 开销
+    与候选成分数成正比，而不是与库大小成正比。
+    """
+    from ..services.kg.entity_resolver import resolve_query
+    from ..services.kg.graph_query import discover_substitutes, get_entity_relations
+
+    insights: list[dict] = []
+    seen: set[str] = set()
+    for f in formulas:
+        for comp in (f.components or []):
+            key = (comp.cas_no or comp.name or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            try:
+                resolved = resolve_query(key, settings=settings)
+            except Exception:
+                continue
+            for eid in (resolved.expanded_entity_ids or [])[:3]:
+                try:
+                    subs = discover_substitutes(eid, limit=5)
+                    rels = get_entity_relations(eid, limit=8)
+                except Exception:
+                    continue
+                sub_names = [c.entity_name for c in (subs.substitutes or []) if c.entity_name]
+                if not sub_names and not rels:
+                    continue
+                insights.append(
+                    {
+                        "component": comp.name,
+                        "cas_no": comp.cas_no,
+                        "substitutes": sub_names,
+                        "relations": [
+                            {
+                                "type": str(r.relation_type),
+                                "target": r.target_entity_id,
+                                "confidence": r.confidence,
+                            }
+                            for r in rels
+                        ],
+                    }
+                )
+    return insights
 
 
 def _evidence_as_recommendation_response(

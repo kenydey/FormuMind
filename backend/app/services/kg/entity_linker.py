@@ -117,6 +117,35 @@ def rebuild_all(*, project_id: str | None = None, settings: Settings | None = No
         return report
 
 
+def rebuild_relations(
+    source_ids: list[str] | None = None,
+    *,
+    settings: Settings | None = None,
+) -> dict:
+    """重跑关系提取，不重跑实体提及（mentions 已在库）。
+
+    闲时/按需补语义关系：实体提及快（入库同步），关系提取（尤其 LLM）慢，
+    这里只跑后者。``source_ids`` 限定范围，None = 所有含 mentions 的 source。
+    """
+    settings = settings or get_settings()
+    if not settings.kg_enabled or not settings.kg_relation_extract_enabled:
+        return {"rebuilt_sources": 0, "relations_upserted": 0}
+    store = get_entity_store()
+    if source_ids is None:
+        with store._session_factory() as session:
+            source_ids = [r[0] for r in session.query(KGMention.source_id).distinct().all()]
+    total = 0
+    for sid in source_ids:
+        store.delete_links_for_source(sid)
+        chunks = get_chunk_store().get_by_source(sid)
+        n = 0
+        with commit_session(store._session_factory) as session:
+            for chunk in chunks:
+                n += _extract_relations_for_chunk(session, chunk, sid, settings)
+        total += n
+    return {"rebuilt_sources": len(source_ids), "relations_upserted": total}
+
+
 def _link_chunk(session: Session, chunk, source_id: str, settings: Settings) -> tuple[int, set[str], int]:
     store = get_entity_store()
     touched: set[str] = set()
