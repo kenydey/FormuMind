@@ -2,8 +2,7 @@
 
 **AI-assisted formulation R&D platform for chemistry.
 
-FormuMind takes an R&D requirement (substrate, salt-spray target, film weight,
-cure temperature, cleaning efficiency, VOC limit…) and runs a closed loop:
+FormuMind takes an R&D requirement and runs a closed loop:
 
 ```
 requirement → patent/literature retrieval → RAG-grounded research
