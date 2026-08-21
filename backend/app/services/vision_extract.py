@@ -424,8 +424,58 @@ def _verify_molecules(molecules: list[VisionMolecule]) -> list[VisionMolecule]:
     return out
 
 
+def _molecules_from_smiles(smiles: str) -> VisionExtraction:
+    """把单个 SMILES 字符串包成 VisionExtraction（经 RDKit 验证兜底）。"""
+    mol = VisionMolecule(smiles=(smiles or "").strip(), confidence=0.8)
+    molecules = _verify_molecules([mol])
+    return VisionExtraction(kind="structure", molecules=molecules)
+
+
+def _decimer_direct(content: bytes, settings) -> VisionExtraction | None:
+    """① DECIMER 离线直识（免 token，假设图已裁剪）。
+
+    投递独立 decimer Celery worker 识别，成功即返回；任何失败返回 None
+    （由调用方回退视觉 LLM）。
+    """
+    if not settings.decimer_enabled:
+        return None
+    try:
+        # 延迟导入：避免主进程模块加载期拉起 Celery/TF 依赖链
+        from app.worker.celery_app import celery_app
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(content)
+            path = f.name
+        try:
+            res = celery_app.send_task(
+                "formumind.decimer_recognize",
+                args=[{"image_path": path}],
+                queue=settings.decimer_queue,
+            ).get(timeout=settings.decimer_timeout_s)
+        finally:
+            os.unlink(path)
+        if res and res.get("ok"):
+            return _molecules_from_smiles(res["smiles"])
+    except Exception as exc:
+        logger.warning("DECIMER direct path failed: %s", exc)
+    return None
+
+
 def extract_image(content: bytes, filename: str) -> tuple[VisionExtraction | None, str | None]:
-    """Structured extraction for one image; (None, reason) when unavailable."""
+    """Structured extraction for one image; (None, reason) when unavailable.
+
+    结构图→SMILES 优先走 DECIMER 离线直识（免 token），失败回退视觉 LLM。
+    """
+    settings = get_settings()
+    # ① DECIMER 离线直识（免 token，主路径）
+    if settings.decimer_enabled:
+        extraction = _decimer_direct(content, settings)
+        if extraction is not None:
+            return extraction, None
+
+    # ④ 兜底：视觉 LLM（原逻辑不动）
     ok, hint = vision_available()
     if not ok:
         return None, hint

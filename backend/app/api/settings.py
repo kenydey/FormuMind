@@ -331,3 +331,42 @@ def set_formulation_mode(body: FormulationModeUpdate) -> dict:
         pass  # read-only FS — live process env still applied
     get_settings.cache_clear()
     return {"mode": body.mode, "status": "ok"}
+
+
+# ── DECIMER mode selector (non-boolean) ────────────────────────────────
+
+DECIMER_MODE_CHOICES = [
+    {"value": "auto", "label": "Auto 自动", "desc": "运行时探测：GPU 可用→gpu，否则→cpu（推荐）"},
+    {"value": "cpu", "label": "CPU 纯识别", "desc": "tensorflow-cpu + 纯识别，无结构切分（当前 VPS）"},
+    {"value": "gpu", "label": "GPU 全流程", "desc": "tensorflow 完整版 + decimer-segmentation 先切分后识别（预留）"},
+]
+
+
+class DecimerModeUpdate(BaseModel):
+    mode: str = Field(default="auto", pattern="^(auto|cpu|gpu)$")
+
+
+@router.get("/settings/decimer")
+def get_decimer() -> dict:
+    from ..services.decimer_ocr import availability
+
+    s = get_settings()
+    return {
+        "current": s.decimer_mode,
+        "choices": DECIMER_MODE_CHOICES,
+        "status": availability(),
+    }
+
+
+@router.post("/settings/decimer")
+def set_decimer_mode(body: DecimerModeUpdate) -> dict:
+    import os
+    from ..services.secrets_store import write_env_updates
+
+    os.environ["FORMUMIND_DECIMER_MODE"] = body.mode
+    try:
+        write_env_updates({"FORMUMIND_DECIMER_MODE": body.mode})
+    except OSError:
+        pass  # read-only FS — live process env still applied
+    get_settings.cache_clear()
+    return {"mode": body.mode, "status": "ok"}

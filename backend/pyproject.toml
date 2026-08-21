@@ -126,6 +126,12 @@ dev = [
     "pypdf>=4.0",             # real PDF parsing in test_pdf_downloader real-path tests
 ]
 postgres = ["psycopg2-binary>=2.9"]
+# DECIMER 离线 OCSR：cpu 纯识别 / gpu 含结构切分（预留）。
+# 均需独立 venv + 独立 Celery worker（tensorflow 与主 env 的 torch 冲突）。
+# ⚠️ decimer 声明依赖 tensorflow（完整版），cpu 模式安装后须
+#    `pip uninstall tensorflow && pip install tensorflow-cpu`（见 setup_decimer_worker.sh）。
+decimer-cpu = ["decimer>=2.8.0", "tensorflow-cpu>=2.12,<2.21"]
+decimer-gpu = ["decimer>=2.8.0", "tensorflow>=2.12,<2.21", "decimer-segmentation>=1.5.0"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

@@ -488,6 +488,20 @@ class Settings(BaseSettings):
     # X-Scale-Up-Timeout 它会改为挂住请求直到就绪。0 = 不发该头。
     vision_scale_up_timeout: int = 600
 
+    # ═══ DECIMER 离线结构识别（OCSR）════
+    # 化学结构图离线识别为 SMILES，作为主路径（免 token，省费用），视觉 LLM 兜底。
+    # 运行在独立 decimer Celery worker（独立 venv，tensorflow-cpu），不占主服务内存。
+    decimer_enabled: bool = False
+    # auto = 探测（GPU 可用→gpu，否则→cpu）；gpu = tensorflow 完整版 + decimer-segmentation（预留）；
+    # cpu = tensorflow-cpu + 纯识别（无 segmentation，定位交给视觉 LLM）
+    decimer_mode: str = "auto"
+    # TensorFlow 线程限流（CPU 模式必须 =1，防吃满 4 核饿死 API worker）
+    decimer_threads: int = 1
+    # Celery 队列名（独立 worker 消费）
+    decimer_queue: str = "decimer"
+    # DECIMER 单张识别超时（CPU 纯推理 10s + 排队余量）
+    decimer_timeout_s: float = 60.0
+
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
     source_guide_max_chars: int = 12000

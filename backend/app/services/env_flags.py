@@ -178,6 +178,11 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("vision_extract_enabled", "图片视觉解析",
             "上传图片经视觉大模型结构化：表格→Markdown、分子结构图→SMILES（RDKit 验证）。",
             "chem", "需具备视觉能力的 LLM（FORMUMIND_VISION_MODEL 可指定专用模型）"),
+    EnvFlag("decimer_enabled", "DECIMER 离线结构识别",
+            "化学结构图优先用 DECIMER 离线识别为 SMILES（免 token，省费用），失败自动回退视觉 LLM。"
+            "独立 worker 进程（tensorflow-cpu），不占主服务内存。"
+            "cpu 模式纯识别；gpu 模式含 decimer-segmentation 结构切分（预留）。",
+            "chem", "需独立 decimer worker venv + Celery worker；冷启动约 2 分钟"),
     EnvFlag("chemtools_descriptor_features", "v2 分子描述符特征",
             "机器学习特征向量追加 6 个重量加权 RDKit 分子描述符。", "chem",
             "需 rdkit；切换后需重启以重训模型"),

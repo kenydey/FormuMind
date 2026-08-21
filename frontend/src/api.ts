@@ -1184,6 +1184,16 @@ export const api = {
   setFormulationMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
 
+  getDecimer: () =>
+    get<{
+      current: string;
+      choices: { value: string; label: string; desc: string }[];
+      status: DecimerStatus;
+    }>("/api/settings/decimer"),
+
+  setDecimerMode: (mode: string) =>
+    post<{ mode: string; status: string }>("/api/settings/decimer", { mode }),
+
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   getAuthStatus: () =>
@@ -1839,6 +1849,15 @@ export interface EnvFlag {
   hint: string;
   value: boolean;
   default: boolean;
+}
+
+export interface DecimerStatus {
+  enabled: boolean;
+  mode: string;
+  installed_in_process: boolean;
+  queue: string;
+  segmentation: boolean;
+  timeout_s: number;
 }
 
 export interface KBReindexResult {
