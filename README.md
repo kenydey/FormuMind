@@ -1,8 +1,6 @@
 # FormuMind
 
-**AI-assisted formulation R&D platform for metal surface treatment** — covering
-anti-corrosion coatings (防腐蚀涂料), degreasers (脱脂剂), and surface treatment
-agents (表面处理剂).
+**AI-assisted formulation R&D platform for chemistry.
 
 FormuMind takes an R&D requirement (substrate, salt-spray target, film weight,
 cure temperature, cleaning efficiency, VOC limit…) and runs a closed loop:
