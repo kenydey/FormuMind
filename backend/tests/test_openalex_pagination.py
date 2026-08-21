@@ -14,6 +14,9 @@ def _page_payload(page: int, n: int = 25):
                 "display_name": f"Work {page}-{i}",
                 "doi": f"https://doi.org/10.1234/p{page}{i}",
                 "abstract_inverted_index": {"test": [0]},
+                # search_openalex 强制过滤无 OA 文献（is_oa=False 直接跳过），
+                # 假数据必须标记为 OA 才能通过该过滤。
+                "open_access": {"is_oa": True},
             }
             for i in range(n)
         ]

@@ -11,7 +11,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, Session
 
 logger = logging.getLogger(__name__)
@@ -58,35 +58,27 @@ def ingest_document_tx(
 
     with commit_session(session_factory) as session:
         try:
-            # ── 1. SourceDocument savepoint-upsert ──────────────────────────
+            # ── 1. SourceDocument upsert ──────────────────────────────────
             doc = session.get(SourceDocument, source_id)
             if doc is None:
-                sp = session.begin_nested()
-                try:
-                    session.add(
-                        SourceDocument(
-                            id=source_id,
-                            filename=title or "api_ingest",
-                            title=title or "API Ingest",
-                            source_kind="api",
-                            full_text=text,
-                            content_hash=hashlib.sha256(
-                                text.encode("utf-8", errors="replace")
-                            ).hexdigest(),
-                            raw_text_chars=len(text),
-                        )
+                session.add(
+                    SourceDocument(
+                        id=source_id,
+                        filename=title or "api_ingest",
+                        title=title or "API Ingest",
+                        source_kind="api",
+                        full_text=text,
+                        content_hash=hashlib.sha256(
+                            text.encode("utf-8", errors="replace")
+                        ).hexdigest(),
+                        raw_text_chars=len(text),
                     )
-                    session.flush()
-                    sp.commit()
-                except IntegrityError:
-                    sp.rollback()
-                    doc = session.get(SourceDocument, source_id)
-                    if doc is None:
-                        raise
-                except OperationalError:
-                    raise
-                # Sp not committed — caller's rollback can undo this INSERT.
-                # See formumind-dev skill §19 for why.
+                )
+                # No savepoint (see outbox_store.enqueue): begin_nested() on
+                # SQLite commits the flushed INSERT, so a caller rollback could
+                # not undo it. A concurrent-duplicate IntegrityError propagates;
+                # the retry sees the now-committed document (idempotent).
+                session.flush()
 
             # ── 2. Chunk idempotency check + write ─────────────────────────
             existing = session.query(DocumentChunk).filter(

@@ -10,7 +10,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .models import TaskOutbox
@@ -50,25 +49,13 @@ def enqueue(
         idempotency_key=idempotency_key,
         payload=payload,
     )
-    # Use a savepoint so that a concurrent-duplicate IntegrityError only
-    # rolls back the INSERT, not other pending changes the caller owns.
-    sp = session.begin_nested()
-    try:
-        session.add(row)
-        session.flush()
-        sp.commit()
-    except IntegrityError:
-        sp.rollback()
-        existing = session.execute(
-            select(TaskOutbox).filter_by(
-                operation=operation, idempotency_key=idempotency_key,
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return existing.id, existing.status
-        raise
-    except OperationalError:
-        raise
+    # No savepoint here: SQLAlchemy's begin_nested() on SQLite/pysqlite releases
+    # the savepoint in a way that commits the flushed INSERT, so an outer
+    # session.rollback() cannot undo it (breaks caller transaction atomicity).
+    # A concurrent-duplicate IntegrityError propagates to the caller, which
+    # rolls back its own transaction and re-selects idempotently.
+    session.add(row)
+    session.flush()
     return row.id, "PENDING"
 
 
