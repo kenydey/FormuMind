@@ -57,6 +57,25 @@ def predict_smiles_local(image_path: str) -> str | None:
         return None
 
 
+def prewarm_decimer() -> bool:
+    """在 decimer worker 启动时预加载 TF 模型（import DECIMER 即触发）。
+
+    冷启动约 2 分钟，若落在首个 decimer_recognize 任务里会超时并回退视觉 LLM。
+    把它挪到 worker 启动时，稳态下每个任务只剩纯推理（约 10s）。主进程（无
+    tensorflow）返回 False 且绝不 import。任何异常都吞掉——预热失败不能阻止
+    worker 启动，逐任务路径仍会照常回退。
+    """
+    if not decimer_available():
+        return False
+    try:
+        from DECIMER import predict_SMILES  # noqa: F401
+
+        return True
+    except Exception as exc:
+        logger.warning("DECIMER prewarm failed: %s", exc)
+        return False
+
+
 def availability() -> dict:
     """Per-capability 报告（供 /api/chemical/tools 或 settings UI）。"""
     s = get_settings()

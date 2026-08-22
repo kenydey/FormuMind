@@ -513,8 +513,11 @@ class Settings(BaseSettings):
     decimer_threads: int = 1
     # Celery 队列名（独立 worker 消费）
     decimer_queue: str = "decimer"
-    # DECIMER 单张识别超时（CPU 纯推理 10s + 排队余量）
-    decimer_timeout_s: float = 60.0
+    # DECIMER 单张识别超时。CPU 纯推理约 10s；但 worker 冷启动时首个任务要等
+    # tensorflow 模型加载（import DECIMER 即触发，~2min）。预热钩子把加载挪到
+    # worker 启动时，仍要覆盖「主 worker 先发任务、decimer worker 尚未就绪」的
+    # 窗口，故给 180s 余量。超时后回退视觉 LLM，非硬失败。
+    decimer_timeout_s: float = 180.0
 
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True

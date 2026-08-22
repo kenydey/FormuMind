@@ -49,3 +49,17 @@ celery_app.conf.update(
 
 # Register Celery tasks on import.
 import app.worker.tasks  # noqa: F401
+
+# ── DECIMER prewarm ───────────────────────────────────────────────────────────
+# The decimer worker runs in a separate venv with tensorflow-cpu; `import DECIMER`
+# loads the TF model (~2 min) and would otherwise hit the first recognize task and
+# blow past decimer_timeout_s. Load it once at worker boot instead. Guarded by
+# decimer_available() so the main worker (no tensorflow) never imports it.
+from celery.signals import worker_process_init
+
+
+@worker_process_init.connect
+def _prewarm_decimer(**kwargs):  # pragma: no cover - runs in the decimer worker
+    from ..services import decimer_ocr
+
+    decimer_ocr.prewarm_decimer()

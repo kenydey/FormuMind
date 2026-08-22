@@ -111,3 +111,21 @@ def test_settings_have_decimer_fields():
 def test_env_flag_registered():
     attrs = {f["attr"] for f in list_env_flags()}
     assert "decimer_enabled" in attrs
+
+
+# ── prewarm (worker boot, not per task) ──────────────────────────────────────
+
+
+def test_prewarm_is_a_noop_without_decimer():
+    assert decimer_ocr.prewarm_decimer() is False
+
+
+def test_prewarm_imports_decimer_when_present(monkeypatch):
+    _install_fake_decimer(monkeypatch)
+    assert decimer_ocr.prewarm_decimer() is True
+
+
+def test_prewarm_swallows_import_errors(monkeypatch):
+    """decimer_available() 为真但 predict_SMILES 缺失时，预热吞掉错误返回 False。"""
+    monkeypatch.setitem(sys.modules, "DECIMER", types.ModuleType("DECIMER"))
+    assert decimer_ocr.prewarm_decimer() is False
