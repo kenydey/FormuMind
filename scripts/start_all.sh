@@ -64,7 +64,7 @@ if $WITH_DECIMER; then
       TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1 TF_CPP_MIN_LOG_LEVEL=2 \
         FORMUMIND_CELERY_EAGER=false \
         nohup "$DECIMER_VENV/bin/celery" -A app.worker.celery_app worker \
-        --queues=decimer --concurrency=1 --loglevel=info \
+        -n decimer@%h --queues=decimer --concurrency=1 --loglevel=info \
         >>"$LOGS/decimer.log" 2>&1 &
     )
     echo "    DECIMER worker 已启动（队列 decimer，并发 1）"
