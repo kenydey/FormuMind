@@ -15,9 +15,28 @@ from app.domain.schemas import ProductMention, SourceGuideSchema
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
+    from app.services.runtime_secrets import get_runtime_secrets
+
     monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "false")
+    # 其他测试文件（如 test_vision_settings_api）会通过 apply_persisted_ui_settings
+    # 把 LLM/vision 键写进 os.environ；不清掉会跨文件污染（vision_api_key 残留会让
+    # 继承分支失效，拿到别人的 key）。
+    for _key in (
+        "FORMUMIND_LLM_PROVIDER",
+        "FORMUMIND_LLM_MODEL",
+        "FORMUMIND_LLM_BASE_URL",
+        "FORMUMIND_VISION_PROVIDER",
+        "FORMUMIND_VISION_MODEL",
+        "FORMUMIND_VISION_BASE_URL",
+        "FORMUMIND_VISION_API_KEY",
+        "FORMUMIND_CUSTOM_API_KEY",
+        "FORMUMIND_CUSTOM_BASE_URL",
+    ):
+        monkeypatch.delenv(_key, raising=False)
     get_settings.cache_clear()
+    get_runtime_secrets().clear()
     yield
+    get_runtime_secrets().clear()
     get_settings.cache_clear()
 
 

@@ -94,6 +94,7 @@ PROVIDERS: list[dict] = [
         "models": [
             {"id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro (最强)", "recommended": True},
             {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash (快速经济)"},
+            {"id": "deepseek-v4-flash-vision-exp", "label": "DeepSeek V4 Flash Vision (视觉·实验)"},
         ],
     },
     {

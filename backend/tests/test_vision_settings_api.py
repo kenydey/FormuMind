@@ -275,3 +275,37 @@ def test_health_detailed_follows_a_provider_switch():
     rs.set("moonshot_api_key", "sk-switched")
 
     assert client.get("/health/detailed").json()["llm"] == "moonshot"
+
+
+# ── DeepSeek 视觉模型支持 ────────────────────────────────────────────────────
+
+
+def test_deepseek_vision_model_is_accepted():
+    """deepseek + 视觉模型（deepseek-v4-flash-vision-exp）→ vision_available 可用。"""
+    from app.services.vision_extract import vision_available
+
+    rs = get_runtime_secrets()
+    rs.set("vision_provider", "deepseek")
+    rs.set("vision_model", "deepseek-v4-flash-vision-exp")
+    rs.set("deepseek_api_key", "sk-test")
+    try:
+        ok, hint = vision_available()
+        assert ok, hint
+    finally:
+        rs.clear()
+
+
+def test_deepseek_text_model_is_rejected_with_vision_hint():
+    """deepseek + 文本模型 → 提示指定 deepseek 视觉模型。"""
+    from app.services.vision_extract import vision_available
+
+    rs = get_runtime_secrets()
+    rs.set("vision_provider", "deepseek")
+    rs.set("vision_model", "deepseek-v4-pro")
+    rs.set("deepseek_api_key", "sk-test")
+    try:
+        ok, hint = vision_available()
+        assert not ok
+        assert "deepseek-v4-flash-vision-exp" in hint
+    finally:
+        rs.clear()

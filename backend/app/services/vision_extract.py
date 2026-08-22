@@ -66,17 +66,18 @@ class VisionExtraction(BaseModel):
     notes: str = ""
 
 
-# Providers verified to reject image input outright, as opposed to merely
-# needing a particular model. DeepSeek answers an `image_url` content part
-# with `unknown variant 'image_url', expected 'text'` — being
-# OpenAI-compatible for chat says nothing about accepting images, and without
-# this the UI reported vision as available and every figure failed on a 400
-# that named a JSON deserialisation error rather than the real cause.
-#
-# Deliberately a list of what has been *checked*, not a capability matrix:
-# qwen and moonshot depend on which model is selected, so they are left to
-# fail at the call with the provider's own message rather than be guessed at.
-_NO_VISION_PROVIDERS = frozenset({"deepseek"})
+# DeepSeek ships a vision model (`deepseek-v4-flash-vision-exp`) but its text
+# models (deepseek-v4-pro / v4-flash) still reject an `image_url` content part
+# with a 400 ("This model does not support image"). So the guard is model-level
+# for deepseek: a vision model passes, a text model gets a hint naming the
+# vision model. Every other OpenAI-compatible vendor (qwen / moonshot) is left
+# to fail at the call with the provider's own message rather than be guessed at.
+_DEEPSEEK_VISION_MARKER = "vision"
+
+
+def _is_deepseek_vision(model: str) -> bool:
+    """DeepSeek models that accept images carry ``vision`` in their id."""
+    return _DEEPSEEK_VISION_MARKER in (model or "").lower()
 
 
 def vision_available() -> tuple[bool, str]:
@@ -113,11 +114,12 @@ def vision_available() -> tuple[bool, str]:
         return False, "未指定视觉模型名称（设置 → 大模型 → 视觉模型）"
     if cfg.provider == "gemini":
         return False, "Gemini 原生接口暂不支持图片解析——请切换 OpenAI 兼容供应商或 Anthropic"
-    if cfg.provider in _NO_VISION_PROVIDERS:
+    if cfg.provider == "deepseek" and not _is_deepseek_vision(cfg.model):
         hint = (
-            f"{cfg.provider} 不支持图片输入，无法解析化学结构图/图表。"
-            "请在「设置 → 大模型 → 视觉模型」单独指定一个支持视觉的供应商"
-            "（Claude / OpenAI / 自定义端点），文本模型可以保持不变。"
+            "deepseek 文本模型（deepseek-v4-pro / v4-flash）不支持图片输入。"
+            "请在「设置 → 大模型 → 视觉模型」指定 deepseek-v4-flash-vision-exp，"
+            "或切换其他支持视觉的供应商（Claude / OpenAI / 自定义端点），"
+            "文本模型可保持不变。"
         )
         return False, hint
 
