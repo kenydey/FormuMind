@@ -17,7 +17,9 @@ the SDK is missing or the API call fails.
 from __future__ import annotations
 
 from .errors import degrade_return, optional_import, reraise_if_fatal
+import json
 import logging
+from pathlib import Path
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -170,7 +172,58 @@ _EXCLUDE_MODEL_SUBSTR = (
 
 
 def static_models_for_provider(provider: str) -> list[dict]:
+    cached = _load_model_cache().get(provider)
+    if cached:
+        return [dict(m) for m in cached]
     return [dict(m) for m in _PROVIDER_INDEX.get(provider, {}).get("models") or []]
+
+
+# ── 远端模型列表本地缓存 ────────────────────────────────────────────────────
+# 「更新列表」从远端 /models 拉到的模型列表会持久化到 data/llm_models_cache.json，
+# 下次打开设置面板直接展示，而不是每次都要点「更新列表」、其余时间回退硬编码目录。
+_MODEL_CACHE_REL = Path("data") / "llm_models_cache.json"
+
+
+def _load_model_cache() -> dict[str, list[dict]]:
+    try:
+        if _MODEL_CACHE_REL.exists():
+            data = json.loads(_MODEL_CACHE_REL.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception as exc:
+        degrade_return(log, exc, "load model cache failed", None)
+    return {}
+
+
+def _save_model_cache(cache: dict[str, list[dict]]) -> None:
+    try:
+        _MODEL_CACHE_REL.parent.mkdir(parents=True, exist_ok=True)
+        _MODEL_CACHE_REL.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as exc:
+        degrade_return(log, exc, "save model cache failed", None)
+
+
+def _persist_provider_models(provider: str, models: list[dict]) -> None:
+    cache = _load_model_cache()
+    cache[provider] = [dict(m) for m in models]
+    _save_model_cache(cache)
+
+
+def providers_with_cache() -> list[dict]:
+    """PROVIDERS 目录，模型列表被持久化的远端列表覆盖（如有）。"""
+    cache = _load_model_cache()
+    out: list[dict] = []
+    for p in PROVIDERS:
+        cached = cache.get(p["id"])
+        if cached:
+            merged = dict(p)
+            merged["models"] = [dict(m) for m in cached]
+            out.append(merged)
+        else:
+            out.append(p)
+    return out
 
 
 def _is_listable_chat_model(model_id: str) -> bool:
@@ -312,13 +365,15 @@ def list_remote_models(
                 "models": _merge_model_catalog(static, [], current_model),
                 "message": "远端未返回可用 chat 模型，已回退内置目录",
             }
+        merged = _merge_model_catalog(static, remote_ids, current_model)
+        _persist_provider_models(provider, merged)
         return {
             "ok": True,
             "provider": provider,
             "base_url": effective_base,
             "source": "remote",
-            "models": _merge_model_catalog(static, remote_ids, current_model),
-            "message": f"已从远端加载 {len(remote_ids)} 个模型",
+            "models": merged,
+            "message": f"已从远端加载 {len(remote_ids)} 个模型，并保存到本地",
         }
     except Exception as exc:
         degrade_return(log, exc, "list_remote_models failed", None)

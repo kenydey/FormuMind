@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
-from ..services.llm import PROVIDERS, _provider_default_base_url, list_remote_models, test_connection
+from ..services.llm import _provider_default_base_url, list_remote_models, providers_with_cache, test_connection
 from ..services.llm_roles import CUSTOM_PROVIDER, VISION, normalize_base_url, resolve_role
 from ..services.vision_extract import probe_vision, vision_available
 from ..services.runtime_secrets import effective_setting, get_runtime_secrets
@@ -220,7 +220,7 @@ def get_llm_settings():
         "model": effective_setting(s, "llm_model"),
         "key_set": bool(s.get_active_api_key()),
         "base_url": effective_setting(s, "llm_base_url"),
-        "providers": PROVIDERS,
+        "providers": providers_with_cache(),
         "vision": _vision_state(),
     }
 
