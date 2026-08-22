@@ -329,6 +329,14 @@ class Settings(BaseSettings):
     mineru_max_upload_mb: int = 200
     # 内容哈希缓存目录：同一份文件重复解析既费钱又费时。
     mineru_cache_dir: str = "./data/mineru_cache"
+    # ═══ 入库收尾自动清理（省空间）════
+    # 源文档全文（source_documents.full_text）在切块完成后冗余——切块已覆盖全文，
+    # 检索走 document_chunks + kb_mentions，不再读 full_text（仅 reindex 重建会读）。
+    # 入库后清空 full_text，保留行元数据（content_hash 去重 / 左栏列表 / source_guide）。
+    prune_source_fulltext: bool = True
+    # MinerU 云端解析缓存：content_hash 去重会拦截重复 PDF（解析前就跳过），缓存几乎
+    # 没有复用机会，反而累积到数百 MB。开启后 parse 不读不写缓存（历史缓存需手动清）。
+    prune_mineru_cache: bool = True
     # 一页图片面积占比超过此值即视为"有值得看的图"，触发升级。
     hybrid_image_area_threshold: float = 0.20
     # 视觉解析断路器：连续 N 次永久性失败（端点暂停/鉴权拒绝）后，

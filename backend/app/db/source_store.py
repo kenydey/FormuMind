@@ -80,6 +80,17 @@ class SourceStore:
                 .first()
             )
 
+    def clear_full_text(self, source_id: str) -> None:
+        """入库收尾：清空冗余的 full_text（切块已覆盖全文，检索不再读它）。
+
+        只清空字段、保留行——content_hash 去重 / 左栏列表 / source_guide 都还依赖
+        这一行存在。已为 NULL 则不动（幂等）。
+        """
+        with commit_session(self._session_factory) as session:
+            doc = session.get(SourceDocument, source_id)
+            if doc is not None and doc.full_text:
+                doc.full_text = None
+
     def get_source_guide(self, source_id: str) -> SourceGuideSchema | None:
         row = self.get(source_id)
         if row is None or not row.source_guide:

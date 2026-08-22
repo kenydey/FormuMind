@@ -108,6 +108,8 @@ def sdk(monkeypatch: pytest.MonkeyPatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
     monkeypatch.setattr(settings, "mineru_api_key", "test-token", raising=False)
+    # 缓存测试需要缓存开启（生产默认 prune_mineru_cache=True 会跳过缓存）。
+    monkeypatch.setattr(settings, "prune_mineru_cache", False, raising=False)
     return module
 
 
@@ -289,6 +291,24 @@ def test_second_call_is_served_from_cache(sdk) -> None:
     assert len(sdk.calls) == 1, "the same bytes must not be parsed twice"
 
 
+def test_prune_cache_default_skips_cache(sdk, monkeypatch: pytest.MonkeyPatch) -> None:
+    """生产默认 prune_mineru_cache=True：不读缓存，每次都真正解析。"""
+    monkeypatch.setattr(get_settings(), "prune_mineru_cache", True, raising=False)
+    first = mineru_cloud.parse_bytes(b"%PDF-1.4 prune", ext="pdf")
+    second = mineru_cloud.parse_bytes(b"%PDF-1.4 prune", ext="pdf")
+    assert first is not None and second is not None
+    assert second.cached is False
+    assert len(sdk.calls) == 2, "prune 时每次都真正解析（不读缓存）"
+
+
+def test_prune_cache_writes_nothing(sdk, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """prune 时不写缓存目录（不累积磁盘）。"""
+    monkeypatch.setattr(get_settings(), "prune_mineru_cache", True, raising=False)
+    mineru_cloud.parse_bytes(b"%PDF-1.4 prune2", ext="pdf")
+    cache_root = tmp_path / "cache"
+    assert not cache_root.exists() or not any(cache_root.iterdir())
+
+
 def test_cached_images_survive_the_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _FakeResult(
         content_list=[{"type": "image", "page_idx": 0, "img_path": "images/a.png"}],
@@ -299,6 +319,7 @@ def test_cached_images_survive_the_round_trip(monkeypatch: pytest.MonkeyPatch) -
     settings = get_settings()
     monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
     monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+    monkeypatch.setattr(settings, "prune_mineru_cache", False, raising=False)
 
     mineru_cloud.parse_bytes(b"%PDF img", ext="pdf")
     cached = mineru_cloud.parse_bytes(b"%PDF img", ext="pdf")

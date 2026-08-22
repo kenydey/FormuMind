@@ -255,6 +255,14 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
                 link_source(source_id, settings=settings)
             except Exception as link_exc:
                 degrade_return(logger, link_exc, "kg link_on_ingest failed", None)
+        if n and settings.prune_source_fulltext:
+            # 入库收尾：切块成功 → full_text 冗余，清空省空间（保留行元数据）。
+            try:
+                from ..db.source_store import get_source_store
+
+                get_source_store().clear_full_text(source_id)
+            except Exception as exc:
+                degrade_return(logger, exc, "prune full_text failed", None)
         return n
     except Exception as exc:
         return degrade_return(logger, exc, "kb index_source failed", 0)

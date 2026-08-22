@@ -234,6 +234,20 @@ def test_kb_api_endpoints(monkeypatch, stores):
 
     re_resp = client.post("/api/kb/reindex", params={"embed": "false"})
     assert re_resp.status_code == 200
+    # prune_source_fulltext=True（默认）：index_source 切块后已清空 full_text，
+    # reindex 找不到全文 → 跳过（"入库后删源文档"的预期代价，见 test_ingest_prune）。
+    assert re_resp.json()["reindexed_sources"] == 0
+
+
+def test_kb_reindex_works_when_prune_disabled(monkeypatch, stores):
+    """关闭 prune 时 full_text 保留，reindex 可正常重建（功能可回退）。"""
+    monkeypatch.setattr(get_settings(), "prune_source_fulltext", False, raising=False)
+    src, _ = stores
+    sid = src.create(filename="p.md", title="防腐底漆专利", source_kind="patent",
+                     full_text=MD, content_hash="h6")
+    kb_index.index_source(sid, MD, embed=False)
+    re_resp = _client().post("/api/kb/reindex", params={"embed": "false"})
+    assert re_resp.status_code == 200
     assert re_resp.json()["reindexed_sources"] == 1
 
 

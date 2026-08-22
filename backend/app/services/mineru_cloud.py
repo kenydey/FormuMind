@@ -227,13 +227,14 @@ def parse_bytes(
         return None
 
     key = _cache_key(content, ext=ext, ocr=ocr)
-    cached = _cache_load(key)
-    if cached is not None:
-        logger.info("mineru: cache hit (%s)", key[:12])
-        return cached
+    if not settings.prune_mineru_cache:
+        cached = _cache_load(key)
+        if cached is not None:
+            logger.info("mineru: cache hit (%s)", key[:12])
+            return cached
 
     document = _extract(content, ext=ext, ocr=ocr, timeout=timeout)
-    if document is not None:
+    if document is not None and not settings.prune_mineru_cache:
         # Only successes are cached. Caching a failure would turn one network
         # blip into a permanently broken document.
         _cache_store(key, document)
