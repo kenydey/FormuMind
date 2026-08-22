@@ -4,13 +4,13 @@ Single entry point (``parse_document``) used by file upload, URL ingestion and
 the full-text fetcher, replacing the per-caller parser cascades.  Parsers are
 pluggable and probed at call time:
 
-* **PDF**: hybrid (pymupdf4llm, layout-aware, CPU-cheap) → Docling → marker →
-  MinerU → MarkItDown → pypdf, order controlled by
-  ``FORMUMIND_PDF_PARSER`` (``auto`` tries best-first; naming a parser pins it
-  with fallback to the tiers below it).  Docling / marker / MinerU produce
-  real Markdown (layout-aware, tables preserved; Docling and MinerU can emit
-  equations as LaTeX) and are optional heavy extras; MarkItDown is the light
-  default; pypdf is the last-resort plain-text tier.
+* **PDF**: hybrid (pymupdf4llm + 云端 MinerU 按页升级 + 本地 OCR，CPU-cheap 主路径)
+  → docling → marker → mineru(magic-pdf 本地) → rapidocr → markitdown → pypdf,
+  order controlled by ``FORMUMIND_PDF_PARSER`` (``auto`` tries best-first; naming
+  a parser pins it with fallback to the tiers below it).  hybrid 已内置本地布局
+  解析 + 本地 OCR + 云端 MinerU，后面的 docling / marker / 本地 magic-pdf 是
+  离线高保真降级（docling/marker 需 weights、CPU 极慢，本地 magic-pdf 需 GPU）；
+  markitdown / pypdf 是纯文本兜底。
 * **Other formats** (DOCX/XLSX/PPTX/HTML/…): MarkItDown → format-specific
   fallbacks (python-docx, plain text decode).
 * **Page provenance**: Docling and pypdf interleave ``<!-- page:N -->``
@@ -161,7 +161,10 @@ def _parse_marker(content: bytes) -> str | None:
 
 
 def _parse_mineru(content: bytes) -> str | None:
-    """MinerU (magic-pdf): highest-fidelity PDF → Markdown (optional, GPU-friendly).
+    """MinerU (magic-pdf 本地): highest-fidelity PDF → Markdown（需 GPU）。
+
+    无 GPU 部署请走 hybrid 的云端 MinerU（``hybrid_parse._escalate_page``）；
+    本地 magic-pdf 在 CPU 上慢到不可用，仅作有 GPU 主机的离线高保真选项。
 
     Chemistry-aware knobs: ``FORMUMIND_PDF_OCR`` routes scanned documents
     through the OCR pipeline; formula/table recognition is requested when the

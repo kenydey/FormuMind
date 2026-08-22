@@ -67,15 +67,15 @@ file_ingest = [
     "trafilatura>=1.8",
 ]
 # Layout-aware PDF → Markdown parsers. FORMUMIND_PDF_PARSER picks the tier:
-# hybrid → docling → marker → MinerU → MarkItDown → pypdf.
+# hybrid → rapidocr → markitdown → pypdf（docling/marker/本地 magic-pdf 已移除）.
 #
 # ⚠️ LICENSING: pymupdf4llm and its PyMuPDF backend are AGPL-3.0, or a paid
 # Artifex commercial licence. Every call to them is confined to
 # app/services/pdf_local.py so this can be swapped without an audit.
 #
-# docling and marker-pdf pull torch and are impractical on a small CPU-only
-# host (marker measures ~54 s/page without a GPU); they stay declared for
-# machines that can afford them.
+# docling / marker-pdf / 本地 magic-pdf 需要 torch 权重或 GPU，在 CPU-only
+# 主机上不实用（marker 实测 ~54 s/page），已移除——高保真解析走 hybrid 的
+# 云端 MinerU（mineru-open-sdk）。有 GPU 的主机可自行加回。
 parse_pro = [
     # Local OCR for scanned pages. rapidocr>=3.9 ships the PP-OCRv6 small ONNX
     # weights inside the wheel, so no model download at deploy time.
@@ -85,8 +85,6 @@ parse_pro = [
     "opencv-python-headless>=4.9",
     "pymupdf4llm>=0.0.17",
     "mineru-open-sdk>=0.2.5",
-    "docling>=2.0",
-    "marker-pdf>=1.0",
 ]
 export = ["openpyxl>=3.1"]
 # Semantic-embedding RAG upgrade: sentence-transformers + optional chromadb.
