@@ -238,22 +238,28 @@ def _merge_model_catalog(
     remote_ids: list[str],
     current_model: str | None,
 ) -> list[dict]:
-    static_by_id = {m["id"]: dict(m) for m in static}
-    merged: list[dict] = []
-    seen: set[str] = set()
-    for mid in remote_ids:
-        if mid in seen:
-            continue
-        seen.add(mid)
-        if mid in static_by_id:
-            merged.append(static_by_id[mid])
-        else:
+    """Merge remote model ids with the static catalog.
+
+    When the remote endpoint answered, its ids ARE the authoritative model
+    names — the static catalog's friendly labels are hardcoded guesses that
+    drift, so showing them after a successful refresh defeats the point of
+    asking the vendor. A remote hit therefore uses the id as its own label;
+    the static catalog (with its labels) is only the fallback for when the
+    remote call returned nothing.
+    """
+    if remote_ids:
+        merged: list[dict] = []
+        seen: set[str] = set()
+        for mid in remote_ids:
+            if mid in seen:
+                continue
+            seen.add(mid)
             merged.append({"id": mid, "label": mid})
+    else:
+        merged = [dict(m) for m in static]
+        seen = {m["id"] for m in merged}
     if current_model and current_model not in seen:
-        if current_model in static_by_id:
-            merged.insert(0, static_by_id[current_model])
-        else:
-            merged.insert(0, {"id": current_model, "label": f"{current_model} (当前)"})
+        merged.insert(0, {"id": current_model, "label": current_model})
     for item in merged:
         item.pop("recommended", None)
     rec_id = current_model if current_model and any(m["id"] == current_model for m in merged) else (
