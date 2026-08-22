@@ -44,7 +44,8 @@ class _FakeResult:
     task_id: str = "t-1"
 
 
-def _make_sdk(*, result=None, raise_name: str | None = None) -> types.ModuleType:
+def _make_sdk(*, result=None, raise_name: str | None = None,
+              batch_results: list[_FakeResult] | None = None) -> types.ModuleType:
     """A stand-in `mineru` module with the real exception taxonomy.
 
     Failures are named rather than passed in as instances: each call mints a
@@ -73,6 +74,8 @@ def _make_sdk(*, result=None, raise_name: str | None = None) -> types.ModuleType
     module._Unexpected = ValueError          # not a MinerUError at all
     module.calls = []
     module.sources_existed = []
+    module.batch_calls = []                  # list[list[str]] — 每次 extract_batch 的源
+    module.batch_sources_existed = []        # list[list[bool]]
 
     class _Client:
         def __init__(self, token=None, base_url=None):
@@ -89,6 +92,25 @@ def _make_sdk(*, result=None, raise_name: str | None = None) -> types.ModuleType
             if raise_name is not None:
                 raise getattr(module, raise_name)("simulated failure")
             return result if result is not None else _FakeResult()
+
+        def extract_batch(self, sources, **kwargs):
+            import os
+
+            module.batch_calls.append(list(sources))
+            module.batch_sources_existed.append(
+                [os.path.isfile(s) for s in sources]
+            )
+            module.last_batch_kwargs = kwargs
+            if raise_name is not None:
+                raise getattr(module, raise_name)("simulated failure")
+            if batch_results is not None:
+                return iter(batch_results)
+            return iter([
+                _FakeResult(
+                    content_list=[{"type": "text", "page_idx": 0, "text": "BATCH TEXT"}]
+                )
+                for _ in sources
+            ])
 
         def get_task(self, task_id):
             if raise_name is not None:
@@ -531,3 +553,79 @@ def test_a_timeout_is_reported_with_the_budget_that_was_actually_used(
         assert mineru_cloud.parse_bytes(b"%PDF slow", ext="pdf", timeout=90.0) is None
 
     assert "90" in caplog.text and "300" not in caplog.text
+
+
+# ── batch submission: N pages in one round trip ──────────────────────────────
+
+
+def _batch_result(state: str = "done", text: str = "BATCH TEXT", error=None) -> _FakeResult:
+    if state == "done":
+        return _FakeResult(
+            content_list=[{"type": "text", "page_idx": 0, "text": text}],
+        )
+    return _FakeResult(state="failed", error=error, markdown=None, content_list=None)
+
+
+def test_parse_pages_batch_submits_one_call(sdk) -> None:
+    """Three pages must be one batch, not three round trips."""
+    results = mineru_cloud.parse_pages_batch([b"%PDF 1", b"%PDF 2", b"%PDF 3"])
+    assert len(sdk.batch_calls) == 1
+    assert len(sdk.batch_calls[0]) == 3
+    assert all(r is not None for r in results)
+    assert [r.blocks[0].text for r in results] == ["BATCH TEXT"] * 3
+
+
+def test_parse_pages_batch_maps_failures_per_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed page inside a batch is that page's None, not the whole batch."""
+    module = _make_sdk(batch_results=[
+        _batch_result("done", text="ONE"),
+        _batch_result("failed", error="boom"),
+        _batch_result("done", text="THREE"),
+    ])
+    _install(monkeypatch, module)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+
+    results = mineru_cloud.parse_pages_batch([b"a", b"b", b"c"])
+
+    assert results[0] is not None and results[0].blocks[0].text == "ONE"
+    assert results[1] is None
+    assert results[2] is not None and results[2].blocks[0].text == "THREE"
+
+
+def test_parse_pages_batch_deletes_temp_files(sdk) -> None:
+    """Uploaded pages are proprietary data — temp files must not survive."""
+    import os
+
+    mineru_cloud.parse_pages_batch([b"%PDF a", b"%PDF b"])
+    assert sdk.batch_sources_existed[0] == [True, True]
+    for source in sdk.batch_calls[0]:
+        assert not os.path.exists(source)
+
+
+def test_parse_pages_batch_degrade_when_sdk_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single batch failure degrades every page to None, never raises."""
+    _install(monkeypatch, _make_sdk(raise_name="MinerUError"))
+    settings = get_settings()
+    monkeypatch.setattr(settings, "mineru_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "mineru_api_key", "t", raising=False)
+
+    assert mineru_cloud.parse_pages_batch([b"%PDF a", b"%PDF b"]) == [None, None]
+
+
+def test_parse_pages_batch_serves_cache_hits(sdk) -> None:
+    """Same bytes served from cache on the second batch — one network call total."""
+    first = mineru_cloud.parse_pages_batch([b"%PDF A", b"%PDF B"])
+    second = mineru_cloud.parse_pages_batch([b"%PDF A", b"%PDF B"])
+    assert first[0] is not None and second[0] is not None
+    assert second[0].cached is True and second[1].cached is True
+    assert len(sdk.batch_calls) == 1, "the second batch must not reach the network"
+
+
+def test_parse_pages_batch_uses_the_batch_timeout(
+    sdk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "mineru_batch_timeout_s", 1800.0, raising=False)
+    mineru_cloud.parse_pages_batch([b"%PDF one"])
+    assert sdk.last_batch_kwargs["timeout"] == 1800

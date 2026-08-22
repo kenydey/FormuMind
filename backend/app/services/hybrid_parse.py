@@ -233,6 +233,40 @@ def _escalate_page(content: bytes, page: pdf_local.LocalPage) -> str | None:
     return _render_blocks(document.blocks, page_label=f"p.{page.page_no}") or None
 
 
+def _escalate_pages_batch(
+    content: bytes, pages: list[pdf_local.LocalPage]
+) -> dict[int, str]:
+    """All qualifying non-scanned pages in one batch MinerU submission.
+
+    Sliced as single-page PDFs (text layer intact, so MinerU reads characters
+    instead of OCR-ing pixels), submitted in one ``/file-urls/batch`` call so the
+    server parses them in parallel, then rendered page by page through the same
+    fusion layer as the single-page path. A page whose slice failed or whose
+    batch result is missing keeps its local text — identical degradation to the
+    serial path, just reached with one round trip instead of N.
+    """
+    page_pdfs: list[bytes] = []
+    order: list[int] = []
+    for page in pages:
+        page_pdf = pdf_local.page_as_pdf(content, page.page_no)
+        if not page_pdf:
+            continue
+        page_pdfs.append(page_pdf)
+        order.append(page.page_no)
+    if not page_pdfs:
+        return {}
+
+    documents = mineru_cloud.parse_pages_batch(page_pdfs)
+    upgraded: dict[int, str] = {}
+    for page_no, document in zip(order, documents):
+        if document is None or not document.blocks:
+            continue
+        rendered = _render_blocks(document.blocks, page_label=f"p.{page_no}")
+        if rendered:
+            upgraded[page_no] = rendered
+    return upgraded
+
+
 def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | None:
     """A document with no text layer: the whole thing, with OCR.
 
@@ -381,37 +415,42 @@ def parse(content: bytes) -> str | None:
 
         prewarm()
 
-    # Escalation is sequential, so a failure is not free — it costs the full
-    # per-page timeout, and an unreachable MinerU charges that once per page.
-    # The breaker turns "20 pages × one broken network" into three attempts.
-    # Counted *consecutively*: a document where some pages come back keeps
-    # going, because that is a working connection with a few hard pages.
+    # The per-page paths (scanned pages, and the batch-off rollback below) are
+    # sequential, so a failure is not free — it costs the full per-page timeout,
+    # and an unreachable MinerU charges that once per page. The breaker turns
+    # "20 pages × one broken network" into three attempts. Counted
+    # *consecutively*: a document where some pages come back keeps going,
+    # because that is a working connection with a few hard pages. The batch
+    # path needs no breaker — a broken network costs it one timeout, not N.
     budget = int(get_settings().mineru_max_page_failures)
     min_conf = float(get_settings().rapidocr_min_confidence)
     upgraded: dict[int, str] = {}
     attempted = 0
     consecutive_failures = 0
-    for page in selected:
-        attempted += 1
-        # 扫描页先本地 OCR：高置信度直接用本地结果（快、免费、省配额），
-        # 低置信度或读不出才回退 MinerU 结构化解析。
-        if page.looks_scanned:
-            from . import rapidocr_local
 
-            png = pdf_local.page_as_png(
-                content, page.page_no, dpi=int(get_settings().rapidocr_dpi)
-            )
-            if png:
-                text, conf = rapidocr_local.ocr_png_scored(png)
-                del png
-                if text and conf >= min_conf:
-                    upgraded[page.page_no] = text
-                    consecutive_failures = 0
-                    logger.info(
-                        "hybrid: p.%d read by local OCR (conf %.2f ≥ %.2f)",
-                        page.page_no, conf, min_conf,
-                    )
-                    continue
+    scanned_sel = [p for p in selected if p.looks_scanned]
+    cloud_sel = [p for p in selected if not p.looks_scanned]
+
+    # ① 扫描页：本地 OCR 优先（快、免费、省配额），低置信度或读不出才回退
+    # MinerU 单页结构化解析。逐页串行 + 熔断保留——扫描页在本语料里罕见。
+    for page in scanned_sel:
+        attempted += 1
+        from . import rapidocr_local
+
+        png = pdf_local.page_as_png(
+            content, page.page_no, dpi=int(get_settings().rapidocr_dpi)
+        )
+        if png:
+            text, conf = rapidocr_local.ocr_png_scored(png)
+            del png
+            if text and conf >= min_conf:
+                upgraded[page.page_no] = text
+                consecutive_failures = 0
+                logger.info(
+                    "hybrid: p.%d read by local OCR (conf %.2f ≥ %.2f)",
+                    page.page_no, conf, min_conf,
+                )
+                continue
         rendered = _escalate_page(content, page)
         if rendered:
             upgraded[page.page_no] = rendered
@@ -425,6 +464,28 @@ def parse(content: bytes) -> str | None:
                 consecutive_failures, attempted, len(selected),
             )
             break
+
+    # ② 非扫描页（密集表格/图）：一次批量提交，服务端并行；开关关闭退回逐页串行。
+    if cloud_sel:
+        if get_settings().mineru_batch_enabled:
+            attempted += len(cloud_sel)
+            upgraded.update(_escalate_pages_batch(content, cloud_sel))
+        else:
+            for page in cloud_sel:
+                attempted += 1
+                rendered = _escalate_page(content, page)
+                if rendered:
+                    upgraded[page.page_no] = rendered
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if budget and consecutive_failures >= budget:
+                        logger.warning(
+                            "hybrid: %d consecutive MinerU page failures — abandoning "
+                            "escalation after %d/%d pages; the rest keep their local text",
+                            consecutive_failures, attempted, len(selected),
+                        )
+                        break
 
     # `attempted`, not `len(selected)`: once the breaker can cut the loop short,
     # reporting the plan instead of the work would make this line a lie about

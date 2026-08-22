@@ -241,6 +241,105 @@ def parse_bytes(
     return document
 
 
+def parse_pages_batch(
+    contents: list[bytes], *, ext: str = "pdf", timeout: float | None = None,
+) -> list[MinerUDocument | None]:
+    """Parse several single-page PDFs in one batch submission.
+
+    The point over ``parse_bytes`` called N times: one ``POST /file-urls/batch``,
+    MinerU processes the pages in parallel, one poll loop. Returns one
+    ``MinerUDocument`` per input in the same order, ``None`` where a page failed
+    or could not be sent, so the caller keeps its local text for those pages
+    exactly as it does today.
+
+    Only pages that pass the local pre-flight (supported format, under the size
+    limit, not served from cache) are uploaded; the rest come back ``None``
+    without touching the network. A single batch failure degrades every page to
+    ``None`` — the caller falls back to the local result, never to an error.
+    """
+    available, hint = mineru_available()
+    if not available:
+        logger.debug("mineru unavailable: %s", hint)
+        return [None] * len(contents)
+    ext = (ext or "").lower().lstrip(".")
+    if ext not in SUPPORTED_EXTS:
+        logger.debug("mineru: .%s is not an accepted format", ext)
+        return [None] * len(contents)
+
+    settings = get_settings()
+    limit = int(settings.mineru_max_upload_mb) * 1024 * 1024
+    results: list[MinerUDocument | None] = [None] * len(contents)
+    accepted: list[int] = []
+    paths: list[str] = []
+
+    for i, content in enumerate(contents):
+        if len(content) > limit:
+            logger.warning(
+                "mineru: page %d (%.1f MB) exceeds the %d MB limit — skipping",
+                i, len(content) / 1024 / 1024, settings.mineru_max_upload_mb,
+            )
+            continue
+        key = _cache_key(content, ext=ext, ocr=False)
+        if not settings.prune_mineru_cache:
+            cached = _cache_load(key)
+            if cached is not None:
+                logger.info("mineru: cache hit (%s)", key[:12])
+                results[i] = cached
+                continue
+        handle, path = tempfile.mkstemp(suffix=f".{ext}")
+        with os.fdopen(handle, "wb") as fh:
+            fh.write(content)
+        paths.append(path)
+        accepted.append(i)
+
+    if not paths:
+        return results
+
+    import mineru  # type: ignore
+
+    token = str(effective_setting(settings, "mineru_api_key") or "")
+    wait = float(settings.mineru_batch_timeout_s if timeout is None else timeout)
+
+    try:
+        client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
+        documents = list(client.extract_batch(paths, timeout=int(wait)))
+    except mineru.AuthError as exc:
+        logger.error("mineru: token rejected (%s) — check 设置 → API 配置", exc)
+        return results
+    except mineru.QuotaExceededError as exc:
+        logger.error("mineru: daily quota exhausted (%s) — falling back to local", exc)
+        return results
+    except mineru.TimeoutError as exc:
+        logger.warning("mineru: batch timed out after %ss (%s)", wait, exc)
+        return results
+    except mineru.MinerUError as exc:
+        return degrade_return(logger, exc, "mineru batch failed", results)
+    except Exception as exc:
+        if _is_auth_failure(exc):
+            logger.error("mineru: token rejected (HTTP 401/403) — check 设置 → API 配置")
+            return results
+        return degrade_return(logger, exc, "mineru batch call failed", results)
+    finally:
+        for path in paths:
+            try:
+                os.unlink(path)
+            except OSError:  # pragma: no cover - already gone
+                pass
+
+    for idx, document in zip(accepted, documents):
+        if document is None or getattr(document, "state", "done") != "done":
+            continue
+        images: dict[str, bytes] = {}
+        for image in getattr(document, "images", None) or []:
+            images[getattr(image, "path", "")] = image.data
+            images[getattr(image, "name", "")] = image.data
+        normalised = _normalise(document, images)
+        results[idx] = normalised
+        if not settings.prune_mineru_cache:
+            _cache_store(_cache_key(contents[idx], ext=ext, ocr=False), normalised)
+    return results
+
+
 def _extract(
     content: bytes, *, ext: str, ocr: bool, timeout: float | None = None
 ) -> MinerUDocument | None:

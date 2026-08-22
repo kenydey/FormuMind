@@ -319,6 +319,12 @@ class Settings(BaseSettings):
     # 把它调大只会把等待翻倍，所以这里给单页一个短得多的额度；整份扫描件的上传
     # 体积大得多，仍用上面的 300s。
     mineru_page_timeout_s: float = 90.0
+    # 批量升级：把同一份文档的多个升级页合并为一次 MinerU batch 提交（服务端并行），
+    # 替代逐页串行往返——实测多图表 PDF 单页串行要 2-3 分钟/页，批量可 5-10× 提速。
+    # 关闭则退回逐页串行（旧行为，保留作一键回退开关）。
+    mineru_batch_enabled: bool = True
+    # 批量提交的轮询超时（SDK batch 默认 1800s，单页是 300s）。
+    mineru_batch_timeout_s: float = 1800.0
     # 连续多少页升级失败就放弃这份文档的升级。没有它，一条不通的网络会被
     # 逐页原样重试一遍——同一个错误付 20 次超时的钱。0 = 不熔断。
     mineru_max_page_failures: int = 3

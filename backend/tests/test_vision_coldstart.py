@@ -180,11 +180,13 @@ def test_failed_prewarm_does_not_stop_the_pages(monkeypatch):
         warmed.append(True)
         return False, 1.0, "still cold"
 
+    def _batch(content, pages):
+        for p in pages:
+            seen.append(p.page_no)
+        return {p.page_no: "escalated" for p in pages}
+
     monkeypatch.setattr(vision_extract, "prewarm", _cold)
-    monkeypatch.setattr(
-        hybrid_parse, "_escalate_page",
-        lambda content, page: seen.append(page.page_no) or "escalated",
-    )
+    monkeypatch.setattr(hybrid_parse, "_escalate_pages_batch", _batch)
 
     page = hybrid_parse.pdf_local.LocalPage(
         page_no=1, markdown="local", char_count=500, n_tables=1, n_images=0

@@ -108,6 +108,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("mineru_enabled", "MinerU 云端解析",
             "本地解析不好的单页（密集表格/公式/图表）升级到 MinerU 云端。", "kb",
             "需 MinerU Token；被升级的页面会上传至 mineru.net（第三方）"),
+    EnvFlag("mineru_batch_enabled", "MinerU 批量升级",
+            "同一份文档的多个升级页合并为一次 MinerU batch 提交（服务端并行），"
+            "替代逐页串行往返，多图表 PDF 显著提速。关闭则退回逐页串行。", "kb",
+            "需 MinerU Token；批量提交受 MinerU 并发/配额约束"),
     EnvFlag("pdf_local_ocr", "本地版面解析内置 OCR",
             "pymupdf4llm 在版面解析时对文字稀疏的页面逐页 OCR。它跑在解析级联最前面、"
             "对每一份 PDF 都跑，实测是入库耗时的最大来源；扫描件另有专门的层处理，"
