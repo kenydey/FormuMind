@@ -370,3 +370,44 @@ def set_decimer_mode(body: DecimerModeUpdate) -> dict:
         pass  # read-only FS — live process env still applied
     get_settings.cache_clear()
     return {"mode": body.mode, "status": "ok"}
+
+
+# ── OCSR 多后端 ─────────────────────────────────────────────────────────────
+OCSR_BACKEND_CHOICES = [
+    {"value": "auto", "label": "Auto 自动",
+     "desc": "探测 GPU：有 GPU → DECIMER+segmentation，无 GPU → MolScribe（推荐）"},
+    {"value": "molscribe", "label": "MolScribe（无 GPU）",
+     "desc": "torch-cpu 轻量识别，内存 ~1.9GB、冷启动 ~35s（当前 VPS 默认）"},
+    {"value": "decimer", "label": "DECIMER（有 GPU）",
+     "desc": "tensorflow 完整版 + decimer-segmentation 先切分后识别（预留）"},
+]
+
+
+class OcsrBackendUpdate(BaseModel):
+    backend: str = Field(default="auto", pattern="^(auto|molscribe|decimer)$")
+
+
+@router.get("/settings/ocsr")
+def get_ocsr() -> dict:
+    from ..services.ocsr import availability
+
+    s = get_settings()
+    return {
+        "current": s.ocsr_backend,
+        "choices": OCSR_BACKEND_CHOICES,
+        "status": availability(),
+    }
+
+
+@router.post("/settings/ocsr")
+def set_ocsr_backend(body: OcsrBackendUpdate) -> dict:
+    import os
+    from ..services.secrets_store import write_env_updates
+
+    os.environ["FORMUMIND_OCSR_BACKEND"] = body.backend
+    try:
+        write_env_updates({"FORMUMIND_OCSR_BACKEND": body.backend})
+    except OSError:
+        pass  # read-only FS — live process env still applied
+    get_settings.cache_clear()
+    return {"backend": body.backend, "status": "ok"}

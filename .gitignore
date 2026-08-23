@@ -8,6 +8,7 @@ dist/
 .venv/
 venv/
 .venv-decimer/
+.venv-molscribe/
 .pytest_cache/
 .env
 
@@ -33,3 +34,7 @@ backend/scripts/vision_benchmark/_preview.png
 
 # venv rebuild notes (local only)
 backend/.venv-backup-notes/
+
+# OCSR POC / vendored source (re-cloned by setup scripts)
+MolScribe/
+poc_ocsr/

@@ -1194,6 +1194,16 @@ export const api = {
   setDecimerMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/decimer", { mode }),
 
+  getOcsr: () =>
+    get<{
+      current: string;
+      choices: { value: string; label: string; desc: string }[];
+      status: OcsrStatus;
+    }>("/api/settings/ocsr"),
+
+  setOcsrBackend: (backend: string) =>
+    post<{ backend: string; status: string }>("/api/settings/ocsr", { backend }),
+
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   getAuthStatus: () =>
@@ -1858,6 +1868,18 @@ export interface DecimerStatus {
   queue: string;
   segmentation: boolean;
   timeout_s: number;
+}
+
+export interface OcsrStatus {
+  enabled: boolean;
+  backend: string;
+  ocsr_backend: string;
+  molscribe_installed: boolean;
+  decimer_installed: boolean;
+  molscribe_queue: string;
+  decimer_queue: string;
+  molscribe_timeout_s: number;
+  decimer_timeout_s: number;
 }
 
 export interface KBReindexResult {

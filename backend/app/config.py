@@ -519,6 +519,14 @@ class Settings(BaseSettings):
     # 窗口，故给 180s 余量。超时后回退视觉 LLM，非硬失败。
     decimer_timeout_s: float = 180.0
 
+    # ═══ OCSR 后端选择（多后端）════
+    # 无 GPU → molscribe（torch 2.3.0+cpu，轻量，内存 ~1.9GB）；有 GPU → decimer + segmentation。
+    # auto = 探测 GPU：有 GPU → decimer，无 GPU → molscribe。
+    ocsr_backend: str = "auto"  # auto | molscribe | decimer
+    molscribe_queue: str = "molscribe"
+    # MolScribe CPU 推理 ~54s/张（自回归 decoder，无 AVX2 老 CPU），含 worker 冷启动余量给 180s。
+    molscribe_timeout_s: float = 180.0
+
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
     source_guide_max_chars: int = 12000

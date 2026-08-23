@@ -7,7 +7,7 @@ import EnvFlagsPanel from "./EnvFlagsPanel";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import VisionModelPanel from "./VisionModelPanel";
 import FormulationModeSelector from "./FormulationModeSelector";
-import DecimerPanel from "./DecimerPanel";
+import OcsrPanel from "./OcsrPanel";
 import { useStore } from "../store";
 import {
   api,
@@ -193,7 +193,7 @@ export default function SettingsModal() {
       ) : settingsTab === "recommend" ? (
         <div className="space-y-4">
           <FormulationModeSelector />
-          <DecimerPanel />
+          <OcsrPanel />
         </div>
       ) : providers.length === 0 && !loadError ? (
         <p className="text-xs text-slate-500 py-4 text-center">正在加载供应商列表…</p>
