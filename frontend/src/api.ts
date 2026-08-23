@@ -1184,25 +1184,7 @@ export const api = {
   setFormulationMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
 
-  getDecimer: () =>
-    get<{
-      current: string;
-      choices: { value: string; label: string; desc: string }[];
-      status: DecimerStatus;
-    }>("/api/settings/decimer"),
-
-  setDecimerMode: (mode: string) =>
-    post<{ mode: string; status: string }>("/api/settings/decimer", { mode }),
-
-  getOcsr: () =>
-    get<{
-      current: string;
-      choices: { value: string; label: string; desc: string }[];
-      status: OcsrStatus;
-    }>("/api/settings/ocsr"),
-
-  setOcsrBackend: (backend: string) =>
-    post<{ backend: string; status: string }>("/api/settings/ocsr", { backend }),
+  getOcsr: () => get<{ status: OcsrStatus }>("/api/settings/ocsr"),
 
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
@@ -1861,25 +1843,11 @@ export interface EnvFlag {
   default: boolean;
 }
 
-export interface DecimerStatus {
-  enabled: boolean;
-  mode: string;
-  installed_in_process: boolean;
-  queue: string;
-  segmentation: boolean;
-  timeout_s: number;
-}
-
 export interface OcsrStatus {
   enabled: boolean;
-  backend: string;
-  ocsr_backend: string;
   molscribe_installed: boolean;
-  decimer_installed: boolean;
   molscribe_queue: string;
-  decimer_queue: string;
   molscribe_timeout_s: number;
-  decimer_timeout_s: number;
 }
 
 export interface KBReindexResult {

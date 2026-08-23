@@ -51,19 +51,14 @@ celery_app.conf.update(
 import app.worker.tasks  # noqa: F401
 
 # ── OCSR prewarm ───────────────────────────────────────────────────────────
-# MolScribe 与 DECIMER 都跑在独立 venv 的 worker 里；`import` 即加载模型（MolScribe
-# ~35s，DECIMER ~2min），否则会落在首个 recognize 任务上超时。按当前进程可 import
-# 的后端自适应预热；主 worker（两者皆无）不加载任何模型。
+# MolScribe 跑在独立 venv 的 worker 里；`import` 即加载模型（~35s），否则会落在首个
+# recognize 任务上超时。仅 molscribe worker（可 import MolScribe）预热；主 worker 不加载。
 from celery.signals import worker_process_init
 
 
 @worker_process_init.connect
-def _prewarm_ocsr(**kwargs):  # pragma: no cover - runs in a dedicated OCSR worker
+def _prewarm_ocsr(**kwargs):  # pragma: no cover - runs in the molscribe worker
     from ..services import ocsr
 
     if ocsr.molscribe_available():
         ocsr.prewarm_molscribe()
-    else:
-        from ..services import decimer_ocr
-
-        decimer_ocr.prewarm_decimer()

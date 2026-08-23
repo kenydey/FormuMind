@@ -852,25 +852,6 @@ def run_deps_install_task(self, payload: dict) -> dict:
         raise
 
 
-@celery_app.task(bind=True, name="formumind.decimer_recognize")
-def run_decimer_recognize_task(self, payload: dict) -> dict:
-    """离线识别单张结构图 → SMILES。只在 decimer 队列 worker 上执行。
-
-    由主 backend 通过 ``send_task(..., queue=decimer_queue)`` 投递，返回
-    ``{"ok": True, "smiles": ...}`` 或 ``{"ok": False, "reason": ...}``。
-    不写 SSE 进度（内部同步 RPC 语义）。
-    """
-    from ..services.decimer_ocr import predict_smiles_local
-
-    image_path = payload.get("image_path", "")
-    if not image_path:
-        return {"ok": False, "smiles": None, "reason": "missing image_path"}
-    smiles = predict_smiles_local(image_path)
-    if not smiles:
-        return {"ok": False, "smiles": None, "reason": "DECIMER unavailable or failed"}
-    return {"ok": True, "smiles": smiles}
-
-
 @celery_app.task(bind=True, name="formumind.molscribe_recognize")
 def run_molscribe_recognize_task(self, payload: dict) -> dict:
     """离线识别单张结构图 → SMILES（MolScribe 后端）。只在 molscribe 队列 worker 上执行。

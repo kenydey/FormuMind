@@ -433,22 +433,14 @@ def _molecules_from_smiles(smiles: str) -> VisionExtraction:
     return VisionExtraction(kind="structure", molecules=molecules)
 
 
-def _ocsr_direct(content: bytes, settings, backend: str) -> VisionExtraction | None:
+def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
     """① OCSR 离线直识（免 token，假设图已裁剪）。
 
-    按 backend 投递到对应 Celery worker（molscribe 或 decimer）识别，成功即返回；
-    任何失败返回 None（由调用方回退视觉 LLM）。
+    投递独立 molscribe Celery worker 识别，成功即返回；任何失败返回 None
+    （由调用方回退视觉 LLM）。
     """
-    if not settings.decimer_enabled:
+    if not settings.ocsr_enabled:
         return None
-    if backend == "molscribe":
-        task_name = "formumind.molscribe_recognize"
-        queue = settings.molscribe_queue
-        timeout = settings.molscribe_timeout_s
-    else:  # decimer
-        task_name = "formumind.decimer_recognize"
-        queue = settings.decimer_queue
-        timeout = settings.decimer_timeout_s
     try:
         # 延迟导入：避免主进程模块加载期拉起 Celery 依赖链
         from app.worker.celery_app import celery_app
@@ -460,31 +452,28 @@ def _ocsr_direct(content: bytes, settings, backend: str) -> VisionExtraction | N
             path = f.name
         try:
             res = celery_app.send_task(
-                task_name,
+                "formumind.molscribe_recognize",
                 args=[{"image_path": path}],
-                queue=queue,
-            ).get(timeout=timeout)
+                queue=settings.molscribe_queue,
+            ).get(timeout=settings.molscribe_timeout_s)
         finally:
             os.unlink(path)
         if res and res.get("ok"):
             return _molecules_from_smiles(res["smiles"])
     except Exception as exc:
-        logger.warning("OCSR direct path (%s) failed: %s", backend, exc)
+        logger.warning("OCSR direct path failed: %s", exc)
     return None
 
 
 def extract_image(content: bytes, filename: str) -> tuple[VisionExtraction | None, str | None]:
     """Structured extraction for one image; (None, reason) when unavailable.
 
-    结构图→SMILES 优先走 DECIMER 离线直识（免 token），失败回退视觉 LLM。
+    结构图→SMILES 优先走 OCSR（MolScribe）离线直识（免 token），失败回退视觉 LLM。
     """
     settings = get_settings()
     # ① OCSR 离线直识（免 token，主路径）
-    if settings.decimer_enabled:
-        from .ocsr import resolve_ocsr_backend
-
-        backend = resolve_ocsr_backend(settings)
-        extraction = _ocsr_direct(content, settings, backend)
+    if settings.ocsr_enabled:
+        extraction = _ocsr_direct(content, settings)
         if extraction is not None:
             return extraction, None
 

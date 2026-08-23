@@ -502,29 +502,15 @@ class Settings(BaseSettings):
     # X-Scale-Up-Timeout 它会改为挂住请求直到就绪。0 = 不发该头。
     vision_scale_up_timeout: int = 600
 
-    # ═══ DECIMER 离线结构识别（OCSR）════
+    # ═══ OCSR 离线结构识别（MolScribe）════
     # 化学结构图离线识别为 SMILES，作为主路径（免 token，省费用），视觉 LLM 兜底。
-    # 运行在独立 decimer Celery worker（独立 venv，tensorflow-cpu），不占主服务内存。
-    decimer_enabled: bool = False
-    # auto = 探测（GPU 可用→gpu，否则→cpu）；gpu = tensorflow 完整版 + decimer-segmentation（预留）；
-    # cpu = tensorflow-cpu + 纯识别（无 segmentation，定位交给视觉 LLM）
-    decimer_mode: str = "auto"
-    # TensorFlow 线程限流（CPU 模式必须 =1，防吃满 4 核饿死 API worker）
-    decimer_threads: int = 1
+    # 运行在独立 molscribe Celery worker（独立 venv，torch-cpu），不占主服务内存。
+    ocsr_enabled: bool = False
     # Celery 队列名（独立 worker 消费）
-    decimer_queue: str = "decimer"
-    # DECIMER 单张识别超时。CPU 纯推理约 10s；但 worker 冷启动时首个任务要等
-    # tensorflow 模型加载（import DECIMER 即触发，~2min）。预热钩子把加载挪到
-    # worker 启动时，仍要覆盖「主 worker 先发任务、decimer worker 尚未就绪」的
-    # 窗口，故给 180s 余量。超时后回退视觉 LLM，非硬失败。
-    decimer_timeout_s: float = 180.0
-
-    # ═══ OCSR 后端选择（多后端）════
-    # 无 GPU → molscribe（torch 2.3.0+cpu，轻量，内存 ~1.9GB）；有 GPU → decimer + segmentation。
-    # auto = 探测 GPU：有 GPU → decimer，无 GPU → molscribe。
-    ocsr_backend: str = "auto"  # auto | molscribe | decimer
     molscribe_queue: str = "molscribe"
-    # MolScribe CPU 推理 ~54s/张（自回归 decoder，无 AVX2 老 CPU），含 worker 冷启动余量给 180s。
+    # MolScribe 单张识别超时。CPU 推理预热后 ~3-8s/张；但 worker 冷启动时首个任务要等
+    # 模型加载（~35s）。预热钩子把加载挪到 worker 启动时，仍要覆盖「主 worker 先发任务、
+    # molscribe worker 尚未就绪」的窗口，故给 180s 余量。超时后回退视觉 LLM，非硬失败。
     molscribe_timeout_s: float = 180.0
 
     # Source Guide LLM extraction (ingest pipeline)

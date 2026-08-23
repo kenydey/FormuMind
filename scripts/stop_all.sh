@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 停止 FormuMind 全部服务栈（含 DECIMER worker）。
+# 停止 FormuMind 全部服务栈（含 MolScribe OCSR worker）。
 #
 # 用法：bash scripts/stop_all.sh
 # 注意：Redis 默认一并停止（--keep-redis 保留）。
@@ -12,7 +12,7 @@ for a in "$@"; do
   esac
 done
 
-echo "==> 停止 celery worker（含 DECIMER worker）"
+echo "==> 停止 celery worker（含 MolScribe OCSR worker）"
 pkill -9 -f "celery -A app.worker.celery_app" 2>/dev/null || echo "    无 celery 进程"
 
 echo "==> 停止 uvicorn"
