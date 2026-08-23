@@ -33,7 +33,15 @@ def test_ingredients_endpoint():
     assert data["Deionized water"]["voc_contrib"] == 0.0
 
 
-def test_research_endpoint():
+def test_research_endpoint(monkeypatch):
+    from app.domain.schemas import Evidence
+
+    def _fake_iter_search(query, source_types, req=None, **kwargs):
+        return ([Evidence(source="literature", identifier="doi:mock", title="Mock study",
+                          snippet="Zinc phosphate and polyamide hardener formulation.", relevance=0.9)], {})
+
+    # Mock 联邦检索（arXiv/专利）——否则真实 arXiv 限流(429)会让 evidence 为空、断言失败。
+    monkeypatch.setattr("app.services.literature.iter_search", _fake_iter_search)
     payload = {"domain": "degreaser", "substrate": "carbon_steel", "cleaning_efficiency": 95, "ph_target": 12.5}
     r = client.post("/api/research", json=payload)
     assert r.status_code == 200

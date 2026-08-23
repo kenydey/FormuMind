@@ -1,10 +1,20 @@
 import pytest
 
-from app.domain.schemas import ObjectiveSpec, ProductDomain, Requirement, Substrate
+from app.domain.schemas import Evidence, ObjectiveSpec, ProductDomain, Requirement, Substrate
 from app.pipeline import workflow
 
 
-def test_research_returns_evidence_and_recommendations():
+@pytest.fixture()
+def fake_federated_search(monkeypatch):
+    """Mock 联邦检索（arXiv/专利）——live-search 测试不再打真实网络，arXiv 限流(429)会 flake 全量套件。"""
+    def _fake_iter_search(query, source_types, req=None, **kwargs):
+        return ([Evidence(source="literature", identifier="doi:mock", title="Mock study",
+                          snippet="Zinc phosphate and polyamide hardener formulation.", relevance=0.9)], {})
+
+    monkeypatch.setattr("app.services.literature.iter_search", _fake_iter_search)
+
+
+def test_research_returns_evidence_and_recommendations(fake_federated_search):
     req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500, film_weight_gsm=70)
     result = workflow.run_research(req)
     assert result.evidence, "should retrieve prior art"
@@ -51,7 +61,7 @@ def test_research_source_types_filters_preloaded():
     assert all("literature" in e.source.lower() or e.identifier.startswith("DOI") for e in result.evidence)
 
 
-def test_research_source_types_live_search():
+def test_research_source_types_live_search(fake_federated_search):
     req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
     result = workflow.run_research(req, source_types=["patents", "literature"])
     assert result.evidence
