@@ -1079,6 +1079,13 @@ def _product_hints_prompt_block(req: Requirement) -> str:
     )
 
 
+def _system_prompt_block(req: Requirement) -> str:
+    """Matched formulation-system + corrosion-grade hard constraints."""
+    from ..domain.formulation_systems import build_system_prompt_block
+
+    return build_system_prompt_block(req.product_type or "")
+
+
 def _recommend_user_prompt(
     req: Requirement,
     objectives: list[ObjectiveSpec],
@@ -1107,6 +1114,7 @@ def _recommend_user_prompt(
         f"Notes: {req.notes}\n\n"
         f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
         f"Process constraints (must respect):\n{_constraints_prompt_block(req)}\n"
+        f"{_system_prompt_block(req)}"
         f"{_levers_prompt_block(req)}"
         f"{_func_groups_prompt_block(req, base_formulas)}"
         f"{_product_hints_prompt_block(req)}"
