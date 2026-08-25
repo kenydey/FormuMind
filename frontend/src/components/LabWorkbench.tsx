@@ -22,6 +22,7 @@ import LineageTree from "./LineageTree";
 import ExperimentDiff from "./ExperimentDiff";
 import ExperimentDetail from "./ExperimentDetail";
 import QCReportModal from "./QCReportModal";
+import CampaignRoundsModal from "./CampaignRoundsModal";
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -70,6 +71,7 @@ export default function LabWorkbench({
   const [lineageRow, setLineageRow] = useState<WorkbenchRow | null>(null);
   const [diffPair, setDiffPair] = useState<[WorkbenchRow, WorkbenchRow] | null>(null);
   const [qcReportRow, setQcReportRow] = useState<WorkbenchRow | null>(null);
+  const [showRounds, setShowRounds] = useState(false);
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
@@ -365,6 +367,12 @@ export default function LabWorkbench({
           onClose={() => setQcReportRow(null)}
         />
       )}
+      {showRounds && (
+        <CampaignRoundsModal
+          campaignId={campaignId}
+          onClose={() => setShowRounds(false)}
+        />
+      )}
 
       <div className="shadow-sm rounded-lg border border-gray-200 dark:border-edge overflow-hidden bg-panel/30">
         {frozen && frozen.length > 0 && (
@@ -443,6 +451,10 @@ export default function LabWorkbench({
             </label>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={() => setShowRounds(true)}
+              className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
+              轮次历史
+            </button>
             <button type="button" onClick={handleCompare}
               className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
               对比选中

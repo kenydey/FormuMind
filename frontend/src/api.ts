@@ -779,6 +779,11 @@ export const api = {
     }),
   doe: (req: Requirement, design: string, engine = "auto") =>
     post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
+  listDoeHistory: (opts: { campaignId?: number | null; page?: number; pageSize?: number } = {}) =>
+    get<{ items: Record<string, unknown>[]; total: number; page: number; page_size: number }>(
+      `/api/doe/history?page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 20}` +
+        (opts.campaignId != null ? `&campaign_id=${opts.campaignId}` : "")
+    ),
   suggestFactors: (req: Requirement) =>
     post<{ factors: FactorCandidate[]; count: number }>("/api/doe/suggest-factors", req),
   kbSources: (projectId?: string | null, limit = 100) =>
@@ -1030,6 +1035,10 @@ export const api = {
     }),
   getWorkbenchCampaign: (campaignId: number) =>
     get<WorkbenchCampaignResponse>(`/api/experiments/workbench/${campaignId}`),
+  listCampaignRounds: (campaignId: number, opts: { page?: number; pageSize?: number } = {}) =>
+    get<{ rounds: Record<string, unknown>[]; total_rounds: number; page: number; page_size: number; unassociated_ledger: number }>(
+      `/api/experiments/workbench/${campaignId}/rounds?page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 5}`
+    ),
 
   getRowLineage: (campaignId: number, rowId: number) =>
     get<WorkbenchRow[]>(
