@@ -154,3 +154,28 @@ def test_resolve_infer_failure_falls_back_to_infer_block(store, monkeypatch):
     req = Requirement(domain=ProductDomain.degreaser, product_type="未知体系XYZ")
     block = llm_mod._resolve_system_constraints(req)
     assert "INFER" in block
+
+
+def test_mark_promoted_excludes_from_match(store):
+    store.upsert("key4", "产品D", _sys())
+    assert store.match("key4") is not None
+    assert store.mark_promoted("key4") is True
+    # promoted 后不再作为 active 缓存命中（已固化进静态库）
+    assert store.match("key4") is None
+    assert store.mark_promoted("nonexistent") is False
+
+
+def test_cli_hot_lists_candidates(store, monkeypatch, capsys):
+    import app.db.inferred_system_store as store_mod
+    from app.cli import main
+
+    store.upsert("k_a", "产品A", _sys(system_name="体系A"))
+    for _ in range(5):
+        store.match("k_a")
+
+    monkeypatch.setattr(store_mod, "_store", store)
+    rc = main(["inferred-systems", "hot", "--threshold", "5"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "产品A" in out
+    assert "体系A" in out

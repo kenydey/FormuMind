@@ -82,6 +82,19 @@ class InferredSystemStore:
                 row.source_requirement_text = source_requirement_text
             row.updated_at = _utcnow()
 
+    def mark_promoted(self, normalized_key: str) -> bool:
+        """Mark an entry as promoted into the static KB after human review."""
+        with commit_session(self._session_factory) as session:
+            row = (
+                session.query(InferredSystemRow)
+                .filter(InferredSystemRow.normalized_key == normalized_key)
+                .first()
+            )
+            if row is None:
+                return False
+            row.status = "promoted"
+            return True
+
     def hot(self, threshold: int = 5) -> list[dict]:
         """Active systems with hit_count ≥ threshold, for promotion review."""
         with self._session_factory() as session:
