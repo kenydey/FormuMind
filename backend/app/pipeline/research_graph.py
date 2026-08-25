@@ -637,6 +637,31 @@ def run_research_graph(
     return state
 
 
+def _filter_unindexed_external(evidence: list[Evidence]) -> list[Evidence]:
+    """过滤「外部 URL 但 full-text 从未成功入库」的 evidence。
+
+    用户原则：无法下载全文的资料源（无 OA 文献 / 下载超时 / 解析为空）对
+    FormuMind 无价值，强制过滤。外部源的 full-text 仅在 kb_ingest 成功获取时
+    写入 source 表（origin_url=identifier）；find_by_origin_url 查不到即视为
+    失败/未获取。seed 语料（seed:*）与本地文件（identifier 非 URL）不受影响。
+    """
+    try:
+        from ..db.source_store import get_source_store
+
+        store = get_source_store()
+    except Exception:
+        return evidence  # DB 不可达时保守返回全部，避免 recommend 退化为空
+
+    kept: list[Evidence] = []
+    for ev in evidence:
+        ident = (ev.identifier or "").strip()
+        if ident.startswith(("http://", "https://")) and store.find_by_origin_url(ident) is None:
+            logger.info("过滤未入库外部源: {}", ident)
+            continue
+        kept.append(ev)
+    return kept
+
+
 def resolve_grounded_evidence(
     req: Requirement,
     query: str,
@@ -666,6 +691,8 @@ def resolve_grounded_evidence(
         evidence = list(pre) + [
             e for e in evidence if (e.identifier or e.title) not in pre_keys
         ]
+
+    evidence = _filter_unindexed_external(evidence)
 
     return GroundedEvidenceResult(
         query=query,
