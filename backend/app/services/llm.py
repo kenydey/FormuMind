@@ -712,6 +712,11 @@ class LLMStructuredUnsupported(Exception):
     """
 
 
+# Providers already observed to reject `response_format` json_schema — cached so
+# subsequent structured calls skip the doomed 400 attempt (DeepSeek among them).
+_STRUCTURED_UNSUPPORTED_PROVIDERS: set[str] = set()
+
+
 # Substrings that mean "structured output is not implemented here", as opposed
 # to "your request was malformed".
 _STRUCTURED_UNSUPPORTED_MARKERS = (
@@ -846,6 +851,19 @@ def _invoke_structured_once(
     schema: dict,
 ) -> TModel:
     if provider not in ("anthropic", "gemini"):
+        if provider in _STRUCTURED_UNSUPPORTED_PROVIDERS:
+            # 已知该 provider 不支持 native structured output，直接 prompt-based，
+            # 省去每次先发一次必然 400 的请求。
+            return _openai_prompt_structured_request(
+                system,
+                user,
+                model_type,
+                api_key=api_key,
+                model=model,
+                max_tokens=max_tokens,
+                base_url=base_url,
+                schema=schema,
+            )
         try:
             return _openai_structured_request(
                 system,
@@ -859,6 +877,7 @@ def _invoke_structured_once(
             )
         except LLMStructuredUnsupported as exc:
             # Fall back rather than retry: the endpoint will keep saying no.
+            _STRUCTURED_UNSUPPORTED_PROVIDERS.add(provider)
             log.info(
                 "%s has no native structured output (%s) — using prompt-based JSON",
                 provider, exc,
@@ -999,7 +1018,9 @@ def _recommend_system_prompt() -> str:
         "4. For coating formulations weight_pct values should sum to approximately 100.\n"
         "5. Populate component_type (resin/hardener/inhibitor/solvent/etc), amount_display, and notes in Chinese where helpful.\n"
         "6. objectives_summary explains how the recipe meets each objective.\n"
-        "7. Return JSON only — no markdown fences."
+        "7. Return JSON only — no markdown fences.\n"
+        "8. RESPECT product_type strictly: if the product_type/headline says 「含聚合物/树脂的乳液型」 (polymer/resin EMULSION type), you MUST include a polymer resin (acrylic / epoxy / polyurethane emulsion) as the film-forming binder — a purely inorganic conversion coating does NOT satisfy an emulsion-type product.\n"
+        "9. Salt-spray realism: purely inorganic conversion coatings (zirconate/silane/rare-earth, 2-5% solids) realistically reach only 50-200h salt spray; only organic polymer/resin emulsion systems reach 500-1440h. Never claim 500h+ for an inorganic-only formula — keep predicted salt_spray_hours consistent with the formula type."
     )
 
 
