@@ -151,7 +151,8 @@ def analyze_tradeoffs(
 
     for idx, form in enumerate(forms):
         cid = candidate_id(form.name, idx)
-        grounding = grounding_summary_from_rec(rec_by_name.get(form.name))
+        rec = rec_by_name.get(form.name)
+        grounding = grounding_summary_from_rec(rec)
         predicted = dict(form.predicted or {})
         cost = predicted.get("cost_cny_per_kg")
         if cost is None and form.ingredients:
@@ -170,6 +171,20 @@ def analyze_tradeoffs(
             row_vals.append(float(val) if val is not None else float("nan"))
         values.append(row_vals)
 
+        cand_warnings = list(form.warnings or [])
+        # 交叉校验：LLM 与 predictor 预测相差 >5× 时提示两套引擎不一致，
+        # 避免 tradeoff 排序/场景结论建立在失真预测上而不自知。
+        llm_pred = dict(rec.predicted or {}) if rec is not None else {}
+        for metric in ("salt_spray_hours", "coating_weight_gsm", "film_weight_gsm"):
+            pv = predicted.get(metric)
+            lv = llm_pred.get(metric)
+            if pv and lv and pv > 0 and lv > 0:
+                ratio = lv / pv
+                if ratio > 5.0 or ratio < 0.2:
+                    cand_warnings.append(
+                        f"{metric} 预测不一致：LLM {lv} vs predictor {pv}（{ratio:.1f}×，请人工核实）"
+                    )
+
         candidates.append(
             FormulationCandidateView(
                 id=cid,
@@ -180,7 +195,7 @@ def analyze_tradeoffs(
                 score=form.score,
                 confidence=_confidence(form, grounding),
                 grounding=grounding,
-                warnings=list(form.warnings or []),
+                warnings=cand_warnings,
             )
         )
 
