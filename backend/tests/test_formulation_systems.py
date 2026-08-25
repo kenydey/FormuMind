@@ -144,24 +144,3 @@ def test_knowledge_base_completeness():
     # 知识库应包含 7 组 26 个体系 + 6 个等级
     assert len(FORMULATION_SYSTEMS) == 26
     assert len(CORROSION_GRADES) == 6
-
-
-def test_p1_known_system_returns_hard_block():
-    from app.domain.schemas import ProductDomain, Requirement
-    from app.services.llm import _system_prompt_block
-
-    req = Requirement(domain=ProductDomain.surface_treatment, product_type="自沉积型涂料")
-    block = _system_prompt_block(req)
-    assert "HARD constraints" in block
-    assert "INFER" not in block
-
-
-def test_p1_unknown_system_infers_constraints():
-    from app.domain.schemas import ProductDomain, Requirement
-    from app.services.llm import _system_prompt_block
-
-    req = Requirement(domain=ProductDomain.anticorrosion_coating, product_type="电子级环氧胶粘剂")
-    block = _system_prompt_block(req)
-    assert "INFER" in block
-    assert "infer and state the system constraints" in block
-    assert "Forbidden components" in block

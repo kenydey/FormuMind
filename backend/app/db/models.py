@@ -513,3 +513,36 @@ class DOEPlanRow(Base):
         Index("ix_doe_plans_experiment", "experiment_id"),
         Index("ix_doe_plans_campaign", "campaign_id"),
     )
+
+
+class InferredSystemRow(Base):
+    """LLM-inferred formulation-system constraints, persisted for reuse (P2).
+
+    Unknown product_types are matched here before falling back to a fresh LLM
+    inference; each hit increments ``hit_count`` so hot entries can be promoted
+    into the static knowledge base after human review.
+    """
+
+    __tablename__ = "inferred_systems"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Stable cache key = normalize_key(product_type).
+    normalized_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    product_type: Mapped[str] = mapped_column(Text, default="")
+    system_name: Mapped[str] = mapped_column(String(200), default="")
+    must_include_roles: Mapped[list] = mapped_column(JSON, default=list)
+    must_exclude: Mapped[str] = mapped_column(Text, default="")
+    constraints: Mapped[list] = mapped_column(JSON, default=list)
+    metric_ranges: Mapped[dict] = mapped_column(JSON, default=dict)
+    confidence: Mapped[str] = mapped_column(String(10), default="medium")
+    hit_count: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    # Provenance: which requirement first triggered this inference.
+    source_requirement_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    source_requirement_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )

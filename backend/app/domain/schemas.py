@@ -228,6 +228,21 @@ class RecommendedFormulaListResponse(BaseModel):
     engine: Literal["llm", "offline"] = "offline"
 
 
+class InferredSystem(BaseModel):
+    """LLM-inferred formulation-system constraints (P2 persistence carrier).
+
+    Schema mirrors ``FormulationSystem`` so an inferred entry can be promoted
+    into the static knowledge base with no translation.
+    """
+
+    system_name: str = ""
+    must_include_roles: list[str] = Field(default_factory=list)
+    must_exclude: str = ""
+    constraints: list[str] = Field(default_factory=list)
+    metric_ranges: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    confidence: Literal["high", "medium", "low"] = "medium"
+
+
 EntityKind = Literal["chemical", "trade_product", "element", "parameter"]
 CompositionStatus = Literal["resolved", "partial", "mixture", "proprietary", "unknown"]
 

@@ -382,6 +382,14 @@ def match_grade(product_type: str) -> CorrosionGrade | None:
     return None
 
 
+def normalize_key(text: str) -> str:
+    """Normalise a product_type into a stable cache key (lowercase, strip
+    whitespace/punctuation, keep CJK + alphanumerics)."""
+    import re
+
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", (text or "").lower())
+
+
 def build_system_prompt_block(product_type: str) -> str:
     """Render the matched systems' hard constraints as an English prompt block."""
     systems = match_systems(product_type)

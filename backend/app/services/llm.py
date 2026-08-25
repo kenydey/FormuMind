@@ -1079,15 +1079,48 @@ def _product_hints_prompt_block(req: Requirement) -> str:
     )
 
 
-def _system_prompt_block(req: Requirement) -> str:
-    """Matched formulation-system + corrosion-grade hard constraints."""
-    from ..domain.formulation_systems import build_system_prompt_block
+def _resolve_system_constraints(req: Requirement) -> str:
+    """Resolve formulation-system constraints via the 3-tier funnel.
 
-    block = build_system_prompt_block(req.product_type or "")
+    1. static KB (26 systems + ISO 12944 grades) — authoritative
+    2. inferred cache (SQLite) — self-learned, hit_count++
+    3. fresh LLM inference — persisted to the cache for reuse
+    """
+    from ..db.inferred_system_store import get_inferred_system_store
+    from ..domain.formulation_systems import (
+        build_system_prompt_block,
+        normalize_key,
+    )
+
+    product_type = req.product_type or ""
+    block = build_system_prompt_block(product_type)
     if block:
         return block
-    # P1 fallback: unknown product_type → self-infer constraints instead of running
-    # unconstrained (the root cause of the earlier "emulsion type ignored" failure).
+
+    key = normalize_key(product_type)
+    if key:
+        store = get_inferred_system_store()
+        cached = store.match(key)
+        if cached is not None:
+            log.info("命中沉淀约束: {}", product_type)
+            return _format_inferred_block(cached)
+
+        inferred = _infer_system_constraints(product_type)
+        if inferred is not None:
+            store.upsert(
+                key,
+                product_type,
+                inferred,
+                source_requirement_id=_requirement_fingerprint(req),
+                source_requirement_text=req.headline(),
+            )
+            return _format_inferred_block(inferred)
+
+    # 三层都失败 → 软推理指令（保留 P1 行为）
+    return _infer_constraints_block()
+
+
+def _infer_constraints_block() -> str:
     return (
         "Formulation-system requirements (INFER — product_type does not match a known "
         "system; before designing, FIRST infer and state the system constraints from the "
@@ -1100,6 +1133,53 @@ def _system_prompt_block(req: Requirement) -> str:
     )
 
 
+def _format_inferred_block(sys) -> str:
+    lines = [
+        "Formulation-system requirements (self-learned — verify before relying):"
+    ]
+    if sys.system_name:
+        lines.append(f"- System: {sys.system_name}")
+    if sys.must_include_roles:
+        lines.append(f"- Required component roles: {', '.join(sys.must_include_roles)}")
+    if sys.must_exclude:
+        lines.append(f"- Forbidden: {sys.must_exclude}")
+    for c in sys.constraints:
+        lines.append(f"- {c}")
+    for metric, (lo, hi) in sys.metric_ranges.items():
+        lines.append(f"- {metric}: {lo}–{hi}")
+    return "\n".join(lines) + "\n"
+
+
+def _infer_system_constraints(product_type: str):
+    from ..domain.schemas import InferredSystem
+
+    system = (
+        "You are a formulation-system analyst for industrial chemical R&D.\n"
+        "Given a product type, infer its formulation-system constraints.\n"
+        "Return JSON only, no markdown fences.\n"
+        "Fields:\n"
+        "- system_name: short system name\n"
+        "- must_include_roles: required component roles (resin/hardener/inhibitor/solvent/...)\n"
+        "- must_exclude: forbidden components (e.g. 'no chromate for chrome-free')\n"
+        "- constraints: process conditions (pH, cure temperature, solids)\n"
+        "- metric_ranges: realistic performance ranges as {metric: [min, max]}, "
+        'e.g. {"salt_spray_hours": [500, 1440]}. Be conservative and physically plausible.\n'
+        "- confidence: high/medium/low\n"
+    )
+    user = f"Product type: {product_type}\nInfer its formulation-system constraints."
+    parsed, err = complete_structured(system, user, InferredSystem)
+    if parsed is not None:
+        return parsed
+    log.warning("体系约束推理失败: {}", err)
+    return None
+
+
+def _requirement_fingerprint(req: Requirement) -> str:
+    import hashlib
+
+    return hashlib.sha1(req.headline().encode("utf-8")).hexdigest()[:16]
+
+
 def _recommend_user_prompt(
     req: Requirement,
     objectives: list[ObjectiveSpec],
@@ -1108,6 +1188,7 @@ def _recommend_user_prompt(
     *,
     modify_prompt: str = "",
     base_formulas: list | None = None,
+    system_block: str = "",
 ) -> str:
     citations = "\n".join(
         f"[{e.source}] {e.title}: {e.snippet[:200]}" for e in evidence[:6]
@@ -1128,7 +1209,7 @@ def _recommend_user_prompt(
         f"Notes: {req.notes}\n\n"
         f"Objectives:\n{_objectives_prompt_block(objectives)}\n\n"
         f"Process constraints (must respect):\n{_constraints_prompt_block(req)}\n"
-        f"{_system_prompt_block(req)}"
+        f"{system_block}"
         f"{_levers_prompt_block(req)}"
         f"{_func_groups_prompt_block(req, base_formulas)}"
         f"{_product_hints_prompt_block(req)}"
@@ -1157,10 +1238,12 @@ def recommend_formulations(
     evidence = evidence or []
 
     system = _recommend_system_prompt()
+    system_block = _resolve_system_constraints(req)
     user = _recommend_user_prompt(
         req, objectives, evidence, n,
         modify_prompt=modify_prompt,
         base_formulas=base_formulas,
+        system_block=system_block,
     )
 
     parsed, err = complete_structured(system, user, RecommendedFormulaListResponse)
