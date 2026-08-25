@@ -212,7 +212,8 @@ def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -
         from ..db import doe_plan_store
         from ..db.database import default_session_factory
 
-        with default_session_factory() as session:
+        factory = default_session_factory()
+        with factory() as session:
             plan = doe_plan_store.load(session, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail=f"DOE plan {plan_id} not found.")
@@ -261,7 +262,8 @@ def doe_history(
     from ..db import doe_plan_store
     from ..db.database import default_session_factory
 
-    with default_session_factory() as session:
+    factory = default_session_factory()
+    with factory() as session:
         items, total = doe_plan_store.list_history(
             session, campaign_id=campaign_id, page=page, page_size=page_size
         )

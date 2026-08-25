@@ -752,7 +752,8 @@ def _campaign_rounds_data(campaign_id: int) -> tuple[list[dict], int]:
     loop_history = list(campaign.loop_history or [])
     loop_ats = [e.get("at") for e in loop_history if e.get("at")]
 
-    with default_session_factory() as session:
+    factory = default_session_factory()
+    with factory() as session:
         doe_items, _ = doe_plan_store.list_history(
             session, campaign_id=campaign_id, page=1, page_size=1000
         )
@@ -761,7 +762,8 @@ def _campaign_rounds_data(campaign_id: int) -> tuple[list[dict], int]:
     }
 
     prefix = f"wb:{campaign_id}:"
-    with default_session_factory() as session:
+    factory = default_session_factory()
+    with factory() as session:
         exp_rows = (
             session.query(ExperimentRow)
             .filter(ExperimentRow.label.like(f"{prefix}%"))
