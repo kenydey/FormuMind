@@ -15,6 +15,63 @@ from .schemas import Formulation
 
 logger = logging.getLogger(__name__)
 
+# ── Role normalisation ──────────────────────────────────────────────────────
+# LLM 生成的 ingredient.role 常为中文（"树脂"/"锆盐"/"缓蚀剂"/"硅烷偶联剂"…），
+# 而 predictor / chemistry / genome 统一使用英文规范 role（见
+# examples.ROLE_CATALOG）。这里把自由文本 role 归一到规范英文，消除两者
+# 语义不一致导致的预测失真（active/inhibitor/resin 全被算成 0）。
+_CANONICAL_ROLES: frozenset[str] = frozenset({
+    "resin", "hardener", "inhibitor", "pigment", "filler", "surfactant",
+    "builder", "solvent", "active", "accelerator", "chelant", "additive",
+})
+
+_ROLE_ALIASES: dict[str, str] = {
+    # 中文 → 英文
+    "树脂": "resin", "乳液": "resin", "环氧树脂": "resin",
+    "固化剂": "hardener", "交联剂": "hardener", "硬化剂": "hardener",
+    "缓蚀剂": "inhibitor", "腐蚀抑制剂": "inhibitor",
+    "颜料": "pigment",
+    "填料": "filler", "纳米填料": "filler", "体质颜料": "filler",
+    "表面活性剂": "surfactant",
+    "溶剂": "solvent",
+    "主盐": "active", "成膜剂": "active", "锆盐": "active", "活性成分": "active",
+    "促进剂": "accelerator", "加速剂": "accelerator",
+    "螯合剂": "chelant",
+    "添加剂": "additive", "助剂": "additive",
+    # 英文别名
+    "crosslinker": "hardener", "curing agent": "hardener",
+    "coupling agent": "active", "silane": "active",
+}
+
+# 复合 role（如 "成膜剂/钝化主盐"、"有机硅烷偶联剂/成膜助剂"）按子串命中。
+_ROLE_SUBSTRINGS: list[tuple[str, str]] = [
+    ("硅烷偶联", "active"), ("偶联剂", "active"), ("成膜", "active"),
+    ("锆盐", "active"), ("钝化", "active"), ("主盐", "active"),
+    ("缓蚀", "inhibitor"), ("树脂", "resin"), ("乳液", "resin"),
+    ("固化", "hardener"), ("交联", "hardener"), ("硬化", "hardener"),
+    ("填料", "filler"), ("溶剂", "solvent"), ("颜料", "pigment"),
+    ("表面活性", "surfactant"), ("促进", "accelerator"), ("螯合", "chelant"),
+]
+
+
+def normalize_role(role: str) -> str:
+    """归一中英文/自由文本 role 到规范英文 role。
+
+    未识别的 role 原样返回（英文规范值或其它自由文本），让调用方继续用
+    精确匹配兜底——不静默映射到错误的角色。
+    """
+    r = (role or "").strip()
+    low = r.lower()
+    if low in _CANONICAL_ROLES:
+        return low
+    if low in _ROLE_ALIASES:
+        return _ROLE_ALIASES[low]
+    for sub, canonical in _ROLE_SUBSTRINGS:
+        if sub in r:
+            return canonical
+    return r
+
+
 # Standard atomic weights (g/mol), IUPAC abridged — enough for common
 # coating / surface-treatment raw materials.
 ATOMIC_MASS: dict[str, float] = {
@@ -140,8 +197,8 @@ def amine_epoxy_ratio(form: Formulation) -> float | None:
     callers and trained-model feature vectors; see ``resin_hardener_ratio`` in
     ``features.py`` for the canonical feature key.
     """
-    resin = sum(i.weight_pct for i in form.ingredients if i.role == "resin")
-    hardener = sum(i.weight_pct for i in form.ingredients if i.role == "hardener")
+    resin = sum(i.weight_pct for i in form.ingredients if normalize_role(i.role) == "resin")
+    hardener = sum(i.weight_pct for i in form.ingredients if normalize_role(i.role) == "hardener")
     if resin <= 0 or hardener <= 0:
         return None
     return round(resin / hardener, 3)
@@ -217,10 +274,11 @@ def _component_volumes(form: Formulation) -> tuple[float, float, float]:
     volumes (mass-fraction / density) over the formulation."""
     pigment = binder = volatile = 0.0
     for ing in form.ingredients:
-        vol = ing.weight_pct / _density_gcm3(ing.name, ing.role)
-        if ing.role in _PIGMENT_ROLES:
+        r = normalize_role(ing.role)
+        vol = ing.weight_pct / _density_gcm3(ing.name, r)
+        if r in _PIGMENT_ROLES:
             pigment += vol
-        elif ing.role in _VOLATILE_ROLES:
+        elif r in _VOLATILE_ROLES:
             volatile += vol
         else:
             binder += vol

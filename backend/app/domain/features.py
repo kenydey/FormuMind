@@ -15,7 +15,7 @@ aligned within a process; models must be retrained after toggling the flag
 """
 from __future__ import annotations
 
-from .chemistry import amine_epoxy_ratio, is_waterborne
+from .chemistry import amine_epoxy_ratio, is_waterborne, normalize_role
 from .schemas import Formulation
 
 ROLE_KEYS = [
@@ -85,7 +85,8 @@ def featurize(form: Formulation, process: dict | None = None) -> dict[str, float
     process = process or {}
     roles = {k: 0.0 for k in ROLE_KEYS}
     for ing in form.ingredients:
-        key = ing.role if ing.role in roles else "additive"
+        key = normalize_role(ing.role)
+        key = key if key in roles else "additive"
         roles[key] += ing.weight_pct
 
     ratio = amine_epoxy_ratio(form) or 0.0

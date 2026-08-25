@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 def _sum_role(form: Formulation, role: str) -> float:
-    return sum(i.weight_pct for i in form.ingredients if i.role == role)
+    from ..domain.chemistry import normalize_role
+
+    return sum(i.weight_pct for i in form.ingredients if normalize_role(i.role) == role)
 
 
 def _has_waterborne(form: Formulation) -> bool:
@@ -266,9 +268,13 @@ def _predict_mechanistic(
         active = _sum_role(form, "active")
         accel = _sum_role(form, "accelerator")
         inhibitor = _sum_role(form, "inhibitor")
-        props["coating_weight_gsm"] = round(0.4 + active * 0.22 + accel * 2.5, 2)
-        props["salt_spray_hours"] = round(48.0 + active * 9.0 + inhibitor * 30.0, 1)
-        props["adhesion_promotion_idx"] = round(active * 0.6 + 1.0, 2)
+        resin = _sum_role(form, "resin") + _sum_role(form, "hardener")
+        # 有机乳液型钝化（环氧丙烯酸/聚氨酯乳液等）以树脂成膜为主，耐盐雾与
+        # 膜重远高于纯无机转化膜（锆/硅烷 48–200h → 720–1440h）。resin 系数为
+        # 初始估计，量级对齐 LLM 领域知识预测，需实验数据校准。
+        props["coating_weight_gsm"] = round(0.4 + active * 0.22 + accel * 2.5 + resin * 0.30, 2)
+        props["salt_spray_hours"] = round(48.0 + active * 9.0 + inhibitor * 30.0 + resin * 38.0, 1)
+        props["adhesion_promotion_idx"] = round(active * 0.6 + resin * 0.12 + 1.0, 2)
 
     if mol and "salt_spray_hours" in props:
         logp = mol.get("mean_logp", 0.0)
