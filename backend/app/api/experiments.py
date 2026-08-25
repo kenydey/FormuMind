@@ -719,3 +719,109 @@ async def convergence_webhook(
     # Forward to WebSocket / SSE notification system
     # (handled by existing notification pipeline)
     return {"status": "received", "campaign_id": str(payload.campaign_id)}
+
+
+# ── Round-grouped history view ────────────────────────────────────────────────
+
+
+class CampaignRoundsResponse(BaseModel):
+    rounds: list[dict]
+    total_rounds: int
+    page: int
+    page_size: int
+    unassociated_ledger: int
+
+
+def _campaign_rounds_data(campaign_id: int) -> tuple[list[dict], int]:
+    """组装 campaign 按 round 分组视图，返回 (rounds, unassociated_ledger)。
+
+    每个 round: {round, loop_entry, doe_plan, ledger_rows}
+    - loop_entry: loop_history 该轮收敛分析（含 doe_plan_id）
+    - doe_plan: 该轮 DOE（doe_plans 按 round 匹配）
+    - ledger_rows: 该轮台账行（按 created_at 时间窗口推断：落在某轮 loop 收敛
+      时间戳之前、上一轮之后的，归该轮）
+    """
+    from ..db import doe_plan_store
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow
+
+    campaign = get_campaign_store().get_campaign_sync(campaign_id)
+    if campaign is None:
+        return [], 0
+
+    loop_history = list(campaign.loop_history or [])
+    loop_ats = [e.get("at") for e in loop_history if e.get("at")]
+
+    with default_session_factory() as session:
+        doe_items, _ = doe_plan_store.list_history(
+            session, campaign_id=campaign_id, page=1, page_size=1000
+        )
+    doe_by_round: dict[int, dict] = {
+        d["round"]: d for d in doe_items if d.get("round") is not None
+    }
+
+    prefix = f"wb:{campaign_id}:"
+    with default_session_factory() as session:
+        exp_rows = (
+            session.query(ExperimentRow)
+            .filter(ExperimentRow.label.like(f"{prefix}%"))
+            .all()
+        )
+    ledger = [
+        {
+            "item_id": (
+                r.item_id or (r.label[len(prefix):] if r.label.startswith(prefix) else "")
+            ),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "measured": r.measured,
+        }
+        for r in exp_rows
+    ]
+
+    rounds = [
+        {
+            "round": idx,
+            "loop_entry": entry,
+            "doe_plan": doe_by_round.get(idx),
+            "ledger_rows": [],
+        }
+        for idx, entry in enumerate(loop_history, start=1)
+    ]
+
+    unassociated = 0
+    for lr in ledger:
+        cat = lr.get("created_at")
+        assigned = None
+        if cat and loop_ats:
+            for i, at in enumerate(loop_ats):
+                if cat <= at:
+                    assigned = i
+                    break
+        if assigned is not None:
+            rounds[assigned]["ledger_rows"].append(lr)
+        else:
+            unassociated += 1
+
+    return rounds, unassociated
+
+
+@router.get(
+    "/experiments/workbench/{campaign_id}/rounds",
+    response_model=CampaignRoundsResponse,
+)
+def campaign_rounds(
+    campaign_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(5, ge=1, le=20),
+) -> CampaignRoundsResponse:
+    """按 round 分页查看 DOE + 台账（时间窗口推断）。"""
+    rounds, unassociated = _campaign_rounds_data(campaign_id)
+    total = len(rounds)
+    start = (page - 1) * page_size
+    return CampaignRoundsResponse(
+        rounds=rounds[start:start + page_size],
+        total_rounds=total,
+        page=page,
+        page_size=page_size,
+        unassociated_ledger=unassociated,
+    )
