@@ -507,6 +507,8 @@ class DOEPlanRow(Base):
     )
     design_type: Mapped[str] = mapped_column(String(32), nullable=False)
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Closed-loop round this plan was generated for (1-based); NULL = manual/unassociated.
+    round: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
     __table_args__ = (

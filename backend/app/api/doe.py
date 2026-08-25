@@ -29,7 +29,7 @@ DOE_ENGINES = ["auto", "native", "pydoe"]
 AL_ENGINES = ["auto", "legacy", "baybe"]
 
 
-def _persist_doe_plan(plan: DOEPlan) -> None:
+def _persist_doe_plan(plan: DOEPlan, campaign_id: int | None = None) -> None:
     """Best-effort: persist a single DOEPlan to the doe_plans table."""
     try:
         from ..db import doe_plan_store
@@ -38,7 +38,7 @@ def _persist_doe_plan(plan: DOEPlan) -> None:
 
         factory = default_session_factory()
         with commit_session(factory) as session:
-            doe_plan_store.save(session, plan)
+            doe_plan_store.save(session, plan, campaign_id=campaign_id)
     except Exception as exc:
         logger.warning("persist doe plan failed: %s", exc, exc_info=True)
 
@@ -166,7 +166,7 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
         workbench_campaign_id=req.workbench_campaign_id,
         budget_remaining=req.budget_remaining,
     )
-    _persist_doe_plan(result.plan)
+    _persist_doe_plan(result.plan, campaign_id=req.workbench_campaign_id)
     return result
 
 
@@ -198,7 +198,7 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
     result.plan.plan_id = uuid.uuid4().hex
     result.plan.domain = base_req.domain
     workflow._cache_plan(result.plan)
-    _persist_doe_plan(result.plan)
+    _persist_doe_plan(result.plan, campaign_id=req.workbench_campaign_id)
     _persist_run_record("baybe_recommend", req.model_dump(), result)
     return result
 
@@ -208,7 +208,14 @@ def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -
     """Export a previously generated DOE plan as a fill-in worksheet."""
     plan = workflow.get_cached_plan(plan_id)
     if plan is None:
-        raise HTTPException(status_code=404, detail=f"DOE plan {plan_id} not found (regenerate it).")
+        # fallback：从 doe_plans 表读（重启后内存缓存丢失仍可导出）
+        from ..db import doe_plan_store
+        from ..db.database import default_session_factory
+
+        with default_session_factory() as session:
+            plan = doe_plan_store.load(session, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"DOE plan {plan_id} not found.")
 
     metrics = [workflow.OBJECTIVE[plan.domain]] if plan.domain else []
     safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", plan_id)[:8]
@@ -232,3 +239,30 @@ def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
     )
+
+
+class DoeHistoryResponse(BaseModel):
+    items: list[dict]
+    total: int
+    page: int
+    page_size: int
+
+
+@router.get("/doe/history", response_model=DoeHistoryResponse)
+def doe_history(
+    campaign_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> DoeHistoryResponse:
+    """分页查询历史 DOE 记录（最新优先）。
+
+    ``campaign_id`` 缺省时返回全部（含未关联的孤立记录）。
+    """
+    from ..db import doe_plan_store
+    from ..db.database import default_session_factory
+
+    with default_session_factory() as session:
+        items, total = doe_plan_store.list_history(
+            session, campaign_id=campaign_id, page=page, page_size=page_size
+        )
+    return DoeHistoryResponse(items=items, total=total, page=page, page_size=page_size)

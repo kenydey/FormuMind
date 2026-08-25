@@ -720,7 +720,36 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
         return
     from datetime import UTC, datetime
 
+    import uuid
+
     from ..db.campaign_store import get_campaign_store
+
+    # 持久化 next_doe 到 doe_plans（带 campaign_id + round），并把 plan_id 记入 loop_history
+    doe_plan_id = None
+    next_doe = getattr(report, "next_doe", None)
+    if next_doe is not None:
+        store = get_campaign_store()
+        campaign = (
+            store.get_campaign_sync(campaign_id)
+            if hasattr(store, "get_campaign_sync")
+            else None
+        )
+        round_no = len(campaign.loop_history or []) + 1 if campaign is not None else None
+        if not getattr(next_doe, "plan_id", None):
+            next_doe.plan_id = uuid.uuid4().hex
+        doe_plan_id = next_doe.plan_id
+        try:
+            from ..db import doe_plan_store
+            from ..db.database import default_session_factory
+            from ..db.session_utils import commit_session
+
+            with commit_session(default_session_factory()) as session:
+                doe_plan_store.save(
+                    session, next_doe, campaign_id=campaign_id, round_no=round_no
+                )
+        except Exception as exc:
+            log_handled_exception(logger, exc, "persist loop next_doe")
+            doe_plan_id = None
 
     entry = {
         "round": 0,
@@ -729,6 +758,7 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
         "rmse_by_metric": report.rmse_by_metric,
         "engine": report.engine,
         "loop_message": report.loop_message,
+        "doe_plan_id": doe_plan_id,
     }
     try:
         store = get_campaign_store()
