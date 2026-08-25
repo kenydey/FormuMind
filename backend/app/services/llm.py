@@ -1083,7 +1083,21 @@ def _system_prompt_block(req: Requirement) -> str:
     """Matched formulation-system + corrosion-grade hard constraints."""
     from ..domain.formulation_systems import build_system_prompt_block
 
-    return build_system_prompt_block(req.product_type or "")
+    block = build_system_prompt_block(req.product_type or "")
+    if block:
+        return block
+    # P1 fallback: unknown product_type → self-infer constraints instead of running
+    # unconstrained (the root cause of the earlier "emulsion type ignored" failure).
+    return (
+        "Formulation-system requirements (INFER — product_type does not match a known "
+        "system; before designing, FIRST infer and state the system constraints from the "
+        "headline/substrate, then design strictly within them):\n"
+        "- Required components (film-forming resin / active / hardener) and their roles\n"
+        "- Forbidden components (e.g. no chromate for chrome-free, no VOC for waterborne)\n"
+        "- Process conditions (pH, cure temperature, solids content)\n"
+        "- Realistic performance ranges (salt spray / film weight / cost) — be conservative "
+        "and physically plausible; do not claim unrealistic values\n"
+    )
 
 
 def _recommend_user_prompt(
