@@ -1334,7 +1334,14 @@ def _chemcrow_llm_ready() -> bool:
 
 
 def _paperqa_available() -> bool:
-    return optional_import("paperqa")
+    if not optional_import("paperqa"):
+        return False
+    settings = get_settings()
+    # paper-qa 默认走 OpenAI（llm=gpt-4o + embedding=text-embedding-3-small），
+    # 二者都需要 OPENAI key。DeepSeek-only 环境（本项目）没有 OPENAI key，
+    # 直接跳过 Tier 2，避免 litellm 每次空跑 3 次重试并报 "Missing credentials"
+    # （随后才 fall through 到 Tier 3）。配置了 OPENAI key 时自动恢复该路径。
+    return bool(effective_setting(settings, "openai_api_key"))
 
 
 def _chemcrow_answer(question: str) -> str | None:
