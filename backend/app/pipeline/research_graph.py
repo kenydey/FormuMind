@@ -653,12 +653,18 @@ def _filter_unindexed_external(evidence: list[Evidence]) -> list[Evidence]:
         return evidence  # DB 不可达时保守返回全部，避免 recommend 退化为空
 
     kept: list[Evidence] = []
+    filtered: list[str] = []
     for ev in evidence:
         ident = (ev.identifier or "").strip()
         if ident.startswith(("http://", "https://")) and store.find_by_origin_url(ident) is None:
-            logger.info("过滤未入库外部源: {}", ident)
+            filtered.append(ident)
             continue
         kept.append(ev)
+    if filtered:
+        logger.info(
+            "过滤 %d 条未入库外部源（full-text 获取失败），示例: %s",
+            len(filtered), filtered[0],
+        )
     return kept
 
 
