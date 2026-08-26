@@ -27,8 +27,11 @@ echo "    容器已确保运行"
 
 echo "==> 3/6 后端 celery worker"
 CELERY_BIN="$ROOT/backend/.venv/bin/celery"
-FORMUMIND_CELERY_EAGER=false nohup "$CELERY_BIN" -A app.worker.celery_app worker --loglevel=info \
-  >>"$LOGS/celery.log" 2>&1 &
+(
+  cd "$ROOT/backend"
+  FORMUMIND_CELERY_EAGER=false nohup "$CELERY_BIN" -A app.worker.celery_app worker --loglevel=info \
+    >>"$LOGS/celery.log" 2>&1 &
+)
 
 echo "==> 4/6 后端 uvicorn"
 UVICORN_BIN="$ROOT/backend/.venv/bin/uvicorn"
