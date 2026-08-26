@@ -9,6 +9,8 @@ Workbench row data is stored in Datalab (SSOT) via :class:`DatalabCampaignStore`
 """
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -22,6 +24,8 @@ from ..db.models import Campaign
 from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, Requirement, TrainingReport
 from ..services import io_export
 from ..services.training import registry
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["experiments"])
 
@@ -351,6 +355,43 @@ async def sync_workbench(
 
 # ── Experiment attachments (Phase 0.2) ────────────────────────────────────────
 
+async def _upload_or_store_locally(content: bytes, filename: str) -> str:
+    """上传 Datalab；失败时落盘本地并返回指向真实文件的引用。
+
+    旧实现失败时伪造 ``local-{uuid}`` 引用——文件字节被丢弃却返回 200，
+    用户以为附件存在但内容永久丢失。现在失败路径把内容写入
+    ``backend/data/attachments/``，引用可追溯到真实文件。
+    """
+    from ..db.datalab_client import upload_file as datalab_upload_file
+
+    doc_id = await datalab_upload_file(
+        get_settings().datalab_api_url, content, filename
+    )
+    if doc_id:
+        return doc_id
+
+    # 本地兜底：落盘 + 内容哈希引用（local-<sha1[:16]>）
+    import hashlib
+    import uuid as _uuid
+
+    from ..config import get_settings as _gs
+
+    digest = hashlib.sha1(content).hexdigest()[:16]
+    local_id = f"local-{digest}"
+    base = Path(_gs().db_url.replace("sqlite:///", "")).parent / "attachments"
+    dest = base / f"{local_id}-{_uuid.uuid4().hex[:8]}-{filename}"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content)
+    except OSError:
+        logger.exception("attachment local fallback write failed")
+        raise HTTPException(
+            status_code=503,
+            detail="附件存储不可用（Datalab 上传失败且本地落盘失败），请稍后重试",
+        )
+    return local_id
+
+
 class AttachmentResponse(BaseModel):
     id: str
     experiment_id: int
@@ -427,23 +468,12 @@ async def upload_experiment_attachment(
     a local ``ExperimentAttachment`` row keeps the reference.
     """
     from ..db.measurement_store import get_measurement_store
-    from ..db.datalab_client import upload_file as datalab_upload_file
 
-    settings = get_settings()
     filename = file.filename or "upload"
 
-    # Upload to Datalab ELN (best-effort; falls back to local-only)
+    # Upload to Datalab ELN (best-effort; falls back to local file storage)
     content = await file.read()
-    source_document_id = (
-        await datalab_upload_file(settings.datalab_api_url, content, filename) or ""
-    )
-
-    # If Datalab upload failed, generate a local reference
-    if not source_document_id:
-        import uuid as _uuid
-
-        source_document_id = f"local-{_uuid.uuid4().hex[:12]}"
-
+    source_document_id = await _upload_or_store_locally(content, filename)
     # Create local attachment link
     store = get_measurement_store()
     attachment_id = store.attach(
@@ -520,14 +550,7 @@ async def upload_workbench_row_attachment(
     settings = get_settings()
     filename = file.filename or "upload"
     content = await file.read()
-    source_document_id = (
-        await datalab_upload_file(settings.datalab_api_url, content, filename) or ""
-    )
-    if not source_document_id:
-        import uuid as _uuid
-
-        source_document_id = f"local-{_uuid.uuid4().hex[:12]}"
-
+    source_document_id = await _upload_or_store_locally(content, filename)
     store = get_measurement_store()
     attachment_id = store.attach(
         experiment_id, source_document_id, kind=kind, note=note

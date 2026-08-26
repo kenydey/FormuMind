@@ -506,8 +506,16 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 note=note,
                 tags=tags,
             )
-            item_data["blocks_obj"] = blocks
-            item_data["display_order"] = [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK]
+            # 合并而非整体替换：保留用户在 Datalab 上添加的其他 block，
+            # 只更新 FormuMind 自有的两个键。
+            existing_blocks = dict(item_data.get("blocks_obj") or {})
+            existing_blocks.update(blocks)
+            item_data["blocks_obj"] = existing_blocks
+            merged_order = list(item_data.get("display_order") or [])
+            for key in (_PARAMS_BLOCK, _MEASUREMENTS_BLOCK):
+                if key not in merged_order:
+                    merged_order.append(key)
+            item_data["display_order"] = merged_order
             try:
                 await self._save_item(item_id, item_data)
             except Exception as exc:

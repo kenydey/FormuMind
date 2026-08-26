@@ -418,9 +418,11 @@ def run_optimize_task(self, payload: dict) -> dict:
     task_id = self.request.id
     publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting optimizer")
 
-    req = Requirement(**payload["requirement"])
-
     try:
+        # req 构造在 try 内：payload 校验失败也要走失败持久化，
+        # 否则任务快照永远停留 queued、SSE 无终止事件。
+        req = Requirement(**payload["requirement"])
+
         def progress(p: float, msg: str) -> None:
             publish_progress(
                 task_id,
@@ -772,9 +774,11 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
     from ..services import auto_loop
 
     publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting loop")
-    req = Requirement(**payload["requirement"])
 
     try:
+        # req 构造在 try 内：payload 校验失败也要走失败持久化。
+        req = Requirement(**payload["requirement"])
+
         def progress(p: float, msg: str) -> None:
             publish_progress(
                 task_id,
@@ -799,8 +803,10 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
             prior_next_doe=_parse_optional_model(payload.get("prior_next_doe"), DOEPlan),
             budget_remaining=payload.get("budget_remaining"),
         )
-        data = result.model_dump()
+        # 先持久化（内部会给 next_doe.plan_id 赋新 UUID），再 dump，
+        # 否则任务结果里的 plan_id 是旧值，前端无法关联该 DOE 计划。
         _persist_loop_history(payload.get("workbench_campaign_id"), result)
+        data = result.model_dump()
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "loop", data)
         return data
@@ -821,10 +827,12 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
     from ..services import inverse_design
 
     publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting inverse design")
-    req = Requirement(**payload["requirement"])
-    targets = TargetSpec.model_validate(payload.get("targets") or {})
 
     try:
+        # req/targets 构造在 try 内：payload 校验失败也要走失败持久化。
+        req = Requirement(**payload["requirement"])
+        targets = TargetSpec.model_validate(payload.get("targets") or {})
+
         def progress(p: float, msg: str) -> None:
             publish_progress(
                 task_id,

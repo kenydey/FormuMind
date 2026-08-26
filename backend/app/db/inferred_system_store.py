@@ -60,6 +60,8 @@ class InferredSystemStore:
         source_requirement_text: str = "",
     ) -> None:
         """Insert or update a cached system (idempotent on normalized_key)."""
+        from sqlalchemy.exc import IntegrityError
+
         with commit_session(self._session_factory) as session:
             row = (
                 session.query(InferredSystemRow)
@@ -69,6 +71,18 @@ class InferredSystemStore:
             if row is None:
                 row = InferredSystemRow(normalized_key=normalized_key)
                 session.add(row)
+                try:
+                    session.flush()
+                except IntegrityError:
+                    # 并发首次写入撞唯一约束：回滚 savepoint 后转为更新已有行
+                    session.rollback()
+                    row = (
+                        session.query(InferredSystemRow)
+                        .filter(InferredSystemRow.normalized_key == normalized_key)
+                        .first()
+                    )
+                    if row is None:
+                        raise
             row.product_type = product_type
             row.system_name = system.system_name
             row.must_include_roles = list(system.must_include_roles)

@@ -155,13 +155,13 @@ export default function LabWorkbench({
     []
   );
 
-  // ── Phase 1.4: Excel export ──────────────────────────────────
+  // ── Phase 1.4: CSV export ────────────────────────────────────
+  // ag-grid Community 版无 exportDataAsExcel（Enterprise 功能，静默无效），改用 CSV。
   const handleExportExcel = useCallback(() => {
     const agApi = gridRef.current?.api;
     if (!agApi) return;
-    agApi.exportDataAsExcel({
-      fileName: `DOE-C${campaignId}-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      sheetName: "实验台账",
+    agApi.exportDataAsCsv({
+      fileName: `DOE-C${campaignId}-${new Date().toISOString().slice(0, 10)}.csv`,
       processCellCallback: (p) => p.value ?? "",
     });
   }, [campaignId]);
@@ -286,7 +286,12 @@ export default function LabWorkbench({
           }
           return {
             id: r.id, status: r.status,
-            actual_params: r.actual_params ?? {},
+            // 过滤 null/非有限值：清空单元格会产生 null，后端严格校验会 422 整体失败
+            actual_params: Object.fromEntries(
+              Object.entries(r.actual_params ?? {}).filter(
+                ([, v]) => typeof v === "number" && Number.isFinite(v)
+              )
+            ),
             measurements,
             note: r.note,
             tags: r.tags,

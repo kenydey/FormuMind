@@ -21,6 +21,11 @@ def _commit_with_retry(session: Session, *, max_attempts: int = 6) -> None:
     few times with exponential backoff instead of failing the whole document —
     this is the "database is locked" that used to fail dozens of fetched
     documents per batch.
+
+    The retry covers both failure phases: a lock error raised during the
+    implicit flush (INSERT/UPDATE) leaves the session in pending-rollback, so
+    we ``rollback()`` before retrying — otherwise the next ``commit()`` would
+    raise ``PendingRollbackError`` and defeat the retry entirely.
     """
     delay = 0.5
     for attempt in range(max_attempts):
@@ -31,6 +36,11 @@ def _commit_with_retry(session: Session, *, max_attempts: int = 6) -> None:
             if "database is locked" not in str(exc).lower():
                 raise
             if attempt == max_attempts - 1:
+                raise
+            try:
+                session.rollback()
+            except Exception:
+                logger.exception("rollback during lock-retry also failed")
                 raise
             time.sleep(delay)
             delay *= 2

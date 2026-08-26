@@ -1452,6 +1452,7 @@ export function awaitTaskStream(
         pollTask(
           taskId,
           (s) => {
+            if (settled) return;  // 已 settle：停止向 onEvent 泄漏事件
             armIdle();
             if (s.state === "running" || s.state === "pending") {
               onEvent?.({
@@ -1464,7 +1465,10 @@ export function awaitTaskStream(
           400,
           timeoutMs > 0 ? undefined : 0,
         )
-          .then(resolveFromStatus)
+          .then((s) => {
+            if (settled) return;  // 超时/取消已先 settle：丢弃迟到的轮询结果
+            resolveFromStatus(s);
+          })
           .catch(() => {
             finish(() =>
               reject(

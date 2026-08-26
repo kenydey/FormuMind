@@ -271,14 +271,16 @@ def _evidence_as_recommendation_response(
     """Convert KB evidence into a basic recommendation response (kb_only mode)."""
     formulas: list[RecommendedFormula] = []
     for i, ev in enumerate(evidence[:5]):
+        # predicted 按 objectives 的 metric 生成占位键（0 = 未预测），不再捏造 salt_spray_hours
+        predicted = {o.metric: 0 for o in objectives} if objectives else {}
         formulas.append(RecommendedFormula(
             name=ev.title or f"KB 候选 #{i+1}",
             domain=requirement.domain,
             rationale=f"知识库检索结果：{ev.snippet[:200]}" if ev.snippet else "无详细描述",
             objectives_summary="; ".join(
                 f"{o.metric}: {o.direction}" for o in objectives),
-            predicted={"salt_spray_hours": 0},
-            score=ev.relevance or 0.5,
+            predicted=predicted,
+            score=0.5 if ev.relevance is None else ev.relevance,
         ))
     return RecommendedFormulaListResponse(
         formulas=formulas, engine="offline",
