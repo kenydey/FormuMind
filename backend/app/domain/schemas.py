@@ -661,21 +661,6 @@ class IPAnalysisRequest(BaseModel):
 
 # ── v0.5: Process parameter optimization ────────────────────────────────────
 
-class ProcessOptRequest(BaseModel):
-    domain: ProductDomain
-    iterations: int = 18
-    objectives: list[ObjectiveSpec] = Field(default_factory=list)
-
-
-class ProcessOptResult(BaseModel):
-    domain: str
-    iterations: int
-    engine: str
-    history: list[float]
-    best_params: dict[str, float]
-    predicted_outcome: dict[str, float]
-
-
 # ── v0.6: Self-driving closed loop ───────────────────────────────────────────
 
 class LoopRequest(Requirement):

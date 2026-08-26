@@ -10,7 +10,6 @@ import type {
   LoopReport,
   ModelInfo,
   ObjectiveSpec,
-  ProcessOptResult,
   ProductDomain,
   Requirement,
   ResearchResult,
@@ -107,7 +106,6 @@ export interface AppState {
 
   projects: ProjectSummary[];
   activeProjectId: string | null;
-  processOptResult: ProcessOptResult | null;
   projectSaveBusy: boolean;
   requirementLocked: boolean;
   historyOpen: boolean;
@@ -195,7 +193,6 @@ export interface AppState {
   loadProject: (id: string) => Promise<void>;
   createProject: (title?: string) => Promise<void>;
   deleteProject: (id: string, knowledge?: "delete" | "global") => Promise<void>;
-  setProcessOptResult: (result: ProcessOptResult | null) => void;
   setSearchQuery: (q: string) => void;
   setSourceTypes: (types: SearchSourceType[]) => void;
   setRecommendSourceTypes: (types: SearchSourceType[]) => void;

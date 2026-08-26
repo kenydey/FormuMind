@@ -118,7 +118,6 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.measured = {};
           draft.loopReport = null;
           draft.rmseHistory = [];
-          draft.processOptResult = null;
           draft.optimizationHistory = [];
           draft.modelHistory = [];
           draft.trainMessage = "";
@@ -234,13 +233,6 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    setProcessOptResult: (result) => {
-      set((draft) => {
-        draft.processOptResult = result;
-      });
-      get().scheduleAutosave();
-    },
-
     // v0.3 actions
-  } as Pick<AppState, 'toggleHistory' | 'scheduleAutosave' | 'cancelAutosave' | 'saveProject' | 'loadProject' | 'createProject' | 'deleteProject' | 'initProjects' | 'setProcessOptResult'>;
+  } as Pick<AppState, 'toggleHistory' | 'scheduleAutosave' | 'cancelAutosave' | 'saveProject' | 'loadProject' | 'createProject' | 'deleteProject' | 'initProjects'>;
 }

@@ -41,7 +41,6 @@ function populatedState(): AppState {
     optimizationHistory: [0.1, 0.4],
     loopReport: { domain: "anticorrosion_coating" },
     rmseHistory: [{ salt_spray_hours: 12 }],
-    processOptResult: { domain: "anticorrosion_coating" },
     doeEngine: "pydoe",
     alEngine: "baybe",
     optimizeEngine: "botorch",

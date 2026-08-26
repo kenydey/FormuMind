@@ -12,7 +12,6 @@ import type {
   LoopReport,
   ModelInfo,
   ObjectiveSpec,
-  ProcessOptResult,
   Requirement,
   ResearchResult,
   SearchSourceType,
@@ -64,7 +63,6 @@ export interface ProjectSummary {
   has_doe: boolean;
   has_optimize: boolean;
   has_loop: boolean;
-  has_process_opt: boolean;
 }
 
 export interface ProjectWorkspacePayload {
@@ -91,7 +89,6 @@ export interface ProjectWorkspacePayload {
   optimization_history: number[];
   loop_report: LoopReport | null;
   rmse_history: Record<string, number>[];
-  process_opt_result: ProcessOptResult | null;
   doe_engine: string;
   al_engine: string;
   optimize_engine: string;
@@ -125,7 +122,6 @@ export interface StoreWorkspaceSlice {
   optimizationHistory: number[];
   loopReport: LoopReport | null;
   rmseHistory: Record<string, number>[];
-  processOptResult: ProcessOptResult | null;
   doeEngine: "auto" | "native" | "pydoe";
   alEngine: "auto" | "legacy" | "baybe";
   optimizeEngine: "auto" | "baybe" | "legacy";
@@ -185,7 +181,6 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     optimization_history: slice.optimizationHistory,
     loop_report: sanitizeObjectOrNull(slice.loopReport),
     rmse_history: slice.rmseHistory,
-    process_opt_result: sanitizeObjectOrNull(slice.processOptResult),
     doe_engine: slice.doeEngine,
     al_engine: slice.alEngine,
     optimize_engine: slice.optimizeEngine,
@@ -236,7 +231,6 @@ export function applyWorkspacePayload(
     optimizationHistory: ws.optimization_history ?? [],
     loopReport: ws.loop_report ?? null,
     rmseHistory: ws.rmse_history ?? [],
-    processOptResult: ws.process_opt_result ?? null,
     doeEngine: (ws.doe_engine as StoreWorkspaceSlice["doeEngine"]) ?? "auto",
     alEngine: (ws.al_engine as StoreWorkspaceSlice["alEngine"]) ?? "auto",
     optimizeEngine: (ws.optimize_engine as StoreWorkspaceSlice["optimizeEngine"]) ?? "auto",

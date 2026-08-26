@@ -17,7 +17,6 @@ const WorkbenchModal = lazy(() => import("./WorkbenchModal"));
 const DoeResultsPanel = lazy(() => import("./DoeResultsPanel"));
 const SimPlaceholder = lazy(() => import("./SimPlaceholder"));
 const LoopModal = lazy(() => import("./LoopModal"));
-const ProcessOptModal = lazy(() => import("./ProcessOptModal"));
 const InverseDesignModal = lazy(() => import("./InverseDesignModal"));
 
 function ModalFallback() {
@@ -41,7 +40,6 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并导出记录表" },
   { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实际参数与实测值，同步至 BayBE 闭环" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
-  { id: "process", icon: "⚙️", title: "工艺优化", desc: "固化/分散/膜厚等工艺参数优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
 ];
 
@@ -325,20 +323,6 @@ export default function ActionsPanel() {
         ) : (
           <p className="text-slate-500 text-sm">运行寻优后，此处显示收敛折线图与最优配方。</p>
         )}
-      </Modal>
-
-      <Modal
-        title="⚙️ 工艺参数优化 · Process Optimization"
-        open={openModal === "process"}
-        testId="modal-process"
-        onClose={() => setOpenModal(null)}
-        size="lg"
-        onSave={handleSave}
-        saveLabel={saveBtnLabel}
-      >
-        <Suspense fallback={<ModalFallback />}>
-          <ProcessOptModal />
-        </Suspense>
       </Modal>
 
       <Modal

@@ -20,15 +20,6 @@ from .schemas import (
 )
 
 
-class ProcessOptResultPayload(BaseModel):
-    domain: str = ""
-    iterations: int = 0
-    engine: str = ""
-    history: list[float] = Field(default_factory=list)
-    best_params: dict[str, float] = Field(default_factory=dict)
-    predicted_outcome: dict[str, float] = Field(default_factory=dict)
-
-
 class ProjectWorkspace(BaseModel):
     """Complete UI workspace for one research project."""
 
@@ -55,7 +46,6 @@ class ProjectWorkspace(BaseModel):
     optimization_history: list[float] = Field(default_factory=list)
     loop_report: LoopReport | None = None
     rmse_history: list[dict[str, float]] = Field(default_factory=list)
-    process_opt_result: ProcessOptResultPayload | None = None
     doe_engine: str = "auto"
     al_engine: str = "auto"
     optimize_engine: str = "auto"
@@ -78,7 +68,7 @@ class ProjectSummary(BaseModel):
     has_doe: bool = False
     has_optimize: bool = False
     has_loop: bool = False
-    has_process_opt: bool = False
+
 
 
 class ProjectDetail(BaseModel):
@@ -167,5 +157,4 @@ def summary_stats(workspace: ProjectWorkspace) -> dict[str, Any]:
         "has_doe": workspace.doe_plan is not None,
         "has_optimize": len(workspace.optimization_history) > 0,
         "has_loop": workspace.loop_report is not None,
-        "has_process_opt": workspace.process_opt_result is not None,
     }

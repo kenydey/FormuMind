@@ -1245,9 +1245,6 @@ export const api = {
   analyzeIP: (req: IPAnalysisRequest) =>
     post<IPReport>("/api/ip/analyze", req),
 
-  optimizeProcess: (req: ProcessOptRequest) =>
-    post<ProcessOptResult>("/api/process-optimize", req),
-
   loopIterate: (
     req: Requirement,
     optimize_iterations = 24,
@@ -1951,20 +1948,6 @@ export interface IPReport {
 export interface IPAnalysisRequest {
   formulation: Formulation;
   limit_patents?: number;
-}
-
-export interface ProcessOptRequest {
-  domain: ProductDomain;
-  iterations?: number;
-}
-
-export interface ProcessOptResult {
-  domain: string;
-  iterations: number;
-  engine: string;
-  history: number[];
-  best_params: Record<string, number>;
-  predicted_outcome: Record<string, number>;
 }
 
 // ── v0.6 新增类型 ────────────────────────────────────────────────────────────

@@ -46,7 +46,7 @@ def test_optimization_result_reports_engine():
     from app.pipeline import workflow
 
     res = workflow.run_optimization(_REQ, iterations=1)
-    assert res.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "baybe"}
+    assert res.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "baybe", "botorch-ei"}
     assert len(res.history) == 1
     assert res.top_formulations
 
@@ -267,24 +267,6 @@ def test_full_safety_check_standalone():
     assert isinstance(warnings, list)
     assert any("SVHC" in w for w in warnings), "Sodium nitrite SVHC warning expected"
 
-
-# ── v0.5: Process optimizer endpoint ─────────────────────────────────────────
-
-def test_process_optimize_endpoint():
-    from fastapi.testclient import TestClient
-    from app.main import app
-
-    client = TestClient(app)
-    resp = client.post("/api/process-optimize", json={
-        "domain": "anticorrosion_coating",
-        "iterations": 4,
-    })
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["engine"] in {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei"}
-    assert len(data["history"]) == 4
-    assert "best_params" in data
-    assert "predicted_outcome" in data
 
 
 # ── v0.5: IP analysis endpoint ────────────────────────────────────────────────

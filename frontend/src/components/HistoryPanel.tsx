@@ -57,9 +57,6 @@ function ProjectCard({
             {project.has_loop && (
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300">闭环</span>
             )}
-            {project.has_process_opt && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">工艺</span>
-            )}
           </div>
         </button>
         <button

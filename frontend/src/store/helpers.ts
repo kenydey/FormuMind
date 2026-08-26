@@ -67,7 +67,6 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   }
   if (patch.loopReport !== undefined) draft.loopReport = patch.loopReport;
   if (patch.rmseHistory !== undefined) draft.rmseHistory = patch.rmseHistory;
-  if (patch.processOptResult !== undefined) draft.processOptResult = patch.processOptResult;
   if (patch.doeEngine !== undefined) draft.doeEngine = patch.doeEngine;
   if (patch.alEngine !== undefined) draft.alEngine = patch.alEngine;
   if (patch.optimizeEngine !== undefined) draft.optimizeEngine = patch.optimizeEngine;
@@ -104,7 +103,6 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     optimizationHistory: state.optimizationHistory,
     loopReport: state.loopReport,
     rmseHistory: state.rmseHistory,
-    processOptResult: state.processOptResult,
     doeEngine: state.doeEngine,
     alEngine: state.alEngine,
     optimizeEngine: state.optimizeEngine,
