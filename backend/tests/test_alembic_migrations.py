@@ -266,7 +266,7 @@ def test_migrations_idempotent_on_fresh_db(
 
 
 def test_revision_chain_head_is_0014(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head at revision ``0014``."""
+    """The revision chain is linear with a single head (currently ``0016``)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0014(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0014"
+    assert heads[0] == "0016"
 
 
 def test_migrations_partial_columns_branch(
