@@ -13,6 +13,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGS="$ROOT/logs"
 mkdir -p "$LOGS"
 
+# 绝对路径 DB：消除 cwd 依赖（celery/uvicorn 必须连同一个库文件）。
+# 相对路径 sqlite:///./data/formumind.db 会因进程 cwd 不同而解析到不同文件，
+# 曾导致 loop_history 写入旧库 /root/FormuMind/data/formumind.db 而前端读新库。
+export FORMUMIND_DB_URL="${FORMUMIND_DB_URL:-sqlite:///$ROOT/backend/data/formumind.db}"
+
 echo "==> 1/6 Redis"
 if ! redis-cli ping >/dev/null 2>&1; then
   redis-server --daemonize yes --dir /var/lib/redis
