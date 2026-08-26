@@ -168,8 +168,15 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
             rec_resp = llm.recommend_formulations(
                 body.requirement, objectives, evidence, n=llm_n)
         except Exception as exc:
-            log.exception("recommend_formulations LLM failed")
-            raise HTTPException(status_code=503, detail="配方推荐失败") from exc
+            if mode == "hybrid" and evidence:
+                # KB 已有证据：降级为 KB-only 推荐，不让 LLM 故障整体 503（A8）
+                log.warning("LLM 合成失败，hybrid 降级为 KB-only: %s", exc)
+                rec_resp = _evidence_as_recommendation_response(
+                    evidence, body.requirement, objectives)
+                rec_resp.warnings.append("LLM 合成失败，已降级为知识库检索结果")
+            else:
+                log.exception("recommend_formulations LLM failed")
+                raise HTTPException(status_code=503, detail="配方推荐失败") from exc
     else:
         # kb_only: return evidence as lightweight recommendations
         rec_resp = _evidence_as_recommendation_response(

@@ -37,9 +37,11 @@ def _persist_task(task_id: str, status: TaskStatus) -> None:
         _TASK_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
         data = status.model_dump()
         data["state"] = data["state"].value if hasattr(data["state"], "value") else data["state"]
-        (_TASK_PERSIST_DIR / f"{task_id}.json").write_text(
-            json.dumps(data, ensure_ascii=False), encoding="utf-8"
-        )
+        # 原子写：先写 .tmp 再 rename，避免进程崩溃时留下半截 JSON（W5）。
+        target = _TASK_PERSIST_DIR / f"{task_id}.json"
+        tmp = _TASK_PERSIST_DIR / f".{task_id}.tmp"
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
     except Exception as exc:
         log_handled_exception(logger, exc, "handled exception")
 
@@ -111,11 +113,22 @@ def _status_from_progress(task_id: str, kind: str) -> TaskStatus:
 class TaskManager:
     """Registry of Celery task metadata for read-only status snapshots."""
 
+    # 进程级单例，长生命周期下任务数无界增长 → 用有界 LRU 避免内存泄漏（W4）。
+    _KINDS_MAX = 1024
+
     def __init__(self) -> None:
-        self._kinds: dict[str, str] = {}
+        from collections import OrderedDict
+
+        self._kinds: "OrderedDict[str, str]" = OrderedDict()
+
+    def _remember(self, task_id: str, kind: str) -> None:
+        self._kinds[task_id] = kind
+        self._kinds.move_to_end(task_id)
+        while len(self._kinds) > self._KINDS_MAX:
+            self._kinds.popitem(last=False)
 
     def register_celery_task(self, task_id: str, kind: str) -> None:
-        self._kinds[task_id] = kind
+        self._remember(task_id, kind)
         existing = load_persisted_task(task_id)
         if existing and existing.state in (TaskState.completed, TaskState.failed):
             return
@@ -174,6 +187,9 @@ class TaskManager:
             "doe_engine": kwargs.get("doe_engine", "auto"),
             "workbench_campaign_id": kwargs.get("workbench_campaign_id"),
             "campaign_state": kwargs.get("campaign_state"),
+            # prior_rmse_history 必须透传：run_loop_iterate_impl 用它做收敛检测，
+            # 丢弃会导致每轮都从空历史开始（W3 根因）。
+            "prior_rmse_history": kwargs.get("prior_rmse_history") or [],
         }
         async_result = run_loop_task.delay(payload)
         self.register_celery_task(async_result.id, "loop")
@@ -736,7 +752,11 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
             if hasattr(store, "get_campaign_sync")
             else None
         )
-        round_no = len(campaign.loop_history or []) + 1 if campaign is not None else None
+        # round_no 由 _append_loop_history 内部以 len(history)+1 单一真相源计算，
+        # 不在两个独立读改写点各算一次（避免 TOCTOU 与 JSON 列丢失更新）。
+        round_no = (
+            len(campaign.loop_history or []) + 1 if campaign is not None else None
+        )
         if not getattr(next_doe, "plan_id", None):
             next_doe.plan_id = uuid.uuid4().hex
         doe_plan_id = next_doe.plan_id
@@ -754,6 +774,7 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
             doe_plan_id = None
 
     entry = {
+        # round 由 _append_loop_history 内部以 len(history)+1 兜底重写，此处仅占位
         "round": 0,
         "at": datetime.now(UTC).isoformat(),
         "converged": report.converged,

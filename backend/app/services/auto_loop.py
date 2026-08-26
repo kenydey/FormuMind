@@ -114,6 +114,8 @@ def loop_iterate(
     model_info, rmse = _rmse_by_metric(req.domain)
 
     history = list(prior_rmse_history or [])
+    # 仅用于 plateau 检测：近 N 轮足够，避免跨长循环无限增长内存（S7）。
+    history = history[-50:]
     full_history = history + [rmse] if rmse is not None else history
     converged = (
         settings.loop_convergence_enabled

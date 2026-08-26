@@ -138,6 +138,12 @@ class CampaignStoreInterface(ABC):
     @abstractmethod
     async def list_rows(self, campaign_id: int) -> list[WorkbenchRow]: ...
 
+    async def set_row_tags(
+        self, campaign_id: int, row_id: int, tags: list[str]
+    ) -> WorkbenchRow | None:
+        """只更新单行 tags（默认实现走 batch_sync，子类可覆盖为字段级更新）。"""
+        return None
+
     @abstractmethod
     async def batch_sync(
         self,
@@ -594,6 +600,47 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return []
         return self._refs_to_rows(campaign)
+
+    async def set_row_tags(
+        self, campaign_id: int, row_id: int, tags: list[str]
+    ) -> WorkbenchRow | None:
+        """只更新单行的 tags，不回写其他字段（避免读改写竞态覆盖并发编辑）。
+
+        旧 update_row_tags 走 batch_sync 把整行（actual_params/measurements/note）
+        回写，会覆盖并发期间别人改的字段（A9）。这里在读到的 item_data 上原地
+        只改 tags 后保存，最大程度减小写窗口。
+        """
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
+            return None
+        ref_by_id = {int(r["id"]): str(r["item_id"]) for r in (campaign.sample_refs or [])}
+        item_id = ref_by_id.get(row_id)
+        if not item_id:
+            return None
+        try:
+            item_data = await self._get_item(item_id)
+        except Exception as exc:
+            logger.warning("set_row_tags skip %s: %s", item_id, exc)
+            return None
+        if item_data is None:
+            return None
+        blocks = dict(item_data.get("blocks_obj") or {})
+        params_block = dict((blocks.get(_PARAMS_BLOCK) or {}).get("data") or {})
+        params_block["tags"] = list(tags or [])
+        blocks[_PARAMS_BLOCK] = datalab_block(_PARAMS_BLOCK, params_block)
+        merged = dict(item_data.get("blocks_obj") or {})
+        merged.update(blocks)
+        item_data["blocks_obj"] = merged
+        order = list(item_data.get("display_order") or [])
+        if _PARAMS_BLOCK not in order:
+            order.append(_PARAMS_BLOCK)
+        item_data["display_order"] = order
+        try:
+            await self._save_item(item_id, item_data)
+        except Exception as exc:
+            logger.warning("set_row_tags save failed for %s: %s", item_id, exc)
+            return None
+        return next((r for r in self._refs_to_rows(campaign) if r.id == row_id), None)
 
     async def batch_sync(
         self,

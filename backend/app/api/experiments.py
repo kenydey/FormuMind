@@ -10,6 +10,7 @@ Workbench row data is stored in Datalab (SSOT) via :class:`DatalabCampaignStore`
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -471,8 +472,14 @@ async def upload_experiment_attachment(
 
     filename = file.filename or "upload"
 
+    # 上限 20MB：优先用 Content-Length 预估，缺失则读后检查（A11：原端点无上限）
+    MAX_BYTES = 20 * 1024 * 1024
+    if file.size is not None and file.size > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
     # Upload to Datalab ELN (best-effort; falls back to local file storage)
     content = await file.read()
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
     source_document_id = await _upload_or_store_locally(content, filename)
     # Create local attachment link
     store = get_measurement_store()
@@ -549,7 +556,12 @@ async def upload_workbench_row_attachment(
 
     settings = get_settings()
     filename = file.filename or "upload"
+    MAX_BYTES = 20 * 1024 * 1024
+    if file.size is not None and file.size > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
     content = await file.read()
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
     source_document_id = await _upload_or_store_locally(content, filename)
     store = get_measurement_store()
     attachment_id = store.attach(
@@ -587,17 +599,10 @@ async def update_row_tags(
 ) -> WorkbenchRowResponse:
     """Set tags on a workbench row."""
     store = get_campaign_store()
-    rows = await store.list_rows(campaign_id)
-    match = next((r for r in rows if r.id == row_id), None)
-    if match is None:
+    # 只更新 tags 字段，不回写整行 —— 避免覆盖并发编辑的其他字段（A9）
+    fresh = await store.set_row_tags(campaign_id, row_id, body.tags)
+    if fresh is None:
         raise HTTPException(status_code=404, detail="Row not found")
-    match.tags = body.tags
-    updated, refreshed = await store.batch_sync(
-        campaign_id,
-        [{"id": row_id, "tags": body.tags, "actual_params": match.actual_params,
-          "measurements": match.measurements, "status": match.status, "note": match.note}],
-    )
-    fresh = next((r for r in refreshed if r.id == row_id), match)
     return _row_response(fresh)
 
 
@@ -680,22 +685,30 @@ async def search_experiments(
         for camp in campaigns:
             refs = camp.sample_refs or []
             for ref in refs:
-                if not q:
+                # 空 q：返回全部行（与 Datalab 搜索路径一致，A12 行为不一致修复）
+                if q:
+                    tags = " ".join(ref.get("tags") or [])
+                    note = str(ref.get("note") or "")
+                    text = f"{tags} {note}".lower()
+                    if q.lower() not in text:
+                        continue
+                # ref["id"] 可能缺失：容错跳过而非 KeyError
+                rid = ref.get("id")
+                if rid is None:
                     continue
-                # Simple substring match across tags + note
-                tags = " ".join(ref.get("tags") or [])
-                note = str(ref.get("note") or "")
-                text = f"{tags} {note}".lower()
-                if q.lower() in text:
-                    results.append(ExperimentSearchResult(
-                        row_id=int(ref["id"]),
-                        campaign_id=camp.id,
-                        campaign_name=camp.name,
-                        item_id=str(ref.get("item_id", "")),
-                        status=str(ref.get("status", "Pending")),
-                        planned_params=ref.get("planned_params", {}),
-                        measurements=ref.get("measurements", {}),
-                    ))
+                try:
+                    row_id = int(rid)
+                except (TypeError, ValueError):
+                    continue
+                results.append(ExperimentSearchResult(
+                    row_id=row_id,
+                    campaign_id=camp.id,
+                    campaign_name=camp.name,
+                    item_id=str(ref.get("item_id", "")),
+                    status=str(ref.get("status", "Pending")),
+                    planned_params=ref.get("planned_params", {}),
+                    measurements=ref.get("measurements", {}),
+                ))
     return results
 
 
@@ -818,16 +831,30 @@ def _campaign_rounds_data(campaign_id: int) -> tuple[list[dict], int]:
         cat = lr.get("created_at")
         assigned = None
         if cat and loop_ats:
-            for i, at in enumerate(loop_ats):
-                if cat <= at:
-                    assigned = i
-                    break
+            try:
+                cat_dt = _parse_iso(cat)
+            except ValueError:
+                cat_dt = None
+            if cat_dt is not None:
+                for i, at in enumerate(loop_ats):
+                    at_dt = _parse_iso(at)
+                    if at_dt is not None and cat_dt <= at_dt:
+                        assigned = i
+                        break
         if assigned is not None:
             rounds[assigned]["ledger_rows"].append(lr)
         else:
             unassociated += 1
 
     return rounds, unassociated
+
+
+def _parse_iso(s: str) -> datetime | None:
+    """解析 ISO 时间戳为 datetime（兼容 'Z' 与 '+00:00' 后缀，统一到可比较对象）。"""
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 @router.get(

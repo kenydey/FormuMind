@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 import logging
+import json
 import re
 import uuid
 
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["doe"])
 
 NATIVE_DESIGNS = ["full_factorial", "fractional_factorial", "plackett_burman", "ccd", "lhs"]
-PYDOE_DESIGNS = ["bbdesign", "simplex_lattice", "sobol"]
+# 单一来源：从 pydoe_engine 导入，避免两处定义漂移（A14）
+from ..services.engines.pydoe_engine import PYDOE_DESIGNS as _PYDOE_DESIGNS
+PYDOE_DESIGNS = list(_PYDOE_DESIGNS)
 ALL_DESIGNS = NATIVE_DESIGNS + PYDOE_DESIGNS
 DOE_ENGINES = ["auto", "native", "pydoe"]
 AL_ENGINES = ["auto", "legacy", "baybe"]
@@ -187,6 +190,18 @@ def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
     engine = BaybeCampaignEngine()
     if not engine.available():
         raise HTTPException(status_code=503, detail="baybe is not installed")
+    # campaign_state 必须是合法 JSON 字符串（engine 内部 from_json 解析）；
+    # 非法则提前 422 而非裸抛 500（A13）。
+    if req.campaign_state:
+        try:
+            parsed = json.loads(req.campaign_state)
+            if not isinstance(parsed, dict):
+                raise ValueError("campaign_state must be a JSON object")
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"campaign_state 不是合法 JSON 对象: {exc}",
+            ) from exc
     result = engine.recommend(
         base_req,
         campaign_state=req.campaign_state,

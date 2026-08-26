@@ -13,15 +13,13 @@ from __future__ import annotations
 import logging
 from .errors import degrade_return
 from ..domain import features, knowledge
-from ..domain.chemistry import amine_epoxy_ratio, cpvc, pvc, solids_by_volume
+from ..domain.chemistry import amine_epoxy_ratio, cpvc, normalize_role, pvc, solids_by_volume
 from ..domain.schemas import Formulation, ProductDomain
 
 logger = logging.getLogger(__name__)
 
 
 def _sum_role(form: Formulation, role: str) -> float:
-    from ..domain.chemistry import normalize_role
-
     return sum(i.weight_pct for i in form.ingredients if normalize_role(i.role) == role)
 
 
@@ -258,8 +256,14 @@ def _predict_mechanistic(
     elif form.domain == ProductDomain.degreaser:
         surfactant = _sum_role(form, "surfactant")
         builder = _sum_role(form, "builder")
-        solvent = sum(i.weight_pct for i in form.ingredients if i.role == "solvent" and i.name != "Deionized water")
-        cleaning = 40.0 + surfactant * 3.2 + builder * 2.1 + solvent * 1.4
+        solvent = _sum_role(form, "solvent")
+        # 去离子水不算溶剂活性贡献，按名称排除。_sum_role 已走 normalize_role，
+        # 不再裸比较 i.role（S6 根因：原始比对绕过角色归一化）。
+        solvent_excl_water = sum(
+            i.weight_pct for i in form.ingredients
+            if normalize_role(i.role) == "solvent" and i.name != "Deionized water"
+        )
+        cleaning = 40.0 + surfactant * 3.2 + builder * 2.1 + solvent_excl_water * 1.4
         props["cleaning_efficiency"] = round(min(99.0, cleaning), 1)
         props["foam_index"] = round(surfactant * 1.5, 2)
         props["bath_life_cycles"] = round(builder * 4.0 + 10.0, 0)
