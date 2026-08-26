@@ -155,6 +155,9 @@ def _resolve_fields(
             need_mm=need_mm,
         )
 
+    # 反查必须建立在 CAS 校验和通过之上（C18：未通过校验和的 CAS 绝不用于
+    # 反查数据库/覆盖字段，否则伪造或错填的 CAS 可绕过闸门污染成分数据）。
+    # 128 行已把不过校验和的 merged_cas 清空，此处条件再次显式校验。
     if merged_cas and _cas_checksum_ok(merged_cas):
         from ..services.chemical_lookup import lookup_chemical
 

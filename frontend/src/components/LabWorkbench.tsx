@@ -24,6 +24,12 @@ import ExperimentDetail from "./ExperimentDetail";
 import QCReportModal from "./QCReportModal";
 import CampaignRoundsModal from "./CampaignRoundsModal";
 
+// F22：稳定模块级组件，避免每次渲染生成新的内联箭头函数导致 AG Grid
+// 反复重建 detail 面板。objectives 由 detailCellRendererParams 注入。
+function ExperimentDetailRenderer(params: any) {
+  return <ExperimentDetail data={params.data} objectives={params.objectives} />;
+}
+
 interface LabWorkbenchProps {
   campaignId: number;
   doePlan: DOEPlan;
@@ -91,6 +97,19 @@ export default function LabWorkbench({
   );
 
   const factorKeys = useMemo(() => factorKeysFromPlan(doePlan, rows), [doePlan, rows]);
+
+  // F19/F20：切换 campaignId 时立即清空上一路的状态，避免旧 campaign 的
+  // attachmentCounts / apiSnapshot / loop 统计残留，并配合上方加载 effect 的
+  // cancelled 标志防止慢请求回写错乱。
+  useEffect(() => {
+    setRows([]);
+    setError(null);
+    setSaveHint(null);
+    setLoopRoundCount(0);
+    setLoopConverged(false);
+    setApiSnapshot(undefined);
+    setAttachmentCounts({});
+  }, [campaignId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,7 +250,11 @@ export default function LabWorkbench({
             measurements: noteEditorRow.measurements ?? {},
             note } as any],
         });
-      } catch {}
+      } catch (e) {
+        // 不再静默吞错（F21）：提示用户并保留编辑器，便于重试
+        setError(`笔记保存失败：${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
       setNoteEditorRow(null);
     },
     [noteEditorRow, campaignId]
@@ -255,7 +278,13 @@ export default function LabWorkbench({
             measurements: tagPickerRow.measurements ?? {},
             tags } as any],
         });
-      } catch {}
+      } catch (e) {
+        // 不再静默吞错（F21）：提示并回滚本地乐观更新
+        setError(`标签保存失败：${e instanceof Error ? e.message : String(e)}`);
+        setRows((prev) => prev.map((r) => r.id === tagPickerRow.id ? tagPickerRow : r));
+        setTagPickerRow(null);
+        return;
+      }
       setTagPickerRow(null);
     },
     [tagPickerRow, campaignId]
@@ -430,9 +459,7 @@ export default function LabWorkbench({
             masterDetail={true}
             detailCellRendererParams={{ objectives }}
             detailRowHeight={200}
-            detailCellRenderer={(params: any) => (
-              <ExperimentDetail data={params.data} objectives={objectives} />
-            )}
+            detailCellRenderer={ExperimentDetailRenderer}
           />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">

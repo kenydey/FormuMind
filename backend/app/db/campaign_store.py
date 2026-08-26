@@ -282,7 +282,12 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         self._client_loop: asyncio.AbstractEventLoop | None = None
 
     async def _ensure_client(self) -> httpx.AsyncClient:
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 无运行事件循环（同步/线程上下文）：回退到默认策略 loop，
+            # 避免 get_running_loop 抛 RuntimeError 使整个 store 不可用（C17 加固）。
+            loop = asyncio.new_event_loop()
         if self._client is not None and self._client_loop is None:
             # Client injected externally (e.g. tests) — bind to current loop.
             self._client_loop = loop
@@ -410,8 +415,10 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                     "blocks_obj": blocks,
                     "display_order": [_PARAMS_BLOCK, _MEASUREMENTS_BLOCK],
                 }
-                created_item_ids.append(item_id)
+                # 仅在实际创建成功后才记录，避免回滚时尝试删除从未创建的 item
+                # 从而产生无意义的清理错误或掩盖真实失败原因（C16）。
                 await self._create_sample(sample_data)
+                created_item_ids.append(item_id)
                 refs.append({"id": idx, "item_id": item_id})
 
             self._save_sample_refs(campaign.id, refs)
