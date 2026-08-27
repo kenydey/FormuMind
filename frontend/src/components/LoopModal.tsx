@@ -100,6 +100,16 @@ export default function LoopModal() {
               {loopReport.loop_message || "模型 RMSE 已进入平台期，建议停止闭环迭代。"}
             </div>
           )}
+          {loopReport.chemical_feasibility && !loopReport.chemical_feasibility.feasible && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              <div className="font-semibold mb-1">⚠ 知识图谱化学可行性告警</div>
+              <ul className="list-disc list-inside space-y-0.5">
+                {loopReport.chemical_feasibility.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* Loop status row */}
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <span>引擎：<span className="font-mono text-accent2">{loopReport.engine}</span></span>

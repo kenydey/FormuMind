@@ -434,6 +434,14 @@ export default function DoeResultsPanel() {
                       {run.ai_suggested && (
                         <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
                       )}
+                      {run.infeasible && (
+                        <span
+                          className="ml-1 text-[9px] text-red-400 font-mono"
+                          title={run.infeasible_reason || "知识图谱检测到材料不相容"}
+                        >
+                          ⚠不可行
+                        </span>
+                      )}
                     </td>
                     {doePlan.factors.map((f) => (
                       <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">

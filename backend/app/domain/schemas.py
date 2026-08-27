@@ -403,6 +403,12 @@ class DOERun(BaseModel):
     coded: dict[str, float]
     natural: dict[str, float]
     ai_suggested: bool = False
+    # Closed-loop chemical feasibility flag (KG material-compatibility gate).
+    # Set when the candidate's material skeleton shares an INHIBITS relation in
+    # the knowledge graph. The whole batch shares one formulation skeleton, so
+    # an infeasible skeleton marks every run.
+    infeasible: bool = False
+    infeasible_reason: str | None = None
 
 
 class DOEPlan(BaseModel):
@@ -454,6 +460,10 @@ class BaybeRecommendResult(AdaptiveDOEMetadata):
     plan: DOEPlan
     campaign_state: str
     engine: str = "baybe"
+    # KG chemical-compatibility verdict for the shared formulation skeleton.
+    # None when KG is disabled or no material resolved. Structured as
+    # {"feasible": bool, "status": str, "reasons": list[str]}.
+    chemical_feasibility: dict | None = None
 
 
 class ActiveDoeResult(AdaptiveDOEMetadata):
@@ -462,6 +472,9 @@ class ActiveDoeResult(AdaptiveDOEMetadata):
     plan: DOEPlan
     campaign_state: str | None = None
     engine: str = "legacy"
+    # KG chemical-compatibility verdict for the shared formulation skeleton.
+    # Mirrors BaybeRecommendResult.chemical_feasibility (None when KG disabled).
+    chemical_feasibility: dict | None = None
 
 
 class OptimizationResult(BaseModel):
@@ -691,6 +704,8 @@ class LoopReport(AdaptiveDOEMetadata):
     campaign_state: str | None = None
     converged: bool = False
     loop_message: str = ""
+    # KG chemical-compatibility verdict for the recommended batch's skeleton.
+    chemical_feasibility: dict | None = None
 
 
 # ── v0.6: Natural-language intent parsing ────────────────────────────────────

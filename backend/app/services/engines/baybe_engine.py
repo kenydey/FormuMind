@@ -238,10 +238,38 @@ class BaybeCampaignEngine:
 
         rec_df = campaign.recommend(batch_size=batch_size)
         plan = dataframe_to_doe_plan(rec_df, factor_list, design, engine="baybe", ai_suggested=True)
+
+        # ── KG chemical-compatibility gate (closed-loop constraint) ──────────
+        # The whole batch shares one formulation skeleton (material composition
+        # from the requirement), so a single KG check covers every run. If the
+        # skeleton carries an INHIBITS relation between two resolved materials,
+        # every candidate is flagged infeasible with the reason. KG off or no
+        # material resolves → no constraint, loop proceeds normally.
+        chem_verdict = None
+        try:
+            from ..kg_chemical_check import check_formulation_chemistry
+            from ...domain import knowledge
+
+            skeleton = req.active_formulation or knowledge.baseline_formulation(req)
+            if skeleton is not None:
+                chk = check_formulation_chemistry(skeleton)
+                chem_verdict = {
+                    "feasible": chk.feasible,
+                    "status": chk.status,
+                    "reasons": chk.reasons,
+                }
+                if not chk.feasible:
+                    for run in plan.runs:
+                        run.infeasible = True
+                        run.infeasible_reason = "; ".join(chk.reasons) or "知识图谱检测到材料不相容"
+        except Exception as exc:  # gate must never break recommendation
+            log.debug("KG chemical gate skipped ({}); allowing", exc)
+
         result = BaybeRecommendResult(
             plan=plan,
             campaign_state=campaign.to_json(),
             engine="baybe",
+            chemical_feasibility=chem_verdict,
         )
         from ..doe_adaptive import enrich_baybe_result
 

@@ -245,16 +245,26 @@ export interface AdaptiveDOEMetadata {
   budget_remaining?: number | null;
 }
 
+export interface ChemicalFeasibility {
+  feasible: boolean;
+  status: string;
+  reasons: string[];
+}
+
 export interface ActiveDoeResult extends AdaptiveDOEMetadata {
   plan: DOEPlan;
   campaign_state: string | null;
   engine: string;
+  // KG chemical-compatibility verdict for the shared formulation skeleton.
+  chemical_feasibility?: ChemicalFeasibility | null;
 }
 
 export interface BaybeRecommendResult extends AdaptiveDOEMetadata {
   plan: DOEPlan;
   campaign_state: string;
   engine: string;
+  // KG chemical-compatibility verdict for the shared formulation skeleton.
+  chemical_feasibility?: ChemicalFeasibility | null;
 }
 
 export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
@@ -295,6 +305,10 @@ export interface DOERun {
   coded: Record<string, number>;
   natural: Record<string, number>;
   ai_suggested?: boolean;
+  // Closed-loop KG chemical-feasibility gate (set when the shared formulation
+  // skeleton shares an INHIBITS relation in the knowledge graph).
+  infeasible?: boolean;
+  infeasible_reason?: string | null;
 }
 
 export interface DOEPlan {
@@ -1963,6 +1977,8 @@ export interface LoopReport extends AdaptiveDOEMetadata {
   campaign_state?: string | null;
   converged?: boolean;
   loop_message?: string;
+  // KG chemical-compatibility verdict for the recommended batch's skeleton.
+  chemical_feasibility?: ChemicalFeasibility | null;
 }
 
 export interface IntentResult {

@@ -127,6 +127,8 @@ def loop_iterate(
         )
     )
 
+    chem = None
+
     if converged:
         if progress_cb:
             progress_cb(1.0, "converged — skipping optimize")
@@ -144,6 +146,7 @@ def loop_iterate(
             converged=True,
             loop_message="模型 RMSE 已进入平台期，建议停止闭环迭代",
             recommended_next_action="模型 RMSE 已收敛，建议汇总结果并停止新增实验。",
+            chemical_feasibility=chem,
         )
 
     if progress_cb:
@@ -176,6 +179,7 @@ def loop_iterate(
         workbench_campaign_id=workbench_campaign_id,
         budget_remaining=budget_remaining,
     )
+    chem = getattr(next_result, "chemical_feasibility", None)
 
     if progress_cb:
         progress_cb(1.0, "done")
@@ -190,11 +194,16 @@ def loop_iterate(
         engine=optimization.engine,
         campaign_state=getattr(next_result, "campaign_state", None) or campaign_state,
         converged=False,
-        loop_message="",
+        loop_message=(
+            "⚠ 知识图谱检测到推荐配方骨架存在材料不相容，详见化学可行性字段"
+            if chem and not chem.get("feasible")
+            else ""
+        ),
         strategy_label=next_result.strategy_label,
         strategy_rationale=next_result.strategy_rationale,
         run_explanations=next_result.run_explanations,
         anomalies=next_result.anomalies,
         recommended_next_action=next_result.recommended_next_action,
         budget_remaining=next_result.budget_remaining,
+        chemical_feasibility=chem,
     )
