@@ -9,6 +9,7 @@ import {
   type HardConstraint,
   type InverseDesignResult,
   type ObjectiveSpec,
+  type VerificationDoe,
 } from "../api";
 
 /**
@@ -59,8 +60,12 @@ function defaultObjectives(domain: string): ObjectiveSpec[] {
 }
 
 export default function InverseDesignModal() {
-  const { requirement, setLeaderboard } = useStore(
-    useShallow((s) => ({ requirement: s.requirement, setLeaderboard: s.setLeaderboard }))
+  const { requirement, setLeaderboard, adoptDoePlanToWorkbench } = useStore(
+    useShallow((s) => ({
+      requirement: s.requirement,
+      setLeaderboard: s.setLeaderboard,
+      adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
+    }))
   );
 
   const [hard, setHard] = useState<HardConstraint[]>(() =>
@@ -281,6 +286,34 @@ export default function InverseDesignModal() {
               </tbody>
             </table>
           </div>
+
+          {/* Third priority: minimal verification DOE per Pareto-front / scenario
+              candidate — one click pushes it into the workbench for validation. */}
+          {result.tradeoff?.verification_does && result.tradeoff.verification_does.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <div className="text-xs text-slate-400 font-medium">验证 DOE（一键下发台账验证预测）</div>
+              {result.tradeoff.verification_does.map((v: VerificationDoe, i: number) => (
+                <div
+                  key={i}
+                  className="rounded border border-edge/50 bg-ink/40 px-3 py-2 text-xs flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-accent font-medium truncate">{v.candidate_name}</div>
+                    <div className="text-slate-400 mt-0.5">{v.note}</div>
+                    <div className="text-slate-500 mt-0.5">
+                      {v.doe_plan.runs.length} 个实验点 · {v.doe_plan.design}
+                    </div>
+                  </div>
+                  <button
+                    className="shrink-0 border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-2 py-1"
+                    onClick={() => adoptDoePlanToWorkbench(v.doe_plan)}
+                  >
+                    下发台账
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <button
             className="px-3 py-1.5 rounded bg-panel border border-edge text-slate-300

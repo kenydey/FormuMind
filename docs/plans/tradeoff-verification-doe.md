@@ -76,8 +76,8 @@
 
 | # | 文件 | 改动 |
 |---|------|------|
-| F1 | `frontend/src/api.ts` | `TradeOffAnalysis` 加 `verification_does?: VerificationDoe[]`；新增 `VerificationDoe` 接口 |
-| F2 | `frontend/src/components/InverseDesignModal.tsx`（或 trade-off 展示组件） | 每个 candidate 卡片加折叠"验证 DOE"区（展示 doe_plan.runs 概览）+ "下发台账"按钮（调 `adoptDoePlanToWorkbench`） |
+| F1 | frontend/src/api.ts | TradeOffAnalysis 加 verification_does?: VerificationDoe[]；新增 VerificationDoe 接口；InverseDesignResult 补 tradeoff?: TradeOffAnalysis | null（对齐后端，前端此前漏字段） |
+| F2 | frontend/src/components/InverseDesignModal.tsx | 候选表格后新增验证 DOE 区块：遍历 result.tradeoff.verification_does，每卡显示候选名/note/实验点数 + 下发台账按钮（调 adoptDoePlanToWorkbench，复用第一优先下发路径） |
 
 ---
 

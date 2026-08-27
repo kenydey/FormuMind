@@ -490,6 +490,7 @@ export interface InverseDesignResult {
   domain: string;
   candidates: DesignCandidate[];
   pareto_frontier_ids: string[];
+  tradeoff?: TradeOffAnalysis | null;
   generations: number;
   evaluations: number;
   rejected_infeasible: number;

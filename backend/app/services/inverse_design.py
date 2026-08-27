@@ -484,7 +484,7 @@ def design(
     _assign_ranks(current, objectives)
     _assign_crowding(current, objectives)
     forms = [ind.formulation for ind in current if ind.formulation is not None]
-    tradeoff = analyze_tradeoffs(forms, objectives, settings=settings)
+    tradeoff = analyze_tradeoffs(forms, objectives, req=req, settings=settings)
 
     candidates = [
         DesignCandidate(
