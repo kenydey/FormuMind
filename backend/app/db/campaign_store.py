@@ -478,6 +478,8 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
         ref_by_id = {int(r["id"]): str(r["item_id"]) for r in (campaign.sample_refs or [])}
         updated = 0
+        failed = 0
+        total_rows = len(rows)
 
         for payload in rows:
             row_id = int(payload["id"])
@@ -488,6 +490,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 item_data = await self._get_item(item_id)
             except Exception as exc:
                 logger.warning("batch_sync skip %s: %s", item_id, exc)
+                failed += 1
                 continue
             if item_data is None:
                 logger.warning("batch_sync skip %s: item deleted from Datalab", item_id)
@@ -533,9 +536,16 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                 await self._save_item(item_id, item_data)
             except Exception as exc:
                 logger.warning("batch_sync save failed for %s: %s", item_id, exc)
+                failed += 1
                 continue
             updated += 1
 
+        if total_rows > 0 and failed == total_rows:
+            # 整批全部失败（疑似 Datalab 不可达），不再静默返回 0 让上游误判成功
+            raise DatalabUnavailableError(
+                self._api_url,
+                f"batch_sync 全部 {total_rows} 行失败（疑似 Datalab 不可达）",
+            )
         refreshed = await self.list_rows(campaign_id)
         self._update_campaign_status(campaign_id, refreshed)
         return updated, refreshed

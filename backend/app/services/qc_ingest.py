@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from typing import Any
 from dataclasses import dataclass, field
 
 from loguru import logger
@@ -145,7 +146,7 @@ def ingest_qc_report_tx(
     )
 
 
-def sync_measurements_to_experiment(experiment_id: int) -> dict[str, float]:
+def sync_measurements_to_experiment(experiment_id: int) -> dict[str, Any]:
     """Fold typed measurements back into the experiment's flat ``measured`` JSON.
 
     The training pipeline reads that column, so a QC report only becomes
@@ -172,4 +173,4 @@ def sync_measurements_to_experiment(experiment_id: int) -> dict[str, float]:
             return merged
     except Exception as exc:
         logger.warning("measured sync failed for experiment {}: {}", experiment_id, exc)
-        return {}
+        return {"_sync_error": str(exc), "experiment_id": experiment_id}

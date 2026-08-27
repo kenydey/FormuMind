@@ -314,3 +314,60 @@ def test_parse_item_envelope_requires_blocks():
         required_blocks=(_PARAMS, _MEASUREMENTS),
     )
     assert _PARAMS in item["blocks_obj"]
+
+
+@pytest.mark.asyncio
+async def test_batch_sync_all_fail_raises(tmp_path, monkeypatch):
+    """A3: 整批行全部失败（疑似 Datalab 不可达）不应静默返回 0，必须 raise。"""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=2))
+        refs = campaign.sample_refs
+
+        async def _boom(_item_id):
+            raise RuntimeError("datalab down")
+
+        monkeypatch.setattr(store, "_get_item", _boom)
+        with pytest.raises(DatalabUnavailableError, match="全部 2 行失败"):
+            await store.batch_sync(
+                campaign.id,
+                [
+                    {"id": refs[0]["id"], "status": "Completed", "measurements": {}},
+                    {"id": refs[1]["id"], "status": "Completed", "measurements": {}},
+                ],
+            )
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_batch_sync_partial_fail_does_not_raise(tmp_path, monkeypatch):
+    """部分失败不应 raise，成功的行仍应返回。"""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=2))
+        refs = campaign.sample_refs
+        orig_get = store._get_item
+        call_count = {"n": 0}
+
+        async def _flaky(item_id):
+            # 仅前 2 次调用（batch_sync 循环内）对第一个 item 失败；
+            # 后续 list_rows 刷新时恢复正常，避免副作用污染断言
+            call_count["n"] += 1
+            if call_count["n"] <= 2 and item_id == refs[0]["item_id"]:
+                raise RuntimeError("flaky")
+            return await orig_get(item_id)
+
+        monkeypatch.setattr(store, "_get_item", _flaky)
+        updated, rows = await store.batch_sync(
+            campaign.id,
+            [
+                {"id": refs[0]["id"], "status": "Completed", "measurements": {}},
+                {"id": refs[1]["id"], "status": "Completed", "measurements": {}},
+            ],
+        )
+        assert updated == 1
+    finally:
+        await store.close()

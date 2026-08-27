@@ -103,3 +103,21 @@ def test_check_formulation_predictions_flags_missing_evidence():
     evidence = [_evidence("Degreaser pH adjustment for aluminum cleaning only.")]
     warnings = check_formulation_predictions(form, evidence)
     assert any("salt_spray_hours" in w for w in warnings)
+
+
+def test_claim_check_llm_failure_marks_degraded(monkeypatch):
+    """When the LLM claim-check call raises, the result must be distinguishable
+    from the no-key offline path via engine='degraded' (A1 transparency)."""
+    import app.pipeline.claim_checker as cc
+    from app.config import Settings as _S
+
+    monkeypatch.setattr(cc, "verify_claims_llm", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("llm down")))
+    monkeypatch.setattr(_S, "get_active_api_key", lambda self: "fake-key")
+    settings = _S()
+
+    report = "## 关键发现\n\n- Waterborne epoxy with zinc phosphate inhibitor improves corrosion resistance.\n"
+    evidence = [_evidence("Waterborne epoxy with zinc phosphate inhibitor for corrosion protection.")]
+    result = cc.check_claims("epoxy primer", report, evidence, settings)
+    assert result.engine == "degraded"
+    # offline fallback still produced verified claims, not an empty result
+    assert len(result.claims) >= 1
