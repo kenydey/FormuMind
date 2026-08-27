@@ -182,42 +182,6 @@ def test_fetch_campaign_data_for_baybe(tmp_path):
     assert "salt_spray_hours" in merged.columns
 
 
-def test_baybe_recommend_accepts_workbench_campaign_id(tmp_path):
-    client = _client_with_memory_db(tmp_path)
-    created = client.post("/api/experiments/workbench/campaigns", json={"plan": _plan().model_dump()}).json()
-    campaign_id = created["campaign_id"]
-    row = created["rows"][0]
-    client.put(
-        "/api/experiments/workbench/sync",
-        json={
-            "campaign_id": campaign_id,
-            "rows": [
-                {
-                    "id": row["id"],
-                    "status": "Pending",
-                    "actual_params": row["planned_params"],
-                    "measurements": {"salt_spray_hours": 880.0, "cost_cny_per_kg": 25.0, "sustainability_idx": 0.72},
-                }
-            ],
-        },
-    )
-
-    res = client.post(
-        "/api/baybe/recommend",
-        json={
-            "domain": ProductDomain.anticorrosion_coating.value,
-            "salt_spray_hours": 500,
-            "workbench_campaign_id": campaign_id,
-            "batch_size": 2,
-        },
-    )
-    assert res.status_code in (200, 503)
-    if res.status_code == 200:
-        body = res.json()
-        assert len(body["plan"]["runs"]) == 2
-        assert body["campaign_state"]
-
-
 def test_search_experiments_local_scan(tmp_path, monkeypatch):
     """Regression: the local-SQLite-scan fallback imported from the
     nonexistent app.api.database module and crashed with ModuleNotFoundError

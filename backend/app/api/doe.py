@@ -13,7 +13,7 @@ import json
 import re
 import uuid
 
-from ..domain.schemas import ActiveDoeResult, BaybeRecommendResult, DOEPlan, ExperimentRecord, Requirement
+from ..domain.schemas import ActiveDoeResult, DOEPlan, ExperimentRecord, Requirement
 from ..pipeline import workflow
 from ..services import io_export
 from ..services.active_learning import active_learning_doe
@@ -44,50 +44,6 @@ def _persist_doe_plan(plan: DOEPlan, campaign_id: int | None = None) -> None:
             doe_plan_store.save(session, plan, campaign_id=campaign_id)
     except Exception as exc:
         logger.warning("persist doe plan failed: %s", exc, exc_info=True)
-
-
-def _persist_run_record(
-    operation: str, request_data: dict, result: BaybeRecommendResult,
-) -> None:
-    """Best-effort: enqueue baybe run record to task_outbox (idempotent audit).
-
-    Uses content-addressed idempotency derived from the request parameters so
-    retries with the same payload collapse onto a single outbox row.
-    """
-    try:
-        import hashlib
-        import json
-
-        from ..db import outbox_store
-        from ..db.database import default_session_factory
-        from ..db.session_utils import commit_session
-
-        raw = json.dumps(request_data, sort_keys=True, ensure_ascii=False)
-        idempotency_key = hashlib.sha256(raw.encode()).hexdigest()
-
-        plan = result.plan
-        payload: dict = {
-            "plan_id": plan.plan_id,
-            "domain": plan.domain.value if plan.domain else None,
-            "design": plan.design,
-            "suggestions_count": len(plan.runs),
-            "factors": [f.name for f in plan.factors],
-            "engine": getattr(result, "engine", "baybe"),
-            "campaign_state": (
-                result.campaign_state[:100] if result.campaign_state else ""
-            ),
-        }
-
-        factory = default_session_factory()
-        with commit_session(factory) as session:
-            outbox_store.enqueue(
-                session,
-                operation=operation,
-                idempotency_key=idempotency_key,
-                payload=payload,
-            )
-    except Exception as exc:
-        logger.warning("persist run record failed: %s", exc, exc_info=True)
 
 
 @router.post("/doe", response_model=DOEPlan)
@@ -131,16 +87,6 @@ class ActiveDoeRequest(Requirement):
     budget_remaining: int | None = None
 
 
-class BaybeRecommendRequest(Requirement):
-    """Stateless baybe recommend roundtrip."""
-
-    existing_records: list[ExperimentRecord] = []
-    batch_size: int = Field(default=4, ge=1, le=50)
-    campaign_state: str | None = None
-    workbench_campaign_id: int | None = None
-    budget_remaining: int | None = None
-
-
 @router.post("/doe/active", response_model=ActiveDoeResult)
 def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
     """Generate a DOE plan with AI-selected most-informative experiments flagged."""
@@ -170,51 +116,6 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
         budget_remaining=req.budget_remaining,
     )
     _persist_doe_plan(result.plan, campaign_id=req.workbench_campaign_id)
-    return result
-
-
-@router.post("/baybe/recommend", response_model=BaybeRecommendResult)
-def baybe_recommend(req: BaybeRecommendRequest) -> BaybeRecommendResult:
-    """Pure baybe Campaign recommendation with JSON state roundtrip."""
-    base_req = Requirement(
-        **req.model_dump(
-            exclude={
-                "existing_records",
-                "batch_size",
-                "campaign_state",
-                "workbench_campaign_id",
-                "budget_remaining",
-            }
-        )
-    )
-    engine = BaybeCampaignEngine()
-    if not engine.available():
-        raise HTTPException(status_code=503, detail="baybe is not installed")
-    # campaign_state 必须是合法 JSON 字符串（engine 内部 from_json 解析）；
-    # 非法则提前 422 而非裸抛 500（A13）。
-    if req.campaign_state:
-        try:
-            parsed = json.loads(req.campaign_state)
-            if not isinstance(parsed, dict):
-                raise ValueError("campaign_state must be a JSON object")
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"campaign_state 不是合法 JSON 对象: {exc}",
-            ) from exc
-    result = engine.recommend(
-        base_req,
-        campaign_state=req.campaign_state,
-        measurements=req.existing_records,
-        batch_size=req.batch_size,
-        workbench_campaign_id=req.workbench_campaign_id,
-        budget_remaining=req.budget_remaining,
-    )
-    result.plan.plan_id = uuid.uuid4().hex
-    result.plan.domain = base_req.domain
-    workflow._cache_plan(result.plan)
-    _persist_doe_plan(result.plan, campaign_id=req.workbench_campaign_id)
-    _persist_run_record("baybe_recommend", req.model_dump(), result)
     return result
 
 

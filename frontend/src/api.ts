@@ -278,14 +278,6 @@ export interface ActiveDoeResult extends AdaptiveDOEMetadata {
   chemical_feasibility?: ChemicalFeasibility | null;
 }
 
-export interface BaybeRecommendResult extends AdaptiveDOEMetadata {
-  plan: DOEPlan;
-  campaign_state: string;
-  engine: string;
-  // KG chemical-compatibility verdict for the shared formulation skeleton.
-  chemical_feasibility?: ChemicalFeasibility | null;
-}
-
 export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
 
 export interface TaskProgressEvent {
@@ -847,22 +839,6 @@ export const api = {
       campaign_state: opts.campaign_state ?? null,
       workbench_campaign_id: opts.workbench_campaign_id ?? null,
       budget_remaining: opts.budget_remaining ?? null,
-    }),
-  baybeRecommend: (
-    req: Requirement,
-    opts: {
-      batch_size?: number;
-      campaign_state?: string | null;
-      workbench_campaign_id?: number | null;
-      existing_records?: ExperimentRecord[];
-    } = {}
-  ) =>
-    post<BaybeRecommendResult>("/api/baybe/recommend", {
-      ...req,
-      existing_records: opts.existing_records ?? [],
-      batch_size: opts.batch_size ?? 4,
-      campaign_state: opts.campaign_state ?? null,
-      workbench_campaign_id: opts.workbench_campaign_id ?? null,
     }),
   // ── Inverse design ──
   startInverseDesign: (
