@@ -7,11 +7,14 @@ over time (a flywheel). Measured evidence is tagged with
 ``extraction_method="measured"`` so it is distinguishable from literature evidence
 and is accumulated (never overwrites) via ``evidence_refs``.
 
-Scope (v1, pragmatic): the unit of feedback is
-``(campaign domain entity, performance metric entity, measured value)``.
-Component-level feedback (lever role -> chemical entity) needs a lever->chemical
-mapping that is out of scope for v1; domain-level feedback is enough to prove the
-loop end-to-end without risking KG pollution.
+Real-environment adaptations (learned from live-DB validation):
+* ``Campaign`` has no ``domain`` column, so we read it defensively and fall back to
+  a candidate list (``anticorrosion_coating`` -> ``corrosion`` -> ``Corrosion``) to
+  resolve the domain entity that actually exists in the KG.
+* The KG may not yet contain property entities for every metric (e.g. the live DB
+  only has ``Corrosion`` / ``Coatings`` trade products). When a metric cannot be
+  resolved we *create* a ``property`` entity from the campaign's objective
+  ``display_name`` so measured evidence still lands and the KG self-enriches.
 """
 
 from __future__ import annotations
@@ -30,12 +33,57 @@ from ..db.models import KGEntityLink
 logger = logging.getLogger(__name__)
 
 
+def _utcnow():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
 def _resolve_entity_id(store, name: str) -> str | None:
     """Best-effort entity resolution by display name; None if not in KG."""
     if not name:
         return None
     hits = store.search_entities(name, limit=1)
     return hits[0].id if hits else None
+
+
+def _resolve_domain_id(store, campaign) -> str | None:
+    """Resolve the campaign's domain entity, tolerant of missing ``domain`` attr
+    and of KG naming (e.g. ``Corrosion`` rather than ``anticorrosion_coating``)."""
+    candidates: list[str] = []
+    dom = getattr(campaign, "domain", "") or ""
+    if dom:
+        candidates.append(str(dom))
+    candidates += ["anticorrosion_coating", "anticorrosion", "corrosion", "Corrosion"]
+    for cand in candidates:
+        eid = _resolve_entity_id(store, cand)
+        if eid:
+            return eid
+    return None
+
+
+def _resolve_or_create_property(store, session, metric: str, display_name: str | None) -> str | None:
+    """Resolve a performance-property entity; create it if absent so measured
+    evidence can always land (KG self-enrichment)."""
+    eid = _resolve_entity_id(store, metric)
+    if eid:
+        return eid
+    label = (display_name or metric).strip()
+    eid = _resolve_entity_id(store, label)
+    if eid:
+        return eid
+    # create a property entity keyed by metric id for stable lookup
+    try:
+        store.upsert_entity(
+            session,
+            id=f"prop:{metric}",
+            canonical_name=label or metric,
+            kind="property",
+        )
+        return f"prop:{metric}"
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("kg_feedback: could not create property entity %s: %s", metric, exc)
+        return None
 
 
 def _normalize_confidence(value: float) -> float:
@@ -62,14 +110,22 @@ def _merge_evidence_refs(existing_refs, evidence_ref):
     return refs[:20]
 
 
+def _objective_display_names(campaign) -> dict[str, str]:
+    """Map metric id -> human display name from the campaign objectives snapshot."""
+    snap = getattr(campaign, "objectives_snapshot", None) or []
+    out: dict[str, str] = {}
+    for obj in snap:
+        if isinstance(obj, dict) and obj.get("metric"):
+            out[obj["metric"]] = obj.get("display_name") or obj["metric"]
+    return out
+
+
 def ingest_measured_evidence(campaign_id: int) -> int:
     """Write measured performance from a campaign's synced rows back to the KG.
 
     Returns the number of links written. Safe no-ops when disabled, when the
-    campaign/domain entity is missing, or when a metric has no KG entity.
-    Uses its own session so the write is committed deterministically (bypassing
-    ``merge_semantic_link``'s nested-savepoint path, which does not reliably
-    persist in this SQLite setup).
+    campaign/domain entity is missing, or when a metric cannot be resolved or
+    created. Uses its own session so the write is committed deterministically.
     """
     settings = get_settings()
     if not settings.kg_measured_feedback_enabled:
@@ -81,7 +137,6 @@ def ingest_measured_evidence(campaign_id: int) -> int:
         logger.warning("kg_feedback: campaign %s not found, skip", campaign_id)
         return 0
 
-    domain_name = (campaign.domain or "").strip()
     rows = store.list_rows_sync(campaign_id)
     if not rows:
         return 0
@@ -96,15 +151,16 @@ def ingest_measured_evidence(campaign_id: int) -> int:
         return 0
 
     es = get_entity_store()
-    src_id = _resolve_entity_id(es, domain_name)
+    src_id = _resolve_domain_id(es, campaign)
     if src_id is None:
-        logger.warning("kg_feedback: domain entity %r not in KG, skip", domain_name)
+        logger.warning("kg_feedback: domain entity not resolvable for campaign %s, skip", campaign_id)
         return 0
 
+    display = _objective_display_names(campaign)
     written = 0
     with es._session_factory() as session:
         for metric, value in measured.items():
-            dst_id = _resolve_entity_id(es, metric)
+            dst_id = _resolve_or_create_property(es, session, metric, display.get(metric))
             if dst_id is None or dst_id == src_id:
                 continue
             if "measured_performance" not in SEMANTIC_LINK_TYPES:
@@ -112,7 +168,7 @@ def ingest_measured_evidence(campaign_id: int) -> int:
             evidence_ref = {
                 "source_id": f"measured:campaign_{campaign_id}",
                 "extraction_method": "measured",
-                "sentence": f"实测 {metric}={value}",
+                "sentence": f"实测 {display.get(metric, metric)}={value}",
             }
             existing = (
                 session.query(KGEntityLink)
@@ -160,9 +216,3 @@ def ingest_measured_evidence(campaign_id: int) -> int:
             written,
         )
     return written
-
-
-def _utcnow():
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc)
