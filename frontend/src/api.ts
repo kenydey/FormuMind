@@ -206,6 +206,16 @@ export interface TradeOffAnalysis {
   comparison_table?: Record<string, unknown>[];
   scenario_picks?: ScenarioPick[];
   dominance_notes?: string[];
+  // Third priority: minimal verification DOE per Pareto-front / scenario-pick
+  // candidate, ready to push into the workbench.
+  verification_does?: VerificationDoe[];
+}
+
+export interface VerificationDoe {
+  candidate_id: string;
+  candidate_name: string;
+  note: string;
+  doe_plan: DOEPlan;
 }
 
 export interface ScenarioPick {

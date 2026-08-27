@@ -119,6 +119,7 @@ def finalize_recommendation_bundle(
             objectives,
             rec_map,
             scenario_kinds=scenario_kinds,
+            req=req,
             settings=settings,
         )
 

@@ -1,11 +1,12 @@
 """Pareto frontier and scenario picks for formulation candidates."""
 from __future__ import annotations
 
+import logging
 import re
 from typing import Iterable
 
 from ..config import Settings, get_settings
-from ..domain.schemas import Formulation, ObjectiveSpec, RecommendedFormula
+from ..domain.schemas import Formulation, ObjectiveSpec, RecommendedFormula, Requirement
 from ..domain.tradeoff_schemas import (
     ConfidenceLevel,
     FormulationCandidateView,
@@ -13,7 +14,10 @@ from ..domain.tradeoff_schemas import (
     ScenarioKind,
     ScenarioPick,
     TradeOffAnalysis,
+    VerificationDoe,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def candidate_id(name: str, index: int) -> str:
@@ -128,12 +132,58 @@ def _confidence(form: Formulation, grounding: GroundingSummary) -> ConfidenceLev
     return "high"
 
 
+def _verification_doe_for(
+    form: Formulation,
+    req,
+    objectives: list[ObjectiveSpec],
+    *,
+    settings: Settings | None = None,
+) -> VerificationDoe | None:
+    """Build a minimal verification DOE anchored to one candidate.
+
+    Reuses the mature ``build_doe`` (LHS, n=verification_doe_n) and annotates
+    the plan notes with the reference candidate so the chemist knows what
+    prediction this experiment validates. Returns None if disabled or on any
+    failure (must never break the trade-off analysis).
+    """
+    settings = settings or get_settings()
+    if not settings.verification_doe_enabled:
+        return None
+    try:
+        from ..pipeline.workflow import build_doe
+
+        plan = build_doe(req, "lhs", n=settings.verification_doe_n)
+        plan.design = "verification"
+        predicted = dict(form.predicted or {})
+        targets = ", ".join(
+            f"{o.metric}={predicted.get(o.metric)}" for o in objectives if o.metric in predicted
+        )
+        plan.notes = (
+            f"验证 DOE — 参考基线候选「{form.name}」\n"
+            f"目标确认：{targets or '（见候选预测）'}\n"
+            f"建议：执行此 DOE 确认 {form.name} 的预测性能，达标后再放大批次。\n"
+            + (plan.notes or "")
+        )
+        cid = ""
+        # Reuse the same candidate id scheme as analyze_tradeoffs.
+        return VerificationDoe(
+            candidate_id=cid,
+            candidate_name=form.name,
+            note=f"验证候选「{form.name}」的预测性能（{targets or '见候选预测'}）",
+            doe_plan=plan,
+        )
+    except Exception as exc:
+        logger.debug("verification DOE skipped for %s: %s", form.name, exc)
+        return None
+
+
 def analyze_tradeoffs(
     forms: list[Formulation],
     objectives: list[ObjectiveSpec],
     rec_by_name: dict[str, RecommendedFormula] | None = None,
     *,
     scenario_kinds: Iterable[ScenarioKind] | None = None,
+    req: "Requirement | None" = None,
     settings: Settings | None = None,
 ) -> TradeOffAnalysis | None:
     settings = settings or get_settings()
@@ -240,6 +290,38 @@ def analyze_tradeoffs(
             + (f"（{' × '.join(o.metric for o in objectives)}）。" if objectives else "。")
         )
 
+    # Third priority: minimal verification DOE per Pareto-front / scenario-pick
+    # candidate, anchored to that candidate. Skip KG-incompatible candidates
+    # (second-priority gate) — no point verifying a chemically-infeasible mix.
+    verification_does: list[VerificationDoe] = []
+    if req is not None and settings.verification_doe_enabled:
+        picked_names: list[str] = []
+        picked_names.extend(frontier_ids)  # frontier ids are candidate ids, map below
+        scenario_names = [p.candidate_name for p in scenario_picks if p.candidate_name]
+        # Map candidate id → form name; frontier_ids are candidate ids.
+        id_to_form = {cand.id: cand.name for cand in candidates}
+        verify_names = set(scenario_names)
+        for cid in frontier_ids:
+            nm = id_to_form.get(cid)
+            if nm:
+                verify_names.add(nm)
+        seen: set[str] = set()
+        for form in forms:
+            if form.name not in verify_names or form.name in seen:
+                continue
+            seen.add(form.name)
+            # Skip KG-incompatible (second-priority gate).
+            _kc = getattr(form, "kg_compat", None)
+            if _kc and not _kc.get("feasible", True):
+                continue
+            vdoe = _verification_doe_for(form, req, objectives, settings=settings)
+            if vdoe is not None:
+                # Backfill candidate id from the matched candidate.
+                vdoe.candidate_id = next(
+                    (c.id for c in candidates if c.name == form.name), vdoe.candidate_id
+                )
+                verification_does.append(vdoe)
+
     return TradeOffAnalysis(
         objectives=objectives,
         metric_columns=metric_columns,
@@ -249,6 +331,7 @@ def analyze_tradeoffs(
         scenario_picks=scenario_picks,
         dominance_notes=notes,
         engine="predictor",
+        verification_does=verification_does,
     )
 
 

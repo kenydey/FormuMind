@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     recommend_diversity_lambda: float = 0.7
     recommend_tradeoff_enabled: bool = True
     recommend_uncertainty_flag: bool = True
+    # Third priority: per-candidate minimal verification DOE for trade-off
+    # recommendations. Generates a small LHS DOE anchored to each Pareto-front
+    # / scenario-pick candidate so the chemist can verify predictions with one
+    # click into the workbench. Off → no verification DOE generated.
+    verification_doe_enabled: bool = True
+    verification_doe_n: int = 4
 
     # Experiment feedback / model training.
     # Measured DOE results are persisted in a SQL database (SQLite by default;

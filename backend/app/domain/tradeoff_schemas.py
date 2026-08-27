@@ -1,11 +1,17 @@
 """P1-R2 trade-off analysis schemas."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
 from .schemas import ObjectiveSpec
+
+if TYPE_CHECKING:
+    # Avoid a circular import with app.domain.schemas (DOEPlan is defined
+    # after TradeOffAnalysis is imported there). Pydantic v2 resolves the
+    # forward reference lazily on first use.
+    from .schemas import DOEPlan
 
 CandidateSource = Literal["llm_recommend", "offline", "manual", "optimize", "baybe"]
 ConfidenceLevel = Literal["high", "medium", "low"]
@@ -52,6 +58,21 @@ class TradeOffAnalysis(BaseModel):
     scenario_picks: list[ScenarioPick] = Field(default_factory=list)
     dominance_notes: list[str] = Field(default_factory=list)
     engine: str = "predictor"
+    # Third priority: minimal verification DOE per Pareto-front / scenario-pick
+    # candidate, so the chemist can validate predictions with one click into
+    # the workbench. Empty when verification_doe_enabled is False.
+    verification_does: list["VerificationDoe"] = Field(default_factory=list)
+
+
+class VerificationDoe(BaseModel):
+    """A minimal DOE anchored to one recommended candidate for validation."""
+
+    candidate_id: str
+    candidate_name: str
+    # Why verify this one / what to confirm (ties back to "why A not B").
+    note: str
+    # Ready-to-adopt DOE plan (frontend pushes via adoptDoePlanToWorkbench).
+    doe_plan: DOEPlan
 
 
 class RecommendMeta(BaseModel):
