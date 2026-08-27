@@ -123,6 +123,15 @@ export interface Formulation {
   score: number | null;
   warnings: string[];
   source?: string;
+  // KG compatibility adjustment detail (second priority). Populated by the
+  // backend when KG is enabled; optional on the client side.
+  kg_compat?: {
+    feasible: boolean;
+    status: string;
+    incompatible_pairs: { a: string; b: string; relation: string }[];
+    synergy_pairs: { a: string; b: string; relation: string }[];
+    reasons: string[];
+  } | null;
 }
 
 export interface EvidenceEntityRef {

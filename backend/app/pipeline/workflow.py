@@ -87,6 +87,13 @@ def _score_and_validate(
         from ..services import chemtools
 
         form.warnings.extend(chemtools.screen_formulation(form))
+        # KG compatibility as a *soft* ranking factor (second priority):
+        # INHIBITS → score penalty + warning; SYNERGIZES → optional bonus.
+        # Never runs inside optimization loops (they pass chem_screen=False
+        # and use the hard infeasible gate from the first-priority work).
+        from ..services.kg_recommend_score import kg_compat_adjust
+
+        kg_compat_adjust(form)  # applies penalty/bonus + records form.kg_compat
     # `objectives` defaults to req.objectives for every existing caller. Callers
     # that already resolved a different objectives list to rank/select
     # candidates by (e.g. run_optimization falling back to default_objectives()

@@ -183,6 +183,9 @@ class Formulation(BaseModel):
     prediction_tiers: dict[str, str] = Field(default_factory=dict)
     score: float | None = None
     warnings: list[str] = Field(default_factory=list)
+    # KG compatibility adjustment detail (second priority). Populated by
+    # kg_recommend_score when KG is enabled; None otherwise.
+    kg_compat: dict | None = None
 
     def total_pct(self) -> float:
         return round(sum(i.weight_pct for i in self.ingredients), 4)

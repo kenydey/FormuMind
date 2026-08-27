@@ -1,11 +1,15 @@
 """KG-driven chemical feasibility check for DOE candidate formulations.
 
 This is the *deterministic, zero-LLM-cost* chemical constraint source for the
-closed-loop DOE generator. For each candidate formulation it resolves the
-material names to KG entities (best-effort, by canonical-name match) and asks
-the knowledge graph whether any pair of materials shares an ``INHIBITS``
-(incompatible) relation. A hit marks the candidate ``infeasible`` with a
-human-readable reason sourced from the relation's evidence sentence.
+closed-loop DOE generator and the recommendation ranker. For each candidate
+formulation it resolves the material names to KG entities (best-effort, by
+canonical-name match) and asks the knowledge graph whether any pair of
+materials shares an ``INHIBITS`` (incompatible) relation. A hit marks the
+candidate ``infeasible`` with a human-readable reason sourced from the
+relation's evidence sentence.
+
+Optionally (for the recommendation ranker) it also surfaces ``SYNERGIZES``
+relations as a positive signal.
 
 Design notes
 ------------
@@ -47,6 +51,9 @@ class ChemicalCheckResult:
     status: str = "pass"  # pass | warn | infeasible
     reasons: list[str] = field(default_factory=list)
     incompatible_pairs: list[tuple[str, str, str]] = field(default_factory=list)
+    # Positive signal for the recommendation ranker (only populated when
+    # include_synergies=True): material pairs sharing a SYNERGIZES relation.
+    synergy_pairs: list[tuple[str, str, str]] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return self.feasible
@@ -97,12 +104,45 @@ def _incompatible_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
     return out
 
 
-def check_formulation_chemistry(form: Formulation) -> ChemicalCheckResult:
+# Relation types that express material synergy / beneficial combination.
+_SYNERGY_RELATIONS = ("synergizes",)
+
+
+def _synergy_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
+    """Return [(other_entity_id, relation_type, evidence_sentence), ...]."""
+    from ..services.kg.graph_query import get_entity_relations
+
+    rels = get_entity_relations(
+        entity_id,
+        direction="both",
+        link_types=list(_SYNERGY_RELATIONS),
+        limit=50,
+    )
+    out = []
+    for r in rels:
+        if r.confidence < _MIN_RELATION_CONFIDENCE:
+            continue
+        other = r.source_entity_id if r.target_entity_id == entity_id else r.target_entity_id
+        sentence = ""
+        if r.evidence:
+            sentence = r.evidence[0].sentence
+        out.append((other, r.relation_type.value, sentence))
+    return out
+
+
+def check_formulation_chemistry(
+    form: Formulation,
+    *,
+    include_synergies: bool = False,
+) -> ChemicalCheckResult:
     """Deterministic KG chemical-compatibility check for a candidate formula.
 
     Returns ``feasible=True`` (status ``pass``) when KG is disabled, no
     material resolves, or no incompatibility is found. Marks ``infeasible``
     only on a concrete KG ``INHIBITS`` relation between two resolved materials.
+
+    When ``include_synergies=True`` (recommendation ranker path) it also
+    collects ``SYNERGIZES`` pairs as a positive signal.
     """
     settings = get_settings()
     if not settings.kg_enabled:
@@ -125,6 +165,7 @@ def check_formulation_chemistry(form: Formulation) -> ChemicalCheckResult:
 
     reasons: list[str] = []
     pairs: list[tuple[str, str, str]] = []
+    synergies: list[tuple[str, str, str]] = []
     name_by_eid: dict[str, str] = {eid: name for name, eid in resolved.items()}
 
     names = list(resolved.keys())
@@ -137,6 +178,10 @@ def check_formulation_chemistry(form: Formulation) -> ChemicalCheckResult:
                     cause = sentence or f"知识图谱记录 {m_a} 与 {m_b} 存在不相容关系（{rel_type}）"
                     reasons.append(f"{m_a} 与 {m_b} 不相容：{cause}")
                     pairs.append((m_a, m_b, rel_type))
+            if include_synergies:
+                for other, rel_type, sentence in _synergy_pairs_for(eid_a):
+                    if other == eid_b:
+                        synergies.append((m_a, m_b, rel_type))
 
     if pairs:
         return ChemicalCheckResult(
@@ -144,5 +189,10 @@ def check_formulation_chemistry(form: Formulation) -> ChemicalCheckResult:
             status="infeasible",
             reasons=reasons,
             incompatible_pairs=pairs,
+            synergy_pairs=synergies,
         )
-    return ChemicalCheckResult(feasible=True, status="pass")
+    return ChemicalCheckResult(
+        feasible=True,
+        status="pass",
+        synergy_pairs=synergies,
+    )

@@ -441,6 +441,12 @@ class Settings(BaseSettings):
     kg_llm_relation_extract: bool = False
     kg_relation_min_confidence: float = 0.55
     kg_multimodal_fusion_enabled: bool = False
+    # KG → recommendation ranking weights (second priority). Soft constraints:
+    # an INHIBITS relation between skeleton materials multiplies the
+    # formulation score (sinks it in ranking, never deletes); SYNERGIZES gives
+    # a mild bonus when explicitly enabled. KG disabled → both treated as 1.0.
+    kg_inhibits_penalty: float = 0.5
+    kg_synergizes_bonus: float = 1.0  # 1.0 = disabled by default
 
     # Chat P0 — multi-turn, structured answers, soft clarification.
     chat_multi_turn_enabled: bool = True
