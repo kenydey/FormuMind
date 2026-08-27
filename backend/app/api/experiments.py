@@ -334,6 +334,15 @@ async def sync_workbench(
 
     from ..services.workbench_loop import dispatch_loop_after_sync
 
+    # P0 KG self-evolution: push measured results back into the KG (best-effort,
+    # never blocks the sync response).
+    try:
+        from ..services import kg_feedback
+
+        kg_feedback.ingest_measured_evidence(payload.campaign_id)
+    except Exception as exc:  # pragma: no cover - defense in depth
+        logger.warning("kg_feedback ingest failed (non-fatal): %s", exc)
+
     loop_task_id, loop_message = dispatch_loop_after_sync(
         training_ingested=training_ingested,
         workbench_campaign_id=payload.campaign_id,

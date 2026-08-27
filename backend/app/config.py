@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     recommend_diversity_lambda: float = 0.7
     recommend_tradeoff_enabled: bool = True
     recommend_uncertainty_flag: bool = True
+    # P0 KG 自进化闭环：台账实测 → 写回 KG 关系（extraction_method="measured"）
+    kg_measured_feedback_enabled: bool = True
     # Third priority: per-candidate minimal verification DOE for trade-off
     # recommendations. Generates a small LHS DOE anchored to each Pareto-front
     # / scenario-pick candidate so the chemist can verify predictions with one

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Text, cast, func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker, attributes
 
 from .models import KGEntity, KGEntityLink, KGMention
 from .session_utils import commit_session
@@ -22,6 +22,7 @@ SEMANTIC_LINK_TYPES = frozenset(
         "correlates_pos",
         "correlates_neg",
         "requires",
+        "measured_performance",
     }
 )
 
@@ -255,6 +256,7 @@ class EntityStore:
             ):
                 refs.append(evidence_ref)
             existing.evidence_refs = refs[:20]
+            attributes.flag_modified(existing, "evidence_refs")
             existing.confidence = max(float(existing.confidence or 0), confidence)
             existing.extraction_method = extraction_method
             existing.is_valid = True
@@ -275,7 +277,9 @@ class EntityStore:
             .first()
         )
         if existing:
-            return _merge(existing)
+            result = _merge(existing)
+            session.flush()
+            return result
         sp = session.begin_nested()
         try:
             session.add(
@@ -339,6 +343,7 @@ class EntityStore:
             ):
                 refs.append(evidence_ref)
             existing.evidence_refs = refs[:20]
+            attributes.flag_modified(existing, "evidence_refs")
             existing.confidence = max(float(existing.confidence or 0), confidence)
             existing.extraction_method = extraction_method
             existing.is_valid = True
@@ -359,7 +364,9 @@ class EntityStore:
             .first()
         )
         if existing:
-            return _merge(existing)
+            result = _merge(existing)
+            session.flush()
+            return result
         sp = session.begin_nested()
         try:
             session.add(
