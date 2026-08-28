@@ -424,6 +424,7 @@ export interface WorkbenchSyncResponse {
   rows: WorkbenchRow[];
   training_ingested?: number;
   training_message?: string;
+  prediction_bias?: { n_rows: number; by_metric: Record<string, { n: number; mean_error: number; rmse: number; mae: number; max_abs: number }> } | null;
   loop_task_id?: string | null;
   loop_message?: string;
 }

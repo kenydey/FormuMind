@@ -82,6 +82,7 @@ class WorkbenchSyncResponse(BaseModel):
     rows: list[WorkbenchRowResponse]
     training_ingested: int = 0
     training_message: str = ""
+    prediction_bias: dict | None = None
     loop_task_id: str | None = None
     loop_message: str = ""
 
@@ -370,6 +371,7 @@ async def sync_workbench(
         rows=[_row_response(r) for r in rows],
         training_ingested=training_ingested,
         training_message=training_message,
+        prediction_bias=train_result.get("prediction_bias"),
         loop_task_id=loop_task_id,
         loop_message=loop_message,
     )

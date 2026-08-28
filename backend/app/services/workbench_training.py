@@ -71,12 +71,79 @@ def _campaign_domain(campaign: Campaign) -> ProductDomain:
     return ProductDomain.anticorrosion_coating
 
 
+def _compute_prediction_bias(
+    to_add: list[ExperimentRecord],
+    domain: ProductDomain,
+    project_id: str,
+) -> dict:
+    """Compute predicted vs measured bias using the *current* registry (before retrain).
+
+    Returns ``{n_rows, by_metric: {metric: {n, mean_error, rmse, mae, max_abs}}}``
+    or ``{}`` when no metric has a trained model yet.
+    """
+    if not to_add:
+        return {}
+    from ..domain import features
+    from ..domain.schemas import Requirement, Substrate
+    from ..pipeline import reconstruct
+    from .training import registry
+
+    per_metric_errors: dict[str, list[float]] = {}
+    for rec in to_add:
+        # Build feature vector exactly as training does
+        req = Requirement(domain=rec.domain)
+        sub_raw = rec.factors.get("substrate")
+        if sub_raw is not None:
+            try:
+                req.substrate = Substrate(str(sub_raw))
+            except Exception:
+                pass
+        try:
+            form = reconstruct.formulation_from_factors(req, rec.factors)
+            vec = features.vector(form, {"cure_temperature_c": rec.cure_temperature_c or 0.0})
+        except Exception:
+            continue
+        for metric, measured in rec.measured.items():
+            try:
+                res = registry.predict(domain, metric, vec, project_id=project_id)
+            except Exception:
+                continue
+            if res is None:
+                continue
+            pred, _n = res
+            err = float(pred) - float(measured)  # predicted - measured
+            per_metric_errors.setdefault(metric, []).append(err)
+
+    if not per_metric_errors:
+        return {}
+
+    import math as _m
+
+    by_metric: dict[str, dict] = {}
+    for metric, errs in per_metric_errors.items():
+        n = len(errs)
+        mean_err = sum(errs) / n
+        mse = sum(e * e for e in errs) / n
+        rmse = _m.sqrt(mse)
+        mae = sum(abs(e) for e in errs) / n
+        max_abs = max(abs(e) for e in errs)
+        by_metric[metric] = {
+            "n": n,
+            "mean_error": round(mean_err, 4),
+            "rmse": round(rmse, 4),
+            "mae": round(mae, 4),
+            "max_abs": round(max_abs, 4),
+        }
+
+    return {"n_rows": len(to_add), "by_metric": by_metric}
+
+
 def ingest_workbench_rows(
     campaign_id: int,
     rows: list[WorkbenchRow],
     *,
     retrain: bool = True,
-) -> dict[str, int | str]:
+) -> dict:
     """Idempotently push Completed workbench rows into ModelRegistry."""
     settings = get_settings()
     if not settings.workbench_auto_train:
@@ -109,6 +176,8 @@ def ingest_workbench_rows(
         known.add(rec.label)
 
     if to_add:
+        # P2: compute bias BEFORE retrain (use current model as baseline)
+        bias = _compute_prediction_bias(to_add, domain, project_id)
         registry.add(to_add, retrain=retrain)
         logger.info(
             "workbench_training: ingested %d record(s) for campaign %s (skipped %d dupes)",
@@ -116,13 +185,36 @@ def ingest_workbench_rows(
             campaign_id,
             skipped,
         )
+        if bias and bias.get("by_metric"):
+            # Persist lightweight bias calibration to loop_history (no table)
+            try:
+                from datetime import datetime, timezone
+
+                entry = {
+                    "type": "prediction_bias",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "n_rows": bias.get("n_rows", len(to_add)),
+                    "by_metric": bias["by_metric"],
+                }
+                store.append_loop_history_sync(campaign_id, entry)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("prediction_bias history append failed: %s", exc)
+    else:
+        bias = {}
 
     msg = (
         f"已回灌 {len(to_add)} 条训练样本"
         if to_add
         else ("无新增 Completed 行" if not skipped else f"{skipped} 条已存在，跳过")
     )
-    return {"ingested": len(to_add), "skipped": skipped, "message": msg}
+    if bias and bias.get("by_metric"):
+        # Append concise bias summary to message for API transparency
+        parts = []
+        for m, s in bias["by_metric"].items():
+            parts.append(f"{m}: mean_err {s['mean_error']:+g} rmse {s['rmse']:g} (n={s['n']})")
+        msg = f"{msg} | 预测偏差 " + "; ".join(parts)
+        return {"ingested": len(to_add), "skipped": skipped, "message": msg, "prediction_bias": bias}
+    return {"ingested": len(to_add), "skipped": skipped, "message": msg, "prediction_bias": bias if to_add else {}}
 
 
 def resolve_experiment_for_row(campaign_id: int, row_id: int) -> int | None:

@@ -65,6 +65,7 @@ export default function LabWorkbench({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveHint, setSaveHint] = useState<string | null>(null);
+  const [biasSummary, setBiasSummary] = useState<NonNullable<import("../api").WorkbenchSyncResponse["prediction_bias"]> | null>(null);
   const [loopRoundCount, setLoopRoundCount] = useState(0);
   const [loopConverged, setLoopConverged] = useState(false);
   const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
@@ -337,6 +338,11 @@ export default function LabWorkbench({
       if (res.training_message) hints.push(res.training_message);
       if (res.loop_message) hints.push(res.loop_message);
       if (hints.length) setSaveHint(hints.join(" · "));
+      if (res.prediction_bias?.by_metric && Object.keys(res.prediction_bias.by_metric).length) {
+        setBiasSummary(res.prediction_bias);
+      } else {
+        setBiasSummary(null);
+      }
       onSaved?.(res.rows);
       void refreshWorkbenchStats();
       if (res.loop_task_id) void followLoopTask(res.loop_task_id);
@@ -424,6 +430,25 @@ export default function LabWorkbench({
         )}
         {saveHint && !error && (
           <p className="text-[11px] text-emerald-400 px-2 py-1 border-b border-edge/30">{saveHint}</p>
+        )}
+        {biasSummary && !error && (
+          <div className="px-2 py-1.5 border-b border-edge/30 bg-amber-500/5 text-[10px]">
+            <div className="flex items-center justify-between">
+              <span className="text-amber-300 font-medium">预测偏差校准（{biasSummary.n_rows} 行，预测−实测）</span>
+              <button type="button" onClick={() => setBiasSummary(null)} className="text-slate-500 hover:text-slate-300">×</button>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {Object.entries(biasSummary.by_metric).map(([metric, s]) => (
+                <span key={metric} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 font-mono text-[10px] text-amber-200">
+                  <span className="font-semibold">{metric}</span>
+                  <span>mean {s.mean_error > 0 ? `+${s.mean_error}` : s.mean_error}</span>
+                  <span className="text-slate-400">rmse {s.rmse}</span>
+                  <span className="text-slate-400">mae {s.mae}</span>
+                  <span className="text-slate-500">n={s.n}</span>
+                </span>
+              ))}
+            </div>
+          </div>
         )}
         <div className="ag-theme-alpine-dark w-full" style={{ height: 320 }}>
           <AgGridReact<WorkbenchRow>
