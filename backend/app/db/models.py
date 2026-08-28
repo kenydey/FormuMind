@@ -434,6 +434,9 @@ class KGEntityLink(Base):
 
     __table_args__ = (
         UniqueConstraint("src_entity_id", "dst_entity_id", "link_type", name="uq_kb_link_triplet"),
+        # v7: KG 图谱查询热点是 (src,dst)×link_type 复合过滤，单列索引下需回表过滤。
+        Index("ix_kb_link_src_type", "src_entity_id", "link_type"),
+        Index("ix_kb_link_dst_type", "dst_entity_id", "link_type"),
     )
 
 
