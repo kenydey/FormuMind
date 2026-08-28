@@ -148,3 +148,38 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
 
 def install_api_auth(app) -> None:
     app.add_middleware(ApiAuthMiddleware)
+
+
+def get_current_owner(request: Request) -> str:
+    """Phase 1 预埋：单 token 模式恒返回 ``default``，多用户时解析 token→owner.
+
+    - 当 ``FORMUMIND_MULTI_USER != true``：恒 ``default``，所有校验 no-op。
+    - 未来多用户：``FORMUMIND_API_TOKENS_JSON='{\"alice\": \"tok1\", ...}'`` 或
+      ``Authorization: Bearer <owner>:<token>`` 时解析 owner。
+    目前仅为 experiments/tasks 的 TODO 锚点提供统一入口。
+    """
+    # 单 token 模式：无身份来源
+    if os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() not in ("1", "true", "yes"):
+        return "default"
+    # 预留：多用户时从 token 映射 owner（当前未启用，保持 default 兼容）
+    provided = _extract_token(request)
+    if provided and ":" in provided:
+        maybe_owner = provided.split(":", 1)[0].strip()
+        if maybe_owner:
+            return maybe_owner
+    return "default"
+
+
+def assert_owner(resource_owner: str | None, current_owner: str) -> None:
+    """Phase 1 软校验：单 token (current=default) 或资源无 owner 时恒过。
+
+    Phase 2 强校验：当 ``FORMUMIND_MULTI_USER=true`` 且资源有 owner 时，
+    owner 不一致则 403。当前 Phase 1 仅 debug 日志，不阻断。
+    """
+    if current_owner == "default" or not resource_owner:
+        logger.debug("owner check pass (soft): resource=%s current=%s", resource_owner, current_owner)
+        return
+    if resource_owner != current_owner:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=403, detail="Forbidden: resource not owned by caller")

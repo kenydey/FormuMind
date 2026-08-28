@@ -130,6 +130,7 @@ class CampaignStoreInterface(ABC):
         strategy: str = "BayBE-LHS",
         req: Requirement | None = None,
         project_id: str | None = None,
+        owner_id: str | None = None,
     ) -> Campaign: ...
 
     @abstractmethod
@@ -185,6 +186,7 @@ class _CampaignMetaMixin:
         strategy: str,
         req: Requirement | None,
         project_id: str | None,
+        owner_id: str | None = None,
     ) -> Campaign:
         campaign_name = name or f"DOE {plan.design} ({plan.plan_id[:8] or 'local'})"
         domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
@@ -200,6 +202,7 @@ class _CampaignMetaMixin:
                     strategy=strategy,
                     status="IN_PROGRESS",
                     project_id=project_id,
+                    owner_id=owner_id,
                     primary_metric=primary,
                     objectives_snapshot=[o.model_dump() for o in objectives],
                     lever_snapshot=lever_snapshot,
@@ -387,9 +390,10 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         strategy: str = "BayBE-LHS",
         req: Requirement | None = None,
         project_id: str | None = None,
+        owner_id: str | None = None,
     ) -> Campaign:
         campaign = self._create_campaign_meta(
-            plan, name=name, strategy=strategy, req=req, project_id=project_id
+            plan, name=name, strategy=strategy, req=req, project_id=project_id, owner_id=owner_id
         )
         domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
         objectives = normalize_objectives(req) if req else objectives_from_snapshot(None, domain)
@@ -566,9 +570,10 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         strategy: str = "BayBE-LHS",
         req: Requirement | None = None,
         project_id: str | None = None,
+        owner_id: str | None = None,
     ) -> Campaign:
         campaign = self._create_campaign_meta(
-            plan, name=name, strategy=strategy, req=req, project_id=project_id
+            plan, name=name, strategy=strategy, req=req, project_id=project_id, owner_id=owner_id
         )
         domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
         objectives = normalize_objectives(req) if req else objectives_from_snapshot(None, domain)

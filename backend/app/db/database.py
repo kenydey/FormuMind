@@ -89,6 +89,7 @@ def make_engine(db_url: str) -> Engine:
         Base.metadata.create_all(engine)
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
+    _ensure_owner_id_column(engine, "task_outbox")
     _ensure_source_document_columns(engine)
     _ensure_kb_entity_link_columns(engine)
     _ensure_material_columns(engine)
@@ -116,6 +117,7 @@ def _require_columns(engine: Engine, table: str, columns: tuple[str, ...]) -> No
 def _ensure_experiment_columns(engine: Engine) -> None:
     """只读守护：experiments 表必须具备 Phase 2 索引列。"""
     _require_columns(engine, "experiments", ("item_id", "project_id"))
+    _ensure_owner_id_column(engine, "experiments")
 
 
 def _ensure_campaign_columns(engine: Engine) -> None:
@@ -132,6 +134,7 @@ def _ensure_campaign_columns(engine: Engine) -> None:
             "loop_history",
         ),
     )
+    _ensure_owner_id_column(engine, "campaigns")
 
 
 def _ensure_source_document_columns(engine: Engine) -> None:
@@ -161,6 +164,26 @@ def _ensure_material_columns(engine: Engine) -> None:
         "materials",
         ("norm_key", "name", "origin", "availability", "functional_class"),
     )
+
+
+def _ensure_owner_id_column(engine: Engine, table: str) -> None:
+    """P2 预埋：owner_id 缺失时自动 ALTER（nullable，无 backfill，兼容旧库）。"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
+        return
+    existing = {c["name"] for c in inspector.get_columns(table)}
+    if "owner_id" in existing:
+        return
+    # SQLite/Postgres 均支持 ADD COLUMN nullable 快速完成
+    with engine.begin() as conn:
+        conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN owner_id VARCHAR(64)'))
+        # 索引单独建，失败不阻断（已存在等）
+        try:
+            conn.execute(text(f'CREATE INDEX ix_{table}_owner_id ON "{table}" (owner_id)'))
+        except Exception:
+            pass
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

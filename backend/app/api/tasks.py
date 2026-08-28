@@ -8,7 +8,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..config import get_settings
@@ -129,9 +129,11 @@ async def _poll_until_terminal(
 
 
 @router.get("/tasks/{task_id}/stream")
-async def stream_task_progress(task_id: str) -> StreamingResponse:
-    # TODO: 添加 owner 校验 — 单 token 模式下暂无法实现，迁移到多用户后需校验
-    # task_id 归属当前调用者。
+async def stream_task_progress(task_id: str, request: Request) -> StreamingResponse:
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
+    # Phase 1 软校验：task 暂无 owner 持久化，恒过，仅锚点
+    assert_owner(None, get_current_owner(request))
     if not task_exists(task_id):
         raise HTTPException(status_code=404, detail="Unknown task id")
 

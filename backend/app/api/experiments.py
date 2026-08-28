@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -283,10 +283,14 @@ def list_workbench_campaigns() -> list[WorkbenchCampaignSummary]:
 @router.post("/experiments/workbench/campaigns", response_model=WorkbenchCampaignResponse)
 async def create_workbench_campaign(
     payload: CreateWorkbenchCampaignRequest,
+    request: Request,
 ) -> WorkbenchCampaignResponse:
     """Seed a campaign + pending rows from a generated DOE plan (Datalab samples)."""
-    # TODO: 添加 owner 校验 — 单 token 模式下暂无法实现，迁移到多用户后需校验
-    # payload.project_id 归属当前调用者。
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
+    current_owner = get_current_owner(request)
+    # Phase 1 软校验：单 token 恒过，仅记录
+    assert_owner(None, current_owner)
     store = get_campaign_store()
     campaign = await store.create_from_plan(
         payload.plan,
@@ -294,6 +298,7 @@ async def create_workbench_campaign(
         strategy=payload.strategy,
         req=payload.requirement,
         project_id=payload.project_id,
+        owner_id=current_owner if current_owner != "default" else None,
     )
     rows = await store.list_rows(campaign.id)
     return _campaign_response(campaign, rows)
@@ -302,12 +307,15 @@ async def create_workbench_campaign(
 @router.get("/experiments/workbench/{campaign_id}", response_model=WorkbenchCampaignResponse)
 async def get_workbench_campaign(
     campaign_id: int,
+    request: Request,
 ) -> WorkbenchCampaignResponse:
-    # TODO: 添加 owner 校验 — 校验 campaign_id 归属当前调用者。
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
     store = get_campaign_store()
     campaign = await store.get_campaign(campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    assert_owner(getattr(campaign, "owner_id", None), get_current_owner(request))
     rows = await store.list_rows(campaign_id)
     return _campaign_response(campaign, rows)
 
@@ -315,12 +323,16 @@ async def get_workbench_campaign(
 @router.put("/experiments/workbench/sync", response_model=WorkbenchSyncResponse)
 async def sync_workbench(
     payload: BatchUpdateRequest,
+    request: Request,
 ) -> WorkbenchSyncResponse:
     """Batch-update workbench rows from AG Grid edits (forwarded to Datalab)."""
-    # TODO: 添加 owner 校验 — 校验 payload.campaign_id 归属当前调用者。
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
     store = get_campaign_store()
-    if await store.get_campaign(payload.campaign_id) is None:
+    _campaign = await store.get_campaign(payload.campaign_id)
+    if _campaign is None:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    assert_owner(getattr(_campaign, "owner_id", None), get_current_owner(request))
 
     updated, rows = await store.batch_sync(
         payload.campaign_id,
