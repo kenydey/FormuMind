@@ -325,7 +325,35 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         client = await self._ensure_client()
         resp = await client.post("/new-sample/", json=payload)
         resp.raise_for_status()
-        sample = parse_create_sample_response(resp.json(), expected_id)
+        try:
+            sample = parse_create_sample_response(resp.json(), expected_id)
+        except Exception as exc:
+            # C16 补充：创建请求已成功（200）但响应校验失败（如 item_id
+            # mismatch）时，sample 在 Datalab 端已真实创建，本地却无从记录
+            # —— 不补偿删除会留下真孤儿。用响应中的实际 id 删除（回退
+            # expected_id），再抛原始异常，避免吞掉真实失败原因。
+            logger.error(
+                "Datalab sample created but response invalid (item_id=%s): %s",
+                expected_id,
+                exc,
+            )
+            try:
+                resp_body = resp.json()
+                entry_raw = (
+                    resp_body.get("sample_list_entry")
+                    if isinstance(resp_body.get("sample_list_entry"), dict)
+                    else resp_body
+                )
+                actual_id = str(entry_raw.get("item_id")) if isinstance(entry_raw, dict) else expected_id
+                await self._delete_sample(actual_id or expected_id)
+                logger.info("Saga rollback: deleted mismatched sample %s", actual_id or expected_id)
+            except Exception as cleanup_exc:
+                logger.error(
+                    "Failed to clean up mismatched sample %s: %s",
+                    expected_id,
+                    cleanup_exc,
+                )
+            raise
         logger.info("Datalab created sample item_id=%s", sample.item_id)
         return sample
 

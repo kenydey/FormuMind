@@ -145,7 +145,9 @@ async def test_create_from_plan_saga_rollback_on_mid_failure(tmp_path):
 
         assert len(state.created) == 1
         assert set(state.created).issubset(state.deleted)
-        assert len(state.deleted) == 2
+        # C16: 回滚只删「实际创建成功」的 sample——失败的那次从未创建，
+        # 删除会是无意义的假性清理。故 deleted 仅含 1 个已创建项。
+        assert len(state.deleted) == 1
 
         with store._session_factory() as session:
             from app.db.models import Campaign
@@ -164,7 +166,8 @@ async def test_create_from_plan_saga_rollback_on_item_id_mismatch(tmp_path):
             state.create_calls += 1
             body = json.loads(request.content)
             item_id = body["new_sample_data"]["item_id"]
-            state.created.append(item_id)
+            # 模拟真实 Datalab：实际创建的是响应里返回的 id（与请求 id 不符）
+            state.created.append("wrong-id")
             return httpx.Response(
                 200,
                 json={"sample_list_entry": {"item_id": "wrong-id", "name": "x"}},
