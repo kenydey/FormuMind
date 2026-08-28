@@ -102,6 +102,29 @@ def feedback_report() -> dict:
     return {**stats, "alert": alert, "recent_bias": recent_bias}
 
 
+@router.get("/calibration")
+def calibration() -> dict:
+    """KG 权重校准：返回当前 penalty/bonus 与命中计数，供调参。"""
+    s = get_settings()
+    from ..db.entity_store import get_entity_store
+    from ..db.models import KGEntityLink
+
+    inh = sub = syn = 0
+    if kg_enabled():
+        es = get_entity_store()
+        with es._session_factory() as session:
+            inh = session.query(KGEntityLink).filter(KGEntityLink.link_type == "inhibits").count()
+            sub = session.query(KGEntityLink).filter(KGEntityLink.link_type == "substitutes").count()
+            syn = session.query(KGEntityLink).filter(KGEntityLink.link_type == "synergizes").count()
+    return {
+        "kg_enabled": bool(s.kg_enabled),
+        "kg_inhibits_penalty": float(getattr(s, "kg_inhibits_penalty", 0.5)),
+        "kg_synergizes_bonus": float(getattr(s, "kg_synergizes_bonus", 1.0)),
+        "kg_measured_bonus": float(getattr(s, "kg_measured_bonus", 1.15)),
+        "counts": {"inhibits": inh, "substitutes": sub, "synergizes": syn},
+    }
+
+
 @router.post("/rebuild", response_model=KGRebuildReport)
 def rebuild(body: KGRebuildBody | None = None) -> KGRebuildReport:
     if not kg_enabled():

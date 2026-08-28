@@ -431,7 +431,7 @@ class Settings(BaseSettings):
     loop_convergence_patience: int = 2
 
     # Knowledge graph P0 — entity index + enumerative RAG (default off for CI).
-    kg_enabled: bool = False
+    kg_enabled: bool = True
     # 入库时的 KG 链接拆成两段：实体提及（快，枚举 RAG 根基）与关系提取
     # （慢，尤其 LLM 关系每 chunk 一次 API 调用）。默认只做实体，关系后置。
     # kg_link_on_ingest 保留为兼容别名；新逻辑用下面两个字段。
