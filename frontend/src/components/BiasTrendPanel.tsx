@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useStore } from "../store";
 
 type BiasTrend = {
   campaign_id: number;
@@ -9,6 +10,7 @@ type BiasTrend = {
 
 export default function BiasTrendPanel({ campaignId }: { campaignId: number | null }) {
   const [data, setData] = useState<BiasTrend | null>(null);
+  const rmseHistory = useStore((s) => s.rmseHistory);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -25,11 +27,15 @@ export default function BiasTrendPanel({ campaignId }: { campaignId: number | nu
   const primary = metrics[0];
   const values = slice.map((t) => t.by_metric[primary]?.rmse ?? 0);
   const maeValues = slice.map((t) => t.by_metric[primary]?.mae ?? 0);
-  const maxV = Math.max(1, ...values, ...maeValues, 50);
+  // 模型 RMSE 历史（store.rmseHistory 同指标，取近 8 轮）
+  const modelSlice = rmseHistory.slice(-8);
+  const modelValues = modelSlice.map((h) => (h[primary] ?? 0));
+  const maxV = Math.max(1, ...values, ...maeValues, ...modelValues, 50);
   const w = 300, h = 60, pad = 6;
-  const step = slice.length > 1 ? (w - pad * 2) / (slice.length - 1) : 0;
+  const stepBias = slice.length > 1 ? (w - pad * 2) / (slice.length - 1) : 0;
+  const stepModel = modelSlice.length > 1 ? (w - pad * 2) / (modelSlice.length - 1) : 0;
   const y = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
-  const path = (vals: number[]) => vals.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step} ${y(v)}`).join(" ");
+  const path = (vals: number[], step: number) => vals.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step} ${y(v)}`).join(" ");
   const thrY = y(50);
 
   return (
@@ -40,15 +46,17 @@ export default function BiasTrendPanel({ campaignId }: { campaignId: number | nu
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-16 mb-1.5 bg-ink/30 rounded border border-edge/20">
         <line x1={pad} y1={thrY} x2={w - pad} y2={thrY} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth={0.8} opacity={0.7} />
-        <path d={path(values)} fill="none" stroke="#f59e0b" strokeWidth={1.5} />
-        <path d={path(maeValues)} fill="none" stroke="#64748b" strokeWidth={1} strokeDasharray="4 2" />
+        <path d={path(values, stepBias)} fill="none" stroke="#f59e0b" strokeWidth={1.5} />
+        <path d={path(maeValues, stepBias)} fill="none" stroke="#64748b" strokeWidth={1} strokeDasharray="4 2" />
+        {modelValues.length > 1 && <path d={path(modelValues, stepModel)} fill="none" stroke="#22c55e" strokeWidth={1.2} opacity={0.85} />}
         {values.map((v, i) => (
-          <circle key={i} cx={pad + i * step} cy={y(v)} r={2} fill={v > 50 ? "#f43f5e" : "#f59e0b"} />
+          <circle key={i} cx={pad + i * stepBias} cy={y(v)} r={2} fill={v > 50 ? "#f43f5e" : "#f59e0b"} />
         ))}
       </svg>
       <div className="flex gap-2 text-[9px] text-slate-500 mb-1">
-        <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-500 inline-block" /> RMSE</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-500 inline-block" /> RMSE(预测偏差)</span>
         <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-slate-500 inline-block border-dashed border-t border-slate-500" /> MAE</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-emerald-500 inline-block" /> 模型 RMSE</span>
         <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-500/60 inline-block" style={{ borderTop: "1px dashed #f59e0b" }} /> 阈值 50</span>
       </div>
       {data.alerts.length > 0 && (
