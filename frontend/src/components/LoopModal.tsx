@@ -2,6 +2,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import SimPlaceholder from "./SimPlaceholder";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
+import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 
 function RmseTrend({ history, metric }: { history: Record<string, number>[]; metric: string }) {
   const series = history.map((snap) => snap[metric]).filter((v) => v != null);
@@ -92,10 +93,10 @@ export default function LoopModal() {
             className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-1.5 text-xs disabled:opacity-40"
             title={loopConverged ? "模型 RMSE 已收敛，建议停止迭代" : undefined}
           >
-            {busy === "looping" ? (task?.message ? `迭代中… ${task.message}` : task?.stage === "retrieve" ? "模型冷启动中… 正在检索" : "迭代中…") : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
+            {busy === "looping" ? coldStartMessage(task?.stage, task?.message, "迭代中…") : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
           </button>
           {busy === "looping" && (
-            <button onClick={cancelLoopTask} className="border border-rose-500/50 text-rose-300 hover:bg-rose-500/10 rounded px-2 py-1.5 text-xs">✕ 取消</button>
+            <button onClick={cancelLoopTask} className={CANCEL_BUTTON_CLASS + " px-3 py-1.5"}>✕ 取消</button>
           )}
         </div>
       </div>

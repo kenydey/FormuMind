@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
 import KgRelationPanel from "./KgRelationPanel";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
+import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
 
@@ -187,11 +188,11 @@ export default function SourcesPanel() {
         className="shrink-0 w-full border border-accent2/40 bg-accent2/10 hover:bg-accent2/20 text-accent2 font-semibold rounded px-3 py-1.5 text-sm disabled:opacity-40 flex items-center justify-center gap-1.5"
       >
         {deepResearchBusy
-          ? `🔬 ${deepResearchMessage || (deepResearchStage === "retrieve" ? "模型冷启动中… 正在检索" : "深度研究中…")}`
+          ? `🔬 ${coldStartMessage(deepResearchStage, deepResearchMessage, "深度研究中…")}`
           : "🔬 深度研究"}
       </button>
       {deepResearchBusy && (
-        <button type="button" onClick={() => void cancelDeepResearch()} className="w-full border border-rose-500/50 text-rose-300 hover:bg-rose-500/10 rounded px-2 py-1 text-xs">✕ 取消深度研究</button>
+        <button type="button" onClick={() => void cancelDeepResearch()} className={"w-full " + CANCEL_BUTTON_CLASS}>✕ 取消深度研究</button>
       )}
 
       <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
