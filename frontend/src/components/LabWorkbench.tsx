@@ -9,6 +9,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { api } from "../api";
 import type { DOEPlan, Requirement, WorkbenchRow } from "../api";
+import BiasTrendPanel from "./BiasTrendPanel";
 import { useStore } from "../store";
 import {
   buildWorkbenchColumnDefs,
@@ -88,6 +89,7 @@ export default function LabWorkbench({
   const campaignState = useStore((s) => s.campaignState);
   const followLoopTask = useStore((s) => s.followLoopTask);
   const refreshWorkbenchStats = useStore((s) => s.refreshWorkbenchStats);
+  const workbenchCampaignId = useStore((s) => s.workbenchCampaignId);
 
   const objectives = useMemo(
     () => effectiveObjectives(
@@ -451,6 +453,7 @@ export default function LabWorkbench({
             </div>
           </div>
         )}
+        <BiasTrendPanel campaignId={(campaignId ?? workbenchCampaignId) ?? null} />
         <div className="ag-theme-alpine-dark w-full" style={{ height: 320 }}>
           <AgGridReact<WorkbenchRow>
             ref={gridRef}

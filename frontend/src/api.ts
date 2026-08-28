@@ -1203,6 +1203,11 @@ export const api = {
       "/api/kg/feedback/report"
     ),
 
+  getBiasTrend: (campaignId: number, thresholdRmse = 50) =>
+    get<{ campaign_id: number; trend: { at: string | null; n_rows: number; by_metric: Record<string, { n: number; mean_error: number; rmse: number; mae: number; max_abs: number }> }[]; alerts: string[]; threshold_rmse: number }>(
+      `/api/experiments/workbench/${campaignId}/bias-trend?threshold_rmse=${thresholdRmse}`
+    ),
+
   kgSubstitutes: (opts: { entityId?: string; q?: string; limit?: number }) => {
     const params = new URLSearchParams();
     if (opts.entityId) params.set("entity_id", opts.entityId);

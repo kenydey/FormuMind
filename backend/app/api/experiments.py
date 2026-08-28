@@ -322,6 +322,44 @@ async def get_workbench_campaign(
     return _campaign_response(campaign, rows)
 
 
+@router.get("/experiments/workbench/{campaign_id}/bias-trend")
+async def get_bias_trend(
+    campaign_id: int,
+    request: Request,
+    threshold_rmse: float = Query(default=50.0, description="RMSE 告警阈值"),
+) -> dict:
+    """返回该 campaign 的 prediction_bias 趋势（loop_history 抽取）与阈值告警。"""
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
+    store = get_campaign_store()
+    campaign = await store.get_campaign(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    assert_owner(getattr(campaign, "owner_id", None), get_current_owner(request))
+    history = campaign.loop_history or []
+    trend = []
+    alerts: list[str] = []
+    for entry in history:
+        if entry.get("type") != "prediction_bias":
+            continue
+        at = entry.get("at")
+        bias = entry.get("bias") or entry.get("data") or {}
+        # 兼容两种结构：{by_metric: {...}} 或直接 bias dict
+        by_metric = bias.get("by_metric") if isinstance(bias, dict) else None
+        if not by_metric and isinstance(entry.get("by_metric"), dict):
+            by_metric = entry.get("by_metric")
+        if not by_metric:
+            continue
+        n_rows = bias.get("n_rows") or entry.get("n_rows") or 0
+        trend.append({"at": at, "n_rows": n_rows, "by_metric": by_metric})
+        for metric, vals in by_metric.items():
+            rmse = vals.get("rmse")
+            if rmse is not None and rmse > threshold_rmse:
+                alerts.append(f"{metric} RMSE {rmse:.1f} 超阈值 {threshold_rmse}（{at or 'unknown'}）")
+    trend.sort(key=lambda x: x.get("at") or "")
+    return {"campaign_id": campaign_id, "trend": trend, "alerts": alerts, "threshold_rmse": threshold_rmse}
+
+
 @router.put("/experiments/workbench/sync", response_model=WorkbenchSyncResponse)
 async def sync_workbench(
     payload: BatchUpdateRequest,
