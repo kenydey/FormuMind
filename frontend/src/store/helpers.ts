@@ -76,6 +76,8 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   }
   if (patch.lastAlEngine !== undefined) draft.lastAlEngine = patch.lastAlEngine;
   if (patch.autoLoopOnSync !== undefined) draft.autoLoopOnSync = patch.autoLoopOnSync;
+  if (patch.autoLoopMaxRounds !== undefined) draft.autoLoopMaxRounds = patch.autoLoopMaxRounds;
+  if (patch.autoLoopRound !== undefined) draft.autoLoopRound = patch.autoLoopRound;
 }
 
 export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
@@ -110,5 +112,7 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     recommendSourceTypes: state.recommendSourceTypes,
     lastAlEngine: state.lastAlEngine,
     autoLoopOnSync: state.autoLoopOnSync,
+    autoLoopMaxRounds: state.autoLoopMaxRounds,
+    autoLoopRound: state.autoLoopRound,
   };
 }

@@ -31,8 +31,13 @@ export default function LoopModal() {
     workbenchAdoptedPlanId,
     optimizeEngine,
     loopDoeEngine,
+    autoLoopOnSync,
+    autoLoopMaxRounds,
+    autoLoopRound,
     setOptimizeEngine,
     setLoopDoeEngine,
+    setAutoLoopOnSync,
+    setAutoLoopMaxRounds,
     adoptDoePlanToWorkbench,
     setOpenModal,
   } = useStore(
@@ -48,8 +53,13 @@ export default function LoopModal() {
       workbenchAdoptedPlanId: s.workbenchAdoptedPlanId,
       optimizeEngine: s.optimizeEngine,
       loopDoeEngine: s.loopDoeEngine,
+      autoLoopOnSync: s.autoLoopOnSync,
+      autoLoopMaxRounds: s.autoLoopMaxRounds,
+      autoLoopRound: s.autoLoopRound,
       setOptimizeEngine: s.setOptimizeEngine,
       setLoopDoeEngine: s.setLoopDoeEngine,
+      setAutoLoopOnSync: s.setAutoLoopOnSync,
+      setAutoLoopMaxRounds: s.setAutoLoopMaxRounds,
       adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
       setOpenModal: s.setOpenModal,
     }))
@@ -67,6 +77,17 @@ export default function LoopModal() {
           DOE。形成 实验→数据→优化→新实验 的数字闭环。
         </p>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <label className="flex items-center gap-1 text-[10px] text-slate-400 border border-edge rounded px-1.5 py-1">
+            <input type="checkbox" checked={autoLoopOnSync} onChange={(e) => setAutoLoopOnSync(e.target.checked)} className="accent-accent2" />
+            自主
+          </label>
+          {autoLoopOnSync && (
+            <span className="flex items-center gap-1 text-[10px] text-slate-400">
+              最多
+              <input type="number" min={1} max={10} value={autoLoopMaxRounds} onChange={(e) => setAutoLoopMaxRounds(Number(e.target.value))} className="w-10 bg-ink border border-edge rounded px-1 py-0.5 text-[10px] text-slate-300" />
+              轮 {busy === "looping" ? `(${autoLoopRound + 1}/${autoLoopMaxRounds})` : ""}
+            </span>
+          )}
           <select
             value={optimizeEngine}
             onChange={(e) => setOptimizeEngine(e.target.value as "auto" | "baybe" | "legacy")}

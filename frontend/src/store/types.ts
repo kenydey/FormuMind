@@ -93,6 +93,8 @@ export interface AppState {
   optimizeEngine: "auto" | "baybe" | "legacy";
   loopDoeEngine: "auto" | "legacy" | "baybe";
   autoLoopOnSync: boolean;
+  autoLoopMaxRounds: number;
+  autoLoopRound: number;
   campaignState: string | null;
   workbenchCampaignId: number | null;
   /** plan_id last written to workbench via createWorkbenchCampaign */
@@ -222,6 +224,7 @@ export interface AppState {
   cancelLoopTask: () => Promise<void>;
   runNextRoundDoe: () => Promise<void>;
   setAutoLoopOnSync: (enabled: boolean) => void;
+  setAutoLoopMaxRounds: (n: number) => void;
   applyIntent: (text: string) => Promise<string[]>;
 }
 

@@ -146,6 +146,21 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
             },
             { skipLeaderboardReplace: skipReplace }
           );
+          // 自主闭环：未收敛且开启自动时，限轮自动下一轮
+          const { autoLoopOnSync, autoLoopMaxRounds, autoLoopRound } = get();
+          if (autoLoopOnSync && !report.converged && autoLoopRound < autoLoopMaxRounds - 1) {
+            set((draft) => {
+              draft.autoLoopRound += 1;
+            });
+            // 800ms 后自动下一轮，避免紧接着的请求风暴
+            setTimeout(() => {
+              void get().runLoop();
+            }, 800);
+          } else if (autoLoopOnSync && report.converged) {
+            set((draft) => {
+              draft.autoLoopRound = 0;
+            });
+          }
         }
       } catch (e) {
         const msg = formatApiError(e);
@@ -257,6 +272,14 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     setAutoLoopOnSync: (enabled: boolean) => {
       set((draft) => {
         draft.autoLoopOnSync = enabled;
+        if (enabled) draft.autoLoopRound = 0;
+      });
+      get().scheduleAutosave();
+    },
+
+    setAutoLoopMaxRounds: (n: number) => {
+      set((draft) => {
+        draft.autoLoopMaxRounds = Math.max(1, Math.min(10, Math.round(n)));
       });
       get().scheduleAutosave();
     },
@@ -552,5 +575,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
 }

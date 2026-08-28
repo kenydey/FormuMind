@@ -96,6 +96,8 @@ export interface ProjectWorkspacePayload {
   recommend_source_types: SearchSourceType[];
   last_al_engine: string | null;
   auto_loop_on_sync?: boolean;
+  auto_loop_max_rounds?: number;
+  auto_loop_round?: number;
 }
 
 export interface StoreWorkspaceSlice {
@@ -129,6 +131,8 @@ export interface StoreWorkspaceSlice {
   recommendSourceTypes: SearchSourceType[];
   lastAlEngine: string | null;
   autoLoopOnSync: boolean;
+  autoLoopMaxRounds: number;
+  autoLoopRound: number;
 }
 
 function adaptiveFromLoopReport(loop: LoopReport | null | undefined): AdaptiveDOEMetadata | null {
@@ -188,6 +192,8 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     recommend_source_types: slice.recommendSourceTypes,
     last_al_engine: slice.lastAlEngine,
     auto_loop_on_sync: slice.autoLoopOnSync,
+    auto_loop_max_rounds: slice.autoLoopMaxRounds,
+    auto_loop_round: slice.autoLoopRound,
   };
 }
 
@@ -240,6 +246,8 @@ export function applyWorkspacePayload(
       : ["patents", "literature", "internet"]) as SearchSourceType[],
     lastAlEngine: ws.last_al_engine ?? null,
     autoLoopOnSync: ws.auto_loop_on_sync ?? false,
+    autoLoopMaxRounds: ws.auto_loop_max_rounds ?? 5,
+    autoLoopRound: ws.auto_loop_round ?? 0,
   };
 }
 
