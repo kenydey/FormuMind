@@ -203,6 +203,9 @@ function FormulaCard({
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
+          {form.kg_compat?.measured_materials && form.kg_compat.measured_materials.length > 0 && (
+            <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成</div>
+          )}
           <MolViewer entries={form.ingredients.map((i) => ({ name: i.name, smiles: i.smiles }))} />
           <div className="flex gap-1 mt-1">
             <button

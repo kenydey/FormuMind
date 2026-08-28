@@ -130,6 +130,7 @@ export interface Formulation {
     status: string;
     incompatible_pairs: { a: string; b: string; relation: string }[];
     synergy_pairs: { a: string; b: string; relation: string }[];
+    measured_materials?: string[];
     reasons: string[];
   } | null;
 }

@@ -54,6 +54,8 @@ class ChemicalCheckResult:
     # Positive signal for the recommendation ranker (only populated when
     # include_synergies=True): material pairs sharing a SYNERGIZES relation.
     synergy_pairs: list[tuple[str, str, str]] = field(default_factory=list)
+    # 实测验证：包含 measured 证据的材料名（用于推荐加成）
+    measured_materials: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return self.feasible
@@ -130,6 +132,19 @@ def _synergy_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _has_measured_evidence(entity_id: str) -> bool:
+    """材料实体是否有 measured 证据（任意 relation 的 extraction_method == measured）。"""
+    from ..services.kg.graph_query import get_entity_relations
+
+    rels = get_entity_relations(
+        entity_id,
+        direction="both",
+        extraction_method="measured",
+        limit=1,
+    )
+    return len(rels) > 0
+
+
 def check_formulation_chemistry(
     form: Formulation,
     *,
@@ -183,6 +198,16 @@ def check_formulation_chemistry(
                     if other == eid_b:
                         synergies.append((m_a, m_b, rel_type))
 
+    # 实测验证：收集有 measured 证据的材料
+    measured_materials: list[str] = []
+    if include_synergies:
+        for m, eid in resolved.items():
+            try:
+                if _has_measured_evidence(eid):
+                    measured_materials.append(m)
+            except Exception:
+                continue
+
     if pairs:
         return ChemicalCheckResult(
             feasible=False,
@@ -190,9 +215,11 @@ def check_formulation_chemistry(
             reasons=reasons,
             incompatible_pairs=pairs,
             synergy_pairs=synergies,
+            measured_materials=measured_materials,
         )
     return ChemicalCheckResult(
         feasible=True,
         status="pass",
         synergy_pairs=synergies,
+        measured_materials=measured_materials,
     )

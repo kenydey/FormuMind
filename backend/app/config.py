@@ -458,6 +458,7 @@ class Settings(BaseSettings):
     # a mild bonus when explicitly enabled. KG disabled → both treated as 1.0.
     kg_inhibits_penalty: float = 0.5
     kg_synergizes_bonus: float = 1.0  # 1.0 = disabled by default
+    kg_measured_bonus: float = 1.15  # 实测证据加成：材料有 measured 关系时配方得分提升
 
     # Chat P0 — multi-turn, structured answers, soft clarification.
     chat_multi_turn_enabled: bool = True

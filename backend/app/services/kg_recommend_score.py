@@ -42,6 +42,7 @@ def kg_compat_adjust(form: Formulation) -> ChemicalCheckResult:
 
     penalty = float(settings.kg_inhibits_penalty)
     bonus = float(settings.kg_synergizes_bonus)
+    measured_bonus = float(getattr(settings, "kg_measured_bonus", 1.15))
 
     if not chk.feasible:
         # INHIBITS hit → sink the candidate.
@@ -54,6 +55,15 @@ def kg_compat_adjust(form: Formulation) -> ChemicalCheckResult:
         # Optional SYNERGIZES boost (off by default).
         if form.score is not None:
             form.score = float(form.score) * bonus
+
+    # 实测验证加成：在 feasible 且材料有 measured 证据时提升排名
+    if chk.feasible and chk.measured_materials and measured_bonus > 1.0:
+        if form.score is not None:
+            form.score = float(form.score) * measured_bonus
+        # 透明：追加提示（不与不相容告警混淆）
+        form.warnings.append(
+            "实测验证加成：配方含实测验证材料 " + "、".join(chk.measured_materials)
+        )
 
     record_kg_compat(form, chk)
     return chk
@@ -70,5 +80,6 @@ def record_kg_compat(form: Formulation, chk: ChemicalCheckResult) -> None:
         "synergy_pairs": [
             {"a": a, "b": b, "relation": rel} for a, b, rel in chk.synergy_pairs
         ],
+        "measured_materials": list(chk.measured_materials),
         "reasons": chk.reasons,
     }
