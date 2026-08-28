@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
 import KgRelationPanel from "./KgRelationPanel";
+import RagPrewarmBar from "./RagPrewarmBar";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 
@@ -122,6 +123,8 @@ export default function SourcesPanel() {
       <h2 className="text-sm uppercase tracking-widest text-accent2 shrink-0">
         资料来源 · Sources
       </h2>
+
+      <RagPrewarmBar />
 
       <label className="block shrink-0">
         <span className="text-xs text-slate-400">研究主题 · Topic</span>
