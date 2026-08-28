@@ -58,6 +58,16 @@ export default function KgRelationPanel({ query }: { query: string }) {
   const [substitutes, setSubstitutes] = useState<KGSubstituteDiscoverResponse | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [methodFilter, setMethodFilter] = useState<string>("all");
+  const [reportAlert, setReportAlert] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .kgFeedbackReport()
+      .then((r) => {
+        if (r.alert) setReportAlert(r.alert);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const q = query.trim();
@@ -140,6 +150,10 @@ export default function KgRelationPanel({ query }: { query: string }) {
 
       {error && (
         <p className="mt-1 text-rose-300/90 text-[10px]">{error}</p>
+      )}
+
+      {reportAlert && (
+        <p className="mt-1 text-amber-300/90 text-[10px] border border-amber-500/30 bg-amber-500/10 rounded px-1.5 py-0.5">⚠ {reportAlert}</p>
       )}
 
       {!expanded && !loading && relations.length > 0 && (

@@ -1198,6 +1198,11 @@ export const api = {
       "/api/kg/feedback/stats"
     ),
 
+  kgFeedbackReport: () =>
+    get<{ measured_total: number; measured_performance: number; by_campaign: Record<string, number>; alert: string | null; recent_bias: unknown[] }>(
+      "/api/kg/feedback/report"
+    ),
+
   kgSubstitutes: (opts: { entityId?: string; q?: string; limit?: number }) => {
     const params = new URLSearchParams();
     if (opts.entityId) params.set("entity_id", opts.entityId);
