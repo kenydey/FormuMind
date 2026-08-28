@@ -497,6 +497,7 @@ class TaskState(str, Enum):
     running = "running"
     completed = "completed"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class TaskStatus(BaseModel):
@@ -507,6 +508,9 @@ class TaskStatus(BaseModel):
     message: str = ""
     result: dict[str, Any] | None = None
     stream_url: str = ""
+    # P2：可观测
+    stage: str = ""
+    elapsed_ms: int | None = None
 
 
 class AsyncTaskAccepted(BaseModel):

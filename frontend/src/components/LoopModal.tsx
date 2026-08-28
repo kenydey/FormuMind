@@ -20,7 +20,9 @@ function RmseTrend({ history, metric }: { history: Record<string, number>[]; met
 export default function LoopModal() {
   const {
     runLoop,
+    cancelLoopTask,
     busy,
+    task,
     loopReport,
     rmseHistory,
     doePlan,
@@ -35,7 +37,9 @@ export default function LoopModal() {
   } = useStore(
     useShallow((s) => ({
       runLoop: s.runLoop,
+      cancelLoopTask: s.cancelLoopTask,
       busy: s.busy,
+      task: s.task,
       loopReport: s.loopReport,
       rmseHistory: s.rmseHistory,
       doePlan: s.doePlan,
@@ -88,8 +92,11 @@ export default function LoopModal() {
             className="border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-1.5 text-xs disabled:opacity-40"
             title={loopConverged ? "模型 RMSE 已收敛，建议停止迭代" : undefined}
           >
-            {busy === "looping" ? "迭代中…" : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
+            {busy === "looping" ? (task?.message ? `迭代中… ${task.message}` : task?.stage === "retrieve" ? "模型冷启动中… 正在检索" : "迭代中…") : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
           </button>
+          {busy === "looping" && (
+            <button onClick={cancelLoopTask} className="border border-rose-500/50 text-rose-300 hover:bg-rose-500/10 rounded px-2 py-1.5 text-xs">✕ 取消</button>
+          )}
         </div>
       </div>
 

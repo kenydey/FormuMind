@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -97,8 +98,17 @@ def _status_from_progress(task_id: str, kind: str) -> TaskStatus:
         "RUNNING": TaskState.running,
         "COMPLETED": TaskState.completed,
         "FAILED": TaskState.failed,
+        "CANCELLED": TaskState.cancelled,
     }
     progress = float(meta.get("progress", 0.0) or 0.0)
+    # elapsed_ms
+    elapsed_ms = None
+    try:
+        st = meta.get("started_at")
+        if st:
+            elapsed_ms = int((time.time() - float(st)) * 1000)
+    except Exception:
+        elapsed_ms = None
     return TaskStatus(
         task_id=task_id,
         kind=kind or meta.get("kind", "unknown"),
@@ -107,6 +117,8 @@ def _status_from_progress(task_id: str, kind: str) -> TaskStatus:
         message=meta.get("message", ""),
         result=result,
         stream_url=f"/api/tasks/{task_id}/stream",
+        stage=meta.get("stage", "") or "",
+        elapsed_ms=elapsed_ms,
     )
 
 
@@ -234,8 +246,43 @@ class TaskManager:
         self.register_celery_task(async_result.id, "deps")
         return async_result.id
 
+    def cancel(self, task_id: str) -> bool:
+        """Best-effort revoke + persist CANCELLED. Returns True if task was pending/running."""
+        meta_status = None
+        try:
+            from .task_progress import get_task_meta
+
+            meta = get_task_meta(task_id)
+            meta_status = (meta or {}).get("status")
+        except Exception:
+            meta_status = None
+        if meta_status in ("COMPLETED", "FAILED", "CANCELLED"):
+            return False
+        try:
+            celery_app.control.revoke(task_id, terminate=True)
+        except Exception as exc:
+            logger.warning("revoke failed for %s: %s", task_id, exc)
+        kind = self._kinds.get(task_id) or ""
+        try:
+            from .task_progress import TaskProgressStatus, publish_progress
+
+            publish_progress(task_id, TaskProgressStatus.CANCELLED, stage="cancelled", message="已取消", kind=kind or "unknown")
+        except Exception:
+            pass
+        # 持久化 cancelled 快照
+        try:
+            status = TaskStatus(task_id=task_id, kind=kind or "unknown", state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled")
+            _persist_task(task_id, status)
+        except Exception:
+            pass
+        return True
+
 
 task_manager = TaskManager()
+
+
+def cancel_task(task_id: str) -> bool:
+    return task_manager.cancel(task_id)
 
 
 def _progress_cb(task_id: str):

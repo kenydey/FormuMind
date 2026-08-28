@@ -5,6 +5,7 @@ import logging
 from ..services.errors import degrade_return, log_handled_exception
 import json
 import os
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ class TaskProgressStatus(str, Enum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class TaskProgressEvent(BaseModel):
@@ -176,6 +178,21 @@ def publish_progress(
         data=data,
     )
     _store_progress(task_id, event, kind=kind)
+    # 首次写入即记录 started_at（用于 elapsed_ms）
+    try:
+        client = _redis_client()
+        client.hsetnx(_meta_key(task_id), "started_at", str(time.time()))
+    except Exception:
+        # disk fallback
+        try:
+            p = _meta_path(task_id)
+            if p.exists():
+                meta = json.loads(p.read_text(encoding="utf-8"))
+                if "started_at" not in meta:
+                    meta["started_at"] = str(time.time())
+                    p.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
     return event
 
 

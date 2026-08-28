@@ -148,12 +148,26 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           );
         }
       } catch (e) {
+        const msg = formatApiError(e);
+        const isCancelled = msg.includes("取消") || msg.includes("cancel");
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.error = isCancelled ? "任务已取消" : msg;
         });
       } finally {
         set((draft) => {
           draft.busy = "idle";
+        });
+      }
+    },
+
+    cancelLoopTask: async () => {
+      const { task } = get();
+      if (!task?.task_id) return;
+      try {
+        await api.cancelTask(task.task_id);
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
         });
       }
     },
@@ -538,5 +552,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
 }

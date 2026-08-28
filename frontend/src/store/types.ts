@@ -217,6 +217,7 @@ export interface AppState {
   setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend") => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
+  cancelLoopTask: () => Promise<void>;
   runNextRoundDoe: () => Promise<void>;
   setAutoLoopOnSync: (enabled: boolean) => void;
   applyIntent: (text: string) => Promise<string[]>;

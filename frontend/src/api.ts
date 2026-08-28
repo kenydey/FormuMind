@@ -278,7 +278,7 @@ export interface ActiveDoeResult extends AdaptiveDOEMetadata {
   chemical_feasibility?: ChemicalFeasibility | null;
 }
 
-export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
 export interface TaskProgressEvent {
   status: TaskProgressStatus;
@@ -297,11 +297,13 @@ export interface AsyncTaskAccepted {
 export interface TaskStatus {
   task_id: string;
   kind: string;
-  state: "pending" | "running" | "completed" | "failed";
+  state: "pending" | "running" | "completed" | "failed" | "cancelled";
   progress: number;
   message: string;
   result: Record<string, unknown> | null;
   stream_url?: string;
+  stage?: string;
+  elapsed_ms?: number | null;
 }
 
 export interface DOEFactor {
@@ -1029,6 +1031,12 @@ export const api = {
     if (!res.ok) throw new Error(`task ${id} -> ${res.status}`);
     return res.json();
   },
+
+  cancelTask: async (id: string): Promise<TaskStatus> => {
+    const res = await fetch(`/api/tasks/${id}/cancel`, { method: "POST", headers: apiAuthHeaders() });
+    if (!res.ok) throw new Error(`cancel ${id} -> ${res.status}`);
+    return res.json();
+  },
   submitExperiments: (records: ExperimentRecord[]) =>
     post<TrainingReport>("/api/experiments", { records, retrain: true }),
   createWorkbenchCampaign: (
@@ -1315,6 +1323,7 @@ const TASK_STATE_MAP: Record<TaskProgressStatus, TaskStatus["state"]> = {
   RUNNING: "running",
   COMPLETED: "completed",
   FAILED: "failed",
+  CANCELLED: "cancelled",
 };
 
 /** Map SSE progress event to legacy TaskStatus snapshot shape. */
@@ -1422,15 +1431,19 @@ export function awaitTaskStream(
     };
 
     const resolveFromStatus = (s: TaskStatus) => {
+      const map: Record<string, TaskProgressStatus> = { completed: "COMPLETED", failed: "FAILED", cancelled: "CANCELLED", pending: "PENDING", running: "RUNNING" };
       const ev: TaskProgressEvent = {
-        status: s.state === "completed" ? "COMPLETED" : "FAILED",
+        status: (map[s.state] as TaskProgressStatus) || "FAILED",
         message: s.message,
         progress: s.progress,
+        stage: s.stage || "",
         data: s.result ?? undefined,
       };
       onEvent?.(ev);
       if (s.state === "completed") {
         finish(() => resolve(ev));
+      } else if (s.state === "cancelled") {
+        finish(() => reject(new Error(s.message || "任务已取消")));
       } else {
         finish(() => reject(new Error(s.message || "任务失败")));
       }
@@ -1452,10 +1465,10 @@ export function awaitTaskStream(
       (ev) => {
         armIdle();  // progress means alive — restart the silence clock
         onEvent?.(ev);
-        if (ev.status === "COMPLETED" || ev.status === "FAILED") {
+        if (ev.status === "COMPLETED" || ev.status === "FAILED" || ev.status === "CANCELLED") {
           es.close();
-          if (ev.status === "FAILED") {
-            finish(() => reject(new Error(ev.message || "任务失败")));
+          if (ev.status === "FAILED" || ev.status === "CANCELLED") {
+            finish(() => reject(new Error(ev.message || (ev.status === "CANCELLED" ? "任务已取消" : "任务失败"))));
           } else {
             finish(() => resolve(ev));
           }

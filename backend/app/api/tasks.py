@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
-_TERMINAL = (TaskProgressStatus.COMPLETED, TaskProgressStatus.FAILED)
+_TERMINAL = (TaskProgressStatus.COMPLETED, TaskProgressStatus.FAILED, TaskProgressStatus.CANCELLED)
 
 # Cap concurrent SSE progress streams to prevent unbounded resource usage.
 _SSE_SEMAPHORE = asyncio.Semaphore(50)
@@ -51,19 +51,38 @@ def get_task(task_id: str) -> TaskStatus:
     return status
 
 
+@router.post("/tasks/{task_id}/cancel", response_model=TaskStatus)
+def cancel_task_endpoint(task_id: str) -> TaskStatus:
+    status = task_manager.get(task_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Unknown task id")
+    if status.state in (TaskState.completed, TaskState.failed, TaskState.cancelled):
+        return status
+    from ..worker.tasks import cancel_task
+
+    cancel_task(task_id)
+    # 返回 cancelled 快照（可能仍在 revoke 竞态中，强制返回 cancelled）
+    updated = task_manager.get(task_id)
+    if updated and updated.state == TaskState.cancelled:
+        return updated
+    return TaskStatus(task_id=task_id, kind=status.kind, state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled")
+
+
 def _terminal_event_from_disk(task_id: str) -> TaskProgressEvent | None:
     persisted = load_persisted_task(task_id)
-    if not persisted or persisted.state not in (TaskState.completed, TaskState.failed):
+    if not persisted or persisted.state not in (TaskState.completed, TaskState.failed, TaskState.cancelled):
         return None
+    mapping = {
+        TaskState.completed: TaskProgressStatus.COMPLETED,
+        TaskState.failed: TaskProgressStatus.FAILED,
+        TaskState.cancelled: TaskProgressStatus.CANCELLED,
+    }
     return TaskProgressEvent(
-        status=(
-            TaskProgressStatus.COMPLETED
-            if persisted.state == TaskState.completed
-            else TaskProgressStatus.FAILED
-        ),
-        message=persisted.message or "done",
-        progress=persisted.progress if persisted.progress else 1.0,
+        status=mapping.get(persisted.state, TaskProgressStatus.FAILED),
+        message=persisted.message or ("已取消" if persisted.state == TaskState.cancelled else "done"),
+        progress=persisted.progress if persisted.progress else (0.0 if persisted.state == TaskState.cancelled else 1.0),
         data=persisted.result,
+        stage=persisted.stage or ("cancelled" if persisted.state == TaskState.cancelled else ""),
     )
 
 
