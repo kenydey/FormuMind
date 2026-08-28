@@ -14,6 +14,7 @@ import MolViewer from "./MolViewer";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import VersionHistoryModal from "./VersionHistoryModal";
+import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
 
@@ -90,6 +91,7 @@ function FormulaCard({
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [substituteOpen, setSubstituteOpen] = useState<string | null>(null);
   const expanded = open || forceOpen;
 
   // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
@@ -203,6 +205,14 @@ function FormulaCard({
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
+          {form.kg_compat && !form.kg_compat.feasible && form.kg_compat.incompatible_pairs?.length > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); const m = (form.kg_compat?.incompatible_pairs?.[0] as any)?.a || form.ingredients[0]?.name || ""; if (m) setSubstituteOpen(m); }}
+              className="text-[11px] border border-amber-500/40 text-amber-400 rounded px-2 py-1 hover:bg-amber-500/10 w-full text-left"
+            >
+              🔁 一键替代 — {String((form.kg_compat.incompatible_pairs[0] as any)?.a ?? form.ingredients[0]?.name)} 不相容，查找实测优先的替代料
+            </button>
+          )}
           {form.kg_compat?.measured_materials && form.kg_compat.measured_materials.length > 0 && (
             <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成</div>
           )}
@@ -243,6 +253,9 @@ function FormulaCard({
       >
         <VersionHistoryModal form={form} />
       </Modal>
+      {substituteOpen && (
+        <MaterialSubstitutionModal initialMaterial={substituteOpen} onClose={() => setSubstituteOpen(null)} />
+      )}
     </div>
   );
 }

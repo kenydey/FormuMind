@@ -240,6 +240,17 @@ def discover_substitutes(
                     break
 
     candidates.sort(key=lambda c: (-c.confidence, c.hops))
+    # measured 优先：实测边涉及的实体前置
+    try:
+        _measured: set[str] = set()
+        for link in store.get_links_for_entity(entity_id, direction="both", link_types=["substitutes", "inhibits", "synergizes"], limit=200):
+            if getattr(link, "extraction_method", None) == "measured":
+                _measured.add(link.src_entity_id)
+                _measured.add(link.dst_entity_id)
+        if _measured:
+            candidates.sort(key=lambda c: (0 if c.entity_id in _measured else 1, -c.confidence, c.hops))
+    except Exception:
+        pass
     return KGSubstituteDiscoverResponse(
         query_entity_id=entity_id,
         query_entity_name=entity_name,
