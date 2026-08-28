@@ -29,6 +29,7 @@ from ..config import get_settings
 from ..db.entity_store import get_entity_store, SEMANTIC_LINK_TYPES
 from ..db.campaign_store import get_campaign_store
 from ..db.models import KGEntityLink
+from ..db.session_utils import commit_session
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ def ingest_measured_evidence(campaign_id: int) -> int:
 
     display = _objective_display_names(campaign)
     written = 0
-    with es._session_factory() as session:
+    with commit_session(es._session_factory) as session:
         for metric, value in measured.items():
             dst_id = _resolve_or_create_property(es, session, metric, display.get(metric))
             if dst_id is None or dst_id == src_id:
@@ -207,7 +208,6 @@ def ingest_measured_evidence(campaign_id: int) -> int:
                     )
                 )
             written += 1
-        session.commit()
 
     if written:
         logger.info(

@@ -255,6 +255,7 @@ def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
     from ..db.campaign_store import get_campaign_store
     from ..db.database import default_session_factory
     from ..db.models import ExperimentRow
+    from ..db.session_utils import commit_session
 
     store = get_campaign_store()
     rows = store.list_rows_sync(campaign_id)
@@ -263,7 +264,7 @@ def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
         raise ValueError(f"workbench row {row_id} not found in campaign {campaign_id}")
 
     label = workbench_record_label(campaign_id, match.item_id)
-    with default_session_factory()() as session:
+    with commit_session(default_session_factory()) as session:
         existing = (
             session.query(ExperimentRow).filter(ExperimentRow.label == label).first()
         )
@@ -303,6 +304,5 @@ def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
             label=label,
         )
         session.add(placeholder)
-        session.commit()
         session.refresh(placeholder)
         return placeholder.id

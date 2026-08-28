@@ -30,6 +30,30 @@ def _rmse_by_metric(domain: ProductDomain) -> tuple[list, dict[str, float]]:
     return infos, rmse
 
 
+def _cost_summary(optimization: OptimizationResult) -> dict | None:
+    """Average cost_cny_per_kg / voc_gpl across top formulations from predictions."""
+    costs, vocs = [], []
+    for f in optimization.top_formulations or []:
+        pred = getattr(f, "predicted", None) or {}
+        if pred.get("cost_cny_per_kg") is not None:
+            try:
+                costs.append(float(pred["cost_cny_per_kg"]))
+            except (TypeError, ValueError):
+                pass
+        if pred.get("voc_gpl") is not None:
+            try:
+                vocs.append(float(pred["voc_gpl"]))
+            except (TypeError, ValueError):
+                pass
+    if not costs and not vocs:
+        return None
+    return {
+        "cost_cny_per_kg": round(sum(costs) / len(costs), 2) if costs else None,
+        "voc_gpl": round(sum(vocs) / len(vocs), 1) if vocs else None,
+        "n": len(costs) + len(vocs),
+    }
+
+
 def rmse_plateau_detected(
     history: list[dict[str, float]],
     *,
@@ -147,6 +171,7 @@ def loop_iterate(
             loop_message="模型 RMSE 已进入平台期，建议停止闭环迭代",
             recommended_next_action="模型 RMSE 已收敛，建议汇总结果并停止新增实验。",
             chemical_feasibility=chem,
+            cost_summary=_cost_summary(optimization),
         )
 
     if progress_cb:
@@ -206,4 +231,5 @@ def loop_iterate(
         recommended_next_action=next_result.recommended_next_action,
         budget_remaining=next_result.budget_remaining,
         chemical_feasibility=chem,
+        cost_summary=_cost_summary(optimization),
     )

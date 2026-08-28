@@ -7,7 +7,7 @@ import type {
   OptimizationResult,
 } from "../../api";
 import { extractMeasuredValues, objectiveMetrics } from "../../utils/objectiveContract";
-import { applyEnrichedLeaderboard } from "../formulationEnrich";
+import { applyEnrichedLeaderboard, enrichFormulationsViaValidate } from "../formulationEnrich";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -541,6 +541,23 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
+    // 训练后重算 leaderboard 预测（含 cost/voc 等），保持模型与展示一致
+    recomputePredicted: async () => {
+      const { leaderboard, requirement } = get();
+      if (!leaderboard.length) return;
+      try {
+        const { formulations } = await enrichFormulationsViaValidate(leaderboard, requirement);
+        set((draft) => {
+          draft.leaderboard = formulations;
+        });
+        get().scheduleAutosave();
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      }
+    },
+
     exportDoe: (format) => {
       const { doePlan } = get();
       if (!doePlan?.plan_id) {
@@ -575,5 +592,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

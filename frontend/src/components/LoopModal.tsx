@@ -149,6 +149,12 @@ export default function LoopModal() {
             <span>引擎：<span className="font-mono text-accent2">{loopReport.engine}</span></span>
             <span>已录入实验：<span className="font-mono text-accent2">{loopReport.total_records}</span> 条</span>
             <span>本域模型：<span className="font-mono text-accent2">{loopReport.model_info.length}</span> 个</span>
+            {loopReport.cost_summary?.cost_cny_per_kg != null && (
+              <span>均成本：<span className="font-mono text-accent2">{loopReport.cost_summary.cost_cny_per_kg}</span> CNY/kg</span>
+            )}
+            {loopReport.cost_summary?.voc_gpl != null && (
+              <span>均VOC：<span className="font-mono text-accent2">{loopReport.cost_summary.voc_gpl}</span> g/L</span>
+            )}
           </div>
 
           {/* Model RMSE/R² cards */}

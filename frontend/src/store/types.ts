@@ -187,6 +187,7 @@ export interface AppState {
   ensureWorkbenchCampaign: () => Promise<number | null>;
   adoptDoePlanToWorkbench: (plan?: DOEPlan) => Promise<number | null>;
   refreshModels: () => Promise<void>;
+  recomputePredicted: () => Promise<void>;
   exportDoe: (format: "csv" | "xlsx") => void;
   importCsv: (file: File) => Promise<void>;
   toggleHistory: () => void;

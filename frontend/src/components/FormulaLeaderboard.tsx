@@ -216,6 +216,17 @@ function FormulaCard({
           {form.kg_compat?.measured_materials && form.kg_compat.measured_materials.length > 0 && (
             <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成</div>
           )}
+          {/* 成本 / 碳足迹徽标 */}
+          {form.predicted && (form.predicted.cost_cny_per_kg != null || form.predicted.voc_gpl != null) && (
+            <div className="flex flex-wrap gap-1 text-[10px]">
+              {form.predicted.cost_cny_per_kg != null && (
+                <span className="bg-edge/60 px-1.5 py-0.5 rounded text-slate-300">成本 <span className="font-mono text-accent2">{form.predicted.cost_cny_per_kg}</span> CNY/kg</span>
+              )}
+              {form.predicted.voc_gpl != null && (
+                <span className="bg-edge/60 px-1.5 py-0.5 rounded text-slate-300">VOC <span className="font-mono text-accent2">{form.predicted.voc_gpl}</span> g/L</span>
+              )}
+            </div>
+          )}
           <MolViewer entries={form.ingredients.map((i) => ({ name: i.name, smiles: i.smiles }))} />
           <div className="flex gap-1 mt-1">
             <button

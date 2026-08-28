@@ -2018,6 +2018,8 @@ export interface LoopReport extends AdaptiveDOEMetadata {
   loop_message?: string;
   // KG chemical-compatibility verdict for the recommended batch's skeleton.
   chemical_feasibility?: ChemicalFeasibility | null;
+  // 成本/碳足迹摘要（top 配方均值）
+  cost_summary?: { cost_cny_per_kg?: number | null; voc_gpl?: number | null; n: number } | null;
 }
 
 export interface IntentResult {

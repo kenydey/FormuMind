@@ -89,6 +89,7 @@ export default function LabWorkbench({
   const campaignState = useStore((s) => s.campaignState);
   const followLoopTask = useStore((s) => s.followLoopTask);
   const refreshWorkbenchStats = useStore((s) => s.refreshWorkbenchStats);
+  const recomputePredicted = useStore((s) => s.recomputePredicted);
   const workbenchCampaignId = useStore((s) => s.workbenchCampaignId);
 
   const objectives = useMemo(
@@ -348,6 +349,7 @@ export default function LabWorkbench({
       }
       onSaved?.(res.rows);
       void refreshWorkbenchStats();
+      void recomputePredicted();
       if (res.loop_task_id) void followLoopTask(res.loop_task_id);
     } catch (e) {
       setError(String(e));

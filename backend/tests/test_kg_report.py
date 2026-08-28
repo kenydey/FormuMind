@@ -57,3 +57,21 @@ def test_report_no_alert_when_has_measured(tmp_path, monkeypatch):
     body = r.json()
     assert body["measured_performance"] == 1
     assert body["alert"] is None
+
+
+def test_calibration_exposes_penalty_and_counts(tmp_path, monkeypatch):
+    store = _store(tmp_path, monkeypatch)
+    with store._session_factory() as s:
+        store.upsert_entity(s, id="dom", canonical_name="anticorrosion_coating", kind="domain")
+        store.upsert_entity(s, id="a", canonical_name="A", kind="material")
+        store.upsert_entity(s, id="b", canonical_name="B", kind="material")
+    with store._session_factory() as s:
+        store.merge_semantic_link(s, src_entity_id="a", dst_entity_id="b", link_type="inhibits", confidence=0.9, evidence_ref={"source_id": "x", "sentence": "y"}, extraction_method="rule")
+    client = TestClient(app)
+    r = client.get("/api/kg/calibration")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kg_enabled"] is True
+    assert body["kg_inhibits_penalty"] > 0
+    assert body["kg_measured_bonus"] > 1.0
+    assert body["counts"]["inhibits"] >= 1
