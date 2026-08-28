@@ -32,7 +32,6 @@ _RATE_RULES: tuple[tuple[str, str, int, float], ...] = (
     ("POST", "/api/kg/retrieve", 20, 60.0),
     ("POST", "/api/kb/reindex", 3, 300.0),
     ("POST", "/api/experiments/import-csv", 10, 60.0),
-    ("POST", "/api/baybe/recommend", 10, 60.0),
 )
 
 _buckets: dict[tuple[str, str, str], deque[float]] = defaultdict(deque)
