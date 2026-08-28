@@ -1312,6 +1312,12 @@ export const api = {
   getSourceStatus: () =>
     get<Record<string, SourceStatus>>("/api/search/status"),
 
+  getRagStatus: () =>
+    get<{ backend: string; formulation_mode: string; gpu_enabled: boolean; gpu_available: boolean; rag_backend_setting: string; prewarm: { status: string; backend: string | null; elapsed_ms: number | null; error: string | null } }>("/api/research/rag/status"),
+
+  prewarmRag: (background = true) =>
+    post<{ status: string; backend: string | null; elapsed_ms: number | null; error: string | null }>(`/api/research/rag/prewarm?background=${String(background)}`, {}),
+
   listDependencies: () =>
     get<DependencyListResponse>("/api/dependencies"),
 

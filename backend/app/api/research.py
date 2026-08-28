@@ -137,12 +137,26 @@ def rag_status() -> dict:
     """Return current RAG retrieval backend and formulation mode."""
     from ..config import get_settings
     from ..services.colbert_store import active_backend, colbert_available_gpu
+    from ..services.rag_preheat import get_status as _prewarm_status
 
     s = get_settings()
-    return {
+    status = {
         "backend": active_backend(s),
         "formulation_mode": s.formulation_mode,
         "gpu_enabled": s.gpu_enabled,
         "gpu_available": colbert_available_gpu(s),
         "rag_backend_setting": s.rag_backend,
+        "prewarm": _prewarm_status(),
     }
+    return status
+
+
+@router.post("/research/rag/prewarm")
+def rag_prewarm(background: bool = True) -> dict:
+    """手动触发 RAG 预热（幂等，background=false 时同步等待）。"""
+    from ..services.rag_preheat import get_status, preheat
+
+    if not background:
+        preheat(background=False)
+        return get_status()
+    return preheat(background=True)

@@ -140,6 +140,22 @@ async def lifespan(_app: FastAPI):
             get_experiment_store(settings)
     except Exception as exc:
         log_handled_exception(logger, exc, "lifespan: ELN store initialization failed", level=logging.ERROR)
+    # RAG 冷启动预热（非阻塞，2s 后后台触发）
+    if not skip_bootstrap:
+        try:
+            import asyncio as _asyncio
+
+            from .services.rag_preheat import preheat as _rag_prewarm
+
+            loop = _asyncio.get_running_loop()
+
+            def _schedule():
+                _rag_prewarm(background=True)
+
+            loop.call_later(2.0, _schedule)
+            logger.info("lifespan: scheduled rag prewarm in 2s")
+        except Exception as exc:
+            log_handled_exception(logger, exc, "lifespan: schedule rag prewarm failed")
     yield
     try:
         from .db.campaign_store import get_campaign_store
