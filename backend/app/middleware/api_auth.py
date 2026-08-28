@@ -133,6 +133,25 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         if not settings.api_auth_enabled or _is_public_path(request.url.path):
             return await call_next(request)
+        # Phase 2 多用户：允许 JSON 映射中的任意 token
+        if os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() in ("1", "true", "yes"):
+            raw = os.getenv("FORMUMIND_API_TOKENS_JSON", "").strip()
+            if raw:
+                try:
+                    import json
+
+                    mapping = json.loads(raw)
+                    if isinstance(mapping, dict):
+                        provided = _extract_token(request)
+                        if provided:
+                            for tok in mapping.values():
+                                if isinstance(tok, str) and tok and secrets.compare_digest(provided, tok):
+                                    return await call_next(request)
+                            # 反向 {token: owner}
+                            if provided in mapping:
+                                return await call_next(request)
+                except Exception:
+                    pass
         token = resolve_api_token(settings)
         if token is None:
             return await call_next(request)
@@ -155,18 +174,39 @@ def get_current_owner(request: Request) -> str:
 
     - 当 ``FORMUMIND_MULTI_USER != true``：恒 ``default``，所有校验 no-op。
     - 未来多用户：``FORMUMIND_API_TOKENS_JSON='{\"alice\": \"tok1\", ...}'`` 或
-      ``Authorization: Bearer <owner>:<token>`` 时解析 owner。
+      ``Authorization: Bearer *** 时解析 owner。
     目前仅为 experiments/tasks 的 TODO 锚点提供统一入口。
     """
     # 单 token 模式：无身份来源
     if os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() not in ("1", "true", "yes"):
         return "default"
-    # 预留：多用户时从 token 映射 owner（当前未启用，保持 default 兼容）
+    # 多用户：优先从 JSON 映射解析 token -> owner
     provided = _extract_token(request)
-    if provided and ":" in provided:
-        maybe_owner = provided.split(":", 1)[0].strip()
-        if maybe_owner:
-            return maybe_owner
+    if provided:
+        # 1) JSON 映射表
+        raw = os.getenv("FORMUMIND_API_TOKENS_JSON", "").strip()
+        if raw:
+            try:
+                import json
+
+                mapping = json.loads(raw)
+                if isinstance(mapping, dict):
+                    for owner, tok in mapping.items():
+                        if isinstance(tok, str) and tok and secrets.compare_digest(provided, tok):
+                            return str(owner)
+                    # 也支持 {token: owner} 反向写法
+                    if provided in mapping and isinstance(mapping[provided], str):
+                        return str(mapping[provided])
+            except Exception:
+                pass
+        # 2) 兼容 owner:token 明文（开发联调用，生产不推荐）
+        if ":" in provided:
+            maybe_owner = provided.split(":", 1)[0].strip()
+            if maybe_owner:
+                return maybe_owner
+        # 3) 单 token 回退：有 multi_user 但未配映射时，以 token 哈希前缀作 owner（便于测试）
+        #    实际部署应配置 JSON 映射。
+        return provided[:16]
     return "default"
 
 

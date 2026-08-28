@@ -7,13 +7,19 @@ export default function ApiAccessPanel({
   onTokenSaved?: () => void;
 }) {
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
+  const [multiUser, setMultiUser] = useState(false);
+  const [owner, setOwner] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState(getApiToken() ?? "");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api
       .getAuthStatus()
-      .then((s) => setAuthRequired(s.auth_required))
+      .then((s) => {
+        setAuthRequired(s.auth_required);
+        setMultiUser(!!s.multi_user);
+        setOwner(s.owner ?? null);
+      })
       .catch(() => setAuthRequired(null));
   }, []);
 
@@ -23,10 +29,16 @@ export default function ApiAccessPanel({
 
   return (
     <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 space-y-2">
-      <div className="text-xs text-amber-200 font-semibold">API 访问令牌 · Bearer Token</div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-amber-200 font-semibold">API 访问令牌 · Bearer Token</span>
+        {multiUser && owner && (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-500/30">owner: {owner}</span>
+        )}
+      </div>
       <p className="text-[11px] text-amber-100/80 leading-relaxed">
         服务器已启用 API 鉴权。请在下方输入与后端{" "}
         <code className="text-amber-200/90">FORMUMIND_API_TOKEN</code> 相同的令牌，否则设置、依赖列表等接口无法加载。
+        {multiUser && <span className="ml-1 text-amber-200/70">多用户模式已启用（FORMUMIND_MULTI_USER=true），令牌按 owner 隔离。</span>}
       </p>
       <div className="flex gap-2">
         <input

@@ -1209,7 +1209,7 @@ export const api = {
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),
 
   getAuthStatus: () =>
-    get<{ auth_required: boolean; hint: string }>("/api/auth/status"),
+    get<{ auth_required: boolean; hint: string; multi_user?: boolean; owner?: string }>("/api/auth/status"),
 
   postSettings: (update: Partial<LLMConfig> & { api_key?: string }) =>
     post<{ ok: boolean; provider: string; model: string; message: string }>(

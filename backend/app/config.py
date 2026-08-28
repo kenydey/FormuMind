@@ -18,6 +18,9 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_ENV_FILE",
     "FORMUMIND_TASK_DIR",
     "FORMUMIND_TASK_PROGRESS_DIR",
+    # P1 owner Phase2 多用户开关
+    "FORMUMIND_MULTI_USER",
+    "FORMUMIND_API_TOKENS_JSON",
     # Test-only lifespan fast-path flag (see app/main.py::_skip_lifespan_bootstrap).
     "FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP",
 })
