@@ -121,6 +121,11 @@ export default function LoopModal() {
           )}
         </div>
       </div>
+      {busy === "looping" && task && (
+        <div className="text-[10px] text-slate-500 font-mono">
+          {task.stage ? `${task.stage} · ` : ""}{task.elapsed_ms != null ? `${(task.elapsed_ms / 1000).toFixed(1)}s` : task.message || "进行中…"}
+        </div>
+      )}
 
       {loopReport && (
         <div className="space-y-4">

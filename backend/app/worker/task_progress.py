@@ -39,6 +39,7 @@ class TaskProgressEvent(BaseModel):
     message: str = ""
     progress: float = 0.0
     data: dict[str, Any] | None = None
+    elapsed_ms: int | None = None
 
 
 class AsyncTaskAccepted(BaseModel):
@@ -170,12 +171,22 @@ def publish_progress(
     kind: str | None = None,
 ) -> TaskProgressEvent:
     """Publish progress to Redis channel and update meta hash."""
+    # 计算 elapsed_ms（基于 started_at）
+    elapsed_ms = None
+    try:
+        meta = get_task_meta(task_id)
+        st = (meta or {}).get("started_at")
+        if st is not None:
+            elapsed_ms = int((time.time() - float(st)) * 1000)
+    except Exception:
+        pass
     event = TaskProgressEvent(
         status=status,
         stage=stage,
         message=message,
         progress=progress,
         data=data,
+        elapsed_ms=elapsed_ms,
     )
     _store_progress(task_id, event, kind=kind)
     # 首次写入即记录 started_at（用于 elapsed_ms）

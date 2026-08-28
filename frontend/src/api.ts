@@ -287,6 +287,7 @@ export interface TaskProgressEvent {
   message: string;
   progress?: number;
   data?: Record<string, unknown>;
+  elapsed_ms?: number | null;
 }
 
 export interface AsyncTaskAccepted {
@@ -1357,6 +1358,8 @@ export function progressToTaskStatus(
     message: ev.message,
     result: ev.data ?? null,
     stream_url: `/api/tasks/${taskId}/stream`,
+    stage: (ev as any).stage ?? "",
+    elapsed_ms: (ev as any).elapsed_ms ?? null,
   };
 }
 
