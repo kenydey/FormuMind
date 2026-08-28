@@ -170,7 +170,9 @@ export interface AppState {
   ) => void;
   runAiModifyFormula: (prompt: string, baseIndex?: number) => Promise<void>;
   runResearch: () => Promise<void>;
+  cancelResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
+  cancelDeepResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
   generateDoe: (design: string) => Promise<void>;
   setDoeEngine: (engine: "auto" | "native" | "pydoe") => void;

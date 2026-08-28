@@ -71,6 +71,7 @@ export default function ActionsPanel() {
     openModal,
     setOpenModal,
     runResearch,
+    cancelResearch,
     runOptimize,
     busy,
     formulationBusy,
@@ -91,6 +92,7 @@ export default function ActionsPanel() {
       openModal: s.openModal,
       setOpenModal: s.setOpenModal,
       runResearch: s.runResearch,
+      cancelResearch: s.cancelResearch,
       runOptimize: s.runOptimize,
       busy: s.busy,
       formulationBusy: s.formulationBusy,
@@ -250,8 +252,11 @@ export default function ActionsPanel() {
             onClick={runResearch}
             className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
           >
-            {formulationBusy ? "检索中…" : "从知识库推荐配方"}
+            {formulationBusy ? (recommendMessage || (recommendStage === "retrieve" ? "模型冷启动中… 正在检索" : "检索中…")) : "从知识库推荐配方"}
           </button>
+          {formulationBusy && (
+            <button onClick={cancelResearch} className="w-full border border-rose-500/50 text-rose-300 hover:bg-rose-500/10 rounded px-2 py-1 text-xs mt-1">✕ 取消推荐</button>
+          )}
         </div>
         <FormulaLeaderboard />
       </Modal>

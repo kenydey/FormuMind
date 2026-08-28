@@ -116,6 +116,10 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.recommendMessage = "正在检索";
         draft.error = null;
       });
+      const ctrl = new AbortController();
+      set((draft) => {
+        (draft as unknown as Record<string, unknown>)._researchAbort = ctrl;
+      });
       try {
         const { requirement, sources, selectedSources, searchQuery } = get();
         const selected = sources.filter((e) =>
@@ -127,13 +131,15 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           payload,
           searchQuery.trim()
         );
+        (ctrl as unknown as Record<string, unknown>).taskId = task_id;
         const final = await awaitTaskStream(task_id, (ev) => {
           set((draft) => {
             draft.recommendStage = ev.stage ?? "";
-            draft.recommendMessage = ev.message ?? "";
+            // 冷启动区分：首包 retrieve 阶段文案
+            draft.recommendMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
             draft.task = progressToTaskStatus(task_id, "recommend", ev);
           });
-        });
+        }, 120_000, ctrl.signal);
         const wrapped = final.data as { research?: ResearchResult } | undefined;
         const research = wrapped?.research;
         if (!research) throw new Error("推荐未返回结果");
@@ -141,15 +147,28 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.research = { ...research, recommended: draft.leaderboard };
         });
       } catch (e) {
+        const msg = formatApiError(e);
+        const isCancelled = msg.includes("取消") || msg.includes("cancel");
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.error = isCancelled ? "推荐已取消" : msg;
         });
       } finally {
         set((draft) => {
           draft.formulationBusy = false;
           draft.recommendStage = "";
           draft.recommendMessage = "";
+          delete (draft as unknown as Record<string, unknown>)._researchAbort;
         });
+      }
+    },
+
+    cancelResearch: async () => {
+      const abort = (get() as unknown as Record<string, unknown>)._researchAbort as AbortController & { taskId?: string } | undefined;
+      if (!abort) return;
+      abort.abort();
+      const tid = abort.taskId;
+      if (tid) {
+        try { await api.cancelTask(tid); } catch {}
       }
     },
 
@@ -162,6 +181,10 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.error = null;
         undismiss(draft.notificationsDismissed, ["deep-research", "deep-report"]);
       });
+      const ctrl = new AbortController();
+      set((draft) => {
+        (draft as unknown as Record<string, unknown>)._deepResearchAbort = ctrl;
+      });
       try {
         const { task_id } = await api.submitDeepResearch(
           searchQuery,
@@ -169,13 +192,14 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           sources,
           searchQuery.trim()
         );
+        (ctrl as unknown as Record<string, unknown>).taskId = task_id;
         const final = await awaitTaskStream(task_id, (ev) => {
           set((draft) => {
             draft.deepResearchStage = ev.stage ?? "";
-            draft.deepResearchMessage = ev.message ?? "";
+            draft.deepResearchMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
             draft.task = progressToTaskStatus(task_id, "deep_research", ev);
           });
-        }, 600_000 /* 10 min — deep research LLM calls can be slow */);
+        }, 600_000, ctrl.signal);
         const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
         const report = wrapped?.report;
         if (!report) throw new Error("深度研究未返回结果");
@@ -196,17 +220,28 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         });
         get().scheduleAutosave();
       } catch (e) {
+        const msg = formatApiError(e);
+        const isCancelled = msg.includes("取消") || msg.includes("cancel");
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.error = isCancelled ? "深度研究已取消" : msg;
         });
       } finally {
         set((draft) => {
           draft.deepResearchBusy = false;
           draft.deepResearchStage = "";
           draft.deepResearchMessage = "";
+          delete (draft as unknown as Record<string, unknown>)._deepResearchAbort;
         });
       }
     },
 
-  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'runAiModifyFormula' | 'runResearch' | 'runDeepResearch'>;
+    cancelDeepResearch: async () => {
+      const abort = (get() as unknown as Record<string, unknown>)._deepResearchAbort as AbortController & { taskId?: string } | undefined;
+      if (!abort) return;
+      abort.abort();
+      const tid = abort.taskId;
+      if (tid) try { await api.cancelTask(tid); } catch {}
+    },
+
+  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'runAiModifyFormula' | 'runResearch' | 'cancelResearch' | 'runDeepResearch' | 'cancelDeepResearch'>;
 }
