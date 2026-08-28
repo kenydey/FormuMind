@@ -1,7 +1,7 @@
 """Research endpoint: CRAG graph via Celery + SSE task stream."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -60,8 +60,10 @@ def start_research(body: ResearchRequest) -> ResearchResult:
 
 
 @router.post("/research/recommend", status_code=202)
-def start_recommend_research(body: ResearchRequest) -> JSONResponse:
+def start_recommend_research(body: ResearchRequest, request: Request) -> JSONResponse:
     """Enqueue lightweight CRAG recommend; subscribe via GET /api/tasks/{id}/stream."""
+    from ..middleware.api_auth import get_current_owner
+
     req = Requirement(**{
         k: v for k, v in body.model_dump().items()
         if k not in ("sources", "source_types", "query")
@@ -73,12 +75,14 @@ def start_recommend_research(body: ResearchRequest) -> JSONResponse:
         "query": body.query or req.headline(),
     }
     outbox_id = _enqueue_outbox("research_recommend", payload)
-    return submit(run_recommend_task, payload, "recommend", outbox_id=outbox_id)
+    return submit(run_recommend_task, payload, "recommend", outbox_id=outbox_id, owner_id=get_current_owner(request))
 
 
 @router.post("/research/deep", status_code=202)
-def start_deep_research(body: DeepResearchRequest) -> JSONResponse:
+def start_deep_research(body: DeepResearchRequest, request: Request) -> JSONResponse:
     """Enqueue CRAG deep research; subscribe via GET /api/tasks/{id}/stream."""
+    from ..middleware.api_auth import get_current_owner
+
     payload = {
         "topic": body.topic,
         "requirement": body.requirement.model_dump(),
@@ -86,13 +90,14 @@ def start_deep_research(body: DeepResearchRequest) -> JSONResponse:
         "query": body.query or body.topic,
     }
     outbox_id = _enqueue_outbox("research_deep", payload)
-    return submit(run_deep_research_task, payload, "deep_research", outbox_id=outbox_id)
+    return submit(run_deep_research_task, payload, "deep_research", outbox_id=outbox_id, owner_id=get_current_owner(request))
 
 
 @router.post("/research/modify", status_code=202)
-def modify_recommendation(body: ModifyRequest) -> JSONResponse:
+def modify_recommendation(body: ModifyRequest, request: Request) -> JSONResponse:
     """AI-modify formulas: async CRAG + recommend (subscribe via GET /api/tasks/{id}/stream)."""
     from ..domain.research_query import build_research_query
+    from ..middleware.api_auth import get_current_owner
 
     req = body.requirement.model_copy(deep=True)
     note = f"[AI modify] {body.modify_prompt}"
@@ -117,7 +122,7 @@ def modify_recommendation(body: ModifyRequest) -> JSONResponse:
         "base_formulas": [f.model_dump() for f in base_formulas],
         "n": body.n,
     }
-    return submit(run_recommend_task, payload, "recommend")
+    return submit(run_recommend_task, payload, "recommend", owner_id=get_current_owner(request))
 
 
 @router.get("/research/expand", response_model=ExpandedQuery, deprecated=True)

@@ -109,6 +109,13 @@ def _status_from_progress(task_id: str, kind: str) -> TaskStatus:
             elapsed_ms = int((time.time() - float(st)) * 1000)
     except Exception:
         elapsed_ms = None
+    owner_id = (meta.get("owner_id") or "").strip() or None
+    # 回退：内存表或持久化
+    if not owner_id:
+        try:
+            owner_id = task_manager._owners.get(task_id)  # type: ignore[name-defined]
+        except Exception:
+            owner_id = None
     return TaskStatus(
         task_id=task_id,
         kind=kind or meta.get("kind", "unknown"),
@@ -119,6 +126,7 @@ def _status_from_progress(task_id: str, kind: str) -> TaskStatus:
         stream_url=f"/api/tasks/{task_id}/stream",
         stage=meta.get("stage", "") or "",
         elapsed_ms=elapsed_ms,
+        owner_id=owner_id,
     )
 
 
@@ -132,17 +140,25 @@ class TaskManager:
         from collections import OrderedDict
 
         self._kinds: "OrderedDict[str, str]" = OrderedDict()
+        self._owners: "OrderedDict[str, str | None]" = OrderedDict()
 
-    def _remember(self, task_id: str, kind: str) -> None:
+    def _remember(self, task_id: str, kind: str, owner_id: str | None = None) -> None:
         self._kinds[task_id] = kind
         self._kinds.move_to_end(task_id)
+        self._owners[task_id] = owner_id
+        self._owners.move_to_end(task_id)
         while len(self._kinds) > self._KINDS_MAX:
             self._kinds.popitem(last=False)
+        while len(self._owners) > self._KINDS_MAX:
+            self._owners.popitem(last=False)
 
-    def register_celery_task(self, task_id: str, kind: str) -> None:
-        self._remember(task_id, kind)
+    def register_celery_task(self, task_id: str, kind: str, owner_id: str | None = None) -> None:
+        # owner 优先来自显式参数，否则沿用已有记录
+        if owner_id is None:
+            owner_id = self._owners.get(task_id)
+        self._remember(task_id, kind, owner_id)
         existing = load_persisted_task(task_id)
-        if existing and existing.state in (TaskState.completed, TaskState.failed):
+        if existing and existing.state in (TaskState.completed, TaskState.failed, TaskState.cancelled):
             return
         register_pending(task_id, kind)
         status = TaskStatus(
@@ -151,8 +167,17 @@ class TaskManager:
             state=TaskState.pending,
             message="queued",
             stream_url=f"/api/tasks/{task_id}/stream",
+            owner_id=owner_id,
         )
         _persist_task(task_id, status)
+        # 同步写入 owner 到 meta，便于 _status_from_progress 回读
+        try:
+            from .task_progress import _redis_client, _meta_key
+
+            c = _redis_client()
+            c.hset(_meta_key(task_id), mapping={"owner_id": owner_id or ""})
+        except Exception:
+            pass
 
     def get(self, task_id: str) -> TaskStatus | None:
         from .task_progress import get_task_meta
@@ -173,6 +198,7 @@ class TaskManager:
                 state=TaskState.pending,
                 message="queued",
                 stream_url=f"/api/tasks/{task_id}/stream",
+                owner_id=self._owners.get(task_id),
             )
         return None
 
@@ -263,15 +289,24 @@ class TaskManager:
         except Exception as exc:
             logger.warning("revoke failed for %s: %s", task_id, exc)
         kind = self._kinds.get(task_id) or ""
+        owner_id = self._owners.get(task_id)
         try:
             from .task_progress import TaskProgressStatus, publish_progress
 
             publish_progress(task_id, TaskProgressStatus.CANCELLED, stage="cancelled", message="已取消", kind=kind or "unknown")
+            # 保留 owner
+            if owner_id:
+                try:
+                    from .task_progress import _redis_client, _meta_key
+
+                    _redis_client().hset(_meta_key(task_id), mapping={"owner_id": owner_id})
+                except Exception:
+                    pass
         except Exception:
             pass
         # 持久化 cancelled 快照
         try:
-            status = TaskStatus(task_id=task_id, kind=kind or "unknown", state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled")
+            status = TaskStatus(task_id=task_id, kind=kind or "unknown", state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled", owner_id=owner_id)
             _persist_task(task_id, status)
         except Exception:
             pass

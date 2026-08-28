@@ -75,7 +75,7 @@ def broker_reachable() -> bool:
         return False
 
 
-def submit(task, payload: dict, kind: str, *, outbox_id: str | None = None) -> JSONResponse:
+def submit(task, payload: dict, kind: str, *, outbox_id: str | None = None, owner_id: str | None = None) -> JSONResponse:
     """Dispatch ``task`` with ``payload`` and return the 202 accepted response.
 
     Raises:
@@ -95,4 +95,4 @@ def submit(task, payload: dict, kind: str, *, outbox_id: str | None = None) -> J
         # client gets a reason instead of an unparseable 500.
         logger.exception("celery dispatch failed for {}", kind)
         raise HTTPException(status_code=503, detail=f"{BROKER_DOWN_DETAIL}（{exc}）") from exc
-    return accepted_response(async_result.id, kind, outbox_id=outbox_id)
+    return accepted_response(async_result.id, kind, outbox_id=outbox_id, owner_id=owner_id)

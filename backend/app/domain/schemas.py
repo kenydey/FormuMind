@@ -511,6 +511,7 @@ class TaskStatus(BaseModel):
     # P2：可观测
     stage: str = ""
     elapsed_ms: int | None = None
+    owner_id: str | None = None
 
 
 class AsyncTaskAccepted(BaseModel):

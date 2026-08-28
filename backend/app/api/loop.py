@@ -1,9 +1,8 @@
 """Self-driving loop endpoint — Celery + SSE."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-
 from ..domain.schemas import LoopRequest, Requirement
 from ..worker.tasks import run_loop_task
 from ._dispatch import submit
@@ -12,7 +11,9 @@ router = APIRouter(prefix="/api", tags=["loop"])
 
 
 @router.post("/loop/iterate", status_code=202)
-def iterate_loop(payload: LoopRequest) -> JSONResponse:
+def iterate_loop(payload: LoopRequest, request: Request) -> JSONResponse:
+    from ..middleware.api_auth import get_current_owner
+
     req = Requirement(
         **payload.model_dump(
             exclude={
@@ -43,4 +44,4 @@ def iterate_loop(payload: LoopRequest) -> JSONResponse:
         else None,
         "prior_next_doe": payload.prior_next_doe.model_dump() if payload.prior_next_doe else None,
         "budget_remaining": payload.budget_remaining,
-    }, "loop")
+    }, "loop", owner_id=get_current_owner(request))

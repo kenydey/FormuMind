@@ -32,8 +32,8 @@ _TERMINAL = (TaskProgressStatus.COMPLETED, TaskProgressStatus.FAILED, TaskProgre
 _SSE_SEMAPHORE = asyncio.Semaphore(50)
 
 
-def accepted_response(task_id: str, kind: str, outbox_id: str | None = None) -> JSONResponse:
-    task_manager.register_celery_task(task_id, kind)
+def accepted_response(task_id: str, kind: str, outbox_id: str | None = None, owner_id: str | None = None) -> JSONResponse:
+    task_manager.register_celery_task(task_id, kind, owner_id=owner_id)
     body = AsyncTaskAccepted(
         task_id=task_id,
         stream_url=f"/api/tasks/{task_id}/stream",
@@ -44,18 +44,24 @@ def accepted_response(task_id: str, kind: str, outbox_id: str | None = None) -> 
 
 
 @router.get("/tasks/{task_id}", response_model=TaskStatus)
-def get_task(task_id: str) -> TaskStatus:
+def get_task(task_id: str, request: Request) -> TaskStatus:
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
     status = task_manager.get(task_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Unknown task id")
+    assert_owner(status.owner_id, get_current_owner(request))
     return status
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskStatus)
-def cancel_task_endpoint(task_id: str) -> TaskStatus:
+def cancel_task_endpoint(task_id: str, request: Request) -> TaskStatus:
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
     status = task_manager.get(task_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Unknown task id")
+    assert_owner(status.owner_id, get_current_owner(request))
     if status.state in (TaskState.completed, TaskState.failed, TaskState.cancelled):
         return status
     from ..worker.tasks import cancel_task
@@ -64,8 +70,9 @@ def cancel_task_endpoint(task_id: str) -> TaskStatus:
     # 返回 cancelled 快照（可能仍在 revoke 竞态中，强制返回 cancelled）
     updated = task_manager.get(task_id)
     if updated and updated.state == TaskState.cancelled:
+        assert_owner(updated.owner_id, get_current_owner(request))
         return updated
-    return TaskStatus(task_id=task_id, kind=status.kind, state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled")
+    return TaskStatus(task_id=task_id, kind=status.kind, state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled", owner_id=status.owner_id)
 
 
 def _terminal_event_from_disk(task_id: str) -> TaskProgressEvent | None:
@@ -151,8 +158,9 @@ async def _poll_until_terminal(
 async def stream_task_progress(task_id: str, request: Request) -> StreamingResponse:
     from ..middleware.api_auth import assert_owner, get_current_owner
 
-    # Phase 1 软校验：task 暂无 owner 持久化，恒过，仅锚点
-    assert_owner(None, get_current_owner(request))
+    persisted = task_manager.get(task_id)
+    owner_to_check = persisted.owner_id if persisted else None
+    assert_owner(owner_to_check, get_current_owner(request))
     if not task_exists(task_id):
         raise HTTPException(status_code=404, detail="Unknown task id")
 
