@@ -48,7 +48,7 @@ def test_retrieve_node_merges_kb_chunks(monkeypatch, stores):
     from app.pipeline.research_graph import retrieve_node
 
     monkeypatch.setattr(
-        "app.services.kb_index.search_chunks", lambda q, k=4: [_kb_hit()]
+        "app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: [_kb_hit()]
     )
     state = retrieve_node({"topic": "环氧防腐底漆", "query": "环氧防腐底漆"})
     ids = [e.identifier for e in state["evidence"]]
@@ -59,7 +59,7 @@ def test_retrieve_node_dedupes_kb_against_colbert(monkeypatch, stores):
     from app.pipeline.research_graph import retrieve_node
 
     hit = _kb_hit()
-    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=4: [hit])
+    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: [hit])
     state = retrieve_node(
         {"topic": "环氧防腐底漆", "query": "环氧防腐底漆", "pre_index": [hit]}
     )
@@ -68,26 +68,31 @@ def test_retrieve_node_dedupes_kb_against_colbert(monkeypatch, stores):
 
 
 def test_retrieve_node_kb_disabled_no_call(monkeypatch, stores):
+    # v6 起 KG 默认开启：KG 语义检索会调 search_chunks。要验证「检索层
+    # 完全禁用时零调用」，须同时关 KG 与 KB 两个开关（KG 是新的调用者）。
     monkeypatch.setenv("FORMUMIND_KB_V2_ENABLED", "false")
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
     get_settings.cache_clear()
     from app.pipeline.research_graph import retrieve_node
 
     called = []
     monkeypatch.setattr(
-        "app.services.kb_index.search_chunks", lambda q, k=4: called.append(q) or []
+        "app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: called.append(q) or []
     )
     retrieve_node({"topic": "环氧防腐底漆", "query": "环氧防腐底漆"})
     assert called == []
 
 
 def test_retrieve_node_kb_topk_zero_no_call(monkeypatch, stores):
+    # 同 kb_disabled：KG 默认开时是 search_chunks 的调用者，须同时关掉。
     monkeypatch.setenv("FORMUMIND_KB_RECOMMEND_TOP_K", "0")
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
     get_settings.cache_clear()
     from app.pipeline.research_graph import retrieve_node
 
     called = []
     monkeypatch.setattr(
-        "app.services.kb_index.search_chunks", lambda q, k=4: called.append(q) or []
+        "app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: called.append(q) or []
     )
     retrieve_node({"topic": "环氧防腐底漆", "query": "环氧防腐底漆"})
     assert called == []

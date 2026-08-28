@@ -206,11 +206,14 @@ def test_chat_skips_duplicate_kb_identifiers(monkeypatch, stores):
 
 
 def test_chat_unchanged_when_kb_disabled(monkeypatch, stores):
+    # v6 起 KG 默认开启且优先于 KB 分支（chat.py:115），KG 语义检索会调
+    # search_chunks。验证「检索完全禁用时 KB 零调用」须同时关 KG。
     monkeypatch.setenv("FORMUMIND_KB_V2_ENABLED", "false")
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
     get_settings.cache_clear()
     called = []
     monkeypatch.setattr("app.services.kb_index.search_chunks",
-                        lambda q, k=6: called.append(q) or [])
+                        lambda q, k=6, project_id=None: called.append(q) or [])
     resp = _client().post("/api/chat", json={"question": "q", "sources": []})
     assert resp.status_code == 200
     assert called == []

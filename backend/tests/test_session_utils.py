@@ -54,4 +54,6 @@ def test_commit_session_retries_on_database_locked(monkeypatch):
         s.add("row")
 
     assert session.commit.call_count == 3
-    session.rollback.assert_not_called()
+    # 锁重试前需 rollback 清 PendingRollbackError 态（session_utils 注释），
+    # 故前两次失败各触发一次 rollback，最终 commit 成功。
+    assert session.rollback.call_count == 2
