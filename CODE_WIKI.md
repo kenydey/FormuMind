@@ -196,6 +196,15 @@ SQLite 默认**不**执行外键约束，且该开关是**每连接**生效的�
 | `/api/qc/experiments/{id}/measurements` | 某实验的逐条实测值 |
 | `/api/formulations/versions` | 配方版本谱系：保存 / 检索 / 详情 / 差异 |
 | `/api/kb/integrity` | 引用完整性巡检（孤儿行报告） |
+| `/api/kg/feedback/stats` | KG 实测回流统计（`measured` 计数 + `by_campaign`） |
+| `/api/kg/feedback/report` | KG 审计报表（`measured` + 零增长 `alert` + `recent_bias`） |
+| `/api/kg/relations/{id}?extraction_method=measured` | 图谱关系按 `extraction_method` 过滤 |
+| `/api/research/rag/status` | RAG 后端 + `prewarm` 状态（`idle/warming/ready/failed`） |
+| `/api/research/rag/prewarm` | 手动触发 RAG 预热（`background` 幂等） |
+| `/api/tasks/{id}` | 任务进度查询（新增 `stage/elapsed_ms/owner_id`） |
+| `/api/tasks/{id}/cancel` | 任务取消（`CANCELLED` 终态 + `owner` 403 鉴权） |
+| `/api/tasks/{id}/stream` | SSE 进度流（`CANCELLED` 终态 + 鉴权） |
+| `/api/experiments/workbench/{id}/bias-trend` | 预测偏差趋势（`loop_history` 聚合 + 阈值告警） |
 
 ### 6.2 认证与安全
 
