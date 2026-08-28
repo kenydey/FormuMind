@@ -255,6 +255,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
         });
         await get().refreshWorkbenchStats();
+        await get().recomputePredicted();
         get().scheduleAutosave();
         return wb.campaign_id;
       } catch (e) {
@@ -517,6 +518,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.trainMessage = report.message;
         });
         await get().runResearch();
+        await get().recomputePredicted();
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
@@ -582,6 +584,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.trainMessage = report.message;
         });
         await get().runResearch();
+        await get().recomputePredicted();
       } catch (e) {
         set((draft) => {
           draft.error = `CSV 导入失败：${e instanceof Error ? e.message : String(e)}`;

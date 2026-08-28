@@ -48,6 +48,8 @@ function populatedState(): AppState {
     recommendSourceTypes: ["patents"],
     lastAlEngine: "baybe",
     autoLoopOnSync: true,
+    autoLoopMaxRounds: 5,
+    autoLoopRound: 2,
   } as unknown as AppState;
 }
 
