@@ -42,6 +42,36 @@ def stats() -> KGStats:
     return KGStats(enabled=True, **get_entity_store().stats())
 
 
+@router.get("/feedback/stats")
+def feedback_stats() -> dict:
+    """Measured feedback crawl stats — how many measured_performance links landed."""
+    from ..db.entity_store import get_entity_store
+    from ..db.models import KGEntityLink
+
+    if not kg_enabled():
+        raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
+    es = get_entity_store()
+    with es._session_factory() as session:
+        total = session.query(KGEntityLink).filter(KGEntityLink.extraction_method == "measured").count()
+        measured_perf = (
+            session.query(KGEntityLink)
+            .filter(KGEntityLink.link_type == "measured_performance", KGEntityLink.extraction_method == "measured")
+            .count()
+        )
+        by_campaign: dict[str, int] = {}
+        rows = (
+            session.query(KGEntityLink.evidence_refs)
+            .filter(KGEntityLink.extraction_method == "measured")
+            .all()
+        )
+        for (refs,) in rows:
+            for r in (refs or []):
+                sid = r.get("source_id", "")
+                if sid.startswith("measured:campaign_"):
+                    by_campaign[sid] = by_campaign.get(sid, 0) + 1
+    return {"measured_total": total, "measured_performance": measured_perf, "by_campaign": by_campaign}
+
+
 @router.post("/rebuild", response_model=KGRebuildReport)
 def rebuild(body: KGRebuildBody | None = None) -> KGRebuildReport:
     if not kg_enabled():
@@ -76,11 +106,12 @@ def resolve(q: str = Query(min_length=1)) -> EntityResolveResponse:
 def entity_relations(
     entity_id: str,
     direction: str = Query(default="both", pattern="^(both|outgoing|incoming)$"),
+    extraction_method: str | None = Query(default=None, description="Filter by extraction_method: rule|llm|measured|vision_table"),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[KGRelationView]:
     if not kg_enabled():
         raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
-    return get_entity_relations(entity_id, direction=direction, limit=limit)
+    return get_entity_relations(entity_id, direction=direction, extraction_method=extraction_method, limit=limit)
 
 
 @router.get("/path", response_model=KGPathResponse)

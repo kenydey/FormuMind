@@ -337,6 +337,7 @@ export default function LabWorkbench({
       const hints: string[] = [];
       if (res.training_message) hints.push(res.training_message);
       if (res.loop_message) hints.push(res.loop_message);
+      if (res.kg_written) hints.push(`KG 回流 ${res.kg_written} 条实测证据`);
       if (hints.length) setSaveHint(hints.join(" · "));
       if (res.prediction_bias?.by_metric && Object.keys(res.prediction_bias.by_metric).length) {
         setBiasSummary(res.prediction_bias);

@@ -61,6 +61,7 @@ def get_entity_relations(
     *,
     direction: str = "both",
     link_types: list[str] | None = None,
+    extraction_method: str | None = None,
     limit: int = 50,
 ) -> list[KGRelationView]:
     store = get_entity_store()
@@ -69,10 +70,15 @@ def get_entity_relations(
         entity_id,
         direction=direction,
         link_types=types,
-        limit=limit,
+        limit=limit if not extraction_method else limit * 3,
     )
     cache: dict[str, str] = {}
-    return [link_to_view(link, name_cache=cache) for link in links]
+    views = [link_to_view(link, name_cache=cache) for link in links]
+    if extraction_method:
+        wanted = extraction_method.strip().lower()
+        views = [v for v in views if (v.extraction_method or "").lower() == wanted or any((e.extraction_method or "").lower() == wanted for e in v.evidence)]
+        views = views[:limit]
+    return views
 
 
 def find_path(

@@ -22,13 +22,26 @@ function relationLabel(type: string): string {
 
 function RelationRow({ rel }: { rel: KGRelationView }) {
   const evidence = rel.evidence[0];
+  const method = (rel.extraction_method || evidence?.extraction_method || "rule").toLowerCase();
+  const methodBadge =
+    method === "measured"
+      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+      : method === "llm"
+        ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
+        : method === "vision_table"
+          ? "bg-teal-500/20 text-teal-300 border-teal-500/40"
+          : "bg-slate-700/40 text-slate-400 border-slate-600/40";
+  const methodLabel = method === "measured" ? "实测" : method === "vision_table" ? "表格" : method;
   return (
     <li className="text-[10px] text-slate-400 leading-relaxed border-l border-violet-500/30 pl-2">
-      <span className="text-violet-300">{relationLabel(rel.relation_type)}</span>
-      <span className="text-slate-500 mx-1">·</span>
-      <span className="font-mono text-slate-500">{rel.source_entity_id.slice(0, 18)}</span>
-      <span className="text-slate-600 mx-0.5">→</span>
-      <span className="font-mono text-slate-500">{rel.target_entity_id.slice(0, 18)}</span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-violet-300">{relationLabel(rel.relation_type)}</span>
+        <span className={`inline-flex px-1 py-0 rounded border text-[8px] font-mono ${methodBadge}`}>{methodLabel}</span>
+        <span className="text-slate-500 mx-1">·</span>
+        <span className="font-mono text-slate-500">{rel.source_entity_id.slice(0, 18)}</span>
+        <span className="text-slate-600 mx-0.5">→</span>
+        <span className="font-mono text-slate-500">{rel.target_entity_id.slice(0, 18)}</span>
+      </div>
       {evidence?.sentence && (
         <p className="mt-0.5 text-slate-500 italic truncate" title={evidence.sentence}>
           “{evidence.sentence}”
@@ -44,6 +57,7 @@ export default function KgRelationPanel({ query }: { query: string }) {
   const [resolved, setResolved] = useState<KGEntityResolveResponse | null>(null);
   const [substitutes, setSubstitutes] = useState<KGSubstituteDiscoverResponse | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [methodFilter, setMethodFilter] = useState<string>("all");
 
   useEffect(() => {
     const q = query.trim();
@@ -93,6 +107,11 @@ export default function KgRelationPanel({ query }: { query: string }) {
   }, [query]);
 
   const relations = resolved?.top_relations ?? [];
+  const filteredRelations = methodFilter === "all" ? relations : relations.filter((r) => {
+    const m = (r.extraction_method || r.evidence[0]?.extraction_method || "rule").toLowerCase();
+    return m === methodFilter;
+  });
+  const measuredCount = relations.filter((r) => (r.extraction_method || r.evidence[0]?.extraction_method || "").toLowerCase() === "measured").length;
   const hasContent =
     loading ||
     error ||
@@ -126,6 +145,7 @@ export default function KgRelationPanel({ query }: { query: string }) {
       {!expanded && !loading && relations.length > 0 && (
         <p className="mt-1 text-slate-400">
           {primary}：{relations.length} 条语义关系
+          {measuredCount > 0 && <span className="ml-1 text-amber-300">· {measuredCount} 条实测</span>}
           {substitutes && substitutes.substitutes.length > 0 && (
             <span> · {substitutes.substitutes.length} 个替代品候选</span>
           )}
@@ -143,9 +163,17 @@ export default function KgRelationPanel({ query }: { query: string }) {
 
           {relations.length > 0 ? (
             <div>
-              <div className="text-violet-300/90 font-medium mb-1">语义关系 ({relations.length})</div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-violet-300/90 font-medium">语义关系 ({filteredRelations.length}/{relations.length})</span>
+                <select value={methodFilter} onChange={(e) => setMethodFilter(e.target.value)} className="bg-ink border border-edge rounded px-1 py-0.5 text-[10px] text-slate-400">
+                  <option value="all">全部</option>
+                  <option value="measured">实测</option>
+                  <option value="rule">文献(rule)</option>
+                  <option value="llm">LLM</option>
+                </select>
+              </div>
               <ul className="space-y-1 max-h-28 overflow-y-auto">
-                {relations.map((rel) => (
+                {filteredRelations.map((rel) => (
                   <RelationRow key={rel.id} rel={rel} />
                 ))}
               </ul>

@@ -83,6 +83,7 @@ class WorkbenchSyncResponse(BaseModel):
     training_ingested: int = 0
     training_message: str = ""
     prediction_bias: dict | None = None
+    kg_written: int | None = None
     loop_task_id: str | None = None
     loop_message: str = ""
 
@@ -349,10 +350,11 @@ async def sync_workbench(
 
     # P0 KG self-evolution: push measured results back into the KG (best-effort,
     # never blocks the sync response).
+    kg_written: int | None = None
     try:
         from ..services import kg_feedback
 
-        kg_feedback.ingest_measured_evidence(payload.campaign_id)
+        kg_written = kg_feedback.ingest_measured_evidence(payload.campaign_id)
     except Exception as exc:  # pragma: no cover - defense in depth
         logger.warning("kg_feedback ingest failed (non-fatal): %s", exc)
 
@@ -372,6 +374,7 @@ async def sync_workbench(
         training_ingested=training_ingested,
         training_message=training_message,
         prediction_bias=train_result.get("prediction_bias"),
+        kg_written=kg_written,
         loop_task_id=loop_task_id,
         loop_message=loop_message,
     )

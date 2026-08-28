@@ -425,6 +425,7 @@ export interface WorkbenchSyncResponse {
   training_ingested?: number;
   training_message?: string;
   prediction_bias?: { n_rows: number; by_metric: Record<string, { n: number; mean_error: number; rmse: number; mae: number; max_abs: number }> } | null;
+  kg_written?: number | null;
   loop_task_id?: string | null;
   loop_message?: string;
 }
@@ -1175,9 +1176,17 @@ export const api = {
   kgResolve: (q: string) =>
     get<KGEntityResolveResponse>(`/api/kg/resolve?q=${encodeURIComponent(q)}`),
 
-  kgRelations: (entityId: string, direction = "both", limit = 20) =>
-    get<KGRelationView[]>(
-      `/api/kg/relations/${encodeURIComponent(entityId)}?direction=${direction}&limit=${limit}`
+  kgRelations: (entityId: string, direction = "both", limit = 20, extraction_method?: string) => {
+    const params = new URLSearchParams({ direction, limit: String(limit) });
+    if (extraction_method) params.set("extraction_method", extraction_method);
+    return get<KGRelationView[]>(
+      `/api/kg/relations/${encodeURIComponent(entityId)}?${params}`
+    );
+  },
+
+  kgFeedbackStats: () =>
+    get<{ measured_total: number; measured_performance: number; by_campaign: Record<string, number> }>(
+      "/api/kg/feedback/stats"
     ),
 
   kgSubstitutes: (opts: { entityId?: string; q?: string; limit?: number }) => {
