@@ -177,13 +177,18 @@ def _ensure_owner_id_column(engine: Engine, table: str) -> None:
     if "owner_id" in existing:
         return
     # SQLite/Postgres 均支持 ADD COLUMN nullable 快速完成
-    with engine.begin() as conn:
-        conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN owner_id VARCHAR(64)'))
-        # 索引单独建，失败不阻断（已存在等）
-        try:
-            conn.execute(text(f'CREATE INDEX ix_{table}_owner_id ON "{table}" (owner_id)'))
-        except Exception:
-            pass
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN owner_id VARCHAR(64)'))
+            # 索引单独建，失败不阻断（已存在等）
+            try:
+                conn.execute(text(f'CREATE INDEX ix_{table}_owner_id ON "{table}" (owner_id)'))
+            except Exception:
+                pass
+    except Exception as exc:
+        # 竞态或已存在：静默（alembic 已加过）
+        if "duplicate column" not in str(exc).lower():
+            raise
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
