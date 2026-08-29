@@ -1,9 +1,12 @@
 """Shared Datalab Headless ELN HTTP contract helpers (campaign + experiment stores)."""
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from ..domain.schemas import DatalabDeleteResponse, DatalabItemEnvelope, DatalabSampleResponse
+
+logger = logging.getLogger(__name__)
 
 
 class DatalabStoreError(ValueError):
@@ -134,5 +137,6 @@ async def upload_file(
                 return None
             body = resp.json()
             return body.get("source_document_id") or None
-    except Exception:
+    except Exception as exc:
+        logger.warning("datalab upload failed: %s", exc)
         return None

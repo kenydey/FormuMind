@@ -1338,8 +1338,8 @@ def _chat_prompt(
         from .kg.retrieval import trade_product_prompt_suffix
 
         trade_suffix = trade_product_prompt_suffix(evidence)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("trade product prompt suffix unavailable: %s", exc)
     return (
         f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
         f"Cite sources by number [1], [2], etc.\n"

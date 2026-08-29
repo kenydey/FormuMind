@@ -176,8 +176,8 @@ class TaskManager:
 
             c = _redis_client()
             c.hset(_meta_key(task_id), mapping={"owner_id": owner_id or ""})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("owner_id redis sync failed for %s: %s", task_id, exc)
 
     def get(self, task_id: str) -> TaskStatus | None:
         from .task_progress import get_task_meta
@@ -300,16 +300,16 @@ class TaskManager:
                     from .task_progress import _redis_client, _meta_key
 
                     _redis_client().hset(_meta_key(task_id), mapping={"owner_id": owner_id})
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    logger.debug("cancelled owner redis sync failed for %s: %s", task_id, exc)
+        except Exception as exc:
+            logger.warning("cancel progress publish failed for %s: %s", task_id, exc)
         # 持久化 cancelled 快照
         try:
             status = TaskStatus(task_id=task_id, kind=kind or "unknown", state=TaskState.cancelled, message="已取消", stream_url=f"/api/tasks/{task_id}/stream", stage="cancelled", owner_id=owner_id)
             _persist_task(task_id, status)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("cancelled snapshot persist failed for %s: %s", task_id, exc)
         return True
 
 

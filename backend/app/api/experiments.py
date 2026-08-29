@@ -738,8 +738,8 @@ async def search_experiments(
                     resp = await client.get("/search/", params={"q": q})
                     if resp.status_code < 400:
                         return _parse_datalab_search(resp.json())
-            except Exception:
-                pass  # fall through to local scan
+            except Exception as exc:
+                logger.debug("datalab search failed, falling back to local scan: %s", exc)
 
     # Local SQLite scan
     results: list[ExperimentSearchResult] = []
