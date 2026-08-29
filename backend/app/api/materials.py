@@ -2,7 +2,6 @@
 
 GET  /api/materials              — list / filter the catalog
 POST /api/materials              — add or update one material (auto-enriched)
-POST /api/materials/promote      — promote harvested trade products into it
 POST /api/materials/availability — flag supply status (drives substitution)
 
 The catalog used to be a module literal; making it data is what lets ingredient
@@ -72,20 +71,6 @@ class MaterialListResponse(BaseModel):
     total: int
     materials: list[MaterialView]
     store_enabled: bool
-
-
-class PromoteRequest(BaseModel):
-    """Promote trade products harvested from ingested documents into materials."""
-
-    limit: int = Field(default=50, ge=1, le=500)
-    min_mentions: int = Field(default=2, ge=1)
-    role: str = ""
-
-
-class PromoteResult(BaseModel):
-    promoted: int
-    skipped: int
-    names: list[str] = Field(default_factory=list)
 
 
 class AvailabilityRequest(BaseModel):
@@ -176,56 +161,6 @@ def _enrich_spec(name: str, spec: dict) -> dict:
         if not spec.get(key) and found.get(key):
             out[key] = found[key]
     return out
-
-
-@router.post("/promote", response_model=PromoteResult)
-def promote_products(body: PromoteRequest) -> PromoteResult:
-    """Promote commercial products harvested from ingested literature.
-
-    ``kb_products`` already carries trade_name/supplier/cas/smiles/role for
-    every product seen in the corpus — this turns that registry into usable
-    formulation candidates, which is how the catalog grows past the curated
-    seed without manual data entry.
-    """
-    store = _require_store()
-    try:
-        from ..db.product_store import get_product_store
-
-        products = get_product_store().search(limit=body.limit * 4)
-    except Exception as exc:
-        logger.warning("promote: product registry unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="产品登记簿不可用") from exc
-
-    promoted: list[str] = []
-    skipped = 0
-    for product in products:
-        if len(promoted) >= body.limit:
-            break
-        role = (product.role or "").strip()
-        if body.role and role != body.role:
-            continue
-        if (product.mention_count or 0) < body.min_mentions:
-            skipped += 1
-            continue
-        name = " ".join(x for x in (product.trade_name, product.grade) if x).strip()
-        if not name or name in RAW_MATERIALS:
-            skipped += 1
-            continue
-        spec = {
-            "role": role or "additive",
-            "cas_no": product.cas or None,
-            "smiles": product.smiles,
-            "zh_name": product.generic_name or None,
-            "supplier": product.supplier or None,
-        }
-        # overwrite=False: a harvested row must never clobber curated chemistry.
-        if store.upsert(name, spec, origin="kb_promoted", overwrite=False):
-            promoted.append(name)
-        else:
-            skipped += 1
-    if promoted:
-        RAW_MATERIALS.refresh()
-    return PromoteResult(promoted=len(promoted), skipped=skipped, names=promoted)
 
 
 class SubstituteRequest(BaseModel):

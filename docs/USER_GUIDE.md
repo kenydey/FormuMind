@@ -692,7 +692,6 @@ database.
 |---|---|
 | `GET /api/materials` | search the catalogue (filter by role, functional class, substitute group) |
 | `POST /api/materials` | add or update a material |
-| `POST /api/materials/promote` | promote an ad-hoc ingredient into the catalogue |
 | `POST /api/materials/availability` | mark `available` / `restricted` / `discontinued` |
 
 ### 5.20 Referential integrity check
@@ -812,7 +811,6 @@ The **Export ▾** menu on each leaderboard card offers:
 | POST | `/api/research` | retrieve prior art + RAG + recommended formulations (accepts optional pre-loaded `sources`) |
 | POST | `/api/research/deep` | async deep-research: DeepResearchEngine multi-agent pipeline (web + KB + HyDE + re-rank + cross-validation report) → returns `task_id` |
 | GET | `/api/search/status` | lightweight per-source availability check (no retrieval, no network) |
-| POST | `/api/agents/review` | multi-agent formulation review: ChemistAgent (RDKit + water-incompatibility rules) + InspectorAgent (SVHC/VOC) + InitializeAgent supervisor → `ReviewVerdict` |
 | POST | `/api/ip/analyze` | per-formula novelty score, infringement-risk list, white-space hints |
 | POST | `/api/doe?design=…` | generate a DOE plan (5 designs) |
 | POST | `/api/doe/active` | 🧠 active-learning DOE: surrogate EI selection (LHS fallback) |
@@ -825,7 +823,6 @@ The **Export ▾** menu on each leaderboard card offers:
 | **POST** | **`/api/materials/substitutes`** | **ranked replacements for one slot, with per-metric Δ (§5.16)** |
 | **GET** | **`/api/materials/supply-risk`** | **formulations affected by discontinued materials** |
 | **POST** | **`/api/materials/availability`** | **mark a material `available` / `restricted` / `discontinued`** |
-| **POST** | **`/api/materials/promote`** | **promote an ad-hoc ingredient into the catalogue** |
 | POST | `/api/qc/analyze` | (reserved) computer-vision QC analysis stub |
 | **POST** | **`/api/qc/report`** | **upload a QC report → extracted measurements bound to an experiment (§5.17)** |
 | **GET** | **`/api/qc/experiments/{id}/measurements`** | **per-measurement rows (metric, value, unit, method, spec limit)** |
@@ -837,7 +834,6 @@ The **Export ▾** menu on each leaderboard card offers:
 | **GET** | **`/api/formulations/versions/{from}/diff/{to}`** | **structured diff between two versions** |
 | POST | `/api/train` | force a retrain over all stored experiments |
 | GET | `/api/models` | list trained models with `n_samples`, `R²`, `cv_R²`, `RMSE` |
-| GET | `/api/ingredients` | full raw-material library incl. price & VOC contribution |
 | **GET** | **`/api/kb/integrity`** | **orphan report over the soft references (§5.20)** |
 | GET | `/api/meta`, `/api/templates/{domain}` | metadata & baseline templates |
 | GET | `/health` | database, **task broker** and Datalab reachability |

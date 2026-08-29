@@ -139,7 +139,6 @@ Enterprise ELN (Postgres + Datalab): `docker compose -f docker-compose.yml -f do
 | POST | `/api/experiments/import-csv` | upload a filled-in worksheet → bulk-ingest results + (re)train |
 | POST | `/api/train` | force a retrain over all stored experiments |
 | GET | `/api/models` | list trained models with `n_samples`, `R²`, `cv_R²`, `RMSE` |
-| GET | `/api/ingredients` | full raw-material library incl. price (CNY/kg) & VOC contribution |
 | GET | `/api/meta`, `/api/templates/{domain}` | metadata & baseline templates |
 | GET | `/health` | service + active-engine status |
 

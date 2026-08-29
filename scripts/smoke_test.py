@@ -49,9 +49,6 @@ def main() -> int:
     code, body = req("GET", "/api/meta")
     check("meta", code == 200 and "domains" in body, str(body)[:120])
 
-    code, body = req("GET", "/api/ingredients")
-    check("ingredients", code == 200 and "Xylene" in body, str(body)[:120])
-
     code, body = req("POST", "/api/research", {
         "domain": "degreaser", "substrate": "carbon_steel",
         "cleaning_efficiency": 95, "ph_target": 12.5,

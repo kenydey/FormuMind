@@ -2,10 +2,9 @@
 
 The multi-agent review already encodes the chemistry rules — waterborne /
 solvent-carrier incompatibility, free isocyanate in water, acid-base conflict,
-SVHC, VOC — but nothing consumes its verdict as a hard gate: it is reachable
-only through ``POST /api/agents/review``. Genome search needs exactly that
-verdict, applied *inside* the loop, so an infeasible candidate never costs an
-evaluation instead of being flagged after the fact.
+SVHC, VOC — but nothing consumes its verdict as a hard gate. Genome search
+needs exactly that verdict, applied *inside* the loop, so an infeasible
+candidate never costs an evaluation instead of being flagged after the fact.
 
 No new rules are written here. This is the existing gate, wired up.
 """

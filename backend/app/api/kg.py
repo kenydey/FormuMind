@@ -32,7 +32,7 @@ class KGRebuildBody(BaseModel):
     project_id: str | None = None
 
 
-@router.get("/stats", response_model=KGStats)
+@router.get("/stats", response_model=KGStats, include_in_schema=False)
 def stats() -> KGStats:
     from ..db.entity_store import get_entity_store
 
@@ -87,22 +87,10 @@ def feedback_report() -> dict:
         alert = "暂无实测回流证据：请在实验台账完成至少一行 Completed 并同步（sync 会写入 KG）"
     # 最近 bias 趋势：从 campaign 的 loop_history 抽取（best-effort，失败则空）
     recent_bias: list[dict] = []
-    try:
-        from ..db.campaign_store import get_campaign_store
-
-        store = get_campaign_store()
-        # 同步方法遍历最近 5 个 campaign 的 loop_history
-        import asyncio
-
-        # 尝试同步获取：若 store 为 sqlite，可直接同步查询
-        # 退化：仅返回空列表，不阻塞报表
-        pass
-    except Exception:
-        pass
     return {**stats, "alert": alert, "recent_bias": recent_bias}
 
 
-@router.get("/calibration")
+@router.get("/calibration", include_in_schema=False)
 def calibration() -> dict:
     """KG 权重校准：返回当前 penalty/bonus 与命中计数，供调参。"""
     s = get_settings()
@@ -167,7 +155,7 @@ def entity_relations(
     return get_entity_relations(entity_id, direction=direction, extraction_method=extraction_method, limit=limit)
 
 
-@router.get("/path", response_model=KGPathResponse)
+@router.get("/path", response_model=KGPathResponse, include_in_schema=False)
 def entity_path(
     src: str = Query(min_length=1),
     dst: str = Query(min_length=1),

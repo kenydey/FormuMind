@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from ..domain.examples import BUILTIN_METRICS, EXAMPLE_PROJECTS, ROLE_CATALOG, load_example
 from ..domain.formulation_gate import validate_formulations
-from ..domain.knowledge import RAW_MATERIALS, baseline_formulation
+from ..domain.knowledge import baseline_formulation
 from ..domain.objective_contract import normalize_objectives
 from ..domain.schemas import (
     Evidence,
@@ -54,22 +54,6 @@ def metadata() -> dict:
 @router.get("/examples/{example_id}", response_model=Requirement)
 def get_example_project(example_id: str) -> Requirement:
     return load_example(example_id)
-
-
-@router.get("/ingredients")
-def ingredients() -> dict:
-    """Return the full raw-material library including price and VOC metadata."""
-    return {
-        name: {
-            "role": spec.get("role"),
-            "formula": spec.get("formula"),
-            "cas_no": spec.get("cas_no"),
-            "molar_mass": spec.get("molar_mass"),
-            "price_cny_per_kg": spec.get("price_cny_per_kg"),
-            "voc_contrib": spec.get("voc_contrib"),
-        }
-        for name, spec in RAW_MATERIALS.items()
-    }
 
 
 @router.get("/templates/{domain}", response_model=Formulation)

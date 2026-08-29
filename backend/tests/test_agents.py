@@ -6,8 +6,6 @@ free-isocyanate detection, the Inspector Agent (REACH SVHC + VOC), the superviso
 aggregation, the pure-JSON endpoint contract, and the no-op Redis bus.
 All run fully offline (no LLM, no Redis).
 """
-from fastapi.testclient import TestClient
-
 from app.agents import bus
 from app.agents.chemist import ChemistAgent
 from app.agents.inspector import InspectorAgent
@@ -18,9 +16,6 @@ from app.domain.schemas import (
     ProductDomain,
     Requirement,
 )
-from app.main import app
-
-client = TestClient(app)
 
 
 def _form(name: str, domain: ProductDomain, items: list[tuple[str, float]], **kw) -> Formulation:
@@ -206,12 +201,14 @@ def test_supervisor_pass_on_clean_formulation():
 
 # ── API endpoint: pure-JSON contract ─────────────────────────────────────────
 
-def test_review_endpoint_returns_pure_json_intercept():
+def test_review_returns_pure_json_intercept():
+    """Supervisor verdict must be pure data (no markdown wrapping).
+
+    The HTTP route was retired in v8 (feasibility service is the real consumer);
+    this asserts the same contract at the service layer.
+    """
     form = _waterborne_with_desmodur()
-    payload = {"formulation": form.model_dump(), "explain": False}
-    r = client.post("/api/agents/review", json=payload)
-    assert r.status_code == 200
-    data = r.json()  # must parse as pure JSON (no markdown wrapping)
+    data = InitializeAgent().review(form, explain=False).model_dump()
     assert data["overall_status"] == "intercept"
     assert data["formulation_name"] == form.name
     assert any(f["agent"] == "chemist" for f in data["findings"])
