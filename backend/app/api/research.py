@@ -1,14 +1,13 @@
 """Research endpoint: CRAG graph via Celery + SSE task stream."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..domain.schemas import Evidence, Formulation, Requirement, ResearchResult
 from ..pipeline import workflow
-from ..services.deep_research import ExpandedQuery, QueryExpander
 from ..worker.tasks import run_deep_research_task, run_recommend_task
 from ._dispatch import submit
 from ._idempotency import enqueue_outbox, idempotency_key
@@ -123,11 +122,6 @@ def modify_recommendation(body: ModifyRequest, request: Request) -> JSONResponse
         "n": body.n,
     }
     return submit(run_recommend_task, payload, "recommend", owner_id=get_current_owner(request))
-
-
-@router.get("/research/expand", response_model=ExpandedQuery, deprecated=True)
-def expand_research_query(topic: str = Query(..., min_length=1)) -> ExpandedQuery:
-    return QueryExpander().expand(topic)
 
 
 # ── RAG backend status ──────────────────────────────────────────────────

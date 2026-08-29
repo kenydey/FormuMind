@@ -220,20 +220,6 @@ def test_build_store_always_returns_store_with_query():
     assert len(results) >= 1
 
 
-# ── v0.4: QC placeholder endpoint ─────────────────────────────────────────────
-
-def test_qc_placeholder_returns_empty_defects():
-    from fastapi.testclient import TestClient
-    from app.main import app
-
-    client = TestClient(app)
-    resp = client.post("/api/qc/analyze", json={"image_url": "http://example.com/img.jpg"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["defects"] == []
-    assert data["engine"] == "placeholder"
-
-
 # ── v0.5: Rheology (Fox Tg / Mooney) always returns VEI ──────────────────────
 
 def test_predict_full_includes_viscoelastic_index():

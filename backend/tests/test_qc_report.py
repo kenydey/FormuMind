@@ -362,10 +362,3 @@ def test_report_endpoint_422_when_nothing_parses(db, experiment):
         data={"experiment_id": str(experiment)},
     )
     assert response.status_code == 422
-
-
-def test_defect_placeholder_endpoint_is_untouched():
-    """The CV contract is a separate concern and must keep its shape."""
-    response = client.post("/api/qc/analyze", json={"image_url": "http://example.com/i.jpg"})
-    assert response.status_code == 200
-    assert response.json()["engine"] == "placeholder"

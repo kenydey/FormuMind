@@ -823,7 +823,6 @@ The **Export ▾** menu on each leaderboard card offers:
 | **POST** | **`/api/materials/substitutes`** | **ranked replacements for one slot, with per-metric Δ (§5.16)** |
 | **GET** | **`/api/materials/supply-risk`** | **formulations affected by discontinued materials** |
 | **POST** | **`/api/materials/availability`** | **mark a material `available` / `restricted` / `discontinued`** |
-| POST | `/api/qc/analyze` | (reserved) computer-vision QC analysis stub |
 | **POST** | **`/api/qc/report`** | **upload a QC report → extracted measurements bound to an experiment (§5.17)** |
 | **GET** | **`/api/qc/experiments/{id}/measurements`** | **per-measurement rows (metric, value, unit, method, spec limit)** |
 | GET | `/api/tasks/{id}` | poll task progress + result (Top-N leaderboard, loop report, …) |

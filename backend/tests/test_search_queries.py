@@ -73,15 +73,3 @@ def test_merge_filter_drops_irrelevant_literature():
     ids = {e.identifier for e in merged}
     assert "arxiv:1" in ids
     assert "arxiv:2" not in ids
-
-
-def test_expand_api_returns_per_source_queries():
-    from fastapi.testclient import TestClient
-    from app.main import app
-
-    client = TestClient(app)
-    r = client.get("/api/search/expand", params={"topic": "水性聚氨酯防腐涂料"})
-    assert r.status_code == 200
-    body = r.json()
-    for key in ("rank_q", "patent_q", "western_q", "chinese_q", "ipc_codes"):
-        assert key in body

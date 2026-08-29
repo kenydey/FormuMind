@@ -71,11 +71,3 @@ def test_deep_research_engine_search_offline():
     assert report.expanded_query is not None
     assert len(report.results) >= 1
     assert report.source_counts
-
-
-def test_expand_api_endpoint():
-    r = client.get("/api/research/expand", params={"topic": "水性聚氨酯防腐涂料"})
-    assert r.status_code == 200
-    body = r.json()
-    assert "chinese_keywords" in body
-    assert "ipc_cpc_suggestions" in body
