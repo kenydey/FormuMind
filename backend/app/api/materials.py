@@ -97,7 +97,7 @@ def _to_view(name: str, spec: dict) -> MaterialView:
     )
 
 
-@router.get("", response_model=MaterialListResponse)
+@router.get("", response_model=MaterialListResponse, include_in_schema=False)
 def list_materials(
     q: str = Query(default=""),
     role: str = Query(default=""),

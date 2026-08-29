@@ -140,7 +140,7 @@ def ingest_from_text(req: IngestTextRequest):
     return _to_ingest_response(title, outcome)
 
 
-@router.get("/sources/{source_id}", response_model=SourceDocumentResponse)
+@router.get("/sources/{source_id}", response_model=SourceDocumentResponse, include_in_schema=False)
 def get_source(source_id: str):
     row = get_source_store().get(source_id)
     if row is None:

@@ -176,7 +176,7 @@ async def import_experiments_csv(
         await file.close()
 
 
-@router.post("/train", response_model=TrainingReport)
+@router.post("/train", response_model=TrainingReport, include_in_schema=False)
 def train_models() -> TrainingReport:
     """Force a retrain over all stored experiments."""
     trained = registry.train()
@@ -716,7 +716,7 @@ class ExperimentSearchResult(BaseModel):
     measurements: dict[str, Any]
 
 
-@router.get("/experiments/search", response_model=list[ExperimentSearchResult])
+@router.get("/experiments/search", response_model=list[ExperimentSearchResult], include_in_schema=False)
 async def search_experiments(
     q: str = Query(default="", description="搜索关键词"),
 ) -> list[ExperimentSearchResult]:
@@ -803,7 +803,7 @@ class ConvergenceWebhookPayload(BaseModel):
     message: str = ""
 
 
-@router.post("/experiments/hooks/convergence")
+@router.post("/experiments/hooks/convergence", include_in_schema=False)
 async def convergence_webhook(
     payload: ConvergenceWebhookPayload,
 ) -> dict[str, str]:

@@ -146,7 +146,7 @@ class KBProductsResponse(BaseModel):
     total: int
 
 
-@router.get("/products", response_model=KBProductsResponse)
+@router.get("/products", response_model=KBProductsResponse, include_in_schema=False)
 def products(
     q: str = Query(default=""),
     limit: int = Query(default=50, ge=1, le=200),
@@ -241,7 +241,7 @@ class IngestResponse(BaseModel):
     status: str
 
 
-@router.post("/ingest", response_model=IngestResponse, summary="全文入库（幂等）")
+@router.post("/ingest", response_model=IngestResponse, summary="全文入库（幂等）", include_in_schema=False)
 def ingest(body: IngestRequest) -> IngestResponse:
     """Full-document ingest → chunk + index + store + outbox record.
 

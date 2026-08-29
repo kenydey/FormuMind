@@ -56,7 +56,7 @@ def get_example_project(example_id: str) -> Requirement:
     return load_example(example_id)
 
 
-@router.get("/templates/{domain}", response_model=Formulation)
+@router.get("/templates/{domain}", response_model=Formulation, include_in_schema=False)
 def template(domain: ProductDomain) -> Formulation:
     req = Requirement(domain=domain)
     return baseline_formulation(req)
@@ -422,7 +422,7 @@ def formulation_lineage(lineage_id: str) -> LineageResponse:
     return LineageResponse(lineage_id=lineage_id, versions=[_to_view(r) for r in rows])
 
 
-@router.get("/formulations/versions/detail/{version_id}", response_model=VersionDetail)
+@router.get("/formulations/versions/detail/{version_id}", response_model=VersionDetail, include_in_schema=False)
 def formulation_version_detail(version_id: str) -> VersionDetail:
     from ..services.formulation_history import get_history_store
 
