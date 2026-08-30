@@ -219,6 +219,7 @@ def active_learning_doe(
                         recommended_next_action=result.recommended_next_action,
                         budget_remaining=result.budget_remaining,
                         chemical_feasibility=result.chemical_feasibility,
+                        physical_constraints=result.physical_constraints,
                     )
             except Exception:
                 if eng == "baybe":

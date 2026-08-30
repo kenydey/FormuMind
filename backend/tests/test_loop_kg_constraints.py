@@ -75,3 +75,53 @@ def test_doe_run_infeasible_flag_roundtrip():
     )
     assert run.infeasible is True
     assert "不相容" in run.infeasible_reason
+
+
+# ── v11 physical-constraint verdict wiring ──────────────────────────────────
+
+def test_baybe_result_carries_physical_constraints():
+    plan = _plan()
+    verdict = {
+        "feasible": False,
+        "status": "infeasible",
+        "reasons": ["碳酸盐填料在酸性浴中释放 CO₂"],
+        "acid_stability": {"status": "infeasible", "reasons": ["碳酸盐填料在酸性浴中释放 CO₂"]},
+        "compliance": {"status": "pass", "reasons": []},
+    }
+    res = BaybeRecommendResult(
+        plan=plan,
+        campaign_state="{}",
+        engine="baybe",
+        chemical_feasibility=None,
+        physical_constraints=verdict,
+    )
+    assert res.physical_constraints == verdict
+    assert res.physical_constraints["status"] == "infeasible"
+
+
+def test_loop_report_carries_physical_constraints():
+    opt = OptimizationResult(
+        iterations=1,
+        objective="x",
+        history=[],
+        top_formulations=[],
+        engine="numpy-ucb",
+    )
+    report = LoopReport(
+        domain="autodeposition_coating",
+        total_records=0,
+        optimization=opt,
+        next_doe=_plan(),
+        engine="baybe",
+        converged=False,
+        chemical_feasibility=None,
+        physical_constraints={
+            "feasible": True,
+            "status": "warn",
+            "reasons": ["含胺中和剂组分在低 pH 浴中可能质子化失效"],
+            "acid_stability": {"status": "warn", "reasons": []},
+            "compliance": {"status": "pass", "reasons": []},
+        },
+    )
+    assert report.physical_constraints is not None
+    assert report.physical_constraints["status"] == "warn"

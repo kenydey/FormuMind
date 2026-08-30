@@ -196,12 +196,95 @@ def amine_epoxy_ratio(form: Formulation) -> float | None:
     None when not applicable. The name is kept for backward compatibility with
     callers and trained-model feature vectors; see ``resin_hardener_ratio`` in
     ``features.py`` for the canonical feature key.
+
+    For the *true* stoichiometric ratio use :func:`equivalent_ratio`.
     """
     resin = sum(i.weight_pct for i in form.ingredients if normalize_role(i.role) == "resin")
     hardener = sum(i.weight_pct for i in form.ingredients if normalize_role(i.role) == "hardener")
     if resin <= 0 or hardener <= 0:
         return None
     return round(resin / hardener, 3)
+
+
+def equivalent_ratio(form: Formulation) -> float | None:
+    """True epoxy:amine stoichiometric ratio (equivalent ratio).
+
+    ratio = (m_resin / EEW) / (m_hardener / AHEW)
+
+    where ``EEW`` is the epoxy equivalent weight of the resin and ``AHEW`` the
+    amine hydrogen equivalent weight of the hardener, taken from the raw
+    material catalog's ``equivalent_weight`` field. A ratio of ~1.0 means the
+    epoxide and amine-hydrogen groups are present in stoichiometric balance
+    (target for maximum cross-link density).
+
+    Returns None when either side is missing / has no equivalent-weight
+    metadata — degrades gracefully, never fabricates a number.
+    """
+    from .knowledge import RAW_MATERIALS
+
+    resin_eq = 0.0  # epoxy equivalents (mol)
+    hardener_eq = 0.0  # amine-hydrogen equivalents (mol)
+    resin_ok = hardener_ok = False
+    for ing in form.ingredients:
+        role = normalize_role(ing.role)
+        spec = RAW_MATERIALS.get(ing.name, {})
+        ew = spec.get("equivalent_weight")
+        if ew is None or ew <= 0:
+            continue
+        if role == "resin":
+            resin_eq += ing.weight_pct / float(ew)
+            resin_ok = True
+        elif role == "hardener":
+            hardener_eq += ing.weight_pct / float(ew)
+            hardener_ok = True
+    if not (resin_ok and hardener_ok) or hardener_eq <= 0:
+        return None
+    return round(resin_eq / hardener_eq, 3)
+
+
+def dimension_closure(form: Formulation) -> list[str]:
+    """Dimension-consistency checks beyond the weight-% closure.
+
+    Returns a list of human-readable warnings. Checks:
+
+    1. weight-% sums to ~100 (cheap re-assert of :func:`validate_formulation`)
+    2. an aqueous system must actually contain water / aqueous-carried matter
+    3. a solvent-borne system must not be mislabelled as waterborne (no water
+       carrier but high "aqueous" share from role-name coincidence)
+    4. solids fraction (100 − water − volatile solvent) stays in 0-100
+    """
+    from .knowledge import RAW_MATERIALS
+
+    warnings: list[str] = []
+    total = form.total_pct()
+    if abs(total - 100.0) > 5.0:
+        warnings.append(f"Weight percentages sum to {total:.2f}, expected ~100.")
+
+    water = sum(
+        ing.weight_pct
+        for ing in form.ingredients
+        if (ing.name == "Deionized water") or (RAW_MATERIALS.get(ing.name, {}).get("carrier") == "aqueous" and normalize_role(ing.role) == "solvent")
+    )
+    solvent = sum(
+        ing.weight_pct
+        for ing in form.ingredients
+        if normalize_role(ing.role) == "solvent" and ing.name != "Deionized water"
+    )
+    solids = total - water - solvent
+
+    if is_waterborne(form) and water <= 0 and solids <= 0:
+        warnings.append("Formulation is classified waterborne but contains no water/aqueous carrier.")
+
+    if not is_waterborne(form) and water > 40:
+        warnings.append(
+            f"Aqueous content is {water:.1f}% but the system is not classified waterborne "
+            "(carrier metadata mismatch)."
+        )
+
+    if solids < 0 or solids > 100:
+        warnings.append(f"Computed solids fraction {solids:.1f}% is outside [0, 100].")
+
+    return warnings
 
 
 # ── Pigment Volume Concentration (PVC / CPVC / solids-by-volume) ──────────────

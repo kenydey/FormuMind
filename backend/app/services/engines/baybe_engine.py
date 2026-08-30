@@ -265,11 +265,52 @@ class BaybeCampaignEngine:
         except Exception as exc:  # gate must never break recommendation
             log.debug("KG chemical gate skipped ({}); allowing", exc)
 
+        # ── Physical-constraint gate (v11) ───────────────────────────────────
+        # Deterministic acid-stability + compliance screen on the same
+        # skeleton, stacked AFTER the KG gate. Acid-stability hard hits
+        # (strong alkali / carbonate filler / reactive metal in an acidic
+        # bath) and RoHS restricted substances mark candidates infeasible;
+        # warn-level hits surface as reasons without blocking.
+        phys_verdict = None
+        try:
+            from ..acid_stability import check_acid_stability
+            from ..compliance_rules import check_compliance
+            from ...domain import knowledge
+
+            skeleton = req.active_formulation or knowledge.baseline_formulation(req)
+            if skeleton is not None:
+                acid = check_acid_stability(skeleton, bath_ph=req.ph_target)
+                comp = check_compliance(skeleton)
+                hard_reasons: list[str] = []
+                warn_reasons: list[str] = []
+                if acid.status == "infeasible":
+                    hard_reasons.extend(acid.reasons)
+                elif acid.status == "warn":
+                    warn_reasons.extend(acid.reasons)
+                if comp.status == "infeasible":
+                    hard_reasons.extend(comp.reasons)
+                elif comp.status == "warn":
+                    warn_reasons.extend(comp.reasons)
+                phys_verdict = {
+                    "feasible": not hard_reasons,
+                    "status": "infeasible" if hard_reasons else ("warn" if warn_reasons else "pass"),
+                    "reasons": hard_reasons + warn_reasons,
+                    "acid_stability": {"status": acid.status, "reasons": acid.reasons},
+                    "compliance": {"status": comp.status, "reasons": comp.reasons},
+                }
+                if hard_reasons:
+                    for run in plan.runs:
+                        run.infeasible = True
+                        run.infeasible_reason = "; ".join(hard_reasons) or "物理约束检测到不可行组合"
+        except Exception as exc:  # gate must never break recommendation
+            log.debug("Physical-constraint gate skipped ({}); allowing", exc)
+
         result = BaybeRecommendResult(
             plan=plan,
             campaign_state=campaign.to_json(),
             engine="baybe",
             chemical_feasibility=chem_verdict,
+            physical_constraints=phys_verdict,
         )
         from ..doe_adaptive import enrich_baybe_result
 

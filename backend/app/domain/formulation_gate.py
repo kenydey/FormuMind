@@ -390,6 +390,26 @@ def validate_formulations(
         missing_cas = [i.name for i in enriched.ingredients if not i.cas_no]
         if missing_cas and len(missing_cas) == len(enriched.ingredients):
             warnings.append(f"{form.name}: no CAS numbers resolved for ingredients")
+        # v11 physical-constraint advisory layer (soft path — warnings only).
+        # Hard blocking lives in the DOE gate (baybe_engine); here we surface
+        # acid-stability / compliance / stoichiometry issues without deleting
+        # the candidate so the user can judge.
+        from ..services.acid_stability import check_acid_stability
+        from ..services.compliance_rules import check_compliance
+        from .chemistry import dimension_closure, equivalent_ratio
+
+        acid = check_acid_stability(enriched, bath_ph=req.ph_target if req else None)
+        if acid.status != "pass":
+            warnings.extend(f"{enriched.name}: {r}" for r in acid.reasons)
+        comp = check_compliance(enriched)
+        if comp.status != "pass":
+            warnings.extend(f"{enriched.name}: {r}" for r in comp.reasons)
+        eq = equivalent_ratio(enriched)
+        if eq is not None and not (0.6 <= eq <= 1.8):
+            warnings.append(
+                f"{enriched.name}: 环氧/胺当量比 {eq:.2f} 偏离化学计量窗口 0.6-1.8（交联密度风险）"
+            )
+        warnings.extend(f"{enriched.name}: {r}" for r in dimension_closure(enriched))
         if req is not None:
             warnings.extend(_requirement_constraint_warnings(enriched, req))
         out.append(enriched)

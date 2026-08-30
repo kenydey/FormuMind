@@ -205,9 +205,18 @@ def loop_iterate(
         budget_remaining=budget_remaining,
     )
     chem = getattr(next_result, "chemical_feasibility", None)
+    phys = getattr(next_result, "physical_constraints", None)
 
     if progress_cb:
         progress_cb(1.0, "done")
+
+    loop_message = (
+        "⚠ 知识图谱检测到推荐配方骨架存在材料不相容，详见化学可行性字段"
+        if chem and not chem.get("feasible")
+        else ""
+    )
+    if phys and phys.get("status") == "infeasible":
+        loop_message = "⚠ 物理约束检测到推荐配方骨架不可行（酸性稳定性/合规），详见物理约束字段"
 
     return LoopReport(
         domain=req.domain.value,
@@ -219,11 +228,7 @@ def loop_iterate(
         engine=optimization.engine,
         campaign_state=getattr(next_result, "campaign_state", None) or campaign_state,
         converged=False,
-        loop_message=(
-            "⚠ 知识图谱检测到推荐配方骨架存在材料不相容，详见化学可行性字段"
-            if chem and not chem.get("feasible")
-            else ""
-        ),
+        loop_message=loop_message,
         strategy_label=next_result.strategy_label,
         strategy_rationale=next_result.strategy_rationale,
         run_explanations=next_result.run_explanations,
@@ -231,5 +236,6 @@ def loop_iterate(
         recommended_next_action=next_result.recommended_next_action,
         budget_remaining=next_result.budget_remaining,
         chemical_feasibility=chem,
+        physical_constraints=phys,
         cost_summary=_cost_summary(optimization),
     )
