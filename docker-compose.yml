@@ -24,6 +24,32 @@ services:
       retries: 5
       start_period: 5s
 
+  # Knowledge Graph Service (Neo4j)
+  kg:
+    image: neo4j:5.15
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/formumind123
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_dbms_memory_pagecache_size=512M
+      - NEO4J_dbms_memory_heap_max__size=512M
+    volumes:
+      - ./data/neo4j:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p formumind123 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -40,6 +66,11 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+      # Optional Neo4j graph-store adapter (sibling to SQLite KG).
+      FORMUMIND_NEO4J_ENABLED: "true"
+      FORMUMIND_NEO4J_URI: bolt://kg:7687
+      FORMUMIND_NEO4J_USER: neo4j
+      FORMUMIND_NEO4J_PASSWORD: formumind123
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -49,6 +80,8 @@ services:
       - "8000:8000"
     depends_on:
       redis:
+        condition: service_healthy
+      kg:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
@@ -73,6 +106,11 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+      # Optional Neo4j graph-store adapter (sibling to SQLite KG).
+      FORMUMIND_NEO4J_ENABLED: "true"
+      FORMUMIND_NEO4J_URI: bolt://kg:7687
+      FORMUMIND_NEO4J_USER: neo4j
+      FORMUMIND_NEO4J_PASSWORD: formumind123
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -87,6 +125,54 @@ services:
     # likely to be broken here.
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.worker.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      kg:
+        condition: service_healthy
+
+  # MolScribe OCSR worker — dedicated image (torch 2.3.0+cpu pin), consumes
+  # only the `molscribe` queue. mem_limit isolates its ~1.9 GB peak so an OOM
+  # restarts this container alone, never the main stack.
+  molscribe:
+    build: ./deploy/molscribe
+    restart: unless-stopped
+    # --pool=solo: MolScribe's OpenNMT stack spawns multiprocessing children,
+    # which celery's default prefork pool forbids (daemonic processes cannot
+    # have children). concurrency is already 1, so solo costs nothing.
+    command: celery -A app.worker.celery_app.celery_app worker -n molscribe@%h --queues=molscribe --concurrency=1 --pool=solo --loglevel=info
+    env_file:
+      - .env
+    environment:
+      FORMUMIND_REDIS_URL: redis://redis:6379/0
+      FORMUMIND_CELERY_EAGER: "false"
+      FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
+      FORMUMIND_CAMPAIGN_BACKEND: datalab
+      FORMUMIND_EXPERIMENT_BACKEND: datalab
+      FORMUMIND_DATALAB_REQUIRED: "true"
+      FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+      FORMUMIND_NEO4J_ENABLED: "true"
+      FORMUMIND_NEO4J_URI: bolt://kg:7687
+      FORMUMIND_NEO4J_USER: neo4j
+      FORMUMIND_NEO4J_PASSWORD: formumind123
+      HF_HUB_OFFLINE: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/colbert_index:/app/data/colbert_index
+      - ./data:/app/data
+      # MolScribe weights (1.1 GB) — bind-mounted, not baked into the image.
+      - ./deploy/molscribe/hf-cache/models--yujieq--MolScribe:/root/.cache/huggingface/hub/models--yujieq--MolScribe:ro
+    mem_limit: 2500m
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app.celery_app inspect ping -d molscribe@$$HOSTNAME --timeout 5"]
       interval: 30s
       timeout: 10s
       retries: 3

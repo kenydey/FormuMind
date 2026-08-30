@@ -38,3 +38,17 @@ backend/.venv-backup-notes/
 # OCSR POC / vendored source (re-cloned by setup scripts)
 MolScribe/
 poc_ocsr/
+
+# Dev backup residue (never commit)
+*.bak
+*.bak2
+*.bak3
+*.orig
+*.work
+*.backup*
+*.before_fix
+*.backup_before_mod
+docker-compose.yml.bak*
+
+# MolScribe weights (bind-mounted at runtime, 1.1 GB)
+deploy/molscribe/hf-cache/
