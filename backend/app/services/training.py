@@ -302,4 +302,43 @@ def _build_registry() -> ModelRegistry:
     return ModelRegistry()
 
 
-registry = _build_registry()
+class _RegistryProxy:
+    """Lazy :class:`ModelRegistry` built on first use.
+
+    Import-time construction crashed the backend whenever the configured
+    ExperimentStore (Datalab) was not yet reachable: ``get_experiment_store``
+    raises, uvicorn fails to import the app, and the container restarts in a
+    loop until Datalab happens to come up. Deferring construction to first
+    actual use lets the API boot, pass health checks, and fail only on the
+    specific code path that needs lab data — with a normal request error
+    instead of a whole-process crash.
+
+    All call sites use attribute access (``registry.records_for(...)``,
+    ``registry.predict(...)``), so a ``__getattr__`` proxy is transparent.
+    """
+
+    def __init__(self) -> None:
+        self._registry: ModelRegistry | None = None
+        self._lock = threading.RLock()
+
+    def _get(self) -> ModelRegistry:
+        if self._registry is None:
+            with self._lock:
+                if self._registry is None:
+                    self._registry = _build_registry()
+        return self._registry
+
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name in {"_registry", "_lock"}:
+            object.__setattr__(self, name, value)
+            return
+        # Delegate attribute assignment (e.g. tests swapping
+        # ``registry._store``) to the real registry so the proxy stays
+        # transparent for both reads and writes.
+        setattr(self._get(), name, value)
+
+
+registry = _RegistryProxy()

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from typing import Any
+from typing import Any, Dict, Optional
 
 from ..config import get_settings
 from ..domain.schemas import LeverSpec, ProductDomain, Requirement
@@ -165,3 +165,53 @@ def _safe_loop(task_id: str, payload: dict) -> None:
             _persist_terminal(task_id, "loop", err, failed=True, message=str(exc))
         except Exception:
             logger.exception("failed to mark task as failed")
+
+
+# ── DOE cycle pause/resume hooks ─────────────────────────────────────────
+def pause_resume_doecyle(campaign_id: int, is_paused: bool) -> bool:
+    """Pause or resume a DOE cycle for a campaign.
+
+    Implemented by setting a flag in Redis that the loop task checks.
+    """
+    try:
+        from ..worker.task_progress import _redis_client
+
+        client = _redis_client()
+        key = f"doe_cycle:paused:{campaign_id}"
+        client.set(key, str(is_paused).lower(), ex=86400)  # 24h TTL
+        logger.info("DOE cycle for campaign %s %s", campaign_id, "paused" if is_paused else "resumed")
+        return True
+    except Exception as exc:
+        logger.error("Failed to pause/resume DOE cycle for campaign %s: %s", campaign_id, exc)
+        return False
+
+
+def get_doecyle_status(campaign_id: int) -> Optional[Dict[str, Any]]:
+    """Get the current status of a DOE cycle for a campaign.
+
+    Returns: {"isPaused": bool, "lastUpdated": str, ...}
+    """
+    try:
+        from ..worker.task_progress import _redis_client
+
+        client = _redis_client()
+        key = f"doe_cycle:paused:{campaign_id}"
+        is_paused_str = client.get(key)
+        is_paused = is_paused_str == "true" if is_paused_str is not None else False
+
+        # Get last updated time from the key's TTL or metadata
+        ttl = client.ttl(key)
+        last_updated = None
+        if ttl is not None and ttl > 0:
+            # Approximate last updated based on remaining TTL
+            from datetime import datetime, timedelta
+            last_updated = (datetime.now() - timedelta(seconds=(86400 - ttl))).isoformat()
+
+        return {
+            "isPaused": is_paused,
+            "lastUpdated": last_updated,
+            "campaignId": campaign_id,
+        }
+    except Exception as exc:
+        logger.error("Failed to get DOE cycle status for campaign %s: %s", campaign_id, exc)
+        return None

@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -941,3 +941,46 @@ def campaign_rounds(
         page_size=page_size,
         unassociated_ledger=unassociated,
     )
+
+
+# ── Pause/Resume DOE cycle hooks ─────────────────────────────────────────
+@router.post("/experiments/hooks/pause-doecycle/{campaign_id}", response_model=Dict[str, str])
+async def pause_doecyle(
+    campaign_id: int,
+    payload: Dict[str, bool],
+) -> Dict[str, str]:
+    """Pause or resume a DOE cycle for a campaign.
+
+    Expected payload: {"isPaused": true/false}
+    """
+    from ..services.workbench_loop import pause_resume_doecyle
+
+    is_paused = payload.get("isPaused", False)
+    success = await pause_resume_doecyle(campaign_id, is_paused)
+
+    if success:
+        return {"status": "success", "message": f"DOE cycle {'paused' if is_paused else 'resumed'} for campaign {campaign_id}"}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to {'pause' if is_paused else 'resume'} DOE cycle for campaign {campaign_id}",
+        )
+
+
+@router.get("/experiments/hooks/doecyle-status/{campaign_id}", response_model=Dict[str, Any])
+async def get_doecyle_status(
+    campaign_id: int,
+) -> Dict[str, Any]:
+    """Get the current status of a DOE cycle for a campaign.
+
+    Returns: {"isPaused": bool, "lastUpdated": str, "currentRound": int, ...}
+    """
+    from ..services.workbench_loop import get_doecyle_status as _impl
+
+    status_val = await _impl(campaign_id)
+    if status_val is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"DOE cycle status not found for campaign {campaign_id}",
+        )
+    return status_val

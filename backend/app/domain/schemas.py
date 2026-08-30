@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
 class ProductDomain(str, Enum):
@@ -161,6 +161,26 @@ class Ingredient(BaseModel):
     notes: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
     grounding_confidence: Literal["high", "medium", "low"] = "high"
+
+    @field_validator("molar_mass", "equivalents", "mmol", mode="before")
+    @classmethod
+    def _coerce_numeric(cls, v: Any) -> Any:
+        """Normalize numeric fields that may arrive as strings.
+
+        LLM/Datalab responses sometimes carry numbers as strings (e.g.
+        molar_mass="35.046"). Pydantic would accept the value but emit
+        PydanticSerializationUnexpectedValue warnings on every dump, and
+        Celery's logger then fails to format that warning (a stray ``%`` in
+        the message) producing a spurious "Logging error" traceback.
+        Coerce here instead so the field is a real float from the start.
+        """
+        if v is None or isinstance(v, (int, float)):
+            return v
+        try:
+            return float(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+
     @model_validator(mode="after")
     def _sync_formula_fields(self) -> Ingredient:
         if self.mf_structure and not self.formula:

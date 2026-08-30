@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from ..config import Settings, get_settings
 
@@ -67,11 +68,38 @@ def predict_smiles_local(image_path: str) -> str | None:
     return predict_smiles_molscribe(image_path)
 
 
+_alive_cache: dict = {"t": 0.0, "v": False}
+
+
+def _molscribe_worker_alive() -> bool:
+    """Whether a dedicated MolScribe Celery worker is consuming the queue.
+
+    ``molscribe_available()`` only reports the *current* process, and the
+    main backend never carries MolScribe (it lives in the dedicated worker
+    image), so it would report False even when OCSR is fully operational.
+    Probe the broker instead: ping all workers and look for the
+    ``molscribe@`` name set by ``celery -n molscribe@%h``. Cached 30 s — the
+    settings panel polls this.
+    """
+    now = time.monotonic()
+    if now - _alive_cache["t"] < 30:
+        return _alive_cache["v"]
+    try:
+        from ..worker.celery_app import celery_app
+
+        pings = celery_app.control.ping(timeout=2) or {}
+        alive = any("molscribe" in str(name).lower() for name in pings)
+    except Exception:
+        alive = False
+    _alive_cache.update(t=now, v=alive)
+    return alive
+
+
 def availability() -> dict:
     s = get_settings()
     return {
         "enabled": s.ocsr_enabled,
-        "molscribe_installed": molscribe_available(),
+        "molscribe_installed": _molscribe_worker_alive(),
         "molscribe_queue": s.molscribe_queue,
         "molscribe_timeout_s": s.molscribe_timeout_s,
     }

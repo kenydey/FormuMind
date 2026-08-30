@@ -122,7 +122,7 @@ def lookup(name: str) -> dict | None:
         c = matches[0]
         syns = pcp.get_synonyms(c.cid, "cid") if c.cid else []
         out: dict = {}
-        smiles = getattr(c, "canonical_smiles", None) or getattr(c, "isomeric_smiles", None)
+        smiles = getattr(c, "connectivity_smiles", None) or getattr(c, "canonical_smiles", None) or getattr(c, "isomeric_smiles", None)
         if smiles:
             out["smiles"] = smiles
         if getattr(c, "molecular_weight", None):

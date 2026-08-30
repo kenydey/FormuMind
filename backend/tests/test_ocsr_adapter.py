@@ -38,10 +38,19 @@ def test_prewarm_molscribe_noop_without_molscribe():
     assert ocsr.prewarm_molscribe() is False
 
 
-def test_availability_structure():
+def test_availability_structure(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(ocsr, "_molscribe_worker_alive", lambda: False)
     a = ocsr.availability()
     assert set(a) == {"enabled", "molscribe_installed", "molscribe_queue", "molscribe_timeout_s"}
     assert a["molscribe_installed"] is False
+
+
+def test_availability_reports_worker_alive(monkeypatch: pytest.MonkeyPatch):
+    """molscribe_installed reflects the dedicated worker's liveness probe."""
+    monkeypatch.setattr(ocsr, "_molscribe_worker_alive", lambda: True)
+    assert ocsr.availability()["molscribe_installed"] is True
+    monkeypatch.setattr(ocsr, "_molscribe_worker_alive", lambda: False)
+    assert ocsr.availability()["molscribe_installed"] is False
 
 
 # ── config 字段 ──────────────────────────────────────────────────────────────
