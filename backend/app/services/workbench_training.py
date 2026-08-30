@@ -201,6 +201,20 @@ def ingest_workbench_rows(
             len(report),
             ", ".join(report[:20]),
         )
+        try:
+            from datetime import datetime, timezone
+
+            store.append_loop_history_sync(
+                campaign_id,
+                {
+                    "type": "data_quality",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "dropped_values": len(report),
+                    "dropped": report[:20],
+                },
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("data_quality history append failed: %s", exc)
 
     if to_add:
         # P2: compute bias BEFORE retrain (use current model as baseline)

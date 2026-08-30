@@ -436,6 +436,34 @@ async def reconcile_workbench(campaign_id: int, request: Request) -> dict:
     return await store.reconcile_sample_refs(campaign_id)
 
 
+@router.get("/experiments/workbench/{campaign_id}/quality", response_model=dict)
+async def workbench_quality(campaign_id: int) -> dict:
+    """Data-quality snapshot for a campaign (read-only, no pruning).
+
+    Returns ``{stale_count, stale_refs, errors_count, dropped_total}``:
+    ``stale_*`` are sample refs whose Datalab item is gone (404), and
+    ``dropped_total`` is the cumulative count of non-numeric / empty values
+    discarded during workbench ingest (from ``data_quality`` loop_history
+    events).
+    """
+    store = get_campaign_store()
+    campaign = await store.get_campaign(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    probe = await store.probe_sample_refs(campaign_id)
+    dropped_total = 0
+    for entry in campaign.loop_history or []:
+        if entry.get("type") == "data_quality":
+            dropped_total += int(entry.get("dropped_values", 0))
+    return {
+        "stale_count": len(probe.get("stale", [])),
+        "stale_refs": probe.get("stale", []),
+        "errors_count": len(probe.get("errors", [])),
+        "dropped_total": dropped_total,
+    }
+
+
 # ── Experiment attachments (Phase 0.2) ────────────────────────────────────────
 
 async def _upload_or_store_locally(content: bytes, filename: str) -> str:

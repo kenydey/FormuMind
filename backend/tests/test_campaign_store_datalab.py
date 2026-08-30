@@ -440,3 +440,26 @@ async def test_list_rows_auto_prunes_stale_refs(tmp_path):
         assert len(remaining_ids) == 1
     finally:
         await store.close()
+
+
+@pytest.mark.asyncio
+async def test_probe_sample_refs_is_read_only(tmp_path):
+    """probe_sample_refs reports stale refs but does NOT prune them."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=3))
+        deleted_item_id = campaign.sample_refs[1]["item_id"]
+        state.missing_item_ids.add(deleted_item_id)
+
+        probe = await store.probe_sample_refs(campaign.id)
+
+        assert probe["stale"] == [deleted_item_id]
+        assert len(probe["valid"]) == 2
+        assert probe["errors"] == []
+
+        # read-only: sample_refs unchanged
+        refreshed = store.get_campaign_sync(campaign.id)
+        assert len(refreshed.sample_refs) == 3
+    finally:
+        await store.close()

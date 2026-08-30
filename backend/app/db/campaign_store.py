@@ -166,6 +166,14 @@ class CampaignStoreInterface(ABC):
         """
         return {"removed": [], "kept": [], "removed_count": 0, "errors": []}
 
+    async def probe_sample_refs(self, campaign_id: int) -> dict:
+        """Read-only stale-ref probe (no pruning) for the quality report.
+
+        Returns ``{stale, valid, errors}`` where ``stale`` are definitive 404s
+        and ``errors`` are transient failures (neither is modified).
+        """
+        return {"stale": [], "valid": [], "errors": []}
+
     def list_rows_sync(self, campaign_id: int) -> list[WorkbenchRow]:
         return _run_async(self.list_rows(campaign_id))
 
@@ -568,6 +576,28 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             "removed_count": len(removed),
             "errors": errors,
         }
+
+    async def probe_sample_refs(self, campaign_id: int) -> dict:
+        """Read-only stale-ref probe (no pruning) for the quality report."""
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
+            return {"stale": [], "valid": [], "errors": []}
+        stale: list[str] = []
+        valid: list[str] = []
+        errors: list[str] = []
+        for ref in campaign.sample_refs or []:
+            item_id = str(ref.get("item_id", ""))
+            try:
+                item_data = await self._get_item(item_id)
+            except httpx.HTTPError as exc:
+                logger.warning("probe_sample_refs skip %s: %s", item_id, exc)
+                errors.append(item_id)
+                continue
+            if item_data is None:
+                stale.append(item_id)
+            else:
+                valid.append(item_id)
+        return {"stale": stale, "valid": valid, "errors": errors}
 
     async def batch_sync(
         self,
