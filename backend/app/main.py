@@ -21,6 +21,7 @@ from .api import chemistry as chemistry_router
 from .api import doe, experiments, formulations, optimize, research, tasks
 from .api import search as search_router, ingest as ingest_router, chat as chat_router, settings as settings_router
 from .api import qc as qc_router
+from .api import session as session_router
 from .api import ip_analysis as ip_router
 from .api import loop as loop_router
 from .api import design as design_router
@@ -29,6 +30,7 @@ from .api import dependencies as dependencies_router
 from .api import kb as kb_router
 from .api import materials as materials_router
 from .api import kg as kg_router
+from .api import kg_neo4j as kg_neo4j_router
 from .api import notebooklm as notebooklm_router
 from .api import meta as meta_router
 from .api import projects as projects_router
@@ -139,7 +141,17 @@ async def lifespan(_app: FastAPI):
             get_experiment_store(settings)
     except Exception as exc:
         log_handled_exception(logger, exc, "lifespan: ELN store initialization failed", level=logging.ERROR)
+    # Initialize session memory service
+    try:
+        await init_session_memory_on_startup()
+    except Exception as e:
+        logger.error(f"Failed to initialize session memory service: {e}")
     # RAG 冷启动预热（非阻塞，2s 后后台触发）
+    # Close session memory service on shutdown
+    try:
+        await close_session_memory_on_shutdown()
+    except Exception as e:
+        logger.error(f"Error closing session memory service on shutdown: {e}")
     if not skip_bootstrap:
         try:
             import asyncio as _asyncio
@@ -198,8 +210,10 @@ app.include_router(search_router.router, prefix="/api")
 app.include_router(ingest_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(kb_router.router, prefix="/api")
+app.include_router(session_router.router, prefix="/api")
 app.include_router(materials_router.router, prefix="/api")
 app.include_router(kg_router.router, prefix="/api")
+app.include_router(kg_neo4j_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(qc_router.router, prefix="/api")
 app.include_router(ip_router.router)

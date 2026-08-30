@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   api,
   formatApiError,
+  type KGContradictionResponse,
   type KGEntityResolveResponse,
   type KGRelationView,
   type KGSubstituteDiscoverResponse,
@@ -56,6 +57,7 @@ export default function KgRelationPanel({ query }: { query: string }) {
   const [error, setError] = useState<string | null>(null);
   const [resolved, setResolved] = useState<KGEntityResolveResponse | null>(null);
   const [substitutes, setSubstitutes] = useState<KGSubstituteDiscoverResponse | null>(null);
+  const [contradictions, setContradictions] = useState<KGContradictionResponse | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [methodFilter, setMethodFilter] = useState<string>("all");
   const [reportAlert, setReportAlert] = useState<string | null>(null);
@@ -92,8 +94,11 @@ export default function KgRelationPanel({ query }: { query: string }) {
           if (primaryId) {
             const subResp = await api.kgSubstitutes({ entityId: primaryId, limit: 5 });
             if (!cancelled) setSubstitutes(subResp);
+            const contraResp = await api.kgContradictions({ entityId: primaryId });
+            if (!cancelled) setContradictions(contraResp);
           } else {
             setSubstitutes(null);
+            setContradictions(null);
           }
         } catch (err) {
           if (!cancelled) {
@@ -163,6 +168,9 @@ export default function KgRelationPanel({ query }: { query: string }) {
           {substitutes && substitutes.substitutes.length > 0 && (
             <span> · {substitutes.substitutes.length} 个替代品候选</span>
           )}
+          {contradictions && contradictions.contradictions.length > 0 && (
+            <span className="ml-1 text-rose-300">· ⚠ {contradictions.contradictions.length} 处矛盾</span>
+          )}
         </p>
       )}
 
@@ -206,6 +214,14 @@ export default function KgRelationPanel({ query }: { query: string }) {
                     <span className="text-slate-600 ml-1">
                       ({relationLabel(c.relation_type)}, {Math.round(c.confidence * 100)}%)
                     </span>
+                    {c.contradiction_flag && (
+                      <span
+                        className="ml-1 inline-flex items-center px-1 py-0 rounded border text-[8px] font-mono bg-rose-500/20 text-rose-300 border-rose-500/40"
+                        title={c.contradiction_detail || "文献关系与实测矛盾"}
+                      >
+                        ⚠ 实测反驳
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -48,3 +48,5 @@ ddgs==9.14.4
 # so `arxiv_source` converts section by section and falls back to a regex
 # stripper, keeping a crash to one section instead of the whole document.
 pylatexenc==2.11
+# Neo4j graph store adapter (optional; off by default)
+neo4j==6.1.0

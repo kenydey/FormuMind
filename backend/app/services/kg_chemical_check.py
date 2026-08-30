@@ -20,17 +20,34 @@ Design notes
   is simply skipped (we constrain only what the graph actually knows), so a
   sparse KG degrades to "no chemical constraint" rather than blocking the loop.
 * KG off (``kg_enabled is False``) → returns feasible, no work done.
+* Enhanced: Uses Neo4j backend when available for improved performance and
+  additional relation types.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import List, Tuple, Optional
 
 from ..config import get_settings
 from ..domain.schemas import Formulation
 
 logger = logging.getLogger(__name__)
+
+# Try to import Neo4j helpers - if unavailable, we'll fall back to SQLite
+try:
+    from .neo4j_kg import (
+        resolve_entity_id as neo4j_resolve_entity_id,
+        get_incompatible_pairs_for as neo4j_get_incompatible_pairs_for,
+        get_synergy_pairs_for as neo4j_get_synergy_pairs_for,
+        has_measured_evidence as neo4j_has_measured_evidence,
+        is_enabled as neo4j_is_enabled,
+    )
+    _NEO4J_AVAILABLE = True
+except Exception:  # pragma: no cover - neo4j_kg might not be importable
+    _NEO4J_AVAILABLE = False
+    logger.debug("Neo4j KG helpers not available, falling back to SQLite-only")
 
 # Relation types that express material incompatibility / hostility.
 _INCOMPATIBLE_RELATIONS = ("inhibits",)
@@ -61,8 +78,18 @@ class ChemicalCheckResult:
         return self.feasible
 
 
-def _resolve_entity_id(material_name: str) -> str | None:
-    """Best-effort resolve a free-text material name to a KG entity id."""
+def _resolve_entity_id(material_name: str) -> Optional[str]:
+    """Best-effort resolve a free-text material name to a KG entity id.
+    Uses Neo4j when available, falls back to SQLite.
+    """
+    if _NEO4J_AVAILABLE and neo4j_is_enabled():
+        try:
+            return neo4j_resolve_entity_id(material_name)
+        except Exception as e:
+            logger.warning("Neo4j entity resolution failed for %s: %s", material_name, e)
+            # Fall through to SQLite
+    
+    # Fallback to SQLite implementation
     from ..db.entity_store import get_entity_store
 
     store = get_entity_store()
@@ -78,14 +105,25 @@ def _resolve_entity_id(material_name: str) -> str | None:
         c_tokens = {t for t in cname.split() if len(t) > 1}
         if q_tokens & c_tokens:
             return h.id
+
     # Fall back to top hit only if names are very close in length (loose guard).
     if abs(len(hits[0].canonical_name) - len(material_name)) <= 3:
         return hits[0].id
     return None
 
 
-def _incompatible_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
-    """Return [(other_entity_id, relation_type, evidence_sentence), ...]."""
+def _incompatible_pairs_for(entity_id: str) -> List[Tuple[str, str, str]]:
+    """Return [(other_entity_id, relation_type, evidence_sentence), ...].
+    Uses Neo4j when available, falls back to SQLite.
+    """
+    if _NEO4J_AVAILABLE and neo4j_is_enabled():
+        try:
+            return neo4j_get_incompatible_pairs_for(entity_id)
+        except Exception as e:
+            logger.warning("Neo4j incompatible pairs failed for %s: %s", entity_id, e)
+            # Fall through to SQLite
+    
+    # Fallback to SQLite implementation
     from ..services.kg.graph_query import get_entity_relations
 
     rels = get_entity_relations(
@@ -106,18 +144,24 @@ def _incompatible_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
     return out
 
 
-# Relation types that express material synergy / beneficial combination.
-_SYNERGY_RELATIONS = ("synergizes",)
-
-
-def _synergy_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
-    """Return [(other_entity_id, relation_type, evidence_sentence), ...]."""
+def _synergy_pairs_for(entity_id: str) -> List[Tuple[str, str, str]]:
+    """Return [(other_entity_id, relation_type, evidence_sentence), ...].
+    Uses Neo4j when available, falls back to SQLite.
+    """
+    if _NEO4J_AVAILABLE and neo4j_is_enabled():
+        try:
+            return neo4j_get_synergy_pairs_for(entity_id)
+        except Exception as e:
+            logger.warning("Neo4j synergy pairs failed for %s: %s", entity_id, e)
+            # Fall through to SQLite
+    
+    # Fallback to SQLite implementation
     from ..services.kg.graph_query import get_entity_relations
 
     rels = get_entity_relations(
         entity_id,
         direction="both",
-        link_types=list(_SYNERGY_RELATIONS),
+        link_types=list(("synergizes",)),
         limit=50,
     )
     out = []
@@ -133,7 +177,17 @@ def _synergy_pairs_for(entity_id: str) -> list[tuple[str, str, str]]:
 
 
 def _has_measured_evidence(entity_id: str) -> bool:
-    """材料实体是否有 measured 证据（任意 relation 的 extraction_method == measured）。"""
+    """材料实体是否有 measured 证据（任意 relation 的 extraction_method == measured）。
+    Uses Neo4j when available, falls back to SQLite.
+    """
+    if _NEO4J_AVAILABLE and neo4j_is_enabled():
+        try:
+            return neo4j_has_measured_evidence(entity_id)
+        except Exception as e:
+            logger.warning("Neo4j measured evidence check failed for %s: %s", entity_id, e)
+            # Fall through to SQLite
+    
+    # Fallback to SQLite implementation
     from ..services.kg.graph_query import get_entity_relations
 
     rels = get_entity_relations(

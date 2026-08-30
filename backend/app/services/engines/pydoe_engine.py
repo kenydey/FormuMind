@@ -67,6 +67,7 @@ def build_pydoe_plan(
     factors: list[DOEFactor],
     design: str,
     n: int | None = None,
+    requirement: "Requirement | None" = None,
 ) -> DOEPlan:
     if not pydoe_available():
         raise RuntimeError("pydoe is not installed")
@@ -81,7 +82,34 @@ def build_pydoe_plan(
     else:
         matrix = _generate_matrix(design, k, _default_n(k, n))
 
-    return matrix_to_doe_plan(matrix, factors, design, engine="pydoe")
+    plan = matrix_to_doe_plan(matrix, factors, design, engine="pydoe")
+
+    # KG chemical-compatibility gate: if the baseline formulation skeleton
+    # carries an INHIBITS relation, mark every run infeasible. Mirrors the
+    # baybe_engine gate so both DOE engines produce consistent results.
+    if requirement is not None:
+        try:
+            from ..services.kg_chemical_check import check_formulation_chemistry
+            from ...domain import knowledge
+
+            skeleton = (
+                requirement.active_formulation
+                or knowledge.baseline_formulation(requirement)
+            )
+            if skeleton is not None:
+                chk = check_formulation_chemistry(skeleton, include_synergies=False)
+                if not chk.feasible:
+                    for run in plan.runs:
+                        run.infeasible = True
+                        run.infeasible_reason = (
+                            "; ".join(chk.reasons)
+                            or "知识图谱检测到材料不相容"
+                        )
+        except Exception:
+            # Never let the KG gate break DOE generation
+            pass
+
+    return plan
 
 
 def build_plan_with_fallback(

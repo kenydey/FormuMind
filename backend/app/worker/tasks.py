@@ -964,6 +964,53 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
         raise
 
 
+
+
+
+@celery_app.task(bind=True, name="formumind.doe_cycle", soft_time_limit=1500, time_limit=1800, max_retries=3)
+def run_doe_cycle_task(self, payload: dict) -> dict:
+    """Execute one DOE cycle: generate experiments using Bayesian optimization.
+    
+    This task implements the closed-loop DOE automation:
+    1. Load requirement from payload
+    2. Call recommendation service to get candidate formulations (Top-20)
+    3. Use Baybe engine to generate next batch of experiment points
+    4. Write experiment points to experiments table with status=pending
+    5. Return experiment ID list
+    """
+    from ..services import doe_cycle_service
+    
+    task_id = self.request.id
+    publish_progress(task_id, TaskProgressStatus.RUNNING, message="Starting DOE cycle")
+    
+    try:
+        # Extract payload
+        requirement_dict = payload.get("requirement", {})
+        if not requirement_dict:
+            raise ValueError("Missing requirement in payload")
+        
+        from ..domain.schemas import Requirement
+        requirement = Requirement(**requirement_dict)
+        
+        # Execute DOE cycle
+        result = doe_cycle_service.run_doe_cycle(requirement)
+        
+        publish_progress(task_id, TaskProgressStatus.COMPLETED, message="DOE cycle completed")
+        
+        persist_result(task_id, result, failed=False)
+        _persist_terminal(task_id, "doe_cycle", result, failed=False)
+        
+        return result
+        
+    except Exception as exc:
+        err = {"error": str(exc)}
+        publish_progress(task_id, TaskProgressStatus.FAILED, message=str(exc))
+        
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "doe_cycle", err, failed=True, message=str(exc))
+        
+        raise
+
 @celery_app.task(bind=True, name="formumind.deps_install")
 def run_deps_install_task(self, payload: dict) -> dict:
     from ..services import dependencies as deps

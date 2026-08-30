@@ -106,6 +106,8 @@ class KGSubstituteCandidate(BaseModel):
     confidence: float = 0.5
     hops: int = 1
     path: list[KGPathStep] = Field(default_factory=list)
+    contradiction_flag: bool = False     # v10: 该候选被实测反驳
+    contradiction_detail: str = ""       # 冲突类型简述，供前端徽标
 
 
 class KGSubstituteDiscoverResponse(BaseModel):
@@ -164,7 +166,6 @@ class KGRebuildReport(BaseModel):
     entities_upserted: int = 0
     mentions_upserted: int = 0
     links_created: int = 0
-    relations_upserted: int = 0
 
 
 class KGLinkReport(BaseModel):
@@ -173,3 +174,23 @@ class KGLinkReport(BaseModel):
     mentions_upserted: int = 0
     links_created: int = 0
     relations_upserted: int = 0
+
+
+class KGContradictionMark(BaseModel):
+    """一条文献关系与团队实测证据的方向冲突标记。"""
+    target_entity_id: str
+    target_entity_name: str = ""
+    literature_relation: RelationType
+    literature_confidence: float = 0.5
+    measured_property: str = ""          # 实测对照的指标（如 adhesion / corrosion_resistance）
+    measured_value: float | None = None
+    measured_source_id: str = ""         # measured:campaign_xxx
+    contradiction_type: str = ""         # synergy_vs_poor / inhibit_vs_good / substitute_vs_poor
+    strength: float = 0.0                # |实测偏离| × 文献置信度
+    recommended_action: str = ""         # review_experiment / demote_literature_edge
+
+
+class KGContradictionResponse(BaseModel):
+    entity_id: str
+    entity_name: str = ""
+    contradictions: list[KGContradictionMark] = Field(default_factory=list)

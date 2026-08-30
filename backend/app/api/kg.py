@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from ..config import get_settings
 from ..domain.kg_schemas import (
     EntityResolveResponse,
+    KGContradictionResponse,
     KGPathResponse,
     KGLinkReport,
     KGRebuildReport,
@@ -19,6 +20,10 @@ from ..domain.kg_schemas import (
     KGSubstituteDiscoverResponse,
 )
 from ..services.kg import kg_enabled, retrieve
+from ..services.kg.contradiction import (
+    detect_contradictions,
+    detect_contradictions_by_query,
+)
 from ..services.kg.entity_linker import link_source, rebuild_all
 from ..services.kg.entity_resolver import resolve_query
 from ..services.kg.graph_query import discover_substitutes, find_path, get_entity_relations
@@ -75,7 +80,7 @@ def feedback_stats() -> dict:
 @router.get("/feedback/report")
 def feedback_report() -> dict:
     """审计报表：measured 统计 + 零增长告警 + 最近 campaign bias 趋势（loop_history 抽取）。"""
-    from ..db.entity_store import get_entity_store
+    from ..db.campaign_store import get_campaign_store
     from ..db.models import KGEntityLink
 
     if not kg_enabled():
@@ -85,8 +90,35 @@ def feedback_report() -> dict:
     alert = None
     if stats["measured_performance"] == 0:
         alert = "暂无实测回流证据：请在实验台账完成至少一行 Completed 并同步（sync 会写入 KG）"
-    # 最近 bias 趋势：从 campaign 的 loop_history 抽取（best-effort，失败则空）
+    # 最近 bias 趋势：从各 campaign 的 loop_history 末条 entry 抽 rmse_by_metric
     recent_bias: list[dict] = []
+    try:
+        from ..db.campaign_store import get_campaign_store
+        from ..db.models import Campaign as CampaignModel
+
+        store = get_campaign_store()
+        with store._session_factory() as session:
+            campaigns = session.query(CampaignModel).order_by(CampaignModel.id.desc()).limit(20).all()
+        for c in campaigns:
+            history = list(getattr(c, "loop_history", None) or [])
+            if not history:
+                continue
+            last = history[-1]
+            rmse_map = last.get("rmse_by_metric") or {}
+            if not rmse_map:
+                continue
+            trend = "improving" if (last.get("converged") or float(min(rmse_map.values())) < 0.2) else "unsettled"
+            recent_bias.append({
+                "campaign_id": getattr(c, "id", None),
+                "campaign_name": getattr(c, "name", ""),
+                "primary_metric": getattr(c, "primary_metric", None),
+                "rmse_by_metric": rmse_map,
+                "trend": trend,
+                "converged": bool(last.get("converged")),
+            })
+    except Exception as exc:  # best-effort：任何异常都不应让报表 500
+        logger.warning("feedback_report recent_bias extract failed: %s", exc)
+        recent_bias = []
     return {**stats, "alert": alert, "recent_bias": recent_bias}
 
 
@@ -184,6 +216,26 @@ def substitute_discover(
     if not resolved_id:
         raise HTTPException(status_code=400, detail="请提供 entity_id 或可解析的 q 参数")
     return discover_substitutes(resolved_id, limit=limit)
+
+
+@router.get("/contradictions", response_model=KGContradictionResponse)
+def contradictions(
+    entity_id: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+) -> KGContradictionResponse:
+    """KG v10 — 文献关系 vs 团队实测的矛盾检测（只读视图）。
+
+    对 ``entity_id``（或 ``q`` 解析出的实体）比较其文献语义关系
+    （substitutes/synergizes/inhibits/...）与 ``kg_feedback`` 写回的
+    ``measured_performance`` 实测边，标记方向冲突。无实测实体返回空列表。
+    """
+    if not kg_enabled():
+        raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
+    if entity_id:
+        return detect_contradictions(entity_id)
+    if q:
+        return detect_contradictions_by_query(q)
+    raise HTTPException(status_code=400, detail="请提供 entity_id 或可解析的 q 参数")
 
 
 @router.post("/retrieve", response_model=KGRetrieveResponse)

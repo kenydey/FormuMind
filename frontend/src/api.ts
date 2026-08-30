@@ -1217,6 +1217,13 @@ export const api = {
     return get<KGSubstituteDiscoverResponse>(`/api/kg/discover/substitutes?${params}`);
   },
 
+  kgContradictions: (opts: { entityId?: string; q?: string }) => {
+    const params = new URLSearchParams();
+    if (opts.entityId) params.set("entity_id", opts.entityId);
+    if (opts.q) params.set("q", opts.q);
+    return get<KGContradictionResponse>(`/api/kg/contradictions?${params}`);
+  },
+
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 
   postEnvFlags: (updates: Record<string, boolean>) =>
@@ -1232,6 +1239,12 @@ export const api = {
 
   setFormulationMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
+
+  postDoeCyclePause: (campaignId: number | string, isPaused: boolean) =>
+    post<{ status: string; message: string }>(
+      `/api/experiments/hooks/pause-doecycle/${campaignId}`,
+      { isPaused },
+    ),
 
   getOcsr: () => get<{ status: OcsrStatus }>("/api/settings/ocsr"),
 
@@ -1864,6 +1877,27 @@ export interface KGSubstituteCandidate {
   confidence: number;
   hops: number;
   path: { relation: KGRelationView; entity_id: string; entity_name: string }[];
+  contradiction_flag?: boolean;
+  contradiction_detail?: string;
+}
+
+export interface KGContradictionMark {
+  target_entity_id: string;
+  target_entity_name?: string;
+  literature_relation: KGRelationType;
+  literature_confidence?: number;
+  measured_property?: string;
+  measured_value?: number | null;
+  measured_source_id?: string;
+  contradiction_type?: string;
+  strength?: number;
+  recommended_action?: string;
+}
+
+export interface KGContradictionResponse {
+  entity_id: string;
+  entity_name?: string;
+  contradictions: KGContradictionMark[];
 }
 
 export interface KGSubstituteDiscoverResponse {

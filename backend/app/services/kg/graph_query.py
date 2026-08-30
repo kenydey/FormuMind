@@ -160,10 +160,25 @@ def discover_substitutes(
     candidates: list[KGSubstituteCandidate] = []
     seen: set[str] = {entity_id}
 
+    # v10: pre-compute contradiction flags per candidate target
+    _contra_map: dict[str, str] = {}
+    try:
+        from ...config import get_settings
+        from .contradiction import detect_contradictions
+
+        if get_settings().kg_contradiction_demote:
+            _resp = detect_contradictions(entity_id)
+            for _m in _resp.contradictions:
+                _contra_map[_m.target_entity_id] = _m.contradiction_type
+    except Exception as _exc:  # pragma: no cover - defensive
+        import logging as _logging
+        _logging.getLogger(__name__).warning("discover_contradiction precompute failed: %s", _exc)
+
     def _add_candidate(sub_id: str, rel: KGRelationView, path: list[KGPathStep]) -> None:
         if sub_id in seen:
             return
         seen.add(sub_id)
+        contra = _contra_map.get(sub_id, "")
         candidates.append(
             KGSubstituteCandidate(
                 entity_id=sub_id,
@@ -172,6 +187,8 @@ def discover_substitutes(
                 confidence=rel.confidence,
                 hops=len(path),
                 path=path,
+                contradiction_flag=bool(contra),
+                contradiction_detail=contra,
             )
         )
 
@@ -241,8 +258,8 @@ def discover_substitutes(
 
     candidates.sort(key=lambda c: (-c.confidence, c.hops))
     # measured 优先：实测边涉及的实体前置
+    _measured: set[str] = set()
     try:
-        _measured: set[str] = set()
         for link in store.get_links_for_entity(entity_id, direction="both", link_types=["substitutes", "inhibits", "synergizes"], limit=200):
             if getattr(link, "extraction_method", None) == "measured":
                 _measured.add(link.src_entity_id)
@@ -251,6 +268,16 @@ def discover_substitutes(
             candidates.sort(key=lambda c: (0 if c.entity_id in _measured else 1, -c.confidence, c.hops))
     except Exception:
         pass
+    # v10: 矛盾候选置后（被实测反驳的替代物排在末尾），除非实测明确好
+    if _contra_map:
+        candidates.sort(
+            key=lambda c: (
+                1 if c.contradiction_flag else 0,
+                0 if c.entity_id in _measured else 1,
+                -c.confidence,
+                c.hops,
+            )
+        )
     return KGSubstituteDiscoverResponse(
         query_entity_id=entity_id,
         query_entity_name=entity_name,

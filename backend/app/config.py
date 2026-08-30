@@ -23,6 +23,11 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_API_TOKENS_JSON",
     # Test-only lifespan fast-path flag (see app/main.py::_skip_lifespan_bootstrap).
     "FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP",
+    # Optional Neo4j graph-store adapter (sibling to SQLite KG).
+    "FORMUMIND_NEO4J_ENABLED",
+    "FORMUMIND_NEO4J_URI",
+    "FORMUMIND_NEO4J_USER",
+    "FORMUMIND_NEO4J_PASSWORD",
 })
 
 
@@ -459,6 +464,10 @@ class Settings(BaseSettings):
     kg_inhibits_penalty: float = 0.5
     kg_synergizes_bonus: float = 1.0  # 1.0 = disabled by default
     kg_measured_bonus: float = 1.15  # 实测证据加成：材料有 measured 关系时配方得分提升
+
+    # KG v10 — 文献↔实测矛盾检测
+    kg_contradiction_threshold: float = 0.3  # 冲突强度阈值：低于此不标记
+    kg_contradiction_demote: bool = True  # 冲突替代候选是否在 discover 排序中置后
 
     # Chat P0 — multi-turn, structured answers, soft clarification.
     chat_multi_turn_enabled: bool = True
