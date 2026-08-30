@@ -374,3 +374,69 @@ async def test_batch_sync_partial_fail_does_not_raise(tmp_path, monkeypatch):
         assert updated == 1
     finally:
         await store.close()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_prunes_stale_refs(tmp_path):
+    """reconcile_sample_refs removes refs whose Datalab item returns a definitive 404."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=3))
+        deleted_item_id = campaign.sample_refs[1]["item_id"]
+        state.missing_item_ids.add(deleted_item_id)
+
+        result = await store.reconcile_sample_refs(campaign.id)
+
+        assert result["removed"] == [deleted_item_id]
+        assert result["removed_count"] == 1
+        assert result["errors"] == []
+
+        # sample_refs persisted: stale ref gone, others kept
+        refreshed = store.get_campaign_sync(campaign.id)
+        remaining_ids = {str(r["item_id"]) for r in refreshed.sample_refs}
+        assert deleted_item_id not in remaining_ids
+        assert len(remaining_ids) == 2
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_idempotent(tmp_path):
+    """A second reconcile on a clean campaign returns an empty removed list."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=2))
+        deleted_item_id = campaign.sample_refs[0]["item_id"]
+        state.missing_item_ids.add(deleted_item_id)
+
+        first = await store.reconcile_sample_refs(campaign.id)
+        second = await store.reconcile_sample_refs(campaign.id)
+
+        assert first["removed_count"] == 1
+        assert second["removed"] == []
+        assert second["removed_count"] == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_list_rows_auto_prunes_stale_refs(tmp_path):
+    """list_rows prunes definitive 404 refs so subsequent reads stop warning."""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan(runs=2))
+        deleted_item_id = campaign.sample_refs[0]["item_id"]
+        state.missing_item_ids.add(deleted_item_id)
+
+        rows = await store.list_rows(campaign.id)
+        assert len(rows) == 1  # live row still returned
+
+        refreshed = store.get_campaign_sync(campaign.id)
+        remaining_ids = {str(r["item_id"]) for r in refreshed.sample_refs}
+        assert deleted_item_id not in remaining_ids
+        assert len(remaining_ids) == 1
+    finally:
+        await store.close()

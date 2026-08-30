@@ -64,6 +64,38 @@ def test_row_to_experiment_record_completed():
     assert rec.label == "wb:1:local_c1_r1"
 
 
+def test_numeric_measured_reports_dropped_values():
+    report: list[str] = []
+    out = workbench_training._numeric_measured(
+        {"salt_spray_hours": "900.5", "cost_cny_per_kg": "abc", "voc_gpl": None, "ph_value": ""},
+        report=report,
+    )
+    assert out == {"salt_spray_hours": 900.5}
+    assert "non_numeric:cost_cny_per_kg" in report
+    assert "empty:voc_gpl" in report
+    assert "empty:ph_value" in report
+
+
+def test_row_to_experiment_record_reports_non_numeric_factor():
+    from app.db.campaign_types import WorkbenchRow
+
+    row = WorkbenchRow(
+        id=1,
+        campaign_id=1,
+        item_id="local_c1_r1",
+        status="Completed",
+        planned_params={"Zinc phosphate": 8.0},
+        actual_params={"Zinc phosphate": 8.5, "cure_temperature_c": 81.0, "surfactant": "not-a-number"},
+        measurements={"salt_spray_hours": 900.0},
+    )
+    report: list[str] = []
+    rec = workbench_training.row_to_experiment_record(
+        row, campaign_id=1, domain=ProductDomain.anticorrosion_coating, report=report
+    )
+    assert rec is not None
+    assert "non_numeric_factor:surfactant" in report
+
+
 def test_sync_workbench_ingests_training(tmp_path):
     client = TestClient(app)
     created = client.post("/api/experiments/workbench/campaigns", json={"plan": _plan().model_dump()}).json()

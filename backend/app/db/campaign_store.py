@@ -157,6 +157,15 @@ class CampaignStoreInterface(ABC):
         """Completed rows with measurements — BayBE closed-loop input."""
         ...
 
+    async def reconcile_sample_refs(self, campaign_id: int) -> dict:
+        """Detect and prune stale ``sample_refs`` whose Datalab item is gone.
+
+        Returns ``{removed, kept, removed_count, errors}``. Network / 5xx
+        failures are reported in ``errors`` and never pruned (only a definitive
+        404 is treated as deleted). Idempotent.
+        """
+        return {"removed": [], "kept": [], "removed_count": 0, "errors": []}
+
     def list_rows_sync(self, campaign_id: int) -> list[WorkbenchRow]:
         return _run_async(self.list_rows(campaign_id))
 
@@ -487,15 +496,78 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return []
         out: list[WorkbenchRow] = []
+        stale: list[str] = []
         for ref in campaign.sample_refs or []:
             row_id = int(ref["id"])
             item_id = str(ref["item_id"])
-            item_data = await self._get_item(item_id)
+            try:
+                item_data = await self._get_item(item_id)
+            except httpx.HTTPError as exc:
+                # Transient Datalab/network failure — keep the ref, skip this row.
+                # Business errors (DatalabStoreError) still propagate.
+                logger.warning("list_rows skip %s: %s", item_id, exc)
+                continue
             if item_data is None:
-                logger.warning("list_rows skip %s: item deleted from Datalab", item_id)
+                stale.append(item_id)
                 continue
             out.append(_parse_row_from_item(campaign_id, row_id, item_id, item_data))
+        if stale:
+            # Auto-prune definitive 404s so the same campaign stops warning on
+            # every subsequent read.
+            await self._prune_stale_refs(campaign_id, stale)
         return out
+
+    async def _prune_stale_refs(self, campaign_id: int, stale_ids: list[str]) -> None:
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
+            return
+        stale_set = set(stale_ids)
+        kept = [r for r in (campaign.sample_refs or []) if str(r.get("item_id")) not in stale_set]
+        if len(kept) != len(campaign.sample_refs or []):
+            self._save_sample_refs(campaign_id, kept)
+            logger.warning(
+                "list_rows auto-pruned %d stale ref(s) from campaign %s: %s",
+                len(stale_set),
+                campaign_id,
+                sorted(stale_set),
+            )
+
+    async def reconcile_sample_refs(self, campaign_id: int) -> dict:
+        """Detect and prune stale ``sample_refs``; only a definitive 404 prunes."""
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
+            return {"removed": [], "kept": [], "removed_count": 0, "errors": []}
+        refs = campaign.sample_refs or []
+        kept: list[dict] = []
+        removed: list[str] = []
+        errors: list[str] = []
+        for ref in refs:
+            item_id = str(ref.get("item_id", ""))
+            try:
+                item_data = await self._get_item(item_id)
+            except httpx.HTTPError as exc:
+                logger.warning("reconcile skip %s: %s", item_id, exc)
+                errors.append(item_id)
+                kept.append(ref)  # keep on transient failure
+                continue
+            if item_data is None:
+                removed.append(item_id)
+            else:
+                kept.append(ref)
+        if removed:
+            self._save_sample_refs(campaign_id, kept)
+            logger.warning(
+                "reconcile pruned %d stale ref(s) from campaign %s: %s",
+                len(removed),
+                campaign_id,
+                removed,
+            )
+        return {
+            "removed": removed,
+            "kept": kept,
+            "removed_count": len(removed),
+            "errors": errors,
+        }
 
     async def batch_sync(
         self,

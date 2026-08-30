@@ -418,6 +418,24 @@ async def sync_workbench(
     )
 
 
+@router.post("/experiments/workbench/{campaign_id}/reconcile", response_model=dict)
+async def reconcile_workbench(campaign_id: int, request: Request) -> dict:
+    """Detect and prune stale ``sample_refs`` whose Datalab item was deleted.
+
+    Only a definitive 404 prunes; network / 5xx failures are reported in
+    ``errors`` and left untouched. Idempotent: a second call returns an empty
+    ``removed`` list once the campaign is clean.
+    """
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
+    store = get_campaign_store()
+    campaign = await store.get_campaign(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    assert_owner(getattr(campaign, "owner_id", None), get_current_owner(request))
+    return await store.reconcile_sample_refs(campaign_id)
+
+
 # ── Experiment attachments (Phase 0.2) ────────────────────────────────────────
 
 async def _upload_or_store_locally(content: bytes, filename: str) -> str:

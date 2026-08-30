@@ -15,14 +15,28 @@ def workbench_record_label(campaign_id: int, item_id: str) -> str:
     return f"wb:{campaign_id}:{item_id}"
 
 
-def _numeric_measured(measurements: dict) -> dict[str, float]:
+def _numeric_measured(measurements: dict, report: list[str] | None = None) -> dict[str, float]:
+    """Coerce measurements to float, dropping non-numeric / empty values.
+
+    Each dropped value is logged and, when ``report`` is supplied, appended as
+    ``"non_numeric:<key>"`` so the caller can surface data-quality losses.
+    """
     out: dict[str, float] = {}
     for key, val in (measurements or {}).items():
         if val is None or val == "":
+            if report is not None:
+                report.append(f"empty:{key}")
             continue
         try:
             out[str(key)] = float(val)
         except (TypeError, ValueError):
+            if report is not None:
+                report.append(f"non_numeric:{key}")
+            logger.warning(
+                "workbench_training: dropped non-numeric measurement %s=%r",
+                key,
+                val,
+            )
             continue
     return out
 
@@ -33,10 +47,11 @@ def row_to_experiment_record(
     campaign_id: int,
     domain: ProductDomain,
     project_id: str = "",
+    report: list[str] | None = None,
 ) -> ExperimentRecord | None:
     if row.status != "Completed":
         return None
-    measured = _numeric_measured(row.measurements)
+    measured = _numeric_measured(row.measurements, report=report)
     if not measured:
         return None
 
@@ -53,6 +68,8 @@ def row_to_experiment_record(
         try:
             factors[str(key)] = float(val)
         except (TypeError, ValueError):
+            if report is not None:
+                report.append(f"non_numeric_factor:{key}")
             continue
 
     return ExperimentRecord(
@@ -163,9 +180,10 @@ def ingest_workbench_rows(
 
     to_add: list[ExperimentRecord] = []
     skipped = 0
+    report: list[str] = []
     for row in rows:
         rec = row_to_experiment_record(
-            row, campaign_id=campaign_id, domain=domain, project_id=project_id
+            row, campaign_id=campaign_id, domain=domain, project_id=project_id, report=report
         )
         if rec is None:
             continue
@@ -174,6 +192,15 @@ def ingest_workbench_rows(
             continue
         to_add.append(rec)
         known.add(rec.label)
+
+    quality: dict = {"dropped_values": len(report), "dropped": report[:20]}
+    if report:
+        logger.warning(
+            "workbench_training: campaign %s dropped %d invalid value(s): %s",
+            campaign_id,
+            len(report),
+            ", ".join(report[:20]),
+        )
 
     if to_add:
         # P2: compute bias BEFORE retrain (use current model as baseline)
@@ -213,8 +240,20 @@ def ingest_workbench_rows(
         for m, s in bias["by_metric"].items():
             parts.append(f"{m}: mean_err {s['mean_error']:+g} rmse {s['rmse']:g} (n={s['n']})")
         msg = f"{msg} | 预测偏差 " + "; ".join(parts)
-        return {"ingested": len(to_add), "skipped": skipped, "message": msg, "prediction_bias": bias}
-    return {"ingested": len(to_add), "skipped": skipped, "message": msg, "prediction_bias": bias if to_add else {}}
+        return {
+            "ingested": len(to_add),
+            "skipped": skipped,
+            "message": msg,
+            "prediction_bias": bias,
+            "quality": quality,
+        }
+    return {
+        "ingested": len(to_add),
+        "skipped": skipped,
+        "message": msg,
+        "prediction_bias": bias if to_add else {},
+        "quality": quality,
+    }
 
 
 def resolve_experiment_for_row(campaign_id: int, row_id: int) -> int | None:

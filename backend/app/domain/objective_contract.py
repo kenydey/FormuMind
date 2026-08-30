@@ -1,9 +1,12 @@
 """Objective contract helpers — normalize, validate, and list metrics for closed-loop."""
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 from .schemas import ObjectiveSpec, ProductDomain, Requirement
+
+logger = logging.getLogger(__name__)
 
 _METRIC_UNITS: dict[str, str] = {
     "salt_spray_hours": "h",
@@ -79,8 +82,14 @@ def validate_measurements(
     objectives: list[ObjectiveSpec],
     *,
     strict: bool = False,
+    report: list[str] | None = None,
 ) -> dict:
-    """Return cleaned measurements; unknown keys dropped unless strict raises."""
+    """Return cleaned measurements; unknown keys dropped unless strict raises.
+
+    When ``report`` is provided, each dropped key is appended (e.g.
+    ``"unknown_key:viscosity"``) so callers can surface data-quality losses
+    instead of silently discarding them.
+    """
     allowed = set(objective_metrics(objectives))
     if not allowed:
         return dict(measurements or {})
@@ -90,6 +99,14 @@ def validate_measurements(
             out[key] = val
         elif strict:
             raise ValueError(f"Unknown measurement key {key!r}; allowed: {sorted(allowed)}")
+        else:
+            if report is not None:
+                report.append(f"unknown_key:{key}")
+            logger.warning(
+                "validate_measurements dropped unknown key %r (allowed: %s)",
+                key,
+                sorted(allowed),
+            )
     return out
 
 
