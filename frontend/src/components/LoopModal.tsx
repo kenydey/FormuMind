@@ -144,6 +144,26 @@ export default function LoopModal() {
               </ul>
             </div>
           )}
+          {loopReport.physical_constraints && loopReport.physical_constraints.status !== "pass" && (
+            <div
+              className={`rounded-lg border px-3 py-2 text-xs ${
+                loopReport.physical_constraints.status === "infeasible"
+                  ? "border-red-500/40 bg-red-500/10 text-red-200"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-200"
+              }`}
+            >
+              <div className="font-semibold mb-1">
+                {loopReport.physical_constraints.status === "infeasible"
+                  ? "⚠ 物理约束不可行（酸性稳定性/合规）"
+                  : "⚠ 物理约束提示"}
+              </div>
+              <ul className="list-disc list-inside space-y-0.5">
+                {loopReport.physical_constraints.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* Loop status row */}
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <span>引擎：<span className="font-mono text-accent2">{loopReport.engine}</span></span>

@@ -271,12 +271,22 @@ export interface ChemicalFeasibility {
   reasons: string[];
 }
 
+export interface PhysicalConstraints {
+  feasible: boolean;
+  status: string; // pass | warn | infeasible
+  reasons: string[];
+  acid_stability?: { status: string; reasons: string[] };
+  compliance?: { status: string; reasons: string[] };
+}
+
 export interface ActiveDoeResult extends AdaptiveDOEMetadata {
   plan: DOEPlan;
   campaign_state: string | null;
   engine: string;
   // KG chemical-compatibility verdict for the shared formulation skeleton.
   chemical_feasibility?: ChemicalFeasibility | null;
+  // v11: deterministic physical-constraint verdict (acid stability + compliance).
+  physical_constraints?: PhysicalConstraints | null;
 }
 
 export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
@@ -2071,6 +2081,8 @@ export interface LoopReport extends AdaptiveDOEMetadata {
   loop_message?: string;
   // KG chemical-compatibility verdict for the recommended batch's skeleton.
   chemical_feasibility?: ChemicalFeasibility | null;
+  // v11: deterministic physical-constraint verdict (acid stability + compliance).
+  physical_constraints?: PhysicalConstraints | null;
   // 成本/碳足迹摘要（top 配方均值）
   cost_summary?: { cost_cny_per_kg?: number | null; voc_gpl?: number | null; n: number } | null;
 }
