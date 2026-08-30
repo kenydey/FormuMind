@@ -61,6 +61,14 @@ CATALOG: tuple[Dependency, ...] = (
         "sentence-transformers", "sentence_transformers", "embedding",
         "语义向量检索（离线 RAG 质量升级）",
     ),
+    Dependency(
+        "ragatouille", "ragatouille", "colbert",
+        "ColBERT 检索后端（需要 torch；GPU 或 CPU 均可）",
+    ),
+    Dependency(
+        "langgraph", "langgraph", "crag",
+        "CRAG 联邦检索编排（LangGraph StateGraph）",
+    ),
     # ── Science ────────────────────────────────────────────────────────────
     Dependency("rdkit", "rdkit", "science", "RDKit 分子描述符 / SMARTS 相容性校验"),
     Dependency("scipy", "scipy", "science", "科学计算（曲线拟合等）"),

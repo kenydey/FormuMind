@@ -132,6 +132,8 @@ const EXTRA_LABELS: Record<string, string> = {
   llm: "大模型供应商 · LLM",
   intel: "在线检索 · Retrieval",
   embedding: "语义向量 RAG · Embedding",
+  colbert: "ColBERT 检索 · ColBERT",
+  crag: "联邦检索 · CRAG",
   science: "科学计算 · Science",
   optimize: "寻优器 · Optimize",
   bo: "高斯过程寻优 · BoTorch",
