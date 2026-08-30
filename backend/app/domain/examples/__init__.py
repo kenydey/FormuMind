@@ -54,6 +54,23 @@ EXAMPLE_PROJECTS: dict[str, dict] = {
             LeverSpec(name="Manganese dihydrogen phosphate", low=1.0, high=8.0),
         ],
     },
+    "autodeposition_coating": {
+        "id": "autodeposition_coating",
+        "label": "自沉积涂料 · Autodeposition",
+        "product_type": "自沉积环氧丙烯酸涂料",
+        "application": "carbon_steel",
+        "domain": ProductDomain.autodeposition_coating,
+        "objectives": [
+            ObjectiveSpec(metric="salt_spray_hours", weight=0.5, direction="maximize", target_value=720),
+            ObjectiveSpec(metric="cost_cny_per_kg", weight=0.25, direction="minimize"),
+            ObjectiveSpec(metric="sustainability_idx", weight=0.25, direction="maximize"),
+        ],
+        "levers": [
+            LeverSpec(name="Ferric fluoride (FeF3)", low=0.2, high=2.5),
+            LeverSpec(name="Acidic-stable epoxy-acrylic emulsion", low=5.0, high=16.0),
+            LeverSpec(name="Hydrofluoric acid (HF)", low=0.05, high=0.6),
+        ],
+    },
 }
 
 BUILTIN_METRICS = [

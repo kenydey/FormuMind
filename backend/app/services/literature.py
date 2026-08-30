@@ -58,6 +58,18 @@ SEED_CORPUS: dict[ProductDomain, list[dict]] = {
         {"identifier": "DOI:10.1016/j.surfcoat.2017.06.001", "source": "literature", "title": "Cerium-based passivation",
          "snippet": "Cerium nitrate post-treatment precipitates cerium oxide/hydroxide at cathodic sites, inhibiting corrosion on aluminum alloys."},
     ],
+    ProductDomain.autodeposition_coating: [
+        # Structured from data/knowledge/autodeposition_emulsion_suppliers.md
+        # (Henkel BONDERITE M-PP series + patent WO2017117169A1).
+        {"identifier": "BONDERITE-M-PP-866R", "source": "Henkel datasheet", "title": "BONDERITE M-PP 866R epoxy autodeposition bath",
+         "snippet": "Black smooth epoxy emulsion film deposited without applied current; working bath pH 2-4; uniform deposition on steel interiors and complex cavities; general corrosion protection."},
+        {"identifier": "BONDERITE-M-PP-930C", "source": "Henkel datasheet", "title": "BONDERITE M-PP 930C low-VOC autodeposition coating",
+         "snippet": "Epoxy emulsion autodeposition bath compliant with RoHS/REACH, VOC below 0.03 lbs/gal; low-temperature cure around 130 C; for environmentally sensitive applications."},
+        {"identifier": "WO2017117169A1", "source": "WIPO", "title": "Low-bake epoxy-acrylate graft autodeposition coating",
+         "snippet": "Epoxy-acrylate graft emulsion (Epon-828-type epoxy + MMA/BA acrylics, persulfate initiation, sulfonate/phosphate stabilizer 0.5-5%) with blocked isocyanate crosslinker; stable at pH 1.5-6.0, particle size 0.1-5 um, solids 20-35%; cures below 130 C."},
+        {"identifier": "DOI:10.1016/j.porgcoat.2018.03.010", "source": "literature", "title": "Autodeposition mechanism: acid-induced coagulation",
+         "snippet": "Autodeposition proceeds by acid-catalyzed coagulation of polymer dispersion at the metal/liquid interface: dissolved Fe2+/Fe3+ (from fluoride etch and oxidizer) destabilizes the latex, and film growth self-limits as deposited polymer blocks further iron dissolution."},
+    ],
 }
 
 # Identifiers that belong to the offline seed corpus — used to tell offline

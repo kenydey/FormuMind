@@ -12,6 +12,7 @@ _DOMAIN_LABELS: dict[ProductDomain, str] = {
     ProductDomain.anticorrosion_coating: "防腐蚀涂料",
     ProductDomain.degreaser: "脱脂剂",
     ProductDomain.surface_treatment: "表面处理剂",
+    ProductDomain.autodeposition_coating: "自沉积涂料",
 }
 
 _LEGACY_CONSTRAINT_LABELS: dict[str, str] = {
@@ -56,6 +57,11 @@ _LEGACY_LEVERS: dict[ProductDomain, list[tuple[str, float, float]]] = {
         ("Sodium metasilicate", 2.0, 14.0),
     ],
     # surface_treatment: use substrate_default_levers() in levers.py (SSOT)
+    ProductDomain.autodeposition_coating: [
+        ("Ferric fluoride (FeF3)", 0.2, 2.5),
+        ("Acidic-stable epoxy-acrylic emulsion", 5.0, 16.0),
+        ("Hydrofluoric acid (HF)", 0.05, 0.6),
+    ],
 }
 
 

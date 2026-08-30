@@ -1365,11 +1365,12 @@ def _offline_synthesis(req: Requirement, evidence: list[Evidence], recommended: 
         ProductDomain.anticorrosion_coating: "防腐蚀涂料",
         ProductDomain.degreaser: "脱脂剂",
         ProductDomain.surface_treatment: "表面处理剂",
+        ProductDomain.autodeposition_coating: "自沉积涂料",
     }
     d = domain_names.get(req.domain, req.domain.value)
     top = recommended[0] if recommended else None
     mech = (
-        f"{d}的核心机理：{'环氧树脂与固化剂形成交联网络，缓蚀剂（磷酸锌等）在界面形成致密保护膜，阻断腐蚀电化学反应。' if req.domain == ProductDomain.anticorrosion_coating else '表面活性剂降低油-水界面张力，使油污乳化脱落；碱性助剂（磷酸钠、碳酸钠）皂化动植物油脂。' if req.domain == ProductDomain.degreaser else '磷化/铬化/硅烷偶联形成转化膜，提升基材与后续涂层的附着力与耐蚀性。'}"
+        f"{d}的核心机理：{'环氧树脂与固化剂形成交联网络，缓蚀剂（磷酸锌等）在界面形成致密保护膜，阻断腐蚀电化学反应。' if req.domain == ProductDomain.anticorrosion_coating else '表面活性剂降低油-水界面张力，使油污乳化脱落；碱性助剂（磷酸钠、碳酸钠）皂化动植物油脂。' if req.domain == ProductDomain.degreaser else '磷化/铬化/硅烷偶联形成转化膜，提升基材与后续涂层的附着力与耐蚀性。' if req.domain == ProductDomain.surface_treatment else '酸性浴中聚合物分散体在金属表面酸致凝聚沉积：HF 刻蚀基材溶出铁离子，Fe³⁺（FeF3）与氧化剂（H2O2）维持界面凝聚驱动力，涂层在 pH 2-4 浴中自沉积生长。'}"
     )
     chat = f"## {d} 配方研究报告\n\n**机理**：{mech}\n\n"
     if top:

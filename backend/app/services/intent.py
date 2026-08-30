@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 # ── Keyword tables for the offline heuristic ─────────────────────────────────
 
 _DOMAIN_KEYWORDS: list[tuple[ProductDomain, tuple[str, ...]]] = [
+    # Autodeposition must come FIRST: _detect_domain returns the first match,
+    # and an autodeposition request ("自沉积涂料") would otherwise hit the
+    # generic "涂料/coating" keyword of anticorrosion_coating first.
+    (ProductDomain.autodeposition_coating,
+     ("自沉积", "自泳", "autodepos", "autophoret", "auto-depos", "MPP", "M-PP", "bonderite")),
     (ProductDomain.degreaser, ("脱脂", "清洗", "除油", "degreas", "cleaning", "cleaner")),
     (ProductDomain.surface_treatment,
      ("磷化", "钝化", "转化", "前处理", "phosphat", "passivat", "conversion", "pretreat")),
@@ -164,7 +169,7 @@ Return ONLY a JSON object with these keys (omit a key if not stated):
 {{
   "product_type": "<short product description>",
   "application": "<substrate or use case>",
-  "domain": "anticorrosion_coating" | "degreaser" | "surface_treatment",
+  "domain": "anticorrosion_coating" | "degreaser" | "surface_treatment" | "autodeposition_coating",
   "substrate": "carbon_steel" | "galvanized_steel" | "aluminum" | "stainless_steel" | "magnesium_alloy",
   "salt_spray_hours": <number>,
   "film_weight_gsm": <number>,

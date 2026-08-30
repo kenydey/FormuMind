@@ -219,6 +219,92 @@ _SEED_MATERIALS: dict[str, dict] = {
         "zh_name": "(3-氨丙基)三乙氧基硅烷",
         "price_cny_per_kg": 85.0, "voc_contrib": 0.55,
     },
+    # ── Autodeposition (self-depositing / autophoretic) bath materials ──────
+    # Autodeposition baths run at pH 2-4; the dispersed polymer must remain
+    # stable in the bulk bath and only coagulate at the metal surface (acid-
+    # catalyzed, Fe²⁺/Fe³⁺-promoted). acid_tolerance_ph = lowest bath pH the
+    # dispersion survives; lower is more acid-tolerant.
+    "Acidic-stable epoxy-acrylic emulsion": {
+        "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
+        "cas_no": None,
+        "zh_name": "酸性稳定环氧丙烯酸乳液",
+        "price_cny_per_kg": 28.0, "voc_contrib": 0.02,
+        "tg_k": 283.0,  # Tg ≈ +10 °C, film former of choice for M-PP-type baths
+        "carrier": "aqueous", "water_compatible": True,
+        "acid_tolerance_ph": 2.0,
+    },
+    "Cationic polyurethane dispersion (acid-stable)": {
+        "role": "resin", "formula": None, "smiles": None, "molar_mass": None,
+        "cas_no": None,
+        "zh_name": "阳离子聚氨酯分散体（耐酸型）",
+        "price_cny_per_kg": 45.0, "voc_contrib": 0.02,
+        "tg_k": 243.0,  # PUD Tg ≈ −30 °C
+        "carrier": "aqueous", "water_compatible": True,
+        "acid_tolerance_ph": 2.5,
+    },
+    "Ferric fluoride (FeF3)": {
+        "role": "active", "formula": "FeF3", "smiles": None, "molar_mass": 112.84,
+        "cas_no": "7783-50-8",
+        "zh_name": "氟化铁",
+        "price_cny_per_kg": 60.0, "voc_contrib": 0.0,
+        # Fe³⁺ is the classic autodeposition promoter: it destabilizes the
+        # polymer dispersion at the substrate/liquid interface (coagulation
+        # deposition) and etches iron to supply fresh Fe²⁺.
+        "carrier": "both",
+    },
+    "Hydrofluoric acid (HF)": {
+        "role": "active", "formula": "HF", "smiles": "F", "molar_mass": 20.01,
+        "cas_no": "7664-39-3",
+        "zh_name": "氢氟酸",
+        "price_cny_per_kg": 15.0, "voc_contrib": 0.0,
+        # F⁻ etches the steel surface and complexes Fe³⁺, keeping the bath
+        # iron concentration in the active window.
+        "carrier": "both",
+    },
+    "Hydrogen peroxide (H2O2)": {
+        "role": "accelerator", "formula": "H2O2", "smiles": "OO", "molar_mass": 34.01,
+        "cas_no": "7722-84-1",
+        "zh_name": "过氧化氢",
+        "price_cny_per_kg": 6.0, "voc_contrib": 0.0,
+        # Oxidizer: re-oxidizes Fe²⁺ → Fe³⁺ to sustain the deposition-driving
+        # trivalent iron level without raising pH.
+        "carrier": "both",
+    },
+    "Citric acid": {
+        "role": "chelant", "formula": "C6H8O7",
+        "smiles": "OC(=O)CC(O)(CC(=O)O)C(=O)O", "molar_mass": 192.12,
+        "cas_no": "77-92-9",
+        "zh_name": "柠檬酸",
+        "price_cny_per_kg": 8.0, "voc_contrib": 0.0,
+        # pH buffer / Fe complexant for bath stabilisation at pH 2-4.
+        "carrier": "both",
+    },
+    "Carbon black": {
+        "role": "pigment", "formula": "C", "smiles": None, "molar_mass": 12.01,
+        "cas_no": "1333-86-4",
+        "zh_name": "炭黑",
+        "price_cny_per_kg": 15.0, "voc_contrib": 0.0,
+        "density_gcm3": 1.8, "oil_absorption": 90.0, "lab": [2.0, 0.0, 0.0],
+        # The classic black appearance of autodeposition films.
+        "carrier": "both",
+    },
+    "Acid-tolerant nonionic wetting agent": {
+        "role": "surfactant", "formula": None, "smiles": None, "molar_mass": 550.0,
+        "cas_no": None,
+        "zh_name": "耐酸非离子润湿剂",
+        "price_cny_per_kg": 25.0, "voc_contrib": 0.0,
+        # Nonionic (e.g. alkylphenol-ethoxylate-free EO/PO) so it survives the
+        # acidic bath without charge inversion or hydrolysis.
+        "carrier": "aqueous",
+    },
+    "Sodium bifluoride (NaHF2)": {
+        "role": "active", "formula": "NaHF2", "smiles": None, "molar_mass": 61.99,
+        "cas_no": "1333-83-1",
+        "zh_name": "氟氢化钠",
+        "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
+        # Safer-to-handle F⁻ source for bath replenishment (HF precursor).
+        "carrier": "both",
+    },
 }
 
 # The catalog callers actually use: seed materials (in the order above) plus
@@ -352,6 +438,37 @@ _SUBSTITUTION_META: dict[str, dict] = {
     },
     "(3-Aminopropyl)triethoxysilane (APTES)": {
         "functional_class": "silane", "substitute_group": "conversion_former",
+    },
+    # Autodeposition bath materials
+    "Acidic-stable epoxy-acrylic emulsion": {
+        "functional_class": "acrylic", "substitute_group": "autodep_binder",
+        # Epoxy-acrylate graft: epoxy backbone ~500 g/eq epoxy group.
+        "equivalent_weight": 500.0,
+    },
+    "Cationic polyurethane dispersion (acid-stable)": {
+        "functional_class": "polyurethane", "substitute_group": "autodep_binder",
+    },
+    "Ferric fluoride (FeF3)": {
+        "functional_class": "iron_fluoride", "substitute_group": "autodep_promoter",
+    },
+    "Hydrofluoric acid (HF)": {
+        "functional_class": "mineral_acid", "substitute_group": "autodep_acid",
+    },
+    "Hydrogen peroxide (H2O2)": {
+        "functional_class": "peroxide", "substitute_group": "autodep_oxidizer",
+    },
+    "Citric acid": {
+        "functional_class": "hydroxycarboxylate", "substitute_group": "autodep_buffer",
+    },
+    "Carbon black": {
+        "functional_class": "carbon", "substitute_group": "black_pigment",
+    },
+    "Acid-tolerant nonionic wetting agent": {
+        "functional_class": "nonionic_ethoxylate", "substitute_group": "nonionic_surfactant",
+        "hlb": 11.0,
+    },
+    "Sodium bifluoride (NaHF2)": {
+        "functional_class": "bifluoride", "substitute_group": "autodep_acid",
     },
 }
 
@@ -492,6 +609,36 @@ def _surface_treatment_template(req: Requirement) -> Formulation:
     return _balanced(name, ProductDomain.surface_treatment, ings, rationale)
 
 
+def _autodeposition_template(req: Requirement) -> Formulation:
+    """Autodeposition (self-depositing) bath baseline — pH 2-4, no current.
+
+    Skeleton: acid-tolerant polymer dispersion + Fe³⁺ promoter (FeF3) +
+    oxidizer (H₂O₂) + F⁻ etch source (HF) + pH buffer, all water-carried.
+    Higher salt-spray targets scale the promoter and binder.
+    """
+    salt = req.salt_spray_hours if req.salt_spray_hours else 240.0
+    promoter_pct = round(min(2.0, 0.3 + salt / 500.0), 3)  # 0.3 → ~0.8
+    binder_pct = round(min(14.0, 7.0 + salt / 100.0), 3)   # 7.0 → ~9.4
+    ings = [
+        ingredient("Acidic-stable epoxy-acrylic emulsion", binder_pct),
+        ingredient("Ferric fluoride (FeF3)", promoter_pct),
+        ingredient("Hydrofluoric acid (HF)", 0.2),
+        ingredient("Hydrogen peroxide (H2O2)", 0.8),
+        ingredient("Citric acid", 1.0),
+        ingredient("Carbon black", 2.0),
+        ingredient("Acid-tolerant nonionic wetting agent", 0.5),
+        ingredient("Deionized water", 0.0),  # _balanced fills the remainder
+    ]
+    name = "Autodeposition bath (baseline)"
+    rationale = (
+        "Acid-catalyzed self-deposition bath: acid-tolerant epoxy-acrylic "
+        "dispersion coagulates at the steel surface, driven by Fe³⁺ from FeF3 "
+        "and sustained by H₂O₂ oxidizer; HF etches and supplies fresh iron; "
+        "citric acid buffers the pH 2-4 working window."
+    )
+    return _balanced(name, ProductDomain.autodeposition_coating, ings, rationale)
+
+
 def _balanced(name: str, domain: ProductDomain, ings: list[Ingredient], rationale: str) -> Formulation:
     """Normalise weight percentages to sum to 100 by adjusting the solvent."""
     total = sum(i.weight_pct for i in ings)
@@ -521,6 +668,7 @@ TEMPLATE_BUILDERS = {
     ProductDomain.anticorrosion_coating: _anticorrosion_template,
     ProductDomain.degreaser: _degreaser_template,
     ProductDomain.surface_treatment: _surface_treatment_template,
+    ProductDomain.autodeposition_coating: _autodeposition_template,
 }
 
 
@@ -544,6 +692,7 @@ def offline_recommend_fallback(req: Requirement, n: int = 3) -> list[Formulation
     domain_levers = {
         ProductDomain.anticorrosion_coating: ("Zinc phosphate", [1.4, 0.7]),
         ProductDomain.degreaser: ("Nonionic surfactant (C12-14 EO7)", [1.5, 0.6]),
+        ProductDomain.autodeposition_coating: ("Ferric fluoride (FeF3)", [1.5, 0.5]),
     }
     target_role: str | None = None
     factors = [1.3, 0.75]
@@ -585,5 +734,11 @@ MECHANISMS = {
         "Conversion film growth: acid attack micro-etches the metal, raising interfacial pH and "
         "precipitating an insoluble phosphate/oxide-fluoride film that is chemically bonded to the substrate, "
         "increasing surface area and providing anchoring and corrosion-inhibiting sites for subsequent coats."
+    ),
+    ProductDomain.autodeposition_coating: (
+        "Acid-catalyzed coagulation deposition: dissolved iron from the substrate (Fe²⁺/Fe³⁺, promoted by "
+        "fluoride etch and oxidizer) destabilizes the acid-tolerant polymer dispersion at the metal/liquid "
+        "interface, so the film grows without applied current; the bulk bath stays pH 2-4 where the "
+        "dispersion is stable, and film thickness self-limits as the deposited layer blocks further iron dissolution."
     ),
 }

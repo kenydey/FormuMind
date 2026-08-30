@@ -32,6 +32,7 @@ OBJECTIVE: dict[ProductDomain, str] = {
     ProductDomain.anticorrosion_coating: "salt_spray_hours",
     ProductDomain.degreaser: "cleaning_efficiency",
     ProductDomain.surface_treatment: "salt_spray_hours",
+    ProductDomain.autodeposition_coating: "salt_spray_hours",
 }
 
 _DEFAULT_OBJECTIVES: dict[ProductDomain, list[ObjectiveSpec]] = {
@@ -49,6 +50,11 @@ _DEFAULT_OBJECTIVES: dict[ProductDomain, list[ObjectiveSpec]] = {
         ObjectiveSpec(metric="salt_spray_hours", weight=0.5, direction="maximize"),
         ObjectiveSpec(metric="coating_weight_gsm", weight=0.2, direction="maximize"),
         ObjectiveSpec(metric="cost_cny_per_kg", weight=0.3, direction="minimize"),
+    ],
+    ProductDomain.autodeposition_coating: [
+        ObjectiveSpec(metric="salt_spray_hours", weight=0.5, direction="maximize"),
+        ObjectiveSpec(metric="cost_cny_per_kg", weight=0.25, direction="minimize"),
+        ObjectiveSpec(metric="sustainability_idx", weight=0.25, direction="maximize"),
     ],
 }
 

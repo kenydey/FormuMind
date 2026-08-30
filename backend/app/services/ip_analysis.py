@@ -157,6 +157,11 @@ def _offline_keyword_analysis(form: Formulation, patents: list) -> IPReport:
             "Rare-earth-free conversion coatings for aluminum",
             "One-step phosphating + passivation baths",
         ],
+        ProductDomain.autodeposition_coating: [
+            "Acid-tolerant cationic polyurethane dispersions for autodeposition baths",
+            "Low-bake (<130 C) epoxy-acrylate graft emulsions with blocked isocyanate crosslinkers",
+            "Chrome-free / PFOS-free autodeposition bath stabilizers",
+        ],
     }
     whitespace = domain_hints.get(form.domain, ["Evaluate adjacent technologies for novelty."])
 

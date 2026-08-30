@@ -12,11 +12,12 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 
 
 class ProductDomain(str, Enum):
-    """The three metal surface treatment product families FormuMind targets."""
+    """The metal surface treatment product families FormuMind targets."""
 
     anticorrosion_coating = "anticorrosion_coating"  # 防腐蚀涂料
     degreaser = "degreaser"  # 脱脂剂
     surface_treatment = "surface_treatment"  # 表面处理剂
+    autodeposition_coating = "autodeposition_coating"  # 自沉积涂料（Autodeposition/Autophoretic）
 
 
 class Substrate(str, Enum):
@@ -487,6 +488,11 @@ class BaybeRecommendResult(AdaptiveDOEMetadata):
     # None when KG is disabled or no material resolved. Structured as
     # {"feasible": bool, "status": str, "reasons": list[str]}.
     chemical_feasibility: dict | None = None
+    # v11: deterministic physical-constraint verdict (acid stability +
+    # compliance) for the shared skeleton. None when the gate was skipped.
+    # Structured as {"feasible", "status", "reasons", "acid_stability",
+    # "compliance"}.
+    physical_constraints: dict | None = None
 
 
 class ActiveDoeResult(AdaptiveDOEMetadata):
@@ -498,6 +504,9 @@ class ActiveDoeResult(AdaptiveDOEMetadata):
     # KG chemical-compatibility verdict for the shared formulation skeleton.
     # Mirrors BaybeRecommendResult.chemical_feasibility (None when KG disabled).
     chemical_feasibility: dict | None = None
+    # v11: deterministic physical-constraint verdict (acid stability +
+    # compliance). Mirrors BaybeRecommendResult.physical_constraints.
+    physical_constraints: dict | None = None
 
 
 class OptimizationResult(BaseModel):
@@ -734,6 +743,9 @@ class LoopReport(AdaptiveDOEMetadata):
     loop_message: str = ""
     # KG chemical-compatibility verdict for the recommended batch's skeleton.
     chemical_feasibility: dict | None = None
+    # v11: deterministic physical-constraint verdict (acid stability +
+    # compliance) for the recommended batch's skeleton.
+    physical_constraints: dict | None = None
     # 成本/碳足迹摘要（top 配方均值），供前端展示成本趋势
     cost_summary: dict | None = None
 
