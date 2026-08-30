@@ -8,7 +8,7 @@ import "ag-grid-community/styles/ag-theme-alpine.css";
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { api } from "../api";
-import type { DOEPlan, Requirement, WorkbenchRow } from "../api";
+import type { DOEPlan, Requirement, WorkbenchRow, WorkbenchQuality } from "../api";
 import BiasTrendPanel from "./BiasTrendPanel";
 import { useStore } from "../store";
 import {
@@ -67,6 +67,8 @@ export default function LabWorkbench({
   const [error, setError] = useState<string | null>(null);
   const [saveHint, setSaveHint] = useState<string | null>(null);
   const [biasSummary, setBiasSummary] = useState<NonNullable<import("../api").WorkbenchSyncResponse["prediction_bias"]> | null>(null);
+  const [quality, setQuality] = useState<WorkbenchQuality | null>(null);
+  const [reconciling, setReconciling] = useState(false);
   const [loopRoundCount, setLoopRoundCount] = useState(0);
   const [loopConverged, setLoopConverged] = useState(false);
   const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
@@ -113,6 +115,36 @@ export default function LabWorkbench({
     setLoopConverged(false);
     setApiSnapshot(undefined);
     setAttachmentCounts({});
+    setQuality(null);
+  }, [campaignId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const q = await api.getWorkbenchQuality(campaignId);
+        if (!cancelled) setQuality(q);
+      } catch {
+        if (!cancelled) setQuality(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId]);
+
+  const reconcileRefs = useCallback(async () => {
+    setReconciling(true);
+    try {
+      await api.reconcileWorkbench(campaignId);
+      const q = await api.getWorkbenchQuality(campaignId);
+      setQuality(q);
+      setSaveHint("已清理失效引用");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setReconciling(false);
+    }
   }, [campaignId]);
 
   useEffect(() => {
@@ -452,6 +484,38 @@ export default function LabWorkbench({
                   <span className="text-slate-500">n={s.n}</span>
                 </span>
               ))}
+            </div>
+          </div>
+        )}
+        {quality && (quality.stale_count > 0 || quality.dropped_total > 0) && (
+          <div className="px-2 py-1.5 border-b border-edge/30 bg-rose-500/5 text-[10px]">
+            <div className="flex items-center justify-between">
+              <span className="text-rose-300 font-medium">数据质量</span>
+              <button
+                type="button"
+                onClick={() => void reconcileRefs()}
+                disabled={reconciling}
+                className="text-slate-400 hover:text-slate-200 disabled:opacity-40"
+              >
+                {reconciling ? "清理中…" : quality.stale_count > 0 ? "清理失效引用" : ""}
+              </button>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {quality.stale_count > 0 && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-rose-500/30 bg-rose-500/10 font-mono text-rose-300">
+                  失效引用 {quality.stale_count}
+                </span>
+              )}
+              {quality.errors_count > 0 && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 font-mono text-amber-300">
+                  探测失败 {quality.errors_count}
+                </span>
+              )}
+              {quality.dropped_total > 0 && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 font-mono text-amber-200">
+                  累计丢弃非法值 {quality.dropped_total}
+                </span>
+              )}
             </div>
           </div>
         )}

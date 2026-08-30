@@ -432,6 +432,21 @@ export interface WorkbenchSyncResponse {
   kg_written?: number | null;
   loop_task_id?: string | null;
   loop_message?: string;
+  quality?: { dropped_values: number; dropped: string[] };
+}
+
+export interface WorkbenchQuality {
+  stale_count: number;
+  stale_refs: string[];
+  errors_count: number;
+  dropped_total: number;
+}
+
+export interface ReconcileResult {
+  removed: string[];
+  kept: Array<{ id: number; item_id: string }>;
+  removed_count: number;
+  errors: string[];
 }
 
 export interface FactorCandidate {
@@ -1057,6 +1072,10 @@ export const api = {
     }),
   getWorkbenchCampaign: (campaignId: number) =>
     get<WorkbenchCampaignResponse>(`/api/experiments/workbench/${campaignId}`),
+  getWorkbenchQuality: (campaignId: number) =>
+    get<WorkbenchQuality>(`/api/experiments/workbench/${campaignId}/quality`),
+  reconcileWorkbench: (campaignId: number) =>
+    post<ReconcileResult>(`/api/experiments/workbench/${campaignId}/reconcile`, {}),
   listCampaignRounds: (campaignId: number, opts: { page?: number; pageSize?: number } = {}) =>
     get<{ rounds: Record<string, unknown>[]; total_rounds: number; page: number; page_size: number; unassociated_ledger: number }>(
       `/api/experiments/workbench/${campaignId}/rounds?page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 5}`
