@@ -25,6 +25,9 @@ export FORMUMIND_ENV_FILE="$ENV_FILE"
 
 # 开发模式固定值（容器内是 /app/data，host 是源码路径）
 export FORMUMIND_COLBERT_INDEX_DIR="$ROOT/data/colbert_index"
+# 关键：源码模式 CWD=backend/，默认 db_url 会落到 backend/data/formumind.db（8MB 空库）。
+# 显式指向仓库根 data/ 的真库（504MB，17 campaigns / 591 docs）。
+export FORMUMIND_DB_URL="sqlite:///$ROOT/data/formumind.db"
 
 start() {
   echo "==> 启动 backend (uvicorn :8000)"
