@@ -348,7 +348,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    sendChat: async (question) => {
+    sendChat: async (question, structure) => {
       const { sources, selectedSources, requirement } = get();
       const active = sources
         .filter((e) => selectedSources.includes(e.identifier || e.title))
@@ -370,6 +370,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             content: m.content,
             citations: m.citations,
           })),
+          structure: structure ?? undefined,
         });
         set((draft) => {
           draft.chatHistory.push({

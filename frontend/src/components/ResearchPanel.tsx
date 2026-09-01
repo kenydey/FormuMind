@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
-import type { Evidence } from "../api";
+import type { Evidence, StructureRecognitionResult } from "../api";
+import { api } from "../api";
 import type { NotificationKind } from "../store/notifications";
 import MarkdownMessage from "./MarkdownMessage";
 import NotificationStack from "./NotificationStack";
@@ -120,7 +121,36 @@ export default function ResearchPanel() {
     }))
   );
   const [draft, setDraft] = useState("");
+  const [structInfo, setStructInfo] = useState<StructureRecognitionResult | null>(null);
+  const [structBusy, setStructBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  async function uploadStructure(file: File) {
+    setStructBusy(true);
+    try {
+      const res = await api.uploadStructure(file);
+      setStructInfo(res);
+    } catch (e) {
+      setStructInfo({
+        recognized: false,
+        smiles: null,
+        moljson: null,
+        hits: [],
+        image_sha: "",
+        cached: false,
+        warnings: [(e as Error).message || "结构图上传失败"],
+        error: String(e),
+      });
+    } finally {
+      setStructBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function clearStructure() {
+    setStructInfo(null);
+  }
 
   const activeStageIdx = stageIndex(deepResearchStage);
   // `task` is a single slot written by recommend, optimize and loop as well, so
@@ -147,7 +177,9 @@ export default function ResearchPanel() {
     const q = draft.trim();
     if (!q || !canSend) return;
     setDraft("");
-    sendChat(q);
+    sendChat(q, structInfo);
+    // 结构上下文随本次提问消费后清空，避免串到下一问。
+    setStructInfo(null);
   }
 
   return (
@@ -223,7 +255,54 @@ export default function ResearchPanel() {
 
       {/* Input */}
       <div className="p-3 border-t border-edge shrink-0">
+        {/* 结构图识别结果预览（可清除） */}
+        {structInfo && (
+          <div className="mb-2 rounded bg-ink/50 border border-accent/30 px-2.5 py-1.5 text-[11px]">
+            {structInfo.recognized ? (
+              <div className="text-slate-300">
+                <span className="text-emerald-300 font-semibold">✓ 已识别结构</span>
+                <code className="ml-1.5 text-accent">{structInfo.smiles}</code>
+                {structInfo.hits.length > 0 && (
+                  <div className="mt-1 text-slate-400">
+                    相似材料：{structInfo.hits.map((h) => `${h.name} (${Math.round(h.similarity * 100)}%)`).join("、")}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-amber-300/90">
+                ⚠ 未能识别：{structInfo.error || "未知错误"}
+                {structInfo.warnings.length > 0 && (
+                  <div className="text-slate-400">{structInfo.warnings.join("；")}</div>
+                )}
+              </div>
+            )}
+            <button
+              onClick={clearStructure}
+              className="mt-1 text-[10px] text-slate-500 hover:text-slate-300"
+            >
+              ✕ 移除结构上下文
+            </button>
+          </div>
+        )}
         <div className="flex gap-2 items-end">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadStructure(f);
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={structBusy || chatBusy}
+            title="上传化学结构式图片（MolScribe 识别 → 相似材料检索）"
+            className="bg-ink border border-edge hover:border-accent/50 rounded px-2.5 py-1.5 text-sm shrink-0 disabled:opacity-50"
+          >
+            {structBusy ? "识别中…" : "📷"}
+          </button>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

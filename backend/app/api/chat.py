@@ -6,7 +6,13 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import field_validator
 
-from ..domain.chat_schemas import ChatRequest, ChatResponse, ChatTurn, StructuredAnswer
+from ..domain.chat_schemas import (
+    ChatRequest,
+    ChatResponse,
+    ChatTurn,
+    StructuredAnswer,
+    structure_retrieval_context,
+)
 from ..domain.kg_schemas import EntityResolutionSummary, KGRetrieveStats
 from ..domain.schemas import Evidence
 from ..services.chat_claims import build_sourced_claims
@@ -158,6 +164,12 @@ def chat(req: ChatRequestValidated):
             req.clarified_entities,
             settings=settings,
         )
+
+        # 结构图上下文：相似材料名并入检索 query（增强命中），不污染展示文案。
+        struct_ctx = structure_retrieval_context(req.structure)
+        if struct_ctx:
+            retrieval_query = f"{struct_ctx} {retrieval_query}".strip()
+            rewritten_query = rewritten_query or retrieval_query
 
         sources = [_sanitize_evidence(ev) for ev in req.sources]
         sources, kb_used, entity_resolution, kg_stats = _augment_with_kb(

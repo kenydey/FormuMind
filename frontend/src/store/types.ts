@@ -214,7 +214,7 @@ export interface AppState {
   loadSourceStatus: () => Promise<void>;
   hydrateLlmSettings: () => Promise<void>;
   uploadFiles: (files: File[]) => Promise<void>;
-  sendChat: (question: string) => Promise<void>;
+  sendChat: (question: string, structure?: import("../api").StructureRecognitionResult | null) => Promise<void>;
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;

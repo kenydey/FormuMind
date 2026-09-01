@@ -70,6 +70,36 @@ class ChatRequest(BaseModel):
     clarified_entities: list[ClarifiedEntity] = Field(default_factory=list, max_length=8)
     response_format: ChatResponseFormat = "markdown"
     attachment_source_ids: list[str] = Field(default_factory=list)
+    # 结构图识别结果（POST /api/chemical/structure 的返回）——相似材料名
+    # 注入检索 query；smiles/moljson 仅作上下文提示，可缺省。
+    structure: dict | None = None
+
+
+class StructureContext(BaseModel):
+    """Normalized structure-image context attached to a chat request."""
+
+    smiles: str | None = None
+    moljson: dict | None = None
+    hits: list[dict] = Field(default_factory=list)  # [{name, role, similarity}]
+
+
+def structure_retrieval_context(structure: dict | None) -> str:
+    """Collapse a /api/chemical/structure payload into query-context terms.
+
+    Similar-material names are the retrieval lever (BM25/vector match the
+    names in documents); SMILES/MolJSON are hints for the LLM, not retrieval
+    tokens.
+    """
+    if not structure:
+        return ""
+    hits = structure.get("hits") or []
+    names: list[str] = []
+    for h in hits:
+        name = (h.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    # MolJSON contains no searchable chemical names — skip it here.
+    return " ".join(names[:5])
 
 
 class ChatResponse(BaseModel):

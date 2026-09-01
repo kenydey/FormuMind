@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, DOMAIN_OBJECTIVES } from "../store";
-import type { ObjectiveSpec, ProductDomain, Requirement } from "../api";
+import type { ObjectiveSpec, ProductDomain, Requirement, StructureRecognitionResult } from "../api";
+import { api } from "../api";
 import {
   normalizeObjective,
 } from "../utils/objectiveContract";
@@ -466,6 +467,37 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
   );
   const domain = requirement.domain;
   const locked = requirementLocked;
+  const [structInfo, setStructInfo] = useState<StructureRecognitionResult | null>(null);
+  const [structBusy, setStructBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function uploadStructure(file: File) {
+    setStructBusy(true);
+    try {
+      const res = await api.uploadStructure(file);
+      setStructInfo(res);
+      if (res.recognized && res.hits.length > 0) {
+        // 把相似材料名写入需求备注——保存后随项目创建/研究进入检索。
+        const hitNames = res.hits.map((h) => h.name).join("、");
+        const note = `目标结构 SMILES：${res.smiles}；相似材料：${hitNames}`;
+        setField("notes", [requirement.notes, note].filter(Boolean).join("\n"));
+      }
+    } catch (e) {
+      setStructInfo({
+        recognized: false,
+        smiles: null,
+        moljson: null,
+        hits: [],
+        image_sha: "",
+        cached: false,
+        warnings: [(e as Error).message || "结构图上传失败"],
+        error: String(e),
+      });
+    } finally {
+      setStructBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   return (
     <aside className={embedded ? "flex flex-col gap-1" : "glass rounded-xl p-4 flex flex-col gap-1 overflow-y-auto"}>
@@ -574,6 +606,25 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         </button>
         <button
           type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={structBusy || projectSaveBusy || formulationBusy}
+          title="上传化学结构式图片（MolScribe 识别 → 相似材料写入需求备注）"
+          className="border border-edge text-slate-400 rounded px-2.5 py-1.5 text-sm disabled:opacity-40"
+        >
+          {structBusy ? "识别中…" : "📷 结构图"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) uploadStructure(f);
+          }}
+        />
+        <button
+          type="button"
           onClick={unlockRequirement}
           disabled={!locked}
           className="border border-edge text-slate-400 rounded px-3 py-1.5 text-sm disabled:opacity-40"
@@ -589,6 +640,20 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
           恢复
         </button>
       </div>
+
+      {structInfo && (
+        <div
+          className={`mb-3 rounded px-2 py-1 text-[11px] border ${
+            structInfo.recognized
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+              : "bg-amber-500/10 border-amber-500/30 text-amber-300/90"
+          }`}
+        >
+          {structInfo.recognized
+            ? `✓ 已识别：${structInfo.smiles}（相似材料 ${structInfo.hits.length} 条已写入备注）`
+            : `⚠ ${structInfo.error || "识别失败"}（可继续用文字）`}
+        </div>
+      )}
 
       {!embedded && (
         <div className="mt-auto pt-3 flex flex-col gap-2">

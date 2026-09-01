@@ -445,11 +445,14 @@ def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
         # 延迟导入：避免主进程模块加载期拉起 Celery 依赖链
         from app.worker.celery_app import celery_app
         import os
-        import tempfile
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        # 写共享卷而非 /tmp：molscribe 是独立容器，看不到 backend 的 /tmp
+        # （OpenCV 报 !src.empty()）。/app/data 两容器都挂载。
+        shared_dir = "/app/data/_ocsr_tmp"
+        os.makedirs(shared_dir, exist_ok=True)
+        path = os.path.join(shared_dir, f"ocsr_{os.getpid()}.png")
+        with open(path, "wb") as f:
             f.write(content)
-            path = f.name
         try:
             res = celery_app.send_task(
                 "formumind.molscribe_recognize",
@@ -457,7 +460,10 @@ def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
                 queue=settings.molscribe_queue,
             ).get(timeout=settings.molscribe_timeout_s)
         finally:
-            os.unlink(path)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         if res and res.get("ok"):
             return _molecules_from_smiles(res["smiles"])
     except Exception as exc:

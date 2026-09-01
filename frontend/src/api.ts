@@ -1208,6 +1208,24 @@ export const api = {
 
   chat: (req: ChatRequest) => post<ChatResponse>("/api/chat", req),
 
+  /** 上传结构图 → MolScribe 识别 → SMILES + MolJSON + 相似材料命中。 */
+  uploadStructure: async (
+    image: File,
+    opts: { threshold?: number; top_k?: number } = {}
+  ): Promise<StructureRecognitionResult> => {
+    const body = new FormData();
+    body.append("image", image);
+    if (opts.threshold != null) body.append("threshold", String(opts.threshold));
+    if (opts.top_k != null) body.append("top_k", String(opts.top_k));
+    const res = await fetch("/api/chemical/structure", {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body,
+    });
+    if (!res.ok) throw new ApiError(await readApiError(res, "/api/chemical/structure"));
+    return res.json();
+  },
+
   kbStats: () => get<KBStats>("/api/kb/stats"),
 
   kbReindex: () => post<KBReindexResult>("/api/kb/reindex", {}),
@@ -1814,6 +1832,27 @@ export interface ChatRequest {
   clarified_entities?: ClarifiedEntity[];
   response_format?: ChatResponseFormat;
   attachment_source_ids?: string[];
+  /** 结构图识别结果（uploadStructure 返回），相似材料名注入检索。 */
+  structure?: StructureRecognitionResult | null;
+}
+
+/** POST /api/chemical/structure 返回：图 → SMILES + MolJSON + 相似材料。 */
+export interface StructureRecognitionResult {
+  recognized: boolean;
+  smiles: string | null;
+  moljson: { atoms?: unknown[]; bonds?: unknown[] } | null;
+  hits: StructureHit[];
+  image_sha: string;
+  cached: boolean;
+  warnings: string[];
+  error: string | null;
+}
+
+export interface StructureHit {
+  name: string;
+  role: string;
+  smiles?: string | null;
+  similarity: number;
 }
 
 export interface ChatResponse {
