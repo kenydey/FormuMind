@@ -385,6 +385,18 @@ def validate_formulations(
             warnings.extend(ing_warnings)
             if not ing.component_type and (ing.role or updates.get("role")):
                 updates.setdefault("component_type", ing.role or updates.get("role", ""))
+            # P1: LLM 输出的 smiles 结构校验（MolJSON/RDKit 回读）。
+            # 非法结构 → 告警 + 清空，让下游 catalog 重填（避免幻觉结构进入推理）。
+            raw_smiles = updates.get("smiles") or ing.smiles
+            if raw_smiles:
+                from ..services.moljson import validate_smiles
+
+                s_info = validate_smiles(raw_smiles)
+                if not s_info["valid"]:
+                    warnings.append(
+                        f"{ing.name}: SMILES '{raw_smiles}' 无法被 RDKit 解析（结构幻觉），已清空待重填"
+                    )
+                    updates["smiles"] = None
             enriched_ings.append(ing.model_copy(update=updates) if updates else ing)
         enriched = form.model_copy(update={"ingredients": enriched_ings})
         missing_cas = [i.name for i in enriched.ingredients if not i.cas_no]
@@ -437,6 +449,17 @@ def validate_recommended_formulas(
                 component_type=comp.component_type,
             )
             warnings.extend(comp_warnings)
+            # P1: LLM 输出的 smiles 结构校验（MolJSON/RDKit 回读）。
+            raw_smiles = updates.get("smiles") or comp.smiles
+            if raw_smiles:
+                from ..services.moljson import validate_smiles
+
+                s_info = validate_smiles(raw_smiles)
+                if not s_info["valid"]:
+                    warnings.append(
+                        f"{comp.name}: SMILES '{raw_smiles}' 无法被 RDKit 解析（结构幻觉），已清空待重填"
+                    )
+                    updates["smiles"] = None
             enriched_comps.append(comp.model_copy(update=updates) if updates else comp)
         missing_cas = [c.name for c in enriched_comps if not c.cas_no]
         if missing_cas:

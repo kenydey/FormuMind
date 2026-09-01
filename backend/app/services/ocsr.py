@@ -51,6 +51,44 @@ def predict_smiles_molscribe(image_path: str) -> str | None:
         return None
 
 
+def validate_recognized_smiles(image_path: str) -> dict:
+    """MolScribe 识别 + MolJSON/RDKit 结构校验（P1 校验闭环）。
+
+    Runs the recognition and validates the result structurally, so
+    recognition errors (missing atoms, wrong bonds, unparseable output)
+    are exposed *before* the SMILES reaches any downstream reasoning.
+
+    Returns::
+
+        {"ok": True,  "smiles": ..., "valid": True,  "atom_count": N,
+         "ring_count": N, "roundtrip_ok": True}
+        {"ok": True,  "smiles": ..., "valid": False, "reason": "...",
+         "atom_count": 0, "ring_count": 0, "roundtrip_ok": False}
+        {"ok": False, "smiles": None, "reason": "MolScribe unavailable or failed",
+         "valid": False, "atom_count": 0, "ring_count": 0, "roundtrip_ok": False}
+
+    ``valid: False`` with ``ok: True`` means the image was recognized but
+    the structure fails RDKit parsing (e.g. MolScribe emitted an invalid
+    SMILES) — treat the result as low-confidence.
+    """
+    smiles = predict_smiles_molscribe(image_path)
+    if not smiles:
+        return {"ok": False, "smiles": None,
+                "reason": "MolScribe unavailable or failed",
+                "valid": False, "atom_count": 0, "ring_count": 0,
+                "roundtrip_ok": False}
+    from .moljson import validate_smiles
+
+    info = validate_smiles(smiles)
+    if not info["valid"]:
+        return {"ok": True, "smiles": smiles, "valid": False,
+                "reason": "RDKit 无法解析 MolScribe 输出（结构可疑）",
+                "atom_count": 0, "ring_count": 0, "roundtrip_ok": False}
+    return {"ok": True, "smiles": info["smiles"], "valid": True,
+            "atom_count": info["atom_count"], "ring_count": info["ring_count"],
+            "roundtrip_ok": info["roundtrip_ok"]}
+
+
 def prewarm_molscribe() -> bool:
     if not molscribe_available():
         return False

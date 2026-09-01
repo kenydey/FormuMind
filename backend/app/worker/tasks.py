@@ -1047,16 +1047,16 @@ def run_molscribe_recognize_task(self, payload: dict) -> dict:
     由主 backend 通过 ``send_task(..., queue=molscribe_queue)`` 投递，返回
     ``{"ok": True, "smiles": ...}`` 或 ``{"ok": False, "reason": ...}``。
     不写 SSE 进度（内部同步 RPC 语义）。
+
+    P1 起：结果附带 MolJSON/RDKit 结构校验（``valid`` / ``atom_count`` /
+    ``ring_count`` / ``roundtrip_ok``），识别误差在进入下游推理前暴露。
     """
-    from ..services.ocsr import predict_smiles_molscribe
+    from ..services.ocsr import validate_recognized_smiles
 
     image_path = payload.get("image_path", "")
     if not image_path:
         return {"ok": False, "smiles": None, "reason": "missing image_path"}
-    smiles = predict_smiles_molscribe(image_path)
-    if not smiles:
-        return {"ok": False, "smiles": None, "reason": "MolScribe unavailable or failed"}
-    return {"ok": True, "smiles": smiles}
+    return validate_recognized_smiles(image_path)
 
 
 # Legacy names kept for imports
