@@ -44,11 +44,34 @@ def predict_smiles_molscribe(image_path: str) -> str | None:
         return None
     try:
         model = _get_molscribe_model()
-        out = model.predict_image_file(image_path)
+        out = model.predict_image_file(image_path, return_confidence=True)
         return (out or {}).get("smiles") or None
     except Exception as exc:
         logger.warning("MolScribe predict failed: %s", exc)
         return None
+
+
+def predict_molscribe_with_confidence(image_path: str) -> dict:
+    """P-C: MolScribe 识别 + 置信度（overall_score）。
+
+    Returns {"smiles": str|None, "confidence": float|None}. Confidence is the
+    model's ``overall_score`` in [0,1] — low scores flag likely-misrecognized
+    structures for human review. Never raises.
+    """
+    if not molscribe_available():
+        return {"smiles": None, "confidence": None}
+    try:
+        model = _get_molscribe_model()
+        out = model.predict_image_file(image_path, return_confidence=True)
+        if not out:
+            return {"smiles": None, "confidence": None}
+        return {
+            "smiles": (out.get("smiles") or "").strip() or None,
+            "confidence": float(out.get("confidence")) if out.get("confidence") is not None else None,
+        }
+    except Exception as exc:
+        logger.warning("MolScribe predict failed: %s", exc)
+        return {"smiles": None, "confidence": None}
 
 
 def validate_recognized_smiles(image_path: str) -> dict:
@@ -71,22 +94,25 @@ def validate_recognized_smiles(image_path: str) -> dict:
     the structure fails RDKit parsing (e.g. MolScribe emitted an invalid
     SMILES) — treat the result as low-confidence.
     """
-    smiles = predict_smiles_molscribe(image_path)
+    pred = predict_molscribe_with_confidence(image_path)
+    smiles = pred.get("smiles")
+    confidence = pred.get("confidence")
     if not smiles:
         return {"ok": False, "smiles": None,
                 "reason": "MolScribe unavailable or failed",
                 "valid": False, "atom_count": 0, "ring_count": 0,
-                "roundtrip_ok": False}
+                "roundtrip_ok": False, "confidence": None}
     from .moljson import validate_smiles
 
     info = validate_smiles(smiles)
     if not info["valid"]:
         return {"ok": True, "smiles": smiles, "valid": False,
                 "reason": "RDKit 无法解析 MolScribe 输出（结构可疑）",
-                "atom_count": 0, "ring_count": 0, "roundtrip_ok": False}
+                "atom_count": 0, "ring_count": 0, "roundtrip_ok": False,
+                "confidence": confidence}
     return {"ok": True, "smiles": info["smiles"], "valid": True,
             "atom_count": info["atom_count"], "ring_count": info["ring_count"],
-            "roundtrip_ok": info["roundtrip_ok"]}
+            "roundtrip_ok": info["roundtrip_ok"], "confidence": confidence}
 
 
 def prewarm_molscribe() -> bool:

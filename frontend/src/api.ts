@@ -1842,6 +1842,9 @@ export interface StructureRecognitionResult {
   smiles: string | null;
   moljson: { atoms?: unknown[]; bonds?: unknown[] } | null;
   hits: StructureHit[];
+  kg_hits?: StructureHit[];
+  /** MolScribe overall_score [0,1]，低置信（<0.6）提示人工复核。 */
+  confidence?: number | null;
   image_sha: string;
   cached: boolean;
   warnings: string[];

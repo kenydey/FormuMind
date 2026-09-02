@@ -104,3 +104,17 @@ def substructure_endpoint(
         "smarts": smarts,
         "hits": substructure_hits(smarts, top_k=top_k),
     }
+
+
+@router.get("/chemical/scaffold-substitutes")
+def scaffold_substitutes_endpoint(
+    smiles: str = Query(..., min_length=1, description="查询分子 SMILES"),
+    top_k: int = Query(10, ge=1, le=50),
+) -> dict:
+    """P-D: Murcko 骨架替代发现 — 相同骨架的材料 = drop-in 候选。"""
+    from ..services.structure_search import scaffold_substitutes
+
+    return {
+        "smiles": smiles,
+        "hits": scaffold_substitutes(smiles, top_k=top_k),
+    }

@@ -43,8 +43,8 @@ def _formulation(ingredients: list[dict]) -> Formulation:
 class TestValidateRecognizedSmiles:
     def test_valid_smiles_passthrough(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.ocsr.predict_smiles_molscribe",
-            lambda path: "CCO",
+            "app.services.ocsr.predict_molscribe_with_confidence",
+            lambda path: {"smiles": "CCO", "confidence": 0.95},
         )
         res = validate_recognized_smiles("/tmp/x.png")
         assert res["ok"] is True
@@ -52,11 +52,12 @@ class TestValidateRecognizedSmiles:
         assert res["smiles"] == "CCO"
         assert res["atom_count"] == 3
         assert res["roundtrip_ok"] is True
+        assert res["confidence"] == 0.95  # P-C: confidence passthrough
 
     def test_invalid_smiles_marked_low_confidence(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.ocsr.predict_smiles_molscribe",
-            lambda path: "not-a-molecule",
+            "app.services.ocsr.predict_molscribe_with_confidence",
+            lambda path: {"smiles": "not-a-molecule", "confidence": 0.4},
         )
         res = validate_recognized_smiles("/tmp/x.png")
         assert res["ok"] is True  # recognized but...
@@ -65,8 +66,8 @@ class TestValidateRecognizedSmiles:
 
     def test_no_smiles_reported_failure(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.ocsr.predict_smiles_molscribe",
-            lambda path: None,
+            "app.services.ocsr.predict_molscribe_with_confidence",
+            lambda path: {"smiles": None, "confidence": None},
         )
         res = validate_recognized_smiles("/tmp/x.png")
         assert res["ok"] is False

@@ -262,3 +262,45 @@ def kg_structure_hits(
             )
     hits.sort(key=lambda h: h["similarity"], reverse=True)
     return hits[:top_k]
+
+
+def scaffold_substitutes(
+    smiles: str,
+    *,
+    top_k: int = 10,
+    settings=None,
+) -> list[dict]:
+    """P-D: Murcko 骨架替代发现 — 相同骨架 = 潜在结构替代。
+
+    RDKit MurckoScaffold 提取查询分子骨架，返回材料库中**骨架一致**的
+    材料（不同商品名/端基但核心环系相同 → drop-in 候选）。返回
+    [{"name", "role", "smiles", "scaffold"}...]。RDKit 缺失或无效输入 → []。
+    """
+    if not (smiles or "").strip():
+        return []
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.Scaffolds import MurckoScaffold
+
+        query = Chem.MolFromSmiles(smiles)
+        if query is None:
+            return []
+        q_scaffold = Chem.MolToSmiles(MurckoScaffold.GetScaffoldForMol(query))
+    except Exception as exc:
+        logger.warning("structure_search: scaffold extraction failed: %s", exc)
+        return []
+
+    hits: list[dict] = []
+    for name, role, cand_smiles in _material_candidates(settings=settings):
+        try:
+            cand = Chem.MolFromSmiles(cand_smiles)
+            if cand is None:
+                continue
+            c_scaffold = Chem.MolToSmiles(MurckoScaffold.GetScaffoldForMol(cand))
+            if c_scaffold == q_scaffold:
+                hits.append(
+                    {"name": name, "role": role, "smiles": cand_smiles, "scaffold": c_scaffold}
+                )
+        except Exception:
+            continue
+    return hits[:top_k]

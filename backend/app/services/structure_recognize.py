@@ -186,6 +186,7 @@ def recognize_structure_image(
         return _result(False, None, None, [], sha, False, warnings, err)
 
     smiles = res["smiles"]
+    confidence = res.get("confidence")  # P-C: MolScribe overall_score
     # ── structural validation (RDKit round-trip) ─────────────────────
     try:
         from ..services.moljson import validate_smiles
@@ -232,6 +233,7 @@ def recognize_structure_image(
 
     payload = _result(True, smiles, moljson, hits, sha, False, warnings, None)
     payload["kg_hits"] = kg_hits
+    payload["confidence"] = confidence  # P-C: 低置信标记人工复核
     _cache_put(sha, payload, settings)
     return payload
 
@@ -252,6 +254,7 @@ def _result(
         "moljson": moljson,
         "hits": hits,
         "kg_hits": [],
+        "confidence": None,
         "image_sha": image_sha,
         "cached": cached,
         "warnings": warnings,

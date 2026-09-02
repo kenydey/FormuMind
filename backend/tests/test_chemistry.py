@@ -1,7 +1,7 @@
 import pytest
 
 from app.domain import chemistry, knowledge
-from app.domain.schemas import ProductDomain, Requirement
+from app.domain.schemas import Formulation, Ingredient, ProductDomain, Requirement
 
 
 def test_molar_mass_simple():
@@ -39,6 +39,52 @@ def test_validation_flags_no_errors_on_baseline():
     form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
     warnings = chemistry.validate_formulation(form)
     assert warnings == []
+
+
+# ── P-A: element balance (claim-missing-source detection) ───────────────────
+
+def test_element_balance_claims_phosphate_but_no_p_source():
+    form = Formulation(
+        name="test",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(name="Zinc phosphate pigment", formula="", role="pigment", weight_pct=8.0),
+            Ingredient(name="Epoxy resin", formula="C21H24O4", role="resin", weight_pct=60.0),
+        ],
+        rationale="t",
+    )
+    warns = chemistry.element_balance_check(form)
+    assert any("宣称含 P" in w for w in warns)
+    assert any("宣称含 Zn" in w for w in warns)
+
+
+def test_element_balance_satisfied_when_source_present():
+    form = Formulation(
+        name="test",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(name="Zinc phosphate pigment", formula="Zn3(PO4)2", role="pigment", weight_pct=8.0),
+            Ingredient(name="Epoxy resin", formula="C21H24O4", role="resin", weight_pct=60.0),
+        ],
+        rationale="t",
+    )
+    warns = chemistry.element_balance_check(form)
+    assert warns == []
+
+
+def test_element_balance_no_false_positive_without_claims():
+    # 无宣称词（silane/zinc/phosphate 都不在名字里）→ 零告警
+    form = Formulation(
+        name="test",
+        domain=ProductDomain.autodeposition_coating,
+        ingredients=[
+            Ingredient(name="Acrylic emulsion", formula="C3H4O2", role="binder", weight_pct=50.0),
+            Ingredient(name="Water", formula="H2O", role="carrier", weight_pct=50.0),
+        ],
+        rationale="t",
+    )
+    warns = chemistry.element_balance_check(form)
+    assert warns == []
 
 
 def test_amine_epoxy_ratio_present_for_2k_system():

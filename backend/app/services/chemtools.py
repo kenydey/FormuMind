@@ -686,12 +686,21 @@ def screen_formulation_local(form: Any) -> list[str]:
     与 ``screen_formulation`` 不同：不调用 ChemCrow/网络，可安全用于
     优化循环（NSGA-II 每代数百次调用不触网）。返回告警字符串列表，
     永不阻塞。缺 RDKit 或 molbloom 时静默降级（只返回能算的检查）。
+
+    P-B: 增加 PAINS/Brenk 泛干扰子结构筛查（RDKit FilterCatalog，本地）。
     """
     warnings: list[str] = []
     if not rdkit_available():
         return warnings
     try:
         from rdkit import Chem
+        from rdkit.Chem import FilterCatalog
+
+        # PAINS (Pan-Assay INterference) + Brenk 目录
+        _pains_params = FilterCatalog.FilterCatalogParams()
+        _pains_params.AddCatalog(FilterCatalog.FilterCatalogParams.FilterCatalogs.PAINS)
+        _pains_params.AddCatalog(FilterCatalog.FilterCatalogParams.FilterCatalogs.BRENK)
+        _pains_catalog = FilterCatalog.FilterCatalog(_pains_params)
     except Exception:
         return warnings
     patent = molbloom_available()
@@ -705,6 +714,15 @@ def screen_formulation_local(form: Any) -> list[str]:
         if mol is None:
             warnings.append(f"结构校验：{name} 的 SMILES 无法被 RDKit 解析，请核对结构")
             continue
+        # PAINS/Brenk 泛干扰子结构（本地目录，药物筛选毒性警报）
+        try:
+            match = _pains_catalog.GetFirstMatch(mol)
+            if match is not None:
+                warnings.append(
+                    f"结构安全：{name} 命中泛干扰子结构 {match.GetDescription()}（PAINS/Brenk），建议人工复核"
+                )
+        except Exception:
+            pass
         # molbloom patent 布隆过滤器（本地离线数据）
         if patent:
             try:

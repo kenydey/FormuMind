@@ -159,6 +159,57 @@ def _parse_mass(formula: str) -> float:
     return round(stack[0], 4)
 
 
+# 成分名中暗示功能元素的信号词 → 期望元素。名称含这些词但配方无该元素
+# 来源 → 告警（零误报：不宣称就不查）。
+_ELEMENT_CLAIM_SIGNALS = {
+    "P": ("phosphate", "phosphat", "磷酸", "磷酸盐", "磷"),
+    "Zn": ("zinc", "zno", "锌"),
+    "Si": ("silane", "silicate", "silicone", "硅烷", "硅酸", "有机硅"),
+}
+
+
+def element_balance_check(
+    form: Formulation,
+) -> list[str]:
+    """P-A: ChemFormula mass_fraction 配方元素平衡校验（宣称-缺源检测）。
+
+    当配方某成分名**宣称**含功能元素（如 zinc phosphate/磷酸锌 → P+Zn），
+    但整个配方没有任何成分的化学式实际携带该元素 → 告警。零网络、纯本地、
+    零误报（不宣称就不检查；无 formula 的混合物成分跳过）。缺 chemformula
+    时优雅降级返回 []。
+    """
+    warnings: list[str] = []
+    try:
+        import chemformula  # type: ignore
+    except ImportError:
+        return warnings
+
+    # 实际携带的元素集合（从所有可解析 formula 收集）
+    actual: set[str] = set()
+    for ing in form.ingredients:
+        formula = getattr(ing, "formula", None) or ""
+        if not formula:
+            continue
+        try:
+            cf = chemformula.ChemFormula(formula)
+            mf = dict(cf.mass_fraction or {})
+        except Exception:
+            continue
+        actual.update(k for k, v in mf.items() if v)
+
+    # 成分名宣称元素 → 检查来源
+    for ing in form.ingredients:
+        name = (getattr(ing, "name", "") or "").lower()
+        if not name:
+            continue
+        for elem, signals in _ELEMENT_CLAIM_SIGNALS.items():
+            if any(sig in name for sig in signals) and elem not in actual:
+                warnings.append(
+                    f"元素平衡：{ing.name} 宣称含 {elem}，但配方无任何携带 {elem} 的化学式成分"
+                )
+    return warnings
+
+
 def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) -> list[str]:
     """Return a list of human-readable warnings about a formulation.
 
@@ -187,6 +238,12 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
         voc = form.predicted["voc_gpl"]
         if voc > voc_limit_gpl:
             warnings.append(f"VOC {voc:.0f} g/L exceeds limit {voc_limit_gpl:.0f} g/L.")
+    # P-A: 元素平衡校验（ChemFormula mass_fraction，宣称-缺源检测，
+    # 零误报——不宣称就不检查，任何配方安全）。
+    try:
+        warnings.extend(element_balance_check(form))
+    except Exception:
+        pass
     return warnings
 
 

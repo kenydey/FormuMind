@@ -262,6 +262,14 @@ export default function ResearchPanel() {
               <div className="text-slate-300">
                 <span className="text-emerald-300 font-semibold">✓ 已识别结构</span>
                 <code className="ml-1.5 text-accent">{structInfo.smiles}</code>
+                {structInfo.confidence != null && structInfo.confidence < 0.6 && (
+                  <span
+                    className="ml-1.5 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                    title="MolScribe 识别置信度偏低，建议人工核对结构"
+                  >
+                    低置信 {Math.round(structInfo.confidence * 100)}%
+                  </span>
+                )}
                 {structInfo.hits.length > 0 && (
                   <div className="mt-1 text-slate-400">
                     相似材料：{structInfo.hits.map((h) => `${h.name} (${Math.round(h.similarity * 100)}%)`).join("、")}
