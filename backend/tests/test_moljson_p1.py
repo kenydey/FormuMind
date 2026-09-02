@@ -124,3 +124,73 @@ class TestRecommendedGateSmiles:
         )
         assert recs[0].components[0].smiles is None
         assert any("SMILES" in w for w in warnings)
+
+
+class TestMolscribeFullAudit:
+    """M-D: atom-level confidence audit from return_atoms_bonds."""
+
+    def test_low_confidence_atoms_detected(self, monkeypatch):
+        from app.services.ocsr import predict_molscribe_full
+
+        monkeypatch.setattr("app.services.ocsr.molscribe_available", lambda: True)
+        monkeypatch.setattr(
+            "app.services.ocsr._get_molscribe_model",
+            lambda: _FakeMolscribeModel(
+                {
+                    "smiles": "CCO",
+                    "confidence": 0.7,
+                    "atoms": [
+                        {"atom_symbol": "C", "x": 1, "y": 1, "confidence": 0.9},
+                        {"atom_symbol": "C", "x": 2, "y": 1, "confidence": 0.3},  # low
+                        {"atom_symbol": "O", "x": 3, "y": 1, "confidence": 0.95},
+                    ],
+                }
+            ),
+        )
+        res = predict_molscribe_full("/tmp/x.png")
+        assert res["smiles"] == "CCO"
+        assert res["low_confidence_atoms"] == [1]  # atom idx 1 is low
+        assert res["atom_confidence_ok"] is False
+
+    def test_all_high_confidence_ok(self, monkeypatch):
+        from app.services.ocsr import predict_molscribe_full
+
+        monkeypatch.setattr("app.services.ocsr.molscribe_available", lambda: True)
+        monkeypatch.setattr(
+            "app.services.ocsr._get_molscribe_model",
+            lambda: _FakeMolscribeModel(
+                {
+                    "smiles": "CCO",
+                    "confidence": 0.9,
+                    "atoms": [
+                        {"atom_symbol": "C", "x": 1, "y": 1, "confidence": 0.9},
+                        {"atom_symbol": "O", "x": 2, "y": 1, "confidence": 0.95},
+                    ],
+                }
+            ),
+        )
+        res = predict_molscribe_full("/tmp/x.png")
+        assert res["atom_confidence_ok"] is True
+        assert res["low_confidence_atoms"] == []
+
+    def test_no_atoms_graceful(self, monkeypatch):
+        from app.services.ocsr import predict_molscribe_full
+
+        monkeypatch.setattr("app.services.ocsr.molscribe_available", lambda: True)
+        monkeypatch.setattr(
+            "app.services.ocsr._get_molscribe_model",
+            lambda: _FakeMolscribeModel({"smiles": "CCO", "confidence": 0.8}),
+        )
+        res = predict_molscribe_full("/tmp/x.png")
+        assert res["atoms"] is not None  # [] default
+        assert res["atom_confidence_ok"] is True  # no atoms → vacuously ok
+
+
+class _FakeMolscribeModel:
+    """Stand-in for MolScribe model.predict_image_file."""
+
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def predict_image_file(self, image_file, return_confidence=False, return_atoms_bonds=False):
+        return self._payload

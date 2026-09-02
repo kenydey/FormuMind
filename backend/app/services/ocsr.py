@@ -58,20 +58,56 @@ def predict_molscribe_with_confidence(image_path: str) -> dict:
     model's ``overall_score`` in [0,1] — low scores flag likely-misrecognized
     structures for human review. Never raises.
     """
+    return predict_molscribe_full(image_path)
+
+
+def predict_molscribe_full(image_path: str) -> dict:
+    """M-D: MolScribe 识别 + 整图/逐原子置信度 + 低置信原子审计。
+
+    Returns::
+
+        {
+          "smiles": str|None,
+          "confidence": float|None,        # overall_score [0,1]
+          "atoms": [{"symbol", "x", "y", "confidence"}...] | None,
+          "low_confidence_atoms": [int...] | None,  # idx with conf < 0.5
+          "atom_confidence_ok": bool|None,  # None when atoms unavailable
+        }
+
+    逐原子置信度来自 MolScribe ``return_atoms_bonds``（atom_scores）。
+    低置信原子提示「该结构区域识别可信度低」——比整图 confidence 细。
+    """
     if not molscribe_available():
-        return {"smiles": None, "confidence": None}
+        return {"smiles": None, "confidence": None, "atoms": None,
+                "low_confidence_atoms": None, "atom_confidence_ok": None}
     try:
         model = _get_molscribe_model()
-        out = model.predict_image_file(image_path, return_confidence=True)
+        out = model.predict_image_file(
+            image_path, return_confidence=True, return_atoms_bonds=True
+        )
         if not out:
-            return {"smiles": None, "confidence": None}
+            return {"smiles": None, "confidence": None, "atoms": None,
+                    "low_confidence_atoms": None, "atom_confidence_ok": None}
+        atoms = out.get("atoms") or []
+        low: list[int] = []
+        if atoms:
+            for i, a in enumerate(atoms):
+                try:
+                    if float(a.get("confidence", 1.0)) < 0.5:
+                        low.append(i)
+                except (TypeError, ValueError):
+                    pass
         return {
             "smiles": (out.get("smiles") or "").strip() or None,
-            "confidence": float(out.get("confidence")) if out.get("confidence") is not None else None,
+            "confidence": float(out["confidence"]) if out.get("confidence") is not None else None,
+            "atoms": atoms,
+            "low_confidence_atoms": low,
+            "atom_confidence_ok": (len(low) == 0) if atoms is not None else None,
         }
     except Exception as exc:
         logger.warning("MolScribe predict failed: %s", exc)
-        return {"smiles": None, "confidence": None}
+        return {"smiles": None, "confidence": None, "atoms": None,
+                "low_confidence_atoms": None, "atom_confidence_ok": None}
 
 
 def validate_recognized_smiles(image_path: str) -> dict:
@@ -97,11 +133,13 @@ def validate_recognized_smiles(image_path: str) -> dict:
     pred = predict_molscribe_with_confidence(image_path)
     smiles = pred.get("smiles")
     confidence = pred.get("confidence")
+    atom_confidence_ok = pred.get("atom_confidence_ok")  # M-D
     if not smiles:
         return {"ok": False, "smiles": None,
                 "reason": "MolScribe unavailable or failed",
                 "valid": False, "atom_count": 0, "ring_count": 0,
-                "roundtrip_ok": False, "confidence": None}
+                "roundtrip_ok": False, "confidence": None,
+                "atom_confidence_ok": atom_confidence_ok}
     from .moljson import validate_smiles
 
     info = validate_smiles(smiles)
@@ -109,10 +147,11 @@ def validate_recognized_smiles(image_path: str) -> dict:
         return {"ok": True, "smiles": smiles, "valid": False,
                 "reason": "RDKit 无法解析 MolScribe 输出（结构可疑）",
                 "atom_count": 0, "ring_count": 0, "roundtrip_ok": False,
-                "confidence": confidence}
+                "confidence": confidence, "atom_confidence_ok": atom_confidence_ok}
     return {"ok": True, "smiles": info["smiles"], "valid": True,
             "atom_count": info["atom_count"], "ring_count": info["ring_count"],
-            "roundtrip_ok": info["roundtrip_ok"], "confidence": confidence}
+            "roundtrip_ok": info["roundtrip_ok"], "confidence": confidence,
+            "atom_confidence_ok": atom_confidence_ok}
 
 
 def prewarm_molscribe() -> bool:

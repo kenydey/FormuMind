@@ -77,18 +77,24 @@ def _formula_plausible(token: str) -> bool:
 
 
 def extract_formulas(text: str) -> list[str]:
-    from ..domain.chemistry import molar_mass
+    from ..domain.chemistry import molar_mass, canonical_formula
 
     out: list[str] = []
+    seen_canon: set[str] = set()
     for m in _FORMULA_CAND_RE.finditer(text or ""):
         token = m.group(0)
-        if not _formula_plausible(token) or token in out:
+        if not _formula_plausible(token):
             continue
         try:
             if molar_mass(token) <= 0:
                 continue
         except Exception:
             continue
+        # M-B: Hill 序去重 — Zn3(PO4)2 与 Zn3P2O8 判同（保留首个展示形式）
+        canon = canonical_formula(token) or token
+        if canon in seen_canon:
+            continue
+        seen_canon.add(canon)
         out.append(token)
     return out
 

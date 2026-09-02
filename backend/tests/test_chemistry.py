@@ -156,6 +156,28 @@ def test_structure_equivalent_ratio_missing_side_returns_none():
     assert chemistry.structure_equivalent_ratio(form) is None
 
 
+# ── M-B: hill-formula canonicalisation ──────────────────────────────────────
+
+def test_canonical_formula_equivalent_forms():
+    # Zn3(PO4)2 and Zn3P2O8 are the same formula → same Hill key
+    a = chemistry.canonical_formula("Zn3(PO4)2")
+    b = chemistry.canonical_formula("Zn3P2O8")
+    assert a is not None and a == b == "O8P2Zn3"
+
+
+def test_canonical_formula_invalid_returns_none():
+    assert chemistry.canonical_formula("") is None
+    assert chemistry.canonical_formula("not-a-formula") is None
+
+
+def test_extract_formulas_dedupes_hill_equivalent():
+    from app.services.chem_extract import extract_formulas
+
+    r = extract_formulas("配方含 Zn3(PO4)2 与 Zn3P2O8 两种写法")
+    assert len(r) == 1  # Hill-deduped, first display form kept
+    assert r[0] == "Zn3(PO4)2"
+
+
 def test_amine_epoxy_ratio_present_for_2k_system():
     form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
     ratio = chemistry.amine_epoxy_ratio(form)

@@ -1336,10 +1336,12 @@ def _chat_prompt(
             hist_block = "Recent dialogue:\n" + "\n".join(lines) + "\n\n"
     # P0: 结构图识别结果铺进推理上下文 — MolJSON 显式原子/键让 LLM
     # 数碳/环/官能团零误差（P0 benchmark +7pp 的落地）。
+    # M-A: 附 RDKit 算好的 meta 摘要（分子式/分子量/环数），LLM 直接引用
+    # 无需自行计数。
     struct_block = ""
     if structure:
         try:
-            from .moljson import validate_smiles, smiles_to_moljson
+            from .moljson import validate_smiles, smiles_to_moljson, moljson_meta, detect_functional_groups
 
             smiles = (structure.get("smiles") or "").strip()
             info = validate_smiles(smiles) if smiles else {"valid": False}
@@ -1348,10 +1350,28 @@ def _chat_prompt(
                 if mj:
                     import json as _json
 
+                    meta = moljson_meta(smiles)
+                    if meta:
+                        meta_json = _json.dumps(meta, ensure_ascii=False)
+                        meta_line = (
+                            "\nComputed properties (authoritative, do not re-count):\n"
+                            f"{meta_json}\n"
+                        )
+                    else:
+                        meta_line = ""
+                    # M-C: 官能团检测摘要（SMARTS 命中列表）
+                    groups = detect_functional_groups(smiles)
+                    groups_line = (
+                        f"Functional groups detected by SMARTS: {', '.join(groups)}\n"
+                        if groups
+                        else ""
+                    )
                     struct_block = (
                         "Target molecular structure (authoritative graph, use this "
                         "over any textual hints when counting atoms/rings/functional groups):\n"
-                        f"```json\n{_json.dumps(mj, ensure_ascii=False)}\n```\n\n"
+                        f"```json\n{_json.dumps(mj, ensure_ascii=False)}\n```\n"
+                        f"{meta_line}"
+                        f"{groups_line}\n"
                     )
         except Exception as exc:
             log.debug("structure prompt block failed: %s", exc)

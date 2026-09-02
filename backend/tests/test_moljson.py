@@ -82,3 +82,47 @@ class TestValidateSmiles:
         assert info["roundtrip_ok"] is True
         assert info["atom_count"] == 3
         assert info["ring_count"] == 0
+
+
+class TestMoljsonMeta:
+    """M-A: computed-properties enrichment."""
+
+    def test_meta_dgeba(self):
+        from app.services.moljson import moljson_meta
+
+        meta = moljson_meta("CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1")
+        assert meta is not None
+        assert meta["formula"] == "C21H24O4"
+        assert meta["heavy_atoms"] == 25
+        assert meta["total_rings"] == 4
+        assert meta["aromatic_rings"] == 2
+
+    def test_meta_invalid_none(self):
+        from app.services.moljson import moljson_meta
+
+        assert moljson_meta("not-a-molecule") is None
+        assert moljson_meta("") is None
+
+
+class TestDetectFunctionalGroups:
+    """M-C: SMARTS functional-group detection."""
+
+    def test_dgeba_groups(self):
+        from app.services.moljson import detect_functional_groups
+
+        g = detect_functional_groups("CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1")
+        assert "epoxy" in g
+        assert "aromatic_ring" in g
+
+    def test_ipda_groups(self):
+        from app.services.moljson import detect_functional_groups
+
+        g = detect_functional_groups("CC1(C)CC(N)CC(C)(CN)C1")
+        assert "amine_primary" in g
+        assert "epoxy" not in g
+
+    def test_invalid_empty(self):
+        from app.services.moljson import detect_functional_groups
+
+        assert detect_functional_groups("not-a-molecule") == []
+        assert detect_functional_groups("") == []

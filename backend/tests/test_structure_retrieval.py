@@ -213,6 +213,12 @@ class TestStructurePromptInjection:
         assert "Target molecular structure" in prompt
         assert '"element": "C"' in prompt
         assert '"bonds"' in prompt
+        # M-A: computed-properties meta is embedded too
+        assert "Computed properties" in prompt
+        assert '"formula": "C9H10O2"' in prompt
+        # M-C: functional-group detection line is embedded
+        assert "Functional groups detected" in prompt
+        assert "epoxy" in prompt
 
     def test_chat_prompt_without_structure_unchanged(self):
         from app.services.llm import _chat_prompt

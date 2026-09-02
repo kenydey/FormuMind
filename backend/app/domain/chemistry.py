@@ -109,6 +109,24 @@ def _parse_hydrate(formula: str) -> float:
     return round(total, 4)
 
 
+def canonical_formula(formula: str) -> str | None:
+    """M-B: ChemFormula hill_formula 规范化 — 等式的规范排序键。
+
+    ``Zn3(PO4)2`` 与 ``Zn3P2O8`` 化学式相同但字符串不同 → Hill 序
+    (O8P2Zn3) 归一为同一键。chemformula 不可用或解析失败 → None。
+    """
+    if not (formula or "").strip():
+        return None
+    try:
+        import chemformula  # type: ignore
+
+        cf = chemformula.ChemFormula(formula)
+        hill = getattr(cf, "hill_formula", None)
+        return str(hill) if hill else None
+    except Exception:
+        return None
+
+
 def molar_mass(formula: str) -> float:
     """Parse a chemical formula and return its molar mass (g/mol).
 
