@@ -8,6 +8,10 @@ import pytest
 
 os.environ.setdefault("FORMUMIND_API_AUTH_ENABLED", "false")
 os.environ.setdefault("FORMUMIND_ENVIRONMENT", "test")
+# Datalab 已非 TESTING 公开模式：legacy TestClient 测试不得直连真平台。
+# Datalab 专项测试显式构造 store/override settings，不受此默认值影响。
+os.environ.setdefault("FORMUMIND_CAMPAIGN_BACKEND", "sqlite")
+os.environ.setdefault("FORMUMIND_EXPERIMENT_BACKEND", "sqlite")
 # Test speed-up: skip heavy lifespan bootstrap (ColBERT seed corpus, settings
 # reload, PubChem enrichment). Default/production behaviour is unchanged.
 os.environ.setdefault("FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP", "1")
