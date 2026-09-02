@@ -116,27 +116,39 @@ async def upload_file(
     content: bytes,
     filename: str,
     *,
+    item_id: str | None = None,
     timeout: float = 30.0,
 ) -> str | None:
-    """Upload a file to Datalab ELN ``POST /upload/``; return its ``source_document_id``.
+    """Upload a file to Datalab ELN ``POST /upload-file/``; return its ``file_id``.
 
     Best-effort: returns ``None`` on any failure (unreachable, non-2xx, bad body)
     so callers can degrade gracefully to a local-only reference. This is the
-    single upload path shared by experiment attachments (Phase 2.1) and QC-report
-    archival (Phase 2.6) — keep it here, don't inline httpx in callers.
+    single upload path shared by experiment attachments and QC-report archival.
+
+    The platform requires the target ``item_id`` in the multipart form (the file
+    is stored under that item), so callers should resolve the Datalab sample id
+    of the experiment / workbench row they are archiving for. Without it the
+    upload cannot be attached to anything and we return ``None``.
     """
     import httpx
 
     url = (api_url or "").rstrip("/")
-    if not url:
+    if not url or not item_id:
         return None
     try:
         async with httpx.AsyncClient(base_url=url, timeout=timeout) as client:
-            resp = await client.post("/upload/", files={"file": (filename, content)})
+            resp = await client.post(
+                "/upload-file/",
+                files={"file": (filename, content)},
+                data={"item_id": item_id, "replace_file": "null"},
+            )
             if resp.status_code >= 400:
+                logger.warning(
+                    "datalab upload failed: HTTP %s %s", resp.status_code, resp.text[:200]
+                )
                 return None
             body = resp.json()
-            return body.get("source_document_id") or None
+            return body.get("file_id") or None
     except Exception as exc:
         logger.warning("datalab upload failed: %s", exc)
         return None

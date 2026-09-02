@@ -127,11 +127,23 @@ async def ingest_qc_report(
     # the original file so the certificate is traceable in the ELN too, and
     # records the ELN file id on the attachment.
     try:
+        from ..db.campaign_store import get_campaign_store
         from ..db.datalab_client import upload_file as _datalab_upload_file
         from ..db.measurement_store import get_measurement_store as _get_ms
 
+        _row_item = None
+        if campaign_id > 0 and row_id > 0:
+            try:
+                _rows = get_campaign_store().list_rows_sync(campaign_id)
+                _match = next((r for r in _rows if r.id == row_id), None)
+                _row_item = _match.item_id if _match else None
+            except Exception:
+                _row_item = None
         _file_id = await _datalab_upload_file(
-            get_settings().datalab_api_url, content, filename
+            get_settings().datalab_api_url,
+            content,
+            filename,
+            item_id=_row_item,
         )
         if _file_id:
             _get_ms().set_attachment_datalab_ref(

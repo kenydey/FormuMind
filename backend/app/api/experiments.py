@@ -503,7 +503,38 @@ async def workbench_quality(campaign_id: int) -> dict:
 
 # ── Experiment attachments (Phase 0.2) ────────────────────────────────────────
 
-async def _upload_or_store_locally(content: bytes, filename: str) -> str:
+async def _datalab_item_id_for(
+    experiment_id: int = 0, campaign_id: int = 0, row_id: int = 0
+) -> str | None:
+    """Resolve the Datalab sample id a file upload should attach to.
+
+    Workbench rows always live on a Datalab sample (formumind_cXX_rY_hash);
+    plain experiments only after they have been ingested from such a row.
+    Best-effort: any lookup failure yields ``None`` so uploads fall back to
+    the local-attachment path instead of crashing.
+    """
+    try:
+        if campaign_id > 0 and row_id > 0:
+            from ..db.campaign_store import get_campaign_store
+
+            rows = get_campaign_store().list_rows_sync(campaign_id)
+            match = next((r for r in rows if r.id == row_id), None)
+            return (match.item_id if match and match.item_id else None)
+        if experiment_id > 0:
+            from ..db.database import default_session_factory
+            from ..db.models import ExperimentRow
+
+            with default_session_factory() as session:
+                row = session.get(ExperimentRow, experiment_id)
+                return row.item_id if row else None
+    except Exception:
+        logger.warning("datalab item_id resolve failed", exc_info=True)
+    return None
+
+
+async def _upload_or_store_locally(
+    content: bytes, filename: str, item_id: str | None = None
+) -> str:
     """上传 Datalab；失败时落盘本地并返回指向真实文件的引用。
 
     旧实现失败时伪造 ``local-{uuid}`` 引用——文件字节被丢弃却返回 200，
@@ -513,7 +544,7 @@ async def _upload_or_store_locally(content: bytes, filename: str) -> str:
     from ..db.datalab_client import upload_file as datalab_upload_file
 
     doc_id = await datalab_upload_file(
-        get_settings().datalab_api_url, content, filename
+        get_settings().datalab_api_url, content, filename, item_id=item_id
     )
     if doc_id:
         return doc_id
@@ -627,7 +658,8 @@ async def upload_experiment_attachment(
     content = await file.read()
     if len(content) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="文件过大，最大20MB")
-    source_document_id = await _upload_or_store_locally(content, filename)
+    item_id = await _datalab_item_id_for(experiment_id=experiment_id)
+    source_document_id = await _upload_or_store_locally(content, filename, item_id=item_id)
     # Create local attachment link
     store = get_measurement_store()
     attachment_id = store.attach(
@@ -709,7 +741,8 @@ async def upload_workbench_row_attachment(
     content = await file.read()
     if len(content) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="文件过大，最大20MB")
-    source_document_id = await _upload_or_store_locally(content, filename)
+    item_id = await _datalab_item_id_for(campaign_id=campaign_id, row_id=row_id)
+    source_document_id = await _upload_or_store_locally(content, filename, item_id=item_id)
     store = get_measurement_store()
     attachment_id = store.attach(
         experiment_id, source_document_id, kind=kind, note=note
