@@ -173,6 +173,11 @@ class ModelRegistry:
         with self._lock:
             return len(self._records)
 
+    def all_records(self) -> list[ExperimentRecord]:
+        """B: 全部训练记录（供状态总览按 domain 聚合）。"""
+        with self._lock:
+            return list(self._records)
+
     def records_for(self, domain: ProductDomain, project_id: str = "") -> list[ExperimentRecord]:
         """Return stored experiment records for a domain / project."""
         with self._lock:

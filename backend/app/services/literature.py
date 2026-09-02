@@ -528,9 +528,9 @@ def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
 
 def _rank_score_with_boost(e: Evidence, q_kw: set[str], qctx: dict) -> tuple[float, float]:
     base0, base1 = _rank_score(e, q_kw)
-    from .search_scoring import evidence_entity_boost
+    from .search_scoring import evidence_entity_boost, evidence_authority_bonus
 
-    return (base0 + evidence_entity_boost(e, qctx), base1)
+    return (base0 + evidence_entity_boost(e, qctx) + evidence_authority_bonus(e), base1)
 
 
 def _is_weblike(e: Evidence) -> bool:

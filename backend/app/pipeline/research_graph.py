@@ -179,7 +179,7 @@ def _retrieval_queries(
     return [query] + [q for q in questions if q != topic]
 
 
-def _search_one(query: str, settings: Settings, *, hyde: bool = False) -> list[Evidence]:
+def _search_one(query: str, settings: Settings, *, hyde: bool = False, domain: str | None = None) -> list[Evidence]:
     """One retrieval, optionally through a hypothetical-answer expansion.
 
     HyDE is applied to the primary query only, not to every sub-question. Its
@@ -190,10 +190,10 @@ def _search_one(query: str, settings: Settings, *, hyde: bool = False) -> list[E
     """
     if hyde and settings.deep_hyde_enabled:
         # The legitimate use of an ungrounded LLM call: the generated text steers
-        # retrieval and never reaches the report. Already implemented, no callers.
+        # retrieval and never reaches the report.
         from ..services.rag import hyde_expand
 
-        query = hyde_expand(query)
+        query = hyde_expand(query, domain=domain)
     return [h.evidence for h in colbert_store.search(query, settings=settings)]
 
 
@@ -217,15 +217,26 @@ def retrieve_node(
             logger.warning("ColBERT bootstrap failed (backend={}): {}", backend, exc)
     queries = _retrieval_queries(state, settings, mode)
     state["retrieval_queries"] = queries
+    # A: HyDE 应用到主查询 + 前 N 个子问题（原只主查询）。
+    # 每角度 1 次 LLM 调用换取检索深度；受 deep_hyde_subquestions 上限控
+    # 制避免 10 次调用拖垮延迟。domain 透传给 HyDE（检索质量关键）。
+    hyde_limit = int(getattr(settings, "deep_hyde_subquestions", 2))
+    domain_val = None
+    _req = state.get("req")
+    if _req is not None and hasattr(_req, "domain"):
+        try:
+            domain_val = _req.domain.value
+        except Exception:
+            domain_val = None
     if len(queries) > 1:
         from . import subquestions
 
-        # Primary query gets HyDE; the sub-questions are already distinct angles.
         evidence = subquestions.merge_evidence(
-            [_search_one(q, settings, hyde=(i == 0)) for i, q in enumerate(queries)]
+            [_search_one(q, settings, hyde=(i < hyde_limit), domain=domain_val)
+             for i, q in enumerate(queries)]
         )
     else:
-        evidence = _search_one(queries[0], settings, hyde=True)
+        evidence = _search_one(queries[0], settings, hyde=True, domain=domain_val)
     # User-supplied sources are high-trust: keep them as candidates ahead of
     # the retrieved hits (deduped) so an explicit pre-load always surfaces.
     if pre:

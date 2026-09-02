@@ -171,10 +171,15 @@ def test_recommend_mode_never_decomposes(monkeypatch):
     assert called == []
 
 
-def test_hyde_runs_once_not_per_angle(monkeypatch):
-    """Four angles plus a fallback round would be ten LLM calls instead of two."""
+def test_hyde_runs_limited_not_per_angle(monkeypatch):
+    """A: HyDE 应用于主查询 + 前 deep_hyde_subquestions 个子问题，而非每个角度。
+
+    4 个角度 + fallback 全走 HyDE 会是十几次 LLM 调用；deep_hyde_subquestions
+    默认 2 限制为 3 次（主 + 前 2 子问题）。
+    """
     monkeypatch.setattr(get_settings(), "deep_subquestions", 4, raising=False)
     monkeypatch.setattr(get_settings(), "deep_hyde_enabled", True, raising=False)
+    monkeypatch.setattr(get_settings(), "deep_hyde_subquestions", 2, raising=False)
     monkeypatch.setattr(get_settings(), "kg_enabled", False, raising=False)
     monkeypatch.setattr(get_settings(), "kb_v2_enabled", False, raising=False)
     monkeypatch.setattr(
@@ -188,7 +193,8 @@ def test_hyde_runs_once_not_per_angle(monkeypatch):
     _stub_search(monkeypatch)
 
     rg.retrieve_node({"topic": "主题", "query": "主题"}, mode="deep")
-    assert len(hyde_calls) == 1
+    # i<2 → 主查询 + 1 个子问题 = 2 次 HyDE（其余角度原样）
+    assert len(hyde_calls) == 2
 
 
 def test_hyde_can_be_turned_off(monkeypatch):

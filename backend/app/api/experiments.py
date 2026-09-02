@@ -192,6 +192,43 @@ def list_models() -> list[ModelInfo]:
     return registry.info()
 
 
+class TrainingStatus(BaseModel):
+    """B: 训练数据就绪度总览 — 让「寻优是预测器回声」透明化。"""
+
+    total_records: int
+    min_samples: int
+    sufficient: bool  # total_records >= min_samples → GP/Ridge 才有真数据
+    models_trained: int
+    by_domain: dict[str, int] = Field(default_factory=dict)
+    message: str = ""
+
+
+@router.get("/training-status", response_model=TrainingStatus)
+def training_status() -> TrainingStatus:
+    """B: 训练数据可见性。数据不足时前端/用户应知寻优结果基于先验。"""
+    from ..config import get_settings
+
+    settings = get_settings()
+    total = registry.total_records
+    by_domain: dict[str, int] = {}
+    for rec in registry.all_records():
+        dom = rec.domain.value if hasattr(rec.domain, "value") else str(rec.domain)
+        by_domain[dom] = by_domain.get(dom, 0) + 1
+    sufficient = total >= settings.min_train_samples
+    msg = (
+        f"训练数据 {total} 条{'≥' if sufficient else '<'} min_samples {settings.min_train_samples}，"
+        + ("GP/经验模型已可训练" if sufficient else "寻优结果为预测器先验（数据到位后收敛才是真的）")
+    )
+    return TrainingStatus(
+        total_records=total,
+        min_samples=settings.min_train_samples,
+        sufficient=sufficient,
+        models_trained=len(registry.info()),
+        by_domain=by_domain,
+        message=msg,
+    )
+
+
 class ExperimentSummary(BaseModel):
     """One stored experiment, identified by row id.
 

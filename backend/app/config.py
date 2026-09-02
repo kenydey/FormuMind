@@ -277,6 +277,9 @@ class Settings(BaseSettings):
     deep_subquestions: int = 4
     # 用假设性答案改进检索（HyDE）。生成内容只用于检索，绝不进入报告正文。
     deep_hyde_enabled: bool = True
+    # A: HyDE 覆盖的前 N 个查询（含主查询，i < N）。默认 2 = 主查询 + 第 1
+    # 个子问题；每多 1 次 HyDE = 1 次 LLM 调用。0 = 完全关闭（旧行为）。
+    deep_hyde_subquestions: int = 2
 
     # PDF 解析器层级（KB P1）："auto" = hybrid → Docling → marker → MinerU →
     # MarkItDown → pypdf 逐级回退；指定名称则固定首选（仍向下回退）。
