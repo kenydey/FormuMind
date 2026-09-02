@@ -160,6 +160,44 @@ def test_experiment_below_threshold_reports_no_model():
         registry.reset(persist=True)
 
 
+def test_training_status_exposes_readiness():
+    """B: training-status 让前端在操作前看到数据就绪度（< min_samples 是纯先验）。"""
+    from app.services.training import registry
+
+    registry.reset(persist=True)
+    try:
+        r = client.get("/api/training-status")
+        assert r.status_code == 200
+        st = r.json()
+        assert st["total_records"] == 0
+        assert st["sufficient"] is False
+        assert st["min_samples"] >= 1
+        assert st["models_trained"] == 0
+
+        records = [
+            {
+                "domain": "anticorrosion_coating",
+                "factors": {
+                    "Zinc phosphate": 4,
+                    "Bisphenol-A epoxy (DGEBA)": 38,
+                    "Polyamide hardener": 14,
+                },
+                "cure_temperature_c": 80,
+                "measured": {"salt_spray_hours": 200},
+            }
+            for _ in range(8)  # 超过默认 min_train_samples=4
+        ]
+        client.post("/api/experiments", json={"records": records, "retrain": True})
+
+        st2 = client.get("/api/training-status").json()
+        assert st2["total_records"] == 8
+        assert st2["sufficient"] is True
+        assert st2["by_domain"].get("anticorrosion_coating") == 8
+        assert "≥" in st2["message"]
+    finally:
+        registry.reset(persist=True)
+
+
 def test_validate_formulations_with_requirement_voc():
     payload = {
         "formulations": [
