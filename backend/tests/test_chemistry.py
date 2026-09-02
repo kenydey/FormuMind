@@ -87,6 +87,75 @@ def test_element_balance_no_false_positive_without_claims():
     assert warns == []
 
 
+# ── P-F: reaction SMARTS functional-group counting ──────────────────────────
+
+def test_functional_group_count_epoxy_dgeba():
+    # DGEBA has exactly 2 epoxide rings
+    assert chemistry.functional_group_count(
+        "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", "epoxy"
+    ) == 2
+
+
+def test_functional_group_count_amine_ipda():
+    # IPDA has 2 primary amines (no secondary)
+    ipda = "CC1(C)CC(N)CC(C)(CN)C1"
+    assert chemistry.functional_group_count(ipda, "amine_primary") == 2
+    assert chemistry.functional_group_count(ipda, "amine_secondary") == 0
+
+
+def test_functional_group_count_invalid_returns_zero():
+    assert chemistry.functional_group_count("not-a-molecule", "epoxy") == 0
+    assert chemistry.functional_group_count("", "epoxy") == 0
+    assert chemistry.functional_group_count("CCO", "unknown_group") == 0
+
+
+def test_structure_equivalent_ratio_dgeba_ipda():
+    """70g DGEBA + 30g IPDA → epoxy:amine-H ≈ 0.584 (hand-computed)."""
+    form = Formulation(
+        name="t",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(
+                name="DGEBA",
+                smiles="CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1",
+                formula="C21H24O4",
+                role="resin",
+                weight_pct=70.0,
+            ),
+            Ingredient(
+                name="IPDA",
+                smiles="CC1(C)CC(N)CC(C)(CN)C1",
+                formula="C10H22N2",
+                role="hardener",
+                weight_pct=30.0,
+            ),
+        ],
+        rationale="t",
+    )
+    ratio = chemistry.structure_equivalent_ratio(form)
+    assert ratio is not None
+    assert abs(ratio - 0.584) < 0.02
+
+
+def test_structure_equivalent_ratio_missing_side_returns_none():
+    # 只有树脂（无固化剂）→ None（不臆造）
+    form = Formulation(
+        name="t",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(
+                name="DGEBA",
+                smiles="CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1",
+                formula="C21H24O4",
+                role="resin",
+                weight_pct=100.0,
+            ),
+        ],
+        rationale="t",
+    )
+    assert chemistry.structure_equivalent_ratio(form) is None
+
+
 def test_amine_epoxy_ratio_present_for_2k_system():
     form = knowledge.baseline_formulation(Requirement(domain=ProductDomain.anticorrosion_coating))
     ratio = chemistry.amine_epoxy_ratio(form)

@@ -551,4 +551,110 @@ def full_safety_check(
             f"VOC {voc_gpl:.0f} g/L exceeds limit {voc_limit_gpl:.0f} g/L "
             f"(category: {check_voc_category(form, voc_gpl)})."
         )
+    # P-F: 结构计量平衡软告警（环氧:胺当量比，仅当可算且严重失衡时提示）
+    try:
+        sratio = structure_equivalent_ratio(form)
+        if sratio is not None and (sratio < 0.7 or sratio > 1.4):
+            warnings.append(
+                f"结构计量：环氧:胺当量比 {sratio} 偏离理想 1.0（基于 SMILES 官能团计数），"
+                "可能交联不完全或过量固化剂"
+            )
+    except Exception:
+        pass
     return warnings
+
+
+# ── P-F: 反应 SMARTS 官能团计量（交联模拟的结构基础）─────────────────────────
+# RDKit 子结构模式：数配方分子的关键反应官能团。
+# 环氧基: 三元环醚 C1CO1；伯胺: [NX3;H2]；仲胺: [NX3;H1]；
+# 异氰酸酯: N=C=O。
+_EPOXY_SMARTS = "C1CO1"
+_AMINE_PRIMARY_SMARTS = "[NX3;H2;!$(NC=O)]"
+_AMINE_SECONDARY_SMARTS = "[NX3;H1;!$(NC=O)]"
+_ISOCYANATE_SMARTS = "N=C=O"
+
+
+def functional_group_count(smiles: str, group: str) -> int:
+    """P-F: RDKit SMARTS 数关键反应官能团数量。
+
+    ``group`` ∈ {"epoxy", "amine_primary", "amine_secondary", "isocyanate"}。
+    返回结构中的官能团个数（如 DGEBA 环氧基=2）；RDKit 缺失/非法输入 → 0。
+    """
+    if not (smiles or "").strip():
+        return 0
+    try:
+        from rdkit import Chem
+
+        patt_smarts = {
+            "epoxy": _EPOXY_SMARTS,
+            "amine_primary": _AMINE_PRIMARY_SMARTS,
+            "amine_secondary": _AMINE_SECONDARY_SMARTS,
+            "isocyanate": _ISOCYANATE_SMARTS,
+        }.get(group)
+        if patt_smarts is None:
+            return 0
+        mol = Chem.MolFromSmiles(smiles)
+        patt = Chem.MolFromSmarts(patt_smarts)
+        if mol is None or patt is None:
+            return 0
+        return len(mol.GetSubstructMatches(patt))
+    except Exception:
+        return 0
+
+
+def structure_equivalent_ratio(form: Formulation) -> float | None:
+    """P-F: 从结构官能团推导环氧:胺化学计量比（不依赖 equivalent_weight）。
+
+    当材料缺 equivalent_weight 元数据时，用 SMILES 数环氧基/胺氢：
+    epoxy_eq = Σ(wt%_resin / M_resin × n_epoxy)
+    amine_h_eq = Σ(wt%_hardener / M_hardener × n_amine_h)（伯胺 2H + 仲胺 1H）
+
+    需要各成分的 SMILES + formula（算分子量）。任一关键成分无法解析 → None
+    （诚实降级，不臆造）。这是 predictor 中 ``equivalent_ratio`` 的
+    结构推导补充——两者目标相同、数据源不同。
+    """
+    try:
+        from rdkit import Chem
+    except Exception:
+        return None
+
+    resin_eq = 0.0  # 环氧当量 (mol 环氧 / 100g)
+    amine_eq = 0.0  # 胺氢当量 (mol H / 100g)
+    resin_ok = False
+    amine_ok = False
+
+    for ing in form.ingredients:
+        role = normalize_role(ing.role)
+        smiles = getattr(ing, "smiles", None) or ""
+        formula = getattr(ing, "formula", None) or ""
+        wt = float(getattr(ing, "weight_pct", 0.0) or 0.0)
+        if not smiles or wt <= 0:
+            continue
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            continue
+        # 分子量优先 formula（精确），无则 RDKit 结构算
+        try:
+            mw = molar_mass(formula) if formula else float(
+                Chem.Descriptors.MolWt(mol)
+            )
+        except Exception:
+            mw = float(Chem.Descriptors.MolWt(mol))
+        if mw <= 0:
+            continue
+        moles_per_100g = wt / mw  # 每 100g 配方的摩尔数
+        if role == "resin":
+            n_epoxy = functional_group_count(smiles, "epoxy")
+            if n_epoxy > 0:
+                resin_eq += moles_per_100g * n_epoxy
+                resin_ok = True
+        elif role == "hardener":
+            n_prim = functional_group_count(smiles, "amine_primary")
+            n_sec = functional_group_count(smiles, "amine_secondary")
+            if n_prim + n_sec > 0:
+                amine_eq += moles_per_100g * (2 * n_prim + n_sec)  # 伯胺 2H
+                amine_ok = True
+
+    if not resin_ok or not amine_ok or amine_eq <= 0:
+        return None
+    return round(resin_eq / amine_eq, 3)
