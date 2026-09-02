@@ -372,6 +372,16 @@ export interface TrainingReport {
   message: string;
 }
 
+/** B: 训练数据就绪度 — 数据 < min_samples 时寻优结果是预测器先验。 */
+export interface TrainingStatus {
+  total_records: number;
+  min_samples: number;
+  sufficient: boolean;
+  models_trained: number;
+  by_domain: Record<string, number>;
+  message: string;
+}
+
 export interface Attachment {
   id: string;
   experiment_id: number;
@@ -1098,6 +1108,7 @@ export const api = {
   syncWorkbench: (body: BatchUpdateRequest) =>
     put<WorkbenchSyncResponse>("/api/experiments/workbench/sync", body),
   models: () => get<ModelInfo[]>("/api/models"),
+  trainingStatus: () => get<TrainingStatus>("/api/training-status"),
   doeExportUrl: (planId: string, format: "csv" | "xlsx" = "csv") =>
     `/api/doe/${planId}/export?format=${format}`,
   importExperimentsCsv: async (file: File, domain?: ProductDomain): Promise<TrainingReport> => {

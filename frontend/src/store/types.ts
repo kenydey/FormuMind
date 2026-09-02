@@ -105,6 +105,8 @@ export interface AppState {
   models: ModelInfo[];
   modelHistory: ModelInfo[][];
   trainMessage: string;
+  /** B: 训练数据就绪度（数据 < min_samples 时寻优是先验） */
+  trainingStatus: import("../api").TrainingStatus | null;
 
   projects: ProjectSummary[];
   activeProjectId: string | null;
@@ -187,6 +189,8 @@ export interface AppState {
   ensureWorkbenchCampaign: () => Promise<number | null>;
   adoptDoePlanToWorkbench: (plan?: DOEPlan) => Promise<number | null>;
   refreshModels: () => Promise<void>;
+  /** B: 训练数据就绪度刷新（导入/训练后调用） */
+  refreshTrainingStatus: () => Promise<void>;
   recomputePredicted: () => Promise<void>;
   exportDoe: (format: "csv" | "xlsx") => void;
   importCsv: (file: File) => Promise<void>;

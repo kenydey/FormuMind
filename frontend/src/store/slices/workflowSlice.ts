@@ -543,6 +543,17 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
+    refreshTrainingStatus: async () => {
+      try {
+        const st = await api.trainingStatus();
+        set((draft) => {
+          draft.trainingStatus = st;
+        });
+      } catch {
+        // 状态横幅是增强，失败静默（不污染主流程）
+      }
+    },
+
     // 训练后重算 leaderboard 预测（含 cost/voc 等），保持模型与展示一致
     recomputePredicted: async () => {
       const { leaderboard, requirement } = get();
@@ -585,6 +596,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
         await get().runResearch();
         await get().recomputePredicted();
+        await get().refreshTrainingStatus();
       } catch (e) {
         set((draft) => {
           draft.error = `CSV 导入失败：${e instanceof Error ? e.message : String(e)}`;
@@ -595,5 +607,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

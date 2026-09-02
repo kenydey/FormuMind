@@ -48,6 +48,7 @@ export const useStore = create<AppState>()(
       models: [],
       modelHistory: [],
       trainMessage: "",
+      trainingStatus: null,
       projects: [],
       activeProjectId: null,
       projectSaveBusy: false,
