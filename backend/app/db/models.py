@@ -188,6 +188,11 @@ class Campaign(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     # Ordered Datalab sample refs: [{"id": 1, "item_id": "fm_c1_r1"}, ...]
     sample_refs: Mapped[list] = mapped_column(JSON, default=list)
+    # P1: DataLab collection_id holding this campaign's DOE-row items
+    # (collection_id in Datalab: "formumind_campaign_{id}")
+    datalab_collection_id: Mapped[str | None] = mapped_column(
+        String(96), nullable=True, default=None
+    )
     # Closed-loop round snapshots: [{round, at, rmse_by_metric, converged, ...}]
     loop_history: Mapped[list] = mapped_column(JSON, default=list)
 

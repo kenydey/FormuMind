@@ -66,6 +66,8 @@ class MockDatalabState:
     invalid_item_blocks: bool = False
     missing_item_ids: set[str] = field(default_factory=set)
     saved_items: dict[str, dict] = field(default_factory=dict)
+    collections: dict[str, str] = field(default_factory=dict)  # id -> title
+    collection_puts: int = 0
 
 
 def _mock_handler(state: MockDatalabState):
@@ -82,6 +84,18 @@ def _mock_handler(state: MockDatalabState):
                 200,
                 json={"sample_list_entry": {"item_id": item_id, "name": body["new_sample_data"]["name"]}},
             )
+        if path == "/collections":
+            state.collection_puts += 1
+            data = json.loads(request.content)["data"]
+            if data["collection_id"] in state.collections:
+                return httpx.Response(409, json={"error": "already exists"})
+            state.collections[data["collection_id"]] = data.get("title", "")
+            return httpx.Response(201, json={"status": "success"})
+        if path.startswith("/collections/"):
+            coll_id = path.rsplit("/", 1)[-1]
+            if coll_id in state.collections:
+                return httpx.Response(200, json={"status": "success", "data": {"collection_id": coll_id}})
+            return httpx.Response(404, json={"error": "collection not found"})
         if path.startswith("/get-item-data/"):
             item_id = path.rsplit("/", 1)[-1]
             if item_id in state.missing_item_ids:
@@ -461,5 +475,71 @@ async def test_probe_sample_refs_is_read_only(tmp_path):
         # read-only: sample_refs unchanged
         refreshed = store.get_campaign_sync(campaign.id)
         assert len(refreshed.sample_refs) == 3
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_campaign_collection_created_and_idempotent(tmp_path):
+    """P1: create_from_plan 自动建 collection；重复 sync 幂等不重建。"""
+    from app.db.models import Campaign
+
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan())
+        assert state.collection_puts == 1
+        assert campaign.datalab_collection_id == f"formumind_campaign_{campaign.id}"
+        assert state.collections.get(f"formumind_campaign_{campaign.id}")
+
+        # 幂等：已存在则 GET 命中，不再 PUT
+        again = await store.sync_campaign_collection(campaign.id)
+        assert again == f"formumind_campaign_{campaign.id}"
+        assert state.collection_puts == 1
+
+        with store._session_factory() as session:
+            row = session.get(Campaign, campaign.id)
+            assert row.datalab_collection_id == f"formumind_campaign_{campaign.id}"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_campaign_collection_recreates_after_gone(tmp_path):
+    """collection 在平台被删 → 下次 sync 自动重建并更新记录。"""
+    from app.db.models import Campaign
+
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan())
+        assert state.collection_puts == 1
+
+        # 平台侧 collection 消失（外部删除）
+        del state.collections[f"formumind_campaign_{campaign.id}"]
+
+        again = await store.sync_campaign_collection(campaign.id)
+        assert again == f"formumind_campaign_{campaign.id}"
+        assert state.collection_puts == 2
+        with store._session_factory() as session:
+            row = session.get(Campaign, campaign.id)
+            assert row.datalab_collection_id == f"formumind_campaign_{campaign.id}"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_campaign_collection_failure_swallowed(tmp_path):
+    """collection 同步失败只告警，不阻断 campaign 主流程。"""
+    state = MockDatalabState()
+    store = await _store_with_mock(tmp_path, state)
+    try:
+        campaign = await store.create_from_plan(_plan())
+        assert campaign.id >= 1  # campaign 本身成功
+
+        # 平台 500 → sync 返回 None，不抛
+        state.collections = None  # type: ignore[assignment]  # force handler crash
+        result = await store.sync_campaign_collection(campaign.id)
+        assert result is None
     finally:
         await store.close()

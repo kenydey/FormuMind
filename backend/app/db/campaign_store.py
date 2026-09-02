@@ -477,6 +477,11 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             # value, so mirror the write onto the object we hand back — callers
             # use the return value directly instead of re-fetching.
             campaign.sample_refs = refs
+            # P1: project-organise the DOE rows into a DataLab collection.
+            # Best-effort — a collection failure must not fail the campaign.
+            _coll = await self.sync_campaign_collection(campaign.id)
+            if _coll:
+                campaign.datalab_collection_id = _coll
             return campaign
 
         except Exception as exc:
@@ -526,6 +531,75 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
             # every subsequent read.
             await self._prune_stale_refs(campaign_id, stale)
         return out
+
+    async def sync_campaign_collection(self, campaign_id: int) -> str | None:
+        """P1: project-organise a campaign's DOE rows into a DataLab collection.
+
+        Idempotent: re-uses an existing ``formumid_campaign_{id}`` collection and
+        only records the mapping back into SQLite. Any failure is logged and
+        swallowed (None) so campaign flows are never blocked by collection
+        bookkeeping. Rows added to the campaign after the initial sync are not
+        retro-attached (the add-items endpoint requires refcodes; revisit if DOE
+        campaigns ever grow rows after creation).
+        """
+        try:
+            campaign = self._get_campaign_sync(campaign_id)
+            if campaign is None:
+                return None
+            coll_id = f"formumind_campaign_{campaign_id}"
+            client = await self._ensure_client()
+
+            if getattr(campaign, "datalab_collection_id", None):
+                resp = await client.get(
+                    f"/collections/{campaign.datalab_collection_id}"
+                )
+                if resp.status_code == 200:
+                    return campaign.datalab_collection_id
+                if resp.status_code not in (401, 403, 404):
+                    resp.raise_for_status()
+                logger.warning(
+                    "campaign %s collection %s gone (%s) — recreating",
+                    campaign_id,
+                    campaign.datalab_collection_id,
+                    resp.status_code,
+                )
+
+            refs = campaign.sample_refs or []
+            payload = {
+                "data": {
+                    "collection_id": coll_id,
+                    "title": f"FM-C{campaign_id} {campaign.name or ''}".strip(),
+                    "starting_members": [
+                        {"item_id": str(r.get("item_id"))} for r in refs if r.get("item_id")
+                    ],
+                }
+            }
+            resp = await client.put("/collections", json=payload)
+            if resp.status_code == 409:
+                logger.info(
+                    "campaign %s collection %s already exists (created elsewhere)",
+                    campaign_id,
+                    coll_id,
+                )
+            elif resp.status_code not in (200, 201):
+                resp.raise_for_status()
+
+            with commit_session(self._session_factory) as session:
+                row = session.get(Campaign, campaign_id)
+                if row is not None:
+                    row.datalab_collection_id = coll_id
+            logger.info(
+                "campaign %s → DataLab collection %s (%d DOE rows)",
+                campaign_id,
+                coll_id,
+                len(refs),
+            )
+            return coll_id
+        except Exception as exc:
+            logger.warning(
+                "sync_campaign_collection(campaign %s) failed: %s", campaign_id, exc
+            )
+            return None
 
     async def _prune_stale_refs(self, campaign_id: int, stale_ids: list[str]) -> None:
         campaign = self._get_campaign_sync(campaign_id)
