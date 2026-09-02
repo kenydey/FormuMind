@@ -387,6 +387,34 @@ def get_experiment_store(settings: Settings | None = None) -> ExperimentStore:
             max_connections=s.datalab_max_connections,
             max_keepalive_connections=s.datalab_max_keepalive_connections,
         )
+        logger.info("Experiment store: Datalab SSOT (%s)", s.datalab_api_url)
+    elif backend == "auto":
+        # auto 语义与 campaign_store 对齐（config 注释承诺）：探测 Datalab →
+        # 可达即以其为 SSOT；不可达时 REQUIRED 则硬失败，否则回退 sqlite。
+        ok, reason = check_datalab_reachable(
+            s.datalab_api_url,
+            timeout=min(2.0, s.datalab_timeout_seconds),
+        )
+        if ok:
+            _store = DatalabExperimentStore(
+                s.datalab_api_url,
+                factory,
+                timeout=s.datalab_timeout_seconds,
+                max_connections=s.datalab_max_connections,
+                max_keepalive_connections=s.datalab_max_keepalive_connections,
+            )
+            logger.info("Experiment store: Datalab (auto, %s)", s.datalab_api_url)
+        elif s.datalab_required or (s.campaign_backend or "").lower() == "datalab":
+            raise DatalabUnavailableError(
+                s.datalab_api_url,
+                f"auto 探测失败（{reason}）且 Datalab 为必需",
+            )
+        else:
+            logger.warning(
+                "Datalab 不可达（%s），训练记录后端回退 SqlExperimentStore（auto）",
+                reason,
+            )
+            _store = SqlExperimentStore(factory)
     else:
         if s.environment == "production":
             logger.warning(
