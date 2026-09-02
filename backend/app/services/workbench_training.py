@@ -357,5 +357,6 @@ def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
             label=label,
         )
         session.add(placeholder)
+        session.flush()  # 先落库拿 autoincrement id，refresh 才有效（commit 在 with 退出时）
         session.refresh(placeholder)
         return placeholder.id

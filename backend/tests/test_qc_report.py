@@ -298,6 +298,71 @@ def test_ingest_rejects_unknown_experiment(db):
         ingest_qc_report_tx(factory, experiment_id=999999, filename="x.md", text="body")
 
 
+# ── workbench-row binding (P3 regression: ensure_experiment_for_row) ─────────
+
+
+class _FakeCampaign:
+    def __init__(self):
+        self.id = 42
+        self.project_id = "proj_qc"
+        self.owner_id = None
+
+
+def test_qc_report_binds_workbench_row_placeholder(db, monkeypatch):
+    """POST /api/qc/report with campaign_id+row_id must create the ExperimentRow
+    placeholder and bind measurements — regression for the un-flushed refresh
+    crash (InvalidRequestError) that only fired on real datalab-mode binding."""
+    from app.db.campaign_types import WorkbenchRow
+    from app.services import qc_report as qc_module
+    from app.services.qc_ingest import ingest_qc_report_tx
+
+    factory, _ = db
+
+    class _FakeStore:
+        def list_rows_sync(self, campaign_id):
+            assert campaign_id == 42
+            return [WorkbenchRow(
+                id=1, campaign_id=42, item_id="formumind_c42_r1_hash",
+                status="Pending", planned_params={"Zinc phosphate": 9.0},
+                actual_params={}, measurements={},
+            )]
+
+        def get_campaign_sync(self, campaign_id):
+            return _FakeCampaign()
+
+    monkeypatch.setattr(
+        "app.db.campaign_store.get_campaign_store",
+        lambda: _FakeStore(),
+    )
+    payload = QCReportExtraction(
+        measurements=[QCMeasurement(metric="salt_spray_hours", value=720, unit="h")]
+    )
+    monkeypatch.setattr(qc_module, "complete_structured", lambda *a, **k: (payload, None))
+
+    resp = client.post(
+        "/api/qc/report",
+        data={"campaign_id": "42", "row_id": "1", "sync_measured": "false"},
+        files={"file": ("TR.md", io.BytesIO(b"# TR\nsalt spray 720 h"), "text/markdown")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["experiment_id"] > 0
+    assert body["measurement_count"] == 1
+    assert body["synced_measured"] == {}
+
+    # The placeholder row must exist and be labelled for the workbench row.
+    with factory() as session:
+        row = (
+            session.query(ExperimentRow)
+            .filter(ExperimentRow.id == body["experiment_id"])
+            .first()
+        )
+        assert row is not None
+        assert row.label == "wb:42:formumind_c42_r1_hash"
+        assert row.item_id is None  # placeholder: not yet ingested into training
+
+
+
 def test_measurements_sync_into_the_trainable_column(db, experiment, monkeypatch):
     """A certificate only becomes training data once it reaches `measured`."""
     import app.db.database as database_mod
