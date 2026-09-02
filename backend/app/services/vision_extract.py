@@ -447,16 +447,35 @@ def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
         import os
 
         # 写共享卷而非 /tmp：molscribe 是独立容器，看不到 backend 的 /tmp
-        # （OpenCV 报 !src.empty()）。/app/data 两容器都挂载。
-        shared_dir = "/app/data/_ocsr_tmp"
+        # （OpenCV 报 !src.empty()）。/app/data 两容器都挂载；源码模式
+        # host 写仓库根 data/（同一挂载源双视角）。用 FORMUMIND_ENV_FILE
+        # 标志区分（不能用 /app/data 存在性——host 可能残留孤儿目录）。
+        if os.environ.get("FORMUMIND_ENV_FILE"):
+            # __file__ = <root>/backend/app/services/vision_extract.py
+            _root = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            )
+            shared_dir = os.path.join(_root, "data", "_ocsr_tmp")
+        else:
+            shared_dir = "/app/data/_ocsr_tmp"
         os.makedirs(shared_dir, exist_ok=True)
         path = os.path.join(shared_dir, f"ocsr_{os.getpid()}.png")
         with open(path, "wb") as f:
             f.write(content)
         try:
+            # 容器视角路径：worker(molscribe 容器) 读 /app/data；host 源码
+            # 模式写的是仓库根 data/（同一挂载双视角），投递前转换。
+            worker_path = path
+            if os.environ.get("FORMUMIND_ENV_FILE"):
+                _root = os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                )
+                _host_data = os.path.join(_root, "data")
+                if worker_path.startswith(_host_data):
+                    worker_path = "/app/data" + worker_path[len(_host_data):]
             res = celery_app.send_task(
                 "formumind.molscribe_recognize",
-                args=[{"image_path": path}],
+                args=[{"image_path": worker_path}],
                 queue=settings.molscribe_queue,
             ).get(timeout=settings.molscribe_timeout_s)
         finally:

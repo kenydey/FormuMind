@@ -76,6 +76,7 @@ def _score_and_validate(
     req: Requirement | None = None,
     *,
     chem_screen: bool = False,
+    chem_screen_local: bool = False,
     objectives: list[ObjectiveSpec] | None = None,
     bounds: dict[str, tuple[float, float]] | None = None,
 ) -> Formulation:
@@ -100,6 +101,12 @@ def _score_and_validate(
         from ..services.kg_recommend_score import kg_compat_adjust
 
         kg_compat_adjust(form)  # applies penalty/bonus + records form.kg_compat
+    if chem_screen_local:
+        # P3: 零网络本地化学预筛（RDKit 价键 + molbloom patent）——
+        # 优化循环安全版，每代数百次调用不触网。
+        from ..services import chemtools
+
+        form.warnings.extend(chemtools.screen_formulation_local(form))
     # `objectives` defaults to req.objectives for every existing caller. Callers
     # that already resolved a different objectives list to rank/select
     # candidates by (e.g. run_optimization falling back to default_objectives()

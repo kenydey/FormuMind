@@ -155,3 +155,110 @@ def substructure_hits(
         except Exception:
             continue
     return hits[:top_k]
+
+
+def _kg_entities_with_smiles(settings=None, limit: int = 2000) -> list[tuple[str, str, str | None]]:
+    """[(id, canonical_name, smiles)] from the KG entity store (chemical kind).
+
+    P4: KG structure-similarity dimension — entities with a SMILES are
+    candidates for Tanimoto ranking alongside catalog materials.
+    """
+    settings = settings or get_settings()
+    out: list[tuple[str, str, str | None]] = []
+    try:
+        from ..db.entity_store import get_entity_store
+
+        store = get_entity_store()
+        rows = store.search_entities("", limit=limit)
+        # search_entities("") returns [] — fall back to a direct scan.
+        if not rows:
+            from ..db.database import default_session_factory
+            from ..db.models import KGEntity
+
+            with default_session_factory()() as session:
+                rows = (
+                    session.query(KGEntity)
+                    .filter(KGEntity.kind == "chemical", KGEntity.smiles.isnot(None))
+                    .limit(limit)
+                    .all()
+                )
+        for row in rows:
+            s = getattr(row, "smiles", None)
+            if s:
+                name = getattr(row, "canonical_name", "") or getattr(row, "id", "")
+                out.append((getattr(row, "id", ""), name, s))
+    except Exception as exc:
+        logger.debug("structure_search: kg entity scan skipped: %s", exc)
+    return out
+
+
+def _adaptive_kg_threshold(smiles: str, requested: float) -> float:
+    """P4 调优: 大分子 Tanimoto 天然偏低（Morgan 指纹位多，交集占比小），
+    固定阈值会让 KG 相似命中对聚合物/树脂类高分子恒为空。两档制：
+    ≤15 原子小分子用请求阈值（0.6 保精度）；>15 大分子放宽到 0.25
+    （文献实体多为小分子，与树脂类查询的交集天然稀疏，0.25 是实测
+    DGEBA→环氧硅烷 0.28 的可达档）。"""
+    try:
+        from rdkit import Chem
+
+        mol = Chem.MolFromSmiles(smiles)
+        n_atoms = mol.GetNumAtoms() if mol else 0
+    except Exception:
+        return requested
+    if n_atoms <= 15:
+        return requested
+    return max(0.15, min(requested, 0.25))
+
+
+def kg_structure_hits(
+    smiles: str,
+    *,
+    top_k: int = 10,
+    threshold: float = 0.6,
+    settings=None,
+) -> list[dict]:
+    """P4: rank KG chemical entities by Morgan Tanimoto to ``smiles``.
+
+    Returns [{"id", "name", "smiles", "similarity"}...] desc. Empty when RDKit
+    unavailable or nothing clears threshold. Complements catalog hits with the
+    knowledge-graph dimension (entities from ingested literature).
+
+    ``threshold`` is the caller's requested cutoff for small molecules; large
+    ones (polymers/resins) get an adaptive relaxation via ``_adaptive_kg_threshold``.
+    """
+    if not (smiles or "").strip():
+        return []
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem, DataStructs
+
+        query = Chem.MolFromSmiles(smiles)
+        if query is None:
+            return []
+        qfp = AllChem.GetMorganFingerprintAsBitVect(query, 2, nBits=2048)
+        effective_threshold = _adaptive_kg_threshold(smiles, threshold)
+    except Exception as exc:
+        logger.warning("structure_search: kg query fingerprint failed: %s", exc)
+        return []
+
+    hits: list[dict] = []
+    for eid, name, cand_smiles in _kg_entities_with_smiles(settings=settings):
+        try:
+            cand = Chem.MolFromSmiles(cand_smiles)
+            if cand is None:
+                continue
+            cfp = AllChem.GetMorganFingerprintAsBitVect(cand, 2, nBits=2048)
+            sim = float(DataStructs.TanimotoSimilarity(qfp, cfp))
+        except Exception:
+            continue
+        if sim >= effective_threshold:
+            hits.append(
+                {
+                    "id": eid,
+                    "name": name,
+                    "smiles": cand_smiles,
+                    "similarity": round(sim, 4),
+                }
+            )
+    hits.sort(key=lambda h: h["similarity"], reverse=True)
+    return hits[:top_k]

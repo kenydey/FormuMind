@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.domain import knowledge
+from app.domain.schemas import Formulation, Ingredient, ProductDomain
 from app.main import app
 from app.services.structure_recognize import recognize_structure_image
 
@@ -345,6 +346,189 @@ class TestSubstructureHits:
         body = r.json()
         assert body["smarts"] == "[NX3;H2]"
         assert isinstance(body["hits"], list)
+
+
+class TestScreenFormulationLocal:
+    """P3: zero-network chemical pre-screen for optimisation loops."""
+
+    def _form(self, **ing_kwargs) -> Formulation:
+        defaults = dict(name="Epoxy resin X", role="resin", weight_pct=50.0)
+        defaults.update(ing_kwargs)
+        return Formulation(
+            name="test",
+            domain=ProductDomain.autodeposition_coating,
+            ingredients=[Ingredient(**defaults)],
+            rationale="t",
+        )
+
+    def test_invalid_smiles_flagged(self):
+        from app.services.chemtools import screen_formulation_local
+
+        warns = screen_formulation_local(self._form(smiles="C1=CC=CC"))
+        assert any("无法被 RDKit 解析" in w for w in warns)
+
+    def test_valid_smiles_no_warnings(self, monkeypatch):
+        from app.services.chemtools import screen_formulation_local
+
+        monkeypatch.setattr(
+            "app.services.chemtools.molbloom_available", lambda: False
+        )
+        warns = screen_formulation_local(self._form(smiles="CCO"))
+        assert warns == []  # valid + patent check disabled
+
+    def test_low_weight_skipped(self):
+        from app.services.chemtools import screen_formulation_local
+
+        warns = screen_formulation_local(
+            self._form(smiles="not-a-molecule", weight_pct=0.01)
+        )
+        assert warns == []  # below _SCREEN_MIN_WT_PCT → not screened
+
+    def test_patented_flagged_when_molbloom(self, monkeypatch):
+        from app.services.chemtools import screen_formulation_local
+
+        monkeypatch.setattr(
+            "app.services.chemtools.molbloom_available", lambda: True
+        )
+        monkeypatch.setattr(
+            "app.services.chemtools.patent_check", lambda smiles: True
+        )
+        warns = screen_formulation_local(self._form(smiles="CCO"))
+        assert any("IP 预筛" in w for w in warns)
+
+    def test_no_network_calls(self, monkeypatch):
+        """P3 core guarantee: optimisation loops never hit the network."""
+        from app.services.chemtools import screen_formulation_local
+
+        called = {"n": 0}
+
+        def boom(*a, **k):
+            called["n"] += 1
+            raise AssertionError("network must not be called")
+
+        monkeypatch.setattr(
+            "app.services.chemtools.controlled_check", boom
+        )
+        monkeypatch.setattr("app.services.chemtools.molbloom_available", lambda: False)
+        screen_formulation_local(self._form(smiles="CCO"))
+        assert called["n"] == 0
+
+
+class TestKgStructureHits:
+    """P4: KG entity structure-similarity dimension."""
+
+    def test_kg_hits_ranked(self, monkeypatch, material_store):
+        from app.services.structure_search import kg_structure_hits
+
+        # Mock KG entities: one similar to ethanol, one unrelated
+        fake_rows = [
+            ("chem:1", "Ethanol-like", "CCO"),
+            ("chem:2", "Benzene ring", "c1ccccc1"),
+        ]
+
+        def fake_scan(settings=None, limit=2000):
+            return fake_rows
+
+        monkeypatch.setattr(
+            "app.services.structure_search._kg_entities_with_smiles", fake_scan
+        )
+        hits = kg_structure_hits("CCO", top_k=5, threshold=0.3)
+        assert hits
+        assert hits[0]["name"] == "Ethanol-like"  # Tanimoto 1.0 with CCO
+        assert hits[0]["similarity"] == 1.0
+        assert all("id" in h and "name" in h and "similarity" in h for h in hits)
+
+    def test_kg_hits_threshold_filters(self, monkeypatch, material_store):
+        from app.services.structure_search import kg_structure_hits
+
+        monkeypatch.setattr(
+            "app.services.structure_search._kg_entities_with_smiles",
+            lambda settings=None, limit=2000: [("chem:1", "A", "CCO")],
+        )
+        hits = kg_structure_hits("CCO", top_k=5, threshold=1.0)
+        assert len(hits) == 1 and hits[0]["similarity"] == 1.0
+        hits = kg_structure_hits("CCCO", top_k=5, threshold=1.0)  # propanol ≠ ethanol
+        assert hits == []
+
+    def test_invalid_query_empty(self):
+        from app.services.structure_search import kg_structure_hits
+
+        assert kg_structure_hits("not-a-molecule") == []
+        assert kg_structure_hits("") == []
+
+    def test_recognize_includes_kg_hits(self, monkeypatch, material_store):
+        """Full pipeline: kg_hits field present and populated on success."""
+        monkeypatch.setattr(
+            "app.worker.celery_app.celery_app.send_task",
+            lambda *a, **k: _FakeAsyncResult(
+                {"ok": True, "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1"}
+            ),
+        )
+        monkeypatch.setattr(
+            "app.services.structure_search._kg_entities_with_smiles",
+            lambda settings=None, limit=2000: [
+                ("chem:1", "DGEBA", "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1")
+            ],
+        )
+        res = recognize_structure_image(_FAKE_PNG)
+        assert res["recognized"] is True
+        assert "kg_hits" in res
+        assert res["kg_hits"]  # non-empty with the mocked entity
+
+    def test_failure_path_has_kg_hits_field(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.worker.celery_app.celery_app.send_task",
+            lambda *a, **k: _FakeAsyncResult({"ok": False, "reason": "x"}),
+        )
+        res = recognize_structure_image(_FAKE_PNG)
+        assert res["recognized"] is False
+        assert res["kg_hits"] == []  # field present for consistent shape
+
+
+class TestAdaptiveKgThreshold:
+    """P4 tuning: large molecules get relaxed Tanimoto cutoff."""
+
+    def test_small_molecule_keeps_requested(self):
+        from app.services.structure_search import _adaptive_kg_threshold
+
+        # ethanol (9 atoms) ≤ 15 → keep 0.6
+        assert _adaptive_kg_threshold("CCO", 0.6) == 0.6
+
+    def test_large_molecule_relaxed(self):
+        from app.services.structure_search import _adaptive_kg_threshold
+
+        # DGEBA (25 atoms) > 15 → 0.25 (two-tier)
+        t = _adaptive_kg_threshold(
+            "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1", 0.6
+        )
+        assert t == 0.25
+
+    def test_floor_at_015(self):
+        from app.services.structure_search import _adaptive_kg_threshold
+
+        # huge molecule with tiny requested → never below 0.15
+        big = "C" * 300
+        assert _adaptive_kg_threshold(big, 0.05) == 0.15
+
+    def test_dgeba_gets_kg_hits_with_adaptive(self, monkeypatch, material_store):
+        """Real effect: DGEBA previously 0 hits at 0.6; adaptive finds the epoxy silane."""
+        from app.services.structure_search import kg_structure_hits
+
+        monkeypatch.setattr(
+            "app.services.structure_search._kg_entities_with_smiles",
+            lambda settings=None, limit=2000: [
+                ("chem:1", "Epoxy silane", "CO[Si](CCCOCC1CO1)(OC)OC"),
+                ("chem:2", "Benzene", "c1ccccc1"),
+            ],
+        )
+        hits = kg_structure_hits(
+            "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1",
+            top_k=5,
+            threshold=0.6,  # caller still asks 0.6
+        )
+        names = {h["name"] for h in hits}
+        assert "Epoxy silane" in names  # 0.28 sim ≥ 0.5 adaptive threshold
+        assert "Benzene" not in names  # too dissimilar
 
 
 class _FakeSettings:

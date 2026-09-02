@@ -19,7 +19,29 @@ from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_SHARED_DIR = "/app/data/_structure_tmp"
+# 跨容器共享目录：backend(host 或容器) 写的图，molscribe 容器必须能读。
+# 容器模式：/app/data（compose 挂载 ./data）；源码模式：仓库根 data/
+# （host 的 ./data 就是容器挂载源，同一目录双视角）。
+def _shared_dir() -> str:
+    import os
+
+    # 源码模式由 FORMUMIND_ENV_FILE 标志区分（start-dev.sh 设置）。不能用
+    # /app/data 存在性判断——host 可能残留容器模式的孤儿目录。
+    if os.environ.get("FORMUMIND_ENV_FILE"):
+        from ..config import get_settings
+
+        if get_settings().environment.strip().lower() == "test":
+            return "/tmp/_structure_tmp"
+        # __file__ = <root>/backend/app/services/structure_recognize.py
+        # 上三级 = backend/ → 再上一级 = 仓库根
+        root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        return os.path.join(root, "data", "_structure_tmp")
+    return "/app/data/_structure_tmp"
+
+
+_SHARED_DIR = _shared_dir()
 _MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_MAGIC = {
     b"\x89PNG\r\n\x1a\n": "png",
@@ -128,9 +150,22 @@ def recognize_structure_image(
     try:
         from app.worker.celery_app import celery_app
 
+        # 容器视角路径：worker(molscribe 容器) 读 /app/data，而 host 源码
+        # 模式写的是 /root/FormuMind/data（同一挂载双视角）。投递前转换。
+        import os as _os
+
+        worker_path = path
+        if _os.environ.get("FORMUMIND_ENV_FILE"):
+            _root = _os.path.dirname(
+                _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            )
+            _host_data = _os.path.join(_root, "data")
+            if worker_path.startswith(_host_data):
+                worker_path = "/app/data" + worker_path[len(_host_data):]
+
         res = celery_app.send_task(
             "formumind.molscribe_recognize",
-            args=[{"image_path": path}],
+            args=[{"image_path": worker_path}],
             queue=settings.molscribe_queue,
         ).get(timeout=settings.molscribe_timeout_s)
     except Exception as exc:
@@ -184,7 +219,19 @@ def recognize_structure_image(
         logger.warning("structure similarity scan failed: %s", exc)
         warnings.append("相似材料扫描失败（不影响识别结果）")
 
+    # ── P4: KG structure-similarity dimension ────────────────────────
+    kg_hits: list[dict] = []
+    try:
+        from ..services.structure_search import kg_structure_hits
+
+        kg_hits = kg_structure_hits(
+            smiles, top_k=top_k, threshold=threshold, settings=settings
+        )
+    except Exception as exc:
+        logger.debug("kg structure scan failed (non-fatal): %s", exc)
+
     payload = _result(True, smiles, moljson, hits, sha, False, warnings, None)
+    payload["kg_hits"] = kg_hits
     _cache_put(sha, payload, settings)
     return payload
 
@@ -204,6 +251,7 @@ def _result(
         "smiles": smiles,
         "moljson": moljson,
         "hits": hits,
+        "kg_hits": [],
         "image_sha": image_sha,
         "cached": cached,
         "warnings": warnings,

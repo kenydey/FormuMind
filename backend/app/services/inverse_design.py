@@ -105,9 +105,9 @@ def _evaluate(
     if not verdict.feasible:
         return False
 
-    # chem_screen stays off: it is network-bound (ChemCrow) and documented as
-    # unsuitable for optimisation loops.
-    form = _score_and_validate(form, process, req, chem_screen=False)
+    # P3: chem_screen 解封 — 网络版 (ChemCrow) 不适合优化循环，改用
+    # 零网络本地版（RDKit 价键 + molbloom patent），每代数百次调用安全。
+    form = _score_and_validate(form, process, req, chem_screen_local=True)
     individual.formulation = form
     individual.metrics = dict(form.predicted)
     individual.violation = _total_violation(individual.metrics, hard)
