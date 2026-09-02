@@ -25,6 +25,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .datalab_client import datalab_headers
 from .models import TaskOutbox
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,9 @@ def reconcile(
     errors = 0
     skipped = 0
 
-    with httpx.Client(base_url=base_url, timeout=timeout) as client:
+    with httpx.Client(
+        base_url=base_url, timeout=timeout, headers=datalab_headers()
+    ) as client:
         for row in rows:
             payload: dict = row.payload if isinstance(row.payload, dict) else {}
             experiment_id = payload.get("experiment_id")

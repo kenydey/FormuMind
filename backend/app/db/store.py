@@ -29,6 +29,7 @@ from .datalab_client import (
     DatalabUnavailableError,
     check_datalab_reachable,
     datalab_block,
+    datalab_headers,
     datalab_sample_type,
     parse_create_sample_response,
     parse_delete_response,
@@ -225,6 +226,7 @@ class DatalabExperimentStore:
                 timeout=self._timeout,
                 limits=self._limits,
                 transport=httpx.HTTPTransport(retries=2),
+                headers=datalab_headers(),
             )
         return self._client
 

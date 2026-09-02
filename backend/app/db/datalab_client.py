@@ -47,6 +47,19 @@ def datalab_sample_type() -> str:
     return DATALAB_SAMPLE_TYPE
 
 
+def datalab_headers() -> dict[str, str]:
+    """Auth headers for Datalab API calls.
+
+    The platform runs non-TESTING (2026-09-02 hardened): every request must
+    carry the ``DATALAB-API-KEY`` header or the endpoint 401s. Returns {} when
+    no token is configured so older deployments keep working unauthenticated.
+    """
+    from ..config import get_settings
+
+    token = get_settings().datalab_api_token
+    return {"DATALAB-API-KEY": token} if token else {}
+
+
 def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, str | None]:
     """Return (reachable, error_reason)."""
     import httpx
@@ -55,7 +68,7 @@ def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, s
     if not url:
         return False, "FORMUMIND_DATALAB_API_URL 未配置"
     try:
-        with httpx.Client(base_url=url, timeout=timeout) as client:
+        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
             resp = client.get("/")
             resp.raise_for_status()
         return True, None
@@ -136,7 +149,7 @@ async def upload_file(
     if not url or not item_id:
         return None
     try:
-        async with httpx.AsyncClient(base_url=url, timeout=timeout) as client:
+        async with httpx.AsyncClient(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
             resp = await client.post(
                 "/upload-file/",
                 files={"file": (filename, content)},

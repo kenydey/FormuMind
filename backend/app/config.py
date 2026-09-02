@@ -553,6 +553,7 @@ class Settings(BaseSettings):
     # DOE workbench / campaign persistence (Headless ELN)
     campaign_backend: str = "auto"  # auto (probe Datalab → fallback sqlite) | sqlite | datalab
     datalab_api_url: str = "http://localhost:5001"
+    datalab_api_token: str = ""  # DATALAB-API-KEY header（平台非 TESTING 模式必需）
     datalab_timeout_seconds: float = 30.0
     datalab_max_connections: int = 10
     datalab_max_keepalive_connections: int = 5

@@ -842,7 +842,7 @@ async def search_experiments(
     backend = (settings.campaign_backend or "sqlite").lower()
 
     if backend in ("datalab", "auto"):
-        from ..db.datalab_client import check_datalab_reachable
+        from ..db.datalab_client import check_datalab_reachable, datalab_headers
         ok, _ = await run_in_threadpool(check_datalab_reachable, settings.datalab_api_url, timeout=2.0)
         if ok:
             import httpx
@@ -850,6 +850,7 @@ async def search_experiments(
                 async with httpx.AsyncClient(
                     base_url=settings.datalab_api_url.rstrip("/"),
                     timeout=10.0,
+                    headers=datalab_headers(),
                 ) as client:
                     resp = await client.get("/search/", params={"q": q})
                     if resp.status_code < 400:
