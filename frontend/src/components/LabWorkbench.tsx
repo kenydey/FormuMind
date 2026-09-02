@@ -92,6 +92,7 @@ export default function LabWorkbench({
   const followLoopTask = useStore((s) => s.followLoopTask);
   const refreshWorkbenchStats = useStore((s) => s.refreshWorkbenchStats);
   const recomputePredicted = useStore((s) => s.recomputePredicted);
+  const refreshTrainingStatus = useStore((s) => s.refreshTrainingStatus);
   const workbenchCampaignId = useStore((s) => s.workbenchCampaignId);
 
   const objectives = useMemo(
@@ -291,9 +292,10 @@ export default function LabWorkbench({
         setError(`笔记保存失败：${e instanceof Error ? e.message : String(e)}`);
         return;
       }
+      void refreshTrainingStatus();
       setNoteEditorRow(null);
     },
-    [noteEditorRow, campaignId]
+    [noteEditorRow, campaignId, refreshTrainingStatus]
   );
 
   // ── Phase 2: tag save ─────────────────────────────────────
@@ -321,9 +323,10 @@ export default function LabWorkbench({
         setTagPickerRow(null);
         return;
       }
+      void refreshTrainingStatus();
       setTagPickerRow(null);
     },
-    [tagPickerRow, campaignId]
+    [tagPickerRow, campaignId, refreshTrainingStatus]
   );
 
   const handleSave = async () => {
@@ -382,6 +385,7 @@ export default function LabWorkbench({
       onSaved?.(res.rows);
       void refreshWorkbenchStats();
       void recomputePredicted();
+      void refreshTrainingStatus(); // 回灌后横幅即时反映数据量
       if (res.loop_task_id) void followLoopTask(res.loop_task_id);
     } catch (e) {
       setError(String(e));
