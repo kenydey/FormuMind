@@ -208,6 +208,7 @@ def chat(req: ChatRequestValidated):
                     sources,
                     domain=req.domain,
                     history=history,
+                    structure=req.structure,
                 )
                 answer = _ensure_answer(answer)
         else:
@@ -216,6 +217,7 @@ def chat(req: ChatRequestValidated):
                 sources,
                 domain=req.domain,
                 history=history,
+                structure=req.structure,
             )
             answer = _ensure_answer(answer)
 

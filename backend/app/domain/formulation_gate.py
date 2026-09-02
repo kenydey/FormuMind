@@ -67,6 +67,45 @@ def _chemtools_gap_fill(name: str, has_smiles: bool, has_cas: bool) -> dict:
     return updates
 
 
+def _web_search_gap_fill(name: str, updates: dict) -> list[str]:
+    """P1: 网络检索兜底 — ChemCrow/PubChem 查不到的长尾材料名，用
+    Tavily/SerpAPI 检索「{name} chemical CAS SMILES」文本，从结果摘要里
+    提取 CAS 号回填。失败静默（返回警告，不阻断）。
+
+    返回 warning 列表（供调用方挂到配方的 warnings）。
+    """
+    warnings: list[str] = []
+    if updates.get("cas_no"):
+        return warnings  # CAS 已解析，无需网络兜底
+    from ..config import get_settings
+
+    # 测试环境不触网（DDG 反爬会在无 mock 时挂起 60s）。网络兜底仅 dev/prod。
+    if get_settings().environment.strip().lower() == "test":
+        return warnings
+    from ..services import literature
+
+    query = f"{name} chemical CAS number"
+    try:
+        hits = literature.search_web(query, limit=3)
+    except Exception:
+        return warnings
+    blob = " ".join((h.title or "") + " " + (h.snippet or "") for h in hits)
+    if not blob:
+        return warnings
+    import re
+
+    m = re.search(r"\b(\d{2,7}-\d{2}-\d)\b", blob)
+    if m:
+        cas = m.group(1)
+        # 校验和后回填（C18 纪律：伪造/错填 CAS 不越过闸门）
+        if _cas_checksum_ok(cas):
+            updates["cas_no"] = cas
+            warnings.append(f"{name}: 通过网络检索补全 CAS {cas}")
+        else:
+            warnings.append(f"{name}: 网络检索 CAS {cas} 校验失败，已忽略")
+    return warnings
+
+
 def _apply_lookup_hit(updates: dict, hit: dict, *, need_cas: bool, need_zh: bool, need_smiles: bool, need_formula: bool, need_mm: bool) -> None:
     if need_cas and hit.get("cas"):
         updates["cas_no"] = hit["cas"]
@@ -189,6 +228,10 @@ def _resolve_fields(
             has_cas=bool(updates.get("cas_no") or merged_cas),
         )
     )
+
+    # P1: 网络检索兜底 — ChemCrow/PubChem 全 miss 的长尾材料名，Tavily 检索补 CAS。
+    if not (updates.get("smiles") or merged_smiles) or not (updates.get("cas_no") or merged_cas):
+        warnings.extend(_web_search_gap_fill(gap_name, updates))
 
     if not component_type and not updates.get("component_type") and (role or updates.get("role")):
         updates["component_type"] = role or updates.get("role")

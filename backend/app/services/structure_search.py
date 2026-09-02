@@ -116,3 +116,42 @@ def structure_query_terms(hits: list[dict]) -> str:
         if name and name not in terms:
             terms.append(name)
     return " ".join(terms[:5])
+
+
+def substructure_hits(
+    smarts: str,
+    *,
+    top_k: int = 20,
+    settings=None,
+) -> list[dict]:
+    """Filter catalog materials by SMARTS substructure match.
+
+    Returns [{"name", "role", "smiles"}...] for materials whose structure
+    contains the given substructure (e.g. ``[NX3;H2]`` primary amine,
+    ``c1ccccc1`` benzene ring). Empty list when RDKit unavailable, the SMARTS
+    is invalid, or nothing matches. Best-effort: rows without SMILES or that
+    fail to parse are skipped.
+    """
+    if not (smarts or "").strip():
+        return []
+    try:
+        from rdkit import Chem
+
+        patt = Chem.MolFromSmarts(smarts)
+        if patt is None:
+            return []
+    except Exception as exc:
+        logger.warning("structure_search: SMARTS parse failed: %s", exc)
+        return []
+
+    hits: list[dict] = []
+    for name, role, cand_smiles in _material_candidates(settings=settings):
+        try:
+            cand = Chem.MolFromSmiles(cand_smiles)
+            if cand is None:
+                continue
+            if cand.HasSubstructMatch(patt):
+                hits.append({"name": name, "role": role, "smiles": cand_smiles})
+        except Exception:
+            continue
+    return hits[:top_k]

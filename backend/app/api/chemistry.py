@@ -90,3 +90,17 @@ async def structure_image_endpoint(
             "warnings": [f"识别服务异常：{exc}"],
             "error": str(exc),
         }
+
+
+@router.get("/chemical/substructure")
+def substructure_endpoint(
+    smarts: str = Query(..., min_length=1, description="SMARTS 子结构模式，如 [NX3;H2] 伯胺"),
+    top_k: int = Query(20, ge=1, le=100),
+) -> dict:
+    """按 SMARTS 子结构筛选材料库（含某官能团/环的材料）。"""
+    from ..services.structure_search import substructure_hits
+
+    return {
+        "smarts": smarts,
+        "hits": substructure_hits(smarts, top_k=top_k),
+    }

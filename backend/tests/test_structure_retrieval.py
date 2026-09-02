@@ -183,6 +183,177 @@ class TestChatStructureContext:
         assert structure_retrieval_context({}) == ""
 
 
+class TestStructurePromptInjection:
+    """P0: MolJSON must reach the LLM prompt (structure → explicit atom/bond graph)."""
+
+    def test_chat_prompt_embeds_moljson(self):
+        from app.services.llm import _chat_prompt
+        from app.domain.schemas import Evidence
+
+        ev = Evidence(
+            source="seed",
+            identifier="e1",
+            title="t",
+            snippet="s",
+            relevance=0.5,
+        )
+        prompt = _chat_prompt(
+            "这个结构有几个苯环？",
+            [ev],
+            "autodeposition_coating",
+            structure={
+                "recognized": True,
+                "smiles": "c1ccc(OCC2CO2)cc1",
+                "moljson": None,  # server regenerates from smiles
+                "hits": [],
+            },
+        )
+        # MolJSON explicit graph is embedded
+        assert "Target molecular structure" in prompt
+        assert '"element": "C"' in prompt
+        assert '"bonds"' in prompt
+
+    def test_chat_prompt_without_structure_unchanged(self):
+        from app.services.llm import _chat_prompt
+        from app.domain.schemas import Evidence
+
+        ev = Evidence(source="seed", identifier="e1", title="t", snippet="s", relevance=0.5)
+        prompt = _chat_prompt("问题", [ev], "autodeposition_coating")
+        assert "Target molecular structure" not in prompt
+
+    def test_chat_prompt_invalid_smiles_skipped(self):
+        from app.services.llm import _chat_prompt
+        from app.domain.schemas import Evidence
+
+        ev = Evidence(source="seed", identifier="e1", title="t", snippet="s", relevance=0.5)
+        prompt = _chat_prompt(
+            "问题",
+            [ev],
+            "autodeposition_coating",
+            structure={"smiles": "not-a-molecule", "hits": []},
+        )
+        assert "Target molecular structure" not in prompt
+
+
+class TestWebSearchGapFill:
+    """P1: long-tail material names get CAS backfilled via web search."""
+
+    def _ev(self, title: str, snippet: str):
+        from app.domain.schemas import Evidence
+
+        return Evidence(
+            source="Tavily", identifier="t1", title=title, snippet=snippet, relevance=0.5
+        )
+
+    def test_cas_extracted_and_backfilled(self, monkeypatch):
+        from app.domain.formulation_gate import _web_search_gap_fill
+
+        monkeypatch.setattr(
+            "app.services.literature.search_web",
+            lambda q, limit: [
+                self._ev(
+                    "Product X safety sheet",
+                    "CAS 1317-65-3, also known as limestone, chemical formula CaCO3",
+                )
+            ],
+        )
+        monkeypatch.setattr(
+            "app.config.get_settings",
+            lambda: _FakeSettings(environment="development"),
+        )
+        updates: dict = {}
+        warns = _web_search_gap_fill("Limestone powder", updates)
+        assert updates.get("cas_no") == "1317-65-3"
+        assert any("网络检索" in w for w in warns)
+
+    def test_invalid_cas_not_backfilled(self, monkeypatch):
+        from app.domain.formulation_gate import _web_search_gap_fill
+
+        monkeypatch.setattr(
+            "app.services.literature.search_web",
+            lambda q, limit: [self._ev("x", "CAS 999-99-9 fake number here")],
+        )
+        monkeypatch.setattr(
+            "app.config.get_settings",
+            lambda: _FakeSettings(environment="development"),
+        )
+        updates: dict = {}
+        warns = _web_search_gap_fill("Fake material", updates)
+        assert "cas_no" not in updates  # checksum failed → not backfilled
+        assert any("校验失败" in w for w in warns)
+
+    def test_test_env_skips_network(self, monkeypatch):
+        from app.domain.formulation_gate import _web_search_gap_fill
+
+        called = {"n": 0}
+
+        def boom(*a, **k):
+            called["n"] += 1
+            raise AssertionError("network must not be called in test env")
+
+        monkeypatch.setattr("app.services.literature.search_web", boom)
+        updates: dict = {}
+        warns = _web_search_gap_fill("X", updates)
+        assert called["n"] == 0
+        assert warns == []
+
+    def test_no_hits_noop(self, monkeypatch):
+        from app.domain.formulation_gate import _web_search_gap_fill
+
+        monkeypatch.setattr("app.services.literature.search_web", lambda q, limit: [])
+        monkeypatch.setattr(
+            "app.config.get_settings",
+            lambda: _FakeSettings(environment="development"),
+        )
+        updates: dict = {}
+        warns = _web_search_gap_fill("Unknown thing", updates)
+        assert updates == {}
+        assert warns == []
+
+
+class TestSubstructureHits:
+    """P2: SMARTS substructure filter over the catalog."""
+
+    def test_primary_amine_filter(self, material_store):
+        from app.services.structure_search import substructure_hits
+
+        hits = substructure_hits("[NX3;H2]", top_k=20)
+        # IPDA has two primary amines; non-amines excluded
+        names = {h["name"] for h in hits}
+        assert "Isophorone diamine (IPDA)" in names
+        assert "Deionized water" not in names  # water has no N
+        assert "Xylene" not in names  # aromatic C only
+
+    def test_benzene_ring_filter(self, material_store):
+        from app.services.structure_search import substructure_hits
+
+        hits = substructure_hits("c1ccccc1", top_k=20)
+        names = {h["name"] for h in hits}
+        assert "Bisphenol-A epoxy (DGEBA)" in names  # two benzene rings
+        assert "Xylene" in names  # aromatic
+        assert "Butyl glycol" not in names  # aliphatic
+
+    def test_invalid_smarts_returns_empty(self):
+        from app.services.structure_search import substructure_hits
+
+        assert substructure_hits("[not-a-smarts") == []
+        assert substructure_hits("") == []
+
+    def test_endpoint_works(self, material_store):
+        r = client.get("/api/chemical/substructure", params={"smarts": "[NX3;H2]"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["smarts"] == "[NX3;H2]"
+        assert isinstance(body["hits"], list)
+
+
+class _FakeSettings:
+    """Minimal Settings stand-in for environment-dependent branches."""
+
+    def __init__(self, environment: str = "development"):
+        self.environment = environment
+
+
 class _FakeAsyncResult:
     """Minimal stand-in for celery AsyncResult.get()."""
 

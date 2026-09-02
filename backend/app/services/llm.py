@@ -1320,6 +1320,7 @@ def _chat_prompt(
     domain: str | None,
     *,
     history: list | None = None,
+    structure: dict | None = None,
 ) -> str:
     context = _build_context(evidence)
     domain_hint = f"Domain context: {domain}\n" if domain else ""
@@ -1333,6 +1334,27 @@ def _chat_prompt(
                 lines.append(f"{role}: {str(content)[:400]}")
         if lines:
             hist_block = "Recent dialogue:\n" + "\n".join(lines) + "\n\n"
+    # P0: 结构图识别结果铺进推理上下文 — MolJSON 显式原子/键让 LLM
+    # 数碳/环/官能团零误差（P0 benchmark +7pp 的落地）。
+    struct_block = ""
+    if structure:
+        try:
+            from .moljson import validate_smiles, smiles_to_moljson
+
+            smiles = (structure.get("smiles") or "").strip()
+            info = validate_smiles(smiles) if smiles else {"valid": False}
+            if info.get("valid"):
+                mj = smiles_to_moljson(smiles)
+                if mj:
+                    import json as _json
+
+                    struct_block = (
+                        "Target molecular structure (authoritative graph, use this "
+                        "over any textual hints when counting atoms/rings/functional groups):\n"
+                        f"```json\n{_json.dumps(mj, ensure_ascii=False)}\n```\n\n"
+                    )
+        except Exception as exc:
+            log.debug("structure prompt block failed: %s", exc)
     trade_suffix = ""
     try:
         from .kg.retrieval import trade_product_prompt_suffix
@@ -1350,6 +1372,7 @@ def _chat_prompt(
         f"suppliers exactly as the sources write them.\n"
         f"{domain_hint}"
         f"{hist_block}"
+        f"{struct_block}"
         f"Sources:\n{context}\n\n"
         f"<user_question>\n{question}\n</user_question>\n\n"
         f"Answer concisely in the same language as the question (Markdown allowed):"
@@ -1542,6 +1565,7 @@ def answer_question(
     domain: str | None = None,
     *,
     history: list | None = None,
+    structure: dict | None = None,
 ) -> tuple[str, list[Evidence]]:
     """Answer a user question grounded in the provided sources.
 
@@ -1592,7 +1616,7 @@ def answer_question(
             return pq
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
-    prompt = _chat_prompt(question, relevant, domain, history=history)
+    prompt = _chat_prompt(question, relevant, domain, history=history, structure=structure)
     answer = _call_llm(prompt)
     if not answer:
         # Tier 4 — offline fallback: return the most relevant snippet.
