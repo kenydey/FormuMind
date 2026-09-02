@@ -296,6 +296,7 @@ class WorkbenchCampaignSummary(BaseModel):
     strategy: str = ""
     row_count: int = 0
     project_id: str | None = None
+    datalab_collection_id: str | None = None  # P1: DataLab 项目集合
 
 
 @router.get("/experiments/workbench/campaigns", response_model=list[WorkbenchCampaignSummary])
@@ -314,6 +315,7 @@ def list_workbench_campaigns() -> list[WorkbenchCampaignSummary]:
                 strategy=c.strategy or "",
                 row_count=len(c.sample_refs or []),
                 project_id=c.project_id,
+                datalab_collection_id=c.datalab_collection_id,
             )
             for c in rows
         ]
