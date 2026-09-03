@@ -94,7 +94,7 @@ export default function FormulationLineageGraph({
     );
   }
 
-  const { positions, nodeMap } = layout;
+  const { positions } = layout;
 
   return (
     <ChartContainer title="配方谱系演进" className={className}>

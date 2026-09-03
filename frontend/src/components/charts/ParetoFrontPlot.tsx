@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 import {
-  ScatterChart,
   Scatter,
   XAxis,
   YAxis,
@@ -8,7 +7,6 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  ReferenceLine,
   Line,
   ComposedChart,
 } from "recharts";
@@ -49,7 +47,7 @@ export default function ParetoFrontPlot({
   onPointClick,
   className = "",
 }: ParetoFrontPlotProps) {
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [, setHoveredId] = useState<string | null>(null);
 
   const rawPoints = formulations
     .map((f, i) => {

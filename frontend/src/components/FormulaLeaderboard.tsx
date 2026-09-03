@@ -452,7 +452,7 @@ export default function FormulaLeaderboard() {
             { key: "voc_gpl", label: "VOC", direction: "minimize", unit: "g/L" },
             { key: "film_weight_gsm", label: "膜重", direction: "match_target" as "minimize", unit: "g/m²" },
           ]}
-          onBrush={(filtered) => {
+          onBrush={() => {
             // Optional: track filtered count or highlight
           }}
         />

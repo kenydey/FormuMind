@@ -13,7 +13,6 @@ import ChartContainer from "./ChartContainer";
 
 interface BiasTrendData {
   at: string | null;
-  round: number;
   n_rows: number;
   by_metric: Record<string, { n: number; mean_error: number; rmse: number; mae: number; max_abs: number }>;
 }

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useStore } from "../store";
 import BiasTrendChart from "./charts/BiasTrendChart";
 
 type BiasTrend = {
@@ -11,8 +10,6 @@ type BiasTrend = {
 
 export default function BiasTrendPanel({ campaignId }: { campaignId: number | null }) {
   const [data, setData] = useState<BiasTrend | null>(null);
-  const rmseHistory = useStore((s) => s.rmseHistory);
-
   useEffect(() => {
     if (!campaignId) return;
     api
@@ -26,18 +23,6 @@ export default function BiasTrendPanel({ campaignId }: { campaignId: number | nu
   const slice = data.trend.slice(-8);
   const metrics = Array.from(new Set(slice.flatMap((t) => Object.keys(t.by_metric))));
   const primary = metrics[0];
-  const values = slice.map((t) => t.by_metric[primary]?.rmse ?? 0);
-  const maeValues = slice.map((t) => t.by_metric[primary]?.mae ?? 0);
-  // 模型 RMSE 历史（store.rmseHistory 同指标，取近 8 轮）
-  const modelSlice = rmseHistory.slice(-8);
-  const modelValues = modelSlice.map((h) => (h[primary] ?? 0));
-  const maxV = Math.max(1, ...values, ...maeValues, ...modelValues, 50);
-  const w = 300, h = 60, pad = 6;
-  const stepBias = slice.length > 1 ? (w - pad * 2) / (slice.length - 1) : 0;
-  const stepModel = modelSlice.length > 1 ? (w - pad * 2) / (modelSlice.length - 1) : 0;
-  const y = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
-  const path = (vals: number[], step: number) => vals.map((v, i) => `${i === 0 ? "M" : "L"} ${pad + i * step} ${y(v)}`).join(" ");
-  const thrY = y(50);
 
   return (
     <div className="rounded border border-edge/40 bg-ink/40 px-2 py-1.5 text-[11px]">

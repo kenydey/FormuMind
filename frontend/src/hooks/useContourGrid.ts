@@ -55,8 +55,6 @@ export function generateContourPaths(
 ): Array<{ level: number; paths: string[] }> {
   const ny = grid.length;
   const nx = grid[0]?.length || 0;
-  const dx = gridX[1] - gridX[0];
-  const dy = gridY[1] - gridY[0];
   const result: Array<{ level: number; paths: string[] }> = [];
 
   for (const level of levels) {

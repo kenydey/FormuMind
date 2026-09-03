@@ -1,32 +1,13 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
-
-interface OrgDashboardStats {
-  total_experiments: number;
-  total_campaigns: number;
-  total_projects: number;
-  active_projects: number;
-  by_domain: Record<string, number>;
-  top_performers: Array<{
-    metric: string; value: number; experiment_id: number;
-    project_title: string; formulation_preview: string; measured_at: string;
-  }>;
-  ingredient_frequency: Array<{
-    ingredient_name: string; experiment_count: number;
-    avg_weight_pct: number; best_result_metric: string | null;
-  }>;
-  convergence_rate: number;
-  avg_rounds_to_converge: number;
-  recent_activity: { experiments_added: number; campaigns_created: number };
-}
+import { api, type OrgDashboardStats } from "../api";
 
 export default function OrganizationDashboard() {
   const [data, setData] = useState<OrgDashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/org/dashboard")
-      .then((res) => setData(res.data))
+    api.orgDashboard()
+      .then((res) => setData(res))
       .catch((err) => console.error("Dashboard load failed:", err))
       .finally(() => setLoading(false));
   }, []);

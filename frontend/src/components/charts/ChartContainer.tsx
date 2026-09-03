@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { CHART_THEME } from "./chartUtils";
 
 interface ChartContainerProps {
   title: string;

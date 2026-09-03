@@ -30,7 +30,10 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
     },
 
     saveProject: async () => {
-      const { activeProjectId } = get();
+      const { activeProjectId, projectLoading } = get();
+      // loadProject 未完成时挂起 autosave：此时 workspace state 可能仍为空
+      // （persist 不含 sources/chat），立即保存会把空 workspace 覆盖到后端 payload。
+      if (projectLoading) return;
       if (!activeProjectId) return;
       set((draft) => {
         draft.projectSaveBusy = true;
@@ -57,6 +60,10 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
     },
 
     loadProject: async (id) => {
+      set((draft) => {
+        draft.projectLoading = true;
+      });
+      get().cancelAutosave();
       try {
         const { activeProjectId } = get();
         if (activeProjectId && activeProjectId !== id) {
@@ -93,6 +100,10 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
+        });
+      } finally {
+        set((draft) => {
+          draft.projectLoading = false;
         });
       }
     },

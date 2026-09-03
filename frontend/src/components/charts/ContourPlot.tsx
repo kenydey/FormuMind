@@ -36,7 +36,7 @@ export default function ContourPlot({ data, xFactor, yFactor, metric, className 
   const xScale = linearScale(xDomain, [0, innerWidth]);
   const yScale = linearScale(yDomain, [innerHeight, 0]);
 
-  const { grid, gridX, gridY, paths, levelValues } = useContourGrid(data, xDomain, yDomain, 30, 8);
+  const { grid, gridX, gridY, paths } = useContourGrid(data, xDomain, yDomain, 30, 8);
 
   const colorScale = useMemo(() => {
     return (z: number): string => {

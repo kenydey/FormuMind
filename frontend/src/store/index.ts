@@ -52,6 +52,7 @@ export const useStore = create<AppState>()(
       projects: [],
       activeProjectId: null,
       projectSaveBusy: false,
+      projectLoading: false,
       requirementLocked: false,
       historyOpen: false,
       searchQuery: "",

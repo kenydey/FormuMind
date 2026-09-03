@@ -120,6 +120,14 @@ export interface Formulation {
   predicted: Record<string, number>;
   predicted_std: Record<string, number>;
   prediction_tiers?: Record<string, string>;
+  // Real experiment measurements for this formulation when it corresponds to
+  // a measured run (charts prefer these over `predicted`); absent for pure
+  // predictions. Optional so existing Formulation producers are unaffected.
+  measured?: Record<string, number>;
+  // Ingredient/factor values in natural units (cross-project KG similarity
+  // queries are built from these); absent when the formulation carries no
+  // experiment factors.
+  factors?: Record<string, number>;
   score: number | null;
   warnings: string[];
   source?: string;
@@ -399,6 +407,9 @@ export interface WorkbenchRow {
   planned_params: Record<string, number>;
   actual_params: Record<string, number>;
   measurements: Record<string, number | string>;
+  // Predicted values for planned-but-unmeasured rows; optional numeric fallback
+  // when a metric has not been measured yet.
+  predicted?: Record<string, number | string>;
   // Phase 2
   note?: string | null;
   tags?: string[];
@@ -631,6 +642,9 @@ export interface FormulationVersionView {
   change_summary: string;
   created_by: string;
   created_at: string | null;
+  // Frozen formulation payload at this revision (graph/tooltip views); absent
+  // on older records that predate snapshot storage.
+  snapshot?: Record<string, unknown>;
 }
 
 export interface IngredientChangeView {
@@ -786,6 +800,49 @@ export interface ProjectDetailResponse {
   created_at: string;
   updated_at: string;
   workspace: import("./projectWorkspace").ProjectWorkspacePayload;
+}
+
+/** POST /api/kg/formulations/similar — cross-project similar-formulation search. */
+export interface SimilarFormulationMatch {
+  experiment_id: number;
+  project_id: string;
+  project_title: string | null;
+  similarity: number;
+  factors: Record<string, number>;
+  measured: Record<string, number>;
+  shared_ingredients: string[];
+  differing_ingredients: string[];
+}
+
+export interface SimilarFormulationResponse {
+  matches: SimilarFormulationMatch[];
+  query_factors: Record<string, number>;
+}
+
+/** GET /api/org/dashboard — organization-level R&D aggregate stats. */
+export interface OrgDashboardStats {
+  total_experiments: number;
+  total_campaigns: number;
+  total_projects: number;
+  active_projects: number;
+  by_domain: Record<string, number>;
+  top_performers: Array<{
+    metric: string;
+    value: number;
+    experiment_id: number;
+    project_title: string;
+    formulation_preview: string;
+    measured_at: string;
+  }>;
+  ingredient_frequency: Array<{
+    ingredient_name: string;
+    experiment_count: number;
+    avg_weight_pct: number;
+    best_result_metric: string | null;
+  }>;
+  convergence_rate: number;
+  avg_rounds_to_converge: number;
+  recent_activity: { experiments_added: number; campaigns_created: number };
 }
 
 export const api = {
@@ -1333,6 +1390,11 @@ export const api = {
     if (opts.q) params.set("q", opts.q);
     return get<KGContradictionResponse>(`/api/kg/contradictions?${params}`);
   },
+
+  kgSimilarFormulations: (factors: Record<string, number>, limit = 10) =>
+    post<SimilarFormulationResponse>("/api/kg/formulations/similar", { factors, limit }),
+
+  orgDashboard: () => get<OrgDashboardStats>("/api/org/dashboard"),
 
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 

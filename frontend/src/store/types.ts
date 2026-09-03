@@ -111,6 +111,8 @@ export interface AppState {
   projects: ProjectSummary[];
   activeProjectId: string | null;
   projectSaveBusy: boolean;
+  /** loadProject 进行中：autosave 挂起，防 GET 完成前以空 workspace 覆盖后端 payload */
+  projectLoading: boolean;
   requirementLocked: boolean;
   historyOpen: boolean;
 

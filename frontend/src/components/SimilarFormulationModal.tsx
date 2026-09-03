@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api, type Formulation } from "../api";
+import { api, formatApiError, type Formulation } from "../api";
 
 interface SimilarMatch {
   experiment_id: number;
@@ -24,16 +24,16 @@ export default function SimilarFormulationModal({ formulation, onClose }: Simila
 
   useEffect(() => {
     const factors: Record<string, number> = {};
-    for (const [k, v] of Object.entries(formulation.factors)) {
+    for (const [k, v] of Object.entries(formulation.factors ?? {})) {
       if (typeof v === "number") factors[k] = v;
     }
     if (Object.keys(factors).length === 0) {
       setLoading(false);
       return;
     }
-    api.post("/kg/formulations/similar", { factors, limit: 10 })
-      .then((res) => setMatches(res.data.matches || []))
-      .catch((err) => setError(err.response?.data?.detail || "查询失败"))
+    api.kgSimilarFormulations(factors, 10)
+      .then((res) => setMatches(res.matches || []))
+      .catch((err) => setError(formatApiError(err)))
       .finally(() => setLoading(false));
   }, [formulation]);
 
@@ -46,7 +46,7 @@ export default function SimilarFormulationModal({ formulation, onClose }: Simila
         </div>
         <div className="mb-3 p-2 rounded bg-ink/60 border border-edge/30 text-[11px]">
           <span className="text-slate-500">当前配方: </span>
-          {Object.entries(formulation.factors).map(([k, v]) => (
+          {Object.entries(formulation.factors ?? {}).map(([k, v]) => (
             <span key={k} className="text-slate-300 mr-2">{k}: {v}%</span>
           ))}
         </div>
