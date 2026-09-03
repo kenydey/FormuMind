@@ -178,6 +178,24 @@ class MeasurementStore:
                 .all()
             )
 
+    def delete_attachment(self, attachment_id: str) -> bool:
+        """P4: unbind an attachment (local row only).
+
+        The DataLab ELN copy (if any) is intentionally kept — the platform's
+        delete-file API is inconsistent with its storage layout, so platform
+        removal is out of scope (v2 after fixing the platform side).
+        """
+        try:
+            with commit_session(self._session_factory) as session:
+                row = session.get(ExperimentAttachment, attachment_id)
+                if row is None:
+                    return False
+                session.delete(row)
+                return True
+        except Exception as exc:
+            logger.warning("delete_attachment(%s) failed: %s", attachment_id, exc)
+            return False
+
     def set_attachment_datalab_ref(
         self, experiment_id: int, source_document_id: str, datalab_file_id: str
     ) -> None:

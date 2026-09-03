@@ -13,6 +13,7 @@ interface RowVersionHistoryModalProps {
   campaignId: number;
   rowId: number;
   onClose: () => void;
+  onRestored?: () => void;
 }
 
 /**
@@ -20,16 +21,20 @@ interface RowVersionHistoryModalProps {
  *
  * The platform snapshots the item on every save (workbench sync → save-item),
  * so this is a zero-effort audit trail of how a row's params/measurements
- * evolved. Each entry can be diffed against the previous one.
+ * evolved. Each entry can be diffed against the previous one, or restored
+ * (the platform mints a new "restored" version, keeping the operation
+ * reversible).
  */
 export default function RowVersionHistoryModal({
   campaignId,
   rowId,
   onClose,
+  onRestored,
 }: RowVersionHistoryModalProps) {
   const [versions, setVersions] = useState<VersionEntry[]>([]);
   const [refcode, setRefcode] = useState("");
   const [error, setError] = useState("");
+  const [restoring, setRestoring] = useState<string | null>(null);
   const [diff, setDiff] = useState<{ v1: number; v2: number; summary: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,6 +51,22 @@ export default function RowVersionHistoryModal({
   useEffect(() => {
     load();
   }, [load]);
+
+  async function restore(v: VersionEntry) {
+    const msg = `将行 #${rowId} 恢复到 v${v.version}（${v.timestamp ? v.timestamp.replace("T", " ").slice(0, 16) : ""}）？\n\n将覆盖该行当前的参数/测量/状态。平台会立即留一个新版本，可再次恢复——此操作可逆。`;
+    if (!window.confirm(msg)) return;
+    setRestoring(v.id);
+    setError("");
+    try {
+      await api.restoreWorkbenchVersion(campaignId, rowId, v.id);
+      await load();
+      onRestored?.();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setRestoring(null);
+    }
+  }
 
   async function compare(v: VersionEntry) {
     setBusy(true);
@@ -129,6 +150,14 @@ export default function RowVersionHistoryModal({
                     title="与上一版本对比"
                   >
                     ⚖ 对比
+                  </button>
+                  <button
+                    className="text-red-400 hover:text-red-300 disabled:opacity-40"
+                    disabled={restoring != null}
+                    onClick={() => restore(v)}
+                    title="恢复到该版本（可逆，平台留新版本）"
+                  >
+                    {restoring === v.id ? "恢复中…" : "⏪ 恢复"}
                   </button>
                 </li>
               ))}

@@ -754,6 +754,39 @@ async def get_workbench_row_attachments(
     ]
 
 
+@router.post(
+    "/experiments/workbench/{campaign_id}/rows/{row_id}/versions/{version_id}/restore",
+    response_model=dict,
+)
+async def restore_workbench_row_version(
+    campaign_id: int,
+    row_id: int,
+    version_id: str,
+) -> dict:
+    """P3: restore a DOE row's DataLab item to a saved version.
+
+    The platform mints a new "restored" version afterwards, so the operation is
+    reversible — restoring again to any earlier version stays possible.
+    """
+    from ..config import get_settings
+    from ..db.campaign_store import get_campaign_store
+    from ..db.datalab_client import restore_item_version
+
+    rows = await get_campaign_store().list_rows(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None or not getattr(match, "refcode", None):
+        raise HTTPException(status_code=404, detail="该行无 DataLab 版本记录")
+    ok = await run_in_threadpool(
+        restore_item_version,
+        get_settings().datalab_api_url,
+        match.refcode,
+        version_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail="DataLab 版本恢复失败")
+    return {"restored": True, "refcode": match.refcode}
+
+
 @router.get(
     "/experiments/workbench/{campaign_id}/rows/{row_id}/versions",
     response_model=dict,
@@ -864,6 +897,34 @@ async def download_workbench_row_attachment(
                     },
                 )
     raise HTTPException(status_code=404, detail="文件不可用（平台与本机均无副本）")
+
+
+@router.delete(
+    "/experiments/workbench/{campaign_id}/rows/{row_id}/attachments/{attachment_id}",
+)
+async def delete_workbench_row_attachment(
+    campaign_id: int,
+    row_id: int,
+    attachment_id: str,
+) -> dict:
+    """P4: unbind an attachment from the row.
+
+    Local attachment row is deleted; the DataLab ELN copy (if any) is kept for
+    traceability (platform delete-file API is out of sync with its storage —
+    see platform-maximize plan §P4).
+    """
+    from ..db.measurement_store import get_measurement_store
+
+    experiment_id = await _resolve_workbench_experiment_id(campaign_id, row_id)
+    if experiment_id is None:
+        raise HTTPException(status_code=404, detail="该行无实验记录")
+    store = get_measurement_store()
+    attachments = store.attachments_for(experiment_id)
+    if not any(str(a.id) == attachment_id for a in attachments):
+        raise HTTPException(status_code=404, detail="附件不存在")
+    if not store.delete_attachment(attachment_id):
+        raise HTTPException(status_code=500, detail="附件删除失败")
+    return {"deleted": True}
 
 
 @router.post("/experiments/workbench/{campaign_id}/rows/{row_id}/attachments",

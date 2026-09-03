@@ -97,3 +97,87 @@ def test_get_file_bytes_failure_paths():
         return httpx.Response(404, json={"error": "nope"})
 
     assert get_file_bytes(_BASE, "cccccccccccccccccccccccc", "qc.txt", _transport=httpx.MockTransport(not_found)) is None
+
+
+def test_restore_item_version_happy_path():
+    from app.db.datalab_client import restore_item_version
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/items/test:ABC123/restore-version/"
+        import json
+
+        assert json.loads(request.content) == {"version_id": "aaaaaaaaaaaaaaaaaaaaaaaa"}
+        return httpx.Response(200, json={"status": "success"})
+
+    ok = restore_item_version(
+        _BASE, "test:ABC123", "aaaaaaaaaaaaaaaaaaaaaaaa",
+        _transport=httpx.MockTransport(handler),
+    )
+    assert ok is True
+
+
+def test_restore_item_version_failure_paths():
+    from app.db.datalab_client import restore_item_version
+
+    assert restore_item_version("", "test:ABC123", "aaa") is False
+    assert restore_item_version(_BASE, "", "aaa") is False
+    assert restore_item_version(_BASE, "test:ABC123", "") is False
+
+    def boom(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "version gone"})
+
+    assert (
+        restore_item_version(
+            _BASE, "test:ABC123", "aaaaaaaaaaaaaaaaaaaaaaaa",
+            _transport=httpx.MockTransport(boom),
+        )
+        is False
+    )
+
+
+def test_delete_attachment_store(tmp_path):
+    """P4: delete_attachment unbinds the local row (platform copy kept)."""
+    from app.db.database import make_engine, make_session_factory
+    from app.db.measurement_store import MeasurementStore
+    from app.db.models import Base, ExperimentAttachment, ExperimentRow, SourceDocument
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'att.db'}")
+    Base.metadata.create_all(engine)
+    factory = make_session_factory(engine)
+    store = MeasurementStore(factory)
+
+    with factory() as session:
+        exp = ExperimentRow(
+            id=1,
+            item_id="test-item",
+            label="test:1",
+            source="test",
+            domain="anticorrosion_coating",
+            measured={},
+        )
+        session.add(exp)
+        doc = SourceDocument(
+            id="local-deadbeef",
+            filename="qc.txt",
+            source_kind="qc_report",
+            content_hash="deadbeef",
+        )
+        session.add(doc)
+        session.commit()
+
+    with factory() as session:
+        att = ExperimentAttachment(
+            id="test-attach-0001",
+            experiment_id=1,
+            source_document_id="local-deadbeef",
+            kind="qc_report",
+            note="[datalab:6a984f3fc6651cf90cfa6931]",
+        )
+        session.add(att)
+        session.commit()
+        att_id = att.id
+
+    assert store.delete_attachment(str(att_id)) is True
+    assert store.delete_attachment(str(att_id)) is False  # 已删
+    with factory() as session:
+        assert session.get(ExperimentAttachment, att_id) is None

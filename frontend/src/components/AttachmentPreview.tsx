@@ -56,6 +56,20 @@ export default function AttachmentPreview({
     }
   }
 
+  async function remove(att: Attachment) {
+    if (!window.confirm(`删除附件「${att.filename || att.source_document_id}」？\n仅解除与实验的绑定，DataLab 归档副本保留（可追溯）。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.deleteWorkbenchAttachment(campaignId, rowId, att.id);
+      await load();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -121,6 +135,14 @@ export default function AttachmentPreview({
                 >
                   ⬇ 下载
                 </a>
+                <button
+                  className="text-red-400/80 hover:text-red-300 disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => remove(a)}
+                  title="删除（解除绑定，平台副本保留）"
+                >
+                  ✕
+                </button>
               </li>
             ))}
           </ul>

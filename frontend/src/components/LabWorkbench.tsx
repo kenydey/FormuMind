@@ -153,6 +153,26 @@ export default function LabWorkbench({
     }
   }, [campaignId]);
 
+  // P3: 版本恢复成功后重载行数据（行内容已被平台回滚）
+  const reloadRows = useCallback(async () => {
+    try {
+      const data = await api.getWorkbenchCampaign(campaignId);
+      setRows(data.rows);
+      if (data.objectives_snapshot?.length) {
+        setApiSnapshot(data.objectives_snapshot as any);
+      }
+      const history = data.loop_history ?? [];
+      setLoopRoundCount(history.length);
+      setLoopConverged(Boolean(history.length && (history[history.length - 1] as any)?.converged));
+      setDirtyIds(new Set());
+      setSelectedRow((prev) =>
+        prev ? (data.rows.find((r) => r.id === prev.id) ?? null) : null
+      );
+    } catch {
+      /* 保持现状，重载失败不打扰 */
+    }
+  }, [campaignId]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -539,6 +559,7 @@ export default function LabWorkbench({
           campaignId={campaignId}
           rowId={versionRow.id}
           onClose={() => setVersionRow(null)}
+          onRestored={() => void reloadRows()}
         />
       )}
       {lineageRow && (

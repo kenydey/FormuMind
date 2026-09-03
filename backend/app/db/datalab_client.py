@@ -252,3 +252,37 @@ def get_file_bytes(
     except Exception as exc:
         logger.warning("datalab get_file_bytes(%s) failed: %s", file_id, exc)
         return None
+
+
+def restore_item_version(
+    api_url: str, refcode: str, version_id: str, *, timeout: float = 15.0, _transport=None
+) -> bool:
+    """P3: restore an item to a saved version (platform mints a new version).
+
+    Returns True on success; False on any failure (the caller shows a message).
+    """
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url or not refcode or not version_id:
+        return False
+    try:
+        with httpx.Client(
+            base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport
+        ) as client:
+            resp = client.post(
+                f"/items/{refcode}/restore-version/",
+                json={"version_id": version_id},
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "datalab restore_item_version(%s) failed: HTTP %s %s",
+                    refcode,
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                return False
+            return True
+    except Exception as exc:
+        logger.warning("datalab restore_item_version(%s) failed: %s", refcode, exc)
+        return False

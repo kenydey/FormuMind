@@ -1023,6 +1023,25 @@ export const api = {
       `/api/experiments/workbench/${campaignId}/rows/${rowId}/versions?compare_v1=${v1}&compare_v2=${v2}`
     ),
 
+  restoreWorkbenchVersion: (
+    campaignId: number,
+    rowId: number,
+    versionId: string
+  ) =>
+    post<{ restored: boolean; refcode?: string }>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/versions/${versionId}/restore`,
+      {}
+    ),
+
+  deleteWorkbenchAttachment: (
+    campaignId: number,
+    rowId: number,
+    attachmentId: string
+  ) =>
+    del<{ deleted: boolean }>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments/${attachmentId}`
+    ),
+
   uploadWorkbenchAttachment: async (
     file: File,
     campaignId: number,
