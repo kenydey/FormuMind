@@ -405,6 +405,8 @@ export interface WorkbenchRow {
   parent_sample_id?: string | null;
   parent_campaign_id?: number | null;
   attachments?: Attachment[];
+  // P3: DataLab platform refcode (version history is keyed by it)
+  refcode?: string | null;
 }
 
 export interface WorkbenchCampaignResponse {
@@ -996,6 +998,28 @@ export const api = {
     attachmentId: string
   ) =>
     `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments/${attachmentId}/download`,
+
+  getWorkbenchVersions: (campaignId: number, rowId: number) =>
+    get<{
+      refcode: string;
+      versions: {
+        id: string;
+        version: number;
+        action?: string;
+        timestamp?: string;
+        creator?: string | null;
+      }[];
+    }>(`/api/experiments/workbench/${campaignId}/rows/${rowId}/versions`),
+
+  compareWorkbenchVersions: (
+    campaignId: number,
+    rowId: number,
+    v1: string,
+    v2: string
+  ) =>
+    get<{ refcode: string; diff: Record<string, unknown> }>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/versions?compare_v1=${v1}&compare_v2=${v2}`
+    ),
 
   uploadWorkbenchAttachment: async (
     file: File,

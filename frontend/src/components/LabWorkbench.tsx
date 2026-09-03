@@ -19,6 +19,7 @@ import {
 import NoteEditor from "./NoteEditor";
 import TagPicker from "./TagPicker";
 import AttachmentPreview from "./AttachmentPreview";
+import RowVersionHistoryModal from "./RowVersionHistoryModal";
 import LineageTree from "./LineageTree";
 import ExperimentDiff from "./ExperimentDiff";
 import ExperimentDetail from "./ExperimentDetail";
@@ -81,6 +82,7 @@ export default function LabWorkbench({
   const [lineageRow, setLineageRow] = useState<WorkbenchRow | null>(null);
   const [diffPair, setDiffPair] = useState<[WorkbenchRow, WorkbenchRow] | null>(null);
   const [qcReportRow, setQcReportRow] = useState<WorkbenchRow | null>(null);
+  const [versionRow, setVersionRow] = useState<WorkbenchRow | null>(null);
   const [showRounds, setShowRounds] = useState(false);
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
@@ -254,6 +256,10 @@ export default function LabWorkbench({
           action: () => setLineageRow(rowData),
         });
         items.push({
+          name: "🕘 版本历史",
+          action: () => setVersionRow(rowData),
+        });
+        items.push({
           name: "✏️ 添加备注",
           action: () => setNoteEditorRow(rowData),
         });
@@ -425,6 +431,13 @@ export default function LabWorkbench({
           onChanged={(count) =>
             setAttachmentCounts((prev) => ({ ...prev, [attachmentRow.id]: count }))
           }
+        />
+      )}
+      {versionRow && (
+        <RowVersionHistoryModal
+          campaignId={campaignId}
+          rowId={versionRow.id}
+          onClose={() => setVersionRow(null)}
         />
       )}
       {lineageRow && (
