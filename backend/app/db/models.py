@@ -445,6 +445,27 @@ class KGEntityLink(Base):
     )
 
 
+
+class KGFormulationLink(Base):
+    """Link between an experiment (formulation) and a knowledge-graph entity."""
+    __tablename__ = "kg_formulation_links"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "entity_id", "role", name="uq_kg_formulation_link"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(
+        ForeignKey("experiments.id", ondelete="CASCADE"), index=True
+    )
+    entity_id: Mapped[str] = mapped_column(
+        ForeignKey("kb_entities.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(60), default="")
+    weight_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    link_type: Mapped[str] = mapped_column(String(32), default="contains")
+    project_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class ProjectRow(Base):
     """NotebookLM-style project workspace (JSON payload)."""
 

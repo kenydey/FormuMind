@@ -16,6 +16,8 @@ from ..domain.kg_schemas import (
     KGRetrieveRequest,
     KGRetrieveResponse,
     KGRelationView,
+    SimilarFormulationRequest,
+    SimilarFormulationResponse,
     KGStats,
     KGSubstituteDiscoverResponse,
 )
@@ -27,6 +29,7 @@ from ..services.kg.contradiction import (
 from ..services.kg.entity_linker import link_source, rebuild_all
 from ..services.kg.entity_resolver import resolve_query
 from ..services.kg.graph_query import discover_substitutes, find_path, get_entity_relations
+from ..services.kg.formulation_similarity import find_similar_formulations
 
 logger = logging.getLogger(__name__)
 
@@ -254,3 +257,66 @@ def retrieve_endpoint(req: KGRetrieveRequest) -> KGRetrieveResponse:
         max_sources=req.max_sources,
         k_semantic=req.k_semantic,
     )
+
+@router.post("/formulations/similar", response_model=SimilarFormulationResponse)
+def similar_formulations(req: SimilarFormulationRequest) -> SimilarFormulationResponse:
+    """Find historically similar formulations across projects."""
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow, ProjectRow
+
+    factory = default_session_factory()
+    with factory() as session:
+        q = session.query(ExperimentRow)
+        if req.domain:
+            q = q.filter(ExperimentRow.domain == req.domain)
+        rows = q.all()
+        all_exps = [
+            {
+                "id": r.id,
+                "project_id": r.project_id or "",
+                "domain": r.domain or "",
+                "factors": r.factors or {},
+                "measured": r.measured or {},
+            }
+            for r in rows
+        ]
+
+    matches_raw = find_similar_formulations(
+        req.factors,
+        all_exps,
+        domain=req.domain,
+        exclude_project_id=req.exclude_project_id,
+        min_similarity=req.min_similarity,
+        limit=req.limit,
+    )
+
+    # Enrich with project titles
+    project_ids = {m["project_id"] for m in matches_raw if m.get("project_id")}
+    project_titles = {}
+    if project_ids:
+        with factory() as session:
+            for pid in project_ids:
+                proj = session.query(ProjectRow).filter(ProjectRow.id == pid).first()
+                if proj:
+                    project_titles[pid] = proj.title
+
+    matches = []
+    for m in matches_raw:
+        factors = m.get("factors", {})
+        query_ings = set(req.factors.keys())
+        match_ings = set(factors.keys())
+        shared = list(query_ings & match_ings)
+        differing = list(match_ings - query_ings)
+        matches.append(SimilarFormulationMatch(
+            experiment_id=m["experiment_id"],
+            project_id=m.get("project_id", ""),
+            project_title=project_titles.get(m.get("project_id", "")),
+            similarity=m["similarity"],
+            factors=factors,
+            measured={k: v for k, v in (m.get("measured") or {}).items() if v is not None},
+            shared_ingredients=shared,
+            differing_ingredients=differing,
+        ))
+
+    return SimilarFormulationResponse(matches=matches, query_factors=req.factors)
+

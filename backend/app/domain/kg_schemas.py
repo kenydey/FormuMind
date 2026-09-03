@@ -194,3 +194,25 @@ class KGContradictionResponse(BaseModel):
     entity_id: str
     entity_name: str = ""
     contradictions: list[KGContradictionMark] = Field(default_factory=list)
+
+
+class SimilarFormulationRequest(BaseModel):
+    factors: dict[str, float]
+    domain: str | None = None
+    exclude_project_id: str | None = None
+    min_similarity: float = 0.3
+    limit: int = Field(default=10, ge=1, le=50)
+
+class SimilarFormulationMatch(BaseModel):
+    experiment_id: int
+    project_id: str
+    project_title: str | None = None
+    similarity: float
+    factors: dict[str, float]
+    measured: dict[str, float | None]
+    shared_ingredients: list[str] = Field(default_factory=list)
+    differing_ingredients: list[str] = Field(default_factory=list)
+
+class SimilarFormulationResponse(BaseModel):
+    matches: list[SimilarFormulationMatch] = Field(default_factory=list)
+    query_factors: dict[str, float] = Field(default_factory=dict)

@@ -1189,6 +1189,7 @@ def _recommend_user_prompt(
     modify_prompt: str = "",
     base_formulas: list | None = None,
     system_block: str = "",
+    historical_context: str = "",
 ) -> str:
     citations = "\n".join(
         f"[{e.source}] {e.title}: {e.snippet[:200]}" for e in evidence[:6]
@@ -1237,6 +1238,33 @@ def recommend_formulations(
     objectives = objectives or normalize_objectives(req)
     evidence = evidence or []
 
+    # Inject historical similar formulations query
+    historical_context = ""
+    try:
+        from ..services.kg.formulation_similarity import find_similar_formulations
+        from ..db.database import default_session_factory
+        from ..db.models import ExperimentRow
+        factory = default_session_factory()
+        with factory() as session:
+            rows = session.query(ExperimentRow).all()
+            all_exps = [
+                {"id": r.id, "project_id": r.project_id or "", "domain": r.domain or "", "factors": r.factors or {}, "measured": r.measured or {}}
+                for r in rows
+            ]
+        # Build a lightweight factor dict from requirement materials
+        query_factors = {m.name: float(m.weight_pct or 0) for m in (req.materials or []) if m.name and m.weight_pct}
+        if query_factors:
+            sims = find_similar_formulations(query_factors, all_exps, domain=req.domain.value, limit=5)
+            if sims:
+                lines = []
+                for s in sims[:3]:
+                    factors_str = ", ".join(f"{k}:{v}%" for k, v in list(s.get("factors", {}).items())[:4])
+                    measured_str = ", ".join(f"{k}={v}" for k, v in list(s.get("measured", {}).items())[:3])
+                    lines.append(f"- Exp #{s['experiment_id']} (sim={s['similarity']:.0%}): {factors_str} | measured: {measured_str}")
+                historical_context = "\\n".join(lines)
+    except Exception as exc:
+        log.debug("Historical similarity query failed (non-fatal): %s", exc)
+
     system = _recommend_system_prompt()
     system_block = _resolve_system_constraints(req)
     user = _recommend_user_prompt(
@@ -1244,6 +1272,7 @@ def recommend_formulations(
         modify_prompt=modify_prompt,
         base_formulas=base_formulas,
         system_block=system_block,
+        historical_context=historical_context,
     )
 
     parsed, err = complete_structured(system, user, RecommendedFormulaListResponse)

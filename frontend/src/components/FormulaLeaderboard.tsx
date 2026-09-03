@@ -14,6 +14,7 @@ import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import VersionHistoryModal from "./VersionHistoryModal";
 import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
+import SimilarFormulationModal from "./SimilarFormulationModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
 import ParetoFrontPlot from "./charts/ParetoFrontPlot";
@@ -93,6 +94,7 @@ function FormulaCard({
   const [ipOpen, setIpOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [substituteOpen, setSubstituteOpen] = useState<string | null>(null);
+  const [similarOpen, setSimilarOpen] = useState(false);
   const expanded = open || forceOpen;
 
   // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
@@ -241,6 +243,12 @@ function FormulaCard({
             >
               🕘 修订历史
             </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSimilarOpen(true); }}
+              className="flex-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent2 hover:border-accent2/50"
+            >
+              🔍 相似历史
+            </button>
           </div>
         </div>
       )}
@@ -266,6 +274,9 @@ function FormulaCard({
       </Modal>
       {substituteOpen && (
         <MaterialSubstitutionModal initialMaterial={substituteOpen} onClose={() => setSubstituteOpen(null)} />
+      )}
+      {similarOpen && (
+        <SimilarFormulationModal formulation={form} onClose={() => setSimilarOpen(false)} />
       )}
     </div>
   );
