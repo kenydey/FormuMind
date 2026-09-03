@@ -407,6 +407,8 @@ export interface WorkbenchRow {
   attachments?: Attachment[];
   // P3: DataLab platform refcode (version history is keyed by it)
   refcode?: string | null;
+  // P5: measurements already ingested into training data
+  ingested?: boolean;
 }
 
 export interface WorkbenchCampaignResponse {

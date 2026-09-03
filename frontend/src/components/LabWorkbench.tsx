@@ -20,17 +20,11 @@ import NoteEditor from "./NoteEditor";
 import TagPicker from "./TagPicker";
 import AttachmentPreview from "./AttachmentPreview";
 import RowVersionHistoryModal from "./RowVersionHistoryModal";
+import RowDetailBar, { type RowDetailAction } from "./RowDetailBar";
 import LineageTree from "./LineageTree";
 import ExperimentDiff from "./ExperimentDiff";
-import ExperimentDetail from "./ExperimentDetail";
 import QCReportModal from "./QCReportModal";
 import CampaignRoundsModal from "./CampaignRoundsModal";
-
-// F22：稳定模块级组件，避免每次渲染生成新的内联箭头函数导致 AG Grid
-// 反复重建 detail 面板。objectives 由 detailCellRendererParams 注入。
-function ExperimentDetailRenderer(params: any) {
-  return <ExperimentDetail data={params.data} objectives={params.objectives} />;
-}
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -40,13 +34,18 @@ interface LabWorkbenchProps {
 }
 
 function StatusBadge({ value }: { value: string }) {
+  const v = value || "Pending";
   const tone =
-    value === "Completed"
+    v === "Completed"
       ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-      : "bg-amber-500/20 text-amber-300 border-amber-500/40";
+      : v === "In Progress"
+        ? "bg-blue-500/20 text-blue-300 border-blue-500/40 animate-pulse"
+        : v === "Blocked"
+          ? "bg-red-500/20 text-red-300 border-red-500/40"
+          : "bg-slate-500/20 text-slate-400 border-slate-500/40";
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium ${tone}`}>
-      {value || "Pending"}
+      {v}
     </span>
   );
 }
@@ -63,6 +62,10 @@ export default function LabWorkbench({
 }: LabWorkbenchProps) {
   const gridRef = useRef<AgGridReact<WorkbenchRow>>(null);
   const [rows, setRows] = useState<WorkbenchRow[]>([]);
+  // P1: 未保存编辑的行 id 集合（单元格编辑后累积，保存成功后清空）
+  const [dirtyIds, setDirtyIds] = useState<Set<number>>(() => new Set());
+  // P2: 当前选中行（详情条）
+  const [selectedRow, setSelectedRow] = useState<WorkbenchRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -235,6 +238,102 @@ export default function LabWorkbench({
     }
   }, []);
 
+  // ── P1: dirty 追踪（单元格编辑完成 → 标记未保存）──────────────
+  const handleCellValueChanged = useCallback(
+    (params: { data?: WorkbenchRow }) => {
+      if (params.data?.id != null) {
+        setDirtyIds((prev) => {
+          if (prev.has(params.data!.id)) return prev;
+          const next = new Set(prev);
+          next.add(params.data!.id);
+          return next;
+        });
+        setSelectedRow((prev) => (prev?.id === params.data!.id ? { ...prev, ...params.data } : prev));
+      }
+    },
+    []
+  );
+
+  const getRowClass = useCallback(
+    (params: { data?: WorkbenchRow }) =>
+      params.data?.id != null && dirtyIds.has(params.data.id)
+        ? "row-dirty"
+        : "",
+    [dirtyIds]
+  );
+
+  const handleSelectionChanged = useCallback(() => {
+    const sel = gridRef.current?.api.getSelectedRows() ?? [];
+    setSelectedRow(sel[0] ?? null);
+  }, []);
+
+  // ── P2: 批量操作（选中行）──────────────────────────────────────
+  const selectedIds = () =>
+    (gridRef.current?.api.getSelectedRows() ?? []).map((r) => r.id);
+
+  const applyToRows = (mutate: (r: WorkbenchRow) => void) => {
+    const ids = new Set(selectedIds());
+    if (ids.size === 0) {
+      setError("请先选中至少一行（Ctrl/⌘ 多选）");
+      return;
+    }
+    setRows((prev) => {
+      const next = prev.map((r) => {
+        if (!ids.has(r.id)) return r;
+        mutate(r);
+        return r;
+      });
+      return next;
+    });
+    setDirtyIds((prev) => {
+      const s = new Set(prev);
+      ids.forEach((i) => s.add(i));
+      return s;
+    });
+    gridRef.current?.api.redrawRows({ rowNodes: gridRef.current.api.getSelectedNodes() });
+    setError(null);
+  };
+
+  const [batchStatus, setBatchStatus] = useState<string>("Completed");
+
+  const handleBatchSetStatus = useCallback(() => {
+    const status = batchStatus;
+    if (!window.confirm(`将选中的 ${selectedIds().length} 行状态设为「${status}」？（未保存，需点保存台账生效）`)) return;
+    applyToRows((r) => {
+      r.status = status;
+    });
+  }, [batchStatus]);
+
+  const handleBatchClearMeasurements = useCallback(() => {
+    if (!window.confirm(`清空选中的 ${selectedIds().length} 行的测量值？（未保存，需点保存台账生效）`)) return;
+    applyToRows((r) => {
+      r.measurements = {};
+    });
+  }, []);
+
+  const handleBatchCopyPlanToActual = useCallback(() => {
+    const n = selectedIds().length;
+    if (!window.confirm(`将选中的 ${n} 行的「实际参数」复制为「计划参数」？（未保存，需点保存台账生效）`)) return;
+    applyToRows((r) => {
+      r.actual_params = { ...(r.planned_params ?? {}) };
+    });
+  }, []);
+
+  // ── P2: 详情条 action → 弹现有 modal ───────────────────────────
+  const handleRowAction = useCallback((action: RowDetailAction) => {
+    setSelectedRow((row) => {
+      if (row) {
+        if (action === "versions") setVersionRow(row);
+        else if (action === "attachments") setAttachmentRow(row);
+        else if (action === "qc") setQcReportRow(row);
+        else if (action === "lineage") setLineageRow(row);
+        else if (action === "note") setNoteEditorRow(row);
+        else if (action === "tags") setTagPickerRow(row);
+      }
+      return row;
+    });
+  }, []);
+
   // ── Phase 2: context menu ────────────────────────────────────
   const getContextMenuItems = useCallback(
     (params: GetContextMenuItemsParams) => {
@@ -378,6 +477,8 @@ export default function LabWorkbench({
         campaign_state: campaignState,
       });
       setRows(res.rows);
+      setDirtyIds(new Set());
+      setError(null);
       const hints: string[] = [];
       if (res.training_message) hints.push(res.training_message);
       if (res.loop_message) hints.push(res.loop_message);
@@ -565,19 +666,32 @@ export default function LabWorkbench({
             }}
             // ── Phase 2: right-click menu ──
             getContextMenuItems={getContextMenuItems}
-            // ── Phase 3.3: multi-select for diff ──
+            // ── Phase 3.3: multi-select for diff / batch ──
             rowSelection="multiple"
-            // ── Phase 3.1: Master / Detail ──
-            masterDetail={true}
-            detailCellRendererParams={{ objectives }}
-            detailRowHeight={200}
-            detailCellRenderer={ExperimentDetailRenderer}
+            // ── P1/P2: dirty 高亮、选中行详情条 ──
+            onCellValueChanged={handleCellValueChanged}
+            getRowClass={getRowClass}
+            onSelectionChanged={handleSelectionChanged}
           />
         </div>
+        {selectedRow && (
+          <RowDetailBar
+            row={selectedRow}
+            objectives={objectives}
+            attachmentCount={attachmentCounts[selectedRow.id] ?? 0}
+            onAction={handleRowAction}
+            onClose={() => setSelectedRow(null)}
+          />
+        )}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">
           <div className="flex flex-col gap-1 min-w-0">
             <span className="text-[10px] text-slate-500">
               {rows.filter((r) => r.status === "Completed").length}/{rows.length} 已完成 ·{" "}
+              {rows.filter((r) => Object.keys(r.measurements ?? {}).some((k) => (r.measurements as Record<string, unknown>)?.[k] != null)).length} 有测量 ·{" "}
+              {rows.filter((r) => r.ingested).length} 已入训练
+              {dirtyIds.size > 0 && (
+                <span className="ml-2 text-amber-300">· {dirtyIds.size} 行未保存</span>
+              )}
               {objectives.length} 项指标 · 支持 Excel 粘贴
               {loopRoundCount > 0 && (
                 <span className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-medium ${
@@ -595,6 +709,29 @@ export default function LabWorkbench({
             </label>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <select
+              value={batchStatus}
+              onChange={(e) => setBatchStatus(e.target.value)}
+              className="text-xs bg-ink border border-edge rounded px-1.5 py-1.5 text-slate-300"
+              title="批量目标状态"
+            >
+              <option>Pending</option>
+              <option>In Progress</option>
+              <option>Completed</option>
+              <option>Blocked</option>
+            </select>
+            <button type="button" onClick={handleBatchSetStatus}
+              className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
+              批量标状态
+            </button>
+            <button type="button" onClick={handleBatchClearMeasurements}
+              className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
+              清空选中测量
+            </button>
+            <button type="button" onClick={handleBatchCopyPlanToActual}
+              className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
+              计划→实际
+            </button>
             <button type="button" onClick={() => setShowRounds(true)}
               className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
               轮次历史
@@ -609,7 +746,7 @@ export default function LabWorkbench({
             </button>
             <button type="button" onClick={() => void handleSave()} disabled={saving}
               className="text-xs bg-accent2/90 hover:bg-accent2 text-ink font-semibold rounded px-3 py-1.5 disabled:opacity-40">
-              {saving ? "同步中…" : "保存台账并同步"}
+              {saving ? "同步中…" : dirtyIds.size > 0 ? `保存台账并同步 (${dirtyIds.size})` : "保存台账并同步"}
             </button>
           </div>
         </div>

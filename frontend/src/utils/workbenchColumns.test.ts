@@ -9,10 +9,13 @@
 import { describe, expect, it } from "vitest";
 import type { DOEPlan, ObjectiveSpec, WorkbenchRow } from "../api";
 import {
+  WORKBENCH_STATUS_OPTIONS,
   buildWorkbenchColumnDefs,
   effectiveObjectives,
   factorKeysFromPlan,
   numericParser,
+  specText,
+  valueMeetsSpec,
 } from "./workbenchColumns";
 
 const parse = (value: unknown) =>
@@ -115,7 +118,36 @@ describe("buildWorkbenchColumnDefs", () => {
     const id = cols.find((c) => "field" in c && c.field === "id");
     const status = cols.find((c) => "field" in c && c.field === "status");
     expect((id as Record<string, unknown>)?.editable).toBe(false);
-    expect((status as Record<string, unknown>)?.editable).toBe(false);
+    // P1: status 可下拉编辑（Completed 触发回灌训练）——不再是只读徽章
+    expect((status as Record<string, unknown>)?.editable).toBe(true);
+  });
+
+  it("status column offers the workbench status enum via select editor", () => {
+    const cols = buildWorkbenchColumnDefs([], [objective()]);
+    const status = cols.find((c) => "field" in c && c.field === "status");
+    const params = (status as Record<string, unknown>)?.cellEditorParams as {
+      values: string[];
+    };
+    expect((status as Record<string, unknown>)?.cellEditor).toBe("agSelectCellEditor");
+    expect(params?.values).toEqual(WORKBENCH_STATUS_OPTIONS);
+  });
+
+  it("measurement columns carry spec tooltips and RAG verdict helpers", () => {
+    // specText / valueMeetsSpec drive tooltip + detail-bar verdicts
+    const obj = {
+      metric: "salt_spray_hours",
+      display_name: "盐雾",
+      unit: "h",
+      direction: "maximize" as const,
+      ref_min: 400,
+      weight: 1,
+    };
+    expect(specText(obj)).toContain("≥ 400");
+    expect(specText(obj)).toContain("h");
+    expect(valueMeetsSpec(obj, 500)).toBe(true);
+    expect(valueMeetsSpec(obj, 100)).toBe(false);
+    expect(valueMeetsSpec(obj, null)).toBeNull();
+    expect(valueMeetsSpec(obj, "")).toBeNull();
   });
 
   it("builds a usable grid with no factors at all", () => {

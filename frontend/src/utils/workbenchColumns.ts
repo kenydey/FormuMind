@@ -10,6 +10,13 @@ import type { ColDef, ColGroupDef, ValueParserParams, ValueSetterParams } from "
 import type { DOEPlan, ObjectiveSpec, WorkbenchRow } from "../api";
 
 const RATING_OPTIONS = ["A", "B", "C", "D", "pass", "fail"];
+/** 后端 row.status 枚举（P1: 状态下拉编辑；Completed 触发回灌训练） */
+export const WORKBENCH_STATUS_OPTIONS = [
+  "Pending",
+  "In Progress",
+  "Completed",
+  "Blocked",
+] as const;
 
 export function numericParser(params: ValueParserParams) {
   const raw = String(params.newValue ?? "").trim().replace(/\s+/g, "");
@@ -24,6 +31,37 @@ function isRatingObjective(obj: ObjectiveSpec): boolean {
 
 // ── RAG conditional formatting (Phase 1.1) ─────────────────────────────
 
+/** spec 窗口文本（tooltip 用）：≥800 h / 8–15 g/m² / 目标 12.5 */
+export function specText(obj: ObjectiveSpec): string {
+  const unit = obj.unit ? ` ${obj.unit}` : "";
+  if (obj.ref_min != null && obj.ref_max != null) return `${obj.ref_min}–${obj.ref_max}${unit}`;
+  if (obj.ref_min != null)
+    return obj.direction === "minimize"
+      ? `≤ ${obj.ref_min}${unit}`
+      : `≥ ${obj.ref_min}${unit}`;
+  if (obj.ref_max != null) return `≤ ${obj.ref_max}${unit}`;
+  if (obj.target_value != null) {
+    const dir =
+      obj.direction === "maximize" ? "≥" : obj.direction === "minimize" ? "≤" : "≈";
+    return `${dir} ${obj.target_value}${unit}`;
+  }
+  return "";
+}
+
+/** 当前值是否满足 spec（含无 spec 时的目标方向判定） */
+export function valueMeetsSpec(obj: ObjectiveSpec, value: unknown): boolean | null {
+  const v = Number(value);
+  if (value == null || value === "" || Number.isNaN(v)) return null; // 空值
+  if (obj.ref_min != null && v < obj.ref_min) return false;
+  if (obj.ref_max != null && v > obj.ref_max) return false;
+  if (obj.ref_min == null && obj.ref_max == null && obj.target_value != null) {
+    if (obj.direction === "maximize") return v >= obj.target_value;
+    if (obj.direction === "minimize") return v <= obj.target_value;
+    return Math.abs(v - obj.target_value) / Math.max(Math.abs(obj.target_value), 1) <= 0.1;
+  }
+  return true;
+}
+
 function ragStyle(
   obj: ObjectiveSpec,
 ): (params: { value: unknown }) => { backgroundColor?: string; color?: string } {
@@ -31,12 +69,16 @@ function ragStyle(
   const target = obj.target_value;
   return (params) => {
     const v = Number(params.value);
-    if (Number.isNaN(v) || target == null) return {};
+    if (Number.isNaN(v) || params.value === "" || params.value == null) return {};
     let ok = false;
-    if (dir === "maximize") ok = v >= target;
-    else if (dir === "minimize") ok = v <= target;
-    else if (dir === "match_target")
-      ok = Math.abs(v - target) / Math.max(Math.abs(target), 1) <= 0.1;
+    if (obj.ref_min != null && v < obj.ref_min) ok = false;
+    else if (obj.ref_max != null && v > obj.ref_max) ok = false;
+    else if (obj.ref_min == null && obj.ref_max == null) {
+      if (dir === "maximize") ok = v >= (target ?? Number.NEGATIVE_INFINITY);
+      else if (dir === "minimize") ok = v <= (target ?? Number.POSITIVE_INFINITY);
+      else if (dir === "match_target")
+        ok = target != null && Math.abs(v - target) / Math.max(Math.abs(target), 1) <= 0.1;
+    } else ok = true;
     return ok
       ? { backgroundColor: "#dcfce7", color: "#166534" }
       : { backgroundColor: "#fef2f2", color: "#991b1b" };
@@ -67,8 +109,10 @@ export function buildWorkbenchColumnDefs(
     {
       field: "status",
       headerName: "状态",
-      editable: false,
-      width: 96,
+      editable: true,
+      width: 128,
+      cellEditor: "agSelectCellEditor",
+      cellEditorParams: { values: WORKBENCH_STATUS_OPTIONS },
     },
   ];
 
@@ -147,6 +191,21 @@ export function buildWorkbenchColumnDefs(
         ? { values: RATING_OPTIONS }
         : undefined,
       cellStyle: ragStyle(obj),  // ← Phase 1.1: RAG coloring
+      tooltipValueGetter: (p: { value?: unknown }) => {
+        const spec = specText(obj);
+        const pass = valueMeetsSpec(obj, p.value);
+        const state =
+          p.value == null || p.value === ""
+            ? "待回填"
+            : pass === true
+              ? "满足规格"
+              : pass === false
+                ? "超出规格"
+                : "";
+        return `${obj.display_name || obj.metric}${spec ? `\n规格 ${spec}` : ""}${
+          state ? `\n${state}` : ""
+        }`;
+      },
       flex: 1,
       minWidth: 110,
     };

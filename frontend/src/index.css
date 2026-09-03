@@ -18,3 +18,11 @@ body {
   backdrop-filter: blur(8px);
   border: 1px solid rgba(56, 189, 248, 0.12);
 }
+
+/* P1: 未保存编辑行高亮（LabWorkbench dirty 追踪） */
+.ag-theme-alpine-dark .ag-row.row-dirty {
+  box-shadow: inset 3px 0 0 0 rgba(251, 191, 36, 0.9);
+}
+.ag-theme-alpine-dark .ag-row.row-dirty .ag-cell {
+  background-color: rgba(251, 191, 36, 0.06);
+}
