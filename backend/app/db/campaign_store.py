@@ -116,6 +116,7 @@ def _parse_row_from_item(
         measurements=dict(meas_block),
         note=params_block.get("note"),
         tags=list(params_block.get("tags") or []),
+        refcode=item_data.get("refcode"),
     )
 
 

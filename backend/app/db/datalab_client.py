@@ -165,3 +165,90 @@ async def upload_file(
     except Exception as exc:
         logger.warning("datalab upload failed: %s", exc)
         return None
+
+
+def list_item_versions(
+    api_url: str, refcode: str, *, timeout: float = 15.0, _transport=None
+) -> list[dict]:
+    """P3: list saved DataLab versions for an item (by refcode), newest first.
+
+    Returns [] on any failure (unreachable / 401 / 404) so the UI can degrade
+    to "no version history" instead of erroring.
+    """
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url or not refcode:
+        return []
+    try:
+        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
+            resp = client.get(f"/items/{refcode}/versions/")
+            if resp.status_code != 200:
+                return []
+            body = resp.json()
+            versions = body.get("versions") or []
+            out = []
+            for v in versions:
+                out.append(
+                    {
+                        "id": str(v.get("_id") or ""),
+                        "version": v.get("version") or v.get("datalab_version"),
+                        "action": v.get("action"),
+                        "timestamp": (v.get("timestamp") or "")[:19],
+                        "creator": (v.get("creator") or {}).get("display_name"),
+                    }
+                )
+            return out
+    except Exception as exc:
+        logger.warning("datalab list_item_versions(%s) failed: %s", refcode, exc)
+        return []
+
+
+def diff_item_versions(
+    api_url: str, refcode: str, v1_id: str, v2_id: str, *, timeout: float = 15.0, _transport=None
+) -> dict:
+    """P3: DeepDiff between two saved versions; {} on failure."""
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url or not refcode:
+        return {}
+    try:
+        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
+            resp = client.get(
+                f"/items/{refcode}/compare-versions/",
+                params={"v1": v1_id, "v2": v2_id},
+            )
+            if resp.status_code != 200:
+                return {}
+            return resp.json().get("diff") or {}
+    except Exception as exc:
+        logger.warning("datalab diff_item_versions(%s) failed: %s", refcode, exc)
+        return {}
+
+
+def get_file_bytes(
+    api_url: str, file_id: str, filename: str, *, timeout: float = 30.0, _transport=None
+) -> bytes | None:
+    """P4: fetch a file's bytes from the platform (GET /files/<id>/<filename>).
+
+    Returns None on any failure (unreachable / 401 / 404) so callers can fall
+    back to a local copy / friendly 404.
+    """
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url or not file_id:
+        return None
+    try:
+        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
+            resp = client.get(f"/files/{file_id}/{filename}")
+            if resp.status_code != 200:
+                logger.warning(
+                    "datalab get_file_bytes(%s) failed: HTTP %s", file_id, resp.status_code
+                )
+                return None
+            return resp.content
+    except Exception as exc:
+        logger.warning("datalab get_file_bytes(%s) failed: %s", file_id, exc)
+        return None

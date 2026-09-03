@@ -21,3 +21,5 @@ class WorkbenchRow:
     tags: list[str] = field(default_factory=list)
     parent_sample_id: str | None = None
     parent_campaign_id: int | None = None
+    # P3: platform refcode (test:XXXX) — 版本历史 API 以 refcode 寻址
+    refcode: str | None = None

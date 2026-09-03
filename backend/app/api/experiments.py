@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -710,6 +710,117 @@ async def get_workbench_row_attachments(
         )
         for a in store.attachments_for(experiment_id)
     ]
+
+
+@router.get(
+    "/experiments/workbench/{campaign_id}/rows/{row_id}/versions",
+    response_model=dict,
+)
+async def workbench_row_versions(
+    campaign_id: int,
+    row_id: int,
+    compare_v1: str = Query(default=""),
+    compare_v2: str = Query(default=""),
+) -> dict:
+    """P3: version history of a DOE row's DataLab item (auto-saved on every sync).
+
+    Without compare params returns ``{refcode, versions: [{id, version, action,
+    timestamp, creator}]}``; with ``compare_v1`` + ``compare_v2`` returns the
+    DeepDiff between those two version ids under ``diff``.
+    """
+    from ..config import get_settings
+    from ..db.campaign_store import get_campaign_store
+    from ..db.datalab_client import diff_item_versions, list_item_versions
+
+    rows = await get_campaign_store().list_rows(campaign_id)
+    match = next((r for r in rows if r.id == row_id), None)
+    if match is None or not getattr(match, "refcode", None):
+        raise HTTPException(status_code=404, detail="该行无 DataLab 版本记录")
+
+    settings = get_settings()
+    refcode = match.refcode
+    if compare_v1 and compare_v2:
+        diff = await run_in_threadpool(
+            diff_item_versions, settings.datalab_api_url, refcode, compare_v1, compare_v2
+        )
+        return {"refcode": refcode, "diff": diff}
+    versions = await run_in_threadpool(
+        list_item_versions, settings.datalab_api_url, refcode
+    )
+    return {"refcode": refcode, "versions": versions}
+
+
+@router.get(
+    "/experiments/workbench/{campaign_id}/rows/{row_id}/attachments/{attachment_id}/download",
+)
+async def download_workbench_row_attachment(
+    campaign_id: int,
+    row_id: int,
+    attachment_id: str,
+) -> Response:
+    """P4: download an attachment's original file.
+
+    Prefers the DataLab ELN copy (attachment note carries ``[datalab:<file_id>]``);
+    falls back to the local mirror stored under backend/data/attachments/ when the
+    platform copy is unreachable or was never uploaded.
+    """
+    import re
+
+    from ..db.campaign_store import get_campaign_store
+    from ..db.datalab_client import get_file_bytes
+    from ..db.measurement_store import get_measurement_store
+
+    experiment_id = await _resolve_workbench_experiment_id(campaign_id, row_id)
+    if experiment_id is None:
+        raise HTTPException(status_code=404, detail="该行无实验记录")
+    store = get_measurement_store()
+    attachments = store.attachments_for(experiment_id)
+    att = next((a for a in attachments if str(a.id) == attachment_id), None)
+    if att is None:
+        raise HTTPException(status_code=404, detail="附件不存在")
+
+    # Original filename from the stored source document (local SSOT).
+    filename = att.source_document_id or "attachment"
+    from ..db.database import default_session_factory
+    from ..db.models import SourceDocument
+
+    with default_session_factory()() as session:
+        doc = session.get(SourceDocument, att.source_document_id)
+        if doc is not None and doc.filename:
+            filename = doc.filename
+
+    # 1) DataLab ELN copy
+    from ..config import get_settings
+
+    m = re.search(r"\[datalab:([0-9a-f]{24})\]", att.note or "")
+    if m:
+        content = await run_in_threadpool(
+            get_file_bytes,
+            get_settings().datalab_api_url,
+            m.group(1),
+            filename,
+        )
+        if content is not None:
+            return Response(
+                content=content,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+    # 2) local mirror fallback (data/attachments/{local-<hash>}-{uuid}-{name})
+    base = Path(get_settings().db_url.replace("sqlite:///", "")).parent / "attachments"
+    if base.is_dir():
+        prefix = f"{att.source_document_id}-"
+        for candidate in base.iterdir():
+            if candidate.is_file() and candidate.name.startswith(prefix):
+                return Response(
+                    content=candidate.read_bytes(),
+                    media_type="application/octet-stream",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{filename}"'
+                    },
+                )
+    raise HTTPException(status_code=404, detail="文件不可用（平台与本机均无副本）")
 
 
 @router.post("/experiments/workbench/{campaign_id}/rows/{row_id}/attachments",
