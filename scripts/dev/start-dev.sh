@@ -37,7 +37,10 @@ start() {
   echo "    PID $! → logs/dev-backend.log"
 
   echo "==> 启动 worker (celery)"
+  # 内存硬约束（VPS 6.3GB）：并发 2 防重量级任务（search 索引 ~2GB / PDF 解析
+  # ~0.8GB）同刻并存撞物理内存 SIGSEGV；prefetch=1 让任务串行化领取。
   nohup "$VENV/bin/celery" -A app.worker.celery_app.celery_app worker \
+    --concurrency=2 --prefetch-multiplier=1 \
     --loglevel=info > "$LOG_DIR/dev-worker.log" 2>&1 &
   echo "    PID $! → logs/dev-worker.log"
 
