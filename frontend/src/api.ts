@@ -990,6 +990,13 @@ export const api = {
       `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments`
     ),
 
+  workbenchAttachmentDownloadUrl: (
+    campaignId: number,
+    rowId: number,
+    attachmentId: string
+  ) =>
+    `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments/${attachmentId}/download`,
+
   uploadWorkbenchAttachment: async (
     file: File,
     campaignId: number,

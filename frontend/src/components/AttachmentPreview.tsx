@@ -113,6 +113,14 @@ export default function AttachmentPreview({
                   {a.filename || a.source_document_id}
                 </span>
                 <span className="text-slate-500">{a.kind}</span>
+                <a
+                  href={api.workbenchAttachmentDownloadUrl(campaignId, rowId, a.id)}
+                  download={a.filename || undefined}
+                  className="text-accent hover:text-accent/80"
+                  title="下载原件（DataLab 归档副本优先）"
+                >
+                  ⬇ 下载
+                </a>
               </li>
             ))}
           </ul>
