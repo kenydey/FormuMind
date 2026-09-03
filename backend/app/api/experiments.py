@@ -63,6 +63,9 @@ class WorkbenchRowResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     parent_sample_id: str | None = None
     parent_campaign_id: int | None = None
+    refcode: str | None = None
+    # P5: 该行测量已回灌为训练数据（experiments 有 wb 标签且 measured 非空）
+    ingested: bool = False
 
 
 class WorkbenchCampaignResponse(BaseModel):
@@ -96,7 +99,41 @@ class CreateWorkbenchCampaignRequest(BaseModel):
     requirement: Requirement | None = None
 
 
+def _ingested_item_ids(campaign_id: int, rows: list[WorkbenchRow]) -> set[str]:
+    """P5: item_ids whose measurements were already ingested into training.
+
+    One query: experiments rows with label ``wb:{cid}:{item_id}`` and non-empty
+    measured JSON. Any lookup failure degrades to an empty set (badges off).
+    """
+    try:
+        from ..db.database import default_session_factory
+        from ..db.models import ExperimentRow
+
+        item_ids = [r.item_id for r in rows if r.item_id]
+        if not item_ids:
+            return set()
+        labels = [f"wb:{campaign_id}:{it}" for it in item_ids]
+        with default_session_factory()() as session:
+            candidates = (
+                session.query(ExperimentRow.label, ExperimentRow.measured)
+                .filter(ExperimentRow.label.in_(labels))
+                .all()
+            )
+        ingested: set[str] = set()
+        for label, measured in candidates:
+            item_id = str(label).split(":", 2)[-1] if label else ""
+            if item_id and measured:
+                ingested.add(item_id)
+        return ingested
+    except Exception:
+        logger.warning(
+            "ingested aggregation failed for campaign %s", campaign_id, exc_info=True
+        )
+        return set()
+
+
 def _campaign_response(campaign: Campaign, rows: list[WorkbenchRow]) -> WorkbenchCampaignResponse:
+    ingested_items = _ingested_item_ids(campaign.id, rows)
     return WorkbenchCampaignResponse(
         campaign_id=campaign.id,
         name=campaign.name,
@@ -106,11 +143,11 @@ def _campaign_response(campaign: Campaign, rows: list[WorkbenchRow]) -> Workbenc
         primary_metric=campaign.primary_metric,
         objectives_snapshot=campaign.objectives_snapshot or [],
         loop_history=campaign.loop_history or [],
-        rows=[_row_response(r) for r in rows],
+        rows=[_row_response(r, ingested_items) for r in rows],
     )
 
 
-def _row_response(row: WorkbenchRow) -> WorkbenchRowResponse:
+def _row_response(row: WorkbenchRow, ingested_items: set[str] | None = None) -> WorkbenchRowResponse:
     return WorkbenchRowResponse(
         id=row.id,
         campaign_id=row.campaign_id,
@@ -123,6 +160,8 @@ def _row_response(row: WorkbenchRow) -> WorkbenchRowResponse:
         tags=row.tags or [],
         parent_sample_id=row.parent_sample_id,
         parent_campaign_id=row.parent_campaign_id,
+        refcode=row.refcode,
+        ingested=bool(row.item_id and ingested_items and row.item_id in ingested_items),
     )
 
 
@@ -447,7 +486,10 @@ async def sync_workbench(
 
     return WorkbenchSyncResponse(
         updated=updated,
-        rows=[_row_response(r) for r in rows],
+        rows=[
+            _row_response(r, _ingested_item_ids(payload.campaign_id, rows))
+            for r in rows
+        ],
         training_ingested=training_ingested,
         training_message=training_message,
         prediction_bias=train_result.get("prediction_bias"),
@@ -738,6 +780,7 @@ async def workbench_row_versions(
         raise HTTPException(status_code=404, detail="该行无 DataLab 版本记录")
 
     settings = get_settings()
+    assert match.refcode  # guard 上方已保证非空
     refcode = match.refcode
     if compare_v1 and compare_v2:
         diff = await run_in_threadpool(
