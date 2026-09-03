@@ -25,6 +25,7 @@ import LineageTree from "./LineageTree";
 import ExperimentDiff from "./ExperimentDiff";
 import QCReportModal from "./QCReportModal";
 import CampaignRoundsModal from "./CampaignRoundsModal";
+import ContourPlot from "./charts/ContourPlot";
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -87,6 +88,7 @@ export default function LabWorkbench({
   const [qcReportRow, setQcReportRow] = useState<WorkbenchRow | null>(null);
   const [versionRow, setVersionRow] = useState<WorkbenchRow | null>(null);
   const [showRounds, setShowRounds] = useState(false);
+  const [showContour, setShowContour] = useState(false);
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
@@ -659,6 +661,23 @@ export default function LabWorkbench({
           </div>
         )}
         <BiasTrendPanel campaignId={(campaignId ?? workbenchCampaignId) ?? null} />
+        {showContour && rows.filter((r) => r.status === "Completed").length >= 6 && (
+          <div className="px-2 py-2 border-b border-edge/30">
+            <ContourPlot
+              data={rows
+                .filter((r) => r.status === "Completed")
+                .map((r) => ({
+                  x: Number(r.actual_params?.[factorKeys[0]] ?? r.planned_params?.[factorKeys[0]] ?? 0),
+                  y: Number(r.actual_params?.[factorKeys[1]] ?? r.planned_params?.[factorKeys[1]] ?? 0),
+                  z: Number(r.measurements?.[objectives[0]?.metric] ?? r.predicted?.[objectives[0]?.metric] ?? 0),
+                }))
+                .filter((d) => !isNaN(d.x) && !isNaN(d.y) && !isNaN(d.z) && d.z !== 0)}
+              xFactor={factorKeys[0] || "因子A"}
+              yFactor={factorKeys[1] || "因子B"}
+              metric={objectives[0]?.metric || "指标"}
+            />
+          </div>
+        )}
         <div className="ag-theme-alpine-dark w-full" style={{ height: 320 }}>
           <AgGridReact<WorkbenchRow>
             ref={gridRef}
@@ -765,6 +784,15 @@ export default function LabWorkbench({
               className="text-xs border border-edge rounded px-2 py-1.5 hover:bg-ink/30 text-slate-400">
               导出 Excel
             </button>
+            {rows.filter((r) => r.status === "Completed").length >= 6 && (
+              <button
+                type="button"
+                onClick={() => setShowContour((s) => !s)}
+                className={`text-xs border rounded px-2 py-1.5 ${showContour ? "bg-accent/20 text-accent border-accent/40" : "border-edge text-slate-400 hover:text-accent"}`}
+              >
+                📊 等高线图
+              </button>
+            )}
             <button type="button" onClick={() => void handleSave()} disabled={saving}
               className="text-xs bg-accent2/90 hover:bg-accent2 text-ink font-semibold rounded px-3 py-1.5 disabled:opacity-40">
               {saving ? "同步中…" : dirtyIds.size > 0 ? `保存台账并同步 (${dirtyIds.size})` : "保存台账并同步"}

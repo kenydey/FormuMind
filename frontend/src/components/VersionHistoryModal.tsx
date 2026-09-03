@@ -6,6 +6,7 @@ import {
   type FormulationVersionView,
   type VersionDiffResult,
 } from "../api";
+import FormulationLineageGraph from "./charts/FormulationLineageGraph";
 
 /**
  * Revision history for one formulation.
@@ -43,6 +44,7 @@ export default function VersionHistoryModal({ form }: { form: Formulation }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
 
   const load = useCallback(async () => {
     try {
@@ -123,10 +125,46 @@ export default function VersionHistoryModal({ form }: { form: Formulation }) {
         </div>
       )}
 
+      {versions.length > 0 && (
+        <div className="flex items-center gap-1 border border-edge rounded overflow-hidden w-fit">
+          <button
+            onClick={() => setViewMode("list")}
+            className={`text-[11px] px-2.5 py-1 ${viewMode === "list" ? "bg-accent/20 text-accent" : "text-slate-400"}`}
+          >
+            列表
+          </button>
+          <button
+            onClick={() => setViewMode("graph")}
+            className={`text-[11px] px-2.5 py-1 ${viewMode === "graph" ? "bg-accent/20 text-accent" : "text-slate-400"}`}
+          >
+            图谱
+          </button>
+        </div>
+      )}
+
       {versions.length === 0 ? (
         <div className="text-slate-500 text-xs">
           该配方尚无修订记录——保存一次即可开始记录谱系。
         </div>
+      ) : viewMode === "graph" ? (
+        <FormulationLineageGraph
+          nodes={versions.map((v) => ({
+            id: v.id,
+            version: v.version,
+            name: form.name,
+            change_summary: v.change_summary || "无说明",
+            snapshot: v.snapshot || {},
+            parent_id: v.parent_version_id,
+            children: versions.filter((child) => child.parent_version_id === v.id).map((child) => child.id),
+          }))}
+          onNodeClick={(node) => {
+            const version = versions.find((v) => v.id === node.id);
+            if (version) {
+              const prev = versions.find((v2) => v2.version === version.version - 1);
+              if (prev) showDiff(prev.id, version.id);
+            }
+          }}
+        />
       ) : (
         <div className="space-y-1">
           {versions.map((v, i) => {

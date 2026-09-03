@@ -16,6 +16,8 @@ import VersionHistoryModal from "./VersionHistoryModal";
 import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
+import ParetoFrontPlot from "./charts/ParetoFrontPlot";
+import ParallelCoordinates from "./charts/ParallelCoordinates";
 
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
@@ -339,7 +341,7 @@ export default function FormulaLeaderboard() {
       formulationValidateWarnings: s.formulationValidateWarnings,
     }))
   );
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [viewMode, setViewMode] = useState<"cards" | "table" | "pareto" | "parallel">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const [showAiPrompt, setShowAiPrompt] = useState(false);
   const [aiModifyPrompt, setAiModifyPrompt] = useState("");
@@ -386,6 +388,20 @@ export default function FormulaLeaderboard() {
           >
             列表
           </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("pareto")}
+            className={`text-[11px] px-2.5 py-1 ${viewMode === "pareto" ? "bg-accent/20 text-accent" : "text-slate-400"}`}
+          >
+            帕累托
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("parallel")}
+            className={`text-[11px] px-2.5 py-1 ${viewMode === "parallel" ? "bg-accent/20 text-accent" : "text-slate-400"}`}
+          >
+            平行坐标
+          </button>
         </div>
         <ListExportMenu forms={leaderboard} />
       </div>
@@ -401,6 +417,34 @@ export default function FormulaLeaderboard() {
       )}
       {leaderboard.length === 0 ? (
         <p className="text-slate-500 text-sm">尚无配方。先运行检索推荐或寻优。</p>
+      ) : viewMode === "pareto" ? (
+        <ParetoFrontPlot
+          formulations={leaderboard}
+          xMetric="cost_cny_per_kg"
+          yMetric="salt_spray_hours"
+          xLabel="成本 (CNY/kg)"
+          yLabel="耐盐雾 (h)"
+          xDirection="minimize"
+          yDirection="maximize"
+          onPointClick={(f) => {
+            const idx = leaderboard.findIndex((l) => l.name === f.name);
+            if (idx >= 0) switchToCard(idx);
+          }}
+        />
+      ) : viewMode === "parallel" ? (
+        <ParallelCoordinates
+          formulations={leaderboard}
+          axes={[
+            { key: "score", label: "Score", direction: "maximize" },
+            { key: "cost_cny_per_kg", label: "成本", direction: "minimize", unit: "CNY/kg" },
+            { key: "salt_spray_hours", label: "耐盐雾", direction: "maximize", unit: "h" },
+            { key: "voc_gpl", label: "VOC", direction: "minimize", unit: "g/L" },
+            { key: "film_weight_gsm", label: "膜重", direction: "match_target" as "minimize", unit: "g/m²" },
+          ]}
+          onBrush={(filtered) => {
+            // Optional: track filtered count or highlight
+          }}
+        />
       ) : viewMode === "table" ? (
         <FormulaTableView
           forms={leaderboard}
