@@ -203,3 +203,33 @@ def test_ip_report_carries_molecule_checks(monkeypatch):
     check = report.molecule_checks[0]
     assert check.name == "Epoxy resin X"
     assert check.patented is True
+
+
+# --- PubChem 查询前置过滤（journal-citation artifacts） ---
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        # 期刊卷期引用形态 → 拦截（不再产生 PubChem 往返）
+        ("Calphad 2001", False),
+        ("Ferroelectrics 76", False),
+        ("Ferroelectrics 553", False),
+        ("Soc 1972", False),
+        ("Energy 2014", False),
+        ("Chemie 59", False),
+        ("Nanoscale 2018", False),
+        ("We 14", False),
+        # OCR 碎片 / 空 → 拦截
+        ("T", False),
+        ("-", False),
+        ("", False),
+        # 真化学物 / 商标 → 放行（单次 404 无害）
+        ("Kapton", True),
+        ("Sigraflex", True),
+        ("magnesium stearate", True),
+        ("Calcium carbonate", True),
+    ],
+)
+def test_is_queryable_name_filters_citation_artifacts(name, expected):
+    assert chemtools._is_queryable_name(name) is expected

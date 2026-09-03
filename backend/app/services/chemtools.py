@@ -277,8 +277,37 @@ def _pubchem_get(path: str) -> Any | None:
 # isomeric form when present.
 _PUBCHEM_SMILES_KEYS = ("SMILES", "ConnectivitySMILES", "IsomericSMILES", "CanonicalSMILES")
 
+# OCR/全文抽取会把期刊卷期引用误当产品名（如 "Calphad 2001"、"Ferroelectrics 76"、
+# "We 14"），逐名 PubChem 往返既浪费又触发限流。命中以下形态直接跳过查询。
+_YEAR_TOKEN_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_STOP_FIRST_TOKENS = {
+    "we", "of", "in", "on", "at", "the", "a", "an", "for", "to", "from", "with", "and",
+}
+
+
+def _is_queryable_name(name: str) -> bool:
+    """True when *name* plausibly names a chemical product (not a citation artifact)."""
+    n = (name or "").strip()
+    if not n or len(n) > 60:
+        return False
+    toks = n.split()
+    # 期刊卷期引用: 末尾 token 是纯数字（卷/页/年），或句中含 4 位年份
+    if toks and toks[-1].isdigit():
+        return False
+    if _YEAR_TOKEN_RE.search(n):
+        return False
+    # 引用句首停用词: "We 14" / "Of ..."
+    if toks and toks[0].lower() in _STOP_FIRST_TOKENS:
+        return False
+    # 纯标点 / 单字符（"T"、"L" 之类 OCR 碎片）
+    if len(n) < 2 or not any(ch.isalnum() for ch in n):
+        return False
+    return True
+
 
 def _pubchem_name_to_smiles(name: str) -> str | None:
+    if not _is_queryable_name(name):
+        return None
     encoded = quote(name, safe="")
     data = _pubchem_get(
         f"/pug/compound/name/{encoded}/property/SMILES,ConnectivitySMILES/JSON"
@@ -297,6 +326,8 @@ def _pubchem_name_to_smiles(name: str) -> str | None:
 def _pubchem_name_to_cas(name: str) -> str | None:
     # PubChem deprecated the RegistryNumber xref endpoint; the canonical CAS now
     # lives among the compound synonyms (first CAS-format entry is the primary).
+    if not _is_queryable_name(name):
+        return None
     encoded = quote(name, safe="")
     data = _pubchem_get(f"/pug/compound/name/{encoded}/synonyms/JSON")
     info = ((data or {}).get("InformationList") or {}).get("Information") or []
