@@ -10,7 +10,6 @@ import {
   exportFormulaToPdf,
   exportLeaderboardToPdf,
 } from "../utils/export";
-import MolViewer from "./MolViewer";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import VersionHistoryModal from "./VersionHistoryModal";
@@ -227,7 +226,6 @@ function FormulaCard({
               )}
             </div>
           )}
-          <MolViewer entries={form.ingredients.map((i) => ({ name: i.name, smiles: i.smiles }))} />
           <div className="flex gap-1 mt-1">
             <button
               onClick={(e) => { e.stopPropagation(); setIpOpen(true); }}
