@@ -65,6 +65,7 @@ def _kill_native_backends(monkeypatch):
     fallbacks would make real network calls; we blank them to test the truly
     offline contract deterministically.
     """
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     monkeypatch.setattr(chemtools, "pubchem_available", lambda: False)
     monkeypatch.setattr(chemtools, "molbloom_available", lambda: False)
     monkeypatch.setattr(chemtools, "_pubchem_get", lambda path: None)
@@ -334,6 +335,7 @@ def test_lookup_chemical_tier4_chemcrow(monkeypatch):
 
 def test_name_to_smiles_pubchem_fallback(monkeypatch):
     """With ChemCrow absent but PubChem reachable, name→SMILES still resolves."""
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
     monkeypatch.setattr(
         chemtools,
@@ -349,6 +351,7 @@ def test_name_to_smiles_pubchem_fallback(monkeypatch):
 
 
 def test_name_to_cas_pubchem_fallback(monkeypatch):
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
     monkeypatch.setattr(
         chemtools,
@@ -363,6 +366,7 @@ def test_name_to_cas_pubchem_fallback(monkeypatch):
 
 
 def test_explosive_check_pubchem_fallback(monkeypatch):
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
 
     def fake_get(path):
@@ -387,6 +391,7 @@ def test_explosive_check_pubchem_fallback(monkeypatch):
 
 
 def test_patent_check_molbloom_fallback(monkeypatch):
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     monkeypatch.setattr(chemtools, "molbloom_available", lambda: True)
     monkeypatch.setattr(chemtools, "_molbloom_patented", lambda smiles: True)
     assert chemtools.patent_check("CCO") is True

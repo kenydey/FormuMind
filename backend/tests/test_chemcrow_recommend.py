@@ -104,7 +104,8 @@ def test_enrich_component_gap_fills_via_gateway(monkeypatch):
 # ── formulation screening ────────────────────────────────────────────────────
 
 
-def test_screen_formulation_empty_without_chemcrow():
+def test_screen_formulation_empty_without_chemcrow(monkeypatch):
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     assert chemtools.screen_formulation(_form(smiles="CCO")) == []
 
 
@@ -183,6 +184,7 @@ def test_ip_report_molecule_checks_empty_without_chemcrow(monkeypatch):
     from app.domain.schemas import IPAnalysisRequest
     from app.services.ip_analysis import analyze_ip_risk
 
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     monkeypatch.setattr(
         "app.services.ip_analysis._search_relevant_patents", lambda *a, **k: []
     )

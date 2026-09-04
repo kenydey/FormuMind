@@ -50,7 +50,8 @@ def _install_fake_chemcrow(monkeypatch, **tool_outputs):
 # ── query expansion chemical normalization ───────────────────────────────────
 
 
-def test_augment_is_noop_without_chemcrow():
+def test_augment_is_noop_without_chemcrow(monkeypatch):
+    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
     expanded = ExpandedQuery(
         intent="x",
         chinese_keywords=["防腐涂层"],
