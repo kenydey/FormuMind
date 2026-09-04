@@ -19,7 +19,7 @@ _TRANSLATE_PROMPT = (
 )
 
 
-def translate_query_zh_to_en(query: str, *, timeout_s: float = 4.0) -> str | None:
+def translate_query_zh_to_en(query: str, *, timeout_s: float = 15.0) -> str | None:
     """中文 → 英文检索查询; 失败/超时/输出不可用 → None(调用方降级)。
 
     复用 llm 私有通道(_call_llm + _call_with_deadline 硬超时), 不新增
