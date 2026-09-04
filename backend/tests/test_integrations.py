@@ -98,15 +98,9 @@ def test_answer_question_offline_fallback_to_snippet():
     assert citations  # re-ranked sources returned as citation chips
 
 
-def test_chemistry_question_detection():
-    assert llm._is_chemistry_question("What is the LogP of this inhibitor?")
-    assert llm._is_chemistry_question("这个组分的溶解度如何？")
-    assert not llm._is_chemistry_question("推荐一个配方")
-
-
-def test_chemcrow_and_paperqa_probes_safe_without_libs():
+def test_optional_probes_safe_without_libs():
     # Probes must never raise, regardless of whether the libs are present.
-    assert isinstance(llm._chemcrow_available(), bool)
+    # (chemcrow probe removed with the de-ChemCrow effort 2026-09.)
     assert isinstance(llm._paperqa_available(), bool)
 
 

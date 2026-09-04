@@ -1,10 +1,7 @@
 """Phase B tests — chemical entity query expansion, chemlit evidence
-splitting, and requirement material enrichment (all ChemCrow-gateway backed,
-all no-ops when chemcrow is absent)."""
+splitting, and requirement material enrichment (native PubChem/RDKit gateway
+backed, all no-ops when the backends are absent)."""
 from __future__ import annotations
-
-import sys
-import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +14,7 @@ from app.services.deep_research.query_expander import (
     _augment_with_chemical_entities,
     prepare_search_queries,
 )
-from app.services.literature import split_chemcrow_answer
+from app.services.literature import split_lit_answer
 
 
 @pytest.fixture(autouse=True)
@@ -30,28 +27,28 @@ def _fresh(monkeypatch):
     chemtools.clear_cache()
 
 
-def _install_fake_chemcrow(monkeypatch, **tool_outputs):
-    tools_mod = types.ModuleType("chemcrow.tools")
-    for name, output in tool_outputs.items():
-        def make_cls(out):
-            class _Tool:
-                def _run(self, arg):
-                    return out(arg) if callable(out) else out
+def _stub_pubchem(monkeypatch, *, cas_by_name: dict[str, str] | None = None, spy: list | None = None):
+    """Route PubChem synonym lookups to canned CAS answers (no network)."""
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
 
-            return _Tool
+    def fake_get(path: str):
+        if spy is not None:
+            spy.append(path)
+        if "/synonyms/" not in path:
+            return None
+        for name, cas in (cas_by_name or {}).items():
+            if name.lower().replace(" ", "%20") in path or name in path:
+                return {"InformationList": {"Information": [{"Synonym": [name, cas]}]}}
+        return None
 
-        setattr(tools_mod, name, make_cls(output))
-    pkg = types.ModuleType("chemcrow")
-    pkg.tools = tools_mod
-    monkeypatch.setitem(sys.modules, "chemcrow", pkg)
-    monkeypatch.setitem(sys.modules, "chemcrow.tools", tools_mod)
+    monkeypatch.setattr(chemtools, "_pubchem_get", fake_get)
 
 
 # ── query expansion chemical normalization ───────────────────────────────────
 
 
-def test_augment_is_noop_without_chemcrow(monkeypatch):
-    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
+def test_augment_is_noop_offline(monkeypatch):
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: False)
     expanded = ExpandedQuery(
         intent="x",
         chinese_keywords=["防腐涂层"],
@@ -63,10 +60,7 @@ def test_augment_is_noop_without_chemcrow(monkeypatch):
 
 
 def test_augment_appends_cas_numbers(monkeypatch):
-    def fake_cas(arg):
-        return {"isophorone diamine": "CAS: 2855-13-2"}.get(arg, "not found")
-
-    _install_fake_chemcrow(monkeypatch, Query2CAS=fake_cas)
+    _stub_pubchem(monkeypatch, cas_by_name={"isophorone diamine": "2855-13-2"})
     expanded = ExpandedQuery(
         intent="x",
         chinese_keywords=[],
@@ -81,12 +75,7 @@ def test_augment_appends_cas_numbers(monkeypatch):
 
 def test_augment_skips_long_phrases_and_dedups(monkeypatch):
     calls: list[str] = []
-
-    def fake_cas(arg):
-        calls.append(arg)
-        return "CAS: 2855-13-2"
-
-    _install_fake_chemcrow(monkeypatch, Query2CAS=fake_cas)
+    _stub_pubchem(monkeypatch, cas_by_name={"IPDA": "2855-13-2", "isophorone diamine": "2855-13-2"}, spy=calls)
     expanded = ExpandedQuery(
         intent="x",
         chinese_keywords=[],
@@ -105,7 +94,22 @@ def test_augment_skips_long_phrases_and_dedups(monkeypatch):
 
 
 def test_prepare_search_queries_includes_cas_in_patent_query(monkeypatch):
-    _install_fake_chemcrow(monkeypatch, Query2CAS="2855-13-2")
+    from app.services.deep_research import query_expander as qe_mod
+    from app.services.deep_research.models import ExpandedQuery
+
+    _stub_pubchem(monkeypatch, cas_by_name={"isophorone diamine": "2855-13-2"})
+    # Pin the LLM expand step (env-dependent) so the test targets the CAS
+    # augmentation reaching the patent/rank queries deterministically.
+    monkeypatch.setattr(
+        qe_mod.QueryExpander,
+        "expand",
+        lambda self, q: ExpandedQuery(
+            intent="x",
+            chinese_keywords=[],
+            english_synonyms=["isophorone diamine"],
+            ipc_cpc_suggestions=[],
+        ),
+    )
     sq = prepare_search_queries("isophorone diamine coating")
     # offline expansion tokens + appended CAS should reach the patent query
     assert "2855-13-2" in sq.patent_q or "2855-13-2" in sq.rank_q
@@ -115,7 +119,7 @@ def test_prepare_search_queries_includes_cas_in_patent_query(monkeypatch):
 
 
 def test_split_no_doi_keeps_legacy_single_blob():
-    out = split_chemcrow_answer("An answer with no citations.", query="epoxy")
+    out = split_lit_answer("An answer with no citations.", query="epoxy")
     assert len(out) == 1
     assert out[0].source == "ChemCrow-Lit"
     assert out[0].identifier.startswith("chemlit:")
@@ -129,7 +133,7 @@ def test_split_extracts_doi_citations():
         "1. Smith et al., Prog. Org. Coat. 2020. 10.1016/j.porgcoat.2020.105678\n"
         "2. Lee et al., Corros. Sci. 2021. 10.1016/j.corsci.2021.109432\n"
     )
-    out = split_chemcrow_answer(text, query="epoxy salt spray")
+    out = split_lit_answer(text, query="epoxy salt spray")
     ids = [e.identifier for e in out]
     assert ids[0].startswith("chemlit:")
     assert "doi:10.1016/j.porgcoat.2020.105678" in ids
@@ -137,18 +141,18 @@ def test_split_extracts_doi_citations():
     # citation rows rank slightly below the synthesized answer
     assert all(e.relevance < 0.92 for e in out[1:])
     # duplicate DOIs collapse
-    out2 = split_chemcrow_answer(text + text, query="epoxy salt spray")
+    out2 = split_lit_answer(text + text, query="epoxy salt spray")
     assert len([i for i in (e.identifier for e in out2) if i.startswith("doi:")]) == 2
 
 
 def test_split_respects_limit():
     text = "\n".join(f"ref {i}: 10.1000/test.{i}" for i in range(10))
-    out = split_chemcrow_answer(text, query="q", limit=3)
+    out = split_lit_answer(text, query="q", limit=3)
     assert len(out) == 4  # 1 answer + 3 citations
 
 
 def test_split_empty_returns_empty():
-    assert split_chemcrow_answer("", query="q") == []
+    assert split_lit_answer("", query="q") == []
 
 
 # ── material enrichment ──────────────────────────────────────────────────────
@@ -163,23 +167,28 @@ def test_enrich_materials_catalog_fill_works_offline():
     assert warnings == []
 
 
-def test_enrich_materials_gateway_fill_and_screen(monkeypatch):
+def test_enrich_materials_gateway_fill_via_pubchem(monkeypatch):
     from app.domain.schemas import MaterialSpec
 
-    _install_fake_chemcrow(
-        monkeypatch,
-        Query2SMILES="CCO",
-        ControlChemCheck="This molecule appears in a list of controlled chemicals",
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
+    monkeypatch.setattr(
+        chemtools,
+        "_pubchem_get",
+        lambda path: {"PropertyTable": {"Properties": [{"SMILES": "CCO"}]}}
+        if "/property/" in path
+        else None,
     )
     mats = [MaterialSpec(name="mystery solvent X", role="solvent", weight_pct=10.0)]
     warnings = chemtools.enrich_material_specs(mats)
     assert mats[0].smiles == "CCO"
-    assert warnings and "管制" in warnings[0]
+    # controlled check is neutral post-ChemCrow → no compliance warning
+    assert warnings == []
 
 
-def test_enrich_materials_noop_without_chemcrow():
+def test_enrich_materials_noop_offline(monkeypatch):
     from app.domain.schemas import MaterialSpec
 
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: False)
     mats = [MaterialSpec(name="totally unknown compound", role="additive")]
     warnings = chemtools.enrich_material_specs(mats)
     assert mats[0].smiles is None

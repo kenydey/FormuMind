@@ -2,9 +2,6 @@
 formulation similarity dedup."""
 from __future__ import annotations
 
-import sys
-import types
-
 import pytest
 
 from app.config import get_settings
@@ -29,23 +26,6 @@ def _fresh(monkeypatch):
     yield
     get_settings.cache_clear()
     chemtools.clear_cache()
-
-
-def _install_fake_chemcrow(monkeypatch, **tool_outputs):
-    tools_mod = types.ModuleType("chemcrow.tools")
-    for name, output in tool_outputs.items():
-        def make_cls(out):
-            class _Tool:
-                def _run(self, arg):
-                    return out(arg) if callable(out) else out
-
-            return _Tool
-
-        setattr(tools_mod, name, make_cls(output))
-    pkg = types.ModuleType("chemcrow")
-    pkg.tools = tools_mod
-    monkeypatch.setitem(sys.modules, "chemcrow", pkg)
-    monkeypatch.setitem(sys.modules, "chemcrow.tools", tools_mod)
 
 
 def _form(name: str, *ings: Ingredient) -> Formulation:
@@ -134,19 +114,13 @@ def test_review_doe_empty_offline():
 
 
 def test_review_doe_flags_reactive_pair_without_cure_factor(monkeypatch):
-    def fake_groups(smiles):
-        return {
-            "EPOXY": "This molecule contains epoxide groups.",
-            "AMINE": "This molecule contains primary amine groups.",
-        }.get(smiles, "This molecule contains ether groups.")
-
-    _install_fake_chemcrow(monkeypatch, FuncGroups=fake_groups, ControlChemCheck="not found")
+    # Real RDKit-parseable structures: DGEBA carries epoxide, IPDA primary amine.
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         substrate=Substrate.carbon_steel,
         materials=[
-            {"name": "resin", "role": "resin", "smiles": "EPOXY"},
-            {"name": "hardener", "role": "hardener", "smiles": "AMINE"},
+            {"name": "resin", "role": "resin", "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1"},
+            {"name": "hardener", "role": "hardener", "smiles": "CC1(C)CC(N)CC(C)(CN)C1"},
         ],
     )
     notes = chemtools.review_doe_factors(req, _plan("resin", "hardener"))
@@ -156,19 +130,16 @@ def test_review_doe_flags_reactive_pair_without_cure_factor(monkeypatch):
     assert not any("固化温度" in n for n in notes2)
 
 
-def test_review_doe_flags_controlled_material(monkeypatch):
-    _install_fake_chemcrow(
-        monkeypatch,
-        FuncGroups="This molecule contains ether groups.",
-        ControlChemCheck="appears in a list of controlled chemicals",
-    )
+def test_review_doe_controlled_check_is_neutral(monkeypatch):
+    # Controlled-chemical screening is neutral since ChemCrow's removal
+    # (0.3.7 never shipped the tool) — no compliance note, no crash.
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         substrate=Substrate.carbon_steel,
         materials=[{"name": "solventX", "role": "solvent", "smiles": "CCO"}],
     )
     notes = chemtools.review_doe_factors(req, _plan("solvent"))
-    assert any("管制" in n for n in notes)
+    assert not any("管制" in n for n in notes)
 
 
 def test_build_doe_appends_review_notes(monkeypatch):

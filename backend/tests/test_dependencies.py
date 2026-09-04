@@ -43,7 +43,7 @@ def test_get_dependencies_endpoint():
     assert "dependencies" in body and isinstance(body["dependencies"], list)
     assert "online_core_missing" in body
     names = {d["pip_name"] for d in body["dependencies"]}
-    assert {"anthropic", "arxiv", "ddgs", "chemcrow"} <= names
+    assert {"anthropic", "arxiv", "ddgs", "molbloom"} <= names
 
 
 def test_install_endpoint_rejects_empty_selection():

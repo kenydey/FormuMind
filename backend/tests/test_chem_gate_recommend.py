@@ -1,9 +1,10 @@
-"""Phase C tests — formulation gate ChemCrow gap-fill, chem screening on
-recommend paths, functional-group prompt block, and molbloom IP checks."""
-from __future__ import annotations
+"""Phase C tests — formulation gate native gap-fill, chem screening on
+recommend paths, functional-group prompt block, and molbloom IP checks.
 
-import sys
-import types
+(ChemCrow removed 2026-09 — these exercise the native PubChem/RDKit/molbloom
+gateway behind the same public functions.)
+"""
+from __future__ import annotations
 
 import pytest
 
@@ -30,21 +31,25 @@ def _fresh(monkeypatch):
     chemtools.clear_cache()
 
 
-def _install_fake_chemcrow(monkeypatch, **tool_outputs):
-    tools_mod = types.ModuleType("chemcrow.tools")
-    for name, output in tool_outputs.items():
-        def make_cls(out):
-            class _Tool:
-                def _run(self, arg):
-                    return out(arg) if callable(out) else out
+def _stub_pubchem(monkeypatch, *, smiles: str | None = None, cas: str | None = None, spy: list | None = None):
+    """Route PubChem lookups to canned SMILES/CAS answers (no network)."""
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
 
-            return _Tool
+    def fake_get(path: str):
+        if spy is not None:
+            spy.append(path)
+        if "/property/" in path and smiles is not None:
+            return {"PropertyTable": {"Properties": [{"SMILES": smiles}]}}
+        if "/synonyms/" in path and cas is not None:
+            return {"InformationList": {"Information": [{"Synonym": [cas]}]}}
+        return None
 
-        setattr(tools_mod, name, make_cls(output))
-    pkg = types.ModuleType("chemcrow")
-    pkg.tools = tools_mod
-    monkeypatch.setitem(sys.modules, "chemcrow", pkg)
-    monkeypatch.setitem(sys.modules, "chemcrow.tools", tools_mod)
+    monkeypatch.setattr(chemtools, "_pubchem_get", fake_get)
+
+
+def _stub_molbloom(monkeypatch, patented: bool | None):
+    monkeypatch.setattr(chemtools, "molbloom_available", lambda: patented is not None)
+    monkeypatch.setattr(chemtools, "_molbloom_patented", lambda smiles: patented)
 
 
 def _form(**ing_kwargs) -> Formulation:
@@ -61,15 +66,16 @@ def _form(**ing_kwargs) -> Formulation:
 # ── gate gap-fill ────────────────────────────────────────────────────────────
 
 
-def test_enrich_ingredient_unchanged_without_chemcrow():
+def test_enrich_ingredient_unchanged_offline(monkeypatch):
+    monkeypatch.setattr(chemtools, "pubchem_available", lambda: False)
     ing = Ingredient(name="mystery resin", role="resin", weight_pct=50.0)
     out = enrich_ingredient(ing)
     assert out.smiles is None
     assert out.cas_no is None
 
 
-def test_enrich_ingredient_gap_fills_via_gateway(monkeypatch):
-    _install_fake_chemcrow(monkeypatch, Query2SMILES="C1CO1", Query2CAS="75-21-8")
+def test_enrich_ingredient_gap_fills_via_pubchem(monkeypatch):
+    _stub_pubchem(monkeypatch, smiles="C1CO1", cas="75-21-8")
     ing = Ingredient(name="mystery oxirane", role="resin", weight_pct=50.0)
     out = enrich_ingredient(ing)
     assert out.smiles == "C1CO1"
@@ -78,12 +84,7 @@ def test_enrich_ingredient_gap_fills_via_gateway(monkeypatch):
 
 def test_enrich_ingredient_catalog_wins_over_gateway(monkeypatch):
     smiles_calls: list[str] = []
-
-    def smiles_spy(arg):
-        smiles_calls.append(arg)
-        return "CCO"
-
-    _install_fake_chemcrow(monkeypatch, Query2SMILES=smiles_spy, Query2CAS="2855-13-2")
+    _stub_pubchem(monkeypatch, smiles="CCO", cas="2855-13-2", spy=smiles_calls)
     # Catalog has curated SMILES for IPDA — gateway must not override it and
     # must only be consulted for the field the catalog lacks (CAS).
     ing = Ingredient(name="Isophorone diamine (IPDA)", role="hardener", weight_pct=20.0)
@@ -93,8 +94,8 @@ def test_enrich_ingredient_catalog_wins_over_gateway(monkeypatch):
     assert out.cas_no == "2855-13-2"  # missing field gap-filled
 
 
-def test_enrich_component_gap_fills_via_gateway(monkeypatch):
-    _install_fake_chemcrow(monkeypatch, Query2SMILES="CCN", Query2CAS="75-04-7")
+def test_enrich_component_gap_fills_via_pubchem(monkeypatch):
+    _stub_pubchem(monkeypatch, smiles="CCN", cas="75-04-7")
     comp = RecommendedFormulaComponent(name="mystery amine", weight_pct=5.0)
     out = enrich_component(comp)
     assert out.smiles == "CCN"
@@ -104,24 +105,19 @@ def test_enrich_component_gap_fills_via_gateway(monkeypatch):
 # ── formulation screening ────────────────────────────────────────────────────
 
 
-def test_screen_formulation_empty_without_chemcrow(monkeypatch):
-    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
+def test_screen_formulation_empty_offline(monkeypatch):
+    monkeypatch.setattr(chemtools, "molbloom_available", lambda: False)
     assert chemtools.screen_formulation(_form(smiles="CCO")) == []
 
 
-def test_screen_formulation_flags_patented_and_controlled(monkeypatch):
-    _install_fake_chemcrow(
-        monkeypatch,
-        PatentCheck="Patented",
-        ControlChemCheck="appears in a list of controlled chemicals",
-    )
+def test_screen_formulation_flags_patented(monkeypatch):
+    _stub_molbloom(monkeypatch, patented=True)
     warnings = chemtools.screen_formulation(_form(smiles="CCO"))
     assert any("IP 预筛" in w for w in warnings)
-    assert any("管制" in w for w in warnings)
 
 
 def test_screen_formulation_skips_trace_and_smiles_less(monkeypatch):
-    _install_fake_chemcrow(monkeypatch, PatentCheck="Patented", ControlChemCheck="not found")
+    _stub_molbloom(monkeypatch, patented=True)
     trace = _form(smiles="CCO", weight_pct=0.1)  # below threshold
     assert chemtools.screen_formulation(trace) == []
     no_smiles = _form(smiles=None)
@@ -131,9 +127,7 @@ def test_screen_formulation_skips_trace_and_smiles_less(monkeypatch):
 def test_score_and_validate_screens_only_when_asked(monkeypatch):
     from app.pipeline.workflow import _score_and_validate
 
-    _install_fake_chemcrow(
-        monkeypatch, PatentCheck="Patented", ControlChemCheck="not found"
-    )
+    _stub_molbloom(monkeypatch, patented=True)
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating, substrate=Substrate.carbon_steel
     )
@@ -145,6 +139,8 @@ def test_score_and_validate_screens_only_when_asked(monkeypatch):
 
 # ── prompt block ─────────────────────────────────────────────────────────────
 
+_DGEBA = "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1"
+
 
 def test_func_groups_prompt_block_empty_offline():
     from app.services.llm import _func_groups_prompt_block
@@ -152,39 +148,37 @@ def test_func_groups_prompt_block_empty_offline():
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         substrate=Substrate.carbon_steel,
-        materials=[{"name": "Bisphenol-A epoxy (DGEBA)", "role": "resin",
-                    "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1"}],
+        materials=[{"name": "Bisphenol-A epoxy (DGEBA)", "role": "resin", "smiles": _DGEBA}],
     )
     block = _func_groups_prompt_block(req, None)
-    # No chemcrow and no rdkit in CI -> no groups resolvable -> block omitted
+    # RDKit absent in a bare env -> no groups resolvable -> block omitted
     if not chemtools.rdkit_available():
         assert block == ""
 
 
-def test_func_groups_prompt_block_lists_groups(monkeypatch):
+def test_func_groups_prompt_block_lists_groups():
     from app.services.llm import _func_groups_prompt_block
 
-    _install_fake_chemcrow(
-        monkeypatch, FuncGroups="This molecule contains epoxide groups and aromatic rings."
-    )
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,
         substrate=Substrate.carbon_steel,
-        materials=[{"name": "DGEBA", "role": "resin", "smiles": "CC(C)(c1ccc(OCC2CO2)cc1)c1ccc(OCC2CO2)cc1"}],
+        materials=[{"name": "DGEBA", "role": "resin", "smiles": _DGEBA}],
     )
     block = _func_groups_prompt_block(req, None)
-    assert "DGEBA" in block
-    assert "epoxide groups" in block
+    if chemtools.rdkit_available():
+        assert "DGEBA" in block
+        assert "epoxide" in block  # RDKit epoxide SMARTS label
+        assert "aromatic ring" in block
 
 
 # ── IP molecule checks ───────────────────────────────────────────────────────
 
 
-def test_ip_report_molecule_checks_empty_without_chemcrow(monkeypatch):
+def test_ip_report_molecule_checks_empty_without_molbloom(monkeypatch):
     from app.domain.schemas import IPAnalysisRequest
     from app.services.ip_analysis import analyze_ip_risk
 
-    monkeypatch.setattr(chemtools, "chemcrow_available", lambda: False)
+    monkeypatch.setattr(chemtools, "molbloom_available", lambda: False)
     monkeypatch.setattr(
         "app.services.ip_analysis._search_relevant_patents", lambda *a, **k: []
     )
@@ -196,7 +190,7 @@ def test_ip_report_carries_molecule_checks(monkeypatch):
     from app.domain.schemas import IPAnalysisRequest
     from app.services.ip_analysis import analyze_ip_risk
 
-    _install_fake_chemcrow(monkeypatch, PatentCheck="Patented")
+    _stub_molbloom(monkeypatch, patented=True)
     monkeypatch.setattr(
         "app.services.ip_analysis._search_relevant_patents", lambda *a, **k: []
     )
