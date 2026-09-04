@@ -372,10 +372,12 @@ def test_loop_iterate_endpoint():
     handle = resp.json()
     assert "task_id" in handle and "stream_url" in handle and "status_url" in handle
 
-    # In the CI baseline Celery runs eager / in-thread; poll until terminal.
+    # Poll until terminal. 窗口 600×0.1s=60s: run_optimization 实测 15s
+    # (含 predictor.predict 首次冷启动 8.8s —— 一次性 descriptor/模型初始化),
+    # celery eager 多线程下任务总耗时 17-40s 波动 —— 10s/30s 窗都会误杀。
     import time
 
-    for _ in range(100):
+    for _ in range(600):
         st = client.get(handle["status_url"]).json()
         if st["state"] in ("completed", "failed"):
             break
