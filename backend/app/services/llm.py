@@ -20,7 +20,7 @@ from .errors import degrade_return, optional_import, reraise_if_fatal
 import json
 import logging
 from pathlib import Path
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 from pydantic import BaseModel
 from tenacity import (
@@ -455,7 +455,10 @@ def _llm_timeout_seconds() -> float:
 
 
 _LLM_RETRY = tenacity_retry(
-    stop=stop_after_attempt(3),
+    # 2026-09-04: 3 次重试 × 120s 超时让 chat 单步最多挂 6 分钟(deepseek
+    # 慢窗口实测 150s+ 无响应)——改为 2 次尝试 + 60s idle 超时(上游持续
+    # 吐数据不受影响), 失败更快触发上层降级(offline/无 claims), 问答不无限挂。
+    stop=stop_after_attempt(2),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type((LLMTransientError, TimeoutError, ConnectionError)),
     before_sleep=before_sleep_log(log, logging.WARNING),
@@ -511,9 +514,17 @@ def _complete_anthropic(prompt: str, api_key: str, model: str, max_tokens: int) 
 
 
 def _complete_openai_compatible(
-    prompt: str, api_key: str, model: str, max_tokens: int, base_url: str | None = None
+    prompt: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    *,
+    disable_thinking: bool = False,
 ) -> str | None:
-    text, _ = _complete_openai_compatible_detail(prompt, api_key, model, max_tokens, base_url)
+    text, _ = _complete_openai_compatible_detail(
+        prompt, api_key, model, max_tokens, base_url, disable_thinking=disable_thinking
+    )
     return text
 
 
@@ -525,6 +536,7 @@ def _openai_compatible_request(
     base_url: str | None = None,
     *,
     probe: bool = False,
+    disable_thinking: bool = False,
 ) -> str:
     try:
         from openai import OpenAI  # type: ignore
@@ -540,7 +552,10 @@ def _openai_compatible_request(
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
-        if probe and _is_deepseek_model(model):
+        # deepseek v4 系列默认带 thinking: 复杂任务(长 KB 上下文)会把推理草稿
+        # 直接写进 content 且拖满 token 预算(实测 154s 草稿污染, 答案被截断)。
+        # 问答/探测路径显式关闭 thinking — 输出直接干净(实测 6s)。
+        if (probe or disable_thinking) and _is_deepseek_model(model):
             create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         resp = client.chat.completions.create(**create_kwargs)
         text = _openai_message_text(resp.choices[0].message)
@@ -565,9 +580,11 @@ def _complete_openai_compatible_raw(
     base_url: str | None = None,
     *,
     probe: bool = False,
+    disable_thinking: bool = False,
 ) -> str:
     return _openai_compatible_request(
-        prompt, api_key, model, max_tokens, base_url, probe=probe
+        prompt, api_key, model, max_tokens, base_url,
+        probe=probe, disable_thinking=disable_thinking,
     )
 
 
@@ -579,11 +596,13 @@ def _complete_openai_compatible_detail(
     base_url: str | None = None,
     *,
     probe: bool = False,
+    disable_thinking: bool = False,
 ) -> tuple[str | None, str | None]:
     """Call an OpenAI-compatible chat API; return (text, error_message)."""
     try:
         text = _complete_openai_compatible_raw(
-            prompt, api_key, model, max_tokens, base_url, probe=probe
+            prompt, api_key, model, max_tokens, base_url,
+            probe=probe, disable_thinking=disable_thinking,
         )
         return text, None
     except LLMConfigError as exc:
@@ -626,12 +645,16 @@ def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
         return None
 
 
-def _call_llm(prompt: str, max_tokens: int | None = None) -> str | None:
+def _call_llm(
+    prompt: str, max_tokens: int | None = None, *, disable_thinking: bool = False
+) -> str | None:
     """Route to the configured provider; return None on any failure.
 
     max_tokens=None → settings.llm_max_tokens (16384 默认, 为长文转录
     设计); 问答类调用应传较小的预算(如 2048), 否则推理模型会拖满
     max_tokens 才停, 单次回答耗时 2 分钟+(2026-09-04 排查 136-143s 根因)。
+    disable_thinking=True → deepseek v4 系关闭 thinking(问答主回答用:
+    实测 154s 草稿污染 vs 6s 直接干净回答)。
     """
     settings = get_settings()
     provider = effective_setting(settings, "llm_provider")
@@ -648,7 +671,9 @@ def _call_llm(prompt: str, max_tokens: int | None = None) -> str | None:
 
     # All other providers are OpenAI-compatible.
     base_url = _resolve_openai_base_url(provider, effective_setting(settings, "llm_base_url"))
-    return _complete_openai_compatible(prompt, api_key, model, max_tokens, base_url)
+    return _complete_openai_compatible(
+        prompt, api_key, model, max_tokens, base_url, disable_thinking=disable_thinking
+    )
 
 
 def complete_json(prompt: str) -> dict | None:
@@ -1436,6 +1461,47 @@ def _chat_prompt(
 
 # ── Offline fallback ─────────────────────────────────────────────────────────
 
+_DRAFT_MARKERS = (
+    "let's ", "let me ", "perhaps ", "need to answer", "need answer",
+    "we need answer", "i'll formulate", "i'll write", "let's examine",
+    "let us ", "we should ", "i think i ", "formulate:", "draft:",
+    "need to check", "let's look", "not sure", "maybe combine",
+)
+
+
+def _looks_like_draft(text: str | None) -> bool:
+    """草稿污染检测: LLM 把推理过程(中英混杂自言自语)写进 content 的特征。
+
+    2026-09-04 实测: deepseek v4 默认 thinking 在长 KB 上下文下输出
+    "我们 need answer Chinese… Let's examine… Perhaps combine…" 这类草稿,
+    2048 token 预算被耗尽, 正式答案被截断。命中特征词 ≥2 且文本偏长 → 判草稿。
+    """
+    if not text:
+        return False
+    t = text.lower()
+    hits = sum(1 for m in _DRAFT_MARKERS if m in t)
+    return hits >= 2 and len(text) > 600
+
+
+def _call_with_deadline(fn: Callable[[], str | None], seconds: float) -> str | None:
+    """Run *fn* on a worker thread with a hard wall-clock deadline.
+
+    2026-09-04: deepseek 慢窗口下 openai SDK 的 idle 超时(60s)不覆盖
+    "持续慢速吐数据"场景, 单次 LLM 调用实测挂 150s+。问答主回答用它
+    封顶 45s, 超时返回 None → 上层降级 offline snippet, 请求必有响应。
+    孤儿线程 shutdown(wait=False) 自然结束, 不阻塞后续请求。
+    """
+    import concurrent.futures
+
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(fn).result(timeout=seconds)
+    except Exception:
+        return None
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+
 def _offline_synthesis(req: Requirement, evidence: list[Evidence], recommended: list) -> tuple[str, str]:
     """Deterministic rule-based synthesis — works without any API key."""
     domain_names = {
@@ -1604,12 +1670,11 @@ def answer_question(
     candidates_n = min(settings.chat_rerank_candidates, max(1, len(sources)))
     recalled = store.query(question, k=candidates_n) or sources[:candidates_n]
 
-    if settings.chat_rerank_enabled and len(recalled) > 1:
-        from ..services.rag import llm_rerank
-
-        relevant = llm_rerank(question, recalled, k=settings.chat_rerank_top_k)
-    else:
-        relevant = recalled[:settings.chat_rerank_top_k]
+    # 2026-09-04: chat 主路径不做 LLM 二次精排。kb_augment(图谱/KB)与
+    # BM25 已两级排序, llm_rerank 再对 50 条候选打分在 deepseek 慢窗口
+    # 实测多花 30-76s/问(耗时探针 answer=93.5s 的大头), 收益边际。
+    # 深度研究/文献检索等长任务路径的 llm_rerank 不受影响。
+    relevant = recalled[: settings.chat_rerank_top_k]
 
     # Tier 2: paper-qa semantic synthesis with citations.
     if _paperqa_available() and sources:
@@ -1619,9 +1684,20 @@ def answer_question(
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
     prompt = _chat_prompt(question, relevant, domain, history=history, structure=structure)
-    # 问答主回答用小 token 预算: 推理模型拖满 16384 会让单次问答 2 分钟+,
-    # 前端表现为"问答失败"(2026-09-04 实测 136-143s 慢响应根因)。
-    answer = _call_llm(prompt, max_tokens=2048)
+    # 问答主回答: 小 token 预算 + 关闭 thinking(2026-09-04 深度排查):
+    # 1) 16384 预算会让推理模型拖满, 单次 2 分钟+(136-143s 慢响应根因);
+    # 2) deepseek v4 默认 thinking 在长 KB 上下文下把推理草稿写进 content
+    #    (中英混杂 "Let's examine…"), 2048 预算被草稿耗尽 → 正式答案被截断,
+    #    前端表现为"答非所问/报错"。关闭后直接输出干净答案(实测 6s vs 154s)。
+    answer = _call_with_deadline(
+        lambda: _call_llm(prompt, max_tokens=2048, disable_thinking=True), 45.0
+    )
+    if _looks_like_draft(answer):
+        log.warning("answer_question: LLM 输出疑似推理草稿(%d 字符), 重试一次", len(answer or ""))
+        retry = _call_with_deadline(
+            lambda: _call_llm(prompt, max_tokens=2048, disable_thinking=True), 45.0
+        )
+        answer = retry or answer
     if not answer:
         # Tier 4 — offline fallback: return the most relevant snippet.
         if relevant:

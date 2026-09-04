@@ -9,6 +9,15 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+# 2026-09-04: app logger 无 handler 导致所有业务日志(chat failed traceback、
+# 耗时分解等)静默丢失——显式挂 root handler, INFO 起步输出到 stdout
+# (uvicorn 日志文件/管道一并接收)。
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware

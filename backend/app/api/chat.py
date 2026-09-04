@@ -151,12 +151,20 @@ def _ensure_answer(text: str | None, *, fallback: str = "暂无可用回答。")
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequestValidated):
+    import time as _time
+    _t0 = _time.time()
+    _marks: list[str] = []
+
+    def _mark(name: str) -> None:
+        _marks.append(f"{name}={_time.time() - _t0:.1f}s")
+
     try:
         from ..config import get_settings
 
         settings = get_settings()
         question = req.question.strip()
         history = trim_history(req.history)
+        _mark("parse")
 
         retrieval_query, rewritten_query = rewrite_query(
             question,
@@ -178,6 +186,7 @@ def chat(req: ChatRequestValidated):
             project_id=req.project_id,
             include_entity_resolution=req.include_entity_resolution,
         )
+        _mark("kb_augment")
 
         clarification = detect_clarification(
             question,
@@ -185,6 +194,7 @@ def chat(req: ChatRequestValidated):
             req.clarified_entities,
             settings=settings,
         )
+        _mark("clarify")
 
         structured: StructuredAnswer | None = None
         citations: list[Evidence]
@@ -211,6 +221,7 @@ def chat(req: ChatRequestValidated):
                     structure=req.structure,
                 )
                 answer = _ensure_answer(answer)
+            _mark("answer")
         else:
             answer, citations = answer_question(
                 question,
@@ -220,6 +231,7 @@ def chat(req: ChatRequestValidated):
                 structure=req.structure,
             )
             answer = _ensure_answer(answer)
+            _mark("answer")
 
         if clarification and clarification.possible_meanings and "按" not in answer:
             hint = clarification.possible_meanings[0]
@@ -232,6 +244,8 @@ def chat(req: ChatRequestValidated):
             structured=structured,
             settings=settings,
         )
+        _mark("claims")
+        logger.info("chat 耗时分解: %s", " | ".join(_marks))
 
         return ChatResponse(
             answer=answer,
@@ -248,5 +262,7 @@ def chat(req: ChatRequestValidated):
     except HTTPException:
         raise
     except Exception as exc:
+        _mark("FAILED")
+        logger.info("chat 耗时分解(失败): %s | %s", " | ".join(_marks), str(exc)[:200])
         logger.exception("chat failed")
         raise HTTPException(status_code=500, detail="问答处理失败") from exc

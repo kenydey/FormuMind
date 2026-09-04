@@ -31,7 +31,17 @@ def build_sourced_claims(
         return []
 
     try:
-        verified = verify_claims_llm(question, claims, sources)
+        # 2026-09-04: deepseek 慢窗口会让 claims 的 LLM 验证挂 60-120s+
+        # (实测 150s+ 卡死整次问答)——12s 硬超时, 超时降级 offline 验证,
+        # 主回答不受影响。孤儿线程 shutdown(wait=False) 不阻塞后续请求。
+        import concurrent.futures
+
+        _ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            _fut = _ex.submit(verify_claims_llm, question, claims, sources)
+            verified = _fut.result(timeout=12)
+        finally:
+            _ex.shutdown(wait=False, cancel_futures=True)
     except Exception:
         verified = [verify_claim_offline(c, sources) for c in claims]
 
