@@ -62,3 +62,14 @@ def _prewarm_ocsr(**kwargs):  # pragma: no cover - runs in the molscribe worker
 
     if ocsr.molscribe_available():
         ocsr.prewarm_molscribe()
+
+
+@worker_process_init.connect
+def _prewarm_predictor(**kwargs):  # pragma: no cover - runs in worker processes
+    # R4 (2026-09-04): DOE/loop 任务跑在 worker, 首个 predict 冷启动实测
+    # 9-29s(thermo 数据库初始化 + rdkit)——worker_process_init 在 prefork
+    # 子进程启动时触发, 预热前置使任务内的首个 predict 不付数据库初始化。
+    # 幂等 + 失败静默(warm_predict 内部 guard/try)。
+    from ..services.predictor import warm_predict
+
+    warm_predict()

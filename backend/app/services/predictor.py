@@ -370,3 +370,50 @@ def multi_objective_score(
         total += obj.weight * norm
         total_weight += obj.weight
     return total / total_weight if total_weight > 0 else 0.0
+
+
+# ── Cold-start prewarm (R4, 2026-09-04) ─────────────────────────────────────
+# 实测首个 predict 冷启动 9-29s 的构成: thermo 数据库核心初始化 ~7.5s(进程
+# 一次) + 查不到的复杂成分名单次失败查询 ~10.6s(thermo 进程内缓存, 失败也
+# 缓存, 故热态 predict 仅 0.08s); rdkit import ~1.5s。warm_predict() 把固定
+# 成本(rdkit + thermo 数据库初始化 + 常见溶剂名)前置到 uvicorn lifespan /
+# celery worker_process_init, 首个真实 predict 不再付数据库初始化。
+# 幂等 + 失败静默: 预热永不阻断业务, 失败只意味着首个请求再付一次冷启动。
+_warm_guard: dict[str, bool] = {"done": False}
+
+_PREWARM_SOLVENTS = (
+    "water", "ethanol", "isopropanol", "acetone",
+    "xylene", "butanol", "propylene glycol",
+)
+
+
+def _do_warm() -> None:
+    from rdkit import Chem  # noqa: F401
+    from rdkit.Chem import Descriptors  # noqa: F401
+
+    try:
+        from thermo import Chemical
+
+        for _name in _PREWARM_SOLVENTS:
+            try:
+                Chemical(_name)
+            except Exception:
+                pass
+    except ImportError:
+        pass  # thermo 缺席时密度链已回退 1.3 kg/L 名义值
+
+
+def warm_predict() -> None:
+    """Pre-load RDKit + thermo so the first real predict isn't cold.
+
+    Idempotent (module-level guard) and failure-silent. Callable from the
+    uvicorn lifespan (background thread) and the celery worker_process_init
+    signal; safe to call from both in the same process.
+    """
+    if _warm_guard["done"]:
+        return
+    _warm_guard["done"] = True
+    try:
+        _do_warm()
+    except Exception:
+        logger.exception("predictor warm_predict failed (non-fatal)")

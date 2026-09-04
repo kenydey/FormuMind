@@ -76,6 +76,19 @@ async def lifespan(_app: FastAPI):
     """
     skip_bootstrap = _skip_lifespan_bootstrap()
     # ------------------------------------------------------------------
+    # R4: 预热 predictor 冷启动(首个 predict 实测 9-29s: thermo 数据库
+    # 初始化 + rdkit import)——后台线程, 不阻塞启动; 失败静默(首个
+    # 请求再付一次冷启动, 不报错)。测试环境 SKIP 隔离, 不慢化现有测试。
+    # ------------------------------------------------------------------
+    if not skip_bootstrap:
+        import threading
+
+        from .services.predictor import warm_predict
+
+        threading.Thread(
+            target=warm_predict, name="predictor-prewarm", daemon=True
+        ).start()
+    # ------------------------------------------------------------------
     # Fail-fast: ensure the API token is resolvable at startup so a missing
     # FORMUMIND_API_TOKEN surfaces immediately in production instead of on
     # the first authenticated request.
