@@ -226,6 +226,13 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
             }
             for c in chunks
         ]
+        # 2026-09-04 (双语分流): 嵌入前预标 lang(与 chunk_store 写入判定
+        # 同源), 让嵌入模型选择(zh→bge / en→MiniLM)在写入前就正确。
+        if rows:
+            from ..db.chunk_store import _detect_chunk_lang
+
+            for _r in rows:
+                _r["lang"] = _detect_chunk_lang(_r.get("text") or "")
         with timing.span("entities"):
             _attach_entities(source_id, rows)
         if embed and rows:
