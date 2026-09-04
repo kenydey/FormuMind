@@ -15,6 +15,20 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _detect_chunk_lang(text: str) -> str | None:
+    """轻量语言判定(双语分流, 2026-09-04): CJK 占比 ≥25% → zh, 否则 en。
+
+    与 scripts/backfill_chunk_lang.py 阈值一致; 乱码检测由回填脚本负责
+    (存量), 增量这里只分 zh/en(乱码按 en 处理, 由清洗工单收尾)。
+    """
+    if not text:
+        return None
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    if cjk / max(1, len(text)) >= 0.25:
+        return "zh"
+    return "en"
+
+
 class ChunkStore:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
@@ -54,12 +68,13 @@ class ChunkStore:
                         meta[key] = val
             if not meta:
                 meta = None
+            text = chunk.get("text", "") or ""
             session.add(
                 DocumentChunk(
                     id=str(uuid.uuid4()),
                     source_id=source_id,
                     ord=i,
-                    text=chunk.get("text", ""),
+                    text=text,
                     heading_path=(chunk.get("heading_path") or "")[:120],
                     page_no=chunk.get("page_no"),
                     offset_start=chunk.get("offset_start"),
@@ -68,6 +83,9 @@ class ChunkStore:
                     meta=meta,
                     embedding=chunk.get("embedding"),
                     embedding_model=chunk.get("embedding_model"),
+                    # 2026-09-04 (双语分流): 写入时自动标语言子库(显式
+                    # chunk["lang"] 优先), 增量 ingest 无需跑回填脚本。
+                    lang=chunk.get("lang") or _detect_chunk_lang(text),
                     created_at=_utcnow(),
                 )
             )

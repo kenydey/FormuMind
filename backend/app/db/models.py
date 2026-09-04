@@ -267,6 +267,11 @@ class DocumentChunk(Base):
         comment="归一化句向量（JSON 数组）",
     )
     embedding_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Bilingual routing (2026-09-04): "zh" | "en" | None — filled by the lang
+    # backfill; retrieval filters by language and embeds per language model.
+    # zh chunks use BAAI/bge-small-zh-v1.5, en chunks keep all-MiniLM-L6-v2 —
+    # embedding_model column already distinguishes them (comparable_embedding).
+    lang: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     # Extracted entities: {"chem": [{type, value, ...}], "products": [...]}.
     meta: Mapped[dict | None] = mapped_column(
         JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
