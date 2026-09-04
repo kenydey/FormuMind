@@ -275,3 +275,23 @@ P2 已落地的别名归一化+词法降权 0.15 是当前数据条件下的正�
 
 *复核基线:全部现状论据来自 2026-09-04 实读代码/实测打点(行号见各节);R5 不实施理由为
 chem_extract 能力边界(非懈怠);2b 收敛为 BayBE 数学表达能力的诚实边界,不做假承诺。*
+
+---
+
+## 执行偏差记录(2026-09-04 实施后)
+
+- **R1**: 实读发现 acid_stability 硬编码**5 组规则**(强碱/碳酸盐/活泼金属/胺 +
+  RESIN_ROLES 策略常量), 审查清单只提碱+金属——4 组数据规则全部 TOML 化;
+  规则文件放 `app/resources/rules/`(跟随 kg_elements.json 资源先例)。
+- **R2 2a**: 落地自适应档位(fast 1/16 / balanced 3/32 / thorough 5/64,
+  env FORMUMIND_BO_QUALITY 覆盖)。**2b**: spike 确认数值空间全连续且已有总量
+  线性约束——化学互斥(成分语义级)数学层不可达 → 收敛为 gate 占比写入 notes。
+  **2c**: 关闭——复核发现 `default_bounds` 种子预锁定已存在(L373-375)。
+- **R3**: 正则扩词(盘点/综述/汇总/一览/清单/筛出/什么牌号/哪些厂|家), 高歧义词
+  (总结/整理/对比)留 LLM 层; LLM 兜底 3s deadline, 失败落 auto 不劣化。
+- **R4**: 打点两轮推翻假设(rdkit 1s 非慢源)→ 真凶 thermo 数据库初始化 7.5s +
+  复杂成分名失败查询 10.6s/个; warm_predict 双挂(lifespan 后台线程 + worker_
+  process_init), 实测 uvicorn 2.3s / worker 2 子进程各 3.4s。
+- **R5**: 影响面扩大——SMILES 入库还解锁 baybe SubstanceParameter(现 1/3 目录
+  覆盖率不足, genome 空间被 categorical 兜底)——见 spike 附档, 独立工单。
+- 全量回归: 12 文件 **100 passed**; 服务重启端到端冒烟(预热日志双端确认)。

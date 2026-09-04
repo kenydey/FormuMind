@@ -413,7 +413,11 @@ def warm_predict() -> None:
     if _warm_guard["done"]:
         return
     _warm_guard["done"] = True
+    import time as _t
+
+    _t0 = _t.time()
     try:
         _do_warm()
+        logger.info("predictor prewarm done in %.1fs (rdkit+thermo hot)", _t.time() - _t0)
     except Exception:
         logger.exception("predictor warm_predict failed (non-fatal)")
