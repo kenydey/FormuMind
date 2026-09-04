@@ -102,26 +102,26 @@ _SEED_MATERIALS: dict[str, dict] = {
     "Bismuth neodecanoate": {
         # Bismuth cure catalyst for waterborne 2K-PU — preferred over tin (DBTL)
         # in aqueous systems, which promotes side reactions with water.
-        "role": "accelerator", "formula": None, "smiles": None, "molar_mass": None,
+        "role": "accelerator", "formula": None, "smiles": "CCCCCCC(C)(C)C(=O)O[Bi](OC(=O)C(C)(C)CCCCCC)OC(=O)C(C)(C)CCCCCC", "molar_mass": None,
         "price_cny_per_kg": 140.0, "voc_contrib": 0.0,
         "carrier": "both",
     },
     # Corrosion inhibitors / passivators
     "Zinc phosphate": {
-        "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": None, "molar_mass": 386.11,
+        "role": "inhibitor", "formula": "Zn3(PO4)2", "smiles": "[O-]P(=O)([O-])[O-].[O-]P(=O)([O-])[O-].[Zn+2].[Zn+2].[Zn+2]", "molar_mass": 386.11,
         "cas_no": "7779-90-0",
         "zh_name": "磷酸锌",
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
         "density_gcm3": 3.1, "oil_absorption": 25.0, "lab": [92.0, -0.5, 2.0],
     },
     "Zinc molybdate": {
-        "role": "inhibitor", "formula": "ZnMoO4", "smiles": None, "molar_mass": 225.33,
+        "role": "inhibitor", "formula": "ZnMoO4", "smiles": "[O-][Mo](=O)(=O)[O-].[Zn+2]", "molar_mass": 225.33,
         "price_cny_per_kg": 45.0, "voc_contrib": 0.0,
         "density_gcm3": 4.3, "oil_absorption": 20.0, "lab": [95.0, -1.0, 3.0],
         "svhc": True,
     },
     "Cerium nitrate": {
-        "role": "inhibitor", "formula": "Ce(NO3)3", "smiles": None, "molar_mass": 326.13,
+        "role": "inhibitor", "formula": "Ce(NO3)3", "smiles": "[N+](=O)([O-])[O-].[N+](=O)([O-])[O-].[N+](=O)([O-])[O-].[Ce+3]", "molar_mass": 326.13,
         "cas_no": "7789-18-6",
         "zh_name": "硝酸铈",
         "price_cny_per_kg": 120.0, "voc_contrib": 0.0,
@@ -134,17 +134,17 @@ _SEED_MATERIALS: dict[str, dict] = {
     },
     # Pigments / fillers
     "Titanium dioxide": {
-        "role": "pigment", "formula": "TiO2", "smiles": None, "molar_mass": 79.87,
+        "role": "pigment", "formula": "TiO2", "smiles": "O=[Ti]=O", "molar_mass": 79.87,
         "price_cny_per_kg": 18.0, "voc_contrib": 0.0,
         "density_gcm3": 4.0, "oil_absorption": 18.0, "lab": [97.0, -0.6, 1.8],
     },
     "Talc": {
-        "role": "filler", "formula": "Mg3Si4O10(OH)2", "smiles": None, "molar_mass": 379.27,
+        "role": "filler", "formula": "Mg3Si4O10(OH)2", "smiles": "[OH-].[OH-].[O-][Si]12O[Si]3(O[Si](O1)(O[Si](O2)(O3)[O-])[O-])[O-].[Mg+2].[Mg+2].[Mg+2]", "molar_mass": 379.27,
         "price_cny_per_kg": 3.0, "voc_contrib": 0.0,
         "density_gcm3": 2.75, "oil_absorption": 35.0, "lab": [90.0, -0.8, 2.5],
     },
     "Fumed silica": {
-        "role": "filler", "formula": "SiO2", "smiles": None, "molar_mass": 60.08,
+        "role": "filler", "formula": "SiO2", "smiles": "O=[Si]=O", "molar_mass": 60.08,
         "price_cny_per_kg": 30.0, "voc_contrib": 0.0,
         "density_gcm3": 2.2, "oil_absorption": 100.0, "lab": [94.0, -0.3, 1.0],
     },
@@ -164,11 +164,11 @@ _SEED_MATERIALS: dict[str, dict] = {
     },
     # Degreaser actives
     "Sodium hydroxide": {
-        "role": "builder", "formula": "NaOH", "smiles": None, "molar_mass": 40.00,
+        "role": "builder", "formula": "NaOH", "smiles": "[OH-].[Na+]", "molar_mass": 40.00,
         "price_cny_per_kg": 3.5, "voc_contrib": 0.0,
     },
     "Sodium metasilicate": {
-        "role": "builder", "formula": "Na2SiO3", "smiles": None, "molar_mass": 122.06,
+        "role": "builder", "formula": "Na2SiO3", "smiles": "[O-][Si](=O)[O-].[Na+].[Na+]", "molar_mass": 122.06,
         "price_cny_per_kg": 5.0, "voc_contrib": 0.0,
     },
     "Sodium tripolyphosphate": {
@@ -180,7 +180,7 @@ _SEED_MATERIALS: dict[str, dict] = {
         "price_cny_per_kg": 22.0, "voc_contrib": 0.0,
     },
     "Sodium gluconate": {
-        "role": "chelant", "formula": "C6H11NaO7", "smiles": None, "molar_mass": 218.14,
+        "role": "chelant", "formula": "C6H11NaO7", "smiles": "C(C(C(C(C(C(=O)[O-])O)O)O)O)O.[Na+]", "molar_mass": 218.14,
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,
     },
     "D-Limonene": {
@@ -194,20 +194,20 @@ _SEED_MATERIALS: dict[str, dict] = {
         "price_cny_per_kg": 5.0, "voc_contrib": 0.0,
     },
     "Zinc oxide": {
-        "role": "active", "formula": "ZnO", "smiles": None, "molar_mass": 81.38,
+        "role": "active", "formula": "ZnO", "smiles": "[O-2].[Zn+2]", "molar_mass": 81.38,
         "price_cny_per_kg": 20.0, "voc_contrib": 0.0,
     },
     "Manganese dihydrogen phosphate": {
-        "role": "active", "formula": "Mn(H2PO4)2", "smiles": None, "molar_mass": 248.94,
+        "role": "active", "formula": "Mn(H2PO4)2", "smiles": "OP(=O)(O)[O-].OP(=O)(O)[O-].[Mn+2]", "molar_mass": 248.94,
         "price_cny_per_kg": 18.0, "voc_contrib": 0.0,
     },
     "Sodium nitrite": {
-        "role": "accelerator", "formula": "NaNO2", "smiles": None, "molar_mass": 69.00,
+        "role": "accelerator", "formula": "NaNO2", "smiles": "N(=O)[O-].[Na+]", "molar_mass": 69.00,
         "price_cny_per_kg": 6.0, "voc_contrib": 0.0,
         "svhc": True,
     },
     "Hexafluorozirconic acid": {
-        "role": "active", "formula": "H2ZrF6", "smiles": None, "molar_mass": 208.23,
+        "role": "active", "formula": "H2ZrF6", "smiles": "F.F.F[Zr](F)(F)F", "molar_mass": 208.23,
         "cas_no": "12021-95-3",
         "zh_name": "六氟锆酸",
         "price_cny_per_kg": 95.0, "voc_contrib": 0.0,
@@ -298,7 +298,7 @@ _SEED_MATERIALS: dict[str, dict] = {
         "carrier": "aqueous",
     },
     "Sodium bifluoride (NaHF2)": {
-        "role": "active", "formula": "NaHF2", "smiles": None, "molar_mass": 61.99,
+        "role": "active", "formula": "NaHF2", "smiles": "F.[F-].[Na+]", "molar_mass": 61.99,
         "cas_no": "1333-83-1",
         "zh_name": "氟氢化钠",
         "price_cny_per_kg": 12.0, "voc_contrib": 0.0,

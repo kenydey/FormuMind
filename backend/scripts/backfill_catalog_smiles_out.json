@@ -1,0 +1,82 @@
+{
+  "resolved": {
+    "Bismuth neodecanoate": "CCCCCCC(C)(C)C(=O)O[Bi](OC(=O)C(C)(C)CCCCCC)OC(=O)C(C)(C)CCCCCC",
+    "Zinc phosphate": "[O-]P(=O)([O-])[O-].[O-]P(=O)([O-])[O-].[Zn+2].[Zn+2].[Zn+2]",
+    "Zinc molybdate": "[O-][Mo](=O)(=O)[O-].[Zn+2]",
+    "Cerium nitrate": "[N+](=O)([O-])[O-].[N+](=O)([O-])[O-].[N+](=O)([O-])[O-].[Ce+3]",
+    "Titanium dioxide": "O=[Ti]=O",
+    "Talc": "[OH-].[OH-].[O-][Si]12O[Si]3(O[Si](O1)(O[Si](O2)(O3)[O-])[O-])[O-].[Mg+2].[Mg+2].[Mg+2]",
+    "Fumed silica": "O=[Si]=O",
+    "Sodium hydroxide": "[OH-].[Na+]",
+    "Sodium metasilicate": "[O-][Si](=O)[O-].[Na+].[Na+]",
+    "Sodium gluconate": "C(C(C(C(C(C(=O)[O-])O)O)O)O)O.[Na+]",
+    "Zinc oxide": "[O-2].[Zn+2]",
+    "Manganese dihydrogen phosphate": "OP(=O)(O)[O-].OP(=O)(O)[O-].[Mn+2]",
+    "Sodium nitrite": "N(=O)[O-].[Na+]",
+    "Hexafluorozirconic acid": "F.F.F[Zr](F)(F)F",
+    "Sodium bifluoride (NaHF2)": "F.[F-].[Na+]"
+  },
+  "failed": [
+    {
+      "name": "Polyurethane dispersion",
+      "reason": "polymer/dispersion — 无单一分子, 跳过网络"
+    },
+    {
+      "name": "Zinc-rich epoxy binder",
+      "reason": "polymer/dispersion — 无单一分子, 跳过网络"
+    },
+    {
+      "name": "Polyamide hardener",
+      "reason": "polymer/dispersion — 无单一分子, 跳过网络"
+    },
+    {
+      "name": "Desmodur BL 3175",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Waterborne polyisocyanate (hydrophilic HDI)",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Deionized water",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Sodium tripolyphosphate",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Nonionic surfactant (C12-14 EO7)",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Acidic-stable epoxy-acrylic emulsion",
+      "reason": "polymer/dispersion — 无单一分子, 跳过网络"
+    },
+    {
+      "name": "Cationic polyurethane dispersion (acid-stable)",
+      "reason": "polymer/dispersion — 无单一分子, 跳过网络"
+    },
+    {
+      "name": "Ferric fluoride (FeF3)",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Hydrofluoric acid (HF)",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Hydrogen peroxide (H2O2)",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Carbon black",
+      "reason": "pubchem no hit"
+    },
+    {
+      "name": "Acid-tolerant nonionic wetting agent",
+      "reason": "pubchem no hit"
+    }
+  ],
+  "skipped_no_missing": []
+}
