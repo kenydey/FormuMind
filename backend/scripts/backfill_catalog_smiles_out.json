@@ -14,7 +14,12 @@
     "Manganese dihydrogen phosphate": "OP(=O)(O)[O-].OP(=O)(O)[O-].[Mn+2]",
     "Sodium nitrite": "N(=O)[O-].[Na+]",
     "Hexafluorozirconic acid": "F.F.F[Zr](F)(F)F",
-    "Sodium bifluoride (NaHF2)": "F.[F-].[Na+]"
+    "Sodium bifluoride (NaHF2)": "F.[F-].[Na+]",
+    "Sodium tripolyphosphate": "[O-]P(=O)([O-])OP(=O)([O-])OP(=O)([O-])[O-].[Na+].[Na+].[Na+].[Na+].[Na+]",
+    "Ferric fluoride (FeF3)": "F[Fe](F)F",
+    "Deionized water": "O",
+    "Hydrofluoric acid (HF)": "F",
+    "Hydrogen peroxide (H2O2)": "OO"
   },
   "failed": [
     {
@@ -38,14 +43,6 @@
       "reason": "pubchem no hit"
     },
     {
-      "name": "Deionized water",
-      "reason": "pubchem no hit"
-    },
-    {
-      "name": "Sodium tripolyphosphate",
-      "reason": "pubchem no hit"
-    },
-    {
       "name": "Nonionic surfactant (C12-14 EO7)",
       "reason": "pubchem no hit"
     },
@@ -58,24 +55,12 @@
       "reason": "polymer/dispersion — 无单一分子, 跳过网络"
     },
     {
-      "name": "Ferric fluoride (FeF3)",
-      "reason": "pubchem no hit"
-    },
-    {
-      "name": "Hydrofluoric acid (HF)",
-      "reason": "pubchem no hit"
-    },
-    {
-      "name": "Hydrogen peroxide (H2O2)",
+      "name": "Acid-tolerant nonionic wetting agent",
       "reason": "pubchem no hit"
     },
     {
       "name": "Carbon black",
-      "reason": "pubchem no hit"
-    },
-    {
-      "name": "Acid-tolerant nonionic wetting agent",
-      "reason": "pubchem no hit"
+      "reason": "人工否决 [C] — 不定形碳无单一分子(单原子占位会误导 Tanimoto)"
     }
   ],
   "skipped_no_missing": []

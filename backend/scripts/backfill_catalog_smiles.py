@@ -39,6 +39,18 @@ _POLYMER_HINTS = re.compile(
 )
 _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
 
+# 阶段2 (--retry-failed): 失败条目的 PubChem 可查候选名。仅给化学事实
+# 名(去括号核心名/规范同义名/语义等价物), 不给臆造结构——PubChem
+# 解析确认后才应用。
+_RETRY_NAMES: dict[str, list[str]] = {
+    "Ferric fluoride (FeF3)": ["Ferric fluoride", "Iron(III) fluoride"],
+    "Hydrofluoric acid (HF)": ["Hydrofluoric acid"],
+    "Hydrogen peroxide (H2O2)": ["Hydrogen peroxide"],
+    "Sodium tripolyphosphate": ["Sodium tripolyphosphate", "Pentasodium triphosphate"],
+    "Deionized water": ["Water", "Deionized Water"],
+    "Carbon black": ["Carbon black"],
+}
+
 
 def load_seed() -> dict[str, dict]:
     src = (Path("app/domain/knowledge.py")).read_text(encoding="utf-8")
@@ -58,7 +70,9 @@ def _valid_smiles(smi: str | None) -> str | None:
     if not smi:
         return None
     s = str(smi).strip()
-    if len(s) < 4 or len(s) > 300:
+    # 2026-09-04: 长度下限放宽——单原子/小分子 SMILES 合法("O"=水,
+    # "F"=HF, "OO"=H2O2), 原 <4 下限误杀。信任 PubChem 规范输出。
+    if len(s) < 1 or len(s) > 300:
         return None
     if re.search(r"\s", s) or not re.search(r"[A-Za-z]", s):
         return None
@@ -87,10 +101,61 @@ def _pubchem_smiles(name: str) -> str | None:
     return None
 
 
+def _retry_failed() -> int:
+    """阶段2: 读上次 out json 失败名单, 用候选名重查非聚合物条目。
+
+    仅尝试 _RETRY_NAMES 有化学事实候选名的条目(无候选名的聚合物/
+    描述名保持失败)。结果并入主 out json(resolved 增补, failed 移除
+    已救条目)。PubChem 确认后才应用——不臆造结构。
+    """
+    out_path = _BACKEND / "scripts" / "backfill_catalog_smiles_out.json"
+    if not out_path.exists():
+        print(f"缺上次结果: {out_path}"); return 1
+    out = json.loads(out_path.read_text(encoding="utf-8"))
+    resolved: dict[str, str] = dict(out.get("resolved", {}))
+    failed: list[dict[str, str]] = list(out.get("failed", []))
+
+    still_failed: list[dict[str, str]] = []
+    for item in failed:
+        name = item["name"]
+        candidates = _RETRY_NAMES.get(name)
+        if not candidates:
+            still_failed.append(item)  # 聚合物/描述名/无事实候选名 → 保持失败
+            print(f"KEEP  {name}")
+            continue
+        smi = None
+        for cand in candidates:
+            smi = _pubchem_smiles(cand)
+            if smi:
+                print(f"OK    {name}  ← {cand!r}")
+                break
+            time.sleep(_RATE_S)
+        if smi:
+            resolved[name] = smi
+        else:
+            still_failed.append(item)
+            print(f"FAIL  {name}")
+        time.sleep(_RATE_S)
+
+    out["resolved"] = resolved
+    out["failed"] = still_failed
+    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\n阶段2: 新成功 {len(resolved) - len(out.get('resolved', {}))} 条")
+    print(f"累计: resolved {len(resolved)} / 仍失败 {len(still_failed)}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument(
+        "--retry-failed", action="store_true",
+        help="阶段2: 对上次失败名单用候选名(PubChem 可查的化学事实名)重查",
+    )
     args = ap.parse_args()
+
+    if args.retry_failed:
+        return _retry_failed()
 
     seed = load_seed()
     resolved: dict[str, str] = {}

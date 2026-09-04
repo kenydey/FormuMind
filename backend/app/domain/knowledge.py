@@ -172,7 +172,7 @@ _SEED_MATERIALS: dict[str, dict] = {
         "price_cny_per_kg": 5.0, "voc_contrib": 0.0,
     },
     "Sodium tripolyphosphate": {
-        "role": "builder", "formula": "Na5P3O10", "smiles": None, "molar_mass": 367.86,
+        "role": "builder", "formula": "Na5P3O10", "smiles": "[O-]P(=O)([O-])OP(=O)([O-])OP(=O)([O-])[O-].[Na+].[Na+].[Na+].[Na+].[Na+]", "molar_mass": 367.86,
         "price_cny_per_kg": 7.0, "voc_contrib": 0.0,
     },
     "Nonionic surfactant (C12-14 EO7)": {
@@ -243,7 +243,7 @@ _SEED_MATERIALS: dict[str, dict] = {
         "acid_tolerance_ph": 2.5,
     },
     "Ferric fluoride (FeF3)": {
-        "role": "active", "formula": "FeF3", "smiles": None, "molar_mass": 112.84,
+        "role": "active", "formula": "FeF3", "smiles": "F[Fe](F)F", "molar_mass": 112.84,
         "cas_no": "7783-50-8",
         "zh_name": "氟化铁",
         "price_cny_per_kg": 60.0, "voc_contrib": 0.0,
