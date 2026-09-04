@@ -626,15 +626,20 @@ def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
         return None
 
 
-def _call_llm(prompt: str) -> str | None:
-    """Route to the configured provider; return None on any failure."""
+def _call_llm(prompt: str, max_tokens: int | None = None) -> str | None:
+    """Route to the configured provider; return None on any failure.
+
+    max_tokens=None → settings.llm_max_tokens (16384 默认, 为长文转录
+    设计); 问答类调用应传较小的预算(如 2048), 否则推理模型会拖满
+    max_tokens 才停, 单次回答耗时 2 分钟+(2026-09-04 排查 136-143s 根因)。
+    """
     settings = get_settings()
     provider = effective_setting(settings, "llm_provider")
     api_key = settings.get_active_api_key()
     if not api_key:
         return None
     model = effective_setting(settings, "llm_model")
-    max_tokens = settings.llm_max_tokens
+    max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
     if provider == "anthropic":
         return _complete_anthropic(prompt, api_key, model, max_tokens)
@@ -1614,7 +1619,9 @@ def answer_question(
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
     prompt = _chat_prompt(question, relevant, domain, history=history, structure=structure)
-    answer = _call_llm(prompt)
+    # 问答主回答用小 token 预算: 推理模型拖满 16384 会让单次问答 2 分钟+,
+    # 前端表现为"问答失败"(2026-09-04 实测 136-143s 慢响应根因)。
+    answer = _call_llm(prompt, max_tokens=2048)
     if not answer:
         # Tier 4 — offline fallback: return the most relevant snippet.
         if relevant:
