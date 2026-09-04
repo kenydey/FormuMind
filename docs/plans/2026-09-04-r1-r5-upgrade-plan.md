@@ -294,4 +294,14 @@ chem_extract 能力边界(非懈怠);2b 收敛为 BayBE 数学表达能力的诚
   process_init), 实测 uvicorn 2.3s / worker 2 子进程各 3.4s。
 - **R5**: 影响面扩大——SMILES 入库还解锁 baybe SubstanceParameter(现 1/3 目录
   覆盖率不足, genome 空间被 categorical 兜底)——见 spike 附档, 独立工单。
+- **R5 实施偏差(2026-09-04 补)**: 数据源决策=PubChem REST 复用现成
+  name_to_smiles(用户三选项里 molbloom 前提错误——实读它是专利预筛消费 SMILES,
+  非名称解析器)。5a 回填: seed smiles 34%→76%(31/41), kb_entities 0→81%
+  (25/31)。两处执行教训: ① 首版整行替换吞同行 role/formula(seed 部分 spec
+  单行多字段)——还原改子串替换; ② SMILES 校验器 len<4 下限误杀单原子/小分子
+  (水='O'/HF='F'/H2O2='OO'——它们本是 seed 已有值, 被误判缺失又经 PubChem
+  独立确认一致)。人工否决 Carbon black='[C]'(不定形碳无单一分子, 单原子占位
+  会误导 Tanimoto)。5b 指纹级已接入 formulation_similarity(双方有结构 →
+  Morgan/Tanimoto ≥0.6, 无机盐对实测保守 0 分; 分布与 P2 一致无倒挂)。
+  SubstanceParameter 升级自动受益(运行时按池覆盖判定), 无需代码改动。
 - 全量回归: 12 文件 **100 passed**; 服务重启端到端冒烟(预热日志双端确认)。
