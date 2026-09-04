@@ -144,7 +144,7 @@ def test_search_chunks_embedding_mode(stores, monkeypatch):
         {"text": "epoxy anticorrosion primer", "embedding": [1.0, 0.0], "embedding_model": "m"},
         {"text": "polyurethane topcoat gloss", "embedding": [0.0, 1.0], "embedding_model": "m"},
     ])
-    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[0.9, 0.1]])
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts, model_name=None: [[0.9, 0.1]])
     # The stored rows claim model "m", so the query has to come from "m" too —
     # otherwise `comparable_embedding` rightly refuses to score them together.
     monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "m")
@@ -298,7 +298,7 @@ def test_mixed_dimensions_are_not_scored_by_truncation(stores, monkeypatch):
         {"text": "epoxy anticorrosion primer", "embedding": [0.9, 0.1],
          "embedding_model": "m"},
     ])
-    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[1.0, 0.0]])
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts, model_name=None: [[1.0, 0.0]])
     monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "m")
 
     hits = kb_index.search_chunks("防腐", k=2)
@@ -315,7 +315,7 @@ def test_vectors_from_another_model_are_not_compared(stores, monkeypatch):
     chk.replace_for_source(sid, [
         {"text": "alpha", "embedding": [1.0, 0.0], "embedding_model": "old-model"},
     ])
-    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[1.0, 0.0]])
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts, model_name=None: [[1.0, 0.0]])
     monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "new-model")
 
     chunk = chk.get_by_source(sid)[0]
@@ -347,7 +347,7 @@ def test_embedding_count_mismatch_drops_the_batch(stores, monkeypatch):
     sid = src.create(filename="p.md", title="T", source_kind="literature",
                      full_text=text, content_hash="hcount")
     # One vector back for several chunks.
-    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts: [[1.0, 0.0]])
+    monkeypatch.setattr(kb_index, "_embed_texts", lambda texts, model_name=None: [[1.0, 0.0]])
 
     kb_index.index_source(sid, text)
     assert len(chk.get_by_source(sid)) > 1, "fixture must produce a real mismatch"

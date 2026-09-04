@@ -124,7 +124,7 @@ def test_hybrid_ranks_by_relevance(stores, monkeypatch):
     # Mock embeddings so the epoxy chunk aligns with a corrosion query
     monkeypatch.setattr(
         "app.services.kb_index._embed_texts",
-        lambda texts: [[0.9, 0.1]],
+        lambda texts, model_name=None: [[0.9, 0.1]],
     )
 
     from app.services.hybrid_search import hybrid_search
