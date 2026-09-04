@@ -64,3 +64,30 @@ def test_lexical_only_bonus_bounded_low():
     c = {"Waterborne polyurethane resin": 50.0}
     s = formulation_similarity(q, c)
     assert s <= 0.3
+
+
+def test_fingerprint_path_high_tanimoto_counts(monkeypatch):
+    """R5: 双方解析到目录且都有 SMILES → 走指纹路径; Tanimoto≥0.6 计入。"""
+    from app.services.kg import formulation_similarity as fs
+
+    monkeypatch.setattr(fs, "_tanimoto_similarity", lambda a, b: 0.72)
+    # Zinc phosphate / Zinc molybdate 都在 RAW_MATERIALS 且有 smiles(5a 回填)
+    assert fs._chemical_name_similarity("Zinc phosphate", "Zinc molybdate") == 0.72
+
+
+def test_fingerprint_path_below_threshold_zero(monkeypatch):
+    """Tanimoto <0.6 → 不给低置信加分(宁缺勿滥)。"""
+    from app.services.kg import formulation_similarity as fs
+
+    monkeypatch.setattr(fs, "_tanimoto_similarity", lambda a, b: 0.41)
+    assert fs._chemical_name_similarity("Zinc phosphate", "Zinc molybdate") == 0.0
+
+
+def test_fingerprint_real_values_conservative_for_inorganics():
+    """真实无机盐对(磷酸锌/钼酸锌/氧化物)指纹相似度低 → 0(化学上正确的保守)。"""
+    from app.services.kg.formulation_similarity import _chemical_name_similarity as s
+
+    assert s("Zinc phosphate", "Zinc molybdate") == 0.0
+    assert s("Zinc oxide", "Titanium dioxide") == 0.0
+    assert s("Zinc dust", "Zinc phosphate") == 0.0
+    assert s("Bismuth neodecanoate", "Zinc molybdate") == 0.0

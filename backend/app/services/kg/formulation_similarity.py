@@ -7,23 +7,30 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 def _chemical_name_similarity(a: str, b: str) -> float:
-    """化学上有意义的未匹配成分相似度(替代词法 overlap 高分)。
+    """未匹配成分的化学相似度, 三级: 归一化精确 → RDKit 指纹 → 词法兜底。
 
-    2026-09-04 (P2): 原实现 ``q_parts & c_parts`` 词法拆分让 "Waterborne
+    2026-09-04 (P2+R5): 原实现 ``q_parts & c_parts`` 词法拆分让 "Waterborne
     epoxy resin" 与 "Waterborne polyurethane resin" 共享 2/3 词得 0.5×weight
-    加分(化学荒谬)。替换为:
-      1) KG 别名归一化(resolve_material_name): 归一化后相同 = 真同一物 → 1.0;
-      2) 词法 overlap 仅作低置信兜底: 权重 0.15、阈值 50%(宁缺毋滥)。
-    RDKit 指纹路径需名称→结构解析(当前仅 molbloom 网络可用, 热路径不可行),
-    留待成分结构入库后(v2)。
+    加分(化学荒谬)。P2 替换为归一化精确(1.0)+ 词法 0.15 兜底; R5 成分
+    结构回填后插入指纹级: 双方解析到 RAW_MATERIALS 且都有 SMILES 时用
+    Morgan fingerprint (radius=2, 2048bit) Tanimoto, ≥0.6 才计(低于不算
+    命中); 无结构 → 词法 0.15 兜底。任何异常静默降级(永不打断推荐)。
     """
     try:
-        from ...domain.knowledge import resolve_material_name
+        from ...domain.knowledge import RAW_MATERIALS, resolve_material_name
 
-        na = resolve_material_name(a) or a
-        nb = resolve_material_name(b) or b
-        if na.lower() == nb.lower():
-            return 1.0
+        if a.strip().lower() == b.strip().lower():
+            return 1.0  # 同名防御(调用方已做集合差, 直调安全网)
+        na = resolve_material_name(a)
+        nb = resolve_material_name(b)
+        if na and nb and na.lower() == nb.lower():
+            return 1.0  # ① 别名/目录归一化后同物(真同一材料)
+        sa = RAW_MATERIALS.get(na, {}).get("smiles") if na else None
+        sb = RAW_MATERIALS.get(nb, {}).get("smiles") if nb else None
+        if sa and sb:  # ② 双方都有结构 → Morgan/Tanimoto
+            sim = _tanimoto_similarity(sa, sb)
+            if sim is not None:
+                return sim if sim >= _TANIMOTO_MIN else 0.0
     except Exception:
         pass
     q_parts = set(a.lower().split())
@@ -32,8 +39,29 @@ def _chemical_name_similarity(a: str, b: str) -> float:
         return 0.0
     overlap = q_parts & c_parts
     if len(overlap) >= max(2, min(len(q_parts), len(c_parts)) * 0.5):
-        return 0.15
+        return 0.15  # ③ 词法低置信兜底(无结构数据的最后手段)
     return 0.0
+
+
+# Tanimoto 有意义阈值: <0.6 视为化学不相似(不给加分)。
+_TANIMOTO_MIN = 0.6
+
+
+def _tanimoto_similarity(smi_a: str, smi_b: str) -> float | None:
+    """Morgan 指纹 Tanimoto; RDKit 缺失/解析失败 → None(调用方降级)。"""
+    try:
+        from rdkit import Chem  # type: ignore
+        from rdkit.Chem import AllChem, DataStructs  # type: ignore
+
+        mol_a = Chem.MolFromSmiles(smi_a)
+        mol_b = Chem.MolFromSmiles(smi_b)
+        if mol_a is None or mol_b is None:
+            return None
+        fp_a = AllChem.GetMorganFingerprintAsBitVect(mol_a, 2, nBits=2048)
+        fp_b = AllChem.GetMorganFingerprintAsBitVect(mol_b, 2, nBits=2048)
+        return float(DataStructs.TanimotoSimilarity(fp_a, fp_b))
+    except Exception:
+        return None
 
 
 _ROLE_WEIGHTS = {
