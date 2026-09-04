@@ -13,6 +13,23 @@ logger = logging.getLogger(__name__)
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[。！？.!?])\s*")
 
+# 2026-09-04 (P3): 每次问答新建 executor + shutdown(wait=False) 会让超时的
+# deepseek 阻塞线程成为孤儿(60s idle×2 重试 ≈ 2 分钟才自然消亡), 慢窗口
+# 高频问答下 OS 线程持续积累。改为模块级共享池(max_workers=2): 超时任务
+# 仍占 worker 直至上游返回, 但总数封顶、排队自然节流, 不再无限新增线程。
+import concurrent.futures as _cf
+
+_CLAIM_EXECUTOR: _cf.ThreadPoolExecutor | None = None
+
+
+def _claim_executor() -> _cf.ThreadPoolExecutor:
+    global _CLAIM_EXECUTOR
+    if _CLAIM_EXECUTOR is None:
+        _CLAIM_EXECUTOR = _cf.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="claim-verify"
+        )
+    return _CLAIM_EXECUTOR
+
 
 def build_sourced_claims(
     question: str,
@@ -33,15 +50,16 @@ def build_sourced_claims(
     try:
         # 2026-09-04: deepseek 慢窗口会让 claims 的 LLM 验证挂 60-120s+
         # (实测 150s+ 卡死整次问答)——12s 硬超时, 超时降级 offline 验证,
-        # 主回答不受影响。孤儿线程 shutdown(wait=False) 不阻塞后续请求。
-        import concurrent.futures
-
-        _ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        # 主回答不受影响。共享池(见模块级 _CLAIM_EXECUTOR)封顶线程数。
+        _ex = _claim_executor()
+        _fut = None
         try:
             _fut = _ex.submit(verify_claims_llm, question, claims, sources)
             verified = _fut.result(timeout=12)
-        finally:
-            _ex.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            if _fut is not None:
+                _fut.cancel()  # 运行中取消无效, 但可清队列中未启动任务
+            raise
     except Exception:
         verified = [verify_claim_offline(c, sources) for c in claims]
 

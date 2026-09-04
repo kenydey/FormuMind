@@ -6,6 +6,36 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+def _chemical_name_similarity(a: str, b: str) -> float:
+    """化学上有意义的未匹配成分相似度(替代词法 overlap 高分)。
+
+    2026-09-04 (P2): 原实现 ``q_parts & c_parts`` 词法拆分让 "Waterborne
+    epoxy resin" 与 "Waterborne polyurethane resin" 共享 2/3 词得 0.5×weight
+    加分(化学荒谬)。替换为:
+      1) KG 别名归一化(resolve_material_name): 归一化后相同 = 真同一物 → 1.0;
+      2) 词法 overlap 仅作低置信兜底: 权重 0.15、阈值 50%(宁缺毋滥)。
+    RDKit 指纹路径需名称→结构解析(当前仅 molbloom 网络可用, 热路径不可行),
+    留待成分结构入库后(v2)。
+    """
+    try:
+        from ...domain.knowledge import resolve_material_name
+
+        na = resolve_material_name(a) or a
+        nb = resolve_material_name(b) or b
+        if na.lower() == nb.lower():
+            return 1.0
+    except Exception:
+        pass
+    q_parts = set(a.lower().split())
+    c_parts = set(b.lower().split())
+    if not q_parts or not c_parts:
+        return 0.0
+    overlap = q_parts & c_parts
+    if len(overlap) >= max(2, min(len(q_parts), len(c_parts)) * 0.5):
+        return 0.15
+    return 0.0
+
+
 _ROLE_WEIGHTS = {
     "resin": 1.0, "hardener": 1.0, "catalyst": 0.8,
     "pigment": 0.5, "filler": 0.5, "solvent": 0.4,
@@ -51,11 +81,13 @@ def formulation_similarity(
         if kg_bonus and q_only and c_only:
             for q_ing in q_only:
                 for c_ing in c_only:
-                    q_parts = set(q_ing.lower().split())
-                    c_parts = set(c_ing.lower().split())
-                    overlap = q_parts & c_parts
-                    if overlap and len(overlap) >= min(len(q_parts), len(c_parts)) * 0.3:
-                        role_score += 0.5 * weight
+                    ing_sim = _chemical_name_similarity(q_ing, c_ing)
+                    if ing_sim > 0:
+                        role_score += ing_sim * weight
+                        # 分母固定半权折扣: 若按 ing_sim 加权则归一化抵消
+                        # (x·w)/(x·w)=1.0 —— 旧代码词法命中实际把该 role 相似度
+                        # 拉满到 1.0, 比"0.5 加分"更糟。固定 0.5 → 未匹配对
+                        # 对相似度的贡献封顶 ~0.3, 不再虚高。
                         role_weight += weight * 0.5
         if role_weight > 0:
             total_score += role_score

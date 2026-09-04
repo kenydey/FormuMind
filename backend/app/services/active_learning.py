@@ -44,6 +44,8 @@ def _surrogate_score(
 
     props = predictor.predict(form)
     mean = props.get(objective_metric, 0.0)
+    if objective_metric not in props:
+        return 0.0, 0.0
 
     if len(existing) >= _MIN_TRAIN_SAMPLES:
         vec = features.vector(form, None)
@@ -52,10 +54,28 @@ def _surrogate_score(
             mean, std, _ = out
             return float(mean), float(std)
 
-    # Empirical uncertainty: 20% relative
-    if objective_metric not in props:
-        return 0.0, 0.0
-    std = abs(mean) * 0.20 + 1e-3
+    # 2026-09-04 (P4): 训练样本不足时的伪不确定度不再用固定 20% + 绝对
+    # 1e-3 地板 —— 量纲极小属性(mean~1e-4)会被 1e-3 地板主导, std≫signal
+    # 使 EI/UCB 趋平 → 探索停滞退化为随机。
+    #   ① 同属性实测 ≥3 条 → 用实测离散度 pstdev(真实不确定度);
+    #   ② 不足 → 比例法, 地板改为相对量纲(mean 的 5%, 下限 1e-6)。
+    try:
+        measured_rows = [
+            float(r.measured[objective_metric])
+            for r in existing
+            if objective_metric in (r.measured or {})
+        ]
+    except Exception:
+        measured_rows = []
+    if len(measured_rows) >= 3:
+        import statistics
+
+        spread = statistics.pstdev(measured_rows)
+        # 实测有离散度就用实测; pstdev=0(重复实验全同)才回退比例下限。
+        std = spread if spread > 0 else abs(mean) * 0.05
+    else:
+        floor = max(abs(mean) * 0.05, 1e-6)
+        std = abs(mean) * 0.20 + floor
     return float(mean), float(std)
 
 
