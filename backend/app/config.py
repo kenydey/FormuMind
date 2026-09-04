@@ -429,6 +429,10 @@ class Settings(BaseSettings):
     celery_soft_time_limit_s: int = 14400  # 4 小时：抛 SoftTimeLimitExceeded，任务可自报
     celery_hard_time_limit_s: int = 18000  # 5 小时：强杀，防止卡死的任务永久占槽（须 < task_stream_timeout_s 21600）
     kb_ingest_min_relevance: float = 0.0  # 0 = off; e.g. 0.5 filters low-relevance rows
+    # 主题预筛(永久规则 2026-09):自动入库前按项目主题锚词过滤领域外文献
+    # (磁性/储氢/电池/半导体/天文/纯力学等)。True=强制; 项目标题无领域锚词
+    # 或显式置 false 时不过滤(显式手动路径不受影响)。
+    kb_ingest_topic_filter: bool = True
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task
     # Closed-loop RMSE plateau detection (Phase C L-2): skip optimize+DOE when flat.

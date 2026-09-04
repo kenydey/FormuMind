@@ -20,6 +20,7 @@ content hash afterwards (inside ``_persist_fulltext``).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 from ..config import get_settings
@@ -41,6 +42,113 @@ def ingest_enabled() -> bool:
     return bool(settings.kb_ingest_auto and settings.kb_v2_enabled)
 
 
+# ── 主题预筛(永久规则 2026-09) ─────────────────────────────────────────────
+# 背景: 自动入库按 relevance+fetchable 全收, 会吞进磁性/储氢/电池/半导体/
+# 天文/纯力学等与"金属表面处理/配方研发"无关的检索结果(2026-09-04 一次吞 29 篇)。
+# 规则: 项目标题含领域锚词时, 入库前按 高判别词≥1 或 低判别词≥2 放行,
+# 反向硬拦词命中且高判别词<2 时拦截。专利豁免(主动 IP 检索), 无锚词不过滤。
+
+# 高判别词(工艺/功能/配方/腐蚀领域)——命中任一即视为领域内(子串匹配, stem 安全)
+_TOPIC_HIGH = [
+    # 中文
+    "钝化", "转化膜", "防腐", "防锈", "涂层", "涂料", "树脂", "乳液", "聚合物",
+    "磷化", "缓蚀", "清洗", "脱脂", "预处理", "电泳", "阳极氧化", "喷涂",
+    "表面处理", "成膜", "硅烷", "溶胶", "漆", "固化剂", "环氧", "聚氨酯",
+    "丙烯酸", "粘结剂", "颜料", "助剂", "盐雾", "防腐蚀",
+    # 英文(词干, 子串匹配)
+    "corrosi", "passivat", "coating", "paint", "resin", "emulsion", "polymer",
+    "conversion", "phosphat", "chromat", "inhibit", "pretreat", "pickling",
+    "degreas", "anodiz", "electrodeposit", "primer", "adhesion", "sol-gel",
+    "silane", "curing", "epoxy", "polyurethane", "acrylic", "binder",
+    "pigment", "formulation", "salt spray", "surface treatment",
+]
+# 低判别词(基材/金属/合金)——需 ≥2 才放行
+_TOPIC_LOW = [
+    "镁", "铝", "锌", "钢", "铁", "铜", "钛", "镍", "合金", "金属",
+    "底材", "基材", "不锈钢", "碳钢",
+    "magnesium", "aluminum", "aluminium", "zinc", "steel", "iron", "copper",
+    "titanium", "nickel", "alloy", "metal", "substrate", "stainless",
+]
+# 反向硬拦(领域外强信号)——命中且高判别词 <2 → 拦截
+_TOPIC_BLOCK = [
+    "磁性", "超导", "电池", "半导体", "光伏", "天文", "星际", "核聚变",
+    "生物医学", "植入", "可降解", "硬化", "位错", "疲劳", "储氢", "高熵",
+    "刀具", "准晶",
+    "magnetic", "magnetoresist", "superconduct", "battery", "electrode",
+    "photovoltaic", "perovskite", "semiconductor", "astronom", "interstellar",
+    "gravitat", "nuclear", "fusion", "quasicrystal", "biomedical", "implant",
+    "biodegrad", "dental", "dislocation", "hardening", "tensile", "creep",
+    "fatigue", "high-entropy", "nanolamellar", "electrolyzer", "hydride",
+    "heusler", "quasar", "doping", "hydrogen storage", "cutting",
+]
+# 需要词边界而非子串的短反向词(避免 hall∈shall 之类误伤)
+_TOPIC_BLOCK_WORD = ["hall", "doping"]
+
+
+def _topic_anchor(project_id: str | None = None, query: str | None = None) -> tuple[set[str], set[str]] | None:
+    """项目标题/副标题(缺省时用检索 query)中命中的领域词 → (高判别锚, 低判别锚)。
+
+    返回 None = 无领域锚词(或查不到项目)——调用方应跳过过滤(宁吞勿误杀)。
+    search API 不带 project 上下文时, query 即本次检索意图的锚。
+    """
+    text = ""
+    if project_id:
+        try:
+            from ..db.database import default_session_factory
+            from ..db.models import Project
+
+            with default_session_factory()() as session:
+                proj = session.get(Project, project_id)
+                if proj is not None:
+                    text = " ".join(
+                        str(x) for x in (proj.title, proj.headline) if x
+                    )
+        except Exception:
+            logger.warning("kb_ingest topic anchor lookup failed for %s", project_id, exc_info=True)
+            return None
+    if not text:
+        text = query or ""
+    text = text.lower()
+    high = {w for w in _TOPIC_HIGH if w in text}
+    low = {w for w in _TOPIC_LOW if w in text}
+    if not high and not low:
+        logger.info(
+            "kb_ingest topic filter: 锚文本(project=%s)无领域词,跳过过滤",
+            bool(project_id),
+        )
+        return None
+    return high, low
+
+
+def _topic_hits(text: str) -> tuple[int, int, int]:
+    """(高判别命中数, 低判别命中数, 反向命中数)——每词计一次, 词内去重。"""
+    n_high = sum(1 for w in _TOPIC_HIGH if w in text)
+    n_low = sum(1 for w in _TOPIC_LOW if w in text)
+    n_block = sum(1 for w in _TOPIC_BLOCK if w in text)
+    for w in _TOPIC_BLOCK_WORD:  # 词边界版
+        if re.search(rf"(?<![a-z]){re.escape(w)}(?![a-z])", text):
+            n_block += 1
+    return n_high, n_low, n_block
+
+
+def topic_gate(evidence_text: str, *, kind: str | None = None) -> bool:
+    """领域相关性判定(不含项目锚前置检查)。
+
+    kind='patent' 豁免; 高判别≥1 放行; 低判别≥2 放行; 反向命中且高判别<2 拦截。
+    """
+    if kind == "patent":
+        return True
+    text = (evidence_text or "").lower()
+    n_high, n_low, n_block = _topic_hits(text)
+    if n_block and n_high < 2:
+        return False
+    if n_high >= 1:
+        return True
+    if n_low >= 2:
+        return True
+    return False
+
+
 def _doc_meta(ev: Evidence, kind: str | None) -> dict[str, Any]:
     return {
         "identifier": ev.identifier,
@@ -53,9 +161,18 @@ def _doc_meta(ev: Evidence, kind: str | None) -> dict[str, Any]:
 
 
 def select_ingest_targets(
-    evidence: list[Evidence], *, max_docs: int | None = None
+    evidence: list[Evidence], *,
+    max_docs: int | None = None, project_id: str | None = None, query: str | None = None,
 ) -> list[tuple[Evidence, str]]:
-    """The top fetchable rows in rank order, as (evidence, kind) pairs."""
+    """The top fetchable rows in rank order, as (evidence, kind) pairs.
+
+    Applies the topic pre-filter (permanent rule 2026-09): when the project
+    (or the search query, when no project context exists) carries domain
+    anchor words and the filter is enabled, off-domain rows (magnetism /
+    hydrides / batteries / semiconductors / astronomy / pure mechanics …) are
+    dropped before fetching.  Rows are only skipped with a log line; the
+    user-facing search result list is untouched.
+    """
     from . import fulltext_fetcher as ff
 
     # 0 (or None) means no cap: every fetchable hit is ingested. "Searched but
@@ -63,6 +180,8 @@ def select_ingest_targets(
     # is to store everything and let the operator opt into a limit.
     limit = max_docs if max_docs is not None else get_settings().kb_ingest_max_docs
     min_rel = get_settings().kb_ingest_min_relevance
+    topic_filter = bool(get_settings().kb_ingest_topic_filter)
+    anchor = _topic_anchor(project_id, query) if topic_filter else None
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
     for ev in evidence:
@@ -75,6 +194,19 @@ def select_ingest_targets(
             continue
         kind = ff.classify(ev)
         if kind:
+            if anchor is not None:
+                text = " ".join(
+                    str(x)
+                    for x in (ev.title, ev.snippet, ev.identifier)
+                    if x
+                )
+                if not topic_gate(text, kind=kind):
+                    logger.warning(
+                        "kb_ingest 主题预筛拦截: %s (%s)",
+                        (ev.title or ev.identifier)[:90],
+                        ev.identifier,
+                    )
+                    continue
             targets.append((ev, kind))
             seen.add(ident)
     return targets
@@ -187,6 +319,7 @@ def ingest_evidence_docs(
     max_docs: int | None = None,
     status_cb: StatusCb | None = None,
     project_id: str | None = None,
+    query: str | None = None,
 ) -> dict[str, Any]:
     """Sequentially acquire + index the fetchable subset of *evidence*.
 
@@ -199,7 +332,7 @@ def ingest_evidence_docs(
     settings = get_settings()
     emit: StatusCb = status_cb or (lambda meta: None)
     timeout = float(settings.fulltext_timeout_s)
-    targets = select_ingest_targets(evidence, max_docs=max_docs)
+    targets = select_ingest_targets(evidence, max_docs=max_docs, project_id=project_id, query=query)
 
     docs = [_doc_meta(ev, kind) for ev, kind in targets]
     for doc in docs:  # announce the full queue up front
