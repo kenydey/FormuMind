@@ -439,7 +439,9 @@ def health_detailed() -> dict:
             {pkg: None for pkg in ("chemcrow", "paperqa", "patent_client", "sentence_transformers", "rdkit", "psycopg2")}
             if skip_probe
             else {
-                "chemcrow": _ok("chemcrow"),
+                # chemcrow removed 2026-09 (de-ChemCrow); key kept false for
+                # health-contract compatibility with older clients/tests.
+                "chemcrow": False,
                 "paperqa": _ok("paperqa"),
                 "patent_client": _ok("patent_client"),
                 "sentence_transformers": _ok("sentence_transformers"),

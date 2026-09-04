@@ -26,7 +26,7 @@ function profile(query: string): ChemicalProfile {
     func_groups: [],
     patented: null,
     safety: { controlled: null, explosive: null },
-    chemtools: { enabled: false, chemcrow_installed: false },
+    chemtools: { enabled: false },
   };
 }
 

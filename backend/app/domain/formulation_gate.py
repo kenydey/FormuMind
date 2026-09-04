@@ -48,12 +48,12 @@ def _catalog_spec(name: str) -> tuple[str, dict]:
 
 
 def _chemtools_gap_fill(name: str, has_smiles: bool, has_cas: bool) -> dict:
-    """Resolve missing SMILES/CAS via the ChemCrow gateway (cached; no-op offline)."""
+    """Resolve missing SMILES/CAS via the native chemistry gateway (cached)."""
     if has_smiles and has_cas:
         return {}
     from ..services import chemtools
 
-    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+    if not chemtools.gateway_enabled():
         return {}
     updates: dict = {}
     if not has_smiles:

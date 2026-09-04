@@ -196,11 +196,9 @@ class Settings(BaseSettings):
     # 可选增强引擎（adapter + 离线回退；缺库或关闭时行为不变）
     # 启动时用 PubChemPy 按化学名补全知识库的 SMILES/分子量（需 intel extra + 网络）。
     enrich_compounds: bool = False
-    # 化学类问题路由到 ChemCrow 智能体（需 intel extra + 有效 LLM key）。
-    use_chemcrow: bool = True
-    # ChemCrow 工具网关（services/chemtools.py）：工具级化学能力
-    # （名称→SMILES/CAS、官能团、分子专利预筛、管制/爆炸性筛查）。
-    # 缺 chemcrow/rdkit 或关闭开关时所有调用返回中性值，管线行为不变。
+    # 化学工具网关（services/chemtools.py）：工具级化学能力
+    # （名称→SMILES/CAS、官能团、分子专利预筛、爆炸性筛查）。
+    # 缺 rdkit/httpx/molbloom 或关闭开关时所有调用返回中性值，管线行为不变。
     chemtools_enabled: bool = True
     chemtools_timeout_s: float = 10.0
     # v2 特征集：在 v1 特征向量后追加 6 个重量加权 RDKit 分子描述符

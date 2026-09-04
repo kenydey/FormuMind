@@ -83,11 +83,12 @@ def _score_and_validate(
     from ..domain.project_spec import normalize_requirement, primary_objective
 
     req = normalize_requirement(req) if req else None
-    # Enrich BEFORE predicting: chemcrow/PubChem fills cas/smiles/formula on
-    # ingredients, and predictor paths key off those fields (SMILES-bearing
-    # ingredients take a structure-aware prediction branch). Leaving enrich at
-    # the tail made form.score inconsistent with a later re-score of the same
-    # returned object (multi_objective_score re-predicts internally).
+    # Enrich BEFORE predicting: the native chemistry gateway fills
+    # cas/smiles/formula on ingredients, and predictor paths key off those
+    # fields (SMILES-bearing ingredients take a structure-aware prediction
+    # branch). Leaving enrich at the tail made form.score inconsistent with a
+    # later re-score of the same returned object (multi_objective_score
+    # re-predicts internally).
     from ..domain.formulation_gate import enrich_formulation
 
     form = enrich_formulation(form)
@@ -97,7 +98,7 @@ def _score_and_validate(
     voc_gpl = form.predicted.get("voc_gpl")
     form.warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
     if chem_screen:
-        # Molecular patent / controlled-chemical pre-screen (ChemCrow gateway).
+        # Molecular patent / structure pre-screen (native molbloom/RDKit).
         # Only enabled on recommend paths — never inside optimization loops.
         from ..services import chemtools
 

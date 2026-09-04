@@ -76,7 +76,8 @@ export interface ChemicalProfile {
   /** True=分子已见于专利文献（molbloom）, False=novel, null=unknown */
   patented: boolean | null;
   safety: { controlled: boolean | null; explosive: boolean | null };
-  chemtools: { enabled: boolean; chemcrow_installed: boolean };
+  synthetic_accessibility?: { sa_score: number | null; tier: string; note?: string };
+  chemtools: { enabled: boolean };
 }
 
 export interface ChemToolsCapability {
@@ -86,7 +87,6 @@ export interface ChemToolsCapability {
 
 export interface ChemToolsStatus {
   enabled: boolean;
-  chemcrow_installed: boolean;
   rdkit_installed: boolean;
   pubchem_available?: boolean;
   molbloom_installed?: boolean;

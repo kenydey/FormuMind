@@ -649,11 +649,11 @@ def _build_streams(
             lambda off, q=western_query: search_semantic_scholar(q, page_size, offset=off),
             True,
         )
-        add("chemlit", lambda off, q=western_query: search_chemcrow_lit(q, page_size), False)
+        add("chemlit", lambda off, q=western_query: search_chem_lit(q, page_size), False)
     if "internet" in source_types:
         web_q = chinese_query or western_query
         add("internet", lambda off, q=web_q: search_internet(q, page_size, offset=off), True)
-        add("chemweb", lambda off, q=western_query: search_chemcrow_web(q, page_size), False)
+        add("chemweb", lambda off, q=western_query: search_chem_web(q, page_size), False)
     if "notebooklm" in source_types:
         def _nb(off: int, q=western_query) -> list[Evidence]:
             from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
@@ -842,41 +842,22 @@ def search_by_types(
     )[0]
 
 
-def search_chemcrow_web(query: str, limit: int = 5) -> list[Evidence]:
-    """Chemistry-optimized web search via ChemCrow's WebSearch tool (SerpAPI).
+def search_chem_web(query: str, limit: int = 5) -> list[Evidence]:
+    """Chemistry-flavoured web search via the SerpAPI scholar-first chain.
 
-    ChemCrow's WebSearch is distinct from DuckDuckGo: it uses SerpAPI under
-    the hood, which requires a ``SERPAPI_API_KEY`` env var and returns
-    chemistry-focused snippets ranked by relevance to scientific queries.
-    Falls back to [] when chemcrow is not installed or SerpAPI key absent.
+    (Formerly wrapped ChemCrow's WebSearch tool, which was itself a SerpAPI
+    client; the wrapper was removed 2026-09 in the de-ChemCrow effort.)
     """
-    try:
-        from chemcrow.tools import WebSearch  # type: ignore
-
-        tool = WebSearch()
-        result_text = tool._run(query) if hasattr(tool, "_run") else tool.run(query)  # type: ignore
-        if not result_text:
-            return []
-        return [
-            Evidence(
-                source="ChemCrow-Web",
-                identifier=f"chemweb:{abs(hash(query)) % 0xFFFF:04x}",
-                title=f"SerpAPI: {query[:80]}",
-                snippet=str(result_text)[:600],
-                relevance=0.88,
-            )
-        ]
-    except Exception as exc:
-        return degrade_return(logger, exc, "ChemCrow WebSearch failed", [])
+    return search_serpapi_literature(query, limit=limit)
 
 
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+")
 
 
-def split_chemcrow_answer(
+def split_lit_answer(
     text: str, *, query: str, limit: int = 5, relevance: float = 0.92
 ) -> list[Evidence]:
-    """Split a ChemCrow LitSearch answer into per-citation Evidence rows.
+    """Split a literature-search answer into per-citation Evidence rows.
 
     paper-qa answers embed DOIs in their citation lines.  One Evidence per
     unique DOI (identifier ``doi:...``) lets the rows participate in dedup,
@@ -921,25 +902,30 @@ def split_chemcrow_answer(
     return out
 
 
-def search_chemcrow_lit(query: str, limit: int = 5) -> list[Evidence]:
-    """Chemical literature search via ChemCrow's LiteratureSearch tool.
+def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
+    """Chemical literature search via the existing arXiv + Semantic Scholar tiers.
 
-    ChemCrow's LitSearch queries paper-qa + FAISS over scientific literature,
-    returning cited answers from PubMed / arXiv / Semantic Scholar.  It is
-    semantically richer than raw arXiv/S2 abstract retrieval because it uses
-    paper-qa's embedding-based retrieval and citation extraction.
-    Falls back to [] when chemcrow / paper-qa is not installed.
+    (ChemCrow's LiteratureSearch wrapper was removed 2026-09: it required
+    paper-qa + an OpenAI key this DeepSeek-only deployment never had, so it
+    had always degraded to [] in practice.)
     """
+    out: list[Evidence] = []
     try:
-        from chemcrow.tools import LiteratureSearch  # type: ignore
+        out.extend(search_arxiv(query, limit=limit))
+    except Exception:
+        pass
+    if len(out) < limit:
+        try:
+            out.extend(search_semantic_scholar(query, limit=limit - len(out)))
+        except Exception:
+            pass
+    return out[:limit]
 
-        tool = LiteratureSearch()
-        result_text = tool._run(query) if hasattr(tool, "_run") else tool.run(query)  # type: ignore
-        if not result_text:
-            return []
-        return split_chemcrow_answer(str(result_text), query=query, limit=limit)
-    except Exception as exc:
-        return degrade_return(logger, exc, "ChemCrow LiteratureSearch failed", [])
+
+# Compatibility aliases retained for historical imports/tests (de-ChemCrow 2026-09).
+search_chemcrow_web = search_chem_web
+search_chemcrow_lit = search_chem_lit
+split_chemcrow_answer = split_lit_answer
 
 
 def get_source_availability() -> dict[str, dict]:

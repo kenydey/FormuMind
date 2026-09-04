@@ -149,11 +149,12 @@ def _lookup_offline_compounds(q: str) -> dict[str, Any] | None:
 
 
 def _lookup_chemtools(q: str) -> dict[str, Any] | None:
-    """Tier 4: ChemCrow Query2SMILES/Query2CAS (chem-space + PubChem under the
-    hood) — reached only when catalog, PubChem REST and PubChemPy all miss."""
+    """Tier 4: native PubChem name→SMILES/CAS gap-fill — reached only when
+    catalog, PubChem REST and PubChemPy all miss (rare; same data source as
+    the earlier PubChem tiers but a different query shape)."""
     from . import chemtools
 
-    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+    if not chemtools.gateway_enabled():
         return None
     smiles = chemtools.name_to_smiles(q)
     cas = chemtools.name_to_cas(q)
@@ -168,7 +169,7 @@ def _lookup_chemtools(q: str) -> dict[str, Any] | None:
         "smiles": smiles,
         "molar_mass": None,
         "found": True,
-        "source": "chemcrow",
+        "source": "pubchem",
     }
 
 

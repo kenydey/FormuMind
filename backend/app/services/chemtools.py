@@ -1,21 +1,24 @@
-"""ChemCrow tool gateway — deterministic, tool-level chemistry utilities.
+"""Chemistry tool gateway — deterministic, native-only chemistry utilities.
 
 This module is the single integration point between FormuMind pipelines and
-ChemCrow's *tools* (not its ReAct agent, which stays confined to Q&A routing
-in ``llm.answer_question``).  Tool-level calls are deterministic, mostly
-local (RDKit / molbloom) and LLM-free, so they are safe to embed in the
-recommend / DOE / optimize pipelines.
+deterministic chemistry tooling (PubChem REST / RDKit / molbloom).  It was
+previously a ChemCrow tool gateway; ChemCrow has been removed (2026-09, see
+docs/plans/2026-09-04-dechemcrow.md) because every tool it exposed was a thin
+wrapper over the same native backends this module now calls directly.
+Tool-level calls are deterministic, mostly local (RDKit / molbloom) and
+LLM-free, so they are safe to embed in the recommend / DOE / optimize
+pipelines.
 
 Design contract (mirrors the platform's optional-engine conventions):
 
 * every public function degrades to a neutral value (``None`` / ``[]``)
-  when ChemCrow is not installed, the gateway is disabled via
-  ``FORMUMIND_CHEMTOOLS_ENABLED=false``, or the underlying tool fails;
-* pure-structure utilities (functional groups, similarity) fall back to a
-  local RDKit implementation when ChemCrow itself is absent but RDKit is
-  available — ChemCrow's own implementations are RDKit SMARTS underneath;
-* results are memoised in a process-local TTL cache keyed by (tool, arg);
-* network-bound tools run under a hard timeout so pipeline latency is bounded.
+  when the gateway is disabled via ``FORMUMIND_CHEMTOOLS_ENABLED=false``,
+  or the underlying backend fails;
+* pure-structure utilities (functional groups, similarity, descriptors,
+  synthetic accessibility) are local RDKit implementations;
+* network-bound tools (PubChem) run under a hard timeout so pipeline
+  latency is bounded;
+* results are memoised in a process-local TTL cache keyed by (tool, arg).
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ import concurrent.futures
 import json
 import logging
 import re
+import sys
 import threading
 import time
 from typing import Any, Callable, TypeVar
@@ -64,14 +68,6 @@ def gateway_enabled() -> bool:
     return bool(get_settings().chemtools_enabled)
 
 
-def chemcrow_available() -> bool:
-    try:
-        __import__("chemcrow")
-        return True
-    except Exception:
-        return False
-
-
 def rdkit_available() -> bool:
     return optional_import("rdkit")
 
@@ -89,12 +85,11 @@ def molbloom_available() -> bool:
 
 
 def pubchem_available() -> bool:
-    """A name/structure-resolution backend that does not need ChemCrow.
+    """A name/structure-resolution backend that needs no third-party agent.
 
-    ChemCrow's Query2SMILES/Query2CAS/ExplosiveCheck are thin wrappers over the
-    public PubChem API; we can reach the same data directly through ``httpx``
-    (already a hard dependency) or ``pubchempy``.  Treating either as present
-    means these capabilities light up without the heavy ``chemcrow`` install.
+    name→SMILES / name→CAS / explosive screening hit the public PubChem REST
+    API directly through ``httpx`` (already a hard dependency) or
+    ``pubchempy``.
     """
     return _httpx_available() or pubchempy_available()
 
@@ -102,49 +97,38 @@ def pubchem_available() -> bool:
 def availability() -> dict[str, Any]:
     """Per-capability availability report (for /api/chemical/tools and UI).
 
-    Each capability is available when *any* backend that can serve it is
-    present — ChemCrow is one option, not the only one:
+    Each capability is available when the backend that serves it is present:
 
-    * name→SMILES / name→CAS  → ChemCrow **or** PubChem (httpx/pubchempy);
-    * functional groups / similarity → ChemCrow **or** RDKit (local);
-    * molecular patent pre-screen → ChemCrow **or** ``molbloom`` (standalone);
-    * explosive screen → ChemCrow **or** PubChem GHS classification;
-    * controlled-chemical screen → ChemCrow only (ships the curated dataset);
-    * chemistry web search → ChemCrow + SERPAPI_API_KEY.
+    * name→SMILES / name→CAS  → PubChem (httpx/pubchempy);
+    * functional groups / similarity / descriptors / SA score → RDKit (local);
+    * molecular patent pre-screen → ``molbloom`` (standalone);
+    * explosive screen → PubChem GHS classification.
     """
     enabled = gateway_enabled()
-    cc = chemcrow_available()
     rd = rdkit_available()
     pubchem = pubchem_available()
     molbloom = molbloom_available()
-    settings = get_settings()
-    serp = bool(settings.serpapi_api_key)
 
     def cap(available: bool, hint: str | None) -> dict[str, Any]:
         return {"available": bool(enabled and available), "hint": None if (enabled and available) else hint}
 
-    intel_hint = "pip install -e '.[intel]' 安装 ChemCrow 工具链"
     pubchem_hint = "需 httpx（已内置）或 pubchempy 以访问 PubChem；离线环境不可用"
-    rdkit_hint = "pip install rdkit 或安装 intel extra"
-    molbloom_hint = "pip install molbloom 启用分子专利布隆过滤器（或安装 intel extra）"
+    rdkit_hint = "pip install rdkit 以启用本地结构工具"
+    molbloom_hint = "pip install molbloom 启用分子专利布隆过滤器"
     return {
         "enabled": enabled,
-        "chemcrow_installed": cc,
         "rdkit_installed": rd,
         "pubchem_available": pubchem,
         "molbloom_installed": molbloom,
         "capabilities": {
-            "name_to_smiles": cap(cc or pubchem, pubchem_hint),
-            "name_to_cas": cap(cc or pubchem, pubchem_hint),
-            "func_groups": cap(cc or rd, rdkit_hint),
-            "mol_similarity": cap(cc or rd, rdkit_hint),
-            "patent_check": cap(cc or molbloom, molbloom_hint),
-            "controlled_check": cap(cc, intel_hint + "（含管制品数据集）"),
-            "explosive_check": cap(cc or pubchem, pubchem_hint + "；或安装 ChemCrow"),
-            "web_search": {
-                "available": bool(enabled and cc and serp),
-                "hint": None if (enabled and cc and serp) else "需 ChemCrow + SERPAPI_API_KEY",
-            },
+            "name_to_smiles": cap(pubchem, pubchem_hint),
+            "name_to_cas": cap(pubchem, pubchem_hint),
+            "func_groups": cap(rd, rdkit_hint),
+            "mol_similarity": cap(rd, rdkit_hint),
+            "mol_descriptors": cap(rd, rdkit_hint),
+            "synthetic_accessibility": cap(rd, rdkit_hint),
+            "patent_check": cap(molbloom, molbloom_hint),
+            "explosive_check": cap(pubchem, pubchem_hint),
         },
     }
 
@@ -217,35 +201,7 @@ def clear_cache() -> None:
         _CACHE.clear()
 
 
-def _chemcrow_tool(*names: str) -> Any | None:
-    """Instantiate the first importable ChemCrow tool among *names*.
-
-    Tool class names have shifted across chemcrow releases, so callers pass
-    every known alias (e.g. ``"ControlChemCheck", "ControlledChemicalCheck"``).
-    """
-    try:
-        import chemcrow.tools as cct  # type: ignore
-    except Exception as exc:
-        return degrade_return(logger, exc, "chemcrow import failed", None)
-    for name in names:
-        cls = getattr(cct, name, None)
-        if cls is not None:
-            try:
-                return cls()
-            except Exception as exc:
-                degrade_return(logger, exc, f"chemcrow tool {name} init failed", None)
-    return None
-
-
-def _run_tool(tool: Any, arg: str) -> str | None:
-    runner = getattr(tool, "_run", None) or getattr(tool, "run", None)
-    if runner is None:
-        return None
-    out = runner(arg)
-    return str(out) if out is not None else None
-
-
-# ── native PubChem backend (no ChemCrow required) ────────────────────────────
+# ── native PubChem backend ────────────────────────────────────────────────────
 
 
 def _pubchem_get(path: str) -> Any | None:
@@ -368,7 +324,7 @@ def _pubchem_explosive(cas: str) -> bool | None:
     return None
 
 
-# ── native molbloom backend (no ChemCrow required) ───────────────────────────
+# ── native molbloom backend ──────────────────────────────────────────────────
 
 
 def _molbloom_patented(smiles: str) -> bool | None:
@@ -385,7 +341,7 @@ def _molbloom_patented(smiles: str) -> bool | None:
         return degrade_return(logger, exc, "molbloom patent check failed", None)
 
 
-# ── name resolution (network; ChemCrow only) ─────────────────────────────────
+# ── name resolution (network; PubChem) ───────────────────────────────────────
 
 _SMILES_CHARS_RE = re.compile(r"^[A-Za-z0-9@+\-\[\]\(\)=#$/\\%.:*]+$")
 
@@ -396,54 +352,32 @@ def _looks_like_smiles(text: str) -> bool:
 
 
 def name_to_smiles(name: str) -> str | None:
-    """Resolve a chemical name to SMILES (ChemCrow Query2SMILES → PubChem)."""
+    """Resolve a chemical name to SMILES (PubChem REST)."""
     name = (name or "").strip()
-    if not name or not gateway_enabled() or not (chemcrow_available() or pubchem_available()):
+    if not name or not gateway_enabled() or not pubchem_available():
         return None
 
     def compute() -> str | None:
-        def call() -> str | None:
-            if chemcrow_available():
-                tool = _chemcrow_tool("Query2SMILES")
-                if tool is not None:
-                    out = _run_tool(tool, name)
-                    if out and _looks_like_smiles(out):
-                        return out.strip()
-            return _pubchem_name_to_smiles(name)
-
-        return _run_with_timeout(call, None)
+        return _run_with_timeout(lambda: _pubchem_name_to_smiles(name), None)
 
     return _cached("name_to_smiles", name, compute)
 
 
 def name_to_cas(name: str) -> str | None:
-    """Resolve a chemical name to a CAS number (ChemCrow Query2CAS → PubChem)."""
+    """Resolve a chemical name to a CAS number (PubChem REST)."""
     name = (name or "").strip()
-    if not name or not gateway_enabled() or not (chemcrow_available() or pubchem_available()):
+    if not name or not gateway_enabled() or not pubchem_available():
         return None
 
     def compute() -> str | None:
-        def call() -> str | None:
-            if chemcrow_available():
-                tool = _chemcrow_tool("Query2CAS")
-                if tool is not None:
-                    out = _run_tool(tool, name)
-                    if out:
-                        m = _CAS_RE.search(out)
-                        if m:
-                            return m.group(0)
-            return _pubchem_name_to_cas(name)
-
-        return _run_with_timeout(call, None)
+        return _run_with_timeout(lambda: _pubchem_name_to_cas(name), None)
 
     return _cached("name_to_cas", name, compute)
 
 
-# ── structure utilities (local; ChemCrow → RDKit fallback) ───────────────────
+# ── structure utilities (local RDKit) ────────────────────────────────────────
 
 # Compact SMARTS dictionary focused on coating / surface-treatment chemistry.
-# Mirrors the group families ChemCrow's FuncGroups reports, so both paths
-# produce comparable labels.
 _FUNC_GROUP_SMARTS: dict[str, str] = {
     "epoxide": "[OX2r3]1[#6r3][#6r3]1",
     "isocyanate": "[NX2]=[CX2]=[OX1]",
@@ -481,36 +415,13 @@ def _rdkit_func_groups(smiles: str) -> list[str] | None:
         return degrade_return(logger, exc, "rdkit func_groups failed", None)
 
 
-def _parse_func_groups_text(text: str) -> list[str]:
-    """Parse ChemCrow FuncGroups prose ('This molecule contains X, Y, and Z.')."""
-    t = text.strip().rstrip(".")
-    lowered = t.lower()
-    marker = "contains"
-    idx = lowered.rfind(marker)
-    if idx >= 0:
-        t = t[idx + len(marker):]
-    parts = re.split(r",| and ", t)
-    return [p.strip() for p in parts if p.strip() and len(p.strip()) < 60]
-
-
 def func_groups(smiles: str) -> list[str]:
-    """Functional groups present in *smiles* (ChemCrow FuncGroups → RDKit)."""
+    """Functional groups present in *smiles* (local RDKit SMARTS)."""
     smiles = (smiles or "").strip()
     if not smiles or not gateway_enabled():
         return []
 
     def compute() -> list[str] | None:
-        if chemcrow_available():
-            def call() -> list[str] | None:
-                tool = _chemcrow_tool("FuncGroups", "FunctionalGroups")
-                if tool is None:
-                    return None
-                out = _run_tool(tool, smiles)
-                return _parse_func_groups_text(out) if out else None
-
-            groups = _run_with_timeout(call, None)
-            if groups is not None:
-                return groups
         return _rdkit_func_groups(smiles)
 
     return _cached("func_groups", smiles, compute) or []
@@ -553,7 +464,7 @@ def mol_descriptors(smiles: str) -> dict[str, float] | None:
 
 
 def mol_similarity(smiles_a: str, smiles_b: str) -> float | None:
-    """Tanimoto similarity of two molecules (ChemCrow MolSimilarity → RDKit)."""
+    """Tanimoto similarity of two molecules (local RDKit)."""
     a, b = (smiles_a or "").strip(), (smiles_b or "").strip()
     if not a or not b or not gateway_enabled():
         return None
@@ -580,96 +491,104 @@ def mol_similarity(smiles_a: str, smiles_b: str) -> float | None:
     return _cached("mol_similarity", f"{lo}|{hi}", compute)
 
 
-# ── patent / safety screens (ChemCrow only) ──────────────────────────────────
+# ── synthetic accessibility (local RDKit SA score) ────────────────────────────
+
+_SA_TIER = ((3.0, "easy"), (6.0, "moderate"), (8.0, "hard"))
+
+
+def synthetic_accessibility(smiles: str) -> dict[str, Any]:
+    """Ertl & Schuffenhauer synthetic-accessibility score (1=easy → 10=very hard).
+
+    Local RDKit implementation (``Contrib/SA_Score/sascorer``), cached.
+    Returns ``{"sa_score": float, "tier": str, "note": str}``; degrades to
+    ``{"sa_score": None, "tier": "unknown", "note": ...}`` when the SMILES
+    does not parse or RDKit is unavailable.
+
+    Scope note: SA score is designed for drug-like organic small molecules.
+    Coating resins / inorganic salts (no SMILES or non-small-molecule) return
+    ``unknown`` — this field is additive advice in profiles, never a gate.
+    """
+    smiles = (smiles or "").strip()
+    if not smiles or not gateway_enabled():
+        return {"sa_score": None, "tier": "unknown", "note": "网关关闭或无输入"}
+
+    def compute() -> dict[str, Any] | None:
+        try:
+            from rdkit import Chem  # type: ignore
+            from rdkit.Chem import RDConfig  # type: ignore
+
+            sys.path.append(f"{RDConfig.RDContribDir}/SA_Score")  # noqa: PLC0415
+            import sascorer  # type: ignore
+
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return {"sa_score": None, "tier": "unknown", "note": "SMILES 无法解析"}
+            score = float(sascorer.calculateScore(mol))
+            tier = next((t for th, t in _SA_TIER if score <= th), "very_hard")
+            return {
+                "sa_score": round(score, 2),
+                "tier": tier,
+                "note": "1–10，越低越易合成（RDKit SA score）",
+            }
+        except Exception as exc:
+            return degrade_return(logger, exc, "rdkit SA score failed", None)
+
+    return _cached("synthetic_accessibility", smiles, compute) or {
+        "sa_score": None,
+        "tier": "unknown",
+        "note": "不可用",
+    }
+
+
+# ── patent / safety screens (native backends) ────────────────────────────────
 
 
 def patent_check(smiles: str) -> bool | None:
     """molbloom patent pre-screen. True=likely patented, False=novel, None=unknown.
 
-    Prefers ChemCrow's PatentCheck tool when installed; otherwise calls the
-    standalone ``molbloom`` SureChEMBL filter directly (same data source).
+    Calls the standalone ``molbloom`` SureChEMBL filter directly (the same
+    data source ChemCrow's PatentCheck wrapped).
     """
     smiles = (smiles or "").strip()
-    if not smiles or not gateway_enabled() or not (chemcrow_available() or molbloom_available()):
+    if not smiles or not gateway_enabled() or not molbloom_available():
         return None
 
     def compute() -> bool | None:
-        def call() -> bool | None:
-            if chemcrow_available():
-                tool = _chemcrow_tool("PatentCheck")
-                if tool is not None:
-                    out = _run_tool(tool, smiles)
-                    if out:
-                        lowered = out.lower()
-                        if "not patented" in lowered or "novel" in lowered:
-                            return False
-                        if "patented" in lowered:
-                            return True
-                    return None
-            return _molbloom_patented(smiles)
-
-        return _run_with_timeout(call, None)
+        return _run_with_timeout(lambda: _molbloom_patented(smiles), None)
 
     return _cached("patent_check", smiles, compute)
 
 
 def controlled_check(smiles_or_cas: str) -> bool | None:
-    """Controlled-chemical screen. True=on a control list, False=clear, None=unknown."""
-    q = (smiles_or_cas or "").strip()
-    if not q or not gateway_enabled() or not chemcrow_available():
-        return None
+    """Controlled-chemical screen. Always None since ChemCrow's removal.
 
-    def compute() -> bool | None:
-        def call() -> bool | None:
-            tool = _chemcrow_tool("ControlChemCheck", "ControlledChemicalCheck")
-            if tool is None:
-                return None
-            out = _run_tool(tool, q)
-            if not out:
-                return None
-            lowered = out.lower()
-            if "not found" in lowered or "not a controlled" in lowered or "no known" in lowered:
-                return False
-            if "controlled" in lowered or "restricted" in lowered or "schedule" in lowered:
-                return True
-            return None
-
-        return _run_with_timeout(call, None)
-
-    return _cached("controlled_check", q, compute)
+    ChemCrow 0.3.7 shipped no working controlled-chemical tool
+    (``ControlChemCheck`` never existed in its tool table), so this check has
+    always degraded to None on this platform.  The signature and neutral
+    value are kept so callers (``safety_flags`` / screening / DOE review)
+    need no behavioural change; a curated control list can be wired here
+    later without touching call sites.
+    """
+    return None
 
 
 def explosive_check(cas: str) -> bool | None:
     """GHS explosive screen by CAS. True=explosive hazard, False=clear, None=unknown.
 
-    Prefers ChemCrow's ExplosiveCheck; otherwise reads GHS Section 2.1
-    classification straight from PubChem PUG-View (same underlying source).
+    Reads GHS Section 2.1 classification straight from PubChem PUG-View (the
+    same underlying source ChemCrow's ExplosiveCheck wrapped).
     """
     cas = (cas or "").strip()
     if (
         not cas
         or not _CAS_RE.fullmatch(cas)
         or not gateway_enabled()
-        or not (chemcrow_available() or pubchem_available())
+        or not pubchem_available()
     ):
         return None
 
     def compute() -> bool | None:
-        def call() -> bool | None:
-            if chemcrow_available():
-                tool = _chemcrow_tool("ExplosiveCheck")
-                if tool is not None:
-                    out = _run_tool(tool, cas)
-                    if out:
-                        lowered = out.lower()
-                        if "not" in lowered and "explosi" in lowered:
-                            return False
-                        if "explosi" in lowered:
-                            return True
-                    return None
-            return _pubchem_explosive(cas)
-
-        return _run_with_timeout(call, None)
+        return _run_with_timeout(lambda: _pubchem_explosive(cas), None)
 
     return _cached("explosive_check", cas, compute)
 
@@ -688,37 +607,27 @@ _SCREEN_MIN_WT_PCT = 0.5
 
 
 def screen_formulation(form: Any) -> list[str]:
-    """Molecular patent + controlled-chemical pre-screen for a Formulation.
+    """Molecular patent + structure pre-screen for a Formulation.
 
     Returns advisory warning strings (never blocks).  Only ingredients with a
     SMILES and a non-negligible weight are screened; every check is cached in
-    the gateway, and everything degrades to [] when chemcrow is absent.
+    the gateway, and everything degrades to [] when backends are absent.
+
+    Since ChemCrow's removal this is fully local: molbloom patent (offline
+    SureChEMBL Bloom filter) + RDKit valence / PAINS / Brenk checks.  It is
+    now behaviourally identical to ``screen_formulation_local`` and is kept
+    as a separate name only so existing call sites (``chem_screen`` /
+    ``chem_screen_local`` flags in the pipeline) keep their contracts.
     """
-    if not (gateway_enabled() and chemcrow_available()):
-        return []
-    warnings: list[str] = []
-    for ing in getattr(form, "ingredients", []) or []:
-        smiles = getattr(ing, "smiles", None)
-        if not smiles or (getattr(ing, "weight_pct", 0.0) or 0.0) < _SCREEN_MIN_WT_PCT:
-            continue
-        name = getattr(ing, "name", "") or smiles
-        if patent_check(smiles) is True:
-            warnings.append(
-                f"IP 预筛：{name} 的分子结构已见于专利文献（molbloom），建议开展 FTO 检索"
-            )
-        if controlled_check(smiles) is True:
-            warnings.append(f"合规预筛：{name} 命中管制化学品清单")
-    return warnings
+    return screen_formulation_local(form)
 
 
 def screen_formulation_local(form: Any) -> list[str]:
-    """P3: 零网络化学预筛 — molbloom patent (本地) + RDKit 价键校验。
+    """零网络化学预筛 — molbloom patent (本地) + RDKit 价键/PAINS/Brenk 校验。
 
-    与 ``screen_formulation`` 不同：不调用 ChemCrow/网络，可安全用于
-    优化循环（NSGA-II 每代数百次调用不触网）。返回告警字符串列表，
-    永不阻塞。缺 RDKit 或 molbloom 时静默降级（只返回能算的检查）。
-
-    P-B: 增加 PAINS/Brenk 泛干扰子结构筛查（RDKit FilterCatalog，本地）。
+    自 ChemCrow 移除后与 ``screen_formulation`` 等价(全本地、不触网)，
+    可安全用于优化循环(NSGA-II 每代数百次调用)。返回告警字符串列表，
+    永不阻塞。缺 RDKit 或 molbloom 时静默降级(只返回能算的检查)。
     """
     warnings: list[str] = []
     if not rdkit_available():
@@ -975,10 +884,11 @@ def enrich_material_specs(materials: list[Any]) -> list[str]:
 def chemical_profile(q: str) -> dict[str, Any]:
     """Full chemical dossier for a name/CAS query.
 
-    Extends the classic 3-tier ``lookup_chemical`` result with ChemCrow-backed
-    fields: SMILES/CAS gap-fill, functional groups, molecular patent status
-    and safety flags.  Shape is a strict superset of the lookup payload so the
-    frontend can reuse existing typing.
+    Extends the classic 3-tier ``lookup_chemical`` result with native
+    chemistry fields: SMILES/CAS gap-fill, functional groups, molecular
+    patent status, synthetic-accessibility score and safety flags.  Shape is
+    a strict superset of the lookup payload so the frontend can reuse
+    existing typing.
     """
     from .chemical_lookup import lookup_chemical
 
@@ -986,14 +896,14 @@ def chemical_profile(q: str) -> dict[str, Any]:
     smiles = base.get("smiles")
     cas = base.get("cas") or ""
 
-    if gateway_enabled() and (chemcrow_available() or pubchem_available()):
+    if gateway_enabled() and pubchem_available():
         if not smiles:
             smiles = name_to_smiles(q)
             if smiles:
                 base["smiles"] = smiles
                 base["found"] = True
                 if base.get("source") in ("none", "empty"):
-                    base["source"] = "chemcrow" if chemcrow_available() else "pubchem"
+                    base["source"] = "pubchem"
         if not cas:
             resolved = name_to_cas(q)
             if resolved:
@@ -1003,8 +913,12 @@ def chemical_profile(q: str) -> dict[str, Any]:
     base["func_groups"] = func_groups(smiles) if smiles else []
     base["patented"] = patent_check(smiles) if smiles else None
     base["safety"] = safety_flags(smiles, cas)
+    base["synthetic_accessibility"] = synthetic_accessibility(smiles) if smiles else {
+        "sa_score": None,
+        "tier": "unknown",
+        "note": "无 SMILES",
+    }
     base["chemtools"] = {
         "enabled": gateway_enabled(),
-        "chemcrow_installed": chemcrow_available(),
     }
     return base

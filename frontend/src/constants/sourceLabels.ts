@@ -5,9 +5,9 @@ const SOURCE_LABELS: Record<string, string> = {
   openalex: "OpenAlex",
   arxiv: "arXiv",
   s2: "Semantic Scholar",
-  chemlit: "ChemCrow 文献",
+  chemlit: "化学文献",
   internet: "互联网",
-  chemweb: "ChemCrow 网页",
+  chemweb: "化学网页",
   notebooklm: "NotebookLM",
 };
 

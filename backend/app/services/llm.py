@@ -1507,29 +1507,10 @@ def synthesize_research(
 # is installed and configured. Each is gated behind an availability probe and a
 # try/except so the default TF-IDF + multi-LLM path (and the offline fallback)
 # are never affected when the library is absent or its API has drifted.
-
-_CHEM_KEYWORDS = (
-    "smiles", "logp", "溶解度", "solubility", "毒性", "toxicity", "相容", "compatib",
-    "molecular weight", "分子量", "反应", "reaction", "synthes", "合成", "structure",
-    "结构", "官能团", "functional group", "boiling", "沸点", "melting", "熔点", "pka",
-)
-
-
-def _is_chemistry_question(question: str) -> bool:
-    q = question.lower()
-    return any(k in q for k in _CHEM_KEYWORDS)
-
-
-def _chemcrow_available() -> bool:
-    return optional_import("chemcrow")
-
-
-def _chemcrow_llm_ready() -> bool:
-    """ChemCrow agent expects an OpenAI-compatible API key."""
-    settings = get_settings()
-    if effective_setting(settings, "openai_api_key"):
-        return True
-    return effective_setting(settings, "llm_provider") == "openai" and bool(settings.get_active_api_key())
+#
+# ChemCrow's ReAct adapter was removed 2026-09 (docs/plans/2026-09-04-dechemcrow.md):
+# it required an OpenAI-family key the DeepSeek-only deployment never had, so
+# chemistry questions now flow straight to the RAG + multi-LLM tiers below.
 
 
 def _paperqa_available() -> bool:
@@ -1541,26 +1522,6 @@ def _paperqa_available() -> bool:
     # 直接跳过 Tier 2，避免 litellm 每次空跑 3 次重试并报 "Missing credentials"
     # （随后才 fall through 到 Tier 3）。配置了 OPENAI key 时自动恢复该路径。
     return bool(effective_setting(settings, "openai_api_key"))
-
-
-def _chemcrow_answer(question: str) -> str | None:
-    """Route a chemistry question through the ChemCrow ReAct agent."""
-    try:  # pragma: no cover - requires chemcrow + API key
-        from chemcrow.agents import ChemCrow
-
-        settings = get_settings()
-        key = effective_setting(settings, "openai_api_key") or settings.get_active_api_key()
-        if not key:
-            return None
-        agent = ChemCrow(
-            model=effective_setting(settings, "llm_model"),
-            temp=0.1,
-            openai_api_key=key,
-        )
-        result = agent.run(question)
-        return str(result) if result else None
-    except Exception as exc:
-        return degrade_return(log, exc, "operation failed", None)
 
 
 async def _paperqa_answer(
@@ -1619,31 +1580,18 @@ def answer_question(
     """Answer a user question grounded in the provided sources.
 
     Routing (each tier degrades gracefully to the next):
-      1. ChemCrow — for chemistry-flavoured questions, when installed + keyed.
-      2. paper-qa — semantic retrieval + cited synthesis, when installed.
-      3. TF-IDF re-rank → configured multi-LLM provider.
-      4. Offline: the most relevant retrieved snippet.
+      1. paper-qa — semantic retrieval + cited synthesis, when installed.
+      2. TF-IDF re-rank → configured multi-LLM provider.
+      3. Offline: the most relevant retrieved snippet.
+
+    (The former ChemCrow ReAct tier was removed 2026-09; it required an
+    OpenAI-family key this DeepSeek-only deployment never had.)
 
     Returns (answer_text, cited_sources).
     """
     from ..services.rag import build_store
 
     settings = get_settings()
-
-    # Tier 1: ChemCrow for chemistry questions (requires OpenAI-compatible key).
-    if (
-        settings.use_chemcrow
-        and _chemcrow_llm_ready()
-        and _is_chemistry_question(question)
-        and _chemcrow_available()
-    ):
-        cc = _chemcrow_answer(question)
-        if cc:
-            # Re-rank for citation chips even though ChemCrow answered.
-            store = build_store()
-            store.ingest(sources)
-            relevant = store.query(question, k=min(6, len(sources))) or sources[:6]
-            return cc, relevant
 
     # 召回（粗排）→ LLM 精排（无 GPU 时 LLM rerank 替代 ColBERT 语义排序）。
     store = build_store()

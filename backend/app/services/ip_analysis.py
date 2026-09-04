@@ -211,11 +211,11 @@ def _molecule_patent_checks(form: Formulation) -> list[MoleculePatentCheck]:
 
     Complements the text-based patent search: molbloom checks whether the
     exact molecule appears in the SureChEMBL patent corpus, which name
-    matching cannot do.  Empty when chemcrow is not installed.
+    matching cannot do.  Empty when molbloom is unavailable.
     """
     from . import chemtools
 
-    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+    if not (chemtools.gateway_enabled() and chemtools.molbloom_available()):
         return []
     checks: list[MoleculePatentCheck] = []
     for ing in form.ingredients:

@@ -26,7 +26,7 @@ function ChemToolsCard({ status }: { status: ChemToolsStatus | null }) {
   return (
     <div className="border border-edge/60 rounded p-2">
       <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
-        ChemCrow 工具网关 · {okCount}/{caps.length} 可用
+        化学工具网关 · {okCount}/{caps.length} 可用
         {!status.enabled && <span className="text-amber-400 ml-1">（已禁用）</span>}
       </div>
       <div className="flex flex-wrap gap-1">

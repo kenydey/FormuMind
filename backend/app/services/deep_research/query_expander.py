@@ -84,7 +84,7 @@ def _augment_with_chemical_entities(expanded: ExpandedQuery) -> ExpandedQuery:
     """
     from .. import chemtools
 
-    if not (chemtools.gateway_enabled() and chemtools.chemcrow_available()):
+    if not chemtools.gateway_enabled():
         return expanded
     existing = set(expanded.english_synonyms)
     extra: list[str] = []
