@@ -142,17 +142,12 @@ async def lifespan(_app: FastAPI):
             get_experiment_store(settings)
     except Exception as exc:
         log_handled_exception(logger, exc, "lifespan: ELN store initialization failed", level=logging.ERROR)
-    # Initialize session memory service
+    # Initialize session memory service (startup phase)
     try:
-        await init_session_memory_on_startup()
+        await session_router.init_session_memory_on_startup()
     except Exception as e:
         logger.error(f"Failed to initialize session memory service: {e}")
     # RAG 冷启动预热（非阻塞，2s 后后台触发）
-    # Close session memory service on shutdown
-    try:
-        await close_session_memory_on_shutdown()
-    except Exception as e:
-        logger.error(f"Error closing session memory service on shutdown: {e}")
     if not skip_bootstrap:
         try:
             import asyncio as _asyncio
@@ -169,6 +164,11 @@ async def lifespan(_app: FastAPI):
         except Exception as exc:
             log_handled_exception(logger, exc, "lifespan: schedule rag prewarm failed")
     yield
+    try:
+        # Close session memory service (shutdown phase)
+        await session_router.close_session_memory_on_shutdown()
+    except Exception as exc:
+        log_handled_exception(logger, exc, "lifespan shutdown: session memory close failed")
     try:
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store
@@ -211,7 +211,7 @@ app.include_router(search_router.router, prefix="/api")
 app.include_router(ingest_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(kb_router.router, prefix="/api")
-app.include_router(session_router.router, prefix="/api")
+app.include_router(session_router.router)
 app.include_router(materials_router.router, prefix="/api")
 app.include_router(kg_router.router, prefix="/api")
 app.include_router(kg_neo4j_router.router, prefix="/api")
