@@ -17,9 +17,51 @@ from ...domain.knowledge import RAW_MATERIALS, TRADE_ALIASES, resolve_material_n
 from .element_map import load_element_map
 
 _ENUMERATIVE_RE = re.compile(
-    r"所有|全部|列举|有哪些|哪些.*文献|含.*的|牌号.*有哪些|list all|all formulations",
+    r"所有|全部|列举|有哪些|哪些.*文献|含.*的|牌号.*有哪些|"
+    r"盘点|综述|汇总|一览|清单|筛出|什么牌号|哪些厂|哪些家|"
+    r"list all|all formulations",
     re.IGNORECASE,
 )
+# 2026-09-04 (R3): 高歧义词("总结/整理/对比"——"总结这个配方性能"是语义
+# 分析非列举)不进正则, 留给 _llm_intent_mode 判; 词表只收强列举词, 避免
+# 误伤 semantic 问法。
+_LLM_INTENT_MIN_LEN = 12
+_LLM_INTENT_MODES = frozenset({"enumerative", "semantic", "hybrid"})
+
+
+def _llm_intent_mode(query: str) -> str | None:
+    """正则未决的长句 → LLM 结构化意图分类(3s 硬超时, 失败静默)。
+
+    Returns one of ``_LLM_INTENT_MODES``, or None when the query is too
+    short / LLM 未配置 / 超时 / 回复不可解析 —— 调用方保持现有 auto 判定,
+    绝不比现状更差。只在 resolve_query 的正则未决分支触发, 高频简单问法
+    零 LLM 开销。
+    """
+    q = (query or "").strip()
+    if len(q) < _LLM_INTENT_MIN_LEN:
+        return None
+    prompt = (
+        "你是配方知识图谱的查询意图分类器。判断用户提问的检索意图, 只返回 JSON 对象: "
+        '{"mode": "enumerative" 或 "semantic" 或 "hybrid"}。'
+        "enumerative = 要求列举/罗列实体(如 盘点近年综述 / 有哪些牌号 / 所有 XX); "
+        "semantic = 按语义检索相关配方或材料(如 XX 怎么改善耐盐雾); "
+        "hybrid = 提问含明确物质/牌号且要求关联分析。"
+        f"\n问题: {q}"
+    )
+    try:
+        from .. import llm as _llm
+
+        raw = _llm._call_with_deadline(lambda: _llm._call_llm(prompt), 3.0)
+        if not raw:
+            return None
+        import json
+
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        data = json.loads(m.group(0)) if m else None
+        mode = str((data or {}).get("mode", "")).strip().lower()
+        return mode if mode in _LLM_INTENT_MODES else None
+    except Exception:
+        return None
 _CAS_RE = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
 _ELEMENT_RE = re.compile(r"\b([A-Z][a-z]?)\b")
 
@@ -35,7 +77,14 @@ def resolve_query(query: str, *, settings: Settings | None = None) -> EntityReso
     q = (query or "").strip()
     mode = detect_mode(q)
     if mode == "auto":
-        mode = "hybrid" if _CAS_RE.search(q) or _looks_like_trade(q) else "semantic"
+        # R3: 正则未决的长句 → LLM 结构化意图(3s 硬超时); 未决保持现状。
+        llm_mode = _llm_intent_mode(q)
+        if llm_mode:
+            mode = llm_mode
+        elif _CAS_RE.search(q) or _looks_like_trade(q):
+            mode = "hybrid"
+        else:
+            mode = "semantic"
 
     chemicals: list[KGChemicalEntity] = []
     trade_products: list[KGTradeProductEntity] = []
