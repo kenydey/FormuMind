@@ -1,0 +1,13 @@
+# 成分功能(Role)推断子串表(R1, 2026-09-04 迁移自 formulation_linker.py
+# _ROLE_HINTS)。新助剂/新类别在此追加(如 rheology_modifier → additive),
+# 无需改代码。遍历顺序即匹配优先级(TOML 保序): 先列出的 role 先匹配。
+
+[role_hints]
+resin = ["resin", "epoxy", "binder"]
+hardener = ["hardener", "curing_agent"]
+catalyst = ["catalyst"]
+pigment = ["pigment", "colorant"]
+filler = ["filler", "extender"]
+solvent = ["solvent", "carrier"]
+additive = ["additive", "defoamer", "dispersant", "wetting_agent"]
+inhibitor = ["corrosion_inhibitor", "flash_rust_inhibitor"]

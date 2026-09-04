@@ -10,21 +10,6 @@ from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
 
-_AMBIGUOUS_TERMS: dict[str, list[tuple[str, str | None]]] = {
-    "水性": [
-        ("waterborne acrylic emulsion（水乳液）", None),
-        ("water-reducible solvent paint（水稀释溶剂型）", None),
-    ],
-    "快干": [
-        ("常温自干体系", None),
-        ("低温烘烤加速体系", None),
-    ],
-    "环氧": [
-        ("双酚A型环氧树脂", "chem:catalog:bisphenol_a_epoxy"),
-        ("环氧改性丙烯酸", None),
-    ],
-}
-
 _PRONOUN_ONLY = re.compile(r"^(那|它|这个|怎么样|如何)[？?]?$")
 
 
@@ -99,11 +84,14 @@ def _clarify_via_kg(
 
 
 def _clarify_via_lexicon(question: str, resolved_terms: set[str]) -> ClarificationOption | None:
-    for term, candidates in _AMBIGUOUS_TERMS.items():
+    from .rule_loader import load_rules  # R1: 歧义词典配置化(2026-09-04)
+
+    for term, cfg in load_rules("ambiguous_terms").items():
         if term not in question or term in resolved_terms:
             continue
+        candidates = [tuple(c) for c in cfg.get("candidates", [])]  # [含义, 实体id]
         meanings = [c[0] for c in candidates]
-        ids = [c[1] for c in candidates if c[1]]
+        ids = [c[1] for c in candidates if len(c) > 1 and c[1]]
         return ClarificationOption(
             ambiguous_term=term,
             possible_meanings=meanings,

@@ -1,0 +1,21 @@
+# 酸性浴成分安全规则(R1, 2026-09-04 迁移自 acid_stability.py 硬编码常量)。
+# 供配方安全检查(acid_stability.check_acid_stability)消费——新碱/新金属/
+# 新填料类别在此追加, 无需改代码。reason 中的 {names} 为运行时成分名占位。
+# 外部覆盖: FORMUMIND_RULES_DIR 指向含同名文件的目录; 文件缺失回退内置默认。
+
+[strong_alkali]
+exact = ["Sodium metasilicate", "Sodium tripolyphosphate"]
+prefixes = ["Sodium hydroxide", "Potassium hydroxide"]
+reason = "强碱 {names} 与酸性浴 pH 冲突（中和放热，浴失控）"
+
+[carbonate_fillers]
+substrings = ["carbonate", "bicarbonate", "chalk", "limestone"]
+reason = "碳酸盐填料 {names} 在酸性浴中释放 CO₂（起泡）"
+
+[reactive_metals]
+names = ["Zinc dust", "Zinc oxide", "Aluminum powder", "Aluminium powder"]
+reason = "活泼金属 {names} 在酸性浴中析氢（安全与膜层缺陷风险）"
+
+[amine_neutralised]
+substrings = ["amine", "ammonia"]
+reason = "含胺中和剂组分在低 pH 浴中可能质子化失效（建议核实乳液酸耐受性）"

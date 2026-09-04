@@ -1,0 +1,20 @@
+# 术语歧义澄清词典(R1, 2026-09-04 迁移自 chat_clarify.py _AMBIGUOUS_TERMS)。
+# 每节 = 歧义术语, candidates 每行 = [含义文本, 可选实体id(空串=无)]。
+
+["水性"]
+candidates = [
+  ["waterborne acrylic emulsion（水乳液）", ""],
+  ["water-reducible solvent paint（水稀释溶剂型）", ""],
+]
+
+["快干"]
+candidates = [
+  ["常温自干体系", ""],
+  ["低温烘烤加速体系", ""],
+]
+
+["环氧"]
+candidates = [
+  ["双酚A型环氧树脂", "chem:catalog:bisphenol_a_epoxy"],
+  ["环氧改性丙烯酸", ""],
+]

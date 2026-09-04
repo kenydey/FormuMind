@@ -11,22 +11,19 @@ from .entity_resolver import resolve_query
 
 logger = logging.getLogger(__name__)
 
-_ROLE_HINTS = {
-    "resin": "resin", "epoxy": "resin", "binder": "resin",
-    "hardener": "hardener", "curing_agent": "hardener",
-    "catalyst": "catalyst", "pigment": "pigment", "colorant": "pigment",
-    "filler": "filler", "extender": "filler",
-    "solvent": "solvent", "carrier": "solvent",
-    "additive": "additive", "defoamer": "additive", "dispersant": "additive",
-    "wetting_agent": "additive", "corrosion_inhibitor": "inhibitor",
-    "flash_rust_inhibitor": "inhibitor",
-}
 
 def _infer_role(name: str) -> str:
+    """子串 → Role 推断。规则表见 ``resources/rules/linker_roles.toml``
+    (R1, 2026-09-04: 自 _ROLE_HINTS 硬编码迁移; FORMUMIND_RULES_DIR 可
+    覆盖, 缺失回退内置默认)。遍历顺序即优先级(TOML 保序)。"""
+    from ..rule_loader import load_rules
+
     name_lower = name.lower()
-    for hint, role in _ROLE_HINTS.items():
-        if hint in name_lower:
-            return role
+    hints = load_rules("linker_roles")["role_hints"]
+    for role, role_hints in hints.items():
+        for hint in role_hints:
+            if hint in name_lower:
+                return role
     return "unknown"
 
 def link_experiment_to_kg(experiment_id: int, factors: dict[str, Any], domain: str, project_id: str) -> int:

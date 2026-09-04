@@ -47,22 +47,6 @@ _DEFAULT_BATH_PH = 3.0
 # Role of aqueous polymer dispersions that need acid tolerance.
 _RESIN_ROLES = {"resin", "hardener"}
 
-# ── Composition rules (name-prefix + role based, chemistry-derived) ─────────
-
-# Strong alkali names whose co-presence with an acid is a hard infeasibility
-# (they buffer the bath far out of the acidic window and can react violently).
-_STRONG_ALKALI_PREFIXES = ("Sodium hydroxide", "Potassium hydroxide")
-_STRONG_ALKALI_EXACT = {"Sodium metasilicate", "Sodium tripolyphosphate"}
-
-# Carbonate/bicarbonate fillers — gas evolution (CO₂) under acid.
-_CARBONATE_SUBSTRINGS = ("carbonate", "bicarbonate", "chalk", "limestone")
-
-# Reactive metals that evolve hydrogen under acid.
-_REACTIVE_METALS = {"Zinc dust", "Zinc oxide", "Aluminum powder", "Aluminium powder"}
-
-# Acid-cured / amine-neutralised dispersions that fail at low pH.
-_AMINE_NEUTRALISED_SUBSTRINGS = ("amine", "ammonia")
-
 
 @dataclass
 class AcidStabilityResult:
@@ -108,7 +92,25 @@ def _acid_tolerance_violations(form: Formulation, bath_ph: float) -> list[str]:
 
 
 def _composition_violations(form: Formulation) -> list[tuple[bool, str]]:
-    """Composition-rule axis. Returns [(hard, reason), ...]."""
+    """Composition-rule axis. Returns [(hard, reason), ...].
+
+    2026-09-04 (R1): 强碱/碳酸盐/活泼金属/胺规则从硬编码常量迁移至
+    ``resources/rules/acid_stability.toml``(FORMUMIND_RULES_DIR 可覆盖),
+    经 rule_loader 加载; 文件缺失回退内置默认, 行为零漂移。
+    """
+    from .rule_loader import load_rules
+
+    rules = load_rules("acid_stability")
+    alkali_cfg = rules["strong_alkali"]
+    carbonate_cfg = rules["carbonate_fillers"]
+    metal_cfg = rules["reactive_metals"]
+    amine_cfg = rules["amine_neutralised"]
+    alkali_exact = set(alkali_cfg["exact"])
+    alkali_prefixes = tuple(alkali_cfg["prefixes"])
+    carbonate_substrings = tuple(carbonate_cfg["substrings"])
+    reactive_metals = set(metal_cfg["names"])
+    amine_substrings = tuple(amine_cfg["substrings"])
+
     names = [i.name for i in form.ingredients if i.weight_pct > 0.05]
     lowered = {n.lower() for n in names}
     out: list[tuple[bool, str]] = []
@@ -116,24 +118,24 @@ def _composition_violations(form: Formulation) -> list[tuple[bool, str]]:
     # Strong alkali + (any acid) → hard.
     alkali = [
         n for n in names
-        if n in _STRONG_ALKALI_EXACT or any(n.startswith(p) for p in _STRONG_ALKALI_PREFIXES)
+        if n in alkali_exact or any(n.startswith(p) for p in alkali_prefixes)
     ]
     if alkali:
-        out.append((True, f"强碱 {', '.join(alkali)} 与酸性浴 pH 冲突（中和放热，浴失控）"))
+        out.append((True, alkali_cfg["reason"].format(names=", ".join(alkali))))
 
     # Carbonate filler + acid → hard (gas evolution).
-    carbonates = [n for n in names if any(s in n.lower() for s in _CARBONATE_SUBSTRINGS)]
+    carbonates = [n for n in names if any(s in n.lower() for s in carbonate_substrings)]
     if carbonates:
-        out.append((True, f"碳酸盐填料 {', '.join(carbonates)} 在酸性浴中释放 CO₂（起泡）"))
+        out.append((True, carbonate_cfg["reason"].format(names=", ".join(carbonates))))
 
     # Reactive metal + acid → hard (hydrogen).
-    metals = [n for n in names if n in _REACTIVE_METALS]
+    metals = [n for n in names if n in reactive_metals]
     if metals:
-        out.append((True, f"活泼金属 {', '.join(metals)} 在酸性浴中析氢（安全与膜层缺陷风险）"))
+        out.append((True, metal_cfg["reason"].format(names=", ".join(metals))))
 
     # Amine-neutralised binder in a strongly acidic bath → warn.
-    if any(any(s in n.lower() for s in _AMINE_NEUTRALISED_SUBSTRINGS) for n in names):
-        out.append((False, "含胺中和剂组分在低 pH 浴中可能质子化失效（建议核实乳液酸耐受性）"))
+    if any(any(s in n.lower() for s in amine_substrings) for n in names):
+        out.append((False, amine_cfg["reason"].format(names="")))
 
     return out
 
