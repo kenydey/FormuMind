@@ -6,7 +6,7 @@ import {
   parseSearchStreamData,
   sanitizeEvidenceForApi,
 } from "../../api";
-import type { Evidence, SourceStatus } from "../../api";
+import type { ChatMessage, Evidence, SourceStatus } from "../../api";
 import { undismiss } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
@@ -357,31 +357,72 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         draft.chatBusy = true;
         draft.error = null;
         draft.chatHistory.push({ role: "user", content: question });
+        // 占位 assistant 消息 — token 逐段累积。
+        draft.chatHistory.push({
+          role: "assistant",
+          content: "",
+          streaming: true,
+          phase: "retrieval",
+        });
       });
       try {
         const { chatHistory, activeProjectId } = get();
-        const res = await api.chat({
+        const reqBody: Parameters<typeof api.chat>[0] = {
           question,
           sources: active,
           domain: requirement.domain,
           project_id: activeProjectId ?? undefined,
-          history: chatHistory.slice(-6).map((m) => ({
-            role: m.role,
-            content: m.content,
-            citations: m.citations,
-          })),
+          history: chatHistory
+            .filter((m) => !m.streaming) // 进行中的占位不算历史
+            .slice(-6)
+            .map((m) => ({
+              role: m.role,
+              content: m.content,
+              citations: m.citations,
+            })),
           structure: structure ?? undefined,
+        };
+        await api.chatStream(reqBody, (ev) => {
+          const last = (d: { chatHistory: ChatMessage[] }) =>
+            d.chatHistory[d.chatHistory.length - 1];
+          if (ev.type === "phase") {
+            set((draft) => {
+              const m = last(draft);
+              if (m?.role === "assistant" && m.streaming) m.phase = ev.phase;
+            });
+          } else if (ev.type === "token") {
+            set((draft) => {
+              const m = last(draft);
+              if (m?.role === "assistant" && m.streaming) {
+                m.content += ev.delta;
+              }
+            });
+          } else if (ev.type === "done") {
+            set((draft) => {
+              const m = last(draft);
+              if (m?.role === "assistant") {
+                m.content = ev.answer;
+                m.streaming = false;
+                m.phase = undefined;
+                m.citations = ev.citations;
+                m.kbChunksUsed = ev.kb_chunks_used ?? 0;
+              }
+              draft.error = null;
+            });
+            get().scheduleAutosave();
+          } else if (ev.type === "error") {
+            set((draft) => {
+              const m = last(draft);
+              if (m?.role === "assistant") {
+                if (!m.content) m.content = "";
+                m.content += `\n\n> ⚠️ ${ev.message}`;
+                m.streaming = false;
+                m.phase = undefined;
+              }
+              draft.error = ev.message;
+            });
+          }
         });
-        set((draft) => {
-          draft.chatHistory.push({
-            role: "assistant",
-            content: res.answer,
-            citations: res.citations,
-            kbChunksUsed: res.kb_chunks_used ?? 0,
-          });
-          draft.error = null;
-        });
-        get().scheduleAutosave();
       } catch (e) {
         const msg = formatApiError(e);
         const hint =
@@ -389,6 +430,14 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             ? " — 请在设置页填写 API 访问令牌，或将 FORMUMIND_API_AUTH_ENABLED=false"
             : "";
         set((draft) => {
+          // 移除空的流式占位, 避免留下空白气泡; 有内容的保留(部分生成)。
+          const last = draft.chatHistory[draft.chatHistory.length - 1];
+          if (last?.role === "assistant" && last.streaming && !last.content) {
+            draft.chatHistory.pop();
+          } else if (last?.role === "assistant" && last.streaming) {
+            last.streaming = false;
+            last.phase = undefined;
+          }
           draft.error = `问答失败：${msg}${hint}`;
         });
       } finally {

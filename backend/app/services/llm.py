@@ -588,6 +588,61 @@ def _complete_openai_compatible_raw(
     )
 
 
+def _openai_compatible_stream(
+    prompt: str,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    *,
+    on_delta: Callable[[str], None] | None = None,
+    disable_thinking: bool = False,
+) -> str:
+    """OpenAI-compatible **streaming** chat call; returns the full text.
+
+    2026-09-04: chat SSE 流式化 — deepseek v4 系 + thinking disabled 验证
+    通过(2.5s 首字)。每个 content delta 同步回调 *on_delta*(供 worker
+    线程灌入 asyncio.Queue); 不自动重试(流式中途重试会重复已发 token,
+    失败由上层发 error 事件)。异常类型与同步版一致。
+    """
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
+    try:
+        kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = OpenAI(**kwargs)
+        create_kwargs: dict = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+        }
+        if disable_thinking and _is_deepseek_model(model):
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        parts: list[str] = []
+        for chunk in client.chat.completions.create(**create_kwargs):
+            delta = chunk.choices[0].delta if chunk.choices else None
+            piece = (getattr(delta, "content", None) or "") if delta else ""
+            if piece:
+                parts.append(piece)
+                if on_delta:
+                    on_delta(piece)
+        text = "".join(parts).strip()
+        if not text:
+            raise LLMTransientError("API 流式返回空响应")
+        return text
+    except LLMConfigError:
+        raise
+    except Exception as exc:
+        reraise_if_fatal(exc)
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
 def _complete_openai_compatible_detail(
     prompt: str,
     api_key: str,

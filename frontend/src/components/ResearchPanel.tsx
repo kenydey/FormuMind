@@ -219,7 +219,24 @@ export default function ResearchPanel() {
                 }`}
               >
                 {m.role === "assistant" ? (
-                  <MarkdownMessage content={m.content} />
+                  m.streaming ? (
+                    <div className="whitespace-pre-wrap leading-relaxed font-mono text-[13px] text-slate-300">
+                      {m.content}
+                      {m.phase === "retrieval" ? (
+                        <span className="text-accent2 text-xs ml-1">
+                          ⏳ 检索资料中…
+                        </span>
+                      ) : m.phase === "answering" ? (
+                        <span className="inline-block w-2 h-4 bg-accent2/80 ml-0.5 animate-pulse align-middle" />
+                      ) : m.phase === "claims" ? (
+                        <span className="text-slate-500 text-xs ml-1">
+                          ✓ 核对引用…
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <MarkdownMessage content={m.content} />
+                  )
                 ) : (
                   <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
                 )}

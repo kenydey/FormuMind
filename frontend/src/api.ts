@@ -1328,6 +1328,45 @@ export const api = {
 
   chat: (req: ChatRequest) => post<ChatResponse>("/api/chat", req),
 
+  /** SSE 流式问答: 逐事件回调; AbortSignal 可中断(组件卸载/停止)。 */
+  chatStream: async (
+    req: ChatRequest,
+    onEvent: (ev: ChatStreamEvent) => void,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<void> => {
+    const res = await fetch("/api/chat/stream", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify(req),
+      signal: opts.signal,
+    });
+    if (!res.ok || !res.body) {
+      throw new ApiError(await readApiError(res, "/api/chat/stream"));
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = block
+          .split("\n")
+          .find((l) => l.startsWith("data: "));
+        if (!line) continue; // 心跳注释行等
+        try {
+          onEvent(JSON.parse(line.slice(6)) as ChatStreamEvent);
+        } catch {
+          // 单条事件解析失败不中断整个流
+        }
+      }
+    }
+  },
+
   /** 上传结构图 → MolScribe 识别 → SMILES + MolJSON + 相似材料命中。 */
   uploadStructure: async (
     image: File,
@@ -1728,7 +1767,33 @@ export interface ChatMessage {
   citations?: Evidence[];
   /** Persistent-KB chunks that grounded this assistant answer. */
   kbChunksUsed?: number;
+  /** SSE 流式问答中: 该条 assistant 消息仍在接收(逐 token 累积)。 */
+  streaming?: boolean;
+  /** SSE 阶段指示: retrieval | answering | claims(仅 streaming 时有意义)。 */
+  phase?: string;
 }
+
+/** /api/chat/stream 的 SSE 事件(后端 data: JSON 一行一个)。 */
+export type ChatStreamEvent =
+  | { type: "phase"; phase: "retrieval" | "answering" | "claims" }
+  | {
+      type: "meta";
+      kb_used: number;
+      rewritten_query?: string | null;
+      source_count?: number;
+    }
+  | { type: "token"; delta: string }
+  | {
+      type: "done";
+      answer: string;
+      citations?: Evidence[];
+      kb_chunks_used?: number;
+      clarification?: unknown;
+      rewritten_query?: string | null;
+      sourced_claims?: unknown;
+      structured?: unknown;
+    }
+  | { type: "error"; message: string };
 
 export interface LLMModelOption {
   id: string;
