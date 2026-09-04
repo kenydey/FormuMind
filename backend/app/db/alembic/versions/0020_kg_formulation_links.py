@@ -14,6 +14,12 @@ branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
+    # 0001_baseline 用 Base.metadata.create_all() 动态建全表：models.py 若已含
+    # kg_formulation_links（2026-09-03 同批加入），全新库在 0001 就已建好该表，
+    # 此处必须幂等跳过；既有库（0001 早于该表加入）则正常补建。
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table("kg_formulation_links"):
+        return
     op.create_table(
         "kg_formulation_links",
         sa.Column("id", sa.String(36), primary_key=True),
