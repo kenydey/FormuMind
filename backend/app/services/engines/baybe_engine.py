@@ -146,6 +146,36 @@ class BaybeCampaignEngine:
     def available(self) -> bool:
         return baybe_available()
 
+    def _recommender_for(
+        self, n_continuous: int, n_objectives: int
+    ) -> "tuple":
+        """采集超参按复杂度自适应(R2, 2026-09-04)。
+
+        原硬编码 n_restarts=1/n_raw_samples=16 是 2.5min→几秒的时间妥协,
+        高维/多目标非线性响应面上收敛性无保障。档位:
+          fast(1/16)      — 低维平滑空间(连续因子≤4 且目标≤2), 默认快档;
+          balanced(3/32)  — 高维或多目标(默认 auto 在此档);
+          thorough(5/64)  — 显式 env FORMUMIND_BO_QUALITY=thorough 才启用
+            (4 核 VPS 下单轮可达分钟级, 仅 celery worker 后台可接受)。
+        """
+        import os
+
+        from baybe.recommenders import BotorchRecommender, FPSRecommender, TwoPhaseMetaRecommender
+
+        quality = os.environ.get("FORMUMIND_BO_QUALITY", "auto").strip().lower()
+        if quality == "thorough":
+            restarts, raw = 5, 64
+        elif quality == "fast":
+            restarts, raw = 1, 16
+        elif n_continuous > 4 or n_objectives > 2:
+            restarts, raw = 3, 32
+        else:
+            restarts, raw = 1, 16
+        return TwoPhaseMetaRecommender(
+            initial_recommender=FPSRecommender(),
+            recommender=BotorchRecommender(n_restarts=restarts, n_raw_samples=raw),
+        )
+
     def _new_campaign(self, req: Requirement, objectives: list[ObjectiveSpec], factors=None):
         from baybe import Campaign
         from baybe.recommenders import BotorchRecommender, FPSRecommender, TwoPhaseMetaRecommender
@@ -153,16 +183,7 @@ class BaybeCampaignEngine:
         factor_list = factors_for_requirement(req, factors)
         searchspace = build_searchspace(req, factor_list)
         objective = build_objective_from_specs(objectives)
-        recommender = TwoPhaseMetaRecommender(
-            initial_recommender=FPSRecommender(),
-            # n_restarts=1 / n_raw_samples=16 keeps a single botorch round at a
-            # few seconds instead of ~2.5 min (default n_restarts=10, 64 raw
-            # samples). SLSQP restarts from several different starting points;
-            # for a smooth continuous formulation space the first restart is
-            # already a good local optimum, and the multi-restart sweep was the
-            # dominant cost in every slow baybe test.
-            recommender=BotorchRecommender(n_restarts=1, n_raw_samples=16),
-        )
+        recommender = self._recommender_for(len(factor_list), len(objectives))
         return Campaign(searchspace, objective, recommender), factor_list
 
     def recommend(
@@ -304,6 +325,22 @@ class BaybeCampaignEngine:
                         run.infeasible_reason = "; ".join(hard_reasons) or "物理约束检测到不可行组合"
         except Exception as exc:  # gate must never break recommendation
             log.debug("Physical-constraint gate skipped ({}); allowing", exc)
+
+        # R2 (2026-09-04): 互斥为成分语义级(骨架成分, 非因子值), 而数值
+        # 搜索空间全连续(NumericalContinuousParameter)——BayBE constraints
+        # 数学层表达不了跨因子化学互斥, DiscreteExclude 不适用。把"被 gate
+        # 拦截的候选占比"写入 notes 成为可度量项: 持续高位(>30%)才值得
+        # 研究替代采样(如 genome 空间的候选池裁剪), 不假装能前移。
+        n_total = len(plan.runs)
+        n_gated = sum(1 for r in plan.runs if getattr(r, "infeasible", False))
+        if n_total and n_gated:
+            prev = (getattr(plan, "notes", "") or "").strip()
+            note = (
+                f"gate 拦截 {n_gated}/{n_total} "
+                f"({n_gated / n_total * 100:.0f}%)——互斥为成分语义级, "
+                "连续因子空间 BayBE constraints 无法数学层表达(见 run.infeasible_reason)"
+            )
+            plan.notes = f"{prev}; {note}" if prev else note
 
         result = BaybeRecommendResult(
             plan=plan,
