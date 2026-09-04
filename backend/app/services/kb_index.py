@@ -230,25 +230,49 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
             _attach_entities(source_id, rows)
         if embed and rows:
             with timing.span("embed"):
-                vectors = _embed_texts([r["text"] for r in rows])
-            if vectors:
-                if len(vectors) != len(rows):
+                # 2026-09-04 (双语分流): 文档嵌入按语言分模型——zh chunks
+                # 用 bge(512 维), 其余用全局模型(MiniLM 384 维)。文档侧
+                # 不加 bge 指令(仅查询侧加)。分组编码, 每组各自校验长度。
+                from .rag import embed_model_name as _model_for_lang
+
+                def _lang_of(r: dict) -> str:
+                    return (r.get("lang") or "en")
+
+                group_idxs: dict[str, list[int]] = {}
+                for _i, _r in enumerate(rows):
+                    group_idxs.setdefault(_lang_of(_r), []).append(_i)
+                model_per_row: dict[int, str] = {}
+                vec_map: dict[int, list[float]] = {}
+                mismatch = False
+                for lang, idxs in group_idxs.items():
+                    mname = _model_for_lang(lang)
+                    texts = [rows[i]["text"] for i in idxs]
+                    vecs = _embed_texts(texts, mname)
+                    if not vecs or len(vecs) != len(idxs):
+                        mismatch = True
+                        break
+                    for j, i in enumerate(idxs):
+                        vec_map[i] = vecs[j]
+                        model_per_row[id(rows[i])] = mname
+                if len(vec_map) != len(rows):
+                    mismatch = True
+                if mismatch:
                     # A short or long response would bind vectors to the wrong
                     # text from the mismatch onward — every later chunk carries
                     # its neighbour's meaning, and nothing about the result
                     # looks wrong. Drop the batch instead; the rows stay
                     # keyword-searchable and a rebuild can retry.
                     logger.error(
-                        "kb embedding count mismatch: %d vectors for %d chunks — "
-                        "skipping embeddings for this source",
-                        len(vectors), len(rows),
+                        "kb embedding count mismatch for source %s — skipping embeddings",
+                        source_id,
                     )
                     vectors = None
+                else:
+                    vectors = [vec_map[i] for i in range(len(rows))]
             if vectors:
-                model_name = _embed_model_name()
                 for row, vec in zip(rows, vectors):
                     row["embedding"] = vec
-                    row["embedding_model"] = model_name
+                    row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
         n = get_chunk_store().replace_for_source(source_id, rows)
         if n and settings.kg_enabled and (
             settings.kg_entities_on_ingest or settings.kg_relations_on_ingest

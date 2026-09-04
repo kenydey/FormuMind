@@ -369,7 +369,7 @@ def test_embed_texts_receives_every_chunk_it_is_asked_about(stores, monkeypatch)
                      full_text=text, content_hash="hcorr")
     seen: list[list[str]] = []
 
-    def fake_embed(texts):
+    def fake_embed(texts, model_name=None):
         seen.append(list(texts))
         return [[float(i), 0.0] for i in range(len(texts))]
 
