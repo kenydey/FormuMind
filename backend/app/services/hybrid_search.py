@@ -91,20 +91,25 @@ def hybrid_search(
         bm25_scores: np.ndarray = bm25.get_scores(_tokenize(query))
 
         # ── cosine (dense) scores ───────────────────────────────────────
+        # 2026-09-04 (双语分流): chunks 可能由不同模型嵌入(zh→bge, en→
+        # MiniLM)——按 embedding_model 分组, 每组用对应模型编码查询各算
+        # 一次 cosine(bge 查询侧加指令前缀); 无向量/模型未编组 → 0.0,
+        # 交给 BM25 决定(与 search_chunks 同哲学)。
         cosine_scores = np.zeros(n, dtype=float)
-        query_vecs = kb_index._embed_texts([query])
-        query_vec = query_vecs[0] if query_vecs else None
-        if query_vec is not None:
-            # Same guard as `kb_index.search_chunks`: `zip` truncates rather
-            # than compares, so a chunk embedded by a different model would
-            # contribute a plausible-looking cosine score computed over a
-            # prefix of two unrelated spaces. Leaving it at 0.0 lets BM25
-            # decide that row instead.
-            model_name = kb_index._embed_model_name()
-            dim = len(query_vec)
+        model_cols: set[str] = {
+            c.embedding_model for c in chunks if getattr(c, "embedding_model", None)
+        }
+        for mname in sorted(model_cols):
+            from .rag import bge_query_prefix
+
+            vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
+            if not vecs or not vecs[0]:
+                continue
+            qv = vecs[0]
+            dim = len(qv)
             for i, c in enumerate(chunks):
-                if kb_index.comparable_embedding(c, dim, model_name):
-                    cosine_scores[i] = kb_index._dot(query_vec, c.embedding)
+                if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
+                    cosine_scores[i] = kb_index._dot(qv, c.embedding)
 
         # ── normalise each score vector to [0, 1] ────────────────────────
         bm25_max = float(bm25_scores.max()) if bm25_scores.size else 0.0

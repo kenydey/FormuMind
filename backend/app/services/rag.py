@@ -78,28 +78,36 @@ class TfidfStore:
 _EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def embed_model_name() -> str:
-    """The sentence-transformer to embed with.
+# 中文子库嵌入模型(双语分流 2026-09-04)与 bge 查询指令。
+# document_chunks 按 lang 分组: zh → bge-small-zh-v1.5(同语中文检索
+# 实测 0.70-0.77 精准 vs MiniLM 崩坏); en → MiniLM(免重嵌, 英文相当)。
+_EMBED_MODEL_ZH = "BAAI/bge-small-zh-v1.5"
+# bge 官方查询指令(仅查询侧; 文档侧不加)。A/B 实测 zh×zh 检索用它。
+_BGE_QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 
-    Configurable because the default is English-first, and this platform
-    retrieves Chinese patents — `all-MiniLM-L6-v2` is a poor fit for the
-    corpus it is actually pointed at. Chinese-capable alternatives worth
-    setting via ``FORMUMIND_EMBEDDING_MODEL``:
 
-        BAAI/bge-small-zh-v1.5      small, Chinese-first
-        BAAI/bge-m3                 multilingual, much larger
-        moka-ai/m3e-base            Chinese, mid-sized
+def embed_model_name(lang: str | None = None) -> str:
+    """按子库语言返回嵌入模型; lang=None 保持现状(全局配置优先)。
 
-    The default is deliberately unchanged. Switching models invalidates every
-    stored vector — they live in a different semantic space and are no longer
-    comparable — so it is an operator decision, made once, followed by a
-    rebuild. `kb_stats` reports ``vector_mode == "stale"`` with the count and
-    the instruction when that happens, rather than letting retrieval quietly
-    fall back to keywords.
+    显式配置(FORMUMIND_EMBEDDING_MODEL)总是优先——它代表操作者明确选择;
+    未配置时: zh 子库 → bge-small-zh-v1.5, en/其他 → MiniLM。
     """
     from ..config import get_settings
 
-    return (get_settings().embedding_model or "").strip() or _EMBED_MODEL
+    configured = (get_settings().embedding_model or "").strip()
+    if configured:
+        return configured
+    if lang == "zh":
+        return _EMBED_MODEL_ZH
+    return _EMBED_MODEL
+
+
+def bge_query_prefix(model_name: str | None = None) -> str:
+    """bge 查询指令前缀; 非 bge 模型返回空串(文档侧绝不加)。"""
+    name = model_name or embed_model_name()
+    if "bge" in name:
+        return _BGE_QUERY_INSTRUCTION
+    return ""
 
 
 def _embedding_available() -> bool:

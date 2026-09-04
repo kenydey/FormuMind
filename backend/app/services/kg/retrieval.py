@@ -42,7 +42,11 @@ def retrieve(
 ) -> KGRetrieveResponse:
     settings = settings or get_settings()
     if not settings.kg_enabled:
-        hits = kb_index.search_chunks(query, k=k_semantic or settings.kb_chat_top_k, project_id=project_id)
+        from ..kb_bilingual import search as bilingual_search
+
+        hits = bilingual_search(
+            query, k=k_semantic or settings.kb_chat_top_k, project_id=project_id
+        )
         pre = list(pre_evidence or [])
         seen = {e.identifier for e in pre}
         merged = pre + [h for h in hits if h.identifier not in seen]
@@ -84,7 +88,9 @@ def retrieve(
     sem_k = k_semantic or (
         settings.kg_hybrid_semantic_k if plan_mode == "hybrid" else settings.kb_chat_top_k
     )
-    semantic = kb_index.search_chunks(query, k=sem_k, project_id=project_id)
+    from ..kb_bilingual import search as bilingual_search
+
+    semantic = bilingual_search(query, k=sem_k, project_id=project_id)
 
     pool: list[tuple[float, Evidence, str]] = list(mention_evs)
     for ev in semantic:

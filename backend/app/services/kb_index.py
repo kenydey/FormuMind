@@ -30,14 +30,18 @@ def kb_enabled() -> bool:
 # ── embedding helpers (optional sentence-transformers) ───────────────────────
 
 
-def _embed_texts(texts: list[str]) -> list[list[float]] | None:
-    """Normalized embeddings via the shared rag model, or None when unavailable."""
+def _embed_texts(texts: list[str], model_name: str | None = None) -> list[list[float]] | None:
+    """Normalized embeddings via the shared rag model, or None when unavailable.
+
+    ``model_name`` 缺省 = ``rag.embed_model_name()``(全局配置/默认 MiniLM);
+    双语路由传具体子库模型(zh → bge)。bge 查询指令前缀在调用方处理。
+    """
     if not texts:
         return []
     try:
         from .rag import _load_model, embed_model_name
 
-        model = _load_model(embed_model_name())
+        model = _load_model(model_name or embed_model_name())
         vectors = model.encode(texts, normalize_embeddings=True)
         return [[float(x) for x in v] for v in vectors]
     except Exception as exc:
@@ -460,7 +464,13 @@ def _entity_boost(chunk, qctx: dict) -> float:
     return min(boost, 0.6)
 
 
-def search_chunks(query: str, k: int = 6, *, project_id: str | None = None) -> list[Evidence]:
+def search_chunks(
+    query: str,
+    k: int = 6,
+    *,
+    project_id: str | None = None,
+    langs: list[str] | None = None,
+) -> list[Evidence]:
     """Retrieve the top-k KB chunks for a query (chemistry-aware hybrid).
 
     Base score: cosine over stored embeddings when both sides can embed,
@@ -469,6 +479,13 @@ def search_chunks(query: str, k: int = 6, *, project_id: str | None = None) -> l
     via Tanimoto) get an additive boost, and trade names in the question are
     expanded with their registry-linked generic names.  Empty list when
     disabled, empty KB, or on any failure.
+
+    双语分流 (2026-09-04): ``langs`` 限制子库语言("zh"/"en")——chunks 先
+    按 lang 列过滤(乱码/未标 chunk 在双语模式下不参与); 打分按
+    embedding_model 分组: 每种子库模型编码一次查询(bge 加查询指令),
+    该模型的 chunk 用对应向量 cosine, 其余 keyword 兜底。``langs=None``
+    保持现状(全库单模型)。跨语(中文问查英文库)由上层先翻译再带
+    ``langs=["en"]`` 调用。
     """
     if not kb_enabled() or not (query or "").strip() or k <= 0:
         return []
@@ -481,6 +498,11 @@ def search_chunks(query: str, k: int = 6, *, project_id: str | None = None) -> l
         if not chunks:
             return []
 
+        if langs:
+            chunks = [c for c in chunks if (getattr(c, "lang", "") or "") in langs]
+            if not chunks:
+                return []
+
         qctx = _query_chem_context(query)
         expanded_query = query
         if qctx["terms"]:
@@ -488,35 +510,41 @@ def search_chunks(query: str, k: int = 6, *, project_id: str | None = None) -> l
 
         scored: list[tuple[float, object]] = []
         embedded = [c for c in chunks if c.embedding]
-        query_vec = None
+        # 每组模型编码一次查询(双语: zh→bge+指令, en→MiniLM)。
+        vec_by_model: dict[str, list[float]] = {}
         if embedded:
-            vecs = _embed_texts([expanded_query])
-            query_vec = vecs[0] if vecs else None
+            from .rag import bge_query_prefix, embed_model_name
+            from .lang_router import model_for_lang
 
-        if query_vec is not None and embedded:
-            model_name = _embed_model_name()
-            dim = len(query_vec)
-            usable = [c for c in embedded if comparable_embedding(c, dim, model_name)]
-            skipped = len(embedded) - len(usable)
-            if skipped:
-                # Loud on purpose: this is the state where results still look
-                # ranked and are not. It clears after a rebuild.
-                logger.warning(
-                    "kb search: %d/%d chunks embedded by a different model — "
-                    "scored by keyword instead. Rebuild the index to restore "
-                    "semantic ranking.",
-                    skipped, len(embedded),
-                )
-            usable_ids = {id(c) for c in usable}
-            for c in usable:
-                score = _dot(query_vec, c.embedding)
-                scored.append((score, c))
-            # Text-only rows — and rows this model cannot compare against —
-            # still compete via keywords, rescaled below cosine range.
+            if langs:
+                seen: set[str] = set()
+                for lang in langs:
+                    mname = embed_model_name(lang)
+                    if mname in seen:
+                        continue
+                    seen.add(mname)
+                    prefix = bge_query_prefix(mname)
+                    vecs = _embed_texts([prefix + expanded_query], mname)
+                    if vecs and vecs[0]:
+                        vec_by_model[mname] = vecs[0]
+            else:
+                mname = _embed_model_name()
+                prefix = bge_query_prefix(mname)
+                vecs = _embed_texts([prefix + expanded_query], mname)
+                if vecs and vecs[0]:
+                    vec_by_model[mname] = vecs[0]
+
+        if vec_by_model:
             qt = _tokens(expanded_query)
             for c in chunks:
-                if id(c) not in usable_ids:
-                    scored.append((_keyword_score(qt, c.text) * 0.5, c))
+                m = getattr(c, "embedding_model", None)
+                vec = vec_by_model.get(m) if m else None
+                if c.embedding and vec and comparable_embedding(c, len(vec), m or ""):
+                    scored.append((_dot(vec, c.embedding), c))
+                else:
+                    # 该 chunk 模型未参与本组编码(双语另一侧/脏数据/纯文本)
+                    # → keyword 竞争, rescaled below cosine range。
+                    scored.append((_keyword_score(qt, f"{c.heading_path} {c.text}") * 0.5, c))
         else:
             qt = _tokens(expanded_query)
             for c in chunks:

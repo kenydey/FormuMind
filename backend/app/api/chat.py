@@ -137,7 +137,11 @@ def _augment_with_kb(
 
     if not settings.kb_v2_enabled:
         return sources, 0, resolution, kg_stats
-    hits = kb_index.search_chunks(question, k=settings.kb_chat_top_k, project_id=project_id)
+    from ..services.kb_bilingual import search as bilingual_search
+
+    hits = bilingual_search(
+        question, k=settings.kb_chat_top_k, project_id=project_id
+    )
     if not hits:
         return sources, 0, resolution, kg_stats
     seen = {ev.identifier for ev in sources}

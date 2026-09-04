@@ -497,6 +497,14 @@ class Settings(BaseSettings):
     kb_max_chunks_per_source: int = 600
     kb_search_scan_limit: int = 5000
     kb_chat_top_k: int = 20
+    # 双语资料分流(2026-09-04): 中文子库 bge / 英文子库 MiniLM 按查询
+    # 语言路由, 乱码/未标 chunk 不参与双语检索; 默认关(现状全库单模型),
+    # 生产经 FORMUMIND_KB_BILINGUAL=true 显式开启——开启前须先跑
+    # scripts/backfill_chunk_lang.py + scripts/reembed_zh_chunks.py。
+    kb_bilingual: bool = False
+    # 中文问 → LLM 译英 → 英文子库二次检索(跨语通道); 失败自动降级
+    # 为仅中文子库。依赖 kb_bilingual。
+    kb_query_translate: bool = True
     # 检索命中的切块交给 LLM 之前保留多少字符。切块本身是 1600
     # （ingest_chunk_max_chars），此前这里硬编码 600，等于把已经入库的全文
     # 又砍掉三分之二才给模型看。0 = 不截断，完整交出切块。
