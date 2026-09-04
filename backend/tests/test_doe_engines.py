@@ -58,3 +58,15 @@ def test_pydoe_design_falls_back_to_native(monkeypatch):
     monkeypatch.setattr("app.services.engines.pydoe_engine.build_pydoe_plan", boom)
     plan = build_doe_plan(FACTORS, "lhs", engine="pydoe", n=5)
     assert "fallback" in plan.notes or "engine=native" in plan.notes
+
+
+def test_mixture_design_failure_raises_not_fallback(monkeypatch):
+    """P0: simplex_lattice 失败必须显式报错, 不允许静默降级无约束 LHS。"""
+    monkeypatch.setattr("app.services.engines.pydoe_engine.pydoe_available", lambda: True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated pydoe simplex failure")
+
+    monkeypatch.setattr("app.services.engines.pydoe_engine.build_pydoe_plan", boom)
+    with pytest.raises(ValueError, match="混料"):
+        build_doe_plan(FACTORS, "simplex_lattice", engine="pydoe", n=6)

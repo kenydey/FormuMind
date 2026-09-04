@@ -12,6 +12,9 @@ from .native_doe_engine import build_native_plan
 logger = logging.getLogger(__name__)
 
 PYDOE_DESIGNS = frozenset({"lhs", "ccd", "bbdesign", "simplex_lattice", "sobol"})
+# 2026-09-04 (P0): 混料设计的前提是"各成分和=100%", 无约束 LHS 兜底会
+# 静默生成总量偏离 100% 的配方 —— 混料失败必须显式报错, 不允许降级。
+_MIXTURE_DESIGNS = frozenset({"simplex_lattice", "simplex_centroid"})
 
 
 def pydoe_available() -> bool:
@@ -117,13 +120,24 @@ def build_plan_with_fallback(
     design: str,
     n: int | None = None,
 ) -> DOEPlan:
-    """Try pydoe; fall back to native for unknown designs or import failures."""
+    """Try pydoe; fall back to native for unknown designs or import failures.
+
+    Mixture designs (simplex_*) never fall back to LHS: the mixture premise
+    (component sum = 100%) does not survive an unconstrained LHS, so a pyDOE
+    failure on a mixture design raises instead of degrading silently.
+    """
     if design not in PYDOE_DESIGNS:
+        # 未知设计(含 native 引擎不支持的混料名) → native 显式报错。
         return build_native_plan(factors, design, n=n)
     try:
         return build_pydoe_plan(factors, design, n=n)
-    except Exception:
+    except Exception as exc:
+        if design in _MIXTURE_DESIGNS:
+            raise ValueError(
+                f"混料设计 {design!r} 生成失败: {exc} — "
+                "混料约束(成分和=100%)无法由无约束 LHS 兜底, 请检查因子数/设计参数"
+            ) from exc
         native_design = design if design in {"lhs", "ccd"} else "lhs"
         plan = build_native_plan(factors, native_design, n=n)
-        plan.notes = f"engine=native (pydoe fallback); {plan.notes}"
+        plan.notes = f"engine=native (pydoe fallback: {exc}); {plan.notes}"
         return plan

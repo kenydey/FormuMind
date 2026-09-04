@@ -153,3 +153,75 @@ def test_api_contradictions_endpoint(store):
     assert r.status_code == 200
     body = r.json()
     assert any(m["target_entity_id"] == "chem:sub" for m in body["contradictions"])
+
+
+def test_average_trap_two_props_detected_via_worst(store):
+    """P1: 两属性实测 0.1(防腐)+0.9(光泽) → 旧全局平均 0.5 必漏报;
+    新逻辑用最差属性 0.1 → 文献 substitutes 矛盾必命中, 归因到低分属性。"""
+    with store._session_factory() as session:
+        for eid, name in (("chem:d", "Polymer A"), ("chem:sub", "Sub X"),
+                          ("prop:nss", "耐盐雾"), ("prop:gloss", "光泽度")):
+            store.upsert_entity(session, id=eid, kind="chemical",
+                                canonical_name=name, composition_status="resolved")
+        store.merge_semantic_link(
+            session, src_entity_id="chem:d", dst_entity_id="chem:sub",
+            link_type="substitutes", confidence=0.9,
+            evidence_ref={"source_id": "s1", "chunk_id": "c1",
+                          "sentence": "A can be replaced by X", "confidence": 0.9,
+                          "extraction_method": "rule"},
+        )
+        # 防腐 0.1(差) + 光泽 0.9(好) —— 平均值 0.5 会漏报
+        store.merge_semantic_link(
+            session, src_entity_id="chem:d", dst_entity_id="prop:nss",
+            link_type="measured_performance", confidence=0.1,
+            evidence_ref={"source_id": "measured:c1", "extraction_method": "measured",
+                          "sentence": "NSS=0.1"}, extraction_method="measured",
+        )
+        store.merge_semantic_link(
+            session, src_entity_id="chem:d", dst_entity_id="prop:gloss",
+            link_type="measured_performance", confidence=0.9,
+            evidence_ref={"source_id": "measured:c2", "extraction_method": "measured",
+                          "sentence": "gloss=0.9"}, extraction_method="measured",
+        )
+        session.commit()
+    resp = detect_contradictions("chem:d")
+    marks = [m for m in resp.contradictions if m.target_entity_id == "chem:sub"]
+    assert marks, "平均值 0.5 场景必须检出矛盾(最差属性 0.1)"
+    assert marks[0].measured_property == "prop:nss", "归因应为低分属性"
+    assert marks[0].measured_value == 0.1
+
+
+def test_inhibit_claim_uses_best_property(store):
+    """P1: expected_sign=-1(inhibits, 声称性能差)须用最好属性对标——
+    实测 0.1/0.9 时旧平均 0.5 同样漏报; 新逻辑 best=0.9 → inhibit_vs_good 命中。"""
+    with store._session_factory() as session:
+        for eid, name in (("chem:d", "Polymer A"), ("chem:inh", "Inhib X"),
+                          ("prop:nss", "耐盐雾"), ("prop:gloss", "光泽度")):
+            store.upsert_entity(session, id=eid, kind="chemical",
+                                canonical_name=name, composition_status="resolved")
+        store.merge_semantic_link(
+            session, src_entity_id="chem:d", dst_entity_id="chem:inh",
+            link_type="inhibits", confidence=0.9,
+            evidence_ref={"source_id": "s1", "chunk_id": "c1",
+                          "sentence": "X inhibits A", "confidence": 0.9,
+                          "extraction_method": "rule"},
+        )
+        store.merge_semantic_link(
+            session, src_entity_id="chem:d", dst_entity_id="prop:nss",
+            link_type="measured_performance", confidence=0.1,
+            evidence_ref={"source_id": "measured:c1", "extraction_method": "measured",
+                          "sentence": "NSS=0.1"}, extraction_method="measured",
+        )
+        store.merge_semantic_link(
+            session, src_entity_id="chem:d", dst_entity_id="prop:gloss",
+            link_type="measured_performance", confidence=0.9,
+            evidence_ref={"source_id": "measured:c2", "extraction_method": "measured",
+                          "sentence": "gloss=0.9"}, extraction_method="measured",
+        )
+        session.commit()
+    resp = detect_contradictions("chem:d")
+    marks = [m for m in resp.contradictions if m.target_entity_id == "chem:inh"]
+    assert marks, "inhibits 声称 + 实测有属性 0.9 必须检出矛盾(旧平均 0.5 漏报)"
+    assert marks[0].contradiction_type == "inhibit_vs_good"
+    assert marks[0].measured_property == "prop:gloss", "归因应为最好属性"
+    assert marks[0].measured_value == 0.9

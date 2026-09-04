@@ -105,30 +105,41 @@ def detect_contradictions(entity_id: str) -> KGContradictionResponse:
 
     # Index measured performance anchored at this entity (domain). measured
     # edges connect (domain) -> (property); the normalized value encodes how
-    # well the domain performs on that property. We key by property id but the
-    # *anchor* is always entity_id, so a poor domain measurement contradicts
-    # every positively-framed literature claim about that domain.
-    measured_values: list[tuple[float, str]] = []
+    # well the domain performs on that property.
+    #
+    # 2026-09-04 (P1): 属性分桶, 不再跨属性全局平均。图谱数据中测量边对端
+    # 是 prop:* 属性实体, 文献边对端是 chem:formula 等物质实体(两个 id
+    # 空间, 无法按 target 精确对标)——因此采用"最差属性"信号: 文献声称
+    # 整体性能好时, 任一关键属性实测差即为矛盾候选(防 NSS=0.1+光泽=0.9
+    # 被平均成 0.5 而漏报); 归因指向真实的最差属性实体而非链路对端。
+    measured_by_prop: dict[str, list[tuple[float, str]]] = {}
     for ml in measured_links:
         if getattr(ml, "extraction_method", None) != "measured":
             continue
-        other = ml.dst_entity_id if ml.src_entity_id == entity_id else ml.src_entity_id
+        prop = ml.dst_entity_id if ml.src_entity_id == entity_id else ml.src_entity_id
         val = float(getattr(ml, "confidence", 0.5))
         src = ""
         refs = getattr(ml, "evidence_refs", None) or []
         if refs:
             src = refs[0].get("source_id", "") if isinstance(refs[0], dict) else ""
-        measured_values.append((val, src))
+        measured_by_prop.setdefault(prop, []).append((val, src))
 
-    if not measured_values:
+    if not measured_by_prop:
         return KGContradictionResponse(
             entity_id=entity_id,
             entity_name=_entity_display_name(entity_id, cache),
             contradictions=marks,
         )
 
-    # Domain-level measured signal: average normalized performance across props.
-    domain_perf = sum(v for v, _ in measured_values) / len(measured_values)
+    # 每属性桶取均值; 同属性多测点(重复实验)不再重复计数。
+    prop_perf: dict[str, tuple[float, str]] = {
+        p: (sum(v for v, _ in vals) / len(vals), vals[0][1])
+        for p, vals in measured_by_prop.items()
+    }
+    worst_prop = min(prop_perf, key=lambda p: prop_perf[p][0])
+    best_prop = max(prop_perf, key=lambda p: prop_perf[p][0])
+    worst_val, worst_src = prop_perf[worst_prop]
+    best_val, best_src = prop_perf[best_prop]
 
     for link in lit_links:
         lit_type = link.link_type
@@ -139,12 +150,15 @@ def detect_contradictions(entity_id: str) -> KGContradictionResponse:
         ctype, expected_sign = _EXPECTED_SIGN[lit_type]
         target = link.dst_entity_id if link.src_entity_id == entity_id else link.src_entity_id
         lit_conf = float(getattr(link, "confidence", 0.5))
-        # expected_sign +1 => claim expects good performance; contradiction when
-        # domain_perf low. -1 => expects poor; contradiction when domain_perf high.
+        # expected_sign +1(声称性能好)→ 用最差属性: 任一属性实测差即矛盾;
+        # expected_sign -1(声称性能差/inhibits)→ 用最好属性: 任一属性实测
+        # 好即与"抑制/负相关"声称冲突。平均会稀释单属性极端 → 漏报。
         if expected_sign > 0:
-            deviation = (0.5 - domain_perf) * 2  # +1 when perf low
+            ref_val, ref_src = worst_val, worst_src
+            deviation = (0.5 - ref_val) * 2  # +1 when worst perf low
         else:
-            deviation = (domain_perf - 0.5) * 2  # +1 when perf high
+            ref_val, ref_src = best_val, best_src
+            deviation = (ref_val - 0.5) * 2  # +1 when best perf high
         strength = abs(deviation) * lit_conf
         if strength < threshold:
             continue
@@ -154,9 +168,11 @@ def detect_contradictions(entity_id: str) -> KGContradictionResponse:
                 target_entity_name=_entity_display_name(target, cache),
                 literature_relation=RelationType(lit_type),
                 literature_confidence=lit_conf,
-                measured_property=target,
-                measured_value=domain_perf,
-                measured_source_id=measured_values[0][1],
+                measured_property=(
+                    worst_prop if expected_sign > 0 else best_prop
+                ),
+                measured_value=ref_val,
+                measured_source_id=ref_src,
                 contradiction_type=ctype,
                 strength=round(strength, 3),
                 recommended_action=(
