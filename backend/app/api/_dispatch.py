@@ -71,7 +71,7 @@ def broker_reachable() -> bool:
         with socket.create_connection(endpoint, timeout=BROKER_PROBE_TIMEOUT_S):
             return True
     except OSError as exc:
-        logger.warning("broker unreachable at %s:%s (%s)", *endpoint, exc)
+        logger.warning("broker unreachable at {}:{} ({})", *endpoint, exc)
         return False
 
 
@@ -93,13 +93,13 @@ def submit(task, payload: dict, kind: str, *, outbox_id: str | None = None, owne
         # 2026-09-05: uvicorn 进程内 celery producer 首建曾无限卡(所有 submit
         # 端点挂起→前端 502)。预热(lifespan)已把首建移出请求路径; 此处兜底
         # 超时, 宁可明确 503 也不让请求无限挂。
-        logger.error("celery dispatch timed out for %s: %s", kind, exc)
+        logger.error("celery dispatch timed out for {}: {}", kind, exc)
         raise HTTPException(status_code=503, detail=f"{BROKER_DOWN_DETAIL}（dispatch 超时: {exc}）") from exc
     except Exception as exc:
         # The probe passed a moment ago, so this is a broker that died mid-
         # submission or a payload Celery could not serialise. Either way the
         # client gets a reason instead of an unparseable 500.
-        logger.exception("celery dispatch failed for %s", kind)
+        logger.exception("celery dispatch failed for {}", kind)
         raise HTTPException(status_code=503, detail=f"{BROKER_DOWN_DETAIL}（{exc}）") from exc
     return accepted_response(async_result.id, kind, outbox_id=outbox_id, owner_id=owner_id)
 

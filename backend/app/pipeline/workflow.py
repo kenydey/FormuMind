@@ -340,7 +340,7 @@ def run_optimization(
                 # ("numpy-ucb"/"optuna-tpe") with no trace BayBE was even tried.
                 from loguru import logger
 
-                logger.warning("BayBE optimization failed, falling back to numpy/optuna: %s", exc)
+                logger.warning("BayBE optimization failed, falling back to numpy/optuna: {}", exc)
 
     from ..domain.project_spec import resolve_levers
 

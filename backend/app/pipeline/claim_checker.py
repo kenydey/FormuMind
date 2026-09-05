@@ -205,7 +205,7 @@ def check_claims(
             verified = verify_claims_llm(topic, claims, evidence)
             engine = "llm"
         except Exception as exc:
-            logger.warning("Claim check LLM failed: %s", exc)
+            logger.warning("Claim check LLM failed: {}", exc)
             verified = [verify_claim_offline(c, evidence) for c in claims]
             engine = "degraded"  # 明确区分：曾尝试 LLM 但失败回退
     else:

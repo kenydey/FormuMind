@@ -127,7 +127,13 @@ def build_plan_with_fallback(
     failure on a mixture design raises instead of degrading silently.
     """
     if design not in PYDOE_DESIGNS:
-        # 未知设计(含 native 引擎不支持的混料名) → native 显式报错。
+        # Unknown mixture names must not collapse to native "Unknown design" —
+        # surface the mixture constraint failure explicitly.
+        if design in _MIXTURE_DESIGNS:
+            raise ValueError(
+                f"混料设计 {design!r} 不受支持或 pyDOE 不可用 — "
+                "混料约束(成分和=100%)无法由无约束 LHS 兜底"
+            )
         return build_native_plan(factors, design, n=n)
     try:
         return build_pydoe_plan(factors, design, n=n)
