@@ -219,6 +219,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("celery_eager", "任务同步执行",
             "后台任务在进程内同步执行（无需 Redis/Celery worker）。关闭需要可达的 Redis。",
             "infra", "关闭前请确认 Redis 与 worker 已就绪"),
+    EnvFlag("neo4j_enabled", "Neo4j 图存储适配器",
+            "启用可选 Neo4j Bolt 适配器（与 SQLite KG 并存）。关闭时所有 Neo4j API 返回空/禁用。",
+            "infra",
+            "需 neo4j driver + 可达的 FORMUMIND_NEO4J_URI/USER/PASSWORD"),
     EnvFlag("agent_bus_enabled", "多智能体事件总线",
             "启用 Redis Pub/Sub 事件总线（预留能力；Redis 不可达时静默 no-op）。",
             "infra", "需可达的 Redis"),
@@ -292,5 +296,12 @@ def update_env_flags(updates: dict[str, bool]) -> tuple[list[str], list[str]]:
             # Read-only FS etc. — the live process env still applied.
             logger.warning("env flags: .env persistence failed (%s)", exc)
         get_settings.cache_clear()
+        if "neo4j_enabled" in updated:
+            try:
+                from . import neo4j_kg
+
+                neo4j_kg.close()
+            except Exception:
+                pass
         logger.info("env flags updated: %s", ", ".join(updated))
     return updated, rejected

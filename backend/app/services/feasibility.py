@@ -45,8 +45,15 @@ def check_formulation(
     try:
         verdict = InitializeAgent().review(form, requirement=req, explain=False)
     except Exception as exc:
-        logger.debug("feasibility: agent review failed ({}); allowing", exc)
-        return FeasibilityVerdict(feasible=True, status="pass", formulation=form)
+        # Fail-closed: a broken reviewer must not let infeasible chemistry
+        # through the genome search gate (was fail-open / status=pass).
+        logger.warning("feasibility: agent review failed ({}); rejecting", exc)
+        return FeasibilityVerdict(
+            feasible=False,
+            status="invalid",
+            reasons=[f"feasibility review unavailable: {exc}"],
+            formulation=form,
+        )
 
     reasons = [
         f"[{issue.code}] {issue.ingredient or ''} {issue.message}".strip()
