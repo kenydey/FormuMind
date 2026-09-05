@@ -228,6 +228,23 @@ def element_balance_check(
     return warnings
 
 
+def _parse_molar_mass(value: object) -> float | None:
+    """Tolerate str molar masses from LLM/catalog/model_copy paths.
+
+    pydantic 的 ``model_copy(update=...)`` 与 gate 回填不做类型校验 —— 复现:
+    ``molar_mass='381.9 g/mol'`` 原样穿过, validate_formulation 里
+    ``computed - ing.molar_mass`` 抛 TypeError(fix 2026-09-05 recommend 503)。
+    接受 '381.9' / '~382 g/mol' / 381.9; 解析失败返回 None(当作未声明)。
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(",", "").replace("约", "").replace("~", "")
+    m = re.search(r"-?\d+(?:\.\d+)?", s)
+    return float(m.group()) if m else None
+
+
 def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) -> list[str]:
     """Return a list of human-readable warnings about a formulation.
 
@@ -247,11 +264,13 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
             except ValueError as exc:
                 warnings.append(f"{ing.name}: {exc}")
                 continue
-            if ing.molar_mass and abs(computed - ing.molar_mass) / ing.molar_mass > 0.02:
+            mm = _parse_molar_mass(ing.molar_mass)
+            if mm and abs(computed - mm) / mm > 0.02:
                 warnings.append(
                     f"{ing.name}: declared M={ing.molar_mass} but formula {ing.formula} gives {computed}."
                 )
-            ing.molar_mass = ing.molar_mass or computed
+            # 归一: 有效 str → float; 垃圾值('N/A')→ 回填 formula 计算值
+            ing.molar_mass = mm if mm is not None else computed
     if voc_limit_gpl is not None and "voc_gpl" in form.predicted:
         voc = form.predicted["voc_gpl"]
         if voc > voc_limit_gpl:

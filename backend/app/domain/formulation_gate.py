@@ -106,6 +106,18 @@ def _web_search_gap_fill(name: str, updates: dict) -> list[str]:
     return warnings
 
 
+def _parse_declared_mass(raw: object) -> float | None:
+    """Catalog molar-mass values → float ('~382 g/mol' → 382.0; 失败 None)."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    import re
+
+    m = re.search(r"-?\d+(?:\.\d+)?", str(raw).replace(",", ""))
+    return float(m.group()) if m else None
+
+
 def _apply_lookup_hit(updates: dict, hit: dict, *, need_cas: bool, need_zh: bool, need_smiles: bool, need_formula: bool, need_mm: bool) -> None:
     if need_cas and hit.get("cas"):
         updates["cas_no"] = hit["cas"]
@@ -118,7 +130,10 @@ def _apply_lookup_hit(updates: dict, hit: dict, *, need_cas: bool, need_zh: bool
         updates["mf_structure"] = hit["formula"]
         updates["mf"] = hit["formula"]
     if need_mm and hit.get("molar_mass") is not None:
-        updates["molar_mass"] = hit["molar_mass"]
+        raw = hit["molar_mass"]
+        # model_copy(update) 不过 pydantic 校验 —— 先归一, 防 str 逃逸到
+        # validate_formulation(2026-09-05 recommend 503 根因之一)
+        updates["molar_mass"] = float(raw) if isinstance(raw, (int, float)) else _parse_declared_mass(raw)
 
 
 def _resolve_fields(
