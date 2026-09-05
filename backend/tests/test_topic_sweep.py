@@ -31,9 +31,9 @@ def test_topic_sweep_searches_and_dispatches(monkeypatch):
     monkeypatch.setattr("app.services.literature.iter_search", fake_iter)
     monkeypatch.setattr("app.worker.tasks.dispatch_kb_ingest", fake_dispatch)
 
-    res = run_topic_sweep.delay(
+    res = run_topic_sweep.run(  # 直接调任务函数体(eager=false 后 delay 不同步)
         {"query": "镁合金 无铬钝化", "project_id": "1d10717c", "total_limit": 50}
-    ).get()
+    )
 
     assert res["found"] == 1
     assert res["ingest_task_id"] == "kb-task-1"
@@ -48,6 +48,6 @@ def test_topic_sweep_empty_result_skips_ingest(monkeypatch):
         return ([], {})
 
     monkeypatch.setattr("app.services.literature.iter_search", fake_iter)
-    res = run_topic_sweep.delay({"query": "nonexistent chemistry", "project_id": None}).get()
+    res = run_topic_sweep.run({"query": "nonexistent chemistry", "project_id": None})
     assert res["found"] == 0
     assert res["ingest_task_id"] is None

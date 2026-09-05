@@ -85,10 +85,13 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 16384
     llm_timeout_seconds: float = 60.0
 
-    # Celery / Redis. Without a reachable broker the worker runs eagerly
-    # (synchronously, in-process) which keeps the API usable everywhere.
+    # Celery / Redis. Production MUST run with task_always_eager=False (real
+    # worker + broker): eager=true makes every .delay() execute the full task
+    # synchronously in the request thread — recommend/ingest hang for minutes
+    # and the frontend proxy times out (502, fixed 2026-09-05). Standalone /
+    # broker-less deployments can opt back in with FORMUMIND_CELERY_EAGER=true.
     redis_url: str = "redis://localhost:6379/0"
-    celery_eager: bool = True
+    celery_eager: bool = False
 
     # CORS origins for the Vite dev server.
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]

@@ -1111,3 +1111,25 @@ loop_task = run_loop_task
 deep_research_task = run_deep_research_task
 recommend_task = run_recommend_task
 ingest_patents_task = run_deep_research_task  # unused alias
+
+
+@celery_app.task(name="formumind.noop")
+def noop_task(*args: object, **kwargs: object) -> str:
+    """Producer warm-up probe (2026-09-05): 无副作用, 只验证 broker 通道."""
+    return "ok"
+
+
+def warm_celery_producer(timeout: float = 60.0) -> None:
+    """发布一次 noop —— uvicorn 进程内首次 producer 初始化极慢/卡请求线程。
+
+    在 FastAPI lifespan 后台线程预热, 把 producer 首建移到启动期;
+    失败仅日志(首个 submit 请求会再付一次冷启动)。
+    """
+    try:
+        noop_task.delay()
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "celery producer warmup failed (non-fatal)"
+        )

@@ -88,6 +88,13 @@ async def lifespan(_app: FastAPI):
         threading.Thread(
             target=warm_predict, name="predictor-prewarm", daemon=True
         ).start()
+        # 2026-09-05: celery producer 首建在 uvicorn 进程内会卡请求线程
+        # (submit 全挂)——启动期后台预热, 请求期不再付首次初始化。
+        from .worker.tasks import warm_celery_producer
+
+        threading.Thread(
+            target=warm_celery_producer, name="celery-producer-warmup", daemon=True
+        ).start()
     # ------------------------------------------------------------------
     # Fail-fast: ensure the API token is resolvable at startup so a missing
     # FORMUMIND_API_TOKEN surfaces immediately in production instead of on
@@ -143,18 +150,26 @@ async def lifespan(_app: FastAPI):
             except Exception as exc:
                 log_handled_exception(logger, exc, "lifespan: material seed failed")
         if settings.enrich_compounds:
-            try:  # pragma: no cover - opt-in network path
-                from .domain.knowledge import RAW_MATERIALS
-                from .services.compounds import enrich_materials
+            # 2026-09-05: enrich 原同步阻塞启动 —— 材料库未 rich 时逐材料
+            # PubChem + primp 网页搜索兜底, 启动可拖 10+ 分钟(前端 502 根因)。
+            # 改后台线程: 启动不等网络; 完成后 persist, 下次启动跳过。
+            def _bg_enrich() -> None:
+                try:  # pragma: no cover - opt-in network path
+                    from .domain.knowledge import RAW_MATERIALS
+                    from .services.compounds import enrich_materials
 
-                enriched = enrich_materials(RAW_MATERIALS)
-                # enrich_materials mutates the spec dicts in place; persist so
-                # the backfilled SMILES survive a restart instead of costing a
-                # PubChem round-trip on every boot.
-                if enriched and settings.material_store_enabled:
-                    RAW_MATERIALS.persist_all()
-            except Exception as exc:
-                log_handled_exception(logger, exc, "lifespan: PubChem enrichment failed")
+                    enriched = enrich_materials(RAW_MATERIALS)
+                    # enrich_materials mutates the spec dicts in place; persist so
+                    # the backfilled SMILES survive a restart instead of costing a
+                    # PubChem round-trip on every boot.
+                    if enriched and settings.material_store_enabled:
+                        RAW_MATERIALS.persist_all()
+                except Exception as exc:
+                    log_handled_exception(logger, exc, "lifespan: PubChem enrichment failed")
+
+            import threading
+
+            threading.Thread(target=_bg_enrich, name="pubchem-enrich", daemon=True).start()
     try:
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store

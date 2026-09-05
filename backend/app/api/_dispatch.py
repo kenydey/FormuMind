@@ -88,7 +88,13 @@ def submit(task, payload: dict, kind: str, *, outbox_id: str | None = None, owne
     if not broker_reachable():
         raise HTTPException(status_code=503, detail=BROKER_DOWN_DETAIL)
     try:
-        async_result = task.delay(payload)
+        async_result = _delay_with_timeout(task, payload)
+    except _DispatchTimeout as exc:
+        # 2026-09-05: uvicorn 进程内 celery producer 首建曾无限卡(所有 submit
+        # 端点挂起→前端 502)。预热(lifespan)已把首建移出请求路径; 此处兜底
+        # 超时, 宁可明确 503 也不让请求无限挂。
+        logger.error("celery dispatch timed out for {}: {}", kind, exc)
+        raise HTTPException(status_code=503, detail=f"{BROKER_DOWN_DETAIL}（dispatch 超时: {exc}）") from exc
     except Exception as exc:
         # The probe passed a moment ago, so this is a broker that died mid-
         # submission or a payload Celery could not serialise. Either way the
@@ -96,3 +102,26 @@ def submit(task, payload: dict, kind: str, *, outbox_id: str | None = None, owne
         logger.exception("celery dispatch failed for {}", kind)
         raise HTTPException(status_code=503, detail=f"{BROKER_DOWN_DETAIL}（{exc}）") from exc
     return accepted_response(async_result.id, kind, outbox_id=outbox_id, owner_id=owner_id)
+
+
+class _DispatchTimeout(Exception):
+    pass
+
+
+def _delay_with_timeout(task, payload: dict, timeout_s: float = 10.0):
+    """task.delay in a worker thread with a hard cap.
+
+    Celery's producer pool can block for minutes on first use inside a
+    long-lived uvicorn process; the request must never hang on it.
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = pool.submit(task.delay, payload)
+        try:
+            return fut.result(timeout=timeout_s)
+        except FuturesTimeout:
+            raise _DispatchTimeout("task.delay > {}s".format(timeout_s)) from None
+    finally:
+        pool.shutdown(wait=False)  # 卡死线程不等待(超时兜底必须立即返回)
