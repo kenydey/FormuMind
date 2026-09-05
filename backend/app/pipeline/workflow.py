@@ -280,7 +280,9 @@ def build_doe(
     from ..services.engines.doe_registry import build_doe_plan
 
     factors = build_doe_factors(req)
-    plan = build_doe_plan(factors, design=design, engine=engine, n=n)
+    plan = build_doe_plan(
+        factors, design=design, engine=engine, n=n, requirement=req
+    )
     plan.plan_id = uuid.uuid4().hex
     plan.domain = req.domain
     review = chemtools.review_doe_factors(req, plan)
