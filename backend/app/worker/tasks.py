@@ -806,6 +806,47 @@ def run_search_task(self, payload: dict) -> dict:
         raise
 
 
+@celery_app.task(bind=True, name="formumind.topic_sweep")
+def run_topic_sweep(self, payload: dict) -> dict:
+    """主题雷达单次触发(2026-09-05 P2): 检索 → topic 筛选 → 后台 KB 回填.
+
+    Celery Beat 周期调度入口(beat 默认不启, 手动起 celery 加 -B 时按
+    celery_app.py 中注释的 beat_schedule 生效); 亦可由 API 手动触发。
+    """
+    from ..domain.schemas import Requirement
+    from ..services import literature
+
+    task_id = self.request.id
+    query = payload["query"]
+    project_id = payload.get("project_id")
+    try:
+        req = Requirement(**payload["requirement"]) if payload.get("requirement") else None
+        iter_result = literature.iter_search(
+            query,
+            payload.get("source_types") or [],
+            req=req,
+            total_limit=int(payload.get("total_limit", 100)),
+            per_source_cap=int(payload.get("per_source_cap", 30)),
+        )
+        final, _filter_report = (
+            iter_result if isinstance(iter_result, tuple) else (list(iter_result), {})
+        )
+        if not final:
+            return {"task_id": task_id, "query": query, "found": 0, "ingest_task_id": None}
+        kb_task_id = dispatch_kb_ingest(
+            [e.model_dump() for e in final], project_id=project_id, query=query
+        )
+        return {
+            "task_id": task_id,
+            "query": query,
+            "found": len(final),
+            "ingest_task_id": kb_task_id,
+        }
+    except Exception as exc:
+        logger.exception("topic_sweep failed")
+        return {"task_id": task_id, "query": query, "error": str(exc)}
+
+
 @celery_app.task(bind=True, name="formumind.loop")
 def run_loop_task(self, payload: dict) -> dict:
     return run_loop_iterate_impl(self.request.id, payload)
