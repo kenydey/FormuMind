@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
+import SourceDetailModal from "./SourceDetailModal";
 import KgRelationPanel from "./KgRelationPanel";
 import RagPrewarmBar from "./RagPrewarmBar";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
@@ -99,6 +100,7 @@ export default function SourcesPanel() {
   );
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
+  const [detailDoc, setDetailDoc] = useState<{ title: string; sourceId: string } | null>(null);
 
   useEffect(() => {
     loadSourceStatus();
@@ -111,10 +113,17 @@ export default function SourcesPanel() {
     !searchBusy &&
     !deepResearchBusy;
 
-  const kbDocByIdentifier: Record<string, { status: string; error?: string | null }> = {};
+  const kbDocByIdentifier: Record<
+    string,
+    { status: string; error?: string | null; source_id?: string | null }
+  > = {};
   if (kbIngest) {
     for (const d of kbIngest.docs) {
-      kbDocByIdentifier[d.identifier] = { status: d.status, error: d.error };
+      kbDocByIdentifier[d.identifier] = {
+        status: d.status,
+        error: d.error,
+        source_id: d.source_id ?? null,
+      };
     }
   }
 
@@ -296,6 +305,20 @@ export default function SourcesPanel() {
                 >
                   ×
                 </button>
+                {kbDocByIdentifier[e.identifier]?.source_id && (
+                  <button
+                    onClick={() =>
+                      setDetailDoc({
+                        title: e.title || e.identifier || "资料",
+                        sourceId: kbDocByIdentifier[e.identifier].source_id!,
+                      })
+                    }
+                    className="shrink-0 text-slate-600 hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="查看切块 / 链入知识图谱"
+                  >
+                    🔎
+                  </button>
+                )}
               </div>
             );
           })
@@ -306,6 +329,13 @@ export default function SourcesPanel() {
           </p>
         )}
       </div>
+      {detailDoc && (
+        <SourceDetailModal
+          title={detailDoc.title}
+          sourceId={detailDoc.sourceId}
+          onClose={() => setDetailDoc(null)}
+        />
+      )}
     </aside>
   );
 }

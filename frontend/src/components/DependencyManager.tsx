@@ -149,6 +149,117 @@ const EXTRA_LABELS: Record<string, string> = {
 };
 const EXTRA_ORDER = Object.keys(EXTRA_LABELS);
 
+/**
+ * KB/KG 维护诊断卡(B1/B2/B3, 2026-09-05): 完整性扫描(孤儿引用) /
+ * 重建知识图谱 / Neo4j 图谱适配层状态。
+ */
+function KbDiagnosticsCard() {
+  const [integrity, setIntegrity] = useState<import("../api").KbIntegrityResponse | null>(null);
+  const [integBusy, setIntegBusy] = useState(false);
+  const [rebuildBusy, setRebuildBusy] = useState(false);
+  const [neo4j, setNeo4j] = useState<import("../api").Neo4jStats | null>(null);
+  const [neoBusy, setNeoBusy] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
+
+  async function runIntegrity() {
+    setIntegBusy(true);
+    setReport(null);
+    try {
+      setIntegrity(await api.kbIntegrity());
+    } catch (e) {
+      setReport(`完整性检查失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setIntegBusy(false);
+    }
+  }
+
+  async function runRebuild() {
+    if (!window.confirm("重建知识图谱将从全部已入库资料重新提取实体/关系, 耗时较长, 确定执行?")) return;
+    setRebuildBusy(true);
+    setReport(null);
+    try {
+      const r = await api.kgRebuild();
+      setReport(
+        `✓ 图谱重建完成: ${r.linked_sources} 源 / ${r.entities_upserted} 实体 / ${r.mentions_upserted} 提及 / ${r.links_created} 链接`
+      );
+    } catch (e) {
+      setReport(`重建失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRebuildBusy(false);
+    }
+  }
+
+  async function runNeo4j() {
+    setNeoBusy(true);
+    setReport(null);
+    try {
+      setNeo4j(await api.neo4jStats());
+    } catch (e) {
+      setReport(`Neo4j 不可达: ${e instanceof Error ? e.message : String(e)}`);
+      setNeo4j(null);
+    } finally {
+      setNeoBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded border border-edge p-3">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">
+        KB / KG 维护 · 诊断
+      </div>
+      <div className="flex flex-wrap gap-2 mb-2">
+        <button
+          type="button"
+          disabled={integBusy}
+          onClick={() => void runIntegrity()}
+          className="text-[10px] border border-edge rounded px-2 py-1 text-slate-300 hover:border-accent/40 hover:text-accent disabled:opacity-50"
+        >
+          {integBusy ? "扫描中…" : "🔍 KB 完整性扫描"}
+        </button>
+        <button
+          type="button"
+          disabled={rebuildBusy}
+          onClick={() => void runRebuild()}
+          className="text-[10px] border border-amber-500/40 rounded px-2 py-1 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+        >
+          {rebuildBusy ? "重建中…" : "♻ 重建知识图谱"}
+        </button>
+        <button
+          type="button"
+          disabled={neoBusy}
+          onClick={() => void runNeo4j()}
+          className="text-[10px] border border-edge rounded px-2 py-1 text-slate-300 hover:border-accent/40 hover:text-accent disabled:opacity-50"
+        >
+          {neoBusy ? "连接中…" : "🕸 Neo4j 状态"}
+        </button>
+      </div>
+
+      {integrity && (
+        <div
+          className={`text-[11px] rounded px-2 py-1.5 mb-1 border ${
+            integrity.healthy
+              ? "border-emerald-500/40 text-emerald-400"
+              : "border-amber-500/40 text-amber-400"
+          }`}
+        >
+          {integrity.healthy
+            ? "✓ KB 无孤儿引用"
+            : `⚠ ${integrity.total_orphans} 个孤儿引用${integrity.external_backend ? "（外部向量后端）" : ""}`}
+        </div>
+      )}
+      {neo4j && (
+        <div className="text-[11px] text-slate-400 rounded px-2 py-1.5 mb-1 border border-edge">
+          Neo4j {neo4j.reachable === false ? "不可达" : `就绪 · ${neo4j.nodes ?? "?"} 节点 / ${neo4j.edges ?? "?"} 边`}
+          {neo4j.compounds != null && ` · ${neo4j.compounds} 化合物`}
+          {neo4j.formulations != null && ` · ${neo4j.formulations} 配方`}
+          <span className="text-slate-600"> (适配层, 与 SQLite 图谱共存)</span>
+        </div>
+      )}
+      {report && <div className="text-[11px] text-slate-300 rounded px-2 py-1.5 mb-1 border border-edge">{report}</div>}
+    </div>
+  );
+}
+
 export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: number }) {
   const [deps, setDeps] = useState<DependencyInfo[]>([]);
   const [coreMissing, setCoreMissing] = useState<string[]>([]);
@@ -303,6 +414,8 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
 
       <ChemToolsCard status={chemTools} />
       <KnowledgeBaseCard stats={kbStats} onReindex={() => void reindexKb()} reindexing={kbReindexing} />
+
+      <KbDiagnosticsCard />
 
       {/* Progress / result */}
       {busy && (
