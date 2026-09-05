@@ -45,11 +45,13 @@ class _FakeResponse:
 
 
 def test_openai_compatible_retries_on_timeout_then_succeeds():
+    # 对齐 2026-09-04 产品决策(commit 7799467): _LLM_RETRY 为 2 次尝试
+    # (初次 + 1 重试), 避免 deepseek 慢窗口下单步无限挂。
     calls: list[int] = []
 
     def create_side_effect(**kwargs):
         calls.append(1)
-        if len(calls) < 3:
+        if len(calls) < 2:
             raise TimeoutError("simulated timeout")
         return _FakeResponse("OK")
 
@@ -68,7 +70,7 @@ def test_openai_compatible_retries_on_timeout_then_succeeds():
 
     assert err is None
     assert text == "OK"
-    assert len(calls) == 3
+    assert len(calls) == 2
 
 
 def test_openai_compatible_does_not_retry_auth_errors():

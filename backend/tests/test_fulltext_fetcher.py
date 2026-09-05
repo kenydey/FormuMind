@@ -71,22 +71,26 @@ def test_literature_fetch_error_reasons(monkeypatch):
     _enable(monkeypatch)
     ev = _ev("10.3390/coatings14010123", source="OpenAlex")
 
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: None)
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: ([], []))
     with pytest.raises(ff.FetchError) as e1:
         ff._fetch_literature_text(ev, timeout=5)
     assert e1.value.reason == "无 OA 版本"
 
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://oa.example/x.pdf")
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: None)
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: (["https://oa.example/x.pdf"], []))
+    monkeypatch.setattr(
+        "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (None, "status:403")
+    )
     with pytest.raises(ff.FetchError) as e2:
         ff._fetch_literature_text(ev, timeout=5)
-    assert e2.value.reason == "下载超时"
+    assert e2.value.reason == "OA 全文获取失败: status:403"
 
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
+    monkeypatch.setattr(
+        "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
+    )
     monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: "")
     with pytest.raises(ff.FetchError) as e3:
         ff._fetch_literature_text(ev, timeout=5)
-    assert e3.value.reason == "解析为空"
+    assert e3.value.reason == "OA 全文获取失败: extract-empty"
 
 
 # ── enrichment flow ──────────────────────────────────────────────────────────
@@ -192,8 +196,10 @@ def test_web_fetch_refuses_unsafe_urls(monkeypatch):
 
 def test_literature_oa_flow(monkeypatch):
     _enable(monkeypatch)
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://oa.example/x.pdf")
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: (["https://oa.example/x.pdf"], []))
+    monkeypatch.setattr(
+        "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
+    )
     monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
     out, report = ff.enrich_search_results(
         [_ev("10.1016/j.porgcoat.2020.105678", source="OpenAlex")], persist=False
@@ -276,8 +282,10 @@ def test_non_arxiv_doi_never_touches_the_source_path(monkeypatch):
         raise AssertionError("source path must not run for a bare DOI")
 
     monkeypatch.setattr("app.services.arxiv_source.fetch_arxiv_markdown", unexpected)
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://oa.example/x.pdf")
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: (["https://oa.example/x.pdf"], []))
+    monkeypatch.setattr(
+        "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
+    )
     monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
 
     out, report = ff.enrich_search_results(

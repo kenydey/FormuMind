@@ -121,7 +121,7 @@ def test_stats_endpoint_exposes_the_mode(monkeypatch):
     monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "false")
     get_settings.cache_clear()
     body = TestClient(app).get("/api/kb/stats").json()
-    assert body["vector_mode"] in {"semantic", "degraded", "keyword", "empty"}
+    assert body["vector_mode"] in {"semantic", "degraded", "keyword", "empty", "stale"}
     assert "rag_backend" in body
     # The effective backend, not the configured string. Must stay in step with
     # `rag.active_rag_backend`, which gained "bm25_faiss" as the CPU default and
