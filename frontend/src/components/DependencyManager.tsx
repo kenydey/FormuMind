@@ -160,6 +160,19 @@ function KbDiagnosticsCard() {
   const [neo4j, setNeo4j] = useState<import("../api").Neo4jStats | null>(null);
   const [neoBusy, setNeoBusy] = useState(false);
   const [report, setReport] = useState<string | null>(null);
+  const [kgStats, setKgStats] = useState<import("../api").KgStats | null>(null);
+
+  async function refreshKgStats() {
+    try {
+      setKgStats(await api.kgStats());
+    } catch {
+      setKgStats(null);
+    }
+  }
+
+  useEffect(() => {
+    void refreshKgStats();
+  }, []);
 
   async function runIntegrity() {
     setIntegBusy(true);
@@ -182,6 +195,7 @@ function KbDiagnosticsCard() {
       setReport(
         `✓ 图谱重建完成: ${r.linked_sources} 源 / ${r.entities_upserted} 实体 / ${r.mentions_upserted} 提及 / ${r.links_created} 链接`
       );
+      await refreshKgStats();
     } catch (e) {
       setReport(`重建失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -202,6 +216,7 @@ function KbDiagnosticsCard() {
       const r = await api.kgRelationsRebuild(undefined);
       setReport(`关系重建已后台启动 (task ${r.task_id.slice(0, 8)}…) — 可稍后刷新本卡查看产出`);
       setRelTaskId(r.task_id);
+      await refreshKgStats();
     } catch (e) {
       setReport(`启动失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -216,6 +231,9 @@ function KbDiagnosticsCard() {
     try {
       const t = await api.task(relTaskId);
       setRelStatus(`${t.state}: ${t.message ?? ""}`.slice(0, 120));
+      if (t.state === "completed") {
+        await refreshKgStats();
+      }
     } catch {
       setRelStatus("状态查询失败");
     }
@@ -328,6 +346,47 @@ function KbDiagnosticsCard() {
           {neoBusy ? "连接中…" : "🕸 Neo4j 状态"}
         </button>
       </div>
+
+      {kgStats && kgStats.enabled && (
+        <div
+          className={`text-[11px] rounded px-2 py-1.5 mb-1 border ${
+            kgStats.relation_layer_empty
+              ? "border-amber-500/40 text-amber-400"
+              : "border-edge text-slate-400"
+          }`}
+        >
+          <div className="flex flex-wrap gap-1 mb-0.5">
+            <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60">实体 {kgStats.entities}</span>
+            <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60">提及 {kgStats.mentions}</span>
+            <span
+              className={`px-1.5 py-0.5 rounded border ${
+                kgStats.relation_layer_empty
+                  ? "border-amber-500/50 bg-amber-500/10 text-amber-300"
+                  : "border-edge bg-ink/60"
+              }`}
+            >
+              {kgStats.relation_layer_empty ? "⚠ " : ""}关系链接 {kgStats.links}
+            </span>
+            <button
+              type="button"
+              onClick={() => void refreshKgStats()}
+              className="text-[10px] text-slate-500 hover:text-slate-300 underline ml-auto"
+            >
+              刷新
+            </button>
+          </div>
+          {kgStats.relation_layer_empty && (
+            <div title={(kgStats.warnings || []).join(" ")}>
+              关系层为空：请开启「入库关系提取」或点「🕸 补语义关系」重建。
+            </div>
+          )}
+        </div>
+      )}
+      {kgStats && !kgStats.enabled && (
+        <div className="text-[11px] rounded px-2 py-1.5 mb-1 border border-edge text-slate-500">
+          知识图谱未启用（FORMUMIND_KG_ENABLED）
+        </div>
+      )}
 
       {integrity && (
         <div

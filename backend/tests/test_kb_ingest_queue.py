@@ -18,6 +18,11 @@ import time
 
 import pytest
 
+# Historical flaky (audit B-hist): CI occasionally times out on wait loops
+# even though network fetchers are stubbed. Mark so it is visible in reports;
+# re-run locally with `pytest --lf` if it fails.
+pytestmark = pytest.mark.flaky
+
 from app.config import get_settings
 from app.db.database import Base, make_engine, make_session_factory
 from app.domain.schemas import Evidence

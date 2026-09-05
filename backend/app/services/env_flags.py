@@ -138,7 +138,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("kg_entities_on_ingest", "入库实体提及",
             "文档切块入库后自动写入 kb_entities / kb_mentions（快，枚举 RAG 根基）。", "kb"),
     EnvFlag("kg_relations_on_ingest", "入库关系提取",
-            "入库时抽取实体语义关系写入 kb_entity_links（慢，LLM 关系建议后置）。", "kb"),
+            "入库时抽取实体语义关系写入 kb_entity_links（慢，LLM 关系建议后置）。"
+            "关闭时实体/提及仍会写入，但关系层保持为空——Settings「补语义关系」"
+            "或 POST /api/kg/relations/rebuild 可事后补齐；/api/kg/stats 会告警。",
+            "kb"),
     EnvFlag("kg_relation_extract_enabled", "KG 语义关系抽取",
             "link_source 时从 chunk 文本抽取 substitutes/synergizes 等语义关系。", "kb"),
     EnvFlag("kg_llm_relation_extract", "KG LLM 关系抽取",

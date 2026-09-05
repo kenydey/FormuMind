@@ -1355,7 +1355,9 @@ export const api = {
   kbIntegrity: () =>
     get<KbIntegrityResponse>("/api/kb/integrity"),
 
-  // ── KG 维护: 重建 / 挂源 ──
+  // ── KG 维护: 统计 / 重建 / 挂源 ──
+  kgStats: () => get<KgStats>("/api/kg/stats"),
+
   kgRebuild: () =>
     post<KgRebuildReport>("/api/kg/rebuild", {}),
 
@@ -2609,6 +2611,18 @@ export interface KbIntegrityResponse {
   total_orphans: number;
   external_backend: boolean;
   references: Array<Record<string, unknown>>;
+}
+
+export interface KgStats {
+  enabled: boolean;
+  entities: number;
+  mentions: number;
+  links: number;
+  entities_by_kind?: Record<string, number>;
+  links_by_type?: Record<string, number>;
+  /** True when entities > 0 but kb_entity_links is still 0 (B10). */
+  relation_layer_empty?: boolean;
+  warnings?: string[];
 }
 
 export interface KgRebuildReport {

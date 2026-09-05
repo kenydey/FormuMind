@@ -159,6 +159,11 @@ class KGStats(BaseModel):
     links: int = 0
     entities_by_kind: dict[str, int] = Field(default_factory=dict)
     links_by_type: dict[str, int] = Field(default_factory=dict)
+    # B10 observability: entities/mentions can look healthy while the semantic
+    # relation layer (kb_entity_links) stays empty when kg_relations_on_ingest
+    # was never enabled / rebuild never ran.
+    relation_layer_empty: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 
 class KGRebuildReport(BaseModel):
