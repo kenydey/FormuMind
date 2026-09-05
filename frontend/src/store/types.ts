@@ -175,6 +175,8 @@ export interface AppState {
     patch: Partial<import("../api").Ingredient>
   ) => void;
   runAiModifyFormula: (prompt: string, baseIndex?: number) => Promise<void>;
+  removeFormula: (formulaIdx: number) => void;
+  saveFormulaToDoe: (formulaIdx: number) => Promise<{ version_id: string } | null>;
   runResearch: () => Promise<void>;
   cancelResearch: () => Promise<void>;
   runDeepResearch: () => Promise<void>;

@@ -54,6 +54,40 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       get().scheduleAutosave();
     },
 
+    removeFormula: (formulaIdx) => {
+      set((draft) => {
+        if (formulaIdx < 0 || formulaIdx >= draft.leaderboard.length) return;
+        draft.leaderboard = draft.leaderboard.filter((_, idx) => idx !== formulaIdx);
+      });
+      get().scheduleAutosave();
+    },
+
+    saveFormulaToDoe: async (formulaIdx) => {
+      const form = get().leaderboard[formulaIdx];
+      if (!form) return null;
+      // ① 版本库持久化: 同名已存在链则追加版本, 否则开新链(对齐 VersionHistoryModal 语义)
+      const hits = await api.findFormulationLineages(form.name, form.domain, 1).catch(() => []);
+      const lineage = hits[0];
+      const parentId = lineage?.versions.length
+        ? lineage.versions[lineage.versions.length - 1].id
+        : undefined;
+      const saved = await api.saveFormulationVersion({
+        formulation: form,
+        lineage_id: lineage?.lineage_id ?? undefined,
+        parent_version_id: parentId,
+        change_summary: "从推荐列表保存为 DOE 基准配方",
+        created_by: "ui",
+      });
+      // ② 设为 DOE 基准配方(结构化拷贝, 避免与 leaderboard 卡片引用别名 —
+      //    后续卡片编辑不应悄悄改动已保存的基准)
+      const snapshot = JSON.parse(JSON.stringify(form)) as Formulation;
+      set((draft) => {
+        draft.requirement.active_formulation = snapshot;
+      });
+      get().scheduleAutosave();
+      return { version_id: saved.id };
+    },
+
     runAiModifyFormula: async (prompt, baseIndex = 0) => {
       const { requirement, sources, selectedSources, searchQuery, leaderboard } = get();
       const selected = sources.filter((e) =>
@@ -243,5 +277,5 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       if (tid) try { await api.cancelTask(tid); } catch {}
     },
 
-  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'runAiModifyFormula' | 'runResearch' | 'cancelResearch' | 'runDeepResearch' | 'cancelDeepResearch'>;
+  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'removeFormula' | 'saveFormulaToDoe' | 'runAiModifyFormula' | 'runResearch' | 'cancelResearch' | 'runDeepResearch' | 'cancelDeepResearch'>;
 }
