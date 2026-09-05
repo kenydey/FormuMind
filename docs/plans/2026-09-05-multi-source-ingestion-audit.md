@@ -37,7 +37,12 @@
 **B4. ChemRxiv 探针 → 不做(领域价值低), 如需扩展预印本应优先 arXiv + OpenAlex 覆盖度。**
 代码库已能通过 OpenAlex(含 ChemRxiv 收录)发现化学预印本元数据, 缺的只是"下载源码"一步, 而 ChemRxiv 化学合成主题与 FormuMind 配方研发(金属表面处理)交集小。
 
-**B5. Crawl4AI → 本期不引入为常驻依赖; 若未来出现 JS 渲染需求, 用"按需 Playwright 渲染 + 现有 trafilatura 解析"而非 Crawl4AI。**
+**B5. 商业/封闭期刊抓取线逐工具裁定(2026-09-05 核实):** 方案原文 `scihub-cli 聚合路由 (Unpaywall OA → Sci-Hub 镜像兜底)` 拆解:
+- **scihub-cli / Sci-Hub 镜像 → 不引入**(同 B1: 版权违法 + 与"无全文源强制过滤"原则冲突, 不因换工具名而改变立场);
+- **Crossref (habanero) → 不引入**: OpenAlex 元数据已聚合 Crossref 全量 DOI 记录(标题/作者/期刊/年份/引用数), habanero 的独有增量(引文关系深度、DOI 前缀机构)对摄取管线无消费方; 未来若需引文扩展, 用已有 OpenAlex `cited_by`/`related_works` 零新依赖;
+- **Unpaywall API 直查 → 有必要加入(真增量, 零新依赖)**: 现状 `_resolve_oa_pdf_url`(fulltext_fetcher L124)只查 OpenAlex `best_oa_location`——那是**索引快照**(OA 链接更新滞后, 作者自存档延迟开放的 Green OA 常漏); Unpaywall 按 DOI **实时**查 Gold/Green OA 全库。增量场景: OpenAlex `is_oa=False`/无 pdf_url 但实际存在 Green OA → 补捞。实现 = httpx GET `https://api.unpaywall.org/v2/{doi}?email=...` ~15 行, 插在 OpenAlex 查询之后作补查。邮箱礼仪(polite pool): 设置项 `unpaywall_mailto` + 顺手把 `openalex_mailto` 的假邮箱兜底(formumind@example.com)替换为真实邮箱 **kenydey@gmail.com**(用户提供)。
+
+**B6. Crawl4AI → 本期不引入为常驻依赖; 若未来出现 JS 渲染需求, 用"按需 Playwright 渲染 + 现有 trafilatura 解析"而非 Crawl4AI。**
 核实(2026-09-05, 官方仓库/0.5.0 release): Crawl4AI = Playwright(Chromium)之上的异步爬虫封装, 开箱提供 JS 渲染、内容过滤(Pruning/BM25)、LLM 提取、深度爬取; 代价是 **Chromium 本体(Docker ~2GB; 库 + `playwright install chromium`)+ 常驻浏览器进程内存**, 且 0.5.x 正处于 API 大改期(维护风险)。
 - 与现状对照: `html_to_markdown`(parsing.py L398)已用 trafilatura(保表格、去样板、Markdown 输出)+ regex 兜底——FormuMind 网页摄取的真实目标(供应商 TDS/静态配方页/OA 期刊/Google Patents DOM)绝大部分**静态或轻动态, trafilatura 已覆盖**(本日 9 源导入全部成功佐证);
 - 本轮实测失败的两源(SCIRP/MDPI)是 **Cloudflare 类防护**, 而此类防护识别 headless Chromium, Crawl4AI 的 stealth 只缓解不保证——"天然绕过各种反爬"是营销话术, 需打折扣; 真正稳定对抗需要真实指纹 + 高质量代理 IP(即 B2 已拒绝的集群方案);
@@ -72,6 +77,8 @@
 
 | 文件 | 动作 | 内容 |
 |---|---|---|
+| `app/services/fulltext_fetcher.py` | 修改 | `_resolve_oa_pdf_url` OpenAlex 后补 Unpaywall 实时查(~15 行) |
+| `app/config.py` | 修改 | +`unpaywall_mailto`; `openalex_mailto` 假邮箱兜底改默认 kenydey@gmail.com |
 | `app/services/document_task.py` | 新增 | DocumentTask 编排(纯复用 fetcher/parsing) |
 | `app/api/ingest.py` | 修改 | +`POST /ingest/task`(~40 行) |
 | `app/worker/tasks.py` | 修改 | +`formumind.topic_sweep` 任务(~50 行) |
@@ -100,4 +107,4 @@
 
 ## G. 结论
 
-方案 = 一份"外部视角的架构蓝图", 而代码库经过多轮迭代已经实现并超越了它(证据见 A 表)。**不建议大改; 建议只做 P1+P2 两个增量收口**; P3 浏览器兜底仅在高价值 JS 源实证出现后才实施(且用裸 Playwright 而非 Crawl4AI, 见 B5); 明确拒绝 Sci-Hub/代理集群/MinerU 主角化/ChemRxiv 四项。若你认可, 我按 D/E 执行 P1+P2。
+方案 = 一份"外部视角的架构蓝图", 而代码库经过多轮迭代已经实现并超越了它(证据见 A 表)。**不建议大改; 建议只做 P1+P2 两个增量收口**(P1 内含 Unpaywall OA 补查 + 邮箱礼仪配置, 见 B5/D); P3 浏览器兜底仅在高价值 JS 源实证出现后才实施(且用裸 Playwright 而非 Crawl4AI, 见 B6); 明确拒绝 Sci-Hub/代理集群/MinerU 主角化/ChemRxiv/habanero 五项。若你认可, 我按 D/E 执行 P1+P2。
