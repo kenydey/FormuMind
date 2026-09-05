@@ -130,6 +130,9 @@ export interface Formulation {
   predicted: Record<string, number>;
   predicted_std: Record<string, number>;
   prediction_tiers?: Record<string, string>;
+  // Stable client-side identity for DOE baseline badge matching (not persisted
+  // by the backend schema; stamped when saving a card as DOE baseline).
+  client_uid?: string;
   // Real experiment measurements for this formulation when it corresponds to
   // a measured run (charts prefer these over `predicted`); absent for pure
   // predictions. Optional so existing Formulation producers are unaffected.

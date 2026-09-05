@@ -464,7 +464,15 @@ export default function FormulaLeaderboard() {
   const [aiTargetIdx, setAiTargetIdx] = useState<number | null>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
+  const doeBaseUid = requirement.active_formulation?.client_uid ?? null;
   const doeBaseName = requirement.active_formulation?.name ?? null;
+
+  function shiftIndexAfterRemove(cur: number | null, removed: number): number | null {
+    if (cur == null) return null;
+    if (cur === removed) return null;
+    if (cur > removed) return cur - 1;
+    return cur;
+  }
 
   async function handleSaveToDoe(idx: number) {
     setSaveBusyIndex(idx);
@@ -600,7 +608,11 @@ export default function FormulaLeaderboard() {
               onIngredientChange={updateFormulaIngredient}
               validateWarnings={formulationValidateWarnings}
               editing={editIndex === i}
-              isDoeBase={f.name === doeBaseName}
+              isDoeBase={
+                doeBaseUid
+                  ? f.client_uid === doeBaseUid
+                  : f.name === doeBaseName
+              }
               saveBusy={saveBusyIndex === i}
               confirmRemove={removeConfirmIndex === i}
               onToggleEdit={(idx) => setEditIndex((cur) => (cur === idx ? null : idx))}
@@ -612,7 +624,10 @@ export default function FormulaLeaderboard() {
                 if (removeConfirmIndex === idx) {
                   removeFormula(idx);
                   setRemoveConfirmIndex(null);
-                  if (editIndex === idx) setEditIndex(null);
+                  setEditIndex((cur) => shiftIndexAfterRemove(cur, idx));
+                  setAiTargetIdx((cur) => shiftIndexAfterRemove(cur, idx));
+                  setSaveBusyIndex((cur) => shiftIndexAfterRemove(cur, idx));
+                  setHighlightIndex((cur) => shiftIndexAfterRemove(cur, idx));
                 } else {
                   toggleRemoveConfirm(idx);
                 }
