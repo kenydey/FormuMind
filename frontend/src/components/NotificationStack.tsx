@@ -21,6 +21,7 @@ import type {
   NotificationKind,
   NotificationTone,
 } from "../store/notifications";
+import { isBackendUnreachableError } from "../api";
 import NotificationCard from "./NotificationCard";
 
 /** Above this many collapsible notices the stack folds into one line. */
@@ -51,7 +52,8 @@ function buildDetails(s: NotificationInputs): DetailMap {
 
   // The left-column error banner carried this hint and the centre one did not —
   // it is the most actionable line in the whole app when the backend is down.
-  if (error && error.includes("fetch")) {
+  // Match Load failed / Failed to fetch / "/api/... -> 500" / normalised copy.
+  if (error && isBackendUnreachableError(error)) {
     details.error = {
       detail: (
         <span className="text-rose-400/70">

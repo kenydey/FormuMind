@@ -98,6 +98,17 @@ describe("NotificationStack", () => {
     expect(screen.getByText(/uvicorn app.main:app/)).toBeTruthy();
   });
 
+  it("shows the backend-down hint for WebKit Load failed and proxy 5xx", () => {
+    setState({ error: "Load failed" });
+    const { unmount } = render(<NotificationStack />);
+    expect(screen.getByText(/uvicorn app.main:app/)).toBeTruthy();
+    unmount();
+
+    setState({ error: "/api/projects -> 500" });
+    render(<NotificationStack />);
+    expect(screen.getByText(/uvicorn app.main:app/)).toBeTruthy();
+  });
+
   it("hides a running search on close without stopping the search", async () => {
     setState({ searchBusy: true, searchProgress: progress() as never });
     render(<NotificationStack />);

@@ -7,7 +7,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  BACKEND_UNREACHABLE_MESSAGE,
   formatApiError,
+  isBackendUnreachableError,
   parseKbIngestData,
   parseSearchStreamData,
   primaryObjectiveMetric,
@@ -120,6 +122,21 @@ describe("formatApiError", () => {
     expect(formatApiError("plain")).toBe("plain");
     expect(formatApiError(42)).toBe("42");
     expect(formatApiError(null)).toBe("null");
+  });
+
+  it("normalises browser/proxy unreachable errors to Chinese copy", () => {
+    expect(formatApiError(new Error("Load failed"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
+    expect(formatApiError(new Error("Failed to fetch"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
+    expect(formatApiError(new Error("/api/projects -> 500"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
+  });
+});
+
+describe("isBackendUnreachableError", () => {
+  it("detects WebKit Load failed and Vite proxy 5xx", () => {
+    expect(isBackendUnreachableError("Load failed")).toBe(true);
+    expect(isBackendUnreachableError("/api/projects -> 500")).toBe(true);
+    expect(isBackendUnreachableError(BACKEND_UNREACHABLE_MESSAGE)).toBe(true);
+    expect(isBackendUnreachableError("validation failed")).toBe(false);
   });
 });
 

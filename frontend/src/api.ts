@@ -717,10 +717,40 @@ async function readApiError(res: Response, path: string): Promise<string> {
   return detail;
 }
 
+/** Stable Chinese copy when the API process / Vite proxy is unreachable. */
+export const BACKEND_UNREACHABLE_MESSAGE =
+  "后端不可达（无法连接 API）。请确认 uvicorn 已在 :8000 启动。";
+
+/**
+ * True for browser/proxy failures that mean "backend not accepting traffic"
+ * rather than an application-level 4xx/business error.
+ */
+export function isBackendUnreachableError(message: string): boolean {
+  const m = message.trim();
+  if (!m) return false;
+  if (m.includes("后端不可达")) return true;
+  const lower = m.toLowerCase();
+  if (lower === "load failed") return true;
+  if (lower.includes("failed to fetch")) return true;
+  if (lower.includes("networkerror")) return true;
+  if (lower.includes("network request failed")) return true;
+  if (lower.includes("econnrefused")) return true;
+  // Vite proxy when uvicorn is down: "/api/projects -> 500" (often empty body).
+  if (/->\s*5\d\d\b/.test(m)) return true;
+  // Chrome/Firefox TypeError message still contains "fetch".
+  if (lower.includes("fetch")) return true;
+  return false;
+}
+
 export function formatApiError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return String(err);
+  const raw =
+    err instanceof ApiError
+      ? err.message
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  if (isBackendUnreachableError(raw)) return BACKEND_UNREACHABLE_MESSAGE;
+  return raw;
 }
 
 /** Normalize evidence before POST /api/chat (clamp relevance, fill required fields). */

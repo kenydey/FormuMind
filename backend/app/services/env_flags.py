@@ -220,8 +220,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "仅在 campaign/experiment 后端为 datalab 时有意义"),
     # ── 基础设施 ──────────────────────────────────────────────────────────
     EnvFlag("celery_eager", "任务同步执行",
-            "后台任务在进程内同步执行（无需 Redis/Celery worker）。关闭需要可达的 Redis。",
-            "infra", "关闭前请确认 Redis 与 worker 已就绪"),
+            "后台任务在进程内同步执行（无需 Redis/Celery worker）。"
+            "启动期不会同步重放积压 outbox（避免阻塞 :8000）；积压任务需手动重试或改用真实 worker。",
+            "infra", "关闭前请确认 Redis 与 worker 已就绪；本地脏 outbox + eager 曾导致中栏 Load failed"),
     EnvFlag("neo4j_enabled", "Neo4j 图存储适配器",
             "启用可选 Neo4j Bolt 适配器（与 SQLite KG 并存）。关闭时所有 Neo4j API 返回空/禁用。",
             "infra",

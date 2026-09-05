@@ -337,3 +337,87 @@ def test_recover_stalled_skips_dispatch_error(
     assert b is not None
     assert b.status == "PENDING"
     assert b.attempt_count == 1
+
+
+def test_recover_stalled_for_startup_skips_when_eager(
+    session: Session, _stub_dispatch: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under celery_eager, startup recovery must NOT call .delay() (would block :8000)."""
+    import uuid
+
+    import app.db.dispatcher as dispatcher_mod
+
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    row = TaskOutbox(
+        id=str(uuid.uuid4()),
+        operation="research_recommend",
+        idempotency_key="stall-eager-skip",
+        payload={"topic": "test"},
+        status="PENDING",
+        created_at=old,
+        updated_at=old,
+    )
+    session.add(row)
+    session.commit()
+
+    monkeypatch.setattr(dispatcher_mod, "_celery_is_eager", lambda: True)
+    count = dispatcher_mod.recover_stalled_for_startup(session, cutoff_minutes=30)
+    session.commit()
+
+    assert count == 0
+    _stub_dispatch.assert_not_called()
+    reloaded = session.get(TaskOutbox, row.id)
+    assert reloaded is not None
+    assert reloaded.status == "PENDING"
+    assert reloaded.attempt_count == 0
+
+
+def test_schedule_recover_stalled_returns_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """schedule_recover_stalled must not wait for a slow recover body."""
+    import threading
+    import time
+
+    import app.db.dispatcher as dispatcher_mod
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def _slow_startup_recover(session, cutoff_minutes=30, **kwargs):
+        started.set()
+        release.wait(timeout=5)
+        return 0
+
+    monkeypatch.setattr(dispatcher_mod, "recover_stalled_for_startup", _slow_startup_recover)
+
+    # Avoid touching a real DB / redis lock in the background thread.
+    class _FakeCM:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class _FakeSession(_FakeCM):
+        def commit(self):
+            return None
+
+    class _FakeFactory:
+        def __call__(self):
+            return _FakeSession()
+
+    monkeypatch.setattr(
+        "app.db.database.default_session_factory", lambda: _FakeFactory()
+    )
+    monkeypatch.setattr(
+        "app.db.sqlite_lock.sqlite_write_lock", lambda *_a, **_k: _FakeCM()
+    )
+
+    t0 = time.perf_counter()
+    thread = dispatcher_mod.schedule_recover_stalled()
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.5, f"schedule_recover_stalled blocked for {elapsed:.2f}s"
+    assert started.wait(timeout=2), "background recover never started"
+    release.set()
+    thread.join(timeout=2)
