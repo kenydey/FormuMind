@@ -50,7 +50,17 @@
 
 ## C. 真实缺口与推荐实施(增量, 由大到小)
 
-### P1(建议本期做): 摄取管道编排收口 — 单入口 URL/DocumentTask → 全链
+**实测基线(2026-09-05 全链实证, 直接调 fulltext_fetcher 对真实 identifier):**
+| identifier | 结果 | 耗时 |
+|---|---|---|
+| arXiv id(1706.03762) | ✅ 36,331 字符全文(LaTeX 源码) | 0.6s |
+| 专利号 CN104561970A | ✅ 26,061 字符全文(Google Patents DOM: abstract+claims+description) | 0.2s |
+| DOI 10.3390/ma15238676(PMC OA) | ❌ "下载超时" 0.7s —— 实为 MDPI Cloudflare 403 | 0.7s |
+| DOI 非 OA(商业刊) | "无 OA 版本"(设计行为: 强制过滤) | 0.1s |
+
+→ **结论: 源码/专利全文能力已具备; 文献 OA PDF 下载是薄弱点**——OpenAlex `best_oa_location` 只给**单个** pdf_url, 指向墙站即整体失败(该 DOI `any_repository_has_fulltext=True`, PMC 有镜像副本但 OpenAlex 没给); 且 `fetch_pdf` 把 403/连接失败一律归为"下载超时"(误报, 无法定位)。
+
+### P1(建议本期做): 全文获取增强 + 摄取管道编排收口 — 单入口 → 全链
 现状: `api/ingest/url`(单 URL)、`kb_ingest`(检索回填)各自独立调 fetcher/index, **没有面向"用户给一个 DOI/专利号/arXiv id 就完整走一遍三梯度"的统一入口**(现状是给 URL 或经检索证据)。方案 §4 的 `DocumentTask`(doc_type+identifier+extra_meta)仍是合理的收敛点。
 
 - 新增 `app/services/document_task.py`: 接受 `{doc_type: patent|paper|web, identifier: DOI|arxiv:id|patent号|URL}`, 内部路由到现有能力:
@@ -59,7 +69,10 @@
   - web: URL → trafilatura(复用 `ingestion.ingest_url`)。
 - API: `POST /api/ingest/task`(对齐现有 `ingest/url` 返回 IngestResponse)。
 - 幂等: identifier 归一(DOI 小写/arXiv 去版本)查 content_hash 前先查 source_documents 的 URL 指纹。
-- 代码量: ~150 行(编排)+ ~40 行(API)+ 测试。**纯复用, 不新引依赖。**
+- **OA 多候选解析(修实证缺口)**: `_resolve_oa_pdf_url` → `_resolve_oa_candidates`, 返回有序候选列表 = OpenAlex best_oa_location.pdf_url + **Unpaywall** `oa_locations[].pdf_url`(实时, 补 OpenAlex 快照缺失的镜像/Green OA)+ arXiv pdf; `_fetch_literature_text` 逐个尝试, 首个 200+content-type=pdf 即止(403/失败自动换下一个镜像)。
+- **fetch_pdf 失败分类**: 返回原因(status 403 / 连接失败 / 非 PDF / 超时), FetchError 文案区分"被源站拒绝(403)"/"下载超时", 不再统一误报"下载超时"。
+- **文献 HTML 兜底**: 候选 PDF 全败且 landing 可抓时, 走网页文本链(trafilatura 抓 landing/PMC HTML)——PMC HTML 路线此前导入实证成功(PMC9736347 → 493KB 文本)。
+- 代码量: ~150 行(编排)+ ~40 行(API)+ ~60 行(OA 多候选/分类/HTML 兜底)+ 测试。**纯复用, 不新引依赖。**
 
 ### P2(建议本期做, 量小): Celery Beat 雷达 — "主题定期复查"
 现状无定时任务; 运维记忆里 celery 是手动起的(无 beat)。价值: 对镁合金钝化类主题定期(如每周)检索新专利/文献并 ingest(增量 content_hash 幂等天然去重)。
@@ -77,7 +90,8 @@
 
 | 文件 | 动作 | 内容 |
 |---|---|---|
-| `app/services/fulltext_fetcher.py` | 修改 | `_resolve_oa_pdf_url` OpenAlex 后补 Unpaywall 实时查(~15 行) |
+| `app/services/fulltext_fetcher.py` | 修改 | `_resolve_oa_candidates`(OpenAlex+Unpaywall 多候选); PDF 逐个尝试 + 失败换镜像; 文献 HTML 兜底(~60 行) |
+| `app/services/pdf_downloader.py` | 修改 | `fetch_pdf` 失败原因分类(403/超时/非 PDF, ~10 行) |
 | `app/config.py` | 修改 | +`unpaywall_mailto`; `openalex_mailto` 假邮箱兜底改默认 kenydey@gmail.com |
 | `app/services/document_task.py` | 新增 | DocumentTask 编排(纯复用 fetcher/parsing) |
 | `app/api/ingest.py` | 修改 | +`POST /ingest/task`(~40 行) |
@@ -107,4 +121,4 @@
 
 ## G. 结论
 
-方案 = 一份"外部视角的架构蓝图", 而代码库经过多轮迭代已经实现并超越了它(证据见 A 表)。**不建议大改; 建议只做 P1+P2 两个增量收口**(P1 内含 Unpaywall OA 补查 + 邮箱礼仪配置, 见 B5/D); P3 浏览器兜底仅在高价值 JS 源实证出现后才实施(且用裸 Playwright 而非 Crawl4AI, 见 B6); 明确拒绝 Sci-Hub/代理集群/MinerU 主角化/ChemRxiv/habanero 五项。若你认可, 我按 D/E 执行 P1+P2。
+方案 = 一份"外部视角的架构蓝图", 而代码库经过多轮迭代已经实现并超越了它(证据见 A 表 + C 段实测基线)。**不建议大改; 建议做 P1(全文获取增强+统一入口, 修实证缺口)+ P2(雷达)两个增量**; P3 浏览器兜底仅在高价值 JS 源实证出现后才实施(且用裸 Playwright 而非 Crawl4AI, 见 B6); 明确拒绝 Sci-Hub/代理集群/MinerU 主角化/ChemRxiv/habanero 五项。若你认可, 我按 D/E 执行 P1+P2。
