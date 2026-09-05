@@ -225,7 +225,8 @@ class Settings(BaseSettings):
     pdf_download_max: int = 3     # 每次研究最多下载几篇专利 PDF
 
     # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
-    openalex_mailto: str | None = None       # OpenAlex 礼貌池标识
+    openalex_mailto: str | None = "kenydey@gmail.com"  # OpenAlex 礼貌池标识
+    unpaywall_mailto: str | None = "kenydey@gmail.com"  # Unpaywall 礼貌池 email
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
     uspto_api_key: str | None = None           # USPTO Open Data API key

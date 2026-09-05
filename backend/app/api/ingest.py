@@ -58,6 +58,12 @@ class IngestTextRequest(BaseModel):
     title: str = ""
 
 
+class IngestTaskRequest(BaseModel):
+    """统一摄取入口: 按 identifier 拉全文入库(2026-09-05 P1)."""
+    doc_type: str = Field(pattern="^(patent|paper|web)$")
+    identifier: str = Field(min_length=3)
+
+
 def _enforce_upload_size(content: bytes, filename: str) -> None:
     limit = get_settings().ingest_max_upload_bytes
     if len(content) > limit:
@@ -138,6 +144,21 @@ def ingest_from_text(req: IngestTextRequest):
     outcome = ingest_text(req.text, title)
     colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(title, outcome)
+
+
+@router.post("/ingest/task", response_model=IngestResponse)
+def ingest_from_task(req: IngestTaskRequest):
+    """DOI/arXiv id/专利号/URL → 全文 → 入库(编排见 services.document_task)."""
+    from ..services.document_task import resolve_document
+
+    try:
+        outcome = resolve_document(req.doc_type, req.identifier.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if outcome.error:
+        raise HTTPException(status_code=502, detail=outcome.error)
+    colbert_store.index_evidence(outcome.evidence)
+    return _to_ingest_response(outcome.identifier, outcome)
 
 
 @router.get("/sources/{source_id}", response_model=SourceDocumentResponse, include_in_schema=False)

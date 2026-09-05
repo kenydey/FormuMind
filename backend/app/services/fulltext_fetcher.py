@@ -121,38 +121,112 @@ def _fetch_patent_text(ev: Evidence, timeout: float) -> str | None:
     return text if text and len(text.strip()) > 200 else None
 
 
-def _resolve_oa_pdf_url(ev: Evidence, timeout: float) -> str | None:
-    """Locate an Open Access PDF for a DOI (OpenAlex) or arXiv id.
+def _unpaywall_locations(doi: str, timeout: float) -> tuple[list[str], list[str]]:
+    """Unpaywall real-time OA lookup → (pdf_urls, landing_urls).
 
-    Prefers OA metadata carried from the search tier (``ev.oa_pdf_url``) so a
-    non-OA DOI never triggers a second OpenAlex lookup — the search already
-    filtered on ``open_access.is_oa``, so ``is_oa=False`` here means "skip".
+    OpenAlex best_oa_location is a single snapshot entry (mirrors/Green OA
+    often missing); Unpaywall answers per-DOI in real time with every
+    Gold/Green location incl. PMC/repository mirrors.
+    """
+    settings = get_settings()
+    mailto = settings.unpaywall_mailto or settings.openalex_mailto or ""
+    if not mailto:
+        return [], []
+    pdfs: list[str] = []
+    landings: list[str] = []
+    try:
+        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+            r = client.get(f"https://api.unpaywall.org/v2/{doi}?email={mailto}")
+        if r.status_code != 200:
+            return [], []
+        data = r.json()
+    except Exception as exc:
+        return degrade_return(logger, exc, "Unpaywall lookup failed", ([], []))
+    for loc in data.get("oa_locations") or []:
+        loc = loc or {}
+        if loc.get("pdf_url"):
+            pdfs.append(loc["pdf_url"])
+        if loc.get("landing_page_url"):
+            landings.append(loc["landing_page_url"])
+    return pdfs, landings
+
+
+def _europepmc_pmcid(doi: str, timeout: float) -> str | None:
+    """Europe PMC DOI → PMCID bridge (free, no key).
+
+    OpenAlex/Unpaywall 常只给 publisher 墙站链接(MDPI 403); 同一文章 PMC
+    有镜像副本时 Europe PMC 免费 API 返回 pmcid, 用于 HTML 全文兜底。
+    """
+    try:
+        url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:%22{doi}%22&format=json&pageSize=1"
+        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+            r = client.get(url)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        res = (data.get("resultList") or {}).get("result") or []
+        return (res[0] or {}).get("pmcid") or None
+    except Exception as exc:
+        return degrade_return(logger, exc, "Europe PMC lookup failed", None)
+
+
+def _resolve_oa_candidates(ev: Evidence, timeout: float) -> tuple[list[str], list[str]]:
+    """Ordered (pdf candidates, HTML-landing fallbacks) for a DOI/arXiv id.
+
+    2026-09-05 (实测缺口): OpenAlex best_oa_location 只给单个 pdf_url——指向
+    墙站(MDPI Cloudflare 403)即整体失败, 尽管 PMC/仓库有镜像副本。现返回
+    OpenAlex + Unpaywall 的全位置有序列表, 调用方逐个尝试, 403 自动换镜像。
     """
     ident = ev.identifier or ""
     m = _ARXIV_RE.search(ident)
     if m:
-        return f"https://arxiv.org/pdf/{m.group(1)}"
+        return [f"https://arxiv.org/pdf/{m.group(1)}"], []
     if ev.oa_pdf_url:
-        return ev.oa_pdf_url
-    if ev.is_oa is False:
-        return None  # search tier already confirmed non-OA
+        return [ev.oa_pdf_url], []
+    if ev.is_oa is False and not ev.identifier:
+        return [], []
     m = _DOI_RE.search(ident)
     if not m:
-        return None
+        return [], []
     doi = m.group(1).rstrip(".,;)")
     settings = get_settings()
-    mailto = settings.openalex_mailto or "formumind@example.com"
-    url = f"https://api.openalex.org/works/doi:{doi}?mailto={mailto}"
+    mailto = settings.openalex_mailto or "kenydey@gmail.com"
+    pdfs: list[str] = []
+    landings: list[str] = []
     try:
         with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
-            r = client.get(url)
-            if r.status_code != 200:
-                return None
+            r = client.get(f"https://api.openalex.org/works/doi:{doi}?mailto={mailto}")
+        if r.status_code == 200:
             data = r.json()
-        loc = data.get("best_oa_location") or {}
-        return loc.get("pdf_url") or None
+            loc = data.get("best_oa_location") or {}
+            if loc.get("pdf_url"):
+                pdfs.append(loc["pdf_url"])
+            if loc.get("landing_page_url"):
+                landings.append(loc["landing_page_url"])
     except Exception as exc:
-        return degrade_return(logger, exc, "OpenAlex OA resolution failed", None)
+        degrade_return(logger, exc, "OpenAlex OA resolution failed", None)
+    up_pdfs, up_landings = _unpaywall_locations(doi, timeout)
+    seen = set(pdfs)
+    for p in up_pdfs:
+        if p not in seen:
+            seen.add(p)
+            pdfs.append(p)
+    seen = set(landings)
+    for lu in up_landings:
+        if lu not in seen:
+            seen.add(lu)
+            landings.append(lu)
+    # Europe PMC 桥: DOI→PMCID → PMC 全文页(无 Cloudflare 墙)置顶作 HTML 兜底
+    pmcid = _europepmc_pmcid(doi, timeout)
+    if pmcid and pmcid not in {l.split("/articles/")[-1].rstrip("/") for l in landings if "/articles/" in l}:
+        landings.insert(0, f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/")
+    return pdfs, landings
+
+
+def _resolve_oa_pdf_url(ev: Evidence, timeout: float) -> str | None:
+    """Back-compat shim: first OA pdf candidate (previous single-URL logic)."""
+    pdfs, _landings = _resolve_oa_candidates(ev, timeout)
+    return pdfs[0] if pdfs else None
 
 
 def _arxiv_id(ev: Evidence) -> str | None:
@@ -182,16 +256,32 @@ def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
         if md and len(md.strip()) > 200:
             return md
 
-    pdf_url = _resolve_oa_pdf_url(ev, timeout)
-    if not pdf_url:
+    pdf_cands, landing_cands = _resolve_oa_candidates(ev, timeout)
+    if not pdf_cands:
         raise FetchError("无 OA 版本")
-    pdf = fetch_pdf(pdf_url, timeout=timeout)
-    if not pdf:
-        raise FetchError("下载超时")
-    text = _extract_text(pdf)
-    if not text or len(text.strip()) <= 200:
-        raise FetchError("解析为空")
-    return text
+    from .pdf_downloader import _extract_text, fetch_pdf_ex
+
+    last_reason = "no candidate"
+    for pdf_url in pdf_cands:
+        pdf, reason = fetch_pdf_ex(pdf_url, timeout=timeout)
+        last_reason = reason
+        if not pdf:
+            logger.info("OA pdf candidate failed (%s): %s", reason, pdf_url[:90])
+            continue
+        try:
+            text = _extract_text(pdf)
+        except Exception as exc:
+            return degrade_return(logger, exc, f"pdf extract failed: {pdf_url}", None)
+        if text and len(text.strip()) > 200:
+            return text
+        last_reason = "extract-empty"
+    # PDF 候选全败 → HTML 兜底(landing/PMC 页, 2026-09-05 补足)
+    for landing in landing_cands:
+        html_text = _fetch_landing_text(landing, timeout)
+        if html_text and len(html_text.strip()) > 200:
+            logger.info("OA html fallback ok: %s", landing[:90])
+            return html_text
+    raise FetchError(f"OA 全文获取失败: {last_reason}")
 
 
 def _extract_web_text(html: str) -> str:
@@ -199,6 +289,42 @@ def _extract_web_text(html: str) -> str:
     from .parsing import html_to_markdown
 
     return html_to_markdown(html)
+
+
+def _fetch_landing_text(landing_url: str, timeout: float) -> str | None:
+    """HTML fallback for literature: GET a landing/PMC page → body text.
+
+    SSRF-guarded via _is_safe_url (same manual-redirect loop as _fetch_web_text).
+    """
+    from .ingestion import _is_safe_url
+
+    if not _is_safe_url(landing_url):
+        return None
+    current_url = landing_url
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=False, headers=_HEADERS) as client:
+            r = None
+            for _hop in range(4):
+                r = client.get(current_url)
+                if 300 <= int(getattr(r, "status_code", 0)) < 400:
+                    location = r.headers.get("location")
+                    if not location:
+                        break
+                    current_url = str(httpx.URL(current_url).join(location))
+                    if not _is_safe_url(current_url):
+                        return None
+                    continue
+                break
+            if r is None or int(getattr(r, "status_code", 0)) != 200:
+                return None
+            body = r.content
+            ct = (r.headers.get("content-type") or "").lower()
+    except Exception as exc:
+        return degrade_return(logger, exc, f"landing fetch failed: {landing_url}", None)
+    if "html" not in ct and not body.lstrip()[:200].lower().startswith(b"<"):
+        return None
+    text = _extract_web_text(body.decode("utf-8", errors="replace"))
+    return text or None
 
 
 def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:

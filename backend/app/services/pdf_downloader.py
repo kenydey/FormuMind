@@ -188,17 +188,32 @@ def fetch_patent_landing(patent_id: str, timeout: float = 20.0) -> str | None:
 
 def fetch_pdf(url: str, timeout: float = 20.0) -> bytes | None:
     """GET *url*, return PDF bytes or None on any failure."""
+    data, _reason = fetch_pdf_ex(url, timeout=timeout)
+    return data
+
+
+def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
+    """GET *url*, return (PDF bytes, reason).
+
+    reason ∈ {"ok", "status:403", "timeout", "not_pdf", "error:..."} — so
+    callers can distinguish a source refusing the request (403) from a real
+    timeout instead of lumping both into one misleading "download timed out".
+    """
     try:
         with httpx.Client(
             timeout=timeout, follow_redirects=True, headers=_HEADERS
         ) as client:
             r = client.get(url)
-        ct = r.headers.get("content-type", "")
-        if r.status_code == 200 and "pdf" in ct.lower():
-            return r.content
+    except httpx.TimeoutException:
+        return None, "timeout"
     except Exception as exc:
-        log_handled_exception(logger, exc, "handled exception")
-    return None
+        return None, f"error:{type(exc).__name__}"
+    ct = r.headers.get("content-type", "")
+    if r.status_code != 200:
+        return None, f"status:{r.status_code}"
+    if "pdf" not in ct.lower():
+        return None, "not_pdf"
+    return r.content, "ok"
 
 
 def fetch_patent_pdf(patent_id: str, timeout: float = 20.0) -> bytes | None:
