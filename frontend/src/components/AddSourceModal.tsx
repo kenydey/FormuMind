@@ -49,6 +49,9 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
   const [textOpen, setTextOpen] = useState(false);
   const [textTitle, setTextTitle] = useState("");
   const [textBody, setTextBody] = useState("");
+  const [idOpen, setIdOpen] = useState(false);
+  const [idDocType, setIdDocType] = useState<"paper" | "patent" | "web">("paper");
+  const [idValue, setIdValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -98,6 +101,28 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
       setBusy(false);
     }
   }
+
+  async function addByIdentifier() {
+    if (!idValue.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.ingestTask(idDocType, idValue.trim());
+      addSources(res.evidence);
+      setIdOpen(false);
+      setIdValue("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ID_PLACEHOLDERS: Record<string, string> = {
+    paper: "DOI 或 arXiv id（如 10.1000/xyz123 / 2301.00001）",
+    patent: "专利号（如 US10435532B2 / CN110467878A）",
+    web: "网页 URL",
+  };
 
   return (
     <>
@@ -181,6 +206,14 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
               </button>
               <button
                 type="button"
+                onClick={() => setIdOpen(true)}
+                className="text-xs border border-edge rounded-full px-3 py-1.5 text-slate-300 hover:border-accent/40 hover:text-accent"
+                title="按 DOI / arXiv / 专利号 / URL 导入（自动抓取全文入库）"
+              >
+                📇 按标识符
+              </button>
+              <button
+                type="button"
                 onClick={() => setTextOpen(true)}
                 className="text-xs border border-edge rounded-full px-3 py-1.5 text-slate-300 hover:border-accent/40 hover:text-accent"
               >
@@ -253,6 +286,60 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
             className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded py-2 text-sm disabled:opacity-40"
           >
             {busy ? "添加中…" : "确定添加"}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        title="按标识符导入"
+        open={idOpen}
+        onClose={() => setIdOpen(false)}
+        nested
+        size="md"
+        testId="modal-add-identifier"
+      >
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            {(
+              [
+                { id: "paper", label: "📄 文献 DOI/arXiv" },
+                { id: "patent", label: "📃 专利号" },
+                { id: "web", label: "🌐 网页" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setIdDocType(t.id)}
+                className={`text-xs rounded-full px-3 py-1.5 border transition-colors ${
+                  idDocType === t.id
+                    ? "border-accent/50 bg-accent/10 text-accent"
+                    : "border-edge text-slate-400"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <input
+            value={idValue}
+            onChange={(e) => setIdValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && idValue.trim() && !busy) void addByIdentifier();
+            }}
+            placeholder={ID_PLACEHOLDERS[idDocType]}
+            className="w-full bg-ink border border-edge rounded px-3 py-2 text-sm font-mono"
+          />
+          <p className="text-[10px] text-slate-500">
+            自动获取全文并入库（OA 优先, 多源兜底）; 成功后出现在左侧「已加载资料」并可立即用于推荐/问答检索。
+          </p>
+          <button
+            type="button"
+            disabled={busy || !idValue.trim()}
+            onClick={() => void addByIdentifier()}
+            className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded py-2 text-sm disabled:opacity-40"
+          >
+            {busy ? "抓取入库中…" : "确定导入"}
           </button>
         </div>
       </Modal>

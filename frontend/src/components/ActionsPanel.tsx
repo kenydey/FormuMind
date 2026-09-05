@@ -18,6 +18,7 @@ const WorkbenchModal = lazy(() => import("./WorkbenchModal"));
 const DoeResultsPanel = lazy(() => import("./DoeResultsPanel"));
 const SimPlaceholder = lazy(() => import("./SimPlaceholder"));
 const LoopModal = lazy(() => import("./LoopModal"));
+const MaterialsPanel = lazy(() => import("./MaterialsPanel"));
 const InverseDesignModal = lazy(() => import("./InverseDesignModal"));
 
 function ModalFallback() {
@@ -32,7 +33,8 @@ type ModalName =
   | "workbench"
   | "optimize"
   | "process"
-  | "loop";
+  | "loop"
+  | "materials";
 
 const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = [
   { id: "requirements", icon: "🧪", title: "技术需求", desc: "设置产品域、基材与优化目标" },
@@ -42,6 +44,7 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实际参数与实测值，同步至 BayBE 闭环" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
+  { id: "materials", icon: "🧴", title: "材料库", desc: "材料 CRUD、供应状态与结构搜索(SMARTS/骨架替代)" },
 ];
 
 function Badge({ children, tone }: { children: React.ReactNode; tone: "accent" | "amber" }) {
@@ -342,6 +345,17 @@ export default function ActionsPanel() {
       >
         <Suspense fallback={<ModalFallback />}>
           <LoopModal />
+        </Suspense>
+      </Modal>
+      <Modal
+        title="🧴 材料库 · Materials"
+        testId="modal-materials"
+        open={openModal === "materials"}
+        onClose={() => setOpenModal(null)}
+        size="full"
+      >
+        <Suspense fallback={<ModalFallback />}>
+          <MaterialsPanel open onClose={() => setOpenModal(null)} />
         </Suspense>
       </Modal>
     </aside>

@@ -27,6 +27,16 @@ export interface MaterialSpec {
   role: string;
   weight_pct?: number;
   smiles?: string | null;
+  // ── 材料库字段(2026-09-05, 对齐后端 /api/materials upsert) ──
+  formula?: string | null;
+  cas_no?: string | null;
+  zh_name?: string | null;
+  molar_mass?: number | null;
+  price_cny_per_kg?: number | null;
+  voc_contrib?: number | null;
+  density_gcm3?: number | null;
+  oil_absorption?: number | null;
+  tg_k?: number | null;
 }
 
 export interface Requirement {
@@ -1277,6 +1287,90 @@ export const api = {
   ingestText: (text: string, title?: string) =>
     post<IngestResponse>("/api/ingest/text", { text, title: title ?? "Pasted text" }),
 
+  // ── 2026-09-05 统一摄取入口(DOI/arXiv/专利号/URL → 全文 → 入库, OA 破墙) ──
+  ingestTask: (docType: string, identifier: string) =>
+    post<IngestResponse>("/api/ingest/task", { doc_type: docType, identifier }),
+
+  // ── 材料库管理(GET /api/materials 已挂载但隐藏于 OpenAPI schema) ──
+  listMaterials: (params?: { q?: string; role?: string; availability?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.q) q.set("q", params.q);
+    if (params?.role) q.set("role", params.role);
+    if (params?.availability) q.set("availability", params.availability);
+    const qs = q.toString();
+    return get<MaterialListResponse>(`/api/materials${qs ? `?${qs}` : ""}`);
+  },
+
+  upsertMaterial: (spec: MaterialSpec) =>
+    post<MaterialView>("/api/materials", spec),
+
+  enrichMaterials: () =>
+    post<{ enriched: number }>("/api/chemical/enrich-materials", {}),
+
+  // ── 化学结构搜索(SMARTS 子结构 / Murcko 骨架替代) ──
+  substructureSearch: (smarts: string, topK = 20) => {
+    const q = new URLSearchParams({ smarts, top_k: String(topK) });
+    return get<ChemicalHit[]>(`/api/chemical/substructure?${q}`);
+  },
+
+  scaffoldSubstitutes: (smiles: string, topK = 20) => {
+    const q = new URLSearchParams({ smiles, top_k: String(topK) });
+    return get<ChemicalHit[]>(`/api/chemical/scaffold-substitutes?${q}`);
+  },
+
+  // ── 会话记忆(多会话聊天) ──
+  listSessions: (limit = 20) =>
+    get<SessionListResponse>(`/api/session/list?limit=${limit}`),
+
+  saveSession: (body: {
+    session_id: string;
+    history: unknown[];
+    context?: Record<string, unknown>;
+    ttl_seconds?: number;
+  }) => post<{ ok: boolean }>("/api/session/save", body),
+
+  loadSession: (sessionId: string) =>
+    get<SessionLoadResponse>(`/api/session/load/${sessionId}`),
+
+  sessionInfo: (sessionId: string) =>
+    get<SessionInfoResponse>(`/api/session/info/${sessionId}`),
+
+  deleteSession: (sessionId: string) =>
+    del<{ ok: boolean }>(`/api/session/delete/${sessionId}`),
+
+  // ── KB 诊断: 切块详情 / 完整性 ──
+  kbChunksBySource: (sourceId: string) =>
+    get<KbChunk[]>(`/api/kb/chunks/by-source/${sourceId}`),
+
+  kbIntegrity: () =>
+    get<KbIntegrityResponse>("/api/kb/integrity"),
+
+  // ── KG 维护: 重建 / 挂源 ──
+  kgRebuild: () =>
+    post<KgRebuildReport>("/api/kg/rebuild", {}),
+
+  kgLinkSource: (sourceId: string) =>
+    post<KgLinkReport>(`/api/kg/link-source/${sourceId}`, {}),
+
+  // ── Neo4j 图谱适配层 ──
+  neo4jStats: () =>
+    get<Neo4jStats>("/api/kg/neo4j/stats"),
+
+  neo4jEnsureSchema: () =>
+    post<{ ok: boolean }>("/api/kg/neo4j/schema/ensure", {}),
+
+  neo4jUpsertCompound: (spec: Record<string, unknown>) =>
+    post<Record<string, unknown>>("/api/kg/neo4j/compounds", spec),
+
+  neo4jCompoundSimilar: (compUid: string) =>
+    get<Neo4jHit[]>(`/api/kg/neo4j/compounds/${compUid}/similar`),
+
+  neo4jUpsertFormulation: (spec: Record<string, unknown>) =>
+    post<Record<string, unknown>>("/api/kg/neo4j/formulations", spec),
+
+  neo4jFormulationCompounds: (formUid: string) =>
+    get<Neo4jHit[]>(`/api/kg/neo4j/formulations/${formUid}/compounds`),
+
   listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
 
   getDefaultLevers: (params: {
@@ -2411,4 +2505,108 @@ export async function pollTask(
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(`任务轮询超时（${maxAttempts} 次）`);
+}
+
+// ── 2026-09-05 材料库 / 结构搜索 / 会话 / KB-KG 诊断类型(与后端 view 宽松对齐) ──
+
+export interface MaterialView {
+  name: string;
+  role: string;
+  origin?: string;
+  availability?: string;
+  spec: Record<string, unknown>;
+}
+
+export interface MaterialListResponse {
+  materials: MaterialView[];
+  total?: number;
+}
+
+export interface ChemicalHit {
+  name: string;
+  role?: string;
+  smiles?: string | null;
+  formula?: string | null;
+  cas_no?: string | null;
+  zh_name?: string | null;
+  molar_mass?: number | null;
+  /** scaffold-substitutes: 与查询目标的相似度/关系说明 */
+  reason?: string;
+  similarity?: number | null;
+  availability?: string;
+  spec?: Record<string, unknown>;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  updated_at?: string | null;
+  history_count?: number;
+}
+
+export interface SessionListResponse {
+  sessions: SessionSummary[];
+  total_count: number;
+}
+
+export interface SessionLoadResponse {
+  history: unknown[];
+  context: Record<string, unknown> | null;
+  updated_at?: string | null;
+}
+
+export interface SessionInfoResponse {
+  session_id: string;
+  history_count: number;
+  has_context: boolean;
+  updated_at?: string | null;
+}
+
+export interface KbChunk {
+  chunk_id?: string;
+  source_id?: string;
+  text?: string;
+  content?: string;
+  page?: number | null;
+  paragraph?: number | null;
+  offset?: number | null;
+}
+
+export interface KbIntegrityResponse {
+  healthy: boolean;
+  total_orphans: number;
+  external_backend: boolean;
+  references: Array<Record<string, unknown>>;
+}
+
+export interface KgRebuildReport {
+  linked_sources: number;
+  entities_upserted: number;
+  mentions_upserted: number;
+  links_created: number;
+}
+
+export interface KgLinkReport {
+  source_id: string;
+  entities_upserted: number;
+  mentions_upserted: number;
+  links_created: number;
+  relations_upserted: number;
+}
+
+export interface Neo4jStats {
+  adapter_status?: string;
+  reachable?: boolean;
+  nodes?: number;
+  edges?: number;
+  compounds?: number;
+  formulations?: number;
+  detail?: Record<string, unknown>;
+}
+
+export interface Neo4jHit {
+  uid?: string;
+  name?: string;
+  smiles?: string | null;
+  similarity?: number | null;
+  spec?: Record<string, unknown>;
 }
