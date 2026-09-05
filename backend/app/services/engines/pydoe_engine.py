@@ -92,7 +92,9 @@ def build_pydoe_plan(
     # baybe_engine gate so both DOE engines produce consistent results.
     if requirement is not None:
         try:
-            from ..services.kg_chemical_check import check_formulation_chemistry
+            # engines/ → services/: one dot up, not ``..services`` (that resolves
+            # to app.services.services and silently no-ops the whole gate).
+            from ..kg_chemical_check import check_formulation_chemistry
             from ...domain import knowledge
 
             skeleton = (
@@ -108,9 +110,10 @@ def build_pydoe_plan(
                             "; ".join(chk.reasons)
                             or "知识图谱检测到材料不相容"
                         )
-        except Exception:
-            # Never let the KG gate break DOE generation
-            pass
+        except Exception as exc:
+            # Gate must never break DOE generation, but swallow-without-log
+            # hid the broken import for weeks — keep a debug breadcrumb.
+            logger.debug("KG chemical gate skipped (%s); allowing", exc)
 
     return plan
 
@@ -119,6 +122,7 @@ def build_plan_with_fallback(
     factors: list[DOEFactor],
     design: str,
     n: int | None = None,
+    requirement: "Requirement | None" = None,
 ) -> DOEPlan:
     """Try pydoe; fall back to native for unknown designs or import failures.
 
@@ -136,7 +140,7 @@ def build_plan_with_fallback(
             )
         return build_native_plan(factors, design, n=n)
     try:
-        return build_pydoe_plan(factors, design, n=n)
+        return build_pydoe_plan(factors, design, n=n, requirement=requirement)
     except Exception as exc:
         if design in _MIXTURE_DESIGNS:
             raise ValueError(

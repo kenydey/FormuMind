@@ -5,6 +5,11 @@ import { undismiss } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
+/** Long LLM jobs (recommend / AI-modify) emit progress sporadically.
+ *  No wall-clock limit — a fixed 120s abort killed healthy 174–281s recommends
+ *  after celery went async. Stall clock still catches a dead worker. */
+const LLM_TASK_STALL_MS = 5 * 60 * 1000;
+
 export function createResearchSlice(set: SliceSet, get: SliceGet) {
   return {
     setLeaderboard: (forms) => {
@@ -109,13 +114,19 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           query: searchQuery.trim(),
           n: 3,
         });
-        const final = await awaitTaskStream(task_id, (ev) => {
-          set((draft) => {
-            draft.recommendStage = ev.stage ?? "";
-            draft.recommendMessage = ev.message ?? "";
-            draft.task = progressToTaskStatus(task_id, "recommend", ev);
-          });
-        });
+        const final = await awaitTaskStream(
+          task_id,
+          (ev) => {
+            set((draft) => {
+              draft.recommendStage = ev.stage ?? "";
+              draft.recommendMessage = ev.message ?? "";
+              draft.task = progressToTaskStatus(task_id, "recommend", ev);
+            });
+          },
+          0,
+          undefined,
+          LLM_TASK_STALL_MS
+        );
         const wrapped = final.data as { research?: ResearchResult } | undefined;
         const research = wrapped?.research;
         if (!research?.recommended?.length) throw new Error("AI 修改未返回配方");
@@ -166,14 +177,20 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           searchQuery.trim()
         );
         (ctrl as unknown as Record<string, unknown>).taskId = task_id;
-        const final = await awaitTaskStream(task_id, (ev) => {
-          set((draft) => {
-            draft.recommendStage = ev.stage ?? "";
-            // 冷启动区分：首包 retrieve 阶段文案
-            draft.recommendMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
-            draft.task = progressToTaskStatus(task_id, "recommend", ev);
-          });
-        }, 120_000, ctrl.signal);
+        const final = await awaitTaskStream(
+          task_id,
+          (ev) => {
+            set((draft) => {
+              draft.recommendStage = ev.stage ?? "";
+              // 冷启动区分：首包 retrieve 阶段文案
+              draft.recommendMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
+              draft.task = progressToTaskStatus(task_id, "recommend", ev);
+            });
+          },
+          0,
+          ctrl.signal,
+          LLM_TASK_STALL_MS
+        );
         const wrapped = final.data as { research?: ResearchResult } | undefined;
         const research = wrapped?.research;
         if (!research) throw new Error("推荐未返回结果");
