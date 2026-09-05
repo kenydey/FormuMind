@@ -1448,6 +1448,26 @@ export const api = {
       "/api/settings/formulation-mode",
     ),
 
+  getParseProfile: () =>
+    get<{
+      profile: string
+      profiles: string[]
+      availability: {
+        gpu_available: boolean
+        mineru_key_present: boolean
+        vision_available: boolean
+        active_rag_backend: string
+      }
+    }>("/api/settings/parse-profile"),
+
+  postParseProfile: (profile: string) =>
+    post<{
+      profile: string
+      persisted: boolean
+      env: Record<string, string>
+      availability: { gpu_available: boolean; mineru_key_present: boolean; vision_available: boolean; active_rag_backend: string }
+    }>("/api/settings/parse-profile", { profile }),
+
   setFormulationMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
 

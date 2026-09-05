@@ -34,7 +34,7 @@ import logging
 
 from ..config import get_settings
 from . import mineru_cloud, pdf_local
-from .errors import degrade_return
+from .errors import degrade_return, log_handled_exception
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +298,45 @@ def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | No
     return pdf_local.assemble(rendered) or None
 
 
+def _scanned_vision_fallback(content: bytes) -> str | None:
+    """Scanned pages OCR could not read (image/tabular): vision LLM fallback.
+
+    RapidOCR returning almost nothing usually means figure/table-heavy pages
+    where structure is the content. Send the first few rendered pages to the
+    vision model (bounded, gated on availability) and keep whatever markdown
+    comes back. Not a per-page double pass — only fires when OCR was empty-ish.
+    """
+    from . import vision_extract
+    from .pdf_local import page_as_png
+    from ..config import get_settings
+
+    try:
+        ok, _why = vision_extract.vision_available()
+    except Exception:
+        ok = False
+    if not ok:
+        return None
+    limit = min(3, int(getattr(get_settings(), "rapidocr_max_pages", 30)))
+    parts: list[str] = []
+    for page_no in range(1, limit + 1):
+        png = page_as_png(content, page_no, dpi=int(get_settings().rapidocr_dpi))
+        if not png:
+            continue
+        try:
+            result, _err = vision_extract.extract_image(png, filename=f"scan-p{page_no}.png")
+        except Exception as exc:
+            log_handled_exception(logger, exc, "vision scan fallback failed")
+            continue
+        finally:
+            del png
+        if result and getattr(result, "markdown", None):
+            parts.append(f"<!-- page:{page_no} -->\n\n{result.markdown}")
+    if parts:
+        logger.info("hybrid: %d scanned page(s) read by vision fallback", len(parts))
+        return "\n\n".join(parts)
+    return None
+
+
 def _scanned_without_cloud(content: bytes) -> str | None:
     """Read a document with no text layer, using only what is on this host.
 
@@ -325,6 +364,12 @@ def _scanned_without_cloud(content: bytes) -> str | None:
     text = rapidocr_local.ocr_pdf(content)
     if text:
         logger.info("hybrid: scanned document read by local OCR (no cloud)")
+        # OCR 输出过短(图多字少的页, 如数据表/图片型表格) → vision 兜底:
+        # 前几页整图交给视觉 LLM 结构化(表格保真), 避免结构流失为纯文字。
+        if len(text.strip()) < 200:
+            visual = _scanned_vision_fallback(content)
+            if visual:
+                return visual
         return text
 
     # Same page cap as RapidOCR on purpose: this is the same job by another

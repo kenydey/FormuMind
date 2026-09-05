@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..config import get_settings
+from ..services.parse_profiles import apply_profile, current_profile, probe_availability, PROFILE_NAMES
 from ..services.llm import _provider_default_base_url, list_remote_models, providers_with_cache, test_connection
 from ..services.llm_roles import CUSTOM_PROVIDER, VISION, normalize_base_url, resolve_role
 from ..services.vision_extract import probe_vision, vision_available
@@ -290,6 +291,27 @@ def get_env_flags():
     from ..services.env_flags import list_env_flags
 
     return {"flags": list_env_flags()}
+
+
+class ParseProfileRequest(BaseModel):
+    profile: str = Field(pattern="^(low|mid|high)$")
+
+
+@router.get("/settings/parse-profile")
+def get_parse_profile():
+    """当前解析/检索档位判定 + 硬件可用性(供前端档位卡标注)."""
+    return {
+        "profile": current_profile(),
+        "profiles": list(PROFILE_NAMES),
+        "availability": probe_availability(),
+    }
+
+
+@router.post("/settings/parse-profile")
+def post_parse_profile(req: ParseProfileRequest):
+    """一键应用档位(低/中/高): 写 env + 持久化, 返回生效状态."""
+    result = apply_profile(req.profile)
+    return result
 
 
 @router.post("/settings/env-flags")

@@ -4,6 +4,7 @@ import Modal from "./Modal";
 import DependencyManager from "./DependencyManager";
 import ApiSettingsPanel from "./ApiSettingsPanel";
 import EnvFlagsPanel from "./EnvFlagsPanel";
+import ParseProfileSelector from "./ParseProfileSelector";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import VisionModelPanel from "./VisionModelPanel";
 import FormulationModeSelector from "./FormulationModeSelector";
@@ -193,6 +194,7 @@ export default function SettingsModal() {
       ) : settingsTab === "recommend" ? (
         <div className="space-y-4">
           <FormulationModeSelector />
+          <ParseProfileSelector reloadKey={reloadKey} />
           <OcsrPanel />
         </div>
       ) : providers.length === 0 && !loadError ? (
