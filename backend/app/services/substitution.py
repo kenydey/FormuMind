@@ -194,7 +194,7 @@ def _kg_evidence(original: str, candidate: str) -> list[dict]:
                     )
         return out[:5]
     except Exception as exc:
-        logger.debug("substitution: KG evidence unavailable ({})", exc)
+        logger.debug("substitution: KG evidence unavailable (%s)", exc)
         return []
 
 
@@ -341,6 +341,6 @@ def scan_supply_risk(
                     for c in report["candidates"]
                 ]
             except Exception as exc:
-                logger.debug("supply scan: {} failed ({})", hit["material"], exc)
+                logger.debug("supply scan: %s failed (%s)", hit["material"], exc)
         affected.append(entry)
     return {"at_risk": at_risk, "affected": affected}

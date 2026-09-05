@@ -45,7 +45,7 @@ def check_formulation(
     try:
         verdict = InitializeAgent().review(form, requirement=req, explain=False)
     except Exception as exc:
-        logger.debug("feasibility: agent review failed ({}); allowing", exc)
+        logger.debug("feasibility: agent review failed (%s); allowing", exc)
         return FeasibilityVerdict(feasible=True, status="pass", formulation=form)
 
     reasons = [

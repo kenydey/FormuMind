@@ -49,7 +49,7 @@ class FederatedSearchEngine:
         cap = per_source_cap or self._settings.search_limit_per_source
         t0 = time.perf_counter()
 
-        logger.info("FederatedSearch query={!r} sources={}", query[:80], types)
+        logger.info("FederatedSearch query=%r sources=%s", query[:80], types)
         try:
             evidence = literature.iter_search(
                 query,
@@ -60,7 +60,7 @@ class FederatedSearchEngine:
                 progress_cb=progress_cb,
             )[0]
         except Exception as exc:
-            logger.exception("FederatedSearch failed: {}", exc)
+            logger.exception("FederatedSearch failed: %s", exc)
             evidence = []
 
         hits = [RetrievalHit.from_evidence(ev) for ev in evidence]

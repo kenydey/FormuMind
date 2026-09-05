@@ -172,5 +172,5 @@ def sync_measurements_to_experiment(experiment_id: int) -> dict[str, Any]:
             row.measured = merged
             return merged
     except Exception as exc:
-        logger.warning("measured sync failed for experiment {}: {}", experiment_id, exc)
+        logger.warning("measured sync failed for experiment %s: %s", experiment_id, exc)
         return {"_sync_error": str(exc), "experiment_id": experiment_id}

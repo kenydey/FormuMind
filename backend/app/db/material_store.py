@@ -140,7 +140,7 @@ class MaterialStore:
             if self.upsert(name, spec, origin="seed"):
                 written += 1
         if written:
-            logger.info("Seeded material catalog: {} material(s)", written)
+            logger.info("Seeded material catalog: %s material(s)", written)
         return written
 
     def set_availability(self, name: str, availability: str) -> bool:

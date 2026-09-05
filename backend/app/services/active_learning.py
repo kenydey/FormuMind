@@ -100,7 +100,7 @@ def _known_failures(domain) -> list:
     try:
         return failure_memory.failed_records(domain)
     except Exception as exc:
-        logger.debug("active learning: failure memory unavailable ({})", exc)
+        logger.debug("active learning: failure memory unavailable (%s)", exc)
         return []
 
 

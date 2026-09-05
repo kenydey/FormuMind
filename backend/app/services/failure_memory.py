@@ -44,7 +44,7 @@ def failed_records(
         store = get_measurement_store()
         failing = store.failing()
     except Exception as exc:
-        logger.debug("failure memory: measurement store unavailable ({})", exc)
+        logger.debug("failure memory: measurement store unavailable (%s)", exc)
         return []
     if not failing:
         return []
@@ -77,7 +77,7 @@ def _labels_for(experiment_ids: set[int]) -> set[str]:
             )
         return {r[0] for r in rows if r[0]}
     except Exception as exc:
-        logger.debug("failure memory: label lookup failed ({})", exc)
+        logger.debug("failure memory: label lookup failed (%s)", exc)
         return set()
 
 

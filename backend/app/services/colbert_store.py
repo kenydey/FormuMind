@@ -219,7 +219,7 @@ def index_documents(
             manifest.model_dump_json(indent=2), encoding="utf-8"
         )
         logger.info(
-            "Indexed {} docs into collection={} backend={} total={}",
+            "Indexed %s docs into collection=%s backend=%s total=%s",
             len(docs),
             collection,
             backend,
