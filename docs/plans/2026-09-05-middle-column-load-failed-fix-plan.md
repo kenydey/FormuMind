@@ -81,13 +81,13 @@ ResearchPanel → NotificationStack
 ## 2. 根因分层
 
 ```
-[P0 启动阻塞] recover_stalled 同步 + Celery eager/无 Redis
+[P0 启动阻塞] recover_stalled() 同步 + Celery eager / 无 Redis
         ↓
 [:8000 未监听]
         ↓
 [Vite proxy 500 / fetch TypeError]
         ↓
-[initProjects → store.error]
+[initProjects() → store.error = formatApiError(e)]
         ↓
 [P1 UX] 中栏只显示生硬英文/状态码，WebKit/500 无「后端未就绪」提示
 ```
