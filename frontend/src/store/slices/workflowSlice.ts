@@ -66,10 +66,17 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           campaignState,
           workbenchCampaignId
         );
-        const final = await awaitTaskStream(task_id, (ev) =>
-          set((draft) => {
-            draft.task = progressToTaskStatus(task_id, "optimize", ev);
-          })
+        // Optimize can run multi-minute Bayesian loops; no wall-clock limit.
+        // Stall clock (5 min silence) still catches a dead worker.
+        const final = await awaitTaskStream(
+          task_id,
+          (ev) =>
+            set((draft) => {
+              draft.task = progressToTaskStatus(task_id, "optimize", ev);
+            }),
+          0,
+          undefined,
+          5 * 60 * 1000
         );
         const opt = final.data as unknown as OptimizationResult | null;
         if (opt?.top_formulations) {
@@ -129,10 +136,15 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         draft.error = null;
       });
       try {
-        const final = await awaitTaskStream(taskId, (ev) =>
-          set((draft) => {
-            draft.task = progressToTaskStatus(taskId, "loop", ev);
-          })
+        const final = await awaitTaskStream(
+          taskId,
+          (ev) =>
+            set((draft) => {
+              draft.task = progressToTaskStatus(taskId, "loop", ev);
+            }),
+          0,
+          undefined,
+          5 * 60 * 1000
         );
         const report = final.data as unknown as LoopReport | null;
         if (report) {
