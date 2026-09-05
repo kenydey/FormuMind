@@ -52,3 +52,7 @@ docker-compose.yml.bak*
 
 # MolScribe weights (bind-mounted at runtime, 1.1 GB)
 deploy/molscribe/hf-cache/
+
+# Runtime index/cache artifacts
+.ragatouille/
+*.report.json
