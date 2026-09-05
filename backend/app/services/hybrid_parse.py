@@ -31,6 +31,7 @@ its own column rather than hiding it.
 from __future__ import annotations
 
 import logging
+import re
 
 from ..config import get_settings
 from . import mineru_cloud, pdf_local
@@ -78,6 +79,39 @@ def _needs_escalation(page: pdf_local.LocalPage) -> bool:
     return False
 
 
+# "1.1.2 X" / "1.1 X": 编号自带点, 后接空白即可;  "1. X": 半角点后必须空白
+# ("0.5% 硅烷" 的 0.5 不得命中);  "1、引言"/"1。引言": 中文分隔符后空白可省
+_HEADING_MULTI_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){1,2})[\s\u3000]+(\S)")
+_HEADING_DOT_RE = re.compile(r"^(\d{1,2})\.[ \u3000]+(\S)")
+_HEADING_CN_RE = re.compile(r"^(\d{1,2})[、\u3000][ \u3000]*(\S)")
+
+
+def _heading_markdown(text: str, api_level: int) -> tuple[str, int] | None:
+    """Title hierarchy rule layer (2026-09-05, live-API verified).
+
+    云 MinerU 把数字编号标题扁平化 —— 实测 ``1.``/``1.1``/``1.2`` 全部
+    text_level=2, 页 2+ 的标题在文档 markdown 里还会丢 ``#`` 前缀。规则:
+    文本形如编号标题(``1. X`` / ``1.1 X`` / ``1.2.3 X``) → 层级 = 编号段数;
+    否则退回 API 的 text_level。``2026 年`` 这类无句点/顿号的数字开头正文
+    不匹配(需编号后跟 . 、 或 全角句点), 避免误伤。
+    """
+    if not text or not text.strip():
+        return None
+    stripped = text.strip()
+    m = _HEADING_MULTI_RE.match(stripped)
+    if m:
+        return stripped, min(m.group(1).count(".") + 1, 6)
+    m = _HEADING_DOT_RE.match(stripped)
+    if m:
+        return stripped, 1
+    m = _HEADING_CN_RE.match(stripped)
+    if m:
+        return stripped, 1
+    if api_level:
+        return stripped, min(max(int(api_level), 1), 6)
+    return None
+
+
 def _render_blocks(blocks: list[mineru_cloud.MinerUBlock], *, page_label: str) -> str:
     """MinerU blocks → Markdown, routing only what benefits from vision."""
     from .vision_extract import extract_image, image_markdown, vision_available
@@ -95,10 +129,12 @@ def _render_blocks(blocks: list[mineru_cloud.MinerUBlock], *, page_label: str) -
         # {"type": "text", "text": "…", "text_level": 2} for a document title
         # and never emits "title" at all. Keying on the type alone silently
         # demoted every heading to prose, which cost `heading_path` on every
-        # escalated page.
-        if block.text_level and block.text.strip():
-            level = min(max(block.text_level, 1), 6)
-            parts.append(f"{'#' * level} {block.text.strip()}")
+        # escalated page. `_heading_markdown` adds the numbered-heading rule
+        # layer on top (API 把 1./1.1 扁平化为同 level)。
+        heading = _heading_markdown(block.text, block.text_level)
+        if heading:
+            text, level = heading
+            parts.append(f"{'#' * level} {text}")
             continue
 
         if kind == "equation":
