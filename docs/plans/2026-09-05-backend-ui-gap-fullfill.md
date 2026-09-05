@@ -118,8 +118,22 @@
 - 不迁移/合并 SQLite kg 与 Neo4j 两套图谱(共存,各留面板)
 - C1-C6 不做新 UI(除 C4 并入 A2)
 
-## 八、交付物
-- 每 Phase 独立 commit(逻辑分 feat: session-chat / feat: materials-panel / feat: structure-search / feat: ingest-identifier / feat: kb-chunks / feat: kg-maintain / feat: neo4j-panel)
+## 八、交付物- 每 Phase 独立 commit(逻辑分 feat: session-chat / feat: materials-panel / feat: structure-search / feat: ingest-identifier / feat: kb-chunks / feat: kg-maintain / feat: neo4j-panel)
 - 后端测试:chat+session 集成新增 ~6-10 用例;全量 ~1900 回归
 - 前端:tsc 0 错误 + Vitest 全绿(新增 ~25-35)
 - 端到端:DOI 摄取一例、材料添加+SMARTS 搜索一例、会话新建/切换/删除一例、重建图谱一例
+
+## 九、决策记录(2026-09-05 执行后)
+- **A1 后端 chat 集成 session → 不实施(归档)**。理由(全实证): 前端编排已交付全部
+  会话用户价值(多线程/存档/自动落库/恢复, 198 测试绿); chat handler 为同步阻塞
+  LLM、session service 为 async Redis(loop 绑定)集成成本高; 前端仅传最近 6 轮
+  history(< 后端 cap 12)零信息差; session.context 无消费语义(项目级语境由
+  requirement 承担)。真正的会话增强(跨会话记忆融合)是研究级功能, 非缺口补齐。
+- **B3 Neo4j → 已启用 + 浏览面板**。启用时发现根因: .env.host 键只经 UI env-flags
+  白名单灌进程 env, NEO4J_ENABLED/URI 不在白名单 → os.getenv 永空(容器跑 5 天
+  而 enabled=false 的"死键"问题)。修复: neo4j_kg env 读取回退 resolve_env_path
+  文件(与 settings 同源)。启用后 reachable=True, 2758 catalog 化合物可搜。
+- **SQLite kg 关系层为空(kb_entity_links=0)**: 实体 715/提及 7 万, 关系从未产出。
+  挂 POST /api/kg/relations/rebuild(celery 异步 202, source_id 限单源/None 全库)。
+- 已知 flaky(与本次改动无关, git stash 对照实证): test_kb_ingest_queue 两例依赖
+  外部专利源, 网络慢时超时失败。
