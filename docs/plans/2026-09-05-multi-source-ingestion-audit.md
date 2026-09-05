@@ -37,6 +37,12 @@
 **B4. ChemRxiv 探针 → 不做(领域价值低), 如需扩展预印本应优先 arXiv + OpenAlex 覆盖度。**
 代码库已能通过 OpenAlex(含 ChemRxiv 收录)发现化学预印本元数据, 缺的只是"下载源码"一步, 而 ChemRxiv 化学合成主题与 FormuMind 配方研发(金属表面处理)交集小。
 
+**B5. Crawl4AI → 本期不引入为常驻依赖; 若未来出现 JS 渲染需求, 用"按需 Playwright 渲染 + 现有 trafilatura 解析"而非 Crawl4AI。**
+核实(2026-09-05, 官方仓库/0.5.0 release): Crawl4AI = Playwright(Chromium)之上的异步爬虫封装, 开箱提供 JS 渲染、内容过滤(Pruning/BM25)、LLM 提取、深度爬取; 代价是 **Chromium 本体(Docker ~2GB; 库 + `playwright install chromium`)+ 常驻浏览器进程内存**, 且 0.5.x 正处于 API 大改期(维护风险)。
+- 与现状对照: `html_to_markdown`(parsing.py L398)已用 trafilatura(保表格、去样板、Markdown 输出)+ regex 兜底——FormuMind 网页摄取的真实目标(供应商 TDS/静态配方页/OA 期刊/Google Patents DOM)绝大部分**静态或轻动态, trafilatura 已覆盖**(本日 9 源导入全部成功佐证);
+- 本轮实测失败的两源(SCIRP/MDPI)是 **Cloudflare 类防护**, 而此类防护识别 headless Chromium, Crawl4AI 的 stealth 只缓解不保证——"天然绕过各种反爬"是营销话术, 需打折扣; 真正稳定对抗需要真实指纹 + 高质量代理 IP(即 B2 已拒绝的集群方案);
+- 若确有 JS 渲染场景(供应商站成分表异步加载), 正确增量是 **懒加载浏览器兜底**: 后台任务内按需 `playwright` 起 Chromium → 渲染拿 HTML → 交现有 `html_to_markdown`——浏览器进程即用即弃(不常驻 uvicorn), ~60 行, 与 B2"单实例浏览器兜底"一致; Crawl4AI 的过滤/深度爬取能力与现有 chunk 级 topic_gate/Pruning 重叠, 收益不足以换取 2GB 依赖 + API 迭代风险。
+
 ## C. 真实缺口与推荐实施(增量, 由大到小)
 
 ### P1(建议本期做): 摄取管道编排收口 — 单入口 URL/DocumentTask → 全链
@@ -56,7 +62,10 @@
 - 主题持久化: 复用 project `workspace.search_query`(已有)作为雷达主题源。
 - 代码量: ~80 行 + 测试。
 
-### P3(评估项, 非本期): 实施例配比表 → 结构化行
+### P3(条件项, 不做常驻): 网页 JS 渲染兜底(浏览器级, 按需)
+仅当实际遇到"静态抓取返回空/无正文, 而该源确属高价值"(如供应商成分表异步加载)时实施——**不是默认引入**。实现: `app/services/browser_fetch.py`(~60 行)后台子进程按需起 Chromium → 渲染 + 等网络空闲 → 取 HTML → 复用 `html_to_markdown`。挂载点: `parsing.py` 级联 HTML 分支的最末层(`html_to_markdown` 返回空文本后触发, 同 rapidocr 在文本层解析失败后才接力的模式)。不引 Crawl4AI(理由见 B5)。
+
+### P4(评估项, 非本期): 实施例配比表 → 结构化行
 `chem_extract` 已做 chunk 实体抽取; "配方表列→成分+用量+Role(成膜树脂/缓蚀剂/交联剂)结构化行"若确有下游需求(推荐引擎直接吃结构化配方), 需先核 `kg/entity_linker` + `formulation_linker` 的覆盖度再定(可能已部分覆盖)。**本期只做核验, 不动代码。**
 
 ## D. 文件变更清单(P1+P2)
@@ -91,4 +100,4 @@
 
 ## G. 结论
 
-方案 = 一份"外部视角的架构蓝图", 而代码库经过多轮迭代已经实现并超越了它(证据见 A 表)。**不建议大改; 建议只做 P1+P2 两个增量收口**, 并明确拒绝 Sci-Hub/代理集群/MinerU 主角化/ChemRxiv 四项。若你认可, 我按 D/E 执行 P1+P2。
+方案 = 一份"外部视角的架构蓝图", 而代码库经过多轮迭代已经实现并超越了它(证据见 A 表)。**不建议大改; 建议只做 P1+P2 两个增量收口**; P3 浏览器兜底仅在高价值 JS 源实证出现后才实施(且用裸 Playwright 而非 Crawl4AI, 见 B5); 明确拒绝 Sci-Hub/代理集群/MinerU 主角化/ChemRxiv 四项。若你认可, 我按 D/E 执行 P1+P2。
