@@ -133,7 +133,7 @@ def check_integrity(session_factory: sessionmaker[Session] | None = None) -> Int
                     OrphanReport(reference=reference, orphans=orphans, checked=checked, note=note)
                 )
             except Exception as exc:
-                logger.debug("integrity: %s failed (%s)", reference, exc)
+                logger.debug("integrity: {} failed ({})", reference, exc)
                 report.references.append(
                     OrphanReport(reference=reference, note=f"check failed: {exc}", unjoinable=True)
                 )

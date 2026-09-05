@@ -193,7 +193,7 @@ class MeasurementStore:
                 session.delete(row)
                 return True
         except Exception as exc:
-            logger.warning("delete_attachment(%s) failed: %s", attachment_id, exc)
+            logger.warning("delete_attachment({}) failed: {}", attachment_id, exc)
             return False
 
     def set_attachment_datalab_ref(

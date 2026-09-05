@@ -54,7 +54,7 @@ class MaterialCatalog(MutableMapping[str, dict]):
 
             return get_material_store()
         except Exception as exc:  # pragma: no cover - defensive, DB optional
-            logger.debug("material catalog: store unavailable (%s); using seed", exc)
+            logger.debug("material catalog: store unavailable ({}); using seed", exc)
             return None
 
     def _snapshot(self) -> dict[str, dict]:
@@ -94,7 +94,7 @@ class MaterialCatalog(MutableMapping[str, dict]):
                         if _is_blank(existing.get(field)):
                             existing[field] = value
             except Exception as exc:
-                logger.debug("material catalog: overlay failed (%s); using seed", exc)
+                logger.debug("material catalog: overlay failed ({}); using seed", exc)
                 return self._seed
             self._merged = merged
             self._generation = generation
@@ -152,7 +152,7 @@ class MaterialCatalog(MutableMapping[str, dict]):
             store.upsert(name, spec)
             return True
         except Exception as exc:
-            logger.debug("material catalog: persist(%s) failed: %s", name, exc)
+            logger.debug("material catalog: persist({}) failed: {}", name, exc)
             return False
 
     def persist_all(self, *, only_missing: bool = True) -> int:
@@ -169,7 +169,7 @@ class MaterialCatalog(MutableMapping[str, dict]):
                 store.upsert(name, spec)
                 written += 1
             except Exception as exc:
-                logger.debug("material catalog: persist_all(%s) failed: %s", name, exc)
+                logger.debug("material catalog: persist_all({}) failed: {}", name, exc)
         if written:
             self.refresh()
         return written

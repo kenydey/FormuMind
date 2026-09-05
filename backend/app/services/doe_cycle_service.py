@@ -79,7 +79,7 @@ def run_doe_cycle(requirement: Requirement) -> Dict[str, Any]:
                     "natural_factors": run.natural,
                     "ai_suggested": run.ai_suggested,
                     "infeasible": run.infeasible,
-                    "infeasible_reason": exp_dict["infeasible_reason"]
+                    "infeasible_reason": run.infeasible_reason
                 }
                 experiment_dicts.append(exp_dict)
                 

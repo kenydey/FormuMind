@@ -17,6 +17,10 @@ from app.main import app
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "false")
+    # Stream handler exits early with "未配置 LLM API Key" when no key is set.
+    # Provide a dummy key so monkeypatched LLM streams are actually exercised.
+    monkeypatch.setenv("FORMUMIND_DEEPSEEK_API_KEY", "sk-test-chat-stream")
+    monkeypatch.setenv("FORMUMIND_LLM_PROVIDER", "deepseek")
     from app.config import get_settings
 
     get_settings.cache_clear()

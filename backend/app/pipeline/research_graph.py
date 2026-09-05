@@ -110,7 +110,7 @@ def grade_evidence(topic: str, evidence: list[Evidence], settings: Settings | No
     try:
         data = llm.complete_json(_grade_prompt(topic, evidence))
     except Exception as exc:
-        logger.warning("Grade LLM failed: %s", exc)
+        logger.warning("Grade LLM failed: {}", exc)
         data = None
 
     if isinstance(data, dict) and data.get("verdict") in ("correct", "incorrect"):
@@ -214,7 +214,7 @@ def retrieve_node(
         try:
             colbert_store.bootstrap_seed_corpus(settings)
         except Exception as exc:
-            logger.warning("ColBERT bootstrap failed (backend=%s): %s", backend, exc)
+            logger.warning("ColBERT bootstrap failed (backend={}): {}", backend, exc)
     queries = _retrieval_queries(state, settings, mode)
     state["retrieval_queries"] = queries
     # A: HyDE 应用到主查询 + 前 N 个子问题（原只主查询）。

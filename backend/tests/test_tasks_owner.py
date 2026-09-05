@@ -74,7 +74,9 @@ def test_api_creates_task_with_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("FORMUMIND_MULTI_USER", "true")
     monkeypatch.setenv("FORMUMIND_API_TOKENS_JSON", '{"alice":"tok_alice","bob":"tok_bob"}')
     monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "true")
-    monkeypatch.setenv("FORMUMIND_CELERY_EAGER", "false")
+    # Keep celery_eager=True (suite default): this test asserts owner isolation on
+    # the created task handle, not broker connectivity. Forcing eager=False with
+    # no Redis on CI yields 503 before an owner can be recorded.
     get_settings.cache_clear()
 
     client = TestClient(app)

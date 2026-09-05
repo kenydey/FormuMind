@@ -245,7 +245,7 @@ def _slot_bounds(base: FormulationGenome, req: Requirement) -> dict[str, tuple[f
         for lever in resolve_levers(req, base_form):
             lever_bounds[lever.name] = (float(lever.low), float(lever.high))
     except Exception as exc:
-        logger.debug("inverse design: lever bounds unavailable (%s)", exc)
+        logger.debug("inverse design: lever bounds unavailable ({})", exc)
 
     bounds: dict[str, tuple[float, float]] = {}
     for slot in base.slots:
@@ -349,7 +349,7 @@ def _llm_seed_genomes(
     try:
         response = llm_service.recommend_formulations(req, objectives, [], n=n)
     except Exception as exc:
-        logger.debug("inverse design: LLM seeding failed (%s); continuing", exc)
+        logger.debug("inverse design: LLM seeding failed ({}); continuing", exc)
         return out
     for rec in response.formulas:
         try:
