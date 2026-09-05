@@ -34,6 +34,12 @@ function ProjectCard({
             <span className="text-[10px] uppercase tracking-widest text-accent2 font-semibold truncate">
               {project.title || "未命名项目"}
             </span>
+            <span
+              className="text-[9px] px-1 rounded bg-edge/60 text-slate-500 font-mono cursor-help"
+              title={`项目 id: ${project.id} (完整)`}
+            >
+              {project.id.slice(0, 8)}
+            </span>
             <span className="text-[10px] text-slate-600">·</span>
             <span className="text-[10px] text-slate-500 font-mono">{fmt(project.updated_at)}</span>
           </div>

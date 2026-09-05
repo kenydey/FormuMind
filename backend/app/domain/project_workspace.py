@@ -87,7 +87,15 @@ class ProjectCreateRequest(BaseModel):
 
 
 class ProjectUpdateRequest(BaseModel):
-    workspace: ProjectWorkspace
+    """Partial/presence-based workspace update (2026-09-05).
+
+    ``workspace`` 以 dict 传入并在 store 做**字段级合并**: 请求中出现的键才写入,
+    未出现字段保持 DB 现值 —— 杜绝「空 state 覆盖」事故。两个保护例外:
+    ``chat_history`` 由后端从 chat_messages 表重建镜像(权威在表);
+    ``sources`` 非空→空的覆盖会被拒绝(记 warning)。
+    """
+
+    workspace: dict[str, Any]
     title: str | None = None
 
 

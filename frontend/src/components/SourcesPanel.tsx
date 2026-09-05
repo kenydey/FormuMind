@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { api, type KBSourceItem } from "../api";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
 import SourceDetailModal from "./SourceDetailModal";
@@ -101,10 +102,28 @@ export default function SourcesPanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
   const [detailDoc, setDetailDoc] = useState<{ title: string; sourceId: string } | null>(null);
+  // 知识库文档(2026-09-05): 已导入语料列表 —— 项目视图含全局文档(project_id OR NULL),
+  // 不依赖易被覆盖的 payload.sources —— 资料可见性的权威来源。
+  const [kbDocs, setKbDocs] = useState<KBSourceItem[]>([]);
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   useEffect(() => {
     loadSourceStatus();
   }, [loadSourceStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.kbSources(activeProjectId, 200)
+      .then((res) => {
+        if (!cancelled) setKbDocs(res.sources ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setKbDocs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, kbIngest]);
 
   const searchableTypes = searchSourceTypes(sourceTypes);
   const canSearch =
@@ -327,6 +346,46 @@ export default function SourcesPanel() {
           <p className="text-[10px] text-slate-500 text-center py-1 animate-pulse">
             继续加载更多结果…
           </p>
+        )}
+        {!searchBusy && kbDocs.length > 0 && (
+          <div className="border-t border-edge/60 pt-2 mt-1">
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
+              <span>📚 知识库文档 · {kbDocs.length}</span>
+              <span className="text-slate-600 normal-case">
+                （已导入语料，可供检索）
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              {kbDocs.map((d) => (
+                <div
+                  key={d.id}
+                  className="group flex items-center gap-2 rounded px-2 py-1 text-[11px] bg-ink/30 border border-edge/40"
+                >
+                  <span className="shrink-0">{iconForSource(d.source_kind)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-slate-300 truncate" title={d.title ?? ""}>
+                      {d.title ?? d.filename}
+                    </div>
+                    <div className="text-slate-600 truncate text-[10px]">
+                      {d.source_kind ?? "doc"}
+                      {d.raw_text_chars ? ` · ${(d.raw_text_chars / 1000).toFixed(0)}k 字` : ""}
+                      {d.extraction_status ? ` · ${d.extraction_status}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDetailDoc({ title: d.title ?? d.filename ?? "资料", sourceId: d.id })
+                    }
+                    className="shrink-0 text-slate-600 hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="查看切块 / 链入知识图谱"
+                  >
+                    🔎
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
       {detailDoc && (

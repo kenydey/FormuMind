@@ -130,7 +130,18 @@ def test_project_store_unit(tmp_path):
     assert detail.id
     updated = store.update(
         detail.id,
-        ProjectWorkspace(search_query="hello", requirement=default_requirement()),
+        ProjectWorkspace(search_query="hello", requirement=default_requirement()).model_dump(mode="json"),
     )
     assert updated is not None
     assert updated.workspace.search_query == "hello"
+    # 合并语义(2026-09-05): 只传部分字段 → 其余保持; 空 workspace 不清 payload
+    assert store.update(detail.id, {}).workspace.search_query == "hello"
+    got = store.get(detail.id)
+    assert got is not None and got.workspace.search_query == "hello"
+    # 历史快照 + 回滚
+    hist = store.list_payload_history(detail.id)
+    assert len(hist) >= 2
+    latest = store.update(detail.id, {"search_query": "changed"}).workspace.search_query
+    assert latest == "changed"
+    rolled = store.rollback_payload(detail.id, 1)
+    assert rolled is not None and rolled.workspace.search_query != "changed"

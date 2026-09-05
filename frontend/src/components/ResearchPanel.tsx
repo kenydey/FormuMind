@@ -252,7 +252,7 @@ export default function ResearchPanel() {
                 </div>
               )}
               {chatSessions.map((s) => {
-                const title = chatSessionTitles[s.session_id] ?? s.session_id;
+                const title = s.title || chatSessionTitles[s.session_id] || s.session_id.slice(0, 12);
                 const active = s.session_id === activeSessionId;
                 return (
                   <div

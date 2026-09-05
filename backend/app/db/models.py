@@ -486,6 +486,57 @@ class ProjectRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class ChatSessionRow(Base):
+    """Project-scoped chat session (SQLite authority since 2026-09-05).
+
+    会话入库项目数据库: project_id 关联项目, 消息全量在 chat_messages。
+    Redis 仅作热缓存(SQLite 为权威, Redis 重启不丢会话)。
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    has_context: Mapped[bool] = mapped_column(default=False)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ChatMessageRow(Base):
+    """One chat turn, stored per-message so sessions survive payload overwrites."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    project_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+    role: Mapped[str] = mapped_column(String(16), default="user")
+    content: Mapped[str] = mapped_column(Text, default="")
+    meta_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ProjectPayloadHistoryRow(Base):
+    """Versioned payload snapshots: every update archives the previous payload.
+
+    任何覆盖事故可回滚 (GET /history + POST /rollback/{version}),
+    每项目保留最近 MAX_PAYLOAD_VERSIONS 版。
+    """
+
+    __tablename__ = "project_payload_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    cause: Mapped[str] = mapped_column(String(64), default="update")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class TaskOutbox(Base):
     """Durable outbox row for async task dispatch (idempotency foundation).
 

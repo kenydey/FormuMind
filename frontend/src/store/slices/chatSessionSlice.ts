@@ -41,7 +41,9 @@ export function createChatSessionSlice(set: SliceSet, get: SliceGet) {
 
     refreshChatSessions: async () => {
       try {
-        const res = await api.listSessions(50);
+        const { activeProjectId } = get();
+        // 2026-09-05: 会话入库项目 → 列表按项目过滤(切项目只见此项目会话)
+        const res = await api.listSessions(50, activeProjectId ?? undefined);
         set((draft) => {
           draft.chatSessions = res.sessions ?? [];
         });
@@ -134,10 +136,15 @@ export function createChatSessionSlice(set: SliceSet, get: SliceGet) {
       if (!nonEmpty) return;
       const sessionId = activeSessionId ?? nowId();
       const payload = serializeHistory(chatHistory);
+      const { activeProjectId } = get();
+      const firstUser = chatHistory.find((m) => m.role === "user")?.content ?? "";
       await api.saveSession({
         session_id: sessionId,
         history: payload,
         ttl_seconds: 7 * 86400,
+        // 2026-09-05: 会话绑定项目, 可调阅(title = 首个用户问句)
+        project_id: activeProjectId ?? undefined,
+        title: firstUser.slice(0, 80),
       }).catch(() => null);
       set((draft) => {
         draft.activeSessionId = sessionId;

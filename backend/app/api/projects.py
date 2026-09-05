@@ -53,6 +53,28 @@ def delete_project(
     return {"ok": True, **result}
 
 
+@router.get("/{project_id}/history")
+def project_payload_history(project_id: str, limit: int = Query(default=20, ge=1, le=100)) -> dict:
+    """Payload 版本审计(2026-09-05): 每次 update 前快照, 支持回滚。"""
+    detail = get_project_store().get(project_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    versions = get_project_store().list_payload_history(project_id, limit=limit)
+    return {"project_id": project_id, "versions": versions}
+
+
+@router.post("/{project_id}/rollback/{version}", response_model=ProjectDetail)
+def rollback_project(project_id: str, version: int) -> ProjectDetail:
+    """回滚 payload 到指定历史版本(当前值先快照, 再恢复目标)。"""
+    try:
+        detail = get_project_store().rollback_payload(project_id, version)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"version {version} not found")
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return detail
+
+
 @router.get("/{project_id}/db-stats")
 def project_db_stats(project_id: str) -> dict:
     """Real database counts for a project (docs / campaigns / experiments)."""

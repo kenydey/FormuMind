@@ -4,10 +4,26 @@ import { defaultConstraintsForDomain } from "../../constants/constraints";
 import { applyPatchToDraft, AUTOSAVE_MS, workspaceSlice, defaultRequirement } from "../helpers";
 import { noNotificationsDismissed } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
-import type { AppState } from "../types";
+import type { AppState, StoreWorkspaceSlice } from "../types";
 
 export function createProjectSlice(set: SliceSet, get: SliceGet) {
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // dirty 去重(2026-09-05): 内容无变化不重复 PUT(降噪 + 防空覆盖)
+  let lastSavedJson = "";
+
+  function workspaceJson(s: StoreWorkspaceSlice) {
+    const payload = buildWorkspacePayload(s);
+    return JSON.stringify({
+      sources: payload.sources,
+      chat_history: payload.chat_history,
+      requirement: payload.requirement,
+      leaderboard: payload.leaderboard,
+      research: payload.research,
+      doe_plan: payload.doe_plan,
+      active_constraints: payload.active_constraints,
+      measured: payload.measured,
+    });
+  }
 
   return {
     toggleHistory: () =>
@@ -35,6 +51,9 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       // （persist 不含 sources/chat），立即保存会把空 workspace 覆盖到后端 payload。
       if (projectLoading) return;
       if (!activeProjectId) return;
+      // dirty 去重: 内容相对上次保存无变化 → 跳过 PUT(降噪, 防空覆盖)
+      const json = workspaceJson(workspaceSlice(get()));
+      if (json === lastSavedJson) return;
       set((draft) => {
         draft.projectSaveBusy = true;
       });
@@ -42,6 +61,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
         const payload = buildWorkspacePayload(workspaceSlice(get()));
         const title = get().searchQuery.trim() || get().requirement.product_type || undefined;
         await api.updateProject(activeProjectId, payload, title);
+        lastSavedJson = json;
         const projects = await api.listProjects();
         set((draft) => {
           draft.projects = projects;
@@ -71,6 +91,17 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
         }
         const detail = await api.getProject(id);
         const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
+        // 空 payload 保护(2026-09-05): 后端 sources/chat 为空而本地镜像有值
+        // → 保留本地显示(防事故空 payload 循环覆盖), 内容以服务端后续为准。
+        const prevWs = workspaceSlice(get());
+        if (!patch.sources?.length && prevWs.sources?.length) {
+          patch.sources = prevWs.sources;
+          console.warn("[project] 后端 sources 为空, 已用本地镜像恢复显示 (project %s)", id);
+        }
+        if (!patch.chatHistory?.length && prevWs.chatHistory?.length) {
+          patch.chatHistory = prevWs.chatHistory;
+          console.warn("[project] 后端 chat_history 为空, 已用本地镜像恢复显示 (project %s)", id);
+        }
         if (!patch.activeConstraints?.length && patch.requirement) {
           patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
         }

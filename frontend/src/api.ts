@@ -504,17 +504,19 @@ export interface FactorCandidate {
   source: string;
 }
 
+export interface KBSourceItem {
+  id: string;
+  title: string;
+  filename: string;
+  source_kind: string;
+  origin_url?: string | null;
+  project_id?: string | null;
+  raw_text_chars: number;
+  extraction_status: string;
+}
+
 export interface KBSourcesResponse {
-  sources: Array<{
-    id: string;
-    title: string;
-    filename: string;
-    source_kind: string;
-    origin_url?: string | null;
-    project_id?: string | null;
-    raw_text_chars: number;
-    extraction_status: string;
-  }>;
+  sources: KBSourceItem[];
   total: number;
 }
 
@@ -1318,15 +1320,20 @@ export const api = {
     return get<ChemicalHit[]>(`/api/chemical/scaffold-substitutes?${q}`);
   },
 
-  // ── 会话记忆(多会话聊天) ──
-  listSessions: (limit = 20) =>
-    get<SessionListResponse>(`/api/session/list?limit=${limit}`),
+  // ── 会话记忆(多会话聊天; 2026-09-05: 入库项目数据库, 支持项目过滤) ──
+  listSessions: (limit = 20, projectId?: string) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (projectId) q.set("project_id", projectId);
+    return get<SessionListResponse>(`/api/session/list?${q}`);
+  },
 
   saveSession: (body: {
     session_id: string;
     history: unknown[];
     context?: Record<string, unknown>;
     ttl_seconds?: number;
+    project_id?: string;
+    title?: string;
   }) => post<{ ok: boolean }>("/api/session/save", body),
 
   loadSession: (sessionId: string) =>
@@ -2558,6 +2565,8 @@ export interface SessionSummary {
   session_id: string;
   updated_at?: string | null;
   history_count?: number;
+  title?: string | null;
+  project_id?: string | null;
 }
 
 export interface SessionListResponse {
@@ -2569,6 +2578,8 @@ export interface SessionLoadResponse {
   history: unknown[];
   context: Record<string, unknown> | null;
   updated_at?: string | null;
+  project_id?: string | null;
+  title?: string | null;
 }
 
 export interface SessionInfoResponse {
@@ -2576,6 +2587,8 @@ export interface SessionInfoResponse {
   history_count: number;
   has_context: boolean;
   updated_at?: string | null;
+  project_id?: string | null;
+  title?: string | null;
 }
 
 export interface KbChunk {

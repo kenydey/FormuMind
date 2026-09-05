@@ -127,6 +127,10 @@ export const useStore = create<AppState>()(
         workbenchAdoptedPlanId: state.workbenchAdoptedPlanId,
         workbenchObjectivesSnapshot: state.workbenchObjectivesSnapshot,
         rmseHistory: state.rmseHistory,
+        // 2026-09-05: 本地镜像(轻量) —— 刷新后立即可见, 不等 loadProject;
+        // 权威在服务端(chat_messages 表 / payload), load 成功以服务端为准。
+        sources: (state.sources ?? []).slice(0, 50),
+        chatHistory: (state.chatHistory ?? []).slice(-30),
       }),
     }
   )

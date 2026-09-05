@@ -59,6 +59,15 @@ beforeEach(() => {
   seed();
 });
 
+describe("refreshChatSessions", () => {
+  it("按当前项目过滤会话列表(2026-09-05 入库项目)", async () => {
+    mocks.listSessions.mockResolvedValue({ sessions: [], total_count: 0 });
+    useStore.setState({ activeProjectId: "proj-xyz" } as never);
+    await useStore.getState().refreshChatSessions();
+    expect(mocks.listSessions).toHaveBeenCalledWith(50, "proj-xyz");
+  });
+});
+
 describe("persistChatSession", () => {
   it("空对话不落库", async () => {
     await useStore.getState().persistChatSession();
@@ -68,11 +77,15 @@ describe("persistChatSession", () => {
 
   it("无会话时自动登记新会话并保存过滤后的 history", async () => {
     seed([...DONE_HISTORY, { role: "assistant", content: "", streaming: true }]);
+    useStore.setState({ activeProjectId: "proj-abc" } as never);
     await useStore.getState().persistChatSession();
     expect(mocks.saveSession).toHaveBeenCalledTimes(1);
     const [body] = mocks.saveSession.mock.calls[0];
     expect(body.session_id).toMatch(/^chat-\d+$/);
     expect(body.history).toHaveLength(2); // streaming 占位被剔除
+    // 2026-09-05: 会话绑定项目 + 标题 = 首问(入库可调阅)
+    expect(body.project_id).toBe("proj-abc");
+    expect(body.title).toContain("镁合金");
     expect(useStore.getState().activeSessionId).toBe(body.session_id);
     expect(useStore.getState().chatSessionTitles[body.session_id]).toContain("镁合金");
   });

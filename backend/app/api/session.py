@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
@@ -25,13 +25,17 @@ class SessionSaveRequest(BaseModel):
     session_id: str = Field(..., description="Unique session identifier")
     history: List[Dict[str, Any]] = Field(default_factory=list, description="Chat history turns")
     context: Optional[Dict[str, Any]] = Field(None, description="Additional context data")
-    ttl_seconds: int = Field(86400, ge=60, le=2592000, description="Time to live in seconds (default 24h)")
+    ttl_seconds: int = Field(86400, ge=60, le=2592000, description="Hot-cache TTL (Redis only)")
+    project_id: Optional[str] = Field(None, description="Owning project id (SQLite FK-ish link)")
+    title: Optional[str] = Field(None, description="Session display title")
 
 
 class SessionLoadResponse(BaseModel):
     history: List[Dict[str, Any]] = Field(default_factory=list)
     context: Optional[Dict[str, Any]] = None
     updated_at: Optional[str] = None
+    project_id: Optional[str] = None
+    title: Optional[str] = None
 
 
 class SessionInfoResponse(BaseModel):
@@ -39,6 +43,8 @@ class SessionInfoResponse(BaseModel):
     history_count: int
     has_context: bool
     updated_at: Optional[str] = None
+    project_id: Optional[str] = None
+    title: Optional[str] = None
 
 
 class SessionListResponse(BaseModel):
@@ -68,7 +74,9 @@ async def save_session(
             session_id=payload.session_id,
             history=payload.history,
             context=payload.context,
-            ttl_seconds=payload.ttl_seconds
+            ttl_seconds=payload.ttl_seconds,
+            project_id=payload.project_id,
+            title=payload.title,
         )
         
         if success:
@@ -110,7 +118,9 @@ async def load_session(
         return SessionLoadResponse(
             history=session_data.get("history", []),
             context=session_data.get("context"),
-            updated_at=session_data.get("updated_at")
+            updated_at=session_data.get("updated_at"),
+            project_id=session_data.get("project_id"),
+            title=session_data.get("title"),
         )
     except HTTPException:
         raise
@@ -144,13 +154,15 @@ async def get_session_info(
             )
         
         # Get additional info
-        session_data = await service.load_chat_session(session_id) or {}
+        meta = await service.session_meta(session_id) or {}
         
         return SessionInfoResponse(
             session_id=session_id,
-            history_count=history_count,
-            has_context=bool(session_data.get("context")),
-            updated_at=session_data.get("updated_at")
+            history_count=meta.get("history_count", history_count),
+            has_context=bool(meta.get("has_context")),
+            updated_at=meta.get("updated_at"),
+            project_id=meta.get("project_id"),
+            title=meta.get("title"),
         )
     except HTTPException:
         raise
@@ -200,28 +212,29 @@ async def delete_session(
 @router.get("/list", response_model=SessionListResponse)
 async def list_sessions(
     limit: int = 100,
+    project_id: Optional[str] = Query(None, description="Filter sessions by owning project"),
     service: SessionMemoryService = Depends(get_session_memory_service)
 ):
     """
-    List all active chat sessions.
+    List chat sessions, optionally scoped to a project (2026-09-05: 项目内会话).
     """
     try:
         # Initialize service if needed
         if not await service.is_available():
             await service.initialize()
         
-        session_ids = await service.list_active_sessions(limit=limit)
+        session_ids = await service.list_active_sessions(limit=limit, project_id=project_id)
         sessions_info = []
         
         for session_id in session_ids:
-            history_count = await service.get_session_history_count(session_id)
-            session_data = await service.load_chat_session(session_id) or {}
-            
+            meta = await service.session_meta(session_id) or {}
             sessions_info.append(SessionInfoResponse(
                 session_id=session_id,
-                history_count=history_count,
-                has_context=bool(session_data.get("context")),
-                updated_at=session_data.get("updated_at")
+                history_count=meta.get("history_count", 0),
+                has_context=bool(meta.get("has_context")),
+                updated_at=meta.get("updated_at"),
+                project_id=meta.get("project_id"),
+                title=meta.get("title"),
             ))
         
         return SessionListResponse(
