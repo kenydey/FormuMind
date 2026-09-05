@@ -6,6 +6,7 @@ import { defaultConstraintsForDomain } from "../constants/constraints";
 import { defaultRequirement } from "./helpers";
 import { noNotificationsDismissed } from "./notifications";
 import { createNotificationSlice } from "./slices/notificationSlice";
+import { createChatSessionSlice } from "./slices/chatSessionSlice";
 import { createProjectSlice } from "./slices/projectSlice";
 import { createRequirementSlice } from "./slices/requirementSlice";
 import { createResearchSlice } from "./slices/researchSlice";
@@ -63,6 +64,11 @@ export const useStore = create<AppState>()(
       usedSeedFallback: false,
       filterReport: null,
       chatHistory: [],
+      chatSessions: [],
+      activeSessionId: null,
+      chatSessionTitles: {},
+      chatSessionsBusy: false,
+      chatSessionsOpen: false,
       searchBusy: false,
       searchProgress: null,
       kbIngest: null,
@@ -91,6 +97,7 @@ export const useStore = create<AppState>()(
       ...createProjectSlice(set, get),
       ...createSearchSlice(set, get),
       ...createUiSlice(set, get),
+      ...createChatSessionSlice(set, get),
       ...createNotificationSlice(set, get),
     })),
     {

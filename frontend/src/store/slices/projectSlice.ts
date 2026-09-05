@@ -81,7 +81,8 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.error = null;
           draft.task = null;
           draft.busy = "idle";
-          // Run-status notices belong to the project that produced them.
+          // project 切换: 会话归零(旧会话存档在后端, 可经会话列表恢复)
+          draft.activeSessionId = null;
           draft.kbIngest = null;
           draft.searchProgress = null;
           draft.notificationsDismissed = noNotificationsDismissed();
@@ -122,6 +123,9 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.leaderboard = [];
           draft.formulationValidateWarnings = [];
           draft.chatHistory = [];
+          draft.activeSessionId = null;
+          draft.chatSessions = [];
+          draft.chatSessionTitles = {};
           draft.sources = [];
           draft.selectedSources = [];
           draft.doePlan = null;

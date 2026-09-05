@@ -410,6 +410,8 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               draft.error = null;
             });
             get().scheduleAutosave();
+            // 多会话: 每轮完成自动落库(2026-09-05 A1)
+            void get().persistChatSession();
           } else if (ev.type === "error") {
             set((draft) => {
               const m = last(draft);

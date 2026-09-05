@@ -108,6 +108,16 @@ export default function ResearchPanel() {
     deepResearchBusy,
     deepResearchStage,
     task,
+    chatSessions,
+    chatSessionsOpen,
+    activeSessionId,
+    chatSessionTitles,
+    chatSessionsBusy,
+    setChatSessionsOpen,
+    refreshChatSessions,
+    newChatSession,
+    switchChatSession,
+    deleteChatSession,
   } = useStore(
     useShallow((s) => ({
       chatHistory: s.chatHistory,
@@ -118,6 +128,16 @@ export default function ResearchPanel() {
       deepResearchBusy: s.deepResearchBusy,
       deepResearchStage: s.deepResearchStage,
       task: s.task,
+      chatSessions: s.chatSessions,
+      chatSessionsOpen: s.chatSessionsOpen,
+      activeSessionId: s.activeSessionId,
+      chatSessionTitles: s.chatSessionTitles,
+      chatSessionsBusy: s.chatSessionsBusy,
+      setChatSessionsOpen: s.setChatSessionsOpen,
+      refreshChatSessions: s.refreshChatSessions,
+      newChatSession: s.newChatSession,
+      switchChatSession: s.switchChatSession,
+      deleteChatSession: s.deleteChatSession,
     }))
   );
   const [draft, setDraft] = useState("");
@@ -185,11 +205,88 @@ export default function ResearchPanel() {
   return (
     <section className="glass rounded-xl flex flex-col h-full overflow-hidden">
       <div className="px-4 py-3 border-b border-edge shrink-0">
-        <h2 className="text-sm uppercase tracking-widest text-accent2">研究 · Research</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm uppercase tracking-widest text-accent2">研究 · Research</h2>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !chatSessionsOpen;
+                setChatSessionsOpen(next);
+                if (next) void refreshChatSessions();
+              }}
+              className={`text-[10px] rounded-full border px-2 py-0.5 transition-colors ${
+                chatSessionsOpen || activeSessionId
+                  ? "border-accent/50 bg-accent/10 text-accent"
+                  : "border-edge text-slate-400 hover:text-accent hover:border-accent/40"
+              }`}
+              title="会话存档: 新建/切换/恢复对话线程(后端 Redis 持久)"
+            >
+              💬 会话{activeSessionId ? " · " + ((chatSessionTitles[activeSessionId] ?? "").slice(0, 8) || "…") : ""}
+            </button>
+            <button
+              type="button"
+              disabled={chatBusy}
+              onClick={() => void newChatSession()}
+              className="text-[10px] rounded-full border border-edge px-2 py-0.5 text-slate-400 hover:border-accent/40 hover:text-accent disabled:opacity-40"
+              title="开始新会话(当前对话自动存档)"
+            >
+              ＋ 新建
+            </button>
+          </div>
+        </div>
         <p className="text-[11px] text-slate-500 mt-0.5">
           基于左栏已选的 {selectedCount} / {sources.length} 条资料进行问答（RAG 接地）
         </p>
       </div>
+
+      {chatSessionsOpen && (
+        <div className="shrink-0 border-b border-edge bg-ink/40 px-3 py-2">
+          {chatSessionsBusy ? (
+            <div className="text-[11px] text-slate-500 py-1">会话列表加载中…</div>
+          ) : (
+            <div className="space-y-1 max-h-40 overflow-auto">
+              {chatSessions.length === 0 && (
+                <div className="text-[11px] text-slate-500 py-1">
+                  暂无存档会话 — 每轮问答完成后自动存档; 点「＋ 新建」可开新线程。
+                </div>
+              )}
+              {chatSessions.map((s) => {
+                const title = chatSessionTitles[s.session_id] ?? s.session_id;
+                const active = s.session_id === activeSessionId;
+                return (
+                  <div
+                    key={s.session_id}
+                    className={`flex items-center gap-2 rounded px-2 py-1 text-[11px] ${
+                      active ? "bg-accent/15 text-accent" : "text-slate-300 hover:bg-ink/80"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      disabled={active || chatBusy}
+                      onClick={() => void switchChatSession(s.session_id)}
+                      className="flex-1 text-left truncate disabled:opacity-60"
+                      title={s.session_id}
+                    >
+                      {active ? "▶ " : ""}
+                      {title}
+                      <span className="text-slate-600 ml-1">({s.history_count ?? 0} 轮)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteChatSession(s.session_id)}
+                      className="text-slate-600 hover:text-rose-400"
+                      title="删除该存档(当前对话不受影响)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* All run-status notifications — search, KB build, deep research,
           errors — consolidated here from the left column. */}

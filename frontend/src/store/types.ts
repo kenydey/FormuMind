@@ -124,6 +124,12 @@ export interface AppState {
   usedSeedFallback: boolean;
   filterReport: import("../api").FilterReport | null;
   chatHistory: ChatMessage[];
+  // ── 多会话聊天(2026-09-05 A1: 会话=前端状态+后端 session 存储 API) ──
+  chatSessions: import("../api").SessionSummary[];
+  activeSessionId: string | null;
+  chatSessionTitles: Record<string, string>;
+  chatSessionsBusy: boolean;
+  chatSessionsOpen: boolean;
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;
   kbIngest: KbIngestState | null;
@@ -141,6 +147,13 @@ export interface AppState {
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;
+  // ── 多会话聊天 actions(2026-09-05 A1) ──
+  setChatSessionsOpen: (open: boolean) => void;
+  refreshChatSessions: () => Promise<void>;
+  newChatSession: () => Promise<void>;
+  switchChatSession: (sessionId: string) => Promise<void>;
+  deleteChatSession: (sessionId: string) => Promise<void>;
+  persistChatSession: () => Promise<void>;
   activeConstraints: ConstraintKey[];
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
