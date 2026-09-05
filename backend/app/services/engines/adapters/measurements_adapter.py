@@ -42,12 +42,19 @@ def records_to_dataframe(
 
 
 def surrogate_measurements_from_plan(plan, req: Requirement, objective_metric: str | None = None):
-    """Build virtual measurements from predictor for cold-start baybe init."""
+    """Build virtual measurements from predictor for cold-start baybe init.
+
+    Rows where prediction fails or a required metric is missing are *skipped*
+    rather than filled with ``0.0`` — zero surrogates poison BayBE priors.
+    """
+    import logging
+
     import pandas as pd
 
     from ....pipeline import reconstruct
     from ....services import predictor
 
+    log = logging.getLogger(__name__)
     metrics = _metrics_for_req(req)
     if objective_metric and objective_metric not in metrics:
         metrics = [objective_metric, *metrics]
@@ -58,10 +65,14 @@ def surrogate_measurements_from_plan(plan, req: Requirement, objective_metric: s
         try:
             form = reconstruct.formulation_from_factors(req, run.natural)
             props = predictor.predict(form)
-            for metric in metrics:
-                row[metric] = props.get(metric, 0.0)
-        except Exception:
-            for metric in metrics:
-                row[metric] = 0.0
+        except Exception as exc:
+            log.debug("surrogate skip run %s: predict failed (%s)", getattr(run, "id", "?"), exc)
+            continue
+        missing = [m for m in metrics if props.get(m) is None]
+        if missing:
+            log.debug("surrogate skip run %s: missing metrics %s", getattr(run, "id", "?"), missing)
+            continue
+        for metric in metrics:
+            row[metric] = props[metric]
         rows.append(row)
     return pd.DataFrame(rows)
