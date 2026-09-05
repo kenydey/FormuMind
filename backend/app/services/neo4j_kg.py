@@ -83,10 +83,22 @@ def _env_or_file(name: str, default: str = "") -> str:
 
 
 def is_enabled() -> bool:
-    """Return True if the Neo4j adapter should be used."""
+    """Return True if the Neo4j adapter should be used.
+
+    Prefers ``Settings.neo4j_enabled`` (promoted into ``os.environ`` by the
+    Settings UI / env_flags). Falls back to env-or-file for processes that
+    never load Settings.
+    """
     global _enabled
     if _enabled is not None:
         return _enabled
+    try:
+        from ..config import get_settings
+
+        _enabled = bool(get_settings().neo4j_enabled)
+        return _enabled
+    except Exception:
+        pass
     flag = _env_or_file("FORMUMIND_NEO4J_ENABLED", "false").lower()
     _enabled = flag in {"1", "true", "yes", "on"}
     return _enabled
@@ -410,13 +422,14 @@ def healthcheck() -> bool:
 
 
 def close() -> None:
-    global _driver
+    global _driver, _enabled
     if _driver is not None:
         try:
             _driver.close()
         except Exception:  # pragma: no cover
             pass
         _driver = None
+    _enabled = None
 
 
 # ---- Relationship helpers ----

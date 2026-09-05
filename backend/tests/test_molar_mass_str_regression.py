@@ -37,6 +37,21 @@ def test_parse_molar_mass_accepts_numbers_and_messy_strings():
     assert _parse_molar_mass(True) is None
 
 
+def test_ingredient_schema_coerces_unit_bearing_molar_mass():
+    """B13: Ingredient validators must accept '381.9 g/mol', not drop to None."""
+    ing = Ingredient(
+        name="epoxy",
+        role="resin",
+        weight_pct=50.0,
+        molar_mass="381.9 g/mol",
+        equivalents="~1.5 eq",
+        mmol="约 12.0 mmol",
+    )
+    assert ing.molar_mass == pytest.approx(381.9)
+    assert ing.equivalents == pytest.approx(1.5)
+    assert ing.mmol == pytest.approx(12.0)
+
+
 def test_validate_survives_str_molar_mass_and_normalises():
     # 复现 503: model_copy(update) 让 '381.9' str 逃逸进 Ingredient
     ing = _ing(name="Waterborne epoxy ester emulsion", formula="C20H28ClNO4")

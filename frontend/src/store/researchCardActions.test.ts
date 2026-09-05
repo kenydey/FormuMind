@@ -117,4 +117,21 @@ describe("saveFormulaToDoe", () => {
     expect(result).toBeNull();
     expect(mocks.saveFormulationVersion).not.toHaveBeenCalled();
   });
+
+  it("stamps client_uid on DOE baseline and leaderboard card", async () => {
+    mocks.findFormulationLineages.mockResolvedValue([]);
+    mocks.saveFormulationVersion.mockResolvedValue({ id: "nv1" });
+
+    await useStore.getState().saveFormulaToDoe(1);
+    const base = useStore.getState().requirement.active_formulation as Formulation;
+    const card = useStore.getState().leaderboard[1];
+    expect(base.client_uid).toBeTruthy();
+    expect(card.client_uid).toBe(base.client_uid);
+  });
+
+  it("lineage lookup failure surfaces (does not open a silent new chain)", async () => {
+    mocks.findFormulationLineages.mockRejectedValue(new Error("network down"));
+    await expect(useStore.getState().saveFormulaToDoe(0)).rejects.toThrow(/network down/);
+    expect(mocks.saveFormulationVersion).not.toHaveBeenCalled();
+  });
 });

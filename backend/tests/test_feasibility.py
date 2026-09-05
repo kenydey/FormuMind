@@ -137,8 +137,8 @@ def test_empty_genome_is_infeasible():
     assert not genome_is_feasible(genome, _waterborne_req())
 
 
-def test_gate_degrades_open_when_the_reviewer_breaks(monkeypatch):
-    """A broken reviewer must not silently empty the search space."""
+def test_gate_fails_closed_when_the_reviewer_breaks(monkeypatch):
+    """A broken reviewer must not let chemistry through (fail-closed)."""
     import app.agents.supervisor as supervisor_mod
 
     class _Broken:
@@ -149,7 +149,9 @@ def test_gate_degrades_open_when_the_reviewer_breaks(monkeypatch):
     verdict = genome_is_feasible(
         _waterborne_genome("Desmodur BL 3175"), _waterborne_req()
     )
-    assert verdict.feasible
+    assert not verdict.feasible
+    assert verdict.status == "invalid"
+    assert any("unavailable" in r for r in verdict.reasons)
 
 
 # ── batch filtering ──────────────────────────────────────────────────────────

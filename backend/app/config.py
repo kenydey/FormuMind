@@ -23,8 +23,7 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_API_TOKENS_JSON",
     # Test-only lifespan fast-path flag (see app/main.py::_skip_lifespan_bootstrap).
     "FORMUMIND_SKIP_LIFESPAN_BOOTSTRAP",
-    # Optional Neo4j graph-store adapter (sibling to SQLite KG).
-    "FORMUMIND_NEO4J_ENABLED",
+    # Optional Neo4j connection (enabled flag is a Settings field / env-flag).
     "FORMUMIND_NEO4J_URI",
     "FORMUMIND_NEO4J_USER",
     "FORMUMIND_NEO4J_PASSWORD",
@@ -443,6 +442,11 @@ class Settings(BaseSettings):
     loop_convergence_enabled: bool = True
     loop_convergence_eps: float = 0.01
     loop_convergence_patience: int = 2
+
+    # Optional Neo4j graph-store adapter (sibling to SQLite KG). Must be a
+    # Settings field so Settings UI / env_flags promote it into os.environ —
+    # previously a file-only FORMUMIND_NEO4J_ENABLED was a dead key.
+    neo4j_enabled: bool = False
 
     # Knowledge graph P0 — entity index + enumerative RAG (default off for CI).
     kg_enabled: bool = True

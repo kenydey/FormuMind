@@ -3,6 +3,7 @@ research → recommend → DOE → simulate → optimize pipeline.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
@@ -169,18 +170,20 @@ class Ingredient(BaseModel):
         """Normalize numeric fields that may arrive as strings.
 
         LLM/Datalab responses sometimes carry numbers as strings (e.g.
-        molar_mass="35.046"). Pydantic would accept the value but emit
-        PydanticSerializationUnexpectedValue warnings on every dump, and
-        Celery's logger then fails to format that warning (a stray ``%`` in
-        the message) producing a spurious "Logging error" traceback.
-        Coerce here instead so the field is a real float from the start.
+        molar_mass="35.046" or "381.9 g/mol"). Bare ``float(...)`` drops
+        unit-bearing values to None; extract the leading number instead so
+        gate/chemistry parsers see a real float.
         """
         if v is None or isinstance(v, (int, float)):
             return v
-        try:
-            return float(str(v).strip())
-        except (TypeError, ValueError):
+        s = str(v).strip().replace(",", "").replace("约", "").replace("~", "")
+        if not s:
             return None
+        try:
+            return float(s)
+        except (TypeError, ValueError):
+            m = re.search(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", s)
+            return float(m.group()) if m else None
 
     @model_validator(mode="after")
     def _sync_formula_fields(self) -> Ingredient:

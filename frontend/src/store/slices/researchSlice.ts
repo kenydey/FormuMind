@@ -70,8 +70,9 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
     saveFormulaToDoe: async (formulaIdx) => {
       const form = get().leaderboard[formulaIdx];
       if (!form) return null;
-      // ① 版本库持久化: 同名已存在链则追加版本, 否则开新链(对齐 VersionHistoryModal 语义)
-      const hits = await api.findFormulationLineages(form.name, form.domain, 1).catch(() => []);
+      // Lineage lookup errors must surface — swallowing them as "no lineage"
+      // silently opens a new version chain instead of appending.
+      const hits = await api.findFormulationLineages(form.name, form.domain, 1);
       const lineage = hits[0];
       const parentId = lineage?.versions.length
         ? lineage.versions[lineage.versions.length - 1].id
@@ -83,11 +84,23 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         change_summary: "从推荐列表保存为 DOE 基准配方",
         created_by: "ui",
       });
-      // ② 设为 DOE 基准配方(结构化拷贝, 避免与 leaderboard 卡片引用别名 —
-      //    后续卡片编辑不应悄悄改动已保存的基准)
-      const snapshot = JSON.parse(JSON.stringify(form)) as Formulation;
+      // Stamp a stable client_uid on both the DOE baseline snapshot and the
+      // leaderboard card so the 「基准」 badge matches by identity, not name
+      // (duplicate names would otherwise all light up).
+      const clientUid =
+        form.client_uid ??
+        (typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `doe-${Date.now()}-${formulaIdx}`);
+      const snapshot = {
+        ...(JSON.parse(JSON.stringify(form)) as Formulation),
+        client_uid: clientUid,
+      };
       set((draft) => {
         draft.requirement.active_formulation = snapshot;
+        if (draft.leaderboard[formulaIdx]) {
+          draft.leaderboard[formulaIdx].client_uid = clientUid;
+        }
       });
       get().scheduleAutosave();
       return { version_id: saved.id };
