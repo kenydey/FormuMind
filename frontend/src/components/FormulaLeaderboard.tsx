@@ -76,6 +76,14 @@ function FormulaCard({
   objectiveMetrics,
   onIngredientChange,
   validateWarnings,
+  editing,
+  isDoeBase,
+  saveBusy,
+  confirmRemove,
+  onToggleEdit,
+  onAiModify,
+  onRemove,
+  onSave,
 }: {
   form: Formulation;
   rank: number;
@@ -89,6 +97,14 @@ function FormulaCard({
     patch: Partial<import("../api").Ingredient>
   ) => void;
   validateWarnings?: string[];
+  editing?: boolean;
+  isDoeBase?: boolean;
+  saveBusy?: boolean;
+  confirmRemove?: boolean;
+  onToggleEdit?: (idx: number) => void;
+  onAiModify?: (idx: number) => void;
+  onRemove?: (idx: number) => void;
+  onSave?: (idx: number) => void;
 }) {
   const [open, setOpen] = useState(rank === 1);
   const [ipOpen, setIpOpen] = useState(false);
@@ -131,6 +147,19 @@ function FormulaCard({
           {form.source === "manual" && (
             <span className="text-[9px] px-1 py-0.5 rounded border border-slate-600 text-slate-400 shrink-0">
               手动
+            </span>
+          )}
+          {isDoeBase && (
+            <span
+              className="text-[9px] px-1 py-0.5 rounded border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 shrink-0"
+              title="当前 DOE 基准配方 — 生成 DOE 时因子将围绕此配方的实际用量设计"
+            >
+              DOE 基准
+            </span>
+          )}
+          {editing && (
+            <span className="text-[9px] px-1 py-0.5 rounded border border-accent/60 bg-accent/10 text-accent shrink-0">
+              编辑中
             </span>
           )}
         </button>
@@ -201,10 +230,15 @@ function FormulaCard({
           </div>
           <RecommendedFormulaTable
             ingredients={form.ingredients}
-            editable={!!onIngredientChange}
+            editable={!!onIngredientChange && !!editing}
             onIngredientChange={(ingIdx, patch) => onIngredientChange?.(formulaIdx, ingIdx, patch)}
             validateWarnings={validateWarnings}
           />
+          {editing && (
+            <div className="text-[10px] text-slate-500 -mt-1">
+              编辑模式：直接修改组分后点「✓ 完成」退出(修改仅影响当前卡片)
+            </div>
+          )}
           {form.warnings.length > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
@@ -230,6 +264,69 @@ function FormulaCard({
               )}
             </div>
           )}
+          <div className="flex gap-1 mt-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleEdit?.(formulaIdx);
+              }}
+              className={`flex-1 text-[10px] border rounded px-2 py-1 ${
+                editing
+                  ? "border-accent bg-accent/15 text-accent"
+                  : "border-edge text-slate-400 hover:text-accent hover:border-accent/50"
+              }`}
+              title={editing ? "完成编辑(退出编辑模式)" : "进入编辑模式, 手动修改组分"}
+            >
+              {editing ? "✓ 完成" : "✎ 修改"}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAiModify?.(formulaIdx);
+              }}
+              className="flex-1 text-[10px] border border-accent2/50 text-accent2 rounded px-2 py-1 hover:bg-accent2/10"
+              title="仅以此配方为基准, AI 按你的要求生成修改变体(追加为新卡片)"
+            >
+              🤖 AI 修改
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove?.(formulaIdx);
+              }}
+              className={`flex-1 text-[10px] border rounded px-2 py-1 ${
+                confirmRemove
+                  ? "border-red-400 bg-red-500/20 text-red-200"
+                  : "border-red-500/40 text-red-400 hover:bg-red-500/10"
+              }`}
+              title={
+                confirmRemove
+                  ? "再点一次确认删除该配方"
+                  : "从当前推荐列表删除该配方(不删除版本库中已保存的历史)"
+              }
+            >
+              {confirmRemove ? "确认删除?" : "🗑 删除"}
+            </button>
+            <button
+              type="button"
+              disabled={saveBusy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSave?.(formulaIdx);
+              }}
+              className={`flex-1 text-[10px] border rounded px-2 py-1 disabled:opacity-50 ${
+                isDoeBase
+                  ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-300"
+                  : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+              }`}
+              title="保存到版本库并设为 DOE 基准配方(因子将围绕此配方设计)"
+            >
+              {saveBusy ? "保存中…" : isDoeBase ? "✓ DOE 基准" : "💾 保存 DOE"}
+            </button>
+          </div>
           <div className="flex gap-1 mt-1">
             <button
               onClick={(e) => { e.stopPropagation(); setIpOpen(true); }}
@@ -338,6 +435,8 @@ export default function FormulaLeaderboard() {
     addManualFormula,
     runAiModifyFormula,
     updateFormulaIngredient,
+    removeFormula,
+    saveFormulaToDoe,
     formulationBusy,
     formulationValidateWarnings,
   } = useStore(
@@ -348,6 +447,8 @@ export default function FormulaLeaderboard() {
       addManualFormula: s.addManualFormula,
       runAiModifyFormula: s.runAiModifyFormula,
       updateFormulaIngredient: s.updateFormulaIngredient,
+      removeFormula: s.removeFormula,
+      saveFormulaToDoe: s.saveFormulaToDoe,
       formulationBusy: s.formulationBusy,
       formulationValidateWarnings: s.formulationValidateWarnings,
     }))
@@ -356,8 +457,29 @@ export default function FormulaLeaderboard() {
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const [showAiPrompt, setShowAiPrompt] = useState(false);
   const [aiModifyPrompt, setAiModifyPrompt] = useState("");
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [removeConfirmIndex, setRemoveConfirmIndex] = useState<number | null>(null);
+  const [saveBusyIndex, setSaveBusyIndex] = useState<number | null>(null);
+  // AI 修改基准: null=leaderboard 级(默认 #1), 数字=仅以该卡为基准
+  const [aiTargetIdx, setAiTargetIdx] = useState<number | null>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
+  const doeBaseName = requirement.active_formulation?.name ?? null;
+
+  async function handleSaveToDoe(idx: number) {
+    setSaveBusyIndex(idx);
+    try {
+      await saveFormulaToDoe(idx);
+    } catch (e) {
+      useStore.setState({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSaveBusyIndex(null);
+    }
+  }
+
+  function toggleRemoveConfirm(idx: number) {
+    setRemoveConfirmIndex((cur) => (cur === idx ? null : idx));
+  }
 
   function switchToCard(index: number) {
     setViewMode("cards");
@@ -477,6 +599,25 @@ export default function FormulaLeaderboard() {
               objectiveMetrics={objectiveMetrics}
               onIngredientChange={updateFormulaIngredient}
               validateWarnings={formulationValidateWarnings}
+              editing={editIndex === i}
+              isDoeBase={f.name === doeBaseName}
+              saveBusy={saveBusyIndex === i}
+              confirmRemove={removeConfirmIndex === i}
+              onToggleEdit={(idx) => setEditIndex((cur) => (cur === idx ? null : idx))}
+              onAiModify={(idx) => {
+                setAiTargetIdx(idx);
+                setShowAiPrompt(true);
+              }}
+              onRemove={(idx) => {
+                if (removeConfirmIndex === idx) {
+                  removeFormula(idx);
+                  setRemoveConfirmIndex(null);
+                  if (editIndex === idx) setEditIndex(null);
+                } else {
+                  toggleRemoveConfirm(idx);
+                }
+              }}
+              onSave={handleSaveToDoe}
             />
           ))}
         </div>
@@ -501,7 +642,16 @@ export default function FormulaLeaderboard() {
       {showAiPrompt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" data-testid="modal-ai-modify">
           <div className="bg-panel border border-edge rounded-xl p-6 w-[min(500px,92vw)]">
-            <h3 className="text-sm mb-3 text-slate-200">AI 配方修改要求</h3>
+            <h3 className="text-sm mb-1 text-slate-200">
+              {aiTargetIdx != null
+                ? `AI 修改 · 基准: #${aiTargetIdx + 1} ${leaderboard[aiTargetIdx]?.name ?? ""}`
+                : "AI 配方修改要求"}
+            </h3>
+            {aiTargetIdx != null && (
+              <p className="text-[10px] text-slate-500 mb-2">
+                将仅以 #{(aiTargetIdx ?? 0) + 1} 配方为基准生成修改变体(原配方保留, 变体追加为新卡片)
+              </p>
+            )}
             <textarea
               rows={4}
               value={aiModifyPrompt}
@@ -515,6 +665,7 @@ export default function FormulaLeaderboard() {
                 onClick={() => {
                   setShowAiPrompt(false);
                   setAiModifyPrompt("");
+                  setAiTargetIdx(null);
                 }}
                 className="border border-edge rounded px-4 py-1.5 text-sm text-slate-400"
               >
@@ -524,9 +675,11 @@ export default function FormulaLeaderboard() {
                 type="button"
                 disabled={!aiModifyPrompt.trim() || formulationBusy}
                 onClick={() => {
-                  void runAiModifyFormula(aiModifyPrompt.trim(), 0).then(() => {
+                  const target = aiTargetIdx ?? 0;
+                  void runAiModifyFormula(aiModifyPrompt.trim(), target).then(() => {
                     setShowAiPrompt(false);
                     setAiModifyPrompt("");
+                    setAiTargetIdx(null);
                   });
                 }}
                 className="bg-accent text-ink rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-40"
