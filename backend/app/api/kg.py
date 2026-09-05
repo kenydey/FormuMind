@@ -40,14 +40,35 @@ class KGRebuildBody(BaseModel):
     project_id: str | None = None
 
 
-@router.get("/stats", response_model=KGStats, include_in_schema=False)
+@router.get("/stats", response_model=KGStats)
 def stats() -> KGStats:
+    """KG corpus counters + relation-layer health (B10).
+
+    ``relation_layer_empty`` is true when entities exist but ``kb_entity_links``
+    is still 0 — the failure mode that left production with 715 entities /
+    70k mentions and zero usable relations. Surface it so Settings can warn
+    and operators know to run ``POST /api/kg/relations/rebuild``.
+    """
     from ..db.entity_store import get_entity_store
 
     enabled = kg_enabled()
     if not enabled:
         return KGStats(enabled=False)
-    return KGStats(enabled=True, **get_entity_store().stats())
+    raw = get_entity_store().stats()
+    relation_layer_empty = bool(raw.get("entities", 0) > 0 and raw.get("links", 0) == 0)
+    warnings: list[str] = []
+    if relation_layer_empty:
+        warnings.append(
+            "关系层为空：已有实体但 kb_entity_links=0。"
+            "请开启「入库关系提取」或执行「补语义关系」"
+            "（POST /api/kg/relations/rebuild）。"
+        )
+    return KGStats(
+        enabled=True,
+        relation_layer_empty=relation_layer_empty,
+        warnings=warnings,
+        **raw,
+    )
 
 
 @router.get("/feedback/stats")
