@@ -1352,9 +1352,26 @@ export const api = {
   kgLinkSource: (sourceId: string) =>
     post<KgLinkReport>(`/api/kg/link-source/${sourceId}`, {}),
 
+  kgRelationsRebuild: (sourceId?: string) =>
+    post<{ task_id: string; status_url: string }>("/api/kg/relations/rebuild", {
+      source_id: sourceId ?? null,
+    }),
+
   // ── Neo4j 图谱适配层 ──
   neo4jStats: () =>
     get<Neo4jStats>("/api/kg/neo4j/stats"),
+
+  neo4jCompounds: (q = "", limit = 50) => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    qs.set("limit", String(limit));
+    return get<Neo4jCompound[]>(`/api/kg/neo4j/compounds?${qs}`);
+  },
+
+  neo4jFormulations: (limit = 50) => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    return get<Neo4jFormulation[]>(`/api/kg/neo4j/formulations?${qs}`);
+  },
 
   neo4jEnsureSchema: () =>
     post<{ ok: boolean }>("/api/kg/neo4j/schema/ensure", {}),
@@ -2594,6 +2611,7 @@ export interface KgLinkReport {
 }
 
 export interface Neo4jStats {
+  enabled?: boolean;
   adapter_status?: string;
   reachable?: boolean;
   nodes?: number;
@@ -2609,4 +2627,21 @@ export interface Neo4jHit {
   smiles?: string | null;
   similarity?: number | null;
   spec?: Record<string, unknown>;
+}
+
+export interface Neo4jCompound {
+  uid: string;
+  name?: string | null;
+  smiles?: string | null;
+  cas_number?: string | null;
+  molecular_weight?: number | null;
+  supplier?: string | null;
+}
+
+export interface Neo4jFormulation {
+  uid: string;
+  name?: string | null;
+  target_property?: string | null;
+  target_value?: number | null;
+  status?: string | null;
 }

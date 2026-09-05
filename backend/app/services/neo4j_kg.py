@@ -41,12 +41,53 @@ _driver: Optional["Driver"] = None
 _enabled: Optional[bool] = None  # cached result of env check
 
 
+def _flag_from_env_file() -> str:
+    """Fallback to the canonical env file (resolve_env_path) when the process
+    env lacks the flag. Only UI-registry keys get loaded into os.environ by
+    reload_settings, so file-only keys like FORMUMIND_NEO4J_ENABLED were
+    silently dead (2026-09-05: neo4j container ran for days while
+    is_enabled()==False)."""
+    try:
+        from pathlib import Path
+
+        from ..config import resolve_env_path
+
+        for line in Path(resolve_env_path()).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("FORMUMIND_NEO4J_ENABLED="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'").lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _env_or_file(name: str, default: str = "") -> str:
+    """os.environ first, then the canonical env file — same rationale as
+    _flag_from_env_file (file-only keys never reach os.environ)."""
+    val = (os.getenv(name, "") or "").strip()
+    if val:
+        return val
+    try:
+        from pathlib import Path
+
+        from ..config import resolve_env_path
+
+        prefix = name + "="
+        for line in Path(resolve_env_path()).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(prefix):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return default
+
+
 def is_enabled() -> bool:
     """Return True if the Neo4j adapter should be used."""
     global _enabled
     if _enabled is not None:
         return _enabled
-    flag = (os.getenv("FORMUMIND_NEO4J_ENABLED", "false") or "").strip().lower()
+    flag = _env_or_file("FORMUMIND_NEO4J_ENABLED", "false").lower()
     _enabled = flag in {"1", "true", "yes", "on"}
     return _enabled
 
@@ -61,9 +102,9 @@ def _get_driver() -> Optional["Driver"]:
         return None
     if _driver is not None:
         return _driver
-    uri = os.getenv("FORMUMIND_NEO4J_URI", "bolt://kg:7687")
-    user = os.getenv("FORMUMIND_NEO4J_USER", "neo4j")
-    password = os.getenv("FORMUMIND_NEO4J_PASSWORD", "formumind123")
+    uri = _env_or_file("FORMUMIND_NEO4J_URI", "bolt://kg:7687")
+    user = _env_or_file("FORMUMIND_NEO4J_USER", "neo4j")
+    password = _env_or_file("FORMUMIND_NEO4J_PASSWORD", "formumind123")
     try:
         _driver = GraphDatabase.driver(uri, auth=(user, password))
         # Verify reachability once, but don't hard-fail.
@@ -273,15 +314,67 @@ def get_compounds_for_formulation(formulation_uid: str) -> List[Dict[str, Any]]:
         with drv.session() as s:
             rows = s.run(
                 """
-                MATCH (f:Formulation {uid: $uid})-[r:CONTAINS]->(c:Compound)
-                RETURN c.uid AS uid, c.name AS name, c.cas_number AS cas_number, r.ratio AS ratio
-                ORDER BY r.ratio DESC
+                MATCH (f:Formulation {uid: $uid})-[:CONTAINS]->(c:Compound)
+                RETURN c.uid AS uid, c.name AS name, c.smiles AS smiles,
+                       c.cas_number AS cas_number, c.molecular_weight AS molecular_weight
+                ORDER BY c.name
                 """,
                 uid=formulation_uid,
             ).data()
         return list(rows)
     except Exception as e:
         logger.warning("get_compounds_for_formulation failed: %s", e)
+        return []
+
+
+def list_compounds(query: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+    """List/search compounds by uid/name/cas/smiles prefix (browse panel)."""
+    drv = _get_driver()
+    if drv is None:
+        return []
+    try:
+        q = (query or "").strip()
+        cypher = """
+            MATCH (c:Compound)
+            WHERE $q = "" OR toLower(c.name) CONTAINS toLower($q)
+               OR toLower(coalesce(c.uid, "")) CONTAINS toLower($q)
+               OR toLower(coalesce(c.cas_number, "")) CONTAINS toLower($q)
+            RETURN c.uid AS uid, c.name AS name, c.smiles AS smiles,
+                   c.cas_number AS cas_number, c.molecular_weight AS molecular_weight,
+                   coalesce(c.supplier, "") AS supplier
+            ORDER BY c.name
+            LIMIT $limit
+        """
+        with drv.session() as s:
+            rows = s.run(cypher, q=q, limit=int(limit)).data()
+        return list(rows)
+    except Exception as e:
+        logger.warning("list_compounds failed: %s", e)
+        return []
+
+
+def list_formulations(limit: int = 50) -> List[Dict[str, Any]]:
+    """List formulations (browse panel)."""
+    drv = _get_driver()
+    if drv is None:
+        return []
+    try:
+        with drv.session() as s:
+            rows = s.run(
+                """
+                MATCH (f:Formulation)
+                RETURN f.uid AS uid, f.name AS name,
+                       coalesce(f.target_property, "") AS target_property,
+                       coalesce(f.target_value, 0) AS target_value,
+                       coalesce(f.status, "") AS status
+                ORDER BY f.name
+                LIMIT $limit
+                """,
+                limit=int(limit),
+            ).data()
+        return list(rows)
+    except Exception as e:
+        logger.warning("list_formulations failed: %s", e)
         return []
 
 

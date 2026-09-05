@@ -66,6 +66,23 @@ class CompoundStats(BaseModel):
     co_count: int
 
 
+class CompoundBrowseView(BaseModel):
+    uid: str
+    name: Optional[str] = None
+    smiles: Optional[str] = None
+    cas_number: Optional[str] = None
+    molecular_weight: Optional[float] = None
+    supplier: Optional[str] = None
+
+
+class FormulationBrowseView(BaseModel):
+    uid: str
+    name: Optional[str] = None
+    target_property: Optional[str] = None
+    target_value: Optional[float] = None
+    status: Optional[str] = None
+
+
 def _ensure() -> None:
     """Raise 503 if Neo4j adapter is disabled or unreachable."""
     if not neo4j_kg.is_enabled():
@@ -157,6 +174,25 @@ def link_similarity(
 def formulation_compounds(form_uid: str) -> List[Dict[str, Any]]:
     _ensure()
     return neo4j_kg.get_compounds_for_formulation(form_uid)
+
+
+@router.get("/compounds", response_model=List[CompoundBrowseView])
+def browse_compounds(
+    q: str = Query(default="", description="按 uid/名称/CAS 子串过滤"),
+    limit: int = Query(50, ge=1, le=200),
+) -> List[Dict[str, Any]]:
+    """化合物浏览/搜索(Neo4j 图谱面板, 2026-09-05)."""
+    _ensure()
+    return neo4j_kg.list_compounds(query=q, limit=limit)
+
+
+@router.get("/formulations", response_model=List[FormulationBrowseView])
+def browse_formulations(
+    limit: int = Query(50, ge=1, le=200),
+) -> List[Dict[str, Any]]:
+    """配方浏览(Neo4j 图谱面板, 2026-09-05)."""
+    _ensure()
+    return neo4j_kg.list_formulations(limit=limit)
 
 
 @router.get(

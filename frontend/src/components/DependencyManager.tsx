@@ -189,16 +189,92 @@ function KbDiagnosticsCard() {
     }
   }
 
+  const [relBusy, setRelBusy] = useState(false);
+
+  async function runRelationsRebuild() {
+    const all = window.confirm(
+      "补语义关系提取(实体已在库, 只重跑关系)。全库执行可能 10-60 分钟(LLM 逐句); 建议先对单条资料测试。确定全库执行?"
+    );
+    if (!all) return;
+    setRelBusy(true);
+    setReport(null);
+    try {
+      const r = await api.kgRelationsRebuild(undefined);
+      setReport(`关系重建已后台启动 (task ${r.task_id.slice(0, 8)}…) — 可稍后刷新本卡查看产出`);
+      setRelTaskId(r.task_id);
+    } catch (e) {
+      setReport(`启动失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRelBusy(false);
+    }
+  }
+  const [relTaskId, setRelTaskId] = useState<string | null>(null);
+  const [relStatus, setRelStatus] = useState<string | null>(null);
+
+  async function refreshRelStatus() {
+    if (!relTaskId) return;
+    try {
+      const t = await api.task(relTaskId);
+      setRelStatus(`${t.state}: ${t.message ?? ""}`.slice(0, 120));
+    } catch {
+      setRelStatus("状态查询失败");
+    }
+  }
+
   async function runNeo4j() {
     setNeoBusy(true);
     setReport(null);
     try {
-      setNeo4j(await api.neo4jStats());
+      const stats = await api.neo4jStats();
+      setNeo4j(stats);
+      setNeo4jOpen((stats.reachable !== false && stats.enabled !== false) || neo4jOpen);
+      if (stats.reachable !== false) void searchNeo4j("");
     } catch (e) {
       setReport(`Neo4j 不可达: ${e instanceof Error ? e.message : String(e)}`);
       setNeo4j(null);
     } finally {
       setNeoBusy(false);
+    }
+  }
+
+  const [neo4jOpen, setNeo4jOpen] = useState(false);
+  const [neoQuery, setNeoQuery] = useState("");
+  const [neoCompounds, setNeoCompounds] = useState<import("../api").Neo4jCompound[] | null>(null);
+  const [neoFormulations, setNeoFormulations] = useState<import("../api").Neo4jFormulation[] | null>(null);
+  const [neoBusyBrowse, setNeoBusyBrowse] = useState(false);
+  const [neoSimilar, setNeoSimilar] = useState<Record<string, unknown[]>>({});
+  const [neoFormComps, setNeoFormComps] = useState<Record<string, unknown[]>>({});
+
+  async function searchNeo4j(q: string) {
+    setNeoBusyBrowse(true);
+    try {
+      const [comps, forms] = await Promise.all([api.neo4jCompounds(q, 80), api.neo4jFormulations(50)]);
+      setNeoCompounds(comps);
+      setNeoFormulations(forms);
+    } catch (e) {
+      setReport(`Neo4j 浏览失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setNeoBusyBrowse(false);
+    }
+  }
+
+  async function loadSimilar(uid: string) {
+    if (neoSimilar[uid]) return;
+    try {
+      const rows = await api.neo4jCompoundSimilar(uid);
+      setNeoSimilar((m) => ({ ...m, [uid]: rows }));
+    } catch {
+      /* 静默 */
+    }
+  }
+
+  async function loadFormulationCompounds(uid: string) {
+    if (neoFormComps[uid]) return;
+    try {
+      const rows = await api.neo4jFormulationCompounds(uid);
+      setNeoFormComps((m) => ({ ...m, [uid]: rows }));
+    } catch {
+      /* 静默 */
     }
   }
 
@@ -224,6 +300,25 @@ function KbDiagnosticsCard() {
         >
           {rebuildBusy ? "重建中…" : "♻ 重建知识图谱"}
         </button>
+        <button
+          type="button"
+          disabled={relBusy}
+          onClick={() => void runRelationsRebuild()}
+          className="text-[10px] border border-edge rounded px-2 py-1 text-slate-300 hover:border-accent/40 hover:text-accent disabled:opacity-50"
+          title="实体/提及已在库, 异步补语义关系(LLM 慢, 全库 10-60 分钟)"
+        >
+          {relBusy ? "启动中…" : "🕸 补语义关系"}
+        </button>
+        {relTaskId && (
+          <button
+            type="button"
+            onClick={() => void refreshRelStatus()}
+            className="text-[10px] border border-edge rounded px-2 py-1 text-slate-500 hover:text-slate-300"
+            title={relTaskId}
+          >
+            {relStatus ? `状态: ${relStatus}` : "查状态"}
+          </button>
+        )}
         <button
           type="button"
           disabled={neoBusy}
@@ -253,6 +348,100 @@ function KbDiagnosticsCard() {
           {neo4j.compounds != null && ` · ${neo4j.compounds} 化合物`}
           {neo4j.formulations != null && ` · ${neo4j.formulations} 配方`}
           <span className="text-slate-600"> (适配层, 与 SQLite 图谱共存)</span>
+        </div>
+      )}
+      {neo4j?.reachable !== false && neo4j?.enabled !== false && neo4jOpen && (
+        <div className="border border-edge rounded p-2 mb-1 space-y-2">
+          <div className="flex gap-2">
+            <input
+              value={neoQuery}
+              onChange={(e) => setNeoQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void searchNeo4j(neoQuery.trim());
+              }}
+              placeholder="搜索化合物(名称/CAS/uid)…"
+              className="flex-1 bg-ink border border-edge rounded px-2 py-1 text-[11px]"
+            />
+            <button
+              type="button"
+              disabled={neoBusyBrowse}
+              onClick={() => void searchNeo4j(neoQuery.trim())}
+              className="text-[10px] border border-accent/50 text-accent rounded px-2 py-1 disabled:opacity-50"
+            >
+              {neoBusyBrowse ? "…" : "搜索"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setNeo4jOpen(false)}
+              className="text-[10px] text-slate-500 rounded px-1"
+              title="收起"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="max-h-56 overflow-auto space-y-1">
+            {(neoCompounds ?? []).map((c) => (
+              <div key={c.uid} className="border border-edge/60 rounded px-2 py-1">
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-slate-200 truncate flex-1" title={c.uid}>
+                    {c.name ?? c.uid}
+                  </span>
+                  {c.cas_number && <span className="font-mono text-slate-500">{c.cas_number}</span>}
+                  {c.molecular_weight != null && (
+                    <span className="font-mono text-slate-500">{c.molecular_weight} g/mol</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void loadSimilar(c.uid)}
+                    className="text-[9px] text-accent2 hover:underline shrink-0"
+                    title="同配方共现化合物(图路径)"
+                  >
+                    相似▾
+                  </button>
+                </div>
+                {c.smiles && <div className="text-[9px] font-mono text-slate-600 truncate">{c.smiles}</div>}
+                {neoSimilar[c.uid] && (
+                  <div className="mt-1 pl-2 border-l border-edge">
+                    {(neoSimilar[c.uid] as Array<{ uid: string; name?: string; co_count?: number }>).map((s) => (
+                      <div key={s.uid} className="text-[10px] text-slate-400 flex gap-1">
+                        <span className="truncate flex-1">↳ {s.name ?? s.uid}</span>
+                        {s.co_count != null && <span className="text-slate-600">×{s.co_count}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {neoCompounds && neoCompounds.length === 0 && (
+              <div className="text-[10px] text-slate-500 py-1">无匹配化合物</div>
+            )}
+            {!neoCompounds && (
+              <div className="text-[10px] text-slate-500 py-1">点「🕸 Neo4j 状态」加载图谱数据…</div>
+            )}
+          </div>
+          {neoFormulations && neoFormulations.length > 0 && (
+            <div className="border-t border-edge pt-1">
+              <div className="text-[10px] text-slate-500 mb-1">配方(图库)</div>
+              <div className="max-h-28 overflow-auto space-y-1">
+                {neoFormulations.map((f) => (
+                  <div key={f.uid} className="flex items-center gap-2 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => void loadFormulationCompounds(f.uid)}
+                      className="text-slate-300 truncate flex-1 hover:text-accent text-left"
+                      title={f.uid}
+                    >
+                      {f.name ?? f.uid}
+                      {f.target_property ? ` · ${f.target_property}` : ""}
+                    </button>
+                    {neoFormComps[f.uid] && (
+                      <span className="text-slate-600">{(neoFormComps[f.uid] as unknown[]).length} 组分</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {report && <div className="text-[11px] text-slate-300 rounded px-2 py-1.5 mb-1 border border-edge">{report}</div>}
