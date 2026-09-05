@@ -160,6 +160,29 @@ def rebuild(body: KGRebuildBody | None = None) -> KGRebuildReport:
         raise HTTPException(status_code=500, detail="操作失败") from exc
 
 
+class KgRelationsRebuildBody(BaseModel):
+    """关系重建请求: source_id 限定单源(None=全部含提及的源, LLM 慢)."""
+
+    source_id: str | None = None
+
+
+@router.post("/relations/rebuild")
+def rebuild_relations_api(body: KgRelationsRebuildBody | None = None):
+    """异步补语义关系(2026-09-05): 实体/提及已在库, 只重跑关系提取。
+
+    关系层(LLM)可能数十秒~数十分钟, 走 celery 异步 + 202 accepted,
+    前端轮询 GET /api/tasks/{task_id}。同步 CLI 等价:
+    python -m app.services.kg.rebuild_relations --all
+    """
+    if not kg_enabled():
+        raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
+    from ..worker.tasks import run_kg_relations_rebuild
+    from ._dispatch import submit
+
+    payload = {"source_id": (body.source_id if body else None)}
+    return submit(run_kg_relations_rebuild, payload, "kg_relations_rebuild")
+
+
 @router.post("/link-source/{source_id}", response_model=KGLinkReport)
 def link_one_source(source_id: str) -> KGLinkReport:
     if not kg_enabled():

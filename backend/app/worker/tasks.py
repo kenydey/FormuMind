@@ -1119,6 +1119,32 @@ def noop_task(*args: object, **kwargs: object) -> str:
     return "ok"
 
 
+@celery_app.task(bind=True, name="formumind.kg_relations_rebuild", soft_time_limit=5400, time_limit=7200)
+def run_kg_relations_rebuild(self, payload: dict) -> dict:
+    """补语义关系提取(2026-09-05): 实体/提及已在库, 只重跑关系(LLM 慢).
+
+    SQLite kg 实体 715/提及 7 万, 但 kb_entity_links 为 0 —— 关系层从未
+    产出; rebuild_relations CLI 存在却无 API 入口。``source_id`` 限定单源,
+    None = 全部含提及的源。worker 侧异步跑, 完成结果写 celery result。
+    """
+    task_id = self.request.id
+    try:
+        from ..services.kg.entity_linker import rebuild_relations
+
+        source_id = payload.get("source_id")
+        result = rebuild_relations(
+            [source_id] if source_id else None,
+        )
+        return {
+            "task_id": task_id,
+            "source_id": source_id,
+            **result,
+        }
+    except Exception as exc:
+        logger.exception("kg relations rebuild failed")
+        return {"task_id": task_id, "error": str(exc)}
+
+
 def warm_celery_producer(timeout: float = 60.0) -> None:
     """发布一次 noop —— uvicorn 进程内首次 producer 初始化极慢/卡请求线程。
 
