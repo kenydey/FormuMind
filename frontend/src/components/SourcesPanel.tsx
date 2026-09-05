@@ -242,11 +242,11 @@ export default function SourcesPanel() {
 
       <div className="flex items-center justify-between shrink-0 gap-2">
         <span className="text-xs text-slate-400 uppercase tracking-wider">
-          已加载资料 · {sources.length}
+          知识库资料 · {kbDocs.length || sources.length}
           {sources.length > 0 && (
             <span className="text-slate-600 normal-case">
               {" "}
-              （已选 {selectedSources.length}）
+              （已选 {selectedSources.length} 检索证据）
             </span>
           )}
         </span>

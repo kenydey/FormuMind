@@ -103,6 +103,9 @@ export default function HistoryPanel() {
     }))
   );
 
+  const activeDocCount =
+    projects.find((p) => p.id === activeProjectId)?.source_count ?? 0;
+
   const [pendingDelete, setPendingDelete] = useState<
     { project: ProjectSummary; documentCount: number; busy: boolean } | null
   >(null);
@@ -179,11 +182,17 @@ export default function HistoryPanel() {
             <div className="flex-1 h-1.5 bg-edge rounded overflow-hidden">
               <div
                 className="h-full bg-accent transition-all"
-                style={{ width: `${Math.min(100, (sources.length / SOURCE_LIMIT) * 100)}%` }}
+                style={{
+                  // 检索证据(选入问答)进度; 知识库文档数见项目卡「资料 N」
+                  width: `${Math.min(100, (sources.length / SOURCE_LIMIT) * 100)}%`,
+                  opacity: sources.length ? 1 : 0.25,
+                }}
               />
             </div>
-            <span className="font-mono shrink-0">
-              {sources.length} / {SOURCE_LIMIT}
+            <span className="font-mono shrink-0" title="检索证据: 选入问答的来源">
+              {sources.length > 0
+                ? `证据 ${sources.length}/${SOURCE_LIMIT}`
+                : `知识库 ${activeDocCount} 文档`}
             </span>
           </div>
         </div>

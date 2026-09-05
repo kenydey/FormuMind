@@ -70,7 +70,10 @@ def test_update_project(client):
 
     listed = client.get("/api/projects").json()
     match = next(x for x in listed if x["id"] == pid)
-    assert match["source_count"] == 1
+    # source_count 语义(2026-09-05) = 知识库文档数(source_documents),
+    # payload.sources 是检索证据(workspace 仍 1); 测试库无文档 → 0
+    assert match["source_count"] == 0
+    assert match["chat_count"] == 0
 
 
 def test_project_workspace_persists_adaptive_doe(client):
