@@ -1479,6 +1479,38 @@ export const api = {
   kgCalibration: () =>
     get<KgCalibrationResponse>("/api/kg/calibration"),
 
+  /** Shortest relation path between two entity ids (GET /api/kg/path). */
+  kgPath: (src: string, dst: string, maxDepth = 4) => {
+    const qs = new URLSearchParams({
+      src,
+      dst,
+      max_depth: String(maxDepth),
+    });
+    return get<KgPathResponse>(`/api/kg/path?${qs}`);
+  },
+
+  /** KG-aware evidence retrieve probe (POST /api/kg/retrieve). */
+  kgRetrieve: (
+    query: string,
+    opts: { mode?: string; projectId?: string; kSemantic?: number } = {}
+  ) =>
+    post<KgRetrieveResponse>("/api/kg/retrieve", {
+      query,
+      mode: opts.mode ?? "auto",
+      project_id: opts.projectId ?? null,
+      k_semantic: opts.kSemantic ?? 6,
+    }),
+
+  /** Commercial product registry from corpus (GET /api/kb/products). */
+  kbProducts: (q = "", limit = 50, offset = 0) => {
+    const qs = new URLSearchParams({
+      q,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    return get<KbProductsResponse>(`/api/kb/products?${qs}`);
+  },
+
   kgRebuild: () =>
     post<KgRebuildReport>("/api/kg/rebuild", {}),
 
@@ -1520,6 +1552,26 @@ export const api = {
 
   neo4jFormulationCompounds: (formUid: string) =>
     get<Neo4jHit[]>(`/api/kg/neo4j/formulations/${formUid}/compounds`),
+
+  /** Link formulation CONTAINS compound (POST /api/kg/neo4j/formulations/{form}/compounds/{comp}). */
+  neo4jLinkContains: (formUid: string, compUid: string, ratio?: number) => {
+    const qs = new URLSearchParams();
+    if (ratio != null) qs.set("ratio", String(ratio));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return post<Neo4jLinkResponse>(
+      `/api/kg/neo4j/formulations/${encodeURIComponent(formUid)}/compounds/${encodeURIComponent(compUid)}${suffix}`,
+      {}
+    );
+  },
+
+  /** Link two formulations as similar (POST /api/kg/neo4j/formulations/{a}/similar/{b}). */
+  neo4jLinkSimilar: (formA: string, formB: string, score = 1.0) => {
+    const qs = new URLSearchParams({ score: String(score) });
+    return post<Neo4jLinkResponse>(
+      `/api/kg/neo4j/formulations/${encodeURIComponent(formA)}/similar/${encodeURIComponent(formB)}?${qs}`,
+      {}
+    );
+  },
 
   listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
 
@@ -2801,6 +2853,69 @@ export interface ExperimentSearchHit {
   status: string;
   planned_params: Record<string, unknown>;
   measurements: Record<string, unknown>;
+}
+
+/** GET /api/kg/path step. */
+export interface KgPathStep {
+  relation: KGRelationView;
+  entity_id: string;
+  entity_name?: string;
+}
+
+/** GET /api/kg/path response. */
+export interface KgPathResponse {
+  src_entity_id: string;
+  dst_entity_id: string;
+  found: boolean;
+  hops: number;
+  steps: KgPathStep[];
+}
+
+/** POST /api/kg/retrieve stats. */
+export interface KgRetrieveStats {
+  scan_total?: number;
+  chunks_after_dedupe?: number;
+  chunks_sent_to_llm?: number;
+  mention_hits?: number;
+  semantic_hits?: number;
+  truncated?: boolean;
+  trade_only?: boolean;
+}
+
+/** POST /api/kg/retrieve response. */
+export interface KgRetrieveResponse {
+  plan: {
+    mode?: string;
+    entity_ids?: string[];
+    trade_only?: boolean;
+    expanded_terms?: string[];
+  };
+  evidence: Evidence[];
+  stats: KgRetrieveStats;
+}
+
+/** GET /api/kb/products row. */
+export interface KbProductItem {
+  trade_name: string;
+  grade?: string;
+  supplier?: string;
+  generic_name?: string;
+  cas?: string;
+  smiles?: string | null;
+  role?: string;
+  mention_count?: number;
+  sources?: number;
+}
+
+export interface KbProductsResponse {
+  products: KbProductItem[];
+  total: number;
+}
+
+/** Neo4j edge-link result. */
+export interface Neo4jLinkResponse {
+  ok: boolean;
+  message: string;
 }
 
 export interface KbIntegrityResponse {

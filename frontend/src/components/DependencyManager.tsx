@@ -169,6 +169,21 @@ function KbDiagnosticsCard() {
   const [kbProbeHits, setKbProbeHits] = useState<
     Array<{ title: string; snippet: string; score?: number; source?: string }>
   >([]);
+  const [kgRetrieveBusy, setKgRetrieveBusy] = useState(false);
+  const [kgRetrieveHits, setKgRetrieveHits] = useState<
+    Array<{ title: string; snippet: string; score?: number; source?: string }>
+  >([]);
+  const [kgRetrieveStats, setKgRetrieveStats] = useState<string | null>(null);
+  const [productsQ, setProductsQ] = useState("");
+  const [productsBusy, setProductsBusy] = useState(false);
+  const [products, setProducts] = useState<import("../api").KbProductItem[] | null>(null);
+  const [productsTotal, setProductsTotal] = useState(0);
+  const [linkFormUid, setLinkFormUid] = useState("");
+  const [linkCompUid, setLinkCompUid] = useState("");
+  const [linkRatio, setLinkRatio] = useState("0.1");
+  const [linkFormB, setLinkFormB] = useState("");
+  const [linkScore, setLinkScore] = useState("1");
+  const [linkBusy, setLinkBusy] = useState(false);
 
   async function refreshKgStats() {
     try {
@@ -242,6 +257,92 @@ function KbDiagnosticsCard() {
       setReport(`KB ${mode === "search" ? "关键词" : "混合"}检索失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setKbProbeBusy(false);
+    }
+  }
+
+  async function runKgRetrieve() {
+    const q = kbProbeQ.trim();
+    if (!q) {
+      setReport("请先输入检索词再跑 KG retrieve");
+      return;
+    }
+    setKgRetrieveBusy(true);
+    setReport(null);
+    try {
+      const r = await api.kgRetrieve(q, { mode: "auto", kSemantic: 6 });
+      setKgRetrieveHits(
+        (r.evidence || []).map((e) => ({
+          title: e.title || e.identifier || e.source,
+          snippet: e.snippet || "",
+          score: e.relevance,
+          source: e.source,
+        }))
+      );
+      const s = r.stats || {};
+      setKgRetrieveStats(
+        `mode=${r.plan?.mode ?? "?"} · semantic ${s.semantic_hits ?? 0} · mention ${s.mention_hits ?? 0} · chunks ${s.chunks_after_dedupe ?? "?"}`
+      );
+    } catch (e) {
+      setKgRetrieveHits([]);
+      setKgRetrieveStats(null);
+      setReport(`KG retrieve 失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setKgRetrieveBusy(false);
+    }
+  }
+
+  async function runProductsSearch() {
+    setProductsBusy(true);
+    setReport(null);
+    try {
+      const r = await api.kbProducts(productsQ.trim(), 30, 0);
+      setProducts(r.products || []);
+      setProductsTotal(r.total ?? 0);
+    } catch (e) {
+      setProducts(null);
+      setReport(`商业产品检索失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setProductsBusy(false);
+    }
+  }
+
+  async function runNeo4jLinkContains() {
+    const form = linkFormUid.trim();
+    const comp = linkCompUid.trim();
+    if (!form || !comp) {
+      setReport("请填写配方 uid 与化合物 uid 后再建立 CONTAINS 边");
+      return;
+    }
+    const ratio = Number(linkRatio);
+    setLinkBusy(true);
+    setReport(null);
+    try {
+      const r = await api.neo4jLinkContains(form, comp, Number.isFinite(ratio) ? ratio : undefined);
+      setReport(r.ok ? `✓ CONTAINS 已写入: ${form} → ${comp}` : `CONTAINS 失败: ${r.message}`);
+    } catch (e) {
+      setReport(`Neo4j CONTAINS 失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
+  async function runNeo4jLinkSimilar() {
+    const a = linkFormUid.trim();
+    const b = linkFormB.trim();
+    if (!a || !b) {
+      setReport("请填写两个配方 uid 后再建立 SIMILAR 边");
+      return;
+    }
+    const score = Number(linkScore);
+    setLinkBusy(true);
+    setReport(null);
+    try {
+      const r = await api.neo4jLinkSimilar(a, b, Number.isFinite(score) ? score : 1);
+      setReport(r.ok ? `✓ SIMILAR 已写入: ${a} ↔ ${b}` : `SIMILAR 失败: ${r.message}`);
+    } catch (e) {
+      setReport(`Neo4j SIMILAR 失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLinkBusy(false);
     }
   }
 
@@ -632,7 +733,102 @@ function KbDiagnosticsCard() {
           </div>
         )}
       </div>
-      {neo4j && (
+
+      <div
+        className="border border-edge/60 rounded p-2 mb-1 space-y-1.5 bg-ink/30"
+        data-testid="kb-products-panel"
+      >
+        <div className="text-[10px] text-slate-500">
+          商业产品牌号 · /api/kb/products
+          {products != null && <span className="ml-1 text-slate-400">· {productsTotal} 总计</span>}
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <input
+            value={productsQ}
+            onChange={(e) => setProductsQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void runProductsSearch();
+            }}
+            placeholder="牌号 / 供应商（如 Epon / Hexion）…"
+            className="flex-1 min-w-[8rem] bg-ink border border-edge rounded px-2 py-1 text-[11px]"
+            data-testid="kb-products-input"
+          />
+          <button
+            type="button"
+            disabled={productsBusy}
+            onClick={() => void runProductsSearch()}
+            className="text-[10px] border border-accent/50 text-accent rounded px-2 py-1 disabled:opacity-40"
+            data-testid="kb-products-btn"
+          >
+            {productsBusy ? "…" : "查询牌号"}
+          </button>
+        </div>
+        {products != null && (
+          <div className="max-h-36 overflow-auto space-y-1">
+            {products.length === 0 ? (
+              <p className="text-[10px] text-slate-600">无匹配牌号</p>
+            ) : (
+              products.map((p, i) => (
+                <div
+                  key={`${p.trade_name}-${p.grade}-${i}`}
+                  className="border border-edge/40 rounded px-2 py-1 text-[10px]"
+                  data-testid="kb-product-row"
+                >
+                  <div className="flex gap-2 text-slate-300">
+                    <span className="truncate flex-1 font-medium">
+                      {p.trade_name}
+                      {p.grade ? ` ${p.grade}` : ""}
+                    </span>
+                    {p.supplier && <span className="text-slate-500 shrink-0">{p.supplier}</span>}
+                    {p.mention_count != null && (
+                      <span className="font-mono text-slate-600 shrink-0">×{p.mention_count}</span>
+                    )}
+                  </div>
+                  <div className="text-slate-500 truncate">
+                    {[p.generic_name, p.cas, p.role].filter(Boolean).join(" · ") || "—"}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+
+      <div
+        className="border border-edge/60 rounded p-2 mb-1 space-y-1.5 bg-ink/30"
+        data-testid="kg-retrieve-panel"
+      >
+        <div className="text-[10px] text-slate-500">KG Retrieve 探针 · /api/kg/retrieve（复用上方检索词）</div>
+        <div className="flex flex-wrap gap-1 items-center">
+          <button
+            type="button"
+            disabled={kgRetrieveBusy || !kbProbeQ.trim()}
+            onClick={() => void runKgRetrieve()}
+            className="text-[10px] border border-violet-500/40 text-violet-300 rounded px-2 py-1 disabled:opacity-40"
+            data-testid="kg-retrieve-btn"
+          >
+            {kgRetrieveBusy ? "…" : "KG Retrieve"}
+          </button>
+          {kgRetrieveStats && (
+            <span className="text-[10px] text-slate-500" data-testid="kg-retrieve-stats">
+              {kgRetrieveStats}
+            </span>
+          )}
+        </div>
+        {kgRetrieveHits.length > 0 && (
+          <div className="max-h-28 overflow-auto space-y-1" data-testid="kg-retrieve-hits">
+            {kgRetrieveHits.map((h, i) => (
+              <div key={`kr-${i}`} className="border border-violet-500/20 rounded px-2 py-1 text-[10px]">
+                <div className="text-slate-300 truncate">{h.title}</div>
+                {h.snippet && <p className="text-slate-500 line-clamp-2 mt-0.5">{h.snippet}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+            {neo4j && (
         <div className="text-[11px] text-slate-400 rounded px-2 py-1.5 mb-1 border border-edge">
           Neo4j {neo4j.reachable === false ? "不可达" : `就绪 · ${neo4j.nodes ?? "?"} 节点 / ${neo4j.edges ?? "?"} 边`}
           {neo4j.compounds != null && ` · ${neo4j.compounds} 化合物`}
@@ -713,6 +909,68 @@ function KbDiagnosticsCard() {
                 className="text-[10px] border border-violet-500/40 text-violet-300 rounded px-2 py-0.5 disabled:opacity-40"
               >
                 {upsertBusy ? "…" : "写入配方"}
+              </button>
+            </div>
+          </div>
+          <div className="border border-edge/50 rounded p-1.5 space-y-1.5 bg-ink/40" data-testid="neo4j-link-panel">
+            <div className="text-[10px] text-slate-500">图谱边写入（neo4jLinkContains / neo4jLinkSimilar）</div>
+            <div className="flex flex-wrap gap-1">
+              <input
+                value={linkFormUid}
+                onChange={(e) => setLinkFormUid(e.target.value)}
+                placeholder="配方 uid *"
+                className="flex-1 min-w-[6rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+                data-testid="neo4j-link-form-a"
+              />
+              <input
+                value={linkCompUid}
+                onChange={(e) => setLinkCompUid(e.target.value)}
+                placeholder="化合物 uid"
+                className="flex-1 min-w-[6rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+                data-testid="neo4j-link-comp"
+              />
+              <input
+                value={linkRatio}
+                onChange={(e) => setLinkRatio(e.target.value)}
+                placeholder="ratio"
+                className="w-16 bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+                data-testid="neo4j-link-ratio"
+              />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <input
+                value={linkFormB}
+                onChange={(e) => setLinkFormB(e.target.value)}
+                placeholder="相似配方 uid"
+                className="flex-1 min-w-[6rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+                data-testid="neo4j-link-form-b"
+              />
+              <input
+                value={linkScore}
+                onChange={(e) => setLinkScore(e.target.value)}
+                placeholder="score"
+                className="w-16 bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+                data-testid="neo4j-link-score"
+              />
+            </div>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={linkBusy || !linkFormUid.trim() || !linkCompUid.trim()}
+                onClick={() => void runNeo4jLinkContains()}
+                className="text-[10px] border border-teal-500/40 text-teal-300 rounded px-2 py-0.5 disabled:opacity-40"
+                data-testid="neo4j-link-contains-btn"
+              >
+                {linkBusy ? "…" : "CONTAINS 边"}
+              </button>
+              <button
+                type="button"
+                disabled={linkBusy || !linkFormUid.trim() || !linkFormB.trim()}
+                onClick={() => void runNeo4jLinkSimilar()}
+                className="text-[10px] border border-violet-500/40 text-violet-300 rounded px-2 py-0.5 disabled:opacity-40"
+                data-testid="neo4j-link-similar-btn"
+              >
+                {linkBusy ? "…" : "SIMILAR 边"}
               </button>
             </div>
           </div>

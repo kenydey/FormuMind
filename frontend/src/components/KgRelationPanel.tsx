@@ -4,6 +4,7 @@ import {
   formatApiError,
   type KGContradictionResponse,
   type KGEntityResolveResponse,
+  type KgPathResponse,
   type KGRelationView,
   type KGSubstituteDiscoverResponse,
 } from "../api";
@@ -66,6 +67,31 @@ export default function KgRelationPanel({ query }: { query: string }) {
     measured_total: number;
     measured_performance: number;
   } | null>(null);
+  const [pathSrc, setPathSrc] = useState("");
+  const [pathDst, setPathDst] = useState("");
+  const [pathBusy, setPathBusy] = useState(false);
+  const [pathResult, setPathResult] = useState<KgPathResponse | null>(null);
+  const [pathError, setPathError] = useState<string | null>(null);
+
+  async function runPathFind() {
+    const src = pathSrc.trim();
+    const dst = pathDst.trim();
+    if (!src || !dst) {
+      setPathError("请填写起点与终点实体 id");
+      return;
+    }
+    setPathBusy(true);
+    setPathError(null);
+    try {
+      const r = await api.kgPath(src, dst, 4);
+      setPathResult(r);
+    } catch (e) {
+      setPathResult(null);
+      setPathError(formatApiError(e));
+    } finally {
+      setPathBusy(false);
+    }
+  }
 
   useEffect(() => {
     api
@@ -261,6 +287,71 @@ export default function KgRelationPanel({ query }: { query: string }) {
               </ul>
             </div>
           )}
+
+          <div
+            className="border border-violet-500/20 rounded p-2 space-y-1.5 bg-ink/40"
+            data-testid="kg-path-panel"
+          >
+            <div className="text-[10px] text-slate-500 flex items-center justify-between gap-2">
+              <span>实体路径 · /api/kg/path</span>
+              {resolved.chemicals[0]?.id && (
+                <button
+                  type="button"
+                  className="text-[9px] text-violet-300 hover:underline"
+                  onClick={() => setPathSrc(resolved.chemicals[0].id)}
+                  title="用当前主实体作起点"
+                >
+                  用当前实体作起点
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <input
+                value={pathSrc}
+                onChange={(e) => setPathSrc(e.target.value)}
+                placeholder="起点 entity id"
+                className="flex-1 min-w-[7rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[10px] font-mono"
+                data-testid="kg-path-src"
+              />
+              <input
+                value={pathDst}
+                onChange={(e) => setPathDst(e.target.value)}
+                placeholder="终点 entity id"
+                className="flex-1 min-w-[7rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[10px] font-mono"
+                data-testid="kg-path-dst"
+              />
+              <button
+                type="button"
+                disabled={pathBusy || !pathSrc.trim() || !pathDst.trim()}
+                onClick={() => void runPathFind()}
+                className="text-[10px] border border-violet-500/40 text-violet-300 rounded px-2 py-0.5 disabled:opacity-40"
+                data-testid="kg-path-btn"
+              >
+                {pathBusy ? "…" : "寻路"}
+              </button>
+            </div>
+            {pathError && <p className="text-[10px] text-rose-300">{pathError}</p>}
+            {pathResult && (
+              <div className="text-[10px] text-slate-400" data-testid="kg-path-result">
+                {pathResult.found ? (
+                  <div className="space-y-1">
+                    <div className="text-violet-300">
+                      找到路径 · {pathResult.hops} 跳
+                    </div>
+                    <ol className="list-decimal list-inside space-y-0.5 font-mono text-slate-500">
+                      {pathResult.steps.map((s, i) => (
+                        <li key={`${s.entity_id}-${i}`}>
+                          {s.relation?.relation_type ?? "?"} → {s.entity_name || s.entity_id}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : (
+                  <span>未找到路径（关系层可能为空）</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
