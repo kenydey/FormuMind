@@ -59,6 +59,8 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draft, setDraft] = useState<SpecDraft>(EMPTY);
   const [enriching, setEnriching] = useState(false);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupMsg, setLookupMsg] = useState<string | null>(null);
 
   // ── 结构搜索状态 ──
   const [smarts, setSmarts] = useState("");
@@ -88,6 +90,7 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
   function startCreate() {
     setDraft(EMPTY);
     setEditingName(null);
+    setLookupMsg(null);
     setMode("create");
   }
 
@@ -106,7 +109,44 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
       density_gcm3: s.density_gcm3 != null ? String(s.density_gcm3) : "",
     });
     setEditingName(m.name);
+    setLookupMsg(null);
     setMode("edit");
+  }
+
+  async function lookupChemical() {
+    const q =
+      draft.cas_no?.trim() ||
+      draft.name.trim() ||
+      draft.smiles?.trim() ||
+      draft.zh_name?.trim() ||
+      "";
+    if (!q) {
+      setLookupMsg("请先填写名称、CAS 或 SMILES");
+      return;
+    }
+    setLookupBusy(true);
+    setLookupMsg(null);
+    try {
+      const r = await api.chemicalLookup(q);
+      if (!r.found) {
+        setLookupMsg(`未找到: ${r.query}`);
+        return;
+      }
+      setDraft((d) => ({
+        ...d,
+        name: d.name.trim() ? d.name : r.iupac_name || r.zh_name || d.name,
+        zh_name: r.zh_name || d.zh_name,
+        cas_no: r.cas || d.cas_no,
+        formula: r.formula || d.formula,
+        smiles: (r.smiles ?? undefined) || d.smiles,
+        molar_mass: r.molar_mass != null ? String(r.molar_mass) : d.molar_mass,
+      }));
+      setLookupMsg(`已自动填充 · 来源 ${r.source || "lookup"}`);
+    } catch (e) {
+      setLookupMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLookupBusy(false);
+    }
   }
 
   async function saveDraft() {
@@ -578,22 +618,45 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                 />
               </label>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setMode("closed")}
-                className="border border-edge rounded px-4 py-1.5 text-sm text-slate-400"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={busy || !draft.name.trim() || !draft.role.trim()}
-                onClick={() => void saveDraft()}
-                className="bg-accent text-ink font-semibold rounded px-4 py-1.5 text-sm disabled:opacity-40"
-              >
-                {busy ? "保存中…" : "保存"}
-              </button>
+            <div className="flex justify-between items-center gap-2 pt-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <button
+                  type="button"
+                  disabled={lookupBusy || busy}
+                  onClick={() => void lookupChemical()}
+                  className="border border-teal-500/40 text-teal-300 rounded px-3 py-1.5 text-xs hover:bg-teal-500/10 disabled:opacity-40 shrink-0"
+                  title="用名称 / CAS / SMILES 调用 /api/chemical/lookup 自动填充"
+                >
+                  {lookupBusy ? "查询中…" : "🔍 化学查询填充"}
+                </button>
+                {lookupMsg && (
+                  <span
+                    className={`text-[10px] truncate ${
+                      lookupMsg.startsWith("已") ? "text-emerald-400" : "text-amber-400"
+                    }`}
+                    title={lookupMsg}
+                  >
+                    {lookupMsg}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMode("closed")}
+                  className="border border-edge rounded px-4 py-1.5 text-sm text-slate-400"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !draft.name.trim() || !draft.role.trim()}
+                  onClick={() => void saveDraft()}
+                  className="bg-accent text-ink font-semibold rounded px-4 py-1.5 text-sm disabled:opacity-40"
+                >
+                  {busy ? "保存中…" : "保存"}
+                </button>
+              </div>
             </div>
           </div>
         </Modal>

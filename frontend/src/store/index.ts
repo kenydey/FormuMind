@@ -135,3 +135,8 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+/** Dev/e2e hook — Playwright smokes inject chatHistory for CitationRenderer demos. */
+if (typeof window !== "undefined" && import.meta.env.DEV) {
+  (window as unknown as { __FM_STORE__: typeof useStore }).__FM_STORE__ = useStore;
+}

@@ -255,6 +255,23 @@ function KbDiagnosticsCard() {
     }
   }
 
+  async function ensureNeo4jSchema() {
+    setNeoBusy(true);
+    setReport(null);
+    try {
+      const r = await api.neo4jEnsureSchema();
+      setReport(r.ok ? "✓ Neo4j schema 已确保（约束/索引）" : "Neo4j schema ensure 未成功");
+      const stats = await api.neo4jStats();
+      setNeo4j(stats);
+      setNeo4jOpen(true);
+      if (stats.reachable !== false) void searchNeo4j("");
+    } catch (e) {
+      setReport(`Neo4j schema ensure 失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setNeoBusy(false);
+    }
+  }
+
   const [neo4jOpen, setNeo4jOpen] = useState(false);
   const [neoQuery, setNeoQuery] = useState("");
   const [neoCompounds, setNeoCompounds] = useState<import("../api").Neo4jCompound[] | null>(null);
@@ -344,6 +361,15 @@ function KbDiagnosticsCard() {
           className="text-[10px] border border-edge rounded px-2 py-1 text-slate-300 hover:border-accent/40 hover:text-accent disabled:opacity-50"
         >
           {neoBusy ? "连接中…" : "🕸 Neo4j 状态"}
+        </button>
+        <button
+          type="button"
+          disabled={neoBusy}
+          onClick={() => void ensureNeo4jSchema()}
+          className="text-[10px] border border-teal-500/40 text-teal-300 rounded px-2 py-1 hover:bg-teal-500/10 disabled:opacity-50"
+          title="POST /api/kg/neo4j/schema/ensure — 创建/确认约束与索引"
+        >
+          确保 Schema
         </button>
       </div>
 

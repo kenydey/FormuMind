@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
-import type { Evidence, StructureRecognitionResult } from "../api";
+import type { Evidence, SessionInfoResponse, StructureRecognitionResult } from "../api";
 import { api } from "../api";
 import type { NotificationKind } from "../store/notifications";
 import MarkdownMessage from "./MarkdownMessage";
+import CitationRenderer from "./CitationRenderer";
+import {
+  evidenceToCitationAnchors,
+  splitCitationMarkdown,
+} from "./citationMarkdown";
 import NotificationStack from "./NotificationStack";
 
 /**
@@ -143,6 +148,7 @@ export default function ResearchPanel() {
   const [draft, setDraft] = useState("");
   const [structInfo, setStructInfo] = useState<StructureRecognitionResult | null>(null);
   const [structBusy, setStructBusy] = useState(false);
+  const [sessionDetails, setSessionDetails] = useState<Record<string, SessionInfoResponse>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -189,6 +195,30 @@ export default function ResearchPanel() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [chatHistory, chatBusy]);
+
+  useEffect(() => {
+    if (!chatSessionsOpen || chatSessions.length === 0) return;
+    let cancelled = false;
+    const ids = chatSessions.slice(0, 12).map((s) => s.session_id);
+    void (async () => {
+      const next: Record<string, SessionInfoResponse> = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            next[id] = await api.sessionInfo(id);
+          } catch {
+            /* session may have expired — ignore */
+          }
+        }),
+      );
+      if (!cancelled && Object.keys(next).length > 0) {
+        setSessionDetails((prev) => ({ ...prev, ...next }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatSessionsOpen, chatSessions]);
 
   const selectedCount = selectedSources.length;
   const canSend = selectedCount > 0 && !chatBusy;
@@ -254,6 +284,16 @@ export default function ResearchPanel() {
               {chatSessions.map((s) => {
                 const title = s.title || chatSessionTitles[s.session_id] || s.session_id.slice(0, 12);
                 const active = s.session_id === activeSessionId;
+                const info = sessionDetails[s.session_id];
+                const updated =
+                  info?.updated_at &&
+                  (() => {
+                    try {
+                      return new Date(info.updated_at).toLocaleString();
+                    } catch {
+                      return info.updated_at;
+                    }
+                  })();
                 return (
                   <div
                     key={s.session_id}
@@ -266,11 +306,24 @@ export default function ResearchPanel() {
                       disabled={active || chatBusy}
                       onClick={() => void switchChatSession(s.session_id)}
                       className="flex-1 text-left truncate disabled:opacity-60"
-                      title={s.session_id}
+                      title={[
+                        s.session_id,
+                        updated ? `更新: ${updated}` : null,
+                        info?.has_context ? "含上下文" : null,
+                        info?.project_id ? `项目: ${info.project_id}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     >
                       {active ? "▶ " : ""}
                       {title}
-                      <span className="text-slate-600 ml-1">({s.history_count ?? 0} 轮)</span>
+                      <span className="text-slate-600 ml-1">
+                        ({info?.history_count ?? s.history_count ?? 0} 轮
+                        {info?.has_context ? " · ctx" : ""})
+                      </span>
+                      {updated && (
+                        <span className="text-slate-600 ml-1 hidden sm:inline">{updated}</span>
+                      )}
                     </button>
                     <button
                       type="button"
@@ -332,7 +385,19 @@ export default function ResearchPanel() {
                       ) : null}
                     </div>
                   ) : (
-                    <MarkdownMessage content={m.content} />
+                    (() => {
+                      const cited = splitCitationMarkdown(m.content);
+                      if (cited) {
+                        return (
+                          <CitationRenderer
+                            answer={cited.answer}
+                            footnotes={cited.footnotes}
+                            anchors={evidenceToCitationAnchors(m.citations)}
+                          />
+                        );
+                      }
+                      return <MarkdownMessage content={m.content} />;
+                    })()
                   )
                 ) : (
                   <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>

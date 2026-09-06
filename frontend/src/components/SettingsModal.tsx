@@ -150,6 +150,22 @@ export default function SettingsModal() {
     }
   }
 
+  async function onTestOnly() {
+    setTesting(true);
+    setResult(null);
+    try {
+      const t = await api.testConnection();
+      setResult({
+        ok: t.ok,
+        message: t.message || `${t.provider}/${t.model}`,
+      });
+    } catch (e) {
+      setResult({ ok: false, message: formatApiError(e) });
+    } finally {
+      setTesting(false);
+    }
+  }
+
   function onTokenSaved() {
     setReloadKey((k) => k + 1);
   }
@@ -333,7 +349,16 @@ export default function SettingsModal() {
           {/* Each section saves to its own endpoint, so its button lives inside
               it. A shared save row between the two made the vision block read as
               an afterthought rather than the peer choice it is. */}
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => void onTestOnly()}
+              disabled={testing || providers.length === 0}
+              className="text-sm border border-edge text-slate-300 rounded px-4 py-1.5 hover:border-accent/40 hover:text-accent disabled:opacity-40"
+              title="仅测试当前已保存配置（不写入草稿）"
+            >
+              {testing ? "测试中…" : "仅测试连接"}
+            </button>
             <button
               onClick={onSave}
               disabled={testing || providers.length === 0}

@@ -58,15 +58,29 @@ export default function KgRelationPanel({ query }: { query: string }) {
   const [resolved, setResolved] = useState<KGEntityResolveResponse | null>(null);
   const [substitutes, setSubstitutes] = useState<KGSubstituteDiscoverResponse | null>(null);
   const [contradictions, setContradictions] = useState<KGContradictionResponse | null>(null);
+  const [fullRelations, setFullRelations] = useState<KGRelationView[] | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [methodFilter, setMethodFilter] = useState<string>("all");
   const [reportAlert, setReportAlert] = useState<string | null>(null);
+  const [feedbackStats, setFeedbackStats] = useState<{
+    measured_total: number;
+    measured_performance: number;
+  } | null>(null);
 
   useEffect(() => {
     api
       .kgFeedbackReport()
       .then((r) => {
         if (r.alert) setReportAlert(r.alert);
+      })
+      .catch(() => {});
+    api
+      .kgFeedbackStats()
+      .then((r) => {
+        setFeedbackStats({
+          measured_total: r.measured_total,
+          measured_performance: r.measured_performance,
+        });
       })
       .catch(() => {});
   }, []);
@@ -76,6 +90,7 @@ export default function KgRelationPanel({ query }: { query: string }) {
     if (q.length < 2) {
       setResolved(null);
       setSubstitutes(null);
+      setFullRelations(null);
       setError(null);
       return;
     }
@@ -92,13 +107,20 @@ export default function KgRelationPanel({ query }: { query: string }) {
           const primaryId =
             resolveResp.chemicals[0]?.id ?? resolveResp.trade_products[0]?.id ?? null;
           if (primaryId) {
-            const subResp = await api.kgSubstitutes({ entityId: primaryId, limit: 5 });
-            if (!cancelled) setSubstitutes(subResp);
-            const contraResp = await api.kgContradictions({ entityId: primaryId });
-            if (!cancelled) setContradictions(contraResp);
+            const [subResp, contraResp, relResp] = await Promise.all([
+              api.kgSubstitutes({ entityId: primaryId, limit: 5 }),
+              api.kgContradictions({ entityId: primaryId }),
+              api.kgRelations(primaryId, "both", 40).catch(() => null),
+            ]);
+            if (!cancelled) {
+              setSubstitutes(subResp);
+              setContradictions(contraResp);
+              setFullRelations(relResp);
+            }
           } else {
             setSubstitutes(null);
             setContradictions(null);
+            setFullRelations(null);
           }
         } catch (err) {
           if (!cancelled) {
@@ -108,6 +130,7 @@ export default function KgRelationPanel({ query }: { query: string }) {
             }
             setResolved(null);
             setSubstitutes(null);
+            setFullRelations(null);
           }
         } finally {
           if (!cancelled) setLoading(false);
@@ -121,7 +144,10 @@ export default function KgRelationPanel({ query }: { query: string }) {
     };
   }, [query]);
 
-  const relations = resolved?.top_relations ?? [];
+  const relations =
+    fullRelations && fullRelations.length > 0
+      ? fullRelations
+      : (resolved?.top_relations ?? []);
   const filteredRelations = methodFilter === "all" ? relations : relations.filter((r) => {
     const m = (r.extraction_method || r.evidence[0]?.extraction_method || "rule").toLowerCase();
     return m === methodFilter;
@@ -159,6 +185,14 @@ export default function KgRelationPanel({ query }: { query: string }) {
 
       {reportAlert && (
         <p className="mt-1 text-amber-300/90 text-[10px] border border-amber-500/30 bg-amber-500/10 rounded px-1.5 py-0.5">⚠ {reportAlert}</p>
+      )}
+
+      {feedbackStats && feedbackStats.measured_total > 0 && (
+        <p className="mt-1 text-[10px] text-slate-500">
+          实测反馈库：{feedbackStats.measured_total} 条
+          {feedbackStats.measured_performance > 0 &&
+            ` · 性能 ${feedbackStats.measured_performance}`}
+        </p>
       )}
 
       {!expanded && !loading && relations.length > 0 && (
