@@ -77,6 +77,7 @@ def test_propose_high_confidence_upserts_low_goes_pending():
         source="kb_promoted",
     )
     assert high["action"] in {"upsert", "exists"}
+    # Digit-bearing multi-token trade name still may queue under KB gate.
     low = propose_material(
         "P8 Mystery Trade Name XYZ",
         {"role": "additive"},
@@ -88,6 +89,71 @@ def test_propose_high_confidence_upserts_low_goes_pending():
         assert cand.status_code == 200
         names = [c["name"] for c in cand.json()["candidates"]]
         assert "P8 Mystery Trade Name XYZ" in names
+
+
+def test_kb_noise_names_are_skipped_not_pending():
+    from app.services.material_promote import is_plausible_material_name, should_enqueue_low_confidence
+
+    for junk in ("Australia", "Industries", "In", "Beijing", "ImageJ", "University", "Industries Inc"):
+        assert not is_plausible_material_name(junk), junk
+        assert not should_enqueue_low_confidence("kb_promoted", junk), junk
+        result = propose_material(junk, {"role": "additive"}, source="kb_promoted")
+        assert result["action"] == "skipped", result
+
+    # Chem-like / grade-like names remain enqueueable from KB.
+    assert should_enqueue_low_confidence("kb_promoted", "Waterborne acrylic emulsion")
+    assert should_enqueue_low_confidence("kb_promoted", "Zinc phosphate")
+    assert should_enqueue_low_confidence("kb_promoted", "DGEBA")
+    chem = propose_material(
+        "NoiseGate Acrylic Emulsion Z9",
+        {"role": "resin"},
+        source="kb_promoted",
+    )
+    assert chem["action"] in {"pending", "exists"}
+
+    # Non-KB paths still accept plausible bare names (requirement save / workbench).
+    req = propose_material(
+        "NoiseGate Bare Workbench Resin",
+        {"role": "resin"},
+        source="workbench",
+    )
+    assert req["action"] in {"pending", "exists"}
+
+
+def test_dismiss_noisy_candidates_api_cleans_kb_junk():
+    # Seed junk via force_pending (bypass gate) to simulate legacy noise.
+    for junk in ("Australia", "Industries", "Beijing"):
+        propose_material(
+            junk,
+            {"role": ""},
+            source="kb_promoted",
+            force_pending=True,
+        )
+    # Also seed a keepable chem-like candidate.
+    propose_material(
+        "Epoxy resin hardener Z9noise",
+        {"role": "hardener"},
+        source="kb_promoted",
+        force_pending=True,
+    )
+
+    before = client.get("/api/materials/candidates?limit=500")
+    assert before.status_code == 200
+    before_names = {c["name"] for c in before.json()["candidates"]}
+    assert "Australia" in before_names
+
+    cleaned = client.post("/api/materials/candidates/dismiss-noise?source=kb_promoted&limit=2000")
+    assert cleaned.status_code == 200, cleaned.text
+    body = cleaned.json()
+    assert body["dismissed"] >= 1
+    assert "scanned" in body
+
+    after = client.get("/api/materials/candidates?limit=500")
+    after_names = {c["name"] for c in after.json()["candidates"]}
+    assert "Australia" not in after_names
+    assert "Industries" not in after_names
+    assert "Beijing" not in after_names
+    assert "Epoxy resin hardener Z9noise" in after_names
 
 
 def test_prefer_materials_catalog_soft_sort_keeps_out_of_catalog():

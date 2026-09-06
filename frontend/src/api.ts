@@ -1478,6 +1478,12 @@ export const api = {
   dismissMaterialCandidate: (id: string) =>
     post<{ ok: boolean }>(`/api/materials/candidates/${id}/dismiss`, {}),
 
+  dismissNoisyMaterialCandidates: (source = "kb_promoted") =>
+    post<{ dismissed: number; kept: number; scanned: number }>(
+      `/api/materials/candidates/dismiss-noise?source=${encodeURIComponent(source)}`,
+      {}
+    ),
+
   proposeMaterial: (body: {
     name: string;
     role?: string;
@@ -1492,8 +1498,11 @@ export const api = {
     source = "formula"
   ) => post<Record<string, number>>("/api/materials/propose-many", { materials, source }),
 
-  harvestKbProducts: (limit = 200) =>
-    post<Record<string, number>>(`/api/materials/harvest-kb-products?limit=${limit}`, {}),
+  harvestKbProducts: (limit = 200, minMentions = 2) =>
+    post<Record<string, number>>(
+      `/api/materials/harvest-kb-products?limit=${limit}&min_mentions=${minMentions}`,
+      {}
+    ),
 
   archiveMaterial: (name: string, archived = true) =>
     post<MaterialView>("/api/materials/archive", { name, archived }),

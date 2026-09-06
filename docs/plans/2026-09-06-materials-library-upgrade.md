@@ -87,7 +87,7 @@
 
 | 来源 | 触发 | 默认行为 |
 |------|------|----------|
-| KB / `kb_products` | ingest 完成或定时 job | 有 CAS/SMILES/lookup 命中 → 自动 upsert（`origin=kb_promoted`）；否则进待确认 |
+| KB / `kb_products` | ingest 完成或定时 job | 有合法 CAS/SMILES → 自动 upsert（`origin=kb_promoted`）；**低置信裸名默认跳过**（化学名质量门 + `min_mentions≥2`）；仅高置信化学名可进待确认。待入库支持「清理 KB 噪声」批量忽略 |
 | 技术需求 `Requirement.materials` | 保存需求 | 去重后晋升全局库 |
 | 推荐 / 用户采纳配方组分 | 用户点「同步到材料库」或采纳时 | 解析后 upsert / 待确认 |
 | 实验台账配方键 | 同步成功 | 未知键进待确认队列 |

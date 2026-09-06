@@ -397,9 +397,9 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
       {tab === "pending" ? (
         <div className="space-y-2" data-testid="materials-pending">
           <div className="flex gap-2 items-center">
-            <p className="text-[11px] text-slate-500 flex-1">
-              低置信候选（无 CAS/SMILES）待确认晋升；高置信项已自动入库。
-            </p>
+              <p className="text-[11px] text-slate-500 flex-1">
+                低置信候选待确认。KB 自动抽取仅入库有 CAS/SMILES 的项；地名/公司碎片等会被质量门跳过。
+              </p>
             <button
               type="button"
               className="text-[10px] border border-edge rounded px-2 py-1 text-slate-400 hover:text-accent"
@@ -411,6 +411,20 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
               }
             >
               从 KB 商品库收获
+            </button>
+            <button
+              type="button"
+              className="text-[10px] border border-amber-500/40 rounded px-2 py-1 text-amber-300/90 hover:bg-amber-500/10"
+              data-testid="materials-dismiss-noise"
+              title="自动忽略 KB 抽取出的地名/公司碎片等低质量待入库项"
+              onClick={() =>
+                void api.dismissNoisyMaterialCandidates().then((r) => {
+                  setIoMsg(`已清理噪声：忽略 ${r.dismissed} · 保留 ${r.kept}`);
+                  return loadCandidates();
+                })
+              }
+            >
+              清理 KB 噪声
             </button>
             <button
               type="button"

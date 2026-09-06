@@ -451,6 +451,19 @@ def list_candidates(limit: int = Query(default=200, ge=1, le=1000)) -> dict:
     return {"total": len(rows), "candidates": [candidate_to_dict(r) for r in rows]}
 
 
+@router.post("/candidates/dismiss-noise")
+def dismiss_noise_endpoint(
+    source: str = Query(default="kb_promoted"),
+    limit: int = Query(default=2000, ge=1, le=5000),
+) -> dict:
+    """Dismiss pending KB junk that fails the chemistry-name gate."""
+    _require_store()
+    from ..services.material_promote import dismiss_noisy_candidates
+
+    sources = [s.strip() for s in source.split(",") if s.strip()] or ["kb_promoted"]
+    return dismiss_noisy_candidates(sources=sources, limit=limit)
+
+
 @router.post("/candidates/{candidate_id}/promote")
 def promote_candidate_endpoint(candidate_id: str) -> dict:
     _require_store()
@@ -508,8 +521,11 @@ def promote_from_requirement(body: PromoteRequirementRequest) -> dict:
 
 
 @router.post("/harvest-kb-products")
-def harvest_kb_products(limit: int = Query(default=200, ge=1, le=2000)) -> dict:
+def harvest_kb_products(
+    limit: int = Query(default=200, ge=1, le=2000),
+    min_mentions: int = Query(default=2, ge=1, le=50),
+) -> dict:
     _require_store()
     from ..services.material_promote import promote_kb_products
 
-    return promote_kb_products(limit=limit)
+    return promote_kb_products(limit=limit, min_mentions=min_mentions)

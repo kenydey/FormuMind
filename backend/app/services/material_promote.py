@@ -2,10 +2,12 @@
 
 High-confidence candidates (CAS / SMILES present) upsert into ``materials``
 with ``origin=kb_promoted|requirement|formula|workbench``. Low-confidence
-names land in ``material_candidates`` for human promote / dismiss.
+names may land in ``material_candidates`` for human promote / dismiss — but
+**KB-sourced** bare names are gated hard to keep the pending queue usable.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -21,6 +23,56 @@ from ..domain.knowledge import RAW_MATERIALS
 from ..services.errors import degrade_return
 
 _HIGH_ORIGIN = {"kb_promoted", "requirement", "formula", "workbench", "user", "import"}
+# Sources that must not flood the pending queue with extraction junk.
+_STRICT_PENDING_SOURCES = {"kb_promoted"}
+
+_CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
+_HAS_DIGIT = re.compile(r"\d")
+_HAS_CJK = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_WORD = re.compile(r"^[A-Za-z][A-Za-z0-9\-\s®™./]+$")
+
+# Common false positives from patent/paper NER (places, orgs, UI chrome, glue words).
+_NAME_STOPWORDS = {
+    "a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with", "by",
+    "from", "as", "at", "is", "are", "was", "were", "be", "this", "that", "these",
+    "those", "fig", "figure", "table", "scheme", "example", "examples", "results",
+    "method", "methods", "introduction", "conclusion", "abstract", "reference",
+    "references", "supplementary", "supporting", "information", "copyright",
+    "university", "institute", "laboratory", "department", "college", "school",
+    "company", "companies", "corp", "corporation", "inc", "ltd", "llc", "gmbh",
+    "co", "industries", "industry", "group", "holdings", "solutions", "technology",
+    "technologies", "science", "sciences", "research", "center", "centre",
+    "china", "chinese", "beijing", "shanghai", "guangzhou", "shenzhen", "japan",
+    "tokyo", "usa", "uk", "germany", "france", "italy", "spain", "canada",
+    "australia", "india", "korea", "taiwan", "hongkong", "singapore", "russia",
+    "moscow", "akademgorodok", "corning", "imagej", "windows", "linux", "excel",
+    "word", "powerpoint", "pdf", "http", "https", "www", "com", "org", "net",
+    "ca", "us", "eu", "un", "who", "iso", "astm", "din", "gb",
+}
+
+# Short abbreviations that are real materials / resins (allowlist).
+_CHEM_ABBREV = {
+    "peg", "ppg", "pva", "pvc", "ptfe", "pet", "pu", "ep", "upa", "upa",
+    "dgeba", "tdi", "mdi", "ipdi", "hdi", "bpa", "bpf", "hmee", "hme",
+    "teos", "tmos", "gptms", "aptes", "hmds", "tmspma", "ipa", "mek", "mibk",
+    "nmp", "dmf", "dmso", "thf", "toc", "voc", "uv", "led",
+}
+
+_CHEM_HINTS = (
+    "epoxy", "resin", "silane", "siloxane", "acrylate", "methacrylate",
+    "isocyanate", "urethane", "polyol", "amine", "amide", "anhydride",
+    "phosphate", "phosphonate", "sulfate", "sulphate", "chloride", "oxide",
+    "hydroxide", "carbonate", "nitrate", "fluoride", "bromide", "iodide",
+    "glycol", "glycer", "phenol", "bisphenol", "melamine", "urea", "alkyd",
+    "acrylic", "polyester", "polyurethane", "polyamide", "polyimide",
+    "cellulose", "starch", "latex", "emulsion", "hardener", "curing",
+    "crosslink", "catalyst", "inhibitor", "surfactant", "dispersant",
+    "pigment", "filler", "solvent", "thinner", "monomer", "oligomer",
+    "zinc", "titanium", "silicon", "aluminum", "aluminium", "iron", "copper",
+    "nickel", "chrom", "molybd", "tungsten", "boron", "fluor",
+    "树脂", "固化", "环氧", "硅烷", "丙烯酸", "异氰酸", "磷酸", "氧化",
+    "锌", "钛", "硅", "铝", "铁", "铜", "溶剂", "颜料", "填料", "催化剂",
+)
 
 
 def _utcnow() -> datetime:
@@ -28,7 +80,78 @@ def _utcnow() -> datetime:
 
 
 def _has_identity(spec: dict[str, Any]) -> bool:
-    return bool(str(spec.get("cas_no") or "").strip() or str(spec.get("smiles") or "").strip())
+    cas = str(spec.get("cas_no") or "").strip()
+    if cas and _CAS_RE.match(cas):
+        return True
+    return bool(str(spec.get("smiles") or "").strip())
+
+
+def is_plausible_material_name(name: str) -> bool:
+    """Reject NER junk that should never enter the pending queue."""
+    display = (name or "").strip()
+    if not display:
+        return False
+    key = norm_key(display)
+    low = display.lower().strip()
+    if not key or len(key) < 2:
+        return False
+    if key in _NAME_STOPWORDS or low in _NAME_STOPWORDS:
+        return False
+    if key in _CHEM_ABBREV:
+        return True
+    # Too short bare Latin tokens (CA, In, PEG without allowlist already handled).
+    if len(key) <= 3 and not _HAS_CJK.search(display) and not _HAS_DIGIT.search(display):
+        return False
+    if len(display) < 3:
+        return False
+    tokens = [t for t in re.split(r"[\s,/|]+", low) if t]
+    tokens = [re.sub(r"[^a-z0-9\u4e00-\u9fff\-]", "", t) for t in tokens]
+    tokens = [t for t in tokens if t]
+    if tokens and all(t in _NAME_STOPWORDS or norm_key(t) in _NAME_STOPWORDS for t in tokens):
+        return False
+    # Single Title-Case English word with no chemistry signal → likely place/brand chrome.
+    if (
+        _LATIN_WORD.match(display)
+        and " " not in display
+        and not _HAS_DIGIT.search(display)
+        and len(key) <= 12
+        and not any(h in low for h in _CHEM_HINTS)
+        and not any(display.endswith(suf) for suf in ("ane", "ene", "ol", "ate", "ide", "ine", "ium", "yl"))
+    ):
+        # Allow trademarked grades like "Bayhydrol" (long enough + not stopword).
+        if len(key) < 8:
+            return False
+    # Must look vaguely chemical: digit, CJK, chem hint, multi-token grade, or long name.
+    if _HAS_DIGIT.search(display) or _HAS_CJK.search(display):
+        return True
+    if any(h in low for h in _CHEM_HINTS):
+        return True
+    if " " in display or "-" in display or "/" in display:
+        return len(key) >= 6
+    return len(key) >= 10
+
+
+def should_enqueue_low_confidence(source: str, name: str, spec: dict[str, Any] | None = None) -> bool:
+    """Whether a non-CAS/SMILES proposal should enter the pending queue."""
+    src = (source or "").strip()
+    if src not in _STRICT_PENDING_SOURCES:
+        # requirement / workbench / formula: still gate obvious junk.
+        return is_plausible_material_name(name)
+    # KB path: never enqueue without identity unless the name clearly looks chemical.
+    if not is_plausible_material_name(name):
+        return False
+    key = norm_key(name)
+    if key in _CHEM_ABBREV:
+        return True
+    # Extra: KB bare names need a chem hint or multi-token grade-like shape.
+    low = (name or "").lower()
+    if any(h in low for h in _CHEM_HINTS):
+        return True
+    if _HAS_DIGIT.search(name or "") or _HAS_CJK.search(name or ""):
+        return True
+    if " " in (name or "") or "-" in (name or ""):
+        return len(key) >= 8
+    return False
 
 
 class MaterialCandidateStore:
@@ -147,10 +270,16 @@ def propose_material(
     source: str = "kb_promoted",
     source_ref: str = "",
     force_pending: bool = False,
+    enqueue_low_confidence: bool | None = None,
 ) -> dict[str, Any]:
-    """Promote high-confidence materials; queue the rest for review.
+    """Promote high-confidence materials; optionally queue the rest for review.
 
     Returns ``{"action": "upsert"|"pending"|"skipped"|"exists", "name": ...}``.
+
+    For ``source=kb_promoted``, low-confidence names are skipped by default
+    unless they pass the chemistry-name quality gate (see
+    ``should_enqueue_low_confidence``). Requirement / workbench / formula
+    still enqueue plausible low-confidence names.
     """
     display = (name or "").strip()
     if not display:
@@ -170,6 +299,18 @@ def propose_material(
             RAW_MATERIALS.refresh()
             return {"action": "upsert", "name": display, "origin": origin}
         return {"action": "skipped", "name": display, "reason": "upsert_failed"}
+
+    allow_pending = (
+        True
+        if force_pending
+        else (
+            should_enqueue_low_confidence(source, display, payload)
+            if enqueue_low_confidence is None
+            else bool(enqueue_low_confidence) and is_plausible_material_name(display)
+        )
+    )
+    if not allow_pending:
+        return {"action": "skipped", "name": display, "reason": "low_confidence_gated"}
 
     cand = get_candidate_store()
     ok = cand.upsert_pending(
@@ -222,6 +363,7 @@ def propose_many(
     *,
     source: str,
     source_ref: str = "",
+    enqueue_low_confidence: bool | None = None,
 ) -> dict[str, int]:
     counts = {"upsert": 0, "pending": 0, "exists": 0, "skipped": 0}
     for item in items:
@@ -234,13 +376,18 @@ def propose_many(
             item,
             source=source,
             source_ref=source_ref,
+            enqueue_low_confidence=enqueue_low_confidence,
         )
         counts[result.get("action", "skipped")] = counts.get(result.get("action", "skipped"), 0) + 1
     return counts
 
 
-def promote_kb_products(limit: int = 200) -> dict[str, int]:
-    """Harvest ``kb_products`` into the catalog / pending queue."""
+def promote_kb_products(limit: int = 200, *, min_mentions: int = 2) -> dict[str, int]:
+    """Harvest ``kb_products`` into the catalog / pending queue (strict).
+
+    - CAS/SMILES → upsert
+    - else only enqueue when name passes chemistry gate AND mention_count >= min_mentions
+    """
     try:
         from ..db.product_store import get_product_store
 
@@ -257,16 +404,56 @@ def promote_kb_products(limit: int = 200) -> dict[str, int]:
         name = (generic or trade).strip()
         if not name:
             continue
+        cas = getattr(p, "cas", "") or None
+        smiles = getattr(p, "smiles", None)
+        mentions = int(getattr(p, "mention_count", 0) or 0)
+        has_id = bool(str(cas or "").strip() or str(smiles or "").strip())
+        if not has_id and mentions < min_mentions:
+            continue
+        if not has_id and not is_plausible_material_name(name):
+            continue
         items.append(
             {
                 "name": name,
                 "role": getattr(p, "role", "") or "",
-                "cas_no": getattr(p, "cas", "") or None,
-                "smiles": getattr(p, "smiles", None),
+                "cas_no": cas,
+                "smiles": smiles,
                 "supplier": getattr(p, "supplier", "") or None,
             }
         )
+    # KB harvest: still use gated pending for low-confidence survivors.
     return propose_many(items, source="kb_promoted", source_ref="kb_products")
+
+
+def dismiss_noisy_candidates(
+    *,
+    sources: Iterable[str] | None = None,
+    limit: int = 2000,
+) -> dict[str, int]:
+    """Auto-dismiss pending rows that fail the chemistry-name gate.
+
+    Defaults to cleaning ``kb_promoted`` noise; pass ``sources=None`` to scan all.
+    """
+    cand = get_candidate_store()
+    rows = cand.list_pending(limit=limit)
+    wanted = {s.strip() for s in (sources or ("kb_promoted",)) if s and s.strip()}
+    dismissed = 0
+    kept = 0
+    for row in rows:
+        if wanted and (row.source or "") not in wanted:
+            kept += 1
+            continue
+        # Keep high-confidence identity even if the display name looks odd.
+        if _has_identity(
+            {"cas_no": row.cas_no, "smiles": row.smiles}
+        ) or should_enqueue_low_confidence(row.source or "kb_promoted", row.name or ""):
+            kept += 1
+            continue
+        if cand.set_status(row.id, "dismissed"):
+            dismissed += 1
+        else:
+            kept += 1
+    return {"dismissed": dismissed, "kept": kept, "scanned": len(rows)}
 
 
 def candidate_to_dict(row: MaterialCandidateRow) -> dict[str, Any]:
