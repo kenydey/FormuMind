@@ -44,7 +44,7 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实测、跨批次检索与训练记录（原实验库已并入）" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
-  { id: "materials", icon: "🧴", title: "材料库", desc: "材料 CRUD、供应状态与结构搜索(SMARTS/骨架替代)" },
+  { id: "materials", icon: "🧴", title: "材料库", desc: "全局主数据：导入导出、待入库晋升、结构搜索" },
 ];
 
 function Badge({ children, tone }: { children: React.ReactNode; tone: "accent" | "amber" }) {
