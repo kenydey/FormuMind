@@ -55,6 +55,13 @@ DISPATCH_TIMEOUT_DETAIL = (
     "或重启 API 进程；这不代表消息队列一定不可达。"
 )
 
+# Non-timeout failure after a green probe — may be serialisation or a flaky
+# broker; do not claim Redis is definitively down (ELN/lab errors use their own copy).
+DISPATCH_FAILURE_DETAIL = (
+    "任务提交失败：Celery 在入队阶段异常。请查看 API 日志确认原因；"
+    "若为台账/ELN 相关错误，请检查 Datalab 而非 Redis。"
+)
+
 
 def _broker_endpoint() -> tuple[str, int] | None:
     """``(host, port)`` for the configured broker, or None if not a TCP URL."""
@@ -130,10 +137,12 @@ def submit(
         ) from exc
     except Exception as exc:
         # The probe passed a moment ago, so this is a broker that died mid-
-        # submission or a payload Celery could not serialise. Either way the
-        # client gets a reason instead of an unparseable 500.
+        # submission or a payload Celery could not serialise. Do not always
+        # claim "Redis is down" — that mislabels ELN/serialisation failures.
         logger.exception("celery dispatch failed for {}", kind)
-        raise HTTPException(status_code=503, detail=f"{BROKER_DOWN_DETAIL}（{exc}）") from exc
+        raise HTTPException(
+            status_code=503, detail=f"{DISPATCH_FAILURE_DETAIL}（{exc}）"
+        ) from exc
     return accepted_response(async_result.id, kind, outbox_id=outbox_id, owner_id=owner_id)
 
 

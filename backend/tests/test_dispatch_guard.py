@@ -104,7 +104,11 @@ def test_dispatch_failure_after_a_passing_probe_is_still_503(
 
     response = client.post("/api/research/recommend", json=REQUIREMENT)
     assert response.status_code == 503
-    assert isinstance(response.json()["detail"], str)
+    detail = response.json()["detail"]
+    assert isinstance(detail, str)
+    # Must not recycle the broker-down copy for a post-probe failure.
+    assert "当前不可达，无法提交后台任务" not in detail
+    assert "提交失败" in detail or "入队" in detail
 
 
 # ── the probe itself ─────────────────────────────────────────────────────────

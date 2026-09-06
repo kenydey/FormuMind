@@ -219,10 +219,63 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             : null;
         });
         get().scheduleAutosave();
-      } catch (e) {
+      } catch (streamErr) {
+        // Keep the real stream error visible while we try sync POST /api/search
+        // so NotificationStack (and any left-rail consumer of draft.error) shows
+        // the 503/broker detail instead of a silent chat lockout.
+        const streamMsg = formatApiError(streamErr);
         set((draft) => {
-          draft.error = formatApiError(e);
+          draft.error = streamMsg;
+          draft.searchProgress = {
+            message: "流式检索失败，改用同步检索…",
+            total: draft.searchProgress?.total ?? 0,
+            source: null,
+            newCount: 0,
+            sourcesDone: draft.searchProgress?.sourcesDone ?? [],
+            sourcesPending: [],
+          };
         });
+        try {
+          const r = await api.search({
+            query,
+            requirement,
+            source_types: types.length ? types : undefined,
+            total_limit: 300,
+          });
+          if (r.evidence?.length) get().addSources(r.evidence);
+          if (r.filter_report) {
+            set((draft) => {
+              draft.filterReport = r.filter_report!;
+            });
+          }
+          if (r.source_status) {
+            set((draft) => {
+              draft.sourceStatus = r.source_status!;
+            });
+          }
+          if (r.used_seed_fallback || r.evidence?.some((e) => e.is_seed_corpus)) {
+            set((draft) => {
+              draft.usedSeedFallback = true;
+            });
+          }
+          set((draft) => {
+            // Clarify recovery so the user sees why stream failed but chat can unlock.
+            draft.error = `流式检索失败（${streamMsg}），已自动改用同步检索并成功`;
+            draft.searchProgress = {
+              message: `同步检索完成，共 ${draft.sources.length} 条`,
+              total: r.total ?? draft.sources.length,
+              source: null,
+              newCount: r.evidence?.length ?? 0,
+              sourcesDone: draft.searchProgress?.sourcesDone ?? [],
+              sourcesPending: [],
+            };
+          });
+          get().scheduleAutosave();
+        } catch (syncErr) {
+          set((draft) => {
+            draft.error = `流式检索失败（${streamMsg}）；同步检索也失败：${formatApiError(syncErr)}`;
+          });
+        }
       } finally {
         set((draft) => {
           draft.searchBusy = false;

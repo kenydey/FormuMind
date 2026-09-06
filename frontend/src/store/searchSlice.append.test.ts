@@ -14,13 +14,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   searchStream: vi.fn(),
   awaitTaskStream: vi.fn(),
+  search: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
   return {
     ...actual,
-    api: { ...actual.api, searchStream: mocks.searchStream },
+    api: {
+      ...actual.api,
+      searchStream: mocks.searchStream,
+      search: mocks.search,
+    },
     awaitTaskStream: mocks.awaitTaskStream,
   };
 });
@@ -80,5 +85,28 @@ describe("searchSources append", () => {
     await useStore.getState().searchSources("新关键词", { append: true });
 
     expect(useStore.getState().searchQuery).toBe("研究主题");
+  });
+});
+
+describe("searchSources stream→sync fallback", () => {
+  it("stream 失败后走同步 api.search，并填充 sources", async () => {
+    mocks.awaitTaskStream.mockRejectedValue(new Error("503: Redis broker unavailable"));
+    mocks.search.mockResolvedValue({
+      evidence: [NEW],
+      total: 1,
+      source_status: { literature: { available: true } },
+      used_seed_fallback: false,
+      filter_report: null,
+    } as never);
+
+    await useStore.getState().searchSources("新关键词");
+
+    expect(mocks.search).toHaveBeenCalled();
+    const { sources, selectedSources, error, searchBusy } = useStore.getState();
+    expect(sources.map((s) => s.identifier)).toEqual(["new-1"]);
+    expect(selectedSources).toContain("new-1");
+    expect(searchBusy).toBe(false);
+    expect(error).toMatch(/流式检索失败.*同步检索并成功/);
+    expect(error).toContain("503");
   });
 });
