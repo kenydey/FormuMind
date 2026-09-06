@@ -120,7 +120,7 @@ def default_requirement() -> Requirement:
     from ..pipeline.workflow import default_objectives
 
     return Requirement(
-        project_id="anticorrosion_coating",
+        project_id="",  # 创建时由 store 回写 UUID(2026-09-05);空=未归属
         product_type="防腐蚀环氧底漆",
         application="carbon_steel",
         domain=ProductDomain.anticorrosion_coating,

@@ -35,10 +35,31 @@ def test_create_and_get_project(client):
     pid = body["id"]
     assert body["title"]
     assert body["workspace"]["requirement"]["domain"] == "anticorrosion_coating"
+    # requirement.project_id 必须回写为项目 UUID(2026-09-05 slug 错位回归)
+    assert body["workspace"]["requirement"]["project_id"] == pid
 
     r2 = client.get(f"/api/projects/{pid}")
     assert r2.status_code == 200
     assert r2.json()["workspace"]["search_query"] == "水性防腐涂料"
+
+
+def test_create_project_overrides_slug_requirement_project_id(client):
+    """前端传 slug project_id('anticorrosion_coating')时不得原样入库。"""
+    r = client.post(
+        "/api/projects",
+        json={
+            "title": "slug 回写测试",
+            "requirement": {
+                "project_id": "anticorrosion_coating",
+                "product_type": "测试涂料",
+                "domain": "anticorrosion_coating",
+            },
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["workspace"]["requirement"]["project_id"] == body["id"]
+    assert body["workspace"]["requirement"]["project_id"] != "anticorrosion_coating"
 
 
 def test_list_projects(client):

@@ -173,6 +173,12 @@ class ProjectStore:
     def _insert(self, workspace: ProjectWorkspace, *, title: str) -> ProjectDetail:
         pid = str(uuid.uuid4())
         now = _utcnow()
+        # 权威归属: requirement.project_id 一律回写为项目 UUID。
+        # 前端/默认值可能携带 slug('anticorrosion_coating' 等), 若原样入库,
+        # 后续 ingest 会把 source_documents.project_id 写成 slug → 项目视图查不到
+        # (2026-09-05 防腐蚀环氧底漆 18 条资料错位根因)。
+        if workspace.requirement and workspace.requirement.project_id != pid:
+            workspace.requirement.project_id = pid
         domain = workspace.requirement.domain.value if workspace.requirement else ""
         row = ProjectRow(
             id=pid,
