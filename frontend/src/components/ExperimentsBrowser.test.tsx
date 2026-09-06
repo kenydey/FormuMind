@@ -58,4 +58,31 @@ describe("ExperimentsBrowser", () => {
     expect(screen.getByText(/DOE-A/)).toBeTruthy();
     expect(screen.getByText(/row #12/)).toBeTruthy();
   });
+
+
+  it("invokes onOpenWorkbenchHit when a search hit is clicked", async () => {
+    vi.spyOn(api, "listExperiments").mockResolvedValue([]);
+    vi.spyOn(api, "searchExperiments").mockResolvedValue([
+      {
+        row_id: 12,
+        campaign_id: 3,
+        campaign_name: "DOE-A",
+        item_id: "item-12",
+        status: "Done",
+        planned_params: {},
+        measurements: {},
+      },
+    ]);
+    const onOpen = vi.fn();
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    render(<ExperimentsBrowser onOpenWorkbenchHit={onOpen} />);
+    await user.type(screen.getByTestId("experiments-search-input"), "urgent");
+    await user.click(screen.getByTestId("experiments-search-btn"));
+    await user.click(await screen.findByTestId("experiments-search-hit"));
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ row_id: 12, campaign_id: 3, campaign_name: "DOE-A" })
+    );
+  });
+
 });

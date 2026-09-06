@@ -10,8 +10,11 @@ import {
 import { useStore } from "../store";
 
 /**
- * Browse stored experiments (training corpus / ELN-backed rows).
- * Opened from the Actions panel as modal "experiments".
+ * Browse stored experiments (training corpus / ELN-backed rows) and
+ * cross-campaign workbench search.
+ *
+ * Embedded as the "检索 / 历史" tab inside WorkbenchModal (no longer a
+ * separate right-rail Action). Search hits can jump back into the ledger.
  *
  * P3 follow-up: when a row is selected, also load typed QC measurements and
  * legacy experiment attachments (upload/list) — these API clients were orphaned
@@ -19,7 +22,12 @@ import { useStore } from "../store";
  *
  * P4: cross-campaign keyword search via GET /api/experiments/search.
  */
-export default function ExperimentsBrowser() {
+export default function ExperimentsBrowser({
+  onOpenWorkbenchHit,
+}: {
+  /** Open a search hit in the workbench ledger tab. */
+  onOpenWorkbenchHit?: (hit: ExperimentSearchHit) => void;
+} = {}) {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const domain = useStore((s) => s.requirement.domain);
   const [rows, setRows] = useState<ExperimentSummary[]>([]);
@@ -136,7 +144,7 @@ export default function ExperimentsBrowser() {
     <div className="space-y-3" data-testid="experiments-browser">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-slate-500">
-          浏览已入库实验记录（可用于 QC 回看与训练语料审计）。
+          跨批次检索台账行，并浏览已回灌的训练实验记录（QC / 语料审计）。
         </p>
         <div className="flex gap-1 text-[10px]">
           <button
@@ -218,10 +226,14 @@ export default function ExperimentsBrowser() {
               <p className="text-[10px] text-slate-600 px-2 py-2">无匹配行</p>
             ) : (
               searchHits.map((h, i) => (
-                <div
+                <button
                   key={`${h.campaign_id}-${h.row_id}-${h.item_id}-${i}`}
-                  className="px-2 py-1.5 text-[11px]"
+                  type="button"
+                  onClick={() => onOpenWorkbenchHit?.(h)}
+                  className="w-full text-left px-2 py-1.5 text-[11px] hover:bg-accent/10 transition-colors disabled:opacity-60"
                   data-testid="experiments-search-hit"
+                  disabled={!onOpenWorkbenchHit}
+                  title={onOpenWorkbenchHit ? "在台账中打开该行" : undefined}
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-accent2">row #{h.row_id}</span>
@@ -229,11 +241,14 @@ export default function ExperimentsBrowser() {
                       {h.campaign_name || `campaign ${h.campaign_id}`}
                     </span>
                     <span className="text-[10px] text-slate-500">{h.status}</span>
+                    {onOpenWorkbenchHit && (
+                      <span className="text-[10px] text-accent shrink-0">打开台账 →</span>
+                    )}
                   </div>
                   {h.item_id && (
                     <div className="text-[10px] font-mono text-slate-600 truncate">{h.item_id}</div>
                   )}
-                </div>
+                </button>
               ))
             )}
           </div>

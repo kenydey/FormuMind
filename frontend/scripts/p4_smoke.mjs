@@ -67,9 +67,10 @@ try {
   }
   await page.waitForTimeout(400);
 
-  // Experiments browser
-  await page.getByText("实验库", { exact: false }).first().click();
-  await page.waitForSelector('[data-testid="modal-experiments"]');
+  // Experiments browser (folded into 实验台账 → 检索/历史)
+  await page.getByTestId("open-workbench").click();
+  await page.waitForSelector('[data-testid="modal-workbench"]');
+  await page.getByTestId("workbench-tab-library").click();
   await page.waitForSelector('[data-testid="experiments-cross-search"]');
   await shot("p4-experiments-modal");
 

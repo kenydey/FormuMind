@@ -33,6 +33,8 @@ interface LabWorkbenchProps {
   doePlan: DOEPlan | null;
   requirement: Requirement;
   onSaved?: (rows: WorkbenchRow[]) => void;
+  /** When set, select/highlight this workbench row after load (search deep-link). */
+  focusRowId?: number | null;
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -61,6 +63,7 @@ export default function LabWorkbench({
   doePlan,
   requirement,
   onSaved,
+  focusRowId = null,
 }: LabWorkbenchProps) {
   const gridRef = useRef<AgGridReact<WorkbenchRow>>(null);
   const [rows, setRows] = useState<WorkbenchRow[]>([]);
@@ -68,6 +71,21 @@ export default function LabWorkbench({
   const [dirtyIds, setDirtyIds] = useState<Set<number>>(() => new Set());
   // P2: 当前选中行（详情条）
   const [selectedRow, setSelectedRow] = useState<WorkbenchRow | null>(null);
+
+  useEffect(() => {
+    if (focusRowId == null) return;
+    const row = rows.find((r) => r.id === focusRowId);
+    if (!row) return;
+    setSelectedRow(row);
+    const apiGrid = gridRef.current?.api;
+    if (!apiGrid) return;
+    apiGrid.forEachNode((node) => {
+      if (node.data?.id === focusRowId) {
+        node.setSelected(true, true);
+        apiGrid.ensureNodeVisible(node, "middle");
+      }
+    });
+  }, [focusRowId, rows]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

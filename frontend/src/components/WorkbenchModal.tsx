@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import LabWorkbench from "./LabWorkbench";
+import ExperimentsBrowser from "./ExperimentsBrowser";
 import { useStore } from "../store";
-import { api, formatApiError, type WorkbenchCampaignSummary } from "../api";
+import {
+  api,
+  formatApiError,
+  type ExperimentSearchHit,
+  type WorkbenchCampaignSummary,
+} from "../api";
 
-export default function WorkbenchModal() {
+export type WorkbenchModalTab = "ledger" | "library";
+
+/**
+ * Lab workbench shell: campaign picker + ledger editor, with the former
+ * "实验库" folded in as a second tab (cross-campaign search + training corpus).
+ */
+export default function WorkbenchModal({
+  initialTab = "ledger",
+}: {
+  initialTab?: WorkbenchModalTab;
+}) {
   const {
     doePlan,
     requirement,
@@ -36,6 +52,12 @@ export default function WorkbenchModal() {
   const [initError, setInitError] = useState<string | null>(null);
   const [campaigns, setCampaigns] = useState<WorkbenchCampaignSummary[]>([]);
   const [campaignsError, setCampaignsError] = useState<string | null>(null);
+  const [tab, setTab] = useState<WorkbenchModalTab>(initialTab);
+  const [focusRowId, setFocusRowId] = useState<number | null>(null);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   async function refreshCampaignList() {
     try {
@@ -83,6 +105,53 @@ export default function WorkbenchModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doePlan, ensureWorkbenchCampaign]);
 
+  async function openSearchHit(hit: ExperimentSearchHit) {
+    setFocusRowId(hit.row_id);
+    setTab("ledger");
+    if (workbenchCampaignId !== hit.campaign_id) {
+      await selectWorkbenchCampaign(hit.campaign_id);
+    }
+    await refreshCampaignList();
+  }
+
+  const tabs = (
+    <div
+      className="flex gap-1 border-b border-edge/50 pb-2"
+      role="tablist"
+      aria-label="实验台账视图"
+      data-testid="workbench-tabs"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "ledger"}
+        data-testid="workbench-tab-ledger"
+        onClick={() => setTab("ledger")}
+        className={`text-xs rounded px-3 py-1.5 border transition-colors ${
+          tab === "ledger"
+            ? "border-accent/50 bg-accent/10 text-accent"
+            : "border-edge text-slate-400 hover:border-accent/30"
+        }`}
+      >
+        当前台账
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "library"}
+        data-testid="workbench-tab-library"
+        onClick={() => setTab("library")}
+        className={`text-xs rounded px-3 py-1.5 border transition-colors ${
+          tab === "library"
+            ? "border-accent/50 bg-accent/10 text-accent"
+            : "border-edge text-slate-400 hover:border-accent/30"
+        }`}
+      >
+        检索 / 历史
+      </button>
+    </div>
+  );
+
   const campaignPicker = (
     <div className="flex flex-wrap items-center gap-2 text-[11px]">
       <label className="text-slate-500 shrink-0">Campaign</label>
@@ -93,6 +162,7 @@ export default function WorkbenchModal() {
         onChange={(e) => {
           const v = e.target.value;
           if (!v) return;
+          setFocusRowId(null);
           void selectWorkbenchCampaign(Number(v));
         }}
       >
@@ -119,28 +189,48 @@ export default function WorkbenchModal() {
     return <p className="text-sm text-slate-500 py-6 text-center">加载实验台账…</p>;
   }
 
+  // Library tab is always available — even before a campaign exists.
+  if (tab === "library") {
+    return (
+      <div className="space-y-3" data-testid="workbench-modal">
+        {tabs}
+        <ExperimentsBrowser onOpenWorkbenchHit={(hit) => void openSearchHit(hit)} />
+      </div>
+    );
+  }
+
   if (!doePlan && workbenchCampaignId == null) {
     return (
-      <div className="py-6 space-y-4">
+      <div className="py-2 space-y-4" data-testid="workbench-modal">
+        {tabs}
         {campaignPicker}
         {campaignsError && <p className="text-xs text-rose-400">{campaignsError}</p>}
         {campaigns.length > 0 ? (
           <p className="text-slate-400 text-sm text-center">
-            选择已有 Campaign 打开台账，或先在 DOE 设计中生成方案。
+            选择已有 Campaign 打开台账，或切换到「检索 / 历史」跨批次查找；也可先在 DOE 设计中生成方案。
           </p>
         ) : (
           <div className="text-center space-y-4">
             <p className="text-slate-400 text-sm">
               请先在 <span className="text-accent">DOE 设计</span> 中生成实验方案，系统将自动创建台账
-              Campaign。
+              Campaign；也可先打开「检索 / 历史」查看已有记录。
             </p>
-            <button
-              type="button"
-              onClick={() => setOpenModal("doe")}
-              className="text-sm border border-accent text-accent rounded px-4 py-2 hover:bg-accent/10"
-            >
-              打开 DOE 设计
-            </button>
+            <div className="flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setOpenModal("doe")}
+                className="text-sm border border-accent text-accent rounded px-4 py-2 hover:bg-accent/10"
+              >
+                打开 DOE 设计
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("library")}
+                className="text-sm border border-edge text-slate-300 rounded px-4 py-2 hover:border-accent/40"
+              >
+                去检索 / 历史
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -148,12 +238,18 @@ export default function WorkbenchModal() {
   }
 
   if (initError) {
-    return <p className="text-sm text-red-400 py-4">{initError}</p>;
+    return (
+      <div className="space-y-3" data-testid="workbench-modal">
+        {tabs}
+        <p className="text-sm text-red-400 py-4">{initError}</p>
+      </div>
+    );
   }
 
   if (workbenchCampaignId == null) {
     return (
-      <div className="py-8 text-center space-y-4">
+      <div className="py-4 text-center space-y-4" data-testid="workbench-modal">
+        {tabs}
         {campaignPicker}
         <p className="text-slate-400 text-sm">台账未就绪，请选择已有 Campaign 或重试创建。</p>
         <button
@@ -168,7 +264,8 @@ export default function WorkbenchModal() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="workbench-modal">
+      {tabs}
       {campaignPicker}
       {campaignsError && <p className="text-[10px] text-rose-400">{campaignsError}</p>}
 
@@ -190,6 +287,7 @@ export default function WorkbenchModal() {
         doePlan={doePlan}
         requirement={requirement}
         onSaved={() => void refreshWorkbenchStats()}
+        focusRowId={focusRowId}
       />
 
       <button
