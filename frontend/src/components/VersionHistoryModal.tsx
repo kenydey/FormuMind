@@ -50,8 +50,16 @@ export default function VersionHistoryModal({ form }: { form: Formulation }) {
     try {
       const found = await api.findFormulationLineages(form.name, form.domain, 1);
       if (found.length) {
-        setLineageId(found[0].lineage_id);
-        setVersions(found[0].versions);
+        const lid = found[0].lineage_id;
+        setLineageId(lid);
+        // Prefer the dedicated lineage endpoint (was orphaned) so list/search
+        // and id-based refresh stay in sync as the API evolves.
+        try {
+          const full = await api.formulationLineage(lid);
+          setVersions(full.versions);
+        } catch {
+          setVersions(found[0].versions);
+        }
       } else {
         setLineageId(null);
         setVersions([]);

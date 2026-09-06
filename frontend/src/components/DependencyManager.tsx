@@ -245,11 +245,12 @@ function KbDiagnosticsCard() {
     try {
       const stats = await api.neo4jStats();
       setNeo4j(stats);
-      setNeo4jOpen((stats.reachable !== false && stats.enabled !== false) || neo4jOpen);
+      setNeo4jOpen(true);
       if (stats.reachable !== false) void searchNeo4j("");
     } catch (e) {
       setReport(`Neo4j 不可达: ${e instanceof Error ? e.message : String(e)}`);
       setNeo4j(null);
+      setNeo4jOpen(true); // still open panel so upsert CTA is reachable
     } finally {
       setNeoBusy(false);
     }
@@ -269,6 +270,54 @@ function KbDiagnosticsCard() {
       setReport(`Neo4j schema ensure 失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setNeoBusy(false);
+    }
+  }
+
+  const [upsertName, setUpsertName] = useState("");
+  const [upsertCas, setUpsertCas] = useState("");
+  const [upsertSmiles, setUpsertSmiles] = useState("");
+  const [upsertBusy, setUpsertBusy] = useState(false);
+
+  async function upsertNeo4jCompound() {
+    const name = upsertName.trim();
+    if (!name) {
+      setReport("请填写化合物名称后再写入 Neo4j");
+      return;
+    }
+    setUpsertBusy(true);
+    setReport(null);
+    try {
+      const r = await api.neo4jUpsertCompound({
+        name,
+        cas_number: upsertCas.trim() || undefined,
+        smiles: upsertSmiles.trim() || undefined,
+      });
+      setReport(`✓ Neo4j 化合物已写入: ${String((r as { uid?: string }).uid ?? name)}`);
+      setNeo4jOpen(true);
+      void searchNeo4j(name);
+    } catch (e) {
+      setReport(`Neo4j 化合物写入失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpsertBusy(false);
+    }
+  }
+
+  async function upsertNeo4jFormulation() {
+    const name = upsertName.trim();
+    if (!name) {
+      setReport("请填写配方名称后再写入 Neo4j");
+      return;
+    }
+    setUpsertBusy(true);
+    setReport(null);
+    try {
+      const r = await api.neo4jUpsertFormulation({ name });
+      setReport(`✓ Neo4j 配方已写入: ${String((r as { uid?: string }).uid ?? name)}`);
+      setNeo4jOpen(true);
+    } catch (e) {
+      setReport(`Neo4j 配方写入失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpsertBusy(false);
     }
   }
 
@@ -435,8 +484,13 @@ function KbDiagnosticsCard() {
           <span className="text-slate-600"> (适配层, 与 SQLite 图谱共存)</span>
         </div>
       )}
-      {neo4j?.reachable !== false && neo4j?.enabled !== false && neo4jOpen && (
+      {neo4jOpen && (
         <div className="border border-edge rounded p-2 mb-1 space-y-2">
+          {neo4j?.reachable === false && (
+            <p className="text-[10px] text-amber-400">
+              Neo4j 当前不可达 — 仍可尝试写入（失败会显示错误）。
+            </p>
+          )}
           <div className="flex gap-2">
             <input
               value={neoQuery}
@@ -446,10 +500,11 @@ function KbDiagnosticsCard() {
               }}
               placeholder="搜索化合物(名称/CAS/uid)…"
               className="flex-1 bg-ink border border-edge rounded px-2 py-1 text-[11px]"
+              disabled={neo4j?.reachable === false}
             />
             <button
               type="button"
-              disabled={neoBusyBrowse}
+              disabled={neoBusyBrowse || neo4j?.reachable === false}
               onClick={() => void searchNeo4j(neoQuery.trim())}
               className="text-[10px] border border-accent/50 text-accent rounded px-2 py-1 disabled:opacity-50"
             >
@@ -463,6 +518,47 @@ function KbDiagnosticsCard() {
             >
               ✕
             </button>
+          </div>
+          <div className="border border-edge/50 rounded p-1.5 space-y-1.5 bg-ink/40">
+            <div className="text-[10px] text-slate-500">手动写入图谱（neo4jUpsert*）</div>
+            <div className="flex flex-wrap gap-1">
+              <input
+                value={upsertName}
+                onChange={(e) => setUpsertName(e.target.value)}
+                placeholder="名称 *"
+                className="flex-1 min-w-[6rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px]"
+              />
+              <input
+                value={upsertCas}
+                onChange={(e) => setUpsertCas(e.target.value)}
+                placeholder="CAS"
+                className="w-28 bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+              />
+              <input
+                value={upsertSmiles}
+                onChange={(e) => setUpsertSmiles(e.target.value)}
+                placeholder="SMILES"
+                className="flex-1 min-w-[8rem] bg-ink border border-edge rounded px-1.5 py-0.5 text-[11px] font-mono"
+              />
+            </div>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={upsertBusy || !upsertName.trim()}
+                onClick={() => void upsertNeo4jCompound()}
+                className="text-[10px] border border-teal-500/40 text-teal-300 rounded px-2 py-0.5 disabled:opacity-40"
+              >
+                {upsertBusy ? "…" : "写入化合物"}
+              </button>
+              <button
+                type="button"
+                disabled={upsertBusy || !upsertName.trim()}
+                onClick={() => void upsertNeo4jFormulation()}
+                className="text-[10px] border border-violet-500/40 text-violet-300 rounded px-2 py-0.5 disabled:opacity-40"
+              >
+                {upsertBusy ? "…" : "写入配方"}
+              </button>
+            </div>
           </div>
           <div className="max-h-56 overflow-auto space-y-1">
             {(neoCompounds ?? []).map((c) => (

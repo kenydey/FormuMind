@@ -1,10 +1,20 @@
-import { useEffect, useState } from "react";
-import { api, formatApiError, type ExperimentSummary } from "../api";
+import { useEffect, useRef, useState } from "react";
+import {
+  api,
+  formatApiError,
+  type Attachment,
+  type ExperimentSummary,
+  type QCMeasurementView,
+} from "../api";
 import { useStore } from "../store";
 
 /**
  * Browse stored experiments (training corpus / ELN-backed rows).
  * Opened from the Actions panel as modal "experiments".
+ *
+ * P3 follow-up: when a row is selected, also load typed QC measurements and
+ * legacy experiment attachments (upload/list) — these API clients were orphaned
+ * after the workbench path landed its own attachment endpoints.
  */
 export default function ExperimentsBrowser() {
   const activeProjectId = useStore((s) => s.activeProjectId);
@@ -14,6 +24,13 @@ export default function ExperimentsBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<"project" | "all">("project");
   const [selected, setSelected] = useState<ExperimentSummary | null>(null);
+
+  const [typedMeasurements, setTypedMeasurements] = useState<QCMeasurementView[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +60,54 @@ export default function ExperimentsBrowser() {
       cancelled = true;
     };
   }, [activeProjectId, domain, scope]);
+
+  useEffect(() => {
+    if (!selected) {
+      setTypedMeasurements([]);
+      setAttachments([]);
+      setDetailError(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailBusy(true);
+    setDetailError(null);
+    void (async () => {
+      try {
+        const [meas, atts] = await Promise.all([
+          api.experimentMeasurements(selected.id).catch(() => null),
+          api.getAttachments(selected.id).catch(() => [] as Attachment[]),
+        ]);
+        if (cancelled) return;
+        setTypedMeasurements(meas?.measurements ?? []);
+        setAttachments(atts);
+      } catch (e) {
+        if (!cancelled) setDetailError(formatApiError(e));
+      } finally {
+        if (!cancelled) setDetailBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  async function uploadAttachment() {
+    if (!selected) return;
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setUploadBusy(true);
+    setDetailError(null);
+    try {
+      await api.uploadAttachment(file, selected.id);
+      const atts = await api.getAttachments(selected.id);
+      setAttachments(atts);
+      if (fileRef.current) fileRef.current.value = "";
+    } catch (e) {
+      setDetailError(formatApiError(e));
+    } finally {
+      setUploadBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-3" data-testid="experiments-browser">
@@ -121,10 +186,18 @@ export default function ExperimentsBrowser() {
       )}
 
       {selected && (
-        <div className="border border-edge rounded-lg p-3 bg-ink/40 space-y-2">
+        <div className="border border-edge rounded-lg p-3 bg-ink/40 space-y-3">
           <h4 className="text-xs uppercase tracking-widest text-accent2">
             实验 #{selected.id} · 实测摘要
+            {detailBusy && <span className="ml-2 normal-case text-slate-500">加载中…</span>}
           </h4>
+
+          {detailError && (
+            <p className="text-[11px] text-rose-400 border border-rose-500/30 bg-rose-500/10 rounded px-2 py-1">
+              {detailError}
+            </p>
+          )}
+
           {Object.keys(selected.measured || {}).length === 0 ? (
             <p className="text-[11px] text-slate-500">无 measured 快照（可能仅有 typed measurements）</p>
           ) : (
@@ -140,6 +213,62 @@ export default function ExperimentsBrowser() {
               ))}
             </div>
           )}
+
+          {typedMeasurements.length > 0 && (
+            <div>
+              <h5 className="text-[10px] text-slate-500 mb-1">
+                结构化测量 · {typedMeasurements.length}
+              </h5>
+              <div className="space-y-0.5 max-h-28 overflow-auto">
+                {typedMeasurements.map((m, i) => (
+                  <div
+                    key={`${m.metric}-${i}`}
+                    className="flex items-center gap-2 text-[11px] border border-edge/30 rounded px-2 py-0.5"
+                  >
+                    <span className="text-slate-400 truncate flex-1">{m.metric}</span>
+                    <span className="font-mono text-slate-200">
+                      {m.value}
+                      {m.unit ? ` ${m.unit}` : ""}
+                    </span>
+                    {m.passed === true && <span className="text-emerald-400">✓</span>}
+                    {m.passed === false && <span className="text-rose-400">✗</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <h5 className="text-[10px] text-slate-500 mb-1">附件 · {attachments.length}</h5>
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                ref={fileRef}
+                type="file"
+                className="flex-1 text-[10px] text-slate-400 file:mr-2 file:px-2 file:py-0.5
+                           file:rounded file:border file:border-edge file:bg-panel file:text-slate-300"
+              />
+              <button
+                type="button"
+                disabled={uploadBusy}
+                onClick={() => void uploadAttachment()}
+                className="text-[10px] border border-accent/50 text-accent rounded px-2 py-1 disabled:opacity-40"
+              >
+                {uploadBusy ? "上传中…" : "上传"}
+              </button>
+            </div>
+            {attachments.length === 0 ? (
+              <p className="text-[10px] text-slate-600">暂无附件</p>
+            ) : (
+              <ul className="space-y-0.5 max-h-24 overflow-auto">
+                {attachments.map((a) => (
+                  <li key={a.id} className="text-[11px] text-slate-400 flex gap-2 truncate">
+                    <span className="text-slate-500 shrink-0">{a.kind || "file"}</span>
+                    <span className="truncate">{a.filename || a.source_document_id}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>

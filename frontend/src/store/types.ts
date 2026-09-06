@@ -192,6 +192,8 @@ export interface AppState {
   saveFormulaToDoe: (formulaIdx: number) => Promise<{ version_id: string } | null>;
   runResearch: () => Promise<void>;
   cancelResearch: () => Promise<void>;
+  /** Sync /api/research + /api/formulations/recommend (no Celery). */
+  runSyncRecommend: () => Promise<void>;
   runDeepResearch: () => Promise<void>;
   cancelDeepResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;

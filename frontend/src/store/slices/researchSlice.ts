@@ -236,6 +236,52 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
+    runSyncRecommend: async () => {
+      set((draft) => {
+        draft.formulationBusy = true;
+        draft.recommendStage = "recommend";
+        draft.recommendMessage = "同步推荐中…";
+        draft.error = null;
+      });
+      try {
+        const { requirement, sources, selectedSources, searchQuery } = get();
+        const selected = sources.filter((e) =>
+          selectedSources.includes(e.identifier || e.title)
+        );
+        const payload = selected.length > 0 ? selected : sources;
+
+        // Prefer the full sync research endpoint (mechanism + recommended).
+        try {
+          const research = await api.research(requirement, payload, searchQuery.trim());
+          await applyEnrichedLeaderboard(set, get, research.recommended ?? [], (draft) => {
+            draft.research = { ...research, recommended: draft.leaderboard };
+            draft.recommendMessage = "同步研究完成";
+          });
+          return;
+        } catch {
+          // Fall through to recommendFormulations.
+        }
+
+        const rec = await api.recommendFormulations(requirement, undefined, payload, 3);
+        const forms = (rec.scored?.length ? rec.scored : []) as Formulation[];
+        if (!forms.length) {
+          throw new Error(rec.warnings?.[0] || "同步推荐未返回配方");
+        }
+        await applyEnrichedLeaderboard(set, get, forms, (draft) => {
+          draft.recommendMessage = `同步推荐完成 · ${rec.engine || "offline"}`;
+        });
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      } finally {
+        set((draft) => {
+          draft.formulationBusy = false;
+          draft.recommendStage = "";
+        });
+      }
+    },
+
     runDeepResearch: async () => {
       const { searchQuery, requirement, sources } = get();
       set((draft) => {
@@ -307,5 +353,5 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
       if (tid) try { await api.cancelTask(tid); } catch {}
     },
 
-  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'removeFormula' | 'saveFormulaToDoe' | 'runAiModifyFormula' | 'runResearch' | 'cancelResearch' | 'runDeepResearch' | 'cancelDeepResearch'>;
+  } as Pick<AppState, 'setLeaderboard' | 'addManualFormula' | 'updateFormulaIngredient' | 'removeFormula' | 'saveFormulaToDoe' | 'runAiModifyFormula' | 'runResearch' | 'cancelResearch' | 'runSyncRecommend' | 'runDeepResearch' | 'cancelDeepResearch'>;
 }

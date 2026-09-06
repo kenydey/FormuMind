@@ -78,6 +78,7 @@ export default function ActionsPanel() {
     setOpenModal,
     runResearch,
     cancelResearch,
+    runSyncRecommend,
     runOptimize,
     busy,
     formulationBusy,
@@ -99,6 +100,7 @@ export default function ActionsPanel() {
       setOpenModal: s.setOpenModal,
       runResearch: s.runResearch,
       cancelResearch: s.cancelResearch,
+      runSyncRecommend: s.runSyncRecommend,
       runOptimize: s.runOptimize,
       busy: s.busy,
       formulationBusy: s.formulationBusy,
@@ -259,6 +261,15 @@ export default function ActionsPanel() {
             className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
           >
             {formulationBusy ? coldStartMessage(recommendStage, recommendMessage, "检索中…") : "从知识库推荐配方"}
+          </button>
+          <button
+            type="button"
+            disabled={busy !== "idle" || formulationBusy}
+            onClick={() => void runSyncRecommend()}
+            className="w-full mt-1 border border-edge text-slate-300 hover:border-accent/40 hover:text-accent rounded px-3 py-1.5 text-xs disabled:opacity-40"
+            title="同步调用 /api/research（失败则回退 /api/formulations/recommend），不经 Celery"
+          >
+            同步推荐（调试）
           </button>
           {formulationBusy && (
             <button onClick={cancelResearch} className={"w-full mt-1 " + CANCEL_BUTTON_CLASS}>✕ 取消推荐</button>
