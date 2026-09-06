@@ -1,18 +1,19 @@
 """Material-space endpoints — the raw-material catalog behind formulation search.
 
-GET  /api/materials              — list / filter the catalog
-POST /api/materials              — add or update one material (auto-enriched)
-POST /api/materials/availability — flag supply status (drives substitution)
-
-The catalog used to be a module literal; making it data is what lets ingredient
-choice become a search variable, and lets the candidate pool grow from the
-literature the user already ingests.
+GET  /api/materials                 — list / filter the catalog
+POST /api/materials                 — add or update one material (auto-enriched)
+POST /api/materials/availability    — flag supply status (drives substitution)
+POST /api/materials/import          — batch import (json/csv/xlsx)
+GET  /api/materials/export          — batch export
+GET  /api/materials/import-template — empty template download
+GET/POST /api/materials/candidates  — pending promotion queue
 """
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
@@ -54,8 +55,6 @@ class MaterialSpec(BaseModel):
     lead_time_days: int | None = None
     availability: str = "in_stock"
     substitute_group: str | None = None
-    # Fill blank CAS/SMILES/formula from the catalog → PubChem → chemtools
-    # cascade before storing. Network-bound; opt out for bulk imports.
     enrich: bool = True
 
 
@@ -64,6 +63,7 @@ class MaterialView(BaseModel):
     role: str = ""
     origin: str = "seed"
     availability: str = "in_stock"
+    archived: bool = False
     spec: dict = Field(default_factory=dict)
 
 
@@ -76,6 +76,33 @@ class MaterialListResponse(BaseModel):
 class AvailabilityRequest(BaseModel):
     name: str
     availability: str
+
+
+class ArchiveRequest(BaseModel):
+    name: str
+    archived: bool = True
+
+
+class ProposeRequest(BaseModel):
+    name: str
+    role: str = ""
+    cas_no: str | None = None
+    smiles: str | None = None
+    formula: str | None = None
+    zh_name: str | None = None
+    supplier: str | None = None
+    source: str = "formula"
+    source_ref: str = ""
+
+
+class ProposeManyRequest(BaseModel):
+    materials: list[ProposeRequest] = Field(default_factory=list)
+    source: str = "formula"
+    source_ref: str = ""
+
+
+class PromoteRequirementRequest(BaseModel):
+    requirement: Requirement
 
 
 def _require_store():
@@ -93,6 +120,7 @@ def _to_view(name: str, spec: dict) -> MaterialView:
         role=str(spec.get("role") or ""),
         origin=str(spec.get("origin") or "seed"),
         availability=str(spec.get("availability") or "in_stock"),
+        archived=bool(spec.get("archived")),
         spec=spec,
     )
 
@@ -102,16 +130,38 @@ def list_materials(
     q: str = Query(default=""),
     role: str = Query(default=""),
     availability: str = Query(default=""),
+    functional_class: str = Query(default=""),
+    substitute_group: str = Query(default=""),
+    include_archived: bool = Query(default=False),
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> MaterialListResponse:
-    """The full catalog as the formulation engine sees it (seed + additions)."""
     settings = get_settings()
-    term, role_f, avail_f = q.strip().lower(), role.strip(), availability.strip()
+    term = q.strip().lower()
+    role_f, avail_f = role.strip(), availability.strip()
+    fc, sg = functional_class.strip(), substitute_group.strip()
     views: list[MaterialView] = []
-    for name, spec in RAW_MATERIALS.items():
+    source_items = list(RAW_MATERIALS.items())
+    if include_archived:
+        try:
+            store = get_material_store()
+            for row in store.list_all():
+                if not getattr(row, "archived", False):
+                    continue
+                if row.name in RAW_MATERIALS:
+                    continue
+                source_items.append((row.name, store.row_to_spec(row)))
+        except Exception:
+            pass
+    for name, spec in source_items:
+        if not include_archived and spec.get("archived"):
+            continue
         if role_f and spec.get("role") != role_f:
             continue
         if avail_f and (spec.get("availability") or "in_stock") != avail_f:
+            continue
+        if fc and (spec.get("functional_class") or "") != fc:
+            continue
+        if sg and (spec.get("substitute_group") or "") != sg:
             continue
         if term and term not in name.lower() and term not in str(spec.get("zh_name") or "").lower():
             continue
@@ -127,7 +177,6 @@ def list_materials(
 
 @router.post("", response_model=MaterialView)
 def upsert_material(body: MaterialSpec) -> MaterialView:
-    """Add or update a material; it is immediately usable by DOE/optimize."""
     store = _require_store()
     name = body.name.strip()
     if not name:
@@ -148,12 +197,11 @@ def upsert_material(body: MaterialSpec) -> MaterialView:
 
 
 def _enrich_spec(name: str, spec: dict) -> dict:
-    """Fill blank identity fields via the existing resolution cascade."""
     try:
         from ..services.chemical_lookup import lookup_chemical
 
         found = lookup_chemical(name) or {}
-    except Exception as exc:  # pragma: no cover - network/optional path
+    except Exception as exc:  # pragma: no cover
         logger.debug("material enrich failed for %s: %s", name, exc)
         return {}
     out: dict = {}
@@ -164,13 +212,9 @@ def _enrich_spec(name: str, spec: dict) -> dict:
 
 
 class SubstituteRequest(BaseModel):
-    """Ask what could replace one component of a formulation."""
-
     requirement: Requirement | None = None
     formulation: Formulation | None = None
     domain: str = ""
-    # Either the slot position or the material name; the name is friendlier
-    # for callers that did not build the genome themselves.
     slot_index: int | None = None
     material: str = ""
     limit: int = Field(default=10, ge=1, le=50)
@@ -182,15 +226,6 @@ def _slot_candidates(genome) -> list[str]:
 
 
 def _resolve_material_slot(genome, material: str) -> int | None:
-    """Map a user-supplied material name onto a genome slot index.
-
-    Preference order:
-    1. case-insensitive exact match
-    2. unique casefold containment (query ⊆ name or name ⊆ query)
-    3. unique difflib close match
-
-    Returns None when nothing matches or the fuzzy step is ambiguous.
-    """
     from difflib import get_close_matches
 
     needle = material.strip()
@@ -206,9 +241,7 @@ def _resolve_material_slot(genome, material: str) -> int | None:
     if len(exact) > 1:
         return None
 
-    contained = [
-        i for i, f in enumerate(folded) if key in f or (f and f in key)
-    ]
+    contained = [i for i, f in enumerate(folded) if key in f or (f and f in key)]
     if len(contained) == 1:
         return contained[0]
     if len(contained) > 1:
@@ -221,19 +254,17 @@ def _resolve_material_slot(genome, material: str) -> int | None:
 
 
 def _material_not_found(material: str, genome) -> HTTPException:
-    candidates = _slot_candidates(genome)
     return HTTPException(
         status_code=404,
         detail={
             "message": f"配方中不含材料：{material}",
-            "candidates": candidates,
+            "candidates": _slot_candidates(genome),
         },
     )
 
 
 @router.post("/substitutes")
 def substitutes(body: SubstituteRequest) -> dict:
-    """Rank replacements for one component, each with its predicted deltas."""
     from ..domain.genome import genome_from_formulation
     from ..pipeline import reconstruct
     from ..services.substitution import find_substitutes
@@ -267,7 +298,6 @@ def substitutes(body: SubstituteRequest) -> dict:
 
 @router.get("/supply-risk")
 def supply_risk(domain: str = Query(default="")) -> dict:
-    """Materials flagged discontinued/restricted, and the baselines they hit."""
     from ..domain.schemas import ProductDomain
     from ..pipeline import reconstruct
     from ..services.substitution import scan_supply_risk
@@ -287,7 +317,6 @@ def supply_risk(domain: str = Query(default="")) -> dict:
 
 @router.post("/availability", response_model=MaterialView)
 def set_availability(body: AvailabilityRequest) -> MaterialView:
-    """Flag supply status. ``discontinued`` is the substitution trigger."""
     store = _require_store()
     if body.availability not in _AVAILABILITY:
         raise HTTPException(
@@ -296,7 +325,202 @@ def set_availability(body: AvailabilityRequest) -> MaterialView:
     name = body.name.strip()
     if name not in RAW_MATERIALS:
         raise HTTPException(status_code=404, detail=f"未知材料：{name}")
-    # Seed materials have no row until they're edited; upsert covers both.
     store.upsert(name, {"availability": body.availability}, origin="seed", overwrite=True)
     RAW_MATERIALS.refresh()
     return _to_view(name, RAW_MATERIALS.get(name, {}))
+
+
+@router.post("/archive", response_model=MaterialView)
+def archive_material(body: ArchiveRequest) -> MaterialView:
+    store = _require_store()
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name 不能为空")
+    if not store.set_archived(name, body.archived):
+        raise HTTPException(status_code=500, detail="归档失败")
+    RAW_MATERIALS.refresh()
+    if body.archived:
+        row = store.get(name)
+        spec = store.row_to_spec(row) if row else {"archived": True}
+        return _to_view(name, spec)
+    return _to_view(name, RAW_MATERIALS.get(name, {"archived": False}))
+
+
+@router.post("/import")
+async def import_materials(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(default=True),
+) -> dict:
+    _require_store()
+    from ..services import material_io
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="空文件")
+    try:
+        records = material_io.detect_and_parse(file.filename or "", payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    preview = (
+        material_io.plan_import(records)
+        if dry_run
+        else material_io.commit_import(records, origin="import")
+    )
+    return {
+        "dry_run": dry_run,
+        "batch_id": preview.batch_id,
+        "total": preview.total,
+        "creates": preview.creates,
+        "updates": preview.updates,
+        "errors": preview.errors,
+        "rows": [
+            {
+                "name": r.name,
+                "action": r.action,
+                "reason": r.reason,
+                "matched_by": r.matched_by,
+                "existing_name": r.existing_name,
+            }
+            for r in preview.rows[:200]
+        ],
+    }
+
+
+@router.get("/export")
+def export_materials(
+    format: str = Query(default="csv"),
+    q: str = Query(default=""),
+    role: str = Query(default=""),
+    availability: str = Query(default=""),
+    functional_class: str = Query(default=""),
+    substitute_group: str = Query(default=""),
+    include_archived: bool = Query(default=False),
+) -> Response:
+    from ..services import material_io
+
+    fmt = format.lower().strip()
+    records = material_io.export_records(
+        q=q,
+        role=role,
+        availability=availability,
+        functional_class=functional_class,
+        substitute_group=substitute_group,
+        include_archived=include_archived,
+    )
+    try:
+        if fmt == "json":
+            body, media, filename = material_io.serialize_json(records), "application/json", "materials.json"
+        elif fmt == "csv":
+            body, media, filename = material_io.serialize_csv(records), "text/csv", "materials.csv"
+        elif fmt in {"xlsx", "xls"}:
+            body = material_io.serialize_xlsx(records)
+            media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            filename = "materials.xlsx"
+        else:
+            raise HTTPException(status_code=400, detail="format 须为 json / csv / xlsx")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=body,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/import-template")
+def import_template(format: str = Query(default="csv")) -> Response:
+    from ..services import material_io
+
+    try:
+        body, media, filename = material_io.import_template(format)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=body,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/candidates")
+def list_candidates(limit: int = Query(default=200, ge=1, le=1000)) -> dict:
+    _require_store()
+    from ..services.material_promote import candidate_to_dict, get_candidate_store
+
+    rows = get_candidate_store().list_pending(limit=limit)
+    return {"total": len(rows), "candidates": [candidate_to_dict(r) for r in rows]}
+
+
+@router.post("/candidates/{candidate_id}/promote")
+def promote_candidate_endpoint(candidate_id: str) -> dict:
+    _require_store()
+    from ..services.material_promote import promote_candidate as _promote
+
+    result = _promote(candidate_id)
+    if not result.get("ok"):
+        code = 404 if result.get("reason") == "not_found" else 500
+        raise HTTPException(status_code=code, detail=result)
+    return result
+
+
+@router.post("/candidates/{candidate_id}/dismiss")
+def dismiss_candidate_endpoint(candidate_id: str) -> dict:
+    _require_store()
+    from ..services.material_promote import dismiss_candidate as _dismiss
+
+    result = _dismiss(candidate_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail="候选不存在或更新失败")
+    return result
+
+
+@router.post("/propose")
+def propose_one(body: ProposeRequest) -> dict:
+    _require_store()
+    from ..services.material_promote import propose_material
+
+    return propose_material(
+        body.name,
+        body.model_dump(exclude={"name", "source", "source_ref"}, exclude_none=True),
+        source=body.source,
+        source_ref=body.source_ref,
+    )
+
+
+@router.post("/propose-many")
+def propose_many_endpoint(body: ProposeManyRequest) -> dict:
+    _require_store()
+    from ..services.material_promote import propose_many
+
+    items = [
+        m.model_dump(exclude={"source", "source_ref"}, exclude_none=True)
+        for m in body.materials
+    ]
+    return propose_many(items, source=body.source, source_ref=body.source_ref)
+
+
+@router.post("/promote-from-requirement")
+def promote_from_requirement(body: PromoteRequirementRequest) -> dict:
+    _require_store()
+    from ..services.material_promote import propose_many
+
+    mats = getattr(body.requirement, "materials", None) or []
+    items = []
+    for m in mats:
+        if hasattr(m, "model_dump"):
+            d = m.model_dump()
+        elif isinstance(m, dict):
+            d = m
+        else:
+            continue
+        if d.get("name"):
+            items.append(d)
+    return propose_many(items, source="requirement", source_ref="requirement.materials")
+
+
+@router.post("/harvest-kb-products")
+def harvest_kb_products(limit: int = Query(default=200, ge=1, le=2000)) -> dict:
+    _require_store()
+    from ..services.material_promote import promote_kb_products
+
+    return promote_kb_products(limit=limit)
