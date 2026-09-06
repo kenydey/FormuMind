@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore, type ProjectSummary } from "../store";
 import { api } from "../api";
+import ProjectHistoryPanel from "./ProjectHistoryPanel";
 import { SOURCE_LIMIT } from "../projectWorkspace";
 
 function fmt(iso: string): string {
@@ -172,6 +173,12 @@ export default function HistoryPanel() {
             ))
           )}
         </div>
+
+        {activeProjectId && (
+          <div className="px-3 pb-2">
+            <ProjectHistoryPanel projectId={activeProjectId} />
+          </div>
+        )}
 
         <div className="px-4 py-2 border-t border-edge text-[10px] text-slate-600 space-y-1">
           <div>

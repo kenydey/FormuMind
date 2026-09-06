@@ -454,6 +454,23 @@ export interface WorkbenchCampaignSummary {
   strategy: string;
   row_count: number;
   project_id: string | null;
+  /** P1: linked DataLab collection id when ELN backend is active. */
+  datalab_collection_id?: string | null;
+}
+
+/** GET /api/projects/{id}/history — payload version audit metadata. */
+export interface ProjectPayloadVersion {
+  version: number;
+  cause: string;
+  created_at: string | null;
+  fields: string[];
+  chat_count: number;
+  source_count: number;
+}
+
+export interface ProjectPayloadHistoryResponse {
+  project_id: string;
+  versions: ProjectPayloadVersion[];
 }
 
 export interface BatchUpdateRequest {
@@ -1061,9 +1078,10 @@ export const api = {
     post<unknown>("/api/materials/availability", { name, availability }),
 
   // ── Experiments and QC reports ──
-  listExperiments: (opts: { domain?: string; limit?: number } = {}) => {
+  listExperiments: (opts: { domain?: string; project_id?: string; limit?: number } = {}) => {
     const params = new URLSearchParams();
     if (opts.domain) params.set("domain", opts.domain);
+    if (opts.project_id) params.set("project_id", opts.project_id);
     params.set("limit", String(opts.limit ?? 100));
     return get<ExperimentSummary[]>(`/api/experiments?${params}`);
   },
@@ -1518,6 +1536,17 @@ export const api = {
       campaign_count: number;
       experiment_count: number;
     }>(`/api/projects/${encodeURIComponent(id)}/db-stats`),
+
+  getProjectHistory: (id: string, limit = 20) =>
+    get<ProjectPayloadHistoryResponse>(
+      `/api/projects/${encodeURIComponent(id)}/history?limit=${limit}`
+    ),
+
+  rollbackProject: (id: string, version: number) =>
+    post<ProjectDetailResponse>(
+      `/api/projects/${encodeURIComponent(id)}/rollback/${version}`,
+      {}
+    ),
 
   migrateLocalProjects: (snapshots: {
     id: string;

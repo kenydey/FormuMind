@@ -20,6 +20,7 @@ const SimPlaceholder = lazy(() => import("./SimPlaceholder"));
 const LoopModal = lazy(() => import("./LoopModal"));
 const MaterialsPanel = lazy(() => import("./MaterialsPanel"));
 const InverseDesignModal = lazy(() => import("./InverseDesignModal"));
+const ExperimentsBrowser = lazy(() => import("./ExperimentsBrowser"));
 
 function ModalFallback() {
   return <div className="p-6 text-sm text-slate-400">加载中…</div>;
@@ -31,6 +32,7 @@ type ModalName =
   | "design"
   | "doe"
   | "workbench"
+  | "experiments"
   | "optimize"
   | "loop"
   | "materials";
@@ -41,6 +43,7 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "design", icon: "🎯", title: "逆向设计", desc: "给定目标性能，反向搜索帕累托前沿上的配方" },
   { id: "doe", icon: "🔬", title: "DOE 设计", desc: "生成实验方案并导出记录表" },
   { id: "workbench", icon: "📋", title: "实验台账", desc: "填报实际参数与实测值，同步至 BayBE 闭环" },
+  { id: "experiments", icon: "📚", title: "实验库", desc: "浏览已入库实验记录与实测摘要" },
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
   { id: "materials", icon: "🧴", title: "材料库", desc: "材料 CRUD、供应状态与结构搜索(SMARTS/骨架替代)" },
@@ -303,6 +306,18 @@ export default function ActionsPanel() {
       >
         <Suspense fallback={<ModalFallback />}>
           <WorkbenchModal />
+        </Suspense>
+      </Modal>
+
+      <Modal
+        title="实验库 · Experiments"
+        open={openModal === "experiments"}
+        testId="modal-experiments"
+        onClose={() => setOpenModal(null)}
+        size="lg"
+      >
+        <Suspense fallback={<ModalFallback />}>
+          <ExperimentsBrowser />
         </Suspense>
       </Modal>
 

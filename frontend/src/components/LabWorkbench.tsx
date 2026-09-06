@@ -21,6 +21,7 @@ import TagPicker from "./TagPicker";
 import AttachmentPreview from "./AttachmentPreview";
 import RowVersionHistoryModal from "./RowVersionHistoryModal";
 import RowDetailBar, { type RowDetailAction } from "./RowDetailBar";
+import ExperimentDetail from "./ExperimentDetail";
 import LineageTree from "./LineageTree";
 import ExperimentDiff from "./ExperimentDiff";
 import QCReportModal from "./QCReportModal";
@@ -29,7 +30,7 @@ import ContourPlot from "./charts/ContourPlot";
 
 interface LabWorkbenchProps {
   campaignId: number;
-  doePlan: DOEPlan;
+  doePlan: DOEPlan | null;
   requirement: Requirement;
   onSaved?: (rows: WorkbenchRow[]) => void;
 }
@@ -110,7 +111,10 @@ export default function LabWorkbench({
     [requirement.objectives, workbenchObjectivesSnapshot, apiSnapshot]
   );
 
-  const factorKeys = useMemo(() => factorKeysFromPlan(doePlan, rows), [doePlan, rows]);
+  const factorKeys = useMemo(
+    () => factorKeysFromPlan(doePlan ?? ({ factors: [] } as unknown as DOEPlan), rows),
+    [doePlan, rows]
+  );
 
   // F19/F20：切换 campaignId 时立即清空上一路的状态，避免旧 campaign 的
   // attachmentCounts / apiSnapshot / loop 统计残留，并配合上方加载 effect 的
@@ -217,7 +221,7 @@ export default function LabWorkbench({
   }, [campaignId]);
 
   const columnDefs = useMemo<ColDef<WorkbenchRow>[]>(() => {
-    const cols = buildWorkbenchColumnDefs(factorKeys, objectives, doePlan, attachmentCounts);
+    const cols = buildWorkbenchColumnDefs(factorKeys, objectives, doePlan ?? ({ factors: [] } as unknown as DOEPlan), attachmentCounts);
     const statusCol = cols.find(
       (c): c is ColDef<WorkbenchRow> => "field" in c && c.field === "status"
     );
@@ -715,13 +719,16 @@ export default function LabWorkbench({
           />
         </div>
         {selectedRow && (
-          <RowDetailBar
+          <>
+            <RowDetailBar
             row={selectedRow}
             objectives={objectives}
             attachmentCount={attachmentCounts[selectedRow.id] ?? 0}
             onAction={handleRowAction}
             onClose={() => setSelectedRow(null)}
           />
+            <ExperimentDetail data={selectedRow} objectives={objectives} />
+          </>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 border-t border-edge/40 bg-ink/20">
           <div className="flex flex-col gap-1 min-w-0">

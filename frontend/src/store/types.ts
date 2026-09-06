@@ -158,7 +158,7 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm";
+  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org";
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -204,6 +204,8 @@ export interface AppState {
   submitResults: () => Promise<void>;
   refreshWorkbenchStats: () => Promise<void>;
   ensureWorkbenchCampaign: () => Promise<number | null>;
+  /** Switch the active workbench campaign without recreating from DOE. */
+  selectWorkbenchCampaign: (id: number) => Promise<void>;
   adoptDoePlanToWorkbench: (plan?: DOEPlan) => Promise<number | null>;
   refreshModels: () => Promise<void>;
   /** B: 训练数据就绪度刷新（导入/训练后调用） */
@@ -239,8 +241,8 @@ export interface AppState {
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
-  openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm") => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm") => void;
+  openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   cancelLoopTask: () => Promise<void>;
