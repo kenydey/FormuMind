@@ -106,6 +106,30 @@ def test_health_hint_includes_start_command_when_eln_down(monkeypatch):
     assert "eln" in hint.lower() or "datalab" in hint.lower()
 
 
+def test_list_experiments_fail_fast_when_eln_required(monkeypatch):
+    """Product datalab backends must not list sqlite rows as a healthy ledger."""
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_EXPERIMENT_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_DATALAB_REQUIRED", "true")
+    monkeypatch.setenv("FORMUMIND_DATALAB_API_URL", "http://127.0.0.1:1")
+    get_settings.cache_clear()
+    client = TestClient(app)
+    res = client.get("/api/experiments")
+    assert res.status_code == 503
+    assert "Datalab" in res.json()["detail"] or "ELN" in res.json()["detail"]
+
+
+def test_list_workbench_campaigns_fail_fast_when_eln_required(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_DATALAB_REQUIRED", "true")
+    monkeypatch.setenv("FORMUMIND_DATALAB_API_URL", "http://127.0.0.1:1")
+    get_settings.cache_clear()
+    client = TestClient(app)
+    res = client.get("/api/experiments/workbench/campaigns")
+    assert res.status_code == 503
+    assert "启动" in res.json()["detail"] or "Datalab" in res.json()["detail"]
+
+
 def test_sqlite_campaign_still_works_in_dev(monkeypatch, tmp_path):
     monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "sqlite")
     monkeypatch.setenv("FORMUMIND_DB_URL", f"sqlite:///{tmp_path / 'dev.db'}")
