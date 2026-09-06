@@ -86,16 +86,18 @@ it is installed.
 | VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
 | Compound data | PubChemPy (SMILES / molar mass) | hand-curated raw-material library |
 | Stoichiometry & safety | ChemFormula + acid/base, SVHC, VOC-category checks | self-contained formula parser + rule checks |
-| Optimization | BoTorch GP (qNEHVI) · Summit (Bayesian/TSEMO) · Optuna (NSGA-II/TPE, CPU) | numpy UCB Bayesian optimizer |
-| Active-learning DOE | trained surrogate + EI on DOE grid | random LHS sampling |
+| Optimization | BoTorch GP (qNEHVI) · Summit (Bayesian/TSEMO) · Optuna (NSGA-II/TPE, CPU) — all optional | **native** numpy UCB Bayesian optimizer (default) |
+| Active-learning DOE | BayBE / trained surrogate + EI on DOE grid (optional extras) | **native** DOE (LHS / factorial / CCD / …) — default |
 | IP analysis | LLM JSON (`complete_json`) over retrieved patents | offline keyword overlap → risk tag |
 | Process optimizer | shared engine over manufacturing parameters | Arrhenius / empirical outcome models |
 | Cure / MD simulation | HTPolyNet · LUNAR · LAMMPS (Docker) | analytic approximation |
 
-> The genuinely lightweight, high-value parts — the **DOE engine** (full /
-> fractional factorial, Plackett-Burman, central composite, Latin hypercube,
-> AI-active selection) and the **Bayesian optimizer** — are implemented for
-> real in pure numpy.
+> Native **DOE** and the **numpy Bayesian optimizer** are the default product
+> path. BayBE / Optuna / BoTorch are optional extras — missing them does not
+> block recommend, DOE, or optimize. The genuinely lightweight, high-value
+> parts — the **DOE engine** (full / fractional factorial, Plackett-Burman,
+> central composite, Latin hypercube, AI-active selection) and the **Bayesian
+> optimizer** — are implemented for real in pure numpy.
 
 ---
 
@@ -1143,14 +1145,17 @@ clear the stored value.
 
 ## 12. Enabling the real engines
 
-Install the corresponding extras on a capable machine and the adapters switch
-over automatically — no code change:
+Native DOE and the built-in numpy optimizer are the **default**. Install the
+corresponding extras on a capable machine only when you want those engines;
+adapters switch over automatically — no code change. Missing `baybe` /
+`optuna` / `botorch` does **not** block core recommend / native DOE / native
+optimize.
 
 ```bash
 pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
 pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
-pip install -e ".[optimize]"     # optuna (CPU multi-objective optimizer, NSGA-II/TPE)
-pip install -e ".[bo]"           # BoTorch + gpytorch + torch CPU (GP qNEHVI optimizer)
+pip install -e ".[optimize]"     # optuna (optional CPU multi-objective; native is default)
+pip install -e ".[bo]"           # BoTorch + gpytorch + torch CPU (optional GP qNEHVI)
 pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
 pip install -e ".[embedding]"    # sentence-transformers (+ chromadb) → semantic RAG

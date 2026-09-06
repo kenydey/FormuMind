@@ -412,8 +412,11 @@ def get_experiment_store(settings: Settings | None = None) -> ExperimentStore:
                 f"auto 探测失败（{reason}）且 Datalab 为必需",
             )
         else:
+            # Only when DATALAB_REQUIRED=false and campaign is not datalab —
+            # CI/unit isolation. Not a product delivery path.
             logger.warning(
-                "Datalab 不可达（%s），训练记录后端回退 SqlExperimentStore（auto）",
+                "Datalab 不可达（%s），训练记录后端回退 SqlExperimentStore"
+                "（auto + DATALAB_REQUIRED=false，仅测试）",
                 reason,
             )
             _store = SqlExperimentStore(factory)

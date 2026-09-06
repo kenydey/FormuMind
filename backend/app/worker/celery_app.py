@@ -3,10 +3,11 @@
 The API executes async jobs via ``TaskManager`` in ``tasks.py``; Celery is only
 needed when running the optional ``worker`` service (``--profile celery``).
 
-Configured to use Redis as broker/result backend when reachable. The
-``celery_eager`` setting (default False) runs tasks on a real worker + Redis
-broker. Offline tests/CI opt in via ``FORMUMIND_CELERY_EAGER=true`` (see
-``tests/conftest.py``).
+Configured to use Redis as broker/result backend when reachable.
+``FORMUMIND_CELERY_EAGER`` default **False** → ``task_always_eager=False``
+(tasks go to a real worker + Redis). Offline tests/CI opt in with
+``FORMUMIND_CELERY_EAGER=true`` so jobs run in-process (see ``tests/conftest.py``).
+Eager is for local/CI only — production must keep it false.
 """
 from __future__ import annotations
 

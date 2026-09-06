@@ -258,6 +258,72 @@ def test_substitutes_endpoint_404_for_absent_material():
         },
     )
     assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert "message" in detail
+    assert "candidates" in detail
+    assert isinstance(detail["candidates"], list)
+    assert detail["candidates"], "404 should list slot material names"
+    assert "Polyamide hardener" in detail["candidates"]
+
+
+def test_substitutes_endpoint_case_insensitive_material_match():
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "requirement": _req().model_dump(mode="json"),
+            "material": "polyamide HARDENER",
+            "limit": 3,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["original"] == "Polyamide hardener"
+
+
+def test_substitutes_endpoint_fuzzy_substring_material_match():
+    """Partial name that uniquely identifies a slot should resolve."""
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "requirement": _req().model_dump(mode="json"),
+            "material": "polyamide",
+            "limit": 3,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["original"] == "Polyamide hardener"
+
+
+def test_substitutes_endpoint_ambiguous_fuzzy_returns_candidates():
+    """A query matching multiple slots must not silently pick one."""
+    # Anticorrosion baseline includes both "Deionized water" and often other
+    # names containing overlapping tokens; use a formulation with two clear hits.
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "formulation": {
+                "name": "Ambiguous",
+                "domain": "anticorrosion_coating",
+                "ingredients": [
+                    {
+                        "name": "Waterborne acrylic emulsion",
+                        "role": "resin",
+                        "weight_pct": 60.0,
+                    },
+                    {"name": "Deionized water", "role": "solvent", "weight_pct": 40.0},
+                ],
+            },
+            "material": "water",
+            "limit": 3,
+        },
+    )
+    assert response.status_code == 404, response.text
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert set(detail["candidates"]) == {
+        "Waterborne acrylic emulsion",
+        "Deionized water",
+    }
 
 
 def test_supply_risk_endpoint():

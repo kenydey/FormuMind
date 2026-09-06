@@ -70,7 +70,64 @@ def test_health_reports_datalab_degraded_when_required(monkeypatch):
     assert body["status"] == "degraded"
     assert body["datalab"]["required"] is True
     assert body["datalab"]["reachable"] is False
+    assert "hint" in body["datalab"]
+    assert "docker compose" in body["datalab"]["hint"].lower() or "datalab" in body["datalab"]["hint"].lower()
     assert body["database"]["scheme"] in ("sqlite", "postgresql")
+
+
+def test_campaign_auto_unreachable_required_raises(monkeypatch):
+    """auto + unreachable + DATALAB_REQUIRED → hard fail (no silent sqlite)."""
+    from app.db import campaign_store as cs_mod
+    from app.config import get_settings
+
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "auto")
+    monkeypatch.setenv("FORMUMIND_DATALAB_REQUIRED", "true")
+    monkeypatch.setenv("FORMUMIND_DATALAB_API_URL", "http://127.0.0.1:1")
+    get_settings.cache_clear()
+    reset_campaign_store(None)
+    monkeypatch.setattr(
+        cs_mod, "check_datalab_reachable", lambda url, timeout=2.0: (False, "conn refused")
+    )
+    with pytest.raises(DatalabUnavailableError):
+        get_campaign_store()
+
+
+def test_health_hint_includes_start_command_when_eln_down(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_DATALAB_REQUIRED", "true")
+    monkeypatch.setenv("FORMUMIND_DATALAB_API_URL", "http://127.0.0.1:1")
+    get_settings.cache_clear()
+    client = TestClient(app)
+    body = client.get("/health").json()
+    assert body["datalab"]["required"] is True
+    assert body["datalab"]["reachable"] is False
+    hint = body["datalab"]["hint"]
+    assert "docker compose" in hint.lower()
+    assert "eln" in hint.lower() or "datalab" in hint.lower()
+
+
+def test_list_experiments_fail_fast_when_eln_required(monkeypatch):
+    """Product datalab backends must not list sqlite rows as a healthy ledger."""
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_EXPERIMENT_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_DATALAB_REQUIRED", "true")
+    monkeypatch.setenv("FORMUMIND_DATALAB_API_URL", "http://127.0.0.1:1")
+    get_settings.cache_clear()
+    client = TestClient(app)
+    res = client.get("/api/experiments")
+    assert res.status_code == 503
+    assert "Datalab" in res.json()["detail"] or "ELN" in res.json()["detail"]
+
+
+def test_list_workbench_campaigns_fail_fast_when_eln_required(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "datalab")
+    monkeypatch.setenv("FORMUMIND_DATALAB_REQUIRED", "true")
+    monkeypatch.setenv("FORMUMIND_DATALAB_API_URL", "http://127.0.0.1:1")
+    get_settings.cache_clear()
+    client = TestClient(app)
+    res = client.get("/api/experiments/workbench/campaigns")
+    assert res.status_code == 503
+    assert "启动" in res.json()["detail"] or "Datalab" in res.json()["detail"]
 
 
 def test_sqlite_campaign_still_works_in_dev(monkeypatch, tmp_path):

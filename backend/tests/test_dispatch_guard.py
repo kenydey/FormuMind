@@ -88,6 +88,12 @@ def test_dispatch_failure_after_a_passing_probe_is_still_503(
 ) -> None:
     """A broker that dies between the probe and the publish, or a payload
     Celery cannot serialise, must not fall through to a raw 500."""
+    from app.config import get_settings
+
+    # conftest defaults celery_eager=true; this case exercises the non-eager
+    # delay() path after a green probe.
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", False, raising=False)
     monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
     from app.worker import tasks
 
@@ -98,7 +104,11 @@ def test_dispatch_failure_after_a_passing_probe_is_still_503(
 
     response = client.post("/api/research/recommend", json=REQUIREMENT)
     assert response.status_code == 503
-    assert isinstance(response.json()["detail"], str)
+    detail = response.json()["detail"]
+    assert isinstance(detail, str)
+    # Must not recycle the broker-down copy for a post-probe failure.
+    assert "当前不可达，无法提交后台任务" not in detail
+    assert "提交失败" in detail or "入队" in detail
 
 
 # ── the probe itself ─────────────────────────────────────────────────────────
@@ -113,6 +123,65 @@ def test_eager_mode_needs_no_broker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "celery_eager", True, raising=False)
     monkeypatch.setattr(settings, "redis_url", "redis://127.0.0.1:1/0", raising=False)
     assert _dispatch.broker_reachable() is True
+
+
+def test_eager_slow_task_returns_202_within_one_second(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0-1: under celery_eager, delay() == full job body. A 10s producer cap
+    must not false-503 jobs that take longer; HTTP returns 202 immediately."""
+    import time
+
+    from app.config import get_settings
+    from app.worker import tasks
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", True, raising=False)
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
+
+    def slow_apply(*, args=None, task_id=None, **_kwargs):
+        time.sleep(12)
+        return None
+
+    monkeypatch.setattr(tasks.run_optimize_task, "apply", slow_apply)
+
+    t0 = time.perf_counter()
+    response = client.post(
+        "/api/optimize",
+        json={"requirement": REQUIREMENT, "iterations": 2},
+    )
+    elapsed = time.perf_counter() - t0
+    assert response.status_code == 202, response.text
+    assert "task_id" in response.json()
+    assert elapsed < 1.0, f"eager submit blocked for {elapsed:.2f}s (wanted <1s)"
+
+
+def test_dispatch_timeout_detail_does_not_blame_redis(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-eager producer timeout must not reuse the Redis-down message."""
+    from app.config import get_settings
+    from app.worker import tasks
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", False, raising=False)
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
+
+    def hang(_payload):
+        import time
+
+        time.sleep(30)
+
+    monkeypatch.setattr(tasks.run_recommend_task, "delay", hang)
+    monkeypatch.setattr(_dispatch, "_delay_with_timeout", lambda *a, **k: (_ for _ in ()).throw(
+        _dispatch._DispatchTimeout("task.delay > 10.0s")
+    ))
+
+    response = client.post("/api/research/recommend", json=REQUIREMENT)
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "Redis" not in detail
+    assert "提交超时" in detail or "dispatch" in detail.lower() or "超时" in detail
 
 
 def test_closed_port_is_reported_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:

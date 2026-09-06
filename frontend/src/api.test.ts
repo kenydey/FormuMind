@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  ApiError,
   BACKEND_UNREACHABLE_MESSAGE,
   formatApiError,
   isBackendUnreachableError,
@@ -128,6 +129,13 @@ describe("formatApiError", () => {
     expect(formatApiError(new Error("Load failed"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
     expect(formatApiError(new Error("Failed to fetch"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
     expect(formatApiError(new Error("/api/projects -> 500"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
+  });
+
+  it("appends structured candidates from ApiError", () => {
+    const err = new ApiError("配方中不含材料：x", {
+      candidates: ["A", "B"],
+    });
+    expect(formatApiError(err)).toBe("配方中不含材料：x（可选：A、B）");
   });
 });
 

@@ -216,8 +216,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("auto_retrain", "实验自动重训",
             "提交新实验数据后自动重训代理模型。", "data"),
     EnvFlag("datalab_required", "Datalab 硬依赖",
-            "使用 datalab 后端时，ELN 不可达则硬失败（而非降级 SQLite）。", "data",
-            "仅在 campaign/experiment 后端为 datalab 时有意义"),
+            "Datalab ELN 是台账/推荐/优化的核心依赖；不可达时硬失败并在 /health 标 degraded。"
+            "产品默认开启。关闭仅用于 CI/单测隔离，不是正式「无 ELN」运行模式。",
+            "data",
+            "关闭后仍须显式 CAMPAIGN/EXPERIMENT_BACKEND=sqlite 才走本地库（仅测试）"),
     # ── 基础设施 ──────────────────────────────────────────────────────────
     EnvFlag("celery_eager", "任务同步执行",
             "后台任务在进程内同步执行（无需 Redis/Celery worker）。"

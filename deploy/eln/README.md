@@ -65,11 +65,14 @@ FORMUMIND_REDIS_URL=redis://redis:6379/0
 
 ## Datalab 不可达行为
 
-`campaign_backend=datalab` 时：
+`campaign_backend=datalab` / `DATALAB_REQUIRED=true`（产品默认）时：
 
-- **不会** 静默回退 sqlite 台账
-- API 返回 **503**，`detail` 含中文修复指引
-- 前端 DOE 弹窗显示具体错误
+- **不会** 静默回退 sqlite 台账，也**不是**正式「无 ELN」运行模式
+- API 返回 **503**，`detail` 含中文修复指引与 compose 启动命令
+- `GET /health` → `status: degraded`，`datalab.hint` 含启动指引
+- 前端 DOE / workbench / recommend 显示 ELN 错误（不会套 Redis 措辞）
+
+CI / 单测隔离可显式设置 `FORMUMIND_CAMPAIGN_BACKEND=sqlite`（pytest `conftest` 已设）；**不要**把该配置写进用户 Quickstart 或生产 `.env`。
 
 ## Datalab Headless API 契约（FormuMind payload）
 
@@ -81,8 +84,6 @@ FORMUMIND_REDIS_URL=redis://redis:6379/0
 | `blocks_obj.*.blocktype` | `"comment"` | `block_type: "generic"` |
 
 自定义 JSON 存放在 comment block 的 `data` 字段（`formumind_params` / `formumind_measurements`）。
-
-开发/CI 仍可使用 `FORMUMIND_CAMPAIGN_BACKEND=sqlite`。
 
 ## 检索全文获取（生产）
 

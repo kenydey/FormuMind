@@ -13,6 +13,13 @@ class DatalabStoreError(ValueError):
     """Raised when Datalab API responses fail Pydantic contract validation."""
 
 
+# Shown in 503 detail and /health when ELN is required but down.
+DATALAB_START_HINT = (
+    "启动指引：docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d，"
+    "或按 deploy/eln/README.md 拉起 Datalab；确认 FORMUMIND_DATALAB_API_URL 可达。"
+)
+
+
 class DatalabUnavailableError(RuntimeError):
     """Raised when Datalab ELN is required but unreachable."""
 
@@ -20,6 +27,7 @@ class DatalabUnavailableError(RuntimeError):
         msg = (
             f"Datalab ELN 不可达（{api_url}）。"
             "请确认 Datalab API 已启动且 FORMUMIND_DATALAB_API_URL 正确。"
+            f" {DATALAB_START_HINT}"
         )
         if reason:
             msg = f"{msg} 原因：{reason}"

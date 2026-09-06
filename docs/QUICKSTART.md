@@ -8,25 +8,29 @@ For the full reference see [USER_GUIDE.md](./USER_GUIDE.md) (中文: [快速入�
 ## Prerequisite: start the platform
 
 ```bash
-# One-click (recommended)
+# One-click deps
 ./scripts/install.sh
 cp .env.example .env    # intranet: FORMUMIND_API_AUTH_ENABLED=false
+# Product defaults already pin Datalab ELN (do not switch to sqlite for "offline lab")
 
-# Or manual:
-# Backend (terminal 1)
+# Core infra (required): Redis + Datalab ELN + Celery worker
+docker compose up -d redis
+docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d
+# Or: bash scripts/start_all.sh
+
+# Backend + worker (terminal 1–2) — keep CELERY_EAGER=false for real async
 cd backend
-python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
+FORMUMIND_CELERY_EAGER=false uvicorn app.main:app --reload --reload-exclude .venv
+# other terminal:
+FORMUMIND_CELERY_EAGER=false celery -A app.worker.celery_app worker --loglevel=info
 
-# Frontend (terminal 2)
-cd frontend
-npm install
-npm run dev                        # http://localhost:5173
+# Frontend (terminal 3)
+cd frontend && npm run dev                        # http://localhost:5173
 ```
 
-Open **http://localhost:5173**. No LLM API key is required for full offline use.
+Open **http://localhost:5173**. LLM API keys are optional for offline rule-based paths.
+**Datalab ELN (:5001) is required** for recommend / experiments / workbench / optimize.
 If platform bearer auth is enabled, enter the **API access token** in Settings first
 (matching `FORMUMIND_API_TOKEN`), or set `FORMUMIND_API_AUTH_ENABLED=false`.
 
@@ -34,8 +38,8 @@ If platform bearer auth is enabled, enter the **API access token** in Settings f
 
 ```bash
 cp .env.example .env
-docker compose up -d --build       # redis + backend + worker + frontend
-docker compose exec backend alembic upgrade head   # bring an existing DB up to date
+docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d --build
+docker compose exec backend alembic upgrade head
 curl -s localhost:8000/health
 ```
 
@@ -46,12 +50,13 @@ whether the platform can actually do work:
 {"status":"ok",
  "database":  {"ok":true,"scheme":"sqlite"},
  "task_broker":{"required":true,"reachable":true},
- "datalab":   {"required":false,"reachable":false}}
+ "datalab":   {"required":true,"reachable":true}}
 ```
 
-`task_broker.reachable:false` means Redis is unreachable and **every async
-feature is refused** — research, recommend, inverse design, optimization. See
-[Troubleshooting](#troubleshooting) below.
+- `datalab.reachable:false` with `required:true` → start ELN (`deploy/eln/README.md`);
+  lab APIs return 503 with a start hint (no silent sqlite success).
+- `task_broker.reachable:false` → Redis/worker down; async submit is refused.
+  Prefer Redis + worker over treating `CELERY_EAGER=true` as a production substitute.
 
 > Pick one compose invocation and keep it. `docker compose up` uses the bridge
 > network; `-f docker-compose.yml -f docker-compose.host.yml` uses the host

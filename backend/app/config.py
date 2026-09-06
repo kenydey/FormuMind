@@ -568,17 +568,19 @@ class Settings(BaseSettings):
     ingest_chunk_max_chars: int = 1600
     ingest_chunk_overlap: int = 200
 
-    # DOE workbench / campaign persistence (Headless ELN)
-    campaign_backend: str = "auto"  # auto (probe Datalab → fallback sqlite) | sqlite | datalab
+    # DOE workbench / campaign persistence (Headless ELN).
+    # Product default is Datalab (core runtime dependency). Explicit ``sqlite`` is
+    # for CI/unit tests only — not a supported product/offline lab mode.
+    campaign_backend: str = "datalab"  # datalab | auto | sqlite
     datalab_api_url: str = "http://localhost:5001"
     datalab_api_token: str = ""  # DATALAB-API-KEY header（平台非 TESTING 模式必需）
     datalab_timeout_seconds: float = 30.0
     datalab_max_connections: int = 10
     datalab_max_keepalive_connections: int = 5
-    datalab_required: bool = False  # when True with datalab backends, unreachable → hard fail
+    datalab_required: bool = True  # product default: ELN unreachable → hard fail / degraded
 
     # Experiment training persistence (Headless ELN)
-    experiment_backend: str = "auto"  # auto → 探测 Datalab → 回退 sqlite; 也可显式: datalab | sqlite
+    experiment_backend: str = "datalab"  # datalab | auto | sqlite（sqlite = CI only）
 
     # API security — unset env defers to environment: off in dev/test, on in production.
     api_auth_enabled: bool | None = None
