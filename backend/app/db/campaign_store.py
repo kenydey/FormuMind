@@ -973,7 +973,7 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
         return _store
 
     if backend == "auto":
-        ok, _ = check_datalab_reachable(
+        ok, reason = check_datalab_reachable(
             s.datalab_api_url,
             timeout=min(2.0, s.datalab_timeout_seconds),
         )
@@ -987,8 +987,17 @@ def get_campaign_store(settings: Settings | None = None) -> CampaignStoreInterfa
             )
             logger.info("Campaign store: Datalab (auto, %s)", s.datalab_api_url)
             return _store
+        # Product stance: Datalab is core. Silent sqlite "success" is forbidden
+        # whenever REQUIRED is on (the product default). Fallback is only for
+        # explicit test isolation with DATALAB_REQUIRED=false.
+        if s.datalab_required:
+            raise DatalabUnavailableError(
+                s.datalab_api_url,
+                f"auto 探测失败（{reason}）且 Datalab 为必需",
+            )
         logger.warning(
-            "Campaign store: sqlite dev fallback (Datalab unreachable at %s)",
+            "Campaign store: sqlite CI/test fallback (Datalab unreachable at %s; "
+            "DATALAB_REQUIRED=false)",
             s.datalab_api_url,
         )
         _store = SqliteCampaignStore(factory)

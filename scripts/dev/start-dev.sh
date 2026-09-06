@@ -7,9 +7,12 @@
 #   scripts/dev/start-dev.sh status  查看运行状态
 #
 # 前提:
-#   1. redis/neo4j/molscribe/datalab 容器在跑（docker compose up -d redis kg molscribe datalab）
+#   1. redis + datalab ELN 容器在跑（产品核心依赖，不可跳过）
+#        docker compose up -d redis
+#        docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d
+#      或按 deploy/eln/README.md 拉起官方 Datalab（:5001）
 #   2. backend/.venv 已建（uvicorn/celery/rdkit 等），frontend/node_modules 完整
-#   3. data/.env.host 已生成（连接地址指向 localhost）
+#   3. data/.env.host 已生成（连接地址指向 localhost；含 CAMPAIGN/EXPERIMENT=datalab）
 
 set -euo pipefail
 
@@ -28,8 +31,35 @@ export FORMUMIND_COLBERT_INDEX_DIR="$ROOT/data/colbert_index"
 # 关键：源码模式 CWD=backend/，默认 db_url 会落到 backend/data/formumind.db（8MB 空库）。
 # 显式指向仓库根 data/ 的真库（504MB，17 campaigns / 591 docs）。
 export FORMUMIND_DB_URL="sqlite:///$ROOT/data/formumind.db"
+export FORMUMIND_CAMPAIGN_BACKEND="${FORMUMIND_CAMPAIGN_BACKEND:-datalab}"
+export FORMUMIND_EXPERIMENT_BACKEND="${FORMUMIND_EXPERIMENT_BACKEND:-datalab}"
+export FORMUMIND_DATALAB_REQUIRED="${FORMUMIND_DATALAB_REQUIRED:-true}"
+export FORMUMIND_DATALAB_API_URL="${FORMUMIND_DATALAB_API_URL:-http://127.0.0.1:5001}"
+export FORMUMIND_CELERY_EAGER="${FORMUMIND_CELERY_EAGER:-false}"
+
+_probe_datalab() {
+  curl -sf --max-time 2 "${FORMUMIND_DATALAB_API_URL%/}/" >/dev/null 2>&1
+}
+
+_require_infra() {
+  echo "==> 检查核心依赖（Redis + Datalab ELN）"
+  if ! redis-cli ping >/dev/null 2>&1; then
+    echo "❌ Redis 不可达（:6379）。先: docker compose up -d redis"
+    exit 1
+  fi
+  echo "    Redis OK"
+  if ! _probe_datalab; then
+    echo "❌ Datalab ELN 不可达：${FORMUMIND_DATALAB_API_URL}"
+    echo "   启动：docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d"
+    echo "   或见 deploy/eln/README.md — 产品路径不支持跳过 ELN / sqlite 凑合。"
+    exit 1
+  fi
+  echo "    Datalab OK (${FORMUMIND_DATALAB_API_URL})"
+}
 
 start() {
+  _require_infra
+
   echo "==> 启动 backend (uvicorn :8000)"
   cd "$BACKEND"
   nohup "$VENV/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000 \
@@ -52,8 +82,13 @@ start() {
 
   echo "==> 等待健康检查…"
   for i in $(seq 1 30); do
+    body=$(curl -s http://localhost:8000/health 2>/dev/null || true)
     code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health 2>/dev/null || echo 000)
-    if [ "$code" = "200" ]; then echo "    backend healthy (200)"; break; fi
+    if [ "$code" = "200" ]; then
+      echo "    backend HTTP 200"
+      echo "$body" | grep -q '"reachable":true' && echo "    (检查 datalab/task_broker reachable 于 /health JSON)" || true
+      break
+    fi
     sleep 2
   done
   curl -s -o /dev/null -w "    frontend: %{http_code}\n" http://localhost:5173/ 2>/dev/null || true

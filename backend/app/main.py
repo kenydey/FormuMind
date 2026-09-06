@@ -259,7 +259,11 @@ app.include_router(meta_router.router)
 app.include_router(auth_router.router)
 
 
-from .db.datalab_client import DatalabUnavailableError, check_datalab_reachable
+from .db.datalab_client import (
+    DATALAB_START_HINT,
+    DatalabUnavailableError,
+    check_datalab_reachable,
+)
 
 
 @app.exception_handler(DatalabUnavailableError)
@@ -300,7 +304,7 @@ def health() -> dict:
     """
     cfg = get_settings()
 
-    datalab_ok, _ = check_datalab_reachable(cfg.datalab_api_url)
+    datalab_ok, datalab_reason = check_datalab_reachable(cfg.datalab_api_url)
     datalab_required = (
         cfg.campaign_backend.lower() == "datalab"
         or cfg.experiment_backend.lower() == "datalab"
@@ -343,13 +347,20 @@ def health() -> dict:
     if not db_ok or not broker_ok or not pdf_ok or (datalab_required and not datalab_ok):
         overall = "degraded"
 
+    datalab_payload: dict = {"required": datalab_required, "reachable": datalab_ok}
+    if datalab_required and not datalab_ok:
+        hint = DATALAB_START_HINT
+        if datalab_reason:
+            hint = f"{hint} 原因：{datalab_reason}"
+        datalab_payload["hint"] = hint
+
     return {
         "status": overall,
         "database": {"ok": db_ok, "scheme": db_scheme},
         # "required" is False in eager mode, where tasks run in-process.
         "task_broker": {"required": not cfg.celery_eager, "reachable": broker_ok},
         "parsers": formats,
-        "datalab": {"required": datalab_required, "reachable": datalab_ok},
+        "datalab": datalab_payload,
     }
 
 
