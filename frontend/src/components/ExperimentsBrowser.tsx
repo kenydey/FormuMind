@@ -3,6 +3,7 @@ import {
   api,
   formatApiError,
   type Attachment,
+  type ExperimentSearchHit,
   type ExperimentSummary,
   type QCMeasurementView,
 } from "../api";
@@ -15,6 +16,8 @@ import { useStore } from "../store";
  * P3 follow-up: when a row is selected, also load typed QC measurements and
  * legacy experiment attachments (upload/list) — these API clients were orphaned
  * after the workbench path landed its own attachment endpoints.
+ *
+ * P4: cross-campaign keyword search via GET /api/experiments/search.
  */
 export default function ExperimentsBrowser() {
   const activeProjectId = useStore((s) => s.activeProjectId);
@@ -31,6 +34,11 @@ export default function ExperimentsBrowser() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [searchQ, setSearchQ] = useState("");
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchHits, setSearchHits] = useState<ExperimentSearchHit[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +117,21 @@ export default function ExperimentsBrowser() {
     }
   }
 
+  async function runCrossCampaignSearch() {
+    const q = searchQ.trim();
+    setSearchBusy(true);
+    setSearchError(null);
+    try {
+      const hits = await api.searchExperiments(q);
+      setSearchHits(hits);
+    } catch (e) {
+      setSearchHits(null);
+      setSearchError(formatApiError(e));
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-3" data-testid="experiments-browser">
       <div className="flex items-center justify-between gap-2">
@@ -141,6 +164,80 @@ export default function ExperimentsBrowser() {
             全部
           </button>
         </div>
+      </div>
+
+      <div
+        className="border border-edge/50 rounded-lg p-2 space-y-1.5 bg-ink/30"
+        data-testid="experiments-cross-search"
+      >
+        <div className="text-[10px] text-slate-500">
+          跨 Campaign 关键词搜索 · /api/experiments/search
+        </div>
+        <div className="flex gap-1">
+          <input
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void runCrossCampaignSearch();
+            }}
+            placeholder="tags / notes / params（空=全部行）…"
+            className="flex-1 bg-ink border border-edge rounded px-2 py-1 text-[11px]"
+            data-testid="experiments-search-input"
+          />
+          <button
+            type="button"
+            disabled={searchBusy}
+            onClick={() => void runCrossCampaignSearch()}
+            className="text-[10px] border border-accent/50 text-accent rounded px-2 py-1 disabled:opacity-40"
+            data-testid="experiments-search-btn"
+          >
+            {searchBusy ? "…" : "搜索"}
+          </button>
+          {searchHits != null && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchHits(null);
+                setSearchError(null);
+              }}
+              className="text-[10px] text-slate-500 px-1"
+              title="清除搜索结果"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        {searchError && (
+          <p className="text-[11px] text-rose-400 border border-rose-500/30 bg-rose-500/10 rounded px-2 py-1">
+            {searchError}
+          </p>
+        )}
+        {searchHits != null && (
+          <div className="max-h-40 overflow-auto divide-y divide-edge/30 border border-edge/40 rounded">
+            {searchHits.length === 0 ? (
+              <p className="text-[10px] text-slate-600 px-2 py-2">无匹配行</p>
+            ) : (
+              searchHits.map((h, i) => (
+                <div
+                  key={`${h.campaign_id}-${h.row_id}-${h.item_id}-${i}`}
+                  className="px-2 py-1.5 text-[11px]"
+                  data-testid="experiments-search-hit"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-accent2">row #{h.row_id}</span>
+                    <span className="text-slate-300 truncate flex-1">
+                      {h.campaign_name || `campaign ${h.campaign_id}`}
+                    </span>
+                    <span className="text-[10px] text-slate-500">{h.status}</span>
+                  </div>
+                  {h.item_id && (
+                    <div className="text-[10px] font-mono text-slate-600 truncate">{h.item_id}</div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {error && (

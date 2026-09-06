@@ -33,4 +33,29 @@ describe("ExperimentsBrowser", () => {
     expect(screen.getByText(/SS-1000/)).toBeTruthy();
     expect(screen.getByText(/#7/)).toBeTruthy();
   });
+
+  it("runs cross-campaign search via searchExperiments", async () => {
+    vi.spyOn(api, "listExperiments").mockResolvedValue([]);
+    const searchSpy = vi.spyOn(api, "searchExperiments").mockResolvedValue([
+      {
+        row_id: 12,
+        campaign_id: 3,
+        campaign_name: "DOE-A",
+        item_id: "item-12",
+        status: "Done",
+        planned_params: {},
+        measurements: {},
+      },
+    ]);
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    render(<ExperimentsBrowser />);
+    expect(await screen.findByTestId("experiments-cross-search")).toBeTruthy();
+    await user.type(screen.getByTestId("experiments-search-input"), "urgent");
+    await user.click(screen.getByTestId("experiments-search-btn"));
+    await waitFor(() => expect(searchSpy).toHaveBeenCalledWith("urgent"));
+    expect(await screen.findByTestId("experiments-search-hit")).toBeTruthy();
+    expect(screen.getByText(/DOE-A/)).toBeTruthy();
+    expect(screen.getByText(/row #12/)).toBeTruthy();
+  });
 });

@@ -161,6 +161,14 @@ function KbDiagnosticsCard() {
   const [neoBusy, setNeoBusy] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [kgStats, setKgStats] = useState<import("../api").KgStats | null>(null);
+  const [calibration, setCalibration] = useState<import("../api").KgCalibrationResponse | null>(null);
+  const [calibBusy, setCalibBusy] = useState(false);
+  const [kbProbeQ, setKbProbeQ] = useState("");
+  const [kbProbeBusy, setKbProbeBusy] = useState(false);
+  const [kbProbeMode, setKbProbeMode] = useState<"search" | "hybrid" | null>(null);
+  const [kbProbeHits, setKbProbeHits] = useState<
+    Array<{ title: string; snippet: string; score?: number; source?: string }>
+  >([]);
 
   async function refreshKgStats() {
     try {
@@ -183,6 +191,57 @@ function KbDiagnosticsCard() {
       setReport(`完整性检查失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setIntegBusy(false);
+    }
+  }
+
+  async function runCalibration() {
+    setCalibBusy(true);
+    setReport(null);
+    try {
+      setCalibration(await api.kgCalibration());
+    } catch (e) {
+      setReport(`KG 校准读取失败: ${e instanceof Error ? e.message : String(e)}`);
+      setCalibration(null);
+    } finally {
+      setCalibBusy(false);
+    }
+  }
+
+  async function runKbProbe(mode: "search" | "hybrid") {
+    const q = kbProbeQ.trim();
+    if (!q) {
+      setReport("请先输入 KB 检索词");
+      return;
+    }
+    setKbProbeBusy(true);
+    setKbProbeMode(mode);
+    setReport(null);
+    try {
+      if (mode === "search") {
+        const r = await api.kbSearch(q, 6);
+        setKbProbeHits(
+          (r.results || []).map((e) => ({
+            title: e.title || e.identifier || e.source,
+            snippet: e.snippet || "",
+            score: e.relevance,
+            source: e.source,
+          }))
+        );
+      } else {
+        const chunks = await api.kbHybridSearch(q, 8, 0.3);
+        setKbProbeHits(
+          (chunks || []).map((c) => ({
+            title: c.heading_path || c.source_id || c.id,
+            snippet: (c.text || "").slice(0, 220),
+            source: c.source_id,
+          }))
+        );
+      }
+    } catch (e) {
+      setKbProbeHits([]);
+      setReport(`KB ${mode === "search" ? "关键词" : "混合"}检索失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setKbProbeBusy(false);
     }
   }
 
@@ -378,6 +437,16 @@ function KbDiagnosticsCard() {
         </button>
         <button
           type="button"
+          disabled={calibBusy}
+          onClick={() => void runCalibration()}
+          className="text-[10px] border border-edge rounded px-2 py-1 text-slate-300 hover:border-accent/40 hover:text-accent disabled:opacity-50"
+          title="GET /api/kg/calibration — 权重与关系命中计数"
+          data-testid="kg-calibration-btn"
+        >
+          {calibBusy ? "读取中…" : "⚖ KG 校准快照"}
+        </button>
+        <button
+          type="button"
           disabled={rebuildBusy}
           onClick={() => void runRebuild()}
           className="text-[10px] border border-amber-500/40 rounded px-2 py-1 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
@@ -476,6 +545,93 @@ function KbDiagnosticsCard() {
             : `⚠ ${integrity.total_orphans} 个孤儿引用${integrity.external_backend ? "（外部向量后端）" : ""}`}
         </div>
       )}
+      {calibration && (
+        <div
+          className="text-[11px] rounded px-2 py-1.5 mb-1 border border-edge text-slate-400"
+          data-testid="kg-calibration-panel"
+        >
+          <div className="flex flex-wrap gap-1 mb-0.5">
+            <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60">
+              KG {calibration.kg_enabled ? "启用" : "关闭"}
+            </span>
+            <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
+              inhibits×{calibration.kg_inhibits_penalty}
+            </span>
+            <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
+              synergizes+{calibration.kg_synergizes_bonus}
+            </span>
+            <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
+              measured×{calibration.kg_measured_bonus}
+            </span>
+          </div>
+          <div className="text-[10px] text-slate-500">
+            关系命中 · inhibits {calibration.counts.inhibits} · substitutes{" "}
+            {calibration.counts.substitutes} · synergizes {calibration.counts.synergizes}
+          </div>
+        </div>
+      )}
+      <div
+        className="border border-edge/60 rounded p-2 mb-1 space-y-1.5 bg-ink/30"
+        data-testid="kb-probe-panel"
+      >
+        <div className="text-[10px] text-slate-500">KB 检索探针 · /api/kb/search · hybrid-search</div>
+        <div className="flex flex-wrap gap-1">
+          <input
+            value={kbProbeQ}
+            onChange={(e) => setKbProbeQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void runKbProbe("search");
+            }}
+            placeholder="检索词（如 盐雾 / epoxy）…"
+            className="flex-1 min-w-[8rem] bg-ink border border-edge rounded px-2 py-1 text-[11px]"
+            data-testid="kb-probe-input"
+          />
+          <button
+            type="button"
+            disabled={kbProbeBusy || !kbProbeQ.trim()}
+            onClick={() => void runKbProbe("search")}
+            className="text-[10px] border border-accent/50 text-accent rounded px-2 py-1 disabled:opacity-40"
+            data-testid="kb-search-btn"
+          >
+            {kbProbeBusy && kbProbeMode === "search" ? "…" : "关键词"}
+          </button>
+          <button
+            type="button"
+            disabled={kbProbeBusy || !kbProbeQ.trim()}
+            onClick={() => void runKbProbe("hybrid")}
+            className="text-[10px] border border-teal-500/40 text-teal-300 rounded px-2 py-1 disabled:opacity-40"
+            data-testid="kb-hybrid-btn"
+          >
+            {kbProbeBusy && kbProbeMode === "hybrid" ? "…" : "混合检索"}
+          </button>
+        </div>
+        {kbProbeMode && (
+          <div className="max-h-36 overflow-auto space-y-1">
+            {kbProbeHits.length === 0 ? (
+              <p className="text-[10px] text-slate-600">无命中（或 KB 未启用）</p>
+            ) : (
+              kbProbeHits.map((h, i) => (
+                <div
+                  key={`${h.title}-${i}`}
+                  className="border border-edge/40 rounded px-2 py-1 text-[10px]"
+                >
+                  <div className="flex gap-2 text-slate-300">
+                    <span className="truncate flex-1">{h.title}</span>
+                    {h.score != null && (
+                      <span className="font-mono text-slate-500 shrink-0">
+                        {h.score.toFixed?.(3) ?? h.score}
+                      </span>
+                    )}
+                  </div>
+                  {h.snippet && (
+                    <p className="text-slate-500 line-clamp-2 mt-0.5">{h.snippet}</p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
       {neo4j && (
         <div className="text-[11px] text-slate-400 rounded px-2 py-1.5 mb-1 border border-edge">
           Neo4j {neo4j.reachable === false ? "不可达" : `就绪 · ${neo4j.nodes ?? "?"} 节点 / ${neo4j.edges ?? "?"} 边`}

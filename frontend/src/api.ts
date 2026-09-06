@@ -1091,6 +1091,13 @@ export const api = {
     return get<ExperimentSummary[]>(`/api/experiments?${params}`);
   },
 
+  /** Cross-campaign keyword search (tags/notes/params). */
+  searchExperiments: (q: string) => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    return get<ExperimentSearchHit[]>(`/api/experiments/search?${qs}`);
+  },
+
   uploadQcReport: async (
     file: File,
     target: number | { experiment_id?: number; campaign_id?: number; row_id?: number },
@@ -1450,8 +1457,27 @@ export const api = {
   kbIntegrity: () =>
     get<KbIntegrityResponse>("/api/kb/integrity"),
 
+  /** Power-user chunk probe (GET /api/kb/search). */
+  kbSearch: (q: string, k = 6, projectId?: string) => {
+    const qs = new URLSearchParams({ q, k: String(k) });
+    if (projectId) qs.set("project_id", projectId);
+    return get<{ results: Evidence[] }>(`/api/kb/search?${qs}`);
+  },
+
+  /** BM25 + vector hybrid probe (POST /api/kb/hybrid-search). */
+  kbHybridSearch: (query: string, topK = 10, alpha = 0.3) =>
+    post<KbSearchChunk[]>("/api/kb/hybrid-search", {
+      query,
+      top_k: topK,
+      alpha,
+    }),
+
   // ── KG 维护: 统计 / 重建 / 挂源 ──
   kgStats: () => get<KgStats>("/api/kg/stats"),
+
+  /** KG ranking weight calibration snapshot (GET /api/kg/calibration). */
+  kgCalibration: () =>
+    get<KgCalibrationResponse>("/api/kg/calibration"),
 
   kgRebuild: () =>
     post<KgRebuildReport>("/api/kg/rebuild", {}),
@@ -2741,6 +2767,40 @@ export interface KbChunk {
   page?: number | null;
   paragraph?: number | null;
   offset?: number | null;
+}
+
+/** Chunk row from POST /api/kb/hybrid-search. */
+export interface KbSearchChunk {
+  id: string;
+  source_id: string;
+  ord: number;
+  text: string;
+  heading_path?: string;
+  page?: number | null;
+  paragraph?: number | null;
+  offset_start?: number | null;
+  offset_end?: number | null;
+  meta?: Record<string, unknown> | null;
+}
+
+/** GET /api/kg/calibration — ranking weights + relation hit counts. */
+export interface KgCalibrationResponse {
+  kg_enabled: boolean;
+  kg_inhibits_penalty: number;
+  kg_synergizes_bonus: number;
+  kg_measured_bonus: number;
+  counts: { inhibits: number; substitutes: number; synergizes: number };
+}
+
+/** GET /api/experiments/search hit. */
+export interface ExperimentSearchHit {
+  row_id: number;
+  campaign_id: number;
+  campaign_name: string;
+  item_id: string;
+  status: string;
+  planned_params: Record<string, unknown>;
+  measurements: Record<string, unknown>;
 }
 
 export interface KbIntegrityResponse {
