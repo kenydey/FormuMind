@@ -71,6 +71,7 @@ export default function MaterialSubstitutionModal({
   const [risk, setRisk] = useState<SupplyRiskReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [candidates, setCandidates] = useState<string[]>([]);
 
   useEffect(() => {
     api.supplyRisk().then(setRisk).catch(() => setRisk(null));
@@ -85,6 +86,7 @@ export default function MaterialSubstitutionModal({
     if (!material) return;
     setBusy(true);
     setError("");
+    setCandidates([]);
     setReport(null);
     try {
       setReport(
@@ -96,7 +98,18 @@ export default function MaterialSubstitutionModal({
         })
       );
     } catch (err) {
-      setError(formatApiError(err));
+      const fromApi =
+        err && typeof err === "object" && "candidates" in err
+          ? (err as { candidates?: string[] }).candidates
+          : undefined;
+      const list = Array.isArray(fromApi) ? fromApi.filter(Boolean) : [];
+      setCandidates(list);
+      // Prefer the bare message when we render candidates as buttons.
+      setError(
+        list.length && err instanceof Error
+          ? err.message
+          : formatApiError(err)
+      );
     } finally {
       setBusy(false);
     }
@@ -165,7 +178,29 @@ export default function MaterialSubstitutionModal({
 
         {error && (
           <div className="text-red-400 bg-red-400/10 border border-red-400/20 rounded p-2 mb-2">
-            {error}
+            <div>{error}</div>
+            {candidates.length > 0 && (
+              <div className="mt-2 text-slate-300">
+                <div className="text-xs text-slate-400 mb-1">配方中的材料（点击选用）：</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {candidates.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      className="px-2 py-0.5 rounded border border-edge text-slate-200
+                                 hover:border-accent/50 hover:text-accent"
+                      onClick={() => {
+                        setMaterial(name);
+                        setError("");
+                        setCandidates([]);
+                      }}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

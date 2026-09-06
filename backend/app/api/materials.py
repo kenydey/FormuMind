@@ -97,7 +97,7 @@ def _to_view(name: str, spec: dict) -> MaterialView:
     )
 
 
-@router.get("", response_model=MaterialListResponse, include_in_schema=False)
+@router.get("", response_model=MaterialListResponse, include_in_schema=True)
 def list_materials(
     q: str = Query(default=""),
     role: str = Query(default=""),
@@ -177,6 +177,60 @@ class SubstituteRequest(BaseModel):
     include_unavailable: bool = False
 
 
+def _slot_candidates(genome) -> list[str]:
+    return [s.material for s in genome.slots]
+
+
+def _resolve_material_slot(genome, material: str) -> int | None:
+    """Map a user-supplied material name onto a genome slot index.
+
+    Preference order:
+    1. case-insensitive exact match
+    2. unique casefold containment (query ⊆ name or name ⊆ query)
+    3. unique difflib close match
+
+    Returns None when nothing matches or the fuzzy step is ambiguous.
+    """
+    from difflib import get_close_matches
+
+    needle = material.strip()
+    if not needle:
+        return None
+    names = _slot_candidates(genome)
+    folded = [n.casefold() for n in names]
+    key = needle.casefold()
+
+    exact = [i for i, f in enumerate(folded) if f == key]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+
+    contained = [
+        i for i, f in enumerate(folded) if key in f or (f and f in key)
+    ]
+    if len(contained) == 1:
+        return contained[0]
+    if len(contained) > 1:
+        return None
+
+    close = get_close_matches(key, folded, n=3, cutoff=0.6)
+    if len(close) == 1:
+        return folded.index(close[0])
+    return None
+
+
+def _material_not_found(material: str, genome) -> HTTPException:
+    candidates = _slot_candidates(genome)
+    return HTTPException(
+        status_code=404,
+        detail={
+            "message": f"配方中不含材料：{material}",
+            "candidates": candidates,
+        },
+    )
+
+
 @router.post("/substitutes")
 def substitutes(body: SubstituteRequest) -> dict:
     """Rank replacements for one component, each with its predicted deltas."""
@@ -196,13 +250,9 @@ def substitutes(body: SubstituteRequest) -> dict:
     if index is None:
         if not body.material:
             raise HTTPException(status_code=400, detail="需提供 slot_index 或 material")
-        index = next(
-            (i for i, s in enumerate(genome.slots) if s.material == body.material), None
-        )
+        index = _resolve_material_slot(genome, body.material)
         if index is None:
-            raise HTTPException(
-                status_code=404, detail=f"配方中不含材料：{body.material}"
-            )
+            raise _material_not_found(body.material, genome)
     if not 0 <= index < len(genome.slots):
         raise HTTPException(status_code=400, detail="slot_index 超出范围")
 

@@ -62,6 +62,42 @@ def test_substitutes_unknown_material_404():
         json={"formulation": _formulation(), "material": "Nonexistent Resin"},
     )
     assert r.status_code == 404
+    detail = r.json()["detail"]
+    assert isinstance(detail, dict)
+    assert "Nonexistent Resin" in detail["message"]
+    assert detail["candidates"] == [
+        "Waterborne acrylic emulsion",
+        "Deionized water",
+    ]
+
+
+def test_substitutes_case_insensitive_match_on_formulation():
+    r = client.post(
+        "/api/materials/substitutes",
+        json={"formulation": _formulation(), "material": "deionized WATER", "limit": 3},
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_substitutes_fuzzy_unique_substring():
+    r = client.post(
+        "/api/materials/substitutes",
+        json={"formulation": _formulation(), "material": "acrylic", "limit": 3},
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_substitutes_ambiguous_substring_returns_candidates():
+    r = client.post(
+        "/api/materials/substitutes",
+        json={"formulation": _formulation(), "material": "water", "limit": 3},
+    )
+    assert r.status_code == 404
+    detail = r.json()["detail"]
+    assert set(detail["candidates"]) == {
+        "Waterborne acrylic emulsion",
+        "Deionized water",
+    }
 
 
 def test_substitutes_slot_index_out_of_range():

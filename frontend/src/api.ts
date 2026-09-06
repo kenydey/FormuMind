@@ -694,27 +694,64 @@ export function primaryObjectiveMetric(req: Requirement): string {
 
 /** Normalized API failure for store actions and UI banners. */
 export class ApiError extends Error {
-  constructor(message: string) {
+  /** Raw FastAPI `detail` when it was an object (e.g. message + candidates). */
+  detail?: unknown;
+  /** Slot / suggestion names when a 404 carries structured candidates. */
+  candidates?: string[];
+
+  constructor(
+    message: string,
+    opts?: { detail?: unknown; candidates?: string[] }
+  ) {
     super(message);
     this.name = "ApiError";
+    this.detail = opts?.detail;
+    this.candidates = opts?.candidates;
   }
 }
 
-async function readApiError(res: Response, path: string): Promise<string> {
-  let detail = `${path} -> ${res.status}`;
+function formatDetailObject(detail: Record<string, unknown>): {
+  message: string;
+  candidates?: string[];
+} {
+  const candidates = Array.isArray(detail.candidates)
+    ? detail.candidates.map((c) => String(c)).filter(Boolean)
+    : undefined;
+  const base =
+    typeof detail.message === "string" && detail.message.trim()
+      ? detail.message
+      : typeof detail.msg === "string"
+        ? detail.msg
+        : JSON.stringify(detail);
+  return { message: base, candidates };
+}
+
+async function readApiError(res: Response, path: string): Promise<ApiError> {
+  let message = `${path} -> ${res.status}`;
+  let detail: unknown;
+  let candidates: string[] | undefined;
   try {
     const body = (await res.json()) as { detail?: unknown };
+    detail = body.detail;
     if (typeof body.detail === "string") {
-      detail = body.detail;
+      message = body.detail;
     } else if (Array.isArray(body.detail)) {
-      detail = body.detail
-        .map((item) => (typeof item === "object" && item && "msg" in item ? String((item as { msg: unknown }).msg) : String(item)))
+      message = body.detail
+        .map((item) =>
+          typeof item === "object" && item && "msg" in item
+            ? String((item as { msg: unknown }).msg)
+            : String(item)
+        )
         .join("；");
+    } else if (body.detail && typeof body.detail === "object") {
+      const formatted = formatDetailObject(body.detail as Record<string, unknown>);
+      message = formatted.message;
+      candidates = formatted.candidates;
     }
   } catch {
     // keep status fallback
   }
-  return detail;
+  return new ApiError(message, { detail, candidates });
 }
 
 /** Stable Chinese copy when the API process / Vite proxy is unreachable. */
@@ -750,6 +787,13 @@ export function formatApiError(err: unknown): string {
         ? err.message
         : String(err);
   if (isBackendUnreachableError(raw)) return BACKEND_UNREACHABLE_MESSAGE;
+  if (
+    err instanceof ApiError &&
+    Array.isArray(err.candidates) &&
+    err.candidates.length > 0
+  ) {
+    return `${raw}（可选：${err.candidates.join("、")}）`;
+  }
   return raw;
 }
 
@@ -801,7 +845,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new ApiError(await readApiError(res, path));
+  if (!res.ok) throw await readApiError(res, path);
   return res.json();
 }
 
@@ -811,13 +855,13 @@ async function postAccepted(path: string, body: unknown): Promise<AsyncTaskAccep
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (res.status !== 202) throw new ApiError(await readApiError(res, path));
+  if (res.status !== 202) throw await readApiError(res, path);
   return res.json();
 }
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: apiAuthHeaders() });
-  if (!res.ok) throw new ApiError(await readApiError(res, path));
+  if (!res.ok) throw await readApiError(res, path);
   return res.json();
 }
 
@@ -827,13 +871,13 @@ async function put<T>(path: string, body: unknown): Promise<T> {
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new ApiError(await readApiError(res, path));
+  if (!res.ok) throw await readApiError(res, path);
   return res.json();
 }
 
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: "DELETE", headers: apiAuthHeaders() });
-  if (!res.ok) throw new ApiError(await readApiError(res, path));
+  if (!res.ok) throw await readApiError(res, path);
   return res.json();
 }
 
@@ -1048,7 +1092,7 @@ export const api = {
       headers: apiAuthHeaders(),
       body,
     });
-    if (!res.ok) throw new ApiError(await readApiError(res, "/api/qc/report"));
+    if (!res.ok) throw await readApiError(res, "/api/qc/report");
     return res.json();
   },
 
@@ -1084,7 +1128,7 @@ export const api = {
       body,
     });
     if (!res.ok)
-      throw new ApiError(await readApiError(res, "/api/experiments/attachments"));
+      throw await readApiError(res, "/api/experiments/attachments");
     return res.json();
   },
 
@@ -1159,9 +1203,7 @@ export const api = {
       { method: "POST", headers: apiAuthHeaders(), body }
     );
     if (!res.ok)
-      throw new ApiError(
-        await readApiError(res, "/api/experiments/workbench/attachments")
-      );
+      throw await readApiError(res, "/api/experiments/workbench/attachments");
     return res.json();
   },
 
@@ -1494,7 +1536,7 @@ export const api = {
       signal: opts.signal,
     });
     if (!res.ok || !res.body) {
-      throw new ApiError(await readApiError(res, "/api/chat/stream"));
+      throw await readApiError(res, "/api/chat/stream");
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -1534,7 +1576,7 @@ export const api = {
       headers: apiAuthHeaders(),
       body,
     });
-    if (!res.ok) throw new ApiError(await readApiError(res, "/api/chemical/structure"));
+    if (!res.ok) throw await readApiError(res, "/api/chemical/structure");
     return res.json();
   },
 

@@ -9,7 +9,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type { SubstitutionReport, SupplyRiskReport } from "../api";
 import { useStore } from "../store";
 import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
@@ -137,6 +137,21 @@ describe("MaterialSubstitutionModal", () => {
     render(<MaterialSubstitutionModal onClose={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
     await waitFor(() => expect(screen.getByText("backend down")).toBeInTheDocument());
+  });
+
+  it("lists 404 candidates so the user can pick a real slot material", async () => {
+    vi.spyOn(api, "supplyRisk").mockResolvedValue(noRisk);
+    vi.spyOn(api, "findSubstitutes").mockRejectedValue(
+      new ApiError("配方中不含材料：poly", {
+        candidates: ["Polyamide hardener", "Zinc phosphate"],
+      })
+    );
+
+    render(<MaterialSubstitutionModal onClose={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
+    await waitFor(() => expect(screen.getByText(/配方中不含材料/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Polyamide hardener" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zinc phosphate" })).toBeInTheDocument();
   });
 
   it("still renders when the supply-risk probe fails", async () => {

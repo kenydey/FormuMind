@@ -170,15 +170,17 @@ rebuilt from the persisted experiments on startup (no model binaries stored).
 
 ## Enabling the real engines
 
-Install the optional extras on a capable machine and the adapters switch over
+Core **recommend**, **native DOE**, and the **built-in numpy optimizer** work
+out of the box — no BayBE / Optuna / BoTorch required. Install optional extras
+on a capable machine when you want those engines; the adapters switch over
 automatically — no code change:
 
 ```bash
 pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 providers)
 pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
-pip install -e ".[optimize]"     # optuna (CPU multi-objective optimizer, NSGA-II/TPE)
-pip install -e ".[bo]"           # BoTorch GP optimizer (requires torch CPU)
-pip install -e ".[baybe]"        # BayBE constrained Bayesian active learning
+pip install -e ".[optimize]"     # optuna (optional CPU multi-objective; native optimizer is default)
+pip install -e ".[bo]"           # BoTorch GP optimizer (optional; requires torch CPU)
+pip install -e ".[baybe]"        # BayBE constrained Bayesian active learning (optional DOE)
 pip install -e ".[pydoe]"        # pyDOE classic designs (LHS/CCD/Box-Behnken/…)
 pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
