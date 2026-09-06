@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
-import type { Formulation } from "../api";
+import { api, type Formulation } from "../api";
 import {
   copyFormulaJson,
   copyLeaderboardJson,
@@ -652,6 +652,32 @@ export default function FormulaLeaderboard() {
           className="border border-accent2 text-accent2 rounded px-3 py-1.5 text-xs hover:bg-accent2/10 disabled:opacity-40"
         >
           🤖 AI 修改配方
+        </button>
+        <button
+          type="button"
+          disabled={leaderboard.length === 0}
+          data-testid="sync-ingredients-to-materials"
+          title="将推荐配方中的组分提交到全局材料库（有 CAS/SMILES 自动入库，否则进待确认）"
+          onClick={() => {
+            const materials = leaderboard.flatMap((f) =>
+              (f.ingredients ?? []).map((ing) => ({
+                name: ing.name,
+                role: ing.role || "",
+                cas_no: ing.cas_no || undefined,
+                smiles: ing.smiles || undefined,
+              }))
+            );
+            if (!materials.length) return;
+            void api.proposeMaterialsMany(materials, "formula").then((r) => {
+              const msg = `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`;
+              window.alert(msg);
+            }).catch((e) => {
+              useStore.setState({ error: e instanceof Error ? e.message : String(e) });
+            });
+          }}
+          className="border border-edge text-slate-300 rounded px-3 py-1.5 text-xs hover:border-accent/40 hover:text-accent disabled:opacity-40"
+        >
+          入库缺失组分
         </button>
       </div>
       {showAiPrompt && (

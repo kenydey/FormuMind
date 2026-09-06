@@ -146,6 +146,8 @@ export interface AppState {
   formulationBusy: boolean;
   recommendStage: string;
   recommendMessage: string;
+  /** Soft bias: prefer materials-catalog hits when recommending (never materials-only). */
+  preferMaterialsCatalog: boolean;
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;
@@ -244,6 +246,7 @@ export interface AppState {
   uploadFiles: (files: File[]) => Promise<void>;
   sendChat: (question: string, structure?: import("../api").StructureRecognitionResult | null) => Promise<void>;
   setOpenModal: (name: string | null) => void;
+  setPreferMaterialsCatalog: (v: boolean) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
   openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;

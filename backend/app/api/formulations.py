@@ -88,6 +88,8 @@ class RecommendFormulationsRequest(BaseModel):
     scenario_kinds: list[str] = Field(default_factory=list)
     # 关系洞察开关：true 时对候选配方成分按需跑替代品/关系（默认关，省 token）
     relation_insight: bool = False
+    # Soft bias only — NEVER a hard materials-only filter.
+    prefer_materials_catalog: bool = False
 
 
 class RecommendFormulationsResponse(BaseModel):
@@ -170,7 +172,10 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         raise HTTPException(status_code=503, detail="No formulations produced")
 
     grounded_formulas, ground_warnings = ground_recommended_formulas(
-        rec_resp.formulas, evidence)
+        rec_resp.formulas,
+        evidence,
+        prefer_materials_catalog=bool(body.prefer_materials_catalog),
+    )
     rec_resp.warnings.extend(ground_warnings)
 
     if retrieve_ok:

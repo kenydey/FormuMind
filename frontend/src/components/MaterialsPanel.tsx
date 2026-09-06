@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "./Modal";
-import { api, type ChemicalHit, type MaterialView } from "../api";
+import { api, type ChemicalHit, type MaterialCandidate, type MaterialImportPreview, type MaterialView } from "../api";
 
 const ROLES = ["", "resin", "additive", "inhibitor", "solvent", "crosslinker", "surfactant", "catalyst"];
 const AVAIL_LABEL: Record<string, { text: string; cls: string }> = {
@@ -18,7 +18,7 @@ const AVAIL_LABEL: Record<string, { text: string; cls: string }> = {
   discontinued: { text: "停产", cls: "border-rose-500/40 text-rose-400 bg-rose-500/10" },
 };
 
-type Tab = "library" | "structure";
+type Tab = "library" | "structure" | "pending";
 type Mode = "closed" | "create" | "edit";
 
 interface SpecDraft {
@@ -68,6 +68,10 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
   const [structBusy, setStructBusy] = useState(false);
   const [structHits, setStructHits] = useState<ChemicalHit[] | null>(null);
   const [structTitle, setStructTitle] = useState("");
+  const [candidates, setCandidates] = useState<MaterialCandidate[]>([]);
+  const [importPreview, setImportPreview] = useState<MaterialImportPreview | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [ioMsg, setIoMsg] = useState<string | null>(null);
 
   const load = useCallback(async (term = q, roleF = role, availF = avail) => {
     setBusy(true);
@@ -82,10 +86,64 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
     }
   }, [q, role, avail]);
 
+  const loadCandidates = useCallback(async () => {
+    try {
+      const res = await api.listMaterialCandidates();
+      setCandidates(res.candidates ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
   useEffect(() => {
-    if (open) void load();
+    if (open) {
+      void load();
+      void loadCandidates();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    if (open && tab === "pending") void loadCandidates();
+  }, [open, tab, loadCandidates]);
+
+  async function onPickImportFile(file: File | null, dryRun: boolean) {
+    if (!file) return;
+    setImportBusy(true);
+    setIoMsg(null);
+    setError(null);
+    try {
+      const preview = await api.importMaterials(file, dryRun);
+      setImportPreview(preview);
+      setIoMsg(
+        dryRun
+          ? `预览：新增 ${preview.creates} · 更新 ${preview.updates} · 错误 ${preview.errors}`
+          : `已导入：新增 ${preview.creates} · 更新 ${preview.updates} · 错误 ${preview.errors}`
+      );
+      if (!dryRun) {
+        await load();
+        setImportPreview(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function commitLastImport(fileInput: HTMLInputElement | null) {
+    const file = fileInput?.files?.[0] ?? null;
+    if (!file) {
+      setError("请先选择导入文件并预览");
+      return;
+    }
+    await onPickImportFile(file, false);
+  }
+
+  function downloadExport(format: "json" | "csv" | "xlsx") {
+    const url = api.exportMaterialsUrl(format, { q, role });
+    window.open(url, "_blank");
+  }
 
   function startCreate() {
     setDraft(EMPTY);
@@ -238,7 +296,7 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
 
   return (
     <Modal title="🧪 材料库 · Materials" open={open} onClose={onClose} size="xl" testId="modal-materials">
-      <div className="flex gap-2 mb-3">
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
         <button
           type="button"
           onClick={() => setTab("library")}
@@ -250,6 +308,16 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         </button>
         <button
           type="button"
+          onClick={() => setTab("pending")}
+          data-testid="materials-tab-pending"
+          className={`text-xs rounded-full px-3 py-1 border ${
+            tab === "pending" ? "border-accent/50 bg-accent/10 text-accent" : "border-edge text-slate-400"
+          }`}
+        >
+          待入库{candidates.length ? ` (${candidates.length})` : ""}
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("structure")}
           className={`text-xs rounded-full px-3 py-1 border ${
             tab === "structure" ? "border-accent/50 bg-accent/10 text-accent" : "border-edge text-slate-400"
@@ -257,6 +325,44 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         >
           结构搜索
         </button>
+        <label className="text-[10px] border border-edge rounded-full px-3 py-1 text-slate-400 hover:border-accent/40 hover:text-accent cursor-pointer">
+          {importBusy ? "导入中…" : "📥 导入预览"}
+          <input
+            type="file"
+            accept=".json,.csv,.xlsx,.xls"
+            className="hidden"
+            data-testid="materials-import-input"
+            disabled={importBusy}
+            onChange={(e) => void onPickImportFile(e.target.files?.[0] ?? null, true)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={importBusy || !importPreview}
+          className="text-[10px] border border-edge rounded-full px-3 py-1 text-slate-400 hover:border-accent/40 hover:text-accent disabled:opacity-40"
+          data-testid="materials-import-commit"
+          onClick={() => {
+            const input = document.querySelector(
+              '[data-testid="materials-import-input"]'
+            ) as HTMLInputElement | null;
+            void commitLastImport(input);
+          }}
+        >
+          确认导入
+        </button>
+        <div className="flex gap-1">
+          {(["csv", "json", "xlsx"] as const).map((fmt) => (
+            <button
+              key={fmt}
+              type="button"
+              onClick={() => downloadExport(fmt)}
+              className="text-[10px] border border-edge rounded-full px-2 py-1 text-slate-400 hover:border-accent/40 hover:text-accent"
+              data-testid={`materials-export-${fmt}`}
+            >
+              导出 {fmt.toUpperCase()}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           disabled={enriching}
@@ -268,12 +374,103 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         </button>
       </div>
 
+      {ioMsg && <div className="text-[11px] text-emerald-400 mb-2">{ioMsg}</div>}
+      {importPreview && (
+        <div className="mb-2 text-[10px] text-slate-400 border border-edge rounded p-2 max-h-28 overflow-auto" data-testid="materials-import-preview">
+          批次 {importPreview.batch_id.slice(0, 8)}… · {importPreview.total} 行
+          <ul className="mt-1 space-y-0.5">
+            {importPreview.rows.slice(0, 12).map((r, i) => (
+              <li key={`${r.name}-${i}`}>
+                <span className="text-accent">{r.action}</span> {r.name || "(空)"}
+                {r.matched_by ? ` · 匹配 ${r.matched_by}` : ""}
+                {r.reason ? ` · ${r.reason}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {enrichMsg && <div className="text-[11px] text-emerald-400 mb-2">{enrichMsg}</div>}
       {error && (
         <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded p-2 mb-2">{error}</div>
       )}
 
-      {tab === "library" ? (
+      {tab === "pending" ? (
+        <div className="space-y-2" data-testid="materials-pending">
+          <div className="flex gap-2 items-center">
+            <p className="text-[11px] text-slate-500 flex-1">
+              低置信候选（无 CAS/SMILES）待确认晋升；高置信项已自动入库。
+            </p>
+            <button
+              type="button"
+              className="text-[10px] border border-edge rounded px-2 py-1 text-slate-400 hover:text-accent"
+              onClick={() =>
+                void api.harvestKbProducts().then((r) => {
+                  setIoMsg(`KB 收获：${JSON.stringify(r)}`);
+                  return loadCandidates();
+                })
+              }
+            >
+              从 KB 商品库收获
+            </button>
+            <button
+              type="button"
+              className="text-[10px] border border-edge rounded px-2 py-1 text-slate-400 hover:text-accent"
+              onClick={() => void loadCandidates()}
+            >
+              刷新
+            </button>
+          </div>
+          {candidates.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">暂无待入库候选</p>
+          ) : (
+            <div className="max-h-[50vh] overflow-auto border border-edge rounded">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-panel text-slate-500">
+                  <tr className="border-b border-edge">
+                    <th className="text-left px-2 py-1.5">名称</th>
+                    <th className="text-left px-2 py-1.5">来源</th>
+                    <th className="text-left px-2 py-1.5">置信</th>
+                    <th className="px-2 py-1.5" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidates.map((c) => (
+                    <tr key={c.id} className="border-b border-edge/50">
+                      <td className="px-2 py-1.5 text-slate-200">
+                        {c.name}
+                        {c.cas_no ? <span className="text-slate-500 ml-1">{c.cas_no}</span> : null}
+                      </td>
+                      <td className="px-2 py-1.5 text-slate-400">{c.source}</td>
+                      <td className="px-2 py-1.5 text-slate-400">{c.confidence}</td>
+                      <td className="px-2 py-1.5 text-right space-x-1">
+                        <button
+                          type="button"
+                          className="text-accent hover:underline"
+                          onClick={() =>
+                            void api.promoteMaterialCandidate(c.id).then(() => {
+                              void load();
+                              void loadCandidates();
+                            })
+                          }
+                        >
+                          晋升
+                        </button>
+                        <button
+                          type="button"
+                          className="text-slate-500 hover:text-rose-400"
+                          onClick={() => void api.dismissMaterialCandidate(c.id).then(() => loadCandidates())}
+                        >
+                          忽略
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : tab === "library" ? (
         <div className="space-y-3">
           <div className="flex gap-2">
             <input
@@ -328,6 +525,7 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
               <thead className="sticky top-0 bg-panel text-slate-500">
                 <tr className="border-b border-edge">
                   <th className="text-left px-2 py-1.5 font-medium">名称</th>
+                  <th className="text-left px-2 py-1.5 font-medium">来源</th>
                   <th className="text-left px-2 py-1.5 font-medium">中文名</th>
                   <th className="text-left px-2 py-1.5 font-medium">角色</th>
                   <th className="text-left px-2 py-1.5 font-medium">CAS</th>
@@ -349,6 +547,9 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                         {(s.smiles as string) && (
                           <span className="ml-1 text-[9px] text-slate-600 font-mono">SMILES ✓</span>
                         )}
+                      </td>
+                      <td className="px-2 py-1.5 text-slate-500 font-mono text-[10px]">
+                        {m.origin || (s.origin as string) || "seed"}
                       </td>
                       <td className="px-2 py-1.5 text-slate-400">{fmt(s.zh_name)}</td>
                       <td className="px-2 py-1.5 text-slate-400">{m.role}</td>

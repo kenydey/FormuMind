@@ -77,6 +77,8 @@ class MaterialCatalog(MutableMapping[str, dict]):
             merged = {name: dict(spec) for name, spec in self._seed.items()}
             try:
                 for row in store.list_all():
+                    if getattr(row, "archived", False):
+                        continue
                     spec = store.row_to_spec(row)
                     existing = merged.get(row.name)
                     if existing is None:
@@ -93,6 +95,8 @@ class MaterialCatalog(MutableMapping[str, dict]):
                             continue
                         if _is_blank(existing.get(field)):
                             existing[field] = value
+                    if spec.get("origin") and _is_blank(existing.get("origin")):
+                        existing["origin"] = spec["origin"]
             except Exception as exc:
                 logger.debug("material catalog: overlay failed ({}); using seed", exc)
                 return self._seed

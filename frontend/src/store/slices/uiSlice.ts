@@ -8,6 +8,11 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
         draft.openModal = name;
       }),
 
+    setPreferMaterialsCatalog: (v: boolean) =>
+      set((draft) => {
+        draft.preferMaterialsCatalog = Boolean(v);
+      }),
+
     setLlmConfig: (config: Partial<AppState["llmConfig"]>) =>
       set((draft) => {
         Object.assign(draft.llmConfig, config);
@@ -28,5 +33,5 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
       set((draft) => {
         draft.settingsTab = tab;
       }),
-  } as Pick<AppState, 'setOpenModal' | 'setLlmConfig' | 'toggleSettings' | 'openSettings' | 'setSettingsTab'>;
+  } as Pick<AppState, 'setOpenModal' | 'setPreferMaterialsCatalog' | 'setLlmConfig' | 'toggleSettings' | 'openSettings' | 'setSettingsTab'>;
 }

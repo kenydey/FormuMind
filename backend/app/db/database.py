@@ -158,12 +158,42 @@ def _ensure_kb_entity_link_columns(engine: Engine) -> None:
 
 
 def _ensure_material_columns(engine: Engine) -> None:
-    """只读守护：materials 表必须具备替代/采购元数据列。"""
+    """材料表列守护 + 软扩列 archived；并确保 material_candidates 表存在。"""
+    from sqlalchemy import inspect, text
+
     _require_columns(
         engine,
         "materials",
         ("norm_key", "name", "origin", "availability", "functional_class"),
     )
+    inspector = inspect(engine)
+    if "materials" in inspector.get_table_names():
+        existing = {c["name"] for c in inspector.get_columns("materials")}
+        if "archived" not in existing:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            'ALTER TABLE materials ADD COLUMN archived BOOLEAN '
+                            "DEFAULT 0 NOT NULL"
+                        )
+                    )
+                    try:
+                        conn.execute(
+                            text(
+                                "CREATE INDEX ix_materials_archived "
+                                "ON materials (archived)"
+                            )
+                        )
+                    except Exception:
+                        pass
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+    # New pending-queue table: create_all covers fresh DBs; existing DBs need it too.
+    from .models import MaterialCandidateRow
+
+    MaterialCandidateRow.__table__.create(bind=engine, checkfirst=True)
 
 
 def _ensure_owner_id_column(engine: Engine, table: str) -> None:

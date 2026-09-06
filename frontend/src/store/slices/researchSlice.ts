@@ -179,7 +179,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         (draft as unknown as Record<string, unknown>)._researchAbort = ctrl;
       });
       try {
-        const { requirement, sources, selectedSources, searchQuery } = get();
+        const { requirement, sources, selectedSources, searchQuery, preferMaterialsCatalog } = get();
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
@@ -187,7 +187,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         const { task_id } = await api.submitRecommendResearch(
           requirement,
           payload,
-          searchQuery.trim()
+          searchQuery.trim(),
+          { preferMaterialsCatalog }
         );
         (ctrl as unknown as Record<string, unknown>).taskId = task_id;
         const final = await awaitTaskStream(
@@ -244,7 +245,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.error = null;
       });
       try {
-        const { requirement, sources, selectedSources, searchQuery } = get();
+        const { requirement, sources, selectedSources, searchQuery, preferMaterialsCatalog } = get();
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
@@ -262,7 +263,9 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           // Fall through to recommendFormulations.
         }
 
-        const rec = await api.recommendFormulations(requirement, undefined, payload, 3);
+        const rec = await api.recommendFormulations(requirement, undefined, payload, 3, {
+          preferMaterialsCatalog,
+        });
         const forms = (rec.scored?.length ? rec.scored : []) as Formulation[];
         if (!forms.length) {
           throw new Error(rec.warnings?.[0] || "同步推荐未返回配方");

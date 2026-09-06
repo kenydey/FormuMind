@@ -82,6 +82,8 @@ export default function ActionsPanel() {
     formulationBusy,
     recommendStage,
     recommendMessage,
+    preferMaterialsCatalog,
+    setPreferMaterialsCatalog,
     sources,
     task,
     leaderboard,
@@ -104,6 +106,8 @@ export default function ActionsPanel() {
       formulationBusy: s.formulationBusy,
       recommendStage: s.recommendStage,
       recommendMessage: s.recommendMessage,
+      preferMaterialsCatalog: s.preferMaterialsCatalog,
+      setPreferMaterialsCatalog: s.setPreferMaterialsCatalog,
       sources: s.sources,
       task: s.task,
       leaderboard: s.leaderboard,
@@ -208,6 +212,25 @@ export default function ActionsPanel() {
           <p className="text-[11px] text-slate-500">
             从 ColBERT 知识库经 CRAG 评估后推荐配方（源策略由后端配置，无需勾选专利/文献）。
           </p>
+          <label
+            className="flex items-start gap-2 text-[11px] text-slate-300 border border-edge rounded-lg px-2.5 py-2 cursor-pointer hover:border-accent/30"
+            data-testid="prefer-materials-catalog"
+            title="提高库内材料的 grounding/排序权重，不会排除库外材料"
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={preferMaterialsCatalog}
+              onChange={(e) => setPreferMaterialsCatalog(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium text-slate-200">优先材料库</span>
+              <span className="block text-slate-500 mt-0.5">
+                软偏好：提高全局材料库命中权重，<strong className="font-normal text-slate-400">不会</strong>
+                排除库外材料（无「仅材料库」硬约束）。
+              </span>
+            </span>
+          </label>
           {sources.length === 0 && (
             <p className="text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2">
               建议先在左栏检索或上传资料以充实知识库；离线种子语料仍可用于基础推荐。
@@ -359,17 +382,11 @@ export default function ActionsPanel() {
           <LoopModal />
         </Suspense>
       </Modal>
-      <Modal
-        title="🧴 材料库 · Materials"
-        testId="modal-materials"
-        open={openModal === "materials"}
-        onClose={() => setOpenModal(null)}
-        size="full"
-      >
-        <Suspense fallback={<ModalFallback />}>
+      {openModal === "materials" && (
+        <Suspense fallback={null}>
           <MaterialsPanel open onClose={() => setOpenModal(null)} />
         </Suspense>
-      </Modal>
+      )}
     </aside>
   );
 }

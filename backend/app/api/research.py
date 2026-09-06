@@ -19,6 +19,8 @@ class ResearchRequest(Requirement):
     sources: list[Evidence] = Field(default_factory=list)
     source_types: list[str] = Field(default_factory=list, deprecated=True)
     query: str = ""
+    # Soft catalog bias for recommend path (never materials-only).
+    prefer_materials_catalog: bool = False
 
 
 class DeepResearchRequest(BaseModel):
@@ -65,13 +67,14 @@ def start_recommend_research(body: ResearchRequest, request: Request) -> JSONRes
 
     req = Requirement(**{
         k: v for k, v in body.model_dump().items()
-        if k not in ("sources", "source_types", "query")
+        if k not in ("sources", "source_types", "query", "prefer_materials_catalog")
     })
     payload = {
         "topic": body.query or req.headline(),
         "requirement": req.model_dump(),
         "sources": [s.model_dump() for s in body.sources],
         "query": body.query or req.headline(),
+        "prefer_materials_catalog": bool(body.prefer_materials_catalog),
     }
     outbox_id = _enqueue_outbox("research_recommend", payload)
     return submit(run_recommend_task, payload, "recommend", outbox_id=outbox_id, owner_id=get_current_owner(request))

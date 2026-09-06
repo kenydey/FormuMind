@@ -78,6 +78,7 @@ export const useStore = create<AppState>()(
       deepResearchStage: "",
       deepResearchMessage: "",
       formulationBusy: false,
+      preferMaterialsCatalog: false,
       recommendStage: "",
       recommendMessage: "",
       chatBusy: false,
@@ -130,6 +131,7 @@ export const useStore = create<AppState>()(
         rmseHistory: state.rmseHistory,
         // 2026-09-05: 本地镜像(轻量) —— 刷新后立即可见, 不等 loadProject;
         // 权威在服务端(chat_messages 表 / payload), load 成功以服务端为准。
+        preferMaterialsCatalog: state.preferMaterialsCatalog,
         sources: (state.sources ?? []).slice(0, 50),
         chatHistory: (state.chatHistory ?? []).slice(-30),
       }),

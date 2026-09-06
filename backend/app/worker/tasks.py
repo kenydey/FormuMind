@@ -481,6 +481,7 @@ def run_recommend_task(self, payload: dict) -> dict:
             requirement=req_data,
             n=n,
             sources=sources,
+            prefer_materials_catalog=bool(payload.get("prefer_materials_catalog")),
         )
         resp = _sync_recommend(body)
         result_raw = resp.model_dump()

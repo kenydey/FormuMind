@@ -960,13 +960,15 @@ export const api = {
     req: Requirement,
     objectives?: ObjectiveSpec[],
     sources: Evidence[] = [],
-    n = 3
+    n = 3,
+    opts: { preferMaterialsCatalog?: boolean } = {}
   ) =>
     post<RecommendFormulationsResponse>("/api/formulations/recommend", {
       requirement: req,
       objectives: objectives ?? req.objectives,
       sources,
       n,
+      prefer_materials_catalog: Boolean(opts.preferMaterialsCatalog),
     }),
   chemicalLookup: (q: string) =>
     get<{
@@ -1288,8 +1290,18 @@ export const api = {
   ) =>
     postAccepted("/api/research/deep", { topic, requirement: req, sources, query }),
 
-  submitRecommendResearch: (req: Requirement, sources: Evidence[] = [], query = "") =>
-    postAccepted("/api/research/recommend", { ...req, sources, query }),
+  submitRecommendResearch: (
+    req: Requirement,
+    sources: Evidence[] = [],
+    query = "",
+    opts: { preferMaterialsCatalog?: boolean } = {}
+  ) =>
+    postAccepted("/api/research/recommend", {
+      ...req,
+      sources,
+      query,
+      prefer_materials_catalog: Boolean(opts.preferMaterialsCatalog),
+    }),
 
   task: async (id: string): Promise<TaskStatus> => {
     const res = await fetch(`/api/tasks/${id}`, { headers: apiAuthHeaders() });
@@ -1413,17 +1425,78 @@ export const api = {
     post<IngestResponse>("/api/ingest/task", { doc_type: docType, identifier }),
 
   // ── 材料库管理(GET /api/materials 已挂载但隐藏于 OpenAPI schema) ──
-  listMaterials: (params?: { q?: string; role?: string; availability?: string }) => {
+  listMaterials: (params?: {
+    q?: string;
+    role?: string;
+    availability?: string;
+    functional_class?: string;
+    substitute_group?: string;
+    include_archived?: boolean;
+  }) => {
     const q = new URLSearchParams();
     if (params?.q) q.set("q", params.q);
     if (params?.role) q.set("role", params.role);
     if (params?.availability) q.set("availability", params.availability);
+    if (params?.functional_class) q.set("functional_class", params.functional_class);
+    if (params?.substitute_group) q.set("substitute_group", params.substitute_group);
+    if (params?.include_archived) q.set("include_archived", "true");
     const qs = q.toString();
     return get<MaterialListResponse>(`/api/materials${qs ? `?${qs}` : ""}`);
   },
 
   upsertMaterial: (spec: MaterialSpec) =>
     post<MaterialView>("/api/materials", spec),
+
+  importMaterials: async (file: File, dryRun = true) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/materials/import?dry_run=${dryRun ? "true" : "false"}`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw new Error(`/api/materials/import -> ${res.status}`);
+    return res.json() as Promise<MaterialImportPreview>;
+  },
+
+  exportMaterialsUrl: (format: "json" | "csv" | "xlsx", params?: { q?: string; role?: string }) => {
+    const q = new URLSearchParams({ format });
+    if (params?.q) q.set("q", params.q);
+    if (params?.role) q.set("role", params.role);
+    return `/api/materials/export?${q}`;
+  },
+
+  materialsImportTemplateUrl: (format: "json" | "csv" | "xlsx" = "csv") =>
+    `/api/materials/import-template?format=${format}`,
+
+  listMaterialCandidates: (limit = 200) =>
+    get<{ total: number; candidates: MaterialCandidate[] }>(`/api/materials/candidates?limit=${limit}`),
+
+  promoteMaterialCandidate: (id: string) =>
+    post<{ ok: boolean; action?: string; name?: string }>(`/api/materials/candidates/${id}/promote`, {}),
+
+  dismissMaterialCandidate: (id: string) =>
+    post<{ ok: boolean }>(`/api/materials/candidates/${id}/dismiss`, {}),
+
+  proposeMaterial: (body: {
+    name: string;
+    role?: string;
+    cas_no?: string;
+    smiles?: string;
+    source?: string;
+    source_ref?: string;
+  }) => post<{ action: string; name: string }>("/api/materials/propose", body),
+
+  proposeMaterialsMany: (
+    materials: Array<{ name: string; role?: string; cas_no?: string; smiles?: string }>,
+    source = "formula"
+  ) => post<Record<string, number>>("/api/materials/propose-many", { materials, source }),
+
+  harvestKbProducts: (limit = 200) =>
+    post<Record<string, number>>(`/api/materials/harvest-kb-products?limit=${limit}`, {}),
+
+  archiveMaterial: (name: string, archived = true) =>
+    post<MaterialView>("/api/materials/archive", { name, archived }),
 
   enrichMaterials: () =>
     post<{ enriched: number }>("/api/chemical/enrich-materials", {}),
@@ -2776,12 +2849,46 @@ export interface MaterialView {
   role: string;
   origin?: string;
   availability?: string;
+  archived?: boolean;
   spec: Record<string, unknown>;
 }
 
 export interface MaterialListResponse {
   materials: MaterialView[];
   total?: number;
+  store_enabled?: boolean;
+}
+
+export interface MaterialImportPreview {
+  dry_run: boolean;
+  batch_id: string;
+  total: number;
+  creates: number;
+  updates: number;
+  errors: number;
+  rows: Array<{
+    name: string;
+    action: string;
+    reason?: string;
+    matched_by?: string;
+    existing_name?: string;
+  }>;
+}
+
+export interface MaterialCandidate {
+  id: string;
+  name: string;
+  role?: string;
+  cas_no?: string;
+  smiles?: string;
+  formula?: string;
+  zh_name?: string;
+  supplier?: string;
+  source?: string;
+  source_ref?: string;
+  confidence?: string;
+  status?: string;
+  updated_at?: string | null;
 }
 
 export interface ChemicalHit {

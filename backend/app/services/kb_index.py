@@ -332,6 +332,33 @@ def _attach_entities(source_id: str, rows: list[dict]) -> None:
             # `kb_products` being unique by norm_key means one lookup per
             # product instead of up to five per document.
             get_product_store().upsert_mentions(source_id, all_products, link_structures=False)
+            # Semi-auto catalog expansion: CAS/SMILES → materials; else pending queue.
+            try:
+                from .material_promote import propose_many
+
+                promo_items = []
+                for p in all_products:
+                    if not isinstance(p, dict):
+                        continue
+                    name = (
+                        str(p.get("generic_name") or p.get("name") or p.get("trade_name") or "")
+                        .strip()
+                    )
+                    if not name:
+                        continue
+                    promo_items.append(
+                        {
+                            "name": name,
+                            "role": p.get("role") or "",
+                            "cas_no": p.get("cas") or p.get("cas_no"),
+                            "smiles": p.get("smiles"),
+                            "supplier": p.get("supplier"),
+                        }
+                    )
+                if promo_items:
+                    propose_many(promo_items, source="kb_promoted", source_ref=source_id or "")
+            except Exception as promo_exc:
+                degrade_return(logger, promo_exc, "material promote after extract failed", None)
     except Exception as exc:
         degrade_return(logger, exc, "kb entity extraction failed", None)
 

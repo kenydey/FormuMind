@@ -342,7 +342,36 @@ class MaterialRow(Base):
     regulatory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Hand-tagged interchangeable group; members are drop-in for one another.
     substitute_group: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    # Soft archive — hidden from RAW_MATERIALS pools but retained for audit/export.
+    archived: Mapped[bool] = mapped_column(default=False, index=True)
 
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class MaterialCandidateRow(Base):
+    """Low-confidence material proposals awaiting human promote / dismiss.
+
+    High-confidence harvests (CAS/SMILES) upsert directly into ``materials``;
+    bare trade names land here so the main catalog stays clean.
+    """
+
+    __tablename__ = "material_candidates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    norm_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    role: Mapped[str] = mapped_column(String(60), default="")
+    cas_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    smiles: Mapped[str | None] = mapped_column(Text, nullable=True)
+    formula: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    zh_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    supplier: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source: Mapped[str] = mapped_column(String(64), default="kb_promoted", index=True)
+    source_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    confidence: Mapped[str] = mapped_column(String(16), default="low")
+    # pending | promoted | dismissed
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

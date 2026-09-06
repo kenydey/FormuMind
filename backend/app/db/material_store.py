@@ -30,7 +30,7 @@ _SPEC_FIELDS = (
     "tg_k", "lab", "svhc", "carrier", "water_compatible",
     "functional_class", "equivalent_weight", "hansen_d", "hansen_p",
     "hansen_h", "hlb", "supplier", "lead_time_days", "availability",
-    "regulatory", "substitute_group",
+    "regulatory", "substitute_group", "archived",
 )
 _TEXT_WIDTHS = {
     "role": 60, "formula": 120, "cas_no": 32, "zh_name": 200, "carrier": 16,
@@ -164,12 +164,46 @@ class MaterialStore:
                 .first()
             )
 
+    def find_by_cas(self, cas_no: str) -> MaterialRow | None:
+        cas = (cas_no or "").strip()
+        if not cas:
+            return None
+        with self._session_factory() as session:
+            return (
+                session.query(MaterialRow)
+                .filter(MaterialRow.cas_no == cas)
+                .order_by(MaterialRow.updated_at.desc())
+                .first()
+            )
+
+    def find_by_smiles(self, smiles: str) -> MaterialRow | None:
+        smi = (smiles or "").strip()
+        if not smi:
+            return None
+        with self._session_factory() as session:
+            return (
+                session.query(MaterialRow)
+                .filter(MaterialRow.smiles == smi)
+                .order_by(MaterialRow.updated_at.desc())
+                .first()
+            )
+
+    def set_archived(self, name: str, archived: bool = True) -> bool:
+        display = (name or "").strip()
+        if not display:
+            return False
+        # Seed-only rows get materialized on first archive so the flag persists.
+        return self.upsert(display, {"archived": bool(archived)}, overwrite=True)
+
     def search(
         self,
         q: str = "",
         *,
         role: str = "",
         availability: str = "",
+        functional_class: str = "",
+        substitute_group: str = "",
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[MaterialRow]:
@@ -190,6 +224,14 @@ class MaterialStore:
                 query = query.filter(MaterialRow.role == role)
             if availability:
                 query = query.filter(MaterialRow.availability == availability)
+            if functional_class:
+                query = query.filter(MaterialRow.functional_class == functional_class)
+            if substitute_group:
+                query = query.filter(MaterialRow.substitute_group == substitute_group)
+            if not include_archived:
+                query = query.filter(
+                    or_(MaterialRow.archived.is_(False), MaterialRow.archived.is_(None))
+                )
             return query.order_by(MaterialRow.name).offset(offset).limit(limit).all()
 
     def count(self) -> int:
@@ -204,8 +246,12 @@ class MaterialStore:
         ``.get(key, default)`` and a stored None would defeat the default
         (``carrier`` → "both", most visibly).
         """
-        spec: dict = {}
+        spec: dict = {"origin": row.origin or "seed"}
+        if getattr(row, "archived", False):
+            spec["archived"] = True
         for field in _SPEC_FIELDS:
+            if field == "archived":
+                continue
             value = getattr(row, field, None)
             if value is None:
                 continue
