@@ -72,6 +72,7 @@ export default function MaterialSubstitutionModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [candidates, setCandidates] = useState<string[]>([]);
+  const [includeUnavailable, setIncludeUnavailable] = useState(false);
 
   useEffect(() => {
     api.supplyRisk().then(setRisk).catch(() => setRisk(null));
@@ -95,6 +96,7 @@ export default function MaterialSubstitutionModal({
           formulation: formulation ?? undefined,
           material,
           limit: 10,
+          include_unavailable: includeUnavailable,
         })
       );
     } catch (err) {
@@ -175,6 +177,24 @@ export default function MaterialSubstitutionModal({
             </button>
           </div>
         )}
+
+        <label
+          className="flex items-start gap-2 text-[11px] text-slate-400 mb-3 cursor-pointer"
+          data-testid="include-unavailable-substitutes"
+        >
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={includeUnavailable}
+            onChange={(e) => setIncludeUnavailable(e.target.checked)}
+          />
+          <span>
+            包含停产材料
+            <span className="block text-slate-500">
+              默认关闭：替代候选与逆向设计池已排除 discontinued。
+            </span>
+          </span>
+        </label>
 
         {error && (
           <div className="text-red-400 bg-red-400/10 border border-red-400/20 rounded p-2 mb-2">

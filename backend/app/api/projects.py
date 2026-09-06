@@ -38,6 +38,18 @@ def update_project(project_id: str, req: ProjectUpdateRequest) -> ProjectDetail:
     detail = get_project_store().update(project_id, req.workspace, title=req.title)
     if detail is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    # Best-effort: promote requirement.materials into the global catalog.
+    try:
+        from ..services.material_promote import safe_propose_from_requirement
+
+        ws = req.workspace if isinstance(req.workspace, dict) else {}
+        req_blob = ws.get("requirement")
+        if req_blob is None and detail.workspace and detail.workspace.requirement:
+            req_blob = detail.workspace.requirement
+        if req_blob is not None:
+            safe_propose_from_requirement(req_blob, source_ref=f"project:{project_id}")
+    except Exception:
+        pass
     return detail
 
 

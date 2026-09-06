@@ -75,8 +75,11 @@ class MaterialSpec(BaseModel):
     weight_pct: float = Field(default=0.0, ge=0, le=100)
     smiles: str | None = None
     formula: str | None = None
+    cas_no: str | None = None
+    zh_name: str | None = None
     price_cny_per_kg: float | None = None
     voc_contrib: float | None = None
+    supplier: str | None = None
 
 
 class MetricPriorSpec(BaseModel):

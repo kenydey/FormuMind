@@ -502,20 +502,9 @@ def propose_many_endpoint(body: ProposeManyRequest) -> dict:
 @router.post("/promote-from-requirement")
 def promote_from_requirement(body: PromoteRequirementRequest) -> dict:
     _require_store()
-    from ..services.material_promote import propose_many
+    from ..services.material_promote import propose_from_requirement
 
-    mats = getattr(body.requirement, "materials", None) or []
-    items = []
-    for m in mats:
-        if hasattr(m, "model_dump"):
-            d = m.model_dump()
-        elif isinstance(m, dict):
-            d = m
-        else:
-            continue
-        if d.get("name"):
-            items.append(d)
-    return propose_many(items, source="requirement", source_ref="requirement.materials")
+    return propose_from_requirement(body.requirement)
 
 
 @router.post("/harvest-kb-products")

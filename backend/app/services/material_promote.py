@@ -285,3 +285,130 @@ def candidate_to_dict(row: MaterialCandidateRow) -> dict[str, Any]:
         "status": row.status,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+# Process / metric keys that are never materials — skip workbench promotion.
+_PROCESS_KEY_SUFFIXES = (
+    "_c",
+    "_min",
+    "_um",
+    "_mm",
+    "_s",
+    "_h",
+    "_hr",
+    "_gsm",
+    "_gpl",
+    "_pct",
+    "_kpa",
+    "_mpa",
+    "_rpm",
+    "_ph",
+)
+_PROCESS_KEY_EXACT = {
+    "temperature",
+    "time",
+    "ph",
+    "voltage",
+    "current",
+    "status",
+    "note",
+    "tags",
+    "round",
+    "score",
+}
+
+
+def _looks_like_process_key(key: str) -> bool:
+    k = (key or "").strip().lower()
+    if not k or k in _PROCESS_KEY_EXACT:
+        return True
+    if any(k.endswith(suf) for suf in _PROCESS_KEY_SUFFIXES):
+        return True
+    if k.startswith("cure_") or k.startswith("bake_") or k.startswith("film_"):
+        return True
+    return False
+
+
+def propose_from_requirement(
+    requirement: Any,
+    *,
+    source_ref: str = "requirement.materials",
+) -> dict[str, int]:
+    """Promote ``Requirement.materials`` into the global catalog / pending queue."""
+    mats = getattr(requirement, "materials", None)
+    if mats is None and isinstance(requirement, dict):
+        mats = requirement.get("materials")
+    items: list[dict[str, Any]] = []
+    for m in mats or []:
+        if hasattr(m, "model_dump"):
+            d = m.model_dump()
+        elif isinstance(m, dict):
+            d = dict(m)
+        else:
+            continue
+        name = str(d.get("name") or "").strip()
+        if not name:
+            continue
+        items.append(d)
+    if not items:
+        return {"upsert": 0, "pending": 0, "exists": 0, "skipped": 0}
+    return propose_many(items, source="requirement", source_ref=source_ref)
+
+
+def propose_from_workbench_rows(
+    rows: Iterable[Any],
+    *,
+    campaign_id: int | None = None,
+) -> dict[str, int]:
+    """Queue unknown planned/actual param keys from workbench rows as candidates.
+
+    High-confidence identity is rare on factor keys (usually bare names), so
+    most land in the pending queue — which is intentional.
+    """
+    seen: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for row in rows or []:
+        if hasattr(row, "model_dump"):
+            data = row.model_dump()
+        elif isinstance(row, dict):
+            data = row
+        else:
+            data = {
+                "planned_params": getattr(row, "planned_params", None) or {},
+                "actual_params": getattr(row, "actual_params", None) or {},
+            }
+        for bag_name in ("planned_params", "actual_params"):
+            bag = data.get(bag_name) or {}
+            if not isinstance(bag, dict):
+                continue
+            for key in bag.keys():
+                name = str(key or "").strip()
+                if not name or _looks_like_process_key(name):
+                    continue
+                nk = norm_key(name)
+                if nk in seen:
+                    continue
+                seen.add(nk)
+                items.append({"name": name, "role": ""})
+    ref = f"workbench:{campaign_id}" if campaign_id is not None else "workbench"
+    return propose_many(items, source="workbench", source_ref=ref)
+
+
+def safe_propose_from_requirement(requirement: Any, *, source_ref: str = "") -> dict[str, int]:
+    try:
+        return propose_from_requirement(requirement, source_ref=source_ref or "requirement.materials")
+    except Exception as exc:
+        logger.debug("propose_from_requirement failed: {}", exc)
+        return {"upsert": 0, "pending": 0, "exists": 0, "skipped": 0}
+
+
+def safe_propose_from_workbench_rows(
+    rows: Iterable[Any],
+    *,
+    campaign_id: int | None = None,
+) -> dict[str, int]:
+    try:
+        return propose_from_workbench_rows(rows, campaign_id=campaign_id)
+    except Exception as exc:
+        logger.debug("propose_from_workbench_rows failed: {}", exc)
+        return {"upsert": 0, "pending": 0, "exists": 0, "skipped": 0}

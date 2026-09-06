@@ -170,3 +170,12 @@ Phase D 可与 C 并行靠后
 3. 替代、逆向持续使用同一全局库。
 4. 推荐仅有「优先材料库」软偏好，**无硬约束选项**，且库外材料不会被剔除。
 5. 自动扩充有溯源（`origin`）与待确认队列，主库不被噪声冲垮。
+
+## 跟进实现（2026-09-06 晚）
+
+已接线：
+
+- 项目 `PUT /api/projects/{id}` 保存时：自动 `propose_from_requirement(requirement.materials)`
+- 台账 `PUT /api/experiments/workbench/sync`：未知配方键（排除工艺参数）→ `propose_from_workbench_rows`
+- 替代 UI：默认排除停产；可选「包含停产材料」（`include_unavailable`）
+- 逆向设计 / `candidates_for_role`：原本即默认排除 `discontinued`

@@ -482,6 +482,14 @@ async def sync_workbench(
         payload.campaign_id,
         [row.model_dump() for row in payload.rows],
     )
+    # Best-effort: unknown factor keys → material pending queue / catalog.
+    try:
+        from ..services.material_promote import safe_propose_from_workbench_rows
+
+        safe_propose_from_workbench_rows(payload.rows, campaign_id=payload.campaign_id)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("workbench material promote skipped: %s", exc)
+
     from ..services.workbench_training import ingest_workbench_rows
 
     train_result = await run_in_threadpool(ingest_workbench_rows, payload.campaign_id, rows)
