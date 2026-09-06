@@ -1474,6 +1474,16 @@ export const api = {
 
   listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
 
+  getMeta: () =>
+    get<{
+      domains: string[];
+      substrates: string[];
+      designs: string[];
+      example_projects: { id: string; label: string; domain?: string }[];
+      builtin_metrics?: string[];
+      role_catalog?: string[];
+    }>("/api/meta"),
+
   getDefaultLevers: (params: {
     domain: ProductDomain;
     substrate?: string;
@@ -1678,6 +1688,9 @@ export const api = {
 
   getAuthStatus: () =>
     get<{ auth_required: boolean; hint: string; multi_user?: boolean; owner?: string }>("/api/auth/status"),
+
+  /** Public liveness probe — no auth required. */
+  getHealth: () => get<PlatformHealth>("/health"),
 
   postSettings: (update: Partial<LLMConfig> & { api_key?: string }) =>
     post<{ ok: boolean; provider: string; model: string; message: string }>(
@@ -2062,6 +2075,7 @@ export interface NotebookLMStatus {
   notebook_id?: string | null;
   session_present?: boolean;
   can_launch_browser?: boolean;
+  offline_fallback?: boolean;
 }
 
 export interface NotebookLMLoginResult {
@@ -2071,6 +2085,15 @@ export interface NotebookLMLoginResult {
   hint?: string | null;
   command?: string | null;
   manual_url?: string | null;
+}
+
+/** Public `/health` payload — coarse infra booleans only. */
+export interface PlatformHealth {
+  status: "ok" | "degraded";
+  database: { ok: boolean; scheme: string };
+  task_broker: { required: boolean; reachable: boolean };
+  parsers: Record<string, boolean>;
+  datalab: { required: boolean; reachable: boolean; hint?: string };
 }
 
 export interface SourceStatus {

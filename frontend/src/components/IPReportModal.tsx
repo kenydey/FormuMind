@@ -1,29 +1,5 @@
 import { useState } from "react";
-import type { Formulation } from "../api";
-
-interface PatentRisk {
-  patent_id: string;
-  title: string;
-  risk: "high" | "medium" | "low" | "unknown";
-  claim_overlap: string;
-  recommendation: string;
-}
-
-interface MoleculePatentCheck {
-  name: string;
-  smiles: string;
-  patented: boolean | null;
-}
-
-interface IPReport {
-  formulation_name: string;
-  novelty_score: number;
-  risks: PatentRisk[];
-  whitespace_hints: string[];
-  raw_patents_searched: number;
-  engine: string;
-  molecule_checks?: MoleculePatentCheck[];
-}
+import { api, formatApiError, type Formulation, type IPReport } from "../api";
 
 const RISK_COLOR: Record<string, string> = {
   high: "text-red-400 border-red-500/40 bg-red-500/10",
@@ -72,15 +48,9 @@ export default function IPReportModal({ form }: { form: Formulation }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/ip/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formulation: form, limit_patents: 8 }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setReport(await res.json());
+      setReport(await api.analyzeIP({ formulation: form, limit_patents: 8 }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "请求失败");
+      setError(formatApiError(e));
     } finally {
       setLoading(false);
     }

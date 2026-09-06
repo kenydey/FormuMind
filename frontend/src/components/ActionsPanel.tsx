@@ -32,7 +32,6 @@ type ModalName =
   | "doe"
   | "workbench"
   | "optimize"
-  | "process"
   | "loop"
   | "materials";
 

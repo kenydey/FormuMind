@@ -382,8 +382,8 @@ function ExampleLoader() {
   const [examples, setExamples] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
-    fetch("/api/meta")
-      .then((r) => r.json())
+    void api
+      .getMeta()
       .then((meta) => setExamples(meta.example_projects ?? []))
       .catch(() => {});
   }, []);

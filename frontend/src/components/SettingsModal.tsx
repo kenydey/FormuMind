@@ -9,6 +9,7 @@ import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import VisionModelPanel from "./VisionModelPanel";
 import FormulationModeSelector from "./FormulationModeSelector";
 import OcsrPanel from "./OcsrPanel";
+import NotebookLMPanel from "./NotebookLMPanel";
 import { useStore } from "../store";
 import {
   api,
@@ -160,6 +161,7 @@ export default function SettingsModal() {
           ["api", "API 配置"],
           ["env", "环境变量"],
           ["recommend", "推荐"],
+          ["notebooklm", "NotebookLM"],
           ["deps", "依赖管理"],
         ] as const).map(([id, label]) => (
           <button
@@ -191,6 +193,8 @@ export default function SettingsModal() {
         <ApiSettingsPanel reloadKey={reloadKey} />
       ) : settingsTab === "env" ? (
         <EnvFlagsPanel reloadKey={reloadKey} />
+      ) : settingsTab === "notebooklm" ? (
+        <NotebookLMPanel reloadKey={reloadKey} />
       ) : settingsTab === "recommend" ? (
         <div className="space-y-4">
           <FormulationModeSelector />

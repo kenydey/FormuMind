@@ -158,7 +158,7 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api" | "env" | "recommend";
+  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm";
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -239,8 +239,8 @@ export interface AppState {
   setOpenModal: (name: string | null) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
-  openSettings: (tab?: "llm" | "deps" | "api" | "env") => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend") => void;
+  openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm") => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   cancelLoopTask: () => Promise<void>;
