@@ -56,16 +56,45 @@ def test_install_endpoint_rejects_unknown_name():
     assert r.status_code == 400
 
 
-def test_install_endpoint_accepts_known_name(monkeypatch):
+def test_install_endpoint_accepts_known_name_non_eager(monkeypatch):
+    """Non-eager path still publishes via ``.delay()`` and returns its task id."""
     class _FakeAsyncResult:
         id = "fake-task-id"
 
+    from app.api import _dispatch
+    from app.config import get_settings
     from app.worker import tasks as worker_tasks
 
-    monkeypatch.setattr(worker_tasks.run_deps_install_task, "delay", lambda payload: _FakeAsyncResult())
+    settings = get_settings()
+    monkeypatch.setattr(settings, "celery_eager", False, raising=False)
+    monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
+    monkeypatch.setattr(
+        worker_tasks.run_deps_install_task, "delay", lambda payload: _FakeAsyncResult()
+    )
     r = client.post("/api/dependencies/install", json={"names": ["arxiv"]})
     assert r.status_code == 202
     body = r.json()
     assert body["task_id"] == "fake-task-id"
     assert body["stream_url"].endswith("fake-task-id/stream")
     assert body["status_url"].endswith("fake-task-id")
+
+
+def test_install_endpoint_accepts_known_name_eager(monkeypatch):
+    """Eager path returns 202 immediately with a fresh task_id (delay is unused)."""
+    import uuid
+
+    from app.worker import tasks as worker_tasks
+
+    # Avoid running a real pip install in the eager background thread.
+    monkeypatch.setattr(
+        worker_tasks.run_deps_install_task,
+        "apply",
+        lambda *a, **k: None,
+    )
+    r = client.post("/api/dependencies/install", json={"names": ["arxiv"]})
+    assert r.status_code == 202
+    body = r.json()
+    task_id = body["task_id"]
+    uuid.UUID(task_id)  # raises if not a UUID
+    assert body["stream_url"].endswith(f"{task_id}/stream")
+    assert body["status_url"].endswith(task_id)
