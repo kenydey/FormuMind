@@ -921,10 +921,23 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
 
 def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
     from ..services import auto_loop
+    from ..services.workbench_loop import is_doecycle_paused
 
     publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting loop")
 
     try:
+        campaign_id = payload.get("workbench_campaign_id")
+        if campaign_id is not None and is_doecycle_paused(int(campaign_id)):
+            err = {
+                "error": "DOE cycle paused for this campaign",
+                "paused": True,
+                "campaign_id": int(campaign_id),
+            }
+            publish_progress(task_id, TaskProgressStatus.FAILED, message=err["error"])
+            persist_result(task_id, err, failed=True)
+            _persist_terminal(task_id, "loop", err, failed=True, message=err["error"])
+            return err
+
         # req 构造在 try 内：payload 校验失败也要走失败持久化。
         req = Requirement(**payload["requirement"])
 
@@ -1025,11 +1038,24 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
     5. Return experiment ID list
     """
     from ..services import doe_cycle_service
+    from ..services.workbench_loop import is_doecycle_paused
     
     task_id = self.request.id
     publish_progress(task_id, TaskProgressStatus.RUNNING, message="Starting DOE cycle")
     
     try:
+        campaign_id = payload.get("workbench_campaign_id")
+        if campaign_id is not None and is_doecycle_paused(int(campaign_id)):
+            err = {
+                "error": "DOE cycle paused for this campaign",
+                "paused": True,
+                "campaign_id": int(campaign_id),
+            }
+            publish_progress(task_id, TaskProgressStatus.FAILED, message=err["error"])
+            persist_result(task_id, err, failed=True)
+            _persist_terminal(task_id, "doe_cycle", err, failed=True, message=err["error"])
+            return err
+
         # Extract payload
         requirement_dict = payload.get("requirement", {})
         if not requirement_dict:

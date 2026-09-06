@@ -1305,7 +1305,7 @@ def campaign_rounds(
 
 # ── Pause/Resume DOE cycle hooks ─────────────────────────────────────────
 @router.post("/experiments/hooks/pause-doecycle/{campaign_id}", response_model=Dict[str, str])
-async def pause_doecyle(
+def pause_doecyle(
     campaign_id: int,
     payload: Dict[str, bool],
 ) -> Dict[str, str]:
@@ -1316,7 +1316,7 @@ async def pause_doecyle(
     from ..services.workbench_loop import pause_resume_doecyle
 
     is_paused = payload.get("isPaused", False)
-    success = await pause_resume_doecyle(campaign_id, is_paused)
+    success = pause_resume_doecyle(campaign_id, is_paused)
 
     if success:
         return {"status": "success", "message": f"DOE cycle {'paused' if is_paused else 'resumed'} for campaign {campaign_id}"}
@@ -1328,19 +1328,17 @@ async def pause_doecyle(
 
 
 @router.get("/experiments/hooks/doecyle-status/{campaign_id}", response_model=Dict[str, Any])
-async def get_doecyle_status(
+def get_doecyle_status(
     campaign_id: int,
 ) -> Dict[str, Any]:
     """Get the current status of a DOE cycle for a campaign.
 
-    Returns: {"isPaused": bool, "lastUpdated": str, "currentRound": int, ...}
+    Returns: {"isPaused": bool, "lastUpdated": str, "campaignId": int, ...}
     """
     from ..services.workbench_loop import get_doecyle_status as _impl
 
-    status_val = await _impl(campaign_id)
+    status_val = _impl(campaign_id)
     if status_val is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"DOE cycle status not found for campaign {campaign_id}",
-        )
+        # Redis unavailable — still answer so the UI can poll without hard failure.
+        return {"isPaused": False, "lastUpdated": None, "campaignId": campaign_id, "degraded": True}
     return status_val

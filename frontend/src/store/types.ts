@@ -246,6 +246,7 @@ export interface AppState {
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   cancelLoopTask: () => Promise<void>;
+  runDoeCycle: () => Promise<void>;
   runNextRoundDoe: () => Promise<void>;
   setAutoLoopOnSync: (enabled: boolean) => void;
   setAutoLoopMaxRounds: (n: number) => void;

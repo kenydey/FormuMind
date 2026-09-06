@@ -171,7 +171,7 @@ def _safe_loop(task_id: str, payload: dict) -> None:
 def pause_resume_doecyle(campaign_id: int, is_paused: bool) -> bool:
     """Pause or resume a DOE cycle for a campaign.
 
-    Implemented by setting a flag in Redis that the loop task checks.
+    Implemented by setting a flag in Redis that the loop / doe_cycle tasks check.
     """
     try:
         from ..worker.task_progress import _redis_client
@@ -186,6 +186,12 @@ def pause_resume_doecyle(campaign_id: int, is_paused: bool) -> bool:
         return False
 
 
+def is_doecycle_paused(campaign_id: int) -> bool:
+    """Whether the Redis pause flag is set for ``campaign_id`` (false on Redis errors)."""
+    status = get_doecyle_status(campaign_id)
+    return bool(status and status.get("isPaused"))
+
+
 def get_doecyle_status(campaign_id: int) -> Optional[Dict[str, Any]]:
     """Get the current status of a DOE cycle for a campaign.
 
@@ -197,7 +203,9 @@ def get_doecyle_status(campaign_id: int) -> Optional[Dict[str, Any]]:
         client = _redis_client()
         key = f"doe_cycle:paused:{campaign_id}"
         is_paused_str = client.get(key)
-        is_paused = is_paused_str == "true" if is_paused_str is not None else False
+        if isinstance(is_paused_str, bytes):
+            is_paused_str = is_paused_str.decode("utf-8", errors="replace")
+        is_paused = str(is_paused_str).lower() == "true" if is_paused_str is not None else False
 
         # Get last updated time from the key's TTL or metadata
         ttl = client.ttl(key)

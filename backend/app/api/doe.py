@@ -1,11 +1,12 @@
 """DOE endpoint: generate an experimental design over key formulation levers,
 and export a generated plan as a fill-in worksheet (CSV / XLSX).
 v0.5 adds an Active Learning endpoint that flags the most informative runs.
-v0.7 adds pydoe / baybe engine selection."""
+v0.7 adds pydoe / baybe engine selection.
+v0.9 adds async closed-loop DOE cycle dispatch (Celery ``formumind.doe_cycle``)."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 import logging
@@ -18,6 +19,9 @@ from ..pipeline import workflow
 from ..services import io_export
 from ..services.active_learning import active_learning_doe
 from ..services.engines.baybe_engine import BaybeCampaignEngine
+from ..worker.tasks import run_doe_cycle_task
+from ._dispatch import submit
+from ._idempotency import enqueue_outbox
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +123,52 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
     return result
 
 
+class DoeCycleBody(BaseModel):
+    """Async closed-loop DOE cycle: recommend → Baybe/LHS batch → pending experiments."""
+
+    requirement: Requirement
+    workbench_campaign_id: int | None = None
+
+
+@router.post("/doe/cycle", status_code=202)
+def start_doe_cycle(body: DoeCycleBody) -> JSONResponse:
+    """Enqueue one ``formumind.doe_cycle`` job; client follows ``/api/tasks/{id}/stream``."""
+    payload = {
+        "requirement": body.requirement.model_dump(),
+        "workbench_campaign_id": body.workbench_campaign_id,
+    }
+    outbox_id = enqueue_outbox("doe_cycle", payload)
+    return submit(run_doe_cycle_task, payload, "doe_cycle", outbox_id=outbox_id)
+
+
+class DoeHistoryResponse(BaseModel):
+    items: list[dict]
+    total: int
+    page: int
+    page_size: int
+
+
+@router.get("/doe/history", response_model=DoeHistoryResponse)
+def doe_history(
+    campaign_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> DoeHistoryResponse:
+    """分页查询历史 DOE 记录（最新优先）。
+
+    ``campaign_id`` 缺省时返回全部（含未关联的孤立记录）。
+    """
+    from ..db import doe_plan_store
+    from ..db.database import default_session_factory
+
+    factory = default_session_factory()
+    with factory() as session:
+        items, total = doe_plan_store.list_history(
+            session, campaign_id=campaign_id, page=page, page_size=page_size
+        )
+    return DoeHistoryResponse(items=items, total=total, page=page, page_size=page_size)
+
+
 @router.get("/doe/{plan_id}/export")
 def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -> Response:
     """Export a previously generated DOE plan as a fill-in worksheet."""
@@ -156,31 +206,3 @@ def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
     )
-
-
-class DoeHistoryResponse(BaseModel):
-    items: list[dict]
-    total: int
-    page: int
-    page_size: int
-
-
-@router.get("/doe/history", response_model=DoeHistoryResponse)
-def doe_history(
-    campaign_id: int | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> DoeHistoryResponse:
-    """分页查询历史 DOE 记录（最新优先）。
-
-    ``campaign_id`` 缺省时返回全部（含未关联的孤立记录）。
-    """
-    from ..db import doe_plan_store
-    from ..db.database import default_session_factory
-
-    factory = default_session_factory()
-    with factory() as session:
-        items, total = doe_plan_store.list_history(
-            session, campaign_id=campaign_id, page=page, page_size=page_size
-        )
-    return DoeHistoryResponse(items=items, total=total, page=page, page_size=page_size)

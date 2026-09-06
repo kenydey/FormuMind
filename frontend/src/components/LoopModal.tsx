@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { api, formatApiError } from "../api";
 import { useStore } from "../store";
 import SimPlaceholder from "./SimPlaceholder";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
@@ -40,6 +42,7 @@ export default function LoopModal() {
     setAutoLoopMaxRounds,
     adoptDoePlanToWorkbench,
     setOpenModal,
+    workbenchCampaignId,
   } = useStore(
     useShallow((s) => ({
       runLoop: s.runLoop,
@@ -62,12 +65,59 @@ export default function LoopModal() {
       setAutoLoopMaxRounds: s.setAutoLoopMaxRounds,
       adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
       setOpenModal: s.setOpenModal,
+      workbenchCampaignId: s.workbenchCampaignId,
     }))
   );
 
   const loopConverged = Boolean(loopReport?.converged);
   const pendingAdopt =
     !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
+
+  const [cyclePaused, setCyclePaused] = useState(false);
+  const [cycleStatusBusy, setCycleStatusBusy] = useState(false);
+  const [cycleStatusError, setCycleStatusError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (workbenchCampaignId == null) {
+      setCyclePaused(false);
+      setCycleStatusError(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const st = await api.getDoeCycleStatus(workbenchCampaignId);
+        if (!cancelled) {
+          setCyclePaused(Boolean(st.isPaused));
+          setCycleStatusError(null);
+        }
+      } catch (e) {
+        if (!cancelled) setCycleStatusError(formatApiError(e));
+      }
+    };
+    void poll();
+    const id = window.setInterval(() => void poll(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [workbenchCampaignId]);
+
+  async function toggleCyclePause() {
+    if (workbenchCampaignId == null) return;
+    setCycleStatusBusy(true);
+    setCycleStatusError(null);
+    try {
+      await api.postDoeCyclePause(workbenchCampaignId, !cyclePaused);
+      const st = await api.getDoeCycleStatus(workbenchCampaignId);
+      setCyclePaused(Boolean(st.isPaused));
+    } catch (e) {
+      setCycleStatusError(formatApiError(e));
+    } finally {
+      setCycleStatusBusy(false);
+    }
+  }
+
 
   return (
     <div className="space-y-4">
@@ -116,10 +166,34 @@ export default function LoopModal() {
           >
             {busy === "looping" ? coldStartMessage(task?.stage, task?.message, "迭代中…") : loopConverged ? "已收敛" : "🔄 迭代一轮闭环"}
           </button>
+          <button
+            type="button"
+            data-testid="doe-cycle-pause"
+            disabled={workbenchCampaignId == null || cycleStatusBusy || busy === "looping"}
+            onClick={() => void toggleCyclePause()}
+            className={`border rounded px-3 py-1.5 text-xs disabled:opacity-40 ${
+              cyclePaused
+                ? "border-amber-400 text-amber-300 hover:bg-amber-500/10"
+                : "border-edge text-slate-400 hover:text-amber-300 hover:border-amber-400/50"
+            }`}
+            title={
+              workbenchCampaignId == null
+                ? "请先创建/选择实验台账后再暂停 DOE 闭环"
+                : "暂停/恢复该台账上的 DOE 闭环"
+            }
+          >
+            {cycleStatusBusy ? "…" : cyclePaused ? "▶ 恢复闭环" : "⏸ 暂停闭环"}
+          </button>
           {busy === "looping" && (
             <button onClick={cancelLoopTask} className={CANCEL_BUTTON_CLASS + " px-3 py-1.5"}>✕ 取消</button>
           )}
         </div>
+      </div>
+      <div className="text-[10px] font-mono" data-testid="doe-cycle-status">
+        <span className={cyclePaused ? "text-amber-300" : "text-emerald-400/80"}>
+          DOE 闭环：{workbenchCampaignId == null ? "未绑定台账" : cyclePaused ? "已暂停" : "运行中"}
+        </span>
+        {cycleStatusError && <span className="ml-2 text-rose-300">{cycleStatusError}</span>}
       </div>
       {busy === "looping" && task && (
         <div className="text-[10px] text-slate-500 font-mono">

@@ -13,6 +13,7 @@ import { api, primaryObjectiveMetric } from "../api";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
+import DoeHistoryPanel from "./DoeHistoryPanel";
 
 function R2Gauge({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(1, value));
@@ -118,7 +119,7 @@ export default function DoeResultsPanel() {
     busy, generateDoe, exportDoe, importCsv, error, clearError,
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
-    runNextRoundDoe, adoptDoePlanToWorkbench, adaptiveDoe,
+    runNextRoundDoe, runDoeCycle, adoptDoePlanToWorkbench, adaptiveDoe,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -145,6 +146,7 @@ export default function DoeResultsPanel() {
       optimizationHistory: s.optimizationHistory,
       setOpenModal: s.setOpenModal,
       runNextRoundDoe: s.runNextRoundDoe,
+      runDoeCycle: s.runDoeCycle,
       adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
     }))
   );
@@ -245,6 +247,16 @@ export default function DoeResultsPanel() {
             className="text-xs border border-accent text-accent rounded px-2 py-1 hover:bg-accent/10 disabled:opacity-40"
           >
             {busy === "doe" ? "生成中…" : "生成 DOE"}
+          </button>
+          <button
+            type="button"
+            data-testid="doe-cycle-run"
+            disabled={busy !== "idle"}
+            onClick={() => void runDoeCycle()}
+            className="text-xs border border-violet-500/60 text-violet-300 rounded px-2 py-1 hover:bg-violet-500/10 disabled:opacity-40"
+            title="提交异步 DOE 闭环任务（Baybe/LHS → pending experiments）"
+          >
+            {busy === "doe" ? "闭环中…" : "运行 DOE 闭环"}
           </button>
           <button
             type="button"
@@ -455,6 +467,7 @@ export default function DoeResultsPanel() {
           </div>
         </>
       )}
+      <DoeHistoryPanel />
     </section>
   );
 }

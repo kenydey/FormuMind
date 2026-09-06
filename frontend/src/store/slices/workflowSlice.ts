@@ -199,6 +199,56 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
+    runDoeCycle: async () => {
+      set((draft) => {
+        draft.busy = "doe";
+        draft.error = null;
+      });
+      try {
+        const { requirement, workbenchCampaignId } = get();
+        const { task_id } = await api.startDoeCycle(requirement, {
+          workbench_campaign_id: workbenchCampaignId,
+        });
+        const final = await awaitTaskStream(
+          task_id,
+          (ev) =>
+            set((draft) => {
+              draft.task = progressToTaskStatus(task_id, "doe_cycle", ev);
+            }),
+          0,
+          undefined,
+          5 * 60 * 1000
+        );
+        const data = final.data as { status?: string; message?: string; count?: number; paused?: boolean } | null;
+        if (data?.paused) {
+          set((draft) => {
+            draft.error = data.message || "DOE 闭环已暂停";
+          });
+          return;
+        }
+        if (data?.status === "error") {
+          set((draft) => {
+            draft.error = data.message || "DOE 闭环失败";
+          });
+          return;
+        }
+        set((draft) => {
+          draft.trainMessage =
+            data?.message ||
+            (data?.count != null ? `DOE 闭环已生成 ${data.count} 条待测实验` : "DOE 闭环完成");
+        });
+        await get().refreshWorkbenchStats();
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      } finally {
+        set((draft) => {
+          draft.busy = "idle";
+        });
+      }
+    },
+
     runNextRoundDoe: async () => {
       const { doePlan, workbenchAdoptedPlanId } = get();
       if (doePlan && doePlan.plan_id !== workbenchAdoptedPlanId) {
@@ -627,5 +677,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

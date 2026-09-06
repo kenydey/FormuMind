@@ -1018,6 +1018,11 @@ export const api = {
       `/api/doe/history?page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 20}` +
         (opts.campaignId != null ? `&campaign_id=${opts.campaignId}` : "")
     ),
+  startDoeCycle: (req: Requirement, opts: { workbench_campaign_id?: number | null } = {}) =>
+    postAccepted("/api/doe/cycle", {
+      requirement: req,
+      workbench_campaign_id: opts.workbench_campaign_id ?? null,
+    }),
   suggestFactors: (req: Requirement) =>
     post<{ factors: FactorCandidate[]; count: number }>("/api/doe/suggest-factors", req),
   kbSources: (projectId?: string | null, limit = 100) =>
@@ -1710,6 +1715,14 @@ export const api = {
       `/api/experiments/hooks/pause-doecycle/${campaignId}`,
       { isPaused },
     ),
+
+  getDoeCycleStatus: (campaignId: number | string) =>
+    get<{
+      isPaused: boolean;
+      lastUpdated: string | null;
+      campaignId: number;
+      degraded?: boolean;
+    }>(`/api/experiments/hooks/doecyle-status/${campaignId}`),
 
   getOcsr: () => get<{ status: OcsrStatus }>("/api/settings/ocsr"),
 
