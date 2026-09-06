@@ -1014,16 +1014,48 @@ class TagUpdateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class NoteUpdateRequest(BaseModel):
+    note: str | None = None
+
+
 @router.put("/experiments/workbench/{campaign_id}/rows/{row_id}/tags")
 async def update_row_tags(
     campaign_id: int,
     row_id: int,
     body: TagUpdateRequest,
+    request: Request,
 ) -> WorkbenchRowResponse:
-    """Set tags on a workbench row."""
+    """Set tags on a workbench row (field-only; avoids full-row sync races)."""
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
     store = get_campaign_store()
+    campaign = await store.get_campaign(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    assert_owner(getattr(campaign, "owner_id", None), get_current_owner(request))
     # 只更新 tags 字段，不回写整行 —— 避免覆盖并发编辑的其他字段（A9）
     fresh = await store.set_row_tags(campaign_id, row_id, body.tags)
+    if fresh is None:
+        raise HTTPException(status_code=404, detail="Row not found")
+    return _row_response(fresh)
+
+
+@router.put("/experiments/workbench/{campaign_id}/rows/{row_id}/note")
+async def update_row_note(
+    campaign_id: int,
+    row_id: int,
+    body: NoteUpdateRequest,
+    request: Request,
+) -> WorkbenchRowResponse:
+    """Set note on a workbench row (field-only; avoids full-row sync races)."""
+    from ..middleware.api_auth import assert_owner, get_current_owner
+
+    store = get_campaign_store()
+    campaign = await store.get_campaign(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    assert_owner(getattr(campaign, "owner_id", None), get_current_owner(request))
+    fresh = await store.set_row_note(campaign_id, row_id, body.note)
     if fresh is None:
         raise HTTPException(status_code=404, detail="Row not found")
     return _row_response(fresh)

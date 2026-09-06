@@ -480,6 +480,8 @@ export interface BatchUpdateRequest {
     status: string;
     actual_params: Record<string, number>;
     measurements: Record<string, number | string>;
+    note?: string | null;
+    tags?: string[];
   }>;
   trigger_loop?: boolean | null;
   requirement?: Requirement;
@@ -1330,6 +1332,18 @@ export const api = {
   getRowLineage: (campaignId: number, rowId: number) =>
     get<WorkbenchRow[]>(
       `/api/experiments/workbench/${campaignId}/rows/${rowId}/lineage`
+    ),
+  /** Field-only tags write (PUT .../tags) — avoids full-row sync races (A9). */
+  updateWorkbenchRowTags: (campaignId: number, rowId: number, tags: string[]) =>
+    put<WorkbenchRow>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/tags`,
+      { tags }
+    ),
+  /** Field-only note write (PUT .../note) — avoids full-row sync races (A9). */
+  updateWorkbenchRowNote: (campaignId: number, rowId: number, note: string | null) =>
+    put<WorkbenchRow>(
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/note`,
+      { note }
     ),
   syncWorkbench: (body: BatchUpdateRequest) =>
     put<WorkbenchSyncResponse>("/api/experiments/workbench/sync", body),

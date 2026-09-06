@@ -404,6 +404,7 @@ export default function LabWorkbench({
   const handleNoteSave = useCallback(
     async (note: string) => {
       if (!noteEditorRow) return;
+      const previous = noteEditorRow;
       const allRows: WorkbenchRow[] = [];
       gridRef.current?.api.forEachNode((n) => n.data && allRows.push(n.data));
       const updated = allRows.map((r) =>
@@ -411,16 +412,11 @@ export default function LabWorkbench({
       );
       setRows(updated);
       try {
-        await api.syncWorkbench({
-          campaign_id: campaignId,
-          rows: [{ id: noteEditorRow.id, status: noteEditorRow.status,
-            actual_params: noteEditorRow.actual_params ?? {},
-            measurements: noteEditorRow.measurements ?? {},
-            note } as any],
-        });
+        const fresh = await api.updateWorkbenchRowNote(campaignId, noteEditorRow.id, note);
+        setRows((prev) => prev.map((r) => (r.id === fresh.id ? { ...r, ...fresh } : r)));
       } catch (e) {
-        // 不再静默吞错（F21）：提示用户并保留编辑器，便于重试
         setError(`笔记保存失败：${e instanceof Error ? e.message : String(e)}`);
+        setRows((prev) => prev.map((r) => (r.id === previous.id ? previous : r)));
         return;
       }
       void refreshTrainingStatus();
@@ -433,6 +429,7 @@ export default function LabWorkbench({
   const handleTagSave = useCallback(
     async (tags: string[]) => {
       if (!tagPickerRow) return;
+      const previous = tagPickerRow;
       const allRows: WorkbenchRow[] = [];
       gridRef.current?.api.forEachNode((n) => n.data && allRows.push(n.data));
       const updated = allRows.map((r) =>
@@ -440,17 +437,11 @@ export default function LabWorkbench({
       );
       setRows(updated);
       try {
-        await api.syncWorkbench({
-          campaign_id: campaignId,
-          rows: [{ id: tagPickerRow.id, status: tagPickerRow.status,
-            actual_params: tagPickerRow.actual_params ?? {},
-            measurements: tagPickerRow.measurements ?? {},
-            tags } as any],
-        });
+        const fresh = await api.updateWorkbenchRowTags(campaignId, tagPickerRow.id, tags);
+        setRows((prev) => prev.map((r) => (r.id === fresh.id ? { ...r, ...fresh } : r)));
       } catch (e) {
-        // 不再静默吞错（F21）：提示并回滚本地乐观更新
         setError(`标签保存失败：${e instanceof Error ? e.message : String(e)}`);
-        setRows((prev) => prev.map((r) => r.id === tagPickerRow.id ? tagPickerRow : r));
+        setRows((prev) => prev.map((r) => (r.id === previous.id ? previous : r)));
         setTagPickerRow(null);
         return;
       }

@@ -216,3 +216,59 @@ def test_search_experiments_local_scan(tmp_path, monkeypatch):
     body = res.json()
     assert len(body) == 1
     assert body[0]["item_id"] == "fm_c1_r1"
+
+
+def test_put_row_tags_field_only(tmp_path):
+    """P6: dedicated tags endpoint must update tags without wiping other fields."""
+    client = _client_with_memory_db(tmp_path)
+    created = client.post(
+        "/api/experiments/workbench/campaigns", json={"plan": _plan().model_dump()}
+    ).json()
+    campaign_id = created["campaign_id"]
+    row = created["rows"][0]
+
+    # Seed note via field endpoint (avoids sync→training migrate side effects).
+    note_seed = client.put(
+        f"/api/experiments/workbench/{campaign_id}/rows/{row['id']}/note",
+        json={"note": "keep-me"},
+    )
+    assert note_seed.status_code == 200, note_seed.text
+
+    tags_res = client.put(
+        f"/api/experiments/workbench/{campaign_id}/rows/{row['id']}/tags",
+        json={"tags": ["urgent", "pilot"]},
+    )
+    assert tags_res.status_code == 200, tags_res.text
+    body = tags_res.json()
+    assert body["tags"] == ["urgent", "pilot"]
+    assert body["note"] == "keep-me"
+
+    # Missing row → 404
+    missing = client.put(
+        f"/api/experiments/workbench/{campaign_id}/rows/99999/tags",
+        json={"tags": ["x"]},
+    )
+    assert missing.status_code == 404
+
+
+def test_put_row_note_field_only(tmp_path):
+    """P6: dedicated note endpoint must not clobber tags/params."""
+    client = _client_with_memory_db(tmp_path)
+    created = client.post(
+        "/api/experiments/workbench/campaigns", json={"plan": _plan().model_dump()}
+    ).json()
+    campaign_id = created["campaign_id"]
+    row = created["rows"][0]
+
+    client.put(
+        f"/api/experiments/workbench/{campaign_id}/rows/{row['id']}/tags",
+        json={"tags": ["keep"]},
+    )
+    note_res = client.put(
+        f"/api/experiments/workbench/{campaign_id}/rows/{row['id']}/note",
+        json={"note": "field-only note"},
+    )
+    assert note_res.status_code == 200, note_res.text
+    body = note_res.json()
+    assert body["note"] == "field-only note"
+    assert body["tags"] == ["keep"]

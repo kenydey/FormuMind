@@ -144,7 +144,13 @@ class CampaignStoreInterface(ABC):
     async def set_row_tags(
         self, campaign_id: int, row_id: int, tags: list[str]
     ) -> WorkbenchRow | None:
-        """只更新单行 tags（默认实现走 batch_sync，子类可覆盖为字段级更新）。"""
+        """只更新单行 tags（默认实现返回 None；子类覆盖为字段级更新）。"""
+        return None
+
+    async def set_row_note(
+        self, campaign_id: int, row_id: int, note: str | None
+    ) -> WorkbenchRow | None:
+        """只更新单行 note（默认实现返回 None；子类覆盖为字段级更新）。"""
         return None
 
     @abstractmethod
@@ -761,6 +767,67 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         self._update_campaign_status(campaign_id, refreshed)
         return updated, refreshed
 
+    async def set_row_tags(
+        self, campaign_id: int, row_id: int, tags: list[str]
+    ) -> WorkbenchRow | None:
+        """Field-only tags update on Datalab item params block (+ sample_refs index)."""
+        return await self._patch_row_params_field(campaign_id, row_id, tags=list(tags or []))
+
+    async def set_row_note(
+        self, campaign_id: int, row_id: int, note: str | None
+    ) -> WorkbenchRow | None:
+        """Field-only note update on Datalab item params block (+ sample_refs index)."""
+        return await self._patch_row_params_field(campaign_id, row_id, note=note)
+
+    async def _patch_row_params_field(
+        self,
+        campaign_id: int,
+        row_id: int,
+        *,
+        tags: list[str] | None = None,
+        note: str | None | object = ...,
+    ) -> WorkbenchRow | None:
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
+            return None
+        refs = list(campaign.sample_refs or [])
+        ref = next((r for r in refs if int(r["id"]) == row_id), None)
+        if ref is None:
+            return None
+        item_id = str(ref["item_id"])
+        try:
+            item_data = await self._get_item(item_id)
+        except Exception as exc:
+            logger.warning("patch_row_params skip %s: %s", item_id, exc)
+            return None
+        if item_data is None:
+            return None
+        blocks = dict(item_data.get("blocks_obj") or {})
+        params_block = dict((blocks.get(_PARAMS_BLOCK) or {}).get("data") or {})
+        if tags is not None:
+            params_block["tags"] = list(tags)
+            ref["tags"] = list(tags)
+        if note is not ...:
+            params_block["note"] = note
+            ref["note"] = note
+        blocks[_PARAMS_BLOCK] = datalab_block(_PARAMS_BLOCK, params_block)
+        merged = dict(item_data.get("blocks_obj") or {})
+        merged.update(blocks)
+        item_data["blocks_obj"] = merged
+        order = list(item_data.get("display_order") or [])
+        if _PARAMS_BLOCK not in order:
+            order.append(_PARAMS_BLOCK)
+        item_data["display_order"] = order
+        try:
+            await self._save_item(item_id, item_data)
+        except Exception as exc:
+            logger.warning("patch_row_params save failed for %s: %s", item_id, exc)
+            return None
+        self._save_sample_refs(campaign_id, refs)
+        campaign.sample_refs = refs
+        rows = await self.list_rows(campaign_id)
+        return next((r for r in rows if r.id == row_id), None)
+
     async def get_experiments(self, campaign_id: int) -> list[WorkbenchRow]:
         rows = await self.list_rows(campaign_id)
         return [r for r in rows if r.status == "Completed"]
@@ -833,42 +900,43 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
     async def set_row_tags(
         self, campaign_id: int, row_id: int, tags: list[str]
     ) -> WorkbenchRow | None:
-        """只更新单行的 tags，不回写其他字段（避免读改写竞态覆盖并发编辑）。
-
-        旧 update_row_tags 走 batch_sync 把整行（actual_params/measurements/note）
-        回写，会覆盖并发期间别人改的字段（A9）。这里在读到的 item_data 上原地
-        只改 tags 后保存，最大程度减小写窗口。
-        """
+        """Field-only tags update on local sample_refs (no full-row rewrite)."""
         campaign = self._get_campaign_sync(campaign_id)
         if campaign is None:
             return None
-        ref_by_id = {int(r["id"]): str(r["item_id"]) for r in (campaign.sample_refs or [])}
-        item_id = ref_by_id.get(row_id)
-        if not item_id:
+        refs = list(campaign.sample_refs or [])
+        hit = False
+        for ref in refs:
+            if int(ref["id"]) != row_id:
+                continue
+            ref["tags"] = list(tags or [])
+            hit = True
+            break
+        if not hit:
             return None
-        try:
-            item_data = await self._get_item(item_id)
-        except Exception as exc:
-            logger.warning("set_row_tags skip %s: %s", item_id, exc)
+        self._save_sample_refs(campaign_id, refs)
+        campaign.sample_refs = refs
+        return next((r for r in self._refs_to_rows(campaign) if r.id == row_id), None)
+
+    async def set_row_note(
+        self, campaign_id: int, row_id: int, note: str | None
+    ) -> WorkbenchRow | None:
+        """Field-only note update on local sample_refs (no full-row rewrite)."""
+        campaign = self._get_campaign_sync(campaign_id)
+        if campaign is None:
             return None
-        if item_data is None:
+        refs = list(campaign.sample_refs or [])
+        hit = False
+        for ref in refs:
+            if int(ref["id"]) != row_id:
+                continue
+            ref["note"] = note
+            hit = True
+            break
+        if not hit:
             return None
-        blocks = dict(item_data.get("blocks_obj") or {})
-        params_block = dict((blocks.get(_PARAMS_BLOCK) or {}).get("data") or {})
-        params_block["tags"] = list(tags or [])
-        blocks[_PARAMS_BLOCK] = datalab_block(_PARAMS_BLOCK, params_block)
-        merged = dict(item_data.get("blocks_obj") or {})
-        merged.update(blocks)
-        item_data["blocks_obj"] = merged
-        order = list(item_data.get("display_order") or [])
-        if _PARAMS_BLOCK not in order:
-            order.append(_PARAMS_BLOCK)
-        item_data["display_order"] = order
-        try:
-            await self._save_item(item_id, item_data)
-        except Exception as exc:
-            logger.warning("set_row_tags save failed for %s: %s", item_id, exc)
-            return None
+        self._save_sample_refs(campaign_id, refs)
+        campaign.sample_refs = refs
         return next((r for r in self._refs_to_rows(campaign) if r.id == row_id), None)
 
     async def batch_sync(
