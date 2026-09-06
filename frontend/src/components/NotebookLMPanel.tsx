@@ -86,7 +86,6 @@ export default function NotebookLMPanel({ reloadKey = 0 }: { reloadKey?: number 
   const checks = [
     { ok: Boolean(status?.lib_installed), label: "notebooklm-py 已安装" },
     { ok: Boolean(status?.enabled), label: "功能已启用" },
-    { ok: Boolean(status?.notebook_id_set), label: "Notebook ID 已填写" },
     { ok: Boolean(status?.session_present), label: "Google 会话已授权" },
   ];
 
@@ -95,8 +94,8 @@ export default function NotebookLMPanel({ reloadKey = 0 }: { reloadKey?: number 
       <div>
         <h3 className="text-xs uppercase tracking-widest text-accent2">NotebookLM · 授权</h3>
         <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-          将 Google NotebookLM 作为检索源。需安装 notebooklm-py、填写 Notebook ID，并完成一次性
-          Google 授权（后端机器上的浏览器会话）。
+          全局仅负责启用 NotebookLM 与 Google 授权。每个研究项目的 Notebook ID 请在左栏勾选
+          NotebookLM 时于项目弹窗中配置（按项目绑定）。
         </p>
       </div>
 
@@ -120,7 +119,7 @@ export default function NotebookLMPanel({ reloadKey = 0 }: { reloadKey?: number 
             }`}
           >
             {status.available
-              ? "✓ NotebookLM 已就绪，可在检索源中勾选"
+              ? "✓ 全局授权已就绪；请在各项目中绑定 Notebook ID"
               : `⚠ 未就绪${status.hint ? ` — ${status.hint}` : ""}`}
           </div>
 
@@ -163,14 +162,17 @@ export default function NotebookLMPanel({ reloadKey = 0 }: { reloadKey?: number 
           </label>
 
           <label className="block">
-            <span className="text-xs text-slate-400">Notebook ID</span>
+            <span className="text-xs text-slate-400">遗留全局 Notebook ID（可选，仅作迁移回退）</span>
             <input
               value={notebookId}
               onChange={(e) => setNotebookId(e.target.value)}
-              placeholder="NotebookLM 链接中的 notebook id"
+              placeholder="新项目请在左栏项目弹窗中配置"
               className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm font-mono"
               data-testid="notebooklm-notebook-id"
             />
+            <span className="text-[10px] text-slate-500 mt-1 block">
+              推荐：在信息类别勾选 NotebookLM 时为每个项目单独设置 ID。
+            </span>
           </label>
 
           <div className="flex flex-wrap gap-2">

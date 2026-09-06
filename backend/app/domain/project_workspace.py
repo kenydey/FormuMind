@@ -25,6 +25,7 @@ class ProjectWorkspace(BaseModel):
 
     search_query: str = ""
     source_types: list[str] = Field(default_factory=lambda: ["patents", "literature", "internet"])
+    notebooklm_notebook_id: str | None = None
     sources: list[Evidence] = Field(default_factory=list)
     selected_sources: list[str] = Field(default_factory=list)
     chat_history: list[dict[str, Any]] = Field(default_factory=list)

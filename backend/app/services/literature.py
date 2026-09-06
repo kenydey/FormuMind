@@ -601,6 +601,7 @@ def _build_streams(
     *,
     ipc_codes: tuple[str, ...] | list[str] = (),
     chinese_query: str = "",
+    notebooklm_notebook_id: str | None = None,
 ) -> list[dict]:
     """One paged stream per source. ``paged`` sources support offset/round paging;
     single-shot sources (chemcrow/notebooklm) yield once then finish."""
@@ -655,10 +656,10 @@ def _build_streams(
         add("internet", lambda off, q=web_q: search_internet(q, page_size, offset=off), True)
         add("chemweb", lambda off, q=western_query: search_chem_web(q, page_size), False)
     if "notebooklm" in source_types:
-        def _nb(off: int, q=western_query) -> list[Evidence]:
+        def _nb(off: int, q=western_query, nid=notebooklm_notebook_id) -> list[Evidence]:
             from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
 
-            return search_notebooklm(q, page_size)
+            return search_notebooklm(q, page_size, notebook_id=nid)
 
         add("notebooklm", _nb, False)
     return streams
@@ -672,6 +673,7 @@ def iter_search(
     per_source_cap: int = 50,
     max_rounds: int = 5,
     progress_cb=None,
+    notebooklm_notebook_id: str | None = None,
 ) -> tuple[list[Evidence], dict]:
     """Incremental multi-source retrieval — fetch in rounds until no source turns
     up new related results (no fixed time budget).
@@ -695,6 +697,7 @@ def iter_search(
     streams = _build_streams(
         patent_q, western_q, source_types, req, page_size,
         ipc_codes=ipc_codes, chinese_query=chinese_q,
+        notebooklm_notebook_id=notebooklm_notebook_id,
     )
 
     from ..config import get_settings
@@ -827,6 +830,7 @@ def search_by_types(
     req: Requirement | None = None,
     limit_per_source: int = 50,
     total_limit: int = 300,
+    notebooklm_notebook_id: str | None = None,
 ) -> list[Evidence]:
     """多源检索，合并结果（同步、一次性返回——薄封装 :func:`iter_search`）。
 
@@ -839,6 +843,7 @@ def search_by_types(
         req=req,
         total_limit=total_limit,
         per_source_cap=limit_per_source,
+        notebooklm_notebook_id=notebooklm_notebook_id,
     )[0]
 
 

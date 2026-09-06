@@ -9,6 +9,7 @@ import { defaultRequirement } from "./store/helpers";
 function baseSlice(over: Partial<StoreWorkspaceSlice> = {}): StoreWorkspaceSlice {
   return {
     searchQuery: "",
+    notebooklmNotebookId: "",
     sourceTypes: ["literature"],
     sources: [],
     selectedSources: [],

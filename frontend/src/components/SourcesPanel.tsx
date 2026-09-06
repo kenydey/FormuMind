@@ -53,6 +53,8 @@ export default function SourcesPanel() {
     setSearchQuery,
     sourceTypes,
     setSourceTypes,
+    setOpenModal,
+    notebooklmNotebookId,
     sources,
     selectedSources,
     sourceStatus,
@@ -78,6 +80,8 @@ export default function SourcesPanel() {
       setSearchQuery: s.setSearchQuery,
       sourceTypes: s.sourceTypes,
       setSourceTypes: s.setSourceTypes,
+      setOpenModal: s.setOpenModal,
+      notebooklmNotebookId: s.notebooklmNotebookId,
       sources: s.sources,
       selectedSources: s.selectedSources,
       sourceStatus: s.sourceStatus,
@@ -171,7 +175,14 @@ export default function SourcesPanel() {
         <span className="text-xs text-slate-400 block mb-1.5">信息类别 · Sources</span>
         <SourceTypePicker
           selected={sourceTypes}
-          onChange={setSourceTypes}
+          onChange={(types) => {
+            const enabling =
+              types.includes("notebooklm") && !sourceTypes.includes("notebooklm");
+            setSourceTypes(types);
+            if (enabling && !notebooklmNotebookId.trim()) {
+              setOpenModal("notebooklm-setup");
+            }
+          }}
           sourceStatus={sourceStatus}
         />
       </div>

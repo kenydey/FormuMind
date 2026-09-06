@@ -68,6 +68,7 @@ export interface ProjectSummary {
 export interface ProjectWorkspacePayload {
   search_query: string;
   source_types: SearchSourceType[];
+  notebooklm_notebook_id?: string | null;
   sources: Evidence[];
   selected_sources: string[];
   chat_history: ChatMessage[];
@@ -103,6 +104,7 @@ export interface ProjectWorkspacePayload {
 export interface StoreWorkspaceSlice {
   searchQuery: string;
   sourceTypes: SearchSourceType[];
+  notebooklmNotebookId: string;
   sources: Evidence[];
   selectedSources: string[];
   chatHistory: ChatMessage[];
@@ -164,6 +166,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
   return {
     search_query: slice.searchQuery,
     source_types: slice.sourceTypes,
+    notebooklm_notebook_id: slice.notebooklmNotebookId.trim() || null,
     sources: sanitizeObjectArray(slice.sources),
     selected_sources: slice.selectedSources,
     chat_history: sanitizeObjectArray(slice.chatHistory, 100),
@@ -210,6 +213,7 @@ export function applyWorkspacePayload(
     sourceTypes: (ws.source_types?.length
       ? ws.source_types
       : ["patents", "literature", "internet"]) as SearchSourceType[],
+    notebooklmNotebookId: (ws.notebooklm_notebook_id ?? "").trim(),
     sources: ws.sources ?? [],
     selectedSources: ws.selected_sources ?? [],
     chatHistory: ws.chat_history ?? [],

@@ -118,6 +118,8 @@ export interface AppState {
 
   searchQuery: string;
   sourceTypes: SearchSourceType[];
+  /** Per-project Google NotebookLM notebook id */
+  notebooklmNotebookId: string;
   sources: Evidence[];
   selectedSources: string[];
   sourceStatus: Record<string, SourceStatus>;
@@ -225,6 +227,7 @@ export interface AppState {
   deleteProject: (id: string, knowledge?: "delete" | "global") => Promise<void>;
   setSearchQuery: (q: string) => void;
   setSourceTypes: (types: SearchSourceType[]) => void;
+  setNotebooklmNotebookId: (id: string) => void;
   setRecommendSourceTypes: (types: SearchSourceType[]) => void;
   addSources: (evidence: Evidence[]) => void;
   removeSource: (id: string) => void;

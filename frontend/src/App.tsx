@@ -5,6 +5,7 @@ import ResearchPanel from "./components/ResearchPanel";
 import ActionsPanel from "./components/ActionsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import SettingsModal from "./components/SettingsModal";
+import ProjectNotebookLMModal from "./components/ProjectNotebookLMModal";
 import DegradedBanner from "./components/DegradedBanner";
 import InfraHealthBanner from "./components/InfraHealthBanner";
 import TrainingDataBanner from "./components/TrainingDataBanner";
@@ -93,6 +94,7 @@ export default function App() {
 
       <HistoryPanel />
       <SettingsModal />
+      <ProjectNotebookLMModal />
     </div>
   );
 }

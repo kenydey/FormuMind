@@ -19,6 +19,7 @@ import {
 function populatedState(): AppState {
   return {
     searchQuery: "epoxy primer",
+    notebooklmNotebookId: "",
     sourceTypes: ["patents", "literature"],
     sources: [{ source: "Patent", identifier: "US1", title: "T", snippet: "s", relevance: 0.9 }],
     selectedSources: ["US1"],

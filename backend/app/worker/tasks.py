@@ -255,13 +255,22 @@ class TaskManager:
         self.register_celery_task(async_result.id, "recommend")
         return async_result.id
 
-    def submit_search(self, query, source_types, req=None, total_limit=300, per_source_cap=50) -> str:
+    def submit_search(
+        self,
+        query,
+        source_types,
+        req=None,
+        total_limit=300,
+        per_source_cap=50,
+        notebooklm_notebook_id=None,
+    ) -> str:
         payload = {
             "query": query,
             "source_types": source_types,
             "requirement": req.model_dump() if req else None,
             "total_limit": total_limit,
             "per_source_cap": per_source_cap,
+            "notebooklm_notebook_id": notebooklm_notebook_id,
         }
         async_result = run_search_task.delay(payload)
         self.register_celery_task(async_result.id, "search")
@@ -764,6 +773,7 @@ def run_search_task(self, payload: dict) -> dict:
             total_limit=payload.get("total_limit", 300),
             per_source_cap=payload.get("per_source_cap", 50),
             progress_cb=progress,
+            notebooklm_notebook_id=payload.get("notebooklm_notebook_id"),
         )
         # iter_search returns (evidence_list, filter_report); accept a bare
         # list too for backward compatibility with mocks / older callers.
@@ -827,6 +837,7 @@ def run_topic_sweep(self, payload: dict) -> dict:
             req=req,
             total_limit=int(payload.get("total_limit", 100)),
             per_source_cap=int(payload.get("per_source_cap", 30)),
+            notebooklm_notebook_id=payload.get("notebooklm_notebook_id"),
         )
         final, _filter_report = (
             iter_result if isinstance(iter_result, tuple) else (list(iter_result), {})

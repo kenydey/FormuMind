@@ -1,7 +1,7 @@
 """Google NotebookLM as a retrieval source.
 
-Wraps the unofficial ``notebooklm-py`` SDK (browser-session auth) so a single
-fixed notebook can be queried like any other evidence source. The SDK is async
+Wraps the unofficial ``notebooklm-py`` SDK (browser-session auth) so a notebook id (typically per research project) can be queried like any
+other evidence source. The SDK is async
 and optional: when the library is missing, the feature is disabled, or the
 stored login session is absent, every call degrades silently to ``[]`` — exactly
 like the other ``search_*`` adapters in ``literature.py``.
@@ -31,10 +31,20 @@ logger = logging.getLogger(__name__)
 NOTEBOOKLM_URL = "https://notebooklm.google.com"
 
 
-def _notebooklm_available() -> bool:
-    """Enabled + notebook id configured + session file present + lib importable."""
+def _resolve_notebook_id(notebook_id: str | None = None) -> str | None:
+    """Prefer an explicit (per-project) id; fall back to legacy global settings."""
+    explicit = (notebook_id or "").strip()
+    if explicit:
+        return explicit
     s = get_settings()
-    if not s.notebooklm_enabled or not s.notebooklm_notebook_id:
+    legacy = (s.notebooklm_notebook_id or "").strip()
+    return legacy or None
+
+
+def _auth_ready() -> bool:
+    """Global auth prerequisites: feature enabled + session file + library."""
+    s = get_settings()
+    if not s.notebooklm_enabled:
         return False
     if not os.path.exists(s.notebooklm_storage_path):
         return False
@@ -44,6 +54,13 @@ def _notebooklm_available() -> bool:
     except Exception as exc:
         log_handled_exception(logger, exc, "optional feature check")
         return False
+
+
+def _notebooklm_available(notebook_id: str | None = None) -> bool:
+    """Auth ready + a notebook id (per-project override or legacy global)."""
+    if not _auth_ready():
+        return False
+    return _resolve_notebook_id(notebook_id) is not None
 
 
 def _run_async(coro):
@@ -61,15 +78,16 @@ def _run_async(coro):
         return ex.submit(lambda: asyncio.run(coro)).result()
 
 
-def _to_evidence(result, query: str, limit: int) -> list[Evidence]:
+def _to_evidence(
+    result, query: str, limit: int, *, notebook_id: str | None = None
+) -> list[Evidence]:
     """Map a notebooklm-py chat result into Evidence objects.
 
     ``chat.ask`` returns a synthesised answer (``result.answer``) optionally with
     citations. When citations are exposed we emit one Evidence per citation;
     otherwise the answer itself becomes a single Evidence.
     """
-    s = get_settings()
-    notebook_id = s.notebooklm_notebook_id or "notebook"
+    notebook_id = _resolve_notebook_id(notebook_id) or "notebook"
     answer = (getattr(result, "answer", None) or str(result or "")).strip()
 
     citations = getattr(result, "citations", None) or getattr(result, "sources", None) or []
@@ -99,21 +117,32 @@ def _to_evidence(result, query: str, limit: int) -> list[Evidence]:
     return out[:limit]
 
 
-async def _aquery(query: str, limit: int) -> list[Evidence]:
+async def _aquery(
+    query: str, limit: int, *, notebook_id: str | None = None
+) -> list[Evidence]:
     from notebooklm import NotebookLMClient  # type: ignore
 
     s = get_settings()
+    nid = _resolve_notebook_id(notebook_id)
+    if not nid:
+        return []
     async with NotebookLMClient.from_storage(s.notebooklm_storage_path) as client:  # pragma: no cover - network
-        result = await client.chat.ask(s.notebooklm_notebook_id, query)
-    return _to_evidence(result, query, limit)
+        result = await client.chat.ask(nid, query)
+    return _to_evidence(result, query, limit, notebook_id=nid)
 
 
-def search_notebooklm(query: str, limit: int = 5) -> list[Evidence]:
-    """Query the fixed NotebookLM notebook; any failure → [] (silent fallback)."""
-    if not _notebooklm_available():
+def search_notebooklm(
+    query: str, limit: int = 5, *, notebook_id: str | None = None
+) -> list[Evidence]:
+    """Query a NotebookLM notebook; any failure → [] (silent fallback).
+
+    ``notebook_id`` is the per-project notebook. When omitted, the legacy global
+    ``FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID`` is used as a migration fallback.
+    """
+    if not _notebooklm_available(notebook_id):
         return []
     try:
-        return _run_async(_aquery(query, limit))
+        return _run_async(_aquery(query, limit, notebook_id=notebook_id))
     except Exception:
         return []
 
@@ -220,13 +249,16 @@ def get_setup_status() -> dict:
     session_present = bool(
         s.notebooklm_storage_path and os.path.exists(s.notebooklm_storage_path)
     )
+    auth_ready = bool(lib_ok and s.notebooklm_enabled and session_present)
     base = {
         "lib_installed": lib_ok,
         "enabled": bool(s.notebooklm_enabled),
+        # Legacy global notebook id (migration only). Prefer per-project ids.
         "notebook_id_set": bool(s.notebooklm_notebook_id),
         "notebook_id": s.notebooklm_notebook_id,
         "session_present": session_present,
         "can_launch_browser": can_launch_browser(),
+        "auth_ready": auth_ready,
         "offline_fallback": False,
     }
 
@@ -240,13 +272,7 @@ def get_setup_status() -> dict:
         base.update(
             available=False,
             reason="not_enabled",
-            hint="启用 NotebookLM 并填写 Notebook ID 后点击「授权登录」",
-        )
-    elif not s.notebooklm_notebook_id:
-        base.update(
-            available=False,
-            reason="no_notebook_id",
-            hint="填写 Notebook ID（NotebookLM 笔记本链接中的 ID）",
+            hint="在全局设置中启用 NotebookLM，并完成 Google 授权；Notebook ID 请在各项目中配置",
         )
     elif not session_present:
         base.update(
@@ -255,5 +281,10 @@ def get_setup_status() -> dict:
             hint="点击「授权登录」完成 Google 账号授权（一次性操作）",
         )
     else:
-        base.update(available=True, reason=None, hint=None)
+        # Auth is ready. Per-project notebook id is configured in the project UI.
+        base.update(
+            available=True,
+            reason=None,
+            hint="全局授权已就绪。请在各研究项目的信息类别中勾选 NotebookLM 并填写该项目的 Notebook ID",
+        )
     return base

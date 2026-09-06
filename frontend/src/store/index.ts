@@ -58,6 +58,7 @@ export const useStore = create<AppState>()(
       historyOpen: false,
       searchQuery: "",
       sourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
+      notebooklmNotebookId: "",
       sources: [],
       selectedSources: [],
       sourceStatus: {} as Record<string, SourceStatus>,

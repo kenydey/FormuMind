@@ -47,6 +47,13 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       get().scheduleAutosave();
     },
 
+    setNotebooklmNotebookId: (id) => {
+      set((draft) => {
+        draft.notebooklmNotebookId = id;
+      });
+      get().scheduleAutosave();
+    },
+
     setRecommendSourceTypes: (types) => {
       set((draft) => {
         draft.recommendSourceTypes = types;
@@ -113,7 +120,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       }),
 
     searchSources: async (queryOverride?: string, opts?: { append?: boolean }) => {
-      const { searchQuery, requirement, sourceTypes } = get();
+      const { searchQuery, requirement, sourceTypes, notebooklmNotebookId } = get();
       const query = (queryOverride ?? searchQuery).trim();
       // 「添加数据源」走累加（append=true）：保留现有 sources 与研究主题，
       // 新关键词结果经 addSources 去重后追加；左栏「开始检索」保持清空重搜。
@@ -145,12 +152,24 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         };
       });
       const types = sourceTypes.filter((t) => t !== "local");
+      if (types.includes("notebooklm") && !notebooklmNotebookId.trim()) {
+        set((draft) => {
+          draft.searchBusy = false;
+          draft.error = "请先为本项目配置 NotebookLM Notebook ID";
+          draft.searchProgress = null;
+        });
+        get().setOpenModal("notebooklm-setup");
+        return;
+      }
       try {
         const { task_id } = await api.searchStream({
           query,
           requirement,
           source_types: types.length ? types : undefined,
           total_limit: 300,
+          notebooklm_notebook_id: types.includes("notebooklm")
+            ? notebooklmNotebookId.trim() || undefined
+            : undefined,
         });
         const final = await awaitTaskStream(
           task_id,
@@ -241,6 +260,9 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             requirement,
             source_types: types.length ? types : undefined,
             total_limit: 300,
+            notebooklm_notebook_id: types.includes("notebooklm")
+              ? notebooklmNotebookId.trim() || undefined
+              : undefined,
           });
           if (r.evidence?.length) get().addSources(r.evidence);
           if (r.filter_report) {
@@ -501,5 +523,5 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'setSearchQuery' | 'setSourceTypes' | 'setRecommendSourceTypes' | 'addSources' | 'removeSource' | 'clearSources' | 'toggleSourceSelected' | 'selectAllSources' | 'deselectAllSources' | 'searchSources' | 'trackKbIngest' | 'loadSourceStatus' | 'hydrateLlmSettings' | 'uploadFiles' | 'sendChat'>;
+  } as Pick<AppState, 'setSearchQuery' | 'setSourceTypes' | 'setNotebooklmNotebookId' | 'setRecommendSourceTypes' | 'addSources' | 'removeSource' | 'clearSources' | 'toggleSourceSelected' | 'selectAllSources' | 'deselectAllSources' | 'searchSources' | 'trackKbIngest' | 'loadSourceStatus' | 'hydrateLlmSettings' | 'uploadFiles' | 'sendChat'>;
 }

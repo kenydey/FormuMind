@@ -2197,6 +2197,8 @@ export interface SearchRequest {
   requirement?: Requirement;
   limit_per_source?: number;
   total_limit?: number;
+  /** Per-project NotebookLM notebook id (required when source_types includes notebooklm). */
+  notebooklm_notebook_id?: string;
 }
 
 export interface NotebookLMStatus {
@@ -2209,6 +2211,8 @@ export interface NotebookLMStatus {
   notebook_id?: string | null;
   session_present?: boolean;
   can_launch_browser?: boolean;
+  /** Global auth ready (lib + enabled + session); notebook id is per-project. */
+  auth_ready?: boolean;
   offline_fallback?: boolean;
 }
 

@@ -38,6 +38,7 @@ export function objectiveTargetFromRequirement(
 export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspaceSlice>): void {
   if (patch.searchQuery !== undefined) draft.searchQuery = patch.searchQuery;
   if (patch.sourceTypes !== undefined) draft.sourceTypes = patch.sourceTypes;
+  if (patch.notebooklmNotebookId !== undefined) draft.notebooklmNotebookId = patch.notebooklmNotebookId;
   if (patch.sources !== undefined) draft.sources = patch.sources;
   if (patch.selectedSources !== undefined) draft.selectedSources = patch.selectedSources;
   if (patch.chatHistory !== undefined) draft.chatHistory = patch.chatHistory;
@@ -84,6 +85,7 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
   return {
     searchQuery: state.searchQuery,
     sourceTypes: state.sourceTypes,
+    notebooklmNotebookId: state.notebooklmNotebookId,
     sources: state.sources,
     selectedSources: state.selectedSources,
     chatHistory: state.chatHistory,
