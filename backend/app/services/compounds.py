@@ -120,7 +120,14 @@ def lookup(name: str) -> dict | None:
         if not matches:
             return None
         c = matches[0]
-        syns = pcp.get_synonyms(c.cid, "cid") if c.cid else []
+        raw_syns = pcp.get_synonyms(c.cid, "cid") if c.cid else []
+        # PubChemPy returns list[dict{'CID':..., 'Synonym':[...]}]
+        syns: list[str] = []
+        for entry in raw_syns:
+            if isinstance(entry, dict) and "Synonym" in entry:
+                syns.extend(entry["Synonym"])
+            elif isinstance(entry, str):
+                syns.append(entry)
         out: dict = {}
         smiles = getattr(c, "connectivity_smiles", None) or getattr(c, "canonical_smiles", None) or getattr(c, "isomeric_smiles", None)
         if smiles:
@@ -164,7 +171,15 @@ def lookup_compound(q: str) -> dict[str, Any]:
             matches = pcp.get_compounds(q, "name")
         if matches:
             c = matches[0]
-            syns = pcp.get_synonyms(c.cid, "cid") if c.cid else []
+            raw_syns = pcp.get_synonyms(c.cid, "cid") if c.cid else []
+            # PubChemPy returns list[dict{'CID':..., 'Synonym':[...]}]
+            # Extract the string list for downstream helpers (CAS extraction, zh name).
+            syns: list[str] = []
+            for entry in raw_syns:
+                if isinstance(entry, dict) and "Synonym" in entry:
+                    syns.extend(entry["Synonym"])
+                elif isinstance(entry, str):
+                    syns.append(entry)
             result = _compound_to_result(q, c, syns)
             _cache_set(q, result)
             return result
