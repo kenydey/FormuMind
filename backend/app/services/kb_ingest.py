@@ -95,10 +95,10 @@ def _topic_anchor(project_id: str | None = None, query: str | None = None) -> tu
     if project_id:
         try:
             from ..db.database import default_session_factory
-            from ..db.models import Project
+            from ..db.models import ProjectRow
 
             with default_session_factory()() as session:
-                proj = session.get(Project, project_id)
+                proj = session.get(ProjectRow, project_id)
                 if proj is not None:
                     text = " ".join(
                         str(x) for x in (proj.title, proj.headline) if x
