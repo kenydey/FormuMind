@@ -83,6 +83,7 @@ cp .env.example .env                 # optional keys; see API auth below
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+bash scripts/apply_patches.sh      # 第三方库补丁(幂等,pymupdf4llm RapidOCR 属性修复)
 pytest -q                          # 430+ tests, all offline
 uvicorn app.main:app --reload --reload-exclude .venv  # http://localhost:8000/docs
 
@@ -91,6 +92,14 @@ cd frontend
 npm install
 npm run dev                        # http://localhost:5173
 ```
+
+> **第三方库补丁**:`pymupdf4llm==1.28.0` 的 RapidOCR 检测器属性名有 bug
+> (`text_detector` vs 实际 `text_det`),导致扫描版 PDF 的本地 OCR 每次都报
+> `No text_detector available`。`scripts/apply_patches.py` 在 pip 安装后从
+> `backend/patchspec/` 应用补丁修复,幂等可重复执行。版本已 pin 在
+> `backend/pyproject.toml` 的 `parse_pro` extra(`pymupdf4llm==1.28.0`、
+> `PyMuPDF==1.28.0`、`rapidocr==3.9.2`)。详见
+> `backend/scripts/reference/rapidocr-attribute-fix.md`。
 
 ### Docker
 

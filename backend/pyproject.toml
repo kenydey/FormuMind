@@ -82,9 +82,16 @@ parse_pro = [
     # weights inside the wheel, so no model download at deploy time.
     # opencv-python-headless is pinned explicitly: the default opencv-python drags
     # in GUI libraries that a headless VPS does not have.
-    "rapidocr>=3.9.0",
+    "rapidocr==3.9.2",
     "opencv-python-headless>=4.9",
-    "pymupdf4llm>=0.0.17",
+    # pymupdf4llm is pinned to 1.28.0 (NOT >=): 1.28.2 rewrites OCR backend
+    # selection and adds pymupdf.layout which links libmupdf.so.29.0 (absent from
+    # that wheel), breaking use_layout(True). 1.28.0 also has a RapidOCR
+    # attribute-name bug (text_detector vs text_det); scripts/apply_patches.py
+    # fixes it from patchspec/pymupdf4llm/. PyMuPDF is the exact pin pymupdf4llm
+    # 1.28.0 declares as its hard dependency.
+    "pymupdf4llm==1.28.0",
+    "PyMuPDF==1.28.0",
     "mineru-open-sdk>=0.2.5",
 ]
 export = ["openpyxl>=3.1"]

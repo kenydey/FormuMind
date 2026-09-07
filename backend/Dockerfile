@@ -42,7 +42,7 @@ COPY app ./app
 RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
     -e ".[llm,science,optimize,embedding,bo,pydoe,baybe,file_ingest,intel,export,colbert,color,dev,postgres,heavy,crag]" \
     && pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-    pymupdf4llm docling marker-pdf mineru-open-sdk \
+    "pymupdf4llm==1.28.0" "PyMuPDF==1.28.0" docling marker-pdf mineru-open-sdk \
     && pip uninstall -y surya-ocr 2>/dev/null; echo "surya-ocr removed (CPU VPS)"
 
 # 3) Local OCR for scanned pages. No build-time model download step is needed:
@@ -59,6 +59,13 @@ RUN pip install "rapidocr-onnxruntime>=1.4.4" opencv-python-headless \
 m = pathlib.Path(rapidocr_onnxruntime.__file__).parent / 'models'; \
 n = len(list(m.glob('*.onnx'))); print(f'rapidocr models bundled: {n}'); \
 sys.exit(0 if n >= 3 else 1)"
+
+# 4) Apply third-party library patches (idempotent). Fixes pymupdf4llm 1.28.0's
+# RapidOCR attribute-name bug (text_detector vs text_det) that breaks local OCR
+# of scanned PDFs. See scripts/reference/rapidocr-attribute-fix.md.
+COPY scripts ./scripts
+COPY patchspec ./patchspec
+RUN python scripts/apply_patches.py
 
 EXPOSE 8000
 

@@ -1,0 +1,60 @@
+--- a/pymupdf4llm/ocr/rapidtess_api.py
++++ b/pymupdf4llm/ocr/rapidtess_api.py
+@@ -74,22 +74,24 @@
+         Always returns a tuple: (boxes, scores)
+ 
+         This method is defensive: if RapidOCR changes the return
+-        format of text_detector(), a clear error is raised instead
++        format of text_det(), a clear error is raised instead
+         of silently producing incorrect results.
+         """
+-        # Ensure the detector exists
+-        if not hasattr(self, "text_detector") or self.text_detector is None:
++        # Ensure the detector exists. rapidocr_onnxruntime 1.x and rapidocr
++        # 3.x both expose the detector as `text_det`, NOT `text_detector`.
++        # pymupdf4llm 1.28.0 checks the wrong attribute and always raises.
++        if not hasattr(self, "text_det") or self.text_det is None:
+             raise RuntimeError("RapidOCR_DetOnly: No text_detector available.")
+ 
+         # Run detection
+-        result = self.text_detector(img)
++        result = self.text_det(img)
+ 
+         # Validate return format (RapidOCR may change this in the future)
+         if isinstance(result, (list, tuple)) and len(result) >= 2:
+             boxes, scores = result[0], result[1]
+         else:
+             raise RuntimeError(
+-                f"RapidOCR_DetOnly: Unexpected return format from text_detector: {type(result)}"
++                f"RapidOCR_DetOnly: Unexpected return format from text_det: {type(result)}"
+             )
+ 
+         return boxes, scores
+--- a/pymupdf4llm/ocr/paddletess_api.py
++++ b/pymupdf4llm/ocr/paddletess_api.py
+@@ -77,19 +77,21 @@
+         format of text_detector(), a clear error is raised instead
+         of silently producing incorrect results.
+         """
+-        # Ensure the detector exists
+-        if not hasattr(self, "text_detector") or self.text_detector is None:
++        # Ensure the detector exists. rapidocr_onnxruntime 1.x and rapidocr
++        # 3.x both expose the detector as `text_det`, NOT `text_detector`.
++        # pymupdf4llm 1.28.0 checks the wrong attribute and always raises.
++        if not hasattr(self, "text_det") or self.text_det is None:
+             raise RuntimeError("RapidOCR_DetOnly: No text_detector available.")
+ 
+         # Run detection
+-        result = self.text_detector(img)
++        result = self.text_det(img)
+ 
+         # Validate return format (RapidOCR may change this in the future)
+         if isinstance(result, (list, tuple)) and len(result) >= 2:
+             boxes, scores = result[0], result[1]
+         else:
+             raise RuntimeError(
+-                f"RapidOCR_DetOnly: Unexpected return format from text_detector: {type(result)}"
++                f"RapidOCR_DetOnly: Unexpected return format from text_det: {type(result)}"
+             )
+ 
+         return boxes, scores

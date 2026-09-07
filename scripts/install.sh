@@ -18,6 +18,13 @@ pip install arxiv semanticscholar ddgs || true
 # chemcrow installed separately — versions <0.3.7 pin openai==0.27.8 (conflicts with openai>=1.30).
 pip install "chemcrow>=0.3.7" || echo "⚠️  chemcrow skipped — ChemCrow path uses offline fallback"
 
+# Apply third-party library patches (e.g. pymupdf4llm RapidOCR attribute fix).
+# Idempotent — safe to run on every install.
+if [ -f "$ROOT/backend/.venv/bin/python" ]; then
+  "$ROOT/backend/.venv/bin/python" "$ROOT/backend/scripts/apply_patches.py" || \
+    echo "⚠️  patch application failed — see backend/scripts/reference/rapidocr-attribute-fix.md"
+fi
+
 echo ""
 echo "==> Frontend (optional — skip if you only run the API)"
 cd "$ROOT/frontend"
