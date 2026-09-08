@@ -1084,6 +1084,19 @@ export const api = {
       molar_mass?: number | null;
       found: boolean;
       source: string;
+      providers_tried?: string[];
+      surechembl?: {
+        chemical_id?: string | null;
+        global_frequency?: number | null;
+        inchi_key?: string | null;
+        source_url?: string | null;
+        alternates?: Array<{
+          chemical_id?: string | null;
+          name?: string | null;
+          smiles?: string | null;
+          global_frequency?: number | null;
+        }>;
+      };
     }>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
   chemicalProfile: (q: string) =>
     get<ChemicalProfile>(`/api/chemical/profile?q=${encodeURIComponent(q)}`),

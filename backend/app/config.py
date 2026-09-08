@@ -205,6 +205,9 @@ class Settings(BaseSettings):
     chemtools_timeout_s: float = 10.0
     # 材料替代联网召回（PubChem fastsimilarity_2d）。默认开；失败降级为空列表。
     external_substitutes: bool = True
+    # SureChEMBL 官方 API：化学鉴定回退（名称/SMILES）。默认开；失败降级。
+    surechembl: bool = True
+    surechembl_base_url: str = "https://www.surechembl.org/api"
     # 材料替代 L4：规则扩召回后可选 LLM 扩名。默认开；无 key/失败降级为空列表。
     substitute_llm: bool = True
     # v2 特征集：在 v1 特征向量后追加 6 个重量加权 RDKit 分子描述符

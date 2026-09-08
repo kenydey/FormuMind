@@ -173,6 +173,16 @@ def _lookup_chemtools(q: str) -> dict[str, Any] | None:
     }
 
 
+def _lookup_surechembl(q: str) -> dict[str, Any] | None:
+    """Tier last: SureChEMBL official API name/SMILES identification."""
+    try:
+        from .surechembl_lookup import lookup_surechembl
+
+        return lookup_surechembl(q)
+    except Exception as exc:
+        return degrade_return(logger, exc, "surechembl lookup failed", None)
+
+
 def lookup_chemical(q: str) -> dict[str, Any]:
     """Resolve a chemical query (CN/EN name or CAS) to structured metadata."""
     key = (q or "").strip().lower()
@@ -187,19 +197,29 @@ def lookup_chemical(q: str) -> dict[str, Any]:
             "molar_mass": None,
             "found": False,
             "source": "empty",
+            "providers_tried": [],
         }
     cached = _cache_get(key)
     if cached:
         return cached
-    for resolver in (
-        _lookup_catalog,
-        _lookup_pubchem,
-        _lookup_compound_synonyms,
-        _lookup_offline_compounds,
-        _lookup_chemtools,
-    ):
+
+    providers_tried: list[str] = []
+    resolvers = (
+        ("catalog", _lookup_catalog),
+        ("pubchem", _lookup_pubchem),
+        ("pubchempy_compound", _lookup_compound_synonyms),
+        ("pubchempy", _lookup_offline_compounds),
+        ("pubchem", _lookup_chemtools),
+        ("surechembl", _lookup_surechembl),
+    )
+    for provider_name, resolver in resolvers:
+        # Avoid double-counting identical provider labels in tried list.
+        if provider_name not in providers_tried:
+            providers_tried.append(provider_name)
         hit = resolver(q.strip())
         if hit:
+            hit = dict(hit)
+            hit["providers_tried"] = list(providers_tried)
             return _cache_put(key, hit)
     empty = {
         "query": q,
@@ -211,5 +231,6 @@ def lookup_chemical(q: str) -> dict[str, Any]:
         "molar_mass": None,
         "found": False,
         "source": "none",
+        "providers_tried": providers_tried,
     }
     return _cache_put(key, empty)

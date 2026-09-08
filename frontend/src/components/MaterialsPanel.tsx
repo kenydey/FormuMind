@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Modal from "./Modal";
 import { api, type ChemicalHit, type MaterialCandidate, type MaterialImportPreview, type MaterialView } from "../api";
+import { formatChemicalLookupSourceMsg } from "../utils/chemicalLookup";
 
 const ROLES = ["", "resin", "additive", "inhibitor", "solvent", "crosslinker", "surfactant", "catalyst"];
 const AVAIL_LABEL: Record<string, { text: string; cls: string }> = {
@@ -199,7 +200,7 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         smiles: (r.smiles ?? undefined) || d.smiles,
         molar_mass: r.molar_mass != null ? String(r.molar_mass) : d.molar_mass,
       }));
-      setLookupMsg(`已自动填充 · 来源 ${r.source || "lookup"}`);
+      setLookupMsg(formatChemicalLookupSourceMsg(r));
     } catch (e) {
       setLookupMsg(e instanceof Error ? e.message : String(e));
     } finally {
@@ -840,7 +841,7 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                   disabled={lookupBusy || busy}
                   onClick={() => void lookupChemical()}
                   className="border border-teal-500/40 text-teal-300 rounded px-3 py-1.5 text-xs hover:bg-teal-500/10 disabled:opacity-40 shrink-0"
-                  title="用名称 / CAS / SMILES 调用 /api/chemical/lookup 自动填充"
+                  title="用名称 / CAS / SMILES 调用 /api/chemical/lookup（目录→PubChem→SureChEMBL）自动填充"
                 >
                   {lookupBusy ? "查询中…" : "🔍 化学查询填充"}
                 </button>

@@ -193,6 +193,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "材料替代弹窗默认按 CAS/SMILES 调用 PubChem 结构相似检索，列出可入库的联网候选。"
             "关闭后仅使用材料库内候选（请求仍可传 include_external，但会被部署开关压制）。",
             "chem", "需网络；失败降级为空列表，不影响库内替代"),
+    EnvFlag("surechembl", "SureChEMBL 专利化学鉴定",
+            "本地/PubChem 未命中时，用 SureChEMBL 官方 API 按名称或 SMILES 回退鉴定。"
+            "不自动入库；后续可用于专利化学相似替代（P1）。",
+            "chem", "需网络访问 surechembl.org；失败降级为空"),
     EnvFlag("substitute_llm", "材料替代 AI/规则扩召回",
             "材料替代漏斗 L4：库内候选不足（或请求强制）时用化学规则表 + 可选 LLM 扩名。"
             "关闭后跳过 LLM，仅保留规则表种子（仍可被 include_llm=false 完全关闭）。",
