@@ -235,7 +235,7 @@ def find_substitutes(
     process = process_for(req) if req is not None else {}
 
     base_form = _score_and_validate(
-        reconstruct.formulation_from_genome(target, genome),
+        reconstruct.formulation_from_genome(target, genome, strict=False),
         process,
         req,
         enrich_network=False,
@@ -244,8 +244,9 @@ def find_substitutes(
 
     # Recall: same substitute_group, else same role. Group membership is the
     # curated signal, so it takes precedence over the coarser role match.
+    # Uncatalogued originals (LLM recommend) have empty group → role pool.
     group = original_spec.get("substitute_group")
-    role = original_spec.get("role") or slot.role
+    role = original_spec.get("role") or slot.role or "additive"
     pool: list[str] = []
     for name, spec in knowledge.RAW_MATERIALS.items():
         if name == original:
@@ -263,11 +264,15 @@ def find_substitutes(
         score, breakdown = structural_score(original_spec, spec)
         swapped = genome.with_material(slot_index, name)
         try:
-            form = reconstruct.formulation_from_genome(target, swapped)
+            form = reconstruct.formulation_from_genome(target, swapped, strict=False)
         except Exception:
             continue
-        verdict = check_formulation(form, req)
-        form = _score_and_validate(form, process, req, enrich_network=False)
+        try:
+            verdict = check_formulation(form, req)
+            form = _score_and_validate(form, process, req, enrich_network=False)
+        except Exception as exc:
+            logger.debug("substitution candidate {} skipped ({})", name, exc)
+            continue
         candidates.append(
             {
                 "material": name,

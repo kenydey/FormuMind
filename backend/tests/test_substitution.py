@@ -197,6 +197,72 @@ def test_out_of_range_slot_raises():
         find_substitutes(_genome(), 999, _req())
 
 
+def test_uncatalogued_slot_material_still_returns_report():
+    """LLM/recommend formulas often name materials not yet in RAW_MATERIALS.
+
+    Substitution must tolerate that (strict=False) and still rank same-role
+    catalog replacements + optional external lookup.
+    """
+    from app.domain.genome import FormulationGenome, Slot
+
+    genome = FormulationGenome(
+        domain=ProductDomain.anticorrosion_coating,
+        slots=[
+            Slot(role="resin", material="Bisphenol-A epoxy (DGEBA)", weight_pct=55.0),
+            Slot(role="hardener", material="Polyamide hardener", weight_pct=20.0),
+            Slot(
+                role="inhibitor",
+                material="Cerium nitrate hexahydrate",
+                weight_pct=5.0,
+            ),
+            Slot(role="solvent", material="Xylene", weight_pct=20.0),
+        ],
+    )
+    assert "Cerium nitrate hexahydrate" not in knowledge.RAW_MATERIALS
+    idx = next(i for i, s in enumerate(genome.slots) if s.material == "Cerium nitrate hexahydrate")
+    report = find_substitutes(
+        genome, idx, _req(), include_external=False, limit=10
+    )
+    assert report["original"] == "Cerium nitrate hexahydrate"
+    assert report["role"] == "inhibitor"
+    assert report["candidates"], "expected same-role catalog inhibitors"
+    assert all(c["role"] == "inhibitor" for c in report["candidates"] if c.get("role"))
+    # Reconstruct must not raise; identity still present when external off.
+    assert report["identity"]["query"] == "Cerium nitrate hexahydrate"
+
+
+def test_substitutes_endpoint_accepts_uncatalogued_formulation_slot():
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "formulation": {
+                "name": "Ce formula",
+                "domain": "anticorrosion_coating",
+                "ingredients": [
+                    {
+                        "name": "Bisphenol-A epoxy (DGEBA)",
+                        "role": "resin",
+                        "weight_pct": 60.0,
+                    },
+                    {
+                        "name": "Cerium nitrate hexahydrate",
+                        "role": "inhibitor",
+                        "weight_pct": 5.0,
+                    },
+                    {"name": "Xylene", "role": "solvent", "weight_pct": 35.0},
+                ],
+            },
+            "material": "Cerium nitrate hexahydrate",
+            "limit": 5,
+            "include_external": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["original"] == "Cerium nitrate hexahydrate"
+    assert body["candidates"]
+
+
 # ── chemical feasibility is applied ──────────────────────────────────────────
 
 

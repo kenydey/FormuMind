@@ -65,13 +65,17 @@ def genome_from_requirement(req: Requirement | ProductDomain):
     return genome_from_formulation(base, units=units)
 
 
-def formulation_from_genome(req: Requirement | ProductDomain, genome):
+def formulation_from_genome(req: Requirement | ProductDomain, genome, *, strict: bool = True):
     """Genome → Formulation. Sibling of ``formulation_from_factors``.
 
     The factor path can only rescale ingredients already present in the
     hardcoded baseline template; this one lets the composition itself vary,
     which is what inverse design and material substitution both need.
+
+    ``strict=False`` keeps unknown materials (LLM/recommend slots not yet in
+    the catalog) so substitution can still compute deltas; inverse design
+    keeps the default strict path.
     """
     from ..domain.genome import formulation_from_genome as _from_genome
 
-    return _from_genome(req, genome)
+    return _from_genome(req, genome, strict=strict)
