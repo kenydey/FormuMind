@@ -205,7 +205,8 @@ class Settings(BaseSettings):
     chemtools_timeout_s: float = 10.0
     # 材料替代联网召回（PubChem fastsimilarity_2d）。默认开；失败降级为空列表。
     external_substitutes: bool = True
-    # SureChEMBL 官方 API：化学鉴定回退（名称/SMILES）。默认开；失败降级。
+    # SureChEMBL 官方 API：化学鉴定回退 + 替代漏斗结构相似 + 资料检索 content。
+    # 默认开；失败降级为空。检索 source_types 含 "surechembl" 时走 keyword content。
     surechembl: bool = True
     surechembl_base_url: str = "https://www.surechembl.org/api"
     # 材料替代 L4：规则扩召回后可选 LLM 扩名。默认开；无 key/失败降级为空列表。

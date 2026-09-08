@@ -7,6 +7,7 @@ import Modal from "./Modal";
 
 const MODAL_SOURCE_TYPES: { id: SearchSourceType; label: string; icon: string }[] = [
   { id: "patents", label: "专利", icon: "📄" },
+  { id: "surechembl", label: "专利化学", icon: "🧪" },
   { id: "literature", label: "文献", icon: "📚" },
   { id: "internet", label: "互联网", icon: "🌐" },
 ];
@@ -42,7 +43,7 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
   const [modalTypes, setModalTypes] = useState<SearchSourceType[]>(
     sourceTypes.filter((t) => t !== "local" && t !== "notebooklm").length
       ? sourceTypes.filter((t) => t !== "local" && t !== "notebooklm")
-      : (["patents", "literature", "internet"] as SearchSourceType[])
+      : (["patents", "surechembl", "literature", "internet"] as SearchSourceType[])
   );
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlValue, setUrlValue] = useState("");

@@ -500,6 +500,68 @@ def search_web(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
         return degrade_return(logger, exc, "DuckDuckGo search failed", [])
 
 
+def search_surechembl_content(
+    query: str,
+    limit: int = 20,
+    offset: int = 0,
+    *,
+    attach_chemistry: bool = True,
+    chemistry_docs: int = 2,
+    chemistry_limit: int = 6,
+) -> list[Evidence]:
+    """SureChEMBL keyword content search → Evidence (source=surechembl).
+
+    Complements EPO/Google patents: chemistry-annotated patent corpus.
+    Failures degrade to []. Does not replace ``search_patents``.
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        from . import surechembl_client as sch
+
+        if not sch.surechembl_enabled():
+            return []
+        docs = sch.content_search(q, limit=limit, offset=offset)
+    except Exception as exc:
+        return degrade_return(logger, exc, "SureChEMBL content search failed", [])
+
+    out: list[Evidence] = []
+    for i, doc in enumerate(docs):
+        doc_id = str(doc.get("doc_id") or "").strip()
+        if not doc_id:
+            continue
+        bits = [
+            f"doc {doc_id}",
+            f"assignee {doc['assignee']}" if doc.get("assignee") else None,
+            f"published {doc['pub_date']}" if doc.get("pub_date") else None,
+        ]
+        snippet = " · ".join(b for b in bits if b)
+        # Optional: annotate top documents with extracted chemistry names.
+        if attach_chemistry and offset == 0 and i < max(0, int(chemistry_docs)):
+            try:
+                from . import surechembl_client as sch
+
+                chems = sch.document_chemistry(doc_id, limit=chemistry_limit)
+                names = [c.get("name") for c in chems if c.get("name")]
+                if names:
+                    snippet = f"{snippet} · chemistry: {', '.join(names[:chemistry_limit])}"
+            except Exception:
+                pass
+        out.append(
+            Evidence(
+                source="surechembl",
+                identifier=doc_id,
+                title=str(doc.get("title") or doc_id),
+                snippet=snippet[:600],
+                relevance=round(max(0.15, 0.92 - (offset + i) * 0.015), 3),
+                url=doc.get("url"),
+                url_alt=doc.get("surechembl_url"),
+            )
+        )
+    return out
+
+
 def _is_patent_or_literature(e: Evidence) -> bool:
     s = (e.source or "").lower()
     if _is_weblike(e):
@@ -509,6 +571,7 @@ def _is_patent_or_literature(e: Evidence) -> bool:
         for k in (
             "uspto", "epo", "patent", "arxiv", "semantic", "literature",
             "chemcrow", "openalex", "doi", "serpapi", "tavily", "cnipa", "google patents",
+            "surechembl",
         )
     )
 
@@ -655,6 +718,18 @@ def _build_streams(
         web_q = chinese_query or western_query
         add("internet", lambda off, q=web_q: search_internet(q, page_size, offset=off), True)
         add("chemweb", lambda off, q=western_query: search_chem_web(q, page_size), False)
+    if "surechembl" in source_types:
+        # Chemistry-annotated patent content; independent of EPO/Google "patents".
+        # Keep attach_chemistry off in the timed stream fetch (document-chemistry
+        # ZIP is optional enrichment; calling it here can exhaust the shared
+        # source executor under LLM retries). Client still exposes the export.
+        add(
+            "surechembl",
+            lambda off, q=patent_query: search_surechembl_content(
+                q, page_size, offset=off, attach_chemistry=False
+            ),
+            True,
+        )
     if "notebooklm" in source_types:
         def _nb(off: int, q=western_query, nid=notebooklm_notebook_id) -> list[Evidence]:
             from .notebooklm import search_notebooklm  # 延迟导入：未装库时零开销
@@ -834,7 +909,7 @@ def search_by_types(
 ) -> list[Evidence]:
     """多源检索，合并结果（同步、一次性返回——薄封装 :func:`iter_search`）。
 
-    source_types: 任意子集 ["patents", "literature", "internet", "notebooklm"]。
+    source_types: 任意子集 ["patents", "literature", "internet", "surechembl", "notebooklm"]。
     "local" 由 /api/ingest 处理，不在此检索。
     """
     return iter_search(
@@ -1056,6 +1131,16 @@ def get_source_availability() -> dict[str, dict]:
             ),
         },
         "notebooklm": get_setup_status(),
+        "surechembl": {
+            "available": bool(getattr(s, "surechembl", True)),
+            "offline_fallback": False,
+            "reason": None if getattr(s, "surechembl", True) else "disabled",
+            "hint": (
+                None
+                if getattr(s, "surechembl", True)
+                else "FORMUMIND_SURECHEMBL=false；开启后检索专利化学标注文档"
+            ),
+        },
         "local": {
             "available": True,
             "offline_fallback": False,

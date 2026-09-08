@@ -290,7 +290,7 @@ class EvidenceEntityRef(BaseModel):
 class Evidence(BaseModel):
     """A retrieved patent or literature snippet with a citation."""
 
-    source: str  # USPTO / EPO / literature / seed
+    source: str  # USPTO / EPO / literature / seed / surechembl
     identifier: str
     title: str
     snippet: str
@@ -301,6 +301,10 @@ class Evidence(BaseModel):
     # can skip non-OA literature with zero extra API calls.
     oa_pdf_url: str | None = None
     is_oa: bool | None = None
+    # Optional landing URL (e.g. Google Patents for SureChEMBL SCPN).
+    url: str | None = None
+    # Secondary UI link (e.g. SureChEMBL document page).
+    url_alt: str | None = None
 
 
 class ParameterBoundary(BaseModel):

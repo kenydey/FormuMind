@@ -173,6 +173,10 @@ export interface Evidence {
   /** True when this row is from the offline seed corpus, not a live API hit. */
   is_seed_corpus?: boolean;
   entity_refs?: EvidenceEntityRef[];
+  /** Landing URL (e.g. Google Patents). */
+  url?: string | null;
+  /** Secondary URL (e.g. SureChEMBL document page). */
+  url_alt?: string | null;
 }
 
 export interface ResearchResult {
@@ -2367,7 +2371,7 @@ export function awaitTaskStream(
 
 // ── v0.3 新增类型 ────────────────────────────────────────────────────────────
 
-export type SearchSourceType = "patents" | "literature" | "internet" | "local" | "notebooklm";
+export type SearchSourceType = "patents" | "literature" | "internet" | "local" | "notebooklm" | "surechembl";
 
 export interface ChatMessage {
   role: "user" | "assistant";

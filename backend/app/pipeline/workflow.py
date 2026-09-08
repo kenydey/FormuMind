@@ -159,6 +159,8 @@ def _evidence_matches_type(evidence, source_type: str) -> bool:
         return any(x in src for x in ("web", "duck", "internet", "chemcrow-web", "chemcrow_web", "serp"))
     if source_type == "notebooklm":
         return "notebooklm" in src
+    if source_type == "surechembl":
+        return "surechembl" in src
     if source_type == "local":
         return src == "local" or "upload" in src or "ingest" in src
     return True

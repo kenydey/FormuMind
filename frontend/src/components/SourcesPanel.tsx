@@ -13,6 +13,7 @@ const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.
 
 function iconForSource(source: string): string {
   const s = source.toLowerCase();
+  if (s.includes("surechembl")) return "🧪";
   if (s.includes("patent")) return "📄";
   if (s.includes("chemcrow")) return "🧪";
   if (s.includes("arxiv") || s.includes("semantic") || s.includes("literature") || s.includes("paper"))
@@ -326,7 +327,42 @@ export default function SourcesPanel() {
                       />
                     )}
                   </div>
-                  <div className="text-slate-600 truncate">{e.source}</div>
+                  <div className="text-slate-600 truncate flex items-center gap-1.5">
+                    <span className="truncate">{e.source}</span>
+                    {e.identifier && (
+                      <span className="font-mono text-[10px] text-slate-500 shrink-0">
+                        {e.identifier}
+                      </span>
+                    )}
+                    {(e.url || e.url_alt) && (
+                      <span className="shrink-0 flex items-center gap-1">
+                        {e.url && (
+                          <a
+                            href={e.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent/90 hover:underline"
+                            title="打开 Google Patents"
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            Patents
+                          </a>
+                        )}
+                        {e.url_alt && (
+                          <a
+                            href={e.url_alt}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent/70 hover:underline"
+                            title="SureChEMBL 文档页"
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            SureChEMBL
+                          </a>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={() => removeSource(id)}

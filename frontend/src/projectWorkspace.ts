@@ -212,7 +212,7 @@ export function applyWorkspacePayload(
     searchQuery: ws.search_query ?? "",
     sourceTypes: (ws.source_types?.length
       ? ws.source_types
-      : ["patents", "literature", "internet"]) as SearchSourceType[],
+      : ["patents", "surechembl", "literature", "internet"]) as SearchSourceType[],
     notebooklmNotebookId: (ws.notebooklm_notebook_id ?? "").trim(),
     sources: ws.sources ?? [],
     selectedSources: ws.selected_sources ?? [],
@@ -247,7 +247,7 @@ export function applyWorkspacePayload(
     loopDoeEngine: (ws.loop_doe_engine as StoreWorkspaceSlice["loopDoeEngine"]) ?? "auto",
     recommendSourceTypes: (ws.recommend_source_types?.length
       ? ws.recommend_source_types
-      : ["patents", "literature", "internet"]) as SearchSourceType[],
+      : ["patents", "surechembl", "literature", "internet"]) as SearchSourceType[],
     lastAlEngine: ws.last_al_engine ?? null,
     autoLoopOnSync: ws.auto_loop_on_sync ?? false,
     autoLoopMaxRounds: ws.auto_loop_max_rounds ?? 5,

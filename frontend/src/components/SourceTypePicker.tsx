@@ -2,6 +2,7 @@ import type { SearchSourceType, SourceStatus } from "../api";
 
 export const SOURCE_TYPES: { id: SearchSourceType; label: string; icon: string }[] = [
   { id: "patents", label: "专利 Patents", icon: "📄" },
+  { id: "surechembl", label: "专利化学 SureChEMBL", icon: "🧪" },
   { id: "literature", label: "文献 Literature", icon: "📚" },
   { id: "internet", label: "互联网 Internet", icon: "🌐" },
   { id: "local", label: "本地文件 Local", icon: "📎" },

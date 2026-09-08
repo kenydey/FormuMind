@@ -28,7 +28,7 @@ def evidence_authority_bonus(ev: Evidence) -> float:
     权威度用于证据排序加权——LLM 合成时高权威源优先被引用。
     """
     s = (ev.source or "").lower()
-    if any(k in s for k in ("uspto", "epo", "patent", "cnipa")):
+    if any(k in s for k in ("uspto", "epo", "patent", "cnipa", "surechembl")):
         return 0.12  # 官方专利库
     if any(k in s for k in ("arxiv", "scholar", "semantic", "literature", "paper")):
         return 0.08  # 学术文献
