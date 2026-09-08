@@ -664,6 +664,31 @@ export interface LlmSubstituteCandidate {
   note?: string | null;
 }
 
+export interface SurechemblPatent {
+  doc_id: string;
+  title?: string | null;
+  assignee?: string | null;
+  pub_date?: string | null;
+  url?: string | null;
+}
+
+export interface SurechemblSubstituteCandidate {
+  name: string;
+  chemical_id?: string | null;
+  smiles?: string | null;
+  inchi_key?: string | null;
+  formula?: string | null;
+  molar_mass?: number | null;
+  similarity: number;
+  global_frequency?: number | null;
+  source: "surechembl" | string;
+  in_catalog: boolean;
+  catalog_name?: string | null;
+  role_hint?: string | null;
+  patents?: SurechemblPatent[];
+  note?: string | null;
+}
+
 export interface SubstitutionIdentity {
   query: string;
   cas_no?: string;
@@ -689,6 +714,15 @@ export interface SubstitutionLiteratureMeta {
   providers: string[];
 }
 
+export interface SubstitutionSurechemblMeta {
+  enabled: boolean;
+  queried: boolean;
+  count: number;
+  skipped_reason?: string | null;
+  provider: string;
+  search_hash?: string | null;
+}
+
 export interface SubstitutionLlmMeta {
   enabled: boolean;
   queried: boolean;
@@ -712,6 +746,8 @@ export interface SubstitutionReport {
   external_meta?: SubstitutionExternalMeta;
   literature?: LiteratureSubstituteCandidate[];
   literature_meta?: SubstitutionLiteratureMeta;
+  surechembl?: SurechemblSubstituteCandidate[];
+  surechembl_meta?: SubstitutionSurechemblMeta;
   llm?: LlmSubstituteCandidate[];
   llm_meta?: SubstitutionLlmMeta;
   layers_used?: string[];
@@ -1200,6 +1236,8 @@ export const api = {
     similarity_threshold?: number;
     include_literature?: boolean;
     literature_limit?: number;
+    include_surechembl?: boolean;
+    surechembl_limit?: number;
     include_llm?: boolean | null;
     llm_limit?: number;
   }) => post<SubstitutionReport>("/api/materials/substitutes", body),

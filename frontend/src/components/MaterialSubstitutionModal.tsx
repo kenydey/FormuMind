@@ -10,13 +10,14 @@ import {
   type SubstituteCandidate,
   type SubstitutionReport,
   type SupplyRiskReport,
+  type SurechemblSubstituteCandidate,
 } from "../api";
 
 /**
  * What could replace this component, and what would it cost.
  *
- * Four-layer funnel: L1 catalog Δ → L2 literature/KG → L3 PubChem → L4 rules/LLM.
- * Only catalog rows carry formula Δ; literature/external/AI promote via propose.
+ * Funnel: L1 catalog Δ → L2 literature/KG → L3 PubChem → SureChEMBL patents → L4 rules/LLM.
+ * Only catalog rows carry formula Δ; literature/external/SureChEMBL/AI promote via propose.
  */
 
 const CONFIDENCE_NOTE: Record<SubstituteCandidate["delta_confidence"], string> = {
@@ -75,6 +76,7 @@ export default function MaterialSubstitutionModal({
   const [includeUnavailable, setIncludeUnavailable] = useState(false);
   const [includeExternal, setIncludeExternal] = useState(true);
   const [includeLiterature, setIncludeLiterature] = useState(true);
+  const [includeSurechembl, setIncludeSurechembl] = useState(true);
   /** null = auto (L1 < 3), true = force, false = off */
   const [includeLlm, setIncludeLlm] = useState<boolean | null>(null);
   const [promoteMsg, setPromoteMsg] = useState("");
@@ -86,6 +88,10 @@ export default function MaterialSubstitutionModal({
 
   function llmRowKey(row: LlmSubstituteCandidate): string {
     return `${row.source}:${row.name}`;
+  }
+
+  function surechemblRowKey(row: SurechemblSubstituteCandidate): string {
+    return `surechembl:${row.chemical_id || row.smiles || row.name}`;
   }
 
   useEffect(() => {
@@ -116,6 +122,8 @@ export default function MaterialSubstitutionModal({
           external_limit: 8,
           include_literature: includeLiterature,
           literature_limit: 8,
+          include_surechembl: includeSurechembl,
+          surechembl_limit: 8,
           include_llm: includeLlm,
           llm_limit: 5,
         })
@@ -144,6 +152,8 @@ export default function MaterialSubstitutionModal({
     cas_no?: string | null;
     smiles?: string | null;
     role?: string | null;
+    source?: string;
+    source_ref?: string;
   }) {
     setPromoting(opts.key);
     setPromoteMsg("");
@@ -153,7 +163,8 @@ export default function MaterialSubstitutionModal({
         cas_no: opts.cas_no || undefined,
         smiles: opts.smiles || undefined,
         role: opts.role || undefined,
-        source: "user",
+        source: opts.source || "user",
+        source_ref: opts.source_ref,
       });
       const action = result.action || "unknown";
       setPromoteMsg(
@@ -200,13 +211,32 @@ export default function MaterialSubstitutionModal({
     });
   }
 
+  async function promoteSurechembl(row: SurechemblSubstituteCandidate) {
+    const patentIds = (row.patents || []).map((p) => p.doc_id).filter(Boolean).slice(0, 3);
+    await promoteCandidate({
+      key: surechemblRowKey(row),
+      name: row.name,
+      smiles: row.smiles,
+      role: row.role_hint,
+      source: "surechembl",
+      source_ref: [
+        row.chemical_id ? `SCHEMBL:${row.chemical_id}` : null,
+        patentIds.length ? `patents:${patentIds.join(",")}` : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    });
+  }
+
   const atRisk = Object.entries(risk?.at_risk ?? {});
   const external = report?.external ?? [];
   const literature = report?.literature ?? [];
+  const surechembl = report?.surechembl ?? [];
   const llm = report?.llm ?? [];
   const identity = report?.identity;
   const extMeta = report?.external_meta;
   const litMeta = report?.literature_meta;
+  const sureMeta = report?.surechembl_meta;
   const llmMeta = report?.llm_meta;
   const layersUsed = report?.layers_used ?? [];
   const showLlmSection = includeLlm !== false;
@@ -229,7 +259,8 @@ export default function MaterialSubstitutionModal({
         </div>
 
         <p className="text-slate-400 text-xs mb-3">
-          漏斗：库内预测偏离 → 文献/知识库证据 → 联网结构相似（PubChem）→ AI/规则扩召回。仅库内项含配方 Δ；化学上不相容的库内替代会排在最后并附拦截原因。
+          漏斗：库内预测偏离 → 文献/知识库证据 → 联网结构相似（PubChem）→ SureChEMBL
+          专利化学相似 → AI/规则扩召回。仅库内项含配方 Δ；化学上不相容的库内替代会排在最后并附拦截原因。
         </p>
 
         {atRisk.length > 0 && (
@@ -323,6 +354,23 @@ export default function MaterialSubstitutionModal({
               </span>
             </span>
           </label>
+          <label
+            className="flex items-start gap-2 text-[11px] text-slate-400 cursor-pointer"
+            data-testid="include-surechembl-substitutes"
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={includeSurechembl}
+              onChange={(e) => setIncludeSurechembl(e.target.checked)}
+            />
+            <span>
+              SureChEMBL 专利化学相似
+              <span className="block text-slate-500">
+                默认开启：结构相似 + 专利证据链接；与「含停产」无关；不算配方 Δ。
+              </span>
+            </span>
+          </label>
           <div
             className="flex items-start gap-2 text-[11px] text-slate-400"
             data-testid="include-llm-substitutes"
@@ -393,7 +441,8 @@ export default function MaterialSubstitutionModal({
               )}
               {report.substitute_group && ` · 可互换组 ${report.substitute_group}`} · 库内考察{" "}
               {report.total_considered} · 文献 {litMeta?.count ?? literature.length} · 联网{" "}
-              {extMeta?.count ?? external.length} · AI {llmMeta?.count ?? llm.length}
+              {extMeta?.count ?? external.length} · SureChEMBL {sureMeta?.count ?? surechembl.length} · AI{" "}
+              {llmMeta?.count ?? llm.length}
               {layersUsed.length > 0 && (
                 <span data-testid="substitute-layers-used">
                   {" "}
@@ -637,6 +686,115 @@ export default function MaterialSubstitutionModal({
                 )}
                 <div className="text-[11px] text-slate-500 mt-1">
                   ⓘ 联网项未做配方 Δ；入库后可再点「查找替代」查看偏离。聚合物/仅商品名若无法解析结构会显示原因。
+                </div>
+              </div>
+            )}
+
+            {includeSurechembl && (
+              <div data-testid="surechembl-substitutes-section">
+                <div className="text-xs text-slate-300 mb-1">
+                  SureChEMBL 候选（专利化学相似 · 选用后可入库）
+                </div>
+                {sureMeta?.skipped_reason && surechembl.length === 0 ? (
+                  <div className="text-slate-500 text-xs">{sureMeta.skipped_reason}</div>
+                ) : surechembl.length === 0 ? (
+                  <div className="text-slate-500 text-xs">暂无 SureChEMBL 相似结果。</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="text-slate-400">
+                        <tr>
+                          <th className="text-left py-1">名称</th>
+                          <th className="text-right">相似</th>
+                          <th className="text-left pl-2">专利证据</th>
+                          <th className="text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {surechembl.map((row) => {
+                          const rowKey = surechemblRowKey(row);
+                          const patents = row.patents || [];
+                          return (
+                            <tr key={rowKey} className="border-t border-edge/50 align-top">
+                              <td className="py-1">
+                                <div className="text-slate-200">{row.name}</div>
+                                {row.chemical_id && (
+                                  <div className="text-slate-500">SCHEMBL {row.chemical_id}</div>
+                                )}
+                                {row.smiles && (
+                                  <div
+                                    className="text-slate-600 truncate max-w-[14rem]"
+                                    title={row.smiles}
+                                  >
+                                    {row.smiles.length > 28
+                                      ? `${row.smiles.slice(0, 28)}…`
+                                      : row.smiles}
+                                  </div>
+                                )}
+                                {row.in_catalog && (
+                                  <div className="text-accent/80">已在库：{row.catalog_name}</div>
+                                )}
+                              </td>
+                              <td className="text-right">
+                                {(Number(row.similarity) * 100).toFixed(0)}%
+                              </td>
+                              <td className="pl-2 text-slate-500 max-w-[14rem]">
+                                {patents.length === 0 ? (
+                                  "—"
+                                ) : (
+                                  <div className="space-y-0.5">
+                                    {patents.slice(0, 2).map((p) =>
+                                      p.url ? (
+                                        <a
+                                          key={p.doc_id}
+                                          href={p.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="block text-accent/90 hover:underline truncate"
+                                          title={p.title || p.doc_id}
+                                        >
+                                          {p.doc_id}
+                                          {p.title
+                                            ? ` · ${
+                                                p.title.length > 28
+                                                  ? `${p.title.slice(0, 28)}…`
+                                                  : p.title
+                                              }`
+                                            : ""}
+                                        </a>
+                                      ) : (
+                                        <div key={p.doc_id} className="truncate">
+                                          {p.doc_id}
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="text-right">
+                                {row.in_catalog ? (
+                                  <span className="text-slate-500">见上方</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="px-2 py-0.5 rounded border border-accent/40 text-accent
+                                               hover:bg-accent/10 disabled:opacity-50"
+                                    disabled={promoting === rowKey}
+                                    onClick={() => void promoteSurechembl(row)}
+                                  >
+                                    {promoting === rowKey ? "…" : "入库并选用"}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="text-[11px] text-slate-500 mt-1">
+                  ⓘ SureChEMBL 项未做配方 Δ；专利链接指向 Google Patents（由 SCPN 推导）。
                 </div>
               </div>
             )}

@@ -318,6 +318,56 @@ describe("MaterialSubstitutionModal", () => {
     expect(screen.getByTestId("llm-substitutes-section")).toBeInTheDocument();
   });
 
+  it("defaults to SureChEMBL search and shows patent links", async () => {
+    vi.spyOn(api, "supplyRisk").mockResolvedValue(noRisk);
+    const spy = vi.spyOn(api, "findSubstitutes").mockResolvedValue(
+      report({
+        layers_used: ["catalog", "surechembl"],
+        surechembl: [
+          {
+            name: "Patent Analog X",
+            chemical_id: "12345",
+            smiles: "CCO",
+            similarity: 0.91,
+            source: "surechembl",
+            in_catalog: false,
+            patents: [
+              {
+                doc_id: "CN-104789083-B",
+                title: "Example coating patent",
+                url: "https://patents.google.com/patent/CN104789083B",
+              },
+            ],
+            note: "专利化学相似物；未做配方 Δ",
+          },
+        ],
+        surechembl_meta: {
+          enabled: true,
+          queried: true,
+          count: 1,
+          skipped_reason: null,
+          provider: "surechembl_api",
+          search_hash: "h1",
+        },
+      })
+    );
+
+    render(<MaterialSubstitutionModal onClose={vi.fn()} />);
+    expect(screen.getByTestId("include-surechembl-substitutes")).toBeInTheDocument();
+    const checkbox = screen.getByTestId("include-surechembl-substitutes").querySelector("input");
+    expect(checkbox).toBeChecked();
+
+    await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
+    await waitFor(() => expect(screen.getByText("Patent Analog X")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ include_surechembl: true })
+    );
+    expect(screen.getByTestId("surechembl-substitutes-section")).toBeInTheDocument();
+    expect(screen.getByTestId("substitute-layers-used").textContent).toContain("surechembl");
+    const link = screen.getByRole("link", { name: /CN-104789083-B/ });
+    expect(link).toHaveAttribute("href", "https://patents.google.com/patent/CN104789083B");
+  });
+
   it("still renders when the supply-risk probe fails", async () => {
     // It runs on mount; a failure there must not take the modal down.
     vi.spyOn(api, "supplyRisk").mockRejectedValue(new Error("nope"));

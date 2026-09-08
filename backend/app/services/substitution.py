@@ -261,15 +261,18 @@ def find_substitutes(
     similarity_threshold: int = 85,
     include_literature: bool = True,
     literature_limit: int = 8,
+    include_surechembl: bool = True,
+    surechembl_limit: int = 8,
     include_llm: bool | None = None,
     llm_limit: int = 5,
 ) -> dict:
     """Rank replacements for one slot, each with its predicted property delta.
 
-    Layers (four-layer funnel):
+    Layers (four-layer funnel + SureChEMBL patents):
     - L1 catalog candidates with formula Δ (always)
     - L2 literature/KG/kb_products advisory list (``include_literature``)
     - L3 PubChem structure similars (``include_external``)
+    - SureChEMBL structure similars + patent docs (``include_surechembl``)
     - L4 rules/LLM when L1 < 3 or ``include_llm`` forced (``include_llm``)
     """
     from ..domain import knowledge
@@ -425,6 +428,63 @@ def find_substitutes(
             "providers": [],
         }
 
+    surechembl_rows: list[dict] = []
+    surechembl_meta: dict
+    if include_surechembl:
+        try:
+            from .surechembl_alternatives import fetch_surechembl_alternatives
+
+            smi = str(identity.get("smiles") or original_spec.get("smiles") or "") or None
+            sch = fetch_surechembl_alternatives(
+                material=original,
+                smiles=smi,
+                limit=surechembl_limit,
+                threshold=similarity_threshold,
+                role_hint=str(role) if role else None,
+            )
+            surechembl_rows = list(sch.get("surechembl") or [])
+            surechembl_meta = dict(sch.get("surechembl_meta") or {})
+            # Light dedup vs PubChem by SMILES / InChI key.
+            ext_keys = {
+                str(r.get("smiles") or "").strip()
+                for r in external
+                if r.get("smiles")
+            } | {
+                str(r.get("inchi_key") or "").strip()
+                for r in external
+                if r.get("inchi_key")
+            }
+            if ext_keys:
+                surechembl_rows = [
+                    r
+                    for r in surechembl_rows
+                    if (str(r.get("smiles") or "").strip() not in ext_keys)
+                    and (str(r.get("inchi_key") or "").strip() not in ext_keys)
+                ]
+                surechembl_meta["count"] = len(surechembl_rows)
+            if surechembl_rows:
+                layers_used.append("surechembl")
+        except Exception as exc:
+            logger.warning("surechembl substitutes degraded ({})", exc)
+            surechembl_rows = []
+            surechembl_meta = {
+                "enabled": True,
+                "queried": False,
+                "count": 0,
+                "skipped_reason": f"surechembl_error:{exc}",
+                "provider": "surechembl_api",
+                "search_hash": None,
+            }
+    else:
+        surechembl_meta = {
+            "enabled": False,
+            "queried": False,
+            "count": 0,
+            "skipped_reason": "include_surechembl=false",
+            "provider": "surechembl_api",
+            "search_hash": None,
+        }
+
     # L4: auto when catalog hits are scarce; explicit true/false overrides.
     catalog_hits = len(candidates[:limit])
     if include_llm is True:
@@ -443,6 +503,7 @@ def find_substitutes(
             known = [c["material"] for c in candidates[:limit]]
             known.extend(r.get("name") or "" for r in literature)
             known.extend(r.get("name") or "" for r in external)
+            known.extend(r.get("name") or "" for r in surechembl_rows)
             out = fetch_llm_alternatives(
                 material=original,
                 role_hint=str(role) if role else None,
@@ -495,6 +556,8 @@ def find_substitutes(
         "external_meta": external_meta,
         "literature": literature,
         "literature_meta": literature_meta,
+        "surechembl": surechembl_rows,
+        "surechembl_meta": surechembl_meta,
         "llm": llm_rows,
         "llm_meta": llm_meta,
         "layers_used": layers_used,

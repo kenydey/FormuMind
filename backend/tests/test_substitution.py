@@ -26,9 +26,13 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def _disable_external_network(monkeypatch):
-    """Catalog substitution tests must not hit PubChem."""
+    """Catalog substitution tests must not hit PubChem / SureChEMBL."""
     monkeypatch.setattr(
         "app.services.external_alternatives.external_substitutes_enabled",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.services.surechembl_client.surechembl_enabled",
         lambda: False,
     )
 
@@ -830,3 +834,124 @@ def test_include_llm_false_skips():
     assert report["llm"] == []
     assert report["llm_meta"]["mode"] == "off"
     assert report["llm_meta"]["skipped_reason"] == "include_llm=false"
+
+def test_include_surechembl_false_returns_empty():
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=False,
+        include_surechembl=False,
+        include_llm=False,
+    )
+    assert report["surechembl"] == []
+    assert report["surechembl_meta"]["skipped_reason"] == "include_surechembl=false"
+    assert "surechembl" not in report["layers_used"]
+
+
+def test_surechembl_channel_merges_mocked_hits(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.surechembl_client.surechembl_enabled",
+        lambda: True,
+    )
+
+    def _fake_sch(**kwargs):
+        assert kwargs.get("smiles")
+        return {
+            "surechembl": [
+                {
+                    "name": "Patent Analog X",
+                    "chemical_id": "12345",
+                    "smiles": "CCO",
+                    "similarity": 0.91,
+                    "source": "surechembl",
+                    "in_catalog": False,
+                    "catalog_name": None,
+                    "patents": [
+                        {
+                            "doc_id": "CN-104789083-B",
+                            "title": "Example patent",
+                            "url": "https://patents.google.com/patent/CN104789083B",
+                        }
+                    ],
+                    "note": "专利化学相似物；未做配方 Δ",
+                }
+            ],
+            "surechembl_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 1,
+                "skipped_reason": None,
+                "provider": "surechembl_api",
+                "search_hash": "h1",
+            },
+        }
+
+    monkeypatch.setattr(
+        "app.services.surechembl_alternatives.fetch_surechembl_alternatives",
+        _fake_sch,
+    )
+    monkeypatch.setattr(
+        "app.services.external_alternatives.resolve_slot_identity",
+        lambda material, spec, network=False: {
+            "query": material,
+            "cas_no": "",
+            "smiles": "CCO",
+            "cid": None,
+            "source": "catalog",
+            "resolved": True,
+        },
+    )
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=False,
+        include_surechembl=True,
+        include_llm=False,
+    )
+    assert len(report["surechembl"]) == 1
+    assert report["surechembl"][0]["name"] == "Patent Analog X"
+    assert report["surechembl"][0]["patents"][0]["doc_id"] == "CN-104789083-B"
+    assert "surechembl" in report["layers_used"]
+
+
+def test_substitutes_endpoint_default_include_surechembl_true(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.surechembl_client.surechembl_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.services.surechembl_alternatives.fetch_surechembl_alternatives",
+        lambda **kwargs: {
+            "surechembl": [],
+            "surechembl_meta": {
+                "enabled": True,
+                "queried": False,
+                "count": 0,
+                "skipped_reason": "无法解析 SMILES；跳过 SureChEMBL 结构相似",
+                "provider": "surechembl_api",
+                "search_hash": None,
+            },
+        },
+    )
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "requirement": {"domain": "anticorrosion_coating", "voc_limit_gpl": 420},
+            "material": "Polyamide hardener",
+            "limit": 3,
+            "include_external": False,
+            "include_literature": False,
+            "include_llm": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "surechembl" in body
+    assert "surechembl_meta" in body
+    assert body["surechembl_meta"]["provider"] == "surechembl_api"
