@@ -224,6 +224,8 @@ class SubstituteRequest(BaseModel):
     similarity_threshold: int = Field(default=85, ge=60, le=100)
     include_literature: bool = True
     literature_limit: int = Field(default=8, ge=1, le=25)
+    include_llm: bool | None = None
+    llm_limit: int = Field(default=5, ge=1, le=15)
 
 
 def _slot_candidates(genome) -> list[str]:
@@ -304,6 +306,8 @@ def substitutes(body: SubstituteRequest) -> dict:
             similarity_threshold=body.similarity_threshold,
             include_literature=body.include_literature,
             literature_limit=body.literature_limit,
+            include_llm=body.include_llm,
+            llm_limit=body.llm_limit,
         )
     except HTTPException:
         raise

@@ -261,13 +261,16 @@ def find_substitutes(
     similarity_threshold: int = 85,
     include_literature: bool = True,
     literature_limit: int = 8,
+    include_llm: bool | None = None,
+    llm_limit: int = 5,
 ) -> dict:
     """Rank replacements for one slot, each with its predicted property delta.
 
-    Layers (four-layer funnel P0):
+    Layers (four-layer funnel):
     - L1 catalog candidates with formula Δ (always)
     - L2 literature/KG/kb_products advisory list (``include_literature``)
     - L3 PubChem structure similars (``include_external``)
+    - L4 rules/LLM when L1 < 3 or ``include_llm`` forced (``include_llm``)
     """
     from ..domain import knowledge
     from ..pipeline import reconstruct
@@ -422,6 +425,62 @@ def find_substitutes(
             "providers": [],
         }
 
+    # L4: auto when catalog hits are scarce; explicit true/false overrides.
+    catalog_hits = len(candidates[:limit])
+    if include_llm is True:
+        run_llm, llm_mode = True, "forced"
+    elif include_llm is False:
+        run_llm, llm_mode = False, "off"
+    else:
+        run_llm, llm_mode = catalog_hits < 3, "auto"
+
+    llm_rows: list[dict] = []
+    llm_meta: dict
+    if run_llm:
+        try:
+            from .llm_alternatives import fetch_llm_alternatives
+
+            known = [c["material"] for c in candidates[:limit]]
+            known.extend(r.get("name") or "" for r in literature)
+            known.extend(r.get("name") or "" for r in external)
+            out = fetch_llm_alternatives(
+                material=original,
+                role_hint=str(role) if role else None,
+                limit=llm_limit,
+                known_names=known,
+                allow_llm=True,
+            )
+            llm_rows = list(out.get("llm") or [])
+            llm_meta = dict(out.get("llm_meta") or {})
+            llm_meta["mode"] = llm_mode
+            if llm_rows:
+                layers_used.append("llm")
+        except Exception as exc:
+            logger.warning("llm substitutes degraded ({})", exc)
+            llm_rows = []
+            llm_meta = {
+                "enabled": True,
+                "queried": False,
+                "count": 0,
+                "skipped_reason": f"llm_error:{exc}",
+                "mode": llm_mode,
+                "providers": [],
+            }
+    else:
+        reason = (
+            "include_llm=false"
+            if include_llm is False
+            else f"auto_skipped:catalog_hits={catalog_hits}>=3"
+        )
+        llm_meta = {
+            "enabled": False,
+            "queried": False,
+            "count": 0,
+            "skipped_reason": reason,
+            "mode": llm_mode,
+            "providers": [],
+        }
+
     return {
         "original": original,
         "original_in_catalog": original_in_catalog,
@@ -436,6 +495,8 @@ def find_substitutes(
         "external_meta": external_meta,
         "literature": literature,
         "literature_meta": literature_meta,
+        "llm": llm_rows,
+        "llm_meta": llm_meta,
         "layers_used": layers_used,
     }
 

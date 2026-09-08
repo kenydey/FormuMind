@@ -280,6 +280,44 @@ describe("MaterialSubstitutionModal", () => {
     expect(screen.getByText("见上方")).toBeInTheDocument();
   });
 
+  it("defaults AI mode to auto and can show llm suggestions", async () => {
+    vi.spyOn(api, "supplyRisk").mockResolvedValue(noRisk);
+    const spy = vi.spyOn(api, "findSubstitutes").mockResolvedValue(
+      report({
+        candidates: [],
+        total_considered: 0,
+        layers_used: ["catalog", "llm"],
+        llm: [
+          {
+            name: "Lanthanum nitrate",
+            kind: "substitute_inhibitor",
+            rationale: "rare-earth passivation salt",
+            source: "llm",
+            in_catalog: false,
+            note: "AI/规则建议；未做配方 Δ",
+          },
+        ],
+        llm_meta: {
+          enabled: true,
+          queried: true,
+          count: 1,
+          skipped_reason: null,
+          mode: "auto",
+          providers: ["llm"],
+        },
+      })
+    );
+
+    render(<MaterialSubstitutionModal onClose={vi.fn()} />);
+    expect(screen.getByTestId("include-llm-mode")).toHaveValue("auto");
+    await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
+    await waitFor(() => expect(screen.getByText("Lanthanum nitrate")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ include_llm: null })
+    );
+    expect(screen.getByTestId("llm-substitutes-section")).toBeInTheDocument();
+  });
+
   it("still renders when the supply-risk probe fails", async () => {
     // It runs on mount; a failure there must not take the modal down.
     vi.spyOn(api, "supplyRisk").mockRejectedValue(new Error("nope"));

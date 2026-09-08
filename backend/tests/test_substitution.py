@@ -703,3 +703,130 @@ def test_substitutes_endpoint_default_include_external_true(monkeypatch):
     assert "external" in body
     assert "external_meta" in body
     assert body["external_meta"]["provider"] == "pubchem_fastsimilarity_2d"
+
+
+def test_llm_auto_skipped_when_catalog_rich(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.llm_alternatives.fetch_llm_alternatives",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not query llm")),
+    )
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=False,
+        include_llm=None,
+        limit=10,
+    )
+    assert len(report["candidates"]) >= 3 or report["llm_meta"]["mode"] == "auto"
+    if len(report["candidates"]) >= 3:
+        assert report["llm"] == []
+        assert report["llm_meta"]["mode"] == "auto"
+        assert "auto_skipped" in (report["llm_meta"]["skipped_reason"] or "")
+
+
+def test_llm_forced_merges_rules(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.llm_alternatives.fetch_llm_alternatives",
+        lambda **kwargs: {
+            "llm": [
+                {
+                    "name": "Waterborne polyisocyanate (hydrophilic HDI)",
+                    "kind": "substitute_crosslinker",
+                    "rationale": "rules",
+                    "source": "chemist_rules",
+                    "cas_no": None,
+                    "smiles": None,
+                    "role_hint": "hardener",
+                    "in_catalog": True,
+                    "catalog_name": "Waterborne polyisocyanate (hydrophilic HDI)",
+                    "note": "AI/规则建议；未做配方 Δ",
+                }
+            ],
+            "llm_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 1,
+                "skipped_reason": None,
+                "providers": ["chemist_rules"],
+            },
+        },
+    )
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=False,
+        include_llm=True,
+        limit=10,
+    )
+    assert report["llm_meta"]["mode"] == "forced"
+    assert report["llm"][0]["name"].startswith("Waterborne")
+    assert "llm" in report["layers_used"]
+
+
+def test_llm_auto_runs_when_catalog_scarce(monkeypatch):
+    from app.domain.genome import FormulationGenome, Slot
+
+    monkeypatch.setattr(
+        "app.services.llm_alternatives.fetch_llm_alternatives",
+        lambda **kwargs: {
+            "llm": [
+                {
+                    "name": "Lanthanum nitrate",
+                    "kind": "substitute_inhibitor",
+                    "rationale": "rare earth",
+                    "source": "llm",
+                    "in_catalog": False,
+                    "catalog_name": None,
+                    "note": "AI/规则建议；未做配方 Δ",
+                }
+            ],
+            "llm_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 1,
+                "skipped_reason": None,
+                "providers": ["llm"],
+            },
+        },
+    )
+    # Use a nonsense role so catalog pool is empty → auto L4.
+    genome = FormulationGenome(
+        domain=ProductDomain.anticorrosion_coating,
+        slots=[
+            Slot(role="mystery", material="Unknown Widget X", weight_pct=100),
+        ],
+    )
+    report = find_substitutes(
+        genome,
+        0,
+        _req(),
+        include_external=False,
+        include_literature=False,
+        include_llm=None,
+        limit=10,
+    )
+    assert report["candidates"] == []
+    assert report["llm_meta"]["mode"] == "auto"
+    assert report["llm"][0]["name"] == "Lanthanum nitrate"
+    assert "llm" in report["layers_used"]
+
+
+def test_include_llm_false_skips():
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=False,
+        include_llm=False,
+    )
+    assert report["llm"] == []
+    assert report["llm_meta"]["mode"] == "off"
+    assert report["llm_meta"]["skipped_reason"] == "include_llm=false"

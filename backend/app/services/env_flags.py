@@ -193,6 +193,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "材料替代弹窗默认按 CAS/SMILES 调用 PubChem 结构相似检索，列出可入库的联网候选。"
             "关闭后仅使用材料库内候选（请求仍可传 include_external，但会被部署开关压制）。",
             "chem", "需网络；失败降级为空列表，不影响库内替代"),
+    EnvFlag("substitute_llm", "材料替代 AI/规则扩召回",
+            "材料替代漏斗 L4：库内候选不足（或请求强制）时用化学规则表 + 可选 LLM 扩名。"
+            "关闭后跳过 LLM，仅保留规则表种子（仍可被 include_llm=false 完全关闭）。",
+            "chem", "LLM 需有效 key；失败降级为空 llm 列表"),
     EnvFlag("chem_extract_enabled", "化学实体抽取",
             "入库切块时识别 CAS/分子式/SMILES/反应方程式，写入 chunk 元数据供化学感知检索。",
             "chem", "纯离线规则层；SMILES 验证需 rdkit"),

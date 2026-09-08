@@ -651,6 +651,19 @@ export interface LiteratureSubstituteCandidate {
   note?: string | null;
 }
 
+export interface LlmSubstituteCandidate {
+  name: string;
+  kind?: string | null;
+  rationale?: string | null;
+  source: "chemist_rules" | "llm" | string;
+  cas_no?: string | null;
+  smiles?: string | null;
+  role_hint?: string | null;
+  in_catalog: boolean;
+  catalog_name?: string | null;
+  note?: string | null;
+}
+
 export interface SubstitutionIdentity {
   query: string;
   cas_no?: string;
@@ -676,6 +689,15 @@ export interface SubstitutionLiteratureMeta {
   providers: string[];
 }
 
+export interface SubstitutionLlmMeta {
+  enabled: boolean;
+  queried: boolean;
+  count: number;
+  skipped_reason?: string | null;
+  mode?: "auto" | "forced" | "off" | string;
+  providers?: string[];
+}
+
 export interface SubstitutionReport {
   original: string;
   original_in_catalog?: boolean;
@@ -690,6 +712,8 @@ export interface SubstitutionReport {
   external_meta?: SubstitutionExternalMeta;
   literature?: LiteratureSubstituteCandidate[];
   literature_meta?: SubstitutionLiteratureMeta;
+  llm?: LlmSubstituteCandidate[];
+  llm_meta?: SubstitutionLlmMeta;
   layers_used?: string[];
 }
 
@@ -1163,6 +1187,8 @@ export const api = {
     similarity_threshold?: number;
     include_literature?: boolean;
     literature_limit?: number;
+    include_llm?: boolean | null;
+    llm_limit?: number;
   }) => post<SubstitutionReport>("/api/materials/substitutes", body),
 
   supplyRisk: () => get<SupplyRiskReport>("/api/materials/supply-risk"),

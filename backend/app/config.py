@@ -205,6 +205,8 @@ class Settings(BaseSettings):
     chemtools_timeout_s: float = 10.0
     # 材料替代联网召回（PubChem fastsimilarity_2d）。默认开；失败降级为空列表。
     external_substitutes: bool = True
+    # 材料替代 L4：规则扩召回后可选 LLM 扩名。默认开；无 key/失败降级为空列表。
+    substitute_llm: bool = True
     # v2 特征集：在 v1 特征向量后追加 6 个重量加权 RDKit 分子描述符
     # （MolWt/LogP/TPSA/HBD/HBA/芳环数）。需 rdkit；切换后已训模型需重训
     # （重启后 ModelRegistry 会从存储重训，故重启即可）。默认关闭保证兼容。

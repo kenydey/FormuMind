@@ -6,6 +6,7 @@ import {
   formatApiError,
   type ExternalSubstituteCandidate,
   type LiteratureSubstituteCandidate,
+  type LlmSubstituteCandidate,
   type SubstituteCandidate,
   type SubstitutionReport,
   type SupplyRiskReport,
@@ -14,8 +15,8 @@ import {
 /**
  * What could replace this component, and what would it cost.
  *
- * Four-layer funnel (P0): L1 catalog Δ → L2 literature/KG → L3 PubChem.
- * Only catalog rows carry formula Δ; literature/external promote via propose.
+ * Four-layer funnel: L1 catalog Δ → L2 literature/KG → L3 PubChem → L4 rules/LLM.
+ * Only catalog rows carry formula Δ; literature/external/AI promote via propose.
  */
 
 const CONFIDENCE_NOTE: Record<SubstituteCandidate["delta_confidence"], string> = {
@@ -74,11 +75,17 @@ export default function MaterialSubstitutionModal({
   const [includeUnavailable, setIncludeUnavailable] = useState(false);
   const [includeExternal, setIncludeExternal] = useState(true);
   const [includeLiterature, setIncludeLiterature] = useState(true);
+  /** null = auto (L1 < 3), true = force, false = off */
+  const [includeLlm, setIncludeLlm] = useState<boolean | null>(null);
   const [promoteMsg, setPromoteMsg] = useState("");
   const [promoting, setPromoting] = useState<string | null>(null);
 
   function literatureRowKey(row: LiteratureSubstituteCandidate): string {
     return `${row.source}:${row.entity_id || row.name}`;
+  }
+
+  function llmRowKey(row: LlmSubstituteCandidate): string {
+    return `${row.source}:${row.name}`;
   }
 
   useEffect(() => {
@@ -109,6 +116,8 @@ export default function MaterialSubstitutionModal({
           external_limit: 8,
           include_literature: includeLiterature,
           literature_limit: 8,
+          include_llm: includeLlm,
+          llm_limit: 5,
         })
       );
     } catch (err) {
@@ -181,13 +190,26 @@ export default function MaterialSubstitutionModal({
     });
   }
 
+  async function promoteLlm(row: LlmSubstituteCandidate) {
+    await promoteCandidate({
+      key: llmRowKey(row),
+      name: row.name,
+      cas_no: row.cas_no,
+      smiles: row.smiles,
+      role: row.role_hint,
+    });
+  }
+
   const atRisk = Object.entries(risk?.at_risk ?? {});
   const external = report?.external ?? [];
   const literature = report?.literature ?? [];
+  const llm = report?.llm ?? [];
   const identity = report?.identity;
   const extMeta = report?.external_meta;
   const litMeta = report?.literature_meta;
+  const llmMeta = report?.llm_meta;
   const layersUsed = report?.layers_used ?? [];
+  const showLlmSection = includeLlm !== false;
 
   return (
     <div
@@ -207,7 +229,7 @@ export default function MaterialSubstitutionModal({
         </div>
 
         <p className="text-slate-400 text-xs mb-3">
-          漏斗：库内预测偏离 → 文献/知识库证据 → 联网结构相似（PubChem）。仅库内项含配方 Δ；化学上不相容的库内替代会排在最后并附拦截原因。
+          漏斗：库内预测偏离 → 文献/知识库证据 → 联网结构相似（PubChem）→ AI/规则扩召回。仅库内项含配方 Δ；化学上不相容的库内替代会排在最后并附拦截原因。
         </p>
 
         {atRisk.length > 0 && (
@@ -301,6 +323,31 @@ export default function MaterialSubstitutionModal({
               </span>
             </span>
           </label>
+          <div
+            className="flex items-start gap-2 text-[11px] text-slate-400"
+            data-testid="include-llm-substitutes"
+          >
+            <span className="mt-0.5 text-slate-500">AI</span>
+            <span className="flex-1">
+              <span className="text-slate-300">AI / 规则功能扩召回</span>
+              <select
+                className="ml-2 bg-panel border border-edge rounded px-1.5 py-0.5 text-[11px] text-slate-200"
+                value={includeLlm === null ? "auto" : includeLlm ? "on" : "off"}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setIncludeLlm(v === "auto" ? null : v === "on");
+                }}
+                data-testid="include-llm-mode"
+              >
+                <option value="auto">自动（库内&lt;3）</option>
+                <option value="on">强制开启</option>
+                <option value="off">关闭</option>
+              </select>
+              <span className="block text-slate-500 mt-0.5">
+                默认自动：库内候选不足时用规则表 + 可选 LLM 扩名；不算配方 Δ。
+              </span>
+            </span>
+          </div>
         </div>
 
         {error && (
@@ -346,7 +393,7 @@ export default function MaterialSubstitutionModal({
               )}
               {report.substitute_group && ` · 可互换组 ${report.substitute_group}`} · 库内考察{" "}
               {report.total_considered} · 文献 {litMeta?.count ?? literature.length} · 联网{" "}
-              {extMeta?.count ?? external.length}
+              {extMeta?.count ?? external.length} · AI {llmMeta?.count ?? llm.length}
               {layersUsed.length > 0 && (
                 <span data-testid="substitute-layers-used">
                   {" "}
@@ -590,6 +637,75 @@ export default function MaterialSubstitutionModal({
                 )}
                 <div className="text-[11px] text-slate-500 mt-1">
                   ⓘ 联网项未做配方 Δ；入库后可再点「查找替代」查看偏离。聚合物/仅商品名若无法解析结构会显示原因。
+                </div>
+              </div>
+            )}
+
+            {showLlmSection && (
+              <div data-testid="llm-substitutes-section">
+                <div className="text-xs text-slate-300 mb-1">
+                  AI / 规则功能建议
+                  {llmMeta?.mode ? (
+                    <span className="text-slate-500"> · mode={llmMeta.mode}</span>
+                  ) : null}
+                </div>
+                {llmMeta?.skipped_reason && llm.length === 0 ? (
+                  <div className="text-slate-500 text-xs">{llmMeta.skipped_reason}</div>
+                ) : llm.length === 0 ? (
+                  <div className="text-slate-500 text-xs">暂无 AI/规则建议。</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="text-slate-400">
+                        <tr>
+                          <th className="text-left py-1">名称</th>
+                          <th className="text-left">来源</th>
+                          <th className="text-left pl-2">理由</th>
+                          <th className="text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {llm.map((row) => {
+                          const rowKey = llmRowKey(row);
+                          return (
+                            <tr key={rowKey} className="border-t border-edge/50 align-top">
+                              <td className="py-1">
+                                <div className="text-slate-200">{row.name}</div>
+                                {row.kind && (
+                                  <div className="text-slate-500">{row.kind}</div>
+                                )}
+                                {row.in_catalog && (
+                                  <div className="text-accent/80">已在库：{row.catalog_name}</div>
+                                )}
+                              </td>
+                              <td className="text-slate-400">{row.source}</td>
+                              <td className="pl-2 text-slate-500 max-w-[16rem]">
+                                {row.rationale || "—"}
+                              </td>
+                              <td className="text-right">
+                                {row.in_catalog ? (
+                                  <span className="text-slate-500">见上方</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="px-2 py-0.5 rounded border border-accent/40 text-accent
+                                               hover:bg-accent/10 disabled:opacity-50"
+                                    disabled={promoting === rowKey}
+                                    onClick={() => void promoteLlm(row)}
+                                  >
+                                    {promoting === rowKey ? "…" : "入库并选用"}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="text-[11px] text-slate-500 mt-1">
+                  ⓘ AI/规则项未做配方 Δ，且不会编造 CAS；入库后可再查偏离。
                 </div>
               </div>
             )}
