@@ -1,7 +1,8 @@
 # 联网原料替代 — 接口草图与 Modal 线框
 
 状态：已认可 · `include_external` **默认开** · 明确不做 `materials_only` / 静默全量入库  
-关联：`POST /api/materials/substitutes` · 方案 A（PubChem 相似联网补召回）
+关联：`POST /api/materials/substitutes` · 方案 A（PubChem 相似联网补召回）  
+**后续**：四层漏斗（材料库 → 文献/KG → 结构 → AI）见 [`2026-09-08-substitutes-four-layer.md`](./2026-09-08-substitutes-four-layer.md)
 
 ---
 
