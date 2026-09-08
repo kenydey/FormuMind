@@ -235,7 +235,10 @@ def find_substitutes(
     process = process_for(req) if req is not None else {}
 
     base_form = _score_and_validate(
-        reconstruct.formulation_from_genome(target, genome), process, req
+        reconstruct.formulation_from_genome(target, genome),
+        process,
+        req,
+        enrich_network=False,
     )
     base_metrics = dict(base_form.predicted)
 
@@ -264,7 +267,7 @@ def find_substitutes(
         except Exception:
             continue
         verdict = check_formulation(form, req)
-        form = _score_and_validate(form, process, req)
+        form = _score_and_validate(form, process, req, enrich_network=False)
         candidates.append(
             {
                 "material": name,

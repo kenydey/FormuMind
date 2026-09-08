@@ -199,18 +199,26 @@ def _blend_trained(
     * numpy ridge: RMSE from training set (a conservative constant estimate).
     Blending weight w = n / (n + K) converges to the model as data grows.
     """
-    from .training import registry
-
     out_std: dict[str, float] = dict(std or {})
-    if not registry.info():
+    try:
+        from .training import registry
+
+        if not registry.info():
+            return props, out_std
+    except Exception as exc:
+        logger.debug("trained blend skipped (registry unavailable): %s", exc)
         return props, out_std
     vec = features.vector(form, process)
     pid = project_id or form.domain.value
     K = 8.0
     for metric in list(props.keys()):
-        out = registry.predict_with_std(form.domain, metric, vec, project_id=pid)
-        if out is None:
-            out = registry.predict_with_std(form.domain, metric, vec, project_id="")
+        try:
+            out = registry.predict_with_std(form.domain, metric, vec, project_id=pid)
+            if out is None:
+                out = registry.predict_with_std(form.domain, metric, vec, project_id="")
+        except Exception as exc:
+            logger.debug("trained predict skipped for %s: %s", metric, exc)
+            continue
         if out is None:
             continue
         model_pred, model_std, n = out

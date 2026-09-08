@@ -816,7 +816,11 @@ export const BACKEND_UNREACHABLE_MESSAGE =
 
 /**
  * True for browser/proxy failures that mean "backend not accepting traffic"
- * rather than an application-level 4xx/business error.
+ * rather than an application-level 4xx/5xx business error.
+ *
+ * Do NOT treat every `-> 5xx` app error as unreachable — only empty-body
+ * Vite proxy failures (`/api/... -> 500` with no parsed detail) and genuine
+ * network failures. Application Internal Server Error must stay visible.
  */
 export function isBackendUnreachableError(message: string): boolean {
   const m = message.trim();
@@ -828,10 +832,10 @@ export function isBackendUnreachableError(message: string): boolean {
   if (lower.includes("networkerror")) return true;
   if (lower.includes("network request failed")) return true;
   if (lower.includes("econnrefused")) return true;
-  // Vite proxy when uvicorn is down: "/api/projects -> 500" (often empty body).
-  if (/->\s*5\d\d\b/.test(m)) return true;
-  // Chrome/Firefox TypeError message still contains "fetch".
-  if (lower.includes("fetch")) return true;
+  // Vite proxy when uvicorn is down: path-only status fallback, empty body.
+  // e.g. "/api/projects -> 500" — not "Internal Server Error" from FastAPI.
+  if (/^\/api\/\S+\s*->\s*5\d\d\b/.test(m)) return true;
+  if (/^\/health\s*->\s*5\d\d\b/.test(m)) return true;
   return false;
 }
 

@@ -129,6 +129,8 @@ describe("formatApiError", () => {
     expect(formatApiError(new Error("Load failed"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
     expect(formatApiError(new Error("Failed to fetch"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
     expect(formatApiError(new Error("/api/projects -> 500"))).toBe(BACKEND_UNREACHABLE_MESSAGE);
+    // Application 500 detail must not be rewritten as "backend down".
+    expect(formatApiError(new Error("Internal Server Error"))).toBe("Internal Server Error");
   });
 
   it("appends structured candidates from ApiError", () => {
@@ -145,6 +147,8 @@ describe("isBackendUnreachableError", () => {
     expect(isBackendUnreachableError("/api/projects -> 500")).toBe(true);
     expect(isBackendUnreachableError(BACKEND_UNREACHABLE_MESSAGE)).toBe(true);
     expect(isBackendUnreachableError("validation failed")).toBe(false);
+    expect(isBackendUnreachableError("Internal Server Error")).toBe(false);
+    expect(isBackendUnreachableError("Failed to fetch something later")).toBe(true);
   });
 });
 

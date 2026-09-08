@@ -290,16 +290,25 @@ def substitutes(body: SubstituteRequest) -> dict:
     if not 0 <= index < len(genome.slots):
         raise HTTPException(status_code=400, detail="slot_index 超出范围")
 
-    return find_substitutes(
-        genome,
-        index,
-        req,
-        limit=body.limit,
-        include_unavailable=body.include_unavailable,
-        include_external=body.include_external,
-        external_limit=body.external_limit,
-        similarity_threshold=body.similarity_threshold,
-    )
+    try:
+        return find_substitutes(
+            genome,
+            index,
+            req,
+            limit=body.limit,
+            include_unavailable=body.include_unavailable,
+            include_external=body.include_external,
+            external_limit=body.external_limit,
+            similarity_threshold=body.similarity_threshold,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("materials substitutes failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"材料替代分析失败：{exc}",
+        ) from exc
 
 
 @router.get("/supply-risk")

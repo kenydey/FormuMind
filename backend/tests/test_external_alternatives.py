@@ -58,11 +58,11 @@ def test_pubchem_similar_parses_property_table(monkeypatch):
                     ]
                 }
             }
-        if "RegistryNumber" in url:
+        if "RegistryNumber" in url or "synonyms" in url:
             return {
                 "InformationList": {
                     "Information": [
-                        {"CID": 887, "RegistryNumber": ["67-56-1"]},
+                        {"CID": 887, "Synonym": ["Methyl alcohol", "67-56-1", "MeOH"]},
                     ]
                 }
             }

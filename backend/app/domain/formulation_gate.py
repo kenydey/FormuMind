@@ -147,6 +147,7 @@ def _resolve_fields(
     molar_mass: float | None = None,
     role: str | None = None,
     component_type: str | None = None,
+    network: bool = True,
 ) -> tuple[dict, list[str]]:
     """Unified ingredient/component enrich — catalog → lookup → chemtools."""
     warnings: list[str] = []
@@ -195,7 +196,7 @@ def _resolve_fields(
     need_formula = not merged_formula
     need_mm = merged_mm is None
 
-    if any((need_cas, need_zh, need_smiles, need_formula, need_mm)):
+    if network and any((need_cas, need_zh, need_smiles, need_formula, need_mm)):
         from ..services.chemical_lookup import lookup_chemical
 
         lookup_name = canon_name if canon_name != display_name else display_name
@@ -212,7 +213,7 @@ def _resolve_fields(
     # 反查必须建立在 CAS 校验和通过之上（C18：未通过校验和的 CAS 绝不用于
     # 反查数据库/覆盖字段，否则伪造或错填的 CAS 可绕过闸门污染成分数据）。
     # 128 行已把不过校验和的 merged_cas 清空，此处条件再次显式校验。
-    if merged_cas and _cas_checksum_ok(merged_cas):
+    if network and merged_cas and _cas_checksum_ok(merged_cas):
         from ..services.chemical_lookup import lookup_chemical
 
         by_cas = lookup_chemical(merged_cas)
@@ -245,7 +246,11 @@ def _resolve_fields(
     )
 
     # P1: 网络检索兜底 — ChemCrow/PubChem 全 miss 的长尾材料名，Tavily 检索补 CAS。
-    if not (updates.get("smiles") or merged_smiles) or not (updates.get("cas_no") or merged_cas):
+    # Material-substitution scoring passes network=False to avoid multi-second
+    # DuckDuckGo/primp latency on every candidate swap.
+    if network and (
+        not (updates.get("smiles") or merged_smiles) or not (updates.get("cas_no") or merged_cas)
+    ):
         warnings.extend(_web_search_gap_fill(gap_name, updates))
 
     if not component_type and not updates.get("component_type") and (role or updates.get("role")):
@@ -254,7 +259,7 @@ def _resolve_fields(
     return updates, warnings
 
 
-def enrich_ingredient(ing: Ingredient) -> Ingredient:
+def enrich_ingredient(ing: Ingredient, *, network: bool = True) -> Ingredient:
     updates, _ = _resolve_fields(
         ing.name,
         cas_no=ing.cas_no,
@@ -264,13 +269,14 @@ def enrich_ingredient(ing: Ingredient) -> Ingredient:
         molar_mass=ing.molar_mass,
         role=ing.role,
         component_type=ing.component_type,
+        network=network,
     )
     if not ing.component_type and (ing.role or updates.get("role")):
         updates.setdefault("component_type", ing.role or updates.get("role", ""))
     return ing.model_copy(update=updates) if updates else ing
 
 
-def enrich_component(comp: RecommendedFormulaComponent) -> RecommendedFormulaComponent:
+def enrich_component(comp: RecommendedFormulaComponent, *, network: bool = True) -> RecommendedFormulaComponent:
     updates, _ = _resolve_fields(
         comp.name,
         cas_no=comp.cas_no or None,
@@ -279,12 +285,13 @@ def enrich_component(comp: RecommendedFormulaComponent) -> RecommendedFormulaCom
         mf=comp.mf,
         molar_mass=comp.molar_mass,
         component_type=comp.component_type,
+        network=network,
     )
     return comp.model_copy(update=updates) if updates else comp
 
 
-def enrich_formulation(form: Formulation) -> Formulation:
-    ingredients = [enrich_ingredient(i) for i in form.ingredients]
+def enrich_formulation(form: Formulation, *, network: bool = True) -> Formulation:
+    ingredients = [enrich_ingredient(i, network=network) for i in form.ingredients]
     return form.model_copy(update={"ingredients": ingredients})
 
 

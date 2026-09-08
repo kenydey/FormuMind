@@ -79,6 +79,7 @@ def _score_and_validate(
     chem_screen_local: bool = False,
     objectives: list[ObjectiveSpec] | None = None,
     bounds: dict[str, tuple[float, float]] | None = None,
+    enrich_network: bool = True,
 ) -> Formulation:
     from ..domain.project_spec import normalize_requirement, primary_objective
 
@@ -91,7 +92,7 @@ def _score_and_validate(
     # re-predicts internally).
     from ..domain.formulation_gate import enrich_formulation
 
-    form = enrich_formulation(form)
+    form = enrich_formulation(form, network=enrich_network)
     form.predicted, form.predicted_std = predictor.predict_full(form, process, req=req)
     voc_limit = req.voc_limit_gpl if req else None
     form.warnings = validate_formulation(form, voc_limit_gpl=voc_limit)

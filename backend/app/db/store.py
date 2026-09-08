@@ -74,13 +74,30 @@ def _blocks_for_training(rec: ExperimentRecord) -> dict[str, Any]:
     }
 
 
+def _coerce_factor_floats(raw: dict | None) -> dict[str, float]:
+    """Keep only numeric factor levers; drop metadata blobs (e.g. ``_doe_metadata``)."""
+    out: dict[str, float] = {}
+    for key, val in (raw or {}).items():
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, (int, float)):
+            out[str(key)] = float(val)
+            continue
+        if isinstance(val, str):
+            try:
+                out[str(key)] = float(val)
+            except ValueError:
+                continue
+    return out
+
+
 def _record_from_item_data(item_data: dict[str, Any]) -> ExperimentRecord:
     validate_blocks(item_data, _TRAINING_BLOCKS)
     data = (item_data.get("blocks_obj") or {}).get(_TRAINING_BLOCK, {}).get("data") or {}
     return ExperimentRecord(
         domain=ProductDomain(data.get("domain", "anticorrosion_coating")),
         project_id=str(data.get("project_id") or ""),
-        factors=dict(data.get("factors") or {}),
+        factors=_coerce_factor_floats(data.get("factors") or {}),
         cure_temperature_c=data.get("cure_temperature_c"),
         measured=dict(data.get("measured") or {}),
         source=str(data.get("source") or "lab"),
@@ -104,7 +121,17 @@ class JsonExperimentStore:
             except (json.JSONDecodeError, FileNotFoundError) as exc:
                 logger.warning("JSON store corrupted, resetting: %s", exc)
                 return []
-            return [ExperimentRecord(**r) for r in raw]
+            out: list[ExperimentRecord] = []
+            for row in raw:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    payload = dict(row)
+                    payload["factors"] = _coerce_factor_floats(payload.get("factors"))
+                    out.append(ExperimentRecord(**payload))
+                except Exception as exc:
+                    logger.warning("Skipping corrupt experiment JSON row: %s", exc)
+            return out
 
     def _write(self, records: list[ExperimentRecord]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -135,23 +162,6 @@ class JsonExperimentStore:
 
     def close(self) -> None:
         return None
-
-
-def _coerce_factor_floats(raw: dict | None) -> dict[str, float]:
-    """Keep only numeric factor levers; drop metadata blobs (e.g. ``_doe_metadata``)."""
-    out: dict[str, float] = {}
-    for key, val in (raw or {}).items():
-        if isinstance(val, bool):
-            continue
-        if isinstance(val, (int, float)):
-            out[str(key)] = float(val)
-            continue
-        if isinstance(val, str):
-            try:
-                out[str(key)] = float(val)
-            except ValueError:
-                continue
-    return out
 
 
 def _row_to_record(row: ExperimentRow) -> ExperimentRecord:
@@ -192,7 +202,13 @@ class SqlExperimentStore:
                 .where(ExperimentRow.item_id.is_(None))
                 .order_by(ExperimentRow.id)
             ).all()
-            return [_row_to_record(r) for r in rows]
+            out: list[ExperimentRecord] = []
+            for r in rows:
+                try:
+                    out.append(_row_to_record(r))
+                except Exception as exc:
+                    logger.warning("Skipping corrupt experiment SQL row id=%s: %s", getattr(r, "id", "?"), exc)
+            return out
 
     def add(self, records: list[ExperimentRecord]) -> None:
         if not records:

@@ -17,12 +17,15 @@ Training backend follows the same pattern:
 """
 from __future__ import annotations
 
+import logging
 import math
 import threading
 
 import numpy as np
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 from ..domain import features
 from ..domain.schemas import ExperimentRecord, ModelInfo, ProductDomain, Requirement, Substrate
 from ..pipeline import reconstruct  # lightweight: form-from-factors, no cycle
@@ -303,8 +306,28 @@ class ModelRegistry:
 # On startup, migrate legacy experiments.json and inline SQL rows if needed.
 def _build_registry() -> ModelRegistry:
     from ..db.migrate import migrate_experiments_if_needed
-    migrate_experiments_if_needed()
-    return ModelRegistry()
+
+    try:
+        migrate_experiments_if_needed()
+    except Exception as exc:
+        logger.warning("experiment migrate skipped during registry build: %s", exc)
+    try:
+        return ModelRegistry()
+    except Exception as exc:
+        logger.warning("ModelRegistry unavailable (%s); using empty registry", exc)
+        # Construct without load by temporarily using an empty JSON store.
+        from ..db.store import JsonExperimentStore
+        import tempfile
+        from pathlib import Path
+
+        empty = Path(tempfile.mkdtemp(prefix="fm-empty-exp-")) / "empty.json"
+        empty.write_text("[]", encoding="utf-8")
+        reg = object.__new__(ModelRegistry)
+        reg._lock = threading.RLock()
+        reg._store = JsonExperimentStore(str(empty))
+        reg._models = {}
+        reg._records = []
+        return reg
 
 
 class _RegistryProxy:

@@ -141,13 +141,12 @@ def _cid_from_name(name: str) -> int | None:
 
 
 def _cas_map_for_cids(cids: list[int]) -> dict[int, str]:
-    """Batch RegistryNumber lookup; best-effort."""
+    """Best-effort CAS from PubChem synonyms (RegistryNumber xref is unreliable)."""
     out: dict[int, str] = {}
     if not cids:
         return out
-    # PubChem accepts comma-separated CIDs.
     chunk = ",".join(str(c) for c in cids[:25])
-    data = _http_get_json(f"{_PUBCHEM}/compound/cid/{chunk}/xrefs/RegistryNumber/JSON")
+    data = _http_get_json(f"{_PUBCHEM}/compound/cid/{chunk}/synonyms/JSON")
     if not data:
         return out
     for info in (data.get("InformationList") or {}).get("Information") or []:
@@ -155,15 +154,12 @@ def _cas_map_for_cids(cids: list[int]) -> dict[int, str]:
             cid_i = int(info.get("CID"))
         except (TypeError, ValueError):
             continue
-        nums = info.get("RegistryNumber") or []
         chosen = ""
-        for n in nums:
-            s = str(n).strip()
+        for syn in info.get("Synonym") or []:
+            s = str(syn).strip()
             if _CAS_RE.match(s):
                 chosen = s
                 break
-        if not chosen and nums:
-            chosen = str(nums[0]).strip()
         if chosen:
             out[cid_i] = chosen
     return out
