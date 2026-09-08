@@ -607,6 +607,13 @@ export interface SubstituteCandidate {
   blocking_reasons: string[];
   score_after: number | null;
   source?: string;
+  requirement_fit?: number;
+  evidence?: Array<{
+    source_id?: string;
+    chunk_id?: string | null;
+    sentence?: string;
+    confidence?: number | null;
+  }>;
 }
 
 export interface ExternalSubstituteCandidate {
@@ -622,6 +629,25 @@ export interface ExternalSubstituteCandidate {
   in_catalog: boolean;
   catalog_name?: string | null;
   role_hint?: string | null;
+  note?: string | null;
+}
+
+export interface LiteratureSubstituteCandidate {
+  name: string;
+  source: "kg" | "kb_product" | "kb_chunk" | string;
+  confidence?: number | null;
+  entity_id?: string | null;
+  cas_no?: string | null;
+  smiles?: string | null;
+  role_hint?: string | null;
+  in_catalog: boolean;
+  catalog_name?: string | null;
+  evidence?: Array<{
+    source_id?: string;
+    chunk_id?: string | null;
+    sentence?: string;
+    confidence?: number | null;
+  }>;
   note?: string | null;
 }
 
@@ -642,8 +668,17 @@ export interface SubstitutionExternalMeta {
   provider: string;
 }
 
+export interface SubstitutionLiteratureMeta {
+  enabled: boolean;
+  queried: boolean;
+  count: number;
+  skipped_reason?: string | null;
+  providers: string[];
+}
+
 export interface SubstitutionReport {
   original: string;
+  original_in_catalog?: boolean;
   slot_index: number;
   role: string;
   substitute_group: string | null;
@@ -653,6 +688,9 @@ export interface SubstitutionReport {
   identity?: SubstitutionIdentity;
   external?: ExternalSubstituteCandidate[];
   external_meta?: SubstitutionExternalMeta;
+  literature?: LiteratureSubstituteCandidate[];
+  literature_meta?: SubstitutionLiteratureMeta;
+  layers_used?: string[];
 }
 
 export interface SupplyRiskReport {
@@ -1123,6 +1161,8 @@ export const api = {
     include_external?: boolean;
     external_limit?: number;
     similarity_threshold?: number;
+    include_literature?: boolean;
+    literature_limit?: number;
   }) => post<SubstitutionReport>("/api/materials/substitutes", body),
 
   supplyRisk: () => get<SupplyRiskReport>("/api/materials/supply-risk"),

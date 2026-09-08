@@ -474,6 +474,196 @@ def test_external_channel_merges_mocked_pubchem(monkeypatch):
     assert report["identity"]["resolved"] is True
 
 
+def test_include_literature_false_returns_empty_literature():
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=False,
+    )
+    assert report["literature"] == []
+    assert report["literature_meta"]["skipped_reason"] == "include_literature=false"
+    assert "literature" not in report["layers_used"]
+    assert "catalog" in report["layers_used"]
+
+
+def test_literature_channel_merges_mocked_kg_kb(monkeypatch):
+    def _fake_lit(**kwargs):
+        return {
+            "literature": [
+                {
+                    "name": "Fake Lit Hardener",
+                    "source": "kg",
+                    "confidence": 0.8,
+                    "entity_id": "chem:fake",
+                    "cas_no": None,
+                    "smiles": None,
+                    "role_hint": "hardener",
+                    "in_catalog": False,
+                    "catalog_name": None,
+                    "evidence": [
+                        {
+                            "source_id": "doi:10.0/fake",
+                            "chunk_id": None,
+                            "sentence": "Fake Lit Hardener substitutes polyamide.",
+                            "confidence": 0.7,
+                        }
+                    ],
+                    "note": "知识图谱 substitutes 边",
+                }
+            ],
+            "literature_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 1,
+                "skipped_reason": None,
+                "providers": ["kg"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "app.services.literature_alternatives.fetch_literature_alternatives",
+        _fake_lit,
+    )
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=True,
+    )
+    assert len(report["literature"]) == 1
+    assert report["literature"][0]["name"] == "Fake Lit Hardener"
+    assert "literature" in report["layers_used"]
+    assert report["original_in_catalog"] is True
+
+
+def test_literature_failure_degrades_without_500(monkeypatch):
+    def _boom(**kwargs):
+        raise RuntimeError("kg down")
+
+    monkeypatch.setattr(
+        "app.services.literature_alternatives.fetch_literature_alternatives",
+        _boom,
+    )
+    genome = _genome()
+    report = find_substitutes(
+        genome,
+        _slot_of(genome, "hardener"),
+        _req(),
+        include_external=False,
+        include_literature=True,
+    )
+    assert report["candidates"]  # catalog still present
+    assert report["literature"] == []
+    assert "literature_error" in (report["literature_meta"]["skipped_reason"] or "")
+
+
+def test_requirement_fit_prefers_voc_reduction():
+    from app.services.substitution import _requirement_fit
+
+    req = _req(voc=350)
+    better = {
+        "deltas": {
+            "voc_gpl": {"pct": -20.0},
+            "salt_spray_hours": {"pct": 0.0},
+            "cost_cny_per_kg": {"pct": 5.0},
+        }
+    }
+    worse = {
+        "deltas": {
+            "voc_gpl": {"pct": 10.0},
+            "salt_spray_hours": {"pct": 0.0},
+            "cost_cny_per_kg": {"pct": -5.0},
+        }
+    }
+    assert _requirement_fit(better, req) > _requirement_fit(worse, req)
+
+
+def test_uncatalogued_slot_still_returns_literature_keys(monkeypatch):
+    from app.domain.genome import FormulationGenome, Slot
+
+    monkeypatch.setattr(
+        "app.services.literature_alternatives.fetch_literature_alternatives",
+        lambda **kwargs: {
+            "literature": [
+                {
+                    "name": "Cerium nitrate",
+                    "source": "kb_product",
+                    "confidence": 0.55,
+                    "entity_id": None,
+                    "cas_no": None,
+                    "smiles": None,
+                    "role_hint": "inhibitor",
+                    "in_catalog": True,
+                    "catalog_name": "Cerium nitrate",
+                    "evidence": [],
+                    "note": "KB 产品登记簿",
+                }
+            ],
+            "literature_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 1,
+                "skipped_reason": None,
+                "providers": ["kb_product"],
+            },
+        },
+    )
+    genome = FormulationGenome(
+        domain=ProductDomain.anticorrosion_coating,
+        slots=[
+            Slot(role="resin", material="Bisphenol-A epoxy (DGEBA)", weight_pct=40),
+            Slot(role="hardener", material="Polyamide hardener", weight_pct=14),
+            Slot(role="inhibitor", material="Cerium nitrate hexahydrate", weight_pct=3),
+            Slot(role="solvent", material="Deionized water", weight_pct=43),
+        ],
+    )
+    report = find_substitutes(
+        genome, 2, _req(), include_external=False, include_literature=True, limit=10
+    )
+    assert report["original"] == "Cerium nitrate hexahydrate"
+    assert report["original_in_catalog"] is False
+    assert "literature" in report
+    assert report["literature"][0]["name"] == "Cerium nitrate"
+    assert "literature" in report["layers_used"]
+
+
+def test_substitutes_endpoint_default_include_literature_true(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.literature_alternatives.fetch_literature_alternatives",
+        lambda **kwargs: {
+            "literature": [],
+            "literature_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 0,
+                "skipped_reason": "无文献/产品替代命中",
+                "providers": [],
+            },
+        },
+    )
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "requirement": {"domain": "anticorrosion_coating", "voc_limit_gpl": 420},
+            "material": "Polyamide hardener",
+            "limit": 3,
+            "include_external": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "literature" in body
+    assert "literature_meta" in body
+    assert "layers_used" in body
+    assert "original_in_catalog" in body
+    assert body["literature_meta"]["enabled"] is True
+
+
 def test_substitutes_endpoint_default_include_external_true(monkeypatch):
     monkeypatch.setattr(
         "app.services.external_alternatives.external_substitutes_enabled",

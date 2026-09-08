@@ -200,6 +200,86 @@ describe("MaterialSubstitutionModal", () => {
     expect(screen.getByRole("button", { name: /入库并选用/ })).toBeInTheDocument();
   });
 
+  it("defaults to literature search and shows literature candidates", async () => {
+    vi.spyOn(api, "supplyRisk").mockResolvedValue(noRisk);
+    const spy = vi.spyOn(api, "findSubstitutes").mockResolvedValue(
+      report({
+        layers_used: ["catalog", "literature"],
+        literature: [
+          {
+            name: "Lit Substitute Amine",
+            source: "kg",
+            confidence: 0.72,
+            entity_id: "chem:lit:amine",
+            cas_no: null,
+            smiles: null,
+            role_hint: "hardener",
+            in_catalog: false,
+            evidence: [
+              {
+                source_id: "doi:10.1/x",
+                sentence: "IPDA may replace polyamide hardeners in epoxy systems.",
+                confidence: 0.7,
+              },
+            ],
+            note: "知识图谱 substitutes 边",
+          },
+        ],
+        literature_meta: {
+          enabled: true,
+          queried: true,
+          count: 1,
+          skipped_reason: null,
+          providers: ["kg"],
+        },
+      })
+    );
+
+    render(<MaterialSubstitutionModal onClose={vi.fn()} />);
+    expect(screen.getByTestId("include-literature-substitutes")).toBeInTheDocument();
+    const checkbox = screen.getByTestId("include-literature-substitutes").querySelector("input");
+    expect(checkbox).toBeChecked();
+
+    await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
+    await waitFor(() => expect(screen.getByText("Lit Substitute Amine")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ include_literature: true })
+    );
+    expect(screen.getByTestId("literature-substitutes-section")).toBeInTheDocument();
+    expect(screen.getByTestId("substitute-layers-used").textContent).toContain("literature");
+    expect(screen.getByRole("button", { name: /入库并选用/ })).toBeInTheDocument();
+  });
+
+  it("marks in-catalog literature rows as already available above", async () => {
+    vi.spyOn(api, "supplyRisk").mockResolvedValue(noRisk);
+    vi.spyOn(api, "findSubstitutes").mockResolvedValue(
+      report({
+        literature: [
+          {
+            name: "Isophorone diamine (IPDA)",
+            source: "kb_product",
+            confidence: 0.5,
+            in_catalog: true,
+            catalog_name: "Isophorone diamine (IPDA)",
+            evidence: [],
+          },
+        ],
+        literature_meta: {
+          enabled: true,
+          queried: true,
+          count: 1,
+          skipped_reason: null,
+          providers: ["kb_product"],
+        },
+      })
+    );
+
+    render(<MaterialSubstitutionModal onClose={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
+    await waitFor(() => expect(screen.getByText(/已在库/)).toBeInTheDocument());
+    expect(screen.getByText("见上方")).toBeInTheDocument();
+  });
+
   it("still renders when the supply-risk probe fails", async () => {
     // It runs on mount; a failure there must not take the modal down.
     vi.spyOn(api, "supplyRisk").mockRejectedValue(new Error("nope"));

@@ -158,6 +158,57 @@ def _metric_deltas(before: dict, after: dict) -> dict[str, dict]:
     return out
 
 
+def _requirement_fit(candidate: dict, req: Requirement | None) -> float:
+    """Soft score: how well candidate deltas move toward requirement objectives.
+
+    Higher is better. Missing objectives / deltas → 0 (no penalty).
+    """
+    if req is None:
+        return 0.0
+    objectives = list(getattr(req, "objectives", None) or [])
+    if not objectives:
+        # Domain heuristics when the caller did not declare objectives.
+        domain = getattr(getattr(req, "domain", None), "value", None) or str(
+            getattr(req, "domain", "") or ""
+        )
+        if domain == "degreaser":
+            objectives = [
+                type("O", (), {"metric": "cleaning_efficiency", "direction": "maximize"})(),
+                type("O", (), {"metric": "cost_cny_per_kg", "direction": "minimize"})(),
+            ]
+        else:
+            objectives = [
+                type("O", (), {"metric": "salt_spray_hours", "direction": "maximize"})(),
+                type("O", (), {"metric": "voc_gpl", "direction": "minimize"})(),
+                type("O", (), {"metric": "cost_cny_per_kg", "direction": "minimize"})(),
+            ]
+        voc_limit = getattr(req, "voc_limit_gpl", None)
+        if voc_limit is not None:
+            # Prefer stronger VOC reduction when a limit is set.
+            objectives = [
+                type("O", (), {"metric": "voc_gpl", "direction": "minimize"})(),
+                *objectives,
+            ]
+
+    deltas = candidate.get("deltas") or {}
+    score = 0.0
+    for obj in objectives:
+        metric = getattr(obj, "metric", None) or ""
+        direction = (getattr(obj, "direction", None) or "maximize").lower()
+        pct = (deltas.get(metric) or {}).get("pct")
+        if pct is None:
+            continue
+        try:
+            pct_f = float(pct)
+        except (TypeError, ValueError):
+            continue
+        if direction == "minimize":
+            score += -pct_f
+        else:
+            score += pct_f
+    return round(score, 4)
+
+
 def _kg_evidence(original: str, candidate: str) -> list[dict]:
     """Literature-backed substitution edges, when the graph is enabled."""
     from .kg.retrieval import kg_enabled
@@ -208,17 +259,15 @@ def find_substitutes(
     include_external: bool = True,
     external_limit: int = 8,
     similarity_threshold: int = 85,
+    include_literature: bool = True,
+    literature_limit: int = 8,
 ) -> dict:
     """Rank replacements for one slot, each with its predicted property delta.
 
-    Any slot may be queried. ``FormulationGenome.swappable()`` deliberately
-    excludes carriers and fillers, but that is a constraint on *automated
-    search*; when a user asks what could replace a pigment, the answer is not
-    "that slot is off-limits".
-
-    When ``include_external`` is true (default), also returns PubChem
-    structure-similar candidates under ``external`` (no formula Δ until
-    promoted into the catalog).
+    Layers (four-layer funnel P0):
+    - L1 catalog candidates with formula Δ (always)
+    - L2 literature/KG/kb_products advisory list (``include_literature``)
+    - L3 PubChem structure similars (``include_external``)
     """
     from ..domain import knowledge
     from ..pipeline import reconstruct
@@ -231,6 +280,7 @@ def find_substitutes(
     slot = genome.slots[slot_index]
     original = slot.material
     original_spec = dict(knowledge.RAW_MATERIALS.get(original) or {})
+    original_in_catalog = bool(original_spec) or original in knowledge.RAW_MATERIALS
     target = req if req is not None else genome.domain
     process = process_for(req) if req is not None else {}
 
@@ -273,34 +323,32 @@ def find_substitutes(
         except Exception as exc:
             logger.debug("substitution candidate {} skipped ({})", name, exc)
             continue
-        candidates.append(
-            {
-                "material": name,
-                "zh_name": spec.get("zh_name"),
-                "role": spec.get("role"),
-                "functional_class": spec.get("functional_class"),
-                "substitute_group": spec.get("substitute_group"),
-                "availability": spec.get("availability", "in_stock"),
-                "supplier": spec.get("supplier"),
-                "structural_score": score,
-                "structural_breakdown": breakdown,
-                "deltas": _metric_deltas(base_metrics, form.predicted),
-                "delta_confidence": _delta_confidence(original_spec, spec),
-                "feasible": verdict.feasible,
-                "blocking_reasons": [] if verdict.feasible else verdict.reasons,
-                "evidence": _kg_evidence(original, name),
-                "score_after": form.score,
-                "source": "catalog",
-            }
-        )
+        cand = {
+            "material": name,
+            "zh_name": spec.get("zh_name"),
+            "role": spec.get("role"),
+            "functional_class": spec.get("functional_class"),
+            "substitute_group": spec.get("substitute_group"),
+            "availability": spec.get("availability", "in_stock"),
+            "supplier": spec.get("supplier"),
+            "structural_score": score,
+            "structural_breakdown": breakdown,
+            "deltas": _metric_deltas(base_metrics, form.predicted),
+            "delta_confidence": _delta_confidence(original_spec, spec),
+            "feasible": verdict.feasible,
+            "blocking_reasons": [] if verdict.feasible else verdict.reasons,
+            "evidence": _kg_evidence(original, name),
+            "score_after": form.score,
+            "source": "catalog",
+        }
+        cand["requirement_fit"] = _requirement_fit(cand, req)
+        candidates.append(cand)
 
-    # Chemically infeasible replacements sort last however similar they look.
-    # Structural ties are common — everything in one substitute_group scores
-    # identically when no Hansen or Tanimoto data separates them — so break
-    # them on the predicted outcome rather than alphabetically.
+    # Feasible first; then requirement-fit; then structural / score.
     candidates.sort(
         key=lambda c: (
             not c["feasible"],
+            -float(c.get("requirement_fit") or 0.0),
             -c["structural_score"],
             -(c["score_after"] or 0.0),
             c["material"],
@@ -310,6 +358,8 @@ def find_substitutes(
     identity: dict
     external: list[dict] = []
     external_meta: dict
+    layers_used: list[str] = ["catalog"]
+
     if include_external:
         from .external_alternatives import fetch_external_alternatives
 
@@ -323,6 +373,8 @@ def find_substitutes(
         identity = ext["identity"]
         external = list(ext.get("external") or [])
         external_meta = dict(ext.get("external_meta") or {})
+        if external_meta.get("queried") and external:
+            layers_used.append("external")
     else:
         from .external_alternatives import resolve_slot_identity
 
@@ -335,8 +387,44 @@ def find_substitutes(
             "provider": "pubchem_fastsimilarity_2d",
         }
 
+    literature: list[dict] = []
+    literature_meta: dict
+    if include_literature:
+        try:
+            from .literature_alternatives import fetch_literature_alternatives
+
+            lit = fetch_literature_alternatives(
+                material=original,
+                cas_no=str(identity.get("cas_no") or original_spec.get("cas_no") or ""),
+                role_hint=str(role) if role else None,
+                limit=literature_limit,
+            )
+            literature = list(lit.get("literature") or [])
+            literature_meta = dict(lit.get("literature_meta") or {})
+            if literature:
+                layers_used.append("literature")
+        except Exception as exc:
+            logger.warning("literature substitutes degraded ({})", exc)
+            literature = []
+            literature_meta = {
+                "enabled": True,
+                "queried": False,
+                "count": 0,
+                "skipped_reason": f"literature_error:{exc}",
+                "providers": [],
+            }
+    else:
+        literature_meta = {
+            "enabled": False,
+            "queried": False,
+            "count": 0,
+            "skipped_reason": "include_literature=false",
+            "providers": [],
+        }
+
     return {
         "original": original,
+        "original_in_catalog": original_in_catalog,
         "slot_index": slot_index,
         "role": role,
         "substitute_group": group,
@@ -346,6 +434,9 @@ def find_substitutes(
         "identity": identity,
         "external": external,
         "external_meta": external_meta,
+        "literature": literature,
+        "literature_meta": literature_meta,
+        "layers_used": layers_used,
     }
 
 

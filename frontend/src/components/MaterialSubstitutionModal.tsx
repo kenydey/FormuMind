@@ -5,6 +5,7 @@ import {
   api,
   formatApiError,
   type ExternalSubstituteCandidate,
+  type LiteratureSubstituteCandidate,
   type SubstituteCandidate,
   type SubstitutionReport,
   type SupplyRiskReport,
@@ -13,14 +14,8 @@ import {
 /**
  * What could replace this component, and what would it cost.
  *
- * The ranking signal users actually need is the predicted property delta, not
- * a similarity score — so the table leads with "what changes" and annotates
- * how much resolution that prediction has. Launched from the recommended
- * formula's ingredient table (component-level 🔁), so the material is pre-
- * selected; the dropdown remains for pivoting to another component.
- *
- * Networked PubChem similars appear in a second list (default on); they do
- * not carry formula Δ until promoted into the catalog.
+ * Four-layer funnel (P0): L1 catalog Δ → L2 literature/KG → L3 PubChem.
+ * Only catalog rows carry formula Δ; literature/external promote via propose.
  */
 
 const CONFIDENCE_NOTE: Record<SubstituteCandidate["delta_confidence"], string> = {
@@ -78,8 +73,13 @@ export default function MaterialSubstitutionModal({
   const [candidates, setCandidates] = useState<string[]>([]);
   const [includeUnavailable, setIncludeUnavailable] = useState(false);
   const [includeExternal, setIncludeExternal] = useState(true);
+  const [includeLiterature, setIncludeLiterature] = useState(true);
   const [promoteMsg, setPromoteMsg] = useState("");
   const [promoting, setPromoting] = useState<string | null>(null);
+
+  function literatureRowKey(row: LiteratureSubstituteCandidate): string {
+    return `${row.source}:${row.entity_id || row.name}`;
+  }
 
   useEffect(() => {
     api.supplyRisk().then(setRisk).catch(() => setRisk(null));
@@ -107,6 +107,8 @@ export default function MaterialSubstitutionModal({
           include_unavailable: includeUnavailable,
           include_external: includeExternal,
           external_limit: 8,
+          include_literature: includeLiterature,
+          literature_limit: 8,
         })
       );
     } catch (err) {
@@ -127,25 +129,30 @@ export default function MaterialSubstitutionModal({
     }
   }
 
-  async function promoteExternal(row: ExternalSubstituteCandidate) {
-    const key = row.cid != null ? String(row.cid) : row.name;
-    setPromoting(key);
+  async function promoteCandidate(opts: {
+    key: string;
+    name: string;
+    cas_no?: string | null;
+    smiles?: string | null;
+    role?: string | null;
+  }) {
+    setPromoting(opts.key);
     setPromoteMsg("");
     try {
       const result = await api.proposeMaterial({
-        name: row.name,
-        cas_no: row.cas_no || undefined,
-        smiles: row.smiles || undefined,
-        role: row.role_hint || undefined,
+        name: opts.name,
+        cas_no: opts.cas_no || undefined,
+        smiles: opts.smiles || undefined,
+        role: opts.role || undefined,
         source: "user",
       });
       const action = result.action || "unknown";
       setPromoteMsg(
         action === "upsert" || action === "exists"
-          ? `已入库：${result.name || row.name}（${action}）。可再点「查找替代」查看库内 Δ。`
+          ? `已入库：${result.name || opts.name}（${action}）。可再点「查找替代」查看库内 Δ。`
           : action === "pending"
-            ? `已进入待入库：${result.name || row.name}`
-            : `未入库：${result.name || row.name}（${action}${result.reason ? ` · ${result.reason}` : ""}）`
+            ? `已进入待入库：${result.name || opts.name}`
+            : `未入库：${result.name || opts.name}（${action}${result.reason ? ` · ${result.reason}` : ""}）`
       );
     } catch (err) {
       setPromoteMsg(formatApiError(err));
@@ -154,10 +161,33 @@ export default function MaterialSubstitutionModal({
     }
   }
 
+  async function promoteExternal(row: ExternalSubstituteCandidate) {
+    await promoteCandidate({
+      key: row.cid != null ? String(row.cid) : row.name,
+      name: row.name,
+      cas_no: row.cas_no,
+      smiles: row.smiles,
+      role: row.role_hint,
+    });
+  }
+
+  async function promoteLiterature(row: LiteratureSubstituteCandidate) {
+    await promoteCandidate({
+      key: literatureRowKey(row),
+      name: row.name,
+      cas_no: row.cas_no,
+      smiles: row.smiles,
+      role: row.role_hint,
+    });
+  }
+
   const atRisk = Object.entries(risk?.at_risk ?? {});
   const external = report?.external ?? [];
+  const literature = report?.literature ?? [];
   const identity = report?.identity;
   const extMeta = report?.external_meta;
+  const litMeta = report?.literature_meta;
+  const layersUsed = report?.layers_used ?? [];
 
   return (
     <div
@@ -177,9 +207,7 @@ export default function MaterialSubstitutionModal({
         </div>
 
         <p className="text-slate-400 text-xs mb-3">
-          选一个成分，查看库内可替代材料及其
-          <span className="text-accent">预测性能偏离</span>
-          ；默认同时联网检索结构相似候选（PubChem）。化学上不相容的库内替代会排在最后并附拦截原因。
+          漏斗：库内预测偏离 → 文献/知识库证据 → 联网结构相似（PubChem）。仅库内项含配方 Δ；化学上不相容的库内替代会排在最后并附拦截原因。
         </p>
 
         {atRisk.length > 0 && (
@@ -241,6 +269,23 @@ export default function MaterialSubstitutionModal({
           </label>
           <label
             className="flex items-start gap-2 text-[11px] text-slate-400 cursor-pointer"
+            data-testid="include-literature-substitutes"
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={includeLiterature}
+              onChange={(e) => setIncludeLiterature(e.target.checked)}
+            />
+            <span>
+              文献 / 知识库候选
+              <span className="block text-slate-500">
+                默认开启：KG substitutes 边与 KB 产品登记；不算配方 Δ，可一键入库后再算。
+              </span>
+            </span>
+          </label>
+          <label
+            className="flex items-start gap-2 text-[11px] text-slate-400 cursor-pointer"
             data-testid="include-external-substitutes"
           >
             <input
@@ -296,8 +341,18 @@ export default function MaterialSubstitutionModal({
           <div className="space-y-3">
             <div className="text-xs text-slate-400">
               替换 <span className="text-slate-200">{report.original}</span>
+              {report.original_in_catalog === false && (
+                <span className="text-yellow-400/90"> · 原组分不在库</span>
+              )}
               {report.substitute_group && ` · 可互换组 ${report.substitute_group}`} · 库内考察{" "}
-              {report.total_considered} · 联网 {extMeta?.count ?? external.length}
+              {report.total_considered} · 文献 {litMeta?.count ?? literature.length} · 联网{" "}
+              {extMeta?.count ?? external.length}
+              {layersUsed.length > 0 && (
+                <span data-testid="substitute-layers-used">
+                  {" "}
+                  · layers: {layersUsed.join(",")}
+                </span>
+              )}
             </div>
             {identity && (
               <div className="text-[11px] text-slate-500" data-testid="substitute-identity">
@@ -383,6 +438,93 @@ export default function MaterialSubstitutionModal({
                 </div>
               )}
             </div>
+
+            {includeLiterature && (
+              <div data-testid="literature-substitutes-section">
+                <div className="text-xs text-slate-300 mb-1">文献 / 知识库候选（证据 · 选用后可入库）</div>
+                {litMeta?.skipped_reason && literature.length === 0 ? (
+                  <div className="text-slate-500 text-xs">{litMeta.skipped_reason}</div>
+                ) : literature.length === 0 ? (
+                  <div className="text-slate-500 text-xs">暂无文献/产品替代命中。</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="text-slate-400">
+                        <tr>
+                          <th className="text-left py-1">名称</th>
+                          <th className="text-left">来源</th>
+                          <th className="text-right">置信</th>
+                          <th className="text-left pl-2">证据</th>
+                          <th className="text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {literature.map((row) => {
+                          const rowKey = literatureRowKey(row);
+                          const evidenceBits = (row.evidence || [])
+                            .map((e) => e.sentence || e.source_id || "")
+                            .filter(Boolean);
+                          return (
+                            <tr key={rowKey} className="border-t border-edge/50 align-top">
+                              <td className="py-1">
+                                <div className="text-slate-200">{row.name}</div>
+                                {row.cas_no && (
+                                  <div className="text-slate-500">CAS {row.cas_no}</div>
+                                )}
+                                {row.in_catalog && (
+                                  <div className="text-accent/80">已在库：{row.catalog_name}</div>
+                                )}
+                                {row.note && (
+                                  <div className="text-slate-500 truncate max-w-[14rem]" title={row.note}>
+                                    {row.note}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="text-slate-400">{row.source}</td>
+                              <td className="text-right">
+                                {row.confidence != null
+                                  ? `${Math.round(Number(row.confidence) * 100)}%`
+                                  : "—"}
+                              </td>
+                              <td className="pl-2 text-slate-500 max-w-[12rem]">
+                                {evidenceBits.length ? (
+                                  <span title={evidenceBits.join("\n")}>
+                                    {evidenceBits[0].length > 48
+                                      ? `${evidenceBits[0].slice(0, 48)}…`
+                                      : evidenceBits[0]}
+                                    {evidenceBits.length > 1 ? ` (+${evidenceBits.length - 1})` : ""}
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              <td className="text-right">
+                                {row.in_catalog ? (
+                                  <span className="text-slate-500">见上方</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="px-2 py-0.5 rounded border border-accent/40 text-accent
+                                               hover:bg-accent/10 disabled:opacity-50"
+                                    disabled={promoting === rowKey}
+                                    onClick={() => void promoteLiterature(row)}
+                                  >
+                                    {promoting === rowKey ? "…" : "入库并选用"}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="text-[11px] text-slate-500 mt-1">
+                  ⓘ 文献项未做配方 Δ；入库后可再点「查找替代」查看偏离。
+                </div>
+              </div>
+            )}
 
             {includeExternal && (
               <div data-testid="external-substitutes-section">
