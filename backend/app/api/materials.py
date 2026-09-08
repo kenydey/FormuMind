@@ -219,6 +219,9 @@ class SubstituteRequest(BaseModel):
     material: str = ""
     limit: int = Field(default=10, ge=1, le=50)
     include_unavailable: bool = False
+    include_external: bool = True
+    external_limit: int = Field(default=8, ge=1, le=25)
+    similarity_threshold: int = Field(default=85, ge=60, le=100)
 
 
 def _slot_candidates(genome) -> list[str]:
@@ -293,6 +296,9 @@ def substitutes(body: SubstituteRequest) -> dict:
         req,
         limit=body.limit,
         include_unavailable=body.include_unavailable,
+        include_external=body.include_external,
+        external_limit=body.external_limit,
+        similarity_threshold=body.similarity_threshold,
     )
 
 

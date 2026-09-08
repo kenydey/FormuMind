@@ -24,6 +24,15 @@ from app.services.substitution import (
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _disable_external_network(monkeypatch):
+    """Catalog substitution tests must not hit PubChem."""
+    monkeypatch.setattr(
+        "app.services.external_alternatives.external_substitutes_enabled",
+        lambda: False,
+    )
+
+
 @pytest.fixture()
 def material_store(tmp_path, monkeypatch):
     """Isolated material store so availability edits don't leak between tests."""
@@ -330,3 +339,111 @@ def test_supply_risk_endpoint():
     response = client.get("/api/materials/supply-risk")
     assert response.status_code == 200
     assert "at_risk" in response.json()
+
+
+# ── external (PubChem) channel ───────────────────────────────────────────────
+
+
+def test_include_external_false_returns_empty_external():
+    genome = _genome()
+    report = find_substitutes(
+        genome, _slot_of(genome, "hardener"), _req(), include_external=False
+    )
+    assert report["external"] == []
+    assert report["external_meta"]["skipped_reason"] == "include_external=false"
+    assert "identity" in report
+
+
+def test_external_channel_merges_mocked_pubchem(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.external_alternatives.external_substitutes_enabled",
+        lambda: True,
+    )
+
+    def _fake_fetch(**kwargs):
+        return {
+            "identity": {
+                "query": kwargs["material"],
+                "cas_no": "999-99-9",
+                "smiles": "CCO",
+                "cid": None,
+                "source": "catalog",
+                "resolved": True,
+            },
+            "external": [
+                {
+                    "name": "Fake Ext Alcohol",
+                    "iupac_name": "ethanol",
+                    "cas_no": "64-17-5",
+                    "smiles": "CCO",
+                    "cid": 702,
+                    "formula": "C2H6O",
+                    "molar_mass": 46.07,
+                    "similarity": 0.9,
+                    "source": "pubchem_similar",
+                    "in_catalog": False,
+                    "catalog_name": None,
+                    "role_hint": "hardener",
+                    "note": "结构相似；未做配方 Δ 预测（入库后可再算）",
+                }
+            ],
+            "external_meta": {
+                "enabled": True,
+                "queried": True,
+                "count": 1,
+                "skipped_reason": None,
+                "provider": "pubchem_fastsimilarity_2d",
+            },
+        }
+
+    monkeypatch.setattr(
+        "app.services.external_alternatives.fetch_external_alternatives", _fake_fetch
+    )
+    genome = _genome()
+    report = find_substitutes(
+        genome, _slot_of(genome, "hardener"), _req(), include_external=True
+    )
+    assert len(report["external"]) == 1
+    assert report["external"][0]["name"] == "Fake Ext Alcohol"
+    assert report["identity"]["resolved"] is True
+
+
+def test_substitutes_endpoint_default_include_external_true(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.external_alternatives.external_substitutes_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.services.external_alternatives.fetch_external_alternatives",
+        lambda **kwargs: {
+            "identity": {
+                "query": "x",
+                "cas_no": "",
+                "smiles": None,
+                "cid": None,
+                "source": "none",
+                "resolved": False,
+            },
+            "external": [],
+            "external_meta": {
+                "enabled": True,
+                "queried": False,
+                "count": 0,
+                "skipped_reason": "无法解析 SMILES（聚合物/商品名常见）；仅展示库内候选",
+                "provider": "pubchem_fastsimilarity_2d",
+            },
+        },
+    )
+    response = client.post(
+        "/api/materials/substitutes",
+        json={
+            "requirement": {"domain": "anticorrosion_coating", "voc_limit_gpl": 420},
+            "material": "Polyamide hardener",
+            "limit": 3,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "external" in body
+    assert "external_meta" in body
+    assert body["external_meta"]["provider"] == "pubchem_fastsimilarity_2d"

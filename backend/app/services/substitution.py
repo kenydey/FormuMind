@@ -205,6 +205,9 @@ def find_substitutes(
     *,
     limit: int = 10,
     include_unavailable: bool = False,
+    include_external: bool = True,
+    external_limit: int = 8,
+    similarity_threshold: int = 85,
 ) -> dict:
     """Rank replacements for one slot, each with its predicted property delta.
 
@@ -212,6 +215,10 @@ def find_substitutes(
     excludes carriers and fillers, but that is a constraint on *automated
     search*; when a user asks what could replace a pigment, the answer is not
     "that slot is off-limits".
+
+    When ``include_external`` is true (default), also returns PubChem
+    structure-similar candidates under ``external`` (no formula Δ until
+    promoted into the catalog).
     """
     from ..domain import knowledge
     from ..pipeline import reconstruct
@@ -275,6 +282,7 @@ def find_substitutes(
                 "blocking_reasons": [] if verdict.feasible else verdict.reasons,
                 "evidence": _kg_evidence(original, name),
                 "score_after": form.score,
+                "source": "catalog",
             }
         )
 
@@ -290,6 +298,35 @@ def find_substitutes(
             c["material"],
         )
     )
+
+    identity: dict
+    external: list[dict] = []
+    external_meta: dict
+    if include_external:
+        from .external_alternatives import fetch_external_alternatives
+
+        ext = fetch_external_alternatives(
+            material=original,
+            spec=original_spec,
+            limit=external_limit,
+            threshold=similarity_threshold,
+            role_hint=str(role) if role else None,
+        )
+        identity = ext["identity"]
+        external = list(ext.get("external") or [])
+        external_meta = dict(ext.get("external_meta") or {})
+    else:
+        from .external_alternatives import resolve_slot_identity
+
+        identity = resolve_slot_identity(original, original_spec, network=False)
+        external_meta = {
+            "enabled": False,
+            "queried": False,
+            "count": 0,
+            "skipped_reason": "include_external=false",
+            "provider": "pubchem_fastsimilarity_2d",
+        }
+
     return {
         "original": original,
         "slot_index": slot_index,
@@ -298,6 +335,9 @@ def find_substitutes(
         "base_metrics": {k: round(v, 4) for k, v in base_metrics.items()},
         "candidates": candidates[:limit],
         "total_considered": len(pool),
+        "identity": identity,
+        "external": external,
+        "external_meta": external_meta,
     }
 
 
@@ -330,7 +370,9 @@ def scan_supply_risk(
         entry = {"formulation": label, "affected_slots": hits, "suggestions": {}}
         for hit in hits:
             try:
-                report = find_substitutes(genome, hit["slot_index"], req, limit=3)
+                report = find_substitutes(
+                    genome, hit["slot_index"], req, limit=3, include_external=False
+                )
                 entry["suggestions"][hit["material"]] = [
                     {
                         "material": c["material"],

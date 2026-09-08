@@ -606,6 +606,40 @@ export interface SubstituteCandidate {
   feasible: boolean;
   blocking_reasons: string[];
   score_after: number | null;
+  source?: string;
+}
+
+export interface ExternalSubstituteCandidate {
+  name: string;
+  iupac_name?: string | null;
+  cas_no?: string | null;
+  smiles?: string | null;
+  cid?: number | null;
+  formula?: string | null;
+  molar_mass?: number | null;
+  similarity: number;
+  source: string;
+  in_catalog: boolean;
+  catalog_name?: string | null;
+  role_hint?: string | null;
+  note?: string | null;
+}
+
+export interface SubstitutionIdentity {
+  query: string;
+  cas_no?: string;
+  smiles?: string | null;
+  cid?: number | null;
+  source: string;
+  resolved: boolean;
+}
+
+export interface SubstitutionExternalMeta {
+  enabled: boolean;
+  queried: boolean;
+  count: number;
+  skipped_reason?: string | null;
+  provider: string;
 }
 
 export interface SubstitutionReport {
@@ -616,6 +650,9 @@ export interface SubstitutionReport {
   base_metrics: Record<string, number>;
   candidates: SubstituteCandidate[];
   total_considered: number;
+  identity?: SubstitutionIdentity;
+  external?: ExternalSubstituteCandidate[];
+  external_meta?: SubstitutionExternalMeta;
 }
 
 export interface SupplyRiskReport {
@@ -1079,6 +1116,9 @@ export const api = {
     slot_index?: number;
     limit?: number;
     include_unavailable?: boolean;
+    include_external?: boolean;
+    external_limit?: number;
+    similarity_threshold?: number;
   }) => post<SubstitutionReport>("/api/materials/substitutes", body),
 
   supplyRisk: () => get<SupplyRiskReport>("/api/materials/supply-risk"),
@@ -1491,7 +1531,10 @@ export const api = {
     smiles?: string;
     source?: string;
     source_ref?: string;
-  }) => post<{ action: string; name: string }>("/api/materials/propose", body),
+  }) => post<{ action: string; name: string; reason?: string; origin?: string }>(
+    "/api/materials/propose",
+    body
+  ),
 
   proposeMaterialsMany: (
     materials: Array<{ name: string; role?: string; cas_no?: string; smiles?: string }>,

@@ -137,11 +137,28 @@ class JsonExperimentStore:
         return None
 
 
+def _coerce_factor_floats(raw: dict | None) -> dict[str, float]:
+    """Keep only numeric factor levers; drop metadata blobs (e.g. ``_doe_metadata``)."""
+    out: dict[str, float] = {}
+    for key, val in (raw or {}).items():
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, (int, float)):
+            out[str(key)] = float(val)
+            continue
+        if isinstance(val, str):
+            try:
+                out[str(key)] = float(val)
+            except ValueError:
+                continue
+    return out
+
+
 def _row_to_record(row: ExperimentRow) -> ExperimentRecord:
     return ExperimentRecord(
         domain=row.domain,
         project_id=row.project_id or "",
-        factors=row.factors or {},
+        factors=_coerce_factor_floats(row.factors),
         cure_temperature_c=row.cure_temperature_c,
         measured=row.measured,
         source=row.source,

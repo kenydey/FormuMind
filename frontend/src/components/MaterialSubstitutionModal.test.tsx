@@ -154,6 +154,52 @@ describe("MaterialSubstitutionModal", () => {
     expect(screen.getByRole("button", { name: "Zinc phosphate" })).toBeInTheDocument();
   });
 
+  it("defaults to networked search and shows external candidates", async () => {
+    vi.spyOn(api, "supplyRisk").mockResolvedValue(noRisk);
+    const spy = vi.spyOn(api, "findSubstitutes").mockResolvedValue(
+      report({
+        identity: {
+          query: "Polyamide hardener",
+          cas_no: "",
+          smiles: "CCN",
+          source: "catalog",
+          resolved: true,
+        },
+        external: [
+          {
+            name: "Fake Ext Amine",
+            cas_no: "111-11-1",
+            smiles: "CCN",
+            cid: 1,
+            similarity: 0.91,
+            source: "pubchem_similar",
+            in_catalog: false,
+            note: "结构相似",
+          },
+        ],
+        external_meta: {
+          enabled: true,
+          queried: true,
+          count: 1,
+          skipped_reason: null,
+          provider: "pubchem_fastsimilarity_2d",
+        },
+      })
+    );
+
+    render(<MaterialSubstitutionModal onClose={vi.fn()} />);
+    expect(screen.getByTestId("include-external-substitutes")).toBeInTheDocument();
+    const checkbox = screen.getByTestId("include-external-substitutes").querySelector("input");
+    expect(checkbox).toBeChecked();
+
+    await userEvent.click(screen.getByRole("button", { name: /查找替代/ }));
+    await waitFor(() => expect(screen.getByText("Fake Ext Amine")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ include_external: true })
+    );
+    expect(screen.getByRole("button", { name: /入库并选用/ })).toBeInTheDocument();
+  });
+
   it("still renders when the supply-risk probe fails", async () => {
     // It runs on mount; a failure there must not take the modal down.
     vi.spyOn(api, "supplyRisk").mockRejectedValue(new Error("nope"));
