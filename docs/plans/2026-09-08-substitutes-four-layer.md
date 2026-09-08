@@ -1,6 +1,6 @@
 # 材料替代四层漏斗 — 可实施方案
 
-状态：**已认可**（产品决策 2026-09-08）  
+状态：**P0/P1 已实现**（PR 待合入；产品决策 2026-09-08）  
 前置：[`2026-09-08-external-substitutes-sketch.md`](./2026-09-08-external-substitutes-sketch.md)（L3 PubChem 已落地）  
 主接口：`POST /api/materials/substitutes`  
 核心编排：`backend/app/services/substitution.py` · UI：`MaterialSubstitutionModal.tsx`
@@ -260,21 +260,21 @@ flowchart TD
 
 **P0**
 
-- [ ] 默认请求含 `literature` 键；关 `include_literature` 时 count=0 且 reason 清晰  
-- [ ] KG/KB 不可用时库内+联网仍 200  
-- [ ] 库外原组分（如 Cerium nitrate hexahydrate）可出同 role 库内候选  
-- [ ] 无结构时 L3 skipped_reason 可见，不阻塞 L1/L2  
-- [ ] Modal 展示文献区；已在库显示「见上方」  
+- [x] 默认请求含 `literature` 键；关 `include_literature` 时 count=0 且 reason 清晰  
+- [x] KG/KB 不可用时库内+联网仍 200  
+- [x] 库外原组分（如 Cerium nitrate hexahydrate）可出同 role 库内候选  
+- [x] 无结构时 L3 skipped_reason 可见，不阻塞 L1/L2  
+- [x] Modal 展示文献区；已在库显示「见上方」  
 
 **P1**
 
-- [ ] L1≥3 且未强制时 `llm_meta.mode=auto` 且未查询或 count=0  
-- [ ] L1&lt;3 时自动出现规则/LLM 建议；入库走 propose  
+- [x] L1≥3 且未强制时 `llm_meta.mode=auto` 且未查询或 count=0  
+- [x] L1&lt;3 时自动出现规则/LLM 建议；入库走 propose  
 
 **红线回归**
 
-- [ ] 无 `materials_only` API/UI  
-- [ ] 无静默批量 upsert 文献/LLM 结果  
+- [x] 无 `materials_only` API/UI  
+- [x] 无静默批量 upsert 文献/LLM 结果  
 
 ---
 
