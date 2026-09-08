@@ -780,7 +780,7 @@ def test_llm_auto_runs_when_catalog_scarce(monkeypatch):
                     "name": "Lanthanum nitrate",
                     "kind": "substitute_inhibitor",
                     "rationale": "rare earth",
-                    "source": "llm",
+                    "source": "llm_expand",
                     "in_catalog": False,
                     "catalog_name": None,
                     "note": "AI/规则建议；未做配方 Δ",
@@ -791,7 +791,7 @@ def test_llm_auto_runs_when_catalog_scarce(monkeypatch):
                 "queried": True,
                 "count": 1,
                 "skipped_reason": None,
-                "providers": ["llm"],
+                "providers": ["llm_expand"],
             },
         },
     )

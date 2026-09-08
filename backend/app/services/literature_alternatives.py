@@ -172,6 +172,83 @@ def _from_kb_products(
     return rows, None
 
 
+_SUB_KW_RE = re.compile(
+    r"substitut|alternativ|replace|代替|替代|换用|替换",
+    re.IGNORECASE,
+)
+
+
+def _sentence_hits(text: str) -> list[str]:
+    parts = re.split(r"(?<=[。.!?；;])\s+|\n+", text or "")
+    return [p.strip() for p in parts if p.strip() and _SUB_KW_RE.search(p)]
+
+
+def _from_kb_chunks(
+    material: str,
+    *,
+    limit: int,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Optional sentence-level substitute recall when KG/products are thin."""
+    try:
+        from .kb_index import search_chunks
+    except Exception as exc:
+        return [], f"kb_chunks_import_failed:{exc}"
+
+    query = f"{material} substitute alternative 替代 代替"
+    try:
+        hits = search_chunks(query, k=min(12, max(4, limit * 2)))
+    except Exception as exc:
+        logger.debug("literature kb_chunks failed ({})", exc)
+        return [], f"kb_chunks_unavailable:{exc}"
+
+    if not hits:
+        return [], None
+
+    # Prefer names already known in the catalog that co-occur in substitute sentences.
+    catalog_names = sorted(RAW_MATERIALS.keys(), key=len, reverse=True)
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = {norm_key(material)}
+
+    for ev in hits:
+        snippet = (getattr(ev, "snippet", None) or getattr(ev, "text", None) or "")[:1200]
+        for sentence in _sentence_hits(snippet)[:3]:
+            for cat_name in catalog_names:
+                if norm_key(cat_name) in seen:
+                    continue
+                if cat_name.casefold() not in sentence.casefold():
+                    continue
+                if norm_key(cat_name) == norm_key(material):
+                    continue
+                seen.add(norm_key(cat_name))
+                rows.append(
+                    {
+                        "name": cat_name,
+                        "source": "kb_chunk",
+                        "confidence": 0.45,
+                        "entity_id": None,
+                        "cas_no": None,
+                        "smiles": None,
+                        "role_hint": None,
+                        "in_catalog": True,
+                        "catalog_name": cat_name,
+                        "evidence": [
+                            {
+                                "source_id": getattr(ev, "identifier", None)
+                                or getattr(ev, "source_id", None)
+                                or "",
+                                "chunk_id": getattr(ev, "chunk_id", None),
+                                "sentence": sentence[:320],
+                                "confidence": 0.45,
+                            }
+                        ],
+                        "note": "KB chunk 替代句召回",
+                    }
+                )
+                if len(rows) >= limit:
+                    return rows, None
+    return rows, None
+
+
 def fetch_literature_alternatives(
     *,
     material: str,
@@ -179,7 +256,7 @@ def fetch_literature_alternatives(
     role_hint: str | None = None,
     limit: int = 8,
 ) -> dict[str, Any]:
-    """Aggregate KG + kb_products into advisory literature substitutes."""
+    """Aggregate KG + kb_products (+ optional chunks) into advisory literature substitutes."""
     lim = max(1, min(25, int(limit)))
     display = (material or "").strip()
     if not display:
@@ -221,6 +298,23 @@ def fetch_literature_alternatives(
         elif kb_rows:
             providers.append("kb_product")
         for row in kb_rows:
+            key = norm_key(row["name"])
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(row)
+            if len(merged) >= lim:
+                break
+
+    # Chunk sentence recall only when KG/products under-filled the limit.
+    need = lim - len(merged)
+    if need > 0:
+        chunk_rows, chunk_reason = _from_kb_chunks(display, limit=need)
+        if chunk_reason:
+            reasons.append(chunk_reason)
+        elif chunk_rows:
+            providers.append("kb_chunk")
+        for row in chunk_rows:
             key = norm_key(row["name"])
             if key in seen:
                 continue

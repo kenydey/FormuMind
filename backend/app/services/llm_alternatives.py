@@ -154,7 +154,7 @@ def _from_llm(
                 "name": cat_name or name,
                 "kind": str(item.get("kind") or _kind_for_role(role_hint)),
                 "rationale": str(item.get("rationale") or "LLM 功能扩召回")[:400],
-                "source": "llm",
+                "source": "llm_expand",
                 "cas_no": None,
                 "smiles": None,
                 "role_hint": role_hint,
@@ -214,7 +214,7 @@ def fetch_llm_alternatives(
         if llm_reason:
             reasons.append(llm_reason)
         elif llm_rows:
-            providers.append("llm")
+            providers.append("llm_expand")
             merged.extend(llm_rows)
 
     skipped = None

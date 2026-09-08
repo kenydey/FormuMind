@@ -83,6 +83,36 @@ def test_fetch_literature_kg_disabled_still_tries_kb(monkeypatch):
             return []
 
     monkeypatch.setattr("app.db.product_store.get_product_store", lambda: _Store())
+    monkeypatch.setattr(
+        "app.services.literature_alternatives._from_kb_chunks",
+        lambda material, limit: ([], None),
+    )
     out = fetch_literature_alternatives(material="Zinc phosphate", limit=5)
     assert out["literature"][0]["name"] == "Only KB Hit"
     assert out["literature_meta"]["providers"] == ["kb_product"]
+
+
+def test_fetch_literature_kb_chunk_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.literature_alternatives._from_kg",
+        lambda material, limit: ([], "kg_disabled"),
+    )
+    monkeypatch.setattr(
+        "app.services.literature_alternatives._from_kb_products",
+        lambda material, cas="", role_hint=None, limit=8: ([], None),
+    )
+
+    class _Ev:
+        identifier = "doi:10.0/chunk"
+        chunk_id = "c1"
+        snippet = "Zinc phosphate may substitute chromate pigments in primers."
+
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks",
+        lambda query, k=6, **kwargs: [_Ev()],
+    )
+    out = fetch_literature_alternatives(material="Strontium chromate", limit=5)
+    assert out["literature"]
+    assert out["literature"][0]["source"] == "kb_chunk"
+    assert out["literature"][0]["name"] == "Zinc phosphate"
+    assert "kb_chunk" in out["literature_meta"]["providers"]

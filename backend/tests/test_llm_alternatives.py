@@ -49,7 +49,7 @@ def test_llm_suggestions_merged_without_cas(monkeypatch):
     assert "Lanthanum nitrate" in names
     hit = next(r for r in out["llm"] if r["name"] == "Lanthanum nitrate")
     assert hit["cas_no"] is None
-    assert hit["source"] == "llm"
+    assert hit["source"] == "llm_expand"
 
 
 def test_empty_material_skipped():

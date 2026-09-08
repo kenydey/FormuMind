@@ -655,7 +655,7 @@ export interface LlmSubstituteCandidate {
   name: string;
   kind?: string | null;
   rationale?: string | null;
-  source: "chemist_rules" | "llm" | string;
+  source: "chemist_rules" | "llm_expand" | "llm" | string;
   cas_no?: string | null;
   smiles?: string | null;
   role_hint?: string | null;

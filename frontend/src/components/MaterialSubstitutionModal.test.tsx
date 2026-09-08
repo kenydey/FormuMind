@@ -292,7 +292,7 @@ describe("MaterialSubstitutionModal", () => {
             name: "Lanthanum nitrate",
             kind: "substitute_inhibitor",
             rationale: "rare-earth passivation salt",
-            source: "llm",
+            source: "llm_expand",
             in_catalog: false,
             note: "AI/规则建议；未做配方 Δ",
           },
@@ -303,7 +303,7 @@ describe("MaterialSubstitutionModal", () => {
           count: 1,
           skipped_reason: null,
           mode: "auto",
-          providers: ["llm"],
+          providers: ["llm_expand"],
         },
       })
     );
