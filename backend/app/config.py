@@ -512,8 +512,10 @@ class Settings(BaseSettings):
     # 关闭后 API/编译全停，chat/DOE 行为与升级前一致（W3/W4 另旗标默认关）。
     wiki_enabled: bool = True
     wiki_compile_on_ingest: bool = True
-    wiki_chat_blend: bool = False
-    wiki_doe_constraints: bool = False
+    wiki_chat_blend: bool = True
+    wiki_doe_constraints: bool = True
+    wiki_lint_on_compile: bool = True
+    wiki_neo4j_project: bool = False
     # 每篇文档最多持久化多少切块。这是全文成功抓取之后**唯一**还会静默丢内容
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600

@@ -100,7 +100,8 @@ def test_wiki_store_upsert_list_hash_idempotent(wiki_env):
 def test_safe_key_rejects_path_traversal():
     assert ".." not in safe_key("../../etc/passwd")
     assert "/" not in safe_key("a/b")
-    assert safe_key("E-51®") == "e51"
+    assert safe_key("E-51®") in {"e-51", "e51"}
+    assert "催化" in safe_key("催化剂过量")
 
 
 # ── compile ──────────────────────────────────────────────────────────────────

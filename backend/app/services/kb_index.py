@@ -742,6 +742,12 @@ def doe_parameter_hints(factor_names: list[str]) -> list[str]:
         notes.append(
             f"知识库文献范围：{match} ≈ {lo}–{hi}{unit}（{entry['sources']} 个来源）"
         )
+    try:
+        from .wiki.constraints import wiki_doe_hint_lines
+
+        notes.extend(wiki_doe_hint_lines(factor_names))
+    except Exception:
+        pass
     return notes
 
 

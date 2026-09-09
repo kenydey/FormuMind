@@ -22,8 +22,11 @@ from .schema import (
     has_source_block,
     material_entity_id,
     material_path,
+    mechanism_path,
     parse_front_matter,
+    pitfall_path,
     safe_key,
+    system_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -262,6 +265,197 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
             flags=flags,
         )
         updated.append(row.path)
+
+    # Systems / mechanisms / pitfalls from SourceGuide (W4)
+    if guide is not None:
+        for pname, bound in (guide.parameter_space or {}).items():
+            key = safe_key(pname)
+            path = system_path(pname)
+            bounds = [
+                {
+                    "name": pname,
+                    "min": bound.min_value,
+                    "max": bound.max_value,
+                    "unit": bound.unit or "",
+                }
+            ]
+            existing_md = store.read_markdown(path)
+            source_ids = [sid]
+            flags: list[str] = []
+            evidence: list[str] = []
+            summary = f"Process / DOE parameter **{pname}** from literature guides."
+            forbidden: list[str] = []
+            if existing_md:
+                meta, body = parse_front_matter(existing_md)
+                source_ids = list(dict.fromkeys([*(meta.get("source_ids") or []), sid]))
+                flags = list(meta.get("flags") or [])
+                evidence = extract_evidence_blocks(body)
+                import json as _json
+
+                raw_b = meta.get("bounds_json")
+                if isinstance(raw_b, str):
+                    try:
+                        prev = _json.loads(raw_b)
+                        if isinstance(prev, list):
+                            # merge by name
+                            by = {str(x.get("name")): x for x in prev if isinstance(x, dict)}
+                            by[pname] = bounds[0]
+                            bounds = list(by.values())
+                    except Exception:
+                        pass
+            if not has_source_block(evidence, sid):
+                evidence.append(
+                    "\n".join(
+                        [
+                            f"### Source `{sid}`",
+                            f"- document: {title_hint}",
+                            f"- parameter_space: {pname} "
+                            f"[{bound.min_value}–{bound.max_value} {bound.unit}]",
+                        ]
+                    )
+                )
+            # Tight max as soft forbidden note
+            if bound.max_value is not None:
+                forbidden.append(f"{pname} > {bound.max_value} {bound.unit}".strip())
+            row = store.upsert_page(
+                path=path,
+                kind="system",
+                title=pname,
+                norm_key=key,
+                entity_id=f"system:{key}"[:64],
+                markdown=dump_page(
+                    kind="system",
+                    title=pname,
+                    entity_id=f"system:{key}"[:64],
+                    norm_key=key,
+                    source_ids=source_ids,
+                    flags=flags,
+                    summary=summary,
+                    evidence_blocks=evidence,
+                    bounds=bounds,
+                    forbidden=forbidden,
+                ),
+                source_ids=source_ids,
+                flags=flags,
+            )
+            updated.append(row.path)
+
+        # Mechanism page from summary
+        if (guide.summary or "").strip() and guide.status != "degraded":
+            mkey = safe_key((guide.key_entities or ["mechanism"])[0])[:80]
+            path = mechanism_path(mkey)
+            existing_md = store.read_markdown(path)
+            source_ids = [sid]
+            flags = []
+            evidence = []
+            summary = guide.summary.strip()
+            if existing_md:
+                meta, body = parse_front_matter(existing_md)
+                source_ids = list(dict.fromkeys([*(meta.get("source_ids") or []), sid]))
+                flags = list(meta.get("flags") or [])
+                evidence = extract_evidence_blocks(body)
+                if "## Summary" in body:
+                    prev = body.split("## Summary", 1)[1]
+                    if "## Evidence" in prev:
+                        prev = prev.split("## Evidence", 1)[0]
+                    prev = prev.strip()
+                    if prev and prev != "_No summary yet._" and summary not in prev:
+                        summary = f"{prev}\n\n---\n\n{summary}"
+            if not has_source_block(evidence, sid):
+                evidence.append(
+                    "\n".join(
+                        [
+                            f"### Source `{sid}`",
+                            f"- document: {title_hint}",
+                            "- note: from source_guide.summary",
+                        ]
+                    )
+                )
+            row = store.upsert_page(
+                path=path,
+                kind="mechanism",
+                title=f"机理 · {mkey}",
+                norm_key=mkey,
+                entity_id=f"mechanism:{mkey}"[:64],
+                markdown=dump_page(
+                    kind="mechanism",
+                    title=f"机理 · {mkey}",
+                    entity_id=f"mechanism:{mkey}"[:64],
+                    norm_key=mkey,
+                    source_ids=source_ids,
+                    flags=flags,
+                    summary=summary,
+                    evidence_blocks=evidence,
+                ),
+                source_ids=source_ids,
+                flags=flags,
+            )
+            updated.append(row.path)
+
+        # Pitfalls from FAQs mentioning 避免/禁忌/不要/禁止/avoid
+        _pit_re = re.compile(r"避免|禁忌|不要|禁止|avoid|forbid|never", re.I)
+        for faq in guide.faqs or []:
+            text = (faq or "").strip()
+            if not text or not _pit_re.search(text):
+                continue
+            pkey = safe_key(text)[:80]
+            path = pitfall_path(pkey)
+            existing_md = store.read_markdown(path)
+            source_ids = [sid]
+            flags = []
+            evidence = []
+            if existing_md:
+                meta, body = parse_front_matter(existing_md)
+                source_ids = list(dict.fromkeys([*(meta.get("source_ids") or []), sid]))
+                flags = list(meta.get("flags") or [])
+                evidence = extract_evidence_blocks(body)
+            if not has_source_block(evidence, sid):
+                evidence.append(
+                    "\n".join(
+                        [
+                            f"### Source `{sid}`",
+                            f"- document: {title_hint}",
+                            f"- faq: {text}",
+                        ]
+                    )
+                )
+            row = store.upsert_page(
+                path=path,
+                kind="pitfall",
+                title=text[:120],
+                norm_key=pkey,
+                entity_id=f"pitfall:{pkey}"[:64],
+                markdown=dump_page(
+                    kind="pitfall",
+                    title=text[:120],
+                    entity_id=f"pitfall:{pkey}"[:64],
+                    norm_key=pkey,
+                    source_ids=source_ids,
+                    flags=flags,
+                    summary=text,
+                    evidence_blocks=evidence,
+                    forbidden=[text],
+                ),
+                source_ids=source_ids,
+                flags=flags,
+            )
+            updated.append(row.path)
+
+    # Post: lint + optional neo4j
+    if settings.wiki_lint_on_compile and updated:
+        try:
+            from .lint import lint_paths
+
+            lint_paths(updated)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("wiki lint after compile skipped: %s", exc)
+    if getattr(settings, "wiki_neo4j_project", False) and updated:
+        try:
+            from .neo4j_project import project_paths
+
+            project_paths(updated)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("wiki neo4j project skipped: %s", exc)
 
     return {
         "ok": True,

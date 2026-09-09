@@ -85,3 +85,25 @@ def get_by_path(path: str = Query(min_length=1)) -> WikiPageDetail:
     md = store.read_markdown(row.path) or ""
     base = _item(row)
     return WikiPageDetail(**base.model_dump(), markdown=md)
+
+
+class WikiFlagItem(BaseModel):
+    id: str
+    path: str
+    kind: str
+    title: str = ""
+    flags: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class WikiFlagsResponse(BaseModel):
+    pages: list[WikiFlagItem]
+
+
+@router.get("/flags", response_model=WikiFlagsResponse)
+def list_flagged(limit: int = Query(default=50, ge=1, le=200)) -> WikiFlagsResponse:
+    _require_wiki()
+    from ..services.wiki.lint import list_flagged_pages
+
+    rows = list_flagged_pages(limit=limit)
+    return WikiFlagsResponse(pages=[WikiFlagItem(**r) for r in rows])

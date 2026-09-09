@@ -1406,26 +1406,48 @@ def _build_context(evidence: list[Evidence], *, max_chars: int | None = None) ->
     so the model saw at most ~3.2K chars of abstract-level text. Full chunks
     (up to ``chat_context_max_chars``) let it synthesise across documents the
     way NotebookLM does — the rerank stage already narrowed to the most relevant.
+
+    W3: Wiki rows are labeled as compiled memory vs raw excerpts.
     """
     if max_chars is None:
         from ..config import get_settings
 
         max_chars = get_settings().chat_context_max_chars
-    parts: list[str] = []
+    wiki_parts: list[str] = []
+    raw_parts: list[str] = []
     total = 0
+
+    def _append(bucket: list[str], line: str) -> bool:
+        nonlocal total
+        if total + len(line) > max_chars:
+            room = max_chars - total
+            if room > 120:
+                bucket.append(line[:room])
+                total += room
+            return False
+        bucket.append(line)
+        total += len(line)
+        return True
+
     for i, e in enumerate(evidence):
         snippet = (e.snippet or "").strip()
         if not snippet:
             continue
-        line = f"[{i+1}] ({e.source}) {e.title}: {snippet}"
-        if total + len(line) > max_chars:
-            room = max_chars - total
-            if room > 120:
-                parts.append(line[:room])
+        is_wiki = (e.source or "") == "wiki" or (e.identifier or "").startswith("wiki:")
+        tag = "Wiki编译结论" if is_wiki else "原始摘录"
+        line = f"[{i+1}] ({tag} · {e.source}) {e.title}: {snippet}"
+        bucket = wiki_parts if is_wiki else raw_parts
+        if not _append(bucket, line):
             break
-        parts.append(line)
-        total += len(line)
-    return "\n".join(parts)
+    sections: list[str] = []
+    if wiki_parts:
+        sections.append(
+            "### Compiled Wiki memory (secondary; prefer Raw when conflicting)\n"
+            + "\n".join(wiki_parts)
+        )
+    if raw_parts:
+        sections.append("### Raw evidence excerpts\n" + "\n".join(raw_parts))
+    return "\n\n".join(sections)
 
 
 def _chat_prompt(
@@ -1499,6 +1521,8 @@ def _chat_prompt(
     return (
         f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
         f"Cite sources by number [1], [2], etc.\n"
+        f"When both Wiki compiled memory and Raw excerpts are present, treat Wiki as "
+        f"secondary synthesis; prefer Raw excerpts for factual claims and citations.\n"
         f"Chemistry notation rules: keep reaction equations as LaTeX inside $$…$$; "
         f"keep molecular formulas as plain text with digits (Zn3(PO4)2); when giving a "
         f"molecular structure, put its SMILES in a fenced code block tagged `smiles`; "

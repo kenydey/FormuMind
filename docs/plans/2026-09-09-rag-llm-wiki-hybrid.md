@@ -1,6 +1,6 @@
 # RAG + LLM Wiki 混成升级评估与落地切片
 
-状态：**W0–W2 已落地**（混成默认开；W3/W4 延后）（2026-09-09）  
+状态：**W0–W4 已落地**（混成默认开；Chat/DOE/Lint/只读 UI；Neo4j 薄投影默认关）（2026-09-09）  
 范围：在 **不破坏** 现有检索 / 问答 / 推荐 / DOE / ELN 的前提下，把 FormuMind 从「被动 RAG」升级为 **Raw 溯源 + LLM 编译 Wiki + 双轨检索**  
 底座契合：磁盘 Markdown（拟新增 Wiki 页）· SQLite（已有）· Neo4j（可选同步，已有适配）
 
@@ -316,6 +316,7 @@ W5–W6 Lint + 机理/实验回流
 - [x] 切片 W0–W6 排期建议  
 - [x] 产品确认：混成默认开、W0–W2 为第一批（W3/W4 延后）  
 - [x] 实施 W0–W2（见 [`2026-09-09-wiki-w0-w2-impl.md`](./2026-09-09-wiki-w0-w2-impl.md)）  
-- [ ] 感知问答/DOE 增益后开 W3/W4  
+- [x] 实施 W3–W4（见 [`2026-09-09-wiki-w3-w4-impl.md`](./2026-09-09-wiki-w3-w4-impl.md)；Chat 双轨 · DOE 约束 · Lint · 只读浏览器 · Neo4j 薄投影）  
+- [ ] Recommend pitfall 降权 / BayBE 硬切 / WYSIWYG 手改 / ELN 回流（后续）  
 
 **架构师裁决：** FormuMind **应该**升级为 RAG+LLM Wiki 混成，但 **Wiki 是编译层不是新底座**；SQLite chunks + KG 继续做溯源与拓扑，Markdown Wiki 做人读记忆与约束燃料。这样问答、推荐、DOE 都能增强，且现有功能在旗标关闭时完全不受影响。

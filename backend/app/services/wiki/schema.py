@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SAFE_KEY = re.compile(r"[^a-zA-Z0-9._-]+")
+_SAFE_KEY = re.compile(r"[^a-zA-Z0-9._\u4e00-\u9fff-]+")
 
 
 def utcnow_iso() -> str:
@@ -16,13 +16,29 @@ def utcnow_iso() -> str:
 
 def safe_key(raw: str, *, limit: int = 120) -> str:
     s = (raw or "").strip().lower()
-    s = re.sub(r"[\s\-–—_®™()]+", "", s)
+    s = re.sub(r"[\s\-–—_®™()]+", "-", s)
     s = _SAFE_KEY.sub("-", s).strip(".-")
-    return (s or "unknown")[:limit]
+    s = re.sub(r"-{2,}", "-", s)
+    if not s:
+        digest = hashlib.sha1((raw or "unknown").encode("utf-8")).hexdigest()[:12]
+        return f"u-{digest}"
+    return s[:limit]
 
 
 def material_path(norm_key: str) -> str:
     return f"materials/{safe_key(norm_key)}.md"
+
+
+def system_path(param_name: str) -> str:
+    return f"systems/{safe_key(param_name)}.md"
+
+
+def mechanism_path(key: str) -> str:
+    return f"mechanisms/{safe_key(key)}.md"
+
+
+def pitfall_path(key: str) -> str:
+    return f"pitfalls/{safe_key(key)}.md"
 
 
 def chemical_path(*, cas: str | None = None, smiles: str | None = None, name: str | None = None) -> str:
@@ -72,10 +88,16 @@ def dump_page(
     flags: list[str] | None = None,
     summary: str = "",
     evidence_blocks: list[str] | None = None,
+    bounds: list[dict] | None = None,
+    forbidden: list[str] | None = None,
 ) -> str:
     """Serialize a wiki markdown page with YAML-ish front matter (no PyYAML dep)."""
+    import json
+
     flags = flags or []
     evidence_blocks = evidence_blocks or []
+    bounds = bounds or []
+    forbidden = forbidden or []
     src_list = ", ".join(f'"{s}"' for s in source_ids)
     flag_list = ", ".join(f'"{f}"' for f in flags)
     lines = [
@@ -87,15 +109,23 @@ def dump_page(
         f"source_ids: [{src_list}]",
         f"flags: [{flag_list}]",
         f"updated_at: {utcnow_iso()}",
-        "---",
-        "",
-        f"# {title}",
-        "",
-        "## Summary",
-        summary.strip() or "_No summary yet._",
-        "",
-        "## Evidence",
     ]
+    if bounds:
+        lines.append(f"bounds_json: {json.dumps(bounds, ensure_ascii=False)}")
+    if forbidden:
+        lines.append(f"forbidden_json: {json.dumps(forbidden, ensure_ascii=False)}")
+    lines.extend(
+        [
+            "---",
+            "",
+            f"# {title}",
+            "",
+            "## Summary",
+            summary.strip() or "_No summary yet._",
+            "",
+            "## Evidence",
+        ]
+    )
     if evidence_blocks:
         lines.extend(evidence_blocks)
     else:
@@ -128,7 +158,10 @@ def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
         k, v = line.split(":", 1)
         key = k.strip()
         val = v.strip()
-        if val.startswith("[") and val.endswith("]"):
+        # W4: keep JSON payloads as raw strings (bounds_json / forbidden_json).
+        if key.endswith("_json"):
+            meta[key] = val
+        elif val.startswith("[") and val.endswith("]"):
             inner = val[1:-1].strip()
             if not inner:
                 meta[key] = []

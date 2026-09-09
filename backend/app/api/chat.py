@@ -118,6 +118,15 @@ def _augment_with_kb(
     settings = get_settings()
     resolution: EntityResolutionSummary | None = None
     kg_stats: KGRetrieveStats | None = None
+    wiki_added = 0
+
+    # W3: blend Wiki condensed pages (flag-gated; prepended).
+    try:
+        from ..services.wiki.retrieve import blend_wiki_evidence
+
+        sources, wiki_added = blend_wiki_evidence(question, sources)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("wiki chat blend skipped: %s", exc)
 
     if settings.kg_enabled:
         from ..services.kg import retrieve as kg_retrieve
@@ -132,21 +141,31 @@ def _augment_with_kb(
         if include_entity_resolution:
             resolution = build_resolution_summary(question)
         kg_stats = result.stats
-        added = max(0, len(result.evidence) - len(sources))
+        added = max(0, len(result.evidence) - len(sources)) + wiki_added
         return result.evidence, added, resolution, kg_stats
 
     if not settings.kb_v2_enabled:
-        return sources, 0, resolution, kg_stats
+        return sources, wiki_added, resolution, kg_stats
     from ..services.kb_bilingual import search as bilingual_search
 
     hits = bilingual_search(
         question, k=settings.kb_chat_top_k, project_id=project_id
     )
     if not hits:
-        return sources, 0, resolution, kg_stats
+        return sources, wiki_added, resolution, kg_stats
     seen = {ev.identifier for ev in sources}
     added = [h for h in hits if h.identifier not in seen]
-    return sources + added, len(added), resolution, kg_stats
+    return sources + added, len(added) + wiki_added, resolution, kg_stats
+
+
+def _claims_evidence(evidence: list[Evidence]) -> list[Evidence]:
+    """Strip Wiki rows so claims cannot cite compiled pages as Raw proof."""
+    try:
+        from ..services.wiki.retrieve import filter_raw_evidence
+
+        return filter_raw_evidence(evidence)
+    except Exception:
+        return evidence
 
 
 def _ensure_answer(text: str | None, *, fallback: str = "暂无可用回答。") -> str:
@@ -245,7 +264,7 @@ def chat(req: ChatRequestValidated):
         sourced_claims = build_sourced_claims(
             question,
             answer,
-            citations,
+            _claims_evidence(citations),
             structured=structured,
             settings=settings,
         )
@@ -510,7 +529,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                         build_sourced_claims,
                         question,
                         answer,
-                        plan["sources"],
+                        _claims_evidence(plan["sources"]),
                         structured=None,
                         settings=settings,
                     )

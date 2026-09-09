@@ -2201,6 +2201,24 @@ export const api = {
 
   orgDashboard: () => get<OrgDashboardStats>("/api/org/dashboard"),
 
+  listWikiPages: (params?: { kind?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.kind) q.set("kind", params.kind);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.offset != null) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return get<WikiPagesResponse>(`/api/wiki/pages${qs ? `?${qs}` : ""}`);
+  },
+  getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
+  getWikiByPath: (path: string) =>
+    get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
+  listWikiFlags: (params?: { limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return get<WikiFlagsResponse>(`/api/wiki/flags${qs ? `?${qs}` : ""}`);
+  },
+
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 
   postEnvFlags: (updates: Record<string, boolean>) =>
@@ -3010,6 +3028,42 @@ export interface EnvFlag {
   hint: string;
   value: boolean;
   default: boolean;
+}
+
+/** LLM Wiki read models (W1–W4). */
+export interface WikiPageItem {
+  id: string;
+  path: string;
+  kind: string;
+  title: string;
+  norm_key?: string;
+  entity_id?: string | null;
+  source_ids?: string[];
+  flags?: string[];
+  revision?: number;
+  updated_at?: string | null;
+}
+
+export interface WikiPageDetail extends WikiPageItem {
+  markdown: string;
+}
+
+export interface WikiPagesResponse {
+  pages: WikiPageItem[];
+  total: number;
+}
+
+export interface WikiFlagItem {
+  id: string;
+  path: string;
+  kind: string;
+  title: string;
+  flags: string[];
+  source_ids: string[];
+}
+
+export interface WikiFlagsResponse {
+  pages: WikiFlagItem[];
 }
 
 export interface OcsrStatus {
