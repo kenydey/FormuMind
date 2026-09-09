@@ -183,17 +183,32 @@ export interface Evidence {
   pub_date?: string | null;
 }
 
-/** SureChEMBL P3 embodiment draft (review gate; never auto-promote). */
-export interface SurechemblExampleDraft {
+/** SureChEMBL P3 / P3.1 embodiment draft (review gate; never auto-promote). */
+export interface EmbodimentDraft {
   status: string;
   needs_review: boolean;
-  origin: "surechembl" | string;
+  origin: "surechembl" | "surechembl+fulltext" | "patent_fulltext" | "literature_fulltext" | "oa_pdf" | string;
   doc_id: string;
+  source_id?: string | null;
   title?: string | null;
   assignee?: string | null;
   pub_date?: string | null;
   url?: string | null;
   url_alt?: string | null;
+  amount_source?: "table" | "prose" | "placeholder" | "mixed" | string;
+  embodiments?: {
+    label: string;
+    page_hint?: number | null;
+    ingredients: {
+      name: string;
+      role: string;
+      weight_pct: number;
+      unit_raw?: string | null;
+      confidence?: number;
+    }[];
+    amount_source?: string;
+    warnings?: string[];
+  }[];
   formulation: {
     name: string;
     domain: string;
@@ -217,8 +232,25 @@ export interface SurechemblExampleDraft {
     chemical_id?: string | null;
     formula?: string | null;
     global_frequency?: number | null;
+    unit_raw?: string | null;
+    confidence?: number;
   }[];
   chemistry_count?: number;
+}
+
+/** @deprecated alias — prefer EmbodimentDraft */
+export type SurechemblExampleDraft = EmbodimentDraft;
+
+export interface EmbodimentEligibilityItem {
+  source_id: string;
+  eligible: boolean;
+  reason?: string | null;
+  raw_text_chars?: number;
+  extraction_status?: string | null;
+  chunk_count?: number;
+  source_kind?: string | null;
+  has_table_signal?: boolean;
+  title?: string | null;
 }
 
 export interface ResearchResult {
@@ -1871,6 +1903,39 @@ export const api = {
       promoted_to_pool: boolean;
       note?: string;
     }>("/api/surechembl/confirm-example-draft", { draft }),
+
+  /** P3.1: batch eligibility for ingested-fulltext embodiment extract. */
+  embodimentEligibility: (sourceIds: string[]) =>
+    post<{ items: EmbodimentEligibilityItem[] }>(
+      "/api/formulations/embodiment-eligibility",
+      { source_ids: sourceIds }
+    ),
+
+  /** P3.1: extract review-only draft from KB SourceDocument (no live fetch). */
+  extractEmbodimentDraft: (body: {
+    source_id: string;
+    domain?: string;
+    surechembl_hint?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      draft: EmbodimentDraft;
+      reason?: string;
+      eligibility?: EmbodimentEligibilityItem;
+    }>("/api/formulations/extract-embodiment-draft", body),
+
+  /** P3.1: human confirm → KG + pending; never production pool. */
+  confirmEmbodimentDraft: (draft: EmbodimentDraft) =>
+    post<{
+      ok: boolean;
+      source_id?: string;
+      doc_id?: string;
+      pending_materials: { action: string; name?: string; reason?: string }[];
+      formulation_entity_id: string;
+      promoted_to_pool: boolean;
+      amount_source?: string;
+      note?: string;
+    }>("/api/formulations/confirm-embodiment-draft", { draft }),
 
   kgRelationsRebuild: (sourceId?: string) =>
     post<{ task_id: string; status_url: string }>("/api/kg/relations/rebuild", {

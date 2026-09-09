@@ -48,6 +48,7 @@ describe("SourcesPanel SureChEMBL P3 actions", () => {
       surechembl: { available: true },
     } as never);
     vi.spyOn(api, "kbSources").mockResolvedValue({ sources: [] } as never);
+    vi.spyOn(api, "embodimentEligibility").mockResolvedValue({ items: [] });
     setState({
       sources: [DOC] as never,
       selectedSources: ["CN-104789083-B"],
@@ -106,7 +107,7 @@ describe("SourcesPanel SureChEMBL P3 actions", () => {
     });
     render(<SourcesPanel />);
     fireEvent.click(screen.getByTestId("surechembl-extract-draft-CN-104789083-B"));
-    await waitFor(() => expect(screen.getByTestId("surechembl-draft-review")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("embodiment-draft-review")).toBeInTheDocument());
     expect(screen.getByText("zinc phosphate")).toBeInTheDocument();
     expect(screen.getByText(/不会/)).toBeInTheDocument();
   });

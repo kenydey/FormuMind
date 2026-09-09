@@ -181,30 +181,30 @@ POST /api/formulations/confirm-embodiment-draft
 
 ### Slice A — 资格门禁 + API 骨架（约 2–3 天）
 
-- [ ] `embodiment_eligibility(source_id)` 服务 + 单测
-- [ ] `POST /api/formulations/extract-embodiment-draft`（先可返回 placeholder 从 chunk 化学名，证明门禁）
-- [ ] `POST /api/formulations/confirm-embodiment-draft`（复用 P3 confirm 红线）
-- [ ] SourcesPanel **知识库文档行**：仅 `eligible` 显示按钮（检索 Evidence 行默认不显示，除非已映射到 `source_id`）
+- [x] `embodiment_eligibility(source_id)` 服务 + 单测
+- [x] `POST /api/formulations/extract-embodiment-draft`
+- [x] `POST /api/formulations/confirm-embodiment-draft`（复用 P3 confirm 红线）
+- [x] SourcesPanel **知识库文档行**：仅 `eligible` 显示按钮
 
 ### Slice B — 表格真实比重（约 3–5 天，核心价值）
 
-- [ ] 从 chunks / 存档 markdown 中识别表格块
-- [ ] 接入已有 `extract_structured_table_from_image` / MinerU 表 HTML → `VisionFormulation`
-- [ ] unit 归一 + 多实施例拆分
-- [ ] Draft.amount_source=`table`；confirm 写入 `has_ingredient.metadata.weight_pct` 且 `placeholder_amount=false`
-- [ ] 无表 → 明确 fallback，不假装
+- [x] 从 chunks / 存档 markdown 中识别表格块
+- [x] markdown/HTML 表 → 归一 `weight_pct`（wt% / 重量份）
+- [x] unit 归一 + 多实施例拆分
+- [x] Draft.amount_source=`table`；confirm 写入 `has_ingredient.metadata.weight_pct` 且 `placeholder_amount=false`
+- [x] 无表 → 明确 fallback，不假装
 
 ### Slice C — UX 与 SureChEMBL 合流（约 2 天）
 
-- [ ] `EmbodimentDraftModal`（由 `SurechemblDraftModal` 泛化）：展示 `amount_source`、证据页、多实施例 Tab
-- [ ] 检索 Evidence 若 `kbDocByIdentifier` 已有 `source_id` 且 eligible → 同样显示按钮
-- [ ] SureChEMBL：有全文则引导真实比重；无全文保留占位并文案区分
+- [x] `EmbodimentDraftModal`（泛化 SureChEMBL modal）
+- [x] 检索 Evidence 若已映射 `source_id` 且 eligible → 全文提取
+- [x] SureChEMBL：有全文则真实比重；无全文保留占位并文案区分
 
 ### Slice D — KG 文献/专利实体归一（约 2–3 天，可并行）
 
-- [ ] 公开号 normalize（去连字符、国家码）
-- [ ] `paper:*` 实体仅对已入库全文创建
-- [ ] `same_as` 连接 `patent:scpn:` 与 `patent:cn:` 等
+- [x] 公开号 normalize（去连字符、国家码）
+- [x] `paper:*` / `patent:{office}:{pub}` 实体（确认时写入）
+- [x] `same_as` 别名连接 `patent:scpn:` 与归一专利实体
 
 ### Slice E —（可选后续）低置信散文份数
 
@@ -316,7 +316,7 @@ POST /api/formulations/confirm-embodiment-draft
 
 - [x] 产品确认：仅已入库且有全文解析的专利/文献/OA PDF  
 - [x] 产品确认：不做仅摘要、无全文的抽配方  
-- [ ] Slice A–C 实施  
-- [ ] 验收勾选  
+- [x] Slice A–D 实施（门禁 / 表抽 wt% / UX / KG 归一）  
+- [x] 验收勾选（pytest + vitest；散文抽取仍延期）  
 
-**下一步**：按 Slice A 开工（资格门禁 + 通用 extract/confirm 骨架），再上 Slice B 表格真实比重。
+**已实现**（2026-09-09）：通用 `/api/formulations/*embodiment*` + KB 行按钮 + `EmbodimentDraftModal`。

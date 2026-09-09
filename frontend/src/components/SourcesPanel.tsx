@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { api, type Evidence, type KBSourceItem, type SurechemblExampleDraft } from "../api";
+import { api, type Evidence, type EmbodimentDraft, type KBSourceItem } from "../api";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
 import SourceDetailModal from "./SourceDetailModal";
-import SurechemblDraftModal from "./SurechemblDraftModal";
+import EmbodimentDraftModal from "./EmbodimentDraftModal";
 import KgRelationPanel from "./KgRelationPanel";
 import RagPrewarmBar from "./RagPrewarmBar";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
@@ -108,12 +108,13 @@ export default function SourcesPanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
   const [detailDoc, setDetailDoc] = useState<{ title: string; sourceId: string } | null>(null);
-  const [draftReview, setDraftReview] = useState<SurechemblExampleDraft | null>(null);
+  const [draftReview, setDraftReview] = useState<EmbodimentDraft | null>(null);
   const [schActionBusy, setSchActionBusy] = useState<string | null>(null);
   const [schActionMsg, setSchActionMsg] = useState<string | null>(null);
   // 知识库文档(2026-09-05): 已导入语料列表 —— 项目视图含全局文档(project_id OR NULL),
   // 不依赖易被覆盖的 payload.sources —— 资料可见性的权威来源。
   const [kbDocs, setKbDocs] = useState<KBSourceItem[]>([]);
+  const [eligibleIds, setEligibleIds] = useState<Record<string, boolean>>({});
   const activeProjectId = useStore((s) => s.activeProjectId);
 
   async function ingestSurechemblKg(e: Evidence) {
@@ -140,9 +141,36 @@ export default function SourcesPanel() {
     }
   }
 
+  async function extractFulltextDraft(sourceId: string, opts?: { surechemblHint?: boolean }) {
+    setSchActionBusy(`emb:${sourceId}`);
+    setSchActionMsg(null);
+    try {
+      const res = await api.extractEmbodimentDraft({
+        source_id: sourceId,
+        surechembl_hint: opts?.surechemblHint,
+      });
+      if (!res.ok || !res.draft) {
+        setSchActionMsg(res.reason || "无法提取实施例草稿");
+        return;
+      }
+      setDraftReview(res.draft);
+    } catch (err) {
+      setSchActionMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSchActionBusy(null);
+    }
+  }
+
   async function extractSurechemblDraft(e: Evidence) {
     const docId = e.identifier;
     if (!docId) return;
+    const mappedId =
+      (kbIngest?.docs || []).find((d) => d.identifier === e.identifier)?.source_id ||
+      undefined;
+    if (mappedId && eligibleIds[mappedId]) {
+      await extractFulltextDraft(mappedId, { surechemblHint: true });
+      return;
+    }
     setSchActionBusy(`draft:${docId}`);
     setSchActionMsg(null);
     try {
@@ -154,7 +182,10 @@ export default function SourcesPanel() {
         url: e.url,
       });
       if (!res.ok || !res.draft) {
-        setSchActionMsg(res.reason || "无法提取实施例草稿");
+        setSchActionMsg(
+          (res.reason || "无法提取实施例草稿") +
+            " · 提示：入库全文后可提取真实比重"
+        );
         return;
       }
       setDraftReview(res.draft);
@@ -182,6 +213,31 @@ export default function SourcesPanel() {
       cancelled = true;
     };
   }, [activeProjectId, kbIngest]);
+
+  useEffect(() => {
+    const ids = kbDocs.map((d) => d.id).filter(Boolean);
+    if (!ids.length) {
+      setEligibleIds({});
+      return;
+    }
+    let cancelled = false;
+    api
+      .embodimentEligibility(ids.slice(0, 100))
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, boolean> = {};
+        for (const it of res.items || []) {
+          map[it.source_id] = !!it.eligible;
+        }
+        setEligibleIds(map);
+      })
+      .catch(() => {
+        if (!cancelled) setEligibleIds({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kbDocs]);
 
   const searchableTypes = searchSourceTypes(sourceTypes);
   const canSearch =
@@ -439,7 +495,7 @@ export default function SourcesPanel() {
                             void extractSurechemblDraft(e);
                           }}
                           className="text-amber-300/90 hover:underline disabled:opacity-40"
-                          title="提取实施例草稿（需人工确认，不写生产配方池）"
+                          title="提取实施例草稿（无全文时为占位均分；入库全文后可提取真实比重）"
                         >
                           {schActionBusy === `draft:${e.identifier}`
                             ? "提取中…"
@@ -514,6 +570,18 @@ export default function SourcesPanel() {
                   >
                     🔎
                   </button>
+                  {eligibleIds[d.id] && (
+                    <button
+                      type="button"
+                      data-testid={`embodiment-extract-${d.id}`}
+                      disabled={schActionBusy === `emb:${d.id}`}
+                      onClick={() => void extractFulltextDraft(d.id)}
+                      className="shrink-0 text-[10px] text-amber-300/90 hover:underline disabled:opacity-40"
+                      title="从已入库全文提取实施例草稿（需人工确认）"
+                    >
+                      {schActionBusy === `emb:${d.id}` ? "提取中…" : "提取实施例草稿"}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -543,7 +611,7 @@ export default function SourcesPanel() {
         />
       )}
       {draftReview && (
-        <SurechemblDraftModal
+        <EmbodimentDraftModal
           draft={draftReview}
           onClose={() => setDraftReview(null)}
           onConfirmed={(note) => setSchActionMsg(note)}

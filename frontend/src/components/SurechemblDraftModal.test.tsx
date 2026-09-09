@@ -1,5 +1,5 @@
 /**
- * SurechemblDraftModal — confirm gate never claims production pool write.
+ * SurechemblDraftModal — re-exports EmbodimentDraftModal; keep legacy test coverage.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +12,7 @@ const DRAFT: SurechemblExampleDraft = {
   origin: "surechembl",
   doc_id: "CN-104789083-B",
   title: "Primer",
+  amount_source: "placeholder",
   formulation: {
     name: "草稿",
     domain: "anticorrosion_coating",
@@ -21,7 +22,7 @@ const DRAFT: SurechemblExampleDraft = {
   },
 };
 
-describe("SurechemblDraftModal", () => {
+describe("SurechemblDraftModal (alias)", () => {
   it("confirms with promoted_to_pool=false messaging", async () => {
     const confirm = vi.spyOn(api, "surechemblConfirmExampleDraft").mockResolvedValue({
       ok: true,
@@ -35,7 +36,7 @@ describe("SurechemblDraftModal", () => {
     render(<SurechemblDraftModal draft={DRAFT} onClose={() => {}} onConfirmed={onConfirmed} />);
     fireEvent.click(screen.getByRole("button", { name: "人工确认入库" }));
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(DRAFT));
-    await waitFor(() => expect(screen.getByTestId("surechembl-draft-confirmed")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("embodiment-draft-confirmed")).toBeInTheDocument());
     expect(onConfirmed).toHaveBeenCalled();
   });
 });

@@ -35,6 +35,8 @@ describe("SourcesPanel SureChEMBL links", () => {
     vi.spyOn(api, "getSourceStatus").mockResolvedValue({
       surechembl: { available: true },
     } as never);
+    vi.spyOn(api, "kbSources").mockResolvedValue({ sources: [] } as never);
+    vi.spyOn(api, "embodimentEligibility").mockResolvedValue({ items: [] });
     setState({
       sources: [
         {

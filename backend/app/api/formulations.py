@@ -460,3 +460,57 @@ def diff_formulation_versions(from_id: str, to_id: str) -> DiffResponse:
         ],
         metric_deltas=diff.metric_deltas,
     )
+
+
+# ── P3.1: embodiment drafts from ingested fulltext ────────────────────
+
+
+class EmbodimentEligibilityRequest(BaseModel):
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class ExtractEmbodimentDraftRequest(BaseModel):
+    source_id: str = Field(min_length=1)
+    domain: str = "anticorrosion_coating"
+    surechembl_hint: bool = False
+
+
+class ConfirmEmbodimentDraftRequest(BaseModel):
+    draft: dict
+
+
+@router.post("/formulations/embodiment-eligibility")
+def embodiment_eligibility(body: EmbodimentEligibilityRequest) -> dict:
+    """Batch eligibility for KB fulltext embodiment extract."""
+    from ..services import embodiment_drafts as emb
+
+    ids = [str(s).strip() for s in (body.source_ids or []) if str(s).strip()]
+    return emb.check_eligibility_many(ids[:100])
+
+
+@router.post("/formulations/extract-embodiment-draft")
+def extract_embodiment_draft(body: ExtractEmbodimentDraftRequest) -> dict:
+    """Extract review-only draft from an ingested SourceDocument (no live fetch)."""
+    from ..services import embodiment_drafts as emb
+
+    out = emb.extract_embodiment_draft(
+        source_id=body.source_id,
+        domain=body.domain,
+        surechembl_hint=body.surechembl_hint,
+    )
+    if not out.get("ok"):
+        reason = out.get("reason") or "ineligible"
+        code = 404 if reason == "not_ingested" else 400
+        raise HTTPException(status_code=code, detail=reason)
+    return out
+
+
+@router.post("/formulations/confirm-embodiment-draft")
+def confirm_embodiment_draft(body: ConfirmEmbodimentDraftRequest) -> dict:
+    """Human confirm: KG + pending materials only (never production pool)."""
+    from ..services import embodiment_drafts as emb
+
+    out = emb.confirm_embodiment_draft(body.draft or {})
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("reason") or "confirm_failed")
+    return out
