@@ -305,6 +305,9 @@ class Evidence(BaseModel):
     url: str | None = None
     # Secondary UI link (e.g. SureChEMBL document page).
     url_alt: str | None = None
+    # SureChEMBL / patent metadata for KG ingest + draft review (P3).
+    assignee: str | None = None
+    pub_date: str | None = None
 
 
 class ParameterBoundary(BaseModel):

@@ -177,6 +177,48 @@ export interface Evidence {
   url?: string | null;
   /** Secondary URL (e.g. SureChEMBL document page). */
   url_alt?: string | null;
+  /** SureChEMBL / patent assignee (P3 KG). */
+  assignee?: string | null;
+  /** Publication date string from SureChEMBL (P3 KG). */
+  pub_date?: string | null;
+}
+
+/** SureChEMBL P3 embodiment draft (review gate; never auto-promote). */
+export interface SurechemblExampleDraft {
+  status: string;
+  needs_review: boolean;
+  origin: "surechembl" | string;
+  doc_id: string;
+  title?: string | null;
+  assignee?: string | null;
+  pub_date?: string | null;
+  url?: string | null;
+  url_alt?: string | null;
+  formulation: {
+    name: string;
+    domain: string;
+    ingredients: {
+      name: string;
+      role: string;
+      weight_pct: number;
+      smiles?: string | null;
+      cas_no?: string | null;
+    }[];
+    predicted?: Record<string, unknown>;
+    warnings?: string[];
+    source?: string;
+  };
+  ingredients_detail?: {
+    name: string;
+    role: string;
+    weight_pct: number;
+    smiles?: string | null;
+    cas_no?: string | null;
+    chemical_id?: string | null;
+    formula?: string | null;
+    global_frequency?: number | null;
+  }[];
+  chemistry_count?: number;
 }
 
 export interface ResearchResult {
@@ -1780,6 +1822,55 @@ export const api = {
 
   kgLinkSource: (sourceId: string) =>
     post<KgLinkReport>(`/api/kg/link-source/${sourceId}`, {}),
+
+  /** SureChEMBL P3: upsert patent + chemistry entities (appears_in/claimed_in). */
+  surechemblIngestDocument: (body: {
+    doc_id: string;
+    title?: string | null;
+    assignee?: string | null;
+    pub_date?: string | null;
+    url?: string | null;
+    section?: string | null;
+    fetch_chemistry?: boolean;
+    chemistry_limit?: number;
+  }) =>
+    post<{
+      ok: boolean;
+      doc_id: string;
+      patent_entity_id: string;
+      entities: number;
+      links: number;
+      link_type: string;
+      chemicals: number;
+    }>("/api/surechembl/kg/ingest-document", body),
+
+  /** SureChEMBL P3: extract review-only embodiment Formulation draft (no DB writes). */
+  surechemblExtractExampleDraft: (body: {
+    doc_id: string;
+    title?: string | null;
+    assignee?: string | null;
+    pub_date?: string | null;
+    url?: string | null;
+    domain?: string;
+    ingredient_limit?: number;
+  }) =>
+    post<{
+      ok: boolean;
+      draft: SurechemblExampleDraft;
+      reason?: string;
+      chemistry_count?: number;
+    }>("/api/surechembl/extract-example-draft", body),
+
+  /** SureChEMBL P3: human confirm → KG + pending materials; never production pool. */
+  surechemblConfirmExampleDraft: (draft: SurechemblExampleDraft) =>
+    post<{
+      ok: boolean;
+      doc_id: string;
+      pending_materials: { action: string; name?: string; reason?: string }[];
+      formulation_entity_id: string;
+      promoted_to_pool: boolean;
+      note?: string;
+    }>("/api/surechembl/confirm-example-draft", { draft }),
 
   kgRelationsRebuild: (sourceId?: string) =>
     post<{ task_id: string; status_url: string }>("/api/kg/relations/rebuild", {

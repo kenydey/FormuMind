@@ -31,6 +31,9 @@ STRUCTURAL_LINK_TYPES = frozenset(
         "has_ingredient",
         "has_performance",
         "tested_on_substrate",
+        # SureChEMBL P3: chem → patent provenance
+        "appears_in",
+        "claimed_in",
     }
 )
 

@@ -557,6 +557,8 @@ def search_surechembl_content(
                 relevance=round(max(0.15, 0.92 - (offset + i) * 0.015), 3),
                 url=doc.get("url"),
                 url_alt=doc.get("surechembl_url"),
+                assignee=doc.get("assignee"),
+                pub_date=doc.get("pub_date"),
             )
         )
     return out

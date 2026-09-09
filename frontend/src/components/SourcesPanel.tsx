@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { api, type KBSourceItem } from "../api";
+import { api, type Evidence, type KBSourceItem, type SurechemblExampleDraft } from "../api";
 import { useStore } from "../store";
 import AddSourceModal from "./AddSourceModal";
 import SourceDetailModal from "./SourceDetailModal";
+import SurechemblDraftModal from "./SurechemblDraftModal";
 import KgRelationPanel from "./KgRelationPanel";
 import RagPrewarmBar from "./RagPrewarmBar";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
@@ -107,10 +108,62 @@ export default function SourcesPanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
   const [detailDoc, setDetailDoc] = useState<{ title: string; sourceId: string } | null>(null);
+  const [draftReview, setDraftReview] = useState<SurechemblExampleDraft | null>(null);
+  const [schActionBusy, setSchActionBusy] = useState<string | null>(null);
+  const [schActionMsg, setSchActionMsg] = useState<string | null>(null);
   // 知识库文档(2026-09-05): 已导入语料列表 —— 项目视图含全局文档(project_id OR NULL),
   // 不依赖易被覆盖的 payload.sources —— 资料可见性的权威来源。
   const [kbDocs, setKbDocs] = useState<KBSourceItem[]>([]);
   const activeProjectId = useStore((s) => s.activeProjectId);
+
+  async function ingestSurechemblKg(e: Evidence) {
+    const docId = e.identifier;
+    if (!docId) return;
+    setSchActionBusy(`kg:${docId}`);
+    setSchActionMsg(null);
+    try {
+      const res = await api.surechemblIngestDocument({
+        doc_id: docId,
+        title: e.title,
+        assignee: e.assignee,
+        pub_date: e.pub_date,
+        url: e.url,
+        fetch_chemistry: true,
+      });
+      setSchActionMsg(
+        `图谱已更新 · ${docId}：${res.entities} 实体 / ${res.links} 边（${res.link_type}）`
+      );
+    } catch (err) {
+      setSchActionMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSchActionBusy(null);
+    }
+  }
+
+  async function extractSurechemblDraft(e: Evidence) {
+    const docId = e.identifier;
+    if (!docId) return;
+    setSchActionBusy(`draft:${docId}`);
+    setSchActionMsg(null);
+    try {
+      const res = await api.surechemblExtractExampleDraft({
+        doc_id: docId,
+        title: e.title,
+        assignee: e.assignee,
+        pub_date: e.pub_date,
+        url: e.url,
+      });
+      if (!res.ok || !res.draft) {
+        setSchActionMsg(res.reason || "无法提取实施例草稿");
+        return;
+      }
+      setDraftReview(res.draft);
+    } catch (err) {
+      setSchActionMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSchActionBusy(null);
+    }
+  }
 
   useEffect(() => {
     loadSourceStatus();
@@ -362,6 +415,38 @@ export default function SourcesPanel() {
                         )}
                       </span>
                     )}
+                    {e.source === "surechembl" && e.identifier && (
+                      <span className="shrink-0 flex items-center gap-1">
+                        <button
+                          type="button"
+                          data-testid={`surechembl-ingest-kg-${e.identifier}`}
+                          disabled={schActionBusy === `kg:${e.identifier}`}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            void ingestSurechemblKg(e);
+                          }}
+                          className="text-accent2/90 hover:underline disabled:opacity-40"
+                          title="入库知识图谱（patent:scpn / chem:surechembl）"
+                        >
+                          {schActionBusy === `kg:${e.identifier}` ? "入库中…" : "入库图谱"}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`surechembl-extract-draft-${e.identifier}`}
+                          disabled={schActionBusy === `draft:${e.identifier}`}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            void extractSurechemblDraft(e);
+                          }}
+                          className="text-amber-300/90 hover:underline disabled:opacity-40"
+                          title="提取实施例草稿（需人工确认，不写生产配方池）"
+                        >
+                          {schActionBusy === `draft:${e.identifier}`
+                            ? "提取中…"
+                            : "提取实施例草稿"}
+                        </button>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button
@@ -435,11 +520,33 @@ export default function SourcesPanel() {
           </div>
         )}
       </div>
+      {schActionMsg && (
+        <div
+          className="shrink-0 text-[10px] text-slate-400 border border-edge/50 rounded px-2 py-1"
+          data-testid="surechembl-action-msg"
+        >
+          {schActionMsg}
+          <button
+            type="button"
+            className="ml-2 text-slate-600 hover:text-slate-400"
+            onClick={() => setSchActionMsg(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {detailDoc && (
         <SourceDetailModal
           title={detailDoc.title}
           sourceId={detailDoc.sourceId}
           onClose={() => setDetailDoc(null)}
+        />
+      )}
+      {draftReview && (
+        <SurechemblDraftModal
+          draft={draftReview}
+          onClose={() => setDraftReview(null)}
+          onConfirmed={(note) => setSchActionMsg(note)}
         />
       )}
     </aside>

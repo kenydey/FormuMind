@@ -12,6 +12,9 @@ class StructuralLinkType(str, Enum):
     HAS_INGREDIENT = "has_ingredient"
     HAS_PERFORMANCE = "has_performance"
     TESTED_ON_SUBSTRATE = "tested_on_substrate"
+    # SureChEMBL / patent chemistry provenance (chem → patent)
+    APPEARS_IN = "appears_in"
+    CLAIMED_IN = "claimed_in"
 
 
 STRUCTURAL_LINK_TYPES = frozenset(m.value for m in StructuralLinkType)

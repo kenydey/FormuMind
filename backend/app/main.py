@@ -40,6 +40,7 @@ from .api import kb as kb_router
 from .api import materials as materials_router
 from .api import kg as kg_router
 from .api import kg_neo4j as kg_neo4j_router
+from .api import surechembl as surechembl_router
 from .api import org as org_router
 from .api import notebooklm as notebooklm_router
 from .api import meta as meta_router
@@ -244,6 +245,7 @@ app.include_router(session_router.router)
 app.include_router(materials_router.router, prefix="/api")
 app.include_router(kg_router.router, prefix="/api")
 app.include_router(kg_neo4j_router.router, prefix="/api")
+app.include_router(surechembl_router.router, prefix="/api")
 app.include_router(org_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(qc_router.router, prefix="/api")

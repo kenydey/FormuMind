@@ -114,6 +114,8 @@ def test_search_surechembl_content_builds_evidence(monkeypatch):
     assert rows[0].source == "surechembl"
     assert rows[0].identifier == "CN-104789083-B"
     assert rows[0].url and "patents.google.com" in rows[0].url
+    assert rows[0].assignee == "Acme"
+    assert rows[0].pub_date == "20170725"
     assert "chemistry: epoxy" in rows[0].snippet
 
 
