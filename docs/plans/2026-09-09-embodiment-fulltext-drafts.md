@@ -2,7 +2,8 @@
 
 状态：**已实现**（2026-09-09）  
 前置：SureChEMBL P0–P3（lookup · substitutes · content search · SCHEMBL KG/占位草稿）  
-后续漏斗：[`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)（P3.2 Evidence→入库全文）
+后续漏斗：[`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)（P3.2 Evidence→入库全文）  
+质量事故（占位噪音 / 表丢失）：[`2026-09-09-embodiment-draft-noise-recovery.md`](./2026-09-09-embodiment-draft-noise-recovery.md)（P3.1b）
 
 ## 1. 决策摘要（产品已确认）
 
