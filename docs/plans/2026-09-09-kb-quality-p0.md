@@ -1,6 +1,6 @@
 # P0 实施计划 — 知识库检索/入库质量门控（Domain Profile）
 
-状态：**方案已认可，待实施**（2026-09-09）  
+状态：**Q0 已落地，Q1–Q6 待实施**（2026-09-09）  
 范围：**仅 P0**（检索原生分类硬过滤 + 入库门校准 + 可审计打标）  
 不做：pending 人工队列 UI、Wiki 只编译 trusted 全量改造、embedding 第三票、历史库回扫（→ P1/P2）  
 开发约定：**直接在 `main` 切片落地**；旗标默认偏保守，可关回旧行为  
@@ -103,12 +103,24 @@ class DomainSearchProfile:
 | **Google Scholar** | **不硬过滤**；`source_policy=support` 降权 | 入库更严 | scoring |
 | **PubChem** | 不动（非文献源） | — | — |
 
-### 3.1 OpenAlex Concept 包（P0 初值，可后续校正）
+### 3.1 OpenAlex Concept 包（P0 初值，已用 API 确认 ID）
 
-实施时用 OpenAlex API 解析一次稳定 ID，写入常量（示例方向，**落地前用脚本确认 ID**）：
+写入 `search_profiles.py` 的稳定短 ID（不含 URL 前缀）：
 
-- 材料科学 / 涂层 / 腐蚀工程 / 表面改性 等相关 concept  
-- **排除**：植入物、骨科、临床医学大类（deny 或负向 filter 若 API 支持）
+| Concept | OpenAlex ID | 用于域 |
+|---------|-------------|--------|
+| Materials science | `C192562407` | 全域底 |
+| Corrosion | `C20625102` | 防腐 / 表面 / 自沉积 |
+| Coating | `C2781448156` | 防腐 / 自沉积 |
+| Surface modification | `C115537861` | 表面 / 自沉积 |
+| Metallurgy | `C191897082` | 防腐 / 表面 |
+| Passivation | `C33574316` | 表面处理 |
+| Cleaning agent | `C165460524` | 脱脂 |
+| Degreasing | `C150042643` | 脱脂 |
+| Electrochemistry | `C52859227` | 脱脂 / 自沉积 |
+| Nonionic surfactant | `C2994558038` | 脱脂 |
+
+**排除**：植入物、骨科、临床医学大类 → 各域 `keyword_deny`（含 biomedical / implant 等）。
 
 ### 3.2 CPC 前缀初值（按域）
 
@@ -184,7 +196,7 @@ select_ingest_targets(evidence, domain, query):
 
 | 切片 | 内容 | 估时 | 验收 |
 |------|------|------|------|
-| **Q0** | `DomainSearchProfile` 四域常量 + 单元测试映射 | 0.5–1d | 每域含 arxiv/cpc/keywords |
+| **Q0** ✅ | `DomainSearchProfile` 四域常量 + 单元测试映射 | 0.5–1d | 每域含 arxiv/cpc/keywords |
 | **Q1** | arXiv / S2 / expander IPC 按 Profile | 1d | 查询字符串单测 |
 | **Q2** | OpenAlex concept filter + Patents CPC 附加/后滤 | 1–1.5d | mock API 单测；无 concept 时 degrade 不炸 |
 | **Q3** | Evidence 打标 + scoring 加权 | 0.5–1d | 合并结果含 domain_match |
@@ -260,9 +272,10 @@ P0 完成后自然接：
 
 - [x] 方向认可（原生 taxonomy + 产品域双轨）  
 - [x] P0 实施计划成文  
-- [ ] Q0–Q6 代码落地  
+- [x] **Q0** `DomainSearchProfile` 四域常量 + 单测（`backend/app/domain/search_profiles.py`）  
+- [ ] Q1–Q6 代码落地  
 - [ ] DoD D1–D6 验收  
-- [ ] 推送 `main`  
+- [x] Q0 推送 `main`  
 
 ---
 
