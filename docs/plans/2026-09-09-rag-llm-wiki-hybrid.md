@@ -305,7 +305,7 @@ W5–W6 Lint + 机理/实验回流
 | Compiler / Lint / Retrieve | `backend/app/services/wiki/{compile,lint,retrieve,schema}.py` |
 | 挂接 | `kb_index.index_source` 末尾 · `kb_ingest` · `api/chat.py` · `factor_suggest.py` |
 | 旗标 | `config.py` · `env_flags.py` |
-| 前端（后期） | Wiki 只读浏览 / Flag 列表（可先 API-only） |
+| 前端（后期） | Wiki 只读浏览 / Flag 列表（可先 API-only） · **Knowledge Hub**（[`2026-09-09-knowledge-hub-impl.md`](./2026-09-09-knowledge-hub-impl.md)） |
 
 ---
 
