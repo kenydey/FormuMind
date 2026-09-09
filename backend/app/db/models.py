@@ -665,3 +665,26 @@ class InferredSystemRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow
     )
+
+
+class WikiPage(Base):
+    """LLM Wiki compiled page metadata (Markdown body lives on disk).
+
+    Dual-write with ``data/wiki/{path}``. Raw chunks remain the provenance
+    authority; this row indexes human-readable compiled memory.
+    """
+
+    __tablename__ = "wiki_pages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    path: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="material", index=True)
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    norm_key: Mapped[str] = mapped_column(String(200), default="", index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    source_ids: Mapped[list] = mapped_column(JSON, default=list)
+    flags: Mapped[list] = mapped_column(JSON, default=list)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

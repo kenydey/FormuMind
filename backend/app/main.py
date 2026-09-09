@@ -37,6 +37,7 @@ from .api import design as design_router
 from .api import intent as intent_router
 from .api import dependencies as dependencies_router
 from .api import kb as kb_router
+from .api import wiki as wiki_router
 from .api import materials as materials_router
 from .api import kg as kg_router
 from .api import kg_neo4j as kg_neo4j_router
@@ -241,6 +242,7 @@ app.include_router(search_router.router, prefix="/api")
 app.include_router(ingest_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(kb_router.router, prefix="/api")
+app.include_router(wiki_router.router, prefix="/api")
 app.include_router(session_router.router)
 app.include_router(materials_router.router, prefix="/api")
 app.include_router(kg_router.router, prefix="/api")
