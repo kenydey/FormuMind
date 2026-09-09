@@ -334,6 +334,7 @@ def ingest_evidence_docs(
     project_id: str | None = None,
     query: str | None = None,
     skip_topic_filter: bool = False,
+    skip_product_backfill: bool = False,
 ) -> dict[str, Any]:
     """Sequentially acquire + index the fetchable subset of *evidence*.
 
@@ -421,7 +422,13 @@ def ingest_evidence_docs(
     # `kb_index._attach_entities`); resolve it once per product now that the
     # batch is done. Outside `timing.batch` on purpose — it is not part of any
     # document's cost and folding it in would misattribute it.
-    structures = _backfill_product_structures()
+    # One-shot user clicks skip this: PubChem backfill can take tens of seconds
+    # and must not block the 「入库全文」 response.
+    structures = (
+        {"attempted": 0, "resolved": 0, "mentions_covered": 0}
+        if skip_product_backfill
+        else _backfill_product_structures()
+    )
 
     summary = {
         "docs": docs,
@@ -449,6 +456,7 @@ def ingest_single_evidence(
     flat result for ``POST /api/kb/ingest-evidence``:
     ``{ok, status, source_id, canonical_id, reason, kind}``.
     """
+    from ..db.source_store import get_source_store
     from . import fulltext_fetcher as ff
     from .patent_ids import canonical_origin_url, normalize_patent_pub
 
@@ -471,11 +479,29 @@ def ingest_single_evidence(
             "status_url": None,
         }
 
+    # Fast-path dedup before fetch/index/backfill — one-click UX must stay snappy.
+    try:
+        existing = get_source_store().find_by_origin_urls(_origin_lookup_keys(ev))
+    except Exception as exc:
+        existing = degrade_return(logger, exc, "ingest_single dedup failed", None)
+    if existing is not None:
+        return {
+            "ok": True,
+            "status": "skipped",
+            "source_id": existing.id,
+            "canonical_id": canonical,
+            "reason": None,
+            "kind": kind,
+            "task_id": None,
+            "status_url": None,
+        }
+
     summary = ingest_evidence_docs(
         [ev],
         max_docs=1,
         project_id=project_id,
         skip_topic_filter=True,
+        skip_product_backfill=True,
     )
     docs = summary.get("docs") or []
     if not docs:
