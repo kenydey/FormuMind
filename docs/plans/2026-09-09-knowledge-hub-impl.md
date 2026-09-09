@@ -3,7 +3,7 @@
 状态：**范围已确认，待实施**（2026-09-09）  
 性质：**非核心增强层**（服务检索→全文→配方/DOE 主闭环，不替代左栏检索工作台）  
 开发约定：**直接在 `main` 迭代**（与 W0–W4 Wiki 一致）  
-关联：[`2026-09-09-rag-llm-wiki-hybrid.md`](./2026-09-09-rag-llm-wiki-hybrid.md) · P3.2 [`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)
+关联：[`2026-09-09-rag-llm-wiki-hybrid.md`](./2026-09-09-rag-llm-wiki-hybrid.md) · P3.2 [`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md) · 质量门控 P0 [`2026-09-09-kb-quality-p0.md`](./2026-09-09-kb-quality-p0.md)
 
 ---
 
