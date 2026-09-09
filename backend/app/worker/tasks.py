@@ -1183,6 +1183,58 @@ def run_kg_relations_rebuild(self, payload: dict) -> dict:
         return {"task_id": task_id, "error": str(exc)}
 
 
+def _wiki_compile_impl(task_id: str, payload: dict) -> dict:
+    from ..services.wiki.compile import compile_source
+
+    source_id = str(payload.get("source_id") or "").strip()
+    result = compile_source(source_id)
+    return {"task_id": task_id, **result}
+
+
+@celery_app.task(bind=True, name="formumind.wiki_compile")
+def run_wiki_compile_task(self, payload: dict) -> dict:
+    return _wiki_compile_impl(self.request.id, payload)
+
+
+def dispatch_wiki_compile(source_id: str) -> str | None:
+    """Fire-and-forget Wiki compile after KB index. Never raises.
+
+    Eager mode uses a daemon thread (same pattern as ``dispatch_kb_ingest``)
+    so parent ingest/index paths stay non-blocking.
+    """
+    from ..config import get_settings
+
+    settings = get_settings()
+    if not settings.wiki_enabled or not settings.wiki_compile_on_ingest:
+        return None
+    sid = (source_id or "").strip()
+    if not sid:
+        return None
+    payload = {"source_id": sid}
+    try:
+        if settings.celery_eager:
+            task_id = f"wikicompile-{uuid.uuid4().hex[:16]}"
+            task_manager.register_celery_task(task_id, "wiki_compile")
+            threading.Thread(
+                target=lambda: _safe_wiki_compile(task_id, payload),
+                name="wiki-compile",
+                daemon=True,
+            ).start()
+            return task_id
+        async_result = run_wiki_compile_task.delay(payload)
+        task_manager.register_celery_task(async_result.id, "wiki_compile")
+        return async_result.id
+    except Exception as exc:
+        return degrade_return(logger, exc, "wiki compile dispatch failed", None)
+
+
+def _safe_wiki_compile(task_id: str, payload: dict) -> None:
+    try:
+        _wiki_compile_impl(task_id, payload)
+    except Exception as exc:
+        log_handled_exception(logger, exc, "wiki compile background thread")
+
+
 def warm_celery_producer(timeout: float = 60.0) -> None:
     """发布一次 noop —— uvicorn 进程内首次 producer 初始化极慢/卡请求线程。
 

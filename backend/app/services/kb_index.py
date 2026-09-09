@@ -298,6 +298,18 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
                 get_source_store().clear_full_text(source_id)
             except Exception as exc:
                 degrade_return(logger, exc, "prune full_text failed", None)
+        # W2: after successful chunk write, enqueue LLM Wiki compile (best-effort).
+        if (
+            n
+            and settings.wiki_enabled
+            and settings.wiki_compile_on_ingest
+        ):
+            try:
+                from ..worker.tasks import dispatch_wiki_compile
+
+                dispatch_wiki_compile(source_id)
+            except Exception as wiki_exc:
+                degrade_return(logger, wiki_exc, "wiki compile dispatch failed", None)
         return n
     except Exception as exc:
         return degrade_return(logger, exc, "kb index_source failed", 0)
