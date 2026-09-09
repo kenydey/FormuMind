@@ -1,6 +1,6 @@
 # P3.1b — 实施例草稿噪音治理与真实配比表恢复
 
-状态：**计划待实施**（2026-09-09）  
+状态：**F0–F3 已实施**（2026-09-09）；F4 / Slice E 仍待评估  
 触发：CN1227312C 全文提取 → `amount_source=placeholder`，原料为英文句段噪音（如 `Typical compositions may include` / `Translated from`），均分 ~16.67 wt%  
 前置：P3.1 [`2026-09-09-embodiment-fulltext-drafts.md`](./2026-09-09-embodiment-fulltext-drafts.md) · P3.2 [`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)
 
@@ -72,34 +72,34 @@ Google Patents HTML (/en)
 
 ### Slice F0 — 杀掉噪音占位原料（P0，~0.5 天）
 
-- [ ] 删除 / 禁用 Title-Case 句段启发式（`findall` 那段）
-- [ ] 无表时：`ingredients=[]`，或若有 SureChEMBL chemistry 映射则用 **真实化学名**（仍 `amount_source=placeholder`，均分可保留但须标注来自 SCHEMBL）
-- [ ] Modal：空表 + 强提示「未识别到配方表，请换 PDF 入库或人工填写」；可选：空原料时禁用「确认入库」
-- [ ] 单测：复现 CN1227312C 式英文套话正文 → **不得**出现 `Typical compositions` / `Translated from`
+- [x] 删除 / 禁用 Title-Case 句段启发式（`findall` 那段）
+- [x] 无表时：`ingredients=[]`（空草稿）；不再编造 component A/B/C
+- [x] Modal：空表 + 强提示；空原料时隐藏「确认入库」；后端 `no_usable_ingredients`
+- [x] 单测：复现 CN1227312C 式英文套话正文 → **不得**出现 `Typical compositions` / `Translated from`
 
 **验收：** 同款正文再提取，截图级噪音消失；警告仍诚实。
 
 ### Slice F1 — 入库保留 HTML 表 → GFM（P0，~1 天）
 
-- [ ] `patent_text_from_html` / section 抽取：在 `_strip_tags` **之前**把 `<table>` 转为 GFM pipe table
-- [ ] 单测：带 Component/wt% 的 HTML fixture → `parse_markdown_tables` 非空 → extract `amount_source=table`、wt% 非均分
-- [ ] 文档：已入库旧文档需 **再入库全文**（或提供轻量 reparse）才吃到 F1
+- [x] `patent_text_from_html` / section 抽取：在 `_strip_tags` **之前**把 `<table>` 转为 GFM pipe table
+- [x] 单测：带 Component/wt% 的 HTML fixture → `parse_markdown_tables` 非空 → extract `amount_source=table`、wt% 非均分
+- [x] 文档：已入库旧文档需 **再入库全文**（或提供轻量 reparse）才吃到 F1
 
 **验收：** 新入库的「HTML 含表」专利，一点提取即可出真实比重。
 
 ### Slice F2 — HTML 无表 → PDF/hybrid 表路径（P0/P1，~1–2 天）
 
-- [ ] 检测 HTML 正文无 table 信号且存在 `citation_pdf_url`（或 GP PDF）时，入库走现有 `parse_document` / hybrid
-- [ ] 仍挂在用户「入库全文」/ auto ingest，**不**在 extract API 里偷下未入库 URL（守 P3.1 红线）
-- [ ] 失败 reason 可读：`html_no_table` / `pdf_timeout` / `pdf_no_table`
+- [x] 检测 HTML 正文无 table 信号时尝试 PDF；PDF 有表信号或明显更长则采用
+- [x] 仍挂在用户「入库全文」/ `fetch_patent_text`，**不**在 extract API 里偷下未入库 URL
+- [x] 单测：HTML 无表 + PDF 有 GFM 表 → `fetch_patent_text(prefer_html=True)` 返回 PDF 文本
 
 **验收：** HTML 无表、PDF 有表的样例 → 入库后 extract 为 `table`。
 
 ### Slice F3 — 剥扁文本行恢复（P1，~1 天，可与 F2 并行）
 
-- [ ] 在实施例标题附近解析 `原料名 + 数字 (+ wt%/重量份/份)` 连续 ≥2 行
-- [ ] 高精拒绝句段行；`amount_source` 标 `table` 或 `prose`（勿伪称扫描 OCR）
-- [ ] 单测：strip 后的 `Epoxy resin 40` 行可恢复；套话行不可恢复
+- [x] 在实施例标题附近解析 `原料名 + 数字 (+ wt%/重量份/份)` 连续 ≥2 行
+- [x] 高精拒绝句段行；`amount_source` 标 `prose`
+- [x] 单测：strip 后的 `Epoxy resin 40` 行可恢复；套话行不可恢复
 
 **验收：** 不重新下载也能救回一部分存量 KB。
 
@@ -168,7 +168,8 @@ F0（止损） → F1（HTML 表复活） → F2 ∥ F3 → F4 → E（可选）
 - [x] 事故复盘（CN1227312C 截图）  
 - [x] 根因定位（strip_tags + Title-Case fallback）  
 - [x] 优化方案成文  
-- [ ] Slice F0–F1 实施  
-- [ ] 同专利回归冒烟  
+- [x] Slice F0–F3 实施  
+- [ ] 同专利回归冒烟（需 **再入库全文** 后提取）  
+- [ ] F4 / E 按指标决定  
 
-**下一步实施顺序：** F0 → F1（可同一 PR）；F2 紧随。
+**已落地：** F0 止损 · F1 HTML→GFM · F2 PDF 补表 · F3 剥扁行恢复。存量文档须重新「入库全文」才吃到 F1/F2。

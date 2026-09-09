@@ -113,8 +113,66 @@ def _strip_tags(html: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _cell_text(cell_html: str) -> str:
+    import html as html_mod
+
+    t = re.sub(r"(?is)<br\s*/?>", " ", cell_html or "")
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = html_mod.unescape(t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _html_table_to_gfm(table_html: str) -> str:
+    """Convert one ``<table>…</table>`` blob to a GFM pipe table (P3.1b F1)."""
+    rows: list[list[str]] = []
+    for tr in re.finditer(r"(?is)<tr\b[^>]*>(.*?)</tr>", table_html or ""):
+        cells = re.findall(r"(?is)<t[hd]\b[^>]*>(.*?)</t[hd]>", tr.group(1))
+        if not cells:
+            continue
+        rows.append([_cell_text(c) for c in cells])
+    if len(rows) < 2:
+        return ""
+    width = max(len(r) for r in rows)
+    norm = [r + [""] * (width - len(r)) for r in rows]
+    header, body = norm[0], norm[1:]
+    # Skip separator-looking first body row if present
+    if body and all(re.fullmatch(r":?-{2,}:?", (c or "").replace(" ", "")) for c in body[0] if c):
+        body = body[1:]
+    if not body:
+        return ""
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    for r in body:
+        lines.append("| " + " | ".join(r) + " |")
+    return "\n".join(lines)
+
+
+def _preserve_html_tables_as_gfm(html: str) -> str:
+    """Replace ``<table>`` blocks with GFM markdown before tag stripping."""
+
+    def _repl(m: re.Match[str]) -> str:
+        gfm = _html_table_to_gfm(m.group(0))
+        return f"\n\n{gfm}\n\n" if gfm else "\n"
+
+    return re.sub(r"(?is)<table\b[^>]*>.*?</table>", _repl, html or "")
+
+
+def html_has_table_signal(html: str) -> bool:
+    return bool(re.search(r"(?is)<table\b", html or ""))
+
+
+def text_has_table_signal(text: str) -> bool:
+    t = text or ""
+    if "<table" in t.lower():
+        return True
+    pipe = [ln for ln in t.splitlines() if ln.count("|") >= 2]
+    return len(pipe) >= 3
+
+
 def _section_text(html: str, itemprop: str) -> str:
-    """Body of ``<section itemprop="...">``, tags stripped.
+    """Body of ``<section itemprop="...">``, tables kept as GFM then tags stripped.
 
     Regex rather than a parser because these sections nest ``<div>``s but never
     another ``<section>``, so a non-greedy match to the first ``</section>``
@@ -123,7 +181,12 @@ def _section_text(html: str, itemprop: str) -> str:
     m = re.search(
         rf"""<section[^>]*itemprop=["']{itemprop}["'].*?</section>""", html, re.IGNORECASE | re.DOTALL
     )
-    return _strip_tags(m.group(0)) if m else ""
+    if not m:
+        return ""
+    # F1: convert tables to GFM *before* stripping tags, otherwise Component/wt%
+    # structure is lost and P3.1 can only invent placeholder noise.
+    preserved = _preserve_html_tables_as_gfm(m.group(0))
+    return _strip_tags(preserved)
 
 
 def patent_text_from_html(html: str) -> str:
@@ -140,6 +203,12 @@ def patent_text_from_html(html: str) -> str:
         body = re.sub(rf"^{heading}\s*(\(\s*\d+\s*\))?\s*", "", body, flags=re.IGNORECASE).strip()
         if len(body) > 40:
             parts.append(f"## {heading}\n\n{body}")
+    # Some GP pages put formulation tables outside itemprop sections — still keep them.
+    if not text_has_table_signal("\n\n".join(parts)) and html_has_table_signal(html):
+        extra = _preserve_html_tables_as_gfm(html)
+        extra = _strip_tags(extra)
+        if text_has_table_signal(extra) and len(extra) > 40:
+            parts.append(f"## Tables\n\n{extra}")
     return "\n\n".join(parts)
 
 
@@ -239,6 +308,9 @@ def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: boo
 
     One landing-page request serves both tiers, so choosing HTML costs nothing
     extra and choosing PDF costs one more request rather than a fresh lookup.
+
+    P3.1b F2: when HTML is preferred but carries no table signal, try the PDF
+    once and keep it if it exposes a parseable table (or is substantially longer).
     """
     from ..config import get_settings
 
@@ -249,18 +321,37 @@ def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: boo
     if not html:
         return None
 
-    if not prefer_html:
+    def _try_pdf() -> str | None:
         pdf_url = _pdf_url_from_landing(html)
-        if pdf_url:
-            pdf = fetch_pdf(pdf_url, timeout)
-            if pdf:
-                text = _extract_text(pdf)
-                if text and len(text.strip()) > 200:
-                    return text
+        if not pdf_url:
+            return None
+        pdf = fetch_pdf(pdf_url, timeout)
+        if not pdf:
+            return None
+        text = _extract_text(pdf)
+        if text and len(text.strip()) > 200:
+            return text
+        return None
+
+    if not prefer_html:
+        pdf_text = _try_pdf()
+        if pdf_text:
+            return pdf_text
         # Fall through: a missing or unparseable PDF is not a reason to discard
         # a landing page that already holds the description and claims.
 
-    text = patent_text_from_html(html)
+    text = patent_text_from_html(html) or None
+    if prefer_html and text and not text_has_table_signal(text) and not html_has_table_signal(html):
+        pdf_text = _try_pdf()
+        if pdf_text and (
+            text_has_table_signal(pdf_text) or len(pdf_text) > len(text) * 1.2
+        ):
+            logger.info(
+                "patent %s: HTML had no table signal; using PDF text (%d chars)",
+                patent_id,
+                len(pdf_text),
+            )
+            return pdf_text
     return text or None
 
 

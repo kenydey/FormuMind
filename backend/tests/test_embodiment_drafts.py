@@ -229,3 +229,78 @@ def test_normalize_patent_pub():
     assert office == "CN"
     assert compact == "CN104789083B"
     assert emb.patent_entity_id_from_pub("CN104789083B") == "patent:cn:CN104789083B"
+
+
+def test_f0_no_title_case_noise_ingredients(stores):
+    """CN1227312C-style English boilerplate must not become fake ingredients."""
+    sources, chunks, _ = stores
+    prose = (
+        "Translated from the original. Typical compositions may include silane. "
+        "The coating composition may further comprise additives. "
+        "Coatings for food and beverage packaging. The primer composition includes "
+        "a binder. Description of the invention follows with enough filler text. "
+    ) * 12
+    sid = _seed_doc(sources, chunks, text=prose, origin_url="CN1227312C")
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["ok"] is True
+    draft = out["draft"]
+    assert draft["amount_source"] == "placeholder"
+    names = [i["name"] for i in draft["formulation"]["ingredients"]]
+    assert names == []
+    assert draft["chemistry_count"] == 0
+    joined = " ".join(draft["formulation"]["warnings"])
+    assert "未识别到可用配方表" in joined
+    assert "Typical compositions" not in joined
+    for bad in (
+        "Typical compositions may include",
+        "Translated from",
+        "The coating composition may",
+        "Coatings for food and",
+    ):
+        assert bad not in names
+
+    conf = emb.confirm_embodiment_draft(draft)
+    assert conf["ok"] is False
+    assert conf["reason"] == "no_usable_ingredients"
+
+
+def test_f3_flattened_rows_recovery():
+    text = """
+Example 1
+Epoxy resin 40
+Zinc phosphate 25
+Solvent 35
+"""
+    flat = emb.parse_flattened_amount_rows(text)
+    assert flat is not None
+    assert flat["amount_source"] == "prose"
+    pcts = [i["weight_pct"] for i in flat["ingredients"]]
+    assert pcts == [40.0, 25.0, 35.0]
+
+
+def test_f3_rejects_boilerplate_as_rows():
+    text = """
+Typical compositions may include 10
+The coating composition may 20
+"""
+    assert emb.parse_flattened_amount_rows(text) is None
+
+
+def test_extract_uses_flattened_rows_when_no_gfm(stores):
+    sources, chunks, _ = stores
+    body = (
+        "Silane coating composition description with enough characters. " * 20
+        + """
+Example 1
+Epoxy resin 55
+Zinc phosphate 45
+"""
+    )
+    sid = _seed_doc(sources, chunks, text=body)
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["ok"] is True
+    assert out["draft"]["amount_source"] == "prose"
+    names = [i["name"] for i in out["draft"]["formulation"]["ingredients"]]
+    assert "Epoxy resin" in names
+    assert "Zinc phosphate" in names
+

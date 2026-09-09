@@ -140,6 +140,61 @@ def test_patent_text_from_html_empty_when_no_sections():
     assert pd.patent_text_from_html("<html><body>Not found</body></html>") == ""
 
 
+def test_f1_html_tables_preserved_as_gfm():
+    """P3.1b: <table> inside description must survive as GFM for extract."""
+    html = """<html><body>
+<section itemprop="abstract"><h2>Abstract</h2><div>A silane coating for metal.</div></section>
+<section itemprop="description"><h2>Description</h2>
+<div>Example 1</div>
+<table>
+<tr><th>Component</th><th>wt%</th></tr>
+<tr><td>Epoxy resin</td><td>40</td></tr>
+<tr><td>Zinc phosphate</td><td>25</td></tr>
+<tr><td>Solvent</td><td>35</td></tr>
+</table>
+</section>
+<section itemprop="claims"><h2>Claims</h2><div>1. A coating comprising epoxy resin.</div></section>
+</body></html>"""
+    md = pd.patent_text_from_html(html)
+    assert "| Component | wt% |" in md or "| Component | wt%" in md
+    assert "Epoxy resin" in md
+    assert pd.text_has_table_signal(md)
+    from app.services import embodiment_drafts as emb
+
+    tables = emb.parse_markdown_tables(md)
+    assert tables
+    row = emb.table_to_ingredients(tables[0])
+    assert row is not None
+    assert row["amount_source"] == "table"
+    assert [i["weight_pct"] for i in row["ingredients"]] == [40.0, 25.0, 35.0]
+
+
+def test_f2_pdf_used_when_html_has_no_table(monkeypatch):
+    html_only = _LANDING_HTML  # no <table>
+    pdf_md = (
+        "## Description\n\n"
+        + ("Silane primer embodiment with enough characters for the 200-char gate. " * 4)
+        + """
+| Component | wt% |
+| --- | --- |
+| Resin | 70 |
+| Pigment | 30 |
+"""
+    )
+    assert len(pdf_md.strip()) > 200
+
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **k: html_only)
+    monkeypatch.setattr(
+        pd, "_pdf_url_from_landing", lambda html: "https://patentimages.storage.googleapis.com/x.pdf"
+    )
+    monkeypatch.setattr(pd, "fetch_pdf", lambda *a, **k: b"%PDF-fake")
+    monkeypatch.setattr(pd, "_extract_text", lambda content: pdf_md)
+
+    text = pd.fetch_patent_text("CN102345678A", prefer_html=True)
+    assert text == pdf_md
+    assert pd.text_has_table_signal(text)
+
+
 def test_patent_text_from_html_decodes_entities():
     html = (
         '<section itemprop="abstract"><div>'
@@ -191,13 +246,38 @@ def test_pdf_url_from_landing_none_when_absent():
 
 
 def test_fetch_patent_text_prefers_html_and_makes_one_request(monkeypatch):
-    """HTML-first must not download the PDF at all — that is the speed win."""
+    """HTML-first keeps prose when PDF has no usable table (F2 may probe once)."""
     downloads: list[str] = []
     monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: _LANDING_HTML)
     monkeypatch.setattr(pd, "fetch_pdf", lambda url, *a, **kw: downloads.append(url) or b"X")
+    # Short / empty extract → F2 discards PDF and keeps HTML.
+    monkeypatch.setattr(pd, "_extract_text", lambda _: "short")
 
     text = pd.fetch_patent_text("CN102345678A", prefer_html=True)
     assert text and "## Description" in text
+    assert "amine adduct" in text
+    # One probe is OK when HTML lacks table signal; must not prefer junk PDF body.
+    assert len(downloads) <= 1
+
+
+def test_fetch_patent_text_skips_pdf_when_html_already_has_table(monkeypatch):
+    html = """<html><body>
+<section itemprop="abstract"><h2>Abstract</h2><div>A waterborne epoxy primer
+containing zinc phosphate for corrosion protection of carbon steel substrates.</div></section>
+<section itemprop="description"><h2>Description</h2>
+<table><tr><th>Component</th><th>wt%</th></tr>
+<tr><td>Resin</td><td>70</td></tr>
+<tr><td>Pigment</td><td>30</td></tr></table>
+</section>
+<section itemprop="claims"><h2>Claims</h2><div>1. A coating.</div></section>
+</body></html>"""
+    downloads: list[str] = []
+    monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: html)
+    monkeypatch.setattr(pd, "fetch_pdf", lambda url, *a, **kw: downloads.append(url) or b"X")
+
+    text = pd.fetch_patent_text("CN102345678A", prefer_html=True)
+    assert text and "Resin" in text
+    assert pd.text_has_table_signal(text)
     assert downloads == []
 
 

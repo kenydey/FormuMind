@@ -49,8 +49,14 @@ export default function EmbodimentDraftModal({
   const ingredients = form?.ingredients ?? [];
   const amountSource = draft.amount_source || "placeholder";
   const isPlaceholder = amountSource === "placeholder";
+  const hasIngredients = ingredients.length > 0;
+  const canConfirm = hasIngredients && !doneNote;
 
   async function confirm() {
+    if (!hasIngredients) {
+      setError("无可确认组分：未识别到配方表");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -85,15 +91,18 @@ export default function EmbodimentDraftModal({
       onClose={onClose}
       size="lg"
       testId="modal-embodiment-draft"
-      onSave={doneNote ? undefined : () => void confirm()}
+      onSave={canConfirm ? () => void confirm() : undefined}
       saveLabel={busy ? "确认中…" : "人工确认入库"}
+      saveDisabled={busy || !canConfirm}
     >
       <div className="space-y-3 text-sm" data-testid="embodiment-draft-review">
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
           人审闸：确认后仅写入 KG + 原料 pending，
           <strong className="text-amber-100"> 不会</strong> 写入生产配方池或静默 upsert 原料。
           {isPlaceholder
-            ? " 当前比重为占位均分，非原文真实配比。"
+            ? hasIngredients
+              ? " 当前比重为占位均分，非原文真实配比。"
+              : " 未识别到可用配方表或组分——请改用含表格的 PDF 再入库全文，或人工填写后再确认。"
             : " 比重来自已入库全文表格（已归一），请核对原件。"}
         </div>
 
@@ -175,20 +184,36 @@ export default function EmbodimentDraftModal({
                 </tr>
               </thead>
               <tbody>
-                {ingredients.map((ing, i) => (
-                  <tr key={`${ing.name}-${i}`} className="border-t border-edge/50">
-                    <td className="px-2 py-1 text-slate-200">{ing.name}</td>
-                    <td className="px-2 py-1 text-slate-500">{ing.role}</td>
-                    <td className="px-2 py-1 text-right font-mono text-slate-400">
-                      {ing.weight_pct}
+                {ingredients.length === 0 ? (
+                  <tr className="border-t border-edge/50">
+                    <td
+                      colSpan={3}
+                      className="px-2 py-3 text-slate-500 text-center"
+                      data-testid="embodiment-empty-ingredients"
+                    >
+                      无可抽取组分（未识别到配方表）
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  ingredients.map((ing, i) => (
+                    <tr key={`${ing.name}-${i}`} className="border-t border-edge/50">
+                      <td className="px-2 py-1 text-slate-200">{ing.name}</td>
+                      <td className="px-2 py-1 text-slate-500">{ing.role}</td>
+                      <td className="px-2 py-1 text-right font-mono text-slate-400">
+                        {ing.weight_pct}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
           <p className="text-[10px] text-slate-600 mt-1">
-            {isPlaceholder ? "* 占位均分，须人审后才能使用" : "* 来自全文表，请人审后使用"}
+            {!hasIngredients
+              ? "* 空草稿不可确认入库；请先获得含表全文"
+              : isPlaceholder
+                ? "* 占位均分，须人审后才能使用"
+                : "* 来自全文表，请人审后使用"}
           </p>
         </div>
 
