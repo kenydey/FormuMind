@@ -382,6 +382,114 @@ def _placeholder_from_names(names: list[str], *, limit: int = 8) -> list[dict[st
     ]
 
 
+_FLAT_ROW_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\s\-/\.]{1,60}?)"
+    r"\s+(?P<num>\d+(?:\.\d+)?)\s*"
+    r"(?P<unit>wt\s*%|weight\s*%|重量份|质量份|份|%|g|kg)?\s*$",
+    re.I,
+)
+_FLAT_BOILERPLATE = re.compile(
+    r"^(the|a|an|this|typical|translated|description|example|claim|"
+    r"coating|coatings|primer|composition|compositions|may|include|includes|"
+    r"present|invention|according|wherein)\b",
+    re.I,
+)
+_EMBODIMENT_HEADING = re.compile(
+    r"(?i)(example\s*\d+|embodiment\s*\d+|实施例\s*[0-9一二三四五六七八九十]+|配方\s*[0-9]+)"
+)
+
+
+def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
+    """Recover ``Name 40`` / ``环氧树脂 30重量份`` lines after HTML table strip (F3).
+
+    Requires ≥2 consecutive high-precision rows near an embodiment heading
+    (or anywhere if ≥3 rows). Rejects English boilerplate sentence fragments.
+    """
+    lines = (text or "").splitlines()
+    best: list[dict[str, Any]] = []
+    best_label = "Flattened rows"
+    current: list[dict[str, Any]] = []
+    label = "Flattened rows"
+
+    def flush() -> None:
+        nonlocal best, current
+        if len(current) >= 2 and len(current) > len(best):
+            best = list(current)
+        current = []
+
+    for ln in lines:
+        raw = ln.strip()
+        if not raw:
+            flush()
+            continue
+        if _EMBODIMENT_HEADING.search(raw) and len(raw) < 80:
+            flush()
+            label = raw[:80]
+            continue
+        m = _FLAT_ROW_RE.match(raw)
+        if not m:
+            flush()
+            continue
+        name = re.sub(r"\s+", " ", m.group("name")).strip(" -./")
+        if len(name) < 2 or _FLAT_BOILERPLATE.match(name):
+            flush()
+            continue
+        # Reject sentence-like names (too many stopwords / verbs)
+        if re.search(r"\b(may|include|includes|comprising|wherein|according)\b", name, re.I):
+            flush()
+            continue
+        if sum(ch.isalpha() for ch in name) < 2:
+            flush()
+            continue
+        num = float(m.group("num"))
+        unit = (m.group("unit") or "").strip() or None
+        current.append(
+            {
+                "name": name,
+                "role": "additive",
+                "amount_raw": num,
+                "unit_raw": unit,
+                "evidence_span": raw[:200],
+            }
+        )
+        best_label = label
+    flush()
+
+    if len(best) < 2:
+        return None
+    amounts = [r["amount_raw"] for r in best]
+    unit_hint = next((r["unit_raw"] for r in best if r.get("unit_raw")), None)
+    pcts, amount_source, warnings = _amounts_to_weight_pct(amounts, unit_hint)
+    if not all(p is not None for p in pcts):
+        return None
+    # Flattened recovery is not a true GFM table — label honestly.
+    if amount_source == "table":
+        amount_source = "prose"
+    ingredients = []
+    for row, pct in zip(best, pcts):
+        ingredients.append(
+            {
+                "name": row["name"],
+                "role": "additive",
+                "weight_pct": pct,
+                "unit_raw": row.get("unit_raw"),
+                "amount_raw": row.get("amount_raw"),
+                "confidence": 0.55,
+                "evidence_span": row.get("evidence_span"),
+                "smiles": None,
+                "cas_no": None,
+            }
+        )
+    warnings = list(warnings) + ["比重来自剥扁文本行恢复（非原生表格），请核对原件"]
+    return {
+        "label": best_label,
+        "page_hint": None,
+        "ingredients": ingredients,
+        "amount_source": amount_source,
+        "warnings": warnings,
+    }
+
+
 def extract_embodiment_draft(
     *,
     source_id: str,
@@ -418,29 +526,30 @@ def extract_embodiment_draft(
         if amount_source == "table":
             warnings.insert(0, "比重来自已解析全文表格（已归一为 wt%），请核对原件")
     else:
-        # Fallback: chem-like tokens from headings — still placeholder
-        name_hits = re.findall(
-            r"\b([A-Z][a-z]+(?:\s+[a-z]+){0,3}(?:\s+(?:resin|oxide|phosphate|epoxy|acrylic))?)\b",
-            text[:8000],
-        )
-        ingredients = _placeholder_from_names(name_hits, limit=6)
-        if not ingredients:
-            ingredients = _placeholder_from_names(
-                ["component A", "component B", "component C"], limit=3
-            )
-            warnings.append("未识别到配方表；使用占位组分，须人审后替换")
+        # F3: try flattened name+number rows before empty placeholder (P3.1b).
+        flat = parse_flattened_amount_rows(text)
+        if flat and flat.get("ingredients"):
+            embodiments = [flat]
+            ingredients = flat["ingredients"]
+            amount_source = flat.get("amount_source") or "prose"
+            warnings.extend(flat.get("warnings") or [])
         else:
-            warnings.insert(0, "未识别到可用配方表；重量分为占位均分，非专利真实配比")
-        embodiments = [
-            {
-                "label": "Placeholder",
-                "page_hint": None,
-                "ingredients": ingredients,
-                "amount_source": "placeholder",
-                "warnings": list(warnings),
-            }
-        ]
-        amount_source = "placeholder"
+            # F0: never invent Title-Case sentence fragments as ingredients.
+            ingredients = []
+            warnings.insert(
+                0,
+                "未识别到可用配方表或可恢复配比行；请改用含表格的 PDF 再入库全文，或人工填写组分",
+            )
+            embodiments = [
+                {
+                    "label": "No formulation table",
+                    "page_hint": None,
+                    "ingredients": [],
+                    "amount_source": "placeholder",
+                    "warnings": list(warnings),
+                }
+            ]
+            amount_source = "placeholder"
 
     doc = get_source_store().get(source_id)
     origin = _origin_for_kind(doc.source_kind if doc else None, surechembl=surechembl_hint)
@@ -551,6 +660,11 @@ def confirm_embodiment_draft(draft: dict[str, Any]) -> dict[str, Any]:
         details = list(form.get("ingredients") or [])
     if not details and draft.get("embodiments"):
         details = list((draft["embodiments"][0] or {}).get("ingredients") or [])
+
+    # Drop empty / whitespace-only names
+    details = [r for r in details if str((r or {}).get("name") or "").strip()]
+    if not details:
+        return {"ok": False, "reason": "no_usable_ingredients"}
 
     amount_source = str(draft.get("amount_source") or "placeholder")
     placeholder = amount_source == "placeholder"

@@ -43,4 +43,7 @@
 [`2026-09-09-embodiment-fulltext-drafts.md`](./2026-09-09-embodiment-fulltext-drafts.md)（P3.1，已实现）。
 
 检索命中 **一键入库全文** 以挂接 P3.1 见：  
-[`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)（P3.2，待实施）。
+[`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)（P3.2）。
+
+实施例草稿 **噪音 / 无表** 优化见：  
+[`2026-09-09-embodiment-draft-noise-recovery.md`](./2026-09-09-embodiment-draft-noise-recovery.md)（P3.1b，待实施）。

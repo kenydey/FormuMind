@@ -75,4 +75,28 @@ describe("EmbodimentDraftModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "人工确认入库" }));
     await waitFor(() => expect(sch).toHaveBeenCalled());
   });
+
+  it("hides confirm when ingredients are empty (F0)", () => {
+    const draft: EmbodimentDraft = {
+      ...DRAFT,
+      amount_source: "placeholder",
+      embodiments: [
+        {
+          label: "No formulation table",
+          ingredients: [],
+          amount_source: "placeholder",
+        },
+      ],
+      formulation: {
+        name: "空草稿",
+        domain: "anticorrosion_coating",
+        ingredients: [],
+        warnings: ["未识别到可用配方表"],
+        source: "patent_fulltext",
+      },
+    };
+    render(<EmbodimentDraftModal draft={draft} onClose={() => {}} />);
+    expect(screen.getByTestId("embodiment-empty-ingredients")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "人工确认入库" })).not.toBeInTheDocument();
+  });
 });

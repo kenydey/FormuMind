@@ -20,6 +20,7 @@ export default function Modal({
   nested,
   onSave,
   saveLabel,
+  saveDisabled,
   testId,
 }: {
   title: string;
@@ -33,6 +34,7 @@ export default function Modal({
   /** Optional save button — shown in header alongside window controls */
   onSave?: () => void;
   saveLabel?: string;
+  saveDisabled?: boolean;
   /**
    * Stable hook for out-of-process drivers (the Playwright scripts in
    * `scripts/`). Emits `modal-<id>` on the dialog plus `-close`, `-minimize`,
@@ -146,7 +148,8 @@ export default function Modal({
           {onSave && (
             <button
               onClick={onSave}
-              className="text-[11px] border border-accent text-accent rounded px-2.5 py-1 hover:bg-accent/10 transition-colors shrink-0"
+              disabled={saveDisabled}
+              className="text-[11px] border border-accent text-accent rounded px-2.5 py-1 hover:bg-accent/10 transition-colors shrink-0 disabled:opacity-40 disabled:pointer-events-none"
               title="保存"
               data-testid={tid("save")}
             >
