@@ -36,3 +36,8 @@
 - [x] 提取草稿不落库；确认后原料进 pending；`promoted_to_pool=false`
 - [x] UI 对 surechembl Evidence 提供操作入口
 - [x] pytest + vitest + 实网冒烟
+
+## 后续
+
+真实比重 / 多源全文草稿（**仅已入库且有全文解析**）见：  
+[`2026-09-09-embodiment-fulltext-drafts.md`](./2026-09-09-embodiment-fulltext-drafts.md)（P3.1，已确认范围）。
