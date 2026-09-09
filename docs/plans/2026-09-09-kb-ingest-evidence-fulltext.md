@@ -1,6 +1,6 @@
 # P3.2 — Evidence 一键入库全文 → 挂接 P3.1 实施例草稿
 
-状态：**计划待实施**（2026-09-09）  
+状态：**已实施**（2026-09-09）  
 前置：P3.1 已入库全文实施例草稿（[`2026-09-09-embodiment-fulltext-drafts.md`](./2026-09-09-embodiment-fulltext-drafts.md)）  
 相关：SureChEMBL P0–P3 · `kb_ingest.py` · `fulltext_fetcher.py`
 
@@ -118,32 +118,32 @@ P3.1 eligibility → extract-embodiment-draft
 
 ### Slice A — 归一 + classify/fetch/dedup（~1–2 天，阻塞项）
 
-- [ ] `patent_ids.py`：`normalize_patent_pub` / `patent_id_aliases` / `google_patents_url`
-- [ ] `fulltext_fetcher.classify` 先 normalize；SureChEMBL 特例
-- [ ] `_fetch_patent_text` 用 compact
-- [ ] `_persist_fulltext` + `SourceStore.find_by_origin_url`（或 wrapper）多别名查找
-- [ ] 单测：`CN-104789083-B` → kind=`patent`；dedup 连字符与 compact 命中同一行
+- [x] `patent_ids.py`：`normalize_patent_pub` / `patent_id_aliases` / `google_patents_url`
+- [x] `fulltext_fetcher.classify` 先 normalize；SureChEMBL 特例
+- [x] `_fetch_patent_text` 用 compact
+- [x] `_persist_fulltext` + `SourceStore.find_by_origin_url`（或 wrapper）多别名查找
+- [x] 单测：`CN-104789083-B` → kind=`patent`；dedup 连字符与 compact 命中同一行
 
 ### Slice B — `POST /api/kb/ingest-evidence`（~1–2 天）
 
-- [ ] 路由挂在 [`backend/app/api/kb.py`](../../backend/app/api/kb.py)（或 ingest）
-- [ ] 复用 `kb_ingest._fetch_one` / `_index_one` 或 `ingest_evidence_docs([ev], ...)`
-- [ ] 支持同步完成（单篇、超时内）**或**返回 `task_id` + 与现网一致的 SSE（优先：能复用 `dispatch_kb_ingest` 单元素列表）
-- [ ] 失败返回可读 `reason`（无 OA / 超时 / 解析空）
-- [ ] pytest：mock fetch 成功 → 有 `source_id`；二次调用 → skipped
+- [x] 路由挂在 [`backend/app/api/kb.py`](../../backend/app/api/kb.py)（或 ingest）
+- [x] 复用 `kb_ingest._fetch_one` / `_index_one` 或 `ingest_evidence_docs([ev], ...)`
+- [x] 支持同步完成（单篇、超时内）**或**返回 `task_id` + 与现网一致的 SSE（优先：能复用 `dispatch_kb_ingest` 单元素列表）
+- [x] 失败返回可读 `reason`（无 OA / 超时 / 解析空）
+- [x] pytest：mock fetch 成功 → 有 `source_id`；二次调用 → skipped
 
 ### Slice C — SourcesPanel UX（~1–2 天）
 
-- [ ] Evidence 行「入库全文」按钮 + busy/badge
-- [ ] `api.ingestEvidence(...)` + 接入 `trackKbIngest` 或短轮询
-- [ ] `resolveSourceId(evidence, kbIngest, kbDocs)` 归一匹配
-- [ ] SureChEMBL：有 `source_id`+eligible → `extractEmbodimentDraft({ surechembl_hint: true })`；否则占位 + tooltip
-- [ ] vitest：连字符 id 点击入库后出现已入库态；eligible 后出现全文提取
+- [x] Evidence 行「入库全文」按钮 + busy/badge
+- [x] `api.ingestEvidence(...)` + 接入 `trackKbIngest` 或短轮询
+- [x] `resolveSourceId(evidence, kbIngest, kbDocs)` 归一匹配
+- [x] SureChEMBL：有 `source_id`+eligible → `extractEmbodimentDraft({ surechembl_hint: true })`；否则占位 + tooltip
+- [x] vitest：连字符 id 点击入库后出现已入库态；eligible 后出现全文提取
 
 ### Slice D — 自动队列顺带修复（~0.5 天，可与 A 同 PR）
 
-- [ ] `select_ingest_targets` 使用同一 classify → 后台 auto ingest 也能收 SureChEMBL 专利行（仍受 `kb_ingest_auto` / 主题预筛 / max_docs 约束）
-- [ ] 文档注明：auto 与手动按钮并存
+- [x] `select_ingest_targets` 使用同一 classify → 后台 auto ingest 也能收 SureChEMBL 专利行（仍受 `kb_ingest_auto` / 主题预筛 / max_docs 约束）
+- [x] 文档注明：auto 与手动按钮并存
 
 ---
 
@@ -192,11 +192,11 @@ P3.1 eligibility → extract-embodiment-draft
 
 ### 自动化
 
-- [ ] `CN-104789083-B` classify → `patent`
-- [ ] compact / hyphen / URL 去重同一 `source_id`
-- [ ] ingest-evidence mock 成功 → indexed + source_id
-- [ ] 二次 ingest → skipped
-- [ ] vitest：按钮显隐、映射 source_id、SureChEMBL 全文提取路径
+- [x] `CN-104789083-B` classify → `patent`
+- [x] compact / hyphen / URL 去重同一 `source_id`
+- [x] ingest-evidence mock 成功 → indexed + source_id
+- [x] 二次 ingest → skipped
+- [x] vitest：按钮显隐、映射 source_id、SureChEMBL 全文提取路径
 
 ### 手工冒烟（DoD）
 
@@ -227,8 +227,8 @@ P3.1 eligibility → extract-embodiment-draft
 | 公开号归一 | `backend/app/services/patent_ids.py`（新） |
 | classify/fetch | `backend/app/services/fulltext_fetcher.py` |
 | 单篇入库 | `backend/app/services/kb_ingest.py` + `backend/app/api/kb.py` |
-| UI | `frontend/src/components/SourcesPanel.tsx` · `frontend/src/api.ts` |
-| 测试 | `backend/tests/test_kb_ingest_evidence.py` · vitest SourcesPanel |
+| UI | `frontend/src/components/SourcesPanel.tsx` · `frontend/src/api.ts` · `frontend/src/utils/patentIds.ts` |
+| 测试 | `backend/tests/test_kb_ingest_evidence.py` · vitest SourcesPanel.p32 |
 | 计划 | 本文 |
 
 ---
@@ -237,7 +237,7 @@ P3.1 eligibility → extract-embodiment-draft
 
 - [x] 产品方向确认：下一优先 = Evidence→入库全文→P3.1  
 - [x] 实施计划成文  
-- [ ] Slice A–C 实施  
-- [ ] 冒烟 DoD  
+- [x] Slice A–D 实施  
+- [ ] 冒烟 DoD（人工）  
 
-**下一步实施顺序**：A → B → C（D 可并入 A/B）。
+**实施说明**：手动「入库全文」走同步 `ingest_single_evidence`（绕过 topic 预筛与 `kb_ingest_auto`）；后台 auto 队列仍受开关/预筛约束，但已共享修复后的 `classify`。

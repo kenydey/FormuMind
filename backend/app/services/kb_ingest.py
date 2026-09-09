@@ -163,6 +163,7 @@ def _doc_meta(ev: Evidence, kind: str | None) -> dict[str, Any]:
 def select_ingest_targets(
     evidence: list[Evidence], *,
     max_docs: int | None = None, project_id: str | None = None, query: str | None = None,
+    skip_topic_filter: bool = False,
 ) -> list[tuple[Evidence, str]]:
     """The top fetchable rows in rank order, as (evidence, kind) pairs.
 
@@ -172,6 +173,9 @@ def select_ingest_targets(
     hydrides / batteries / semiconductors / astronomy / pure mechanics …) are
     dropped before fetching.  Rows are only skipped with a log line; the
     user-facing search result list is untouched.
+
+    ``skip_topic_filter`` is for user-clicked one-shot ingest (P3.2) so a
+    deliberate Evidence row is never silently dropped by the auto pre-filter.
     """
     from . import fulltext_fetcher as ff
 
@@ -180,7 +184,7 @@ def select_ingest_targets(
     # is to store everything and let the operator opt into a limit.
     limit = max_docs if max_docs is not None else get_settings().kb_ingest_max_docs
     min_rel = get_settings().kb_ingest_min_relevance
-    topic_filter = bool(get_settings().kb_ingest_topic_filter)
+    topic_filter = bool(get_settings().kb_ingest_topic_filter) and not skip_topic_filter
     anchor = _topic_anchor(project_id, query) if topic_filter else None
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
@@ -212,6 +216,16 @@ def select_ingest_targets(
     return targets
 
 
+def _origin_lookup_keys(ev: Evidence) -> list[str]:
+    """Identifier + landing URL variants used for origin_url dedup."""
+    keys: list[str] = []
+    for raw in (ev.identifier, getattr(ev, "url", None), getattr(ev, "url_alt", None)):
+        s = (raw or "").strip()
+        if s and s not in keys:
+            keys.append(s)
+    return keys
+
+
 def _fetch_one(
     ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any]
 ) -> str | None:
@@ -223,11 +237,10 @@ def _fetch_one(
     from ..db.source_store import get_source_store
     from . import fulltext_fetcher as ff
 
-    ident = (ev.identifier or "").strip()
-
-    # Dedup tier 1: this URL / patent id / DOI was already acquired.
+    # Dedup tier 1: this URL / patent id / DOI was already acquired
+    # (compact ↔ hyphen ↔ Google Patents URL aliases).
     try:
-        existing = get_source_store().find_by_origin_url(ident)
+        existing = get_source_store().find_by_origin_urls(_origin_lookup_keys(ev))
     except Exception as exc:
         existing = degrade_return(logger, exc, "kb_ingest dedup lookup failed", None)
     if existing is not None:
@@ -320,6 +333,7 @@ def ingest_evidence_docs(
     status_cb: StatusCb | None = None,
     project_id: str | None = None,
     query: str | None = None,
+    skip_topic_filter: bool = False,
 ) -> dict[str, Any]:
     """Sequentially acquire + index the fetchable subset of *evidence*.
 
@@ -332,7 +346,13 @@ def ingest_evidence_docs(
     settings = get_settings()
     emit: StatusCb = status_cb or (lambda meta: None)
     timeout = float(settings.fulltext_timeout_s)
-    targets = select_ingest_targets(evidence, max_docs=max_docs, project_id=project_id, query=query)
+    targets = select_ingest_targets(
+        evidence,
+        max_docs=max_docs,
+        project_id=project_id,
+        query=query,
+        skip_topic_filter=skip_topic_filter,
+    )
 
     docs = [_doc_meta(ev, kind) for ev, kind in targets]
     for doc in docs:  # announce the full queue up front
@@ -416,3 +436,71 @@ def ingest_evidence_docs(
         summary["indexed"], summary["skipped"], summary["failed"], summary["total"],
     )
     return summary
+
+
+def ingest_single_evidence(
+    ev: Evidence,
+    *,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """User-clicked one-shot fulltext ingest (P3.2).
+
+    Bypasses the auto topic pre-filter and ``kb_ingest_auto`` gate. Returns a
+    flat result for ``POST /api/kb/ingest-evidence``:
+    ``{ok, status, source_id, canonical_id, reason, kind}``.
+    """
+    from . import fulltext_fetcher as ff
+    from .patent_ids import canonical_origin_url, normalize_patent_pub
+
+    ident = (ev.identifier or "").strip()
+    _office, compact = normalize_patent_pub(ident)
+    if not compact:
+        _office, compact = normalize_patent_pub(getattr(ev, "url", None) or "")
+    canonical = compact or canonical_origin_url(ident, url=getattr(ev, "url", None)) or ident or None
+
+    kind = ff.classify(ev)
+    if not kind:
+        return {
+            "ok": False,
+            "status": "failed",
+            "source_id": None,
+            "canonical_id": canonical,
+            "reason": f"不支持入库全文: source={ev.source!r} id={ident!r}",
+            "kind": "unsupported",
+            "task_id": None,
+            "status_url": None,
+        }
+
+    summary = ingest_evidence_docs(
+        [ev],
+        max_docs=1,
+        project_id=project_id,
+        skip_topic_filter=True,
+    )
+    docs = summary.get("docs") or []
+    if not docs:
+        return {
+            "ok": False,
+            "status": "failed",
+            "source_id": None,
+            "canonical_id": canonical,
+            "reason": "无可入库目标（已被过滤或标识无效）",
+            "kind": kind,
+            "task_id": None,
+            "status_url": None,
+        }
+    doc = docs[0]
+    status = doc.get("status") or "failed"
+    source_id = doc.get("source_id")
+    reason = doc.get("error")
+    ok = status in {"indexed", "skipped"}
+    return {
+        "ok": ok,
+        "status": status,
+        "source_id": source_id,
+        "canonical_id": canonical,
+        "reason": reason,
+        "kind": kind,
+        "task_id": None,
+        "status_url": None,
+    }
