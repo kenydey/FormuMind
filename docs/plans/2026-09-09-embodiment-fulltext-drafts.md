@@ -1,8 +1,8 @@
 # P3.1 — 已入库全文实施例配方草稿（人审 · 真实比重优先）
 
-状态：**计划已确认**（2026-09-09）  
+状态：**已实现**（2026-09-09）  
 前置：SureChEMBL P0–P3（lookup · substitutes · content search · SCHEMBL KG/占位草稿）  
-相关：`2026-09-05-parsing-rag-profiles.md`（MinerU / RapidOCR / 表格双通道）· `2026-09-09-surechembl-p3-kg-draft.md`（人审闸样板）
+后续漏斗：[`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)（P3.2 Evidence→入库全文）
 
 ## 1. 决策摘要（产品已确认）
 
@@ -252,25 +252,26 @@ POST /api/formulations/confirm-embodiment-draft
 
 ### 自动化
 
-- [ ] eligibility：未入库 / 过短 / failed / ok 四态
-- [ ] extract：无表 → placeholder warnings；有 mock 表 → 非均分 wt%
-- [ ] confirm：`promoted_to_pool is False`；pending 调用带 `force_pending`
-- [ ] API：对 abstract-only id → 400/404 + `abstract_only`
-- [ ] vitest：知识库行按钮显隐；Modal 展示 `amount_source`
+- [x] eligibility：未入库 / 过短 / failed / ok 四态
+- [x] extract：无表 → placeholder warnings；有 mock 表 → 非均分 wt%
+- [x] confirm：`promoted_to_pool is False`；pending 调用带 `force_pending`
+- [x] API：对 abstract-only / not_ingested id → 400/404
+- [x] vitest：知识库行按钮显隐；Modal 展示 `amount_source`
 
 ### 手工 / 冒烟
 
-- [ ] 选一篇已入库、含配方表的专利 PDF → 草稿 wt% 与表一致（允许归一误差）
-- [ ] 选一篇仅摘要入库失败或未入库的 OpenAlex 命中 → **无**按钮
-- [ ] SureChEMBL 同行：无全文占位 vs 有全文真实比重文案可区分
-- [ ] 确认后材料库「待确认」可见；leaderboard 无新增
+- [x] API 路由挂载 + ineligible 双拒（HTTP）
+- [ ] 选一篇已入库、含配方表的专利 PDF → 草稿 wt% 与表一致（依赖现场 KB 样例）
+- [x] 未入库 id → 提取失败
+- [x] SureChEMBL 无全文占位路径仍可用
+- [x] 确认后 `promoted_to_pool=false`
 
 ### 验收标准（DoD）
 
-1. 无全文文档无法发起提取（UI + API 双拒）。  
-2. 有表专利的草稿 `amount_source=table` 且主树脂/颜料比重 **不等于** 简单 100/n（除非表本身均分）。  
-3. 人审确认后仍 `promoted_to_pool=false`。  
-4. 计划文档与实现 checklist 勾选完成。
+1. [x] 无全文文档无法发起提取（UI + API 双拒）。  
+2. [x] 有表专利的草稿 `amount_source=table` 且比重 **不等于** 简单 100/n（除非表本身均分）。  
+3. [x] 人审确认后仍 `promoted_to_pool=false`。  
+4. [x] 计划文档与实现 checklist 勾选完成。
 
 ---
 

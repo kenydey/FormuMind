@@ -40,4 +40,7 @@
 ## 后续
 
 真实比重 / 多源全文草稿（**仅已入库且有全文解析**）见：  
-[`2026-09-09-embodiment-fulltext-drafts.md`](./2026-09-09-embodiment-fulltext-drafts.md)（P3.1，已确认范围）。
+[`2026-09-09-embodiment-fulltext-drafts.md`](./2026-09-09-embodiment-fulltext-drafts.md)（P3.1，已实现）。
+
+检索命中 **一键入库全文** 以挂接 P3.1 见：  
+[`2026-09-09-kb-ingest-evidence-fulltext.md`](./2026-09-09-kb-ingest-evidence-fulltext.md)（P3.2，待实施）。
