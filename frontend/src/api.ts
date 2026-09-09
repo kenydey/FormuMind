@@ -1266,6 +1266,16 @@ export const api = {
     get<KBSourcesResponse>(
       `/api/kb/sources?limit=${limit}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ""}`
     ),
+
+  deleteKbSource: (sourceId: string) =>
+    del<{
+      ok: boolean;
+      source_id: string;
+      chunks_removed: number;
+      mentions_removed: number;
+      links_removed: number;
+      wiki_pages_touched: number;
+    }>(`/api/kb/sources/${encodeURIComponent(sourceId)}`),
   activeDoe: (
     req: Requirement,
     opts: {

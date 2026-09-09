@@ -84,6 +84,7 @@ export const useStore = create<AppState>()(
       chatBusy: false,
       recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],
       openModal: null,
+      knowledgeHubTab: "materials" as const,
       activeConstraints: defaultConstraintsForDomain("anticorrosion_coating"),
       requirementSnapshot: null,
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },

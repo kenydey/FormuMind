@@ -129,6 +129,36 @@ def list_sources(
     )
 
 
+class KBSourceDeleteResponse(BaseModel):
+    ok: bool
+    source_id: str
+    chunks_removed: int = 0
+    mentions_removed: int = 0
+    links_removed: int = 0
+    wiki_pages_touched: int = 0
+
+
+@router.delete(
+    "/sources/{source_id}",
+    response_model=KBSourceDeleteResponse,
+    summary="永久删除知识库文档（级联切块/KG/Wiki 引用）",
+)
+def delete_source(source_id: str) -> KBSourceDeleteResponse:
+    """Knowledge Hub H2: hard-delete a persisted SourceDocument."""
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用（FORMUMIND_KB_V2_ENABLED）")
+    from ..services.kb_delete import delete_kb_source
+
+    try:
+        result = delete_kb_source(source_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="source not found") from None
+    except Exception as exc:
+        logger.exception("kb source delete failed")
+        raise HTTPException(status_code=500, detail="删除失败") from exc
+    return KBSourceDeleteResponse(**result)
+
+
 class KBProductItem(BaseModel):
     trade_name: str
     grade: str = ""

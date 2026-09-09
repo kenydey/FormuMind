@@ -20,6 +20,7 @@ const SimPlaceholder = lazy(() => import("./SimPlaceholder"));
 const LoopModal = lazy(() => import("./LoopModal"));
 const MaterialsPanel = lazy(() => import("./MaterialsPanel"));
 const InverseDesignModal = lazy(() => import("./InverseDesignModal"));
+const KnowledgeHubModal = lazy(() => import("./knowledge-hub/KnowledgeHubModal"));
 
 function ModalFallback() {
   return <div className="p-6 text-sm text-slate-400">加载中…</div>;
@@ -34,7 +35,8 @@ type ModalName =
   | "experiments" // legacy → workbench library tab
   | "optimize"
   | "loop"
-  | "materials";
+  | "materials"
+  | "knowledge";
 
 const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = [
   { id: "requirements", icon: "🧪", title: "技术需求", desc: "设置产品域、基材与优化目标" },
@@ -45,6 +47,7 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
   { id: "materials", icon: "🧴", title: "材料库", desc: "全局主数据：导入导出、待入库晋升、结构搜索" },
+  { id: "knowledge", icon: "📚", title: "知识库", desc: "资料治理 · Wiki · 图谱 · 文档生成（预留）" },
 ];
 
 function Badge({ children, tone }: { children: React.ReactNode; tone: "accent" | "amber" }) {
@@ -74,6 +77,7 @@ export default function ActionsPanel() {
   const {
     openModal,
     setOpenModal,
+    openKnowledgeHub,
     runResearch,
     cancelResearch,
     runSyncRecommend,
@@ -98,6 +102,7 @@ export default function ActionsPanel() {
     useShallow((s) => ({
       openModal: s.openModal,
       setOpenModal: s.setOpenModal,
+      openKnowledgeHub: s.openKnowledgeHub,
       runResearch: s.runResearch,
       cancelResearch: s.cancelResearch,
       runSyncRecommend: s.runSyncRecommend,
@@ -168,7 +173,11 @@ export default function ActionsPanel() {
       {ACTIONS.map((a) => (
         <button
           key={a.id}
-          onClick={() => (a.id === "workbench" ? openWorkbench() : setOpenModal(a.id))}
+          onClick={() => {
+            if (a.id === "workbench") openWorkbench();
+            else if (a.id === "knowledge") openKnowledgeHub("materials");
+            else setOpenModal(a.id);
+          }}
           className="text-left border border-edge rounded-lg px-3 py-2.5 hover:border-accent/50 hover:bg-accent/5 transition-colors group"
           // Derived from the same id that drives `openModal`, so the tile and
           // the dialog it opens are `open-doe` / `modal-doe` — one vocabulary,
@@ -385,6 +394,11 @@ export default function ActionsPanel() {
       {openModal === "materials" && (
         <Suspense fallback={null}>
           <MaterialsPanel open onClose={() => setOpenModal(null)} />
+        </Suspense>
+      )}
+      {openModal === "knowledge" && (
+        <Suspense fallback={null}>
+          <KnowledgeHubModal open onClose={() => setOpenModal(null)} />
         </Suspense>
       )}
     </aside>

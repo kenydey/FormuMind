@@ -48,6 +48,7 @@ class WikiStore:
         markdown: str,
         source_ids: list[str] | None = None,
         flags: list[str] | None = None,
+        replace_source_ids: bool = False,
     ) -> WikiPage:
         rel = path.replace("\\", "/").lstrip("/")
         body = markdown
@@ -81,11 +82,22 @@ class WikiStore:
                 session.flush()
                 return row
 
+            incoming = list(source_ids or [])
+            if replace_source_ids:
+                merged_sources = incoming
+            else:
+                merged_sources = list(dict.fromkeys([*(row.source_ids or []), *incoming]))
+
             if row.content_hash == digest:
-                # Still refresh source_ids union
-                merged = list(dict.fromkeys([*(row.source_ids or []), *(source_ids or [])]))
-                if merged != list(row.source_ids or []):
-                    row.source_ids = merged
+                # Still refresh source_ids / flags when asked
+                changed = False
+                if merged_sources != list(row.source_ids or []):
+                    row.source_ids = merged_sources
+                    changed = True
+                if flags is not None and list(flags) != list(row.flags or []):
+                    row.flags = list(flags)
+                    changed = True
+                if changed:
                     row.updated_at = _utcnow()
                 return row
 
@@ -94,7 +106,7 @@ class WikiStore:
             row.norm_key = (norm_key or "")[:200]
             row.entity_id = entity_id or row.entity_id
             row.content_hash = digest
-            row.source_ids = list(dict.fromkeys([*(row.source_ids or []), *(source_ids or [])]))
+            row.source_ids = merged_sources
             if flags is not None:
                 row.flags = list(flags)
             row.revision = int(row.revision or 1) + 1

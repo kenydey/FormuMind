@@ -8,7 +8,6 @@ import SourceDetailModal from "./SourceDetailModal";
 import EmbodimentDraftModal from "./EmbodimentDraftModal";
 import KgRelationPanel from "./KgRelationPanel";
 import RagPrewarmBar from "./RagPrewarmBar";
-import WikiBrowserModal from "./WikiBrowserModal";
 import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 
@@ -195,7 +194,6 @@ export default function SourcesPanel() {
   );
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
-  const [wikiOpen, setWikiOpen] = useState(false);
   const [detailDoc, setDetailDoc] = useState<{ title: string; sourceId: string } | null>(null);
   const [draftReview, setDraftReview] = useState<EmbodimentDraft | null>(null);
   const [schActionBusy, setSchActionBusy] = useState<string | null>(null);
@@ -412,9 +410,9 @@ export default function SourcesPanel() {
         <span>资料来源 · Sources</span>
         <button
           type="button"
-          onClick={() => setWikiOpen(true)}
+          onClick={() => useStore.getState().openKnowledgeHub("wiki")}
           className="text-[10px] normal-case tracking-normal px-2 py-0.5 rounded border border-accent/40 text-accent hover:bg-accent/10"
-          title="浏览 LLM Wiki 凝练页"
+          title="打开知识库 Hub · Wiki"
         >
           Wiki
         </button>
@@ -512,7 +510,6 @@ export default function SourcesPanel() {
       </div>
 
       <AddSourceModal open={addSourceOpen} onClose={() => setAddSourceOpen(false)} />
-      <WikiBrowserModal open={wikiOpen} onClose={() => setWikiOpen(false)} />
 
       <div className="border-t border-edge shrink-0" />
 

@@ -8,6 +8,17 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
         draft.openModal = name;
       }),
 
+    setKnowledgeHubTab: (tab: AppState["knowledgeHubTab"]) =>
+      set((draft) => {
+        draft.knowledgeHubTab = tab;
+      }),
+
+    openKnowledgeHub: (tab: AppState["knowledgeHubTab"] = "materials") =>
+      set((draft) => {
+        draft.knowledgeHubTab = tab;
+        draft.openModal = "knowledge";
+      }),
+
     setPreferMaterialsCatalog: (v: boolean) =>
       set((draft) => {
         draft.preferMaterialsCatalog = Boolean(v);
@@ -33,5 +44,15 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
       set((draft) => {
         draft.settingsTab = tab;
       }),
-  } as Pick<AppState, 'setOpenModal' | 'setPreferMaterialsCatalog' | 'setLlmConfig' | 'toggleSettings' | 'openSettings' | 'setSettingsTab'>;
+  } as Pick<
+    AppState,
+    | "setOpenModal"
+    | "setKnowledgeHubTab"
+    | "openKnowledgeHub"
+    | "setPreferMaterialsCatalog"
+    | "setLlmConfig"
+    | "toggleSettings"
+    | "openSettings"
+    | "setSettingsTab"
+  >;
 }

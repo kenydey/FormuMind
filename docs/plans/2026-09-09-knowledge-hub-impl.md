@@ -242,8 +242,8 @@ interface HubMaterialRow {
 - [x] 产品范围确认（资料 + Wiki + 弱图谱 + Report 预留）  
 - [x] 非目标确认（Flashcards/Quiz/Mind Map 顶级；Notebook 克隆）  
 - [x] 详细实施计划成文  
-- [ ] H0–H4 代码落地  
-- [ ] 测试通过 · 已推 `main`  
+- [x] H0–H4 代码落地  
+- [x] 测试通过 · 已推 `main`  
 
 ---
 

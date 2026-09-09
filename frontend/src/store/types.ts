@@ -151,6 +151,8 @@ export interface AppState {
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;
+  /** Knowledge Hub card tab when openModal === "knowledge". */
+  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports";
   // ── 多会话聊天 actions(2026-09-05 A1) ──
   setChatSessionsOpen: (open: boolean) => void;
   refreshChatSessions: () => Promise<void>;
@@ -246,6 +248,8 @@ export interface AppState {
   uploadFiles: (files: File[]) => Promise<void>;
   sendChat: (question: string, structure?: import("../api").StructureRecognitionResult | null) => Promise<void>;
   setOpenModal: (name: string | null) => void;
+  setKnowledgeHubTab: (tab: AppState["knowledgeHubTab"]) => void;
+  openKnowledgeHub: (tab?: AppState["knowledgeHubTab"]) => void;
   setPreferMaterialsCatalog: (v: boolean) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;

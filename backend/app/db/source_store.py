@@ -127,6 +127,15 @@ class SourceStore:
                 )
             return q.limit(limit).all()
 
+    def delete(self, source_id: str) -> bool:
+        """Hard-delete the SourceDocument row. Returns True if a row was removed."""
+        with commit_session(self._session_factory) as session:
+            doc = session.get(SourceDocument, source_id)
+            if doc is None:
+                return False
+            session.delete(doc)
+            return True
+
 
 _store: SourceStore | None = None
 
