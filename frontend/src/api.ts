@@ -181,6 +181,9 @@ export interface Evidence {
   assignee?: string | null;
   /** Publication date string from SureChEMBL (P3 KG). */
   pub_date?: string | null;
+  /** Open Access PDF hint for literature fulltext ingest (P3.2). */
+  oa_pdf_url?: string | null;
+  is_oa?: boolean | null;
 }
 
 /** SureChEMBL P3 / P3.1 embodiment draft (review gate; never auto-promote). */
@@ -1848,6 +1851,32 @@ export const api = {
     });
     return get<KbProductsResponse>(`/api/kb/products?${qs}`);
   },
+
+  /** P3.2 — one-click fulltext ingest from an Evidence row. */
+  ingestEvidence: (body: {
+    identifier: string;
+    title?: string | null;
+    url?: string | null;
+    url_alt?: string | null;
+    source?: string | null;
+    project_id?: string | null;
+    assignee?: string | null;
+    pub_date?: string | null;
+    snippet?: string | null;
+    oa_pdf_url?: string | null;
+    is_oa?: boolean | null;
+    relevance?: number;
+  }) =>
+    post<{
+      ok: boolean;
+      status: string;
+      source_id?: string | null;
+      task_id?: string | null;
+      status_url?: string | null;
+      canonical_id?: string | null;
+      reason?: string | null;
+      kind?: string | null;
+    }>("/api/kb/ingest-evidence", body),
 
   kgRebuild: () =>
     post<KgRebuildReport>("/api/kg/rebuild", {}),

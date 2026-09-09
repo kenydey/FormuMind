@@ -241,6 +241,67 @@ class IngestResponse(BaseModel):
     status: str
 
 
+class IngestEvidenceRequest(BaseModel):
+    """P3.2 — one-click fulltext ingest from a search Evidence row."""
+
+    identifier: str = Field(..., min_length=1, max_length=1024)
+    title: str | None = None
+    url: str | None = None
+    url_alt: str | None = None
+    source: str | None = None
+    project_id: str | None = None
+    assignee: str | None = None
+    pub_date: str | None = None
+    snippet: str | None = None
+    oa_pdf_url: str | None = None
+    is_oa: bool | None = None
+    relevance: float = Field(default=0.9, ge=0, le=1)
+
+
+class IngestEvidenceResponse(BaseModel):
+    ok: bool
+    status: str  # indexed | skipped | queued | failed
+    source_id: str | None = None
+    task_id: str | None = None
+    status_url: str | None = None
+    canonical_id: str | None = None
+    reason: str | None = None
+    kind: str | None = None
+
+
+@router.post(
+    "/ingest-evidence",
+    response_model=IngestEvidenceResponse,
+    summary="Evidence 一键入库全文（P3.2）",
+)
+def ingest_evidence(body: IngestEvidenceRequest) -> IngestEvidenceResponse:
+    """Fetch + persist fulltext for one Evidence row (user-clicked).
+
+    Independent of 「入库图谱」. Does **not** confirm embodiment drafts or
+    write the production formula pool. Idempotent via origin_url aliases.
+    """
+    from ..services import kb_ingest
+
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用（FORMUMIND_KB_V2_ENABLED）")
+
+    ev = Evidence(
+        source=(body.source or "patent").strip() or "patent",
+        identifier=body.identifier.strip(),
+        title=(body.title or body.identifier).strip()[:500],
+        snippet=(body.snippet or "").strip()[:2000],
+        relevance=body.relevance,
+        url=body.url,
+        url_alt=body.url_alt,
+        assignee=body.assignee,
+        pub_date=body.pub_date,
+        oa_pdf_url=body.oa_pdf_url,
+        is_oa=body.is_oa,
+    )
+    result = kb_ingest.ingest_single_evidence(ev, project_id=body.project_id)
+    return IngestEvidenceResponse(**result)
+
+
 @router.post("/ingest", response_model=IngestResponse, summary="全文入库（幂等）", include_in_schema=False)
 def ingest(body: IngestRequest) -> IngestResponse:
     """Full-document ingest → chunk + index + store + outbox record.

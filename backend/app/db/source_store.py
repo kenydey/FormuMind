@@ -68,14 +68,34 @@ class SourceStore:
             )
 
     def find_by_origin_url(self, origin_url: str) -> SourceDocument | None:
-        """Async-ingest dedup: has this URL / patent id / DOI been acquired?"""
-        key = (origin_url or "").strip()
-        if not key:
+        """Async-ingest dedup: has this URL / patent id / DOI been acquired?
+
+        Tries patent-id aliases (compact / SCPN hyphen / Google Patents URL)
+        so ``CN-104789083-B`` and ``CN104789083B`` hit the same row.
+        """
+        return self.find_by_origin_urls([origin_url] if origin_url else [])
+
+    def find_by_origin_urls(self, origin_urls: list[str]) -> SourceDocument | None:
+        """Dedup lookup across any of the given origin_url keys (and aliases)."""
+        from ..services.patent_ids import patent_id_aliases
+
+        keys: list[str] = []
+        seen: set[str] = set()
+        for raw in origin_urls or []:
+            for a in patent_id_aliases(raw):
+                if a not in seen:
+                    seen.add(a)
+                    keys.append(a)
+            s = (raw or "").strip()
+            if s and s not in seen:
+                seen.add(s)
+                keys.append(s[:1024])
+        if not keys:
             return None
         with self._session_factory() as session:
             return (
                 session.query(SourceDocument)
-                .filter(SourceDocument.origin_url == key)
+                .filter(SourceDocument.origin_url.in_(keys))
                 .order_by(SourceDocument.created_at.desc())
                 .first()
             )

@@ -91,11 +91,27 @@ class FulltextReport:
 
 def classify(ev: Evidence) -> str | None:
     """Return the fetcher kind for an Evidence row, or None when un-fetchable."""
+    from .patent_ids import normalize_patent_pub
+
     ident = (ev.identifier or "").strip()
     if not ident or ev.is_seed_corpus or re.search(r"#p?\d+$", ident):
         return None  # already chunk-level or synthetic
-    if _PATENT_RE.match(ident.upper()):
+
+    # Normalize SCPN hyphens / Google Patents URLs before patent matching.
+    # Without this, SureChEMBL ids like ``CN-104789083-B`` never enter kb_ingest.
+    _office, compact = normalize_patent_pub(ident)
+    if not compact:
+        _office, compact = normalize_patent_pub(getattr(ev, "url", None) or "")
+    if compact and _PATENT_RE.match(compact):
         return "patent"
+
+    src = (ev.source or "").lower()
+    url = (getattr(ev, "url", None) or "").strip().lower()
+    if src == "surechembl" and (
+        compact or "patents.google.com/patent/" in url
+    ):
+        return "patent"
+
     if _DOI_RE.search(ident) or _ARXIV_RE.search(ident):
         return "literature"
     if ident.lower().startswith(("http://", "https://")):
@@ -115,9 +131,14 @@ def _fetch_patent_text(ev: Evidence, timeout: float) -> str | None:
     guesses: all three of those endpoints are dead, so every patent used to
     burn two timeouts and yield nothing.
     """
+    from .patent_ids import normalize_patent_pub
     from .pdf_downloader import fetch_patent_text
 
-    text = fetch_patent_text(ev.identifier.strip().upper(), timeout=timeout)
+    _office, compact = normalize_patent_pub(ev.identifier)
+    if not compact:
+        _office, compact = normalize_patent_pub(getattr(ev, "url", None) or "")
+    pub = compact or (ev.identifier or "").strip().upper()
+    text = fetch_patent_text(pub, timeout=timeout)
     return text if text and len(text.strip()) > 200 else None
 
 
@@ -449,8 +470,12 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | N
     import time
 
     from ..db.source_store import get_source_store
+    from .patent_ids import canonical_origin_url
 
     content_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    origin = canonical_origin_url(
+        ev.identifier, url=getattr(ev, "url", None)
+    )
     delay = 0.5
     for attempt in range(6):
         try:
@@ -465,7 +490,7 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | N
                 full_text=text,
                 content_hash=content_hash,
                 extraction_status="fulltext",
-                origin_url=(ev.identifier or "").strip()[:1024] or None,
+                origin_url=origin,
                 project_id=(project_id or None),
             )
             from .kb_index import index_source

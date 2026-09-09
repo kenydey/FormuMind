@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, type Evidence, type EmbodimentDraft, type KBSourceItem } from "../api";
 import { useStore } from "../store";
+import { idsMatch, patentIdAliases } from "../utils/patentIds";
 import AddSourceModal from "./AddSourceModal";
 import SourceDetailModal from "./SourceDetailModal";
 import EmbodimentDraftModal from "./EmbodimentDraftModal";
@@ -47,6 +48,92 @@ function KbDocBadge({ status, error }: { status: string; error?: string | null }
       {badge.label}
     </span>
   );
+}
+
+function canIngestFulltext(e: Evidence): boolean {
+  if (!e.identifier || e.is_seed_corpus) return false;
+  const s = (e.source || "").toLowerCase();
+  if (s.includes("surechembl") || s.includes("patent") || s === "uspto" || s === "epo") {
+    return true;
+  }
+  if (
+    s.includes("literature") ||
+    s.includes("openalex") ||
+    s.includes("arxiv") ||
+    s.includes("semantic") ||
+    s.includes("crossref")
+  ) {
+    return !!(
+      e.is_oa ||
+      e.oa_pdf_url ||
+      /10\.\d{4,9}\//.test(e.identifier) ||
+      /arxiv/i.test(e.identifier)
+    );
+  }
+  return false;
+}
+
+type KbDocStatus = { status: string; error?: string | null; source_id?: string | null };
+
+function resolveSourceId(
+  e: Evidence,
+  kbIngestDocs: { identifier: string; source_id?: string | null }[] | undefined,
+  kbDocs: KBSourceItem[],
+  local?: Record<string, KbDocStatus>
+): string | undefined {
+  const keys = [
+    ...patentIdAliases(e.identifier),
+    ...patentIdAliases(e.url),
+    e.identifier,
+  ].filter(Boolean) as string[];
+  if (local) {
+    for (const k of keys) {
+      const hit = local[k];
+      if (hit?.source_id) return hit.source_id;
+    }
+  }
+  for (const d of kbIngestDocs || []) {
+    if (!d.source_id) continue;
+    if (idsMatch(d.identifier, e.identifier) || idsMatch(d.identifier, e.url)) {
+      return d.source_id;
+    }
+  }
+  for (const d of kbDocs) {
+    if (!d.origin_url && !d.id) continue;
+    if (idsMatch(d.origin_url, e.identifier) || idsMatch(d.origin_url, e.url)) {
+      return d.id;
+    }
+  }
+  return undefined;
+}
+
+function resolveKbRowStatus(
+  e: Evidence,
+  kbIngest: { docs: { identifier: string; status: string; error?: string | null; source_id?: string | null }[] } | null,
+  kbDocs: KBSourceItem[],
+  local: Record<string, KbDocStatus>
+): KbDocStatus | undefined {
+  const keys = patentIdAliases(e.identifier);
+  for (const k of keys) {
+    if (local[k]) return local[k];
+  }
+  if (local[e.identifier]) return local[e.identifier];
+  if (kbIngest) {
+    for (const d of kbIngest.docs) {
+      if (idsMatch(d.identifier, e.identifier) || idsMatch(d.identifier, e.url)) {
+        return {
+          status: d.status,
+          error: d.error,
+          source_id: d.source_id ?? null,
+        };
+      }
+    }
+  }
+  const sid = resolveSourceId(e, undefined, kbDocs, undefined);
+  if (sid) {
+    return { status: "skipped", source_id: sid };
+  }
+  return undefined;
 }
 
 export default function SourcesPanel() {
@@ -111,6 +198,7 @@ export default function SourcesPanel() {
   const [draftReview, setDraftReview] = useState<EmbodimentDraft | null>(null);
   const [schActionBusy, setSchActionBusy] = useState<string | null>(null);
   const [schActionMsg, setSchActionMsg] = useState<string | null>(null);
+  const [localFtStatus, setLocalFtStatus] = useState<Record<string, KbDocStatus>>({});
   // 知识库文档(2026-09-05): 已导入语料列表 —— 项目视图含全局文档(project_id OR NULL),
   // 不依赖易被覆盖的 payload.sources —— 资料可见性的权威来源。
   const [kbDocs, setKbDocs] = useState<KBSourceItem[]>([]);
@@ -141,6 +229,70 @@ export default function SourcesPanel() {
     }
   }
 
+  async function ingestEvidenceFulltext(e: Evidence) {
+    const docId = e.identifier;
+    if (!docId) return;
+    setSchActionBusy(`ft:${docId}`);
+    setSchActionMsg(null);
+    setLocalFtStatus((prev) => ({
+      ...prev,
+      [docId]: { status: "fetching", source_id: prev[docId]?.source_id ?? null },
+    }));
+    try {
+      const res = await api.ingestEvidence({
+        identifier: e.identifier,
+        title: e.title,
+        url: e.url,
+        url_alt: e.url_alt,
+        source: e.source,
+        project_id: activeProjectId,
+        assignee: e.assignee,
+        pub_date: e.pub_date,
+        snippet: e.snippet,
+        oa_pdf_url: e.oa_pdf_url,
+        is_oa: e.is_oa,
+        relevance: e.relevance,
+      });
+      const status = res.status || (res.ok ? "indexed" : "failed");
+      setLocalFtStatus((prev) => ({
+        ...prev,
+        [docId]: {
+          status,
+          source_id: res.source_id ?? null,
+          error: res.reason ?? null,
+        },
+      }));
+      if (res.ok) {
+        setSchActionMsg(
+          status === "skipped"
+            ? `已在库 · ${res.canonical_id || docId}`
+            : `全文已入库 · ${res.canonical_id || docId}`
+        );
+        // Refresh KB list so P3.1 eligibility + extract light up.
+        try {
+          const list = await api.kbSources(activeProjectId, 200);
+          setKbDocs(list.sources ?? []);
+        } catch {
+          /* ignore refresh errors */
+        }
+      } else {
+        setSchActionMsg(res.reason || "入库全文失败");
+      }
+    } catch (err) {
+      setLocalFtStatus((prev) => ({
+        ...prev,
+        [docId]: {
+          status: "failed",
+          source_id: prev[docId]?.source_id ?? null,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      }));
+      setSchActionMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSchActionBusy(null);
+    }
+  }
+
   async function extractFulltextDraft(sourceId: string, opts?: { surechemblHint?: boolean }) {
     setSchActionBusy(`emb:${sourceId}`);
     setSchActionMsg(null);
@@ -164,9 +316,7 @@ export default function SourcesPanel() {
   async function extractSurechemblDraft(e: Evidence) {
     const docId = e.identifier;
     if (!docId) return;
-    const mappedId =
-      (kbIngest?.docs || []).find((d) => d.identifier === e.identifier)?.source_id ||
-      undefined;
+    const mappedId = resolveSourceId(e, kbIngest?.docs, kbDocs, localFtStatus);
     if (mappedId && eligibleIds[mappedId]) {
       await extractFulltextDraft(mappedId, { surechemblHint: true });
       return;
@@ -246,17 +396,11 @@ export default function SourcesPanel() {
     !searchBusy &&
     !deepResearchBusy;
 
-  const kbDocByIdentifier: Record<
-    string,
-    { status: string; error?: string | null; source_id?: string | null }
-  > = {};
-  if (kbIngest) {
-    for (const d of kbIngest.docs) {
-      kbDocByIdentifier[d.identifier] = {
-        status: d.status,
-        error: d.error,
-        source_id: d.source_id ?? null,
-      };
+  const kbDocByIdentifier: Record<string, KbDocStatus> = {};
+  for (const e of sources) {
+    const st = resolveKbRowStatus(e, kbIngest, kbDocs, localFtStatus);
+    if (st && e.identifier) {
+      kbDocByIdentifier[e.identifier] = st;
     }
   }
 
@@ -404,6 +548,14 @@ export default function SourcesPanel() {
           sources.map((e) => {
             const id = e.identifier || e.title;
             const selected = selectedSources.includes(id);
+            const rowKb = kbDocByIdentifier[e.identifier];
+            const mappedSourceId = resolveSourceId(
+              e,
+              kbIngest?.docs,
+              kbDocs,
+              localFtStatus
+            );
+            const fulltextEligible = !!(mappedSourceId && eligibleIds[mappedSourceId]);
             return (
               <div
                 key={id}
@@ -429,11 +581,8 @@ export default function SourcesPanel() {
                       </span>
                     )}
                     <span className="truncate">{e.title}</span>
-                    {kbDocByIdentifier[e.identifier] && (
-                      <KbDocBadge
-                        status={kbDocByIdentifier[e.identifier].status}
-                        error={kbDocByIdentifier[e.identifier].error}
-                      />
+                    {rowKb && (
+                      <KbDocBadge status={rowKb.status} error={rowKb.error} />
                     )}
                   </div>
                   <div className="text-slate-600 truncate flex items-center gap-1.5">
@@ -471,6 +620,31 @@ export default function SourcesPanel() {
                         )}
                       </span>
                     )}
+                    {canIngestFulltext(e) && (
+                      <button
+                        type="button"
+                        data-testid={`ingest-fulltext-${e.identifier}`}
+                        disabled={
+                          schActionBusy === `ft:${e.identifier}` ||
+                          rowKb?.status === "fetching" ||
+                          rowKb?.status === "indexing"
+                        }
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          void ingestEvidenceFulltext(e);
+                        }}
+                        className="text-teal-300/90 hover:underline disabled:opacity-40"
+                        title="下载并入库全文到知识库（与入库图谱独立；成功后可提取真实比重）"
+                      >
+                        {schActionBusy === `ft:${e.identifier}` ||
+                        rowKb?.status === "fetching" ||
+                        rowKb?.status === "indexing"
+                          ? "入库中…"
+                          : rowKb?.source_id
+                            ? "再入库全文"
+                            : "入库全文"}
+                      </button>
+                    )}
                     {e.source === "surechembl" && e.identifier && (
                       <span className="shrink-0 flex items-center gap-1">
                         <button
@@ -489,15 +663,23 @@ export default function SourcesPanel() {
                         <button
                           type="button"
                           data-testid={`surechembl-extract-draft-${e.identifier}`}
-                          disabled={schActionBusy === `draft:${e.identifier}`}
+                          disabled={
+                            schActionBusy === `draft:${e.identifier}` ||
+                            (!!mappedSourceId && schActionBusy === `emb:${mappedSourceId}`)
+                          }
                           onClick={(ev) => {
                             ev.stopPropagation();
                             void extractSurechemblDraft(e);
                           }}
                           className="text-amber-300/90 hover:underline disabled:opacity-40"
-                          title="提取实施例草稿（无全文时为占位均分；入库全文后可提取真实比重）"
+                          title={
+                            fulltextEligible
+                              ? "已有入库全文：提取真实比重实施例草稿"
+                              : "提取实施例草稿（无全文时为占位均分；入库全文后可提取真实比重）"
+                          }
                         >
-                          {schActionBusy === `draft:${e.identifier}`
+                          {schActionBusy === `draft:${e.identifier}` ||
+                          (!!mappedSourceId && schActionBusy === `emb:${mappedSourceId}`)
                             ? "提取中…"
                             : "提取实施例草稿"}
                         </button>
@@ -512,12 +694,12 @@ export default function SourcesPanel() {
                 >
                   ×
                 </button>
-                {kbDocByIdentifier[e.identifier]?.source_id && (
+                {(rowKb?.source_id || mappedSourceId) && (
                   <button
                     onClick={() =>
                       setDetailDoc({
                         title: e.title || e.identifier || "资料",
-                        sourceId: kbDocByIdentifier[e.identifier].source_id!,
+                        sourceId: (rowKb?.source_id || mappedSourceId)!,
                       })
                     }
                     className="shrink-0 text-slate-600 hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"

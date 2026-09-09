@@ -16,6 +16,7 @@ from ..db.entity_store import get_entity_store
 from ..db.session_utils import commit_session
 from ..db.source_store import get_source_store
 from .material_promote import propose_material
+from .patent_ids import normalize_patent_pub
 
 _MIN_CHARS = 500
 _OK_STATUS = frozenset({"ok", "degraded", "fulltext"})
@@ -485,23 +486,7 @@ def extract_embodiment_draft(
 # ── KG helpers (Slice D) ──────────────────────────────────────────────
 
 
-def normalize_patent_pub(raw: str) -> tuple[str | None, str | None]:
-    """Return (office, compact_pub) e.g. ('CN', 'CN104789083B')."""
-    s = re.sub(r"[\s\-_/]", "", (raw or "").upper())
-    # Strip URL tails
-    s = s.split("?")[0]
-    if "PATENT/" in s:
-        s = s.rsplit("PATENT/", 1)[-1]
-    m = re.match(r"^(CN|US|EP|WO|JP|KR)(\d{5,}[A-Z0-9]*)$", s)
-    if not m:
-        # try embedded
-        m2 = re.search(r"(CN|US|EP|WO|JP|KR)\d{5,}[A-Z0-9]*", s)
-        if not m2:
-            return None, None
-        token = m2.group(0)
-        office = token[:2]
-        return office, token
-    return m.group(1), m.group(0)
+# normalize_patent_pub imported from patent_ids (shared with kb ingest / classify)
 
 
 def patent_entity_id_from_pub(raw: str) -> str | None:
