@@ -56,3 +56,7 @@ deploy/molscribe/hf-cache/
 # Runtime index/cache artifacts
 .ragatouille/
 *.report.json
+
+# Local git worktrees (superpowers)
+.worktrees/
+
