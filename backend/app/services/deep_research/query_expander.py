@@ -107,7 +107,12 @@ def _augment_with_chemical_entities(expanded: ExpandedQuery) -> ExpandedQuery:
     )
 
 
-def prepare_search_queries(topic: str, settings: Settings | None = None) -> SearchQueries:
+def prepare_search_queries(
+    topic: str,
+    settings: Settings | None = None,
+    *,
+    domain=None,
+) -> SearchQueries:
     """Expand topic and build per-source query bundle."""
     settings = settings or get_settings()
     q = (topic or "").strip()
@@ -115,8 +120,21 @@ def prepare_search_queries(topic: str, settings: Settings | None = None) -> Sear
         empty = ExpandedQuery(intent="", chinese_keywords=[], english_synonyms=[], ipc_cpc_suggestions=[])
         return SearchQueries(empty, "", "", "", "", ())
 
-    expanded = _augment_with_chemical_entities(QueryExpander(settings).expand(q))
+    expanded = _augment_with_chemical_entities(QueryExpander(settings).expand(q, domain=domain))
     ipc = tuple(expanded.ipc_cpc_suggestions[:5])
+    # P0: when DomainSearchProfile is active, prefer profile.ipc_codes over
+    # the global coating-centric default / LLM suggestions for that domain.
+    try:
+        from ...domain.search_profiles import resolve_profile
+        _prof = resolve_profile(domain)
+        if _prof is not None and _prof.ipc_codes:
+            ipc = tuple(_prof.ipc_codes[:5])
+            # Keep expanded suggestions in sync for rank_q consumers.
+            expanded = expanded.model_copy(update={
+                "ipc_cpc_suggestions": list(ipc),
+            }) if hasattr(expanded, "model_copy") else expanded
+    except Exception:
+        pass
     return SearchQueries(
         expanded=expanded,
         rank_q=build_rank_query(expanded, q),
@@ -153,21 +171,32 @@ class QueryExpander:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
 
-    def expand(self, user_query: str) -> ExpandedQuery:
+
+    def _ipc_for_domain(self, domain=None) -> list[str]:
+        try:
+            from ...domain.search_profiles import resolve_profile
+            prof = resolve_profile(domain)
+            if prof is not None and prof.ipc_codes:
+                return list(prof.ipc_codes[:5])
+        except Exception:
+            pass
+        return list(_DEFAULT_IPC)
+
+    def expand(self, user_query: str, *, domain=None) -> ExpandedQuery:
         query = (user_query or "").strip()
         if not query:
             return ExpandedQuery(
                 intent="空查询",
                 chinese_keywords=[],
                 english_synonyms=[],
-                ipc_cpc_suggestions=_DEFAULT_IPC[:2],
+                ipc_cpc_suggestions=self._ipc_for_domain(domain),
             )
 
         expanded = self._expand_with_llm(query)
         if expanded is not None:
             return expanded
 
-        return self._offline_expand(query)
+        return self._offline_expand(query, domain=domain)
 
     def _expand_with_llm(self, user_query: str) -> ExpandedQuery | None:
         if not self._settings.get_active_api_key():
@@ -194,7 +223,7 @@ class QueryExpander:
         except Exception as exc:
             return degrade_return(logger, exc, "operation failed", None)
 
-    def _offline_expand(self, user_query: str) -> ExpandedQuery:
+    def _offline_expand(self, user_query: str, *, domain=None) -> ExpandedQuery:
         tokens = _TOKEN_RE.findall(user_query.lower())
         chinese = [t for t in tokens if re.search(r"[一-鿿]", t)]
         english = [t for t in tokens if re.match(r"[a-z0-9]+", t)]
@@ -209,5 +238,5 @@ class QueryExpander:
             intent=f"检索与「{user_query[:40]}」相关的专利与文献",
             chinese_keywords=chinese_kw[:8],
             english_synonyms=english_kw[:8],
-            ipc_cpc_suggestions=_DEFAULT_IPC[:3],
+            ipc_cpc_suggestions=self._ipc_for_domain(domain),
         )

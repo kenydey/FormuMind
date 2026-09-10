@@ -76,6 +76,7 @@ def search_openalex(
     offset: int = 0,
     *,
     settings: Settings | None = None,
+    domain=None,
 ) -> list[Evidence]:
     """OpenAlex works search (requires mailto for polite pool)."""
     settings = settings or get_settings()
@@ -87,6 +88,16 @@ def search_openalex(
     if limit <= 0:
         return []
     base_params: dict[str, Any] = {"search": q, "per-page": 25}
+    # P0: DomainSearchProfile → OpenAlex concepts.id filter (degrades gracefully).
+    try:
+        from ..domain.search_profiles import openalex_concepts_filter, resolve_profile
+        if getattr(settings, "openalex_concept_filter", True):
+            _prof = resolve_profile(domain)
+            _cf = openalex_concepts_filter(_prof) if _prof is not None else ""
+            if _cf:
+                base_params["filter"] = _cf
+    except Exception:
+        pass
     if effective_setting(settings, "openalex_mailto"):
         base_params["mailto"] = effective_setting(settings, "openalex_mailto")
     try:
@@ -117,6 +128,10 @@ def search_openalex(
                     break
                 skip_in_page = 0
                 page += 1
+        if domain is not None:
+            from .domain_tagging import tag_evidence_domain
+            for _ev in out:
+                tag_evidence_domain(_ev, domain, taxonomy_source="openalex", match="strong")
         return out
     except Exception as exc:
         return degrade_return(logger, exc, "OpenAlex search failed", [])
@@ -184,6 +199,8 @@ def search_serpapi_patents(
     settings: Settings | None = None,
     hl: str = "en",
     source_label: str = "Google Patents",
+    domain=None,
+    cpc_prefixes: tuple[str, ...] | list[str] | None = None,
 ) -> list[Evidence]:
     """Google Patents via SerpAPI (English or Chinese query)."""
     settings = settings or get_settings()
@@ -191,6 +208,23 @@ def search_serpapi_patents(
     q = (query or "").strip()
     if not key or not q:
         return []
+    # P0: append CPC=(…) from DomainSearchProfile when patent_cpc_filter is on.
+    try:
+        from ..domain.search_profiles import cpc_query_clause, resolve_profile
+        if getattr(settings, "patent_cpc_filter", True):
+            _prof = resolve_profile(domain)
+            if _prof is not None:
+                _clause = cpc_query_clause(_prof)
+                if _clause and _clause not in q:
+                    q = f"{q} {_clause}"
+            elif cpc_prefixes:
+                _clause = "CPC=(" + " OR ".join(
+                    x.strip().upper() for x in cpc_prefixes if x and x.strip()
+                ) + ")"
+                if _clause not in q:
+                    q = f"{q} {_clause}"
+    except Exception:
+        pass
     try:
         data = _serpapi_search(
             "google_patents",
@@ -213,6 +247,12 @@ def search_serpapi_patents(
                     relevance=_ranked(i, offset),
                 )
             )
+        if domain is not None:
+            from .domain_tagging import tag_evidence_domain
+            for _ev in out:
+                tag_evidence_domain(
+                    _ev, domain, taxonomy_source="cpc", match="weak", extra_tags=["cpc_filter"]
+                )
         return out
     except Exception as exc:
         logger.warning("SerpAPI Google Patents failed (%s): %s", hl, exc)

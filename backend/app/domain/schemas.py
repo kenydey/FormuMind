@@ -308,6 +308,10 @@ class Evidence(BaseModel):
     # SureChEMBL / patent metadata for KG ingest + draft review (P3).
     assignee: str | None = None
     pub_date: str | None = None
+    # P0 domain-profile audit fields (optional; old clients ignore).
+    domain_tags: list[str] = Field(default_factory=list)
+    domain_match: Literal["strong", "weak", "none"] | None = None
+    taxonomy_source: Literal["arxiv", "openalex", "cpc", "lexical", "none"] | None = None
 
 
 class ParameterBoundary(BaseModel):

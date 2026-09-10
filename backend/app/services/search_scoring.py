@@ -52,3 +52,13 @@ def evidence_entity_boost(ev: Evidence, qctx: dict) -> float:
             boost += 0.15
             break
     return min(boost, 0.45)
+
+
+def domain_match_bonus(ev: Evidence) -> float:
+    """P0: DomainSearchProfile match weight (strong↑ / none↓)."""
+    try:
+        from .domain_tagging import domain_match_bonus as _bonus
+        return _bonus(ev)
+    except Exception:
+        return 0.0
+

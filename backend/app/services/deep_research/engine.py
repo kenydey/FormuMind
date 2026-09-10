@@ -92,8 +92,8 @@ class DeepResearchEngine:
     def __exit__(self, *args) -> None:
         self.close()
 
-    def expand_query(self, topic: str) -> ExpandedQuery:
-        return self._expander.expand(topic)
+    def expand_query(self, topic: str, domain=None) -> ExpandedQuery:
+        return self._expander.expand(topic, domain=domain)
 
     def retrieve(
         self,
@@ -105,8 +105,9 @@ class DeepResearchEngine:
         progress_cb: Callable[[list[Evidence]], None] | None = None,
     ) -> tuple[list[Evidence], ExpandedQuery]:
         """QueryExpander + iter_search 多源检索。"""
-        expanded = self.expand_query(topic)
-        sq = prepare_search_queries(topic, self._settings)
+        domain = getattr(req, "domain", None) if req is not None else None
+        expanded = self.expand_query(topic, domain=domain)
+        sq = prepare_search_queries(topic, self._settings, domain=domain)
         combined_query = sq.rank_q
         types = source_types or _DEFAULT_SOURCE_TYPES
         limit = total_limit or self._settings.search_total_limit

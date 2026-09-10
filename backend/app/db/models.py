@@ -688,3 +688,21 @@ class WikiPage(Base):
     revision: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class KbIngestAudit(Base):
+    """P0 ingest gate audit — not cascade-deleted with Hub sources."""
+
+    __tablename__ = "kb_ingest_audit"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    domain: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    query_fingerprint: Mapped[str] = mapped_column(String(32), default="")
+    evidence_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    action: Mapped[str] = mapped_column(String(16), default="skip")  # accept | skip
+    reason: Mapped[str] = mapped_column(String(64), default="")
+    domain_match: Mapped[str | None] = mapped_column(String(16), nullable=True)
+

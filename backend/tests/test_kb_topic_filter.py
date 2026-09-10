@@ -75,8 +75,17 @@ class TestTopicGate:
         # 仅 1 个低判别词且无高判别词 → 拦(信息不足)
         assert kb_ingest.topic_gate("Magnetism in magnesium under pressure") is False
 
-    def test_patent_kind_exempt(self):
+    def test_patent_kind_exempt_flag_on(self, monkeypatch):
+        # Legacy blind exempt only when kb_ingest_patent_exempt=True.
+        monkeypatch.setenv("FORMUMIND_KB_INGEST_PATENT_EXEMPT", "true")
+        from app.config import get_settings
+        get_settings.cache_clear()
         assert kb_ingest.topic_gate("A method of manufacturing a turbine blade", kind="patent") is True
+        get_settings.cache_clear()
+
+    def test_patent_kind_not_blind_exempt_by_default(self):
+        # P0: patents require CPC/topic hit when exempt flag is off (default).
+        assert kb_ingest.topic_gate("A method of manufacturing a turbine blade", kind="patent") is False
 
     def test_snippet_can_carry_the_signal(self):
         # 标题只有 Mg 缩写, 但 snippet 带腐蚀抑制上下文 → 放行(DFT 缓蚀研究)

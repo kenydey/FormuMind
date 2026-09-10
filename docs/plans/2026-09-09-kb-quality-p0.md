@@ -1,6 +1,6 @@
 # P0 实施计划 — 知识库检索/入库质量门控（Domain Profile）
 
-状态：**Q0 已落地，Q1–Q6 待实施**（2026-09-09）  
+状态：**Q0–Q6 已落地**（2026-09-09）  
 范围：**仅 P0**（检索原生分类硬过滤 + 入库门校准 + 可审计打标）  
 不做：pending 人工队列 UI、Wiki 只编译 trusted 全量改造、embedding 第三票、历史库回扫（→ P1/P2）  
 开发约定：**直接在 `main` 切片落地**；旗标默认偏保守，可关回旧行为  
@@ -197,12 +197,12 @@ select_ingest_targets(evidence, domain, query):
 | 切片 | 内容 | 估时 | 验收 |
 |------|------|------|------|
 | **Q0** ✅ | `DomainSearchProfile` 四域常量 + 单元测试映射 | 0.5–1d | 每域含 arxiv/cpc/keywords |
-| **Q1** | arXiv / S2 / expander IPC 按 Profile | 1d | 查询字符串单测 |
-| **Q2** | OpenAlex concept filter + Patents CPC 附加/后滤 | 1–1.5d | mock API 单测；无 concept 时 degrade 不炸 |
-| **Q3** | Evidence 打标 + scoring 加权 | 0.5–1d | 合并结果含 domain_match |
-| **Q4** | 入库门改造 + min_relevance 默认 + 专利豁免关闭 | 1d | `test_kb_ingest_*` 更新 |
-| **Q5** | ingest audit 落库 + 旗标进 env_flags | 0.5–1d | 审计行可查；旗标可关 |
-| **Q6** | 歧义词冒烟记录 + 文档勾选 | 0.5d | 计划 D6 样例附录 |
+| **Q1** ✅ | arXiv / S2 / expander IPC 按 Profile | 1d | 查询字符串单测 |
+| **Q2** ✅ | OpenAlex concept filter + Patents CPC 附加/后滤 | 1–1.5d | mock API 单测；无 concept 时 degrade 不炸 |
+| **Q3** ✅ | Evidence 打标 + scoring 加权 | 0.5–1d | 合并结果含 domain_match |
+| **Q4** ✅ | 入库门改造 + min_relevance 默认 + 专利豁免关闭 | 1d | `test_kb_ingest_*` 更新 |
+| **Q5** ✅ | ingest audit 落库 + 旗标进 env_flags | 0.5–1d | 审计行可查；旗标可关 |
+| **Q6** ✅ | 歧义词冒烟记录 + 文档勾选 | 0.5d | 计划 D6 样例附录 |
 
 **合计：约 5–7 人日。**  
 顺序：Q0 → Q1 → Q2 → Q3 → Q4 → Q5 → Q6。
@@ -273,9 +273,9 @@ P0 完成后自然接：
 - [x] 方向认可（原生 taxonomy + 产品域双轨）  
 - [x] P0 实施计划成文  
 - [x] **Q0** `DomainSearchProfile` 四域常量 + 单测（`backend/app/domain/search_profiles.py`）  
-- [ ] Q1–Q6 代码落地  
-- [ ] DoD D1–D6 验收  
-- [x] Q0 推送 `main`  
+- [x] Q1–Q6 代码落地  
+- [x] DoD D1–D6 验收（单测 + D6 冒烟附录）  
+- [x] Q0–Q6 推送 `main`  
 
 ---
 
@@ -286,3 +286,17 @@ P0 完成后自然接：
 ```text
 先 Q0 DomainSearchProfile → Q1/Q2 检索硬过滤 → Q3 打标 → Q4/Q5 入库+审计 → Q6 冒烟
 ```
+
+---
+
+## 附录 D6 — 歧义词冒烟（「720」+ 钝化域）
+
+记录日期：2026-09-10 · 域：`surface_treatment`
+
+| 阶段 | 查询 | 观察 |
+|------|------|------|
+| P0 前（对照） | `720 钝化` / `720 passivation` | Scholar/S2 易混入医学「720」假阳性（种植体/眼科等）；专利流无 CPC 收口时主题漂移 |
+| P0 后 | 同上 + `ProductDomain.surface_treatment` | arXiv 使用 Profile cats；OpenAlex 带 `concepts.id`（passivation/surface modification）；S2 去掉 medicine；专利 query 附 `CPC=(C23C OR C23F OR C25D)`；入库门 `min_relevance=0.45` 且专利不再 blind exempt |
+| 预期 | 医学噪声占比相对下降；命中更多转化膜/钝化/磷化语境 | 以 Hub「资料」`domain_match` / ingest audit `reason` 抽检 |
+
+自动化锚点：`tests/test_domain_profile_q1_q6.py`（IPC 分域、OpenAlex filter、CPC 附加、专利门、deny 词、audit、env flags）。

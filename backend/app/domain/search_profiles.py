@@ -294,3 +294,31 @@ def openalex_concepts_filter(profile: DomainSearchProfile) -> str:
 def profile_for_domain_value(domain_value: str) -> DomainSearchProfile:
     """Cached lookup by string value (handy for API/query paths)."""
     return get_profile(domain_value)
+
+
+def cpc_query_clause(profile: DomainSearchProfile) -> str:
+    """Google-Patents-style CPC clause: ``CPC=(C09D OR C08G)``."""
+    prefs = [p.strip().upper() for p in profile.cpc_prefixes if p and p.strip()]
+    if not prefs:
+        return ""
+    return "CPC=(" + " OR ".join(prefs) + ")"
+
+
+def profile_enabled() -> bool:
+    """True when domain_profile_search flag is on (default True once wired)."""
+    try:
+        from ..config import get_settings
+        return bool(getattr(get_settings(), "domain_profile_search", True))
+    except Exception:
+        return True
+
+
+def resolve_profile(domain: ProductDomain | str | None):
+    """Return profile when flag on and domain set; else None (legacy path)."""
+    if domain is None or not profile_enabled():
+        return None
+    try:
+        return get_profile(domain)
+    except (KeyError, ValueError):
+        return None
+

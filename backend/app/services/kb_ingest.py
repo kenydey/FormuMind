@@ -131,15 +131,56 @@ def _topic_hits(text: str) -> tuple[int, int, int]:
     return n_high, n_low, n_block
 
 
-def topic_gate(evidence_text: str, *, kind: str | None = None) -> bool:
+def topic_gate(
+    evidence_text: str,
+    *,
+    kind: str | None = None,
+    domain=None,
+    cpc_codes: list[str] | None = None,
+) -> bool:
     """领域相关性判定(不含项目锚前置检查)。
 
-    kind='patent' 豁免; 高判别≥1 放行; 低判别≥2 放行; 反向命中且高判别<2 拦截。
+    P0: patents no longer blindly exempt — require CPC/prefix hit OR lexical allow
+    when ``kb_ingest_patent_exempt`` is False (default). Profile deny words block.
     """
+    from ..config import get_settings
+    from ..domain.search_profiles import resolve_profile
+    from .domain_tagging import lexical_hits
+
+    text = (evidence_text or "")
+    text_l = text.lower()
+    profile = resolve_profile(domain)
+
     if kind == "patent":
-        return True
-    text = (evidence_text or "").lower()
-    n_high, n_low, n_block = _topic_hits(text)
+        if get_settings().kb_ingest_patent_exempt:
+            return True
+        # CPC / domain-tag hit OR lexical allow ≥1
+        if profile is not None:
+            allow, deny = lexical_hits(text, profile)
+            if deny and allow < 2:
+                return False
+            if allow >= 1:
+                return True
+            prefs = [p.upper() for p in profile.cpc_prefixes]
+            blob = text.upper()
+            if any(p and p in blob for p in prefs):
+                return True
+            if cpc_codes and any(
+                any(str(c).upper().startswith(p) for p in prefs if p) for c in cpc_codes
+            ):
+                return True
+            return False
+        # No profile: fall through to generic high/low rules (no blind exempt)
+    
+    if profile is not None:
+        allow, deny = lexical_hits(text, profile)
+        if deny and allow < 2:
+            return False
+        if allow >= 1:
+            return True
+        # still allow generic high/low path below as weak channel
+
+    n_high, n_low, n_block = _topic_hits(text_l)
     if n_block and n_high < 2:
         return False
     if n_high >= 1:
@@ -147,6 +188,8 @@ def topic_gate(evidence_text: str, *, kind: str | None = None) -> bool:
     if n_low >= 2:
         return True
     return False
+
+
 
 
 def _doc_meta(ev: Evidence, kind: str | None) -> dict[str, Any]:
@@ -164,6 +207,8 @@ def select_ingest_targets(
     evidence: list[Evidence], *,
     max_docs: int | None = None, project_id: str | None = None, query: str | None = None,
     skip_topic_filter: bool = False,
+    domain=None,
+    write_audit: bool = True,
 ) -> list[tuple[Evidence, str]]:
     """The top fetchable rows in rank order, as (evidence, kind) pairs.
 
@@ -192,6 +237,17 @@ def select_ingest_targets(
         if limit and len(targets) >= limit:
             break
         if min_rel > 0 and (ev.relevance or 0) < min_rel:
+            if write_audit:
+                write_ingest_audit(
+                    project_id=project_id,
+                    domain=str(domain) if domain else None,
+                    query=query,
+                    evidence_id=getattr(ev, "identifier", None),
+                    source=getattr(ev, "source", None),
+                    action="skip",
+                    reason="low_relevance",
+                    domain_match=getattr(ev, "domain_match", None),
+                )
             continue
         ident = (ev.identifier or "").strip()
         if not ident or ident in seen:
@@ -204,15 +260,37 @@ def select_ingest_targets(
                     for x in (ev.title, ev.snippet, ev.identifier)
                     if x
                 )
-                if not topic_gate(text, kind=kind):
+                if not topic_gate(text, kind=kind, domain=domain):
                     logger.warning(
                         "kb_ingest 主题预筛拦截: %s (%s)",
                         (ev.title or ev.identifier)[:90],
                         ev.identifier,
                     )
+                    if write_audit:
+                        write_ingest_audit(
+                            project_id=project_id,
+                            domain=str(domain) if domain else None,
+                            query=query,
+                            evidence_id=ev.identifier,
+                            source=ev.source,
+                            action="skip",
+                            reason="topic_miss",
+                            domain_match=getattr(ev, "domain_match", None),
+                        )
                     continue
             targets.append((ev, kind))
             seen.add(ident)
+            if write_audit:
+                write_ingest_audit(
+                    project_id=project_id,
+                    domain=str(domain) if domain else None,
+                    query=query,
+                    evidence_id=ident,
+                    source=ev.source,
+                    action="accept",
+                    reason="ok",
+                    domain_match=getattr(ev, "domain_match", None),
+                )
     return targets
 
 
@@ -530,3 +608,31 @@ def ingest_single_evidence(
         "task_id": None,
         "status_url": None,
     }
+
+
+def write_ingest_audit(
+    *,
+    project_id: str | None,
+    domain: str | None,
+    query: str | None,
+    evidence_id: str | None,
+    source: str | None,
+    action: str,
+    reason: str,
+    domain_match: str | None = None,
+) -> None:
+    """Append one ingest audit row (SQLite when available; else JSONL)."""
+    try:
+        from .kb_ingest_audit import record_ingest_audit
+        record_ingest_audit(
+            project_id=project_id,
+            domain=domain,
+            query=query,
+            evidence_id=evidence_id,
+            source=source,
+            action=action,
+            reason=reason,
+            domain_match=domain_match,
+        )
+    except Exception:
+        logger.debug("ingest audit write skipped", exc_info=True)

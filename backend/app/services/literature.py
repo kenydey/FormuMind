@@ -108,11 +108,11 @@ def _resolve_search_query(query: str) -> str:
     return prepare_search_queries(query).rank_q
 
 
-def _prepare_search_queries(query: str):
+def _prepare_search_queries(query: str, domain=None):
     """Return SearchQueries bundle for multi-source search."""
     from .deep_research.query_expander import prepare_search_queries
 
-    return prepare_search_queries(query)
+    return prepare_search_queries(query, domain=domain)
 
 
 def _seed_evidence(doc: dict, index: int) -> Evidence:
@@ -261,7 +261,7 @@ def search_patents(
     if us:
         batches.append(us)
     if effective_setting(settings, "serpapi_api_key"):
-        batches.append(search_serpapi_patents(patent_q, want, 0, settings=settings))
+        batches.append(search_serpapi_patents(patent_q, want, 0, settings=settings, domain=getattr(req, "domain", None)))
     cq = (chinese_query or "").strip()
     if cq:
         batches.append(search_google_patents_cn(cq, want, 0, settings=settings))
@@ -302,7 +302,7 @@ def search_patents_by_query(
     if us:
         batches.append(us)
     if effective_setting(settings, "serpapi_api_key"):
-        batches.append(search_serpapi_patents(query, want, 0, settings=settings))
+        batches.append(search_serpapi_patents(query, want, 0, settings=settings, domain=domain))
     cq = (chinese_query or "").strip()
     if cq:
         batches.append(search_google_patents_cn(cq, want, 0, settings=settings))
@@ -328,19 +328,25 @@ def _get_arxiv_client():
     return _ARXIV_CLIENT
 
 
-def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: bool | None = None) -> list[Evidence]:
+def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: bool | None = None, domain=None) -> list[Evidence]:
     """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
     from ..config import get_settings
 
     settings = get_settings()
     if not settings.arxiv_search_enabled:
-        return []
+        _rows = []
     use_filter = domain_filter if domain_filter is not None else settings.arxiv_domain_filter
     arxiv_query = query
     if use_filter and query.strip():
-        arxiv_query = (
-            f"({query}) AND (cat:cond-mat.mtrl-sci OR cat:physics.chem-ph OR cat:cs.CE)"
-        )
+        from ..domain.search_profiles import arxiv_cat_clause, resolve_profile
+        _prof = resolve_profile(domain)
+        if _prof is not None:
+            _clause = arxiv_cat_clause(_prof)
+            arxiv_query = f"({query}) AND {_clause}" if _clause else query
+        else:
+            arxiv_query = (
+                f"({query}) AND (cat:cond-mat.mtrl-sci OR cat:physics.chem-ph OR cat:cs.CE)"
+            )
     try:
         import arxiv  # type: ignore
 
@@ -364,6 +370,11 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
             )
             for i, r in enumerate(results)
         ]
+        if domain is not None:
+            from .domain_tagging import tag_evidence_domain
+            for _ev in _rows:
+                tag_evidence_domain(_ev, domain, taxonomy_source="arxiv", match="strong")
+        return _rows
     except Exception as exc:
         return degrade_return(logger, exc, "arXiv search failed", [])
 
@@ -377,9 +388,16 @@ _ALLOWED_S2_FIELDS = frozenset({
 })
 
 
-def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0, *, domain=None) -> list[Evidence]:
     """Semantic Scholar 学术文献搜索（HTTP API + 超时，避免 SDK 挂死）。"""
     try:
+        from ..domain.search_profiles import resolve_profile
+        _prof = resolve_profile(domain)
+        _allowed = (
+            frozenset(x.lower() for x in _prof.s2_fields_of_study)
+            if _prof is not None
+            else _ALLOWED_S2_FIELDS
+        )
         import httpx
 
         want = min(100, (limit + offset) * 3)
@@ -399,7 +417,7 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
         filtered = []
         for p in papers:
             fos = {str(x).lower() for x in (p.get("fieldsOfStudy") or [])}
-            if fos and not (fos & _ALLOWED_S2_FIELDS):
+            if fos and not (fos & _allowed):
                 continue
             filtered.append(p)
         papers = filtered[offset : offset + limit]
@@ -421,11 +439,11 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0) -> list
         return degrade_return(logger, exc, "Semantic Scholar search failed", [])
 
 
-def search_openalex(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
+def search_openalex(query: str, limit: int = 5, offset: int = 0, *, domain=None) -> list[Evidence]:
     """OpenAlex 学术文献（需 mailto 礼貌池，可在 config 关闭）。"""
     from .search_providers import search_openalex as _openalex
 
-    return _openalex(query, limit, offset)
+    return _openalex(query, limit, offset, domain=domain)
 
 
 def search_serpapi_literature(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
@@ -593,9 +611,15 @@ def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
 
 def _rank_score_with_boost(e: Evidence, q_kw: set[str], qctx: dict) -> tuple[float, float]:
     base0, base1 = _rank_score(e, q_kw)
-    from .search_scoring import evidence_entity_boost, evidence_authority_bonus
+    from .search_scoring import evidence_entity_boost, evidence_authority_bonus, domain_match_bonus
 
-    return (base0 + evidence_entity_boost(e, qctx) + evidence_authority_bonus(e), base1)
+    return (
+        base0
+        + evidence_entity_boost(e, qctx)
+        + evidence_authority_bonus(e)
+        + domain_match_bonus(e),
+        base1,
+    )
 
 
 def _is_weblike(e: Evidence) -> bool:
@@ -701,18 +725,16 @@ def _build_streams(
             True,
         )
         if lit_settings.openalex_enabled:
-            add("openalex", lambda off, q=western_query: search_openalex(q, page_size, offset=off), True)
+            add("openalex", lambda off, q=western_query, d=getattr(req, "domain", None): search_openalex(q, page_size, offset=off, domain=d), True)
         if lit_settings.arxiv_search_enabled:
             add(
                 "arxiv",
-                lambda off, q=western_query: search_arxiv(
-                    q, min(page_size, 15), offset=off
-                ),
+                lambda off, q=western_query, d=getattr(req, "domain", None): search_arxiv(q, min(page_size, 15), offset=off, domain=d),
                 True,
             )
         add(
             "s2",
-            lambda off, q=western_query: search_semantic_scholar(q, page_size, offset=off),
+            lambda off, q=western_query, d=getattr(req, "domain", None): search_semantic_scholar(q, page_size, offset=off, domain=d),
             True,
         )
         add("chemlit", lambda off, q=western_query: search_chem_lit(q, page_size), False)
@@ -761,7 +783,7 @@ def iter_search(
     """
     q = build_research_query(query, req)
     if (query or "").strip():
-        sq = _prepare_search_queries(q)
+        sq = _prepare_search_queries(q, domain=getattr(req, "domain", None) if req is not None else None)
         rank_q = sq.rank_q
         patent_q = sq.patent_q
         western_q = sq.western_q
