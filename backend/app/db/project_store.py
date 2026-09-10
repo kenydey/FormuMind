@@ -164,11 +164,38 @@ class ProjectStore:
         title: str = "",
         requirement=None,
     ) -> ProjectDetail:
-        req = requirement or default_requirement()
+        req = requirement or self._derive_requirement(title) or default_requirement()
         ws = ProjectWorkspace(requirement=req)
         if title:
             ws.search_query = title
         return self._insert(ws, title=title or derive_title(ws))
+
+    @staticmethod
+    def _derive_requirement(title: str):
+        """Parse a free-text project title/brief into a structured Requirement.
+
+        The frontend creates projects with a title only (``POST /api/projects``
+        carries no requirement), so requiring a hand-written requirement here
+        means every project silently inherits ``default_requirement()`` — the
+        hard-coded 防腐蚀环氧底漆/carbon_steel/500h stub. A magnesium-alloy
+        passivation brief would then search and recommend against the wrong
+        substrate and salt-spray target (2026-09-10 root cause).
+
+        ``parse_intent`` is offline-safe and never raises (LLM-first, falls back
+        to a regex heuristic), but we still guard so a parse failure just falls
+        back to the default instead of breaking project creation.
+        """
+        if not title or not title.strip():
+            return None
+        try:
+            from ..services.intent import parse_intent
+
+            parsed = parse_intent(title.strip())
+            if parsed is not None and parsed.requirement is not None:
+                return parsed.requirement
+        except Exception:
+            pass
+        return None
 
     def _insert(self, workspace: ProjectWorkspace, *, title: str) -> ProjectDetail:
         pid = str(uuid.uuid4())

@@ -146,6 +146,31 @@ def test_migrate_local(client):
     assert r.json()[0]["has_optimize"] is True
 
 
+def test_create_project_derives_requirement_from_title(client):
+    """P0(2026-09-10): 无 requirement 但带 title 时不回退硬编码碳钢默认值，
+    而是用 parse_intent 从标题派生 domain/substrate/salt_spray。"""
+    r = client.post(
+        "/api/projects",
+        json={"title": "开发一款用于镁合金表面处理的钝化剂，无铬优先，耐中性盐雾720小时"},
+    )
+    assert r.status_code == 200
+    req = r.json()["workspace"]["requirement"]
+    # 不再残留碳钢/500h 默认值
+    assert req["substrate"] == "magnesium_alloy"
+    assert req["salt_spray_hours"] == 720.0
+    assert req["domain"] == "surface_treatment"
+    assert req["project_id"] == r.json()["id"]
+
+
+def test_create_project_empty_still_defaults(client):
+    """回归: 既无 title 也无 requirement → 仍回退硬编码默认值(首次登录自动建空项目)。"""
+    r = client.post("/api/projects", json={})
+    assert r.status_code == 200
+    req = r.json()["workspace"]["requirement"]
+    assert req["substrate"] == "carbon_steel"
+    assert req["salt_spray_hours"] == 500.0
+
+
 def test_project_store_unit(tmp_path):
     db_url = f"sqlite:///{(tmp_path / 'unit.db').as_posix()}"
     engine = make_engine(db_url)

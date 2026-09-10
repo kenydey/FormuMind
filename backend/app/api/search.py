@@ -32,10 +32,12 @@ def _effective_source_types(request_types: list[str]) -> list[str]:
 
 
 def _assert_requirement_consistency(req: Requirement | None) -> None:
-    """Block search when workspace domain disagrees with the request body.
+    """Block search when workspace requirement disagrees with the request body.
 
     Prevents a previous project's salt-spray / substrate settings from driving
-    a new product-line literature pull.
+    a new product-line literature pull. substrate is a hard block (wrong base
+    metal = wrong formulation direction); salt_spray_hours is a soft annotation
+    (a same-substrate retarget is legitimate, only surfaced for awareness).
     """
     if req is None or not req.project_id:
         return
@@ -49,12 +51,18 @@ def _assert_requirement_consistency(req: Requirement | None) -> None:
         return
     stored_domain = getattr(detail, "domain", None)
     ws = getattr(detail, "workspace", None)
+    stored_req = None
     if ws is not None and getattr(ws, "requirement", None) is not None:
-        stored_domain = getattr(ws.requirement, "domain", stored_domain) or stored_domain
+        stored_req = ws.requirement
+        stored_domain = getattr(stored_req, "domain", stored_domain) or stored_domain
     if stored_domain is None:
         return
-    req_dom = req.domain.value if hasattr(req.domain, "value") else str(req.domain)
-    stored_dom = stored_domain.value if hasattr(stored_domain, "value") else str(stored_domain)
+
+    def _norm(d) -> str:
+        return d.value if hasattr(d, "value") else str(d)
+
+    req_dom = _norm(req.domain) if req.domain else None
+    stored_dom = _norm(stored_domain) if stored_domain else None
     if req_dom and stored_dom and req_dom != stored_dom:
         raise HTTPException(
             status_code=409,
@@ -63,6 +71,32 @@ def _assert_requirement_consistency(req: Requirement | None) -> None:
                 "请先在需求面板切换产品线并保存，再开始检索。"
             ),
         )
+
+    # substrate hard-block: wrong base metal drives a wrong formulation direction.
+    req_sub = _norm(req.substrate) if getattr(req, "substrate", None) else None
+    stored_sub = _norm(stored_req.substrate) if stored_req and getattr(stored_req, "substrate", None) else None
+    if req_sub and stored_sub and req_sub != stored_sub:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"requirement.substrate={req_sub} 与项目存储 substrate={stored_sub} 不一致；"
+                "请先在需求面板切换基材并保存，再开始检索。"
+            ),
+        )
+
+    # salt_spray_hours soft annotation: a same-substrate retarget is legitimate,
+    # so we surface the mismatch for awareness rather than block the search.
+    if stored_req is not None and getattr(stored_req, "salt_spray_hours", 0):
+        req_salt = getattr(req, "salt_spray_hours", 0)
+        if req_salt and float(req_salt) != float(stored_req.salt_spray_hours):
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "search requirement salt_spray_hours=%s differs from stored %s "
+                "(soft: same-substrate retarget assumed legitimate)",
+                req_salt,
+                stored_req.salt_spray_hours,
+            )
 
 
 class TaskHandle(BaseModel):
