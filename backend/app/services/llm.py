@@ -643,6 +643,194 @@ def _openai_compatible_stream(
         raise LLMTransientError(str(exc)) from exc
 
 
+def _merge_tool_call_deltas(acc: dict[int, dict], delta_tool_calls: list | None) -> dict[int, dict]:
+    """Merge streamed tool_call deltas (index-keyed) into full name + arguments."""
+    if not delta_tool_calls:
+        return acc
+    for tc in delta_tool_calls:
+        if isinstance(tc, dict):
+            idx = int(tc.get("index", 0))
+            entry = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+            if tc.get("id"):
+                entry["id"] = tc["id"]
+            fn = tc.get("function") or {}
+            if fn.get("name"):
+                entry["name"] = fn["name"]
+            if fn.get("arguments"):
+                entry["arguments"] += fn["arguments"]
+            continue
+        idx = int(getattr(tc, "index", 0) or 0)
+        entry = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+        tid = getattr(tc, "id", None)
+        if tid:
+            entry["id"] = tid
+        fn = getattr(tc, "function", None)
+        if fn is not None:
+            name = getattr(fn, "name", None)
+            if name:
+                entry["name"] = name
+            args = getattr(fn, "arguments", None)
+            if args:
+                entry["arguments"] += args
+    return acc
+
+
+def _finalize_tool_calls(acc: dict[int, dict]) -> list[dict]:
+    out: list[dict] = []
+    for idx in sorted(acc.keys()):
+        entry = acc[idx]
+        raw_args = entry.get("arguments") or "{}"
+        try:
+            parsed = json.loads(raw_args) if raw_args else {}
+        except json.JSONDecodeError:
+            parsed = {}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        out.append(
+            {
+                "id": entry.get("id") or f"call_{idx}",
+                "name": entry.get("name") or "",
+                "arguments": parsed,
+                "arguments_raw": raw_args,
+            }
+        )
+    return out
+
+
+def complete_chat_with_tools(
+    *,
+    messages: list[dict],
+    tools: list[dict] | None,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    disable_thinking: bool = False,
+    tool_choice: str | dict = "auto",
+) -> dict:
+    """Non-stream OpenAI-compatible chat that may return tool_calls.
+
+    Returns ``{"kind": "message", "content": str}`` or
+    ``{"kind": "tool_calls", "tool_calls": [...], "content": str}``.
+    """
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
+    kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
+    if base_url:
+        kwargs["base_url"] = base_url
+    client = OpenAI(**kwargs)
+    create_kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+    }
+    if tools:
+        create_kwargs["tools"] = tools
+        create_kwargs["tool_choice"] = tool_choice
+    if disable_thinking and _is_deepseek_model(model):
+        create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    try:
+        resp = client.chat.completions.create(**create_kwargs)
+        msg = resp.choices[0].message
+        content = (getattr(msg, "content", None) or "") or ""
+        raw_calls = getattr(msg, "tool_calls", None) or []
+        if raw_calls:
+            acc: dict[int, dict] = {}
+            for i, tc in enumerate(raw_calls):
+                fn = getattr(tc, "function", None)
+                acc[i] = {
+                    "id": getattr(tc, "id", "") or f"call_{i}",
+                    "name": getattr(fn, "name", "") if fn else "",
+                    "arguments": getattr(fn, "arguments", "") if fn else "",
+                }
+            return {
+                "kind": "tool_calls",
+                "content": content,
+                "tool_calls": _finalize_tool_calls(acc),
+            }
+        return {"kind": "message", "content": content.strip()}
+    except Exception as exc:
+        reraise_if_fatal(exc)
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
+def iter_chat_with_tools_stream(
+    *,
+    messages: list[dict],
+    tools: list[dict] | None,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    base_url: str | None = None,
+    on_text_delta: Callable[[str], None] | None = None,
+    disable_thinking: bool = False,
+    tool_choice: str | dict = "auto",
+) -> dict:
+    """Stream OpenAI-compatible chat; aggregate tool_calls if present.
+
+    Text deltas are forwarded via *on_text_delta* only when the completion
+    has no tool_calls (final answer path). Same return shape as
+    :func:`complete_chat_with_tools`.
+    """
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as exc:
+        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
+    kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
+    if base_url:
+        kwargs["base_url"] = base_url
+    client = OpenAI(**kwargs)
+    create_kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+        "stream": True,
+    }
+    if tools:
+        create_kwargs["tools"] = tools
+        create_kwargs["tool_choice"] = tool_choice
+    if disable_thinking and _is_deepseek_model(model):
+        create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    parts: list[str] = []
+    acc: dict[int, dict] = {}
+    try:
+        for chunk in client.chat.completions.create(**create_kwargs):
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice is None:
+                continue
+            delta = choice.delta
+            piece = getattr(delta, "content", None) or ""
+            if piece:
+                parts.append(piece)
+            tcs = getattr(delta, "tool_calls", None)
+            if tcs:
+                _merge_tool_call_deltas(acc, list(tcs))
+            elif piece and not acc and on_text_delta:
+                on_text_delta(piece)
+        content = "".join(parts)
+        if acc:
+            return {
+                "kind": "tool_calls",
+                "content": content,
+                "tool_calls": _finalize_tool_calls(acc),
+            }
+        text = content.strip()
+        if not text:
+            raise LLMTransientError("API 流式返回空响应")
+        return {"kind": "message", "content": text}
+    except LLMConfigError:
+        raise
+    except Exception as exc:
+        reraise_if_fatal(exc)
+        if _is_auth_error(exc):
+            raise LLMConfigError(str(exc)) from exc
+        raise LLMTransientError(str(exc)) from exc
+
+
 def _complete_openai_compatible_detail(
     prompt: str,
     api_key: str,
