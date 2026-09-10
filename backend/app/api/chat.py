@@ -452,7 +452,174 @@ async def chat_stream(req: "ChatRequestValidated"):
                 )
                 return
 
-            # markdown 主回答 — token 流。
+            # markdown 主回答 — 可选 chem tool loop，否则 token 流。
+            from ..services.chat_chem_tools import (
+                build_chat_messages,
+                build_tool_context,
+                openai_tool_schemas,
+                run_tool_loop_events,
+                should_enable_tools,
+            )
+
+            use_tools = should_enable_tools(provider, settings)
+            ctx = build_tool_context(
+                structure=req.structure,
+                attachment_source_ids=list(req.attachment_source_ids or []),
+                settings=settings,
+            )
+            tools_used: list[str] = []
+
+            if use_tools and openai_tool_schemas(ctx):
+                yield _sse({"type": "phase", "phase": "tools"})
+                loop = asyncio.get_running_loop()
+                queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+                result_holder: dict = {}
+
+                def tools_worker() -> None:
+                    try:
+                        base_url = _resolve_openai_base_url(
+                            provider, _es(settings, "llm_base_url")
+                        )
+                        messages = build_chat_messages(prompt=prompt, ctx=ctx)
+                        answer_acc = ""
+                        used: list[str] = []
+                        for ev in run_tool_loop_events(
+                            messages=messages,
+                            ctx=ctx,
+                            api_key=api_key,
+                            model=_es(settings, "llm_model"),
+                            base_url=base_url,
+                            max_tokens=2048,
+                            settings=settings,
+                        ):
+                            if ev["type"] == "token":
+                                answer_acc += ev.get("delta") or ""
+                            if ev["type"] == "loop_done":
+                                answer_acc = ev.get("answer") or answer_acc
+                                used = list(ev.get("tools_used") or [])
+                            try:
+                                loop.call_soon_threadsafe(queue.put_nowait, ("ev", ev))
+                            except RuntimeError:
+                                return
+                        result_holder["text"] = answer_acc
+                        result_holder["tools_used"] = used
+                    except Exception as exc:  # noqa: BLE001
+                        result_holder["error"] = str(exc)[:300]
+                    finally:
+                        try:
+                            loop.call_soon_threadsafe(queue.put_nowait, ("end", None))
+                        except RuntimeError:
+                            pass
+
+                t = threading.Thread(target=tools_worker, daemon=True)
+                t.start()
+                parts: list[str] = []
+                try:
+                    while True:
+                        kind, payload = await asyncio.wait_for(queue.get(), timeout=240)
+                        if kind == "ev":
+                            ev = payload
+                            if ev["type"] in ("phase", "tool_start", "tool_result"):
+                                yield _sse(ev)
+                            elif ev["type"] == "token":
+                                parts.append(ev.get("delta") or "")
+                                yield _sse({"type": "token", "delta": ev.get("delta") or ""})
+                            elif ev["type"] == "loop_done":
+                                tools_used = list(ev.get("tools_used") or [])
+                        else:
+                            break
+                except asyncio.TimeoutError:
+                    yield _sse(
+                        {
+                            "type": "error",
+                            "message": "回答超时(含化学工具), 请重试",
+                        }
+                    )
+                    return
+                finally:
+                    t.join(timeout=0.2)
+
+                if "error" in result_holder:
+                    logger.warning(
+                        "chat/stream chem tools failed, fallback direct: %s",
+                        result_holder["error"],
+                    )
+                    # fall through to legacy stream below by not returning —
+                    # only if we got no answer yet
+                    if not (result_holder.get("text") or "".join(parts).strip()):
+                        use_tools = False
+                    else:
+                        answer = (result_holder.get("text") or "".join(parts)).strip()
+                        yield _sse({"type": "phase", "phase": "claims"})
+                        claims = None
+                        if settings.chat_claim_check_enabled and answer:
+                            try:
+                                claims = await asyncio.to_thread(
+                                    build_sourced_claims,
+                                    question,
+                                    answer,
+                                    _claims_evidence(plan["sources"]),
+                                    structured=None,
+                                    settings=settings,
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning("chat/stream claims 失败: %s", exc)
+                        done_payload = {
+                            "type": "done",
+                            "answer": answer,
+                            "citations": [
+                                _sanitize_evidence(c)
+                                for c in plan["sources"][: min(8, len(plan["sources"]))]
+                            ],
+                            "rag_backend": active_rag_backend(),
+                            "kb_chunks_used": kb_used,
+                            "entity_resolution": plan["entity_resolution"],
+                            "kg_retrieval_stats": plan["kg_stats"],
+                            "clarification": plan["clarification"],
+                            "rewritten_query": plan["rewritten_query"],
+                            "sourced_claims": claims,
+                            "tools_used": tools_used or result_holder.get("tools_used") or [],
+                        }
+                        yield _sse(done_payload)
+                        return
+                else:
+                    answer = (result_holder.get("text") or "".join(parts)).strip()
+                    tools_used = result_holder.get("tools_used") or tools_used
+                    yield _sse({"type": "phase", "phase": "claims"})
+                    claims = None
+                    if settings.chat_claim_check_enabled and answer:
+                        try:
+                            claims = await asyncio.to_thread(
+                                build_sourced_claims,
+                                question,
+                                answer,
+                                _claims_evidence(plan["sources"]),
+                                structured=None,
+                                settings=settings,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("chat/stream claims 失败: %s", exc)
+                    yield _sse(
+                        {
+                            "type": "done",
+                            "answer": answer,
+                            "citations": [
+                                _sanitize_evidence(c)
+                                for c in plan["sources"][: min(8, len(plan["sources"]))]
+                            ],
+                            "rag_backend": active_rag_backend(),
+                            "kb_chunks_used": kb_used,
+                            "entity_resolution": plan["entity_resolution"],
+                            "kg_retrieval_stats": plan["kg_stats"],
+                            "clarification": plan["clarification"],
+                            "rewritten_query": plan["rewritten_query"],
+                            "sourced_claims": claims,
+                            "tools_used": tools_used,
+                        }
+                    )
+                    return
+
+            # markdown 主回答 — token 流（无 tools 或 tools 失败回退）。
             yield _sse({"type": "phase", "phase": "answering"})
             loop = asyncio.get_running_loop()
             queue: asyncio.Queue = asyncio.Queue(maxsize=256)

@@ -426,3 +426,150 @@ def summarize_tool_result(name: str, result: dict[str, Any]) -> str:
     if name == "name_to_smiles":
         return f"SMILES={result.get('smiles')}"
     return f"{name} 完成"
+
+
+# Re-export for monkeypatching in tests / loop
+from .llm import complete_chat_with_tools  # noqa: E402
+
+
+_SYSTEM_CHEM_TOOLS = (
+    "你是 FormuMind 配方与化学助手。涉及精确分子描述符、CAS、安全筛查、结构鉴定时，"
+    "必须先调用提供的 tools，禁止编造数值。"
+    "工具结果优先于你的先验知识。"
+)
+
+
+def build_chat_messages(
+    *,
+    prompt: str,
+    ctx: ChatToolContext,
+) -> list[dict[str, Any]]:
+    system = _SYSTEM_CHEM_TOOLS
+    if ctx.allowed_image_refs:
+        refs = ", ".join(sorted(ctx.allowed_image_refs))
+        system += (
+            f"\n本轮可用结构图 image_ref（仅可传给 recognize_structure）：{refs}。"
+            "若请求已含 SMILES 且用户未要求重识别，优先使用已有 SMILES。"
+        )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+
+
+def run_tool_loop_events(
+    *,
+    messages: list[dict[str, Any]],
+    ctx: ChatToolContext,
+    api_key: str,
+    model: str,
+    base_url: str | None,
+    max_tokens: int,
+    settings: Any,
+) -> Any:
+    """Yield SSE-ready dict events for a chem tool loop (sync generator)."""
+    tools = openai_tool_schemas(ctx)
+    max_rounds = int(getattr(settings, "chat_chem_tools_max_rounds", 4) or 4)
+    max_rounds = max(1, min(max_rounds, 8))
+    tools_used: list[str] = []
+    msgs = list(messages)
+
+    yield {"type": "phase", "phase": "tools"}
+
+    for _round in range(max_rounds):
+        result = complete_chat_with_tools(
+            messages=msgs,
+            tools=tools,
+            api_key=api_key,
+            model=model,
+            max_tokens=max_tokens,
+            base_url=base_url,
+            disable_thinking=True,
+            tool_choice="auto",
+        )
+        if result.get("kind") == "tool_calls":
+            calls = result.get("tool_calls") or []
+            # OpenAI assistant message with tool_calls
+            assistant_tool_calls = []
+            for c in calls:
+                assistant_tool_calls.append(
+                    {
+                        "id": c["id"],
+                        "type": "function",
+                        "function": {
+                            "name": c["name"],
+                            "arguments": c.get("arguments_raw")
+                            or json_dumps(c.get("arguments") or {}),
+                        },
+                    }
+                )
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": result.get("content") or None,
+                    "tool_calls": assistant_tool_calls,
+                }
+            )
+            for c in calls:
+                name = c["name"]
+                args = c.get("arguments") or {}
+                label = TOOL_LABELS.get(name)
+                yield {
+                    "type": "tool_start",
+                    "name": name,
+                    "args": args,
+                    "label": label,
+                }
+                out = execute_tool(name, args, ctx)
+                tools_used.append(name)
+                yield {
+                    "type": "tool_result",
+                    "name": name,
+                    "ok": bool(out.get("ok")),
+                    "summary": summarize_tool_result(name, out),
+                }
+                msgs.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": c["id"],
+                        "content": json_dumps(out),
+                    }
+                )
+            continue
+
+        # Final message
+        answer = (result.get("content") or "").strip()
+        yield {"type": "phase", "phase": "answering"}
+        if answer:
+            # Emit as a single token chunk for sync complete path; stream path
+            # may replace with live deltas later.
+            yield {"type": "token", "delta": answer}
+        yield {
+            "type": "loop_done",
+            "answer": answer,
+            "tools_used": tools_used,
+        }
+        return
+
+    # Exhausted rounds — ask once more without tools
+    result = complete_chat_with_tools(
+        messages=msgs,
+        tools=None,
+        api_key=api_key,
+        model=model,
+        max_tokens=max_tokens,
+        base_url=base_url,
+        disable_thinking=True,
+    )
+    answer = (result.get("content") or "").strip()
+    yield {"type": "phase", "phase": "answering"}
+    if answer:
+        yield {"type": "token", "delta": answer}
+    yield {"type": "loop_done", "answer": answer, "tools_used": tools_used}
+
+
+def json_dumps(obj: Any) -> str:
+    import json
+
+    return json.dumps(obj, ensure_ascii=False, default=str)
+
