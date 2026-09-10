@@ -152,6 +152,8 @@ def test_max_docs_cap(monkeypatch):
 
 def test_web_fetch_uses_trafilatura_fallback_chain(monkeypatch):
     _enable(monkeypatch)
+    # `.example` TLD often resolves to reserved/blocked IPs under SSRF DNS checks.
+    monkeypatch.setattr("app.services.ingestion._is_safe_url", lambda url: True)
 
     class FakeResponse:
         status_code = 200
@@ -208,80 +210,23 @@ def test_literature_oa_flow(monkeypatch):
     assert out[0].identifier.endswith("#p0")
 
 
-def test_arxiv_prefers_latex_source_over_pdf(monkeypatch):
-    """arXiv source first: the PDF path is where the time goes.
 
-    Measured on a 100-page paper: ~53 s via PDF (of which ~50 s was RapidOCR
-    firing on figure-heavy pages) against ~1.2 s via the source.
-    """
+def test_arxiv_identifier_resolves_pdf_url(monkeypatch):
+    """Legacy arXiv ids still resolve to pdf.arxiv.org via URL pattern (no package)."""
     _enable(monkeypatch)
-    pdf_calls: list[str] = []
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: (["https://arxiv.org/pdf/2401.12345"], []))
     monkeypatch.setattr(
-        "app.services.arxiv_source.fetch_arxiv_markdown",
-        lambda aid, timeout=20: "## Introduction\n\n" + LONG_TEXT,
+        "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
     )
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: pdf_calls.append("resolved") or None)
-
-    out, report = ff.enrich_search_results([_ev("arXiv:2401.12345", source="arxiv")], persist=False)
-    assert report.by_kind == {"literature": 1}
-    assert pdf_calls == [], "the PDF path must not be touched when source succeeds"
-
-
-def test_arxiv_falls_back_to_pdf_when_no_source(monkeypatch):
-    """PDF-only submissions exist; they must keep working exactly as before."""
-    _enable(monkeypatch)
-    monkeypatch.setattr("app.services.arxiv_source.fetch_arxiv_markdown", lambda aid, timeout=20: None)
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://arxiv.org/pdf/2401.12345")
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
     monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
 
-    out, report = ff.enrich_search_results([_ev("arXiv:2401.12345", source="arxiv")], persist=False)
+    out, report = ff.enrich_search_results([_ev("arXiv:2401.12345", source="OpenAlex")], persist=False)
     assert report.by_kind == {"literature": 1}
 
 
-def test_arxiv_source_crash_does_not_lose_the_document(monkeypatch):
-    """A raising source fetcher must degrade to the PDF, not fail the document."""
+def test_doi_literature_fetch_uses_oa_pdf(monkeypatch):
+    """A plain DOI uses OA PDF candidates only."""
     _enable(monkeypatch)
-
-    def boom(aid, timeout=20):
-        raise RuntimeError("tarfile exploded")
-
-    monkeypatch.setattr("app.services.arxiv_source.fetch_arxiv_markdown", boom)
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://arxiv.org/pdf/2401.12345")
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
-    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
-
-    out, report = ff.enrich_search_results([_ev("arXiv:2401.12345", source="arxiv")], persist=False)
-    assert report.by_kind == {"literature": 1}
-
-
-def test_arxiv_source_can_be_disabled(monkeypatch):
-    """`arxiv_prefer_source=False` restores the pre-change behaviour exactly."""
-    _enable(monkeypatch)
-    monkeypatch.setenv("FORMUMIND_ARXIV_PREFER_SOURCE", "false")
-    get_settings.cache_clear()
-
-    def unexpected(aid, timeout=20):
-        raise AssertionError("source path must not run when disabled")
-
-    monkeypatch.setattr("app.services.arxiv_source.fetch_arxiv_markdown", unexpected)
-    monkeypatch.setattr(ff, "_resolve_oa_pdf_url", lambda ev, t: "https://arxiv.org/pdf/2401.12345")
-    monkeypatch.setattr("app.services.pdf_downloader.fetch_pdf", lambda url, timeout=20: b"%PDF-fake")
-    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
-
-    out, report = ff.enrich_search_results([_ev("arXiv:2401.12345", source="arxiv")], persist=False)
-    assert report.by_kind == {"literature": 1}
-    get_settings.cache_clear()
-
-
-def test_non_arxiv_doi_never_touches_the_source_path(monkeypatch):
-    """A plain DOI has no arXiv id, so the source fetcher must not be consulted."""
-    _enable(monkeypatch)
-
-    def unexpected(aid, timeout=20):
-        raise AssertionError("source path must not run for a bare DOI")
-
-    monkeypatch.setattr("app.services.arxiv_source.fetch_arxiv_markdown", unexpected)
     monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: (["https://oa.example/x.pdf"], []))
     monkeypatch.setattr(
         "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")

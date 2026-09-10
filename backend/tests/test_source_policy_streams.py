@@ -1,4 +1,4 @@
-"""Source-policy wiring + ChemRxiv OpenAlex channel (2026-09-10 plan)."""
+"""Source-policy wiring + ChemRxiv OpenAlex channel (arXiv removed)."""
 from __future__ import annotations
 
 from app.domain.schemas import ProductDomain, Requirement
@@ -6,17 +6,10 @@ from app.domain.search_profiles import CHEMRXIV_OPENALEX_SOURCE_ID
 from app.services import literature
 
 
-def test_build_streams_skips_arxiv_adds_chemrxiv_by_default(monkeypatch):
+def test_build_streams_adds_chemrxiv_not_arxiv(monkeypatch):
     monkeypatch.setattr(
         "app.config.get_settings",
-        lambda: type(
-            "S",
-            (),
-            {
-                "openalex_enabled": True,
-                "arxiv_search_enabled": True,  # flag on, but policy off
-            },
-        )(),
+        lambda: type("S", (), {"openalex_enabled": True})(),
     )
     req = Requirement(domain=ProductDomain.surface_treatment, project_id="p1")
     streams = literature._build_streams(
@@ -26,6 +19,7 @@ def test_build_streams_skips_arxiv_adds_chemrxiv_by_default(monkeypatch):
     assert "arxiv" not in names
     assert "chemrxiv" in names
     assert "openalex" in names
+    assert not hasattr(literature, "search_arxiv")
 
 
 def test_build_streams_chemrxiv_off(monkeypatch):
@@ -33,9 +27,8 @@ def test_build_streams_chemrxiv_off(monkeypatch):
 
     monkeypatch.setattr(
         "app.config.get_settings",
-        lambda: type("S", (), {"openalex_enabled": True, "arxiv_search_enabled": True})(),
+        lambda: type("S", (), {"openalex_enabled": True})(),
     )
-    # Force chemrxiv off via temporary profile override.
     base = sp.get_profile(ProductDomain.degreaser)
     off_policy = dict(base.source_policy)
     off_policy["chemrxiv"] = "off"
@@ -44,7 +37,6 @@ def test_build_streams_chemrxiv_off(monkeypatch):
         "resolve_profile",
         lambda domain: sp.DomainSearchProfile(
             domain=base.domain,
-            arxiv_categories=base.arxiv_categories,
             openalex_concept_ids=base.openalex_concept_ids,
             s2_fields_of_study=base.s2_fields_of_study,
             cpc_prefixes=base.cpc_prefixes,

@@ -21,9 +21,9 @@ def test_status_lists_catalog_with_required_fields():
 
 
 def test_validate_names_rejects_unknown():
-    deps.validate_names(["arxiv", "ddgs"])  # known → no raise
+    deps.validate_names(["ddgs", "molbloom"])  # known → no raise
     try:
-        deps.validate_names(["arxiv", "totally-not-a-real-pkg"])
+        deps.validate_names(["ddgs", "totally-not-a-real-pkg"])
     except ValueError as exc:
         assert "totally-not-a-real-pkg" in str(exc)
     else:  # pragma: no cover
@@ -43,7 +43,8 @@ def test_get_dependencies_endpoint():
     assert "dependencies" in body and isinstance(body["dependencies"], list)
     assert "online_core_missing" in body
     names = {d["pip_name"] for d in body["dependencies"]}
-    assert {"anthropic", "arxiv", "ddgs", "molbloom"} <= names
+    assert {"anthropic", "ddgs", "molbloom"} <= names
+    assert "arxiv" not in names
 
 
 def test_install_endpoint_rejects_empty_selection():
@@ -71,7 +72,7 @@ def test_install_endpoint_accepts_known_name_non_eager(monkeypatch):
     monkeypatch.setattr(
         worker_tasks.run_deps_install_task, "delay", lambda payload: _FakeAsyncResult()
     )
-    r = client.post("/api/dependencies/install", json={"names": ["arxiv"]})
+    r = client.post("/api/dependencies/install", json={"names": ["ddgs"]})
     assert r.status_code == 202
     body = r.json()
     assert body["task_id"] == "fake-task-id"
@@ -91,7 +92,7 @@ def test_install_endpoint_accepts_known_name_eager(monkeypatch):
         "apply",
         lambda *a, **k: None,
     )
-    r = client.post("/api/dependencies/install", json={"names": ["arxiv"]})
+    r = client.post("/api/dependencies/install", json={"names": ["ddgs"]})
     assert r.status_code == 202
     body = r.json()
     task_id = body["task_id"]

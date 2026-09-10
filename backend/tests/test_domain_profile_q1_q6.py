@@ -8,7 +8,6 @@ import pytest
 from app.config import Settings, get_settings
 from app.domain.schemas import Evidence, ProductDomain
 from app.domain.search_profiles import (
-    arxiv_cat_clause,
     cpc_query_clause,
     get_profile,
     openalex_concepts_filter,
@@ -25,12 +24,6 @@ def _clear_settings(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_profile_arxiv_query_contains_cats():
-    p = get_profile(ProductDomain.surface_treatment)
-    clause = arxiv_cat_clause(p)
-    assert "cat:" in clause
-    assert "cond-mat.mtrl-sci" in clause or "physics" in clause
-
 
 def test_profile_ipc_differs_by_domain():
     deg = prepare_search_queries("脱脂清洗", domain=ProductDomain.degreaser)
@@ -39,33 +32,6 @@ def test_profile_ipc_differs_by_domain():
     assert any(c.startswith("C23G") or c.startswith("C11D") for c in deg.ipc_codes)
     assert any(c.startswith("C09D") for c in coat.ipc_codes)
 
-
-def test_search_arxiv_uses_profile_cats(monkeypatch):
-    from app.services import literature as lit
-
-    captured = {}
-
-    class FakeClient:
-        def results(self, search):
-            captured["query"] = getattr(search, "query", None)
-            return []
-
-    class FakeSearch:
-        def __init__(self, query=None, max_results=None, sort_by=None, **kw):
-            self.query = query
-
-    fake_arxiv = MagicMock()
-    fake_arxiv.Search = FakeSearch
-    fake_arxiv.SortCriterion.Relevance = "R"
-    fake_arxiv.Client = MagicMock(return_value=FakeClient())
-
-    monkeypatch.setitem(__import__("sys").modules, "arxiv", fake_arxiv)
-    lit._ARXIV_CLIENT = FakeClient()
-    lit.search_arxiv("epoxy coating", limit=1, domain=ProductDomain.anticorrosion_coating)
-    assert "query" in captured
-    assert "cat:" in captured["query"]
-    # profile for anticorrosion should include cond-mat.mtrl-sci
-    assert "cond-mat.mtrl-sci" in captured["query"]
 
 
 def test_openalex_filter_param(monkeypatch):

@@ -54,7 +54,6 @@ intel = [
     "paper-qa>=4.0",        # semantic RAG synthesis (auto-detected in chat)
     "molbloom>=2.0",        # standalone SureChEMBL patent pre-screen
     "pubchempy>=1.0.4",     # enrich raw-material SMILES/molar-mass from PubChem
-    "arxiv>=2.1",
     "ddgs>=6.0",            # renamed from duckduckgo-search
 ]
 # MarkItDown keeps every format backend behind an extra — a bare install parses
@@ -121,7 +120,6 @@ intel-colbert = [
     "langgraph>=0.2",
     "sentence-transformers>=2.6",
     "patent-client>=5.0",
-    "arxiv>=2.1",
     "ddgs>=6.0",
 ]
 dev = [

@@ -82,7 +82,7 @@ def test_the_check_is_given_the_baseline(workflow: str) -> None:
 
 
 def test_the_known_downgrades_are_recorded_at_exact_versions(workflow: str) -> None:
-    """`intel` really does downgrade four packages; that stays reviewed, not waived.
+    """`intel` really does downgrade three packages; that stays reviewed, not waived.
 
     Pinned to exact versions so the exception covers only the drift that was
     actually looked at — if it changes, the job fails again rather than the
@@ -92,7 +92,6 @@ def test_the_known_downgrades_are_recorded_at_exact_versions(workflow: str) -> N
     assert allow, "the intel allow-list disappeared"
     entries = dict(item.split(":", 1) for item in allow.group(1).split(","))
     assert entries == {
-        "arxiv": "3.0.0",
         "ddgs": "9.14.3",
         "httpx": "0.27.2",
         "pypdf": "4.3.1",

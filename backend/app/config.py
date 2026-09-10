@@ -253,11 +253,9 @@ class Settings(BaseSettings):
     # 每一档都会把自己的名字写进 `Evidence.source`，所以关它之前可以先看看到底
     # 有多少结果是它给的。
     web_search_allow_ddgs: bool = True
-    arxiv_domain_filter: bool = True
     domain_profile_search: bool = True  # P0: apply DomainSearchProfile to retrieval
     openalex_concept_filter: bool = True  # P0: OpenAlex concepts.id filter
     patent_cpc_filter: bool = True  # P0: append CPC=(…) to patent queries
-    arxiv_search_enabled: bool = True
     openalex_enabled: bool = True
 
     # 检索结果内容过滤（KB P0）：规则层默认开启（保守规则：垃圾域名/
@@ -400,20 +398,7 @@ class Settings(BaseSettings):
     # 设为 false 则优先下载 PDF，落地页无 PDF 时仍回落到 HTML 正文。
     patent_prefer_html: bool = True
 
-    # arXiv 文献优先下载 LaTeX 源码（`/e-print/`）而不是 PDF。
-    # 同一篇 100 页论文实测：
-    #   PDF    下载 1.17 s + 解析 **51.7 s** ≈ 53 s
-    #   源码   下载 0.94 s + 转换  ~0.3 s   ≈ 1.2 s     —— 约 50 倍
-    # 51.7 秒的大头是 **RapidOCR 对 7 个图表密集页启动了 OCR**：图多的版面在
-    # triage 里看起来就像扫描件。源码路径完全不需要 OCR。
-    # 另外公式以 LaTeX 形式保留（`$L(C)=aC^b+c$` 而非 `_aC_<sup>_b_</sup>`），
-    # `\section{}` 变成 Markdown 标题，`chunk_markdown` 的 heading_path 直接受益。
-    # PDF-only 投稿（无源码）自动回落到原来的 PDF 路径。
-    arxiv_prefer_source: bool = True
-
-    # 异步入库队列（KB stream P0）：检索/深度研究/推荐收尾后，后台任务逐篇
-    # 获取全文 → 解析 → 切块 → 入持久知识库，前台经 SSE 实时看到每篇状态，
-    # 检索结果展示不等待解析。按 origin_url / 内容哈希双重去重。
+    
     kb_ingest_auto: bool = True
     # 每批后台入库最多下载多少篇全文。**0 = 不限制**，即检索到的每一条可获取
     # 全文的资料都入库——这是默认值，因为「搜到了但没入库」对使用者来说就是

@@ -7,7 +7,6 @@ from app.domain.schemas import ProductDomain
 from app.domain.search_profiles import (
     DomainSearchProfile,
     all_profiles,
-    arxiv_cat_clause,
     get_profile,
     openalex_concepts_filter,
     profile_for_domain_value,
@@ -15,7 +14,6 @@ from app.domain.search_profiles import (
 
 
 REQUIRED_FIELDS = (
-    "arxiv_categories",
     "openalex_concept_ids",
     "s2_fields_of_study",
     "cpc_prefixes",
@@ -68,26 +66,6 @@ def test_profile_ipc_differs_by_domain():
     assert "C09D" in autodep.cpc_prefixes
 
 
-def test_profile_arxiv_categories_present_and_differ():
-    coating = get_profile(ProductDomain.anticorrosion_coating)
-    surface = get_profile(ProductDomain.surface_treatment)
-    assert "cond-mat.mtrl-sci" in coating.arxiv_categories
-    assert "physics.chem-ph" in coating.arxiv_categories
-    # surface_treatment adds applied-physics lean vs coating soft-matter lean
-    assert "physics.app-ph" in surface.arxiv_categories
-    assert coating.arxiv_categories != surface.arxiv_categories
-
-
-def test_profile_arxiv_query_contains_cats():
-    surface = get_profile(ProductDomain.surface_treatment)
-    clause = arxiv_cat_clause(surface)
-    assert clause.startswith("(") and clause.endswith(")")
-    assert "cat:cond-mat.mtrl-sci" in clause
-    assert " OR " in clause
-    for cat in surface.arxiv_categories:
-        assert f"cat:{cat}" in clause
-
-
 def test_openalex_concepts_filter_format():
     coating = get_profile(ProductDomain.anticorrosion_coating)
     frag = openalex_concepts_filter(coating)
@@ -129,7 +107,7 @@ def test_keyword_allow_and_deny_per_domain():
 
 def test_source_policy_keys():
     p = get_profile(ProductDomain.degreaser)
-    assert p.source_policy["arxiv"] == "off"
+    assert "arxiv" not in p.source_policy
     assert p.source_policy["chemrxiv"] == "primary"
     assert p.source_policy["google_scholar"] == "support"
     assert p.source_policy["openalex"] in {"primary", "support"}
@@ -144,8 +122,6 @@ def test_policy_helpers_respect_tiers():
 
     p = resolve_profile(ProductDomain.surface_treatment)
     assert policy_allows(p, "chemrxiv") is True
-    assert policy_allows(p, "arxiv") is False
-    assert policy_page_size(p, "arxiv", 15) == 0
     assert policy_page_size(p, "semantic_scholar", 30) == max(1, int(30 * 0.33))
     assert policy_page_size(p, "openalex", 30) == 30
 

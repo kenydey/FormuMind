@@ -205,15 +205,20 @@ def test_literature_search_internet_prefers_tavily(monkeypatch):
     reload_settings()
 
 
-def test_arxiv_disabled_returns_empty():
-    from app.config import get_settings
+def test_chem_lit_uses_semantic_scholar_only(monkeypatch):
     from app.services import literature
+    from app.domain.schemas import Evidence
 
-    get_settings.cache_clear()
-    s = get_settings()
-    object.__setattr__(s, "arxiv_search_enabled", False)
-    assert literature.search_arxiv("coating", limit=2) == []
-    get_settings.cache_clear()
+    monkeypatch.setattr(
+        literature,
+        "search_semantic_scholar",
+        lambda q, limit=5, offset=0, domain=None: [
+            Evidence(source="Semantic Scholar", identifier="s2", title="t", snippet="s", relevance=0.9)
+        ],
+    )
+    assert not hasattr(literature, "search_arxiv")
+    hits = literature.search_chem_lit("coating", limit=2)
+    assert hits and hits[0].source == "Semantic Scholar"
 
 
 # ── internet search chain: Tavily → SerpAPI → DuckDuckGo ─────────────────────

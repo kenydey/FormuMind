@@ -3,9 +3,8 @@
 # `pip install -e ".[intel]"` — recommended in the README and both user guides —
 # resolves its conflict with requirements.txt by downgrading rather than by
 # failing. Measured: httpx 0.28.1 -> 0.27.2, pypdf 6.14.2 -> 4.3.1,
-# arxiv 4.0.0 -> 3.0.0, ddgs 9.14.4 -> 9.14.3. httpx is used across the whole
-# codebase, pypdf sits in the parse cascade, and arxiv is the literature search
-# client, so this is not cosmetic.
+# ddgs 9.14.4 -> 9.14.3. httpx is used across the whole codebase and pypdf sits
+# in the parse cascade, so this is not cosmetic.
 #
 # `pip check` does NOT find it: after the downgrade the environment is
 # internally consistent, just not the one requirements.txt describes.
@@ -54,7 +53,7 @@ jobs:
           # was reviewed — and fails again the moment it changes or a new
           # package joins it.
           - extra: intel
-            allow: "arxiv:3.0.0,ddgs:9.14.3,httpx:0.27.2,pypdf:4.3.1"
+            allow: "ddgs:9.14.3,httpx:0.27.2,pypdf:4.3.1"
           - { extra: science,     allow: "" }
           - { extra: optimize,    allow: "" }
           - { extra: pydoe,       allow: "" }

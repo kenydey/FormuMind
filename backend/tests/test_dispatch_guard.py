@@ -365,12 +365,12 @@ def test_ordinary_feature_flags_still_win_over_a_stale_container_env(
     from app.services import secrets_store
 
     monkeypatch.setattr(
-        secrets_store, "read_env_file", lambda: {"FORMUMIND_ARXIV_SEARCH_ENABLED": "true"}
+        secrets_store, "read_env_file", lambda: {"FORMUMIND_FULLTEXT_ENRICH": "true"}
     )
-    monkeypatch.setenv("FORMUMIND_ARXIV_SEARCH_ENABLED", "false")
+    monkeypatch.setenv("FORMUMIND_FULLTEXT_ENRICH", "false")
 
     secrets_store.apply_persisted_ui_settings()
 
     import os
 
-    assert os.environ["FORMUMIND_ARXIV_SEARCH_ENABLED"] == "true"
+    assert os.environ["FORMUMIND_FULLTEXT_ENRICH"] == "true"

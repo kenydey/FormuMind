@@ -48,7 +48,7 @@
 
 | 候选源 | 裁决 | 理由 |
 |---|---|---|
-| **arXiv** | 默认四域 **`source_policy=off`**（保留代码/旗标） | 对本域噪声高；预印本角色改由 ChemRxiv 承担 |
+| **arXiv** | **已移除检索代码**（仅保留历史标识符 URL 解析 / `taxonomy_source` 兼容） | 对本域噪声高；预印本角色改由 ChemRxiv 承担 |
 | **OpenAlex（通用）** | **`primary`** | 期刊 OA 主源；concept 过滤已有 |
 | **ChemRxiv** | **`primary`（经 OpenAlex source 通道）**；可选后期原生 API | 专业化学预印本；学会背书；全文公开 |
 | **Crossref / habanero** | **不引入检索探针** | OpenAlex 已聚合 DOI 元数据 |
@@ -217,4 +217,22 @@ ChemRxiv 条目优先：OpenAlex `best_oa_location` / `oa_locations` PDF → Unp
 - S2：扩展期 deny 过滤同义词；检索期 keyword_deny + `wrong_substrate_hit`
 - S3：`is_oa=False` 文献不出主列表；`FilterReport.source_counts` + 通知栏源占比
 
-未做（按计划条件项）：S0c ChemRxiv Open Engage 原生 API。
+## 11. arXiv 代码移除 + ChemRxiv 原生 API 评估（2026-09-10 晚）
+
+### 11.1 arXiv 已物理删除
+
+- 删除 `search_arxiv` / `_build_streams` arXiv 流 / ChemLit arXiv 分支  
+- 删除 Profile `arxiv_categories`、`source_policy["arxiv"]`、`arxiv_cat_clause`  
+- 删除配置旗标 `arxiv_search_enabled` / `arxiv_domain_filter` / `arxiv_prefer_source`  
+- 删除 `arxiv_source.py` LaTeX 快路径与 `arxiv` pip 依赖  
+- 保留：identifier 中 `arxiv:` 正则 → `arxiv.org/pdf/...` 的 **URL 解析**（无 `arxiv` 包），以及历史 Evidence `taxonomy_source="arxiv"` 字面量兼容  
+
+### 11.2 ChemRxiv 原生 API — **现阶段不必要**
+
+| 问题 | 结论 |
+|---|---|
+| OpenAlex ChemRxiv 通道是否够用？ | **够用**：`primary_location.source.id:S4393918830` + OA PDF 已接线；预印本全文走 OpenAlex/Unpaywall，无需单独爬 ChemRxiv |
+| 原生 Open Engage API 增量？ | 更新时效略好、可按 subject 过滤；但维护成本（API 迁移史、ToS、限流）高于收益 |
+| 何时再做 S0c？ | 仅当冒烟证明：ChemRxiv 官网有高相关命中而 OpenAlex ChemRxiv 流持续空/延迟 >90 天占多数 |
+
+**裁决：不实施 ChemRxiv 原生 API；继续以 OpenAlex ChemRxiv 通道为主。**

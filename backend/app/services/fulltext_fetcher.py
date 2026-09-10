@@ -250,32 +250,14 @@ def _resolve_oa_pdf_url(ev: Evidence, timeout: float) -> str | None:
     return pdfs[0] if pdfs else None
 
 
-def _arxiv_id(ev: Evidence) -> str | None:
-    m = _ARXIV_RE.search(ev.identifier or "")
-    return m.group(1) if m else None
-
 
 def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
-    """OA full text: arXiv LaTeX source when available, else the PDF.
+    """OA full text via PDF candidates (OpenAlex / Unpaywall / landing).
 
-    Source is tried first because the PDF path is where the time goes — a
-    100-page arXiv paper measured ~53 s, of which ~50 s was RapidOCR firing on
-    figure-heavy pages that look like scans to the triage heuristic, against
-    ~1.2 s for the source. It also keeps equations as LaTeX and section
-    structure as headings. PDF-only submissions fall through unchanged.
+    arXiv LaTeX source path removed 2026-09-10 with the arXiv search stack;
+    chemistry preprints now arrive via ChemRxiv/OpenAlex OA PDFs.
     """
     from .pdf_downloader import _extract_text, fetch_pdf
-
-    arxiv_id = _arxiv_id(ev)
-    if arxiv_id and getattr(get_settings(), "arxiv_prefer_source", True):
-        from .arxiv_source import fetch_arxiv_markdown
-
-        try:
-            md = fetch_arxiv_markdown(arxiv_id, timeout)
-        except Exception as exc:
-            md = degrade_return(logger, exc, f"arxiv source fetch failed: {arxiv_id}", None)
-        if md and len(md.strip()) > 200:
-            return md
 
     pdf_cands, landing_cands = _resolve_oa_candidates(ev, timeout)
     if not pdf_cands:

@@ -28,7 +28,6 @@ _SOURCE_TIMEOUT_SEC = 25
 # Shared executor for per-source fetch timeouts (avoid creating a pool per call).
 _FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-_ARXIV_CLIENT = None
 
 # Curated seed corpus — representative, paraphrased abstracts used offline.
 SEED_CORPUS: dict[ProductDomain, list[dict]] = {
@@ -317,66 +316,6 @@ def search_patents_by_query(
                 all_seeds.append(_seed_evidence(doc, i))
     filtered = _filter_seed_by_query(all_seeds, query)
     return filtered[offset : offset + limit]
-
-
-def _get_arxiv_client():
-    global _ARXIV_CLIENT
-    if _ARXIV_CLIENT is None:
-        import arxiv  # type: ignore
-
-        _ARXIV_CLIENT = arxiv.Client(page_size=50, delay_seconds=3, num_retries=1)
-    return _ARXIV_CLIENT
-
-
-def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: bool | None = None, domain=None) -> list[Evidence]:
-    """arXiv 学术预印本搜索（arxiv 库）。``offset`` 支持增量翻页。"""
-    from ..config import get_settings
-
-    settings = get_settings()
-    if not settings.arxiv_search_enabled:
-        return []
-    use_filter = domain_filter if domain_filter is not None else settings.arxiv_domain_filter
-    arxiv_query = query
-    if use_filter and query.strip():
-        from ..domain.search_profiles import arxiv_cat_clause, resolve_profile
-        _prof = resolve_profile(domain)
-        if _prof is not None:
-            _clause = arxiv_cat_clause(_prof)
-            arxiv_query = f"({query}) AND {_clause}" if _clause else query
-        else:
-            arxiv_query = (
-                f"({query}) AND (cat:cond-mat.mtrl-sci OR cat:physics.chem-ph OR cat:cs.CE)"
-            )
-    try:
-        import arxiv  # type: ignore
-
-        client = _get_arxiv_client()
-        results = list(
-            client.results(
-                arxiv.Search(
-                    query=arxiv_query,
-                    max_results=limit + offset,
-                    sort_by=arxiv.SortCriterion.Relevance,
-                )
-            )
-        )[offset : offset + limit]
-        rows = [
-            Evidence(
-                source="arXiv",
-                identifier=r.entry_id,
-                title=r.title,
-                snippet=(r.summary or "")[:500],
-                relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
-            )
-            for i, r in enumerate(results)
-        ]
-        if domain is not None:
-            from .domain_tagging import tag_evidence_domain
-            for _ev in rows:
-                tag_evidence_domain(_ev, domain, taxonomy_source="arxiv", match="strong")
-        return rows
-    except Exception as exc:
-        return degrade_return(logger, exc, "arXiv search failed", [])
 
 
 _ALLOWED_S2_FIELDS = frozenset({
@@ -785,7 +724,6 @@ def _build_streams(
         from ..config import get_settings
         from ..domain.search_profiles import (
             CHEMRXIV_OPENALEX_SOURCE_ID,
-            policy_allows,
             policy_page_size,
             resolve_profile,
         )
@@ -840,16 +778,6 @@ def _build_streams(
                 True,
             )
 
-        arxiv_n = policy_page_size(prof, "arxiv", min(page_size, 15), default="off")
-        if lit_settings.arxiv_search_enabled and arxiv_n > 0:
-            add(
-                "arxiv",
-                lambda off, q=western_query, d=domain, n=arxiv_n: search_arxiv(
-                    q, n, offset=off, domain=d
-                ),
-                True,
-            )
-
         s2_n = policy_page_size(prof, "semantic_scholar", page_size, default="support")
         if s2_n > 0:
             add(
@@ -860,8 +788,7 @@ def _build_streams(
                 True,
             )
 
-        # ChemLit wraps arXiv+S2; skip when arXiv policy is off to avoid backdoor.
-        if policy_allows(prof, "arxiv", default="off") or s2_n > 0:
+        if s2_n > 0:
             add("chemlit", lambda off, q=western_query: search_chem_lit(q, page_size), False)
     if "internet" in source_types:
         web_q = chinese_query or western_query
@@ -1136,23 +1063,16 @@ def split_lit_answer(
 
 
 def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
-    """Chemical literature search via the existing arXiv + Semantic Scholar tiers.
+    """Chemical literature search via Semantic Scholar (arXiv tier removed).
 
     (ChemCrow's LiteratureSearch wrapper was removed 2026-09: it required
     paper-qa + an OpenAI key this DeepSeek-only deployment never had, so it
     had always degraded to [] in practice.)
     """
-    out: list[Evidence] = []
     try:
-        out.extend(search_arxiv(query, limit=limit))
+        return search_semantic_scholar(query, limit=limit)
     except Exception:
-        pass
-    if len(out) < limit:
-        try:
-            out.extend(search_semantic_scholar(query, limit=limit - len(out)))
-        except Exception:
-            pass
-    return out[:limit]
+        return []
 
 
 # Compatibility aliases retained for historical imports/tests (de-ChemCrow 2026-09).
@@ -1191,8 +1111,7 @@ def get_source_availability() -> dict[str, dict]:
 
     patents_online = _ok("patent_client")
     lit_ok = (
-        _ok("arxiv")
-        or _ok("semanticscholar")
+        _ok("semanticscholar")
         or openalex_ok
         or serpapi_ok
     )

@@ -1,7 +1,7 @@
 """Domain search profiles — taxonomy + lexical + source policy per ProductDomain.
 
 Frozen per-domain profiles drive Pull filters, Sanitize gates, and source_policy
-routing (2026-09-10: arXiv off by default; ChemRxiv via OpenAlex source channel).
+routing (2026-09-10+: ChemRxiv via OpenAlex; arXiv integration removed).
 """
 from __future__ import annotations
 
@@ -42,7 +42,6 @@ class DomainSearchProfile:
     """Native taxonomy + lexical anchors for one ProductDomain."""
 
     domain: ProductDomain
-    arxiv_categories: tuple[str, ...]
     openalex_concept_ids: tuple[str, ...]
     s2_fields_of_study: tuple[str, ...]
     cpc_prefixes: tuple[str, ...]
@@ -54,9 +53,8 @@ class DomainSearchProfile:
     chemrxiv_openalex_source_id: str = CHEMRXIV_OPENALEX_SOURCE_ID
 
 
-# Shared source policy (2026-09-10): ChemRxiv replaces default arXiv preprint role.
+# Shared source policy: ChemRxiv + OpenAlex primary; arXiv removed.
 _DEFAULT_SOURCE_POLICY: Mapping[str, str] = {
-    "arxiv": "off",
     "openalex": "primary",
     "chemrxiv": "primary",
     "semantic_scholar": "support",
@@ -85,11 +83,6 @@ _COMMON_DENY: tuple[str, ...] = (
 _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
     ProductDomain.anticorrosion_coating: DomainSearchProfile(
         domain=ProductDomain.anticorrosion_coating,
-        arxiv_categories=(
-            "cond-mat.mtrl-sci",
-            "physics.chem-ph",
-            "cond-mat.soft",
-        ),
         openalex_concept_ids=(
             _OA_MATERIALS_SCIENCE,
             _OA_CORROSION,
@@ -137,11 +130,6 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
     ),
     ProductDomain.degreaser: DomainSearchProfile(
         domain=ProductDomain.degreaser,
-        arxiv_categories=(
-            "physics.chem-ph",
-            "cond-mat.soft",
-            "cond-mat.mtrl-sci",
-        ),
         openalex_concept_ids=(
             _OA_CLEANING_AGENT,
             _OA_DEGREASING,
@@ -185,11 +173,6 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
     ),
     ProductDomain.surface_treatment: DomainSearchProfile(
         domain=ProductDomain.surface_treatment,
-        arxiv_categories=(
-            "cond-mat.mtrl-sci",
-            "physics.chem-ph",
-            "physics.app-ph",
-        ),
         openalex_concept_ids=(
             _OA_SURFACE_MODIFICATION,
             _OA_PASSIVATION,
@@ -233,11 +216,6 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
     ),
     ProductDomain.autodeposition_coating: DomainSearchProfile(
         domain=ProductDomain.autodeposition_coating,
-        arxiv_categories=(
-            "cond-mat.mtrl-sci",
-            "physics.chem-ph",
-            "cond-mat.soft",
-        ),
         openalex_concept_ids=(
             _OA_COATING,
             _OA_ELECTROCHEMISTRY,
@@ -291,14 +269,6 @@ def get_profile(domain: ProductDomain | str) -> DomainSearchProfile:
 def all_profiles() -> tuple[DomainSearchProfile, ...]:
     """All built-in profiles in ProductDomain declaration order."""
     return tuple(_PROFILES[d] for d in ProductDomain)
-
-
-def arxiv_cat_clause(profile: DomainSearchProfile) -> str:
-    """Build ``(cat:A OR cat:B …)`` for arXiv API query append."""
-    cats = [c.strip() for c in profile.arxiv_categories if c and c.strip()]
-    if not cats:
-        return ""
-    return "(" + " OR ".join(f"cat:{c}" for c in cats) + ")"
 
 
 def openalex_concepts_filter(profile: DomainSearchProfile) -> str:
