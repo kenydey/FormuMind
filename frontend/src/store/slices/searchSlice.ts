@@ -501,7 +501,27 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           if (ev.type === "phase") {
             set((draft) => {
               const m = last(draft);
-              if (m?.role === "assistant" && m.streaming) m.phase = ev.phase;
+              if (m?.role === "assistant" && m.streaming) {
+                m.phase = ev.phase;
+                if (ev.phase === "answering" || ev.phase === "claims") {
+                  m.toolStatus = null;
+                }
+              }
+            });
+          } else if (ev.type === "tool_start") {
+            set((draft) => {
+              const m = last(draft);
+              if (m?.role === "assistant" && m.streaming) {
+                m.phase = "tools";
+                m.toolStatus = ev.label || ev.name;
+              }
+            });
+          } else if (ev.type === "tool_result") {
+            set((draft) => {
+              const m = last(draft);
+              if (m?.role === "assistant" && m.streaming) {
+                m.toolStatus = ev.ok ? m.toolStatus : `工具失败: ${ev.name}`;
+              }
             });
           } else if (ev.type === "token") {
             set((draft) => {
@@ -517,6 +537,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                 m.content = ev.answer;
                 m.streaming = false;
                 m.phase = undefined;
+                m.toolStatus = null;
                 m.citations = ev.citations;
                 m.kbChunksUsed = ev.kb_chunks_used ?? 0;
               }

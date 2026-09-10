@@ -2675,19 +2675,23 @@ export interface ChatMessage {
   kbChunksUsed?: number;
   /** SSE 流式问答中: 该条 assistant 消息仍在接收(逐 token 累积)。 */
   streaming?: boolean;
-  /** SSE 阶段指示: retrieval | answering | claims(仅 streaming 时有意义)。 */
+  /** SSE 阶段指示: retrieval | tools | answering | claims(仅 streaming 时有意义)。 */
   phase?: string;
+  /** Live tool status while streaming (e.g. 结构识别中). */
+  toolStatus?: string | null;
 }
 
 /** /api/chat/stream 的 SSE 事件(后端 data: JSON 一行一个)。 */
 export type ChatStreamEvent =
-  | { type: "phase"; phase: "retrieval" | "answering" | "claims" }
+  | { type: "phase"; phase: "retrieval" | "tools" | "answering" | "claims" }
   | {
       type: "meta";
       kb_used: number;
       rewritten_query?: string | null;
       source_count?: number;
     }
+  | { type: "tool_start"; name: string; args: Record<string, unknown>; label?: string }
+  | { type: "tool_result"; name: string; ok: boolean; summary: string }
   | { type: "token"; delta: string }
   | {
       type: "done";
@@ -2698,6 +2702,7 @@ export type ChatStreamEvent =
       rewritten_query?: string | null;
       sourced_claims?: unknown;
       structured?: unknown;
+      tools_used?: string[];
     }
   | { type: "error"; message: string };
 

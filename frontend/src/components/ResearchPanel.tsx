@@ -376,6 +376,10 @@ export default function ResearchPanel() {
                         <span className="text-accent2 text-xs ml-1">
                           ⏳ 检索资料中…
                         </span>
+                      ) : m.phase === "tools" ? (
+                        <span className="text-accent2 text-xs ml-1">
+                          ⏳ {m.toolStatus || "调用化学工具…"}
+                        </span>
                       ) : m.phase === "answering" ? (
                         <span className="inline-block w-2 h-4 bg-accent2/80 ml-0.5 animate-pulse align-middle" />
                       ) : m.phase === "claims" ? (

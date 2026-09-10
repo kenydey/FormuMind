@@ -82,3 +82,15 @@ def test_openai_tool_schemas_omits_recognize_without_refs():
     names = [t["function"]["name"] for t in cct.openai_tool_schemas(ctx)]
     assert "mol_descriptors" in names
     assert "recognize_structure" not in names
+
+
+def test_recognize_unknown_sha_hint():
+    s = Settings(ocsr_enabled=True)
+    ctx = cct.build_tool_context(
+        structure={"image_sha": "deadbeef"},
+        attachment_source_ids=[],
+        settings=s,
+    )
+    out = cct.execute_tool("recognize_structure", {"image_ref": "deadbeef"}, ctx)
+    assert out["ok"] is False
+    assert "hint" in out

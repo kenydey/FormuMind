@@ -130,6 +130,11 @@ def availability() -> dict[str, Any]:
             "patent_check": cap(molbloom, molbloom_hint),
             "explosive_check": cap(pubchem, pubchem_hint),
         },
+        "chat_tool_calling": {
+            "flag_enabled": bool(getattr(get_settings(), "chat_chem_tools_enabled", True)),
+            "chemtools_enabled": bool(enabled),
+            "note": "实际启用还取决于当前 LLM 是否为 OpenAI 兼容供应商",
+        },
     }
 
 
