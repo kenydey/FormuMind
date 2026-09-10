@@ -2419,6 +2419,31 @@ function streamUrl(path: string): string {
   return `${path}${sep}token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * Is the API process actually accepting traffic?
+ *
+ * Used to separate "this stream/task broke" from "the backend is down" — the
+ * two need different copy and different recovery. Deliberately short: during a
+ * backend restart the probe has to answer quickly enough to be worth asking
+ * (1–8 s reconnect backoff budgets depend on it). Any failure (abort, network
+ * error, non-2xx) means "not ready".
+ */
+export async function probeBackend(timeoutMs = 2_000): Promise<boolean> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch("/health", {
+      headers: apiAuthHeaders(),
+      signal: ctrl.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /** Subscribe to task SSE progress (GET /api/tasks/{id}/stream). */
 export function subscribeTaskStream(
   taskId: string,
@@ -2452,6 +2477,12 @@ export function subscribeTaskStream(
  * progress event, so a slow job never trips it, but a worker that has died — OOM
  * killed, container restarted — stops emitting and is reported instead of
  * spinning forever. Total duration unlimited, silence bounded.
+ *
+ * A dropped stream is not a failed job: the task keeps running server-side, so
+ * the stream is reopened with backoff (≤5 attempts, 1→8 s, each gated on a
+ * `/health` probe) before long-polling takes over at 2 s. This keeps a
+ * dev-server reload or a backend restart window from being reported as a dead
+ * task — or worse, as an unreachable backend.
  */
 export function awaitTaskStream(
   taskId: string,
@@ -2462,8 +2493,20 @@ export function awaitTaskStream(
 ): Promise<TaskProgressEvent> {
   return new Promise((resolve, reject) => {
     let settled = false;
-    let es: EventSource;
+    let es: EventSource | undefined;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    /** How many times this wait has already reconnected after a dropped SSE. */
+    let reconnects = 0;
+
+    /** A dropped stream is normally transient (dev-server reload, a backend
+     * restart window) and the task survives it server-side, so reconnect with
+     * backoff first; the polling fallback is the last resort, not the reflex. */
+    const MAX_SSE_RECONNECTS = 5;
+    const RECONNECT_BASE_MS = 1_000;
+    const RECONNECT_MAX_MS = 8_000;
+    /** Polling cadence once SSE is abandoned. A multi-hour ingest does not
+     * need sub-second updates, and 400 ms polling is pure noise. */
+    const FALLBACK_POLL_MS = 2_000;
 
     const clearIdle = () => {
       if (idleTimer) clearTimeout(idleTimer);
@@ -2526,59 +2569,97 @@ export function awaitTaskStream(
           }, timeoutMs)
         : null;
 
+    const handleEvent = (ev: TaskProgressEvent) => {
+      armIdle();  // progress means alive — restart the silence clock
+      onEvent?.(ev);
+      if (ev.status === "COMPLETED" || ev.status === "FAILED" || ev.status === "CANCELLED") {
+        es?.close();
+        if (ev.status === "FAILED" || ev.status === "CANCELLED") {
+          finish(() => reject(new Error(ev.message || (ev.status === "CANCELLED" ? "任务已取消" : "任务失败"))));
+        } else {
+          finish(() => resolve(ev));
+        }
+      }
+    };
+
+    /**
+     * Long-poll the task endpoint — only reached once the reconnect budget is
+     * spent. An unlimited wall clock has to mean the fallback is unlimited too,
+     * otherwise a dropped SSE connection reintroduces a 120 s ceiling by the
+     * back door — which is exactly how a long job "times out" while healthy.
+     */
+    const startPollFallback = () => {
+      pollTask(
+        taskId,
+        (s) => {
+          if (settled) return;  // 已 settle：停止向 onEvent 泄漏事件
+          armIdle();
+          if (s.state === "running" || s.state === "pending") {
+            onEvent?.({
+              status: s.state === "running" ? "RUNNING" : "PENDING",
+              message: s.message,
+              progress: s.progress,
+            });
+          }
+        },
+        FALLBACK_POLL_MS,
+        timeoutMs > 0 ? undefined : 0,
+      )
+        .then((s) => {
+          if (settled) return;  // 超时/取消已先 settle：丢弃迟到的轮询结果
+          resolveFromStatus(s);
+        })
+        .catch(() => {
+          finish(() =>
+            reject(
+              new Error(
+                "SSE 连接中断 — 无法获取任务进度（请检查后端服务；若未启动 Redis，请确认后端已升级支持无 Redis 降级）"
+              )
+            )
+          );
+        });
+    };
+
+    /**
+     * The SSE stream dropped. The task itself is unaffected — its state lives
+     * server-side in Redis/disk — so treat this as a transport problem and
+     * reconnect with backoff before falling back. A dev-server reload or a
+     * backend restart window recovers on the first or second attempt. The
+     * budget is never refunded, so repeated flapping still converges on the
+     * deterministic polling fallback instead of reconnecting forever.
+     */
+    const handleDrop = () => {
+      es?.close();
+      if (settled) return;
+      void (async () => {
+        while (reconnects < MAX_SSE_RECONNECTS && !settled) {
+          const delay = Math.min(
+            RECONNECT_BASE_MS * 2 ** reconnects,
+            RECONNECT_MAX_MS
+          );
+          reconnects += 1;
+          await new Promise((r) => setTimeout(r, delay));
+          if (settled) return;
+          // Reconnecting into a backend that is not accepting traffic just
+          // burns the budget, so keep backing off while the probe says no.
+          if (!(await probeBackend())) continue;
+          if (settled) return;
+          openStream();
+          return;
+        }
+        if (settled) return;
+        startPollFallback();
+      })();
+    };
+
+    const openStream = () => {
+      if (settled) return;
+      es = subscribeTaskStream(taskId, handleEvent, handleDrop);
+    };
+
     signal?.addEventListener("abort", onAbort, { once: true });
     armIdle();
-
-    es = subscribeTaskStream(
-      taskId,
-      (ev) => {
-        armIdle();  // progress means alive — restart the silence clock
-        onEvent?.(ev);
-        if (ev.status === "COMPLETED" || ev.status === "FAILED" || ev.status === "CANCELLED") {
-          es.close();
-          if (ev.status === "FAILED" || ev.status === "CANCELLED") {
-            finish(() => reject(new Error(ev.message || (ev.status === "CANCELLED" ? "任务已取消" : "任务失败"))));
-          } else {
-            finish(() => resolve(ev));
-          }
-        }
-      },
-      () => {
-        es.close();
-        // An unlimited wall clock has to mean the fallback is unlimited too,
-        // otherwise a dropped SSE connection reintroduces a 120 s ceiling by the
-        // back door — which is exactly how a long job "times out" while healthy.
-        pollTask(
-          taskId,
-          (s) => {
-            if (settled) return;  // 已 settle：停止向 onEvent 泄漏事件
-            armIdle();
-            if (s.state === "running" || s.state === "pending") {
-              onEvent?.({
-                status: s.state === "running" ? "RUNNING" : "PENDING",
-                message: s.message,
-                progress: s.progress,
-              });
-            }
-          },
-          400,
-          timeoutMs > 0 ? undefined : 0,
-        )
-          .then((s) => {
-            if (settled) return;  // 超时/取消已先 settle：丢弃迟到的轮询结果
-            resolveFromStatus(s);
-          })
-          .catch(() => {
-            finish(() =>
-              reject(
-                new Error(
-                  "SSE 连接中断 — 无法获取任务进度（请检查后端服务；若未启动 Redis，请确认后端已升级支持无 Redis 降级）"
-                )
-              )
-            );
-          });
-      }
-    );
+    openStream();
   });
 }
 
