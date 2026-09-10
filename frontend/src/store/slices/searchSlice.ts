@@ -1,9 +1,11 @@
 import {
   api,
   awaitTaskStream,
+  BACKEND_UNREACHABLE_MESSAGE,
   formatApiError,
   parseKbIngestData,
   parseSearchStreamData,
+  probeBackend,
   sanitizeEvidenceForApi,
 } from "../../api";
 import type { ChatMessage, Evidence, SourceStatus } from "../../api";
@@ -30,6 +32,22 @@ const KB_INGEST_STALL_MS = 15 * 60 * 1000;
  * catching a worker that has actually gone away.
  */
 const SEARCH_STALL_MS = 5 * 60 * 1000;
+
+/**
+ * Error detail that must not pre-empt the reachability verdict.
+ *
+ * `formatApiError` rewrites any network-ish string into the generic "后端不可达"
+ * copy. That is the right default for a bare request, but wrong inside the
+ * stream→sync recovery: there the reachability question is answered by an actual
+ * probe, and a pre-substituted verdict would both pre-empt it and make the two
+ * branches indistinguishable. So collapse-to-unreachable is undone, and the raw
+ * message (e.g. "Failed to fetch", "503: broker unavailable") is shown as detail.
+ */
+function detailOf(err: unknown): string {
+  const formatted = formatApiError(err);
+  if (formatted !== BACKEND_UNREACHABLE_MESSAGE) return formatted;
+  return err instanceof Error ? err.message : String(err);
+}
 
 export function createSearchSlice(set: SliceSet, get: SliceGet) {
   return {
@@ -239,12 +257,23 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
         });
         get().scheduleAutosave();
       } catch (streamErr) {
-        // Keep the real stream error visible while we try sync POST /api/search
-        // so NotificationStack (and any left-rail consumer of draft.error) shows
-        // the 503/broker detail instead of a silent chat lockout.
-        const streamMsg = formatApiError(streamErr);
+        // Detail text for the stream error, kept visible while we try sync
+        // POST /api/search so NotificationStack (and any left-rail consumer of
+        // draft.error) shows the 503/broker detail instead of a silent chat
+        // lockout. `formatApiError` already collapses network-ish errors into
+        // the generic "unreachable" copy — that verdict is not its call to make
+        // here, so in that case keep the raw message and let the probe below
+        // decide the headline.
+        const streamMsg = detailOf(streamErr);
+        // A broken stream is not evidence that the API is down — the task may
+        // simply have outlived its client. Probe before labelling, so a dropped
+        // SSE or a backend restart window is not reported as an unreachable
+        // server the user would go hunting for.
+        const backendUp = await probeBackend();
         set((draft) => {
-          draft.error = streamMsg;
+          draft.error = backendUp
+            ? `流式检索中断（${streamMsg}），改用同步检索…`
+            : `流式检索中断，后端暂不可达，改用同步检索…`;
           draft.searchProgress = {
             message: "流式检索失败，改用同步检索…",
             total: draft.searchProgress?.total ?? 0,
@@ -282,7 +311,9 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           }
           set((draft) => {
             // Clarify recovery so the user sees why stream failed but chat can unlock.
-            draft.error = `流式检索失败（${streamMsg}），已自动改用同步检索并成功`;
+            draft.error = backendUp
+              ? `流式检索失败（${streamMsg}），已自动改用同步检索并成功`
+              : `流式检索失败（${streamMsg}）；后端已恢复，同步检索成功`;
             draft.searchProgress = {
               message: `同步检索完成，共 ${draft.sources.length} 条`,
               total: r.total ?? draft.sources.length,
@@ -294,8 +325,15 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           });
           get().scheduleAutosave();
         } catch (syncErr) {
+          const syncMsg = detailOf(syncErr);
+          // Second probe: only claim the API is unreachable once it has actually
+          // stopped answering. Otherwise this is a task-level failure and saying
+          // "unreachable" would send the user after the wrong problem.
+          const stillUp = await probeBackend();
           set((draft) => {
-            draft.error = `流式检索失败（${streamMsg}）；同步检索也失败：${formatApiError(syncErr)}`;
+            draft.error = stillUp
+              ? `流式检索失败（${streamMsg}）；同步检索也失败：${syncMsg}`
+              : `${BACKEND_UNREACHABLE_MESSAGE}（流式：${streamMsg}；同步：${syncMsg}）`;
           });
         }
       } finally {
