@@ -53,6 +53,11 @@ def test_registry_excludes_selflockout_and_environment():
     assert "environment" not in attrs
 
 
+def test_chat_chem_tools_flag_registered():
+    attrs = {f.attr for f in env_flags.FLAG_REGISTRY}
+    assert "chat_chem_tools_enabled" in attrs
+
+
 def test_list_env_flags_reports_effective_and_default(monkeypatch):
     monkeypatch.setenv("FORMUMIND_FULLTEXT_ENRICH", "true")  # default false
     get_settings.cache_clear()

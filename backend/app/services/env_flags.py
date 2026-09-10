@@ -217,6 +217,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("chemtools_enabled", "化学工具网关",
             "工具级化学能力：名称→SMILES/CAS、官能团、分子专利预筛、爆炸性筛查。",
             "chem", "需 rdkit/httpx/molbloom；缺库时自动降级"),
+    EnvFlag("chat_chem_tools_enabled", "聊天化学 Tool Calling",
+            "对话中通过供应商原生 tools 自动调用 chemtools / SureChemBL / RDKit 结构检索 / MolScribe。"
+            "仅 OpenAI 兼容供应商生效；关闭后聊天静默直答。",
+            "chem", "需 chemtools_enabled；MolScribe/SureChemBL 另受各自开关约束"),
     EnvFlag("external_substitutes", "材料替代联网检索",
             "材料替代弹窗默认按 CAS/SMILES 调用 PubChem 结构相似检索，列出可入库的联网候选。"
             "关闭后仅使用材料库内候选（请求仍可传 include_external，但会被部署开关压制）。",

@@ -499,6 +499,9 @@ class Settings(BaseSettings):
     chat_structured_enabled: bool = True
     chat_clarification_enabled: bool = True
     chat_claim_check_enabled: bool = True
+    # Chat native chem tool-calling (OpenAI-compatible tools → chemtools / SureChemBL / OCSR).
+    chat_chem_tools_enabled: bool = True
+    chat_chem_tools_max_rounds: int = 4
     chat_history_max_turns: int = 12
     chat_rewrite_context_turns: int = 6
     # LLM 精排问答检索候选（无 GPU 时替代 ColBERT 的语义排序）。召回阶段用
