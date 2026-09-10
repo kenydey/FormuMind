@@ -394,6 +394,7 @@ def run_deep_research_task(self, payload: dict) -> dict:
             result["grounded_evidence"],
             project_id=(req.project_id if req else None),
             query=query,
+            domain=getattr(req, "domain", None) if req else None,
         )
         if kb_task_id:
             result["kb_ingest_task_id"] = kb_task_id
@@ -667,6 +668,7 @@ def run_kb_ingest_task(self, payload: dict) -> dict:
 def dispatch_kb_ingest(
     evidence_dicts: list[dict], *,
     project_id: str | None = None, query: str | None = None,
+    domain=None,
 ) -> str | None:
     """Fire-and-forget background KB build for freshly searched evidence.
 
@@ -684,7 +686,9 @@ def dispatch_kb_ingest(
         return None
     try:
         rows = [Evidence.model_validate(e) for e in evidence_dicts]
-        targets = kb_ingest.select_ingest_targets(rows, project_id=project_id, query=query)
+        targets = kb_ingest.select_ingest_targets(
+            rows, project_id=project_id, query=query, domain=domain
+        )
     except Exception as exc:
         return degrade_return(logger, exc, "kb_ingest target selection failed", None)
     if not targets:
@@ -694,6 +698,7 @@ def dispatch_kb_ingest(
         "evidence": [ev.model_dump() for ev, _ in targets],
         "project_id": project_id,
         "query": query,
+        "domain": str(domain) if domain is not None else None,
     }
     if get_settings().celery_eager:
         task_id = f"kbingest-{uuid.uuid4().hex[:16]}"
@@ -804,6 +809,7 @@ def run_search_task(self, payload: dict) -> dict:
             data["evidence"],
             project_id=(req.project_id if req else None),
             query=query,
+            domain=getattr(req, "domain", None) if req else None,
         )
         if kb_task_id:
             data["kb_ingest_task_id"] = kb_task_id
@@ -846,7 +852,10 @@ def run_topic_sweep(self, payload: dict) -> dict:
         if not final:
             return {"task_id": task_id, "query": query, "found": 0, "ingest_task_id": None}
         kb_task_id = dispatch_kb_ingest(
-            [e.model_dump() for e in final], project_id=project_id, query=query
+            [e.model_dump() for e in final],
+            project_id=project_id,
+            query=query,
+            domain=getattr(req, "domain", None) if req else None,
         )
         return {
             "task_id": task_id,

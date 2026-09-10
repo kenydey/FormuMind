@@ -7,7 +7,7 @@ from ..domain.schemas import Evidence, ProductDomain
 from ..domain.search_profiles import DomainSearchProfile, get_profile, resolve_profile
 
 Match = Literal["strong", "weak", "none"]
-Taxonomy = Literal["arxiv", "openalex", "cpc", "lexical", "none"]
+Taxonomy = Literal["arxiv", "openalex", "chemrxiv", "cpc", "lexical", "none"]
 
 
 def tag_evidence_domain(
@@ -68,7 +68,7 @@ def score_domain_match(
             cpc_hit = True
             break
     tax = ev.taxonomy_source
-    if tax in {"arxiv", "openalex"} and allow >= 0:
+    if tax in {"arxiv", "openalex", "chemrxiv"} and allow >= 0:
         return "strong" if allow >= 1 or tax else "weak"
     if cpc_hit:
         return "strong"

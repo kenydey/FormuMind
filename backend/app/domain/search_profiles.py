@@ -1,7 +1,7 @@
-"""Domain search profiles — P0 taxonomy + lexical contracts per ProductDomain.
+"""Domain search profiles — taxonomy + lexical + source policy per ProductDomain.
 
-Q0 deliverable for KB quality: frozen per-domain profiles used by later slices
-(arXiv / OpenAlex / S2 / CPC·IPC / ingest gates). No provider wiring here.
+Frozen per-domain profiles drive Pull filters, Sanitize gates, and source_policy
+routing (2026-09-10: arXiv off by default; ChemRxiv via OpenAlex source channel).
 """
 from __future__ import annotations
 
@@ -23,6 +23,19 @@ _OA_DEGREASING = "C150042643"
 _OA_ELECTROCHEMISTRY = "C52859227"
 _OA_NONIONIC_SURFACTANT = "C2994558038"
 
+# ChemRxiv repository on OpenAlex (chemistry preprint channel).
+CHEMRXIV_OPENALEX_SOURCE_ID = "S4393918830"
+
+# Preferred OA-friendly coating / corrosion / materials journals (soft boost).
+_PREFERRED_COATING_JOURNALS: tuple[str, ...] = (
+    "S41155759",    # Progress in Organic Coatings
+    "S96167972",    # Corrosion Science
+    "S76010543",    # Surface and Coatings Technology
+    "S164001016",   # ACS Applied Materials & Interfaces
+    "S2481244646",  # RSC Advances
+    "S4210172278",  # Journal of Coatings Technology and Research
+)
+
 
 @dataclass(frozen=True)
 class DomainSearchProfile:
@@ -37,12 +50,15 @@ class DomainSearchProfile:
     keyword_allow: tuple[str, ...]
     keyword_deny: tuple[str, ...]
     source_policy: Mapping[str, str]
+    preferred_openalex_source_ids: tuple[str, ...] = ()
+    chemrxiv_openalex_source_id: str = CHEMRXIV_OPENALEX_SOURCE_ID
 
 
-# Shared source policy defaults (P0). Scholar stays support; not hard-off.
+# Shared source policy (2026-09-10): ChemRxiv replaces default arXiv preprint role.
 _DEFAULT_SOURCE_POLICY: Mapping[str, str] = {
-    "arxiv": "primary",
+    "arxiv": "off",
     "openalex": "primary",
+    "chemrxiv": "primary",
     "semantic_scholar": "support",
     "epo": "primary",
     "google_patents": "primary",
@@ -117,6 +133,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "high-entropy alloy",
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
+        preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
     ),
     ProductDomain.degreaser: DomainSearchProfile(
         domain=ProductDomain.degreaser,
@@ -212,6 +229,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "bone implant",
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
+        preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
     ),
     ProductDomain.autodeposition_coating: DomainSearchProfile(
         domain=ProductDomain.autodeposition_coating,
@@ -252,6 +270,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "hot-dip galvaniz",
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
+        preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
     ),
 }
 
@@ -288,6 +307,36 @@ def openalex_concepts_filter(profile: DomainSearchProfile) -> str:
     if not ids:
         return ""
     return "concepts.id:" + "|".join(ids)
+
+
+def openalex_join_filters(*parts: str) -> str:
+    """AND-join non-empty OpenAlex filter fragments with commas."""
+    return ",".join(p.strip() for p in parts if p and p.strip())
+
+
+def policy_tier(profile: DomainSearchProfile | None, key: str, *, default: str = "off") -> str:
+    """Return primary|support|off for a provider key."""
+    policy = (
+        profile.source_policy if profile is not None else _DEFAULT_SOURCE_POLICY
+    )
+    raw = str(policy.get(key, default) or default).strip().lower()
+    if raw in {"primary", "support", "off"}:
+        return raw
+    return default
+
+
+def policy_allows(profile: DomainSearchProfile | None, key: str, *, default: str = "off") -> bool:
+    return policy_tier(profile, key, default=default) != "off"
+
+
+def policy_page_size(profile: DomainSearchProfile | None, key: str, base: int, *, default: str = "off") -> int:
+    """Shrink support-tier page size (~1/3); off → 0."""
+    tier = policy_tier(profile, key, default=default)
+    if tier == "off":
+        return 0
+    if tier == "support":
+        return max(1, int(base * 0.33))
+    return max(1, int(base))
 
 
 @lru_cache(maxsize=16)

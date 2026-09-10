@@ -1,6 +1,10 @@
 // Typed backend client. Mirrors the FastAPI domain schemas.
 
-export type ProductDomain = "anticorrosion_coating" | "degreaser" | "surface_treatment";
+export type ProductDomain =
+  | "anticorrosion_coating"
+  | "degreaser"
+  | "surface_treatment"
+  | "autodeposition_coating";
 
 export interface ObjectiveSpec {
   id?: string;
@@ -184,6 +188,9 @@ export interface Evidence {
   /** Open Access PDF hint for literature fulltext ingest (P3.2). */
   oa_pdf_url?: string | null;
   is_oa?: boolean | null;
+  domain_tags?: string[];
+  domain_match?: "strong" | "weak" | "none" | null;
+  taxonomy_source?: string | null;
 }
 
 /** SureChEMBL P3 / P3.1 embodiment draft (review gate; never auto-promote). */
@@ -2804,6 +2811,8 @@ export interface FilterReport {
   dropped: number;
   dropped_by_reason: Record<string, number>;
   dropped_examples: string[];
+  /** Per-source counts in the kept list (audit: arXiv≈0, ChemRxiv visible). */
+  source_counts?: Record<string, number>;
 }
 
 /** Incremental search progress payload (SSE task data). */

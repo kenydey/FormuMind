@@ -58,6 +58,7 @@ class FilterReport:
     dropped: int = 0
     dropped_by_reason: dict[str, int] = field(default_factory=dict)
     dropped_examples: list[str] = field(default_factory=list)
+    source_counts: dict[str, int] = field(default_factory=dict)
 
     def record_drop(self, reason: str, ev: Evidence) -> None:
         self.dropped += 1
@@ -74,6 +75,8 @@ class FilterReport:
             if len(self.dropped_examples) >= 8:
                 break
             self.dropped_examples.append(example)
+        for src, count in (other.source_counts or {}).items():
+            self.source_counts[src] = self.source_counts.get(src, 0) + count
 
     def as_dict(self) -> dict:
         return {
@@ -81,6 +84,7 @@ class FilterReport:
             "dropped": self.dropped,
             "dropped_by_reason": dict(self.dropped_by_reason),
             "dropped_examples": list(self.dropped_examples),
+            "source_counts": dict(self.source_counts),
         }
 
 

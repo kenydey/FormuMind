@@ -334,7 +334,7 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
 
     settings = get_settings()
     if not settings.arxiv_search_enabled:
-        _rows = []
+        return []
     use_filter = domain_filter if domain_filter is not None else settings.arxiv_domain_filter
     arxiv_query = query
     if use_filter and query.strip():
@@ -360,7 +360,7 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
                 )
             )
         )[offset : offset + limit]
-        return [
+        rows = [
             Evidence(
                 source="arXiv",
                 identifier=r.entry_id,
@@ -372,9 +372,9 @@ def search_arxiv(query: str, limit: int = 5, offset: int = 0, *, domain_filter: 
         ]
         if domain is not None:
             from .domain_tagging import tag_evidence_domain
-            for _ev in _rows:
+            for _ev in rows:
                 tag_evidence_domain(_ev, domain, taxonomy_source="arxiv", match="strong")
-        return _rows
+        return rows
     except Exception as exc:
         return degrade_return(logger, exc, "arXiv search failed", [])
 
@@ -439,11 +439,30 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0, *, doma
         return degrade_return(logger, exc, "Semantic Scholar search failed", [])
 
 
-def search_openalex(query: str, limit: int = 5, offset: int = 0, *, domain=None) -> list[Evidence]:
+def search_openalex(
+    query: str,
+    limit: int = 5,
+    offset: int = 0,
+    *,
+    domain=None,
+    source_id: str | None = None,
+    evidence_source: str = "OpenAlex",
+    preferred_source_ids: tuple[str, ...] | list[str] | None = None,
+    taxonomy_source: str = "openalex",
+) -> list[Evidence]:
     """OpenAlex 学术文献（需 mailto 礼貌池，可在 config 关闭）。"""
     from .search_providers import search_openalex as _openalex
 
-    return _openalex(query, limit, offset, domain=domain)
+    return _openalex(
+        query,
+        limit,
+        offset,
+        domain=domain,
+        source_id=source_id,
+        evidence_source=evidence_source,
+        preferred_source_ids=preferred_source_ids,
+        taxonomy_source=taxonomy_source,
+    )
 
 
 def search_serpapi_literature(query: str, limit: int = 5, offset: int = 0) -> list[Evidence]:
@@ -635,7 +654,12 @@ def _is_weblike(e: Evidence) -> bool:
 
 
 def _merge_filter_rank(
-    results: list[Evidence], query: str, total_limit: int
+    results: list[Evidence],
+    query: str,
+    total_limit: int,
+    *,
+    domain=None,
+    req: Requirement | None = None,
 ) -> tuple[list[Evidence], "FilterReport"]:
     """Filter junk, dedupe, rank by relevance, and cap to ``total_limit``.
 
@@ -644,6 +668,8 @@ def _merge_filter_rank(
       else a couple of top entries so research is never empty).
     * Internet/web hits with zero query-keyword overlap are dropped as junk.
     * Patents / literature require at least one keyword overlap (unless empty query).
+    * Domain profile: apply lexical match; ``domain_match=none`` dropped from main list.
+    * Literature with explicit ``is_oa=False`` dropped (no fulltext path).
     """
     q_kw = _keywords(query)
     from .search_scoring import query_chem_context
@@ -652,15 +678,51 @@ def _merge_filter_rank(
     seeds = [e for e in results if e.identifier in _SEED_IDENTIFIERS]
     online = [e for e in results if e.identifier not in _SEED_IDENTIFIERS]
 
+    # Stamp domain_match for untagged rows before keep/drop decisions.
+    if domain is not None:
+        from .domain_tagging import apply_domain_match
+
+        for e in online:
+            if e.domain_match is None:
+                apply_domain_match(e, domain)
+
+    from .domain_tagging import lexical_hits
+    from ..domain.search_profiles import resolve_profile
+    from ..domain.research_query import wrong_substrate_hit
+
+    profile = resolve_profile(domain)
+
     def _keep(e: Evidence) -> bool:
-        if not q_kw:
-            return True
-        ov = _overlap(e, q_kw)
-        if _is_weblike(e):
-            return ov > 0
-        if _is_patent_or_literature(e):
-            return ov >= 1
-        return ov > 0
+        text = f"{e.title} {e.snippet} {e.identifier}"
+        if q_kw:
+            ov = _overlap(e, q_kw)
+            if _is_weblike(e):
+                if ov <= 0:
+                    return False
+            elif _is_patent_or_literature(e):
+                if ov < 1:
+                    return False
+            elif ov <= 0:
+                return False
+        # Literature without OA path: do not enter the main ingestible list.
+        src_l = (e.source or "").lower()
+        if e.is_oa is False and (
+            "openalex" in src_l
+            or "chemrxiv" in src_l
+            or "arxiv" in src_l
+            or "scholar" in src_l
+            or "semantic" in src_l
+        ):
+            return False
+        if e.domain_match == "none":
+            return False
+        if profile is not None:
+            _allow, deny = lexical_hits(text, profile)
+            if deny and _allow < 2:
+                return False
+        if req is not None and wrong_substrate_hit(text, req, query=query):
+            return False
+        return True
 
     filtered_online = [e for e in online if _keep(e)]
     merged = filtered_online + _filter_seed_by_query(seeds, query)
@@ -678,6 +740,10 @@ def _merge_filter_rank(
     from .content_filter import filter_evidence
 
     deduped, _report = filter_evidence(deduped, query)
+    by_source: dict[str, int] = {}
+    for e in deduped:
+        by_source[e.source or "unknown"] = by_source.get(e.source or "unknown", 0) + 1
+    _report.source_counts = by_source
     return deduped[:total_limit], _report
 
 
@@ -717,27 +783,86 @@ def _build_streams(
             )
     if "literature" in source_types:
         from ..config import get_settings
+        from ..domain.search_profiles import (
+            CHEMRXIV_OPENALEX_SOURCE_ID,
+            policy_allows,
+            policy_page_size,
+            resolve_profile,
+        )
 
         lit_settings = get_settings()
-        add(
-            "serpapi_lit",
-            lambda off, q=western_query: search_serpapi_literature(q, page_size, offset=off),
-            True,
-        )
-        if lit_settings.openalex_enabled:
-            add("openalex", lambda off, q=western_query, d=getattr(req, "domain", None): search_openalex(q, page_size, offset=off, domain=d), True)
-        if lit_settings.arxiv_search_enabled:
+        domain = getattr(req, "domain", None) if req is not None else None
+        prof = resolve_profile(domain)
+
+        # Google Scholar (support by default) — lower page size when support.
+        scholar_n = policy_page_size(prof, "google_scholar", page_size, default="support")
+        if scholar_n > 0:
             add(
-                "arxiv",
-                lambda off, q=western_query, d=getattr(req, "domain", None): search_arxiv(q, min(page_size, 15), offset=off, domain=d),
+                "serpapi_lit",
+                lambda off, q=western_query, n=scholar_n: search_serpapi_literature(
+                    q, n, offset=off
+                ),
                 True,
             )
-        add(
-            "s2",
-            lambda off, q=western_query, d=getattr(req, "domain", None): search_semantic_scholar(q, page_size, offset=off, domain=d),
-            True,
-        )
-        add("chemlit", lambda off, q=western_query: search_chem_lit(q, page_size), False)
+
+        openalex_n = policy_page_size(prof, "openalex", page_size, default="primary")
+        if lit_settings.openalex_enabled and openalex_n > 0:
+            prefs = tuple(prof.preferred_openalex_source_ids) if prof is not None else ()
+            add(
+                "openalex",
+                lambda off, q=western_query, d=domain, n=openalex_n, p=prefs: search_openalex(
+                    q,
+                    n,
+                    offset=off,
+                    domain=d,
+                    preferred_source_ids=p or None,
+                ),
+                True,
+            )
+
+        chemrxiv_n = policy_page_size(prof, "chemrxiv", page_size, default="primary")
+        if lit_settings.openalex_enabled and chemrxiv_n > 0:
+            crx_id = (
+                (prof.chemrxiv_openalex_source_id if prof is not None else "")
+                or CHEMRXIV_OPENALEX_SOURCE_ID
+            )
+            add(
+                "chemrxiv",
+                lambda off, q=western_query, d=domain, n=chemrxiv_n, sid=crx_id: search_openalex(
+                    q,
+                    n,
+                    offset=off,
+                    domain=d,
+                    source_id=sid,
+                    evidence_source="ChemRxiv",
+                    taxonomy_source="chemrxiv",
+                ),
+                True,
+            )
+
+        arxiv_n = policy_page_size(prof, "arxiv", min(page_size, 15), default="off")
+        if lit_settings.arxiv_search_enabled and arxiv_n > 0:
+            add(
+                "arxiv",
+                lambda off, q=western_query, d=domain, n=arxiv_n: search_arxiv(
+                    q, n, offset=off, domain=d
+                ),
+                True,
+            )
+
+        s2_n = policy_page_size(prof, "semantic_scholar", page_size, default="support")
+        if s2_n > 0:
+            add(
+                "s2",
+                lambda off, q=western_query, d=domain, n=s2_n: search_semantic_scholar(
+                    q, n, offset=off, domain=d
+                ),
+                True,
+            )
+
+        # ChemLit wraps arXiv+S2; skip when arXiv policy is off to avoid backdoor.
+        if policy_allows(prof, "arxiv", default="off") or s2_n > 0:
+            add("chemlit", lambda off, q=western_query: search_chem_lit(q, page_size), False)
     if "internet" in source_types:
         web_q = chinese_query or western_query
         add("internet", lambda off, q=web_q: search_internet(q, page_size, offset=off), True)
@@ -812,7 +937,9 @@ def iter_search(
     def _notify(*, source: str | None = None, new_count: int = 0) -> None:
         if progress_cb is None:
             return
-        ranked, _ = _merge_filter_rank(raw, rank_q, total_limit)
+        ranked, _ = _merge_filter_rank(
+            raw, rank_q, total_limit, domain=getattr(req, "domain", None) if req else None, req=req
+        )
         meta = {
             "source": source,
             "new_count": new_count,
@@ -866,7 +993,9 @@ def iter_search(
                     _notify(source=st["name"], new_count=0)
         ex.shutdown(wait=False)
 
-    final, rule_report = _merge_filter_rank(raw, rank_q, total_limit)
+    final, rule_report = _merge_filter_rank(
+        raw, rank_q, total_limit, domain=getattr(req, "domain", None) if req else None, req=req
+    )
 
     # LLM 后处理（quality judge + rerank）可能耗时数百秒（DeepSeek 慢 + 长
     # prompt），期间无 source 完成事件，前端 stall 时钟（300s）会误判任务中止。

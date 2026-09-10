@@ -46,7 +46,14 @@ def _ranked(i: int, offset: int = 0) -> float:
     return round(max(0.1, 1.0 - (offset + i) * 0.02), 3)
 
 
-def _openalex_work_to_evidence(w: dict[str, Any], rank_index: int, global_offset: int) -> Evidence:
+def _openalex_work_to_evidence(
+    w: dict[str, Any],
+    rank_index: int,
+    global_offset: int,
+    *,
+    evidence_source: str = "OpenAlex",
+    preferred_source_ids: frozenset[str] | None = None,
+) -> Evidence:
     doi = (w.get("doi") or "").replace("https://doi.org/", "")
     identifier = doi or w.get("id") or ""
     abstract = ""
@@ -59,15 +66,31 @@ def _openalex_work_to_evidence(w: dict[str, Any], rank_index: int, global_offset
         abstract = " ".join(w for _, w in sorted(pairs))[:1200]
     oa = w.get("open_access") or {}
     best = w.get("best_oa_location") or {}
-    return Evidence(
-        source="OpenAlex",
+    relevance = _ranked(rank_index, global_offset)
+    venue_pref_hit = False
+    if preferred_source_ids:
+        loc = w.get("primary_location") or {}
+        src = loc.get("source") or {}
+        sid = str(src.get("id") or "")
+        short = sid.rsplit("/", 1)[-1] if sid else ""
+        if short in preferred_source_ids or sid in preferred_source_ids:
+            venue_pref_hit = True
+            relevance = round(min(1.0, relevance + 0.15), 3)
+    ev = Evidence(
+        source=evidence_source,
         identifier=identifier,
         title=w.get("display_name") or "Untitled",
         snippet=abstract[:1200],
-        relevance=_ranked(rank_index, global_offset),
+        relevance=relevance,
         is_oa=oa.get("is_oa"),
         oa_pdf_url=best.get("pdf_url") or None,
     )
+    if venue_pref_hit:
+        tags = list(ev.domain_tags or [])
+        if "venue_pref_hit" not in tags:
+            tags.append("venue_pref_hit")
+        ev.domain_tags = tags
+    return ev
 
 
 def search_openalex(
@@ -77,8 +100,17 @@ def search_openalex(
     *,
     settings: Settings | None = None,
     domain=None,
+    source_id: str | None = None,
+    evidence_source: str = "OpenAlex",
+    preferred_source_ids: tuple[str, ...] | list[str] | None = None,
+    taxonomy_source: str = "openalex",
 ) -> list[Evidence]:
-    """OpenAlex works search (requires mailto for polite pool)."""
+    """OpenAlex works search (requires mailto for polite pool).
+
+    ``source_id`` (e.g. ChemRxiv ``S4393918830``) appends
+    ``primary_location.source.id`` to the filter. ``preferred_source_ids``
+    soft-boosts matching venues without hard-filtering.
+    """
     settings = settings or get_settings()
     if not settings.openalex_enabled:
         return []
@@ -88,16 +120,42 @@ def search_openalex(
     if limit <= 0:
         return []
     base_params: dict[str, Any] = {"search": q, "per-page": 25}
+    filter_parts: list[str] = []
+    preferred: frozenset[str] = frozenset()
     # P0: DomainSearchProfile → OpenAlex concepts.id filter (degrades gracefully).
     try:
-        from ..domain.search_profiles import openalex_concepts_filter, resolve_profile
+        from ..domain.search_profiles import (
+            openalex_concepts_filter,
+            openalex_join_filters,
+            resolve_profile,
+        )
+        _prof = resolve_profile(domain)
         if getattr(settings, "openalex_concept_filter", True):
-            _prof = resolve_profile(domain)
             _cf = openalex_concepts_filter(_prof) if _prof is not None else ""
             if _cf:
-                base_params["filter"] = _cf
+                filter_parts.append(_cf)
+        if preferred_source_ids:
+            preferred = frozenset(str(x).strip() for x in preferred_source_ids if x and str(x).strip())
+        elif _prof is not None and not source_id:
+            preferred = frozenset(
+                str(x).strip()
+                for x in (_prof.preferred_openalex_source_ids or ())
+                if x and str(x).strip()
+            )
+        if source_id:
+            sid = str(source_id).strip()
+            if sid.startswith("https://openalex.org/"):
+                sid = sid.rsplit("/", 1)[-1]
+            if sid:
+                filter_parts.append(f"primary_location.source.id:{sid}")
+        joined = openalex_join_filters(*filter_parts)
+        if joined:
+            base_params["filter"] = joined
     except Exception:
-        pass
+        if source_id:
+            sid = str(source_id).strip().rsplit("/", 1)[-1]
+            if sid:
+                base_params["filter"] = f"primary_location.source.id:{sid}"
     if effective_setting(settings, "openalex_mailto"):
         base_params["mailto"] = effective_setting(settings, "openalex_mailto")
     try:
@@ -120,7 +178,15 @@ def search_openalex(
                     oa = w.get("open_access") or {}
                     if not oa.get("is_oa"):
                         continue
-                    out.append(_openalex_work_to_evidence(w, global_idx, offset))
+                    out.append(
+                        _openalex_work_to_evidence(
+                            w,
+                            global_idx,
+                            offset,
+                            evidence_source=evidence_source,
+                            preferred_source_ids=preferred or None,
+                        )
+                    )
                     global_idx += 1
                     if len(out) >= limit:
                         break
@@ -130,8 +196,11 @@ def search_openalex(
                 page += 1
         if domain is not None:
             from .domain_tagging import tag_evidence_domain
+            tax = taxonomy_source if taxonomy_source in {
+                "arxiv", "openalex", "chemrxiv", "cpc", "lexical", "none"
+            } else "openalex"
             for _ev in out:
-                tag_evidence_domain(_ev, domain, taxonomy_source="openalex", match="strong")
+                tag_evidence_domain(_ev, domain, taxonomy_source=tax, match="strong")  # type: ignore[arg-type]
         return out
     except Exception as exc:
         return degrade_return(logger, exc, "OpenAlex search failed", [])

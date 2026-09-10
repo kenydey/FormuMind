@@ -249,6 +249,19 @@ def select_ingest_targets(
                     domain_match=getattr(ev, "domain_match", None),
                 )
             continue
+        if getattr(ev, "domain_match", None) == "none":
+            if write_audit:
+                write_ingest_audit(
+                    project_id=project_id,
+                    domain=str(domain) if domain else None,
+                    query=query,
+                    evidence_id=getattr(ev, "identifier", None),
+                    source=getattr(ev, "source", None),
+                    action="skip",
+                    reason="domain_match_none",
+                    domain_match="none",
+                )
+            continue
         ident = (ev.identifier or "").strip()
         if not ident or ident in seen:
             continue

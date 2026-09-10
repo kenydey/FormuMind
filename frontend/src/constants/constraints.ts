@@ -91,6 +91,7 @@ export function constraintAppliesToDomain(def: ConstraintDef, domain: ProductDom
 export function defaultConstraintsForDomain(domain: ProductDomain): ConstraintKey[] {
   if (domain === "anticorrosion_coating") return ["voc_limit_gpl", "cure_temperature_c"];
   if (domain === "degreaser") return ["voc_limit_gpl", "ph_target"];
+  if (domain === "autodeposition_coating") return ["voc_limit_gpl", "salt_spray_hours"];
   return ["voc_limit_gpl"];
 }
 

@@ -51,6 +51,11 @@ export const DOMAIN_OBJECTIVES: Record<ProductDomain, ObjectiveSpec[]> = {
     { metric: "coating_weight_gsm", weight: 0.2, direction: "maximize" },
     { metric: "cost_cny_per_kg", weight: 0.3, direction: "minimize" },
   ],
+  autodeposition_coating: [
+    { metric: "salt_spray_hours", weight: 0.5, direction: "maximize" },
+    { metric: "film_weight_gsm", weight: 0.2, direction: "maximize" },
+    { metric: "cost_cny_per_kg", weight: 0.3, direction: "minimize" },
+  ],
 };
 
 export type { ProjectSummary } from "../projectWorkspace";

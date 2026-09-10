@@ -99,18 +99,29 @@ function buildDetails(s: NotificationInputs): DetailMap {
     };
   }
 
-  if (filterReport && filterReport.dropped > 0) {
+  if (filterReport && (filterReport.dropped > 0 || (filterReport.source_counts && Object.keys(filterReport.source_counts).length > 0))) {
     details["filter-report"] = {
       disclosure: true,
       detail: (
         <div className="space-y-1 text-[10px] text-slate-400 border-t border-edge/40 pt-1.5">
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(filterReport.dropped_by_reason).map(([reason, count]) => (
-              <span key={reason} className="px-1 py-0.5 rounded border border-edge/60 bg-ink/50">
-                {FILTER_REASON_LABELS[reason] ?? reason}: {count}
-              </span>
-            ))}
-          </div>
+          {filterReport.source_counts && Object.keys(filterReport.source_counts).length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-1">
+              {Object.entries(filterReport.source_counts).map(([src, count]) => (
+                <span key={src} className="px-1 py-0.5 rounded border border-sky-800/60 bg-sky-950/40 text-sky-300">
+                  {src}: {count}
+                </span>
+              ))}
+            </div>
+          )}
+          {filterReport.dropped > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(filterReport.dropped_by_reason).map(([reason, count]) => (
+                <span key={reason} className="px-1 py-0.5 rounded border border-edge/60 bg-ink/50">
+                  {FILTER_REASON_LABELS[reason] ?? reason}: {count}
+                </span>
+              ))}
+            </div>
+          )}
           {filterReport.dropped_examples.length > 0 && (
             <ul className="list-disc list-inside text-slate-500 max-h-20 overflow-y-auto">
               {filterReport.dropped_examples.map((ex, i) => (

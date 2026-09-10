@@ -133,6 +133,19 @@ def prepare_search_queries(
             expanded = expanded.model_copy(update={
                 "ipc_cpc_suggestions": list(ipc),
             }) if hasattr(expanded, "model_copy") else expanded
+        # Drop expanded synonyms that collide with profile keyword_deny.
+        if _prof is not None and _prof.keyword_deny:
+            deny = tuple(d.casefold() for d in _prof.keyword_deny if d)
+            def _ok(term: str) -> bool:
+                t = (term or "").casefold()
+                return bool(t) and not any(d in t for d in deny)
+
+            eng = [t for t in expanded.english_synonyms if _ok(t)]
+            zh = [t for t in expanded.chinese_keywords if _ok(t)]
+            if eng != list(expanded.english_synonyms) or zh != list(expanded.chinese_keywords):
+                expanded = expanded.model_copy(
+                    update={"english_synonyms": eng, "chinese_keywords": zh}
+                )
     except Exception:
         pass
     return SearchQueries(

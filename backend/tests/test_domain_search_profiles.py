@@ -129,9 +129,25 @@ def test_keyword_allow_and_deny_per_domain():
 
 def test_source_policy_keys():
     p = get_profile(ProductDomain.degreaser)
-    assert p.source_policy["arxiv"] == "primary"
+    assert p.source_policy["arxiv"] == "off"
+    assert p.source_policy["chemrxiv"] == "primary"
     assert p.source_policy["google_scholar"] == "support"
     assert p.source_policy["openalex"] in {"primary", "support"}
+    assert p.chemrxiv_openalex_source_id == "S4393918830"
+    coating = get_profile(ProductDomain.anticorrosion_coating)
+    assert coating.preferred_openalex_source_ids
+    assert "S41155759" in coating.preferred_openalex_source_ids
+
+
+def test_policy_helpers_respect_tiers():
+    from app.domain.search_profiles import policy_allows, policy_page_size, resolve_profile
+
+    p = resolve_profile(ProductDomain.surface_treatment)
+    assert policy_allows(p, "chemrxiv") is True
+    assert policy_allows(p, "arxiv") is False
+    assert policy_page_size(p, "arxiv", 15) == 0
+    assert policy_page_size(p, "semantic_scholar", 30) == max(1, int(30 * 0.33))
+    assert policy_page_size(p, "openalex", 30) == 30
 
 
 def test_profile_for_domain_value_cached():

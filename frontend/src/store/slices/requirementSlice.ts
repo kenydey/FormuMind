@@ -20,10 +20,14 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
 
     setDomain: (d) => {
       set((draft) => {
+        const prev = draft.requirement.domain;
         draft.requirement.domain = d;
-        if (!draft.requirement.objectives.length) {
+        // Full objective reset on domain change — avoid salt-spray targets leaking
+        // into degreaser / other product lines (requirement pollution).
+        if (prev !== d || !draft.requirement.objectives.length) {
           draft.requirement.objectives = [...DOMAIN_OBJECTIVES[d]];
         }
+        draft.activeConstraints = defaultConstraintsForDomain(d);
       });
       void get().syncDefaultLevers();
       get().scheduleAutosave();

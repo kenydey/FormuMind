@@ -311,7 +311,7 @@ class Evidence(BaseModel):
     # P0 domain-profile audit fields (optional; old clients ignore).
     domain_tags: list[str] = Field(default_factory=list)
     domain_match: Literal["strong", "weak", "none"] | None = None
-    taxonomy_source: Literal["arxiv", "openalex", "cpc", "lexical", "none"] | None = None
+    taxonomy_source: Literal["arxiv", "openalex", "chemrxiv", "cpc", "lexical", "none"] | None = None
 
 
 class ParameterBoundary(BaseModel):

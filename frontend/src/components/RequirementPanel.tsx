@@ -52,6 +52,7 @@ const DOMAINS: { value: ProductDomain; label: string }[] = [
   { value: "anticorrosion_coating", label: "防腐蚀涂料 · Anti-corrosion" },
   { value: "degreaser", label: "脱脂剂 · Degreaser" },
   { value: "surface_treatment", label: "表面处理剂 · Surface treatment" },
+  { value: "autodeposition_coating", label: "自沉积涂料 · Autodeposition" },
 ];
 
 const SUBSTRATES = ["carbon_steel", "galvanized_steel", "aluminum", "stainless_steel", "magnesium_alloy"];

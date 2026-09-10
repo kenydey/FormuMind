@@ -3,7 +3,7 @@ POST /api/search/stream — Incremental search; returns a task handle the client
      polls so it can render results while the search keeps going.
 GET  /api/search/status — Per-source availability check (no network requests).
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from ..domain.schemas import Evidence, Requirement
@@ -29,6 +29,40 @@ def _effective_source_types(request_types: list[str]) -> list[str]:
     if request_types:
         return request_types
     return list(get_settings().federated_sources)
+
+
+def _assert_requirement_consistency(req: Requirement | None) -> None:
+    """Block search when workspace domain disagrees with the request body.
+
+    Prevents a previous project's salt-spray / substrate settings from driving
+    a new product-line literature pull.
+    """
+    if req is None or not req.project_id:
+        return
+    try:
+        from ..db.project_store import get_project_store
+
+        detail = get_project_store().get(req.project_id)
+    except Exception:
+        return
+    if detail is None:
+        return
+    stored_domain = getattr(detail, "domain", None)
+    ws = getattr(detail, "workspace", None)
+    if ws is not None and getattr(ws, "requirement", None) is not None:
+        stored_domain = getattr(ws.requirement, "domain", stored_domain) or stored_domain
+    if stored_domain is None:
+        return
+    req_dom = req.domain.value if hasattr(req.domain, "value") else str(req.domain)
+    stored_dom = stored_domain.value if hasattr(stored_domain, "value") else str(stored_domain)
+    if req_dom and stored_dom and req_dom != stored_dom:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"requirement.domain={req_dom} 与项目存储 domain={stored_dom} 不一致；"
+                "请先在需求面板切换产品线并保存，再开始检索。"
+            ),
+        )
 
 
 class TaskHandle(BaseModel):
@@ -74,6 +108,7 @@ def source_status() -> dict[str, SourceStatus]:
 @router.post("/search", response_model=SearchResponse, deprecated=True)
 def search_sources(req: SearchRequest):
     """同步一次性检索（legacy）。前端请使用 ``POST /api/search/stream`` 增量检索。"""
+    _assert_requirement_consistency(req.requirement)
     types = _effective_source_types(req.source_types)
     evidence, filter_report = literature.iter_search(
         query=req.query,
@@ -94,6 +129,7 @@ def search_sources(req: SearchRequest):
 
 @router.post("/search/stream", status_code=202)
 def search_stream(req: SearchRequest) -> JSONResponse:
+    _assert_requirement_consistency(req.requirement)
     return submit(run_search_task, {
         "query": req.query,
         "source_types": _effective_source_types(req.source_types),
