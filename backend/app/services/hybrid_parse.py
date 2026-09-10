@@ -464,12 +464,13 @@ def parse(content: bytes) -> str | None:
         return local_only or None
 
     if scanned:
-        # 本地 OCR 优先：扫描页无文本层，本地 RapidOCR 免费且快（秒级/页），
-        # 而 MinerU OCR 烧配额、耗时长（上传→轮询→下载）且会触发视觉模型调用。
-        # 本地读得出就用本地，读不出才回退 MinerU —— 与混合文档的升级循环一致。
-        ocr = _scanned_without_cloud(content)
-        if ocr:
-            return ocr
+        # RapidOCR 总开关同时作为「本地 OCR 优先」门闩（云端解析档关它）：
+        # 开 → 本地 Tesseract/RapidOCR/版面 OCR 先读，读不出再整份 MinerU；
+        # 关 → 跳过本机 OCR，扫描件直接云 OCR（省弱机 CPU，耗配额）。
+        if get_settings().rapidocr_enabled:
+            ocr = _scanned_without_cloud(content)
+            if ocr:
+                return ocr
         return (
             _parse_scanned(content, pages)
             or local_only
@@ -512,26 +513,28 @@ def parse(content: bytes) -> str | None:
     scanned_sel = [p for p in selected if p.looks_scanned]
     cloud_sel = [p for p in selected if not p.looks_scanned]
 
-    # ① 扫描页：本地 OCR 优先（快、免费、省配额），低置信度或读不出才回退
-    # MinerU 单页结构化解析。逐页串行 + 熔断保留——扫描页在本语料里罕见。
+    # ① 扫描页：RapidOCR 开时本地 OCR 优先（快、免费、省配额），低置信度或
+    # 读不出才回退 MinerU；关则直接单页云升级（与云端解析档一致）。
+    # 逐页串行 + 熔断保留——扫描页在本语料里罕见。
     for page in scanned_sel:
         attempted += 1
-        from . import rapidocr_local
+        if get_settings().rapidocr_enabled:
+            from . import rapidocr_local
 
-        png = pdf_local.page_as_png(
-            content, page.page_no, dpi=int(get_settings().rapidocr_dpi)
-        )
-        if png:
-            text, conf = rapidocr_local.ocr_png_scored(png)
-            del png
-            if text and conf >= min_conf:
-                upgraded[page.page_no] = text
-                consecutive_failures = 0
-                logger.info(
-                    "hybrid: p.%d read by local OCR (conf %.2f ≥ %.2f)",
-                    page.page_no, conf, min_conf,
-                )
-                continue
+            png = pdf_local.page_as_png(
+                content, page.page_no, dpi=int(get_settings().rapidocr_dpi)
+            )
+            if png:
+                text, conf = rapidocr_local.ocr_png_scored(png)
+                del png
+                if text and conf >= min_conf:
+                    upgraded[page.page_no] = text
+                    consecutive_failures = 0
+                    logger.info(
+                        "hybrid: p.%d read by local OCR (conf %.2f ≥ %.2f)",
+                        page.page_no, conf, min_conf,
+                    )
+                    continue
         rendered = _escalate_page(content, page)
         if rendered:
             upgraded[page.page_no] = rendered

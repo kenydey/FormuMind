@@ -294,7 +294,7 @@ def get_env_flags():
 
 
 class ParseProfileRequest(BaseModel):
-    profile: str = Field(pattern="^(low|mid|high)$")
+    profile: str = Field(pattern="^(low|mid|cloud|high)$")
 
 
 @router.get("/settings/parse-profile")
@@ -309,7 +309,7 @@ def get_parse_profile():
 
 @router.post("/settings/parse-profile")
 def post_parse_profile(req: ParseProfileRequest):
-    """一键应用档位(低/中/高): 写 env + 持久化, 返回生效状态."""
+    """一键应用档位(低/中/云/高): 写 env + 持久化, 返回生效状态."""
     result = apply_profile(req.profile)
     return result
 

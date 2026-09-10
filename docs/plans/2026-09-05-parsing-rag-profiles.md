@@ -31,3 +31,15 @@
 ## 风险
 低配缺 vision key 时表格通道自动跳过(探测降级); 档位应用失败(只读 FS)
 仍生效于当前进程并返回提示(沿用 formulation_mode 模式)。
+
+---
+
+## 2026-09-10 追加：`cloud` 云端解析档
+
+第四档一键配置（不发明新 env）：
+
+| 档 | 检索 | 解析 |
+|---|---|---|
+| cloud | gpu_enabled=false → bm25_faiss | pdf_parser=auto; mineru_enabled=true; mineru_batch_enabled=true; rapidocr_enabled=false; pdf_local_ocr=false |
+
+行为约定（`hybrid_parse`）：`rapidocr_enabled=false` 且 MinerU 可用时，跳过 `_scanned_without_cloud` / 混合扫描页本地 OCR，直接云升级；MinerU 不可用时仍走本地 OCR 兜底。`current_profile`：`mineru_enabled and not rapidocr_enabled` → cloud（优先于 mid）。

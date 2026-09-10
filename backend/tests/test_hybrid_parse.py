@@ -725,6 +725,77 @@ def test_a_scan_is_not_lost_when_the_cloud_parser_times_out(
     assert hybrid_parse.parse(b"%PDF scan") == "RAPID TEXT"
 
 
+def test_rapidocr_off_skips_local_ocr_when_mineru_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cloud profile: RapidOCR gate off → scan goes straight to MinerU OCR."""
+    monkeypatch.setattr(get_settings(), "rapidocr_enabled", False, raising=False)
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: _scan_pages())
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+
+    local_calls: list[str] = []
+    cloud_kw: list[dict] = []
+
+    def boom_local(content):
+        local_calls.append("local")
+        raise AssertionError("_scanned_without_cloud must not run")
+
+    monkeypatch.setattr(hybrid_parse, "_scanned_without_cloud", boom_local)
+    monkeypatch.setattr(
+        mineru_cloud,
+        "parse_bytes",
+        lambda c, **kw: (
+            cloud_kw.append(kw)
+            or mineru_cloud.MinerUDocument(
+                blocks=[_block("text", text="CLOUD OCR", page_idx=0)],
+                markdown="cloud",
+            )
+        ),
+    )
+
+    output = hybrid_parse.parse(b"%PDF scan")
+    assert local_calls == []
+    assert cloud_kw and cloud_kw[0].get("ocr") is True
+    assert "CLOUD OCR" in output
+
+
+def test_mixed_scanned_page_skips_local_ocr_when_rapidocr_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed doc: RapidOCR off → blank pages escalate without local OCR."""
+    from app.services import rapidocr_local
+
+    monkeypatch.setattr(get_settings(), "rapidocr_enabled", False, raising=False)
+    monkeypatch.setattr(get_settings(), "mineru_batch_enabled", True, raising=False)
+    pages = [
+        _page(1),
+        _page(2, markdown="", chars=2),
+    ]
+    monkeypatch.setattr(pdf_local, "extract_pages", lambda c, **kw: pages)
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+
+    ocr_calls: list[str] = []
+    monkeypatch.setattr(
+        rapidocr_local,
+        "ocr_png_scored",
+        lambda png: ocr_calls.append("ocr") or ("SHOULD NOT", 0.99),
+    )
+    monkeypatch.setattr(pdf_local, "page_as_png", lambda c, n, dpi: b"PNG")
+    monkeypatch.setattr(pdf_local, "page_as_pdf", lambda c, n: b"%PDF")
+    monkeypatch.setattr(
+        mineru_cloud,
+        "parse_bytes",
+        lambda c, **kw: mineru_cloud.MinerUDocument(
+            blocks=[_block("text", text="PAGE CLOUD", page_idx=0)],
+            markdown="cloud",
+        ),
+    )
+
+    output = hybrid_parse.parse(b"%PDF mixed")
+    assert ocr_calls == []
+    assert "PAGE CLOUD" in output
+
+
 # ── mixed documents: some pages scanned, some not ────────────────────────────
 
 

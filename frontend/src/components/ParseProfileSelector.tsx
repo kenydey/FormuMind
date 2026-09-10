@@ -22,6 +22,11 @@ const PROFILES: Record<
     desc: "低配之上启用云 MinerU 页升级(表格/公式保真)+ GPU 检索自动探测(无 CUDA 自动回落)。",
     needs: ["MinerU Token(云解析)"],
   },
+  cloud: {
+    title: "云端解析 · 弱机友好",
+    desc: "关本地 OCR，扫描/难页走云 MinerU（需 Token，耗配额）；文字 PDF 仍本地 hybrid；检索无 GPU 依赖。",
+    needs: ["MinerU Token(云解析)"],
+  },
   high: {
     title: "高配 · GPU 主机",
     desc: "本地 MinerU(magic-pdf,数据不出域)+ 版面解析内置 OCR + GPU ColBERT(PyLate)。",
@@ -81,7 +86,7 @@ export default function ParseProfileSelector({ reloadKey }: { reloadKey?: number
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {Object.entries(PROFILES).map(([key, p]) => {
           const missing = p.needs.filter((n) =>
             n.includes("GPU")

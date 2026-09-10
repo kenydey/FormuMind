@@ -1,4 +1,4 @@
-"""parse-profiles 三档配置测试(2026-09-05)."""
+"""parse-profiles 四档配置测试(2026-09-05; +cloud 2026-09-10)."""
 import os
 
 import pytest
@@ -30,8 +30,9 @@ def _clean_profile_env(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_profiles_cover_three_names():
-    assert set(pp.PROFILE_NAMES) == {"low", "mid", "high"}
+def test_profiles_cover_four_names():
+    assert set(pp.PROFILE_NAMES) == {"low", "mid", "cloud", "high"}
+    assert pp.PROFILE_NAMES == ("low", "mid", "cloud", "high")
 
 
 def test_apply_low_disables_gpu_and_cloud(monkeypatch):
@@ -44,6 +45,20 @@ def test_apply_low_disables_gpu_and_cloud(monkeypatch):
     assert env["FORMUMIND_PDF_PARSER"] == "auto"
     assert env["FORMUMIND_PDF_OCR"] == "true"
     assert result["profile"] == "low"
+
+
+def test_apply_cloud_disables_local_ocr_enables_mineru_batch(monkeypatch):
+    monkeypatch.setattr(pp.secrets_store, "write_env_updates", lambda d: None)
+    monkeypatch.setattr(pp, "probe_availability", lambda: {"ok": True})
+    result = pp.apply_profile("cloud")
+    env = result["env"]
+    assert env["FORMUMIND_MINERU_ENABLED"] == "true"
+    assert env["FORMUMIND_RAPIDOCR_ENABLED"] == "false"
+    assert env["FORMUMIND_MINERU_BATCH_ENABLED"] == "true"
+    assert env["FORMUMIND_PDF_LOCAL_OCR"] == "false"
+    assert env["FORMUMIND_GPU_ENABLED"] == "false"
+    assert env["FORMUMIND_PDF_PARSER"] == "auto"
+    assert result["profile"] == "cloud"
 
 
 def test_apply_high_pins_mineru_and_gpu(monkeypatch):
@@ -70,3 +85,17 @@ def test_apply_sets_live_os_environ(monkeypatch):
     os.environ.pop("FORMUMIND_GPU_ENABLED", None)
     pp.apply_profile("low")
     assert os.environ.get("FORMUMIND_GPU_ENABLED") == "false"
+
+
+def test_current_profile_cloud_when_mineru_on_rapidocr_off(monkeypatch):
+    monkeypatch.setattr(pp.secrets_store, "write_env_updates", lambda d: None)
+    monkeypatch.setattr(pp, "probe_availability", lambda: {"ok": True})
+    pp.apply_profile("cloud")
+    assert pp.current_profile() == "cloud"
+
+
+def test_current_profile_mid_when_mineru_and_rapidocr_on(monkeypatch):
+    monkeypatch.setattr(pp.secrets_store, "write_env_updates", lambda d: None)
+    monkeypatch.setattr(pp, "probe_availability", lambda: {"ok": True})
+    pp.apply_profile("mid")
+    assert pp.current_profile() == "mid"

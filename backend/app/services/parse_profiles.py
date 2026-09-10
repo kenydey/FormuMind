@@ -1,11 +1,14 @@
-"""Parse/retrieval hardware profiles — one-click presets for low/mid/high.
+"""Parse/retrieval hardware profiles — one-click presets for low/mid/cloud/high.
 
-2026-09-05 (plan 2026-09-05-parsing-rag-profiles.md): 三档一键配置, 全部映射
+2026-09-05 (plan 2026-09-05-parsing-rag-profiles.md): 四档一键配置, 全部映射
 已有底层开关(env-flags 注册表 + pdf_parser/rag_backend env), 不发明新 env。
+2026-09-10: +cloud（云端解析 · 弱机友好）。
 
 - low  : 纯 CPU —— hybrid 本地解析(云 MinerU 关) + bm25_faiss 检索
 - mid  : CPU + 可选云 —— low + 云 MinerU 页升级(需 token) + gpu_enabled
-         (auto: 无 CUDA 自动落 bm25_faiss)
+         (auto: 无 CUDA 自动落 bm25_faiss)；本地 OCR 优先
+- cloud: 云端解析 —— 关本地 RapidOCR/版面 OCR, 开云 MinerU + batch；
+         扫描/难页 OCR 直接上云；文字 PDF 仍本地 hybrid
 - high : GPU 主机 —— pdf_parser=mineru(本地 magic-pdf) + gpu_enabled(auto
          → pylate) + 本地版面 OCR
 
@@ -20,7 +23,7 @@ from . import secrets_store
 
 logger = logging.getLogger(__name__)
 
-PROFILE_NAMES = ("low", "mid", "high")
+PROFILE_NAMES = ("low", "mid", "cloud", "high")
 
 # profile → (env-flag booleans, {str env: value})
 _PROFILES: dict[str, tuple[dict[str, bool], dict[str, str]]] = {
@@ -43,6 +46,17 @@ _PROFILES: dict[str, tuple[dict[str, bool], dict[str, str]]] = {
             "pdf_local_ocr": False,
             "pdf_ocr": True,
             "rapidocr_enabled": True,
+        },
+        {"FORMUMIND_PDF_PARSER": "auto", "FORMUMIND_RAG_BACKEND": "auto"},
+    ),
+    "cloud": (
+        {
+            "gpu_enabled": False,
+            "mineru_enabled": True,  # 需 token; 扫描/难页 OCR 走云
+            "mineru_batch_enabled": True,
+            "pdf_local_ocr": False,
+            "pdf_ocr": True,
+            "rapidocr_enabled": False,  # 关本地 OCR 优先 → hybrid 直接上云
         },
         {"FORMUMIND_PDF_PARSER": "auto", "FORMUMIND_RAG_BACKEND": "auto"},
     ),
@@ -113,8 +127,8 @@ def current_profile() -> str:
     parser = (s.pdf_parser or "auto").lower()
     if parser == "mineru":
         return "high"
-    if s.mineru_enabled and s.gpu_enabled:
-        return "mid"
+    if s.mineru_enabled and not s.rapidocr_enabled:
+        return "cloud"
     if s.mineru_enabled:
         return "mid"
     return "low"
