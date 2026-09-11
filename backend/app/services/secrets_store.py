@@ -37,6 +37,7 @@ SECRET_REGISTRY: list[tuple[str, str, str, str]] = [
     ("epo_consumer_secret", "FORMUMIND_EPO_CONSUMER_SECRET", "EPO OPS Consumer Secret", "patent"),
     ("uspto_api_key", "FORMUMIND_USPTO_API_KEY", "USPTO Open Data", "patent"),
     ("openalex_mailto", "FORMUMIND_OPENALEX_MAILTO", "OpenAlex mailto", "research"),
+    ("openalex_api_key", "FORMUMIND_OPENALEX_API_KEY", "OpenAlex 内容库（全文 PDF/TEI XML）", "research"),
     ("mineru_api_key", "FORMUMIND_MINERU_API_KEY", "MinerU 文档解析", "parse"),
     ("datalab_api_url", "FORMUMIND_DATALAB_API_URL", "Datalab API URL", "infra"),
 ]

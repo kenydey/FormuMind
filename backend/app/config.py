@@ -236,6 +236,12 @@ class Settings(BaseSettings):
 
     # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
     openalex_mailto: str | None = "kenydey@gmail.com"  # OpenAlex 礼貌池标识
+    # OpenAlex 内容库（Content Archive，2026-09 接入）：缓存的 ~50M PDF 与
+    # ~43M GROBID TEI XML，按篇计费（$0.01/篇，免费账号 $1/天）。
+    # 它绕开出版商墙——Unpaywall 给的 pdf_url 常落在 Cloudflare 403 的镜像上，
+    # 而 OpenAlex 的文件由自己托管。缺 key 时该档自动跳过，行为与从前一致。
+    openalex_api_key: str | None = None
+    openalex_content_enabled: bool = True
     unpaywall_mailto: str | None = "kenydey@gmail.com"  # Unpaywall 礼貌池 email
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret

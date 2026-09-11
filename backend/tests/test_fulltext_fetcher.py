@@ -298,3 +298,201 @@ def test_persist_fulltext_retries_on_db_locked(monkeypatch):
     result = ff._persist_fulltext("some full text " * 50, ev, "patent")
     assert result == "src-1"
     assert calls["n"] == 3  # 2 次失败 + 1 次成功
+
+
+# ── OpenAlex content archive (2026-09-11) ────────────────────────────────────
+# The tier exists because the publisher-facing OA chain is the weakest link: a
+# pdf_url on a Cloudflare-fronted host answers 403 and the document is lost even
+# though copies exist. These tests pin the three properties that make it safe to
+# put *ahead* of the existing chain — no key means no network, TEI XML is
+# preferred over the PDF, and a miss falls through instead of failing the fetch.
+
+_TEI_SAMPLE = (
+    b'<?xml version="1.0" encoding="UTF-8"?>'
+    b'<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body><div>'
+    b"<head>Introduction</head>"
+    b"<p>Magnesium alloy passivation with cerium nitrate.</p>"
+    b"<p>Neutral salt spray reached 720 hours.</p>"
+    # Long enough to clear the shared "is this actually a document" floor that
+    # the PDF tier also applies; a real GROBID file is orders of magnitude past it.
+    + b"<p>Zirconium conversion coating on AZ91D substrate improves corrosion "
+    b"resistance and the adhesion of the subsequent organic coating layer.</p>" * 4
+    + b"</div></body></text></TEI>"
+)
+
+
+class _FakeResp:
+    def __init__(self, status_code: int = 200, content: bytes = b"", payload: dict | None = None):
+        self.status_code = status_code
+        self.content = content
+        self._payload = payload or {}
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _FakeClient:
+    """Answer by URL fragment so a test can express a route table."""
+
+    routes: dict = {}
+    seen: list = []
+
+    def __init__(self, *a, **kw):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, url, **kw):
+        type(self).seen.append(url)
+        for frag, resp in type(self).routes.items():
+            if frag in url:
+                return resp
+        return _FakeResp(404)
+
+
+def _with_key(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_OPENALEX_API_KEY", "test-key")
+    get_settings.cache_clear()
+
+
+def test_tei_to_text_keeps_headings_and_paragraphs():
+    text = ff._tei_to_text(_TEI_SAMPLE)
+    assert "## Introduction" in text
+    assert "cerium nitrate" in text
+    assert "720 hours" in text
+
+
+def test_tei_to_text_returns_empty_for_junk():
+    """Empty (not garbage) so the caller falls through to the PDF tier."""
+    assert ff._tei_to_text(b"not xml at all <<<") == ""
+
+
+def test_maybe_gunzip_unwraps_gzip_body():
+    """The live endpoint serves TEI XML as gzip (Content-Type: application/gzip).
+
+    httpx only decodes a `Content-Encoding: gzip` header, not a gzip *body*, so
+    without this the XML parser gets binary and yields nothing. Raw payloads must
+    pass through untouched.
+    """
+    import gzip as _gz
+
+    assert ff._maybe_gunzip(_gz.compress(_TEI_SAMPLE)) == _TEI_SAMPLE
+    assert ff._maybe_gunzip(b"%PDF-1.7 raw") == b"%PDF-1.7 raw"
+    assert ff._maybe_gunzip(b"") == b""
+
+
+def test_openalex_content_handles_gzipped_tei(monkeypatch):
+    """End-to-end through the tier: a gzipped TEI body still yields text."""
+    import gzip as _gz
+
+    _with_key(monkeypatch)
+    _FakeClient.seen = []
+    _FakeClient.routes = {
+        "api.openalex.org": _FakeResp(200, payload={"id": "https://openalex.org/W123456789"}),
+        ".grobid-xml": _FakeResp(200, content=_gz.compress(_TEI_SAMPLE)),
+    }
+    monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
+
+    text = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
+    assert text and "cerium nitrate" in text
+
+
+def test_openalex_content_tier_needs_a_key(monkeypatch):
+    """No key ⇒ total no-op: no HTTP client is even constructed, no spend."""
+    monkeypatch.delenv("FORMUMIND_OPENALEX_API_KEY", raising=False)
+    get_settings.cache_clear()
+    _FakeClient.routes, _FakeClient.seen = {}, []
+    monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
+    ev = _ev("10.3390/coatings11040392", source="OpenAlex")
+    assert ff._openalex_content_text(ev, 5) is None
+    assert _FakeClient.seen == []
+
+
+def test_openalex_content_tier_skips_arxiv(monkeypatch):
+    """arXiv serves its own PDFs for free — paying per file would be waste."""
+    _with_key(monkeypatch)
+    _FakeClient.routes, _FakeClient.seen = {}, []
+    monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
+    assert ff._openalex_content_text(_ev("arXiv:2401.12345", source="arxiv"), 5) is None
+    assert _FakeClient.seen == []
+
+
+def test_openalex_content_prefers_tei_over_pdf(monkeypatch):
+    """TEI XML first: it arrives as structured text, skipping parse/OCR entirely."""
+    _with_key(monkeypatch)
+    _FakeClient.seen = []
+    _FakeClient.routes = {
+        "api.openalex.org": _FakeResp(200, payload={"id": "https://openalex.org/W123456789"}),
+        ".grobid-xml": _FakeResp(200, content=_TEI_SAMPLE),
+        ".pdf": _FakeResp(200, content=b"%PDF-fake"),
+    }
+    monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
+
+    text = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
+    assert text and "cerium nitrate" in text
+    assert any(".grobid-xml" in u for u in _FakeClient.seen)
+    assert not any(u.endswith(".pdf") for u in _FakeClient.seen), "PDF must not be fetched when TEI works"
+
+
+def test_openalex_content_falls_back_to_pdf_when_tei_missing(monkeypatch):
+    _with_key(monkeypatch)
+    _FakeClient.seen = []
+    _FakeClient.routes = {
+        "api.openalex.org": _FakeResp(200, payload={"id": "https://openalex.org/W123456789"}),
+        ".grobid-xml": _FakeResp(404),
+        ".pdf": _FakeResp(200, content=b"%PDF-fake"),
+    }
+    monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
+    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
+
+    text = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
+    assert text == LONG_TEXT
+    assert any(u.endswith(".pdf") for u in _FakeClient.seen)
+
+
+def test_openalex_content_miss_returns_none(monkeypatch):
+    """A work with no cached content must degrade, not raise."""
+    _with_key(monkeypatch)
+    _FakeClient.seen = []
+    _FakeClient.routes = {
+        "api.openalex.org": _FakeResp(200, payload={"id": "https://openalex.org/W123456789"}),
+        ".grobid-xml": _FakeResp(404),
+        ".pdf": _FakeResp(404),
+    }
+    monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
+    assert ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5) is None
+
+
+def test_literature_fetch_prefers_openalex_content(monkeypatch):
+    """A content-archive hit must short-circuit the publisher chain entirely —
+    that is the whole point: those URLs are what answer 403."""
+    _enable(monkeypatch)
+    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t: LONG_TEXT)
+    publisher_hits: list = []
+
+    def _no_oa(ev, t):
+        publisher_hits.append(ev.identifier)
+        return [], []
+
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", _no_oa)
+
+    out, report = ff.enrich_search_results(
+        [_ev("10.3390/coatings11040392", source="OpenAlex")], persist=False
+    )
+    assert report.by_kind == {"literature": 1}
+    assert publisher_hits == [], "publisher resolution must not run after a content hit"
+
+
+def test_literature_fetch_falls_through_when_content_misses(monkeypatch):
+    """Content-archive miss ⇒ unchanged legacy behaviour (here: no OA version)."""
+    _enable(monkeypatch)
+    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t: None)
+    monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: ([], []))
+
+    with pytest.raises(ff.FetchError) as e:
+        ff._fetch_literature_text(_ev("10.3390/coatings11040392", source="OpenAlex"), timeout=5)
+    assert e.value.reason == "无 OA 版本"

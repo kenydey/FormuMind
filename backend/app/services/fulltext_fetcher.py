@@ -17,6 +17,7 @@ re-index without re-downloading.
 from __future__ import annotations
 
 import concurrent.futures
+import gzip
 import hashlib
 import logging
 import re
@@ -250,17 +251,177 @@ def _resolve_oa_pdf_url(ev: Evidence, timeout: float) -> str | None:
     return pdfs[0] if pdfs else None
 
 
+# ── OpenAlex Content Archive (2026-09-11) ─────────────────────────────────────
+# The OA chain's weak link is that it hands back *publisher* URLs: a pdf_url on a
+# Cloudflare-fronted host (MDPI and friends) answers 403 and the document is
+# lost even though copies exist elsewhere. OpenAlex caches ~50M PDFs and ~43M
+# GROBID-parsed TEI XML files and serves them from its own storage, so a DOI
+# that fails through Unpaywall often succeeds here — measured on this host,
+# 5 of the 7 DOIs that had failed with `chars=0` were recoverable.
+#
+# TEI XML is asked for first, not the PDF: it arrives already structured and as
+# plain text, which skips the PDF parse/OCR stage entirely — the most expensive
+# step in ingest. The PDF remains the fallback (and then goes through the normal
+# parse path, OCR included).
+
+_OPENALEX_WORK_RE = re.compile(r"\b(W\d{6,})\b")
+_TEI_NS = "{http://www.tei-c.org/ns/1.0}"
+
+
+def _maybe_gunzip(payload: bytes) -> bytes:
+    """Unwrap a gzipped response body.
+
+    The content API returns the TEI XML as *gzip* (``Content-Type:
+    application/gzip``, magic bytes ``1f 8b``). httpx only transparently decodes
+    a ``Content-Encoding: gzip`` header — not a body that happens to be gzip —
+    so without this the XML parser is handed binary and silently yields nothing.
+    Measured on the live endpoint 2026-09-11.
+    """
+    if payload[:2] == b"\x1f\x8b":
+        try:
+            return gzip.decompress(payload)
+        except Exception as exc:
+            return degrade_return(logger, exc, "OpenAlex content gunzip failed", payload)
+    return payload
+
+
+def _tei_to_text(xml: bytes) -> str:
+    """GROBID TEI XML → plain text with Markdown headings.
+
+    Only ``head`` and ``p`` carry prose worth indexing; the rest of a TEI body
+    is markup, figure captions and (already extracted) table scaffolding.
+    Returns "" when nothing usable is found, so the caller falls through to the
+    PDF rather than persisting an empty document.
+    """
+    try:
+        from lxml import etree
+
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+        root = etree.fromstring(xml, parser=parser)
+    except Exception as exc:
+        return degrade_return(logger, exc, "TEI XML parse failed", "")
+    if root is None:
+        return ""
+
+    body = root.find(f".//{_TEI_NS}body")
+    if body is None:
+        body = root
+
+    out: list[str] = []
+    for el in body.iter():
+        if not isinstance(el.tag, str):
+            continue
+        tag = el.tag.split("}")[-1]
+        if tag == "head":
+            txt = " ".join("".join(el.itertext()).split())
+            if txt:
+                out.append(f"## {txt}")
+        elif tag in ("p", "item", "quote"):
+            txt = " ".join("".join(el.itertext()).split())
+            if len(txt) > 1:
+                out.append(txt)
+    if out:
+        return "\n\n".join(out)
+    # Last resort: flat sweep so a text-bearing file never reads as empty.
+    return " ".join("".join(body.itertext()).split())
+
+
+def _openalex_work_id(ev: Evidence, doi: str | None, timeout: float) -> str | None:
+    """OpenAlex work id for this evidence (direct from identifier, else via DOI)."""
+    m = _OPENALEX_WORK_RE.search(ev.identifier or "")
+    if m:
+        return m.group(1)
+    if not doi:
+        return None
+    settings = get_settings()
+    params: dict[str, str] = {}
+    key = getattr(settings, "openalex_api_key", None)
+    if key:
+        params["api_key"] = key
+    elif settings.openalex_mailto:
+        params["mailto"] = settings.openalex_mailto
+    try:
+        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+            r = client.get(f"https://api.openalex.org/works/doi:{doi}", params=params)
+        if r.status_code != 200:
+            return None
+        wid = (r.json() or {}).get("id") or ""
+    except Exception as exc:
+        degrade_return(logger, exc, "OpenAlex work-id lookup failed", None)
+        return None
+    m = _OPENALEX_WORK_RE.search(str(wid))
+    return m.group(1) if m else None
+
+
+def _openalex_content_text(ev: Evidence, timeout: float) -> str | None:
+    """Full text from the OpenAlex content archive. TEI XML first, then PDF.
+
+    Returns None (never raises) when the tier is off, unkeyed, or the work has
+    no cached content, so the caller continues down the existing chain.
+    """
+    settings = get_settings()
+    api_key = getattr(settings, "openalex_api_key", None)
+    if not api_key or not getattr(settings, "openalex_content_enabled", True):
+        return None
+
+    ident = ev.identifier or ""
+    # arXiv serves its own PDFs for free; no reason to pay per file for them.
+    if _ARXIV_RE.search(ident):
+        return None
+
+    m = _DOI_RE.search(ident)
+    doi = m.group(1).rstrip(".,;)") if m else None
+    work_id = _openalex_work_id(ev, doi, timeout)
+    if not work_id:
+        return None
+
+    base = f"https://content.openalex.org/works/{work_id}"
+    for ext, label in (("grobid-xml", "TEI XML"), ("pdf", "PDF")):
+        url = f"{base}.{ext}"
+        try:
+            with httpx.Client(timeout=timeout, headers=_HEADERS, follow_redirects=True) as client:
+                r = client.get(url, params={"api_key": api_key})
+        except Exception as exc:
+            degrade_return(logger, exc, f"OpenAlex content {label} fetch failed", None)
+            continue
+        if r.status_code != 200:
+            # 401/402 = key or budget problem, 404 = no cached file for this work.
+            logger.info("OpenAlex content %s miss (%s): %s", label, r.status_code, work_id)
+            continue
+        body = _maybe_gunzip(r.content)
+        if ext == "grobid-xml":
+            text = _tei_to_text(body)
+        else:
+            try:
+                from .pdf_downloader import _extract_text
+
+                text = _extract_text(body)
+            except Exception as exc:
+                degrade_return(logger, exc, f"OpenAlex content PDF extract failed: {work_id}", None)
+                continue
+        if text and len(text.strip()) > 200:
+            logger.info("OpenAlex content hit (%s): %s", label, work_id)
+            return text
+    return None
+
 
 def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
-    """OA full text via PDF candidates (OpenAlex / Unpaywall / landing).
+    """Full text for a DOI/arXiv row.
 
-    arXiv LaTeX source path removed 2026-09-10 with the arXiv search stack;
-    chemistry preprints now arrive via ChemRxiv/OpenAlex OA PDFs.
+    Order (2026-09-11): OpenAlex content archive (TEI XML → PDF, publisher-403
+    proof) → OA PDF candidates from OpenAlex/Unpaywall → landing/PMC HTML.
+    arXiv keeps its direct path; chemistry preprints arrive via ChemRxiv/OpenAlex.
     """
     from .pdf_downloader import _extract_text, fetch_pdf
 
+    # Tier 0: OpenAlex-hosted copy. Cheapest when available — TEI XML skips the
+    # parse/OCR stage outright, and it is the only tier immune to publisher 403s.
+    cached = _openalex_content_text(ev, timeout)
+    if cached:
+        return cached
+
     pdf_cands, landing_cands = _resolve_oa_candidates(ev, timeout)
-    if not pdf_cands:
+    if not pdf_cands and not landing_cands:
         raise FetchError("无 OA 版本")
     from .pdf_downloader import _extract_text, fetch_pdf_ex
 
