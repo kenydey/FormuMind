@@ -140,7 +140,32 @@ def _ensure_campaign_columns(engine: Engine) -> None:
 def _ensure_source_document_columns(engine: Engine) -> None:
     """只读守护：source_documents 表必须具备 async-ingest 溯源列。"""
     _require_columns(engine, "source_documents", ("origin_url", "project_id"))
+    _ensure_source_acquisition_column(engine)
     _ensure_document_chunk_columns(engine)
+
+
+def _ensure_source_acquisition_column(engine: Engine) -> None:
+    """软扩列 acquisition（nullable，无 backfill，兼容旧库）。
+
+    记录全文的获取路径（tei/html/pdf/text），供每项目 PDF 配额统计用。旧库
+    运行时会自动补列；已存在则静默——与 materials.archived 同一套做法。
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "source_documents" not in inspector.get_table_names():
+        return
+    existing = {c["name"] for c in inspector.get_columns("source_documents")}
+    if "acquisition" in existing:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text('ALTER TABLE "source_documents" ADD COLUMN acquisition VARCHAR(16)')
+            )
+    except Exception as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
 
 
 def _ensure_document_chunk_columns(engine: Engine) -> None:

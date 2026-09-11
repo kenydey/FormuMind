@@ -96,7 +96,7 @@ def test_select_targets_includes_surechembl(monkeypatch):
 
 
 def test_ingest_evidence_mock_success_and_skip(stores, monkeypatch):
-    def fake_dispatch(kind, ev, timeout):
+    def fake_dispatch(kind, ev, timeout, **kw):
         assert kind == "patent"
         assert normalize_patent_pub(ev.identifier)[1] == "CN104789083B"
         return LONG_TEXT

@@ -110,7 +110,7 @@ def test_patent_hit_replaced_by_fulltext_chunks(monkeypatch):
     _enable(monkeypatch)
     monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
     persisted = []
-    monkeypatch.setattr(ff, "_persist_fulltext", lambda text, ev, kind: persisted.append((ev.identifier, kind)) or "sid")
+    monkeypatch.setattr(ff, "_persist_fulltext", lambda text, ev, kind, **kw: persisted.append((ev.identifier, kind)) or "sid")
 
     before = _ev("US1234567")
     out, report = ff.enrich_search_results([before, _ev("plaintitle", source="notebooklm")])
@@ -471,7 +471,7 @@ def test_literature_fetch_prefers_openalex_content(monkeypatch):
     """A content-archive hit must short-circuit the publisher chain entirely —
     that is the whole point: those URLs are what answer 403."""
     _enable(monkeypatch)
-    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t, **kw: LONG_TEXT)
     publisher_hits: list = []
 
     def _no_oa(ev, t):
@@ -490,7 +490,7 @@ def test_literature_fetch_prefers_openalex_content(monkeypatch):
 def test_literature_fetch_falls_through_when_content_misses(monkeypatch):
     """Content-archive miss ⇒ unchanged legacy behaviour (here: no OA version)."""
     _enable(monkeypatch)
-    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t: None)
+    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t, **kw: None)
     monkeypatch.setattr(ff, "_resolve_oa_candidates", lambda ev, t: ([], []))
 
     with pytest.raises(ff.FetchError) as e:

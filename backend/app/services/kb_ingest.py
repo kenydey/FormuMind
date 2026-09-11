@@ -231,11 +231,34 @@ def select_ingest_targets(
     min_rel = get_settings().kb_ingest_min_relevance
     topic_filter = bool(get_settings().kb_ingest_topic_filter) and not skip_topic_filter
     anchor = _topic_anchor(project_id, query) if topic_filter else None
+    settings = get_settings()
+    # Per-project quota. `kb_ingest_max_docs` bounds a single batch, which cannot
+    # bound a project that accumulates across many runs — and the ingest cost is
+    # per-project cumulative (OCR is the memory bottleneck, not the network).
+    src_quota = int(getattr(settings, "kb_project_source_quota", 0) or 0)
+    if project_id and src_quota > 0:
+        try:
+            from ..db.source_store import get_source_store
+
+            used = get_source_store().count_for_project(project_id)
+        except Exception as exc:
+            used = degrade_return(logger, exc, "source quota lookup failed", 0)
+        room = max(0, src_quota - used)
+        if room <= 0:
+            logger.info(
+                "kb_ingest 项目配额已满: %s (%s/%s)，本轮不再新增", project_id, used, src_quota
+            )
+            return []
+        limit = room if not limit else min(limit, room)
+    shadow = bool(getattr(settings, "kb_relevance_shadow", True))
+    shadow_scores: list[float] = []
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
     for ev in evidence:
         if limit and len(targets) >= limit:
             break
+        if shadow:
+            shadow_scores.append(_topicality(ev, query or ""))
         if min_rel > 0 and (ev.relevance or 0) < min_rel:
             if write_audit:
                 write_ingest_audit(
@@ -304,7 +327,49 @@ def select_ingest_targets(
                     reason="ok",
                     domain_match=getattr(ev, "domain_match", None),
                 )
+    if shadow and shadow_scores:
+        _log_relevance_shadow(shadow_scores)
     return targets
+
+
+def _topicality(ev: Evidence, query: str) -> float:
+    """Share of query keywords present in the row's title+snippet (0..1).
+
+    This is what `relevance` *should* be. It is currently a rank-position proxy
+    (`search_providers._ranked = 1.0 - 0.02 * position`), so
+    `kb_ingest_min_relevance = 0.45` behaves as "position < 27.5" and waves the
+    whole first page through — it filters on how far down the list OpenAlex put
+    a row, not on whether the row is about the topic.
+    """
+    from .literature import _keywords
+
+    kws = _keywords(query or "")
+    if not kws:
+        return 0.0
+    blob = f"{getattr(ev, 'title', '') or ''} {getattr(ev, 'snippet', '') or ''}".casefold()
+    return sum(1 for k in kws if k in blob) / len(kws)
+
+
+def _log_relevance_shadow(scores: list[float]) -> None:
+    """Record what a real topicality gate would have rejected — enforce nothing.
+
+    Shadow mode exists so the threshold can be calibrated against real traffic
+    before it starts dropping rows: the current gate rejects nothing, and
+    switching it to a topicality score in one step would silently change ingest
+    volume. One log line per ingest run is enough to pick the cut afterwards.
+    """
+    ordered = sorted(scores)
+    n = len(ordered)
+
+    def _pct(p: float) -> float:
+        return ordered[min(n - 1, int(p * n))]
+
+    logger.info(
+        "relevance shadow: n=%s p10=%.2f p50=%.2f p90=%.2f | 按 topicality>=0.45 门槛将拒绝 %s/%s (%.1f%%)",
+        n, _pct(0.10), _pct(0.50), _pct(0.90),
+        sum(1 for s in ordered if s < 0.45), n,
+        (sum(1 for s in ordered if s < 0.45) / n * 100) if n else 0.0,
+    )
 
 
 def _origin_lookup_keys(ev: Evidence) -> list[str]:
@@ -318,7 +383,8 @@ def _origin_lookup_keys(ev: Evidence) -> list[str]:
 
 
 def _fetch_one(
-    ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any]
+    ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *,
+    allow_pdf: bool = True,
 ) -> str | None:
     """Acquire one document's full text. Network-bound; safe to run in parallel.
 
@@ -344,7 +410,8 @@ def _fetch_one(
     fetch_reason: str | None = None
     try:
         with timing.span("fetch"):
-            text = ff._dispatch_fetch(kind, ev, timeout)
+            text = ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            doc["acquisition"] = ff._last_acquisition()
     except ff.FetchError as fe:
         text = None
         fetch_reason = fe.reason
@@ -379,7 +446,11 @@ def _index_one(
 
     doc["status"] = "indexing"
     emit(doc)
-    source_id = ff._persist_fulltext(text, ev, kind, project_id=project_id)  # hash-dedup + chunk + embed inside
+    source_id = ff._persist_fulltext(  # hash-dedup + chunk + embed inside
+        text, ev, kind,
+        project_id=project_id,
+        acquisition=doc.get("acquisition"),
+    )
     if source_id:
         doc.update(status="indexed", source_id=source_id)
     else:
@@ -450,6 +521,26 @@ def ingest_evidence_docs(
     for doc in docs:  # announce the full queue up front
         emit(doc)
 
+    # Per-project PDF quota, resolved once per batch: the PDF tiers are dropped
+    # for every document once the project has spent its budget, so one run cannot
+    # blow past it (the guardrail bounds the expensive path, it does not just
+    # count it after the fact).
+    allow_pdf = True
+    pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
+    if project_id and pdf_quota > 0:
+        from ..db.source_store import get_source_store
+
+        try:
+            pdf_used = get_source_store().count_for_project(project_id, acquisition="pdf")
+        except Exception as exc:
+            pdf_used = degrade_return(logger, exc, "pdf quota lookup failed", 0)
+        allow_pdf = pdf_used < pdf_quota
+        if not allow_pdf:
+            logger.info(
+                "kb_ingest PDF 配额已满: %s (%s/%s)，本轮跳过 PDF 解析路径",
+                project_id, pdf_used, pdf_quota,
+            )
+
     # Fetch concurrently, index serially, and pipeline the two. Fetching is
     # network-bound and is the whole cost of a large batch — 340 documents one
     # at a time, at a 20 s timeout each, is over an hour. Indexing stays on one
@@ -464,7 +555,7 @@ def ingest_evidence_docs(
             # `track` spans threads: this runs in a worker, the matching index
             # phase runs on the main thread, and both land in one record.
             with timing.track(ev.identifier or "", kind):
-                return i, _fetch_one(ev, kind, timeout, emit, docs[i])
+                return i, _fetch_one(ev, kind, timeout, emit, docs[i], allow_pdf=allow_pdf)
         except Exception as exc:
             degrade_return(logger, exc, "kb_ingest fetch failed", None)
             docs[i].update(status="failed", error=str(exc)[:200])

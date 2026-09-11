@@ -21,6 +21,7 @@ import gzip
 import hashlib
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 
 import httpx
@@ -353,11 +354,14 @@ def _openalex_work_id(ev: Evidence, doi: str | None, timeout: float) -> str | No
     return m.group(1) if m else None
 
 
-def _openalex_content_text(ev: Evidence, timeout: float) -> str | None:
+def _openalex_content_text(ev: Evidence, timeout: float, *, allow_pdf: bool = True) -> str | None:
     """Full text from the OpenAlex content archive. TEI XML first, then PDF.
 
     Returns None (never raises) when the tier is off, unkeyed, or the work has
     no cached content, so the caller continues down the existing chain.
+
+    ``allow_pdf=False`` skips the PDF tier (per-project PDF quota): the TEI tier
+    is free of parse/OCR cost, so it stays available at any quota.
     """
     settings = get_settings()
     api_key = getattr(settings, "openalex_api_key", None)
@@ -376,7 +380,10 @@ def _openalex_content_text(ev: Evidence, timeout: float) -> str | None:
         return None
 
     base = f"https://content.openalex.org/works/{work_id}"
-    for ext, label in (("grobid-xml", "TEI XML"), ("pdf", "PDF")):
+    tiers = [("grobid-xml", "TEI XML", "tei")]
+    if allow_pdf:
+        tiers.append(("pdf", "PDF", _ACQ_PDF))
+    for ext, label, acq in tiers:
         url = f"{base}.{ext}"
         try:
             with httpx.Client(timeout=timeout, headers=_HEADERS, follow_redirects=True) as client:
@@ -401,26 +408,53 @@ def _openalex_content_text(ev: Evidence, timeout: float) -> str | None:
                 continue
         if text and len(text.strip()) > 200:
             logger.info("OpenAlex content hit (%s): %s", label, work_id)
+            _set_acquisition(acq)
             return text
     return None
 
 
-def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
+# How the *current* fetch obtained its text. Thread-local because
+# `enrich_search_results` fetches targets in a thread pool and the decision is
+# made several frames down (TEI vs PDF vs HTML), so returning it through every
+# intermediate signature would be far more churn than it is worth.
+_ACQ = threading.local()
+
+
+def _set_acquisition(path: str) -> None:
+    _ACQ.path = path
+
+
+def _last_acquisition() -> str:
+    return getattr(_ACQ, "path", "text")
+
+
+_ACQ_PDF = "pdf"
+
+
+def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = True) -> str | None:
     """Full text for a DOI/arXiv row.
 
     Order (2026-09-11): OpenAlex content archive (TEI XML → PDF, publisher-403
     proof) → OA PDF candidates from OpenAlex/Unpaywall → landing/PMC HTML.
     arXiv keeps its direct path; chemistry preprints arrive via ChemRxiv/OpenAlex.
+
+    ``allow_pdf=False`` (per-project PDF quota reached) drops the two PDF tiers
+    and goes straight to HTML: the quota exists to bound the download+parse+OCR
+    path, which is the memory-bound one, so honouring it by skipping *those
+    tiers* is the point — refusing to store the result afterwards would pay the
+    cost and cap nothing.
     """
-    from .pdf_downloader import _extract_text, fetch_pdf
+    from .pdf_downloader import _extract_text, fetch_pdf  # noqa: F401
 
     # Tier 0: OpenAlex-hosted copy. Cheapest when available — TEI XML skips the
     # parse/OCR stage outright, and it is the only tier immune to publisher 403s.
-    cached = _openalex_content_text(ev, timeout)
+    cached = _openalex_content_text(ev, timeout, allow_pdf=allow_pdf)
     if cached:
         return cached
 
     pdf_cands, landing_cands = _resolve_oa_candidates(ev, timeout)
+    if not allow_pdf:
+        pdf_cands = []
     if not pdf_cands and not landing_cands:
         raise FetchError("无 OA 版本")
     from .pdf_downloader import _extract_text, fetch_pdf_ex
@@ -437,6 +471,7 @@ def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
         except Exception as exc:
             return degrade_return(logger, exc, f"pdf extract failed: {pdf_url}", None)
         if text and len(text.strip()) > 200:
+            _set_acquisition(_ACQ_PDF)
             return text
         last_reason = "extract-empty"
     # PDF 候选全败 → HTML 兜底(landing/PMC 页, 2026-09-05 补足)
@@ -444,6 +479,7 @@ def _fetch_literature_text(ev: Evidence, timeout: float) -> str | None:
         html_text = _fetch_landing_text(landing, timeout)
         if html_text and len(html_text.strip()) > 200:
             logger.info("OA html fallback ok: %s", landing[:90])
+            _set_acquisition("html")
             return html_text
     raise FetchError(f"OA 全文获取失败: {last_reason}")
 
@@ -537,14 +573,30 @@ def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:
     return text if text and len(text.strip()) > 200 else None
 
 
-def _dispatch_fetch(kind: str, ev: Evidence, timeout: float) -> str | None:
+def _dispatch_fetch(kind: str, ev: Evidence, timeout: float, *, allow_pdf: bool = True) -> str | None:
     """Resolve the fetcher at call time (keeps the registry monkeypatchable)."""
+    _ACQ.path = "text"  # reset per dispatch: the fetcher downgrades it if it used a PDF
     if kind == "patent":
-        return _fetch_patent_text(ev, timeout)
+        text = _fetch_patent_text(ev, timeout)
+        if text:
+            # Approximation, documented on purpose: `fetch_patent_text` picks
+            # HTML vs PDF internally and does not report which, so attribute by
+            # the configured preference. The default (`patent_prefer_html=True`)
+            # is the landing-page HTML, which needs no parse/OCR at all; a patent
+            # that falls back to PDF is therefore under-counted against the PDF
+            # quota. Acceptable for a resource guardrail, and the alternative
+            # (changing `fetch_patent_text`'s return type) ripples into callers
+            # and tests for no functional gain.
+            prefer_html = bool(getattr(get_settings(), "patent_prefer_html", True))
+            _set_acquisition("html" if prefer_html else _ACQ_PDF)
+        return text
     if kind == "literature":
-        return _fetch_literature_text(ev, timeout)
+        return _fetch_literature_text(ev, timeout, allow_pdf=allow_pdf)
     if kind == "web":
-        return _fetch_web_text(ev, timeout)
+        text = _fetch_web_text(ev, timeout)
+        if text:
+            _set_acquisition("html")
+        return text
     return None
 
 
@@ -601,7 +653,14 @@ def _is_db_locked(exc: Exception) -> bool:
     return False
 
 
-def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | None = None) -> str | None:
+def _persist_fulltext(
+    text: str,
+    ev: Evidence,
+    kind: str,
+    *,
+    project_id: str | None = None,
+    acquisition: str | None = None,
+) -> str | None:
     """Store the raw full text as a SourceDocument (dedup by content hash).
 
     Retries the whole persist on SQLite "database is locked": kb_ingest writes
@@ -635,6 +694,7 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | N
                 extraction_status="fulltext",
                 origin_url=origin,
                 project_id=(project_id or None),
+                acquisition=acquisition,
             )
             from .kb_index import index_source
 
@@ -656,11 +716,18 @@ def enrich_search_results(
     *,
     max_docs: int | None = None,
     persist: bool = True,
+    project_id: str | None = None,
 ) -> tuple[list[Evidence], FulltextReport]:
     """Replace the top fetchable Evidence rows with full-text chunks in place.
 
     Order is preserved; rows that fail to fetch (or beyond ``max_docs``) pass
     through unchanged.  Strict no-op when ``fulltext_enrich`` is disabled.
+
+    ``project_id`` scopes the per-project PDF quota: once a project has
+    ``kb_project_pdf_quota`` documents acquired via the download+parse path, the
+    PDF tiers are dropped for the rest of the run (see ``_fetch_literature_text``)
+    so the memory-bound path stays bounded. ``None`` = no project context, which
+    also means no quota (matching the legacy behaviour for ad-hoc ingest).
     """
     settings = get_settings()
     report = FulltextReport()
@@ -669,6 +736,22 @@ def enrich_search_results(
 
     limit = max_docs if max_docs is not None else settings.fulltext_max_docs
     timeout = float(settings.fulltext_timeout_s)
+    allow_pdf = True
+    pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
+    if project_id and pdf_quota > 0:
+        try:
+            from ..db.source_store import get_source_store
+
+            used = get_source_store().count_for_project(project_id, acquisition="pdf")
+        except Exception as exc:
+            degrade_return(logger, exc, "pdf quota lookup failed", 0)
+            used = 0
+        allow_pdf = used < pdf_quota
+        if not allow_pdf:
+            logger.info(
+                "pdf quota reached for project %s (%s/%s) — dropping PDF tiers this run",
+                project_id, used, pdf_quota,
+            )
 
     # Pick the first `limit` fetchable rows in rank order.
     targets: dict[int, str] = {}
@@ -681,17 +764,20 @@ def enrich_search_results(
     if not targets:
         return evidence, report
 
-    def fetch(idx: int) -> tuple[int, str | None]:
+    def fetch(idx: int) -> tuple[int, str | None, str]:
         ev, kind = evidence[idx], targets[idx]
         try:
-            return idx, _dispatch_fetch(kind, ev, timeout)
+            text = _dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            return idx, text, _last_acquisition()
         except Exception as exc:
-            return idx, degrade_return(logger, exc, f"fulltext fetch failed ({kind})", None)
+            return idx, degrade_return(logger, exc, f"fulltext fetch failed ({kind})", None), "text"
 
     results: dict[int, str | None] = {}
+    acquisitions: dict[int, str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-        for idx, text in ex.map(fetch, list(targets)):
+        for idx, text, acq in ex.map(fetch, list(targets)):
             results[idx] = text
+            acquisitions[idx] = acq
 
     out: list[Evidence] = []
     for i, ev in enumerate(evidence):
@@ -701,7 +787,11 @@ def enrich_search_results(
             chunks = _text_to_chunks(text, ev)
             if chunks:
                 if persist:
-                    _persist_fulltext(text, ev, kind)
+                    _persist_fulltext(
+                        text, ev, kind,
+                        project_id=project_id,
+                        acquisition=acquisitions.get(i),
+                    )
                 out.extend(chunks)
                 report.record(kind, True)
                 continue

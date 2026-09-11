@@ -236,6 +236,30 @@ class Settings(BaseSettings):
 
     # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
     openalex_mailto: str | None = "kenydey@gmail.com"  # OpenAlex 礼貌池标识
+    # ── OpenAlex 多臂检索（2026-09-11）──────────────────────────────────────
+    # OpenAlex 把空格分隔的词按 AND 连接并做词干化，而查询串由 LLM 扩展生成、
+    # 长度每次不同 —— 实测同一主题的召回在 1 条到几千条之间抽奖（「铝合金碱性
+    # 脱脂剂」基线只返回 1 条、领域命中率 0%）。三臂叠加修复断崖：精确臂保留
+    # 用户意图，召回臂把扩展词改成 OR 并锚定基材，广谱臂用领域词表兜底。
+    # 实测数量提升 2–37×，领域命中率不降反升，异基材噪声下降。
+    openalex_multi_arm: bool = True
+    openalex_arm_precise: bool = True
+    openalex_arm_recall: bool = True
+    # 广谱臂单臂可返 14 万条，只在精确臂∪召回臂去重后不足时兜底触发。
+    openalex_arm_broad: bool = True
+    openalex_arm_broad_threshold: int = 30
+    # 精确臂词数上限：实测 >10 词开始断崖（8 词 219 条 vs 2 词 362 条）。
+    openalex_arm_precise_max_terms: int = 8
+    # 每个 OR 组的词数上限。OpenAlex 规定「>5 个布尔运算符」的查询降为
+    # 5 req/s（reason=broad_boolean_query），所以两组各 3 词 = 2+2+1 = 5 运算符，
+    # 正好留在快车道。实测代价：同主题 78,763 vs 128,494 库内总数 —— 只取首页时
+    # 无差别，而两者都远超它要修复的 89 条基线。
+    openalex_arm_group_terms: int = 3
+    # 臂间权重（相关性加性增量）。臂1 命中必须压过广谱臂，否则 14 万条的广谱
+    # 结果会把精确命中挤出候选。
+    openalex_arm_weight_precise: float = 0.06
+    openalex_arm_weight_recall: float = 0.0
+    openalex_arm_weight_broad: float = -0.06
     # OpenAlex 内容库（Content Archive，2026-09 接入）：缓存的 ~50M PDF 与
     # ~43M GROBID TEI XML，按篇计费（$0.01/篇，免费账号 $1/天）。
     # 它绕开出版商墙——Unpaywall 给的 pdf_url 常落在 Cloudflare 403 的镜像上，
@@ -410,6 +434,17 @@ class Settings(BaseSettings):
     # 全文的资料都入库——这是默认值，因为「搜到了但没入库」对使用者来说就是
     # 数据丢失。设成正数只在需要控制外部请求量/磁盘时才有意义。
     kb_ingest_max_docs: int = 0
+    # ── 每项目入库配额（2026-09-11）────────────────────────────────────────
+    # kb_ingest_max_docs 是**每批**上限，管不住项目长期累积；而 OCR 是内存瓶颈
+    # （pymupdf4llm ~350MB/篇、扫描件 OCR ~557MB，本机 4 核取 3 路并发已近上限）。
+    # 这两个配额按**项目**累计，到顶后自动入库停止新增（手动单篇入库不受限）。
+    kb_project_source_quota: int = 300   # 0 = 不限；每项目资料总数上限
+    kb_project_pdf_quota: int = 50       # 0 = 不限；每项目「走 PDF 下载+解析」篇数上限
+    # 相关性闸影子模式（2026-09-11）：relevance 实为名次代理
+    # （_ranked = 1.0 - 0.02*位置），所以 kb_ingest_min_relevance=0.45 等价于
+    # 「名次 < 27.5」，首页全过、形同虚设。影子模式只记录「若改用真实 topicality
+    # 分会被拒多少条」，不改变入库行为，用于校准阈值后再正式启用。
+    kb_relevance_shadow: bool = True
     # 并发获取全文的线程数。**瓶颈是解析内存而不是网络**：每篇 PDF 都会走完整
     # 解析级联，pymupdf4llm 峰值约 350 MB、扫描件走 OCR 约 557 MB，所以在
     # 2.2 GB 的机器上 3 路并发已经接近上限。入库（切块+向量+写库）保持串行，

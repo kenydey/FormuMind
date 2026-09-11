@@ -103,7 +103,7 @@ def test_prepare_search_queries_includes_cas_in_patent_query(monkeypatch):
     monkeypatch.setattr(
         qe_mod.QueryExpander,
         "expand",
-        lambda self, q: ExpandedQuery(
+        lambda self, q, **kw: ExpandedQuery(
             intent="x",
             chinese_keywords=[],
             english_synonyms=["isophorone diamine"],

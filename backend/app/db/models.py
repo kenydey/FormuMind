@@ -226,6 +226,12 @@ class SourceDocument(Base):
     )
     extraction_status: Mapped[str] = mapped_column(String(32), default="pending")
     extraction_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How the full text was obtained: "tei" (structured XML, no parse/OCR),
+    # "html" (landing/web text), "pdf" (download + parse, possibly OCR), or
+    # "text" (unknown/absent). Only "pdf" counts against the per-project PDF
+    # quota, because that path is the memory-bound one (~350 MB per document,
+    # ~557 MB when OCR runs).
+    acquisition: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

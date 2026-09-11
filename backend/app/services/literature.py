@@ -11,7 +11,7 @@ import concurrent.futures
 import logging
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
@@ -388,6 +388,8 @@ def search_openalex(
     evidence_source: str = "OpenAlex",
     preferred_source_ids: tuple[str, ...] | list[str] | None = None,
     taxonomy_source: str = "openalex",
+    arm: str | None = None,
+    arm_delta: float = 0.0,
 ) -> list[Evidence]:
     """OpenAlex 学术文献（需 mailto 礼貌池，可在 config 关闭）。"""
     from .search_providers import search_openalex as _openalex
@@ -401,6 +403,8 @@ def search_openalex(
         evidence_source=evidence_source,
         preferred_source_ids=preferred_source_ids,
         taxonomy_source=taxonomy_source,
+        arm=arm,
+        arm_delta=arm_delta,
     )
 
 
@@ -686,6 +690,112 @@ def _merge_filter_rank(
     return deduped[:total_limit], _report
 
 
+_DOI_PREFIX_RE = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)", re.I)
+
+
+def _evidence_key(e: Evidence) -> str:
+    """Stable cross-source key so the same work dedupes across arms."""
+    ident = str(e.identifier or "").strip()
+    ident = _DOI_PREFIX_RE.sub("", ident).strip().casefold()
+    return ident or str(e.title or "").strip().casefold()
+
+
+def _dedupe_evidence(items: list[Evidence]) -> list[Evidence]:
+    """First-wins dedupe, preserving arm order (precise before recall/broad)."""
+    seen: set[str] = set()
+    out: list[Evidence] = []
+    for e in items or ():
+        key = _evidence_key(e)
+        if not key:
+            out.append(e)
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
+
+
+def openalex_arms(
+    terms: "list[str] | tuple[str, ...]",
+    limit: int,
+    offset: int = 0,
+    *,
+    domain=None,
+    req: Requirement | None = None,
+    preferred_source_ids=None,
+) -> list[Evidence]:
+    """Fetch the OpenAlex arm set for one page and return the merged union.
+
+    A single concatenated query is a lottery: OpenAlex ANDs space-separated words
+    and stems them, so the same topic returned **1** hit in one run and full
+    pages in another (「铝合金碱性脱脂剂」: 1 hit, 0% domain hit rate). Running the
+    arms and merging turns that cliff into a floor — measured on the same three
+    topics, 1→37, 25→72, 25→69 unique rows, with domain hit rates 62%/47%/99%
+    (baseline 0%/40%/100%) and less competing-substrate noise (12%→6.9%).
+
+    Arm order matters for dedupe: precise rows win ties, so the user's own
+    wording keeps its position when the broad arm finds the same work.
+
+    The broad arm is conditional (`openalex_arm_broad_threshold`): it returns
+    hundreds of thousands of hits and discards the user's specific wording, so it
+    only fires when the other two came back thin, and only on the first page —
+    it is a rescue net, not a paging source.
+    """
+    from ..config import get_settings
+    from .search_providers import arm_queries
+
+    settings = get_settings()
+    profile = None
+    try:
+        from ..domain.search_profiles import resolve_profile
+
+        profile = resolve_profile(domain)
+    except Exception:
+        profile = None
+
+    if not getattr(settings, "openalex_multi_arm", True):
+        return search_openalex(
+            " ".join(terms or ()), limit, offset,
+            domain=domain, preferred_source_ids=preferred_source_ids,
+        )
+
+    arms = arm_queries(terms, req=req, profile=profile, settings=settings)
+    if not arms:
+        return []
+
+    deferred = [a for a in arms if a.conditional]
+    primary = [a for a in arms if not a.conditional]
+
+    merged: list[Evidence] = []
+    counts: list[str] = []
+    for arm in primary:
+        rows = search_openalex(
+            arm.query, limit, offset,
+            domain=domain, preferred_source_ids=preferred_source_ids,
+            arm=arm.name, arm_delta=arm.relevance_delta,
+        )
+        counts.append(f"{arm.name}={len(rows)}")
+        merged.extend(rows)
+    merged = _dedupe_evidence(merged)
+
+    if deferred and offset == 0 and len(merged) < int(settings.openalex_arm_broad_threshold):
+        for arm in deferred:
+            rows = search_openalex(
+                arm.query, limit, offset,
+                domain=domain, preferred_source_ids=preferred_source_ids,
+                arm=arm.name, arm_delta=arm.relevance_delta,
+            )
+            counts.append(f"{arm.name}={len(rows)}(rescue)")
+            merged.extend(rows)
+        merged = _dedupe_evidence(merged)
+
+    # Per-arm observability (M4): the lottery is invisible from the merged stream
+    # alone, so the counts go to the log every page.
+    logger.info("openalex arms off=%s merged=%s [%s]", offset, len(merged), " ".join(counts))
+    return merged
+
+
 def _build_streams(
     patent_query: str,
     western_query: str,
@@ -696,6 +806,7 @@ def _build_streams(
     ipc_codes: tuple[str, ...] | list[str] = (),
     chinese_query: str = "",
     notebooklm_notebook_id: str | None = None,
+    western_terms: "Sequence[str] | None" = None,
 ) -> list[dict]:
     """One paged stream per source. ``paged`` sources support offset/round paging;
     single-shot sources (chemcrow/notebooklm) yield once then finish."""
@@ -746,13 +857,18 @@ def _build_streams(
         openalex_n = policy_page_size(prof, "openalex", page_size, default="primary")
         if lit_settings.openalex_enabled and openalex_n > 0:
             prefs = tuple(prof.preferred_openalex_source_ids) if prof is not None else ()
+            # Prefer the structured expansion so arm 1 can truncate on *terms*
+            # rather than words — splitting the joined string would break
+            # multi-word phrases like "chemical conversion coating" apart.
+            cr_terms = list(western_terms or ()) or (western_query or "").split()
             add(
                 "openalex",
-                lambda off, q=western_query, d=domain, n=openalex_n, p=prefs: search_openalex(
-                    q,
+                lambda off, t=cr_terms, d=domain, n=openalex_n, p=prefs, r=req: openalex_arms(
+                    t,
                     n,
                     offset=off,
                     domain=d,
+                    req=r,
                     preferred_source_ids=p or None,
                 ),
                 True,
@@ -842,6 +958,7 @@ def iter_search(
     at round end), so the UI can render results while the search keeps going.
     """
     q = build_research_query(query, req)
+    western_terms: list[str] = []
     if (query or "").strip():
         sq = _prepare_search_queries(q, domain=getattr(req, "domain", None) if req is not None else None)
         rank_q = sq.rank_q
@@ -849,6 +966,9 @@ def iter_search(
         western_q = sq.western_q
         chinese_q = sq.chinese_q
         ipc_codes = sq.ipc_codes
+        # Structured expansion: the arm builder truncates and OR-joins on terms,
+        # not words, so phrases survive intact.
+        western_terms = list(getattr(sq.expanded, "english_synonyms", None) or [])
     else:
         rank_q = patent_q = western_q = chinese_q = q
         ipc_codes = ()
@@ -857,6 +977,7 @@ def iter_search(
         patent_q, western_q, source_types, req, page_size,
         ipc_codes=ipc_codes, chinese_query=chinese_q,
         notebooklm_notebook_id=notebooklm_notebook_id,
+        western_terms=western_terms,
     )
 
     from ..config import get_settings

@@ -32,6 +32,7 @@ class SourceStore:
         extraction_error: str | None = None,
         origin_url: str | None = None,
         project_id: str | None = None,
+        acquisition: str | None = None,
     ) -> str:
         source_id = str(uuid.uuid4())
         guide_payload = source_guide.model_dump(mode="json") if source_guide else None
@@ -48,11 +49,27 @@ class SourceStore:
             source_guide=guide_payload,
             extraction_status=extraction_status,
             extraction_error=extraction_error,
+            acquisition=(acquisition or None),
             created_at=_utcnow(),
         )
         with commit_session(self._session_factory) as session:
             session.add(row)
         return source_id
+
+    def count_for_project(self, project_id: str | None, *, acquisition: str | None = None) -> int:
+        """Rows stored for a project, optionally filtered by acquisition path.
+
+        Used by the per-project quotas: ``kb_project_source_quota`` counts every
+        row, ``kb_project_pdf_quota`` counts only ``acquisition == "pdf"`` (the
+        download+parse path that dominates memory).
+        """
+        if not project_id:
+            return 0
+        with self._session_factory() as session:
+            q = session.query(SourceDocument).filter(SourceDocument.project_id == project_id)
+            if acquisition is not None:
+                q = q.filter(SourceDocument.acquisition == acquisition)
+            return q.count()
 
     def get(self, source_id: str) -> SourceDocument | None:
         with self._session_factory() as session:

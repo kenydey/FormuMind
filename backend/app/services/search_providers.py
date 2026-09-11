@@ -8,6 +8,8 @@ from __future__ import annotations
 from .errors import degrade_return
 import logging
 import re
+import time
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 import httpx
@@ -19,6 +21,8 @@ from ..services.runtime_secrets import effective_setting
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SEC = 25.0
+# OpenAlex broad-boolean 429s (queries with >5 OR/AND/NOT) carry retryAfter.
+_RATE_LIMIT_RETRIES = 2
 _PATENT_ID_RE = re.compile(r"[\s\-/]")
 
 
@@ -46,6 +50,125 @@ def _ranked(i: int, offset: int = 0) -> float:
     return round(max(0.1, 1.0 - (offset + i) * 0.02), 3)
 
 
+def _get_with_retry(client, url: str, params: dict):
+    """GET, retrying the documented broad-boolean rate limit.
+
+    OpenAlex answers queries with more than five boolean operators with a 429
+    carrying ``reason: broad_boolean_query`` and ``retryAfter`` (that bucket is
+    capped at 5 req/s). The arm queries sit in that bucket, and an un-retried 429
+    empties an entire arm *silently* — measured mid-session: the precise arm
+    returned 25 rows while recall and broad both returned 0, leaving a merged
+    stream that looked perfectly healthy. Honouring ``retryAfter`` is cheap; the
+    API explicitly asks for it.
+    """
+    delay = 1.0
+    resp = client.get(url, params=params)
+    for _ in range(_RATE_LIMIT_RETRIES):
+        # `getattr`: several test doubles implement only `raise_for_status` /
+        # `json`, and reading `status_code` off them would raise straight into
+        # the caller's blanket except — turning a healthy search into zero hits.
+        if getattr(resp, "status_code", None) != 429:
+            return resp
+        try:
+            delay = float((resp.json() or {}).get("retryAfter") or 1.0)
+        except Exception:
+            delay = 1.0
+        time.sleep(max(0.2, min(delay, 5.0)))
+        resp = client.get(url, params=params)
+    return resp
+
+
+@dataclass(frozen=True)
+class ArmQuery:
+    """One retrieval arm: an OpenAlex query string plus its relevance nudge."""
+
+    name: str
+    query: str
+    relevance_delta: float = 0.0
+    conditional: bool = False
+
+
+def arm_queries(
+    terms: Sequence[str],
+    *,
+    req=None,
+    profile=None,
+    settings: Settings | None = None,
+    max_precise_terms: int | None = None,
+) -> list[ArmQuery]:
+    """Build the precise / recall / broad query set for one OpenAlex source.
+
+    The single concatenated query is a lottery: OpenAlex ANDs space-separated
+    words and stems them, so a 20-word expansion collapses inside a narrower
+    topic — measured, 「铝合金碱性脱脂剂」 returned **1** hit with a 0% domain
+    hit rate, against 37 for the merged arms. The three arms trade differently:
+
+    * ``precise`` — the expansion truncated to ``max_precise_terms``. Keeps the
+      user's specific intent; highest quality per row.
+    * ``recall`` — ``(substrate…) AND (terms OR…)``. Fixes the stemming drift
+      that makes a bare OR pull in "passive tracers" for "passivation", while
+      opening the AND collar. Biggest single recall win (89 → 2,722 measured).
+    * ``broad`` — ``(substrate…) AND (domain vocabulary OR…)``. A rescue arm:
+      measured 279k-599k hits and the best domain hit rate, but it drops the
+      user's own wording, so it only fires when the other two came back thin.
+    """
+    settings = settings or get_settings()
+    cap = max_precise_terms if max_precise_terms is not None else settings.openalex_arm_precise_max_terms
+    terms = [str(t).strip() for t in (terms or ()) if str(t).strip()]
+    if not terms:
+        return []
+
+    def _or_group(items: Sequence[str]) -> str:
+        return "(" + " OR ".join(items) + ")"
+
+    # OpenAlex rate-limits queries with **more than 5 boolean operators** to 5
+    # requests/second (`reason: broad_boolean_query`), so keep the total budget
+    # at or under that: two groups of ≤3 terms is 2+2+1 = 5 operators. Measured
+    # cost of the smaller groups: 78,763 vs 128,494 corpus hits for the same
+    # topic — irrelevant when only the top page is taken, and both dwarf the
+    # 89-hit baseline this exists to fix. Staying in the fast lane is worth more
+    # than the larger candidate pool.
+    group_cap = max(1, int(getattr(settings, "openalex_arm_group_terms", 3)))
+
+    def _group_of(items: Sequence[str]) -> str:
+        return _or_group(list(items)[:group_cap])
+
+    substrate_words: list[str] = []
+    substrate = getattr(req, "substrate", None) if req is not None else None
+    if substrate is not None:
+        try:
+            from ..domain.research_query import SUBSTRATE_VENUE_TERMS
+
+            substrate_words = list(SUBSTRATE_VENUE_TERMS.get(substrate, ()))
+        except Exception:
+            substrate_words = []
+
+    out: list[ArmQuery] = []
+    if settings.openalex_arm_precise:
+        out.append(ArmQuery("precise", " ".join(terms[: max(1, cap)]), settings.openalex_arm_weight_precise))
+    # The recall/broad arms are substrate-anchored *by construction*: their whole
+    # justification is trading the process-side AND collar for an OR while the
+    # substrate holds precision. Without a substrate a bare OR measurably loses
+    # precision (domain hit rate 100%/28%/29% across three topics, vs 100% for
+    # the AND string), so emit the precise arm alone rather than a loose query.
+    if substrate_words and settings.openalex_arm_recall:
+        out.append(ArmQuery(
+            "recall",
+            f"{_group_of(substrate_words)} AND {_group_of(terms)}",
+            settings.openalex_arm_weight_recall,
+        ))
+    if substrate_words and settings.openalex_arm_broad:
+        venue = [str(v).strip() for v in (getattr(profile, "venue_terms", ()) or ()) if str(v).strip()]
+        if venue:
+            out.append(ArmQuery(
+                "broad",
+                f"{_group_of(substrate_words)} AND {_group_of(venue)}",
+                settings.openalex_arm_weight_broad,
+                conditional=True,
+            ))
+    return out
+
+
 def _openalex_work_to_evidence(
     w: dict[str, Any],
     rank_index: int,
@@ -53,6 +176,8 @@ def _openalex_work_to_evidence(
     *,
     evidence_source: str = "OpenAlex",
     preferred_source_ids: frozenset[str] | None = None,
+    arm: str | None = None,
+    arm_delta: float = 0.0,
 ) -> Evidence:
     doi = (w.get("doi") or "").replace("https://doi.org/", "")
     identifier = doi or w.get("id") or ""
@@ -76,6 +201,12 @@ def _openalex_work_to_evidence(
         if short in preferred_source_ids or sid in preferred_source_ids:
             venue_pref_hit = True
             relevance = round(min(1.0, relevance + 0.15), 3)
+    if arm_delta:
+        # Tiebreaker only: relevance is a rank-position proxy and the real
+        # ordering happens in `_merge_filter_rank`, where it carries 30% of the
+        # score. That is enough to stop the broad arm (14k-279k hits) from
+        # out-ranking precise hits at the same position.
+        relevance = round(min(1.0, max(0.0, relevance + arm_delta)), 3)
     ev = Evidence(
         source=evidence_source,
         identifier=identifier,
@@ -85,10 +216,16 @@ def _openalex_work_to_evidence(
         is_oa=oa.get("is_oa"),
         oa_pdf_url=best.get("pdf_url") or None,
     )
-    if venue_pref_hit:
-        tags = list(ev.domain_tags or [])
-        if "venue_pref_hit" not in tags:
-            tags.append("venue_pref_hit")
+    tags: list[str] = list(ev.domain_tags or [])
+    if venue_pref_hit and "venue_pref_hit" not in tags:
+        tags.append("venue_pref_hit")
+    if arm:
+        # Per-arm observability (M4): without this the lottery problem can
+        # return unnoticed, since the merged stream looks like any other source.
+        tag = f"arm:{arm}"
+        if tag not in tags:
+            tags.append(tag)
+    if tags:
         ev.domain_tags = tags
     return ev
 
@@ -169,6 +306,8 @@ def search_openalex(
     evidence_source: str = "OpenAlex",
     preferred_source_ids: tuple[str, ...] | list[str] | None = None,
     taxonomy_source: str = "openalex",
+    arm: str | None = None,
+    arm_delta: float = 0.0,
 ) -> list[Evidence]:
     """OpenAlex works search (requires mailto for polite pool).
 
@@ -223,6 +362,15 @@ def search_openalex(
                 base_params["filter"] = f"primary_location.source.id:{sid}"
     if effective_setting(settings, "openalex_mailto"):
         base_params["mailto"] = effective_setting(settings, "openalex_mailto")
+    # Ride the keyed budget, not the free tier. The mailto-only tier is 1,000
+    # requests/day and then answers `429 Insufficient budget` — measured
+    # 2026-09-11: the identical query returned 200 with the key and 429 with only
+    # mailto, with `Retry-After: 60264`. The arm design multiplies requests per
+    # search (2-3 arms × pages), so search has to be on the key ($0.001/request)
+    # rather than the shared free pool.
+    _api_key = effective_setting(settings, "openalex_api_key")
+    if _api_key:
+        base_params["api_key"] = _api_key
     try:
         out: list[Evidence] = []
         page = 1 + offset // 25
@@ -231,7 +379,7 @@ def search_openalex(
         with httpx.Client(timeout=_TIMEOUT_SEC) as client:
             while len(out) < limit:
                 params = {**base_params, "page": page}
-                resp = client.get("https://api.openalex.org/works", params=params)
+                resp = _get_with_retry(client, "https://api.openalex.org/works", params)
                 resp.raise_for_status()
                 results = resp.json().get("results") or []
                 if not results:
@@ -250,6 +398,8 @@ def search_openalex(
                             offset,
                             evidence_source=evidence_source,
                             preferred_source_ids=preferred or None,
+                            arm=arm,
+                            arm_delta=arm_delta,
                         )
                     )
                     global_idx += 1
