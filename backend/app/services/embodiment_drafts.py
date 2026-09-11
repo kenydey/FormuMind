@@ -363,6 +363,29 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def score_embodiment_table(table: dict[str, Any], emb_row: dict[str, Any]) -> float:
+    score = 0.0
+    label = str(table.get("label") or emb_row.get("label") or "")
+    headers = " ".join(table.get("headers") or [])
+    if _EXAMPLE_HEAD.search(label) or re.search(r"配方", label):
+        score += 3.0
+    name_ok = bool(re.search(r"component|ingredient|原料|组分|成分", headers, re.I))
+    amt_ok = bool(re.search(r"wt\s*%|重量份|phr|%|parts?", headers, re.I))
+    if name_ok and amt_ok:
+        score += 4.0
+    names = [i.get("name") or "" for i in emb_row.get("ingredients") or []]
+    if names:
+        pub_frac = sum(1 for n in names if _is_publication_number(n)) / len(names)
+        if pub_frac >= 0.5:
+            score -= 10.0
+    blob = f"{label} {headers}"
+    if _PRIOR_ART_CONTEXT.search(blob):
+        score -= 5.0
+    n = len(names)
+    score += 0.1 * min(n, 8)
+    return score
+
+
 def _collect_source_text(source_id: str) -> tuple[str, list[dict[str, Any]]]:
     doc = get_source_store().get(source_id)
     chunks = get_chunk_store().get_by_source(source_id)
@@ -544,24 +567,33 @@ def extract_embodiment_draft(
     text, _chunk_meta = _collect_source_text(source_id)
     md_tables = parse_markdown_tables(text)
     html_tables = parse_html_tables(text)
-    embodiments: list[dict[str, Any]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for t in md_tables + html_tables:
-        emb = table_to_ingredients(t)
-        if emb:
-            embodiments.append(emb)
+        emb_row = table_to_ingredients(t)
+        if not emb_row:
+            continue
+        sc = score_embodiment_table(t, emb_row)
+        if sc < 0:
+            continue
+        emb_row["_score"] = sc
+        scored.append((sc, emb_row))
+    scored.sort(key=lambda x: (-x[0], -len(x[1]["ingredients"]), x[1].get("label") or ""))
+    embodiments = [e for _, e in scored]
+    for e in embodiments:
+        e.pop("_score", None)
 
     amount_source = "placeholder"
     warnings = [
         "人审草稿：确认后仅进入原料 pending + KG，不会写入生产配方池",
     ]
     if embodiments:
-        # Prefer densest table
-        embodiments.sort(key=lambda e: (-len(e["ingredients"]), e.get("label") or ""))
         primary = embodiments[0]
         amount_source = primary.get("amount_source") or "table"
         warnings.extend(primary.get("warnings") or [])
         if len(embodiments) > 1:
-            warnings.append(f"检测到 {len(embodiments)} 个实施例表；默认展示成分最多的一条，其余在人审中切换")
+            warnings.append(
+                f"检测到 {len(embodiments)} 个可用表；默认按表语义分展示，其余可在人审中切换"
+            )
         ingredients = primary["ingredients"]
         if amount_source == "table":
             warnings.insert(0, "比重来自已解析全文表格（已归一为 wt%），请核对原件")

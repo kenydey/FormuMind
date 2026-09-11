@@ -317,6 +317,47 @@ Example 1
     ]
 
 
+def test_extract_prefers_formulation_over_citation_table(stores):
+    sources, chunks, _ = stores
+    md = (
+        "Patent body with enough characters for eligibility. " * 30
+        + """
+Related patents
+| Material | wt% |
+| --- | --- |
+| Polymer A | 16 |
+| Polymer B | 16 |
+| Polymer C | 16 |
+| Polymer D | 16 |
+| Polymer E | 16 |
+| Polymer F | 16 |
+
+| Patent | Title | Year |
+| --- | --- | --- |
+| DE102011120870B4 | Prior coating | 2012 |
+| CN102528001A | Mg alloy | 2011 |
+| US8608869B2 | Surface | 2013 |
+| EP1234567A1 | Film | 2010 |
+| WO2010123456A1 | Bath | 2010 |
+
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 55 |
+| Zinc phosphate | 15 |
+| Talc | 30 |
+"""
+    )
+    sid = _seed_doc(sources, chunks, text=md)
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["ok"] is True
+    names = [i["name"] for i in out["draft"]["formulation"]["ingredients"]]
+    assert "Epoxy resin" in names
+    assert not any(emb._is_publication_number(n) for n in names)
+    warnings = out["draft"]["formulation"]["warnings"]
+    assert any("语义" in w for w in warnings)
+
+
 def test_extract_uses_flattened_rows_when_no_gfm(stores):
     sources, chunks, _ = stores
     body = (
