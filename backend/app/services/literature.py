@@ -764,9 +764,17 @@ def _build_streams(
                 (prof.chemrxiv_openalex_source_id if prof is not None else "")
                 or CHEMRXIV_OPENALEX_SOURCE_ID
             )
+            # ChemRxiv is a single ~63k-work repository, and OpenAlex ANDs the
+            # words of the expanded keyword string — so the query that works over
+            # the whole corpus returned exactly **1** hit inside it. A grouped
+            # boolean (`(substrate…) AND (process…)`) restores recall to ~1,057
+            # with the top ranks on topic. See `venue_scoped_query`.
+            from .search_providers import venue_scoped_query
+
+            crx_q = venue_scoped_query((western_query or "").split(), req=req, profile=prof)
             add(
                 "chemrxiv",
-                lambda off, q=western_query, d=domain, n=chemrxiv_n, sid=crx_id: search_openalex(
+                lambda off, q=crx_q, d=domain, n=chemrxiv_n, sid=crx_id: search_openalex(
                     q,
                     n,
                     offset=off,

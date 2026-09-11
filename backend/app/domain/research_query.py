@@ -26,6 +26,20 @@ SUBSTRATE_QUERY_TERMS: dict[Substrate, list[str]] = {
     Substrate.carbon_steel: ["carbon steel", "低碳钢"],
 }
 
+# Single-token substrate words for *narrow-venue* boolean queries.
+#
+# Distinct from SUBSTRATE_QUERY_TERMS (which mixes Chinese and multi-word phrases
+# for the merged research query). Inside a small venue OpenAlex ANDs the words of
+# a multi-word phrase, so "magnesium alloy" tightens instead of widening — the
+# bare word anchors the substrate without constricting the match.
+SUBSTRATE_VENUE_TERMS: dict[Substrate, tuple[str, ...]] = {
+    Substrate.magnesium_alloy: ("magnesium", "AZ91", "AZ31", "AM60"),
+    Substrate.aluminum: ("aluminum", "aluminium", "AA2024", "AA7075"),
+    Substrate.galvanized_steel: ("galvanized", "galvanised", "zinc"),
+    Substrate.stainless_steel: ("stainless",),
+    Substrate.carbon_steel: ("steel",),
+}
+
 # Competing-metal / process noise when a substrate is locked on the requirement.
 _ALIEN_SUBSTRATE_TERMS: dict[Substrate, tuple[str, ...]] = {
     Substrate.magnesium_alloy: (

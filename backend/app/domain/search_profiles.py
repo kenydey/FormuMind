@@ -51,6 +51,13 @@ class DomainSearchProfile:
     source_policy: Mapping[str, str]
     preferred_openalex_source_ids: tuple[str, ...] = ()
     chemrxiv_openalex_source_id: str = CHEMRXIV_OPENALEX_SOURCE_ID
+    # Single-token search terms for *narrow-venue* boolean queries.
+    #
+    # Deliberately distinct from ``keyword_allow``: those are stems matched with
+    # Python substring logic ("passivat" catches "passivation"), which are useless
+    # as search terms — querying OpenAlex for "passivat" returned 5 unrelated
+    # papers. These are real words the full-text index can match.
+    venue_terms: tuple[str, ...] = ()
 
 
 # Shared source policy: ChemRxiv + OpenAlex primary; arXiv removed.
@@ -127,6 +134,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
+        venue_terms=("corrosion", "coating", "anticorrosive", "primer", "epoxy", "inhibitor"),
     ),
     ProductDomain.degreaser: DomainSearchProfile(
         domain=ProductDomain.degreaser,
@@ -170,6 +178,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "skin care",
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
+        venue_terms=("degreasing", "cleaning", "detergent", "surfactant", "alkaline"),
     ),
     ProductDomain.surface_treatment: DomainSearchProfile(
         domain=ProductDomain.surface_treatment,
@@ -213,6 +222,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
+        venue_terms=("passivation", "conversion", "phosphating", "anodizing", "silane", "pretreatment"),
     ),
     ProductDomain.autodeposition_coating: DomainSearchProfile(
         domain=ProductDomain.autodeposition_coating,
@@ -249,6 +259,7 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
+        venue_terms=("autodeposition", "autophoretic", "emulsion", "coating", "acidic"),
     ),
 }
 

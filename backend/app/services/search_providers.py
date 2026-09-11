@@ -8,7 +8,7 @@ from __future__ import annotations
 from .errors import degrade_return
 import logging
 import re
-from typing import Any
+from typing import Any, Sequence
 
 import httpx
 
@@ -91,6 +91,71 @@ def _openalex_work_to_evidence(
             tags.append("venue_pref_hit")
         ev.domain_tags = tags
     return ev
+
+
+def venue_scoped_query(
+    fallback_terms: Sequence[str] | str,
+    *,
+    req=None,
+    profile=None,
+    max_terms: int = 6,
+) -> str:
+    """Boolean query shaped for a *narrow* venue (one journal or repository).
+
+    OpenAlex treats space-separated words as AND **and stems them**. The expanded
+    keyword string that works over its 260M-work corpus therefore collapses
+    inside a single repository — measured against ChemRxiv (63k works), the
+    expanded string returned **1** hit. Three cheaper fixes were tried and
+    rejected on live counts:
+
+    * plain OR of the same words — 19,058 hits but off topic, because stemming
+      makes "passivation" match "passive tracers" and "conversion" match CO2
+      conversion;
+    * quoted phrases — *tighter*, not looser (30 hits): a quoted multi-word
+      phrase still has to match as a unit;
+    * ``keyword_allow`` stems — useless as search terms ("passivat" → 5
+      unrelated papers). Hence the separate ``venue_terms`` vocabulary.
+
+    What works is grouping the locked substrate against the domain's process
+    vocabulary: ``(magnesium OR AZ91 …) AND (passivation OR conversion …)`` —
+    measured 1,057 hits with the top ranks all on topic. Falls back to the
+    caller's terms when no substrate or profile is available, so a venue search
+    without context degrades to the previous behaviour rather than going empty.
+    """
+    def _words(items) -> list[str]:
+        out: list[str] = []
+        for raw in items or ():
+            term = str(raw or "").strip()
+            # Single tokens only: a phrase inside a venue behaves as an AND of its
+            # own words, which is what starves the query in the first place.
+            if term and " " not in term and term.isascii():
+                out.append(term)
+        return list(dict.fromkeys(out))[:max_terms]
+
+    substrate = getattr(req, "substrate", None) if req is not None else None
+    substrate_words: list[str] = []
+    if substrate is not None:
+        try:
+            from ..domain.research_query import SUBSTRATE_VENUE_TERMS
+
+            substrate_words = _words(SUBSTRATE_VENUE_TERMS.get(substrate, ()))
+        except Exception:
+            substrate_words = []
+
+    process_words = _words(getattr(profile, "venue_terms", ()) or ())
+
+    def _group(words: list[str]) -> str:
+        return "(" + " OR ".join(words) + ")"
+
+    if substrate_words and process_words:
+        return f"{_group(substrate_words)} AND {_group(process_words)}"
+    if substrate_words or process_words:
+        return _group(substrate_words or process_words)
+    # No structured context (e.g. an ad-hoc search with no requirement): keep the
+    # caller's terms verbatim so behaviour is unchanged from before this existed.
+    if isinstance(fallback_terms, str):
+        return fallback_terms
+    return " ".join(str(t) for t in fallback_terms or () if t)
 
 
 def search_openalex(

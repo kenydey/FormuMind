@@ -73,3 +73,91 @@ def test_merge_filter_drops_irrelevant_literature():
     ids = {e.identifier for e in merged}
     assert "arxiv:1" in ids
     assert "arxiv:2" not in ids
+
+
+# ── narrow-venue boolean queries (2026-09-11) ────────────────────────────────
+# OpenAlex ANDs bare space-separated words and stems them, so the expanded keyword
+# string that works over the whole corpus collapses inside a single repository:
+# measured against ChemRxiv, the expanded string returned 1 hit where a grouped
+# boolean returned 1,057. These pin the shape of that query.
+
+
+def _req(substrate="magnesium_alloy"):
+    from app.domain.schemas import ProductDomain, Requirement, Substrate
+
+    return Requirement(domain=ProductDomain.surface_treatment, substrate=Substrate(substrate))
+
+
+def test_venue_scoped_query_groups_substrate_against_process():
+    from app.domain.search_profiles import get_profile
+    from app.services.search_providers import venue_scoped_query
+
+    q = venue_scoped_query(
+        ["magnesium alloy", "passivation"],
+        req=_req(),
+        profile=get_profile("surface_treatment"),
+    )
+    assert " AND " in q, "substrate must be intersected with the process group"
+    assert "magnesium" in q
+    assert "passivation" in q
+    # Parenthesised OR groups, unquoted: quoting makes a phrase match as a unit,
+    # which *tightens* the query and re-starves the venue.
+    assert q.startswith("(")
+    assert '"' not in q
+
+
+def test_venue_scoped_query_drops_phrases_and_non_ascii():
+    """Multi-word and CJK entries cannot anchor a venue query — OpenAlex would
+    AND the words of a phrase, and ChemRxiv indexes no Chinese."""
+    from app.domain.search_profiles import get_profile
+    from app.services.search_providers import venue_scoped_query
+
+    q = venue_scoped_query(
+        ["ignored"],  # fallback unused when structured context exists
+        req=_req(),
+        profile=get_profile("surface_treatment"),
+    )
+    for token in ("magnesium alloy", "镁合金", "镁材钝化"):
+        assert token not in q
+
+
+def test_venue_scoped_query_uses_only_the_domain_vocabulary():
+    from app.domain.search_profiles import get_profile
+    from app.services.search_providers import venue_scoped_query
+
+    q = venue_scoped_query([], req=_req(), profile=get_profile("surface_treatment"))
+    assert "passivation" in q
+    # A degreaser word must not leak into a surface-treatment query.
+    assert "degreasing" not in q
+
+
+def test_venue_scoped_query_keeps_allow_stems_out():
+    """`keyword_allow` holds stems for Python substring matching; querying for
+    them returned 5 unrelated papers, which is why `venue_terms` exists."""
+    from app.domain.search_profiles import get_profile
+    from app.services.search_providers import venue_scoped_query
+
+    q = venue_scoped_query([], req=_req(), profile=get_profile("surface_treatment"))
+    # Compare as *terms*, not substrings — "passivation" legitimately contains
+    # "passivat"; what must not appear is the bare stem as its own query word.
+    import re as _re
+
+    tokens = _re.findall(r"[A-Za-z0-9]+", q)
+    for stem in ("passivat", "phosphat", "anodiz"):
+        assert stem not in tokens
+    assert "passivation" in tokens
+
+
+def test_venue_scoped_query_falls_back_without_context():
+    """No requirement / profile ⇒ previous behaviour, not an empty query."""
+    from app.services.search_providers import venue_scoped_query
+
+    assert venue_scoped_query(["a", "b"], req=None, profile=None) == "a b"
+    assert venue_scoped_query("verbatim query", req=None, profile=None) == "verbatim query"
+
+
+def test_venue_scoped_query_substrate_only_when_profile_missing():
+    from app.services.search_providers import venue_scoped_query
+
+    q = venue_scoped_query([], req=_req(), profile=None)
+    assert q == "(magnesium OR AZ91 OR AZ31 OR AM60)"
