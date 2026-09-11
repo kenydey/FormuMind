@@ -317,6 +317,37 @@ Example 1
     ]
 
 
+def test_score_bare_example_label_no_example_bonus():
+    """Parser default label ``Example`` must not earn the +3 embodiment signal."""
+    table = {"headers": ["Component", "wt%"], "label": "Example"}
+    emb_row = {
+        "label": "Example",
+        "ingredients": [{"name": "A"}, {"name": "B"}],
+    }
+    bare = emb.score_embodiment_table(table, emb_row)
+    numbered = emb.score_embodiment_table(
+        {"headers": ["Component", "wt%"], "label": "Example 1"},
+        {"label": "Example 1", "ingredients": emb_row["ingredients"]},
+    )
+    assert bare == pytest.approx(4.2)  # name_ok + amt_ok + 2 rows, no +3
+    assert numbered == pytest.approx(7.2)  # +3 for real Example 1 heading
+    assert numbered - bare >= 3.0
+
+
+def test_score_material_header_contributes_name_ok():
+    table = {"headers": ["Material", "wt%"], "label": "Example"}
+    emb_row = {
+        "label": "Example",
+        "ingredients": [{"name": "Polymer A"}, {"name": "Polymer B"}],
+    }
+    material_score = emb.score_embodiment_table(table, emb_row)
+    decoy = {"headers": ["Polymer", "wt%"], "label": "Example"}
+    decoy_score = emb.score_embodiment_table(decoy, emb_row)
+    assert material_score == pytest.approx(4.2)  # Material|wt% earns name_ok + amt_ok
+    assert decoy_score == pytest.approx(0.2)  # no name_ok without material/component family
+    assert material_score - decoy_score >= 4.0
+
+
 def test_extract_prefers_formulation_over_citation_table(stores):
     sources, chunks, _ = stores
     md = (

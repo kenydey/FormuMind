@@ -363,13 +363,29 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _is_real_example_label(label: str) -> bool:
+    """Numbered embodiment heading or 配方 — not parser default bare ``Example``."""
+    if re.search(r"配方", label or ""):
+        return True
+    m = _EXAMPLE_HEAD.search(label or "")
+    if not m:
+        return False
+    return bool(m.group(2))
+
+
 def score_embodiment_table(table: dict[str, Any], emb_row: dict[str, Any]) -> float:
     score = 0.0
     label = str(table.get("label") or emb_row.get("label") or "")
     headers = " ".join(table.get("headers") or [])
-    if _EXAMPLE_HEAD.search(label) or re.search(r"配方", label):
+    if _is_real_example_label(label):
         score += 3.0
-    name_ok = bool(re.search(r"component|ingredient|原料|组分|成分", headers, re.I))
+    name_ok = bool(
+        re.search(
+            r"component|ingredient|material|substance|原料|组分|成分|物料",
+            headers,
+            re.I,
+        )
+    )
     amt_ok = bool(re.search(r"wt\s*%|重量份|phr|%|parts?", headers, re.I))
     if name_ok and amt_ok:
         score += 4.0
