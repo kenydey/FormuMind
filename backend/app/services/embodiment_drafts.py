@@ -43,6 +43,33 @@ _EXAMPLE_HEAD = re.compile(
     re.I,
 )
 _NUM_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+_PUB_NO_NAME_RE = re.compile(
+    r"^(?:CN|US|EP|DE|WO|JP|KR)\s*\d{5,}[A-Z0-9]*\b",
+    re.I,
+)
+_FORBIDDEN_NAME_HEADERS = re.compile(
+    r"^(patent|publication|pub\.?\s*no\.?|document|title|编号|公开号|专利号)$",
+    re.I,
+)
+_PRIOR_ART_CONTEXT = re.compile(
+    r"(prior\s*art|related\s*art|citation|references?|现有技术|对比文件|对比实施例)",
+    re.I,
+)
+_DIRTY_NAME_RE = re.compile(
+    r"(preparation\s+method|and\s+its\s+prepar|及其制备|制备方法)",
+    re.I,
+)
+_AMOUNT_UNIT_OK = re.compile(r"wt|%|份|phr|parts?|mass|质量", re.I)
+
+
+def _is_publication_number(name: str) -> bool:
+    return bool(_PUB_NO_NAME_RE.match((name or "").strip()))
+
+
+def _looks_like_year_amount(num: float, unit_hint: str) -> bool:
+    if _AMOUNT_UNIT_OK.search(unit_hint or ""):
+        return False
+    return 1900.0 <= float(num) <= 2100.0
 
 
 def check_eligibility(source_id: str) -> dict[str, Any]:
@@ -225,29 +252,40 @@ def parse_html_tables(text: str) -> list[dict[str, Any]]:
     return tables
 
 
-def _column_map(headers: list[str]) -> tuple[int | None, int | None, str]:
+def _column_map(
+    headers: list[str], rows: list[list[str]] | None = None
+) -> tuple[int | None, int | None, str]:
     name_idx = None
     amt_idx = None
     unit_hint = ""
     for i, h in enumerate(headers):
         key = h.strip()
-        if name_idx is None and _NAME_HEADERS.match(key):
-            name_idx = i
+        if name_idx is None and not _FORBIDDEN_NAME_HEADERS.match(key):
+            if _NAME_HEADERS.match(key):
+                name_idx = i
+            elif re.search(r"component|ingredient|原料|组分|成分", key, re.I):
+                name_idx = i
         if amt_idx is None and _AMOUNT_HEADERS.match(key):
             amt_idx = i
             unit_hint = key
-        # Fuzzy: header contains wt or 份
         if amt_idx is None and re.search(r"wt\s*%|重量份|phr|mass\s*%|质量", key, re.I):
             amt_idx = i
             unit_hint = key
-        if name_idx is None and re.search(r"component|ingredient|原料|组分|成分", key, re.I):
-            name_idx = i
-    if name_idx is None and headers:
-        name_idx = 0
-    if amt_idx is None and len(headers) > 1:
-        # last numeric-looking column
-        amt_idx = len(headers) - 1
-        unit_hint = headers[amt_idx]
+    if amt_idx is None and len(headers) > 1 and rows:
+        last_idx = len(headers) - 1
+        unit_hint_candidate = headers[last_idx]
+        numeric = 0
+        total = 0
+        for row in rows:
+            if last_idx >= len(row):
+                continue
+            total += 1
+            num = _parse_number(row[last_idx])
+            if num is not None and not _looks_like_year_amount(num, unit_hint_candidate):
+                numeric += 1
+        if total > 0 and numeric >= total / 2:
+            amt_idx = last_idx
+            unit_hint = unit_hint_candidate
     return name_idx, amt_idx, unit_hint
 
 
@@ -280,7 +318,7 @@ def _amounts_to_weight_pct(
 def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
     headers = table.get("headers") or []
     rows = table.get("rows") or []
-    name_idx, amt_idx, unit_hint = _column_map(headers)
+    name_idx, amt_idx, unit_hint = _column_map(headers, rows)
     if name_idx is None or amt_idx is None:
         return None
     names: list[str] = []
@@ -291,8 +329,10 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
         name = row[name_idx].strip()
         if not name or _NAME_HEADERS.match(name):
             continue
+        if _is_publication_number(name):
+            continue
         num = _parse_number(row[amt_idx])
-        if num is None:
+        if num is None or _looks_like_year_amount(num, unit_hint):
             continue
         names.append(name[:200])
         amounts.append(num)

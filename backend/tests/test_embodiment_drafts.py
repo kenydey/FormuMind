@@ -286,6 +286,37 @@ The coating composition may 20
     assert emb.parse_flattened_amount_rows(text) is None
 
 
+def test_citation_table_rejected():
+    md = """
+| Patent | Title | Year |
+| --- | --- | --- |
+| DE102011120870B4 | Prior art coating | 2012 |
+| CN102528001A | Magnesium alloy | 2011 |
+| US8608869B2 | Surface treatment | 2013 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    assert emb.table_to_ingredients(tables[0]) is None
+
+
+def test_formulation_table_still_accepted():
+    md = """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 40 |
+| Zinc phosphate | 25 |
+| Solvent | 35 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    row = emb.table_to_ingredients(tables[0])
+    assert row is not None
+    assert [i["name"] for i in row["ingredients"]] == [
+        "Epoxy resin",
+        "Zinc phosphate",
+        "Solvent",
+    ]
+
+
 def test_extract_uses_flattened_rows_when_no_gfm(stores):
     sources, chunks, _ = stores
     body = (
