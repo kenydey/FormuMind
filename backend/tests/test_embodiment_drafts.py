@@ -348,6 +348,28 @@ def test_score_bare_example_label_no_example_bonus():
     assert numbered - bare >= 3.0
 
 
+def test_parse_markdown_tables_does_not_autonumber_unlabeled():
+    """After a real Example heading table, later tables keep bare Example (no Example N)."""
+    md = """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 40 |
+| Zinc phosphate | 25 |
+| Solvent | 35 |
+
+| Material | wt% |
+| --- | --- |
+| Polymer A | 50 |
+| Polymer B | 50 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    assert len(tables) == 2
+    assert emb._is_real_example_label(tables[0]["label"])
+    assert tables[1]["label"] == "Example"
+    assert not emb._is_real_example_label(tables[1]["label"])
+
+
 def test_score_material_header_contributes_name_ok():
     table = {"headers": ["Material", "wt%"], "label": "Example"}
     emb_row = {
@@ -401,6 +423,39 @@ Example 1
     assert not any(emb._is_publication_number(n) for n in names)
     warnings = out["draft"]["formulation"]["warnings"]
     assert any("语义" in w for w in warnings)
+
+
+def test_extract_prefers_example_heading_over_denser_unlabeled_material(stores):
+    """Real Example 1 Component table must beat a denser Material table without Example heading."""
+    sources, chunks, _ = stores
+    md = (
+        "Patent body with enough characters for eligibility. " * 30
+        + """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 55 |
+| Zinc phosphate | 15 |
+| Talc | 30 |
+
+| Material | wt% |
+| --- | --- |
+| Polymer A | 12.5 |
+| Polymer B | 12.5 |
+| Polymer C | 12.5 |
+| Polymer D | 12.5 |
+| Polymer E | 12.5 |
+| Polymer F | 12.5 |
+| Polymer G | 12.5 |
+| Polymer H | 12.5 |
+"""
+    )
+    sid = _seed_doc(sources, chunks, text=md)
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["ok"] is True
+    names = [i["name"] for i in out["draft"]["formulation"]["ingredients"]]
+    assert names == ["Epoxy resin", "Zinc phosphate", "Talc"]
+    assert "Polymer A" not in names
 
 
 def test_dirty_name_lowers_confidence_and_warns():

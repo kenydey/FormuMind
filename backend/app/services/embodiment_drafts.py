@@ -191,12 +191,13 @@ def parse_markdown_tables(text: str) -> list[dict[str, Any]]:
     lines = (text or "").splitlines()
     tables: list[dict[str, Any]] = []
     i = 0
-    pending_label = "Example"
+    # Only set from a real _EXAMPLE_HEAD line; never auto-number unlabeled tables.
+    label_from_heading: str | None = None
     while i < len(lines) - 1:
         line = lines[i].strip()
         em = _EXAMPLE_HEAD.search(line)
         if em and "|" not in line:
-            pending_label = line[:80] or "Example"
+            label_from_heading = line[:80] or "Example"
             i += 1
             continue
         if line.count("|") >= 2 and i + 1 < len(lines) and _is_md_sep(lines[i + 1]):
@@ -214,11 +215,12 @@ def parse_markdown_tables(text: str) -> list[dict[str, Any]]:
                     {
                         "headers": headers,
                         "rows": rows,
-                        "label": pending_label,
+                        "label": label_from_heading or "Example",
                         "page_hint": None,
                     }
                 )
-                pending_label = f"Example {len(tables) + 1}"
+                # Consume heading; bare default does not earn +3 example bonus.
+                label_from_heading = None
             continue
         i += 1
     return tables
