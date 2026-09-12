@@ -432,6 +432,37 @@ def test_role_inferred_not_always_additive():
     assert "additive" not in roles.values() or roles.get("Epoxy resin") != "additive"
 
 
+def test_origin_web_is_document_fulltext_not_literature():
+    assert emb._origin_for_kind("web") == "document_fulltext"
+    assert emb._origin_for_kind("local") == "document_fulltext"
+    assert emb._origin_for_kind("literature") == "literature_fulltext"
+
+
+def test_origin_from_patent_filename(stores):
+    sources, chunks, _ = stores
+    text = ("Eligible body. " * 40) + """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 70 |
+| Solvent | 30 |
+"""
+    sid = sources.create(
+        filename="CN120693379A.pdf",
+        title="一种水性分散体防腐保护涂层组合物",
+        source_kind="web",
+        full_text=text,
+        content_hash=f"h-origin-{hash(text) & 0xFFFFFFFF:x}",
+        extraction_status="ok",
+        origin_url="https://patents.google.com/patent/CN120693379A",
+    )
+    with chunks._session_factory() as session:
+        chunks.replace_for_source_in(session, sid, [{"text": text, "heading_path": "", "page_no": 1, "meta": {}}])
+        session.commit()
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["draft"]["origin"] == "patent_fulltext"
+
+
 def test_extract_uses_flattened_rows_when_no_gfm(stores):
     sources, chunks, _ = stores
     body = (

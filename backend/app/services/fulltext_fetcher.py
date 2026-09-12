@@ -452,12 +452,18 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | N
     import time
 
     from ..db.source_store import get_source_store
-    from .patent_ids import canonical_origin_url
+    from .patent_ids import canonical_origin_url, normalize_patent_pub
 
     content_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
     origin = canonical_origin_url(
         ev.identifier, url=getattr(ev, "url", None)
     )
+    persist_kind = kind
+    _office, compact = normalize_patent_pub(ev.identifier)
+    if not compact:
+        _office, compact = normalize_patent_pub(getattr(ev, "url", None) or "")
+    if compact:
+        persist_kind = "patent"
     delay = 0.5
     for attempt in range(6):
         try:
@@ -468,7 +474,7 @@ def _persist_fulltext(text: str, ev: Evidence, kind: str, *, project_id: str | N
             source_id = store.create(
                 filename=ev.identifier[:500],
                 title=ev.title[:500],
-                source_kind=kind,
+                source_kind=persist_kind,
                 full_text=text,
                 content_hash=content_hash,
                 extraction_status="fulltext",

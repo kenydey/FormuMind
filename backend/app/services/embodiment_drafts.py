@@ -25,6 +25,7 @@ _ALLOWED_ORIGINS = frozenset(
     {
         "patent_fulltext",
         "literature_fulltext",
+        "document_fulltext",
         "oa_pdf",
         "surechembl",
         "surechembl+fulltext",
@@ -428,9 +429,23 @@ def _collect_source_text(source_id: str) -> tuple[str, list[dict[str, Any]]]:
     return "\n\n".join(parts), meta
 
 
-def _origin_for_kind(source_kind: str | None, *, surechembl: bool = False) -> str:
+def _origin_for_kind(
+    source_kind: str | None,
+    *,
+    surechembl: bool = False,
+    doc: Any | None = None,
+) -> str:
     if surechembl:
         return "surechembl+fulltext"
+    if doc is not None:
+        for candidate in (
+            getattr(doc, "filename", None),
+            getattr(doc, "title", None),
+            getattr(doc, "origin_url", None),
+        ):
+            _office, compact = normalize_patent_pub(candidate)
+            if compact:
+                return "patent_fulltext"
     kind = (source_kind or "").lower()
     if "patent" in kind:
         return "patent_fulltext"
@@ -438,7 +453,9 @@ def _origin_for_kind(source_kind: str | None, *, surechembl: bool = False) -> st
         return "oa_pdf"
     if kind in {"literature", "arxiv", "paper", "scholar"}:
         return "literature_fulltext"
-    return "literature_fulltext"
+    if kind in {"web", "local", "upload", "pasted", "image", "api"}:
+        return "document_fulltext"
+    return "document_fulltext"
 
 
 def _placeholder_from_names(names: list[str], *, limit: int = 8) -> list[dict[str, Any]]:
@@ -658,7 +675,7 @@ def extract_embodiment_draft(
             amount_source = "placeholder"
 
     doc = get_source_store().get(source_id)
-    origin = _origin_for_kind(doc.source_kind if doc else None, surechembl=surechembl_hint)
+    origin = _origin_for_kind(doc.source_kind if doc else None, surechembl=surechembl_hint, doc=doc)
     title = (doc.title if doc else None) or elig.get("title") or source_id
     identifier = (doc.origin_url if doc else None) or source_id
 
