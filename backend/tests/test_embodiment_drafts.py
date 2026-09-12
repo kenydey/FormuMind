@@ -286,6 +286,19 @@ The coating composition may 20
     assert emb.parse_flattened_amount_rows(text) is None
 
 
+def test_f3_dirty_name_lowers_confidence_and_warns():
+    text = """
+Example 2
+Water and its preparation method 40
+Epoxy resin 60
+"""
+    flat = emb.parse_flattened_amount_rows(text)
+    assert flat is not None
+    dirty = next(i for i in flat["ingredients"] if "preparation" in i["name"].lower())
+    assert dirty["confidence"] <= 0.45
+    assert any("标题污染" in w or "名称可能" in w for w in flat["warnings"])
+
+
 def test_citation_table_rejected():
     md = """
 | Patent | Title | Year |

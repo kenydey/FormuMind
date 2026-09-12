@@ -555,21 +555,29 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
     if amount_source == "table":
         amount_source = "prose"
     ingredients = []
+    extra_warnings: list[str] = []
     for row, pct in zip(best, pcts):
+        name = row["name"]
+        conf = 0.55
+        if _DIRTY_NAME_RE.search(name):
+            conf = min(conf, 0.45)
+            msg = "名称可能含标题污染，请核对原件"
+            if msg not in extra_warnings:
+                extra_warnings.append(msg)
         ingredients.append(
             {
-                "name": row["name"],
-                "role": row.get("role") or _infer_role(row["name"]),
+                "name": name,
+                "role": row.get("role") or _infer_role(name),
                 "weight_pct": pct,
                 "unit_raw": row.get("unit_raw"),
                 "amount_raw": row.get("amount_raw"),
-                "confidence": 0.55,
+                "confidence": conf,
                 "evidence_span": row.get("evidence_span"),
                 "smiles": None,
                 "cas_no": None,
             }
         )
-    warnings = list(warnings) + ["比重来自剥扁文本行恢复（非原生表格），请核对原件"]
+    warnings = list(warnings) + extra_warnings + ["比重来自剥扁文本行恢复（非原生表格），请核对原件"]
     return {
         "label": best_label,
         "page_hint": None,
