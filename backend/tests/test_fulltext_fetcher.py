@@ -300,6 +300,33 @@ def test_persist_fulltext_retries_on_db_locked(monkeypatch):
     assert calls["n"] == 3  # 2 次失败 + 1 次成功
 
 
+def test_persist_forces_patent_kind_for_pub_id(monkeypatch):
+    """When identifier/url normalizes to a patent pub, persist as source_kind=patent."""
+    created = {}
+
+    class FakeStore:
+        def find_by_hash(self, h):
+            return None
+
+        def create(self, **kw):
+            created.update(kw)
+            return "sid-1"
+
+    monkeypatch.setattr("app.db.source_store.get_source_store", lambda: FakeStore())
+    monkeypatch.setattr("app.services.kb_index.index_source", lambda sid, text: 1)
+
+    ev = Evidence(
+        source="internet",
+        identifier="CN104789083B",
+        title="demo",
+        snippet="x",
+        relevance=0.9,
+        url="https://patents.google.com/patent/CN104789083B",
+    )
+    ff._persist_fulltext("full text body " * 40, ev, "web")
+    assert created["source_kind"] == "patent"
+
+
 # ── OpenAlex content archive (2026-09-11) ────────────────────────────────────
 # The tier exists because the publisher-facing OA chain is the weakest link: a
 # pdf_url on a Cloudflare-fronted host answers 403 and the document is lost even

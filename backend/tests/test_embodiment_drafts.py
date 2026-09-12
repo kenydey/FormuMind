@@ -168,6 +168,7 @@ Example 1
     assert draft["needs_review"] is True
     assert draft["source_id"] == sid
     assert draft["amount_source"] == "table"
+    assert draft.get("text_provenance") in {"markdown_table", "html_table", "prose", "none"}
     assert draft["origin"] == "patent_fulltext"
     pcts = [i["weight_pct"] for i in draft["formulation"]["ingredients"]]
     assert 55.0 in pcts
@@ -284,6 +285,238 @@ Typical compositions may include 10
 The coating composition may 20
 """
     assert emb.parse_flattened_amount_rows(text) is None
+
+
+def test_f3_dirty_name_lowers_confidence_and_warns():
+    text = """
+Example 2
+Water and its preparation method 40
+Epoxy resin 60
+"""
+    flat = emb.parse_flattened_amount_rows(text)
+    assert flat is not None
+    dirty = next(i for i in flat["ingredients"] if "preparation" in i["name"].lower())
+    assert dirty["confidence"] <= 0.45
+    assert any("标题污染" in w or "名称可能" in w for w in flat["warnings"])
+
+
+def test_citation_table_rejected():
+    md = """
+| Patent | Title | Year |
+| --- | --- | --- |
+| DE102011120870B4 | Prior art coating | 2012 |
+| CN102528001A | Magnesium alloy | 2011 |
+| US8608869B2 | Surface treatment | 2013 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    assert emb.table_to_ingredients(tables[0]) is None
+
+
+def test_formulation_table_still_accepted():
+    md = """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 40 |
+| Zinc phosphate | 25 |
+| Solvent | 35 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    row = emb.table_to_ingredients(tables[0])
+    assert row is not None
+    assert [i["name"] for i in row["ingredients"]] == [
+        "Epoxy resin",
+        "Zinc phosphate",
+        "Solvent",
+    ]
+
+
+def test_score_bare_example_label_no_example_bonus():
+    """Parser default label ``Example`` must not earn the +3 embodiment signal."""
+    table = {"headers": ["Component", "wt%"], "label": "Example"}
+    emb_row = {
+        "label": "Example",
+        "ingredients": [{"name": "A"}, {"name": "B"}],
+    }
+    bare = emb.score_embodiment_table(table, emb_row)
+    numbered = emb.score_embodiment_table(
+        {"headers": ["Component", "wt%"], "label": "Example 1"},
+        {"label": "Example 1", "ingredients": emb_row["ingredients"]},
+    )
+    assert bare == pytest.approx(4.2)  # name_ok + amt_ok + 2 rows, no +3
+    assert numbered == pytest.approx(7.2)  # +3 for real Example 1 heading
+    assert numbered - bare >= 3.0
+
+
+def test_parse_markdown_tables_does_not_autonumber_unlabeled():
+    """After a real Example heading table, later tables keep bare Example (no Example N)."""
+    md = """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 40 |
+| Zinc phosphate | 25 |
+| Solvent | 35 |
+
+| Material | wt% |
+| --- | --- |
+| Polymer A | 50 |
+| Polymer B | 50 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    assert len(tables) == 2
+    assert emb._is_real_example_label(tables[0]["label"])
+    assert tables[1]["label"] == "Example"
+    assert not emb._is_real_example_label(tables[1]["label"])
+
+
+def test_score_material_header_contributes_name_ok():
+    table = {"headers": ["Material", "wt%"], "label": "Example"}
+    emb_row = {
+        "label": "Example",
+        "ingredients": [{"name": "Polymer A"}, {"name": "Polymer B"}],
+    }
+    material_score = emb.score_embodiment_table(table, emb_row)
+    decoy = {"headers": ["Polymer", "wt%"], "label": "Example"}
+    decoy_score = emb.score_embodiment_table(decoy, emb_row)
+    assert material_score == pytest.approx(4.2)  # Material|wt% earns name_ok + amt_ok
+    assert decoy_score == pytest.approx(0.2)  # no name_ok without material/component family
+    assert material_score - decoy_score >= 4.0
+
+
+def test_extract_prefers_formulation_over_citation_table(stores):
+    sources, chunks, _ = stores
+    md = (
+        "Patent body with enough characters for eligibility. " * 30
+        + """
+Related patents
+| Material | wt% |
+| --- | --- |
+| Polymer A | 16 |
+| Polymer B | 16 |
+| Polymer C | 16 |
+| Polymer D | 16 |
+| Polymer E | 16 |
+| Polymer F | 16 |
+
+| Patent | Title | Year |
+| --- | --- | --- |
+| DE102011120870B4 | Prior coating | 2012 |
+| CN102528001A | Mg alloy | 2011 |
+| US8608869B2 | Surface | 2013 |
+| EP1234567A1 | Film | 2010 |
+| WO2010123456A1 | Bath | 2010 |
+
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 55 |
+| Zinc phosphate | 15 |
+| Talc | 30 |
+"""
+    )
+    sid = _seed_doc(sources, chunks, text=md)
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["ok"] is True
+    names = [i["name"] for i in out["draft"]["formulation"]["ingredients"]]
+    assert "Epoxy resin" in names
+    assert not any(emb._is_publication_number(n) for n in names)
+    warnings = out["draft"]["formulation"]["warnings"]
+    assert any("语义" in w for w in warnings)
+
+
+def test_extract_prefers_example_heading_over_denser_unlabeled_material(stores):
+    """Real Example 1 Component table must beat a denser Material table without Example heading."""
+    sources, chunks, _ = stores
+    md = (
+        "Patent body with enough characters for eligibility. " * 30
+        + """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 55 |
+| Zinc phosphate | 15 |
+| Talc | 30 |
+
+| Material | wt% |
+| --- | --- |
+| Polymer A | 12.5 |
+| Polymer B | 12.5 |
+| Polymer C | 12.5 |
+| Polymer D | 12.5 |
+| Polymer E | 12.5 |
+| Polymer F | 12.5 |
+| Polymer G | 12.5 |
+| Polymer H | 12.5 |
+"""
+    )
+    sid = _seed_doc(sources, chunks, text=md)
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["ok"] is True
+    names = [i["name"] for i in out["draft"]["formulation"]["ingredients"]]
+    assert names == ["Epoxy resin", "Zinc phosphate", "Talc"]
+    assert "Polymer A" not in names
+
+
+def test_dirty_name_lowers_confidence_and_warns():
+    md = """
+Example 2
+| Component | wt% |
+| --- | --- |
+| Water and its preparation method | 40 |
+| Epoxy resin | 60 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    row = emb.table_to_ingredients(tables[0])
+    dirty = next(i for i in row["ingredients"] if "preparation" in i["name"].lower())
+    assert dirty["confidence"] <= 0.45
+    assert any("标题污染" in w or "名称可能" in w for w in row["warnings"])
+
+
+def test_role_inferred_not_always_additive():
+    md = """
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 50 |
+| Solvent naphtha | 50 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    row = emb.table_to_ingredients(tables[0])
+    roles = {i["name"]: i["role"] for i in row["ingredients"]}
+    assert roles["Epoxy resin"] == "resin"
+    assert roles["Solvent naphtha"] == "solvent"
+    assert "additive" not in roles.values() or roles.get("Epoxy resin") != "additive"
+
+
+def test_origin_web_is_document_fulltext_not_literature():
+    assert emb._origin_for_kind("web") == "document_fulltext"
+    assert emb._origin_for_kind("local") == "document_fulltext"
+    assert emb._origin_for_kind("literature") == "literature_fulltext"
+
+
+def test_origin_from_patent_filename(stores):
+    sources, chunks, _ = stores
+    text = ("Eligible body. " * 40) + """
+Example 1
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 70 |
+| Solvent | 30 |
+"""
+    sid = sources.create(
+        filename="CN120693379A.pdf",
+        title="一种水性分散体防腐保护涂层组合物",
+        source_kind="web",
+        full_text=text,
+        content_hash=f"h-origin-{hash(text) & 0xFFFFFFFF:x}",
+        extraction_status="ok",
+        origin_url="https://patents.google.com/patent/CN120693379A",
+    )
+    with chunks._session_factory() as session:
+        chunks.replace_for_source_in(session, sid, [{"text": text, "heading_path": "", "page_no": 1, "meta": {}}])
+        session.commit()
+    out = emb.extract_embodiment_draft(source_id=sid)
+    assert out["draft"]["origin"] == "patent_fulltext"
 
 
 def test_extract_uses_flattened_rows_when_no_gfm(stores):

@@ -15,6 +15,7 @@ from ..db.chunk_store import get_chunk_store
 from ..db.entity_store import get_entity_store
 from ..db.session_utils import commit_session
 from ..db.source_store import get_source_store
+from .kg.formulation_linker import _infer_role
 from .material_promote import propose_material
 from .patent_ids import normalize_patent_pub
 
@@ -24,6 +25,7 @@ _ALLOWED_ORIGINS = frozenset(
     {
         "patent_fulltext",
         "literature_fulltext",
+        "document_fulltext",
         "oa_pdf",
         "surechembl",
         "surechembl+fulltext",
@@ -43,6 +45,33 @@ _EXAMPLE_HEAD = re.compile(
     re.I,
 )
 _NUM_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+_PUB_NO_NAME_RE = re.compile(
+    r"^(?:CN|US|EP|DE|WO|JP|KR)\s*\d{5,}[A-Z0-9]*\b",
+    re.I,
+)
+_FORBIDDEN_NAME_HEADERS = re.compile(
+    r"^(patent|publication|pub\.?\s*no\.?|document|title|编号|公开号|专利号)$",
+    re.I,
+)
+_PRIOR_ART_CONTEXT = re.compile(
+    r"(prior\s*art|related\s*art|citation|references?|现有技术|对比文件|对比实施例)",
+    re.I,
+)
+_DIRTY_NAME_RE = re.compile(
+    r"(preparation\s+method|and\s+its\s+prepar|及其制备|制备方法)",
+    re.I,
+)
+_AMOUNT_UNIT_OK = re.compile(r"wt|%|份|phr|parts?|mass|质量", re.I)
+
+
+def _is_publication_number(name: str) -> bool:
+    return bool(_PUB_NO_NAME_RE.match((name or "").strip()))
+
+
+def _looks_like_year_amount(num: float, unit_hint: str) -> bool:
+    if _AMOUNT_UNIT_OK.search(unit_hint or ""):
+        return False
+    return 1900.0 <= float(num) <= 2100.0
 
 
 def check_eligibility(source_id: str) -> dict[str, Any]:
@@ -162,12 +191,13 @@ def parse_markdown_tables(text: str) -> list[dict[str, Any]]:
     lines = (text or "").splitlines()
     tables: list[dict[str, Any]] = []
     i = 0
-    pending_label = "Example"
+    # Only set from a real _EXAMPLE_HEAD line; never auto-number unlabeled tables.
+    label_from_heading: str | None = None
     while i < len(lines) - 1:
         line = lines[i].strip()
         em = _EXAMPLE_HEAD.search(line)
         if em and "|" not in line:
-            pending_label = line[:80] or "Example"
+            label_from_heading = line[:80] or "Example"
             i += 1
             continue
         if line.count("|") >= 2 and i + 1 < len(lines) and _is_md_sep(lines[i + 1]):
@@ -185,11 +215,12 @@ def parse_markdown_tables(text: str) -> list[dict[str, Any]]:
                     {
                         "headers": headers,
                         "rows": rows,
-                        "label": pending_label,
+                        "label": label_from_heading or "Example",
                         "page_hint": None,
                     }
                 )
-                pending_label = f"Example {len(tables) + 1}"
+                # Consume heading; bare default does not earn +3 example bonus.
+                label_from_heading = None
             continue
         i += 1
     return tables
@@ -225,29 +256,40 @@ def parse_html_tables(text: str) -> list[dict[str, Any]]:
     return tables
 
 
-def _column_map(headers: list[str]) -> tuple[int | None, int | None, str]:
+def _column_map(
+    headers: list[str], rows: list[list[str]] | None = None
+) -> tuple[int | None, int | None, str]:
     name_idx = None
     amt_idx = None
     unit_hint = ""
     for i, h in enumerate(headers):
         key = h.strip()
-        if name_idx is None and _NAME_HEADERS.match(key):
-            name_idx = i
+        if name_idx is None and not _FORBIDDEN_NAME_HEADERS.match(key):
+            if _NAME_HEADERS.match(key):
+                name_idx = i
+            elif re.search(r"component|ingredient|原料|组分|成分", key, re.I):
+                name_idx = i
         if amt_idx is None and _AMOUNT_HEADERS.match(key):
             amt_idx = i
             unit_hint = key
-        # Fuzzy: header contains wt or 份
         if amt_idx is None and re.search(r"wt\s*%|重量份|phr|mass\s*%|质量", key, re.I):
             amt_idx = i
             unit_hint = key
-        if name_idx is None and re.search(r"component|ingredient|原料|组分|成分", key, re.I):
-            name_idx = i
-    if name_idx is None and headers:
-        name_idx = 0
-    if amt_idx is None and len(headers) > 1:
-        # last numeric-looking column
-        amt_idx = len(headers) - 1
-        unit_hint = headers[amt_idx]
+    if amt_idx is None and len(headers) > 1 and rows:
+        last_idx = len(headers) - 1
+        unit_hint_candidate = headers[last_idx]
+        numeric = 0
+        total = 0
+        for row in rows:
+            if last_idx >= len(row):
+                continue
+            total += 1
+            num = _parse_number(row[last_idx])
+            if num is not None and not _looks_like_year_amount(num, unit_hint_candidate):
+                numeric += 1
+        if total > 0 and numeric >= total / 2:
+            amt_idx = last_idx
+            unit_hint = unit_hint_candidate
     return name_idx, amt_idx, unit_hint
 
 
@@ -280,7 +322,7 @@ def _amounts_to_weight_pct(
 def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
     headers = table.get("headers") or []
     rows = table.get("rows") or []
-    name_idx, amt_idx, unit_hint = _column_map(headers)
+    name_idx, amt_idx, unit_hint = _column_map(headers, rows)
     if name_idx is None or amt_idx is None:
         return None
     names: list[str] = []
@@ -291,8 +333,10 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
         name = row[name_idx].strip()
         if not name or _NAME_HEADERS.match(name):
             continue
+        if _is_publication_number(name):
+            continue
         num = _parse_number(row[amt_idx])
-        if num is None:
+        if num is None or _looks_like_year_amount(num, unit_hint):
             continue
         names.append(name[:200])
         amounts.append(num)
@@ -300,20 +344,29 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
         return None
     pcts, amount_source, warnings = _amounts_to_weight_pct(amounts, unit_hint)
     ingredients = []
+    extra_warnings: list[str] = []
     for name, pct, raw in zip(names, pcts, amounts):
+        role = _infer_role(name)
+        conf = 0.85 if amount_source == "table" else 0.4
+        if _DIRTY_NAME_RE.search(name):
+            conf = min(conf, 0.45)
+            msg = "名称可能含标题污染，请核对原件"
+            if msg not in extra_warnings:
+                extra_warnings.append(msg)
         ingredients.append(
             {
                 "name": name,
-                "role": "additive",
+                "role": role,
                 "weight_pct": pct if pct is not None else round(100.0 / len(names), 4),
                 "unit_raw": unit_hint,
                 "amount_raw": raw,
-                "confidence": 0.85 if amount_source == "table" else 0.4,
+                "confidence": conf,
                 "evidence_span": None,
                 "smiles": None,
                 "cas_no": None,
             }
         )
+    warnings = list(warnings) + extra_warnings
     return {
         "label": table.get("label") or "Example",
         "page_hint": table.get("page_hint"),
@@ -321,6 +374,45 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
         "amount_source": amount_source if all(p is not None for p in pcts) else "placeholder",
         "warnings": warnings,
     }
+
+
+def _is_real_example_label(label: str) -> bool:
+    """Numbered embodiment heading or 配方 — not parser default bare ``Example``."""
+    if re.search(r"配方", label or ""):
+        return True
+    m = _EXAMPLE_HEAD.search(label or "")
+    if not m:
+        return False
+    return bool(m.group(2))
+
+
+def score_embodiment_table(table: dict[str, Any], emb_row: dict[str, Any]) -> float:
+    score = 0.0
+    label = str(table.get("label") or emb_row.get("label") or "")
+    headers = " ".join(table.get("headers") or [])
+    if _is_real_example_label(label):
+        score += 3.0
+    name_ok = bool(
+        re.search(
+            r"component|ingredient|material|substance|原料|组分|成分|物料",
+            headers,
+            re.I,
+        )
+    )
+    amt_ok = bool(re.search(r"wt\s*%|重量份|phr|%|parts?", headers, re.I))
+    if name_ok and amt_ok:
+        score += 4.0
+    names = [i.get("name") or "" for i in emb_row.get("ingredients") or []]
+    if names:
+        pub_frac = sum(1 for n in names if _is_publication_number(n)) / len(names)
+        if pub_frac >= 0.5:
+            score -= 10.0
+    blob = f"{label} {headers}"
+    if _PRIOR_ART_CONTEXT.search(blob):
+        score -= 5.0
+    n = len(names)
+    score += 0.1 * min(n, 8)
+    return score
 
 
 def _collect_source_text(source_id: str) -> tuple[str, list[dict[str, Any]]]:
@@ -339,9 +431,23 @@ def _collect_source_text(source_id: str) -> tuple[str, list[dict[str, Any]]]:
     return "\n\n".join(parts), meta
 
 
-def _origin_for_kind(source_kind: str | None, *, surechembl: bool = False) -> str:
+def _origin_for_kind(
+    source_kind: str | None,
+    *,
+    surechembl: bool = False,
+    doc: Any | None = None,
+) -> str:
     if surechembl:
         return "surechembl+fulltext"
+    if doc is not None:
+        for candidate in (
+            getattr(doc, "filename", None),
+            getattr(doc, "title", None),
+            getattr(doc, "origin_url", None),
+        ):
+            _office, compact = normalize_patent_pub(candidate)
+            if compact:
+                return "patent_fulltext"
     kind = (source_kind or "").lower()
     if "patent" in kind:
         return "patent_fulltext"
@@ -349,7 +455,9 @@ def _origin_for_kind(source_kind: str | None, *, surechembl: bool = False) -> st
         return "oa_pdf"
     if kind in {"literature", "arxiv", "paper", "scholar"}:
         return "literature_fulltext"
-    return "literature_fulltext"
+    if kind in {"web", "local", "upload", "pasted", "image", "api"}:
+        return "document_fulltext"
+    return "document_fulltext"
 
 
 def _placeholder_from_names(names: list[str], *, limit: int = 8) -> list[dict[str, Any]]:
@@ -369,7 +477,7 @@ def _placeholder_from_names(names: list[str], *, limit: int = 8) -> list[dict[st
     return [
         {
             "name": n,
-            "role": "additive",
+            "role": _infer_role(n),
             "weight_pct": share,
             "unit_raw": None,
             "amount_raw": None,
@@ -446,7 +554,7 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
         current.append(
             {
                 "name": name,
-                "role": "additive",
+                "role": _infer_role(name),
                 "amount_raw": num,
                 "unit_raw": unit,
                 "evidence_span": raw[:200],
@@ -466,21 +574,29 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
     if amount_source == "table":
         amount_source = "prose"
     ingredients = []
+    extra_warnings: list[str] = []
     for row, pct in zip(best, pcts):
+        name = row["name"]
+        conf = 0.55
+        if _DIRTY_NAME_RE.search(name):
+            conf = min(conf, 0.45)
+            msg = "名称可能含标题污染，请核对原件"
+            if msg not in extra_warnings:
+                extra_warnings.append(msg)
         ingredients.append(
             {
-                "name": row["name"],
-                "role": "additive",
+                "name": name,
+                "role": row.get("role") or _infer_role(name),
                 "weight_pct": pct,
                 "unit_raw": row.get("unit_raw"),
                 "amount_raw": row.get("amount_raw"),
-                "confidence": 0.55,
+                "confidence": conf,
                 "evidence_span": row.get("evidence_span"),
                 "smiles": None,
                 "cas_no": None,
             }
         )
-    warnings = list(warnings) + ["比重来自剥扁文本行恢复（非原生表格），请核对原件"]
+    warnings = list(warnings) + extra_warnings + ["比重来自剥扁文本行恢复（非原生表格），请核对原件"]
     return {
         "label": best_label,
         "page_hint": None,
@@ -504,24 +620,33 @@ def extract_embodiment_draft(
     text, _chunk_meta = _collect_source_text(source_id)
     md_tables = parse_markdown_tables(text)
     html_tables = parse_html_tables(text)
-    embodiments: list[dict[str, Any]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for t in md_tables + html_tables:
-        emb = table_to_ingredients(t)
-        if emb:
-            embodiments.append(emb)
+        emb_row = table_to_ingredients(t)
+        if not emb_row:
+            continue
+        sc = score_embodiment_table(t, emb_row)
+        if sc < 0:
+            continue
+        emb_row["_score"] = sc
+        scored.append((sc, emb_row))
+    scored.sort(key=lambda x: (-x[0], -len(x[1]["ingredients"]), x[1].get("label") or ""))
+    embodiments = [e for _, e in scored]
+    for e in embodiments:
+        e.pop("_score", None)
 
     amount_source = "placeholder"
     warnings = [
         "人审草稿：确认后仅进入原料 pending + KG，不会写入生产配方池",
     ]
     if embodiments:
-        # Prefer densest table
-        embodiments.sort(key=lambda e: (-len(e["ingredients"]), e.get("label") or ""))
         primary = embodiments[0]
         amount_source = primary.get("amount_source") or "table"
         warnings.extend(primary.get("warnings") or [])
         if len(embodiments) > 1:
-            warnings.append(f"检测到 {len(embodiments)} 个实施例表；默认展示成分最多的一条，其余在人审中切换")
+            warnings.append(
+                f"检测到 {len(embodiments)} 个可用表；默认按表语义分展示，其余可在人审中切换"
+            )
         ingredients = primary["ingredients"]
         if amount_source == "table":
             warnings.insert(0, "比重来自已解析全文表格（已归一为 wt%），请核对原件")
@@ -551,8 +676,15 @@ def extract_embodiment_draft(
             ]
             amount_source = "placeholder"
 
+    if amount_source == "table":
+        text_provenance = "markdown_table" if md_tables else "html_table"
+    elif amount_source == "prose":
+        text_provenance = "prose"
+    else:
+        text_provenance = "none"
+
     doc = get_source_store().get(source_id)
-    origin = _origin_for_kind(doc.source_kind if doc else None, surechembl=surechembl_hint)
+    origin = _origin_for_kind(doc.source_kind if doc else None, surechembl=surechembl_hint, doc=doc)
     title = (doc.title if doc else None) or elig.get("title") or source_id
     identifier = (doc.origin_url if doc else None) or source_id
 
@@ -568,6 +700,7 @@ def extract_embodiment_draft(
         "url": doc.origin_url if doc else None,
         "url_alt": None,
         "amount_source": amount_source,
+        "text_provenance": text_provenance,
         "embodiments": embodiments,
         "formulation": {
             "name": f"全文草稿 · {(title or source_id)[:80]}",
@@ -575,7 +708,7 @@ def extract_embodiment_draft(
             "ingredients": [
                 {
                     "name": ing["name"],
-                    "role": ing.get("role") or "additive",
+                    "role": ing.get("role") or "unknown",
                     "weight_pct": ing["weight_pct"],
                     "smiles": ing.get("smiles"),
                     "cas_no": ing.get("cas_no"),
@@ -681,7 +814,7 @@ def confirm_embodiment_draft(draft: dict[str, Any]) -> dict[str, Any]:
                 {
                     "smiles": row.get("smiles") or None,
                     "cas_no": row.get("cas_no") or None,
-                    "role": row.get("role") or "additive",
+                    "role": row.get("role") or "unknown",
                 },
                 source=origin if len(origin) <= 32 else "fulltext_draft",
                 source_ref=f"embodiment draft {source_id or draft.get('doc_id')}",
