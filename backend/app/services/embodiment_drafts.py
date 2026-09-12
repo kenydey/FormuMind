@@ -674,6 +674,13 @@ def extract_embodiment_draft(
             ]
             amount_source = "placeholder"
 
+    if amount_source == "table":
+        text_provenance = "markdown_table" if md_tables else "html_table"
+    elif amount_source == "prose":
+        text_provenance = "prose"
+    else:
+        text_provenance = "none"
+
     doc = get_source_store().get(source_id)
     origin = _origin_for_kind(doc.source_kind if doc else None, surechembl=surechembl_hint, doc=doc)
     title = (doc.title if doc else None) or elig.get("title") or source_id
@@ -691,6 +698,7 @@ def extract_embodiment_draft(
         "url": doc.origin_url if doc else None,
         "url_alt": None,
         "amount_source": amount_source,
+        "text_provenance": text_provenance,
         "embodiments": embodiments,
         "formulation": {
             "name": f"全文草稿 · {(title or source_id)[:80]}",

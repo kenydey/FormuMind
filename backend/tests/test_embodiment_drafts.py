@@ -168,6 +168,7 @@ Example 1
     assert draft["needs_review"] is True
     assert draft["source_id"] == sid
     assert draft["amount_source"] == "table"
+    assert draft.get("text_provenance") in {"markdown_table", "html_table", "prose", "none"}
     assert draft["origin"] == "patent_fulltext"
     pcts = [i["weight_pct"] for i in draft["formulation"]["ingredients"]]
     assert 55.0 in pcts

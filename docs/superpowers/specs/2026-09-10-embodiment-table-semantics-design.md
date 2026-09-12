@@ -1,6 +1,6 @@
 # 实施例表语义门禁 + 入库/origin 补强（A+B）
 
-> 状态：已确认；实现计划见 `docs/superpowers/plans/2026-09-10-embodiment-table-semantics.md`  
+> 状态：已实现（仅新提取）；实现计划见 `docs/superpowers/plans/2026-09-10-embodiment-table-semantics.md`  
 > 日期：2026-09-10（落地日可能跨至 09-11）  
 > 触发：截图 CN102528001B（公开号当原料）· CN120693379A（半对配方 + 脏名 + 全 additive）  
 > 前置：[2026-09-09-embodiment-draft-noise-recovery.md](../../plans/2026-09-09-embodiment-draft-noise-recovery.md)（F0–F3 已落地）
