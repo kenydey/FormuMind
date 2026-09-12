@@ -389,6 +389,36 @@ Example 1
     assert any("语义" in w for w in warnings)
 
 
+def test_dirty_name_lowers_confidence_and_warns():
+    md = """
+Example 2
+| Component | wt% |
+| --- | --- |
+| Water and its preparation method | 40 |
+| Epoxy resin | 60 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    row = emb.table_to_ingredients(tables[0])
+    dirty = next(i for i in row["ingredients"] if "preparation" in i["name"].lower())
+    assert dirty["confidence"] <= 0.45
+    assert any("标题污染" in w or "名称可能" in w for w in row["warnings"])
+
+
+def test_role_inferred_not_always_additive():
+    md = """
+| Component | wt% |
+| --- | --- |
+| Epoxy resin | 50 |
+| Solvent naphtha | 50 |
+"""
+    tables = emb.parse_markdown_tables(md)
+    row = emb.table_to_ingredients(tables[0])
+    roles = {i["name"]: i["role"] for i in row["ingredients"]}
+    assert roles["Epoxy resin"] == "resin"
+    assert roles["Solvent naphtha"] == "solvent"
+    assert "additive" not in roles.values() or roles.get("Epoxy resin") != "additive"
+
+
 def test_extract_uses_flattened_rows_when_no_gfm(stores):
     sources, chunks, _ = stores
     body = (

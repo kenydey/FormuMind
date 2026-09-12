@@ -15,6 +15,7 @@ from ..db.chunk_store import get_chunk_store
 from ..db.entity_store import get_entity_store
 from ..db.session_utils import commit_session
 from ..db.source_store import get_source_store
+from .kg.formulation_linker import _infer_role
 from .material_promote import propose_material
 from .patent_ids import normalize_patent_pub
 
@@ -340,20 +341,29 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
         return None
     pcts, amount_source, warnings = _amounts_to_weight_pct(amounts, unit_hint)
     ingredients = []
+    extra_warnings: list[str] = []
     for name, pct, raw in zip(names, pcts, amounts):
+        role = _infer_role(name)
+        conf = 0.85 if amount_source == "table" else 0.4
+        if _DIRTY_NAME_RE.search(name):
+            conf = min(conf, 0.45)
+            msg = "名称可能含标题污染，请核对原件"
+            if msg not in extra_warnings:
+                extra_warnings.append(msg)
         ingredients.append(
             {
                 "name": name,
-                "role": "additive",
+                "role": role,
                 "weight_pct": pct if pct is not None else round(100.0 / len(names), 4),
                 "unit_raw": unit_hint,
                 "amount_raw": raw,
-                "confidence": 0.85 if amount_source == "table" else 0.4,
+                "confidence": conf,
                 "evidence_span": None,
                 "smiles": None,
                 "cas_no": None,
             }
         )
+    warnings = list(warnings) + extra_warnings
     return {
         "label": table.get("label") or "Example",
         "page_hint": table.get("page_hint"),
@@ -448,7 +458,7 @@ def _placeholder_from_names(names: list[str], *, limit: int = 8) -> list[dict[st
     return [
         {
             "name": n,
-            "role": "additive",
+            "role": _infer_role(n),
             "weight_pct": share,
             "unit_raw": None,
             "amount_raw": None,
@@ -525,7 +535,7 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
         current.append(
             {
                 "name": name,
-                "role": "additive",
+                "role": _infer_role(name),
                 "amount_raw": num,
                 "unit_raw": unit,
                 "evidence_span": raw[:200],
@@ -549,7 +559,7 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
         ingredients.append(
             {
                 "name": row["name"],
-                "role": "additive",
+                "role": row.get("role") or _infer_role(row["name"]),
                 "weight_pct": pct,
                 "unit_raw": row.get("unit_raw"),
                 "amount_raw": row.get("amount_raw"),
@@ -663,7 +673,7 @@ def extract_embodiment_draft(
             "ingredients": [
                 {
                     "name": ing["name"],
-                    "role": ing.get("role") or "additive",
+                    "role": ing.get("role") or "unknown",
                     "weight_pct": ing["weight_pct"],
                     "smiles": ing.get("smiles"),
                     "cas_no": ing.get("cas_no"),
@@ -769,7 +779,7 @@ def confirm_embodiment_draft(draft: dict[str, Any]) -> dict[str, Any]:
                 {
                     "smiles": row.get("smiles") or None,
                     "cas_no": row.get("cas_no") or None,
-                    "role": row.get("role") or "additive",
+                    "role": row.get("role") or "unknown",
                 },
                 source=origin if len(origin) <= 32 else "fulltext_draft",
                 source_ref=f"embodiment draft {source_id or draft.get('doc_id')}",
