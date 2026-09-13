@@ -1,6 +1,7 @@
 # RAG + LLM Wiki 混成升级评估与落地切片
 
 状态：**W0–W4 已落地**（混成默认开；Chat/DOE/Lint/只读 UI；Neo4j 薄投影默认关）（2026-09-09）  
+续篇（体验 / L2 themes / 检索分期，需求已冻结）：[`2026-09-13-wiki-compiled-memory.md`](./2026-09-13-wiki-compiled-memory.md) · ADR [`../architecture/ADR-2026-09-13-wiki-compiled-memory.md`](../architecture/ADR-2026-09-13-wiki-compiled-memory.md)  
 范围：在 **不破坏** 现有检索 / 问答 / 推荐 / DOE / ELN 的前提下，把 FormuMind 从「被动 RAG」升级为 **Raw 溯源 + LLM 编译 Wiki + 双轨检索**  
 底座契合：磁盘 Markdown（拟新增 Wiki 页）· SQLite（已有）· Neo4j（可选同步，已有适配）
 
