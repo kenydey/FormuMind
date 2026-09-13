@@ -90,15 +90,11 @@ export interface ChemicalLookupResult {
     }>;
   };
   /** Structured supplier list harvested from PubChem ``Chemical Vendors``.
-   *  Price / stock / delivery are ``null`` until a direct enrichment fills them. */
+   *  Only name / homepage / product page — PubChem exposes no commercial terms. */
   suppliers?: Array<{
     name: string;
     url?: string | null;
     product_url?: string | null;
-    price_cny_per_kg?: number | null;
-    inventory_qty?: number | null;
-    inventory_unit?: string | null;
-    delivery_days?: number | null;
   }>;
 }
 
@@ -1252,10 +1248,6 @@ export const api = {
         name: string;
         url?: string | null;
         product_url?: string | null;
-        price_cny_per_kg?: number | null;
-        inventory_qty?: number | null;
-        inventory_unit?: string | null;
-        delivery_days?: number | null;
       }>;
     }>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
   chemicalProfile: (q: string) =>
@@ -3674,8 +3666,4 @@ export interface Supplier {
   name: string;
   url?: string | null;
   product_url?: string | null;
-  price_cny_per_kg?: number | null;
-  inventory_qty?: number | null;
-  inventory_unit?: string | null;
-  delivery_days?: number | null;
 }

@@ -16,18 +16,18 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 class Supplier(BaseModel):
     """Structured supplier record harvested from PubChem ``Chemical Vendors``.
 
-    Each record holds the vendor name, URL, product page, price, inventory
-    and delivery time used in the material catalog. Stored as a JSON array
-    in the ``suppliers_json`` column so the catalog carries sourcing intelligence
-    without a second table.
+    Carries what the source actually exposes: vendor name, homepage URL and
+    product page. Stored as a JSON array in the ``suppliers_json`` column so
+    the catalog carries sourcing intelligence without a second table.
+
+    Price / stock / delivery are intentionally NOT modelled — PubChem's vendor
+    category provides no commercial terms (verified: it returns only
+    ``SourceName`` / ``SourceURL`` / ``SourceRecordURL`` / ``RegistryID``), so
+    such fields could never be filled and would render as empty placeholders.
     """
     name: str = Field(..., max_length=120, description="供应商名称")
     url: str | None = Field(default=None, description="供应商主页 URL")
     product_url: str | None = Field(default=None, description="产品页 URL")
-    price_cny_per_kg: float | None = Field(default=None, ge=0, description="吨参考价格 (CNY)")
-    inventory_qty: float | None = Field(default=None, description="当前可用数量")
-    inventory_unit: str | None = Field(default=None, description="库存单位")
-    delivery_days: int | None = Field(default=None, ge=0, description="标准交付天数")
 
 class ProductDomain(str, Enum):
     """The metal surface treatment product families FormuMind targets."""

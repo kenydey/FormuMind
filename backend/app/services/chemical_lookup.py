@@ -115,12 +115,13 @@ def _lookup_pubchem_vendors(client, encoded: str) -> list[dict[str, Any]]:
     """Fetch the ``Chemical Vendors`` list for a PubChem compound name.
 
     Returns a list of ``Supplier``-shaped dicts (name, url, product_url).
-    Price / stock / delivery are left ``None`` here -- the material catalog
-    can carry them later via direct enrichment -- so the record never claims
-    a price it does not have.
+    Only fields PubChem actually exposes are emitted: price / stock /
+    delivery are deliberately absent rather than emitted as ``null``
+    placeholders -- PubChem's vendor category carries no commercial terms,
+    so a placeholder column would only ever render as "-".
 
-    Note: PubChem does not expose vendor country, so no ``country`` field is
-    emitted.
+    Note: PubChem does not expose vendor country either, so no ``country``
+    field is emitted.
     """
     try:
         cid_url = (
@@ -154,10 +155,6 @@ def _lookup_pubchem_vendors(client, encoded: str) -> list[dict[str, Any]]:
                     "name": name,
                     "url": src.get("SourceURL"),
                     "product_url": src.get("SourceRecordURL"),
-                    "price_cny_per_kg": None,
-                    "inventory_qty": None,
-                    "inventory_unit": None,
-                    "delivery_days": None,
                 }
                 out.append(supplier)
             return out

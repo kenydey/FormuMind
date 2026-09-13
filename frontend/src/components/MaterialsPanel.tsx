@@ -206,14 +206,12 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         // Persist the harvested supplier list on the material so the
         // catalog carries it across sessions (stored as JSON array in
         // ``suppliers_json``; see backend alembic 0027).
+        // Only name / homepage / product page — PubChem vendors expose no
+        // commercial terms, so no price/stock/delivery fields are stored.
         suppliers_json: (r.suppliers ?? []).map((s) => ({
           name: s.name,
           url: s.url ?? undefined,
           product_url: s.product_url ?? undefined,
-          price_cny_per_kg: s.price_cny_per_kg ?? undefined,
-          inventory_qty: s.inventory_qty ?? undefined,
-          inventory_unit: s.inventory_unit ?? undefined,
-          delivery_days: s.delivery_days ?? undefined,
         })),
       }));
       setLookupMsg(formatChemicalLookupSourceMsg(r));
@@ -900,10 +898,8 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                   <thead>
                     <tr className="text-slate-500 border-b border-edge/50">
                       <th className="text-left py-0.5 font-medium">名称</th>
-                      <th className="text-left py-0.5 font-medium">URL</th>
-                      <th className="text-right py-0.5 font-medium">价格 ¥/kg</th>
-                      <th className="text-left py-0.5 font-medium">库存</th>
-                      <th className="text-right py-0.5 font-medium">交付天数</th>
+                      <th className="text-left py-0.5 font-medium">官网</th>
+                      <th className="text-left py-0.5 font-medium">产品页</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -924,16 +920,19 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                             <span className="text-slate-500">-</span>
                           )}
                         </td>
-                        <td className="py-0.5 text-right text-slate-300">
-                          {s.price_cny_per_kg != null ? s.price_cny_per_kg.toFixed(2) : "-"}
-                        </td>
-                        <td className="py-0.5 text-slate-300">
-                          {s.inventory_qty != null
-                            ? `${s.inventory_qty}${s.inventory_unit ?? ""}`
-                            : "-"}
-                        </td>
-                        <td className="py-0.5 text-right text-slate-300">
-                          {s.delivery_days != null ? s.delivery_days : "-"}
+                        <td className="py-0.5">
+                          {s.product_url ? (
+                            <a
+                              href={s.product_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-teal-300 hover:underline"
+                            >
+                              链接
+                            </a>
+                          ) : (
+                            <span className="text-slate-500">-</span>
+                          )}
                         </td>
                       </tr>
                     ))}
