@@ -2270,6 +2270,24 @@ export const api = {
       llm_generated?: boolean;
       source_ids?: string[];
     }>("/api/wiki/themes/compile", body),
+  rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
+  rebuildWikiEmbed: () =>
+    post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(
+      "/api/wiki/embed/rebuild",
+      {},
+    ),
+  reviewWikiPage: (body: {
+    path: string;
+    reviewed?: boolean;
+    human_override?: string;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      reviewed?: boolean | null;
+      human_override?: string | null;
+      flags?: string[];
+    }>("/api/wiki/pages/review", body),
   getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),

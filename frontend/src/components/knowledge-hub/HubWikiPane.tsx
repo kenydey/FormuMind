@@ -21,6 +21,8 @@ export default function HubWikiPane({ active }: { active: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [busy, setBusy] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -51,6 +53,25 @@ export default function HubWikiPane({ active }: { active: boolean }) {
       setLoading(false);
     }
   }, [flagsOnly, kind]);
+
+  const runOps = useCallback(
+    async (label: string, fn: () => Promise<unknown>) => {
+      setBusy(label);
+      setError(null);
+      try {
+        await fn();
+        await refresh();
+        if (detail?.path) {
+          setDetail(await api.getWikiByPath(detail.path));
+        }
+      } catch (e) {
+        setError(formatApiError(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [detail?.path, refresh],
+  );
 
   useEffect(() => {
     if (active) void refresh();
@@ -200,6 +221,57 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           onClick={() => void refresh()}
         >
           刷新
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy}
+          title="重建 Wiki FTS 索引（需 wiki_fts_enabled）"
+          data-testid="hub-wiki-rebuild-fts"
+          onClick={() => void runOps("fts", () => api.rebuildWikiFts())}
+        >
+          {busy === "fts" ? "FTS…" : "重建 FTS"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy}
+          title="重建 Wiki 摘要向量索引（需 wiki_embed_enabled）"
+          data-testid="hub-wiki-rebuild-embed"
+          onClick={() => void runOps("embed", () => api.rebuildWikiEmbed())}
+        >
+          {busy === "embed" ? "Embed…" : "重建 Embed"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy || detail?.kind !== "system"}
+          title="编译当前体系的 L2 综述（需 wiki_llm_themes_enabled）"
+          data-testid="hub-wiki-compile-theme"
+          onClick={() => {
+            const key = detail?.norm_key || detail?.path?.split("/").pop()?.replace(/\.md$/i, "");
+            if (!key) return;
+            void runOps("theme", () =>
+              api.compileWikiTheme({ system_key: key, use_llm: false }),
+            );
+          }}
+        >
+          {busy === "theme" ? "主题…" : "编译主题"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy || !detail}
+          title="Q4 预留：标记当前页已审（非完整编辑器）"
+          data-testid="hub-wiki-mark-reviewed"
+          onClick={() => {
+            if (!detail) return;
+            void runOps("review", () =>
+              api.reviewWikiPage({ path: detail.path, reviewed: true }),
+            );
+          }}
+        >
+          {busy === "review" ? "审阅…" : "标记已审"}
         </button>
       </div>
       {error && (

@@ -252,3 +252,29 @@ def rebuild_embed_endpoint() -> dict:
     from ..services.wiki.embed import rebuild_all_wiki_embeds
 
     return rebuild_all_wiki_embeds()
+
+
+class WikiReviewUpdate(BaseModel):
+    path: str
+    reviewed: bool | None = None
+    human_override: str | None = None
+
+
+@router.post("/pages/review")
+def review_page_endpoint(body: WikiReviewUpdate) -> dict:
+    """Q4 reserved contract: toggle reviewed / human_override (not a full editor)."""
+    _require_wiki()
+    if body.reviewed is None and body.human_override is None:
+        raise HTTPException(status_code=400, detail="reviewed or human_override required")
+    from ..services.wiki.review import apply_page_review
+
+    try:
+        return apply_page_review(
+            body.path,
+            reviewed=body.reviewed,
+            human_override=body.human_override,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"wiki page not found: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
