@@ -950,6 +950,7 @@ export const OBJECTIVE_METRIC: Record<ProductDomain, string> = {
   anticorrosion_coating: "salt_spray_hours",
   degreaser: "cleaning_efficiency",
   surface_treatment: "salt_spray_hours",
+  autodeposition_coating: "salt_spray_hours",
 };
 
 export function primaryObjectiveMetric(req: Requirement): string {
