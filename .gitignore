@@ -49,6 +49,10 @@ poc_ocsr/
 *.before_fix
 *.backup_before_mod
 docker-compose.yml.bak*
+# 带时间戳的备份（如 .env.bak.20260913_143322）——`*.bak` 只匹配以 .bak 结尾，
+# 这类中间带 .bak. 的名字会漏网，可能把含密钥的 env 备份暴露给 git。
+*.bak.*
+.env.bak*
 
 # MolScribe weights (bind-mounted at runtime, 1.1 GB)
 deploy/molscribe/hf-cache/

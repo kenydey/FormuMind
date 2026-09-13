@@ -34,6 +34,9 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
+      # Datalab 平台非 TESTING 模式，每个端点都要求 DATALAB-API-KEY 头，缺失即 401。
+      # 值放 .env（已 gitignore），不要写死在本文件里。
+      FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
     depends_on:
       postgres:
@@ -49,6 +52,9 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: ${FORMUMIND_DATALAB_API_URL:-http://datalab-api:5001}
+      # Datalab 平台非 TESTING 模式，每个端点都要求 DATALAB-API-KEY 头，缺失即 401。
+      # 值放 .env（已 gitignore），不要写死在本文件里。
+      FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
     depends_on:
       postgres:

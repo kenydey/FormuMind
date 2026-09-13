@@ -66,6 +66,10 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+      # Datalab 平台为 PYDATALAB_TESTING=false，每个端点都要求 DATALAB-API-KEY 头；
+      # 缺失时后端日志出现 401 UNAUTHORIZED（前端文案会误导成「ELN 不可达」）。
+      # 值放 .env（已 gitignore），不要写死在本文件里。
+      FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
       # Optional Neo4j graph-store adapter (sibling to SQLite KG).
       FORMUMIND_NEO4J_ENABLED: "true"
       FORMUMIND_NEO4J_URI: bolt://kg:7687
@@ -106,6 +110,10 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+      # Datalab 平台为 PYDATALAB_TESTING=false，每个端点都要求 DATALAB-API-KEY 头；
+      # 缺失时后端日志出现 401 UNAUTHORIZED（前端文案会误导成「ELN 不可达」）。
+      # 值放 .env（已 gitignore），不要写死在本文件里。
+      FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
       # Optional Neo4j graph-store adapter (sibling to SQLite KG).
       FORMUMIND_NEO4J_ENABLED: "true"
       FORMUMIND_NEO4J_URI: bolt://kg:7687
@@ -158,6 +166,10 @@ services:
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
       FORMUMIND_DATALAB_API_URL: http://host.docker.internal:5001
+      # Datalab 平台为 PYDATALAB_TESTING=false，每个端点都要求 DATALAB-API-KEY 头；
+      # 缺失时后端日志出现 401 UNAUTHORIZED（前端文案会误导成「ELN 不可达」）。
+      # 值放 .env（已 gitignore），不要写死在本文件里。
+      FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
       FORMUMIND_NEO4J_ENABLED: "true"
       FORMUMIND_NEO4J_URI: bolt://kg:7687
       FORMUMIND_NEO4J_USER: neo4j
