@@ -182,8 +182,23 @@ def _ensure_kb_entity_link_columns(engine: Engine) -> None:
     )
 
 
+# 软扩列定义: 列名 -> (ADD COLUMN DDL, 可选索引 DDL)。
+# 供非 alembic 管理的旧库使用（如仓库根 data/formumind.db 没有 alembic_version
+# 表，`alembic upgrade head` 会从 0001 重跑而失败）。缺失即就地 ALTER 补上；
+# 全部 nullable 或带默认值，无 backfill，不触碰既有数据。
+_MATERIAL_SOFT_COLUMNS: dict[str, tuple[str, str | None]] = {
+    # alembic 0026
+    "archived": (
+        "archived BOOLEAN DEFAULT 0 NOT NULL",
+        "CREATE INDEX ix_materials_archived ON materials (archived)",
+    ),
+    # alembic 0027 — 供应商清单（PubChem Chemical Vendors 采集，JSON 数组）
+    "suppliers_json": ("suppliers_json JSON", None),
+}
+
+
 def _ensure_material_columns(engine: Engine) -> None:
-    """材料表列守护 + 软扩列 archived；并确保 material_candidates 表存在。"""
+    """材料表列守护 + 软扩列（archived / suppliers_json）；并确保 material_candidates 表存在。"""
     from sqlalchemy import inspect, text
 
     _require_columns(
@@ -194,25 +209,19 @@ def _ensure_material_columns(engine: Engine) -> None:
     inspector = inspect(engine)
     if "materials" in inspector.get_table_names():
         existing = {c["name"] for c in inspector.get_columns("materials")}
-        if "archived" not in existing:
+        for col, (ddl, index_ddl) in _MATERIAL_SOFT_COLUMNS.items():
+            if col in existing:
+                continue
             try:
                 with engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            'ALTER TABLE materials ADD COLUMN archived BOOLEAN '
-                            "DEFAULT 0 NOT NULL"
-                        )
-                    )
-                    try:
-                        conn.execute(
-                            text(
-                                "CREATE INDEX ix_materials_archived "
-                                "ON materials (archived)"
-                            )
-                        )
-                    except Exception:
-                        pass
+                    conn.execute(text(f"ALTER TABLE materials ADD COLUMN {ddl}"))
+                    if index_ddl:
+                        try:
+                            conn.execute(text(index_ddl))
+                        except Exception:
+                            pass
             except Exception as exc:
+                # 竞态或已存在：静默（alembic 已加过）
                 if "duplicate column" not in str(exc).lower():
                     raise
     # New pending-queue table: create_all covers fresh DBs; existing DBs need it too.
