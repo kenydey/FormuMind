@@ -355,6 +355,51 @@ def set_formulation_mode(body: FormulationModeUpdate) -> dict:
     return {"mode": body.mode, "status": "ok"}
 
 
+# ── Wiki chat blend mode (non-boolean; S1) ───────────────────────────────
+
+WIKI_CHAT_MODE_CHOICES = [
+    {
+        "value": "balanced",
+        "label": "均衡",
+        "desc": "Wiki 凝练与 Raw 摘录双轨融合（默认）",
+    },
+    {
+        "value": "wiki_first",
+        "label": "Wiki 优先",
+        "desc": "机理/体系/避坑偏 Wiki；数值与 Claims 仍回 Raw",
+    },
+    {
+        "value": "raw_first",
+        "label": "Raw 优先",
+        "desc": "以原始摘录为主，Wiki 仅作弱提示",
+    },
+]
+
+
+class WikiChatModeUpdate(BaseModel):
+    mode: str = Field(default="balanced", pattern="^(balanced|wiki_first|raw_first)$")
+
+
+@router.get("/settings/wiki-chat-mode")
+def get_wiki_chat_mode() -> dict:
+    s = get_settings()
+    return {"current": s.wiki_chat_mode, "choices": WIKI_CHAT_MODE_CHOICES}
+
+
+@router.post("/settings/wiki-chat-mode")
+def set_wiki_chat_mode(body: WikiChatModeUpdate) -> dict:
+    import os
+    from ..services.secrets_store import write_env_updates
+
+    os.environ["FORMUMIND_WIKI_CHAT_MODE"] = body.mode
+    try:
+        write_env_updates({"FORMUMIND_WIKI_CHAT_MODE": body.mode})
+    except OSError:
+        pass
+    get_settings.cache_clear()
+    return {"mode": body.mode, "status": "ok"}
+
+
 # ── OCSR 状态（MolScribe）────────────────────────────────────────────────
 
 

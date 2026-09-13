@@ -11,6 +11,8 @@ import {
   splitCitationMarkdown,
 } from "./citationMarkdown";
 import NotificationStack from "./NotificationStack";
+import RelatedWikiList from "./RelatedWikiList";
+import WikiChatModeSelector from "./WikiChatModeSelector";
 
 /**
  * Must stay in step with the stages `research_graph._emit` actually sends.
@@ -268,6 +270,7 @@ export default function ResearchPanel() {
         <p className="text-[11px] text-slate-500 mt-0.5">
           基于左栏已选的 {selectedCount} / {sources.length} 条资料进行问答（RAG 接地）
         </p>
+        <WikiChatModeSelector compact className="mt-1.5" />
       </div>
 
       {chatSessionsOpen && (
@@ -422,6 +425,9 @@ export default function ResearchPanel() {
                       <CitationChip key={j} ev={c} />
                     ))}
                   </div>
+                )}
+                {m.role === "assistant" && !m.streaming && (
+                  <RelatedWikiList citations={m.citations} />
                 )}
               </div>
             </div>

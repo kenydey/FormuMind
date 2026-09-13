@@ -1706,11 +1706,33 @@ def _chat_prompt(
         trade_suffix = trade_product_prompt_suffix(evidence)
     except Exception as exc:
         log.debug("trade product prompt suffix unavailable: %s", exc)
+    wiki_mode = "balanced"
+    try:
+        from ..config import get_settings as _gs
+
+        wiki_mode = (_gs().wiki_chat_mode or "balanced").strip().lower()
+    except Exception:
+        pass
+    if wiki_mode in ("wiki_first", "wiki", "wiki-priority"):
+        wiki_guidance = (
+            "When both Wiki compiled memory and Raw excerpts are present, prefer Wiki "
+            "for mechanisms / systems / pitfalls synthesis, but still cite Raw for "
+            "numeric claims and keep Claims provenance on Raw only.\n"
+        )
+    elif wiki_mode in ("raw_first", "raw", "raw-priority"):
+        wiki_guidance = (
+            "When both Wiki compiled memory and Raw excerpts are present, treat Raw as "
+            "primary; Wiki is optional soft context only.\n"
+        )
+    else:
+        wiki_guidance = (
+            "When both Wiki compiled memory and Raw excerpts are present, treat Wiki as "
+            "secondary synthesis; prefer Raw excerpts for factual claims and citations.\n"
+        )
     return (
         f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
         f"Cite sources by number [1], [2], etc.\n"
-        f"When both Wiki compiled memory and Raw excerpts are present, treat Wiki as "
-        f"secondary synthesis; prefer Raw excerpts for factual claims and citations.\n"
+        f"{wiki_guidance}"
         f"Chemistry notation rules: keep reaction equations as LaTeX inside $$…$$; "
         f"keep molecular formulas as plain text with digits (Zn3(PO4)2); when giving a "
         f"molecular structure, put its SMILES in a fenced code block tagged `smiles`; "

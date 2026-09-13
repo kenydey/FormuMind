@@ -2300,6 +2300,15 @@ export const api = {
   setFormulationMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
 
+  getWikiChatMode: () =>
+    get<{
+      current: string;
+      choices: { value: string; label: string; desc: string }[];
+    }>("/api/settings/wiki-chat-mode"),
+
+  setWikiChatMode: (mode: string) =>
+    post<{ mode: string; status: string }>("/api/settings/wiki-chat-mode", { mode }),
+
   postDoeCyclePause: (campaignId: number | string, isPaused: boolean) =>
     post<{ status: string; message: string }>(
       `/api/experiments/hooks/pause-doecycle/${campaignId}`,

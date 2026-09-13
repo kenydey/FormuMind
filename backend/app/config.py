@@ -546,6 +546,11 @@ class Settings(BaseSettings):
     wiki_enabled: bool = True
     wiki_compile_on_ingest: bool = True
     wiki_chat_blend: bool = True
+    # Chat 双轨权重：balanced | wiki_first | raw_first（不影响 Claims 只认 Raw）
+    wiki_chat_mode: str = Field(
+        default="balanced",
+        description="Wiki/Raw blend mode for chat: balanced | wiki_first | raw_first",
+    )
     wiki_doe_constraints: bool = True
     wiki_lint_on_compile: bool = True
     wiki_neo4j_project: bool = False
