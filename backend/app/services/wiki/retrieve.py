@@ -90,7 +90,29 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
             )
         )
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [ev for _, ev in scored[: max(1, min(20, k))]]
+    keyword_hits = [ev for _, ev in scored[: max(1, min(20, k))]]
+
+    # Phase 3: merge embedded wiki summaries (semantic) when flag on.
+    if getattr(settings, "wiki_embed_enabled", False):
+        try:
+            from .embed import search_wiki_embedded
+
+            embedded = search_wiki_embedded(q, k=k)
+        except Exception:
+            embedded = []
+        if embedded:
+            by_id: dict[str, Evidence] = {ev.identifier: ev for ev in embedded}
+            for ev in keyword_hits:
+                prev = by_id.get(ev.identifier)
+                if prev is None or float(ev.relevance or 0) > float(prev.relevance or 0):
+                    by_id[ev.identifier] = ev
+            merged = sorted(
+                by_id.values(),
+                key=lambda e: float(e.relevance or 0),
+                reverse=True,
+            )
+            return merged[: max(1, min(20, k))]
+    return keyword_hits
 
 
 def blend_wiki_evidence(

@@ -558,6 +558,9 @@ class Settings(BaseSettings):
     wiki_fts_enabled: bool = True
     # Phase 2: L2 theme LLM/template compiler. Default OFF.
     wiki_llm_themes_enabled: bool = False
+    # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
+    # Default OFF — dual-track; never replaces Raw chunk RAG.
+    wiki_embed_enabled: bool = False
     # 每篇文档最多持久化多少切块。这是全文成功抓取之后**唯一**还会静默丢内容
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600

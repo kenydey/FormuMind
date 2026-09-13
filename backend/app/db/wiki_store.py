@@ -132,6 +132,13 @@ class WikiStore:
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("wiki FTS sync skipped: %s", exc)
+        # Best-effort Phase-3 embed into document_chunks (flag-gated)
+        try:
+            from ..services.wiki.embed import embed_wiki_page
+
+            embed_wiki_page(rel)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("wiki embed sync skipped: %s", exc)
         return out
 
     def get(self, page_id: str) -> WikiPage | None:

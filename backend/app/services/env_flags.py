@@ -208,6 +208,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("wiki_llm_themes_enabled", "Wiki L2 主题长文",
             "允许手动编译 themes/ 体系综述（可选用 LLM 叙述；默认关）。",
             "kb", "依赖 wiki_enabled；需有效 LLM key 才生成叙述段"),
+    EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
+            "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"
+            "默认关；不关闭 Raw chunk RAG，不新建向量库。",
+            "kb", "依赖 wiki_enabled；有 sentence-transformers 时带向量，否则关键词兜底"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",
             "上传/导入文档时用 LLM 提取全局参数空间与摘要（Source Guide）。",
             "kb", "需有效 LLM key"),

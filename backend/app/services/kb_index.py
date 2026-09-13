@@ -568,6 +568,18 @@ def search_chunks(
         if not chunks:
             return []
 
+        # Dual-track: Wiki summary chunks are Track A only (Phase 3).
+        try:
+            from .wiki.embed import list_wiki_source_ids
+
+            wiki_ids = list_wiki_source_ids()
+            if wiki_ids:
+                chunks = [c for c in chunks if c.source_id not in wiki_ids]
+                if not chunks:
+                    return []
+        except Exception:
+            pass
+
         if langs:
             chunks = [c for c in chunks if (getattr(c, "lang", "") or "") in langs]
             if not chunks:

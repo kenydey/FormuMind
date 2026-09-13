@@ -241,3 +241,14 @@ def rebuild_fts_endpoint() -> dict:
     store = get_wiki_store()
     n = rebuild_all(store._session_factory, store)
     return {"ok": True, "indexed": n}
+
+
+@router.post("/embed/rebuild")
+def rebuild_embed_endpoint() -> dict:
+    """Phase 3: re-embed all wiki page summaries into document_chunks."""
+    _require_wiki()
+    if not getattr(get_settings(), "wiki_embed_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_embed_enabled is false")
+    from ..services.wiki.embed import rebuild_all_wiki_embeds
+
+    return rebuild_all_wiki_embeds()

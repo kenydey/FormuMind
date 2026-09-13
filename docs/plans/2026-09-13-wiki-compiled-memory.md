@@ -160,6 +160,14 @@ Claims ← 仍只 Raw（解锁见 §5）
 2. 人编 B/C 若产品需要再开题  
 3. 导出 / MkDocs 包：仅当评审推翻 Q13 后另立切片  
 
+**DoD（摘要）**
+
+- [x] Flag 关：不写入 wiki 摘要 chunk、rebuild 拒绝  
+- [x] Flag 开：摘要进入 `document_chunks`（`source_kind=wiki`），Chat Track A 可召回  
+- [x] Track B / Claims 仍不把 Wiki 当 Raw；不新建第二向量库  
+
+实现记录：[`2026-09-13-wiki-p3-impl.md`](./2026-09-13-wiki-p3-impl.md)
+
 ---
 
 ## 5. 信任边界与解锁条件
