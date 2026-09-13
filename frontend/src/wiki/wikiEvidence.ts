@@ -21,9 +21,10 @@ export function relatedWikiFromCitations(citations?: Evidence[]): {
   path: string;
   title: string;
   kind: string;
+  snippet?: string;
 }[] {
   if (!citations?.length) return [];
-  const out: { path: string; title: string; kind: string }[] = [];
+  const out: { path: string; title: string; kind: string; snippet?: string }[] = [];
   const seen = new Set<string>();
   for (const c of citations) {
     if (!isWikiEvidence(c)) continue;
@@ -31,10 +32,12 @@ export function relatedWikiFromCitations(citations?: Evidence[]): {
     if (!path || seen.has(path)) continue;
     seen.add(path);
     const kindMatch = (c.title || "").match(/^\[Wiki\/([^\]]+)\]/i);
+    const snip = (c.snippet || "").replace(/\s+/g, " ").trim();
     out.push({
       path,
       title: wikiTitleFromEvidence(c),
       kind: kindMatch?.[1] || "page",
+      snippet: snip ? snip.slice(0, 80) : undefined,
     });
   }
   return out;

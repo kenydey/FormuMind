@@ -554,6 +554,10 @@ class Settings(BaseSettings):
     wiki_doe_constraints: bool = True
     wiki_lint_on_compile: bool = True
     wiki_neo4j_project: bool = False
+    # Phase 2: Wiki FTS5 (title/path/flags/body). Default on — deterministic, no LLM.
+    wiki_fts_enabled: bool = True
+    # Phase 2: L2 theme LLM/template compiler. Default OFF.
+    wiki_llm_themes_enabled: bool = False
     # 每篇文档最多持久化多少切块。这是全文成功抓取之后**唯一**还会静默丢内容
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600

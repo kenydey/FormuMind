@@ -53,6 +53,9 @@ def wiki_parameter_bounds(*, limit: int = 200) -> list[dict[str, Any]]:
         logger.debug("wiki bounds list failed: %s", exc)
         return []
     for row in pages:
+        if (row.kind or "").lower() == "theme":
+            # L2 themes never feed DOE soft/hard constraint extraction
+            continue
         md = store.read_markdown(row.path) or ""
         meta, _ = parse_front_matter(md)
         for b in _parse_bounds(meta):
@@ -84,6 +87,8 @@ def wiki_forbidden(*, limit: int = 200) -> list[dict[str, str]]:
         logger.debug("wiki forbidden list failed: %s", exc)
         return []
     for row in pages:
+        if (row.kind or "").lower() == "theme":
+            continue
         md = store.read_markdown(row.path) or ""
         meta, _ = parse_front_matter(md)
         for text in _parse_forbidden(meta):

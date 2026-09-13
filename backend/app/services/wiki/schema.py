@@ -41,6 +41,11 @@ def pitfall_path(key: str) -> str:
     return f"pitfalls/{safe_key(key)}.md"
 
 
+def theme_path(key: str) -> str:
+    """L2 theme page: ``themes/system-{key}.md`` (system overview template)."""
+    return f"themes/system-{safe_key(key)}.md"
+
+
 def chemical_path(*, cas: str | None = None, smiles: str | None = None, name: str | None = None) -> str:
     if cas:
         # Keep CAS hyphens (safe on disk); only strip path-hostile chars.
@@ -90,6 +95,7 @@ def dump_page(
     evidence_blocks: list[str] | None = None,
     bounds: list[dict] | None = None,
     forbidden: list[str] | None = None,
+    extra_meta: dict[str, Any] | None = None,
 ) -> str:
     """Serialize a wiki markdown page with YAML-ish front matter (no PyYAML dep)."""
     import json
@@ -114,6 +120,13 @@ def dump_page(
         lines.append(f"bounds_json: {json.dumps(bounds, ensure_ascii=False)}")
     if forbidden:
         lines.append(f"forbidden_json: {json.dumps(forbidden, ensure_ascii=False)}")
+    for ek, ev in (extra_meta or {}).items():
+        if ev is None or ev == "":
+            continue
+        if isinstance(ev, (dict, list)):
+            lines.append(f"{ek}: {json.dumps(ev, ensure_ascii=False)}")
+        else:
+            lines.append(f"{ek}: {_yaml_escape(str(ev))}")
     lines.extend(
         [
             "---",

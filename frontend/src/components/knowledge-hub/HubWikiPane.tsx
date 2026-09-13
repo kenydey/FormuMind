@@ -4,16 +4,20 @@ import {
   formatApiError,
   type WikiPageDetail,
   type WikiPageItem,
+  type WikiSearchHit,
 } from "../../api";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 
-/** Wiki pane inside Knowledge Hub (read-only). S1: Reader + substring search + wikilinks. */
+/** Wiki pane inside Knowledge Hub (read-only). S1 reader + P2 FTS search. */
 export default function HubWikiPane({ active }: { active: boolean }) {
   const [pages, setPages] = useState<WikiPageItem[]>([]);
   const [kind, setKind] = useState("");
   const [detail, setDetail] = useState<WikiPageDetail | null>(null);
   const [flagsOnly, setFlagsOnly] = useState(false);
+  const [reviewedOnly, setReviewedOnly] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<WikiSearchHit[] | null>(null);
+  const [searchMode, setSearchMode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,16 +56,74 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     if (active) void refresh();
   }, [active, refresh]);
 
+  // P2: server FTS when query length >= 2 and not flags-only
+  useEffect(() => {
+    if (!active || flagsOnly) {
+      setSearchHits(null);
+      setSearchMode(null);
+      return;
+    }
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchHits(null);
+      setSearchMode(null);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      api
+        .searchWikiPages({ q, kind: kind || undefined, limit: 50 })
+        .then((r) => {
+          if (cancelled) return;
+          setSearchHits(r.hits ?? []);
+          setSearchMode(r.mode);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSearchHits(null);
+            setSearchMode(null);
+          }
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [active, flagsOnly, query, kind]);
+
   const filtered = useMemo(() => {
+    let list = pages;
+    if (reviewedOnly) {
+      list = list.filter((p) => !(p.flags || []).includes("unreviewed"));
+    }
+    if (searchHits) {
+      // Prefer FTS hit order; map to page items when possible
+      const byPath = new Map(list.map((p) => [p.path, p]));
+      return searchHits.map((h) => {
+        const existing = byPath.get(h.path);
+        if (existing) return existing;
+        return {
+          id: h.id || h.path,
+          path: h.path,
+          kind: h.kind,
+          title: h.title,
+          norm_key: h.norm_key || "",
+          source_ids: h.source_ids || [],
+          flags: h.flags || [],
+          revision: 1,
+          updated_at: null,
+        } as WikiPageItem;
+      });
+    }
     const q = query.trim().toLowerCase();
-    if (!q) return pages;
-    return pages.filter((p) => {
+    if (!q) return list;
+    return list.filter((p) => {
       const title = (p.title || "").toLowerCase();
       const path = (p.path || "").toLowerCase();
       const nk = (p.norm_key || "").toLowerCase();
       return title.includes(q) || path.includes(q) || nk.includes(q);
     });
-  }, [pages, query]);
+  }, [pages, query, searchHits, reviewedOnly]);
 
   const linkPages = useMemo(
     () =>
@@ -83,6 +145,9 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     }
   }, []);
 
+  const hitSnippet = (path: string) =>
+    searchHits?.find((h) => h.path === path)?.snippet || null;
+
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-wiki-pane">
       <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
@@ -98,6 +163,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           <option value="system">systems</option>
           <option value="mechanism">mechanisms</option>
           <option value="pitfall">pitfalls</option>
+          <option value="theme">themes</option>
         </select>
         <label className="flex items-center gap-1 text-slate-400">
           <input
@@ -107,14 +173,27 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           />
           仅 Flag
         </label>
+        <label className="flex items-center gap-1 text-slate-400" title="隐藏 flags 含 unreviewed 的主题草稿">
+          <input
+            type="checkbox"
+            checked={reviewedOnly}
+            onChange={(e) => setReviewedOnly(e.target.checked)}
+          />
+          仅已审
+        </label>
         <input
           type="search"
           className="bg-ink border border-edge rounded px-2 py-1 text-slate-200 min-w-[10rem] flex-1"
-          placeholder="搜索标题 / path…"
+          placeholder="搜索标题 / path / 正文…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           data-testid="hub-wiki-search"
         />
+        {searchMode && query.trim().length >= 2 && (
+          <span className="text-[10px] text-slate-500" title="检索后端">
+            {searchMode === "fts" ? "FTS" : "关键词"}
+          </span>
+        )}
         <button
           type="button"
           className="px-2 py-1 border border-edge rounded"
@@ -137,7 +216,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
             </li>
           )}
           {filtered.map((p) => (
-            <li key={p.id}>
+            <li key={p.id || p.path}>
               <button
                 type="button"
                 className={`w-full text-left px-3 py-2 hover:bg-accent/5 ${
@@ -158,6 +237,11 @@ export default function HubWikiPane({ active }: { active: boolean }) {
                     </span>
                   ))}
                 </div>
+                {hitSnippet(p.path) && (
+                  <div className="text-[10px] text-slate-400 mt-0.5 line-clamp-2">
+                    {hitSnippet(p.path)}
+                  </div>
+                )}
               </button>
             </li>
           ))}

@@ -146,11 +146,12 @@ Claims ← 仍只 Raw（解锁见 §5）
 
 **DoD（摘要）**
 
-- [ ] Flag 关：无 L2 页写入、无主题任务  
-- [ ] Flag 开且手动跑：生成体系综述页，含 L1 链接与 Raw source_ids  
-- [ ] FTS 可搜正文术语命中 wiki 页  
-- [ ] L2 不进入 Claims；不进入 DOE 硬边界
+- [x] Flag 关：无 L2 页写入、无主题任务
+- [x] Flag 开且手动跑：生成体系综述页，含 L1 链接与 Raw source_ids
+- [x] FTS 可搜正文术语命中 wiki 页
+- [x] L2 不进入 Claims；不进入 DOE 硬边界（constraints 跳过 `theme`）
 
+实现记录：[`2026-09-13-wiki-p2-impl.md`](./2026-09-13-wiki-p2-impl.md)
 ---
 
 ### Phase 3

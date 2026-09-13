@@ -1,9 +1,10 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { type Components } from "react-markdown";
 import MarkdownMessage from "./MarkdownMessage";
 import { parseWikiFrontMatter } from "../wiki/frontMatter";
 import {
   buildWikiLinkIndex,
+  deadWikiTip,
   parseWikiHref,
   rewriteWikiLinks,
   type WikiLinkIndexEntry,
@@ -28,6 +29,7 @@ type Props = {
 };
 
 function WikiMarkdownReader({ page, linkPages = [], onNavigatePath, className }: Props) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const { meta, body } = useMemo(
     () => parseWikiFrontMatter(page.markdown || ""),
     [page.markdown],
@@ -88,7 +90,7 @@ function WikiMarkdownReader({ page, linkPages = [], onNavigatePath, className }:
           return (
             <span
               className="text-slate-500 cursor-not-allowed no-underline"
-              title={`未编译：${wiki.value}`}
+              title={deadWikiTip(wiki.value)}
             >
               {children}
             </span>
@@ -98,6 +100,23 @@ function WikiMarkdownReader({ page, linkPages = [], onNavigatePath, className }:
           <a href={href} className="text-accent" target="_blank" rel="noreferrer">
             {children}
           </a>
+        );
+      },
+      img({ src, alt }) {
+        if (!src) return null;
+        return (
+          <button
+            type="button"
+            className="block my-2 max-w-full text-left"
+            title="点击放大"
+            onClick={() => setLightboxSrc(src)}
+          >
+            <img
+              src={src}
+              alt={alt || ""}
+              className="max-w-full max-h-64 rounded border border-edge/50 cursor-zoom-in"
+            />
+          </button>
         );
       },
     }),
@@ -159,6 +178,26 @@ function WikiMarkdownReader({ page, linkPages = [], onNavigatePath, className }:
       </header>
 
       <MarkdownMessage content={rewritten || "_empty_"} components={components} />
+
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="wiki-image-lightbox"
+          onClick={() => setLightboxSrc(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setLightboxSrc(null);
+          }}
+        >
+          <img
+            src={lightboxSrc}
+            alt=""
+            className="max-w-[95vw] max-h-[90vh] rounded shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

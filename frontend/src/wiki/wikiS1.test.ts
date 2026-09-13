@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseWikiFrontMatter } from "./frontMatter";
 import {
   buildWikiLinkIndex,
+  deadWikiTip,
   parseWikiHref,
   resolveWikiLink,
   rewriteWikiLinks,
@@ -47,8 +48,12 @@ describe("wikilinks", () => {
     expect(resolveWikiLink("e51", index)?.path).toBe("materials/e51.md");
   });
 
-  it("rewrites live and dead links", () => {
-    const out = rewriteWikiLinks("See [[E-51]] and [[Missing|缺页]] and [[环氧体系|体系]].", index);
+  it("resolves [[kind:key]] and rewrites live/dead links", () => {
+    expect(resolveWikiLink("material:e51", index)?.path).toBe("materials/e51.md");
+    const out = rewriteWikiLinks(
+      "See [[material:e51|牌号]] and [[Missing|缺页]] and [[system:epoxy|体系]].",
+      index,
+    );
     expect(out).toContain("wiki-path:");
     expect(out).toContain("wiki-dead:");
     expect(out).toContain(encodeURIComponent("materials/e51.md"));
@@ -57,6 +62,7 @@ describe("wikilinks", () => {
       value: "materials/e51.md",
     });
     expect(parseWikiHref("wiki-dead:Missing")?.kind).toBe("dead");
+    expect(deadWikiTip("material:missing")).toContain("未编译");
   });
 });
 
@@ -84,5 +90,6 @@ describe("wikiEvidence", () => {
     const related = relatedWikiFromCitations(citations);
     expect(related).toHaveLength(1);
     expect(related[0].title).toBe("E-51");
+    expect(related[0].snippet).toBe("epoxy");
   });
 });

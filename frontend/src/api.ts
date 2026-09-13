@@ -2254,6 +2254,22 @@ export const api = {
     const qs = q.toString();
     return get<WikiPagesResponse>(`/api/wiki/pages${qs ? `?${qs}` : ""}`);
   },
+  searchWikiPages: (params: { q: string; kind?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    q.set("q", params.q);
+    if (params.kind) q.set("kind", params.kind);
+    if (params.limit != null) q.set("limit", String(params.limit));
+    return get<WikiSearchResponse>(`/api/wiki/search?${q}`);
+  },
+  compileWikiTheme: (body: { system_key?: string; topic?: string; use_llm?: boolean }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      title?: string;
+      error?: string;
+      llm_generated?: boolean;
+      source_ids?: string[];
+    }>("/api/wiki/themes/compile", body),
   getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
@@ -3193,6 +3209,24 @@ export interface WikiPageDetail extends WikiPageItem {
 export interface WikiPagesResponse {
   pages: WikiPageItem[];
   total: number;
+}
+
+export interface WikiSearchHit {
+  id: string;
+  path: string;
+  kind: string;
+  title: string;
+  norm_key?: string;
+  snippet?: string;
+  flags?: string[];
+  source_ids?: string[];
+  rank?: number;
+}
+
+export interface WikiSearchResponse {
+  hits: WikiSearchHit[];
+  total: number;
+  mode: string;
 }
 
 export interface WikiFlagItem {

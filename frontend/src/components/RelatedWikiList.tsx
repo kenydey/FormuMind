@@ -65,16 +65,21 @@ export default function RelatedWikiList({ citations }: Props) {
     <>
       <div className="mt-2 pt-2 border-t border-edge/40" data-testid="related-wiki-list">
         <div className="text-[10px] text-slate-500 mb-1">相关 Wiki</div>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-col gap-1">
           {related.map((w) => (
             <button
               key={w.path}
               type="button"
-              className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
+              className="text-left text-[10px] px-1.5 py-1 rounded border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
               title={w.path}
               onClick={() => setOpenPath(w.path)}
             >
-              [{w.kind}] {w.title}
+              <span className="font-medium">
+                [{w.kind}] {w.title}
+              </span>
+              {w.snippet && (
+                <span className="block text-slate-500 mt-0.5 line-clamp-1">{w.snippet}</span>
+              )}
             </button>
           ))}
         </div>
