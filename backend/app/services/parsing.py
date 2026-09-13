@@ -284,6 +284,28 @@ def _parse_docx(content: bytes) -> str | None:
         return None
 
 
+def _parse_xlsx(content: bytes) -> str | None:
+    """Lightweight openpyxl fallback when markitdown[xlsx] is not installed."""
+    try:
+        import openpyxl  # type: ignore
+    except ImportError:
+        return None
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        lines: list[str] = []
+        for sheet in wb.worksheets:
+            lines.append(f"## {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                cells = ["" if c is None else str(c) for c in row]
+                if any(x.strip() for x in cells):
+                    lines.append("\t".join(cells))
+        text = "\n".join(lines).strip()
+        return text or None
+    except Exception as exc:
+        log_handled_exception(logger, exc, "xlsx parse failed")
+        return None
+
+
 def _parse_plain(content: bytes) -> str | None:
     for enc in ("utf-8", "gbk", "latin-1"):
         try:
@@ -344,6 +366,7 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
 _DOC_TIERS: tuple[tuple[str, object], ...] = (
     ("markitdown", lambda c, e: _parse_markitdown(c, e)),
     ("docx", lambda c, e: _parse_docx(c) if e in ("docx", "doc") else None),
+    ("xlsx", lambda c, e: _parse_xlsx(c) if e in ("xlsx", "xlsm") else None),
     ("text", lambda c, e: _parse_plain(c) if e in _ALWAYS_PARSEABLE else None),
 )
 
@@ -478,7 +501,7 @@ def format_availability() -> dict[str, bool]:
         ),
         "docx": _markitdown_can("docx") or optional_import("docx"),
         "pptx": _markitdown_can("pptx"),
-        "xlsx": _markitdown_can("xlsx"),
+        "xlsx": _markitdown_can("xlsx") or optional_import("openpyxl"),
         # trafilatura only improves HTML; the regex stripper always works.
         "html": True,
         "text": True,

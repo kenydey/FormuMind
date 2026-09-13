@@ -325,7 +325,7 @@ def test_fetches_run_concurrently_but_indexing_stays_serial(monkeypatch):
     index_lock = threading.Lock()
     inside = {"n": 0}
 
-    def fake_fetch(ev, kind, timeout, emit, doc):
+    def fake_fetch(ev, kind, timeout, emit, doc, allow_pdf=True):
         fetch_threads.add(threading.get_ident())
         return "全文内容"
 
@@ -353,7 +353,7 @@ def test_a_single_worker_still_works(monkeypatch):
     monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
     monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
     monkeypatch.setattr(get_settings(), "kb_ingest_workers", 1, raising=False)
-    monkeypatch.setattr(kb_ingest, "_fetch_one", lambda *a: "全文")
+    monkeypatch.setattr(kb_ingest, "_fetch_one", lambda *a, **k: "全文")
     monkeypatch.setattr(
         kb_ingest, "_index_one",
         lambda text, ev, kind, emit, doc, project_id=None: doc.update(
@@ -368,7 +368,7 @@ def test_one_failing_fetch_does_not_stop_the_queue(monkeypatch):
     monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
     monkeypatch.setattr(get_settings(), "kb_ingest_workers", 3, raising=False)
 
-    def flaky(ev, kind, timeout, emit, doc):
+    def flaky(ev, kind, timeout, emit, doc, allow_pdf=True):
         if ev.identifier.endswith("00002A"):
             raise RuntimeError("network exploded")
         return "全文"
@@ -394,7 +394,7 @@ def test_the_whole_queue_is_announced_before_any_fetch(monkeypatch):
     announced: list[str] = []
     fetched: list[str] = []
 
-    def fake_fetch(ev, kind, timeout, emit, doc):
+    def fake_fetch(ev, kind, timeout, emit, doc, allow_pdf=True):
         fetched.append(ev.identifier)
         return None
 

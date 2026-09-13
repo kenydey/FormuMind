@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def _fingerprint(query: str | None, domain: str | None) -> str:
-    raw = f"{(query or "").strip().lower()}::{(domain or "").strip().lower()}"
+    # Nested same-quote f-strings are SyntaxError on Python 3.11 (CI).
+    raw = f"{(query or '').strip().lower()}::{(domain or '').strip().lower()}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 

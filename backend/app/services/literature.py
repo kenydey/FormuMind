@@ -80,24 +80,45 @@ _KW_RE = re.compile(r"[a-z0-9]+|[一-鿿]")
 
 
 def _keywords(text: str) -> set[str]:
-    return set(_KW_RE.findall(text.lower()))
+    """Tokenize for overlap scoring.
+
+    Drops pure digits and 1–2 char ASCII fragments so CAS pieces (``7440-66-6`` →
+    ``6``) and IPC tail numbers cannot create false seed matches. Chinese stays
+    character-level (len 1) because that is how bilingual queries are written.
+    """
+    out: set[str] = set()
+    for tok in _KW_RE.findall(text.lower()):
+        if tok.isdigit():
+            continue
+        if tok.isascii() and len(tok) < 3:
+            continue
+        out.add(tok)
+    return out
 
 
 def _filter_seed_by_query(
     seeds: list[Evidence], query: str, min_keep: int = 2
 ) -> list[Evidence]:
-    """Keep seed entries whose title+snippet share a keyword with the query.
+    """Keep seed entries whose title+snippet share keywords with the query.
 
-    Falls back to the ``min_keep`` highest-relevance entries when nothing matches,
-    so offline research always returns some cited evidence.
+    When the query has been expanded with substrate / IPC / CAS noise, a single
+    generic hit (e.g. ``steel``) must not keep every coating seed. Prefer the
+    strongest overlaps; fall back to ``min_keep`` top-relevance rows when none
+    match, so offline research always returns some cited evidence.
     """
     q_kw = _keywords(query)
     if not q_kw or not seeds:
         return seeds
-    matched = [e for e in seeds if q_kw & _keywords(f"{e.title} {e.snippet}")]
-    if matched:
-        return matched
-    return sorted(seeds, key=lambda x: x.relevance, reverse=True)[:min_keep]
+    scored: list[tuple[int, Evidence]] = []
+    for e in seeds:
+        n = len(q_kw & _keywords(f"{e.title} {e.snippet}"))
+        if n:
+            scored.append((n, e))
+    if not scored:
+        return sorted(seeds, key=lambda x: x.relevance, reverse=True)[:min_keep]
+    best = max(n for n, _ in scored)
+    threshold = best if best >= 2 else 1
+    return [e for n, e in scored if n >= threshold]
 
 
 def _resolve_search_query(query: str) -> str:

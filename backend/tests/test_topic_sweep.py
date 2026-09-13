@@ -17,12 +17,14 @@ def test_topic_sweep_searches_and_dispatches(monkeypatch):
 
     called = {}
 
-    def fake_iter(query, source_types, req=None, total_limit=0, per_source_cap=0, progress_cb=None):
+    def fake_iter(query, source_types, req=None, total_limit=0, per_source_cap=0, progress_cb=None, **_kwargs):
+        # **_kwargs absorbs notebooklm_notebook_id and future iter_search options.
         called["query"] = query
         called["source_types"] = source_types
         return ([_ev("10.1000/example")], {"kept": 1, "dropped": 0})
 
-    def fake_dispatch(ev_dicts, project_id=None, query=None):
+    def fake_dispatch(ev_dicts, project_id=None, query=None, **_kwargs):
+        # **_kwargs absorbs domain= and future dispatch_kb_ingest options.
         called["project_id"] = project_id
         called["query_dispatch"] = query
         assert len(ev_dicts) == 1
@@ -44,7 +46,7 @@ def test_topic_sweep_searches_and_dispatches(monkeypatch):
 def test_topic_sweep_empty_result_skips_ingest(monkeypatch):
     from app.worker.tasks import run_topic_sweep
 
-    def fake_iter(query, source_types, req=None, total_limit=0, per_source_cap=0, progress_cb=None):
+    def fake_iter(query, source_types, req=None, total_limit=0, per_source_cap=0, progress_cb=None, **_kwargs):
         return ([], {})
 
     monkeypatch.setattr("app.services.literature.iter_search", fake_iter)
