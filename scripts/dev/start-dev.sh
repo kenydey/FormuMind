@@ -7,10 +7,14 @@
 #   scripts/dev/start-dev.sh status  查看运行状态
 #
 # 前提:
-#   1. redis + datalab ELN 容器在跑（产品核心依赖，不可跳过）
+#   1. 基础设施容器存在（离线镜像 + 镜像名）：
+#      - redis (formumind-redis-1)         —— cache/broker
+#      - datalab-api-1 / datalab-database-1 —— ELN + MongoDB
+#      - formumind-molscribe-1            —— OCSR 结构识别 worker
+#      一键拉起（首次或容器被删后重建）：
 #        docker compose up -d redis
-#        docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d
-#      或按 deploy/eln/README.md 拉起官方 Datalab（:5001）
+#        docker compose up -d molscribe
+#        cd /root/datalab && docker compose --profile prod up -d
 #   2. backend/.venv 已建（uvicorn/celery/rdkit 等），frontend/node_modules 完整
 #   3. data/.env.host 已生成（连接地址指向 localhost；含 CAMPAIGN/EXPERIMENT=datalab）
 
@@ -42,19 +46,38 @@ _probe_datalab() {
 }
 
 _require_infra() {
-  echo "==> 检查核心依赖（Redis + Datalab ELN）"
+  echo "==> 检查核心依赖（Redis + Datalab ELN + MongoDB）"
+  # Redis
   if ! redis-cli ping >/dev/null 2>&1; then
     echo "❌ Redis 不可达（:6379）。先: docker compose up -d redis"
     exit 1
   fi
   echo "    Redis OK"
+  # MongoDB (Datalab-database)
+  if ! docker ps --format '{{.Names}}' | grep -qx datalab-database-1 2>/dev/null; then
+    echo "    MongoDB (datalab-database-1) 未运行，尝试启动…"
+    docker start datalab-database-1 >/dev/null 2>&1 || echo "      ⚠️ 容器不存在，未启动"
+  fi
+  echo "    MongoDB OK"
+  # Datalab API
+  if ! docker ps --format '{{.Names}}' | grep -qx datalab-api-1 2>/dev/null; then
+    echo "    Datalab API (datalab-api-1) 未运行，尝试启动…"
+    docker start datalab-api-1 >/dev/null 2>&1 || echo "      ⚠️ 容器不存在，未启动"
+  fi
+  echo "    Datalab API OK"
+  # Datalab ELN probe
   if ! _probe_datalab; then
     echo "❌ Datalab ELN 不可达：${FORMUMIND_DATALAB_API_URL}"
-    echo "   启动：docker compose -f docker-compose.yml -f docker-compose.eln.yml up -d"
-    echo "   或见 deploy/eln/README.md — 产品路径不支持跳过 ELN / sqlite 凑合。"
+    echo "   预期：docker start datalab-api-1 或参考 deploy/eln/README.md"
     exit 1
   fi
-  echo "    Datalab OK (${FORMUMIND_DATALAB_API_URL})"
+  echo "    Datalab ELN 已就绪 (${FORMUMIND_DATALAB_API_URL})"
+  # MolScribe — OCSR worker 容器（消费 molscribe 队列；未运行则拉起已有容器）
+  if ! docker ps --format '{{.Names}}' | grep -qx formumind-molscribe-1 2>/dev/null; then
+    echo "    MolScribe (formumind-molscribe-1) 未运行，尝试启动…"
+    docker start formumind-molscribe-1 >/dev/null 2>&1 || echo "      ⚠️ 容器不存在，未启动"
+  fi
+  echo "    MolScribe OK"
 }
 
 start() {
@@ -91,6 +114,30 @@ start() {
     fi
     sleep 2
   done
+  # MolScribe worker 探活：ping molscribe 队列的 celery worker。
+  # 注意：① ping 进程自身要加载 torch，--timeout 需给足；
+  #      ② host worker 刚加入 broker 时会有 mingle 同步，ping 可能瞬时无响应，
+  #         故重试 3 次。
+  if docker ps --format '{{.Names}}' | grep -qx formumind-molscribe-1 2>/dev/null; then
+    ms_host="$(docker exec formumind-molscribe-1 hostname 2>/dev/null || echo '')"
+    ms_ready=0
+    for _ in 1 2 3; do
+      if docker exec -w /app formumind-molscribe-1 celery \
+           -A app.worker.celery_app.celery_app \
+           inspect ping -d "molscribe@${ms_host}" --timeout 30 >/dev/null 2>&1; then
+        ms_ready=1
+        break
+      fi
+      sleep 5
+    done
+    if [ "$ms_ready" = "1" ]; then
+      echo "    MolScribe: worker 就绪（队列 molscribe）"
+    else
+      echo "    ⚠️  MolScribe 容器在跑但 worker 未响应 ping（见 docker logs formumind-molscribe-1）"
+    fi
+  else
+    echo "    ⚠️  MolScribe 容器未运行，结构识别（OCSR）任务将不可用"
+  fi
   curl -s -o /dev/null -w "    frontend: %{http_code}\n" http://localhost:5173/ 2>/dev/null || true
   echo "==> 完成。停止: scripts/dev/start-dev.sh stop"
 }
