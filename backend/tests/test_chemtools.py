@@ -287,7 +287,7 @@ def test_lookup_chemical_tier4_pubchem(monkeypatch):
 
     _pubchem_aspirin(monkeypatch)
     monkeypatch.setattr(chemical_lookup, "_lookup_catalog", lambda q: None)
-    monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda q: None)
+    monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda *a, **k: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_offline_compounds", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_CACHE", {})
     hit = chemical_lookup.lookup_chemical("aspirin")

@@ -56,6 +56,9 @@ class MaterialSpec(BaseModel):
     availability: str = "in_stock"
     substitute_group: str | None = None
     enrich: bool = True
+    # Per-supplier sourcing detail (JSON array) harvested from PubChem
+    # ``Chemical Vendors``; stored in ``materials.suppliers_json``.
+    suppliers_json: list[dict] | None = None
 
 
 class MaterialView(BaseModel):

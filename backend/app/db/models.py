@@ -346,6 +346,11 @@ class MaterialRow(Base):
     # in_stock | restricted | discontinued — drives supply-disruption alerts.
     availability: Mapped[str] = mapped_column(String(16), default="in_stock", index=True)
     regulatory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Structured sourcing detail: per-supplier list harvested out of PubChem
+    # ``Chemical Vendors`` (+ optional price/stock/delivery enrichment) — a
+    # JSON array so the catalog carries sourcing intelligence without a
+    # second table. Mirrors ``regulatory``. See alembic 0027.
+    suppliers_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Hand-tagged interchangeable group; members are drop-in for one another.
     substitute_group: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
     # Soft archive — hidden from RAW_MATERIALS pools but retained for audit/export.

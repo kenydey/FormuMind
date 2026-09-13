@@ -31,6 +31,10 @@ _SPEC_FIELDS = (
     "functional_class", "equivalent_weight", "hansen_d", "hansen_p",
     "hansen_h", "hlb", "supplier", "lead_time_days", "availability",
     "regulatory", "substitute_group", "archived",
+    # Per-supplier sourcing detail (JSON array), harvested out of PubChem
+    # ``Chemical Vendors`` and optional price/stock/delivery enrichment.
+    # Mirrors ``regulatory`` — a JSON column, not a second table.
+    "suppliers_json",
 )
 _TEXT_WIDTHS = {
     "role": 60, "formula": 120, "cas_no": 32, "zh_name": 200, "carrier": 16,

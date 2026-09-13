@@ -41,6 +41,7 @@ export interface MaterialSpec {
   density_gcm3?: number | null;
   oil_absorption?: number | null;
   tg_k?: number | null;
+  suppliers_json?: Supplier[] | null;
 }
 
 export interface Requirement {
@@ -73,6 +74,32 @@ export interface ChemicalLookupResult {
   formula: string;
   smiles?: string;
   molar_mass?: number;
+  found?: boolean;
+  source?: string;
+  providers_tried?: string[];
+  surechembl?: {
+    chemical_id?: string | null;
+    global_frequency?: number | null;
+    inchi_key?: string | null;
+    source_url?: string | null;
+    alternates?: Array<{
+      chemical_id?: string | null;
+      name?: string | null;
+      smiles?: string | null;
+      global_frequency?: number | null;
+    }>;
+  };
+  /** Structured supplier list harvested from PubChem ``Chemical Vendors``.
+   *  Price / stock / delivery are ``null`` until a direct enrichment fills them. */
+  suppliers?: Array<{
+    name: string;
+    url?: string | null;
+    product_url?: string | null;
+    price_cny_per_kg?: number | null;
+    inventory_qty?: number | null;
+    inventory_unit?: string | null;
+    delivery_days?: number | null;
+  }>;
 }
 
 /** Full dossier from /api/chemical/profile — superset of the lookup payload. */
@@ -1221,6 +1248,15 @@ export const api = {
           global_frequency?: number | null;
         }>;
       };
+      suppliers?: Array<{
+        name: string;
+        url?: string | null;
+        product_url?: string | null;
+        price_cny_per_kg?: number | null;
+        inventory_qty?: number | null;
+        inventory_unit?: string | null;
+        delivery_days?: number | null;
+      }>;
     }>(`/api/chemical/lookup?q=${encodeURIComponent(q)}`),
   chemicalProfile: (q: string) =>
     get<ChemicalProfile>(`/api/chemical/profile?q=${encodeURIComponent(q)}`),
@@ -3632,4 +3668,14 @@ export interface Neo4jFormulation {
   target_property?: string | null;
   target_value?: number | null;
   status?: string | null;
+}
+
+export interface Supplier {
+  name: string;
+  url?: string | null;
+  product_url?: string | null;
+  price_cny_per_kg?: number | null;
+  inventory_qty?: number | null;
+  inventory_unit?: string | null;
+  delivery_days?: number | null;
 }

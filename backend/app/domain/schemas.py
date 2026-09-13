@@ -12,6 +12,23 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
+
+class Supplier(BaseModel):
+    """Structured supplier record harvested from PubChem ``Chemical Vendors``.
+
+    Each record holds the vendor name, URL, product page, price, inventory
+    and delivery time used in the material catalog. Stored as a JSON array
+    in the ``suppliers_json`` column so the catalog carries sourcing intelligence
+    without a second table.
+    """
+    name: str = Field(..., max_length=120, description="供应商名称")
+    url: str | None = Field(default=None, description="供应商主页 URL")
+    product_url: str | None = Field(default=None, description="产品页 URL")
+    price_cny_per_kg: float | None = Field(default=None, ge=0, description="吨参考价格 (CNY)")
+    inventory_qty: float | None = Field(default=None, description="当前可用数量")
+    inventory_unit: str | None = Field(default=None, description="库存单位")
+    delivery_days: int | None = Field(default=None, ge=0, description="标准交付天数")
+
 class ProductDomain(str, Enum):
     """The metal surface treatment product families FormuMind targets."""
 
@@ -81,6 +98,7 @@ class MaterialSpec(BaseModel):
     voc_contrib: float | None = None
     supplier: str | None = None
 
+    suppliers: list[Supplier] = Field(default_factory=list)
 
 class MetricPriorSpec(BaseModel):
     """Declarative prior for a custom metric (YAML or builtin alias)."""

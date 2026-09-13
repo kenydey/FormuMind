@@ -92,6 +92,9 @@ def _lookup_pubchem(q: str) -> dict[str, Any] | None:
                 nums = info_list[0].get("RegistryNumber", [])
                 if nums:
                     cas = str(nums[0])
+            # Tier 2: harvest structured supplier list from PubChem PUG-View
+            # ``Chemical Vendors`` category.
+            suppliers = _lookup_pubchem_vendors(client, encoded)
             return {
                 "query": q,
                 "cas": cas,
@@ -102,9 +105,66 @@ def _lookup_pubchem(q: str) -> dict[str, Any] | None:
                 "molar_mass": row.get("MolecularWeight"),
                 "found": True,
                 "source": "pubchem",
+                "suppliers": suppliers,
             }
     except Exception as exc:
         return degrade_return(logger, exc, "operation failed", None)
+
+
+def _lookup_pubchem_vendors(client, encoded: str) -> list[dict[str, Any]]:
+    """Fetch the ``Chemical Vendors`` list for a PubChem compound name.
+
+    Returns a list of ``Supplier``-shaped dicts (name, url, product_url).
+    Price / stock / delivery are left ``None`` here -- the material catalog
+    can carry them later via direct enrichment -- so the record never claims
+    a price it does not have.
+
+    Note: PubChem does not expose vendor country, so no ``country`` field is
+    emitted.
+    """
+    try:
+        cid_url = (
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}"
+            "/cids/JSON"
+        )
+        cid_resp = client.get(cid_url)
+        if cid_resp.status_code != 200:
+            return []
+        cid_data = cid_resp.json()
+        cids = (cid_data.get("IdentifierList") or {}).get("CID") or []
+        if not cids:
+            return []
+        cid = cids[0]
+        vendors_url = (
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/categories/compound/{cid}/JSON"
+        )
+        vendors_resp = client.get(vendors_url, timeout=8.0)
+        if vendors_resp.status_code != 200:
+            return []
+        categories = (vendors_resp.json().get("SourceCategories") or {}).get("Categories") or []
+        for cat in categories:
+            if cat.get("Category") != "Chemical Vendors":
+                continue
+            out: list[dict[str, Any]] = []
+            for src in cat.get("Sources") or []:
+                name = (src.get("SourceName") or "").strip()
+                if not name:
+                    continue
+                supplier = {
+                    "name": name,
+                    "url": src.get("SourceURL"),
+                    "product_url": src.get("SourceRecordURL"),
+                    "price_cny_per_kg": None,
+                    "inventory_qty": None,
+                    "inventory_unit": None,
+                    "delivery_days": None,
+                }
+                out.append(supplier)
+            return out
+        return []
+    except Exception as exc:
+        degrade_return(logger, exc, "pubchem vendors fetch failed", [])
+        return []
 
 
 def _lookup_compound_synonyms(q: str) -> dict[str, Any] | None:
@@ -186,6 +246,7 @@ def _lookup_surechembl(q: str) -> dict[str, Any] | None:
 def lookup_chemical(q: str) -> dict[str, Any]:
     """Resolve a chemical query (CN/EN name or CAS) to structured metadata."""
     key = (q or "").strip().lower()
+    cache_key = f"{key}|"
     if not key:
         return {
             "query": q,
@@ -198,8 +259,9 @@ def lookup_chemical(q: str) -> dict[str, Any]:
             "found": False,
             "source": "empty",
             "providers_tried": [],
+            "suppliers": [],
         }
-    cached = _cache_get(key)
+    cached = _cache_get(cache_key)
     if cached:
         return cached
 
@@ -220,7 +282,7 @@ def lookup_chemical(q: str) -> dict[str, Any]:
         if hit:
             hit = dict(hit)
             hit["providers_tried"] = list(providers_tried)
-            return _cache_put(key, hit)
+            return _cache_put(cache_key, hit)
     empty = {
         "query": q,
         "cas": "",
@@ -232,5 +294,6 @@ def lookup_chemical(q: str) -> dict[str, Any]:
         "found": False,
         "source": "none",
         "providers_tried": providers_tried,
+        "suppliers": [],
     }
-    return _cache_put(key, empty)
+    return _cache_put(cache_key, empty)

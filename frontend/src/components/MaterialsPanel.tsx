@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "./Modal";
-import { api, type ChemicalHit, type MaterialCandidate, type MaterialImportPreview, type MaterialView } from "../api";
+import { api, type ChemicalHit, type MaterialCandidate, type MaterialImportPreview, type MaterialView, type Supplier } from "../api";
 import { formatChemicalLookupSourceMsg } from "../utils/chemicalLookup";
 
 const ROLES = ["", "resin", "additive", "inhibitor", "solvent", "crosslinker", "surfactant", "catalyst"];
@@ -33,6 +33,7 @@ interface SpecDraft {
   price_cny_per_kg?: string;
   voc_contrib?: string;
   density_gcm3?: string;
+  suppliers_json?: Supplier[];
 }
 
 const EMPTY: SpecDraft = {
@@ -166,6 +167,9 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
       price_cny_per_kg: s.price_cny_per_kg != null ? String(s.price_cny_per_kg) : "",
       voc_contrib: s.voc_contrib != null ? String(s.voc_contrib) : "",
       density_gcm3: s.density_gcm3 != null ? String(s.density_gcm3) : "",
+      suppliers_json: Array.isArray(s.suppliers_json)
+        ? (s.suppliers_json as Supplier[])
+        : undefined,
     });
     setEditingName(m.name);
     setLookupMsg(null);
@@ -199,6 +203,18 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         formula: r.formula || d.formula,
         smiles: (r.smiles ?? undefined) || d.smiles,
         molar_mass: r.molar_mass != null ? String(r.molar_mass) : d.molar_mass,
+        // Persist the harvested supplier list on the material so the
+        // catalog carries it across sessions (stored as JSON array in
+        // ``suppliers_json``; see backend alembic 0027).
+        suppliers_json: (r.suppliers ?? []).map((s) => ({
+          name: s.name,
+          url: s.url ?? undefined,
+          product_url: s.product_url ?? undefined,
+          price_cny_per_kg: s.price_cny_per_kg ?? undefined,
+          inventory_qty: s.inventory_qty ?? undefined,
+          inventory_unit: s.inventory_unit ?? undefined,
+          delivery_days: s.delivery_days ?? undefined,
+        })),
       }));
       setLookupMsg(formatChemicalLookupSourceMsg(r));
     } catch (e) {
@@ -224,6 +240,7 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         price_cny_per_kg: draft.price_cny_per_kg ? Number(draft.price_cny_per_kg) : null,
         voc_contrib: draft.voc_contrib ? Number(draft.voc_contrib) : null,
         density_gcm3: draft.density_gcm3 ? Number(draft.density_gcm3) : null,
+        suppliers_json: draft.suppliers_json ?? undefined,
       });
       setMode("closed");
       await load();
@@ -874,6 +891,56 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                 </button>
               </div>
             </div>
+            {draft.suppliers_json && draft.suppliers_json.length > 0 && (
+              <div className="border border-edge rounded p-2 mt-2">
+                <div className="text-[10px] text-slate-500 mb-1">
+                  供应商信息（{draft.suppliers_json.length} 家 · 只读，保存后随材料入库）
+                </div>
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-edge/50">
+                      <th className="text-left py-0.5 font-medium">名称</th>
+                      <th className="text-left py-0.5 font-medium">URL</th>
+                      <th className="text-right py-0.5 font-medium">价格 ¥/kg</th>
+                      <th className="text-left py-0.5 font-medium">库存</th>
+                      <th className="text-right py-0.5 font-medium">交付天数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.suppliers_json.map((s, i) => (
+                      <tr key={`${s.name}-${i}`} className="border-b border-edge/30">
+                        <td className="py-0.5 text-slate-200">{s.name}</td>
+                        <td className="py-0.5">
+                          {s.url ? (
+                            <a
+                              href={s.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-teal-300 hover:underline"
+                            >
+                              链接
+                            </a>
+                          ) : (
+                            <span className="text-slate-500">-</span>
+                          )}
+                        </td>
+                        <td className="py-0.5 text-right text-slate-300">
+                          {s.price_cny_per_kg != null ? s.price_cny_per_kg.toFixed(2) : "-"}
+                        </td>
+                        <td className="py-0.5 text-slate-300">
+                          {s.inventory_qty != null
+                            ? `${s.inventory_qty}${s.inventory_unit ?? ""}`
+                            : "-"}
+                        </td>
+                        <td className="py-0.5 text-right text-slate-300">
+                          {s.delivery_days != null ? s.delivery_days : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </Modal>
       )}

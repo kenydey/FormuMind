@@ -116,7 +116,7 @@ def test_lookup_surechembl_shapes_chemical_lookup_payload(monkeypatch):
 
 def test_lookup_chemical_falls_back_to_surechembl(monkeypatch):
     monkeypatch.setattr(chemical_lookup, "_lookup_catalog", lambda q: None)
-    monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda q: None)
+    monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda *a, **k: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_compound_synonyms", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_offline_compounds", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_chemtools", lambda q: None)
@@ -163,7 +163,7 @@ def test_chemical_lookup_endpoint_includes_surechembl_fields(monkeypatch):
     from app.main import app
 
     monkeypatch.setattr(chemical_lookup, "_lookup_catalog", lambda q: None)
-    monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda q: None)
+    monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda *a, **k: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_compound_synonyms", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_offline_compounds", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_chemtools", lambda q: None)
