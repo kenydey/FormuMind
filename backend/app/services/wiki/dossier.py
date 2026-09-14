@@ -67,6 +67,7 @@ _EVENT_SECTIONS: dict[str, list[str]] = {
     "lab_recorded": ["S4_doe", "S5_lab_ledger", "S8_open_questions"],
     "loop_updated": ["S6_optimize_loop", "S7_artifacts", "S8_open_questions"],
     "optimize_completed": ["S6_optimize_loop", "S7_artifacts", "S8_open_questions"],
+    "attachment_uploaded": ["S7_artifacts", "S5_lab_ledger", "S8_open_questions"],
 }
 
 
@@ -805,4 +806,28 @@ def notify_dossier_event_for_campaign(
         )
     except Exception as exc:
         logger.debug("dossier campaign notify failed: %s", exc)
+        return {"ok": False, "skipped": True, "reason": str(exc), "event": event}
+
+
+def notify_dossier_event_for_experiment(
+    experiment_id: int | str | None,
+    event: str,
+    *,
+    sections: list[str] | None = None,
+) -> dict[str, Any]:
+    """Resolve experiment → project_id then notify. Best-effort; never raises."""
+    if experiment_id is None or experiment_id == "":
+        return {"ok": False, "skipped": True, "reason": "no_experiment", "event": event}
+    try:
+        from ...db.database import default_session_factory
+        from ...db.models import ExperimentRow
+
+        with default_session_factory()() as session:
+            exp = session.get(ExperimentRow, int(experiment_id))
+            pid = (getattr(exp, "project_id", None) or "").strip() if exp is not None else ""
+        if not pid:
+            return {"ok": False, "skipped": True, "reason": "no_project", "event": event}
+        return notify_dossier_event(pid, event, sections=sections)
+    except Exception as exc:
+        logger.debug("dossier experiment notify failed: %s", exc)
         return {"ok": False, "skipped": True, "reason": str(exc), "event": event}

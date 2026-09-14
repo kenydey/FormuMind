@@ -758,6 +758,14 @@ async def upload_experiment_attachment(
             f"and document={source_document_id}",
         )
 
+    # P4.2: optional dossier S7/S5 patch after attachment upload (default OFF).
+    try:
+        from ..services.wiki.dossier import notify_dossier_event_for_experiment
+
+        notify_dossier_event_for_experiment(experiment_id, "attachment_uploaded")
+    except Exception:
+        pass
+
     return AttachmentResponse(
         id=attachment_id,
         experiment_id=experiment_id,
@@ -966,6 +974,13 @@ async def delete_workbench_row_attachment(
         raise HTTPException(status_code=404, detail="附件不存在")
     if not store.delete_attachment(attachment_id):
         raise HTTPException(status_code=500, detail="附件删除失败")
+    # Refresh S7/S5 when an attachment is removed (auto_patch default OFF).
+    try:
+        from ..services.wiki.dossier import notify_dossier_event_for_campaign
+
+        notify_dossier_event_for_campaign(campaign_id, "attachment_uploaded")
+    except Exception:
+        pass
     return {"deleted": True}
 
 
@@ -1012,6 +1027,14 @@ async def upload_workbench_row_attachment(
             detail=f"Attachment already exists for experiment={experiment_id} "
             f"and document={source_document_id}",
         )
+
+    # P4.2: optional dossier S7/S5 patch after workbench attachment upload.
+    try:
+        from ..services.wiki.dossier import notify_dossier_event_for_campaign
+
+        notify_dossier_event_for_campaign(campaign_id, "attachment_uploaded")
+    except Exception:
+        pass
 
     return AttachmentResponse(
         id=attachment_id,

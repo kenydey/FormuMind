@@ -47,7 +47,7 @@ def build_project_dossier_pack(
     doe = _doe_slice(ws, campaign_int)
     lab = _lab_slice(pid)
     loop = _loop_slice(ws, campaign_int)
-    artifacts = _artifacts_slice(ws, loop)
+    artifacts = _artifacts_slice(ws, loop, project_id=pid)
 
     return {
         "schema_version": 1,
@@ -335,7 +335,7 @@ def _lab_slice(project_id: str) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     try:
         from ...db.database import default_session_factory
-        from ...db.models import ExperimentRow
+        from ...db.models import ExperimentAttachment, ExperimentRow, SourceDocument
 
         with default_session_factory()() as session:
             exps = (
@@ -348,10 +348,34 @@ def _lab_slice(project_id: str) -> dict[str, Any]:
                 .scalars()
                 .all()
             )
+            exp_ids = [int(e.id) for e in exps]
+            att_by_exp: dict[int, list[str]] = {eid: [] for eid in exp_ids}
+            if exp_ids:
+                atts = session.execute(
+                    select(ExperimentAttachment, SourceDocument)
+                    .join(
+                        SourceDocument,
+                        SourceDocument.id == ExperimentAttachment.source_document_id,
+                        isouter=True,
+                    )
+                    .where(ExperimentAttachment.experiment_id.in_(exp_ids))
+                    .order_by(ExperimentAttachment.created_at.desc())
+                ).all()
+                for att, doc in atts:
+                    label = ""
+                    if doc is not None:
+                        label = (doc.filename or doc.title or "").strip()
+                    if not label:
+                        label = att.source_document_id
+                    att_by_exp.setdefault(int(att.experiment_id), []).append(
+                        f"{att.kind}:{label}"
+                    )
+
         for exp in exps:
             measured = exp.measured or {}
             if not isinstance(measured, dict):
                 measured = {}
+            att_cell = "; ".join((att_by_exp.get(int(exp.id)) or [])[:3])
             if measured:
                 for metric, value in list(measured.items())[:8]:
                     rows.append(
@@ -363,7 +387,7 @@ def _lab_slice(project_id: str) -> dict[str, Any]:
                             "metric": str(metric),
                             "value": value,
                             "method": "",
-                            "attachment": "",
+                            "attachment": att_cell,
                             "source": f"experiment:{exp.id}",
                         }
                     )
@@ -377,7 +401,7 @@ def _lab_slice(project_id: str) -> dict[str, Any]:
                         "metric": "",
                         "value": "",
                         "method": "",
-                        "attachment": "",
+                        "attachment": att_cell,
                         "source": f"experiment:{exp.id}",
                     }
                 )
@@ -438,8 +462,8 @@ def _loop_slice(ws, campaign_id: int | None) -> dict[str, Any]:
     }
 
 
-def _artifacts_slice(ws, loop: dict[str, Any]) -> dict[str, Any]:
-    rows = []
+def _artifacts_slice(ws, loop: dict[str, Any], *, project_id: str = "") -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
     for spec in loop.get("plot_specs") or []:
         rows.append(
             {
@@ -450,4 +474,48 @@ def _artifacts_slice(ws, loop: dict[str, Any]) -> dict[str, Any]:
                 "from": "optimization_history",
             }
         )
+
+    pid = (project_id or "").strip()
+    if pid:
+        try:
+            from ...db.database import default_session_factory
+            from ...db.models import ExperimentAttachment, ExperimentRow, SourceDocument
+
+            with default_session_factory()() as session:
+                exp_ids = [
+                    int(r[0])
+                    for r in session.execute(
+                        select(ExperimentRow.id).where(ExperimentRow.project_id == pid)
+                    ).all()
+                ]
+                if exp_ids:
+                    hits = session.execute(
+                        select(ExperimentAttachment, SourceDocument)
+                        .join(
+                            SourceDocument,
+                            SourceDocument.id == ExperimentAttachment.source_document_id,
+                            isouter=True,
+                        )
+                        .where(ExperimentAttachment.experiment_id.in_(exp_ids))
+                        .order_by(ExperimentAttachment.created_at.desc())
+                        .limit(80)
+                    ).all()
+                    for att, doc in hits:
+                        name = ""
+                        if doc is not None:
+                            name = (doc.filename or doc.title or "").strip()
+                        if not name:
+                            name = att.source_document_id
+                        rows.append(
+                            {
+                                "name": name[:120],
+                                "kind": att.kind or "attachment",
+                                "uri": f"source:{att.source_document_id}",
+                                "section": "S7",
+                                "from": f"experiment:{att.experiment_id}",
+                            }
+                        )
+        except Exception as exc:
+            logger.debug("dossier artifacts hydrate failed: %s", exc)
+
     return {"rows": rows, "plot_specs": list(loop.get("plot_specs") or [])}

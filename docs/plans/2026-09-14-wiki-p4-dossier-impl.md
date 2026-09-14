@@ -13,7 +13,7 @@
 | P4.3 | `dossier_narrative.py`：节级 LLM 叙述；校验禁表/禁伪图；失败保留旧叙述；`use_llm` API |
 | P4.4 | Hub Wiki「项目卷宗 / 刷新卷宗」；Reader 展示 `section_revisions` / Flag；Chat 对 `themes/project-*` 轻微加权 |
 | P4.5 | Reports 占位改为「基于卷宗生成」并标明各模板主读节（P5 已接 Generate） |
-| P4.6 | Claims/DOE 回归；事件矩阵单测；Hub 手测 + smoke；Reports 去「预留」；optimize/loop 完成钩子 |
+| P4.6 | Claims/DOE 回归；事件矩阵；Hub 手测；Reports 去「预留」；optimize/loop/attachment→S7 钩子 |
 
 ## 旗标
 

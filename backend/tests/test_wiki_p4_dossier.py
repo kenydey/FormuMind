@@ -205,6 +205,7 @@ def test_event_section_matrix_routing(env, monkeypatch):
         "lab_recorded": {"S4_doe", "S5_lab_ledger", "S8_open_questions"},
         "loop_updated": {"S6_optimize_loop", "S7_artifacts", "S8_open_questions"},
         "optimize_completed": {"S6_optimize_loop", "S7_artifacts", "S8_open_questions"},
+        "attachment_uploaded": {"S7_artifacts", "S5_lab_ledger", "S8_open_questions"},
     }
     assert set(dossier_mod._EVENT_SECTIONS) == set(expected)
 

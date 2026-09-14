@@ -99,3 +99,4 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 - [ ] C1–C3 边界无破窗
 - [x] `test_wiki_dossier_claims_doe_regression.py` 全绿（CI / 本地 pytest）
 - [x] `test_wiki_optimize_dossier_hook.py`：optimize 完成通知 `optimize_completed`
+- [x] `test_wiki_attachment_s7.py`：附件 hydrate 进 S7/S5 + `attachment_uploaded` 钩子
