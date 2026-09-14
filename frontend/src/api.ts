@@ -2363,6 +2363,29 @@ export const api = {
       llm?: { used_llm?: boolean; error?: string | null };
       error?: string;
     }>("/api/wiki/dossier/report", body),
+  exportWikiReport: async (body: {
+    project_id: string;
+    template: string;
+    format: "md" | "docx" | "pdf" | "pptx";
+    campaign_id?: string;
+    prompt?: string;
+    use_llm?: boolean;
+    ensure_dossier?: boolean;
+  }) => {
+    const res = await fetch("/api/wiki/dossier/report/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `report.${body.format}` };
+  },
   rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
   rebuildWikiEmbed: () =>
     post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(

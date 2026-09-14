@@ -17,12 +17,15 @@ describe("HubReportsPlaceholderPane", () => {
     expect(screen.getByText(/主读卷宗 S1 \+ S6 \+ S8/)).toBeInTheDocument();
   });
 
-  it("enables generate when a template is selected", async () => {
+  it("enables generate and export actions when a template is selected", async () => {
     const user = userEvent.setup();
     render(<HubReportsPlaceholderPane />);
     await user.click(screen.getByRole("button", { name: /文献简报/ }));
     const btn = await screen.findByTestId("hub-reports-generate");
     expect(btn).not.toBeDisabled();
     expect(btn.textContent).toMatch(/基于卷宗生成/);
+    expect(screen.getByTestId("hub-reports-export-pdf")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-reports-export-docx")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-reports-export-pptx")).toBeInTheDocument();
   });
 });

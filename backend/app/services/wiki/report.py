@@ -40,6 +40,12 @@ REPORT_TEMPLATES: dict[str, dict[str, Any]] = {
         "slices": ("literature", "flags"),
         "blurb": "文献/来源地图；须回链 Raw source_ids。",
     },
+    "deck": {
+        "title": "演示文稿 · Slide Deck",
+        "slices": ("requirements", "formula", "doe", "loop", "literature", "flags"),
+        "blurb": "汇报大纲幻灯（Markdown --- 分页；可导出 PPTX）。",
+        "format": "slides",
+    },
 }
 
 
@@ -214,6 +220,9 @@ def render_report_markdown(
     polish: str = "",
 ) -> str:
     meta = REPORT_TEMPLATES[template]
+    if meta.get("format") == "slides":
+        return _render_deck_markdown(pack=pack, prompt=prompt, polish=polish)
+
     title = meta["title"]
     project_id = pack.get("project_id") or ""
     parts = [
@@ -245,6 +254,84 @@ def render_report_markdown(
         ]
     )
     return "\n".join(parts)
+
+
+def _render_deck_markdown(*, pack: dict[str, Any], prompt: str = "", polish: str = "") -> str:
+    """Slide-oriented markdown: sections separated by --- for PPTX export."""
+    pid = pack.get("project_id") or ""
+    title = pack.get("title") or pid
+    req_rows = (pack.get("requirements") or {}).get("rows") or []
+    formula = (pack.get("formula") or {}).get("rows") or []
+    doe = (pack.get("doe") or {}).get("plans") or []
+    loop = pack.get("loop") or {}
+    lit = (pack.get("literature") or {}).get("source_ids") or []
+    flags = pack.get("flags") or {}
+
+    slides: list[str] = []
+    slides.append(
+        "\n".join(
+            [
+                f"# {title}",
+                f"- 项目 `{pid}` · domain=`{pack.get('domain') or '—'}`",
+                "- FormuMind Slide Deck · draft_not_claims",
+                f"- Pack 截止 `{pack.get('updated_at')}`",
+            ]
+        )
+    )
+    if polish.strip():
+        slides.append("\n".join(["# 执行摘要", *[f"- {ln.strip()}" for ln in polish.strip().splitlines() if ln.strip()][:8]]))
+    if prompt.strip():
+        slides.append("\n".join(["# 汇报关注点", f"- {prompt.strip()[:240]}"]))
+
+    req_bullets = [f"- {r.get('metric')}: {r.get('value')} {r.get('unit') or ''}" for r in req_rows[:8]]
+    slides.append("\n".join(["# 技术要求", *(req_bullets or ["- （尚无要求行）"])]))
+
+    form_bullets = [
+        f"- {r.get('name')} · {r.get('role')} · {r.get('weight_pct')}%"
+        for r in formula[:8]
+        if isinstance(r, dict)
+    ]
+    slides.append("\n".join(["# 基准配方", *(form_bullets or ["- （尚无配方）"])]))
+
+    doe_bullets = [
+        f"- {p.get('design_type')} · plan `{p.get('plan_id')}`"
+        for p in doe[:6]
+        if isinstance(p, dict)
+    ]
+    slides.append("\n".join(["# DOE 进展", *(doe_bullets or ["- （尚无 DOE）"])]))
+
+    hist = loop.get("history") or []
+    loop_bullets = []
+    for i, h in enumerate(hist[:5]):
+        if isinstance(h, dict):
+            loop_bullets.append(f"- 轮次 {i+1}: rmse={h.get('rmse')} converged={h.get('converged')}")
+    for c in (loop.get("candidates") or [])[:3]:
+        if isinstance(c, dict):
+            loop_bullets.append(f"- 候选 {c.get('name')} score={c.get('score')}")
+    slides.append("\n".join(["# 闭环与候选", *(loop_bullets or ["- （尚无闭环历史）"])]))
+
+    slides.append(
+        "\n".join(
+            [
+                "# 文献溯源",
+                f"- source_ids: {len(lit)}",
+                *[f"- `{sid}`" for sid in lit[:8]],
+            ]
+        )
+    )
+    flag_lines = [f"- `{k}`" for k, v in flags.items() if v] or ["- （无 Flag）"]
+    slides.append("\n".join(["# 开放问题 / Flag", *flag_lines]))
+    slides.append(
+        "\n".join(
+            [
+                "# 声明",
+                "- 本页由 DossierPack 确定性生成",
+                "- 不得把叙述当作 Claims 证据",
+                "- 引用回链 source_ids / 测量行",
+            ]
+        )
+    )
+    return "\n\n---\n\n".join(slides) + "\n"
 
 
 def _try_llm_polish(*, template: str, pack: dict[str, Any], body: str, prompt: str) -> tuple[str, dict[str, Any]]:
@@ -393,3 +480,57 @@ def generate_report(
     out["markdown"] = md
     out["persisted"] = True
     return out
+
+
+def export_report(
+    project_id: str,
+    template: str,
+    fmt: str,
+    *,
+    campaign_id: str | None = None,
+    prompt: str = "",
+    use_llm: bool = False,
+    ensure_dossier: bool = True,
+) -> dict[str, Any]:
+    """Generate report then export to md/docx/pdf/pptx bytes metadata."""
+    from .report_export import export_bytes, export_capabilities
+
+    caps = export_capabilities()
+    kind = (fmt or "md").strip().lower()
+    if kind in ("ppt", "deck"):
+        kind = "pptx"
+    if kind == "markdown":
+        kind = "md"
+    if kind not in caps or not caps.get(kind):
+        raise RuntimeError(f"export format unavailable: {fmt}; caps={caps}")
+
+    # Deck exports should use the deck template content
+    tpl = (template or "").strip().lower()
+    if kind == "pptx" and tpl != "deck":
+        # Still allow exporting any template as PPTX via slide-split on --- / headings
+        pass
+
+    generated = generate_report(
+        project_id,
+        tpl,
+        campaign_id=campaign_id,
+        prompt=prompt,
+        use_llm=use_llm,
+        ensure_dossier=ensure_dossier,
+        persist=True,
+    )
+    title = str(generated.get("title") or f"report-{tpl}")
+    payload, media_type, ext = export_bytes(generated["markdown"], kind, title=title)
+    filename = f"project-{safe_key(project_id)}-{safe_key(tpl)}.{ext}"
+    return {
+        "ok": True,
+        "format": kind,
+        "filename": filename,
+        "media_type": media_type,
+        "bytes": payload,
+        "path": generated.get("path"),
+        "title": title,
+        "size": len(payload),
+        "capabilities": caps,
+        "disclaimer": generated.get("disclaimer"),
+    }

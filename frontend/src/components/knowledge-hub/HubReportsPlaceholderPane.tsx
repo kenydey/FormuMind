@@ -9,7 +9,6 @@ const TEMPLATES: {
   title: string;
   desc: string;
   dossierSections: string;
-  muted?: boolean;
 }[] = [
   {
     id: "briefing",
@@ -27,7 +26,7 @@ const TEMPLATES: {
     id: "formula-compare",
     title: "配方对比纪要",
     desc: "对比候选配方组分、性能与文献依据。",
-    dossierSections: "主读卷宗 S3 + S6（+ formulation_versions）",
+    dossierSections: "主读卷宗 S3 + S6",
   },
   {
     id: "patent-memo",
@@ -38,34 +37,45 @@ const TEMPLATES: {
   {
     id: "deck",
     title: "演示文稿 · Slide Deck",
-    desc: "汇报用大纲幻灯（后续实现）。",
-    dossierSections: "待定",
-    muted: true,
+    desc: "汇报大纲幻灯；可导出 PPTX。",
+    dossierSections: "S1/S3/S4/S6/S2 大纲分页",
   },
 ];
 
-/** Report generation from DossierPack (P5). */
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** Report generation + export from DossierPack (P5 / P5.1). */
 export default function HubReportsPlaceholderPane() {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
   const [picked, setPicked] = useState<(typeof TEMPLATES)[number] | null>(null);
   const [prompt, setPrompt] = useState("");
   const [useLlm, setUseLlm] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     title: string;
     path: string;
     markdown: string;
     disclaimer?: string;
+    template: string;
   } | null>(null);
 
   const onGenerate = async () => {
-    if (!picked || picked.muted) return;
+    if (!picked) return;
     if (!activeProjectId) {
       setError("请先选择活动项目");
       return;
     }
-    setBusy(true);
+    setBusy("generate");
     setError(null);
     try {
       const out = await api.generateWikiReport({
@@ -84,11 +94,33 @@ export default function HubReportsPlaceholderPane() {
         path: out.path,
         markdown: out.markdown,
         disclaimer: out.disclaimer,
+        template: picked.id,
       });
     } catch (e) {
       setError(formatApiError(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  };
+
+  const onExport = async (format: "md" | "docx" | "pdf" | "pptx") => {
+    if (!activeProjectId || !picked) return;
+    setBusy(`export-${format}`);
+    setError(null);
+    try {
+      const { blob, filename } = await api.exportWikiReport({
+        project_id: activeProjectId,
+        template: picked.id,
+        format,
+        prompt,
+        use_llm: useLlm,
+        ensure_dossier: true,
+      });
+      triggerDownload(blob, filename);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -96,10 +128,8 @@ export default function HubReportsPlaceholderPane() {
     <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto" data-testid="hub-reports-pane">
       <p className="text-[11px] text-slate-500">
         文档生成基于<strong className="text-slate-400 font-normal"> 项目卷宗 DossierPack </strong>
-        （确定性切片表 + source_ids 溯源）。需开启
-        <code className="mx-1">wiki_dossier_report_enabled</code>
-        （并依赖 <code>wiki_project_dossier_enabled</code>）。
-        不做 Flashcards / Quiz；Mind Map 不进顶级菜单。
+        。需开启 <code className="mx-1">wiki_dossier_report_enabled</code>。
+        支持导出 Markdown / Word / PDF；Slide Deck 可导出 PPTX。
       </p>
       <p className="text-[11px] text-slate-500" data-testid="hub-reports-dossier-hint">
         {activeProjectId
@@ -116,24 +146,19 @@ export default function HubReportsPlaceholderPane() {
               setResult(null);
             }}
             className={`text-left border rounded-lg px-3 py-2.5 transition-colors ${
-              t.muted
-                ? "border-edge/40 opacity-60 hover:opacity-80"
-                : picked?.id === t.id
-                  ? "border-accent/60 bg-accent/10"
-                  : "border-edge hover:border-accent/50 hover:bg-accent/5"
+              picked?.id === t.id
+                ? "border-accent/60 bg-accent/10"
+                : "border-edge hover:border-accent/50 hover:bg-accent/5"
             }`}
           >
             <div className="text-sm text-slate-200">{t.title}</div>
             <p className="text-[11px] text-slate-500 mt-1">{t.desc}</p>
             <p className="text-[10px] text-accent/80 mt-1">{t.dossierSections}</p>
-            {t.muted && (
-              <span className="text-[10px] text-amber-400/80 mt-1 inline-block">子项 · 稍后</span>
-            )}
           </button>
         ))}
       </div>
 
-      {picked && !picked.muted && (
+      {picked && (
         <div className="border border-accent/30 rounded-lg p-3 space-y-2 bg-accent/5">
           <div className="flex justify-between gap-2">
             <h3 className="text-sm text-slate-100">{picked.title}</h3>
@@ -143,12 +168,12 @@ export default function HubReportsPlaceholderPane() {
           </div>
           <p className="text-[11px] text-slate-400">依赖：{picked.dossierSections}</p>
           <label className="block text-[11px] text-slate-400">
-            提示词（可选，写入报告备注；不改表内数字）
+            提示词（可选）
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              rows={4}
-              placeholder="例如：针对水性环氧防腐底漆，输出可行性评估，强调 VOC 与盐雾…"
+              rows={3}
+              placeholder="例如：强调 VOC 与盐雾窗口…"
               className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm text-slate-200"
               data-testid="hub-reports-prompt"
             />
@@ -160,27 +185,35 @@ export default function HubReportsPlaceholderPane() {
               onChange={(e) => setUseLlm(e.target.checked)}
               data-testid="hub-reports-use-llm"
             />
-            LLM 执行摘要润色（需 wiki_dossier_llm_narrative；失败则仅确定性稿）
+            LLM 执行摘要润色（需 wiki_dossier_llm_narrative）
           </label>
-          <p className="text-[10px] text-slate-500">
-            输出为研发草稿，需人工审核；不构成正式专利/论文代写。对外引用须回链 source_ids /
-            测量行，不得把 L2 叙述当 Claim。
-          </p>
           {error && (
-            <div className="text-xs text-rose-300 border border-rose-500/40 rounded px-2 py-1">
-              {error}
-            </div>
+            <div className="text-xs text-rose-300 border border-rose-500/40 rounded px-2 py-1">{error}</div>
           )}
-          <button
-            type="button"
-            disabled={busy || !activeProjectId}
-            className="px-3 py-1.5 rounded bg-accent text-ink text-sm disabled:opacity-50"
-            title="基于卷宗生成"
-            data-testid="hub-reports-generate"
-            onClick={() => void onGenerate()}
-          >
-            {busy ? "生成中…" : "基于卷宗生成"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!!busy || !activeProjectId}
+              className="px-3 py-1.5 rounded bg-accent text-ink text-sm disabled:opacity-50"
+              data-testid="hub-reports-generate"
+              onClick={() => void onGenerate()}
+            >
+              {busy === "generate" ? "生成中…" : "基于卷宗生成"}
+            </button>
+            {(["md", "docx", "pdf", "pptx"] as const).map((fmt) => (
+              <button
+                key={fmt}
+                type="button"
+                disabled={!!busy || !activeProjectId}
+                className="px-2 py-1.5 rounded border border-edge text-xs text-slate-200 disabled:opacity-50"
+                data-testid={`hub-reports-export-${fmt}`}
+                title={fmt === "pptx" && picked.id !== "deck" ? "任意模板也可导出 PPTX（按标题分页）" : undefined}
+                onClick={() => void onExport(fmt)}
+              >
+                {busy === `export-${fmt}` ? `${fmt}…` : `导出 ${fmt.toUpperCase()}`}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

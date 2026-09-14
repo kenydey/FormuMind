@@ -335,10 +335,11 @@ DossierPack
 | formula-compare | S3 + S6 → formula / loop |
 | patent-memo | S2 → literature + source_ids |
 
-实现记录：[`2026-09-14-wiki-p5-report.md`](./2026-09-14-wiki-p5-report.md)
+实现记录：[`2026-09-14-wiki-p5-report.md`](./2026-09-14-wiki-p5-report.md) · 导出/Deck/金样：[`2026-09-14-wiki-p5-report-export.md`](./2026-09-14-wiki-p5-report-export.md)
 
 Report **禁止**直接把 L2 叙述当 Claim；对外引用必须能点回 `source_ids` / 测量行。
 MVP：确定性 Markdown + 可选 LLM 执行摘要；旗标 `wiki_dossier_report_enabled`。
+P5.1：DOCX/PDF/PPTX 导出 + `deck` 幻灯模板 + 金样 E2E。
 
 ---
 

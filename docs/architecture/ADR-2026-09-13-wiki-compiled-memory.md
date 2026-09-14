@@ -47,5 +47,5 @@
 - **产物：** `themes/project-{id}.md` + 同路径旁路 `themes/project-{id}.data.json`  
 - **自动 patch：** 默认关；手动 ensure/patch/refresh  
 - **垂直 prompt：** 可选 `vertical_addendum`，不默认加载  
-- **Report：** DossierPack 为上游；P5 MVP = 确定性 Markdown 草稿（`wiki_dossier_report_enabled`）+ 可选 LLM 执行摘要；**不得**把 Dossier/Report 叙述当 Claims 证据；PDF/Word 完整排版仍非目标  
+- **Report：** DossierPack 为上游；P5 MVP = 确定性 Markdown 草稿；P5.1 = DOCX/PDF/PPTX 导出 + `deck` 幻灯（`wiki_dossier_report_enabled`）；**不得**把 Dossier/Report 叙述当 Claims 证据  
 - **约束延续：** 不引入 MkDocs 运行时；不覆盖 L1；不新建第二向量库  

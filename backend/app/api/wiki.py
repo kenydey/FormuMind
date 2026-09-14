@@ -239,12 +239,22 @@ class DossierRefreshRequest(BaseModel):
 
 class DossierReportRequest(BaseModel):
     project_id: str = Field(min_length=1)
-    template: str = Field(min_length=1, description="briefing|feasibility|formula-compare|patent-memo")
+    template: str = Field(min_length=1, description="briefing|feasibility|formula-compare|patent-memo|deck")
     campaign_id: str | None = None
     prompt: str = ""
     use_llm: bool = False
     ensure_dossier: bool = True
     persist: bool = True
+
+
+class DossierReportExportRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    template: str = Field(min_length=1)
+    format: str = Field(default="docx", description="md|docx|pdf|pptx")
+    campaign_id: str | None = None
+    prompt: str = ""
+    use_llm: bool = False
+    ensure_dossier: bool = True
 
 
 @router.post("/themes/compile")
@@ -333,8 +343,9 @@ def list_report_templates_endpoint() -> dict:
     """P5: list available DossierPack-backed report templates."""
     _require_wiki()
     from ..services.wiki.report import list_report_templates
+    from ..services.wiki.report_export import export_capabilities
 
-    return {"templates": list_report_templates()}
+    return {"templates": list_report_templates(), "export": export_capabilities()}
 
 
 @router.post("/dossier/report")
@@ -359,6 +370,41 @@ def generate_dossier_report_endpoint(body: DossierReportRequest) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/dossier/report/export")
+def export_dossier_report_endpoint(body: DossierReportExportRequest):
+    """P5.1: generate + export report as md/docx/pdf/pptx."""
+    _require_wiki()
+    from fastapi.responses import Response
+
+    from ..services.wiki.report import export_report
+
+    try:
+        out = export_report(
+            body.project_id,
+            body.template,
+            body.format,
+            campaign_id=body.campaign_id,
+            prompt=body.prompt or "",
+            use_llm=body.use_llm,
+            ensure_dossier=body.ensure_dossier,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{out["filename"]}"',
+        "X-FormuMind-Report-Path": str(out.get("path") or ""),
+        "X-FormuMind-Disclaimer": str(out.get("disclaimer") or "draft_not_claims"),
+    }
+    return Response(content=out["bytes"], media_type=out["media_type"], headers=headers)
 
 
 @router.get("/dossier/{project_id}")

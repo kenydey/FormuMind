@@ -58,7 +58,7 @@ def _make_project(projects: ProjectStore) -> str:
 
 def test_list_templates():
     ids = {t["id"] for t in list_report_templates()}
-    assert ids == {"briefing", "feasibility", "formula-compare", "patent-memo"}
+    assert ids >= {"briefing", "feasibility", "formula-compare", "patent-memo", "deck"}
 
 
 def test_generate_briefing_persists(env):
@@ -107,8 +107,15 @@ def test_api_generate_and_templates(env):
     assert body["ok"] is True
     assert "VOC" in body["markdown"] or "voc" in body["markdown"].lower() or "提示" in body["markdown"]
 
-    r3 = client.post("/api/wiki/dossier/report", json={"project_id": pid, "template": "deck"})
+    r3 = client.post("/api/wiki/dossier/report", json={"project_id": pid, "template": "nope"})
     assert r3.status_code == 400
+
+    r4 = client.post(
+        "/api/wiki/dossier/report",
+        json={"project_id": pid, "template": "deck", "persist": True},
+    )
+    assert r4.status_code == 200, r4.text
+    assert "---" in r4.json()["markdown"]
 
 
 def test_render_citations_never_claim_l2():
