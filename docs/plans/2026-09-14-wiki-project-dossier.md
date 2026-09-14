@@ -208,7 +208,7 @@ prompt_hash: ""
 | **DOE/台账测量入库** experiments sync | `lab_recorded` | **patch S4+S5+S8** |
 | **寻优完成** optimize task 成功 | `optimize_completed`（campaign 或 `requirement.project_id`） | **patch S6+S7+S8** |
 | **闭环一轮** loop 启动 + 完成 | `loop_updated`（workbench_loop 启动；task 完成再通知） | **patch S6+S7+S8** |
-| **附件/QC/结构图** | attachments | **patch S7**（+ S5 附件列；随 refresh） |
+| **附件/QC/结构图** | 上传/删除 → `attachment_uploaded`（experiment 或 campaign） | **patch S7+S5+S8** |
 | 手动「生成/刷新项目 Wiki」 | Hub「刷新卷宗」/ API refresh | `refresh_all` 或选节 |
 | L2 体系综述编译 | `POST /themes/compile` | 不改 Dossier；S2/S8 可链到 theme path |
 
