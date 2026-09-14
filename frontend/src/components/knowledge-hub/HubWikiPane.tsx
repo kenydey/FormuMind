@@ -41,9 +41,15 @@ export default function HubWikiPane({ active }: { active: boolean }) {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (!activeProjectId) {
+      setPages([]);
+      setError("请先选择活动项目：Wiki 仅显示当前项目关联页（卷宗/报告/本项目资料编译页）");
+      setLoading(false);
+      return;
+    }
     try {
       if (flagsOnly) {
-        const r = await api.listWikiFlags({ limit: 100 });
+        const r = await api.listWikiFlags({ limit: 100, project_id: activeProjectId });
         setPages(
           r.pages.map((p) => ({
             id: p.id,
@@ -59,7 +65,11 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           })),
         );
       } else {
-        const r = await api.listWikiPages({ kind: kind || undefined, limit: 100 });
+        const r = await api.listWikiPages({
+          kind: kind || undefined,
+          limit: 100,
+          project_id: activeProjectId,
+        });
         setPages(r.pages ?? []);
       }
     } catch (e) {
@@ -68,7 +78,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [flagsOnly, kind]);
+  }, [flagsOnly, kind, activeProjectId]);
 
   const runOps = useCallback(
     async (label: string, fn: () => Promise<unknown>) => {
@@ -109,7 +119,12 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     let cancelled = false;
     const t = window.setTimeout(() => {
       api
-        .searchWikiPages({ q, kind: kind || undefined, limit: 50 })
+        .searchWikiPages({
+          q,
+          kind: kind || undefined,
+          limit: 50,
+          project_id: activeProjectId || undefined,
+        })
         .then((r) => {
           if (cancelled) return;
           setSearchHits(r.hits ?? []);
@@ -126,7 +141,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [active, flagsOnly, query, kind]);
+  }, [active, flagsOnly, query, kind, activeProjectId]);
 
   const filtered = useMemo(() => {
     let list = pages;
@@ -309,6 +324,14 @@ export default function HubWikiPane({ active }: { active: boolean }) {
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-wiki-pane">
+      <div
+        className="text-[10px] text-slate-400 border border-edge/50 rounded px-2 py-1"
+        data-testid="hub-wiki-project-scope"
+      >
+        {activeProjectId
+          ? `仅显示当前项目 Wiki · project_id=${activeProjectId}（卷宗/报告 + 本项目资料编译页）`
+          : "未选择活动项目 — Wiki 按项目隔离，请先打开/选择项目"}
+      </div>
       <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
         <select
           className="bg-ink border border-edge rounded px-2 py-1 text-slate-200"
@@ -377,7 +400,10 @@ export default function HubWikiPane({ active }: { active: boolean }) {
                   `Lint：扫描 ${out.scanned ?? "?"} · 有旗标 ${out.flagged ?? "?"} · 孤儿 ${out.orphan_count ?? "?"}`,
                 );
                 setFlagsOnly(true);
-                const r = await api.listWikiFlags({ limit: 100 });
+                const r = await api.listWikiFlags({
+                  limit: 100,
+                  project_id: activeProjectId || undefined,
+                });
                 setPages(
                   r.pages.map((p) => ({
                     id: p.id,

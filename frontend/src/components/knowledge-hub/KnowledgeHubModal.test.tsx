@@ -19,7 +19,7 @@ describe("KnowledgeHubModal reports tab", () => {
     render(<KnowledgeHubModal open onClose={() => undefined} />);
     expect(screen.getByTestId("modal-knowledge-hub")).toBeInTheDocument();
     const reportsTab = screen.getByTestId("hub-tab-reports");
-    expect(reportsTab.textContent).toMatch(/基于卷宗/);
+    expect(reportsTab.textContent).toMatch(/当前项目卷宗报告/);
     expect(reportsTab.textContent).toMatch(/卷宗/);
     expect(reportsTab.textContent).not.toMatch(/预留/);
     expect(screen.getByTestId("hub-reports-pane")).toBeInTheDocument();

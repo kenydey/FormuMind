@@ -1298,10 +1298,13 @@ export const api = {
     }),
   suggestFactors: (req: Requirement) =>
     post<{ factors: FactorCandidate[]; count: number }>("/api/doe/suggest-factors", req),
-  kbSources: (projectId?: string | null, limit = 100) =>
-    get<KBSourcesResponse>(
-      `/api/kb/sources?limit=${limit}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ""}`
-    ),
+  kbSources: (projectId?: string | null, limit = 100, opts?: { includeGlobal?: boolean }) => {
+    const q = new URLSearchParams();
+    q.set("limit", String(limit));
+    if (projectId) q.set("project_id", projectId);
+    if (opts?.includeGlobal) q.set("include_global", "true");
+    return get<KBSourcesResponse>(`/api/kb/sources?${q}`);
+  },
 
   deleteKbSource: (sourceId: string) =>
     del<{
@@ -2247,19 +2250,31 @@ export const api = {
 
   orgDashboard: () => get<OrgDashboardStats>("/api/org/dashboard"),
 
-  listWikiPages: (params?: { kind?: string; limit?: number; offset?: number }) => {
+  listWikiPages: (params?: {
+    kind?: string;
+    limit?: number;
+    offset?: number;
+    project_id?: string | null;
+  }) => {
     const q = new URLSearchParams();
     if (params?.kind) q.set("kind", params.kind);
     if (params?.limit != null) q.set("limit", String(params.limit));
     if (params?.offset != null) q.set("offset", String(params.offset));
+    if (params?.project_id) q.set("project_id", params.project_id);
     const qs = q.toString();
     return get<WikiPagesResponse>(`/api/wiki/pages${qs ? `?${qs}` : ""}`);
   },
-  searchWikiPages: (params: { q: string; kind?: string; limit?: number }) => {
+  searchWikiPages: (params: {
+    q: string;
+    kind?: string;
+    limit?: number;
+    project_id?: string | null;
+  }) => {
     const q = new URLSearchParams();
     q.set("q", params.q);
     if (params.kind) q.set("kind", params.kind);
     if (params.limit != null) q.set("limit", String(params.limit));
+    if (params.project_id) q.set("project_id", params.project_id);
     return get<WikiSearchResponse>(`/api/wiki/search?${q}`);
   },
   compileWikiTheme: (body: { system_key?: string; topic?: string; use_llm?: boolean }) =>
@@ -2407,9 +2422,10 @@ export const api = {
   getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
-  listWikiFlags: (params?: { limit?: number }) => {
+  listWikiFlags: (params?: { limit?: number; project_id?: string | null }) => {
     const q = new URLSearchParams();
     if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.project_id) q.set("project_id", params.project_id);
     const qs = q.toString();
     return get<WikiFlagsResponse>(`/api/wiki/flags${qs ? `?${qs}` : ""}`);
   },
