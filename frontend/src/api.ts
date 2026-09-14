@@ -2413,6 +2413,14 @@ export const api = {
     const qs = q.toString();
     return get<WikiFlagsResponse>(`/api/wiki/flags${qs ? `?${qs}` : ""}`);
   },
+  runWikiLint: (body?: { limit?: number; detect_orphan?: boolean }) =>
+    post<{
+      ok: boolean;
+      scanned?: number;
+      flagged?: number;
+      orphan_count?: number;
+      results?: Record<string, string[]>;
+    }>("/api/wiki/lint/run", body ?? {}),
 
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 
@@ -3363,6 +3371,12 @@ export interface WikiSearchResponse {
   mode: string;
 }
 
+export interface WikiFlagAction {
+  id: string;
+  label: string;
+  hint?: string;
+}
+
 export interface WikiFlagItem {
   id: string;
   path: string;
@@ -3370,6 +3384,7 @@ export interface WikiFlagItem {
   title: string;
   flags: string[];
   source_ids: string[];
+  actions?: WikiFlagAction[];
 }
 
 export interface WikiFlagsResponse {

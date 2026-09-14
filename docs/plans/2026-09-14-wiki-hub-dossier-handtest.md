@@ -18,9 +18,17 @@
 | `FORMUMIND_WIKI_DOE_CONSTRAINTS` | `true`（验 soft hint **不**读 L2） |
 | `FORMUMIND_WIKI_CHAT_BLEND` | `true`（验 Claims 过滤） |
 | `FORMUMIND_WIKI_DOSSIER_AUTO_PATCH` | `false`（先手动 refresh） |
-| `FORMUMIND_WIKI_DOSSIER_LLM_NARRATIVE` | `false`（可选另开一轮） |
+| `FORMUMIND_WIKI_DOSSIER_LLM_NARRATIVE` | `false`（可选另开一轮；开启后为 **两步叙述** Analysis→Prose） |
 
-API 冒烟（创建项目 → ensure → refresh → pack → report）：
+**无活栈灰度门禁（CI / 本地 pytest，优先跑）：**
+
+```bash
+cd backend && python -m pytest -q tests/test_wiki_grayscale_gate.py \
+  tests/test_wiki_dossier_claims_doe_regression.py \
+  tests/test_wiki_w3_w4.py -k lint
+```
+
+API 冒烟（创建项目 → ensure → refresh → pack → report；**需活栈**）：
 
 ```bash
 python3 scripts/hub_dossier_handtest_smoke.py
@@ -53,6 +61,8 @@ cd frontend && npm test -- --run \
 | W3 | Reader 侧栏 / meta | 可见 `section_revisions`、`unreviewed` / LLM Flag（`hub-wiki-dossier-meta`） |
 | W4 | 点「**刷新卷宗**」 | 成功；S1 表含要求指标（盐雾/VOC 等） |
 | W5 | 列表可搜到 `themes/project-*` | Chat blend 可命中（非 Claims） |
+| W6 | 点「**跑 Lint**」 | `POST /api/wiki/lint/run`；摘要显示扫描/旗标/孤儿数；切到「仅 Flag」 |
+| W7 | Flag 行动作芯片 | 打开页面 / 标记已审 / 核对 Evidence / 补链 / 编译主题 / 刷新卷宗（按 flags+kind） |
 
 ---
 
@@ -94,9 +104,11 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 
 ## 5. 通过标准
 
-- [ ] API smoke 脚本全绿（或明确标出未开旗标）
-- [ ] Hub W1–W5、R1–R3 手测通过（Reports 页徽标为「卷宗」而非「预留」）
+- [ ] API smoke 脚本全绿（或明确标出未开旗标；无活栈时以 grayscale pytest 代替）
+- [ ] Hub W1–W7、R1–R3 手测通过（Reports 页徽标为「卷宗」而非「预留」）
 - [ ] C1–C3 边界无破窗
+- [x] `test_wiki_grayscale_gate.py`：开旗标 dossier/report + L2 bounds 不进 DOE + lint actions
 - [x] `test_wiki_dossier_claims_doe_regression.py` 全绿（CI / 本地 pytest）
 - [x] `test_wiki_optimize_dossier_hook.py`：optimize 完成通知 `optimize_completed`
 - [x] `test_wiki_attachment_s7.py`：附件 hydrate 进 S7/S5 + `attachment_uploaded` 钩子
+- [x] 两步叙述 + Lint UX：`test_wiki_p4_dossier` narrative · `test_wiki_w3_w4` orphan/lint · HubWikiPane lint chips

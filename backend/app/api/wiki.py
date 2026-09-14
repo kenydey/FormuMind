@@ -87,6 +87,12 @@ def get_by_path(path: str = Query(min_length=1)) -> WikiPageDetail:
     return WikiPageDetail(**base.model_dump(), markdown=md)
 
 
+class WikiFlagAction(BaseModel):
+    id: str
+    label: str
+    hint: str = ""
+
+
 class WikiFlagItem(BaseModel):
     id: str
     path: str
@@ -94,10 +100,16 @@ class WikiFlagItem(BaseModel):
     title: str = ""
     flags: list[str] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
+    actions: list[WikiFlagAction] = Field(default_factory=list)
 
 
 class WikiFlagsResponse(BaseModel):
     pages: list[WikiFlagItem]
+
+
+class WikiLintRunRequest(BaseModel):
+    limit: int = Field(default=200, ge=1, le=500)
+    detect_orphan: bool = True
 
 
 @router.get("/flags", response_model=WikiFlagsResponse)
@@ -107,6 +119,16 @@ def list_flagged(limit: int = Query(default=50, ge=1, le=200)) -> WikiFlagsRespo
 
     rows = list_flagged_pages(limit=limit)
     return WikiFlagsResponse(pages=[WikiFlagItem(**r) for r in rows])
+
+
+@router.post("/lint/run")
+def run_lint_endpoint(body: WikiLintRunRequest | None = None) -> dict:
+    """W4 ops: scan pages for stale/conflict/orphan and persist flags."""
+    _require_wiki()
+    from ..services.wiki.lint import run_lint_pass
+
+    req = body or WikiLintRunRequest()
+    return run_lint_pass(limit=req.limit, detect_orphan=req.detect_orphan)
 
 
 class WikiSearchHit(BaseModel):
