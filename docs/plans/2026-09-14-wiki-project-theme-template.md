@@ -1,6 +1,9 @@
 # 项目技术 Wiki 模板（表面处理 / 配方 DOE）实施计划
 
-状态：**提案已评审，待立项实施（Phase P4）**  
+> **已修订取代：** 请以 [`2026-09-14-wiki-project-dossier.md`](./2026-09-14-wiki-project-dossier.md) 为准。  
+> 本文保留为早期动机与 MkDocs 可行性评审记录；P4 实施按 **Project Dossier** 八节卷宗 + 事件 patch。
+
+状态：**历史草稿（被 Project Dossier 蓝图取代）**  
 日期：2026-09-14  
 父蓝图：[`2026-09-13-wiki-compiled-memory.md`](./2026-09-13-wiki-compiled-memory.md)  
 ADR：[`../architecture/ADR-2026-09-13-wiki-compiled-memory.md`](../architecture/ADR-2026-09-13-wiki-compiled-memory.md)  
