@@ -53,15 +53,19 @@ def test_optimize_then_poll():
     assert r.status_code == 202
     task_id = r.json()["task_id"]
 
-    # Poll until completion (in-process thread; should be fast).
-    for _ in range(50):
+    # Eager optimize runs in a daemon thread. Wall time is typically ~2s but
+    # fluctuates under CI load / cold predictor init (see test_integrations
+    # loop poll: 15–40s). A fixed 50×50ms (=2.5s) budget flakes as
+    # assert 'running' == 'completed'. Match phase_abc / tasks_sse deadline polls.
+    deadline = time.monotonic() + 60.0
+    body = {}
+    while time.monotonic() < deadline:
         s = client.get(f"/api/tasks/{task_id}")
         assert s.status_code == 200
-        state = s.json()["state"]
-        if state in ("completed", "failed"):
+        body = s.json()
+        if body["state"] in ("completed", "failed"):
             break
         time.sleep(0.05)
-    body = client.get(f"/api/tasks/{task_id}").json()
     assert body["state"] == "completed"
     assert body["result"]["top_formulations"]
 
