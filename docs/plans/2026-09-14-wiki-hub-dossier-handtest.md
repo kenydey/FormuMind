@@ -95,6 +95,7 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 ## 5. 通过标准
 
 - [ ] API smoke 脚本全绿（或明确标出未开旗标）
-- [ ] Hub W1–W5、R1–R3 手测通过
+- [ ] Hub W1–W5、R1–R3 手测通过（Reports 页徽标为「卷宗」而非「预留」）
 - [ ] C1–C3 边界无破窗
-- [ ] `test_wiki_dossier_claims_doe_regression.py` 全绿
+- [x] `test_wiki_dossier_claims_doe_regression.py` 全绿（CI / 本地 pytest）
+- [x] `test_wiki_optimize_dossier_hook.py`：optimize 完成通知 `optimize_completed`
