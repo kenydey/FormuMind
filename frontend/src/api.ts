@@ -2337,6 +2337,32 @@ export const api = {
       `/api/wiki/dossier/${encodeURIComponent(projectId)}/pack${q}`,
     );
   },
+  listWikiReportTemplates: () =>
+    get<{ templates: { id: string; title: string; blurb: string; slices: string }[] }>(
+      "/api/wiki/reports/templates",
+    ),
+  generateWikiReport: (body: {
+    project_id: string;
+    template: string;
+    campaign_id?: string;
+    prompt?: string;
+    use_llm?: boolean;
+    ensure_dossier?: boolean;
+    persist?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      project_id?: string;
+      template?: string;
+      path?: string;
+      title?: string;
+      markdown?: string;
+      page_id?: string;
+      revision?: number;
+      disclaimer?: string;
+      llm?: { used_llm?: boolean; error?: string | null };
+      error?: string;
+    }>("/api/wiki/dossier/report", body),
   rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
   rebuildWikiEmbed: () =>
     post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(

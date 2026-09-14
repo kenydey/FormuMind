@@ -281,6 +281,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           <option value="mechanism">mechanisms</option>
           <option value="pitfall">pitfalls</option>
           <option value="theme">themes</option>
+          <option value="report">reports</option>
         </select>
         <label className="flex items-center gap-1 text-slate-400">
           <input
