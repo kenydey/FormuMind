@@ -17,6 +17,24 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
 
+# Serialize metadata DDL across threads. Eager Celery daemons and Alembic
+# ``0001_baseline`` can both call ``create_all`` on the same SQLite file when a
+# test flips ``FORMUMIND_DB_URL``; ``checkfirst`` alone has a TOCTOU gap that
+# surfaces as ``sqlite3.OperationalError: table … already exists`` in CI.
+_schema_ddl_lock = threading.Lock()
+
+
+def create_all_metadata(bind) -> None:
+    """Process-wide locked ``Base.metadata.create_all(..., checkfirst=True)``."""
+    with _schema_ddl_lock:
+        Base.metadata.create_all(bind, checkfirst=True)
+
+
+def drop_all_metadata(bind) -> None:
+    """Process-wide locked ``Base.metadata.drop_all(..., checkfirst=True)``."""
+    with _schema_ddl_lock:
+        Base.metadata.drop_all(bind, checkfirst=True)
+
 
 def _ensure_sqlite_dir(db_url: str) -> None:
     prefix = "sqlite:///"
@@ -86,7 +104,7 @@ def make_engine(db_url: str) -> Engine:
     from ..config import get_settings
 
     if get_settings().environment not in ("production", "prod"):
-        Base.metadata.create_all(engine)
+        create_all_metadata(engine)
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
     _ensure_owner_id_column(engine, "task_outbox")
@@ -227,7 +245,8 @@ def _ensure_material_columns(engine: Engine) -> None:
     # New pending-queue table: create_all covers fresh DBs; existing DBs need it too.
     from .models import MaterialCandidateRow
 
-    MaterialCandidateRow.__table__.create(bind=engine, checkfirst=True)
+    with _schema_ddl_lock:
+        MaterialCandidateRow.__table__.create(bind=engine, checkfirst=True)
 
 
 def _ensure_owner_id_column(engine: Engine, table: str) -> None:
