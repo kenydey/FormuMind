@@ -248,9 +248,97 @@ def test_wiki_lint_and_flags_api(wiki_env):
             summary="no evidence",
         ),
         source_ids=[],
+        flags=["stale"],
     )
     flags = lint_page("materials/orphan.md")
     assert "stale" in flags
     client = TestClient(app)
     r = client.get("/api/wiki/flags")
     assert r.status_code == 200
+    pages = r.json().get("pages") or []
+    assert pages
+    row = next(p for p in pages if p["path"] == "materials/orphan.md")
+    assert "stale" in row["flags"]
+    action_ids = {a["id"] for a in row.get("actions") or []}
+    assert "open_page" in action_ids
+    assert "check_sources" in action_ids
+
+
+def test_wiki_lint_orphan_and_run_endpoint(wiki_env):
+    from app.services.wiki.lint import detect_orphans, run_lint_pass, suggest_actions
+
+    _, _, wiki, _ = wiki_env
+    wiki.upsert_page(
+        path="materials/hub.md",
+        kind="material",
+        title="hub",
+        norm_key="hub",
+        entity_id="material:hub",
+        markdown=dump_page(
+            kind="material",
+            title="hub",
+            entity_id="material:hub",
+            norm_key="hub",
+            source_ids=["s1"],
+            summary="links [[orphan-mat]]",
+        )
+        + "\n\nSee [[orphan-mat]].\n",
+        source_ids=["s1"],
+    )
+    wiki.upsert_page(
+        path="materials/orphan-mat.md",
+        kind="material",
+        title="orphan-mat",
+        norm_key="orphan-mat",
+        entity_id="material:orphan-mat",
+        markdown=dump_page(
+            kind="material",
+            title="orphan-mat",
+            entity_id="material:orphan-mat",
+            norm_key="orphan-mat",
+            source_ids=["s1"],
+            summary="linked from hub",
+        ),
+        source_ids=["s1"],
+    )
+    wiki.upsert_page(
+        path="materials/lonely.md",
+        kind="material",
+        title="lonely",
+        norm_key="lonely",
+        entity_id="material:lonely",
+        markdown=dump_page(
+            kind="material",
+            title="lonely",
+            entity_id="material:lonely",
+            norm_key="lonely",
+            source_ids=["s1"],
+            summary="no inbound",
+        ),
+        source_ids=["s1"],
+    )
+    orphans = detect_orphans()
+    assert "materials/lonely.md" in orphans
+    assert "materials/orphan-mat.md" not in orphans
+
+    acts = suggest_actions(
+        flags=["orphan", "unreviewed"],
+        kind="system",
+        path="systems/foo.md",
+    )
+    ids = {a["id"] for a in acts}
+    assert "mark_reviewed" in ids
+    assert "link_from_theme" in ids
+    assert "compile_theme" in ids
+
+    summary = run_lint_pass(limit=50, detect_orphan=True)
+    assert summary["ok"] is True
+    assert summary["scanned"] >= 3
+    assert "orphan" in (summary["results"].get("materials/lonely.md") or [])
+
+    client = TestClient(app)
+    r = client.post("/api/wiki/lint/run", json={"limit": 50, "detect_orphan": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("ok") is True
+    assert body.get("orphan_count", 0) >= 1

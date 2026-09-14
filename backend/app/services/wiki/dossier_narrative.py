@@ -3,10 +3,16 @@
 Flag-gated via ``wiki_dossier_llm_narrative`` (default false). Never rewrites
 deterministic markdown tables; never invents image paths. On failure, callers
 keep the previous narrative.
+
+When enabled, generation uses a **two-step** chain (idea borrowed from
+Karpathy-style wikis; reimplemented here):
+  1) structured analysis JSON (entities / tensions / soft next steps)
+  2) Chinese prose from that analysis + the canonical table only
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from typing import Any
@@ -50,7 +56,6 @@ def validate_narrative(text: str, *, table_md: str = "") -> str | None:
         return "contains_table_row"
     if _IMAGE_MD.search(body) or _FAKE_ASSET.search(body):
         return "invented_asset_path"
-    # Soft check: do not introduce pipe-table-looking blocks
     if "<!-- data:" in body:
         return "contains_data_marker"
     return None
@@ -63,14 +68,11 @@ def extract_narrative_from_section(section_body: str) -> str:
         return ""
     lines = text.splitlines()
     i = 0
-    # skip data comment
     while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith("<!--")):
         i += 1
-    # skip table
     if i < len(lines) and lines[i].lstrip().startswith("|"):
         while i < len(lines) and (lines[i].lstrip().startswith("|") or not lines[i].strip()):
             i += 1
-        # optional second table (S4/S6)
         while i < len(lines) and not lines[i].strip():
             i += 1
         if i < len(lines) and lines[i].lstrip().startswith("|"):
@@ -85,8 +87,20 @@ def attach_narrative(table_block: str, narrative: str | None) -> str:
     narr = (narrative or "").strip()
     if not narr:
         return base
-    # Drop previous placeholder / narrative if caller passed table-only block
     return f"{base}\n\n{narr}"
+
+
+def _analysis_brief(analysis: Any) -> str:
+    """Compact analysis for step-2 prompt (no tables)."""
+    if analysis is None:
+        return ""
+    if hasattr(analysis, "model_dump"):
+        data = analysis.model_dump()
+    elif isinstance(analysis, dict):
+        data = analysis
+    else:
+        return str(analysis)[:2000]
+    return json.dumps(data, ensure_ascii=False)[:2500]
 
 
 def generate_section_narrative(
@@ -97,10 +111,10 @@ def generate_section_narrative(
     previous_narrative: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
-    Best-effort LLM narrative for one section.
+    Best-effort two-step LLM narrative for one section.
 
     Returns ``(narrative_or_previous, meta)``. Meta includes model / prompt_hash /
-    ``used_llm`` / ``error``.
+    ``used_llm`` / ``error`` / ``steps``.
     """
     meta: dict[str, Any] = {
         "used_llm": False,
@@ -108,6 +122,7 @@ def generate_section_narrative(
         "prompt_hash": "",
         "error": None,
         "section": section,
+        "steps": [],
     }
     prev = (previous_narrative or "").strip()
     if not narrative_enabled():
@@ -124,40 +139,92 @@ def generate_section_narrative(
 
         from ..llm import complete_structured
 
-        class SectionNarrative(BaseModel):
-            narrative: str = Field(description="Chinese prose only; no markdown tables; no image paths")
+        class SectionAnalysis(BaseModel):
+            key_points: list[str] = Field(
+                default_factory=list,
+                description="3-6 qualitative bullets grounded only in the table",
+            )
+            tensions: list[str] = Field(
+                default_factory=list,
+                description="Contradictions / gaps visible in the table; empty if none",
+            )
+            soft_next_steps: list[str] = Field(
+                default_factory=list,
+                description="Soft suggestions only; never hard DOE bounds or fake cites",
+            )
 
-        system = (
-            "You write short industrial R&D narrative for a Project Dossier wiki section. "
+        class SectionNarrative(BaseModel):
+            narrative: str = Field(
+                description="Chinese prose only; no markdown tables; no image paths"
+            )
+
+        base_system = (
+            "You assist FormuMind Project Dossier (industrial R&D wiki). "
             "Use ONLY the provided markdown table / pack facts. "
             "Do NOT invent numbers, citations, ASTM results, or image/asset paths. "
-            "Do NOT output markdown tables. Do NOT use ![ ]( ) images. "
-            "Reply in Chinese. Keep claims qualitative unless the table states a number."
+            "Do NOT propose hard DOE bounds. Soft suggestions only."
         )
         if addendum:
-            system += "\n\n" + addendum
+            base_system += "\n\n" + addendum
 
-        user = (
+        table_blob = table_md[:4000] or "(empty)"
+        analysis_user = (
             f"Project: {title}\nDomain: {domain}\nSection: {section}\n"
-            f"Instruction: {prompt_hint}\n\n"
-            f"Canonical table:\n{table_md[:4000] or '(empty)'}\n"
+            f"Task: Analyze the canonical table only. Output structured bullets.\n\n"
+            f"Canonical table:\n{table_blob}\n"
         )
-        prompt_hash = hashlib.sha1(f"{system}\n{user}".encode()).hexdigest()[:16]
+        prompt_hash = hashlib.sha1(f"{base_system}\n{analysis_user}\n{prompt_hint}".encode()).hexdigest()[
+            :16
+        ]
         meta["prompt_hash"] = prompt_hash
         meta["model"] = getattr(get_settings(), "llm_model", "") or ""
 
-        out, err = complete_structured(system, user, SectionNarrative, retry=False)
+        # Step 1 — analysis
+        analysis, err1 = complete_structured(
+            base_system + " Reply with structured analysis fields only.",
+            analysis_user,
+            SectionAnalysis,
+            retry=False,
+        )
+        if analysis is None:
+            meta["error"] = err1 or "analysis_llm_failed"
+            meta["steps"] = ["analysis_failed"]
+            return prev, meta
+        meta["steps"].append("analysis_ok")
+
+        # Step 2 — prose from analysis + table
+        prose_system = (
+            base_system
+            + " Write short Chinese narrative only. "
+            "Do NOT output markdown tables. Do NOT use ![ ]( ) images. "
+            "Keep claims qualitative unless the table states a number."
+        )
+        prose_user = (
+            f"Project: {title}\nDomain: {domain}\nSection: {section}\n"
+            f"Instruction: {prompt_hint}\n\n"
+            f"Structured analysis (from step 1):\n{_analysis_brief(analysis)}\n\n"
+            f"Canonical table:\n{table_blob}\n"
+        )
+        out, err2 = complete_structured(prose_system, prose_user, SectionNarrative, retry=False)
         if out is None:
-            meta["error"] = err or "llm_failed"
+            meta["error"] = err2 or "prose_llm_failed"
+            meta["steps"].append("prose_failed")
             return prev, meta
 
         text = (out.narrative or "").strip()
         bad = validate_narrative(text, table_md=table_md)
         if bad:
             meta["error"] = f"validation:{bad}"
+            meta["steps"].append("validation_failed")
             return prev, meta
 
         meta["used_llm"] = True
+        meta["steps"].append("prose_ok")
+        meta["analysis"] = {
+            "key_points": list(getattr(analysis, "key_points", None) or []),
+            "tensions": list(getattr(analysis, "tensions", None) or []),
+            "soft_next_steps": list(getattr(analysis, "soft_next_steps", None) or []),
+        }
         return text, meta
     except Exception as exc:  # noqa: BLE001
         logger.info("dossier narrative unavailable section=%s: %s", section, exc)
