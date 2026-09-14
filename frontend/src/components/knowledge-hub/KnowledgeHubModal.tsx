@@ -11,7 +11,7 @@ const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
   { id: "materials", label: "资料", hint: "检索证据 + 知识库文档" },
   { id: "wiki", label: "Wiki", hint: "LLM 凝练页" },
   { id: "graph", label: "图谱", hint: "KG / Neo4j 探针" },
-  { id: "reports", label: "文档生成", hint: "Report 预留" },
+  { id: "reports", label: "文档生成", hint: "基于卷宗生成报告" },
 ];
 
 /** Knowledge Hub shell — right-rail materials governance entry (H0). */
@@ -56,8 +56,8 @@ export default function KnowledgeHubModal({
                 <div className="text-sm font-medium text-slate-100 flex items-center gap-1">
                   {t.label}
                   {t.id === "reports" && (
-                    <span className="text-[9px] text-amber-400/90 border border-amber-500/30 rounded px-1">
-                      预留
+                    <span className="text-[9px] text-emerald-400/90 border border-emerald-500/30 rounded px-1">
+                      卷宗
                     </span>
                   )}
                 </div>

@@ -200,16 +200,16 @@ prompt_hash: ""
 
 | 事件 | 现网钩子（现状） | Dossier 动作 |
 |------|------------------|--------------|
-| 项目创建 / 首次打开卷宗 | 无 | `ensure` 全骨架 |
-| **技术要求保存** `PUT /api/projects`（requirement 变） | 无 wiki | **patch S1**（表全量替换自 Requirement/objectives/constraint_values）；可选 LLM 刷新 S1 叙述 |
-| **文献检索入库 / ingest 完成** | L1 `compile_source` 已有 | **patch S2**（合并新 source_ids、主题簇行）；L1 照旧；可选抽机理句 |
-| **SourceGuide / 产品抽取更新** | L1 materials/chemicals | **patch S3** 候选物料行 + `l1_paths` |
-| **DOE 计划生成** `doe_plans` 写入 | 无 | **patch S4** 设计表 |
-| **DOE/台账测量入库** experiments/measurements/workbench sync | 无 wiki；或有 auto_loop | **patch S4+S5**；指标行按 metric 对齐 S1 |
-| **寻优完成** optimize task | 无 | **patch S6** 候选表；**patch S7** 若有 plot_spec |
-| **闭环一轮** loop_iterate / auto_loop_on_sync | 写 `loop_history` | **patch S6** 历史行；必要时 S4 下一轮 DOE |
-| **附件/QC/结构图** | attachments | **patch S7**（+ S5 附件列） |
-| 手动「生成/刷新项目 Wiki」 | 仅 themes/system | `refresh_all` 或选节 |
+| 项目创建 / 首次打开卷宗 | Hub「项目卷宗」→ `ensure` | `ensure` 全骨架 |
+| **技术要求保存** `PUT /api/projects`（requirement 变） | `notify_dossier_event(project_updated)` | **patch S1+S3+S8**（auto 默认关） |
+| **文献检索入库 / ingest 完成** | `kb_index` → `literature_ingested` | **patch S2+S8** |
+| **SourceGuide / 产品抽取更新** | L1 materials/chemicals | **patch S3** 候选物料行 + `l1_paths`（随 project_updated / refresh） |
+| **DOE 计划生成** `doe` persist | `notify_dossier_event_for_campaign(doe_updated)` | **patch S4+S8** |
+| **DOE/台账测量入库** experiments sync | `lab_recorded` | **patch S4+S5+S8** |
+| **寻优完成** optimize task 成功 | `optimize_completed`（campaign 或 `requirement.project_id`） | **patch S6+S7+S8** |
+| **闭环一轮** loop 启动 + 完成 | `loop_updated`（workbench_loop 启动；task 完成再通知） | **patch S6+S7+S8** |
+| **附件/QC/结构图** | attachments | **patch S7**（+ S5 附件列；随 refresh） |
+| 手动「生成/刷新项目 Wiki」 | Hub「刷新卷宗」/ API refresh | `refresh_all` 或选节 |
 | L2 体系综述编译 | `POST /themes/compile` | 不改 Dossier；S2/S8 可链到 theme path |
 
 ### 4.4 与「检索后能写 / 要求后能更 / DOE 后能更 / 闭环图能更」对齐
@@ -313,14 +313,15 @@ DossierPack
 ### P4.5 Report 地基（并行预埋，0.5–1d）
 
 - [x] 导出 `GET /api/wiki/dossier/{project_id}/pack`（即 DossierPack JSON）  
-- [x] Hub Reports 占位页改为「基于卷宗生成（即将推出）」并标明依赖 pack  
-- [ ] 不实现完整 Report 排版（留给 P5）
+- [x] Hub Reports 占位页改为「基于卷宗生成」并标明依赖 pack  
+- [x] 完整 Report 排版 / 导出：见 P5 / P5.1（本项原「留给 P5」已落地）
 
 ### P4.6 质量门
 
-- [ ] 单测：各事件只动对应节；Claims/DOE soft 回归  
-- [ ] 金样项目：要求→检索→DOE→台账→闭环 后卷宗五表非空  
-- [ ] 文档：事件矩阵 + 模板锚点冻结说明
+- [x] Hub 手测清单 + API/UI smoke：[`2026-09-14-wiki-hub-dossier-handtest.md`](./2026-09-14-wiki-hub-dossier-handtest.md) · `scripts/hub_dossier_handtest_smoke.py` · `frontend/scripts/hub_dossier_smoke.mjs`  
+- [x] 单测：事件→节路由隔离（`test_event_section_matrix_routing` / `test_notify_doe_event_only_bumps_mapped_revisions`）+ Claims/DOE soft 回归  
+- [x] 金样项目：要求→检索→DOE→台账→闭环→报告→导出（见 `tests/test_wiki_p5_export_e2e.py`）  
+- [x] 文档：事件矩阵（本文 §4.3）+ 模板锚点冻结（§3）+ Hub 手测
 
 **合计约 7–12 人日**（视事件接线面）。
 

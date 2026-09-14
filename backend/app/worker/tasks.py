@@ -552,12 +552,33 @@ def run_optimize_task(self, payload: dict) -> dict:
         data = result.model_dump()
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "optimize", data)
+        # P4.2: optional dossier S6/S7 patch when optimize completes (default OFF).
+        _notify_dossier_optimize_completed(payload)
         return data
     except Exception as exc:
         err = {"error": str(exc)}
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "optimize", err, failed=True, message=str(exc))
         raise
+
+
+def _notify_dossier_optimize_completed(payload: dict) -> None:
+    """Best-effort: map optimize success → dossier ``optimize_completed`` event."""
+    try:
+        from ..services.wiki.dossier import notify_dossier_event, notify_dossier_event_for_campaign
+
+        cid = payload.get("workbench_campaign_id")
+        if cid is not None and cid != "":
+            notify_dossier_event_for_campaign(cid, "optimize_completed")
+            return
+        req = payload.get("requirement") or {}
+        pid = ""
+        if isinstance(req, dict):
+            pid = str(req.get("project_id") or "").strip()
+        if pid:
+            notify_dossier_event(pid, "optimize_completed")
+    except Exception:
+        pass
 
 
 # ── async KB ingest (search → fulltext → knowledge base, in background) ──────
@@ -992,6 +1013,15 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
         data = result.model_dump()
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "loop", data)
+        # P4.2: refresh S6/S7 after loop round persists (in addition to start-of-loop notify).
+        try:
+            from ..services.wiki.dossier import notify_dossier_event_for_campaign
+
+            notify_dossier_event_for_campaign(
+                payload.get("workbench_campaign_id"), "loop_updated"
+            )
+        except Exception:
+            pass
         return data
     except Exception as exc:
         err = {"error": str(exc)}

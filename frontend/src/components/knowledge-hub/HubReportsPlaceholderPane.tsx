@@ -227,7 +227,10 @@ export default function HubReportsPlaceholderPane() {
               <div className="text-sm text-slate-100">{result.title}</div>
               <code className="text-[10px] text-slate-500">{result.path}</code>
             </div>
-            <span className="text-[10px] text-amber-300 border border-amber-500/40 rounded px-1">
+            <span
+              className="text-[10px] text-amber-300 border border-amber-500/40 rounded px-1"
+              data-testid="hub-reports-disclaimer"
+            >
               {result.disclaimer || "draft_not_claims"}
             </span>
           </div>

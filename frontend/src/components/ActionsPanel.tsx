@@ -47,7 +47,7 @@ const ACTIONS: { id: ModalName; icon: string; title: string; desc: string }[] = 
   { id: "optimize", icon: "📈", title: "寻优收敛", desc: "贝叶斯多目标闭环优化" },
   { id: "loop", icon: "🔄", title: "自驱动闭环", desc: "数据→重训→寻优→下一批 DOE 一键迭代" },
   { id: "materials", icon: "🧴", title: "材料库", desc: "全局主数据：导入导出、待入库晋升、结构搜索" },
-  { id: "knowledge", icon: "📚", title: "知识库", desc: "资料治理 · Wiki · 图谱 · 文档生成（预留）" },
+  { id: "knowledge", icon: "📚", title: "知识库", desc: "资料治理 · Wiki · 图谱 · 卷宗报告" },
 ];
 
 function Badge({ children, tone }: { children: React.ReactNode; tone: "accent" | "amber" }) {
