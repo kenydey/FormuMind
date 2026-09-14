@@ -38,6 +38,7 @@ backend/.venv-backup-notes/
 # OCSR POC / vendored source (re-cloned by setup scripts)
 MolScribe/
 poc_ocsr/
+vendor/llm_wiki/
 
 # Dev backup residue (never commit)
 *.bak
