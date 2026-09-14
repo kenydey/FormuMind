@@ -218,6 +218,7 @@ class DossierEnsureRequest(BaseModel):
     project_id: str = Field(min_length=1)
     campaign_id: str | None = None
     vertical: str | None = None
+    use_llm: bool = False
 
 
 class DossierPatchRequest(BaseModel):
@@ -225,6 +226,7 @@ class DossierPatchRequest(BaseModel):
     sections: list[str] | None = None
     campaign_id: str | None = None
     vertical: str | None = None
+    use_llm: bool = False
 
 
 class DossierRefreshRequest(BaseModel):
@@ -232,6 +234,7 @@ class DossierRefreshRequest(BaseModel):
     sections: list[str] | None = None
     campaign_id: str | None = None
     vertical: str | None = None
+    use_llm: bool = False
 
 
 @router.post("/themes/compile")
@@ -261,6 +264,7 @@ def ensure_dossier_endpoint(body: DossierEnsureRequest) -> dict:
             body.project_id,
             campaign_id=body.campaign_id,
             vertical=body.vertical,
+            use_llm=body.use_llm,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -282,6 +286,7 @@ def patch_dossier_endpoint(body: DossierPatchRequest) -> dict:
             body.sections,
             campaign_id=body.campaign_id,
             vertical=body.vertical,
+            use_llm=body.use_llm,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -303,6 +308,7 @@ def refresh_dossier_endpoint(body: DossierRefreshRequest) -> dict:
             campaign_id=body.campaign_id,
             sections=body.sections,
             vertical=body.vertical,
+            use_llm=body.use_llm,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

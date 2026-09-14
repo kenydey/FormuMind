@@ -298,22 +298,22 @@ DossierPack
 
 ### P4.3 LLM 叙述（可选，1–2d）
 
-- [ ] 按节 prompt；输入=该节表 + 有限 Raw 摘录  
-- [ ] 后校验：不得改表数字；不得新增无资产图  
-- [ ] 失败保留旧叙述
+- [x] 按节 prompt；输入=该节表 + 有限 Raw 摘录  
+- [x] 后校验：不得改表数字；不得新增无资产图  
+- [x] 失败保留旧叙述
 
 ### P4.4 API / Hub（1–2d）
 
 - [x] `POST /api/wiki/dossier/ensure`  
 - [x] `POST /api/wiki/dossier/patch` `{project_id, sections?:["S1","S6"]}`  
 - [x] `POST /api/wiki/dossier/refresh`  
-- [ ] Hub 项目旁「项目卷宗」入口；Reader 展示 `section_revisions` / 未审 Flag  
-- [ ] Chat 相关 Wiki 可命中 dossier
+- [x] Hub 项目旁「项目卷宗」入口；Reader 展示 `section_revisions` / 未审 Flag  
+- [x] Chat 相关 Wiki 可命中 dossier（`themes/project-*` 检索加权）
 
 ### P4.5 Report 地基（并行预埋，0.5–1d）
 
 - [x] 导出 `GET /api/wiki/dossier/{project_id}/pack`（即 DossierPack JSON）  
-- [ ] Hub Reports 占位页改为「基于卷宗生成（即将推出）」并标明依赖 pack  
+- [x] Hub Reports 占位页改为「基于卷宗生成（即将推出）」并标明依赖 pack  
 - [ ] 不实现完整 Report 排版（留给 P5）
 
 ### P4.6 质量门

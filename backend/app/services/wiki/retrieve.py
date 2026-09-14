@@ -74,7 +74,8 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
             1.0,
             0.35
             + 0.15 * hits
-            + (0.1 if row.kind in ("material", "system", "pitfall") else 0),
+            + (0.1 if row.kind in ("material", "system", "pitfall") else 0)
+            + (0.08 if row.kind == "theme" and str(row.path or "").startswith("themes/project-") else 0),
         )
         scored.append(
             (

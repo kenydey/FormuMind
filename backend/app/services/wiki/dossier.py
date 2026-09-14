@@ -11,6 +11,12 @@ from typing import Any
 from ...config import get_settings
 from ...db.wiki_store import get_wiki_store
 from .dossier_pack import build_project_dossier_pack
+from .dossier_narrative import (
+    attach_narrative,
+    extract_narrative_from_section,
+    generate_section_narrative,
+    narrative_enabled,
+)
 from .schema import (
     DOSSIER_SECTIONS,
     dump_page,
@@ -24,6 +30,9 @@ from .vertical_addendum import list_addenda, resolve_addendum
 logger = logging.getLogger(__name__)
 
 TEMPLATE = "project_dossier"
+_NARRATIVE_PLACEHOLDER = (
+    "_叙述待补（确定性表已写入；开启 wiki_dossier_llm_narrative 后可润色）。_"
+)
 
 # API may pass "S1" or "S1_requirements"
 _SECTION_ALIASES: dict[str, str] = {
@@ -121,8 +130,7 @@ def render_section(section: str, pack: dict[str, Any]) -> str:
             ],
         )
         return (
-            f"<!-- data:requirements -->\n{table}\n\n"
-            "_叙述待补（确定性表已写入；开启 wiki_dossier_llm_narrative 后可润色）。_"
+            f"<!-- data:requirements -->\n{table}"
         )
     if key == "S2_literature":
         lit_rows = pack.get("literature", {}).get("rows") or []
@@ -296,7 +304,59 @@ def _split_fm(markdown: str) -> tuple[str, str]:
     return "", markdown
 
 
-def _build_body(title: str, project_id: str, pack: dict[str, Any]) -> str:
+def compose_section_body(
+    section: str,
+    pack: dict[str, Any],
+    *,
+    use_llm: bool = False,
+    previous_section_body: str | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Deterministic table + optional LLM narrative. Returns (body, narrative_meta)."""
+    key = normalize_section(section)
+    table = render_section(key, pack)
+    prev = extract_narrative_from_section(previous_section_body or "")
+    # S8 flags list is itself the body; optional narrative appends after.
+    if key == "S8_open_questions":
+        if use_llm and narrative_enabled():
+            narr, meta = generate_section_narrative(
+                key, table_md=table, pack=pack, previous_narrative=prev
+            )
+            if meta.get("used_llm") and narr:
+                return attach_narrative(table, narr), meta
+            return table, meta
+        return table, None
+
+    if use_llm and narrative_enabled():
+        narr, meta = generate_section_narrative(
+            key, table_md=table, pack=pack, previous_narrative=prev
+        )
+        if meta.get("used_llm") and narr:
+            return attach_narrative(table, narr), meta
+        # failure: keep previous narrative if any, else placeholder
+        return attach_narrative(table, prev or _NARRATIVE_PLACEHOLDER), meta
+
+    return attach_narrative(table, prev or _NARRATIVE_PLACEHOLDER), None
+
+
+def _extract_section_body(markdown: str, section: str) -> str:
+    key = normalize_section(section)
+    title = _SECTION_TITLES[key]
+    pattern = re.compile(
+        rf"## {re.escape(title)}\n(.*?)(?=\n## S[1-8]\.|\Z)",
+        re.DOTALL,
+    )
+    m = pattern.search(markdown)
+    return (m.group(1) if m else "").strip()
+
+
+def _build_body(
+    title: str,
+    project_id: str,
+    pack: dict[str, Any],
+    *,
+    use_llm: bool = False,
+    previous_markdown: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     domain = pack.get("domain") or "—"
     substrate = (pack.get("requirements") or {}).get("substrate") or "—"
     campaign = pack.get("campaign_id") or "—"
@@ -310,11 +370,16 @@ def _build_body(title: str, project_id: str, pack: dict[str, Any]) -> str:
         ),
         "",
     ]
+    narrative_meta: dict[str, Any] = {}
     for sid in DOSSIER_SECTIONS:
+        prev_body = _extract_section_body(previous_markdown or "", sid) if previous_markdown else None
+        body, meta = compose_section_body(sid, pack, use_llm=use_llm, previous_section_body=prev_body)
+        if meta:
+            narrative_meta[sid] = meta
         parts.append(f"## {_SECTION_TITLES[sid]}")
-        parts.append(render_section(sid, pack))
+        parts.append(body)
         parts.append("")
-    return "\n".join(parts).rstrip() + "\n"
+    return "\n".join(parts).rstrip() + "\n", narrative_meta
 
 
 def _render_full_markdown(
@@ -324,12 +389,23 @@ def _render_full_markdown(
     pack: dict[str, Any],
     section_revisions: dict[str, int],
     section_hashes: dict[str, str] | None = None,
-) -> str:
-    body = _build_body(title, project_id, pack)
+    use_llm: bool = False,
+    previous_markdown: str | None = None,
+    llm_generated: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    body, narrative_meta = _build_body(
+        title,
+        project_id,
+        pack,
+        use_llm=use_llm,
+        previous_markdown=previous_markdown,
+    )
     extra = {
         "template": TEMPLATE,
         "schema_version": 1,
-        "llm_generated": False,
+        "llm_generated": llm_generated or any(
+            (m or {}).get("used_llm") for m in narrative_meta.values()
+        ),
         "reviewed": False,
         "project_id": project_id,
         "campaign_id": pack.get("campaign_id") or "",
@@ -368,8 +444,8 @@ def _render_full_markdown(
     if stub.startswith("---"):
         end = stub.find("\n---", 3)
         if end > 0:
-            return stub[: end + 4] + "\n\n" + body.strip() + "\n"
-    return body
+            return stub[: end + 4] + "\n\n" + body.strip() + "\n", narrative_meta
+    return body, narrative_meta
 
 
 def _write_data_json(root: Path, rel: str, payload: dict[str, Any]) -> None:
@@ -450,8 +526,9 @@ def ensure_project_dossier(
     *,
     campaign_id: str | None = None,
     vertical: str | None = None,
+    use_llm: bool = False,
 ) -> dict[str, Any]:
-    """Create or refresh full dossier tables from live pack. Does not call LLM."""
+    """Create or refresh full dossier tables from live pack. LLM narrative optional."""
     _require_dossier_enabled()
     pid = (project_id or "").strip()
     if not pid:
@@ -463,15 +540,21 @@ def ensure_project_dossier(
     elif not pack.get("vertical_addendum"):
         pack["vertical_addendum"] = (get_settings().wiki_dossier_vertical_addendum or "").strip()
 
+    store = get_wiki_store()
+    path = project_dossier_path(pid)
+    previous_md = store.read_markdown(path) if store.get_by_path(path) else None
+
     section_revisions = {s: 1 for s in DOSSIER_SECTIONS}
     section_hashes = {s: _content_hash(render_section(s, pack)) for s in DOSSIER_SECTIONS}
     title = pack.get("title") or pid
-    md = _render_full_markdown(
+    md, narrative_meta = _render_full_markdown(
         title=title,
         project_id=pid,
         pack=pack,
         section_revisions=section_revisions,
         section_hashes=section_hashes,
+        use_llm=use_llm,
+        previous_markdown=previous_md,
     )
     out = _persist_dossier(
         project_id=pid,
@@ -480,6 +563,8 @@ def ensure_project_dossier(
         section_revisions=section_revisions,
         section_hashes=section_hashes,
     )
+    out["narrative"] = narrative_meta
+    out["llm_narrative_requested"] = bool(use_llm)
     return out
 
 
@@ -541,8 +626,9 @@ def patch_dossier_sections(
     *,
     campaign_id: str | None = None,
     vertical: str | None = None,
+    use_llm: bool = False,
 ) -> dict[str, Any]:
-    """Rebuild selected sections from live pack; bump revisions only when hash changes."""
+    """Rebuild selected sections from live pack; bump revisions only when table hash changes."""
     _require_dossier_enabled()
     pid = (project_id or "").strip()
     if not pid:
@@ -552,9 +638,7 @@ def patch_dossier_sections(
     store = get_wiki_store()
     path = project_dossier_path(pid)
     if store.get_by_path(path) is None:
-        ensure_project_dossier(pid, campaign_id=campaign_id, vertical=vertical)
-        # ensure already wrote all sections; still apply selective bump semantics below
-        # by re-reading and patching only wanted keys for hash bookkeeping.
+        ensure_project_dossier(pid, campaign_id=campaign_id, vertical=vertical, use_llm=use_llm)
 
     pack = build_project_dossier_pack(pid, campaign_id=campaign_id)
     if vertical is not None:
@@ -573,36 +657,57 @@ def patch_dossier_sections(
     md = store.read_markdown(path) or ""
     if not md:
         title = pack.get("title") or pid
-        md = _render_full_markdown(
+        md, _ = _render_full_markdown(
             title=title,
             project_id=pid,
             pack=pack,
             section_revisions=section_revisions,
             section_hashes=section_hashes,
+            use_llm=use_llm,
         )
 
-    fm, body = _split_fm(md)
+    _, body = _split_fm(md)
     patched: list[str] = []
     skipped: list[str] = []
+    narrative_meta: dict[str, Any] = {}
+    force_narrative = bool(use_llm and narrative_enabled())
+
     for sid in wanted:
-        new_body = render_section(sid, pack)
-        new_hash = _content_hash(new_body)
-        if section_hashes.get(sid) == new_hash:
+        table = render_section(sid, pack)
+        new_hash = _content_hash(table)
+        table_changed = section_hashes.get(sid) != new_hash
+        if not table_changed and not force_narrative:
             skipped.append(sid)
             continue
+        prev_body = _extract_section_body(md, sid)
+        new_body, meta = compose_section_body(
+            sid,
+            pack,
+            use_llm=use_llm,
+            previous_section_body=prev_body,
+        )
+        if meta:
+            narrative_meta[sid] = meta
         body = _replace_section_body(body, sid, new_body)
-        section_hashes[sid] = new_hash
-        section_revisions[sid] = int(section_revisions.get(sid) or 0) + 1
-        patched.append(sid)
+        if table_changed:
+            section_hashes[sid] = new_hash
+            section_revisions[sid] = int(section_revisions.get(sid) or 0) + 1
+            patched.append(sid)
+        elif meta and meta.get("used_llm"):
+            # Narrative-only refresh: bump revision lightly
+            section_revisions[sid] = int(section_revisions.get(sid) or 0) + 1
+            patched.append(sid)
+        else:
+            skipped.append(sid)
 
-    # Refresh front-matter meta while preserving patched body
     title = pack.get("title") or pid
-    fresh = _render_full_markdown(
+    fresh, _ = _render_full_markdown(
         title=title,
         project_id=pid,
         pack=pack,
         section_revisions=section_revisions,
         section_hashes=section_hashes,
+        llm_generated=any((m or {}).get("used_llm") for m in narrative_meta.values()),
     )
     fresh_fm, _ = _split_fm(fresh)
     final_md = (fresh_fm + "\n\n" + body.strip() + "\n") if fresh_fm else body
@@ -616,6 +721,8 @@ def patch_dossier_sections(
     )
     out["patched_sections"] = patched
     out["skipped_unchanged"] = skipped
+    out["narrative"] = narrative_meta
+    out["llm_narrative_requested"] = bool(use_llm)
     return out
 
 
@@ -625,6 +732,7 @@ def refresh_dossier(
     campaign_id: str | None = None,
     sections: list[str] | None = None,
     vertical: str | None = None,
+    use_llm: bool = False,
 ) -> dict[str, Any]:
     """Ensure dossier exists then patch sections (default: all)."""
     _require_dossier_enabled()
@@ -633,12 +741,13 @@ def refresh_dossier(
         raise ValueError("project_id required")
     store = get_wiki_store()
     if store.get_by_path(project_dossier_path(pid)) is None:
-        ensure_project_dossier(pid, campaign_id=campaign_id, vertical=vertical)
+        ensure_project_dossier(pid, campaign_id=campaign_id, vertical=vertical, use_llm=use_llm)
     return patch_dossier_sections(
         pid,
         sections,
         campaign_id=campaign_id,
         vertical=vertical,
+        use_llm=use_llm,
     )
 
 

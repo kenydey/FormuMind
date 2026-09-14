@@ -20,6 +20,12 @@ from app.services.wiki.dossier import (
     patch_dossier_sections,
     refresh_dossier,
 )
+from app.services.wiki.dossier_narrative import (
+    attach_narrative,
+    extract_narrative_from_section,
+    generate_section_narrative,
+    validate_narrative,
+)
 from app.services.wiki.schema import project_dossier_data_path, project_dossier_path
 from app.services.wiki.vertical_addendum import list_addenda, resolve_addendum
 
@@ -237,3 +243,71 @@ def test_vertical_addendum_registry():
     assert "水解" in text or "硅烷" in text
     assert resolve_addendum("") == ""
     assert resolve_addendum("unknown-vertical") == ""
+
+
+def test_narrative_validation_and_extract():
+    assert validate_narrative("这是定性叙述。") is None
+    assert validate_narrative("| a | b |") == "contains_table_row"
+    assert validate_narrative("见图 ![](images/fake.png)") == "invented_asset_path"
+    assert validate_narrative("见 artifacts/x.png") == "invented_asset_path"
+
+    body = "<!-- data:requirements -->\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n旧叙述保留。"
+    assert extract_narrative_from_section(body) == "旧叙述保留。"
+    assert "旧叙述" in attach_narrative("| a | b |", "旧叙述")
+
+
+def test_narrative_llm_flag_and_failure_keeps_previous(env, monkeypatch):
+    pid = _make_project(env["projects"])
+    ensure_project_dossier(pid)
+    md0 = env["wiki"].read_markdown(project_dossier_path(pid)) or ""
+    assert "叙述待补" in md0
+
+    # Flag still off → generate returns previous
+    narr, meta = generate_section_narrative(
+        "S1_requirements",
+        table_md="| m | 1 |",
+        pack={"title": "t", "project_id": pid},
+        previous_narrative="保留旧叙述",
+    )
+    assert narr == "保留旧叙述"
+    assert meta["error"] == "narrative_flag_off"
+
+    monkeypatch.setenv("FORMUMIND_WIKI_DOSSIER_LLM_NARRATIVE", "true")
+    get_settings.cache_clear()
+
+    class _Fake:
+        narrative = "| bad | table |"
+
+    def _fake_complete(system, user, model, retry=False):
+        return _Fake(), None
+
+    monkeypatch.setattr("app.services.llm.complete_structured", _fake_complete)
+    narr2, meta2 = generate_section_narrative(
+        "S1_requirements",
+        table_md="| m | 1 |",
+        pack={"title": "t", "project_id": pid, "vertical_addendum": "silane"},
+        previous_narrative="保留旧叙述",
+    )
+    assert narr2 == "保留旧叙述"
+    assert meta2.get("error", "").startswith("validation:")
+
+    class _Good:
+        narrative = "基材为冷轧板，盐雾目标来自要求表，不得编造未列表数字。"
+
+    monkeypatch.setattr(
+        "app.services.llm.complete_structured",
+        lambda *a, **k: (_Good(), None),
+    )
+    narr3, meta3 = generate_section_narrative(
+        "S1_requirements",
+        table_md="| salt_spray_hours | 500 |",
+        pack={"title": "t", "project_id": pid},
+        previous_narrative="保留旧叙述",
+    )
+    assert meta3.get("used_llm") is True
+    assert "盐雾" in narr3
+
+    out = patch_dossier_sections(pid, ["S1"], use_llm=True)
+    assert out["ok"] is True
+    md1 = env["wiki"].read_markdown(project_dossier_path(pid)) or ""
+    assert "盐雾" in md1 or "叙述待补" in md1 or "冷轧" in md1
