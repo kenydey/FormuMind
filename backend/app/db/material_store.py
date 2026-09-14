@@ -20,6 +20,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..services.errors import degrade_return
+from ..services.supplier_normalize import (
+    fetch_suppliers_for_materials,
+    sync_material_suppliers_from_json,
+)
 from .models import MaterialRow
 from .session_utils import commit_session
 
@@ -31,9 +35,8 @@ _SPEC_FIELDS = (
     "functional_class", "equivalent_weight", "hansen_d", "hansen_p",
     "hansen_h", "hlb", "supplier", "lead_time_days", "availability",
     "regulatory", "substitute_group", "archived",
-    # Per-supplier sourcing detail (JSON array), harvested out of PubChem
-    # ``Chemical Vendors`` and optional price/stock/delivery enrichment.
-    # Mirrors ``regulatory`` — a JSON column, not a second table.
+    # Transitional JSON projection; canonical store is suppliers +
+    # material_suppliers (alembic 0028). Dual-written on upsert.
     "suppliers_json",
 )
 _TEXT_WIDTHS = {
@@ -63,6 +66,15 @@ def _coerce(field: str, value):
     return value
 
 
+def _supplier_payload(spec: dict) -> list | None:
+    """Return raw supplier list from ``suppliers_json`` or legacy ``suppliers``."""
+    if "suppliers_json" in spec:
+        return spec.get("suppliers_json")
+    if "suppliers" in spec:
+        return spec.get("suppliers")
+    return None
+
+
 def _apply_spec(row: MaterialRow, spec: dict, *, overwrite: bool) -> None:
     """Merge a spec dict onto a row.
 
@@ -72,6 +84,9 @@ def _apply_spec(row: MaterialRow, spec: dict, *, overwrite: bool) -> None:
     for field in _SPEC_FIELDS:
         if field not in spec:
             continue
+        if field == "suppliers_json":
+            # Handled by ``_sync_suppliers`` after sanitize (dual-write).
+            continue
         value = spec[field]
         if value is None:
             continue
@@ -79,6 +94,35 @@ def _apply_spec(row: MaterialRow, spec: dict, *, overwrite: bool) -> None:
             continue
         setattr(row, field, _coerce(field, value))
     row.updated_at = _utcnow()
+
+
+def _sync_suppliers(session: Session, row: MaterialRow, spec: dict, *, overwrite: bool) -> None:
+    """Sanitize supplier payload, write link tables, dual-write JSON projection."""
+    raw = _supplier_payload(spec)
+    if raw is None:
+        return
+    existing_json = getattr(row, "suppliers_json", None) or []
+    if not overwrite and existing_json:
+        return
+    cleaned = sync_material_suppliers_from_json(
+        session,
+        row.id,
+        raw,
+        source="upsert",
+        clear_json_projection=False,
+    )
+    row.suppliers_json = cleaned or None
+
+
+def _hydrate_supplier_json(session: Session, rows: list[MaterialRow]) -> None:
+    """Prefer normalized link tables when present; keep JSON as fallback."""
+    if not rows:
+        return
+    by_id = fetch_suppliers_for_materials(session, [r.id for r in rows if r.id])
+    for row in rows:
+        linked = by_id.get(row.id) or []
+        if linked:
+            row.suppliers_json = linked
 
 
 class MaterialStore:
@@ -115,12 +159,15 @@ class MaterialStore:
                         created_at=_utcnow(),
                     )
                     session.add(row)
+                    session.flush()
                 _apply_spec(row, spec, overwrite=overwrite)
+                _sync_suppliers(session, row, spec, overwrite=overwrite)
         except IntegrityError:
             with commit_session(self._session_factory) as session:
                 row = session.query(MaterialRow).filter(MaterialRow.norm_key == key).first()
                 if row is not None:
                     _apply_spec(row, spec, overwrite=overwrite)
+                    _sync_suppliers(session, row, spec, overwrite=overwrite)
         except Exception as exc:
             return degrade_return(logger, exc, f"material upsert failed: {display}", False)
         self.generation += 1
@@ -158,15 +205,22 @@ class MaterialStore:
             query = session.query(MaterialRow).order_by(MaterialRow.created_at, MaterialRow.name)
             if limit is not None:
                 query = query.limit(limit)
-            return query.all()
+            rows = query.all()
+            _hydrate_supplier_json(session, rows)
+            session.expunge_all()
+            return rows
 
     def get(self, name: str) -> MaterialRow | None:
         with self._session_factory() as session:
-            return (
+            row = (
                 session.query(MaterialRow)
                 .filter(MaterialRow.norm_key == norm_key(name))
                 .first()
             )
+            if row is not None:
+                _hydrate_supplier_json(session, [row])
+                session.expunge(row)
+            return row
 
     def find_by_cas(self, cas_no: str) -> MaterialRow | None:
         cas = (cas_no or "").strip()
@@ -236,11 +290,66 @@ class MaterialStore:
                 query = query.filter(
                     or_(MaterialRow.archived.is_(False), MaterialRow.archived.is_(None))
                 )
-            return query.order_by(MaterialRow.name).offset(offset).limit(limit).all()
+            rows = query.order_by(MaterialRow.name).offset(offset).limit(limit).all()
+            _hydrate_supplier_json(session, rows)
+            session.expunge_all()
+            return rows
 
     def count(self) -> int:
         with self._session_factory() as session:
             return int(session.query(func.count(MaterialRow.id)).scalar() or 0)
+
+    def backfill_suppliers(
+        self,
+        *,
+        clear_json: bool = False,
+        limit: int | None = None,
+    ) -> dict[str, int]:
+        """Migrate ``suppliers_json`` blobs into normalized tables.
+
+        Returns counters: ``scanned``, ``with_json``, ``links_written``,
+        ``json_cleared``. Safe to re-run (replace links per material).
+        """
+        scanned = with_json = links = cleared = 0
+        try:
+            with commit_session(self._session_factory) as session:
+                query = session.query(MaterialRow).order_by(MaterialRow.name)
+                if limit is not None:
+                    query = query.limit(limit)
+                rows = query.all()
+                for row in rows:
+                    scanned += 1
+                    raw = getattr(row, "suppliers_json", None)
+                    if not raw:
+                        continue
+                    with_json += 1
+                    cleaned = sync_material_suppliers_from_json(
+                        session,
+                        row.id,
+                        raw,
+                        source="backfill",
+                        clear_json_projection=clear_json,
+                    )
+                    links += len(cleaned)
+                    if clear_json:
+                        row.suppliers_json = None
+                        cleared += 1
+                    else:
+                        row.suppliers_json = cleaned or None
+        except Exception as exc:
+            return degrade_return(
+                logger,
+                exc,
+                "material supplier backfill failed",
+                {"scanned": 0, "with_json": 0, "links_written": 0, "json_cleared": 0},
+            )
+        self.generation += 1
+        return {
+            "scanned": scanned,
+            "with_json": with_json,
+            "links_written": links,
+            "json_cleared": cleared,
+        }
 
     @staticmethod
     def row_to_spec(row: MaterialRow) -> dict:

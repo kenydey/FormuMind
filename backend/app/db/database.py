@@ -243,10 +243,12 @@ def _ensure_material_columns(engine: Engine) -> None:
                 if "duplicate column" not in str(exc).lower():
                     raise
     # New pending-queue table: create_all covers fresh DBs; existing DBs need it too.
-    from .models import MaterialCandidateRow
+    from .models import MaterialCandidateRow, MaterialSupplierRow, SupplierRow
 
     with _schema_ddl_lock:
         MaterialCandidateRow.__table__.create(bind=engine, checkfirst=True)
+        SupplierRow.__table__.create(bind=engine, checkfirst=True)
+        MaterialSupplierRow.__table__.create(bind=engine, checkfirst=True)
 
 
 def _ensure_owner_id_column(engine: Engine, table: str) -> None:
