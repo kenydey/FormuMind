@@ -29,8 +29,11 @@
 cd backend && python -m pytest -q \
   tests/test_wiki_p4_dossier.py \
   tests/test_wiki_dossier_claims_doe_regression.py
-cd frontend && npm test -- --run src/components/knowledge-hub/HubReportsPlaceholderPane.test.tsx
-python scripts/hub_dossier_handtest_smoke.py   # 需本地栈 + 旗标
+cd frontend && npm test -- --run \
+  src/components/knowledge-hub/HubWikiPane.test.tsx \
+  src/components/knowledge-hub/HubReportsPlaceholderPane.test.tsx
+python3 scripts/hub_dossier_handtest_smoke.py   # 需本地栈 + 旗标
+node frontend/scripts/hub_dossier_smoke.mjs      # Hub UI Playwright
 ```
 
 手测清单：[`2026-09-14-wiki-hub-dossier-handtest.md`](./2026-09-14-wiki-hub-dossier-handtest.md)
