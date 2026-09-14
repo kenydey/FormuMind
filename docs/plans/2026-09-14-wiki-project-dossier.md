@@ -318,9 +318,10 @@ DossierPack
 
 ### P4.6 质量门
 
-- [ ] 单测：各事件只动对应节；Claims/DOE soft 回归  
-- [ ] 金样项目：要求→检索→DOE→台账→闭环 后卷宗五表非空  
-- [ ] 文档：事件矩阵 + 模板锚点冻结说明
+- [x] 单测：Claims/DOE soft 回归（`tests/test_wiki_dossier_claims_doe_regression.py`；dossier/report 毒化 bounds 不进 DOE；Claims 过滤 wiki）  
+- [x] Hub 手测清单 + API smoke：[`2026-09-14-wiki-hub-dossier-handtest.md`](./2026-09-14-wiki-hub-dossier-handtest.md) · `scripts/hub_dossier_handtest_smoke.py`  
+- [x] 金样项目：要求→检索→DOE→台账→闭环→报告→导出（见 `tests/test_wiki_p5_export_e2e.py`）  
+- [x] 文档：事件矩阵（本文 §4.3）+ 模板锚点冻结（§3）+ Hub 手测
 
 **合计约 7–12 人日**（视事件接线面）。
 
