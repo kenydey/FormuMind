@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   api,
   formatApiError,
@@ -6,13 +7,23 @@ import {
   type WikiPageItem,
   type WikiSearchHit,
 } from "../../api";
+import { useStore } from "../../store";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 
-/** Wiki pane inside Knowledge Hub (read-only). S1 reader + P2 FTS search. */
+type DossierMeta = {
+  section_revisions?: Record<string, number>;
+  flags?: Record<string, boolean>;
+  project_id?: string;
+  template?: string;
+};
+
+/** Wiki pane inside Knowledge Hub (read-only). S1 reader + P2 FTS search + P4 dossier. */
 export default function HubWikiPane({ active }: { active: boolean }) {
+  const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
   const [pages, setPages] = useState<WikiPageItem[]>([]);
   const [kind, setKind] = useState("");
   const [detail, setDetail] = useState<WikiPageDetail | null>(null);
+  const [dossierMeta, setDossierMeta] = useState<DossierMeta | null>(null);
   const [flagsOnly, setFlagsOnly] = useState(false);
   const [reviewedOnly, setReviewedOnly] = useState(false);
   const [query, setQuery] = useState("");
@@ -118,7 +129,6 @@ export default function HubWikiPane({ active }: { active: boolean }) {
       list = list.filter((p) => !(p.flags || []).includes("unreviewed"));
     }
     if (searchHits) {
-      // Prefer FTS hit order; map to page items when possible
       const byPath = new Map(list.map((p) => [p.path, p]));
       return searchHits.map((h) => {
         const existing = byPath.get(h.path);
@@ -161,13 +171,99 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     try {
       setDetail(await api.getWikiByPath(path));
       setError(null);
+      if (path.startsWith("themes/project-") && path.endsWith(".md")) {
+        // Prefer structured sidecar via dossier API when path looks like a dossier.
+        const m = path.match(/^themes\/project-(.+)\.md$/i);
+        const pid = m?.[1];
+        if (pid) {
+          try {
+            const d = await api.getWikiDossier(pid);
+            setDossierMeta((d.data as DossierMeta) || null);
+          } catch {
+            setDossierMeta(null);
+          }
+        } else {
+          setDossierMeta(null);
+        }
+      } else {
+        setDossierMeta(null);
+      }
     } catch (e) {
       setError(formatApiError(e));
     }
   }, []);
 
+  const openProjectDossier = useCallback(async () => {
+    if (!activeProjectId) {
+      setError("请先在工作区选择/打开一个项目");
+      return;
+    }
+    setBusy("dossier-open");
+    setError(null);
+    try {
+      let page;
+      try {
+        page = await api.getWikiDossier(activeProjectId);
+      } catch {
+        await api.ensureWikiDossier({ project_id: activeProjectId });
+        page = await api.getWikiDossier(activeProjectId);
+        await refresh();
+      }
+      setDetail({
+        id: page.page_id || page.path,
+        path: page.path,
+        kind: "theme",
+        title: page.title || page.path,
+        flags: page.flags || [],
+        source_ids: [],
+        markdown: page.markdown,
+        revision: page.revision,
+      });
+      setDossierMeta((page.data as DossierMeta) || null);
+      setKind("theme");
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [activeProjectId, refresh]);
+
+  const refreshProjectDossier = useCallback(async () => {
+    if (!activeProjectId) {
+      setError("请先在工作区选择/打开一个项目");
+      return;
+    }
+    await runOps("dossier-refresh", async () => {
+      const out = await api.refreshWikiDossier({ project_id: activeProjectId });
+      if (out.path) {
+        const page = await api.getWikiDossier(activeProjectId);
+        setDetail({
+          id: page.page_id || page.path,
+          path: page.path,
+          kind: "theme",
+          title: page.title || page.path,
+          flags: page.flags || [],
+          source_ids: [],
+          markdown: page.markdown,
+          revision: page.revision,
+        });
+        setDossierMeta((page.data as DossierMeta) || null);
+      }
+    });
+  }, [activeProjectId, runOps]);
+
   const hitSnippet = (path: string) =>
     searchHits?.find((h) => h.path === path)?.snippet || null;
+
+  const isDossier =
+    !!detail?.path?.startsWith("themes/project-") && detail.path.endsWith(".md");
+
+  const revisionEntries = useMemo(() => {
+    const rev = dossierMeta?.section_revisions || {};
+    return Object.entries(rev).sort(([a], [b]) => a.localeCompare(b));
+  }, [dossierMeta]);
+
+  const packFlags = dossierMeta?.flags || {};
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-wiki-pane">
@@ -221,6 +317,30 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           onClick={() => void refresh()}
         >
           刷新
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-accent/50 rounded text-accent disabled:opacity-40"
+          disabled={!!busy || !activeProjectId}
+          title={
+            activeProjectId
+              ? `打开/生成当前项目卷宗（project_id=${activeProjectId}）`
+              : "需先选择活动项目"
+          }
+          data-testid="hub-wiki-open-dossier"
+          onClick={() => void openProjectDossier()}
+        >
+          {busy === "dossier-open" ? "卷宗…" : "项目卷宗"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy || !activeProjectId}
+          title="从 live pack 刷新卷宗各节表（确定性；LLM 叙述默认关）"
+          data-testid="hub-wiki-refresh-dossier"
+          onClick={() => void refreshProjectDossier()}
+        >
+          {busy === "dossier-refresh" ? "刷新卷宗…" : "刷新卷宗"}
         </button>
         <button
           type="button"
@@ -320,22 +440,66 @@ export default function HubWikiPane({ active }: { active: boolean }) {
         </ul>
         <div className="overflow-y-auto border border-edge/60 rounded p-3 min-h-0">
           {detail ? (
-            <WikiMarkdownReader
-              page={{
-                path: detail.path,
-                title: detail.title,
-                kind: detail.kind,
-                flags: detail.flags,
-                source_ids: detail.source_ids,
-                markdown: detail.markdown,
-                norm_key: detail.norm_key,
-                updated_at: detail.updated_at,
-              }}
-              linkPages={linkPages}
-              onNavigatePath={(path) => void openPath(path)}
-            />
+            <div className="space-y-2">
+              {isDossier && (
+                <div
+                  className="text-[10px] text-slate-400 border border-edge/50 rounded px-2 py-1.5 space-y-1"
+                  data-testid="hub-wiki-dossier-meta"
+                >
+                  <div className="text-slate-300">
+                    项目卷宗 · section_revisions
+                    {(detail.flags || []).includes("unreviewed") && (
+                      <span className="ml-2 text-amber-300 border border-amber-500/40 rounded px-1">
+                        未审
+                      </span>
+                    )}
+                  </div>
+                  {revisionEntries.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {revisionEntries.map(([k, v]) => (
+                        <code key={k} className="bg-ink/60 border border-edge/40 rounded px-1">
+                          {k}:{v}
+                        </code>
+                      ))}
+                    </div>
+                  ) : (
+                    <div>尚无 sidecar revisions</div>
+                  )}
+                  {Object.keys(packFlags).length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries(packFlags)
+                        .filter(([, v]) => !!v)
+                        .map(([k]) => (
+                          <span
+                            key={k}
+                            className="text-amber-300/90 border border-amber-500/30 rounded px-1"
+                          >
+                            {k}
+                          </span>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <WikiMarkdownReader
+                page={{
+                  path: detail.path,
+                  title: detail.title,
+                  kind: detail.kind,
+                  flags: detail.flags,
+                  source_ids: detail.source_ids,
+                  markdown: detail.markdown,
+                  norm_key: detail.norm_key,
+                  updated_at: detail.updated_at,
+                }}
+                linkPages={linkPages}
+                onNavigatePath={(path) => void openPath(path)}
+              />
+            </div>
           ) : (
-            <span className="text-slate-500 text-xs">选择左侧页面查看编译记忆</span>
+            <span className="text-slate-500 text-xs">
+              选择左侧页面查看编译记忆；或点「项目卷宗」打开当前活动项目的 Dossier
+            </span>
           )}
         </div>
       </div>

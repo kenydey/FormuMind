@@ -1,50 +1,65 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { useStore } from "../../store";
 
 const TEMPLATES: {
   id: string;
   title: string;
   desc: string;
+  dossierSections: string;
   muted?: boolean;
 }[] = [
   {
     id: "briefing",
     title: "文献简报 · Briefing Doc",
     desc: "汇总已选知识库来源的关键洞察与引用摘录。",
+    dossierSections: "主读卷宗 S1 + S6 + S8",
   },
   {
     id: "feasibility",
     title: "技术可行性评估",
     desc: "材料/工艺替代方案的可行性、风险与试验建议。",
+    dossierSections: "主读卷宗 S1 + S3 + S4 + S5",
   },
   {
     id: "formula-compare",
     title: "配方对比纪要",
     desc: "对比候选配方组分、性能与文献依据。",
+    dossierSections: "主读卷宗 S3 + S6（+ formulation_versions）",
   },
   {
     id: "patent-memo",
     title: "专利挖掘备忘",
     desc: "公开号、权利要求要点与规避/借鉴清单（草稿）。",
+    dossierSections: "主读卷宗 S2（source_ids → Raw 回链）",
   },
   {
     id: "deck",
     title: "演示文稿 · Slide Deck",
     desc: "汇报用大纲幻灯（Report 之后实现）。",
+    dossierSections: "待定",
     muted: true,
   },
 ];
 
-/** Report generation placeholder (H4) — no backend yet. */
+/** Report generation placeholder (H4 / P4.5) — pack-backed, no generate API yet. */
 export default function HubReportsPlaceholderPane() {
+  const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
   const [picked, setPicked] = useState<(typeof TEMPLATES)[number] | null>(null);
   const [prompt, setPrompt] = useState("");
 
   return (
     <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto" data-testid="hub-reports-pane">
       <p className="text-[11px] text-slate-500">
-        文档生成对标 NotebookLM Report：基于本项目知识库与 Wiki 生成研发草稿。
+        文档生成将基于<strong className="text-slate-400 font-normal"> 项目卷宗 DossierPack </strong>
+        （GET /api/wiki/dossier/&#123;project_id&#125;/pack）与知识库来源产出研发草稿。
         <strong className="text-slate-400 font-normal"> 当前为预留界面，不调用生成 API。</strong>
         不做 Flashcards / Quiz；Mind Map 不进顶级菜单。
+      </p>
+      <p className="text-[11px] text-slate-500" data-testid="hub-reports-dossier-hint">
+        {activeProjectId
+          ? `当前活动项目：${activeProjectId} · 请先在 Wiki 页生成/刷新「项目卷宗」。`
+          : "尚未选择活动项目；生成前需绑定 project_id 卷宗。"}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {TEMPLATES.map((t) => (
@@ -60,6 +75,7 @@ export default function HubReportsPlaceholderPane() {
           >
             <div className="text-sm text-slate-200">{t.title}</div>
             <p className="text-[11px] text-slate-500 mt-1">{t.desc}</p>
+            <p className="text-[10px] text-accent/80 mt-1">{t.dossierSections}</p>
             {t.muted && (
               <span className="text-[10px] text-amber-400/80 mt-1 inline-block">子项 · 稍后</span>
             )}
@@ -75,6 +91,7 @@ export default function HubReportsPlaceholderPane() {
               关闭
             </button>
           </div>
+          <p className="text-[11px] text-slate-400">依赖：{picked.dossierSections}</p>
           <label className="block text-[11px] text-slate-400">
             提示词（预留）
             <textarea
@@ -86,15 +103,16 @@ export default function HubReportsPlaceholderPane() {
             />
           </label>
           <p className="text-[10px] text-slate-500">
-            输出为研发草稿，需人工审核；不构成正式专利/论文代写。
+            输出为研发草稿，需人工审核；不构成正式专利/论文代写。对外引用须回链 source_ids / 测量行，不得把 L2 叙述当 Claim。
           </p>
           <button
             type="button"
             disabled
             className="px-3 py-1.5 rounded bg-accent/30 text-ink text-sm opacity-60 cursor-not-allowed"
-            title="即将推出"
+            title="基于卷宗生成（即将推出）"
+            data-testid="hub-reports-generate"
           >
-            即将推出 · Generate
+            基于卷宗生成（即将推出）
           </button>
         </div>
       )}

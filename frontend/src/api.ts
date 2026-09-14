@@ -2271,6 +2271,72 @@ export const api = {
       llm_generated?: boolean;
       source_ids?: string[];
     }>("/api/wiki/themes/compile", body),
+  ensureWikiDossier: (body: {
+    project_id: string;
+    campaign_id?: string;
+    vertical?: string;
+    use_llm?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      data_path?: string;
+      project_id?: string;
+      section_revisions?: Record<string, number>;
+      error?: string;
+    }>("/api/wiki/dossier/ensure", body),
+  patchWikiDossier: (body: {
+    project_id: string;
+    sections?: string[];
+    campaign_id?: string;
+    vertical?: string;
+    use_llm?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      patched_sections?: string[];
+      skipped_unchanged?: string[];
+      section_revisions?: Record<string, number>;
+      error?: string;
+    }>("/api/wiki/dossier/patch", body),
+  refreshWikiDossier: (body: {
+    project_id: string;
+    sections?: string[];
+    campaign_id?: string;
+    vertical?: string;
+    use_llm?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      patched_sections?: string[];
+      section_revisions?: Record<string, number>;
+      error?: string;
+    }>("/api/wiki/dossier/refresh", body),
+  getWikiDossier: (projectId: string) =>
+    get<{
+      page_id?: string;
+      path: string;
+      data_path?: string;
+      title?: string;
+      flags?: string[];
+      revision?: number;
+      markdown: string;
+      data?: {
+        section_revisions?: Record<string, number>;
+        flags?: Record<string, boolean>;
+        project_id?: string;
+        template?: string;
+        [key: string]: unknown;
+      } | null;
+    }>(`/api/wiki/dossier/${encodeURIComponent(projectId)}`),
+  getWikiDossierPack: (projectId: string, campaignId?: string) => {
+    const q = campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : "";
+    return get<Record<string, unknown>>(
+      `/api/wiki/dossier/${encodeURIComponent(projectId)}/pack${q}`,
+    );
+  },
   rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
   rebuildWikiEmbed: () =>
     post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(
