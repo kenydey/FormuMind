@@ -397,8 +397,9 @@ def test_structure_lookups_run_concurrently(stores, monkeypatch):
     elapsed = _time.perf_counter() - started
 
     assert peak[0] > 1, "lookups ran one at a time"
-    # Serial would be 4 products x 0.2 s = 0.8 s at minimum.
-    assert elapsed < 0.7, f"lookups did not overlap: {elapsed:.2f}s"
+    # Serial floor ≈ 4 products × 2 lookups × 0.2s = 1.6s. Concurrent path is ~0.4s
+    # ideally; keep headroom for CI jitter without accepting fully serial runs.
+    assert elapsed < 1.2, f"lookups did not overlap enough: {elapsed:.2f}s"
 
 
 def test_structure_results_are_written_back(stores, monkeypatch):
