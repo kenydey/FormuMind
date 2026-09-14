@@ -70,6 +70,12 @@ export function useHubMaterialRows(open: boolean) {
   const refreshKb = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (!activeProjectId) {
+      setKbDocs([]);
+      setError("请先选择活动项目：知识库仅显示当前项目的资料");
+      setLoading(false);
+      return;
+    }
     try {
       const list = await api.kbSources(activeProjectId, 200);
       setKbDocs(list.sources ?? []);
@@ -86,6 +92,8 @@ export function useHubMaterialRows(open: boolean) {
   }, [open, refreshKb]);
 
   const rows = useMemo(() => {
+    if (!activeProjectId) return [];
+
     const selected = new Set(selectedSources);
     const ingestById = new Map<string, { status: string; source_id?: string | null }>();
     for (const d of kbIngest?.docs ?? []) {
@@ -97,6 +105,7 @@ export function useHubMaterialRows(open: boolean) {
 
     const merged: HubMaterialRow[] = [];
     const coveredKb = new Set<string>();
+    const projectKbIds = new Set(kbDocs.map((d) => d.id));
 
     for (const e of sources) {
       let hint: { status?: string; source_id?: string | null } | undefined;
@@ -106,13 +115,17 @@ export function useHubMaterialRows(open: boolean) {
           break;
         }
       }
-      // Match persisted KB by origin_url
       const kbHit = kbDocs.find(
         (d) =>
           idsMatch(d.origin_url, e.identifier) ||
           idsMatch(d.origin_url, e.url) ||
           idsMatch(d.id, hint?.source_id),
       );
+      // Project-scoped Hub: skip session-only rows that are not in this project's KB
+      if (!kbHit) {
+        const hintSid = hint?.source_id;
+        if (!hintSid || !projectKbIds.has(hintSid)) continue;
+      }
       if (kbHit) {
         coveredKb.add(kbHit.id);
         hint = {
@@ -125,7 +138,6 @@ export function useHubMaterialRows(open: boolean) {
 
     for (const d of kbDocs) {
       if (coveredKb.has(d.id)) continue;
-      // Also skip if some session row already matched via alias but coveredKb missed
       const dup = sources.some(
         (e) => idsMatch(d.origin_url, e.identifier) || idsMatch(d.origin_url, e.url),
       );
@@ -133,7 +145,6 @@ export function useHubMaterialRows(open: boolean) {
       merged.push(kbOnlyRow(d));
     }
 
-    // KB first, then session-only
     merged.sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "kb" ? -1 : 1;
       return (a.title || "").localeCompare(b.title || "");
@@ -148,7 +159,7 @@ export function useHubMaterialRows(open: boolean) {
         r.source.toLowerCase().includes(q) ||
         (r.url || "").toLowerCase().includes(q),
     );
-  }, [sources, selectedSources, kbDocs, kbIngest, filter]);
+  }, [sources, selectedSources, kbDocs, kbIngest, filter, activeProjectId]);
 
   async function ingestRow(row: HubMaterialRow) {
     const e = row.evidence;
@@ -227,5 +238,6 @@ export function useHubMaterialRows(open: boolean) {
     ingestRow,
     deleteRow,
     toggleSourceSelected,
+    activeProjectId,
   };
 }

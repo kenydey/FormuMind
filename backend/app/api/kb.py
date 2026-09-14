@@ -107,10 +107,16 @@ class KBSourcesResponse(BaseModel):
 def list_sources(
     project_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
+    include_global: bool = Query(
+        default=False,
+        description="When project_id is set, also include global (project_id NULL) sources",
+    ),
 ) -> KBSourcesResponse:
     from ..db.source_store import get_source_store
 
-    rows = get_source_store().list_for_project(project_id, limit=limit)
+    rows = get_source_store().list_for_project(
+        project_id, limit=limit, include_global=include_global
+    )
     return KBSourcesResponse(
         sources=[
             KBSourceItem(

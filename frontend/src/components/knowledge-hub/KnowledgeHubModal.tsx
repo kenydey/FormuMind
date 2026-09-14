@@ -8,10 +8,10 @@ import HubGraphPane from "./HubGraphPane";
 import HubReportsPlaceholderPane from "./HubReportsPlaceholderPane";
 
 const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
-  { id: "materials", label: "资料", hint: "检索证据 + 知识库文档" },
-  { id: "wiki", label: "Wiki", hint: "LLM 凝练页" },
-  { id: "graph", label: "图谱", hint: "KG / Neo4j 探针" },
-  { id: "reports", label: "文档生成", hint: "基于卷宗生成报告" },
+  { id: "materials", label: "资料", hint: "当前项目入库文档" },
+  { id: "wiki", label: "Wiki", hint: "当前项目编译页 / 卷宗" },
+  { id: "graph", label: "图谱", hint: "全局探针（未项目切分）" },
+  { id: "reports", label: "文档生成", hint: "当前项目卷宗报告" },
 ];
 
 /** Knowledge Hub shell — right-rail materials governance entry (H0). */
@@ -31,7 +31,7 @@ export default function KnowledgeHubModal({
 
   return (
     <Modal
-      title="📚 知识库 · Knowledge Hub"
+      title="📚 知识库 · Knowledge Hub（按当前项目）"
       open={open}
       onClose={onClose}
       size="xl"

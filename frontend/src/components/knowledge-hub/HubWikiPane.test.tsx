@@ -103,11 +103,24 @@ describe("HubWikiPane dossier controls", () => {
     });
   });
 
+  it("passes project_id when listing wiki pages", async () => {
+    vi.mocked(api.listWikiPages).mockResolvedValue({ pages: [], total: 0 });
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    await waitFor(() => {
+      expect(api.listWikiPages).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: "proj-hub-1" }),
+      );
+    });
+    expect(screen.getByTestId("hub-wiki-project-scope").textContent).toMatch(/proj-hub-1/);
+  });
+
   it("disables dossier actions without active project", () => {
     useStore.setState({ activeProjectId: null } as never);
     render(<HubWikiPane active />);
     expect(screen.getByTestId("hub-wiki-open-dossier")).toBeDisabled();
     expect(screen.getByTestId("hub-wiki-refresh-dossier")).toBeDisabled();
+    expect(screen.getByTestId("hub-wiki-project-scope").textContent).toMatch(/未选择/);
   });
 
   it("runs lint and shows actionable flag chips", async () => {
