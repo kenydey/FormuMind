@@ -175,9 +175,12 @@ def index_page(
 
 def rebuild_all(session_factory: sessionmaker[Session], store: Any) -> int:
     """Reindex all wiki pages from store. Returns count."""
-    # Force schema migration + empty index before refill.
+    # Force a full rebuild. Drop the FTS table first so ensure_fts recreates it
+    # from scratch — do NOT touch wiki_fts_meta before the table exists: on a
+    # fresh DB (FTS tables were never created, they live outside alembic) that
+    # DELETE is the very statement that raises "no such table: wiki_fts_meta".
     with session_factory() as session:
-        session.execute(text(f"DELETE FROM {_FTS_META} WHERE k = 'schema'"))
+        session.execute(text(f"DROP TABLE IF EXISTS {_FTS_TABLE}"))
         session.commit()
     ensure_fts(session_factory)
     pages = store.list_pages(limit=500)
