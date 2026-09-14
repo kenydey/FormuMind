@@ -11,6 +11,22 @@ from .schema import parse_front_matter
 
 logger = logging.getLogger(__name__)
 
+# L2 dossier / L2 theme / P5 report must never feed DOE constraint extraction.
+_DOE_SKIP_KINDS = frozenset({"theme", "report"})
+
+
+def _is_doe_excluded_page(*, kind: str | None, path: str | None) -> bool:
+    """True when the page is L2 narrative / Report and must not feed DOE."""
+    k = (kind or "").strip().lower()
+    p = (path or "").strip().replace("\\", "/")
+    if k in _DOE_SKIP_KINDS:
+        return True
+    if p.startswith("reports/"):
+        return True
+    if p.startswith("themes/project-"):
+        return True
+    return False
+
 
 def _parse_bounds(meta: dict[str, Any]) -> list[dict[str, Any]]:
     raw = meta.get("bounds_json") or meta.get("bounds")
@@ -41,7 +57,11 @@ def _parse_forbidden(meta: dict[str, Any]) -> list[str]:
 
 
 def wiki_parameter_bounds(*, limit: int = 200) -> list[dict[str, Any]]:
-    """Flatten bounds from all wiki pages. Empty when DOE wiki flag off."""
+    """Flatten bounds from L1 wiki pages. Empty when DOE wiki flag off.
+
+    Skips L2 themes / project dossiers and P5 reports even if front-matter is
+    poisoned with ``bounds_json`` (defense in depth for Claims/DOE trust boundary).
+    """
     settings = get_settings()
     if not settings.wiki_enabled or not settings.wiki_doe_constraints:
         return []
@@ -53,8 +73,7 @@ def wiki_parameter_bounds(*, limit: int = 200) -> list[dict[str, Any]]:
         logger.debug("wiki bounds list failed: %s", exc)
         return []
     for row in pages:
-        if (row.kind or "").lower() == "theme":
-            # L2 themes never feed DOE soft/hard constraint extraction
+        if _is_doe_excluded_page(kind=row.kind, path=row.path):
             continue
         md = store.read_markdown(row.path) or ""
         meta, _ = parse_front_matter(md)
@@ -87,7 +106,7 @@ def wiki_forbidden(*, limit: int = 200) -> list[dict[str, str]]:
         logger.debug("wiki forbidden list failed: %s", exc)
         return []
     for row in pages:
-        if (row.kind or "").lower() == "theme":
+        if _is_doe_excluded_page(kind=row.kind, path=row.path):
             continue
         md = store.read_markdown(row.path) or ""
         meta, _ = parse_front_matter(md)
