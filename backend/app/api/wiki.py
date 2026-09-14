@@ -220,6 +220,20 @@ class DossierEnsureRequest(BaseModel):
     vertical: str | None = None
 
 
+class DossierPatchRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    sections: list[str] | None = None
+    campaign_id: str | None = None
+    vertical: str | None = None
+
+
+class DossierRefreshRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    sections: list[str] | None = None
+    campaign_id: str | None = None
+    vertical: str | None = None
+
+
 @router.post("/themes/compile")
 def compile_theme_endpoint(body: ThemeCompileRequest) -> dict:
     """Phase 2: compile L2 system-overview theme (flag-gated, default off)."""
@@ -246,6 +260,48 @@ def ensure_dossier_endpoint(body: DossierEnsureRequest) -> dict:
         return ensure_project_dossier(
             body.project_id,
             campaign_id=body.campaign_id,
+            vertical=body.vertical,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/dossier/patch")
+def patch_dossier_endpoint(body: DossierPatchRequest) -> dict:
+    """P4.2: rebuild selected dossier sections from live pack (deterministic)."""
+    _require_wiki()
+    from ..services.wiki.dossier import patch_dossier_sections
+
+    try:
+        return patch_dossier_sections(
+            body.project_id,
+            body.sections,
+            campaign_id=body.campaign_id,
+            vertical=body.vertical,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/dossier/refresh")
+def refresh_dossier_endpoint(body: DossierRefreshRequest) -> dict:
+    """P4.2: ensure dossier exists then patch sections (default: all)."""
+    _require_wiki()
+    from ..services.wiki.dossier import refresh_dossier
+
+    try:
+        return refresh_dossier(
+            body.project_id,
+            campaign_id=body.campaign_id,
+            sections=body.sections,
             vertical=body.vertical,
         )
     except PermissionError as exc:

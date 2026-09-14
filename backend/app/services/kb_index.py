@@ -310,6 +310,18 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
                 dispatch_wiki_compile(source_id)
             except Exception as wiki_exc:
                 degrade_return(logger, wiki_exc, "wiki compile dispatch failed", None)
+        # P4.2: optional project-dossier S2 patch (default OFF via wiki_dossier_auto_patch).
+        if n and settings.wiki_enabled and getattr(settings, "wiki_project_dossier_enabled", False):
+            try:
+                from ..db.source_store import get_source_store
+                from .wiki.dossier import notify_dossier_event
+
+                doc = get_source_store().get(source_id)
+                pid = getattr(doc, "project_id", None) if doc is not None else None
+                if pid:
+                    notify_dossier_event(str(pid), "literature_ingested")
+            except Exception as dossier_exc:
+                degrade_return(logger, dossier_exc, "dossier notify on ingest failed", None)
         return n
     except Exception as exc:
         return degrade_return(logger, exc, "kb index_source failed", 0)

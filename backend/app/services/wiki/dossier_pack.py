@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
 from ...config import get_settings
 from ...db.project_store import get_project_store
 from .schema import DOSSIER_SECTIONS, utcnow_iso
@@ -16,11 +18,7 @@ def build_project_dossier_pack(
     *,
     campaign_id: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble structured pack keyed by ``project_id``.
-
-    P4.1 fills requirements (+ empty shells for later sections). P4.2+ hydrates
-    DOE / lab / loop / artifacts from live stores.
-    """
+    """Assemble structured pack keyed by ``project_id``."""
     pid = (project_id or "").strip()
     if not pid:
         raise ValueError("project_id required")
@@ -37,6 +35,19 @@ def build_project_dossier_pack(
     campaign = campaign_id or (
         str(ws.workbench_campaign_id) if ws.workbench_campaign_id is not None else ""
     )
+    campaign_int: int | None = None
+    try:
+        if campaign:
+            campaign_int = int(campaign)
+    except (TypeError, ValueError):
+        campaign_int = ws.workbench_campaign_id
+
+    literature = _literature_slice(pid, ws)
+    formula_rows = _formula_rows(ws)
+    doe = _doe_slice(ws, campaign_int)
+    lab = _lab_slice(pid)
+    loop = _loop_slice(ws, campaign_int)
+    artifacts = _artifacts_slice(ws, loop)
 
     return {
         "schema_version": 1,
@@ -44,7 +55,7 @@ def build_project_dossier_pack(
         "project_id": pid,
         "title": detail.title or pid,
         "domain": (req.domain.value if req and req.domain else "") or "",
-        "campaign_id": campaign or "",
+        "campaign_id": str(campaign_int or campaign or ""),
         "workbench_campaign_id": ws.workbench_campaign_id,
         "updated_at": utcnow_iso(),
         "sections": list(DOSSIER_SECTIONS),
@@ -60,20 +71,18 @@ def build_project_dossier_pack(
             else [],
             "constraint_values": dict(req.constraint_values or {}) if req else {},
         },
-        "literature": {"rows": [], "source_ids": []},
-        "formula": {"rows": _formula_rows(ws), "unit_note": "wt% unless stated"},
-        "doe": {"plans": [], "runs": []},
-        "lab": {"rows": []},
-        "loop": {
-            "history": list(ws.rmse_history or []),
-            "optimization_history": list(ws.optimization_history or []),
-            "loop_report": ws.loop_report.model_dump(mode="json") if ws.loop_report else None,
-        },
-        "artifacts": {"rows": [], "plot_specs": []},
+        "literature": literature,
+        "formula": {"rows": formula_rows, "unit_note": "wt% unless stated"},
+        "doe": doe,
+        "lab": lab,
+        "loop": loop,
+        "artifacts": artifacts,
         "flags": {
             "missing_requirement": req is None,
-            "empty_literature": True,
-            "empty_doe": ws.doe_plan is None,
+            "empty_literature": not literature.get("rows"),
+            "empty_doe": not (doe.get("plans") or doe.get("runs")),
+            "empty_lab": not lab.get("rows"),
+            "empty_loop": not (loop.get("history") or loop.get("candidates")),
         },
         "vertical_addendum": (get_settings().wiki_dossier_vertical_addendum or "").strip(),
     }
@@ -132,8 +141,10 @@ def _requirement_rows(req) -> list[dict[str, Any]]:
 
 def _formula_rows(ws) -> list[dict[str, Any]]:
     form = None
+    source = "leaderboard"
     if ws.requirement and getattr(ws.requirement, "active_formulation", None):
         form = ws.requirement.active_formulation
+        source = "active_formulation"
     elif ws.leaderboard:
         form = ws.leaderboard[0]
     if form is None:
@@ -146,7 +157,297 @@ def _formula_rows(ws) -> list[dict[str, Any]]:
                 "role": getattr(ing, "role", "") or getattr(ing, "component_type", "") or "",
                 "weight_pct": getattr(ing, "weight_pct", None),
                 "cas": getattr(ing, "cas_no", None) or "",
-                "source": "active_formulation" if form is getattr(ws.requirement, "active_formulation", None) else "leaderboard",
+                "source": source,
             }
         )
     return rows
+
+
+def _literature_slice(project_id: str, ws) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    source_ids: list[str] = []
+    try:
+        from ...db.source_store import get_source_store
+
+        for doc in get_source_store().list_for_project(project_id, limit=40):
+            sid = getattr(doc, "id", "") or ""
+            if sid:
+                source_ids.append(sid)
+            title = (getattr(doc, "title", None) or getattr(doc, "origin_url", None) or sid)[:120]
+            guide = getattr(doc, "source_guide", None) or {}
+            summary = ""
+            if isinstance(guide, dict):
+                summary = str(guide.get("summary") or "")[:80]
+            rows.append(
+                {
+                    "cluster": "project_sources",
+                    "title": title,
+                    "source_id": sid,
+                    "snippet": summary,
+                    "l1": "",
+                }
+            )
+    except Exception as exc:
+        logger.debug("dossier literature hydrate failed: %s", exc)
+
+    # Workspace search hits (Evidence) as secondary rows
+    for ev in (ws.sources or [])[:20]:
+        ident = getattr(ev, "identifier", "") or ""
+        if ident and ident not in source_ids:
+            source_ids.append(ident)
+        rows.append(
+            {
+                "cluster": "search_hit",
+                "title": (getattr(ev, "title", None) or ident)[:120],
+                "source_id": ident,
+                "snippet": (getattr(ev, "snippet", None) or "")[:80],
+                "l1": "",
+            }
+        )
+
+    # de-dupe by source_id keeping first
+    seen: set[str] = set()
+    deduped = []
+    for r in rows:
+        key = r.get("source_id") or r.get("title") or ""
+        if key in seen:
+            continue
+        seen.add(str(key))
+        deduped.append(r)
+
+    return {"rows": deduped[:50], "source_ids": list(dict.fromkeys(source_ids))[:80]}
+
+
+def _doe_slice(ws, campaign_id: int | None) -> dict[str, Any]:
+    plans: list[dict[str, Any]] = []
+    runs: list[dict[str, Any]] = []
+
+    if ws.doe_plan is not None:
+        plan = ws.doe_plan
+        factors = []
+        for f in plan.factors or []:
+            factors.append(
+                {
+                    "name": getattr(f, "name", ""),
+                    "low": getattr(f, "low", None),
+                    "high": getattr(f, "high", None),
+                    "unit": getattr(f, "unit", "") or "",
+                }
+            )
+        plans.append(
+            {
+                "round": "",
+                "design_type": plan.design,
+                "factors": factors,
+                "bounds": "; ".join(
+                    f"{f['name']}[{f['low']},{f['high']}]{f['unit']}" for f in factors
+                ),
+                "plan_id": plan.plan_id or "",
+                "notes": (plan.notes or "")[:120],
+                "source": "workspace.doe_plan",
+            }
+        )
+        for i, run in enumerate(plan.runs or []):
+            vals = (
+                getattr(run, "values", None)
+                or getattr(run, "factor_values", None)
+                or getattr(run, "natural", None)
+                or getattr(run, "coded", None)
+                or {}
+            )
+            if hasattr(vals, "model_dump"):
+                vals = vals.model_dump()
+            runs.append(
+                {
+                    "run": getattr(run, "run_id", None) or i + 1,
+                    "factors": vals if isinstance(vals, dict) else {"raw": str(vals)[:80]},
+                    "metric": "",
+                    "value": "",
+                    "method": "",
+                    "passed": "",
+                    "source": "workspace.doe_plan",
+                }
+            )
+
+    if campaign_id is not None:
+        try:
+            from ...db.database import default_session_factory
+            from ...db.models import DOEPlanRow
+
+            with default_session_factory()() as session:
+                rows = (
+                    session.execute(
+                        select(DOEPlanRow)
+                        .where(DOEPlanRow.campaign_id == int(campaign_id))
+                        .order_by(DOEPlanRow.created_at.desc())
+                        .limit(20)
+                    )
+                    .scalars()
+                    .all()
+                )
+            existing_ids = {p.get("plan_id") for p in plans}
+            for row in rows:
+                if row.id in existing_ids:
+                    continue
+                params = row.parameters or {}
+                factors = params.get("factors") or []
+                bounds = ""
+                if isinstance(factors, list):
+                    parts = []
+                    for f in factors:
+                        if isinstance(f, dict):
+                            parts.append(
+                                f"{f.get('name','')}[{f.get('low')},{f.get('high')}]{f.get('unit') or ''}"
+                            )
+                    bounds = "; ".join(parts)
+                plans.append(
+                    {
+                        "round": row.round if row.round is not None else "",
+                        "design_type": row.design_type,
+                        "factors": factors if isinstance(factors, list) else [],
+                        "bounds": bounds,
+                        "plan_id": row.id,
+                        "notes": str(params.get("notes") or "")[:120],
+                        "source": "doe_plans",
+                    }
+                )
+                for i, run in enumerate(params.get("runs") or []):
+                    if not isinstance(run, dict):
+                        continue
+                    runs.append(
+                        {
+                            "run": run.get("run_id") or i + 1,
+                            "factors": run.get("values") or run.get("factor_values") or {},
+                            "metric": "",
+                            "value": "",
+                            "method": "",
+                            "passed": "",
+                            "source": row.id,
+                        }
+                    )
+        except Exception as exc:
+            logger.debug("dossier doe_plans hydrate failed: %s", exc)
+
+    return {"plans": plans, "runs": runs[:100]}
+
+
+def _lab_slice(project_id: str) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    try:
+        from ...db.database import default_session_factory
+        from ...db.models import ExperimentRow
+
+        with default_session_factory()() as session:
+            exps = (
+                session.execute(
+                    select(ExperimentRow)
+                    .where(ExperimentRow.project_id == project_id)
+                    .order_by(ExperimentRow.created_at.desc())
+                    .limit(50)
+                )
+                .scalars()
+                .all()
+            )
+        for exp in exps:
+            measured = exp.measured or {}
+            if not isinstance(measured, dict):
+                measured = {}
+            if measured:
+                for metric, value in list(measured.items())[:8]:
+                    rows.append(
+                        {
+                            "at": exp.created_at.isoformat() if exp.created_at else "",
+                            "item": exp.item_id or exp.label or str(exp.id),
+                            "planned": "",
+                            "actual": str(exp.factors or {})[:80],
+                            "metric": str(metric),
+                            "value": value,
+                            "method": "",
+                            "attachment": "",
+                            "source": f"experiment:{exp.id}",
+                        }
+                    )
+            else:
+                rows.append(
+                    {
+                        "at": exp.created_at.isoformat() if exp.created_at else "",
+                        "item": exp.item_id or exp.label or str(exp.id),
+                        "planned": "",
+                        "actual": str(exp.factors or {})[:80],
+                        "metric": "",
+                        "value": "",
+                        "method": "",
+                        "attachment": "",
+                        "source": f"experiment:{exp.id}",
+                    }
+                )
+    except Exception as exc:
+        logger.debug("dossier lab hydrate failed: %s", exc)
+    return {"rows": rows}
+
+
+def _loop_slice(ws, campaign_id: int | None) -> dict[str, Any]:
+    history: list[dict[str, Any]] = []
+    # Prefer campaign.loop_history when available
+    if campaign_id is not None:
+        try:
+            from ...db.campaign_store import get_campaign_store
+
+            camp = get_campaign_store().get_campaign_sync(int(campaign_id))
+            if camp is not None:
+                for entry in list(camp.loop_history or []):
+                    if isinstance(entry, dict):
+                        history.append(dict(entry))
+        except Exception as exc:
+            logger.debug("dossier campaign loop hydrate failed: %s", exc)
+
+    if not history:
+        for h in ws.rmse_history or []:
+            if isinstance(h, dict):
+                history.append(dict(h))
+            else:
+                history.append({"rmse": h})
+
+    candidates = []
+    for form in (ws.leaderboard or [])[:5]:
+        candidates.append(
+            {
+                "name": getattr(form, "name", "") or "",
+                "score": getattr(form, "score", None),
+                "predicted": dict(getattr(form, "predicted", None) or {}),
+            }
+        )
+
+    plot_specs = []
+    if ws.optimization_history:
+        plot_specs.append(
+            {
+                "id": "optimization_history",
+                "type": "line",
+                "metric": "objective",
+                "series": list(ws.optimization_history),
+            }
+        )
+
+    return {
+        "history": history,
+        "optimization_history": list(ws.optimization_history or []),
+        "loop_report": ws.loop_report.model_dump(mode="json") if ws.loop_report else None,
+        "candidates": candidates,
+        "plot_specs": plot_specs,
+    }
+
+
+def _artifacts_slice(ws, loop: dict[str, Any]) -> dict[str, Any]:
+    rows = []
+    for spec in loop.get("plot_specs") or []:
+        rows.append(
+            {
+                "name": spec.get("id") or "plot",
+                "kind": "plot_spec",
+                "uri": "",
+                "section": "S6",
+                "from": "optimization_history",
+            }
+        )
+    return {"rows": rows, "plot_specs": list(loop.get("plot_specs") or [])}

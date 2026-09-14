@@ -284,17 +284,17 @@ DossierPack
 - [x] `ensure_project_dossier(project_id)` 写空表头 + data.json  
 - [x] API：`POST /dossier/ensure`、`GET /dossier/{project_id}`、`GET /dossier/{project_id}/pack`  
 - [x] 单测：旗标门闩 + ensure 骨架 + data.json  
-- [ ] 后续：DOE/lab/loop 切片填实（P4.2）
+- [x] 后续：DOE/lab/loop 切片填实（P4.2）
 ### P4.2 节级确定性 patch（2–3d）
 
-- [ ] `patch_dossier_section(project_id, section, pack_slice)`  
-- [ ] 接线事件（均需 `wiki_dossier_auto_patch`）：  
+- [x] `patch_dossier_section(project_id, section, pack_slice)`  
+- [x] 接线事件（均需 `wiki_dossier_auto_patch`）：  
   - project requirement 变更 → S1  
   - ingest 成功回调 → S2（增量 source_ids）  
   - doe_plan 保存 → S4  
   - workbench sync / measurements → S4/S5  
   - optimize/loop 完成 → S6 + plot_spec→S7  
-- [ ] 幂等：content_hash / section_revisions
+- [x] 幂等：content_hash / section_revisions
 
 ### P4.3 LLM 叙述（可选，1–2d）
 
@@ -304,15 +304,15 @@ DossierPack
 
 ### P4.4 API / Hub（1–2d）
 
-- [ ] `POST /api/wiki/dossier/ensure`  
-- [ ] `POST /api/wiki/dossier/patch` `{project_id, sections?:["S1","S6"]}`  
-- [ ] `POST /api/wiki/dossier/refresh`  
+- [x] `POST /api/wiki/dossier/ensure`  
+- [x] `POST /api/wiki/dossier/patch` `{project_id, sections?:["S1","S6"]}`  
+- [x] `POST /api/wiki/dossier/refresh`  
 - [ ] Hub 项目旁「项目卷宗」入口；Reader 展示 `section_revisions` / 未审 Flag  
 - [ ] Chat 相关 Wiki 可命中 dossier
 
 ### P4.5 Report 地基（并行预埋，0.5–1d）
 
-- [ ] 导出 `GET /api/wiki/dossier/{project_id}/pack`（即 DossierPack JSON）  
+- [x] 导出 `GET /api/wiki/dossier/{project_id}/pack`（即 DossierPack JSON）  
 - [ ] Hub Reports 占位页改为「基于卷宗生成（即将推出）」并标明依赖 pack  
 - [ ] 不实现完整 Report 排版（留给 P5）
 
