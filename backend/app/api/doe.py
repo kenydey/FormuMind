@@ -48,6 +48,13 @@ def _persist_doe_plan(plan: DOEPlan, campaign_id: int | None = None) -> None:
             doe_plan_store.save(session, plan, campaign_id=campaign_id)
     except Exception as exc:
         logger.warning("persist doe plan failed: %s", exc, exc_info=True)
+    # P4.2: optional dossier S4 patch (default OFF).
+    try:
+        from ..services.wiki.dossier import notify_dossier_event_for_campaign
+
+        notify_dossier_event_for_campaign(campaign_id, "doe_updated")
+    except Exception:
+        pass
 
 
 @router.post("/doe", response_model=DOEPlan)

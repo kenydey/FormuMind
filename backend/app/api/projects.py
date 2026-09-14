@@ -50,6 +50,13 @@ def update_project(project_id: str, req: ProjectUpdateRequest) -> ProjectDetail:
             safe_propose_from_requirement(req_blob, source_ref=f"project:{project_id}")
     except Exception:
         pass
+    # P4.2: optional dossier auto-patch (default OFF via wiki_dossier_auto_patch).
+    try:
+        from ..services.wiki.dossier import notify_dossier_event
+
+        notify_dossier_event(project_id, "project_updated")
+    except Exception:
+        pass
     return detail
 
 

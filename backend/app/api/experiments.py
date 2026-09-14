@@ -518,6 +518,14 @@ async def sync_workbench(
         campaign_state=payload.campaign_state,
     )
 
+    # P4.2: optional dossier S4/S5 patch after lab sync (default OFF).
+    try:
+        from ..services.wiki.dossier import notify_dossier_event_for_campaign
+
+        notify_dossier_event_for_campaign(payload.campaign_id, "lab_recorded")
+    except Exception:
+        pass
+
     return WorkbenchSyncResponse(
         updated=updated,
         rows=[

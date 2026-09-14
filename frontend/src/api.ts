@@ -2271,6 +2271,121 @@ export const api = {
       llm_generated?: boolean;
       source_ids?: string[];
     }>("/api/wiki/themes/compile", body),
+  ensureWikiDossier: (body: {
+    project_id: string;
+    campaign_id?: string;
+    vertical?: string;
+    use_llm?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      data_path?: string;
+      project_id?: string;
+      section_revisions?: Record<string, number>;
+      error?: string;
+    }>("/api/wiki/dossier/ensure", body),
+  patchWikiDossier: (body: {
+    project_id: string;
+    sections?: string[];
+    campaign_id?: string;
+    vertical?: string;
+    use_llm?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      patched_sections?: string[];
+      skipped_unchanged?: string[];
+      section_revisions?: Record<string, number>;
+      error?: string;
+    }>("/api/wiki/dossier/patch", body),
+  refreshWikiDossier: (body: {
+    project_id: string;
+    sections?: string[];
+    campaign_id?: string;
+    vertical?: string;
+    use_llm?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      patched_sections?: string[];
+      section_revisions?: Record<string, number>;
+      error?: string;
+    }>("/api/wiki/dossier/refresh", body),
+  getWikiDossier: (projectId: string) =>
+    get<{
+      page_id?: string;
+      path: string;
+      data_path?: string;
+      title?: string;
+      flags?: string[];
+      revision?: number;
+      markdown: string;
+      data?: {
+        section_revisions?: Record<string, number>;
+        flags?: Record<string, boolean>;
+        project_id?: string;
+        template?: string;
+        [key: string]: unknown;
+      } | null;
+    }>(`/api/wiki/dossier/${encodeURIComponent(projectId)}`),
+  getWikiDossierPack: (projectId: string, campaignId?: string) => {
+    const q = campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : "";
+    return get<Record<string, unknown>>(
+      `/api/wiki/dossier/${encodeURIComponent(projectId)}/pack${q}`,
+    );
+  },
+  listWikiReportTemplates: () =>
+    get<{ templates: { id: string; title: string; blurb: string; slices: string }[] }>(
+      "/api/wiki/reports/templates",
+    ),
+  generateWikiReport: (body: {
+    project_id: string;
+    template: string;
+    campaign_id?: string;
+    prompt?: string;
+    use_llm?: boolean;
+    ensure_dossier?: boolean;
+    persist?: boolean;
+  }) =>
+    post<{
+      ok: boolean;
+      project_id?: string;
+      template?: string;
+      path?: string;
+      title?: string;
+      markdown?: string;
+      page_id?: string;
+      revision?: number;
+      disclaimer?: string;
+      llm?: { used_llm?: boolean; error?: string | null };
+      error?: string;
+    }>("/api/wiki/dossier/report", body),
+  exportWikiReport: async (body: {
+    project_id: string;
+    template: string;
+    format: "md" | "docx" | "pdf" | "pptx";
+    campaign_id?: string;
+    prompt?: string;
+    use_llm?: boolean;
+    ensure_dossier?: boolean;
+  }) => {
+    const res = await fetch("/api/wiki/dossier/report/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `report.${body.format}` };
+  },
   rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
   rebuildWikiEmbed: () =>
     post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(

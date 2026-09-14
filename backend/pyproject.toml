@@ -66,6 +66,12 @@ file_ingest = [
     "python-docx>=1.1",
     "trafilatura>=1.8",
 ]
+# P5 report export (DOCX / PDF / PPTX). Soft-imported; Hub falls back to Markdown.
+report_export = [
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "fpdf2>=2.7",
+]
 # Layout-aware PDF → Markdown parsers. FORMUMIND_PDF_PARSER picks the tier:
 # hybrid → rapidocr → markitdown → pypdf（docling/marker/本地 magic-pdf 已移除）.
 #

@@ -121,8 +121,12 @@ def submit(
 
     settings = get_settings()
     if settings.celery_eager:
-        task_id = _submit_eager_background(task, payload, kind)
-        return accepted_response(task_id, kind, outbox_id=outbox_id, owner_id=owner_id)
+        # Register PENDING *before* starting the daemon thread so a fast
+        # RUNNING progress write cannot be overwritten by a late register_pending.
+        task_id = str(uuid.uuid4())
+        response = accepted_response(task_id, kind, outbox_id=outbox_id, owner_id=owner_id)
+        _submit_eager_background(task, payload, kind, task_id=task_id)
+        return response
 
     try:
         async_result = _delay_with_timeout(task, payload)
@@ -146,14 +150,19 @@ def submit(
     return accepted_response(async_result.id, kind, outbox_id=outbox_id, owner_id=owner_id)
 
 
-def _submit_eager_background(task, payload: dict, kind: str) -> str:
+def _submit_eager_background(
+    task, payload: dict, kind: str, *, task_id: str | None = None
+) -> str:
     """Run the Celery task body in a daemon thread; return a client task_id now.
 
     Under ``task_always_eager``, ``task.delay()`` blocks until the job finishes.
     HTTP handlers must not wait on that — return 202 and let SSE/status poll
     observe progress the same way a real worker would.
+
+    Caller should register the task id (PENDING) before invoking this so a
+    fast thread cannot race ahead of registration.
     """
-    task_id = str(uuid.uuid4())
+    task_id = task_id or str(uuid.uuid4())
 
     def _run() -> None:
         try:

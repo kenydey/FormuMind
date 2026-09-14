@@ -72,10 +72,19 @@ def run_migrations_online() -> None:
     """Run migrations in online mode against a live database connection."""
     section = config.get_section(config.config_ini_section, {})
     section["sqlalchemy.url"] = _resolve_url()
+    # Match ``make_engine``: eager Celery / test threads may touch the same
+    # SQLite file while Alembic runs; default check_same_thread=True would
+    # reject those connections even when DDL is serialized separately.
+    engine_kwargs: dict = {"poolclass": pool.NullPool}
+    if section["sqlalchemy.url"].startswith("sqlite"):
+        engine_kwargs["connect_args"] = {
+            "check_same_thread": False,
+            "timeout": 30,
+        }
     connectable = engine_from_config(
         section,
         prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+        **engine_kwargs,
     )
     try:
         with connectable.connect() as connection:

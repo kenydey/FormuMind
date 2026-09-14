@@ -105,6 +105,13 @@ def dispatch_loop_after_sync(
         n_suggest=n_suggest,
         prior_rmse_history=prior_rmse,
     )
+    # P4.2: optional dossier S6/S7 patch when loop starts (default OFF).
+    try:
+        from .wiki.dossier import notify_dossier_event_for_campaign
+
+        notify_dossier_event_for_campaign(workbench_campaign_id, "loop_updated")
+    except Exception:
+        pass
     return task_id, "已启动闭环：优化收敛分析 + 下一轮 DOE 建议"
 
 
