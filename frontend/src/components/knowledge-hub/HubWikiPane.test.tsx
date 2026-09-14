@@ -22,6 +22,7 @@ vi.mock("../../api", async () => {
       rebuildWikiEmbed: vi.fn(),
       compileWikiTheme: vi.fn(),
       reviewWikiPage: vi.fn(),
+      runWikiLint: vi.fn(),
     },
   };
 });
@@ -30,6 +31,13 @@ describe("HubWikiPane dossier controls", () => {
   beforeEach(() => {
     useStore.setState({ activeProjectId: "proj-hub-1" } as never);
     vi.mocked(api.listWikiPages).mockResolvedValue({ pages: [], total: 0 });
+    vi.mocked(api.listWikiFlags).mockResolvedValue({ pages: [] });
+    vi.mocked(api.runWikiLint).mockResolvedValue({
+      ok: true,
+      scanned: 3,
+      flagged: 1,
+      orphan_count: 1,
+    });
     vi.mocked(api.getWikiDossier).mockRejectedValue(new Error("not found"));
     vi.mocked(api.ensureWikiDossier).mockResolvedValue({
       ok: true,
@@ -100,5 +108,57 @@ describe("HubWikiPane dossier controls", () => {
     render(<HubWikiPane active />);
     expect(screen.getByTestId("hub-wiki-open-dossier")).toBeDisabled();
     expect(screen.getByTestId("hub-wiki-refresh-dossier")).toBeDisabled();
+  });
+
+  it("runs lint and shows actionable flag chips", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listWikiFlags).mockResolvedValue({
+      pages: [
+        {
+          id: "f1",
+          path: "materials/lonely.md",
+          kind: "material",
+          title: "lonely",
+          flags: ["orphan", "stale"],
+          source_ids: [],
+          actions: [
+            { id: "open_page", label: "打开页面", hint: "materials/lonely.md" },
+            { id: "check_sources", label: "核对 source_ids / Evidence", hint: "补文献" },
+            { id: "link_from_theme", label: "从综述/卷宗补链", hint: "增加 wikilink" },
+          ],
+        },
+      ],
+    });
+    vi.mocked(api.getWikiByPath).mockResolvedValue({
+      id: "f1",
+      path: "materials/lonely.md",
+      kind: "material",
+      title: "lonely",
+      flags: ["orphan", "stale"],
+      source_ids: [],
+      markdown: "# lonely\n",
+      revision: 1,
+    });
+
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    expect(screen.getByTestId("hub-wiki-run-lint")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("hub-wiki-run-lint"));
+    await waitFor(() => {
+      expect(api.runWikiLint).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-lint-summary").textContent).toMatch(/Lint/);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-flag-actions-materials/lonely.md")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("hub-wiki-flag-action-link_from_theme")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("hub-wiki-flag-action-open_page"));
+    await waitFor(() => {
+      expect(api.getWikiByPath).toHaveBeenCalledWith("materials/lonely.md");
+    });
   });
 });
