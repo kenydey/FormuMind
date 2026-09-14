@@ -56,6 +56,12 @@ def project_dossier_data_path(project_id: str) -> str:
     return f"themes/project-{safe_key(project_id)}.data.json"
 
 
+def project_report_path(project_id: str, template: str) -> str:
+    """P5 report page: ``reports/project-{id}-{template}.md``."""
+    tpl = safe_key(template or "briefing", limit=40)
+    return f"reports/project-{safe_key(project_id)}-{tpl}.md"
+
+
 # Frozen section anchors for project_dossier (do not rename casually).
 DOSSIER_SECTIONS: tuple[str, ...] = (
     "S1_requirements",

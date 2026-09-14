@@ -326,16 +326,19 @@ DossierPack
 
 ---
 
-## 8. 后续 P5（Report）如何吃这份 Wiki（预告，非本阶段开发）
+## 8. P5（Report）如何吃这份 Wiki
 
-| Report 模板（Hub 已占位） | 主读 Dossier 节 |
-|---------------------------|-----------------|
-| briefing | S1 + S6 + S8 |
-| feasibility | S1 + S3 + S4 + S5 |
-| formula-compare | S3 + S6 + formulation_versions |
-| patent-memo | S2 + source_ids → Raw 回链 |
+| Report 模板（Hub） | 主读 Dossier 节 / Pack 切片 |
+|--------------------|-----------------------------|
+| briefing | S1 + S6 + S8 → requirements / loop / literature / flags |
+| feasibility | S1 + S3 + S4 + S5 → requirements / formula / doe / lab |
+| formula-compare | S3 + S6 → formula / loop |
+| patent-memo | S2 → literature + source_ids |
+
+实现记录：[`2026-09-14-wiki-p5-report.md`](./2026-09-14-wiki-p5-report.md)
 
 Report **禁止**直接把 L2 叙述当 Claim；对外引用必须能点回 `source_ids` / 测量行。
+MVP：确定性 Markdown + 可选 LLM 执行摘要；旗标 `wiki_dossier_report_enabled`。
 
 ---
 

@@ -237,6 +237,16 @@ class DossierRefreshRequest(BaseModel):
     use_llm: bool = False
 
 
+class DossierReportRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    template: str = Field(min_length=1, description="briefing|feasibility|formula-compare|patent-memo")
+    campaign_id: str | None = None
+    prompt: str = ""
+    use_llm: bool = False
+    ensure_dossier: bool = True
+    persist: bool = True
+
+
 @router.post("/themes/compile")
 def compile_theme_endpoint(body: ThemeCompileRequest) -> dict:
     """Phase 2: compile L2 system-overview theme (flag-gated, default off)."""
@@ -309,6 +319,39 @@ def refresh_dossier_endpoint(body: DossierRefreshRequest) -> dict:
             sections=body.sections,
             vertical=body.vertical,
             use_llm=body.use_llm,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/reports/templates")
+def list_report_templates_endpoint() -> dict:
+    """P5: list available DossierPack-backed report templates."""
+    _require_wiki()
+    from ..services.wiki.report import list_report_templates
+
+    return {"templates": list_report_templates()}
+
+
+@router.post("/dossier/report")
+def generate_dossier_report_endpoint(body: DossierReportRequest) -> dict:
+    """P5: generate a draft report from DossierPack (flag-gated)."""
+    _require_wiki()
+    from ..services.wiki.report import generate_report
+
+    try:
+        return generate_report(
+            body.project_id,
+            body.template,
+            campaign_id=body.campaign_id,
+            prompt=body.prompt or "",
+            use_llm=body.use_llm,
+            ensure_dossier=body.ensure_dossier,
+            persist=body.persist,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

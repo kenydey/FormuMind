@@ -217,6 +217,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("wiki_dossier_auto_patch", "卷宗事件自动更新",
             "要求/入库/DOE/台账/闭环事件自动 patch 对应节（默认关，先手动 API）。",
             "kb", "依赖 wiki_project_dossier_enabled"),
+    EnvFlag("wiki_dossier_report_enabled", "卷宗 Report 生成",
+            "基于 DossierPack 生成 briefing/feasibility 等研发草稿（P5，默认关）。",
+            "kb", "依赖 wiki_project_dossier_enabled；LLM 润色另受 wiki_dossier_llm_narrative"),
     EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
             "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"
             "默认关；不关闭 Raw chunk RAG，不新建向量库。",
