@@ -318,8 +318,8 @@ DossierPack
 
 ### P4.6 质量门
 
-- [x] 单测：Claims/DOE soft 回归（`tests/test_wiki_dossier_claims_doe_regression.py`；dossier/report 毒化 bounds 不进 DOE；Claims 过滤 wiki）  
-- [x] Hub 手测清单 + API smoke：[`2026-09-14-wiki-hub-dossier-handtest.md`](./2026-09-14-wiki-hub-dossier-handtest.md) · `scripts/hub_dossier_handtest_smoke.py`  
+- [x] Hub 手测清单 + API/UI smoke：[`2026-09-14-wiki-hub-dossier-handtest.md`](./2026-09-14-wiki-hub-dossier-handtest.md) · `scripts/hub_dossier_handtest_smoke.py` · `frontend/scripts/hub_dossier_smoke.mjs`  
+- [x] 单测：事件→节路由隔离（`test_event_section_matrix_routing` / `test_notify_doe_event_only_bumps_mapped_revisions`）+ Claims/DOE soft 回归  
 - [x] 金样项目：要求→检索→DOE→台账→闭环→报告→导出（见 `tests/test_wiki_p5_export_e2e.py`）  
 - [x] 文档：事件矩阵（本文 §4.3）+ 模板锚点冻结（§3）+ Hub 手测
 

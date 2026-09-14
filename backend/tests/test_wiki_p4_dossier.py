@@ -190,6 +190,89 @@ def test_refresh_and_auto_patch_gate(env, monkeypatch):
     assert "S1_requirements" in (fired.get("patched_sections") or fired.get("section_revisions") or {})
 
 
+def test_event_section_matrix_routing(env, monkeypatch):
+    """Each auto-patch event must request only its mapped sections (P4.6)."""
+    import app.services.wiki.dossier as dossier_mod
+
+    pid = _make_project(env["projects"])
+    monkeypatch.setenv("FORMUMIND_WIKI_DOSSIER_AUTO_PATCH", "true")
+    get_settings.cache_clear()
+
+    expected = {
+        "project_updated": {"S1_requirements", "S3_baseline_formula", "S8_open_questions"},
+        "literature_ingested": {"S2_literature", "S8_open_questions"},
+        "doe_updated": {"S4_doe", "S8_open_questions"},
+        "lab_recorded": {"S4_doe", "S5_lab_ledger", "S8_open_questions"},
+        "loop_updated": {"S6_optimize_loop", "S7_artifacts", "S8_open_questions"},
+        "optimize_completed": {"S6_optimize_loop", "S7_artifacts", "S8_open_questions"},
+    }
+    assert set(dossier_mod._EVENT_SECTIONS) == set(expected)
+
+    captured: list[list[str]] = []
+
+    def _fake_refresh(project_id, *, campaign_id=None, sections=None, vertical=None, use_llm=False):
+        assert project_id == pid
+        secs = list(sections or [])
+        captured.append(secs)
+        return {"ok": True, "patched_sections": secs, "path": project_dossier_path(pid)}
+
+    monkeypatch.setattr(dossier_mod, "refresh_dossier", _fake_refresh)
+
+    for event, want in expected.items():
+        captured.clear()
+        out = notify_dossier_event(pid, event)
+        assert out.get("ok") is True
+        assert out.get("skipped") is False
+        assert out.get("event") == event
+        assert len(captured) == 1
+        assert set(captured[0]) == want
+        # Must not request the full eight-section set for known events
+        assert set(captured[0]) != set(dossier_mod.DOSSIER_SECTIONS)
+
+    # Unknown event → fall back to all sections
+    captured.clear()
+    out = notify_dossier_event(pid, "totally_unknown_event")
+    assert out.get("ok") is True
+    assert set(captured[0]) == set(dossier_mod.DOSSIER_SECTIONS)
+
+
+def test_notify_doe_event_only_bumps_mapped_revisions(env, monkeypatch):
+    """Integration: doe_updated must not bump unrelated section revisions."""
+    pid = _make_project(env["projects"])
+    ensure_project_dossier(pid)
+    side0 = json.loads((env["root"] / project_dossier_data_path(pid)).read_text(encoding="utf-8"))
+    before = dict(side0["section_revisions"])
+
+    detail = env["projects"].get(pid)
+    plan = DOEPlan(
+        plan_id="doe-evt-1",
+        design="lhs",
+        factors=[DOEFactor(name="pH", low=3.0, high=5.0, unit="")],
+        runs=[DOERun(run_id=1, coded={"pH": 0.0}, natural={"pH": 4.0})],
+        notes="event matrix",
+    )
+    ws = detail.workspace.model_copy(update={"doe_plan": plan})
+    env["projects"].update(pid, ws.model_dump(mode="json"))
+
+    monkeypatch.setenv("FORMUMIND_WIKI_DOSSIER_AUTO_PATCH", "true")
+    get_settings.cache_clear()
+    fired = notify_dossier_event(pid, "doe_updated")
+    assert fired.get("ok") is True
+    assert fired.get("skipped") is False
+
+    side1 = json.loads((env["root"] / project_dossier_data_path(pid)).read_text(encoding="utf-8"))
+    after = side1["section_revisions"]
+    allowed = {"S4_doe", "S8_open_questions"}
+    for key, rev in after.items():
+        if key in allowed:
+            continue
+        assert rev == before[key], f"{key} must stay at {before[key]}, got {rev}"
+    # S4 should have been attempted; content change → bump (or at least not regress)
+    assert after["S4_doe"] >= before["S4_doe"]
+    md = env["wiki"].read_markdown(project_dossier_path(pid)) or ""
+    assert "lhs" in md or "pH" in md
+
+
 def test_pack_endpoint_and_get_page(env):
     pid = _make_project(env["projects"])
     ensure_project_dossier(pid)

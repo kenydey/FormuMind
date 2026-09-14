@@ -23,9 +23,23 @@
 API 冒烟（创建项目 → ensure → refresh → pack → report）：
 
 ```bash
-python scripts/hub_dossier_handtest_smoke.py
+python3 scripts/hub_dossier_handtest_smoke.py
 # 或
-FM_BASE=http://127.0.0.1:5173 python scripts/hub_dossier_handtest_smoke.py
+FM_BASE=http://127.0.0.1:5173 python3 scripts/hub_dossier_handtest_smoke.py
+```
+
+Hub UI Playwright（需本地前端 + 活动项目；旗标关时 soft-warn）：
+
+```bash
+node frontend/scripts/hub_dossier_smoke.mjs
+```
+
+组件单测：
+
+```bash
+cd frontend && npm test -- --run \
+  src/components/knowledge-hub/HubWikiPane.test.tsx \
+  src/components/knowledge-hub/HubReportsPlaceholderPane.test.tsx
 ```
 
 ---
