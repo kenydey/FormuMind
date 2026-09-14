@@ -392,8 +392,16 @@ def run_optimization(
         for k, v in values.items():
             if k in ("cure_temperature_c", "cure_time_min"):
                 top_process[k] = v
+        # Offline / CI have no Redis or PubChem — network enrich of the top-N
+        # ranked formulas is what left optimize tasks stuck at RUNNING after
+        # progress hit 1.0. Local CAS/SMILES from the catalog still apply.
         form = _score_and_validate(
-            _apply_levers(req, values), top_process, req, objectives=objectives, bounds=bounds
+            _apply_levers(req, values),
+            top_process,
+            req,
+            objectives=objectives,
+            bounds=bounds,
+            enrich_network=False,
         )
         form.name = f"Optimized {req.domain.value} (score {score:.3f})"
         top.append(form)

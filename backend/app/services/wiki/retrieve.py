@@ -27,11 +27,22 @@ def filter_raw_evidence(evidence: list[Evidence]) -> list[Evidence]:
     return [e for e in evidence if not is_wiki_evidence(e)]
 
 
+def _normalize_chat_mode(raw: str | None) -> str:
+    mode = (raw or "balanced").strip().lower()
+    if mode in ("wiki_first", "wiki", "wiki-priority"):
+        return "wiki_first"
+    if mode in ("raw_first", "raw", "raw-priority"):
+        return "raw_first"
+    return "balanced"
+
+
 def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
     """Keyword search over wiki titles / norm_key / markdown body."""
     settings = get_settings()
     if not settings.wiki_enabled or not settings.wiki_chat_blend:
         return []
+    if _normalize_chat_mode(getattr(settings, "wiki_chat_mode", None)) == "raw_first":
+        k = min(k, 2)
     q = (query or "").strip()
     if not q:
         return []
@@ -50,7 +61,6 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
         hits = sum(1 for t in tokens if t in blob)
         if hits <= 0:
             continue
-        # Prefer summary section
         summary = ""
         if "## Summary" in body:
             summary = body.split("## Summary", 1)[1]
@@ -60,7 +70,12 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
         snippet = (summary or body)[:800].strip()
         if not snippet:
             continue
-        score = min(1.0, 0.35 + 0.15 * hits + (0.1 if row.kind in ("material", "system", "pitfall") else 0))
+        score = min(
+            1.0,
+            0.35
+            + 0.15 * hits
+            + (0.1 if row.kind in ("material", "system", "pitfall") else 0),
+        )
         scored.append(
             (
                 score,
@@ -75,7 +90,29 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
             )
         )
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [ev for _, ev in scored[: max(1, min(20, k))]]
+    keyword_hits = [ev for _, ev in scored[: max(1, min(20, k))]]
+
+    # Phase 3: merge embedded wiki summaries (semantic) when flag on.
+    if getattr(settings, "wiki_embed_enabled", False):
+        try:
+            from .embed import search_wiki_embedded
+
+            embedded = search_wiki_embedded(q, k=k)
+        except Exception:
+            embedded = []
+        if embedded:
+            by_id: dict[str, Evidence] = {ev.identifier: ev for ev in embedded}
+            for ev in keyword_hits:
+                prev = by_id.get(ev.identifier)
+                if prev is None or float(ev.relevance or 0) > float(prev.relevance or 0):
+                    by_id[ev.identifier] = ev
+            merged = sorted(
+                by_id.values(),
+                key=lambda e: float(e.relevance or 0),
+                reverse=True,
+            )
+            return merged[: max(1, min(20, k))]
+    return keyword_hits
 
 
 def blend_wiki_evidence(
@@ -84,11 +121,21 @@ def blend_wiki_evidence(
     *,
     k: int | None = None,
 ) -> tuple[list[Evidence], int]:
-    """Prepend wiki hits (deduped). Returns (merged, wiki_added_count)."""
+    """Merge wiki hits (deduped). Ordering depends on ``wiki_chat_mode``.
+
+    Returns (merged, wiki_added_count). Claims still use ``filter_raw_evidence``.
+    """
     settings = get_settings()
     if not settings.wiki_enabled or not settings.wiki_chat_blend:
         return sources, 0
-    top_k = k if k is not None else min(5, max(2, settings.kb_chat_top_k // 4 or 2))
+    mode = _normalize_chat_mode(getattr(settings, "wiki_chat_mode", None))
+    if mode == "raw_first":
+        default_k = min(2, max(1, settings.kb_chat_top_k // 8 or 1))
+    elif mode == "wiki_first":
+        default_k = min(8, max(3, settings.kb_chat_top_k // 2 or 3))
+    else:
+        default_k = min(5, max(2, settings.kb_chat_top_k // 4 or 2))
+    top_k = k if k is not None else default_k
     hits = search_wiki(question, k=top_k)
     if not hits:
         return sources, 0
@@ -96,5 +143,6 @@ def blend_wiki_evidence(
     added = [h for h in hits if h.identifier not in seen]
     if not added:
         return sources, 0
-    # Wiki first so prompt sections can separate cleanly; raw follows.
+    if mode == "raw_first":
+        return sources + added, len(added)
     return added + sources, len(added)

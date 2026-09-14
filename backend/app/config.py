@@ -546,9 +546,21 @@ class Settings(BaseSettings):
     wiki_enabled: bool = True
     wiki_compile_on_ingest: bool = True
     wiki_chat_blend: bool = True
+    # Chat 双轨权重：balanced | wiki_first | raw_first（不影响 Claims 只认 Raw）
+    wiki_chat_mode: str = Field(
+        default="balanced",
+        description="Wiki/Raw blend mode for chat: balanced | wiki_first | raw_first",
+    )
     wiki_doe_constraints: bool = True
     wiki_lint_on_compile: bool = True
     wiki_neo4j_project: bool = False
+    # Phase 2: Wiki FTS5 (title/path/flags/body). Default on — deterministic, no LLM.
+    wiki_fts_enabled: bool = True
+    # Phase 2: L2 theme LLM/template compiler. Default OFF.
+    wiki_llm_themes_enabled: bool = False
+    # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
+    # Default OFF — dual-track; never replaces Raw chunk RAG.
+    wiki_embed_enabled: bool = False
     # 每篇文档最多持久化多少切块。这是全文成功抓取之后**唯一**还会静默丢内容
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600

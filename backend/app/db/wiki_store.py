@@ -80,40 +80,66 @@ class WikiStore:
                 session.add(row)
                 abs_path.write_text(body, encoding="utf-8")
                 session.flush()
-                return row
-
-            incoming = list(source_ids or [])
-            if replace_source_ids:
-                merged_sources = incoming
+                session.expunge(row)
+                out = row
             else:
-                merged_sources = list(dict.fromkeys([*(row.source_ids or []), *incoming]))
+                incoming = list(source_ids or [])
+                if replace_source_ids:
+                    merged_sources = incoming
+                else:
+                    merged_sources = list(dict.fromkeys([*(row.source_ids or []), *incoming]))
 
-            if row.content_hash == digest:
-                # Still refresh source_ids / flags when asked
-                changed = False
-                if merged_sources != list(row.source_ids or []):
+                if row.content_hash == digest:
+                    changed = False
+                    if merged_sources != list(row.source_ids or []):
+                        row.source_ids = merged_sources
+                        changed = True
+                    if flags is not None and list(flags) != list(row.flags or []):
+                        row.flags = list(flags)
+                        changed = True
+                    if changed:
+                        row.updated_at = _utcnow()
+                    session.expunge(row)
+                    out = row
+                else:
+                    row.title = title[:512]
+                    row.kind = kind
+                    row.norm_key = (norm_key or "")[:200]
+                    row.entity_id = entity_id or row.entity_id
+                    row.content_hash = digest
                     row.source_ids = merged_sources
-                    changed = True
-                if flags is not None and list(flags) != list(row.flags or []):
-                    row.flags = list(flags)
-                    changed = True
-                if changed:
+                    if flags is not None:
+                        row.flags = list(flags)
+                    row.revision = int(row.revision or 1) + 1
                     row.updated_at = _utcnow()
-                return row
+                    abs_path.write_text(body, encoding="utf-8")
+                    session.flush()
+                    session.expunge(row)
+                    out = row
 
-            row.title = title[:512]
-            row.kind = kind
-            row.norm_key = (norm_key or "")[:200]
-            row.entity_id = entity_id or row.entity_id
-            row.content_hash = digest
-            row.source_ids = merged_sources
-            if flags is not None:
-                row.flags = list(flags)
-            row.revision = int(row.revision or 1) + 1
-            row.updated_at = _utcnow()
-            abs_path.write_text(body, encoding="utf-8")
-            session.flush()
-            return row
+        # Best-effort FTS sync (never breaks compile)
+        try:
+            from ..services.wiki.fts import index_page
+
+            index_page(
+                self._session_factory,
+                path=rel,
+                title=out.title or title,
+                kind=out.kind or kind,
+                norm_key=out.norm_key or norm_key or "",
+                flags=list(out.flags or []),
+                markdown=body,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("wiki FTS sync skipped: %s", exc)
+        # Best-effort Phase-3 embed into document_chunks (flag-gated)
+        try:
+            from ..services.wiki.embed import embed_wiki_page
+
+            embed_wiki_page(rel)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("wiki embed sync skipped: %s", exc)
+        return out
 
     def get(self, page_id: str) -> WikiPage | None:
         with self._session_factory() as session:

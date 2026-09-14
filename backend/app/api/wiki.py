@@ -107,3 +107,174 @@ def list_flagged(limit: int = Query(default=50, ge=1, le=200)) -> WikiFlagsRespo
 
     rows = list_flagged_pages(limit=limit)
     return WikiFlagsResponse(pages=[WikiFlagItem(**r) for r in rows])
+
+
+class WikiSearchHit(BaseModel):
+    id: str = ""
+    path: str
+    kind: str = ""
+    title: str = ""
+    norm_key: str = ""
+    snippet: str = ""
+    flags: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    rank: float = 0.0
+
+
+class WikiSearchResponse(BaseModel):
+    hits: list[WikiSearchHit]
+    total: int
+    mode: str = "fts"  # fts | fallback
+
+
+@router.get("/search", response_model=WikiSearchResponse)
+def search_pages(
+    q: str = Query(min_length=1),
+    kind: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> WikiSearchResponse:
+    """Phase 2: metadata + body search (FTS5 when enabled, else keyword fallback)."""
+    _require_wiki()
+    settings = get_settings()
+    store = get_wiki_store()
+    hits: list[WikiSearchHit] = []
+    mode = "fallback"
+
+    if getattr(settings, "wiki_fts_enabled", True):
+        from ..services.wiki.fts import search_fts
+
+        raw = search_fts(store._session_factory, q, kind=kind, limit=limit)
+        if raw:
+            mode = "fts"
+            for r in raw:
+                row = store.get_by_path(r["path"])
+                hits.append(
+                    WikiSearchHit(
+                        id=row.id if row else "",
+                        path=r["path"],
+                        kind=r.get("kind") or (row.kind if row else ""),
+                        title=r.get("title") or (row.title if row else ""),
+                        norm_key=r.get("norm_key") or (row.norm_key if row else ""),
+                        snippet=r.get("snippet") or "",
+                        flags=list(row.flags or []) if row else [],
+                        source_ids=list(row.source_ids or []) if row else [],
+                        rank=float(r.get("rank") or 0),
+                    )
+                )
+
+    if not hits:
+        # Keyword fallback over listed pages (title/path/norm_key/body)
+        from ..services.wiki.schema import parse_front_matter
+
+        q_lower = q.lower()
+        tokens = [t for t in q_lower.replace("/", " ").split() if t]
+        if not tokens:
+            tokens = [q_lower]
+        scored: list[tuple[int, WikiSearchHit]] = []
+        for row in store.list_pages(kind=kind, limit=min(500, max(50, limit * 10))):
+            md = store.read_markdown(row.path) or ""
+            _, body = parse_front_matter(md)
+            blob = f"{row.title}\n{row.path}\n{row.norm_key}\n{body}".lower()
+            score = sum(1 for t in tokens if t in blob)
+            if score <= 0:
+                continue
+            snip = ""
+            for t in tokens:
+                idx = body.lower().find(t)
+                if idx >= 0:
+                    lo = max(0, idx - 40)
+                    snip = body[lo : idx + 80].replace("\n", " ")
+                    break
+            scored.append(
+                (
+                    score,
+                    WikiSearchHit(
+                        id=row.id,
+                        path=row.path,
+                        kind=row.kind,
+                        title=row.title or "",
+                        norm_key=row.norm_key or "",
+                        snippet=snip,
+                        flags=list(row.flags or []),
+                        source_ids=list(row.source_ids or []),
+                        rank=-float(score),
+                    ),
+                )
+            )
+        scored.sort(key=lambda x: x[0], reverse=True)
+        hits = [h for _, h in scored[:limit]]
+        mode = "fallback"
+
+    return WikiSearchResponse(hits=hits, total=len(hits), mode=mode)
+
+
+class ThemeCompileRequest(BaseModel):
+    system_key: str | None = None
+    topic: str | None = None
+    use_llm: bool = True
+
+
+@router.post("/themes/compile")
+def compile_theme_endpoint(body: ThemeCompileRequest) -> dict:
+    """Phase 2: compile L2 system-overview theme (flag-gated, default off)."""
+    _require_wiki()
+    from ..services.wiki.theme import compile_theme
+
+    try:
+        return compile_theme(
+            system_key=body.system_key,
+            topic=body.topic,
+            use_llm=body.use_llm,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/fts/rebuild")
+def rebuild_fts_endpoint() -> dict:
+    """Rebuild Wiki FTS index from all pages (admin / ops)."""
+    _require_wiki()
+    if not getattr(get_settings(), "wiki_fts_enabled", True):
+        raise HTTPException(status_code=409, detail="wiki_fts_enabled is false")
+    from ..services.wiki.fts import rebuild_all
+
+    store = get_wiki_store()
+    n = rebuild_all(store._session_factory, store)
+    return {"ok": True, "indexed": n}
+
+
+@router.post("/embed/rebuild")
+def rebuild_embed_endpoint() -> dict:
+    """Phase 3: re-embed all wiki page summaries into document_chunks."""
+    _require_wiki()
+    if not getattr(get_settings(), "wiki_embed_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_embed_enabled is false")
+    from ..services.wiki.embed import rebuild_all_wiki_embeds
+
+    return rebuild_all_wiki_embeds()
+
+
+class WikiReviewUpdate(BaseModel):
+    path: str
+    reviewed: bool | None = None
+    human_override: str | None = None
+
+
+@router.post("/pages/review")
+def review_page_endpoint(body: WikiReviewUpdate) -> dict:
+    """Q4 reserved contract: toggle reviewed / human_override (not a full editor)."""
+    _require_wiki()
+    if body.reviewed is None and body.human_override is None:
+        raise HTTPException(status_code=400, detail="reviewed or human_override required")
+    from ..services.wiki.review import apply_page_review
+
+    try:
+        return apply_page_review(
+            body.path,
+            reviewed=body.reviewed,
+            human_override=body.human_override,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"wiki page not found: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

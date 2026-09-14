@@ -1,14 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, formatApiError, type WikiPageDetail, type WikiPageItem } from "../../api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  api,
+  formatApiError,
+  type WikiPageDetail,
+  type WikiPageItem,
+  type WikiSearchHit,
+} from "../../api";
+import WikiMarkdownReader from "../WikiMarkdownReader";
 
-/** Wiki pane inside Knowledge Hub (read-only). */
+/** Wiki pane inside Knowledge Hub (read-only). S1 reader + P2 FTS search. */
 export default function HubWikiPane({ active }: { active: boolean }) {
   const [pages, setPages] = useState<WikiPageItem[]>([]);
   const [kind, setKind] = useState("");
   const [detail, setDetail] = useState<WikiPageDetail | null>(null);
   const [flagsOnly, setFlagsOnly] = useState(false);
+  const [reviewedOnly, setReviewedOnly] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<WikiSearchHit[] | null>(null);
+  const [searchMode, setSearchMode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -41,9 +54,120 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     }
   }, [flagsOnly, kind]);
 
+  const runOps = useCallback(
+    async (label: string, fn: () => Promise<unknown>) => {
+      setBusy(label);
+      setError(null);
+      try {
+        await fn();
+        await refresh();
+        if (detail?.path) {
+          setDetail(await api.getWikiByPath(detail.path));
+        }
+      } catch (e) {
+        setError(formatApiError(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [detail?.path, refresh],
+  );
+
   useEffect(() => {
     if (active) void refresh();
   }, [active, refresh]);
+
+  // P2: server FTS when query length >= 2 and not flags-only
+  useEffect(() => {
+    if (!active || flagsOnly) {
+      setSearchHits(null);
+      setSearchMode(null);
+      return;
+    }
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchHits(null);
+      setSearchMode(null);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      api
+        .searchWikiPages({ q, kind: kind || undefined, limit: 50 })
+        .then((r) => {
+          if (cancelled) return;
+          setSearchHits(r.hits ?? []);
+          setSearchMode(r.mode);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSearchHits(null);
+            setSearchMode(null);
+          }
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [active, flagsOnly, query, kind]);
+
+  const filtered = useMemo(() => {
+    let list = pages;
+    if (reviewedOnly) {
+      list = list.filter((p) => !(p.flags || []).includes("unreviewed"));
+    }
+    if (searchHits) {
+      // Prefer FTS hit order; map to page items when possible
+      const byPath = new Map(list.map((p) => [p.path, p]));
+      return searchHits.map((h) => {
+        const existing = byPath.get(h.path);
+        if (existing) return existing;
+        return {
+          id: h.id || h.path,
+          path: h.path,
+          kind: h.kind,
+          title: h.title,
+          norm_key: h.norm_key || "",
+          source_ids: h.source_ids || [],
+          flags: h.flags || [],
+          revision: 1,
+          updated_at: null,
+        } as WikiPageItem;
+      });
+    }
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((p) => {
+      const title = (p.title || "").toLowerCase();
+      const path = (p.path || "").toLowerCase();
+      const nk = (p.norm_key || "").toLowerCase();
+      return title.includes(q) || path.includes(q) || nk.includes(q);
+    });
+  }, [pages, query, searchHits, reviewedOnly]);
+
+  const linkPages = useMemo(
+    () =>
+      pages.map((p) => ({
+        path: p.path,
+        title: p.title || p.path,
+        norm_key: p.norm_key,
+        kind: p.kind,
+      })),
+    [pages],
+  );
+
+  const openPath = useCallback(async (path: string) => {
+    try {
+      setDetail(await api.getWikiByPath(path));
+      setError(null);
+    } catch (e) {
+      setError(formatApiError(e));
+    }
+  }, []);
+
+  const hitSnippet = (path: string) =>
+    searchHits?.find((h) => h.path === path)?.snippet || null;
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-wiki-pane">
@@ -60,11 +184,37 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           <option value="system">systems</option>
           <option value="mechanism">mechanisms</option>
           <option value="pitfall">pitfalls</option>
+          <option value="theme">themes</option>
         </select>
         <label className="flex items-center gap-1 text-slate-400">
-          <input type="checkbox" checked={flagsOnly} onChange={(e) => setFlagsOnly(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={flagsOnly}
+            onChange={(e) => setFlagsOnly(e.target.checked)}
+          />
           仅 Flag
         </label>
+        <label className="flex items-center gap-1 text-slate-400" title="隐藏 flags 含 unreviewed 的主题草稿">
+          <input
+            type="checkbox"
+            checked={reviewedOnly}
+            onChange={(e) => setReviewedOnly(e.target.checked)}
+          />
+          仅已审
+        </label>
+        <input
+          type="search"
+          className="bg-ink border border-edge rounded px-2 py-1 text-slate-200 min-w-[10rem] flex-1"
+          placeholder="搜索标题 / path / 正文…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          data-testid="hub-wiki-search"
+        />
+        {searchMode && query.trim().length >= 2 && (
+          <span className="text-[10px] text-slate-500" title="检索后端">
+            {searchMode === "fts" ? "FTS" : "关键词"}
+          </span>
+        )}
         <button
           type="button"
           className="px-2 py-1 border border-edge rounded"
@@ -72,52 +222,120 @@ export default function HubWikiPane({ active }: { active: boolean }) {
         >
           刷新
         </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy}
+          title="重建 Wiki FTS 索引（需 wiki_fts_enabled）"
+          data-testid="hub-wiki-rebuild-fts"
+          onClick={() => void runOps("fts", () => api.rebuildWikiFts())}
+        >
+          {busy === "fts" ? "FTS…" : "重建 FTS"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy}
+          title="重建 Wiki 摘要向量索引（需 wiki_embed_enabled）"
+          data-testid="hub-wiki-rebuild-embed"
+          onClick={() => void runOps("embed", () => api.rebuildWikiEmbed())}
+        >
+          {busy === "embed" ? "Embed…" : "重建 Embed"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy || detail?.kind !== "system"}
+          title="编译当前体系的 L2 综述（需 wiki_llm_themes_enabled）"
+          data-testid="hub-wiki-compile-theme"
+          onClick={() => {
+            const key = detail?.norm_key || detail?.path?.split("/").pop()?.replace(/\.md$/i, "");
+            if (!key) return;
+            void runOps("theme", () =>
+              api.compileWikiTheme({ system_key: key, use_llm: false }),
+            );
+          }}
+        >
+          {busy === "theme" ? "主题…" : "编译主题"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy || !detail}
+          title="Q4 预留：标记当前页已审（非完整编辑器）"
+          data-testid="hub-wiki-mark-reviewed"
+          onClick={() => {
+            if (!detail) return;
+            void runOps("review", () =>
+              api.reviewWikiPage({ path: detail.path, reviewed: true }),
+            );
+          }}
+        >
+          {busy === "review" ? "审阅…" : "标记已审"}
+        </button>
       </div>
       {error && (
-        <div className="text-xs text-rose-300 border border-rose-500/40 rounded px-2 py-1">{error}</div>
+        <div className="text-xs text-rose-300 border border-rose-500/40 rounded px-2 py-1">
+          {error}
+        </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 min-h-0 flex-1 overflow-hidden">
         <ul className="overflow-y-auto border border-edge/60 rounded divide-y divide-edge/40 text-sm">
           {loading && <li className="px-3 py-2 text-slate-500">加载中…</li>}
-          {!loading && pages.length === 0 && (
-            <li className="px-3 py-2 text-slate-500">暂无 Wiki 页（入库后自动编译）</li>
+          {!loading && filtered.length === 0 && (
+            <li className="px-3 py-2 text-slate-500">
+              {pages.length === 0 ? "暂无 Wiki 页（入库后自动编译）" : "无匹配结果"}
+            </li>
           )}
-          {pages.map((p) => (
-            <li key={p.id}>
+          {filtered.map((p) => (
+            <li key={p.id || p.path}>
               <button
                 type="button"
-                className="w-full text-left px-3 py-2 hover:bg-accent/5"
-                onClick={async () => {
-                  try {
-                    setDetail(await api.getWikiByPath(p.path));
-                  } catch (e) {
-                    setError(formatApiError(e));
-                  }
-                }}
+                className={`w-full text-left px-3 py-2 hover:bg-accent/5 ${
+                  detail?.path === p.path ? "bg-accent/10" : ""
+                }`}
+                onClick={() => void openPath(p.path)}
               >
                 <div className="text-slate-200 truncate">{p.title || p.path}</div>
                 <div className="text-[10px] text-slate-500 flex gap-2 flex-wrap">
                   <span>{p.kind}</span>
                   <code>{p.path}</code>
                   {(p.flags || []).map((f) => (
-                    <span key={f} className="text-amber-300 border border-amber-500/40 rounded px-1">
+                    <span
+                      key={f}
+                      className="text-amber-300 border border-amber-500/40 rounded px-1"
+                    >
                       {f}
                     </span>
                   ))}
                 </div>
+                {hitSnippet(p.path) && (
+                  <div className="text-[10px] text-slate-400 mt-0.5 line-clamp-2">
+                    {hitSnippet(p.path)}
+                  </div>
+                )}
               </button>
             </li>
           ))}
         </ul>
-        <div className="overflow-y-auto border border-edge/60 rounded p-3 text-xs text-slate-300 whitespace-pre-wrap font-mono">
+        <div className="overflow-y-auto border border-edge/60 rounded p-3 min-h-0">
           {detail ? (
-            <>
-              <div className="text-sm text-slate-100 mb-2 font-sans">{detail.title}</div>
-              <div className="text-[10px] text-slate-500 mb-2 font-sans">{detail.path}</div>
-              {detail.markdown || "_empty_"}
-            </>
+            <WikiMarkdownReader
+              page={{
+                path: detail.path,
+                title: detail.title,
+                kind: detail.kind,
+                flags: detail.flags,
+                source_ids: detail.source_ids,
+                markdown: detail.markdown,
+                norm_key: detail.norm_key,
+                updated_at: detail.updated_at,
+              }}
+              linkPages={linkPages}
+              onNavigatePath={(path) => void openPath(path)}
+            />
           ) : (
-            <span className="text-slate-500 font-sans">选择左侧页面查看 Markdown</span>
+            <span className="text-slate-500 text-xs">选择左侧页面查看编译记忆</span>
           )}
         </div>
       </div>

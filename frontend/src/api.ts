@@ -950,6 +950,7 @@ export const OBJECTIVE_METRIC: Record<ProductDomain, string> = {
   anticorrosion_coating: "salt_spray_hours",
   degreaser: "cleaning_efficiency",
   surface_treatment: "salt_spray_hours",
+  autodeposition_coating: "salt_spray_hours",
 };
 
 export function primaryObjectiveMetric(req: Requirement): string {
@@ -2254,6 +2255,40 @@ export const api = {
     const qs = q.toString();
     return get<WikiPagesResponse>(`/api/wiki/pages${qs ? `?${qs}` : ""}`);
   },
+  searchWikiPages: (params: { q: string; kind?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    q.set("q", params.q);
+    if (params.kind) q.set("kind", params.kind);
+    if (params.limit != null) q.set("limit", String(params.limit));
+    return get<WikiSearchResponse>(`/api/wiki/search?${q}`);
+  },
+  compileWikiTheme: (body: { system_key?: string; topic?: string; use_llm?: boolean }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      title?: string;
+      error?: string;
+      llm_generated?: boolean;
+      source_ids?: string[];
+    }>("/api/wiki/themes/compile", body),
+  rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
+  rebuildWikiEmbed: () =>
+    post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(
+      "/api/wiki/embed/rebuild",
+      {},
+    ),
+  reviewWikiPage: (body: {
+    path: string;
+    reviewed?: boolean;
+    human_override?: string;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      reviewed?: boolean | null;
+      human_override?: string | null;
+      flags?: string[];
+    }>("/api/wiki/pages/review", body),
   getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
@@ -2299,6 +2334,15 @@ export const api = {
 
   setFormulationMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/formulation-mode", { mode }),
+
+  getWikiChatMode: () =>
+    get<{
+      current: string;
+      choices: { value: string; label: string; desc: string }[];
+    }>("/api/settings/wiki-chat-mode"),
+
+  setWikiChatMode: (mode: string) =>
+    post<{ mode: string; status: string }>("/api/settings/wiki-chat-mode", { mode }),
 
   postDoeCyclePause: (campaignId: number | string, isPaused: boolean) =>
     post<{ status: string; message: string }>(
@@ -3184,6 +3228,24 @@ export interface WikiPageDetail extends WikiPageItem {
 export interface WikiPagesResponse {
   pages: WikiPageItem[];
   total: number;
+}
+
+export interface WikiSearchHit {
+  id: string;
+  path: string;
+  kind: string;
+  title: string;
+  norm_key?: string;
+  snippet?: string;
+  flags?: string[];
+  source_ids?: string[];
+  rank?: number;
+}
+
+export interface WikiSearchResponse {
+  hits: WikiSearchHit[];
+  total: number;
+  mode: string;
 }
 
 export interface WikiFlagItem {

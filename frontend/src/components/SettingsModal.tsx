@@ -8,6 +8,7 @@ import ParseProfileSelector from "./ParseProfileSelector";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import VisionModelPanel from "./VisionModelPanel";
 import FormulationModeSelector from "./FormulationModeSelector";
+import WikiChatModeSelector from "./WikiChatModeSelector";
 import OcsrPanel from "./OcsrPanel";
 import NotebookLMPanel from "./NotebookLMPanel";
 import OrganizationDashboard from "./OrganizationDashboard";
@@ -218,6 +219,7 @@ export default function SettingsModal() {
       ) : settingsTab === "recommend" ? (
         <div className="space-y-4">
           <FormulationModeSelector />
+          <WikiChatModeSelector />
           <ParseProfileSelector reloadKey={reloadKey} />
           <OcsrPanel />
         </div>
