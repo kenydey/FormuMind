@@ -214,6 +214,12 @@ class ThemeCompileRequest(BaseModel):
     use_llm: bool = True
 
 
+class DossierEnsureRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    campaign_id: str | None = None
+    vertical: str | None = None
+
+
 @router.post("/themes/compile")
 def compile_theme_endpoint(body: ThemeCompileRequest) -> dict:
     """Phase 2: compile L2 system-overview theme (flag-gated, default off)."""
@@ -228,6 +234,57 @@ def compile_theme_endpoint(body: ThemeCompileRequest) -> dict:
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/dossier/ensure")
+def ensure_dossier_endpoint(body: DossierEnsureRequest) -> dict:
+    """P4: create/refresh project dossier skeleton + data.json (flag-gated)."""
+    _require_wiki()
+    from ..services.wiki.dossier import ensure_project_dossier
+
+    try:
+        return ensure_project_dossier(
+            body.project_id,
+            campaign_id=body.campaign_id,
+            vertical=body.vertical,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/dossier/{project_id}")
+def get_dossier_endpoint(project_id: str) -> dict:
+    """Return dossier markdown + sidecar JSON if present."""
+    _require_wiki()
+    from ..services.wiki.dossier import get_dossier_page
+
+    try:
+        page = get_dossier_page(project_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="project dossier not found")
+    return page
+
+
+@router.get("/dossier/{project_id}/pack")
+def get_dossier_pack_endpoint(project_id: str, campaign_id: str | None = None) -> dict:
+    """Report foundation: structured DossierPack for the project."""
+    _require_wiki()
+    from ..services.wiki.dossier import get_dossier_pack
+
+    try:
+        return get_dossier_pack(project_id, campaign_id=campaign_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/fts/rebuild")

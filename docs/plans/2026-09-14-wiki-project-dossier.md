@@ -272,16 +272,19 @@ DossierPack
 
 ### P4.0 契约（0.5–1d）
 
-- [ ] 定稿本文模板与 `section_revisions` schema  
-- [ ] ADR 附录：Dossier ≠ MkDocs；Dossier 为 Report 上游  
-- [ ] `THEME_TEMPLATES` 注册 `project_dossier`（并存 `system_overview`）
+- [x] 定稿本文模板与 `section_revisions` schema；§10 四项已拍板  
+- [x] ADR 附录：Dossier ≠ MkDocs；Dossier 为 Report 上游  
+- [x] 旗标 `wiki_project_dossier_enabled` / `wiki_dossier_llm_narrative` / `wiki_dossier_auto_patch`（均默认 false）  
+- [x] `THEME_TEMPLATES` 注册 `project_dossier`；`vertical_addendum` 插件钩子  
+- [x] `*.data.json` 旁路双写契约  
 
 ### P4.1 DossierPack + 空骨架（1–2d）
 
-- [ ] `services/wiki/dossier_pack.py`  
-- [ ] `ensure_project_dossier(project_id)` 写空表头  
-- [ ] 单测：Requirement → S1 表行对齐 builtin metrics
-
+- [x] `services/wiki/dossier_pack.py`（requirements 切片 + 空壳字段）  
+- [x] `ensure_project_dossier(project_id)` 写空表头 + data.json  
+- [x] API：`POST /dossier/ensure`、`GET /dossier/{project_id}`、`GET /dossier/{project_id}/pack`  
+- [x] 单测：旗标门闩 + ensure 骨架 + data.json  
+- [ ] 后续：DOE/lab/loop 切片填实（P4.2）
 ### P4.2 节级确定性 patch（2–3d）
 
 - [ ] `patch_dossier_section(project_id, section, pack_slice)`  
@@ -348,12 +351,16 @@ Report **禁止**直接把 L2 叙述当 Claim；对外引用必须能点回 `sou
 
 ---
 
-## 10. 拍板题（实施前）
+## 10. 拍板题（已确认 2026-09-14）
 
-1. Dossier 主键：优先 `project_id`（建议）还是强制绑定 `campaign_id`？  
-2. 自动 patch 默认开还是关？（建议：**旗标默认关**，先手动 API 跑通）  
-3. `*.data.json` 旁路文件：P4.1 就做，还是先 Markdown 表、P5 再加？  
-4. 垂直行业附加 prompt（硅烷等）是否作为 `vertical_addendum` 可选插件？
+| # | 决策 | 结论 |
+|---|------|------|
+| 1 | Dossier 主键 | **`project_id`**（campaign 仅作可选关联字段） |
+| 2 | 自动 patch | **`wiki_dossier_auto_patch` 默认 false**；先手动 API |
+| 3 | `*.data.json` 旁路 | **P4 同步交付**（与 md 同 revision，供 Report） |
+| 4 | 垂直行业 prompt | **可选 `vertical_addendum` 插件**（如 silane）；默认不加载 |
+
+确认后从 **P4.0 → P4.2** 开工（本文已开工契约层）。
 
 ---
 
@@ -362,11 +369,10 @@ Report **禁止**直接把 L2 叙述当 Claim；对外引用必须能点回 `sou
 | 决策 | 选择 |
 |------|------|
 | Wiki 主模板 | **`project_dossier` 八节锚定卷宗**，覆盖 FormuMind 全链路 |
+| 主键 | **`project_id`** |
 | 撰写方式 | 确定性表 + 可选 LLM 叙述；节级 patch |
-| 更新方式 | 事件映射 S1–S7；手动 refresh |
+| 更新方式 | 事件映射 S1–S7（自动默认关）；手动 ensure/patch/refresh |
+| 机读旁路 | **`themes/project-{id}.data.json`** 与 md 双写 |
+| 垂直 prompt | **`vertical_addendum` 可选** |
 | 检索/RAG | 继续喂 L0/L1；Dossier S2 增量引用，不替代 Raw |
-| 要求/DOE/台账/闭环 | 各有 patch 钩子 |
-| 图 | 真资产路径 + plot_spec；禁幻觉图 |
 | Report | 同 DossierPack；P4 预埋 pack API，P5 做排版 |
-
-确认 §10 后即可从 **P4.0 → P4.2** 开工。

@@ -46,6 +46,34 @@ def theme_path(key: str) -> str:
     return f"themes/system-{safe_key(key)}.md"
 
 
+def project_dossier_path(project_id: str) -> str:
+    """L2 project dossier: ``themes/project-{id}.md`` (primary key = project_id)."""
+    return f"themes/project-{safe_key(project_id)}.md"
+
+
+def project_dossier_data_path(project_id: str) -> str:
+    """Machine-readable sidecar next to the dossier markdown."""
+    return f"themes/project-{safe_key(project_id)}.data.json"
+
+
+# Frozen section anchors for project_dossier (do not rename casually).
+DOSSIER_SECTIONS: tuple[str, ...] = (
+    "S1_requirements",
+    "S2_literature",
+    "S3_baseline_formula",
+    "S4_doe",
+    "S5_lab_ledger",
+    "S6_optimize_loop",
+    "S7_artifacts",
+    "S8_open_questions",
+)
+
+THEME_TEMPLATES: dict[str, str] = {
+    "system_overview": "themes/system-{key}.md",
+    "project_dossier": "themes/project-{project_id}.md",
+}
+
+
 def chemical_path(*, cas: str | None = None, smiles: str | None = None, name: str | None = None) -> str:
     if cas:
         # Keep CAS hyphens (safe on disk); only strip path-hostile chars.

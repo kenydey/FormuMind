@@ -558,6 +558,14 @@ class Settings(BaseSettings):
     wiki_fts_enabled: bool = True
     # Phase 2: L2 theme LLM/template compiler. Default OFF.
     wiki_llm_themes_enabled: bool = False
+    # Phase 4: project dossier wiki (project_id primary key). Default OFF.
+    wiki_project_dossier_enabled: bool = False
+    # Phase 4: allow LLM narrative on dossier sections (tables stay deterministic).
+    wiki_dossier_llm_narrative: bool = False
+    # Phase 4: event-driven auto patch. Default OFF — manual API first.
+    wiki_dossier_auto_patch: bool = False
+    # Optional vertical prompt addendum id (e.g. "silane"); empty = none.
+    wiki_dossier_vertical_addendum: str = ""
     # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
     # Default OFF — dual-track; never replaces Raw chunk RAG.
     wiki_embed_enabled: bool = False
