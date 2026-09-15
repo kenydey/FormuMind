@@ -346,10 +346,9 @@ class MaterialRow(Base):
     # in_stock | restricted | discontinued — drives supply-disruption alerts.
     availability: Mapped[str] = mapped_column(String(16), default="in_stock", index=True)
     regulatory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    # Structured sourcing detail: per-supplier list harvested out of PubChem
-    # ``Chemical Vendors`` (+ optional price/stock/delivery enrichment) — a
-    # JSON array so the catalog carries sourcing intelligence without a
-    # second table. Mirrors ``regulatory``. See alembic 0027.
+    # Structured sourcing detail historically stored as JSON (alembic 0027).
+    # Canonical store is now ``suppliers`` + ``material_suppliers`` (0028);
+    # this column remains a dual-written projection / fallback for older readers.
     suppliers_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Hand-tagged interchangeable group; members are drop-in for one another.
     substitute_group: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
@@ -358,6 +357,47 @@ class MaterialRow(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class SupplierRow(Base):
+    """Deduplicated vendor master (P3 — normalized out of ``suppliers_json``)."""
+
+    __tablename__ = "suppliers"
+    __table_args__ = (UniqueConstraint("norm_name", name="uq_suppliers_norm_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    norm_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class MaterialSupplierRow(Base):
+    """Material ↔ supplier link with optional product page URL."""
+
+    __tablename__ = "material_suppliers"
+    __table_args__ = (
+        UniqueConstraint(
+            "material_id",
+            "supplier_id",
+            "product_url",
+            name="uq_material_supplier_product",
+        ),
+        Index("ix_material_suppliers_material_id", "material_id"),
+        Index("ix_material_suppliers_supplier_id", "supplier_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    material_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("materials.id", ondelete="CASCADE"), nullable=False
+    )
+    supplier_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False
+    )
+    product_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="app", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class MaterialCandidateRow(Base):
