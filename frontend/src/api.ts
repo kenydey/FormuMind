@@ -423,13 +423,40 @@ export interface ActiveDoeResult extends AdaptiveDOEMetadata {
 
 export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
+/** Dim-2 thinking timeline step (carried in TaskProgressEvent.data.thinking). */
+export type ThinkingStepKind = "stage" | "thought" | "tool";
+export type ThinkingStepStatus = "pending" | "running" | "done" | "error";
+
+export interface ThinkingStep {
+  id: string;
+  kind?: ThinkingStepKind;
+  title: string;
+  detail?: string;
+  status?: ThinkingStepStatus;
+}
+
 export interface TaskProgressEvent {
   status: TaskProgressStatus;
   stage?: string;
   message: string;
   progress?: number;
-  data?: Record<string, unknown>;
+  data?: Record<string, unknown> & { thinking?: ThinkingStep[] };
   elapsed_ms?: number | null;
+}
+
+/** Extract thinking steps from a progress event (full snapshot). */
+export function extractThinkingSteps(ev: TaskProgressEvent | null | undefined): ThinkingStep[] {
+  const raw = ev?.data?.thinking;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s): s is ThinkingStep => !!s && typeof s === "object" && typeof (s as ThinkingStep).id === "string")
+    .map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      title: s.title || s.id,
+      detail: s.detail || "",
+      status: s.status || "running",
+    }));
 }
 
 export interface AsyncTaskAccepted {

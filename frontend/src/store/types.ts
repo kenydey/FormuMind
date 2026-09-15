@@ -151,6 +151,8 @@ export interface AppState {
   formulationBusy: boolean;
   recommendStage: string;
   recommendMessage: string;
+  /** Dim-2 thinking timeline for the active long task (recommend / optimize / DOE / deep). */
+  taskThinking: import("../api").ThinkingStep[];
   /** Soft bias: prefer materials-catalog hits when recommending (never materials-only). */
   preferMaterialsCatalog: boolean;
   chatBusy: boolean;

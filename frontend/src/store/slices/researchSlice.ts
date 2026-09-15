@@ -1,4 +1,4 @@
-import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
+import { api, awaitTaskStream, extractThinkingSteps, formatApiError, progressToTaskStatus } from "../../api";
 import type { ChatMessage, ComprehensiveReport, Formulation, ResearchResult } from "../../api";
 import { applyEnrichedLeaderboard } from "../formulationEnrich";
 import { undismiss } from "../notifications";
@@ -117,6 +117,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.formulationBusy = true;
         draft.recommendStage = "retrieve";
         draft.recommendMessage = "AI 修改配方中…";
+        draft.taskThinking = [];
         draft.error = null;
       });
       try {
@@ -134,6 +135,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
               draft.recommendStage = ev.stage ?? "";
               draft.recommendMessage = ev.message ?? "";
               draft.task = progressToTaskStatus(task_id, "recommend", ev);
+              const steps = extractThinkingSteps(ev);
+              if (steps.length) draft.taskThinking = steps;
             });
           },
           0,
@@ -163,6 +166,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.formulationBusy = false;
           draft.recommendStage = "";
           draft.recommendMessage = "";
+          draft.taskThinking = [];
         });
       }
     },
@@ -172,6 +176,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.formulationBusy = true;
         draft.recommendStage = "retrieve";
         draft.recommendMessage = "正在检索";
+        draft.taskThinking = [];
         draft.error = null;
       });
       const ctrl = new AbortController();
@@ -199,6 +204,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
               // 冷启动区分：首包 retrieve 阶段文案
               draft.recommendMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
               draft.task = progressToTaskStatus(task_id, "recommend", ev);
+              const steps = extractThinkingSteps(ev);
+              if (steps.length) draft.taskThinking = steps;
             });
           },
           0,
@@ -222,6 +229,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.formulationBusy = false;
           draft.recommendStage = "";
           draft.recommendMessage = "";
+          draft.taskThinking = [];
           delete (draft as unknown as Record<string, unknown>)._researchAbort;
         });
       }
@@ -291,6 +299,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.deepResearchBusy = true;
         draft.deepResearchStage = "retrieve";
         draft.deepResearchMessage = "正在检索";
+        draft.taskThinking = [];
         draft.error = null;
         undismiss(draft.notificationsDismissed, ["deep-research", "deep-report"]);
       });
@@ -311,6 +320,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
             draft.deepResearchStage = ev.stage ?? "";
             draft.deepResearchMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
             draft.task = progressToTaskStatus(task_id, "deep_research", ev);
+            const steps = extractThinkingSteps(ev);
+            if (steps.length) draft.taskThinking = steps;
           });
         }, 600_000, ctrl.signal);
         const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
@@ -343,6 +354,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.deepResearchBusy = false;
           draft.deepResearchStage = "";
           draft.deepResearchMessage = "";
+          draft.taskThinking = [];
           delete (draft as unknown as Record<string, unknown>)._deepResearchAbort;
         });
       }

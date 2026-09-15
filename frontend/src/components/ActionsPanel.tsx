@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react";
 import Modal from "./Modal";
 import RequirementPanel from "./RequirementPanel";
 import FormulaLeaderboard from "./FormulaLeaderboard";
+import ThinkingTimeline from "./ThinkingTimeline";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 import { useStore } from "../store";
 import { useShallow } from "zustand/react/shallow";
@@ -86,6 +87,7 @@ export default function ActionsPanel() {
     formulationBusy,
     recommendStage,
     recommendMessage,
+    taskThinking,
     preferMaterialsCatalog,
     setPreferMaterialsCatalog,
     sources,
@@ -111,6 +113,7 @@ export default function ActionsPanel() {
       formulationBusy: s.formulationBusy,
       recommendStage: s.recommendStage,
       recommendMessage: s.recommendMessage,
+      taskThinking: s.taskThinking,
       preferMaterialsCatalog: s.preferMaterialsCatalog,
       setPreferMaterialsCatalog: s.setPreferMaterialsCatalog,
       sources: s.sources,
@@ -283,6 +286,11 @@ export default function ActionsPanel() {
                   style={{ width: `${Math.min(100, recommendProgressPct)}%` }}
                 />
               </div>
+              {taskThinking.length > 0 && (
+                <div className="mt-2">
+                  <ThinkingTimeline steps={taskThinking} title="思考链路" compact />
+                </div>
+              )}
             </div>
           )}
           <button
@@ -367,6 +375,11 @@ export default function ActionsPanel() {
         >
           {busy === "optimizing" ? "寻优中…" : "运行 DOE 寻优闭环"}
         </button>
+        {busy === "optimizing" && taskThinking.length > 0 && (
+          <div className="mb-4">
+            <ThinkingTimeline steps={taskThinking} title="寻优思考链路" />
+          </div>
+        )}
         {optimizationHistory.length > 0 ? (
           <div className="h-80 [&>div]:h-full">
             <Suspense fallback={<ModalFallback />}>

@@ -1,4 +1,4 @@
-import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
+import { api, awaitTaskStream, extractThinkingSteps, formatApiError, progressToTaskStatus } from "../../api";
 import type {
   AdaptiveDOEMetadata,
   DOEPlan,
@@ -55,6 +55,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     runOptimize: async () => {
       set((draft) => {
         draft.busy = "optimizing";
+        draft.taskThinking = [];
         draft.error = null;
       });
       try {
@@ -73,6 +74,8 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           (ev) =>
             set((draft) => {
               draft.task = progressToTaskStatus(task_id, "optimize", ev);
+              const steps = extractThinkingSteps(ev);
+              if (steps.length) draft.taskThinking = steps;
             }),
           0,
           undefined,
@@ -91,6 +94,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       } finally {
         set((draft) => {
           draft.busy = "idle";
+          draft.taskThinking = [];
         });
       }
     },
@@ -202,6 +206,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     runDoeCycle: async () => {
       set((draft) => {
         draft.busy = "doe";
+        draft.taskThinking = [];
         draft.error = null;
       });
       try {
@@ -214,6 +219,8 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           (ev) =>
             set((draft) => {
               draft.task = progressToTaskStatus(task_id, "doe_cycle", ev);
+              const steps = extractThinkingSteps(ev);
+              if (steps.length) draft.taskThinking = steps;
             }),
           0,
           undefined,
@@ -245,6 +252,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       } finally {
         set((draft) => {
           draft.busy = "idle";
+          draft.taskThinking = [];
         });
       }
     },
