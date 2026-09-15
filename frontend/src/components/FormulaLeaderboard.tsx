@@ -9,6 +9,10 @@ import {
   downloadLeaderboardCsv,
   exportFormulaToPdf,
   exportLeaderboardToPdf,
+  formulaToCsv,
+  leaderboardToCsv,
+  saveTextToProjectShelf,
+  shelfFilename,
 } from "../utils/export";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
@@ -23,12 +27,33 @@ import ParallelCoordinates from "./charts/ParallelCoordinates";
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shelfMsg, setShelfMsg] = useState<string | null>(null);
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   const onCopy = async () => {
     await copyFormulaJson(form);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
     setOpen(false);
+  };
+
+  const onShelf = async (kind: "json" | "csv") => {
+    if (!activeProjectId) {
+      setShelfMsg("请先打开项目");
+      setTimeout(() => setShelfMsg(null), 2000);
+      return;
+    }
+    try {
+      const content = kind === "json" ? JSON.stringify(form, null, 2) : formulaToCsv(form);
+      const name = shelfFilename(slugSafe(form.name), kind);
+      await saveTextToProjectShelf(activeProjectId, name, content);
+      setShelfMsg("已保存到货架");
+      setTimeout(() => setShelfMsg(null), 2000);
+      setOpen(false);
+    } catch {
+      setShelfMsg("保存失败");
+      setTimeout(() => setShelfMsg(null), 2000);
+    }
   };
 
   return (
@@ -41,16 +66,18 @@ function ExportMenu({ form }: { form: Formulation }) {
         className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
         title="导出配方"
       >
-        {copied ? "已复制 ✓" : "导出 ▾"}
+        {shelfMsg || (copied ? "已复制 ✓" : "导出 ▾")}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute right-0 mt-1 z-20 w-28 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
+          <div className="absolute right-0 mt-1 z-20 w-36 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
             {[
               { label: "复制 JSON", fn: onCopy },
               { label: "导出 CSV", fn: () => { downloadFormulaCsv(form); setOpen(false); } },
               { label: "导出 PDF", fn: () => { exportFormulaToPdf(form); setOpen(false); } },
+              { label: "保存 JSON 到货架", fn: () => void onShelf("json") },
+              { label: "保存 CSV 到货架", fn: () => void onShelf("csv") },
             ].map((item) => (
               <button
                 key={item.label}
@@ -65,6 +92,10 @@ function ExportMenu({ form }: { form: Formulation }) {
       )}
     </div>
   );
+}
+
+function slugSafe(name: string): string {
+  return name.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase() || "formula";
 }
 
 function FormulaCard({
@@ -382,8 +413,32 @@ function FormulaCard({
 function ListExportMenu({ forms }: { forms: Formulation[] }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shelfMsg, setShelfMsg] = useState<string | null>(null);
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   if (forms.length === 0) return null;
+
+  const onShelf = async (kind: "json" | "csv") => {
+    if (!activeProjectId) {
+      setShelfMsg("请先打开项目");
+      setTimeout(() => setShelfMsg(null), 2000);
+      return;
+    }
+    try {
+      const content = kind === "json" ? JSON.stringify(forms, null, 2) : leaderboardToCsv(forms);
+      await saveTextToProjectShelf(
+        activeProjectId,
+        shelfFilename(`leaderboard_${forms.length}`, kind),
+        content,
+      );
+      setShelfMsg("已保存到货架");
+      setTimeout(() => setShelfMsg(null), 2000);
+      setOpen(false);
+    } catch {
+      setShelfMsg("保存失败");
+      setTimeout(() => setShelfMsg(null), 2000);
+    }
+  };
 
   return (
     <div className="relative">
@@ -392,12 +447,12 @@ function ListExportMenu({ forms }: { forms: Formulation[] }) {
         onClick={() => setOpen((o) => !o)}
         className="text-[11px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50"
       >
-        {copied ? "已复制 ✓" : "导出列表 ▾"}
+        {shelfMsg || (copied ? "已复制 ✓" : "导出列表 ▾")}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 z-20 w-32 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
+          <div className="absolute right-0 mt-1 z-20 w-40 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
             {[
               {
                 label: "复制 JSON",
@@ -410,6 +465,8 @@ function ListExportMenu({ forms }: { forms: Formulation[] }) {
               },
               { label: "导出 CSV", fn: () => { downloadLeaderboardCsv(forms); setOpen(false); } },
               { label: "导出 PDF", fn: () => { void exportLeaderboardToPdf(forms); setOpen(false); } },
+              { label: "保存 JSON 到货架", fn: () => void onShelf("json") },
+              { label: "保存 CSV 到货架", fn: () => void onShelf("csv") },
             ].map((item) => (
               <button
                 key={item.label}

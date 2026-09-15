@@ -611,6 +611,14 @@ export interface ProjectPayloadHistoryResponse {
   versions: ProjectPayloadVersion[];
 }
 
+/** Dim-4: project export shelf file metadata. */
+export interface ProjectExportFile {
+  name: string;
+  size: number;
+  updated_at: string;
+  content_type: string;
+}
+
 export interface BatchUpdateRequest {
   campaign_id: number;
   rows: Array<{
@@ -2155,6 +2163,23 @@ export const api = {
       campaign_count: number;
       experiment_count: number;
     }>(`/api/projects/${encodeURIComponent(id)}/db-stats`),
+
+  listProjectExports: (id: string) =>
+    get<ProjectExportFile[]>(`/api/projects/${encodeURIComponent(id)}/exports`),
+
+  saveProjectExport: (id: string, filename: string, content: string) =>
+    post<ProjectExportFile>(`/api/projects/${encodeURIComponent(id)}/exports`, {
+      filename,
+      content,
+    }),
+
+  downloadProjectExportUrl: (id: string, filename: string) =>
+    `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`,
+
+  deleteProjectExport: (id: string, filename: string) =>
+    del<{ ok: boolean; filename: string }>(
+      `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`
+    ),
 
   getProjectHistory: (id: string, limit = 20) =>
     get<ProjectPayloadHistoryResponse>(
