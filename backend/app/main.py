@@ -46,6 +46,7 @@ from .api import org as org_router
 from .api import notebooklm as notebooklm_router
 from .api import meta as meta_router
 from .api import projects as projects_router
+from .api import formulation_skills as formulation_skills_router
 from .config import get_settings
 from .middleware.api_auth import install_api_auth
 from .middleware.rate_limit import RateLimitMiddleware
@@ -259,6 +260,7 @@ app.include_router(dependencies_router.router)
 app.include_router(notebooklm_router.router)
 app.include_router(chemistry_router.router)
 app.include_router(projects_router.router)
+app.include_router(formulation_skills_router.router)
 app.include_router(meta_router.router)
 app.include_router(auth_router.router)
 

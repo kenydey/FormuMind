@@ -123,6 +123,10 @@ export interface AppState {
   /** Dim-1: live artifact drawer (symmetric to project history). */
   artifactDrawerOpen: boolean;
   activeArtifactId: import("../artifacts/projectArtifacts").ArtifactKind | null;
+  /** Dim-5: active formulation skill playbook id. */
+  activeSkillId: string | null;
+  activeSkill: import("../api").FormulationSkill | null;
+  pendingDoeDesign: string | null;
 
   searchQuery: string;
   sourceTypes: SearchSourceType[];
@@ -268,6 +272,8 @@ export interface AppState {
   toggleArtifactDrawer: () => void;
   openArtifact: (id: import("../artifacts/projectArtifacts").ArtifactKind) => void;
   setActiveArtifactId: (id: import("../artifacts/projectArtifacts").ArtifactKind | null) => void;
+  applyFormulationSkill: (skill: import("../api").FormulationSkill) => void;
+  clearFormulationSkill: () => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   cancelLoopTask: () => Promise<void>;
