@@ -3,6 +3,7 @@ import Modal from "./Modal";
 import RequirementPanel from "./RequirementPanel";
 import FormulaLeaderboard from "./FormulaLeaderboard";
 import ThinkingTimeline from "./ThinkingTimeline";
+import ArtifactSplitLayout from "./ArtifactSplitLayout";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 import { useStore } from "../store";
 import { useShallow } from "zustand/react/shallow";
@@ -100,6 +101,7 @@ export default function ActionsPanel() {
     refreshWorkbenchStats,
     saveProject,
     projectSaveBusy,
+    openArtifact,
   } = useStore(
     useShallow((s) => ({
       openModal: s.openModal,
@@ -126,8 +128,12 @@ export default function ActionsPanel() {
       refreshWorkbenchStats: s.refreshWorkbenchStats,
       saveProject: s.saveProject,
       projectSaveBusy: s.projectSaveBusy,
+      openArtifact: s.openArtifact,
     }))
   );
+
+  const recommendSplit = leaderboard.length > 0 || (formulationBusy && taskThinking.length > 0);
+  const optimizeSplit = optimizationHistory.length > 0 || (busy === "optimizing" && taskThinking.length > 0);
 
   const activeRecommendIdx = recommendStageIndex(recommendStage);
   const recommendProgressPct = formulationBusy
@@ -220,100 +226,130 @@ export default function ActionsPanel() {
         onSave={handleSave}
         saveLabel={saveBtnLabel}
       >
-        <div className="mb-4 space-y-3">
-          <p className="text-[11px] text-slate-500">
-            从 ColBERT 知识库经 CRAG 评估后推荐配方（源策略由后端配置，无需勾选专利/文献）。
-          </p>
-          <label
-            className="flex items-start gap-2 text-[11px] text-slate-300 border border-edge rounded-lg px-2.5 py-2 cursor-pointer hover:border-accent/30"
-            data-testid="prefer-materials-catalog"
-            title="提高库内材料的 grounding/排序权重，不会排除库外材料"
-          >
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={preferMaterialsCatalog}
-              onChange={(e) => setPreferMaterialsCatalog(e.target.checked)}
-            />
-            <span>
-              <span className="font-medium text-slate-200">优先材料库</span>
-              <span className="block text-slate-500 mt-0.5">
-                软偏好：提高全局材料库命中权重，<strong className="font-normal text-slate-400">不会</strong>
-                排除库外材料（无「仅材料库」硬约束）。
-              </span>
-            </span>
-          </label>
-          {sources.length === 0 && (
-            <p className="text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2">
-              建议先在左栏检索或上传资料以充实知识库；离线种子语料仍可用于基础推荐。
-            </p>
-          )}
-          {formulationBusy && (
-            <div className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
-                <span className="text-accent2 uppercase tracking-widest">推荐配方 · CRAG</span>
-                <span>{recommendMessage || "处理中…"}</span>
-              </div>
-              <div className="flex gap-1 mb-2">
-                {RECOMMEND_STAGES.map((s, i) => {
-                  const done = i < activeRecommendIdx;
-                  const active = i === activeRecommendIdx;
-                  return (
-                    <div key={s.id} className="flex-1 min-w-0">
-                      <div
-                        className={`h-1 rounded-full transition-colors ${
-                          done
-                            ? "bg-accent"
-                            : active
-                              ? "bg-accent/70 animate-pulse"
-                              : "bg-edge"
-                        }`}
-                      />
-                      <div
-                        className={`mt-1 text-[9px] text-center truncate ${
-                          active ? "text-accent font-semibold" : done ? "text-slate-400" : "text-slate-600"
-                        }`}
-                      >
-                        {s.label}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="h-1 bg-edge rounded overflow-hidden">
-                <div
-                  className="h-full bg-accent/80 transition-all duration-500"
-                  style={{ width: `${Math.min(100, recommendProgressPct)}%` }}
+        {(() => {
+          const controls = (
+            <div className="space-y-3">
+              <p className="text-[11px] text-slate-500">
+                从 ColBERT 知识库经 CRAG 评估后推荐配方（源策略由后端配置，无需勾选专利/文献）。
+              </p>
+              <label
+                className="flex items-start gap-2 text-[11px] text-slate-300 border border-edge rounded-lg px-2.5 py-2 cursor-pointer hover:border-accent/30"
+                data-testid="prefer-materials-catalog"
+                title="提高库内材料的 grounding/排序权重，不会排除库外材料"
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={preferMaterialsCatalog}
+                  onChange={(e) => setPreferMaterialsCatalog(e.target.checked)}
                 />
-              </div>
-              {taskThinking.length > 0 && (
-                <div className="mt-2">
-                  <ThinkingTimeline steps={taskThinking} title="思考链路" compact />
+                <span>
+                  <span className="font-medium text-slate-200">优先材料库</span>
+                  <span className="block text-slate-500 mt-0.5">
+                    软偏好：提高全局材料库命中权重，<strong className="font-normal text-slate-400">不会</strong>
+                    排除库外材料（无「仅材料库」硬约束）。
+                  </span>
+                </span>
+              </label>
+              {sources.length === 0 && (
+                <p className="text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2">
+                  建议先在左栏检索或上传资料以充实知识库；离线种子语料仍可用于基础推荐。
+                </p>
+              )}
+              {formulationBusy && (
+                <div className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                    <span className="text-accent2 uppercase tracking-widest">推荐配方 · CRAG</span>
+                    <span>{recommendMessage || "处理中…"}</span>
+                  </div>
+                  <div className="flex gap-1 mb-2">
+                    {RECOMMEND_STAGES.map((s, i) => {
+                      const done = i < activeRecommendIdx;
+                      const active = i === activeRecommendIdx;
+                      return (
+                        <div key={s.id} className="flex-1 min-w-0">
+                          <div
+                            className={`h-1 rounded-full transition-colors ${
+                              done
+                                ? "bg-accent"
+                                : active
+                                  ? "bg-accent/70 animate-pulse"
+                                  : "bg-edge"
+                            }`}
+                          />
+                          <div
+                            className={`mt-1 text-[9px] text-center truncate ${
+                              active ? "text-accent font-semibold" : done ? "text-slate-400" : "text-slate-600"
+                            }`}
+                          >
+                            {s.label}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="h-1 bg-edge rounded overflow-hidden">
+                    <div
+                      className="h-full bg-accent/80 transition-all duration-500"
+                      style={{ width: `${Math.min(100, recommendProgressPct)}%` }}
+                    />
+                  </div>
+                  {taskThinking.length > 0 && (
+                    <div className="mt-2">
+                      <ThinkingTimeline steps={taskThinking} title="思考链路" compact />
+                    </div>
+                  )}
                 </div>
               )}
+              <button
+                disabled={busy !== "idle" || formulationBusy}
+                onClick={runResearch}
+                className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
+              >
+                {formulationBusy ? coldStartMessage(recommendStage, recommendMessage, "检索中…") : "从知识库推荐配方"}
+              </button>
+              <button
+                type="button"
+                disabled={busy !== "idle" || formulationBusy}
+                onClick={() => void runSyncRecommend()}
+                className="w-full mt-1 border border-edge text-slate-300 hover:border-accent/40 hover:text-accent rounded px-3 py-1.5 text-xs disabled:opacity-40"
+                title="同步调用 /api/research（失败则回退 /api/formulations/recommend），不经 Celery"
+              >
+                同步推荐（调试）
+              </button>
+              {formulationBusy && (
+                <button onClick={cancelResearch} className={"w-full mt-1 " + CANCEL_BUTTON_CLASS}>✕ 取消推荐</button>
+              )}
+              {leaderboard.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => openArtifact("leaderboard")}
+                  className="w-full text-[11px] text-accent2 border border-accent2/40 rounded px-2 py-1.5 hover:bg-accent2/10"
+                  data-testid="recommend-open-artifact"
+                >
+                  在产物工作区打开 →
+                </button>
+              )}
             </div>
-          )}
-          <button
-            disabled={busy !== "idle" || formulationBusy}
-            onClick={runResearch}
-            className="w-full bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-2 text-sm disabled:opacity-40"
-          >
-            {formulationBusy ? coldStartMessage(recommendStage, recommendMessage, "检索中…") : "从知识库推荐配方"}
-          </button>
-          <button
-            type="button"
-            disabled={busy !== "idle" || formulationBusy}
-            onClick={() => void runSyncRecommend()}
-            className="w-full mt-1 border border-edge text-slate-300 hover:border-accent/40 hover:text-accent rounded px-3 py-1.5 text-xs disabled:opacity-40"
-            title="同步调用 /api/research（失败则回退 /api/formulations/recommend），不经 Celery"
-          >
-            同步推荐（调试）
-          </button>
-          {formulationBusy && (
-            <button onClick={cancelResearch} className={"w-full mt-1 " + CANCEL_BUTTON_CLASS}>✕ 取消推荐</button>
-          )}
-        </div>
-        <FormulaLeaderboard />
+          );
+
+          if (recommendSplit) {
+            return (
+              <ArtifactSplitLayout
+                leftLabel="控制 · 推荐"
+                rightLabel="产物 · 配方榜"
+                left={controls}
+                right={<FormulaLeaderboard />}
+              />
+            );
+          }
+          return (
+            <>
+              <div className="mb-4">{controls}</div>
+              <FormulaLeaderboard />
+            </>
+          );
+        })()}
       </Modal>
 
       <Modal
@@ -368,27 +404,59 @@ export default function ActionsPanel() {
         onSave={handleSave}
         saveLabel={saveBtnLabel}
       >
-        <button
-          disabled={busy !== "idle"}
-          onClick={runOptimize}
-          className="mb-4 w-full border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-2 text-sm disabled:opacity-40"
-        >
-          {busy === "optimizing" ? "寻优中…" : "运行 DOE 寻优闭环"}
-        </button>
-        {busy === "optimizing" && taskThinking.length > 0 && (
-          <div className="mb-4">
-            <ThinkingTimeline steps={taskThinking} title="寻优思考链路" />
-          </div>
-        )}
-        {optimizationHistory.length > 0 ? (
-          <div className="h-80 [&>div]:h-full">
-            <Suspense fallback={<ModalFallback />}>
-              <SimPlaceholder />
-            </Suspense>
-          </div>
-        ) : (
-          <p className="text-slate-500 text-sm">运行寻优后，此处显示收敛折线图与最优配方。</p>
-        )}
+        {(() => {
+          const controls = (
+            <div className="space-y-3">
+              <button
+                disabled={busy !== "idle"}
+                onClick={runOptimize}
+                className="w-full border border-accent2 text-accent2 hover:bg-accent2/10 rounded px-3 py-2 text-sm disabled:opacity-40"
+              >
+                {busy === "optimizing" ? "寻优中…" : "运行 DOE 寻优闭环"}
+              </button>
+              {busy === "optimizing" && taskThinking.length > 0 && (
+                <ThinkingTimeline steps={taskThinking} title="寻优思考链路" />
+              )}
+              {optimizationHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => openArtifact("optimization")}
+                  className="w-full text-[11px] text-accent2 border border-accent2/40 rounded px-2 py-1.5 hover:bg-accent2/10"
+                  data-testid="optimize-open-artifact"
+                >
+                  在产物工作区打开 →
+                </button>
+              )}
+            </div>
+          );
+          const payload =
+            optimizationHistory.length > 0 ? (
+              <div className="h-80 [&>div]:h-full">
+                <Suspense fallback={<ModalFallback />}>
+                  <SimPlaceholder />
+                </Suspense>
+              </div>
+            ) : (
+              <p className="text-slate-500 text-sm">运行寻优后，此处显示收敛折线图与最优配方。</p>
+            );
+
+          if (optimizeSplit) {
+            return (
+              <ArtifactSplitLayout
+                leftLabel="控制 · 寻优"
+                rightLabel="产物 · 收敛曲线"
+                left={controls}
+                right={payload}
+              />
+            );
+          }
+          return (
+            <>
+              <div className="mb-4">{controls}</div>
+              {payload}
+            </>
+          );
+        })()}
       </Modal>
 
       <Modal

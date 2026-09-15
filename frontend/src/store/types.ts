@@ -120,6 +120,9 @@ export interface AppState {
   projectLoading: boolean;
   requirementLocked: boolean;
   historyOpen: boolean;
+  /** Dim-1: live artifact drawer (symmetric to project history). */
+  artifactDrawerOpen: boolean;
+  activeArtifactId: import("../artifacts/projectArtifacts").ArtifactKind | null;
 
   searchQuery: string;
   sourceTypes: SearchSourceType[];
@@ -262,6 +265,9 @@ export interface AppState {
   toggleSettings: () => void;
   openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
   setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
+  toggleArtifactDrawer: () => void;
+  openArtifact: (id: import("../artifacts/projectArtifacts").ArtifactKind) => void;
+  setActiveArtifactId: (id: import("../artifacts/projectArtifacts").ArtifactKind | null) => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   cancelLoopTask: () => Promise<void>;

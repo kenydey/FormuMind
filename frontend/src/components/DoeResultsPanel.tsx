@@ -13,7 +13,9 @@ import { api, primaryObjectiveMetric } from "../api";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
+import ArtifactSplitLayout from "./ArtifactSplitLayout";
 import DoeHistoryPanel from "./DoeHistoryPanel";
+import ThinkingTimeline from "./ThinkingTimeline";
 
 function R2Gauge({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(1, value));
@@ -120,6 +122,7 @@ export default function DoeResultsPanel() {
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
     runNextRoundDoe, runDoeCycle, adoptDoePlanToWorkbench, adaptiveDoe,
+    taskThinking, openArtifact,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -148,6 +151,8 @@ export default function DoeResultsPanel() {
       runNextRoundDoe: s.runNextRoundDoe,
       runDoeCycle: s.runDoeCycle,
       adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
+      taskThinking: s.taskThinking,
+      openArtifact: s.openArtifact,
     }))
   );
   const metric = primaryObjectiveMetric(requirement);
@@ -283,188 +288,248 @@ export default function DoeResultsPanel() {
         </div>
       </div>
 
-      {factorHints && factorHints.length > 0 && (
-        <div className="mb-3 rounded border border-teal-500/30 bg-teal-500/5 p-2 text-[11px] text-slate-300">
-          <div className="text-teal-300/90 mb-1 font-medium">KB + 需求 levers 因子建议</div>
-          <ul className="space-y-1 max-h-32 overflow-y-auto">
-            {factorHints.map((f) => (
-              <li key={f.name}>
-                <span className="font-mono text-accent2">{f.name}</span>{" "}
-                [{f.low}–{f.high} {f.unit}] — {f.rationale.slice(0, 120)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {optChartData.length > 1 && (
-        <div className="mb-3 h-24 rounded border border-edge/40 bg-ink/40 p-2">
-          <div className="text-[10px] text-slate-500 mb-1">优化收敛曲线（最佳得分）</div>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={optChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              <XAxis dataKey="iter" hide />
-              <YAxis hide domain={["auto", "auto"]} />
-              <Tooltip
-                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", fontSize: 10 }}
-                formatter={(v: number) => [v.toFixed(3), metric]}
-              />
-              <Line type="monotone" dataKey="score" stroke="#34d399" strokeWidth={1.5} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {pendingAdopt && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-accent/30 bg-accent/5 px-2.5 py-2">
-          <span className="text-[11px] text-slate-300">
-            闭环已生成下一批 DOE，尚未写入实验台账
-          </span>
-          <button
-            type="button"
-            disabled={busy !== "idle"}
-            onClick={() => {
-              void adoptDoePlanToWorkbench().then((id) => {
-                if (id != null) setOpenModal("workbench");
-              });
-            }}
-            className="text-[10px] border border-accent text-accent rounded px-2 py-1 hover:bg-accent/10 disabled:opacity-40"
-          >
-            {busy === "doe" ? "创建中…" : "创建实验台账 →"}
-          </button>
-        </div>
-      )}
-
-      {workbenchStats && workbenchStats.completed > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[11px] text-slate-400">
-            实验台账进度：{workbenchStats.completed}/{workbenchStats.total} 已完成（{workbenchStats.strategy}）
-          </span>
-          <button
-            type="button"
-            disabled={busy !== "idle"}
-            onClick={() => {
-              if (pendingAdopt) {
-                void adoptDoePlanToWorkbench().then((id) => {
-                  if (id != null) setOpenModal("workbench");
-                });
-              } else {
-                void runNextRoundDoe();
-              }
-            }}
-            className="text-[10px] border border-violet-500/50 text-violet-300 rounded px-2 py-1 hover:bg-violet-500/10 disabled:opacity-40"
-          >
-            {busy === "doe"
-              ? "处理中…"
-              : pendingAdopt
-                ? "采用下一批 DOE →"
-                : "下一轮 AI 实验 →"}
-          </button>
-        </div>
-      )}
-
-      {models.length > 0 && (
-        <div className="mb-3 grid grid-cols-2 gap-1.5">
-          {models.map((m) => (
-            <ModelCard key={`${m.domain}-${m.metric}`} m={m} trend={trendFor(m)} />
-          ))}
-        </div>
-      )}
-      {trainMessage && <div className="text-[11px] text-slate-500 mb-2">{trainMessage}</div>}
-
-      {!doePlan ? (
-        <p className="text-slate-500 text-sm">
-          生成 DOE 设计后，请在 <span className="text-accent">实验台账</span> 中填报实测{" "}
-          <span className="text-accent font-mono">{metric}</span>，再回灌训练数据驱动模型。
-        </p>
-      ) : (
-        <>
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="text-[11px] text-slate-500 min-w-0 truncate">
-              {doePlan.notes}
-              {lastAlEngine && (
-                <span className="ml-2 text-violet-400 font-mono">AL={lastAlEngine}</span>
+      {doePlan ? (
+        <ArtifactSplitLayout
+          leftLabel="控制 · 洞察"
+          rightLabel="产物 · 实验矩阵"
+          left={
+            <div className="space-y-3">
+              {busy === "doe" && taskThinking.length > 0 && (
+                <ThinkingTimeline steps={taskThinking} title="DOE 思考链路" compact />
               )}
-              {campaignState && (
-                <span className="ml-2 text-slate-600" title="baybe Campaign 状态已保存到会话">· campaign ✓</span>
+              {factorHints && factorHints.length > 0 && (
+                <div className="rounded border border-teal-500/30 bg-teal-500/5 p-2 text-[11px] text-slate-300">
+                  <div className="text-teal-300/90 mb-1 font-medium">KB + 需求 levers 因子建议</div>
+                  <ul className="space-y-1 max-h-32 overflow-y-auto">
+                    {factorHints.map((f) => (
+                      <li key={f.name}>
+                        <span className="font-mono text-accent2">{f.name}</span>{" "}
+                        [{f.low}–{f.high} {f.unit}] — {f.rationale.slice(0, 120)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
-            </span>
-            <div className="flex gap-1.5 shrink-0">
+              {optChartData.length > 1 && (
+                <div className="h-24 rounded border border-edge/40 bg-ink/40 p-2">
+                  <div className="text-[10px] text-slate-500 mb-1">优化收敛曲线（最佳得分）</div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={optChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                      <XAxis dataKey="iter" hide />
+                      <YAxis hide domain={["auto", "auto"]} />
+                      <Tooltip
+                        contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", fontSize: 10 }}
+                        formatter={(v: number) => [v.toFixed(3), metric]}
+                      />
+                      <Line type="monotone" dataKey="score" stroke="#34d399" strokeWidth={1.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {pendingAdopt && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-accent/30 bg-accent/5 px-2.5 py-2">
+                  <span className="text-[11px] text-slate-300">
+                    闭环已生成下一批 DOE，尚未写入实验台账
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy !== "idle"}
+                    onClick={() => {
+                      void adoptDoePlanToWorkbench().then((id) => {
+                        if (id != null) setOpenModal("workbench");
+                      });
+                    }}
+                    className="text-[10px] border border-accent text-accent rounded px-2 py-1 hover:bg-accent/10 disabled:opacity-40"
+                  >
+                    {busy === "doe" ? "创建中…" : "创建实验台账 →"}
+                  </button>
+                </div>
+              )}
+              {workbenchStats && workbenchStats.completed > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    实验台账进度：{workbenchStats.completed}/{workbenchStats.total} 已完成（{workbenchStats.strategy}）
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy !== "idle"}
+                    onClick={() => {
+                      if (pendingAdopt) {
+                        void adoptDoePlanToWorkbench().then((id) => {
+                          if (id != null) setOpenModal("workbench");
+                        });
+                      } else {
+                        void runNextRoundDoe();
+                      }
+                    }}
+                    className="text-[10px] border border-violet-500/50 text-violet-300 rounded px-2 py-1 hover:bg-violet-500/10 disabled:opacity-40"
+                  >
+                    {busy === "doe"
+                      ? "处理中…"
+                      : pendingAdopt
+                        ? "采用下一批 DOE →"
+                        : "下一轮 AI 实验 →"}
+                  </button>
+                </div>
+              )}
+              {models.length > 0 && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {models.map((m) => (
+                    <ModelCard key={`${m.domain}-${m.metric}`} m={m} trend={trendFor(m)} />
+                  ))}
+                </div>
+              )}
+              {trainMessage && <div className="text-[11px] text-slate-500">{trainMessage}</div>}
               <button
-                onClick={() => exportDoe("csv")}
-                className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
-                title="导出 DOE 实验记录表（含空白实测列）"
+                type="button"
+                onClick={() => openArtifact("doe_plan")}
+                className="w-full text-[11px] text-accent2 border border-accent2/40 rounded px-2 py-1.5 hover:bg-accent2/10"
+                data-testid="doe-open-artifact"
               >
-                导出 CSV
-              </button>
-              <button
-                onClick={() => exportDoe("xlsx")}
-                className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
-                title="导出 XLSX（需后端 openpyxl）"
-              >
-                XLSX
+                在产物工作区打开 →
               </button>
             </div>
-          </div>
-
-          <div className="border border-accent/30 bg-accent/5 rounded-lg px-3 py-2.5 mb-3 space-y-2">
-            <p className="text-[11px] text-slate-300">
-              {workbenchCampaignId != null
-                ? "台账已创建。请在实验台账中填写实际参数与实测值，保存后回灌训练。"
-                : "生成成功。打开实验台账填报实测数据。"}
-            </p>
-            <button
-              type="button"
-              onClick={() => setOpenModal("workbench")}
-              className="text-xs border border-accent2 text-accent2 rounded px-3 py-1.5 hover:bg-accent2/10"
-            >
-              打开实验台账 →
-            </button>
-          </div>
-
-          <AdaptiveDoeInsights meta={adaptiveDoe} doePlan={doePlan} />
-
-          <div className="max-h-40 overflow-y-auto border border-edge rounded">
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 bg-panel">
-                <tr className="text-slate-400">
-                  <th className="text-left px-2 py-1">#</th>
-                  {doePlan.factors.map((f) => (
-                    <th key={f.name} className="text-right px-2 py-1 font-normal">
-                      {f.name.replace(" (DGEBA)", "").slice(0, 10)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {doePlan.runs.map((run) => (
-                  <tr
-                    key={run.run_id}
-                    className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
+          }
+          right={
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-500 min-w-0 truncate">
+                  {doePlan.notes}
+                  {lastAlEngine && (
+                    <span className="ml-2 text-violet-400 font-mono">AL={lastAlEngine}</span>
+                  )}
+                  {campaignState && (
+                    <span className="ml-2 text-slate-600" title="baybe Campaign 状态已保存到会话">· campaign ✓</span>
+                  )}
+                </span>
+                <div className="flex gap-1.5 shrink-0">
+                  <button
+                    onClick={() => exportDoe("csv")}
+                    className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                    title="导出 DOE 实验记录表（含空白实测列）"
                   >
-                    <td className="px-2 py-1 text-slate-500">
-                      {run.run_id}
-                      {run.ai_suggested && (
-                        <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
-                      )}
-                      {run.infeasible && (
-                        <span
-                          className="ml-1 text-[9px] text-red-400 font-mono"
-                          title={run.infeasible_reason || "知识图谱检测到材料不相容"}
-                        >
-                          ⚠不可行
-                        </span>
-                      )}
-                    </td>
-                    {doePlan.factors.map((f) => (
-                      <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
-                        {run.natural[f.name]}
-                      </td>
+                    导出 CSV
+                  </button>
+                  <button
+                    onClick={() => exportDoe("xlsx")}
+                    className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
+                    title="导出 XLSX（需后端 openpyxl）"
+                  >
+                    XLSX
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-accent/30 bg-accent/5 rounded-lg px-3 py-2.5 space-y-2">
+                <p className="text-[11px] text-slate-300">
+                  {workbenchCampaignId != null
+                    ? "台账已创建。请在实验台账中填写实际参数与实测值，保存后回灌训练。"
+                    : "生成成功。打开实验台账填报实测数据。"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setOpenModal("workbench")}
+                  className="text-xs border border-accent2 text-accent2 rounded px-3 py-1.5 hover:bg-accent2/10"
+                >
+                  打开实验台账 →
+                </button>
+              </div>
+
+              <AdaptiveDoeInsights meta={adaptiveDoe} doePlan={doePlan} />
+
+              <div className="max-h-56 overflow-y-auto border border-edge rounded">
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 bg-panel">
+                    <tr className="text-slate-400">
+                      <th className="text-left px-2 py-1">#</th>
+                      {doePlan.factors.map((f) => (
+                        <th key={f.name} className="text-right px-2 py-1 font-normal">
+                          {f.name.replace(" (DGEBA)", "").slice(0, 10)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {doePlan.runs.map((run) => (
+                      <tr
+                        key={run.run_id}
+                        className={`border-t border-edge/40 ${run.ai_suggested ? "border-l-2 border-l-violet-500/70 bg-violet-500/5" : ""}`}
+                      >
+                        <td className="px-2 py-1 text-slate-500">
+                          {run.run_id}
+                          {run.ai_suggested && (
+                            <span className="ml-1 text-[9px] text-violet-400 font-mono">AI</span>
+                          )}
+                          {run.infeasible && (
+                            <span
+                              className="ml-1 text-[9px] text-red-400 font-mono"
+                              title={run.infeasible_reason || "知识图谱检测到材料不相容"}
+                            >
+                              ⚠不可行
+                            </span>
+                          )}
+                        </td>
+                        {doePlan.factors.map((f) => (
+                          <td key={f.name} className="text-right px-2 py-1 font-mono text-slate-300">
+                            {run.natural[f.name]}
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          }
+        />
+      ) : (
+        <>
+          {busy === "doe" && taskThinking.length > 0 && (
+            <div className="mb-3">
+              <ThinkingTimeline steps={taskThinking} title="DOE 思考链路" compact />
+            </div>
+          )}
+          {factorHints && factorHints.length > 0 && (
+            <div className="mb-3 rounded border border-teal-500/30 bg-teal-500/5 p-2 text-[11px] text-slate-300">
+              <div className="text-teal-300/90 mb-1 font-medium">KB + 需求 levers 因子建议</div>
+              <ul className="space-y-1 max-h-32 overflow-y-auto">
+                {factorHints.map((f) => (
+                  <li key={f.name}>
+                    <span className="font-mono text-accent2">{f.name}</span>{" "}
+                    [{f.low}–{f.high} {f.unit}] — {f.rationale.slice(0, 120)}
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </ul>
+            </div>
+          )}
+          {optChartData.length > 1 && (
+            <div className="mb-3 h-24 rounded border border-edge/40 bg-ink/40 p-2">
+              <div className="text-[10px] text-slate-500 mb-1">优化收敛曲线（最佳得分）</div>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={optChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                  <XAxis dataKey="iter" hide />
+                  <YAxis hide domain={["auto", "auto"]} />
+                  <Tooltip
+                    contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", fontSize: 10 }}
+                    formatter={(v: number) => [v.toFixed(3), metric]}
+                  />
+                  <Line type="monotone" dataKey="score" stroke="#34d399" strokeWidth={1.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {models.length > 0 && (
+            <div className="mb-3 grid grid-cols-2 gap-1.5">
+              {models.map((m) => (
+                <ModelCard key={`${m.domain}-${m.metric}`} m={m} trend={trendFor(m)} />
+              ))}
+            </div>
+          )}
+          {trainMessage && <div className="text-[11px] text-slate-500 mb-2">{trainMessage}</div>}
+          <p className="text-slate-500 text-sm">
+            生成 DOE 设计后，请在 <span className="text-accent">实验台账</span> 中填报实测{" "}
+            <span className="text-accent font-mono">{metric}</span>，再回灌训练数据驱动模型。
+          </p>
         </>
       )}
       <DoeHistoryPanel />
