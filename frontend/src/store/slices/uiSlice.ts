@@ -1,3 +1,4 @@
+import { modalForArtifact, type ArtifactKind } from "../../artifacts/projectArtifacts";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -44,6 +45,26 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
       set((draft) => {
         draft.settingsTab = tab;
       }),
+
+    toggleArtifactDrawer: () =>
+      set((draft) => {
+        draft.artifactDrawerOpen = !draft.artifactDrawerOpen;
+        if (draft.artifactDrawerOpen) draft.historyOpen = false;
+      }),
+
+    openArtifact: (id: ArtifactKind) =>
+      set((draft) => {
+        draft.activeArtifactId = id;
+        draft.artifactDrawerOpen = true;
+        draft.historyOpen = false;
+        const modal = modalForArtifact(id);
+        if (modal) draft.openModal = modal;
+      }),
+
+    setActiveArtifactId: (id: ArtifactKind | null) =>
+      set((draft) => {
+        draft.activeArtifactId = id;
+      }),
   } as Pick<
     AppState,
     | "setOpenModal"
@@ -54,5 +75,8 @@ export function createUiSlice(set: SliceSet, _get: SliceGet) {
     | "toggleSettings"
     | "openSettings"
     | "setSettingsTab"
+    | "toggleArtifactDrawer"
+    | "openArtifact"
+    | "setActiveArtifactId"
   >;
 }

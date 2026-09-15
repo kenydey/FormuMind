@@ -29,6 +29,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
     toggleHistory: () =>
       set((draft) => {
         draft.historyOpen = !draft.historyOpen;
+        if (draft.historyOpen) draft.artifactDrawerOpen = false;
       }),
 
     scheduleAutosave: () => {

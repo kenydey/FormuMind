@@ -56,6 +56,8 @@ export const useStore = create<AppState>()(
       projectLoading: false,
       requirementLocked: false,
       historyOpen: false,
+      artifactDrawerOpen: false,
+      activeArtifactId: null,
       searchQuery: "",
       sourceTypes: ["patents", "surechembl", "literature", "internet"] as SearchSourceType[],
       notebooklmNotebookId: "",

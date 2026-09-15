@@ -239,7 +239,7 @@ function FormulaCard({
               编辑模式：直接修改组分后点「✓ 完成」退出(修改仅影响当前卡片)
             </div>
           )}
-          {form.warnings.length > 0 && (
+          {(form.warnings?.length ?? 0) > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
           {form.kg_compat && !form.kg_compat.feasible && form.kg_compat.incompatible_pairs?.length > 0 && (
