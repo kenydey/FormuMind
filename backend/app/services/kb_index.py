@@ -551,6 +551,7 @@ def search_chunks(
     k: int = 6,
     *,
     project_id: str | None = None,
+    include_global: bool = False,
     langs: list[str] | None = None,
 ) -> list[Evidence]:
     """Retrieve the top-k KB chunks for a query (chemistry-aware hybrid).
@@ -575,7 +576,9 @@ def search_chunks(
         from ..db.chunk_store import get_chunk_store
 
         chunks = get_chunk_store().all_chunks(
-            limit=get_settings().kb_search_scan_limit, project_id=project_id
+            limit=get_settings().kb_search_scan_limit,
+            project_id=project_id,
+            include_global=include_global,
         )
         if not chunks:
             return []

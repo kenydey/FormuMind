@@ -1862,6 +1862,17 @@ export const api = {
       alpha,
     }),
 
+  /** Scored KB retrieval probe (POST /api/kb/query-test). */
+  kbQueryTest: (body: KbQueryTestRequest) =>
+    post<KbQueryTestResponse>("/api/kb/query-test", body),
+
+  /** Curated golden retrieval questions (GET /api/kb/golden-questions). */
+  kbGoldenQuestions: () => get<KbGoldenQuestion[]>("/api/kb/golden-questions"),
+
+  /** Run golden eval batch (POST /api/kb/golden-eval/run). */
+  kbGoldenEvalRun: (body: KbGoldenEvalRequest) =>
+    post<KbGoldenEvalResponse>("/api/kb/golden-eval/run", body),
+
   // ── KG 维护: 统计 / 重建 / 挂源 ──
   kgStats: () => get<KgStats>("/api/kg/stats"),
 
@@ -3715,6 +3726,88 @@ export interface KbSearchChunk {
   offset_start?: number | null;
   offset_end?: number | null;
   meta?: Record<string, unknown> | null;
+}
+
+export type KbQueryTestMode = "keyword" | "hybrid" | "hybrid_rerank";
+
+export interface KbQueryTestRequest {
+  query: string;
+  mode?: KbQueryTestMode;
+  top_k?: number;
+  alpha?: number;
+  project_id?: string | null;
+  include_global?: boolean;
+  rerank?: boolean | null;
+}
+
+export interface KbQueryTestHit {
+  rank: number;
+  chunk_id?: string | null;
+  source_id?: string | null;
+  ord?: number | null;
+  title: string;
+  snippet: string;
+  bm25_score?: number | null;
+  cosine_score?: number | null;
+  hybrid_score?: number | null;
+  relevance?: number | null;
+  rerank_score?: number | null;
+  rank_before_rerank?: number | null;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface KbQueryTestResponse {
+  query: string;
+  mode: string;
+  params: {
+    top_k: number;
+    alpha: number;
+    project_id?: string | null;
+    include_global?: boolean;
+    rerank_applied?: boolean;
+  };
+  vector_mode: string;
+  elapsed_ms: number;
+  hits: KbQueryTestHit[];
+  warning?: string | null;
+}
+
+export interface KbGoldenQuestion {
+  question: string;
+  expected_keywords: string[];
+  category: string;
+}
+
+export interface KbGoldenEvalRequest {
+  mode?: KbQueryTestMode;
+  top_k?: number;
+  alpha?: number;
+  project_id?: string | null;
+  include_global?: boolean;
+  rerank?: boolean | null;
+}
+
+export interface KbGoldenEvalResultRow {
+  question: string;
+  category: string;
+  passed: boolean;
+  matched_keyword?: string | null;
+  expected_keywords: string[];
+  hit_titles: Array<string | null | undefined>;
+  elapsed_ms?: number;
+  warning?: string | null;
+}
+
+export interface KbGoldenEvalResponse {
+  mode: string;
+  top_k: number;
+  alpha: number;
+  project_id?: string | null;
+  include_global?: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  results: KbGoldenEvalResultRow[];
 }
 
 /** GET /api/kg/calibration — ranking weights + relation hit counts. */

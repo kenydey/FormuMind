@@ -1,9 +1,11 @@
 # 维 3：检索探针（Retrieval Probe）独立方案
 
-> 状态：**纯方案，本文件不改产品代码**，供评审后开工  
+> 状态：**决策已锁定并落地实现（同里程碑含 Golden 批跑）**  
 > 日期：2026-09-15  
 > 来源：Yuxi 借鉴评估维 3；对照仓库 Yuxi v0.7.3（`vendor/Yuxi`，MIT）与 FormuMind 现网  
 > 范围：KB chunk 召回可观测性（关键词 / 混合 / 可选 LLM 重排）；不含 Wiki FTS、结构化学检索、文献外网流式检索的全量统一
+>
+> **实现入口**：Knowledge Hub →「检索探针」；API：`POST /api/kb/query-test`、`GET /api/kb/golden-questions`、`POST /api/kb/golden-eval/run`
 
 ---
 
@@ -284,13 +286,13 @@ Yuxi 的 Ant Design、`query-params` 动态表单生成、manage-gated sample qu
 
 ---
 
-## 9. 决策清单（评审勾选）
+## 9. 决策清单（已锁定 2026-09-15）
 
-- [ ] 入口选 **Knowledge Hub「检索探针」**（推荐）还是 Settings？  
-- [ ] 是否同意 **新端点** `/api/kb/query-test`，保持 `/hybrid-search` 不变？  
-- [ ] MVP 是否包含 **hybrid_rerank**（建议包含，否则「前后对比」叙事不完整）？  
-- [ ] α=0 / α=1 是否足够代替独立 vector/keyword mode？（建议 P0 足够）  
-- [ ] P1 golden 批跑是否进同一里程碑，还是严格 P0 后另开？  
+- [x] 入口选 **Knowledge Hub「检索探针」**
+- [x] 同意 **新端点** `/api/kb/query-test`，保持 `/hybrid-search` 不变
+- [x] MVP 包含 **hybrid_rerank**
+- [x] 暂不拆独立 vector/keyword mode（可用 α=0/1 近似）
+- [x] **golden 批跑进同一里程碑**
 
 ---
 
