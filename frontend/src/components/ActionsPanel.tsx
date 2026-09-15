@@ -4,6 +4,7 @@ import RequirementPanel from "./RequirementPanel";
 import FormulaLeaderboard from "./FormulaLeaderboard";
 import ThinkingTimeline from "./ThinkingTimeline";
 import ArtifactSplitLayout from "./ArtifactSplitLayout";
+import ActionSkillsDock from "./ActionSkillsDock";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 import { useStore } from "../store";
 import { useShallow } from "zustand/react/shallow";
@@ -178,6 +179,7 @@ export default function ActionsPanel() {
   return (
     <aside className="glass rounded-xl p-4 flex flex-col gap-2.5 h-full overflow-y-auto">
       <h2 className="text-sm uppercase tracking-widest text-accent2 shrink-0">操作 · Actions</h2>
+      <ActionSkillsDock />
 
       {ACTIONS.map((a) => (
         <button

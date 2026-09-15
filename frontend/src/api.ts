@@ -619,6 +619,25 @@ export interface ProjectExportFile {
   content_type: string;
 }
 
+/** Dim-5: static formulation action skill (playbook). */
+export interface FormulationSkillChecklistItem {
+  id: string;
+  title: string;
+}
+
+export interface FormulationSkill {
+  id: string;
+  title: string;
+  summary: string;
+  when_to_use: string;
+  action: string;
+  modal: string | null;
+  icon: string;
+  tools: string[];
+  checklist: FormulationSkillChecklistItem[];
+  presets: Record<string, unknown>;
+}
+
 export interface BatchUpdateRequest {
   campaign_id: number;
   rows: Array<{
@@ -2118,6 +2137,11 @@ export const api = {
   },
 
   listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
+
+  listFormulationSkills: () => get<FormulationSkill[]>("/api/formulation-skills"),
+
+  getFormulationSkill: (id: string) =>
+    get<FormulationSkill>(`/api/formulation-skills/${encodeURIComponent(id)}`),
 
   getMeta: () =>
     get<{

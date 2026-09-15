@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LineChart,
   Line,
@@ -122,7 +122,7 @@ export default function DoeResultsPanel() {
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
     runNextRoundDoe, runDoeCycle, adoptDoePlanToWorkbench, adaptiveDoe,
-    taskThinking, openArtifact,
+    taskThinking, openArtifact, pendingDoeDesign,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -153,8 +153,18 @@ export default function DoeResultsPanel() {
       adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
       taskThinking: s.taskThinking,
       openArtifact: s.openArtifact,
+      pendingDoeDesign: s.pendingDoeDesign,
     }))
   );
+
+  useEffect(() => {
+    if (!pendingDoeDesign) return;
+    const el = document.getElementById("doe-design") as HTMLSelectElement | null;
+    if (el) {
+      const has = Array.from(el.options).some((o) => o.value === pendingDoeDesign);
+      if (has) el.value = pendingDoeDesign;
+    }
+  }, [pendingDoeDesign, doeEngine]);
   const metric = primaryObjectiveMetric(requirement);
   const pendingAdopt =
     !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
