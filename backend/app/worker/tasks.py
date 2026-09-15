@@ -22,6 +22,7 @@ from ..domain.schemas import DOEPlan, OptimizationResult, Requirement, TaskState
 from ..pipeline import workflow
 from .celery_app import celery_app
 from .task_progress import (
+    ThinkingTracker,
     TaskProgressStatus,
     persist_result,
     publish_progress,
@@ -330,16 +331,35 @@ def cancel_task(task_id: str) -> bool:
 
 
 def _progress_cb(task_id: str):
+    tracker = ThinkingTracker(task_id)
+
     def cb(stage: str, message: str, partial: dict | None = None) -> None:
-        publish_progress(
-            task_id,
-            TaskProgressStatus.RUNNING,
-            stage=stage,
-            message=message,
+        tracker.emit(
+            stage,
+            message,
+            progress=_stage_progress(stage) if stage else 0.0,
+            step_id=stage or None,
+            title=_thinking_title(stage, message),
+            kind="stage",
+            detail=message,
             data=partial,
         )
 
     return cb
+
+
+def _thinking_title(stage: str, message: str) -> str:
+    labels = {
+        "retrieve": "正在检索知识库与证据…",
+        "grade": "正在评估证据相关性…",
+        "fallback": "检索不足，正在补充召回…",
+        "generate": "正在生成研究报告…",
+        "claim_check": "正在校验关键声明…",
+        "regenerate": "声明未过，正在再生成…",
+        "recommend": "正在生成推荐配方…",
+        "cancelled": "任务已取消",
+    }
+    return labels.get(stage) or message or stage or "处理中…"
 
 
 @celery_app.task(bind=True, name="formumind.deep_research")
@@ -348,7 +368,14 @@ def run_deep_research_task(self, payload: dict) -> dict:
     from ..pipeline.research_graph import run_research_graph
 
     task_id = self.request.id
-    publish_progress(task_id, TaskProgressStatus.RUNNING, stage="retrieve", message="正在检索")
+    tracker = ThinkingTracker(task_id, kind="deep_research")
+    tracker.emit(
+        "retrieve",
+        "正在检索",
+        progress=0.05,
+        step_id="retrieve",
+        title="正在检索知识库与证据…",
+    )
     try:
         req = Requirement(**payload["requirement"]) if payload.get("requirement") else None
         topic = payload.get("topic") or (req.headline() if req else "")
@@ -356,12 +383,14 @@ def run_deep_research_task(self, payload: dict) -> dict:
         sources = [Evidence.model_validate(s) for s in payload.get("sources") or []]
 
         def graph_progress(stage: str, message: str, partial: dict | None = None) -> None:
-            publish_progress(
-                task_id,
-                TaskProgressStatus.RUNNING,
-                stage=stage,
-                message=message,
+            tracker.emit(
+                stage,
+                message,
                 progress=_stage_progress(stage),
+                step_id=stage or None,
+                title=_thinking_title(stage, message),
+                kind="stage",
+                detail=message,
                 data=partial,
             )
 
@@ -398,11 +427,13 @@ def run_deep_research_task(self, payload: dict) -> dict:
         )
         if kb_task_id:
             result["kb_ingest_task_id"] = kb_task_id
+        tracker.finish()
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "deep_research", result)
         return result
     except Exception as exc:
         logger.exception("deep_research task failed")
+        tracker.finish(error=True)
         err = {"error": str(exc)}
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "deep_research", err, failed=True, message=str(exc))
@@ -470,7 +501,15 @@ def run_recommend_task(self, payload: dict) -> dict:
     from ..api.formulations import RecommendFormulationsRequest as SyncRequest
 
     task_id = self.request.id
-    publish_progress(task_id, TaskProgressStatus.RUNNING, stage="recommend", message="推荐配方")
+    tracker = ThinkingTracker(task_id, kind="recommend")
+    tracker.emit(
+        "retrieve",
+        "正在检索配方证据…",
+        progress=0.15,
+        step_id="retrieve",
+        title="正在检索表面活性剂库与知识库…",
+        detail="BM25 / 向量混合召回候选片段",
+    )
     try:
         req_data = payload.get("requirement") or {}
         if not req_data:
@@ -478,11 +517,28 @@ def run_recommend_task(self, payload: dict) -> dict:
         n = payload.get("n") or 3
         sources = payload.get("sources") or []
 
+        tracker.emit(
+            "grade",
+            "正在评估证据相关性…",
+            progress=0.45,
+            step_id="grade",
+            title="正在评估证据相关性（CRAG）…",
+            detail="过滤低相关片段后再进入推荐",
+        )
+
         body = SyncRequest(
             requirement=req_data,
             n=n,
             sources=sources,
             prefer_materials_catalog=bool(payload.get("prefer_materials_catalog")),
+        )
+        tracker.emit(
+            "recommend",
+            "正在生成推荐配方…",
+            progress=0.75,
+            step_id="recommend",
+            title="正在生成推荐配方…",
+            detail="LLM / 规则引擎产出 Top-N 配方",
         )
         resp = _sync_recommend(body)
         result_raw = resp.model_dump()
@@ -512,11 +568,20 @@ def run_recommend_task(self, payload: dict) -> dict:
         if grounded:
             dispatch_kb_ingest(grounded)
 
+        tracker.thought(
+            f"已生成 {len(recommended)} 条推荐配方",
+            stage="recommend",
+            message="推荐完成",
+            progress=0.95,
+            detail=f"engine={result_raw.get('engine', 'llm')}",
+        )
+        tracker.finish()
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "recommend", result)
         return result
     except Exception as exc:
         logger.exception("recommend task failed")
+        tracker.finish(error=True)
         err = {"error": str(exc)}
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "recommend", err, failed=True, message=str(exc))
@@ -526,7 +591,14 @@ def run_recommend_task(self, payload: dict) -> dict:
 @celery_app.task(bind=True, name="formumind.optimize")
 def run_optimize_task(self, payload: dict) -> dict:
     task_id = self.request.id
-    publish_progress(task_id, TaskProgressStatus.RUNNING, message="starting optimizer")
+    tracker = ThinkingTracker(task_id, kind="optimize")
+    tracker.emit(
+        "init",
+        "starting optimizer",
+        progress=0.05,
+        step_id="init",
+        title="正在初始化寻优器…",
+    )
 
     try:
         # req 构造在 try 内：payload 校验失败也要走失败持久化，
@@ -534,11 +606,15 @@ def run_optimize_task(self, payload: dict) -> dict:
         req = Requirement(**payload["requirement"])
 
         def progress(p: float, msg: str) -> None:
-            publish_progress(
-                task_id,
-                TaskProgressStatus.RUNNING,
-                message=msg,
+            stage, title = _optimize_stage(p, msg)
+            tracker.emit(
+                stage,
+                msg,
                 progress=round(p, 3),
+                step_id=stage,
+                title=title,
+                kind="stage",
+                detail=msg,
             )
 
         result = workflow.run_optimization(
@@ -550,16 +626,37 @@ def run_optimize_task(self, payload: dict) -> dict:
             workbench_campaign_id=payload.get("workbench_campaign_id"),
         )
         data = result.model_dump()
+        tracker.emit(
+            "converge",
+            "optimization complete",
+            progress=0.98,
+            step_id="converge",
+            title="寻优收敛完成",
+        )
+        tracker.finish()
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "optimize", data)
         # P4.2: optional dossier S6/S7 patch when optimize completes (default OFF).
         _notify_dossier_optimize_completed(payload)
         return data
     except Exception as exc:
+        tracker.finish(error=True)
         err = {"error": str(exc)}
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "optimize", err, failed=True, message=str(exc))
         raise
+
+
+def _optimize_stage(progress: float, message: str) -> tuple[str, str]:
+    """Map optimizer progress float + message → stage id / timeline title."""
+    msg = (message or "").lower()
+    if progress < 0.2 or "init" in msg or "start" in msg:
+        return "init", "正在初始化寻优器…"
+    if progress < 0.55 or "propos" in msg or "sample" in msg or "suggest" in msg:
+        return "propose", "正在提出候选实验点…"
+    if progress < 0.85 or "evaluat" in msg or "score" in msg or "object" in msg:
+        return "evaluate", "正在评估目标与约束…"
+    return "converge", "正在收敛最优配方…"
 
 
 def _notify_dossier_optimize_completed(payload: dict) -> None:
@@ -1092,7 +1189,14 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
     from ..services.workbench_loop import is_doecycle_paused
     
     task_id = self.request.id
-    publish_progress(task_id, TaskProgressStatus.RUNNING, message="Starting DOE cycle")
+    tracker = ThinkingTracker(task_id, kind="doe_cycle")
+    tracker.emit(
+        "load",
+        "Starting DOE cycle",
+        progress=0.1,
+        step_id="load",
+        title="正在加载技术需求…",
+    )
     
     try:
         campaign_id = payload.get("workbench_campaign_id")
@@ -1102,6 +1206,7 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
                 "paused": True,
                 "campaign_id": int(campaign_id),
             }
+            tracker.finish(error=True)
             publish_progress(task_id, TaskProgressStatus.FAILED, message=err["error"])
             persist_result(task_id, err, failed=True)
             _persist_terminal(task_id, "doe_cycle", err, failed=True, message=err["error"])
@@ -1114,12 +1219,35 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
         
         from ..domain.schemas import Requirement
         requirement = Requirement(**requirement_dict)
+
+        tracker.emit(
+            "candidates",
+            "Generating candidate formulations",
+            progress=0.35,
+            step_id="candidates",
+            title="正在生成候选配方…",
+            detail="Top-N 候选供贝叶斯采样",
+        )
+        tracker.emit(
+            "design",
+            "Building DOE matrix",
+            progress=0.65,
+            step_id="design",
+            title="正在生成 DOE 矩阵…",
+            detail="Bayesian / 实验设计引擎",
+        )
         
         # Execute DOE cycle
         result = doe_cycle_service.run_doe_cycle(requirement)
-        
-        publish_progress(task_id, TaskProgressStatus.COMPLETED, message="DOE cycle completed")
-        
+
+        tracker.emit(
+            "write",
+            "Writing pending experiments",
+            progress=0.9,
+            step_id="write",
+            title="正在写入待做实验点…",
+        )
+        tracker.finish()
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "doe_cycle", result, failed=False)
         
@@ -1127,8 +1255,7 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
         
     except Exception as exc:
         err = {"error": str(exc)}
-        publish_progress(task_id, TaskProgressStatus.FAILED, message=str(exc))
-        
+        tracker.finish(error=True)
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "doe_cycle", err, failed=True, message=str(exc))
         
