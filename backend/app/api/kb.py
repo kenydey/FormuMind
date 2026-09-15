@@ -6,6 +6,8 @@ GET  /api/kb/search   — direct chunk retrieval (debug / power users)
 """
 from __future__ import annotations
 
+from typing import Literal
+
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -259,6 +261,111 @@ def hybrid_search(body: HybridSearchRequest) -> list[DocumentChunkResponse]:
     from ..services.hybrid_search import hybrid_search as _hs
 
     return _hs(body.query, top_k=body.top_k, alpha=body.alpha)
+
+
+# ── retrieval probe (query-test) ─────────────────────────────────────────────
+
+
+class QueryTestRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000)
+    mode: Literal["keyword", "hybrid", "hybrid_rerank"] = "hybrid"
+    top_k: int = Field(default=10, ge=1, le=50)
+    alpha: float = Field(default=0.3, ge=0.0, le=1.0)
+    project_id: str | None = None
+    include_global: bool = True
+    rerank: bool | None = None
+
+
+class QueryTestHit(BaseModel):
+    rank: int
+    chunk_id: str | None = None
+    source_id: str | None = None
+    ord: int | None = None
+    title: str = ""
+    snippet: str = ""
+    bm25_score: float | None = None
+    cosine_score: float | None = None
+    hybrid_score: float | None = None
+    relevance: float | None = None
+    rerank_score: float | None = None
+    rank_before_rerank: int | None = None
+    meta: dict | None = None
+
+
+class QueryTestResponse(BaseModel):
+    query: str
+    mode: str
+    params: dict
+    vector_mode: str = "empty"
+    elapsed_ms: int = 0
+    hits: list[QueryTestHit] = Field(default_factory=list)
+    warning: str | None = None
+
+
+class GoldenEvalRequest(BaseModel):
+    mode: Literal["keyword", "hybrid", "hybrid_rerank"] = "hybrid"
+    top_k: int = Field(default=3, ge=1, le=20)
+    alpha: float = Field(default=0.3, ge=0.0, le=1.0)
+    project_id: str | None = None
+    include_global: bool = True
+    rerank: bool | None = None
+
+
+class GoldenQuestionItem(BaseModel):
+    question: str
+    expected_keywords: list[str] = Field(default_factory=list)
+    category: str = ""
+
+
+@router.post("/query-test", response_model=QueryTestResponse)
+def query_test(body: QueryTestRequest) -> QueryTestResponse:
+    """Scored KB retrieval probe for the Knowledge Hub workbench."""
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用")
+    from ..services.kb_query_test import run_query_test
+
+    try:
+        payload = run_query_test(
+            query=body.query,
+            mode=body.mode,
+            top_k=body.top_k,
+            alpha=body.alpha,
+            project_id=body.project_id,
+            include_global=body.include_global,
+            rerank=body.rerank,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return QueryTestResponse(**payload)
+
+
+@router.get("/golden-questions", response_model=list[GoldenQuestionItem])
+def golden_questions() -> list[GoldenQuestionItem]:
+    """List curated golden retrieval questions (for Hub batch runner)."""
+    from ..services.kb_query_test import list_golden_questions
+
+    return [GoldenQuestionItem(**row) for row in list_golden_questions()]
+
+
+@router.post("/golden-eval/run")
+def golden_eval_run(body: GoldenEvalRequest) -> dict:
+    """Run golden questions through query-test; keyword-hit@top_k pass/fail."""
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用")
+    from ..services.kb_query_test import run_golden_eval
+
+    try:
+        return run_golden_eval(
+            mode=body.mode,
+            top_k=body.top_k,
+            alpha=body.alpha,
+            project_id=body.project_id,
+            include_global=body.include_global,
+            rerank=body.rerank,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 
 # ── ingest ────────────────────────────────────────────────────────────────────

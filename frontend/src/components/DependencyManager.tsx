@@ -675,7 +675,12 @@ function KbDiagnosticsCard() {
         className="border border-edge/60 rounded p-2 mb-1 space-y-1.5 bg-ink/30"
         data-testid="kb-probe-panel"
       >
-        <div className="text-[10px] text-slate-500">KB 检索探针 · /api/kb/search · hybrid-search</div>
+        <div className="text-[10px] text-slate-500">
+          KB 检索探针 · /api/kb/search · hybrid-search
+          <span className="block text-teal-400/80 mt-0.5">
+            完整多路分数 / Golden 批跑见知识中枢 →「检索探针」
+          </span>
+        </div>
         <div className="flex flex-wrap gap-1">
           <input
             value={kbProbeQ}

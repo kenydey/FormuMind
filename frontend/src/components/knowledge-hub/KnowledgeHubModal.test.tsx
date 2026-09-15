@@ -25,3 +25,19 @@ describe("KnowledgeHubModal reports tab", () => {
     expect(screen.getByTestId("hub-reports-pane")).toBeInTheDocument();
   });
 });
+
+describe("KnowledgeHubModal retrieval tab", () => {
+  beforeEach(() => {
+    useStore.setState({
+      knowledgeHubTab: "retrieval",
+      activeProjectId: "proj-demo",
+    } as never);
+  });
+
+  it("shows the retrieval probe workbench", () => {
+    render(<KnowledgeHubModal open onClose={() => undefined} />);
+    expect(screen.getByTestId("hub-tab-retrieval")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-retrieval-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-tab-retrieval").textContent).toMatch(/检索探针/);
+  });
+});

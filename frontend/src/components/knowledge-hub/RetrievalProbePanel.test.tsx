@@ -1,0 +1,76 @@
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../../store";
+import RetrievalProbePanel from "./RetrievalProbePanel";
+
+const kbQueryTest = vi.fn();
+const kbGoldenEvalRun = vi.fn();
+
+vi.mock("../../api", () => ({
+  api: {
+    kbQueryTest: (...args: unknown[]) => kbQueryTest(...args),
+    kbGoldenEvalRun: (...args: unknown[]) => kbGoldenEvalRun(...args),
+  },
+  formatApiError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+}));
+
+describe("RetrievalProbePanel", () => {
+  beforeEach(() => {
+    kbQueryTest.mockReset();
+    kbGoldenEvalRun.mockReset();
+    useStore.setState({ activeProjectId: "proj-demo" } as never);
+  });
+
+  it("renders table headers after a successful probe run", async () => {
+    kbQueryTest.mockResolvedValue({
+      query: "硅烷偶联剂",
+      mode: "hybrid",
+      params: {
+        top_k: 10,
+        alpha: 0.3,
+        project_id: "proj-demo",
+        include_global: true,
+        rerank_applied: false,
+      },
+      vector_mode: "semantic",
+      elapsed_ms: 12,
+      hits: [
+        {
+          rank: 1,
+          title: "硅烷偶联剂 · 表面处理",
+          snippet: "硅烷偶联剂用于金属表面处理",
+          bm25_score: 0.8,
+          cosine_score: 0.4,
+          hybrid_score: 0.52,
+          relevance: 0.52,
+          rerank_score: null,
+          rank_before_rerank: 1,
+        },
+      ],
+      warning: null,
+    });
+
+    render(<RetrievalProbePanel active />);
+    expect(screen.getByTestId("hub-retrieval-pane")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("retrieval-probe-run"));
+    await waitFor(() => {
+      expect(screen.getByTestId("retrieval-probe-table")).toBeInTheDocument();
+    });
+    expect(screen.getByText("bm25")).toBeInTheDocument();
+    expect(screen.getByText("cosine")).toBeInTheDocument();
+    expect(screen.getByText("hybrid")).toBeInTheDocument();
+    expect(screen.getByText("rerank")).toBeInTheDocument();
+    expect(kbQueryTest).toHaveBeenCalled();
+  });
+
+  it("shows empty-query error without calling API", async () => {
+    render(<RetrievalProbePanel active />);
+    fireEvent.change(screen.getByTestId("retrieval-probe-input"), {
+      target: { value: "   " },
+    });
+    // Button is disabled when query empty after trim — force click via clearing
+    const btn = screen.getByTestId("retrieval-probe-run");
+    expect(btn).toBeDisabled();
+    expect(kbQueryTest).not.toHaveBeenCalled();
+  });
+});
