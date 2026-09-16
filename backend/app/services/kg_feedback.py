@@ -298,6 +298,8 @@ def ingest_measured_evidence(campaign_id: int) -> int:
                     "extraction_method": "measured",
                     "sentence": f"实测 {mat_name}: {metric_label}={value}",
                     "granularity": "material",
+                    "metric": metric,
+                    "measured_value": float(value),
                 }
                 if project_id:
                     evidence_ref["project_id"] = str(project_id)
@@ -312,6 +314,8 @@ def ingest_measured_evidence(campaign_id: int) -> int:
                     "extraction_method": "measured",
                     "sentence": f"实测 {metric_label}={value}",
                     "granularity": "domain",
+                    "metric": metric,
+                    "measured_value": float(value),
                 }
                 if project_id:
                     evidence_ref["project_id"] = str(project_id)

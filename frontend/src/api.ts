@@ -3896,6 +3896,9 @@ export interface KgCalibrationResponse {
   kg_inhibits_penalty: number;
   kg_synergizes_bonus: number;
   kg_measured_bonus: number;
+  kg_measured_metric_bonus?: number;
+  kg_measured_metric_penalty?: number;
+  kg_measured_metric_presence?: number;
   counts: { inhibits: number; substitutes: number; synergizes: number };
 }
 
