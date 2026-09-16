@@ -179,6 +179,14 @@ export interface Formulation {
     incompatible_pairs: { a: string; b: string; relation: string }[];
     synergy_pairs: { a: string; b: string; relation: string }[];
     measured_materials?: string[];
+    measured_metric_hits?: {
+      material: string;
+      metric: string;
+      quality: "good" | "poor" | "presence" | string;
+      value?: number | null;
+      confidence?: number;
+      prop_id?: string;
+    }[];
     reasons: string[];
   } | null;
 }
