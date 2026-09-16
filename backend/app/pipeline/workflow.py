@@ -104,13 +104,6 @@ def _score_and_validate(
         from ..services import chemtools
 
         form.warnings.extend(chemtools.screen_formulation(form))
-        # KG compatibility as a *soft* ranking factor (second priority):
-        # INHIBITS → score penalty + warning; SYNERGIZES → optional bonus.
-        # Never runs inside optimization loops (they pass chem_screen=False
-        # and use the hard infeasible gate from the first-priority work).
-        from ..services.kg_recommend_score import kg_compat_adjust
-
-        kg_compat_adjust(form)  # applies penalty/bonus + records form.kg_compat
     if chem_screen_local:
         # P3: 零网络本地化学预筛（RDKit 价键 + molbloom patent）——
         # 优化循环安全版，每代数百次调用不触网。
@@ -142,6 +135,13 @@ def _score_and_validate(
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
         form.score = float(form.predicted.get(metric, 0.0))
+    if chem_screen:
+        # KG soft ranking *after* score assignment so measured/INHIBITS factors
+        # are not wiped by predicted / multi_objective assignment above.
+        # Never runs inside optimization loops (chem_screen=False).
+        from ..services.kg_recommend_score import kg_compat_adjust
+
+        kg_compat_adjust(form, objectives=list(objectives) if objectives else None)
     return form
 
 

@@ -514,7 +514,11 @@ class Settings(BaseSettings):
     # a mild bonus when explicitly enabled. KG disabled → both treated as 1.0.
     kg_inhibits_penalty: float = 0.5
     kg_synergizes_bonus: float = 1.0  # 1.0 = disabled by default
-    kg_measured_bonus: float = 1.15  # 实测证据加成：材料有 measured 关系时配方得分提升
+    kg_measured_bonus: float = 1.15  # 兜底：材料有任意 measured 边时加成（无目标指标命中时）
+    # 指标感知实测调权（mat→prop:{metric}）：好/差/仅存在
+    kg_measured_metric_bonus: float = 1.12
+    kg_measured_metric_penalty: float = 0.92
+    kg_measured_metric_presence: float = 1.05
 
     # KG v10 — 文献↔实测矛盾检测
     kg_contradiction_threshold: float = 0.3  # 冲突强度阈值：低于此不标记

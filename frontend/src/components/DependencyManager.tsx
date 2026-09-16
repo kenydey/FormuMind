@@ -664,6 +664,12 @@ function KbDiagnosticsCard() {
             <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
               measured×{calibration.kg_measured_bonus}
             </span>
+            {calibration.kg_measured_metric_bonus != null && (
+              <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
+                metric×{calibration.kg_measured_metric_bonus}/
+                {calibration.kg_measured_metric_penalty ?? "—"}
+              </span>
+            )}
           </div>
           <div className="text-[10px] text-slate-500">
             关系命中 · inhibits {calibration.counts.inhibits} · substitutes{" "}

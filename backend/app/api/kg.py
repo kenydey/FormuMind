@@ -194,6 +194,9 @@ def calibration() -> dict:
         "kg_inhibits_penalty": float(getattr(s, "kg_inhibits_penalty", 0.5)),
         "kg_synergizes_bonus": float(getattr(s, "kg_synergizes_bonus", 1.0)),
         "kg_measured_bonus": float(getattr(s, "kg_measured_bonus", 1.15)),
+        "kg_measured_metric_bonus": float(getattr(s, "kg_measured_metric_bonus", 1.12)),
+        "kg_measured_metric_penalty": float(getattr(s, "kg_measured_metric_penalty", 0.92)),
+        "kg_measured_metric_presence": float(getattr(s, "kg_measured_metric_presence", 1.05)),
         "counts": {"inhibits": inh, "substitutes": sub, "synergizes": syn},
     }
 
