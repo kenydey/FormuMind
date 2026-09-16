@@ -2303,9 +2303,13 @@ export const api = {
   },
 
   kgFeedbackStats: () =>
-    get<{ measured_total: number; measured_performance: number; by_campaign: Record<string, number> }>(
-      "/api/kg/feedback/stats"
-    ),
+    get<{
+      measured_total: number;
+      measured_performance: number;
+      measured_material?: number;
+      measured_domain?: number;
+      by_campaign: Record<string, number>;
+    }>("/api/kg/feedback/stats"),
 
   kgFeedbackReport: () =>
     get<{ measured_total: number; measured_performance: number; by_campaign: Record<string, number>; alert: string | null; recent_bias: unknown[] }>(
