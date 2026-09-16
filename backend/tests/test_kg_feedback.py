@@ -138,15 +138,82 @@ def test_measured_evidence_accumulates_not_overwrites(entity_store, monkeypatch)
         assert "rule" in methods, "literature evidence must be preserved"
 
 
-def test_measured_evidence_noop_when_domain_missing(entity_store, monkeypatch):
+def test_measured_evidence_noop_when_domain_and_materials_missing(entity_store, monkeypatch):
     _upsert(entity_store, id="met1", canonical_name="salt_spray_resistance", kind="property")
     rows = [
         WorkbenchRow(
             id=3, campaign_id=11, item_id="s3",
             measurements={"salt_spray_resistance": 900},
+            # no actual/planned params → no materials
         )
     ]
     fake = _FakeCampaignStore("anticorrosion_coating", rows)
     monkeypatch.setattr(kg_feedback, "get_campaign_store", lambda: fake)
 
     assert kg_feedback.ingest_measured_evidence(11) == 0
+
+
+def test_measured_evidence_writes_material_links(entity_store, monkeypatch):
+    """Material → property edges from actual_params (core 2026-09-16 MVP)."""
+    _upsert(entity_store, id="dom1", canonical_name="anticorrosion_coating", kind="domain")
+    _upsert(entity_store, id="met1", canonical_name="salt_spray_hours", kind="property")
+
+    rows = [
+        WorkbenchRow(
+            id=4,
+            campaign_id=21,
+            item_id="s4",
+            actual_params={"Zinc phosphate": 9.0, "cure_temperature_c": 82.0},
+            measurements={"salt_spray_hours": 780.0},
+        )
+    ]
+    fake = _FakeCampaignStore("anticorrosion_coating", rows)
+    monkeypatch.setattr(kg_feedback, "get_campaign_store", lambda: fake)
+
+    written = kg_feedback.ingest_measured_evidence(21)
+    # 1 material (Zinc phosphate; cure temp skipped) × 1 metric + 1 domain × 1 metric
+    assert written == 2, f"expected material+domain links, got {written}"
+
+    from app.db.models import KGEntity, KGEntityLink
+
+    with entity_store._session_factory() as s:
+        mats = s.query(KGEntity).filter(KGEntity.id.like("mat:%")).all()
+        assert len(mats) == 1
+        assert "zinc" in mats[0].canonical_name.lower() or "Zinc" in mats[0].canonical_name
+        mat_links = (
+            s.query(KGEntityLink)
+            .filter(
+                KGEntityLink.src_entity_id == mats[0].id,
+                KGEntityLink.link_type == "measured_performance",
+            )
+            .all()
+        )
+        assert len(mat_links) == 1
+        refs = mat_links[0].evidence_refs or []
+        assert any(r.get("granularity") == "material" for r in refs)
+        assert any("Zinc phosphate" in (r.get("sentence") or "") for r in refs)
+
+
+def test_measured_evidence_material_without_domain(entity_store, monkeypatch):
+    """Domain missing must not block material-level flywheel."""
+    _upsert(entity_store, id="met1", canonical_name="salt_spray_hours", kind="property")
+    rows = [
+        WorkbenchRow(
+            id=5,
+            campaign_id=22,
+            item_id="s5",
+            actual_params={"Epoxy resin": 40.0},
+            measurements={"salt_spray_hours": 500.0},
+        )
+    ]
+    fake = _FakeCampaignStore("unknown_domain_xyz", rows)
+    monkeypatch.setattr(kg_feedback, "get_campaign_store", lambda: fake)
+
+    written = kg_feedback.ingest_measured_evidence(22)
+    assert written >= 1
+
+    from app.db.models import KGEntityLink
+
+    with entity_store._session_factory() as s:
+        links = s.query(KGEntityLink).filter(KGEntityLink.src_entity_id.like("mat:%")).all()
+        assert len(links) >= 1
