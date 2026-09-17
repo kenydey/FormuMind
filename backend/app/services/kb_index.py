@@ -204,10 +204,16 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
     try:
         from ..db.chunk_store import get_chunk_store
         from .chunking import chunk_markdown
+        from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
         from . import ingest_timing as timing
 
         settings = get_settings()
+        # Ingest-time quality gate (same rules as hybrid #111): blocked origin
+        # never becomes document_chunks — clear any prior rows and stop early.
+        if ingest_block_reason_for_source(source_id):
+            get_chunk_store().replace_for_source(source_id, [])
+            return 0
         with timing.span("chunk"):
             chunks = chunk_markdown(
                 full_text,
@@ -226,6 +232,10 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
             }
             for c in chunks
         ]
+        rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
+        if not rows:
+            get_chunk_store().replace_for_source(source_id, [])
+            return 0
         # 2026-09-04 (双语分流): 嵌入前预标 lang(与 chunk_store 写入判定
         # 同源), 让嵌入模型选择(zh→bge / en→MiniLM)在写入前就正确。
         if rows:
