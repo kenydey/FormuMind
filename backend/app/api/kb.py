@@ -69,6 +69,31 @@ def stats() -> KBStats:
     return KBStats(**kb_index.kb_stats())
 
 
+class KbRetrievalSettings(BaseModel):
+    """Shared probe ↔ recommend retrieval knobs (read-only snapshot)."""
+
+    kb_hybrid_alpha: float = 0.3
+    kb_recommend_use_hybrid: bool = True
+    kb_recommend_include_global: bool = True
+    kb_recommend_top_k: int = 4
+    kb_recommend_rerank_enabled: bool = False
+
+
+@router.get("/retrieval-settings", response_model=KbRetrievalSettings)
+def retrieval_settings() -> KbRetrievalSettings:
+    """Defaults shared by Hub retrieval probe and recommend hybrid fuse."""
+    from ..config import get_settings
+
+    s = get_settings()
+    return KbRetrievalSettings(
+        kb_hybrid_alpha=float(getattr(s, "kb_hybrid_alpha", 0.3)),
+        kb_recommend_use_hybrid=bool(getattr(s, "kb_recommend_use_hybrid", True)),
+        kb_recommend_include_global=bool(getattr(s, "kb_recommend_include_global", True)),
+        kb_recommend_top_k=int(getattr(s, "kb_recommend_top_k", 4) or 0),
+        kb_recommend_rerank_enabled=bool(getattr(s, "kb_recommend_rerank_enabled", False)),
+    )
+
+
 @router.post("/reindex", response_model=ReindexResult)
 def reindex(embed: bool = True) -> ReindexResult:
     if not kb_index.kb_enabled():

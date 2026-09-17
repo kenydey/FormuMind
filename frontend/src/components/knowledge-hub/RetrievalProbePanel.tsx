@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   api,
@@ -34,6 +34,8 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
   const [mode, setMode] = useState<KbQueryTestMode>("hybrid");
   const [topK, setTopK] = useState(10);
   const [alpha, setAlpha] = useState(0.3);
+  const [serverAlpha, setServerAlpha] = useState<number | null>(null);
+  const alphaTouched = useRef(false);
   const [scope, setScope] = useState<ScopeMode>("project_global");
   const [busy, setBusy] = useState(false);
   const [goldenBusy, setGoldenBusy] = useState(false);
@@ -42,6 +44,28 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
   const [selected, setSelected] = useState<KbQueryTestHit | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [golden, setGolden] = useState<KbGoldenEvalResponse | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await api.kbRetrievalSettings();
+        if (cancelled) return;
+        const a = Number(s.kb_hybrid_alpha);
+        if (!Number.isFinite(a)) return;
+        setServerAlpha(a);
+        if (!alphaTouched.current) {
+          setAlpha(Math.max(0, Math.min(1, a)));
+        }
+      } catch {
+        // Keep local default; probe still works with UI fallback.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
 
   const scopeParams = useMemo(() => {
     if (!activeProjectId || scope === "global") {
@@ -120,6 +144,15 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
         )}
         <span className="block mt-0.5 text-slate-600">
           Wiki FTS / 结构化学检索不在本页；α=0≈向量、α=1≈BM25。
+          {serverAlpha != null && (
+            <span className="text-slate-500">
+              {" "}
+              · 与推荐共享默认 α=
+              <span className="font-mono text-slate-400" data-testid="retrieval-probe-server-alpha">
+                {serverAlpha}
+              </span>
+            </span>
+          )}
         </span>
       </div>
 
@@ -215,7 +248,10 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
             max={1}
             step={0.1}
             value={alpha}
-            onChange={(e) => setAlpha(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
+            onChange={(e) => {
+              alphaTouched.current = true;
+              setAlpha(Math.max(0, Math.min(1, Number(e.target.value) || 0)));
+            }}
             className="bg-ink border border-edge rounded px-2 py-1"
             data-testid="retrieval-probe-alpha"
           />
