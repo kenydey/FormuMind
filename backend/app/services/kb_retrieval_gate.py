@@ -1,10 +1,15 @@
-"""Rule-only quality gate for KB hybrid / probe / recommend fuse.
+"""Rule-only quality gate for KB hybrid / probe / recommend fuse **and** ingest.
 
 Literature retrieval already runs ``content_filter.filter_evidence`` at the
 federated merge point. Chunks that somehow land in ``document_chunks`` (manual
 upload, soft ingest miss, etc.) used to bypass that stack when scored by
 ``hybrid_search_scored``. This module applies a *chunk-native* subset of the
 same rules so Hub retrieval probe and recommend hybrid fuse stay aligned.
+
+The same blocked-domain / garbage-text rules also run at ``index_source`` so
+dirty sources never become ``document_chunks`` — not only get filtered from
+top-k. Wiki exclusion applies at *retrieval* only; wiki must still be able to
+ingest.
 
 LLM judge / SimHash / substrate checks are intentionally out of scope.
 """
@@ -168,3 +173,71 @@ def gate_chunk_indices(
     if dropped:
         logger.debug("kb retrieval gate dropped %d chunk(s) before top_k=%d", dropped, top_k)
     return kept
+
+
+def ingest_block_reason_for_source(source_id: str | None) -> str | None:
+    """Return ``blocked_domain`` when this source must not write any chunks.
+
+    Returns None when the content filter is off, meta is missing, or the
+    origin is clean. Wiki is intentionally not blocked here.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "content_filter_enabled", True)):
+        return None
+    sid = (source_id or "").strip()
+    if not sid:
+        return None
+    meta = _load_source_meta([sid]).get(sid)
+    if meta and is_blocked_origin_url(meta.origin_url):
+        return "blocked_domain"
+    return None
+
+
+def gate_ingest_rows(
+    rows: list[dict],
+    *,
+    source_id: str | None = None,
+) -> tuple[list[dict], str | None]:
+    """Filter chunk rows before ``replace_for_source``.
+
+    Returns ``(kept_rows, drop_reason)``. When the whole source is blocked,
+    ``kept_rows`` is empty and ``drop_reason`` is ``blocked_domain``. When only
+    garbage chunks are removed, ``drop_reason`` is ``garbage_snippet`` if
+    nothing remains, else None (partial keep). Disabled filter → identity.
+    """
+    settings = get_settings()
+    if not bool(getattr(settings, "content_filter_enabled", True)):
+        return rows, None
+
+    block = ingest_block_reason_for_source(source_id)
+    if block:
+        logger.info(
+            "kb ingest gate: source %s blocked (%s) — writing 0 chunks",
+            source_id,
+            block,
+        )
+        return [], block
+
+    kept: list[dict] = []
+    garbage_n = 0
+    for row in rows:
+        text = (row.get("text") if isinstance(row, dict) else "") or ""
+        if is_garbage_chunk_text(text):
+            garbage_n += 1
+            continue
+        kept.append(row)
+    if garbage_n and not kept:
+        logger.info(
+            "kb ingest gate: source %s all %d chunk(s) garbage — writing 0",
+            source_id,
+            garbage_n,
+        )
+        return [], "garbage_snippet"
+    if garbage_n:
+        logger.debug(
+            "kb ingest gate: source %s dropped %d garbage chunk(s), kept %d",
+            source_id,
+            garbage_n,
+            len(kept),
+        )
+    return kept, None

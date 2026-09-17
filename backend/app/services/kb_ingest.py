@@ -405,6 +405,18 @@ def _fetch_one(
         emit(doc)
         return None
 
+    # Content-filter blocklist: skip marketplace / junk landing URLs before fetch.
+    try:
+        from .kb_retrieval_gate import is_blocked_origin_url
+
+        landing = (getattr(ev, "url", None) or "").strip()
+        if get_settings().content_filter_enabled and is_blocked_origin_url(landing):
+            doc.update(status="skipped", error="blocked_domain")
+            emit(doc)
+            return None
+    except Exception as exc:
+        degrade_return(logger, exc, "kb_ingest blocklist check failed", None)
+
     doc["status"] = "fetching"
     emit(doc)
     fetch_reason: str | None = None
