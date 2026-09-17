@@ -91,6 +91,13 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("search_rerank_enabled", "检索 LLM 精排",
             "对合并结果前若干条做 LLM 语义重排，其余按规则排序保留（总量上限 300）。",
             "retrieval", "需有效 LLM key"),
+    EnvFlag("kb_recommend_use_hybrid", "推荐融合探针 hybrid",
+            "推荐/研究 KB 融合走与 Hub 检索探针同栈的 BM25+向量 hybrid（共享 kb_hybrid_alpha）。"
+            "关闭则退回旧 search_chunks。",
+            "retrieval"),
+    EnvFlag("kb_recommend_rerank_enabled", "推荐融合 LLM 精排",
+            "仅对推荐/研究融合后的证据池做 LLM 精排；默认关，不改动全局 search_rerank_enabled。",
+            "retrieval", "需有效 LLM key"),
     EnvFlag("fulltext_enrich", "检索全文获取",
             "把排名靠前的专利/OA 文献/网页命中升级为全文分块并持久化入知识库。",
             "kb", "需网络；每次深度研究会下载最多 8 篇全文"),
