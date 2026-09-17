@@ -145,13 +145,17 @@ def hybrid_search_scored(
 
         order = [i for i in range(n) if float(combined[i]) > 0.0]
         order.sort(key=lambda i: float(combined[i]), reverse=True)
-        order = order[:top_k]
 
         if not order:
             qtoks = set(_tokenize(query))
             order = [i for i in range(n) if qtoks & set(corpus_tokens[i])]
             order.sort(key=lambda i: float(combined[i]), reverse=True)
-            order = order[:top_k]
+
+        # Corpus quality gate (blocked origin_url / garbage / wiki) — shared by
+        # Hub retrieval probe and recommend hybrid fuse. Fills top_k after drops.
+        from .kb_retrieval_gate import gate_chunk_indices
+
+        order = gate_chunk_indices(chunks, order, top_k=top_k)
 
         return [
             ScoredChunk(
