@@ -21,6 +21,7 @@ import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
 import SimilarFormulationModal from "./SimilarFormulationModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
+import MeasuredMetricHitsBanner from "./MeasuredMetricHitsBanner";
 import ParetoFrontPlot from "./charts/ParetoFrontPlot";
 import ParallelCoordinates from "./charts/ParallelCoordinates";
 
@@ -281,8 +282,15 @@ function FormulaCard({
               🔁 一键替代 — {String((form.kg_compat.incompatible_pairs[0] as any)?.a ?? form.ingredients[0]?.name)} 不相容，查找实测优先的替代料
             </button>
           )}
-          {form.kg_compat?.measured_materials && form.kg_compat.measured_materials.length > 0 && (
-            <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成</div>
+          {(form.kg_compat?.measured_metric_hits?.length ?? 0) > 0 ? (
+            <MeasuredMetricHitsBanner hits={form.kg_compat?.measured_metric_hits} />
+          ) : (
+            form.kg_compat?.measured_materials &&
+            form.kg_compat.measured_materials.length > 0 && (
+              <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">
+                ✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成
+              </div>
+            )
           )}
           {/* 成本 / 碳足迹徽标 */}
           {form.predicted && (form.predicted.cost_cny_per_kg != null || form.predicted.voc_gpl != null) && (
