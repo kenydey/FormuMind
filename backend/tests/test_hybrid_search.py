@@ -136,3 +136,25 @@ def test_hybrid_ranks_by_relevance(stores, monkeypatch):
     assert "环氧" in top_text or "防腐" in top_text, (
         f"expected top result to be about epoxy/corrosion, got: {top_text[:80]}"
     )
+
+
+def test_hybrid_alpha_defaults_to_settings(monkeypatch, stores):
+    """Omitted alpha reads settings.kb_hybrid_alpha (probe ↔ recommend shared)."""
+    monkeypatch.setenv("FORMUMIND_KB_HYBRID_ALPHA", "0.55")
+    get_settings.cache_clear()
+    assert get_settings().kb_hybrid_alpha == pytest.approx(0.55)
+
+    seen: dict = {}
+    import app.services.hybrid_search as hs_mod
+
+    real = hs_mod.hybrid_search_scored
+
+    def _wrapped(query, top_k=10, alpha=None, **kw):
+        seen["alpha"] = alpha
+        return real(query, top_k=top_k, alpha=alpha, **kw)
+
+    monkeypatch.setattr(hs_mod, "hybrid_search_scored", _wrapped)
+    from app.services.hybrid_search import hybrid_search
+
+    hybrid_search("anything", top_k=3)  # alpha omitted → settings
+    assert seen.get("alpha") == pytest.approx(0.55)

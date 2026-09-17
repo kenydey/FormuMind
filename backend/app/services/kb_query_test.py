@@ -53,7 +53,7 @@ def run_query_test(
     query: str,
     mode: QueryTestMode = "hybrid",
     top_k: int = 10,
-    alpha: float = 0.3,
+    alpha: float | None = None,
     project_id: str | None = None,
     include_global: bool = True,
     rerank: bool | None = None,
@@ -63,6 +63,8 @@ def run_query_test(
     settings = get_settings()
     q = (query or "").strip()
     top_k = max(1, min(int(top_k), 50))
+    if alpha is None:
+        alpha = float(settings.kb_hybrid_alpha)
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
@@ -198,7 +200,7 @@ def run_golden_eval(
     *,
     mode: QueryTestMode = "hybrid",
     top_k: int = 3,
-    alpha: float = 0.3,
+    alpha: float | None = None,
     project_id: str | None = None,
     include_global: bool = True,
     rerank: bool | None = None,
@@ -206,6 +208,8 @@ def run_golden_eval(
     """Run golden questions against query-test; keyword-hit@top_k pass/fail."""
     from ..resources.golden_retrieval import golden_questions
 
+    if alpha is None:
+        alpha = float(get_settings().kb_hybrid_alpha)
     results: list[dict[str, Any]] = []
     passed = 0
     for entry in golden_questions:

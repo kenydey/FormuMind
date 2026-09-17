@@ -661,6 +661,45 @@ def search_chunks(
         return degrade_return(logger, exc, "kb search failed", [])
 
 
+def search_chunks_hybrid(
+    query: str,
+    k: int = 4,
+    *,
+    alpha: float | None = None,
+    project_id: str | None = None,
+    include_global: bool = True,
+) -> list[Evidence]:
+    """Probe-aligned hybrid retrieval as Evidence (for recommend / research fuse).
+
+    Uses ``hybrid_search_scored`` with shared ``kb_hybrid_alpha`` when ``alpha``
+    is omitted. Safe empty list when KB is off or hybrid fails.
+    """
+    if not kb_enabled() or k <= 0 or not (query or "").strip():
+        return []
+    try:
+        from .hybrid_search import hybrid_search_scored
+
+        settings = get_settings()
+        if alpha is None:
+            alpha = float(settings.kb_hybrid_alpha)
+        scored = hybrid_search_scored(
+            query,
+            top_k=k,
+            alpha=alpha,
+            project_id=project_id or None,
+            include_global=bool(include_global),
+        )
+        if not scored:
+            return []
+        meta = _source_meta()
+        return [
+            _chunk_to_evidence(s.chunk, meta, float(s.hybrid_score))
+            for s in scored
+        ]
+    except Exception as exc:
+        return degrade_return(logger, exc, "kb hybrid search failed", [])
+
+
 def aggregate_parameter_space() -> dict[str, dict]:
     """Fuse the LLM-extracted parameter spaces of all stored source guides.
 
