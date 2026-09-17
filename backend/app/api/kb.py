@@ -51,6 +51,8 @@ class KBStats(BaseModel):
     #: The backend `build_store` would actually pick, not the configured value.
     rag_backend: str = "tfidf"
     products: int = 0
+    #: Process-local quality-gate drop counters (retrieval + ingest).
+    quality_gate_drops: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 class ReindexResult(BaseModel):
@@ -325,6 +327,10 @@ class QueryTestResponse(BaseModel):
     elapsed_ms: int = 0
     hits: list[QueryTestHit] = Field(default_factory=list)
     warning: str | None = None
+    #: Drops during this probe run (hybrid path only; keyword → zeros).
+    gate_drops: dict[str, dict[str, int]] = Field(default_factory=dict)
+    #: Process-lifetime counters at response time.
+    gate_drops_total: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 class GoldenEvalRequest(BaseModel):

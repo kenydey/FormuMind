@@ -3433,6 +3433,14 @@ export interface KBStats {
   /** The backend actually in effect, not the configured value. */
   rag_backend?: string;
   products?: number;
+  /** Process-local quality-gate drop counters (retrieval + ingest). */
+  quality_gate_drops?: KbGateDropStats;
+}
+
+/** Nested drop counters from kb_retrieval_gate. */
+export interface KbGateDropStats {
+  retrieval?: { blocked_domain?: number; garbage_snippet?: number; wiki_track?: number };
+  ingest?: { blocked_domain?: number; garbage_snippet?: number; wiki_track?: number };
 }
 
 /** Shared probe ↔ recommend knobs (GET /api/kb/retrieval-settings). */
@@ -3870,6 +3878,10 @@ export interface KbQueryTestResponse {
   elapsed_ms: number;
   hits: KbQueryTestHit[];
   warning?: string | null;
+  /** Drops during this probe run (hybrid path). */
+  gate_drops?: KbGateDropStats;
+  /** Process-lifetime counters at response time. */
+  gate_drops_total?: KbGateDropStats;
 }
 
 export interface KbGoldenQuestion {

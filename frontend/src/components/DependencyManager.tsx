@@ -123,6 +123,29 @@ function KnowledgeBaseCard({
           </span>
         ))}
       </div>
+      {(() => {
+        const g = stats.quality_gate_drops;
+        if (!g) return null;
+        const r = g.retrieval || {};
+        const i = g.ingest || {};
+        const parts = [
+          r.blocked_domain ? `检索拦域名 ${r.blocked_domain}` : null,
+          r.garbage_snippet ? `检索垃圾 ${r.garbage_snippet}` : null,
+          r.wiki_track ? `检索wiki ${r.wiki_track}` : null,
+          i.blocked_domain ? `入库拦域名 ${i.blocked_domain}` : null,
+          i.garbage_snippet ? `入库垃圾 ${i.garbage_snippet}` : null,
+        ].filter(Boolean);
+        if (parts.length === 0) return null;
+        return (
+          <div
+            className="mt-1 text-[10px] text-slate-500"
+            data-testid="kb-quality-gate-drops"
+            title="进程内质量门禁累计丢弃（重启清零）"
+          >
+            门禁丢弃 · {parts.join(" · ")}
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -67,6 +67,14 @@ describe("RetrievalProbePanel", () => {
         },
       ],
       warning: null,
+      gate_drops: {
+        retrieval: { blocked_domain: 2, garbage_snippet: 0, wiki_track: 0 },
+        ingest: { blocked_domain: 0, garbage_snippet: 0, wiki_track: 0 },
+      },
+      gate_drops_total: {
+        retrieval: { blocked_domain: 5, garbage_snippet: 1, wiki_track: 0 },
+        ingest: { blocked_domain: 1, garbage_snippet: 0, wiki_track: 0 },
+      },
     });
 
     render(<RetrievalProbePanel active />);
@@ -78,6 +86,7 @@ describe("RetrievalProbePanel", () => {
     expect(screen.getByText("bm25")).toBeInTheDocument();
     expect(screen.getByText("cosine")).toBeInTheDocument();
     expect(screen.getByText("hybrid")).toBeInTheDocument();
+    expect(screen.getByTestId("retrieval-probe-gate-drops")).toHaveTextContent("本轮门禁丢弃=2");
     expect(screen.getByText("rerank")).toBeInTheDocument();
     expect(kbQueryTest).toHaveBeenCalled();
   });
