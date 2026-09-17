@@ -1928,6 +1928,9 @@ export const api = {
   kbQueryTest: (body: KbQueryTestRequest) =>
     post<KbQueryTestResponse>("/api/kb/query-test", body),
 
+  /** Shared probe ↔ recommend retrieval knobs (GET /api/kb/retrieval-settings). */
+  kbRetrievalSettings: () => get<KbRetrievalSettings>("/api/kb/retrieval-settings"),
+
   /** Curated golden retrieval questions (GET /api/kb/golden-questions). */
   kbGoldenQuestions: () => get<KbGoldenQuestion[]>("/api/kb/golden-questions"),
 
@@ -3430,6 +3433,15 @@ export interface KBStats {
   /** The backend actually in effect, not the configured value. */
   rag_backend?: string;
   products?: number;
+}
+
+/** Shared probe ↔ recommend knobs (GET /api/kb/retrieval-settings). */
+export interface KbRetrievalSettings {
+  kb_hybrid_alpha: number;
+  kb_recommend_use_hybrid: boolean;
+  kb_recommend_include_global: boolean;
+  kb_recommend_top_k: number;
+  kb_recommend_rerank_enabled: boolean;
 }
 
 /** Boolean feature flag backed by a FORMUMIND_* environment variable. */

@@ -5,11 +5,13 @@ import RetrievalProbePanel from "./RetrievalProbePanel";
 
 const kbQueryTest = vi.fn();
 const kbGoldenEvalRun = vi.fn();
+const kbRetrievalSettings = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
     kbQueryTest: (...args: unknown[]) => kbQueryTest(...args),
     kbGoldenEvalRun: (...args: unknown[]) => kbGoldenEvalRun(...args),
+    kbRetrievalSettings: (...args: unknown[]) => kbRetrievalSettings(...args),
   },
   formatApiError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
 }));
@@ -18,7 +20,24 @@ describe("RetrievalProbePanel", () => {
   beforeEach(() => {
     kbQueryTest.mockReset();
     kbGoldenEvalRun.mockReset();
+    kbRetrievalSettings.mockReset();
+    kbRetrievalSettings.mockResolvedValue({
+      kb_hybrid_alpha: 0.42,
+      kb_recommend_use_hybrid: true,
+      kb_recommend_include_global: true,
+      kb_recommend_top_k: 4,
+      kb_recommend_rerank_enabled: false,
+    });
     useStore.setState({ activeProjectId: "proj-demo" } as never);
+  });
+
+  it("loads shared server alpha when active", async () => {
+    render(<RetrievalProbePanel active />);
+    await waitFor(() => {
+      expect(screen.getByTestId("retrieval-probe-server-alpha")).toHaveTextContent("0.42");
+    });
+    expect(screen.getByTestId("retrieval-probe-alpha")).toHaveValue(0.42);
+    expect(kbRetrievalSettings).toHaveBeenCalled();
   });
 
   it("renders table headers after a successful probe run", async () => {
@@ -68,7 +87,6 @@ describe("RetrievalProbePanel", () => {
     fireEvent.change(screen.getByTestId("retrieval-probe-input"), {
       target: { value: "   " },
     });
-    // Button is disabled when query empty after trim — force click via clearing
     const btn = screen.getByTestId("retrieval-probe-run");
     expect(btn).toBeDisabled();
     expect(kbQueryTest).not.toHaveBeenCalled();
