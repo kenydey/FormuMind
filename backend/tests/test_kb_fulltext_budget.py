@@ -29,19 +29,22 @@ def _fresh():
 
 
 def test_default_passes_the_whole_chunk_through(monkeypatch):
-    monkeypatch.setattr(get_settings(), "kb_snippet_max_chars", 0, raising=False)
+    monkeypatch.setenv("FORMUMIND_KB_SNIPPET_MAX_CHARS", "0")
+    get_settings.cache_clear()
     text = "甲" * 1600
     assert kb_index.chunk_snippet(text) == text
 
 
 def test_a_positive_limit_clips(monkeypatch):
-    monkeypatch.setattr(get_settings(), "kb_snippet_max_chars", 300, raising=False)
+    monkeypatch.setenv("FORMUMIND_KB_SNIPPET_MAX_CHARS", "300")
+    get_settings.cache_clear()
     assert len(kb_index.chunk_snippet("甲" * 1600)) == 300
 
 
 def test_short_text_is_untouched_either_way(monkeypatch):
     for limit in (0, 300):
-        monkeypatch.setattr(get_settings(), "kb_snippet_max_chars", limit, raising=False)
+        monkeypatch.setenv("FORMUMIND_KB_SNIPPET_MAX_CHARS", str(limit))
+        get_settings.cache_clear()
         assert kb_index.chunk_snippet("短文本") == "短文本"
 
 
@@ -51,7 +54,8 @@ def test_fetched_evidence_is_no_longer_clipped_to_600(monkeypatch):
     from app.domain.schemas import Evidence
     from app.services.fulltext_fetcher import _text_to_chunks
 
-    monkeypatch.setattr(get_settings(), "kb_snippet_max_chars", 0, raising=False)
+    monkeypatch.setenv("FORMUMIND_KB_SNIPPET_MAX_CHARS", "0")
+    get_settings.cache_clear()
     ev = Evidence(title="专利", snippet="", source="patents", identifier="CN1", relevance=0.9)
     out = _text_to_chunks("# 标题\n\n" + "甲" * 4000, ev)
 

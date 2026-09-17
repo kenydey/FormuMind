@@ -594,6 +594,14 @@ class Settings(BaseSettings):
     kb_snippet_max_chars: int = 0
     # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
     kb_recommend_top_k: int = 4
+    # 探针 ↔ 推荐共享：BM25 权重 α（与 Hub 检索探针默认 0.3 对齐）。
+    kb_hybrid_alpha: float = 0.3
+    # 推荐/研究 KB 融合走 hybrid_search_scored（探针同栈）；关则退回 search_chunks。
+    kb_recommend_use_hybrid: bool = True
+    # 有 project_id 时是否并入全局资料（对齐探针 project_global）。
+    kb_recommend_include_global: bool = True
+    # 仅推荐/研究融合路径的可选 LLM 精排（默认关；不改动 search_rerank_enabled）。
+    kb_recommend_rerank_enabled: bool = False
 
     # 化学/产品实体抽取（KB stream P2）：入库切块时识别 CAS/分子式/SMILES/反应式
     # 与商业牌号（规则层离线；LLM 层搭 source_guide 便车），写入 chunk 元数据与

@@ -179,3 +179,148 @@ def test_build_doe_unchanged_without_kb_hints(monkeypatch, stores):
     req = Requirement(domain="anticorrosion_coating", description="环氧防腐底漆")
     plan = build_doe(req)
     assert "知识库文献范围" not in (plan.notes or "")
+
+
+# ── probe → recommend hybrid fuse ────────────────────────────────────────────
+
+
+def test_resolve_grounded_evidence_fuses_hybrid(monkeypatch, stores):
+    from app.pipeline.research_graph import resolve_grounded_evidence
+
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
+    get_settings.cache_clear()
+
+    class _Hit:
+        def __init__(self, ev):
+            self.evidence = ev
+
+    colbert_ev = Evidence(
+        source="literature",
+        identifier="lit:1",
+        title="文献命中",
+        snippet="colbert",
+        relevance=0.7,
+    )
+    kb_ev = _kb_hit("kb:hybrid#c0")
+
+    monkeypatch.setattr(
+        "app.services.colbert_store.search",
+        lambda q, k=8, settings=None: [_Hit(colbert_ev)],
+    )
+    monkeypatch.setattr(
+        "app.services.colbert_store.index_evidence",
+        lambda *a, **k: None,
+    )
+    called = {}
+
+    def _hybrid(q, k=4, **kw):
+        called.update(kw)
+        called["k"] = k
+        called["q"] = q
+        return [kb_ev]
+
+    monkeypatch.setattr("app.services.kb_index.search_chunks_hybrid", _hybrid)
+
+    req = Requirement(
+        domain="anticorrosion_coating",
+        description="环氧防腐",
+        project_id="proj-1",
+    )
+    out = resolve_grounded_evidence(req, "环氧防腐底漆")
+    ids = [e.identifier for e in out.evidence]
+    assert "lit:1" in ids
+    assert "kb:hybrid#c0" in ids
+    assert called.get("project_id") == "proj-1"
+    assert called.get("include_global") is True
+
+
+def test_resolve_grounded_evidence_topk_zero_skips_hybrid(monkeypatch, stores):
+    from app.pipeline.research_graph import resolve_grounded_evidence
+
+    monkeypatch.setenv("FORMUMIND_KB_RECOMMEND_TOP_K", "0")
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
+    get_settings.cache_clear()
+
+    class _Hit:
+        def __init__(self, ev):
+            self.evidence = ev
+
+    monkeypatch.setattr(
+        "app.services.colbert_store.search",
+        lambda q, k=8, settings=None: [
+            _Hit(
+                Evidence(
+                    source="literature",
+                    identifier="lit:1",
+                    title="t",
+                    snippet="s",
+                    relevance=0.5,
+                )
+            )
+        ],
+    )
+    monkeypatch.setattr("app.services.colbert_store.index_evidence", lambda *a, **k: None)
+    called = []
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks_hybrid",
+        lambda *a, **k: called.append(1) or [],
+    )
+    out = resolve_grounded_evidence(
+        Requirement(domain="anticorrosion_coating", description="x"), "x"
+    )
+    assert called == []
+    assert [e.identifier for e in out.evidence] == ["lit:1"]
+
+
+def test_retrieve_node_uses_hybrid_when_enabled(monkeypatch, stores):
+    from app.pipeline.research_graph import retrieve_node
+
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
+    monkeypatch.setenv("FORMUMIND_KB_RECOMMEND_USE_HYBRID", "true")
+    get_settings.cache_clear()
+
+    monkeypatch.setattr(
+        "app.pipeline.research_graph._search_one",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(
+        "app.pipeline.research_graph.llm_rerank",
+        lambda q, ev, k=8: ev,
+    )
+    hybrid_called = []
+    legacy_called = []
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks_hybrid",
+        lambda q, k=4, **kw: hybrid_called.append(kw) or [_kb_hit()],
+    )
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks",
+        lambda q, k=4, project_id=None: legacy_called.append(q) or [],
+    )
+    state = retrieve_node({"topic": "环氧防腐底漆", "query": "环氧防腐底漆"})
+    assert hybrid_called
+    assert legacy_called == []
+    assert "kb:s1#c0" in [e.identifier for e in state["evidence"]]
+
+
+def test_retrieve_node_falls_back_to_search_chunks_when_hybrid_off(monkeypatch, stores):
+    from app.pipeline.research_graph import retrieve_node
+
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
+    monkeypatch.setenv("FORMUMIND_KB_RECOMMEND_USE_HYBRID", "false")
+    get_settings.cache_clear()
+
+    monkeypatch.setattr("app.pipeline.research_graph._search_one", lambda *a, **k: [])
+    monkeypatch.setattr("app.pipeline.research_graph.llm_rerank", lambda q, ev, k=8: ev)
+    hybrid_called = []
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks_hybrid",
+        lambda *a, **k: hybrid_called.append(1) or [],
+    )
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks",
+        lambda q, k=4, project_id=None: [_kb_hit("kb:legacy#c0")],
+    )
+    state = retrieve_node({"topic": "环氧防腐底漆", "query": "环氧防腐底漆"})
+    assert hybrid_called == []
+    assert "kb:legacy#c0" in [e.identifier for e in state["evidence"]]

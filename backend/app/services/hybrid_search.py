@@ -76,7 +76,7 @@ def _to_response(c) -> DocumentChunkResponse:
 def hybrid_search_scored(
     query: str,
     top_k: int = 10,
-    alpha: float = 0.3,
+    alpha: float | None = None,
     *,
     project_id: str | None = None,
     include_global: bool = False,
@@ -84,8 +84,12 @@ def hybrid_search_scored(
     """BM25 + vector hybrid retrieval with bm25/cosine/hybrid scores retained.
 
     ``include_global`` only applies when ``project_id`` is set (ChunkStore
-    semantics matching Hub source listing).
+    semantics matching Hub source listing). When ``alpha`` is omitted, uses
+    ``settings.kb_hybrid_alpha`` so the retrieval probe and recommend path share
+    one knobs.
     """
+    if alpha is None:
+        alpha = float(get_settings().kb_hybrid_alpha)
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
@@ -165,13 +169,15 @@ def hybrid_search_scored(
 def hybrid_search(
     query: str,
     top_k: int = 10,
-    alpha: float = 0.3,
+    alpha: float | None = None,
 ) -> list[DocumentChunkResponse]:
     """BM25 + vector hybrid retrieval over the persistent KB chunk store.
 
     Existing callers keep the unscored DocumentChunkResponse list over the
-    global corpus (no project filter).
+    global corpus (no project filter). ``alpha`` defaults to ``kb_hybrid_alpha``.
     """
+    if alpha is None:
+        alpha = float(get_settings().kb_hybrid_alpha)
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
