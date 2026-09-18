@@ -53,6 +53,11 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
         draft.settingsEnvFocusAttr = null;
       }),
 
+    bumpEnvFlagsRevision: () =>
+      set((draft) => {
+        draft.envFlagsRevision = (draft.envFlagsRevision || 0) + 1;
+      }),
+
     setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") =>
       set((draft) => {
         draft.settingsTab = tab;
@@ -135,6 +140,7 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     | "toggleSettings"
     | "openSettings"
     | "clearSettingsEnvFocus"
+    | "bumpEnvFlagsRevision"
     | "setSettingsTab"
     | "toggleArtifactDrawer"
     | "openArtifact"

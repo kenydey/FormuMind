@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { useStore } from "../store";
@@ -34,8 +35,10 @@ describe("EnvFlagsPanel focus anchor", () => {
   beforeEach(() => {
     useStore.setState({
       settingsEnvFocusAttr: "wiki_dossier_report_enabled",
+      envFlagsRevision: 0,
     } as never);
     vi.mocked(api.getEnvFlags).mockReset();
+    vi.mocked(api.postEnvFlags).mockReset();
     vi.mocked(api.getEnvFlags).mockResolvedValue({
       flags: [
         flag("gpu_enabled", false, "retrieval", "检索"),
@@ -55,5 +58,29 @@ describe("EnvFlagsPanel focus anchor", () => {
     await waitFor(() => {
       expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
     });
+  });
+
+  it("bumps envFlagsRevision after successful save", async () => {
+    const user = userEvent.setup();
+    const savedFlags = [
+      flag("wiki_enabled", true),
+      flag("wiki_project_dossier_enabled", true),
+      flag("wiki_dossier_report_enabled", true),
+    ];
+    vi.mocked(api.postEnvFlags).mockResolvedValue({
+      updated: ["wiki_dossier_report_enabled"],
+      rejected: [],
+      flags: savedFlags,
+    });
+    render(<EnvFlagsPanel />);
+    const reportRow = await screen.findByTestId("env-flag-wiki_dossier_report_enabled");
+    const trueBtn = reportRow.querySelectorAll("button")[0];
+    expect(trueBtn?.textContent).toMatch(/True/);
+    await user.click(trueBtn!);
+    await user.click(screen.getByRole("button", { name: /保存并生效/ }));
+    await waitFor(() => {
+      expect(api.postEnvFlags).toHaveBeenCalled();
+    });
+    expect(useStore.getState().envFlagsRevision).toBe(1);
   });
 });

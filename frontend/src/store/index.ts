@@ -97,6 +97,7 @@ export const useStore = create<AppState>()(
       settingsOpen: false,
       settingsTab: "llm",
       settingsEnvFocusAttr: null as string | null,
+      envFlagsRevision: 0,
       loopReport: null,
       rmseHistory: [],
       intentBusy: false,

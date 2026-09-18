@@ -75,6 +75,7 @@ function FlagToggle({
 export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number }) {
   const focusAttr = useStore((s) => s.settingsEnvFocusAttr);
   const clearSettingsEnvFocus = useStore((s) => s.clearSettingsEnvFocus);
+  const bumpEnvFlagsRevision = useStore((s) => s.bumpEnvFlagsRevision);
   const [flags, setFlags] = useState<EnvFlag[]>([]);
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
@@ -136,6 +137,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
       setDrafts(Object.fromEntries((r.flags ?? []).map((f) => [f.attr, f.value])));
       setSavedMsg(`已更新 ${r.updated.length} 项 — 写入 .env 并即时生效`);
       clearSettingsEnvFocus();
+      bumpEnvFlagsRevision();
     } catch (e) {
       setError(formatApiError(e));
     } finally {

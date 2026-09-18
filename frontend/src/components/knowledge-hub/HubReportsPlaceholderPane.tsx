@@ -91,6 +91,7 @@ function triggerDownload(blob: Blob, filename: string) {
 export default function HubReportsPlaceholderPane() {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
   const openSettings = useStore((s) => s.openSettings);
+  const envFlagsRevision = useStore((s) => s.envFlagsRevision);
   const [picked, setPicked] = useState<(typeof TEMPLATES)[number] | null>(null);
   const [prompt, setPrompt] = useState("");
   const [useLlm, setUseLlm] = useState(false);
@@ -132,6 +133,11 @@ export default function HubReportsPlaceholderPane() {
         }
         setFlagMap(next);
         setFlagsError(null);
+        // Drop stale flag-gate errors once the path is open.
+        const allOn = REPORT_FLAG_ATTRS.every((k) => next[k] === true);
+        if (allOn) {
+          setError((prev) => (prev && isFlagGateError(prev) ? null : prev));
+        }
       })
       .catch((e) => {
         if (!cancelled) {
@@ -142,7 +148,7 @@ export default function HubReportsPlaceholderPane() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [envFlagsRevision]);
 
   const flagsReady = flagMap != null;
   const flagsMissing = useMemo(() => {
