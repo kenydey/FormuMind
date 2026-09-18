@@ -34,17 +34,29 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     toggleSettings: () =>
       set((draft) => {
         draft.settingsOpen = !draft.settingsOpen;
+        if (!draft.settingsOpen) draft.settingsEnvFocusAttr = null;
       }),
 
-    openSettings: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" = "llm") =>
+    openSettings: (
+      tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" = "llm",
+      opts?: { focusEnvAttr?: string | null },
+    ) =>
       set((draft) => {
         draft.settingsOpen = true;
         draft.settingsTab = tab;
+        draft.settingsEnvFocusAttr =
+          tab === "env" && opts?.focusEnvAttr ? String(opts.focusEnvAttr) : null;
+      }),
+
+    clearSettingsEnvFocus: () =>
+      set((draft) => {
+        draft.settingsEnvFocusAttr = null;
       }),
 
     setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") =>
       set((draft) => {
         draft.settingsTab = tab;
+        if (tab !== "env") draft.settingsEnvFocusAttr = null;
       }),
 
     toggleArtifactDrawer: () =>
@@ -122,6 +134,7 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     | "setLlmConfig"
     | "toggleSettings"
     | "openSettings"
+    | "clearSettingsEnvFocus"
     | "setSettingsTab"
     | "toggleArtifactDrawer"
     | "openArtifact"

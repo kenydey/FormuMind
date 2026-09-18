@@ -153,7 +153,9 @@ export default function HubReportsPlaceholderPane() {
   const showFlagCta = (flagsReady && flagsMissing.length > 0) || (!!error && isFlagGateError(error));
 
   const goEnvSettings = () => {
-    openSettings("env");
+    const focus =
+      (flagsMissing[0] as string | undefined) || "wiki_dossier_report_enabled";
+    openSettings("env", { focusEnvAttr: focus });
   };
 
   const onGenerate = async () => {

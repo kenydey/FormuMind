@@ -179,6 +179,8 @@ export interface AppState {
   llmConfig: LLMConfig;
   settingsOpen: boolean;
   settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org";
+  /** When opening Settings → 环境变量, scroll/highlight this EnvFlag.attr (e.g. wiki_dossier_report_enabled). */
+  settingsEnvFocusAttr: string | null;
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -267,7 +269,11 @@ export interface AppState {
   setPreferMaterialsCatalog: (v: boolean) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
-  openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
+  openSettings: (
+    tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org",
+    opts?: { focusEnvAttr?: string | null },
+  ) => void;
+  clearSettingsEnvFocus: () => void;
   setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
   toggleArtifactDrawer: () => void;
   openArtifact: (id: import("../artifacts/projectArtifacts").ArtifactKind) => void;

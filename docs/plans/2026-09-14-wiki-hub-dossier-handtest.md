@@ -72,7 +72,7 @@ cd frontend && npm test -- --run \
 |---|------|------|
 | R1 | Hub → **Reports** | 文案标明依赖 DossierPack / `wiki_dossier_report_enabled` |
 | R2 | 选 **briefing** → 生成 | 写入 `reports/project-*-briefing.md`；预览含溯源/`source_ids` |
-| R2b | 看 Reports 顶栏 **灰度旗标** | Wiki/卷宗/Report ✓ 或 ×；未开时「去设置开启」→ Settings · 环境变量（见 `2026-09-18-hub-reports-flag-observability.md`） |
+| R2b | 看 Reports 顶栏 **灰度旗标** | Wiki/卷宗/Report ✓ 或 ×；未开时「去设置开启」→ Settings · 环境变量并**锚到**缺失旗标行（见 `2026-09-18-hub-reports-flag-observability.md` · `2026-09-18-envflags-focus-anchor.md`） |
 | R3 | 检查 disclaimer | 明确 **`draft_not_claims`** / 不得作 Claims |
 | R4 | 可选：feasibility / deck；导出 docx/pdf/pptx | 软依赖缺失时友好提示（按钮禁用 / 501） |
 | R5 | **灰度必测**：briefing → **导出 MD** | 必成功（无软依赖）；下载 `.md`；disclaimer=`draft_not_claims`（见 `2026-09-18-wiki-report-grayscale-smoke.md`） |

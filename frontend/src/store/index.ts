@@ -96,6 +96,7 @@ export const useStore = create<AppState>()(
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },
       settingsOpen: false,
       settingsTab: "llm",
+      settingsEnvFocusAttr: null as string | null,
       loopReport: null,
       rmseHistory: [],
       intentBusy: false,
