@@ -1,9 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, formatApiError } from "../../api";
 import { useStore } from "../../store";
 import { saveTextToProjectShelf, shelfFilename } from "../../utils/export";
 import WikiMarkdownReader from "../WikiMarkdownReader";
+
+/** Grayscale keys required for Hub dossier → Report generate/export. */
+const REPORT_FLAG_ATTRS = [
+  "wiki_enabled",
+  "wiki_project_dossier_enabled",
+  "wiki_dossier_report_enabled",
+] as const;
+
+type ReportFlagAttr = (typeof REPORT_FLAG_ATTRS)[number];
+
+const REPORT_FLAG_LABEL: Record<ReportFlagAttr, string> = {
+  wiki_enabled: "Wiki",
+  wiki_project_dossier_enabled: "卷宗",
+  wiki_dossier_report_enabled: "Report",
+};
+
+function isFlagGateError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("wiki_dossier_report_enabled") ||
+    m.includes("wiki_project_dossier_enabled") ||
+    m.includes("wiki_enabled") ||
+    (m.includes("enabled") && m.includes("false"))
+  );
+}
 
 const TEMPLATES: {
   id: string;
@@ -65,6 +90,7 @@ function triggerDownload(blob: Blob, filename: string) {
 /** Report generation + export from DossierPack (P5 / P5.1). */
 export default function HubReportsPlaceholderPane() {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
+  const openSettings = useStore((s) => s.openSettings);
   const [picked, setPicked] = useState<(typeof TEMPLATES)[number] | null>(null);
   const [prompt, setPrompt] = useState("");
   const [useLlm, setUseLlm] = useState(false);
@@ -72,6 +98,10 @@ export default function HubReportsPlaceholderPane() {
   const [error, setError] = useState<string | null>(null);
   const [shelfMsg, setShelfMsg] = useState<string | null>(null);
   const [exportCaps, setExportCaps] = useState<ExportCaps | null>(null);
+  const [flagMap, setFlagMap] = useState<Partial<Record<ReportFlagAttr, boolean>> | null>(
+    null,
+  );
+  const [flagsError, setFlagsError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     title: string;
     path: string;
@@ -90,10 +120,41 @@ export default function HubReportsPlaceholderPane() {
       .catch(() => {
         if (!cancelled) setExportCaps({ md: true });
       });
+    void api
+      .getEnvFlags()
+      .then((body) => {
+        if (cancelled) return;
+        const next: Partial<Record<ReportFlagAttr, boolean>> = {};
+        for (const f of body.flags ?? []) {
+          if ((REPORT_FLAG_ATTRS as readonly string[]).includes(f.attr)) {
+            next[f.attr as ReportFlagAttr] = Boolean(f.value);
+          }
+        }
+        setFlagMap(next);
+        setFlagsError(null);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setFlagMap(null);
+          setFlagsError(formatApiError(e));
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const flagsReady = flagMap != null;
+  const flagsMissing = useMemo(() => {
+    if (!flagsReady) return [] as ReportFlagAttr[];
+    return REPORT_FLAG_ATTRS.filter((k) => flagMap[k] !== true);
+  }, [flagMap, flagsReady]);
+  const reportPathReady = flagsReady && flagsMissing.length === 0;
+  const showFlagCta = (flagsReady && flagsMissing.length > 0) || (!!error && isFlagGateError(error));
+
+  const goEnvSettings = () => {
+    openSettings("env");
+  };
 
   const onGenerate = async () => {
     if (!picked) return;
@@ -184,10 +245,61 @@ export default function HubReportsPlaceholderPane() {
     <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto" data-testid="hub-reports-pane">
       <p className="text-[11px] text-slate-500">
         文档生成基于<strong className="text-slate-400 font-normal"> 项目卷宗 DossierPack </strong>
-        。需开启 <code className="mx-1">wiki_dossier_report_enabled</code>。
+        。灰度需开启 Wiki / 卷宗 / Report 旗标（见下方状态）。
         支持导出 Markdown / Word / PDF；Slide Deck 可导出 PPTX。
         也可从顶栏「产物」抽屉打开本页。
       </p>
+      <div
+        className="rounded-lg border border-edge/70 bg-ink/40 px-3 py-2 space-y-1.5"
+        data-testid="hub-reports-flags"
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+          <span className="text-slate-500">灰度旗标</span>
+          {REPORT_FLAG_ATTRS.map((attr) => {
+            const on = flagMap?.[attr];
+            const mark = !flagsReady ? "?" : on ? "✓" : "×";
+            const tone = !flagsReady
+              ? "text-slate-500"
+              : on
+                ? "text-emerald-300"
+                : "text-amber-300";
+            return (
+              <span key={attr} className={tone} data-testid={`hub-reports-flag-${attr}`}>
+                {REPORT_FLAG_LABEL[attr]}
+                {mark}
+                <code className="ml-1 text-[9px] text-slate-600">{attr}</code>
+              </span>
+            );
+          })}
+        </div>
+        {flagsError && (
+          <p className="text-[10px] text-rose-300" data-testid="hub-reports-flags-error">
+            无法读取旗标：{flagsError}
+          </p>
+        )}
+        {flagsReady && reportPathReady && (
+          <p className="text-[10px] text-emerald-400/90" data-testid="hub-reports-flags-ready">
+            卷宗 Report 路径已开；可生成 / 导出 MD。
+          </p>
+        )}
+        {showFlagCta && (
+          <div className="flex flex-wrap items-center gap-2" data-testid="hub-reports-flags-cta">
+            <p className="text-[10px] text-amber-200/90">
+              {flagsReady && flagsMissing.length > 0
+                ? `未开启：${flagsMissing.map((k) => REPORT_FLAG_LABEL[k]).join(" · ")}。灰度请在设置中打开。`
+                : "当前错误疑似旗标关闭（409）。请到设置 → 环境变量开启相关项。"}
+            </p>
+            <button
+              type="button"
+              className="text-[10px] px-2 py-1 rounded border border-accent/50 text-accent hover:bg-accent/10"
+              data-testid="hub-reports-open-env-settings"
+              onClick={goEnvSettings}
+            >
+              去设置开启
+            </button>
+          </div>
+        )}
+      </div>
       <p className="text-[11px] text-slate-500" data-testid="hub-reports-dossier-hint">
         {activeProjectId
           ? `当前活动项目：${activeProjectId} · 生成前会自动 ensure 卷宗（若旗标已开）。`
@@ -254,7 +366,22 @@ export default function HubReportsPlaceholderPane() {
             LLM 执行摘要润色（需 wiki_dossier_llm_narrative）
           </label>
           {error && (
-            <div className="text-xs text-rose-300 border border-rose-500/40 rounded px-2 py-1">{error}</div>
+            <div
+              className="text-xs text-rose-300 border border-rose-500/40 rounded px-2 py-1 space-y-1"
+              data-testid="hub-reports-error"
+            >
+              <div>{error}</div>
+              {isFlagGateError(error) && (
+                <button
+                  type="button"
+                  className="text-[10px] px-2 py-0.5 rounded border border-accent/50 text-accent"
+                  data-testid="hub-reports-error-open-env"
+                  onClick={goEnvSettings}
+                >
+                  去设置开启旗标
+                </button>
+              )}
+            </div>
           )}
           <div className="flex flex-wrap gap-2">
             <button
