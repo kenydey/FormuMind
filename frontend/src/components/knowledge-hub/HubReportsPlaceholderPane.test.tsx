@@ -49,6 +49,7 @@ describe("HubReportsPlaceholderPane", () => {
       activeProjectId: "proj-demo",
       settingsOpen: false,
       settingsTab: "llm",
+      settingsEnvFocusAttr: null,
     } as never);
     vi.mocked(api.generateWikiReport).mockReset();
     vi.mocked(api.exportWikiReport).mockReset();
@@ -104,6 +105,8 @@ describe("HubReportsPlaceholderPane", () => {
     const s = useStore.getState();
     expect(s.settingsOpen).toBe(true);
     expect(s.settingsTab).toBe("env");
+    // First missing among Wiki/卷宗/Report — dossier is first false in this mock.
+    expect(s.settingsEnvFocusAttr).toBe("wiki_project_dossier_enabled");
   });
 
   it("enables generate and export actions when a template is selected", async () => {
@@ -198,5 +201,6 @@ describe("HubReportsPlaceholderPane", () => {
     await user.click(screen.getByTestId("hub-reports-error-open-env"));
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useStore.getState().settingsTab).toBe("env");
+    expect(useStore.getState().settingsEnvFocusAttr).toBe("wiki_dossier_report_enabled");
   });
 });
