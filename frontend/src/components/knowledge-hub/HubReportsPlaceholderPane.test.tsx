@@ -99,4 +99,35 @@ describe("HubReportsPlaceholderPane", () => {
     });
     expect(screen.getByTestId("hub-reports-shelf-msg").textContent).toMatch(/已保存到货架/);
   });
+
+  it("export MD calls exportWikiReport with format md", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.exportWikiReport).mockReset();
+    vi.mocked(api.exportWikiReport).mockResolvedValue({
+      blob: new Blob(["# Briefing\n"], { type: "text/markdown" }),
+      filename: "project-proj-demo-briefing.md",
+    });
+    const createObjectURL = vi.fn(() => "blob:mock-md");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+    render(<HubReportsPlaceholderPane />);
+    await user.click(screen.getByRole("button", { name: /文献简报/ }));
+    await user.click(screen.getByTestId("hub-reports-export-md"));
+    await waitFor(() => {
+      expect(api.exportWikiReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_id: "proj-demo",
+          template: "briefing",
+          format: "md",
+          ensure_dossier: true,
+        }),
+      );
+    });
+    expect(createObjectURL).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
 });

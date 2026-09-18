@@ -98,6 +98,25 @@ try {
         throw new Error(`expected draft_not_claims, got ${d}`);
       }
       await shot("hub-dossier-report-result");
+
+      // Grayscale smoke: Hub 生成 → 导出 MD（md 无软依赖）
+      const exportMd = page.getByTestId("hub-reports-export-md");
+      if (await exportMd.isDisabled()) {
+        throw new Error("export MD disabled after successful generate");
+      }
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 20000 }),
+        exportMd.click(),
+      ]);
+      const suggested = download.suggestedFilename();
+      console.log("export md filename:", suggested);
+      if (!String(suggested || "").toLowerCase().endsWith(".md")) {
+        throw new Error(`expected .md download, got ${suggested}`);
+      }
+      const savePath = `${OUT}/hub-dossier-report-export.md`;
+      await download.saveAs(savePath);
+      console.log("saved", savePath);
+      await shot("hub-dossier-report-export-md");
     } else {
       const err = page.locator(".text-rose-300").first();
       console.log(

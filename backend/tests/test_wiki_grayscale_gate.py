@@ -140,6 +140,30 @@ def test_grayscale_dossier_report_and_claims_doe(env):
     rpath = body.get("path") or ""
     assert rpath.startswith("reports/")
 
+    # Hub 灰度冒烟硬路径：生成 → 导出 MD（md 无软依赖，必须 200）
+    exported = client.post(
+        "/api/wiki/dossier/report/export",
+        json={
+            "project_id": pid,
+            "template": "briefing",
+            "format": "md",
+            "use_llm": False,
+            "ensure_dossier": True,
+        },
+    )
+    assert exported.status_code == 200, exported.text
+    assert len(exported.content) > 40
+    text = exported.content.decode("utf-8", errors="replace")
+    assert "#" in text or "简报" in text or "briefing" in text.lower()
+    assert "draft_not_claims" in (
+        exported.headers.get("X-FormuMind-Disclaimer")
+        or exported.headers.get("x-formumind-disclaimer")
+        or ""
+    )
+    cd = exported.headers.get("content-disposition") or ""
+    assert "attachment" in cd.lower()
+    assert ".md" in cd.lower()
+
     lint = client.post("/api/wiki/lint/run", json={"limit": 100, "detect_orphan": True})
     assert lint.status_code == 200
     assert lint.json().get("ok") is True
