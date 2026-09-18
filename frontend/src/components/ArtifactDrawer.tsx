@@ -15,6 +15,7 @@ const KIND_ICON: Record<ArtifactKind, string> = {
   optimization: "📈",
   deep_report: "📑",
   loop_report: "🔄",
+  wiki_report: "📗",
 };
 
 function ArtifactCard({
@@ -55,7 +56,9 @@ function ArtifactCard({
         </span>
       </div>
       <p className="text-[11px] text-slate-500 ml-7 truncate">{artifact.subtitle}</p>
-      {artifact.modal ? (
+      {artifact.modal === "knowledge" ? (
+        <p className="text-[10px] text-slate-600 ml-7 mt-1">点击打开知识库 · 文档生成</p>
+      ) : artifact.modal ? (
         <p className="text-[10px] text-slate-600 ml-7 mt-1">点击打开工作区 Modal</p>
       ) : (
         <p className="text-[10px] text-slate-600 ml-7 mt-1">见研究对话与左栏资料</p>
@@ -254,6 +257,7 @@ export default function ArtifactDrawer() {
         deepReport,
         deepResearchBusy,
         loopReport,
+        activeProjectId,
       }),
     [
       leaderboard,
@@ -264,6 +268,7 @@ export default function ArtifactDrawer() {
       deepReport,
       deepResearchBusy,
       loopReport,
+      activeProjectId,
     ],
   );
 

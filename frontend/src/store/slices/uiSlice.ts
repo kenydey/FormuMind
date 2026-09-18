@@ -58,6 +58,13 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
         draft.activeArtifactId = id;
         draft.artifactDrawerOpen = true;
         draft.historyOpen = false;
+        // Dossier Report lives in Knowledge Hub → Reports tab (P5), not a
+        // dedicated ActionsPanel modal.
+        if (id === "wiki_report") {
+          draft.knowledgeHubTab = "reports";
+          draft.openModal = "knowledge";
+          return;
+        }
         const modal = modalForArtifact(id);
         if (modal) draft.openModal = modal;
       }),

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, formatApiError } from "../../api";
 import { useStore } from "../../store";
+import { saveTextToProjectShelf, shelfFilename } from "../../utils/export";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 
 const TEMPLATES: {
@@ -42,6 +43,14 @@ const TEMPLATES: {
   },
 ];
 
+type ExportCaps = {
+  md?: boolean;
+  docx?: boolean;
+  pdf?: boolean;
+  pptx?: boolean;
+  cjk_font?: string | null;
+};
+
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -61,6 +70,8 @@ export default function HubReportsPlaceholderPane() {
   const [useLlm, setUseLlm] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shelfMsg, setShelfMsg] = useState<string | null>(null);
+  const [exportCaps, setExportCaps] = useState<ExportCaps | null>(null);
   const [result, setResult] = useState<{
     title: string;
     path: string;
@@ -68,6 +79,21 @@ export default function HubReportsPlaceholderPane() {
     disclaimer?: string;
     template: string;
   } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listWikiReportTemplates()
+      .then((body) => {
+        if (!cancelled) setExportCaps(body.export ?? { md: true });
+      })
+      .catch(() => {
+        if (!cancelled) setExportCaps({ md: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onGenerate = async () => {
     if (!picked) return;
@@ -77,6 +103,7 @@ export default function HubReportsPlaceholderPane() {
     }
     setBusy("generate");
     setError(null);
+    setShelfMsg(null);
     try {
       const out = await api.generateWikiReport({
         project_id: activeProjectId,
@@ -105,6 +132,10 @@ export default function HubReportsPlaceholderPane() {
 
   const onExport = async (format: "md" | "docx" | "pdf" | "pptx") => {
     if (!activeProjectId || !picked) return;
+    if (exportCaps && exportCaps[format] === false) {
+      setError(`当前环境未安装 ${format.toUpperCase()} 导出依赖`);
+      return;
+    }
     setBusy(`export-${format}`);
     setError(null);
     try {
@@ -124,18 +155,52 @@ export default function HubReportsPlaceholderPane() {
     }
   };
 
+  const onSaveShelf = async () => {
+    if (!activeProjectId || !result?.markdown) return;
+    setBusy("shelf");
+    setShelfMsg(null);
+    setError(null);
+    try {
+      const name = shelfFilename(
+        `wiki_report_${result.template || "briefing"}`,
+        "md",
+      );
+      await saveTextToProjectShelf(activeProjectId, name, result.markdown);
+      setShelfMsg(`已保存到货架：${name}`);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const capLabel = (fmt: "md" | "docx" | "pdf" | "pptx") => {
+    if (!exportCaps) return fmt.toUpperCase();
+    if (exportCaps[fmt] === false) return `${fmt.toUpperCase()}(不可用)`;
+    return fmt.toUpperCase();
+  };
+
   return (
     <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto" data-testid="hub-reports-pane">
       <p className="text-[11px] text-slate-500">
         文档生成基于<strong className="text-slate-400 font-normal"> 项目卷宗 DossierPack </strong>
         。需开启 <code className="mx-1">wiki_dossier_report_enabled</code>。
         支持导出 Markdown / Word / PDF；Slide Deck 可导出 PPTX。
+        也可从顶栏「产物」抽屉打开本页。
       </p>
       <p className="text-[11px] text-slate-500" data-testid="hub-reports-dossier-hint">
         {activeProjectId
           ? `当前活动项目：${activeProjectId} · 生成前会自动 ensure 卷宗（若旗标已开）。`
           : "尚未选择活动项目；生成前需绑定 project_id 卷宗。"}
       </p>
+      {exportCaps && (
+        <p className="text-[10px] text-slate-600" data-testid="hub-reports-export-caps">
+          导出能力：MD{exportCaps.md === false ? "×" : "✓"} · DOCX
+          {exportCaps.docx ? "✓" : "×"} · PDF{exportCaps.pdf ? "✓" : "×"} · PPTX
+          {exportCaps.pptx ? "✓" : "×"}
+          {exportCaps.cjk_font ? ` · CJK ${exportCaps.cjk_font.split("/").pop()}` : ""}
+        </p>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {TEMPLATES.map((t) => (
           <button
@@ -144,6 +209,7 @@ export default function HubReportsPlaceholderPane() {
             onClick={() => {
               setPicked(t);
               setResult(null);
+              setShelfMsg(null);
             }}
             className={`text-left border rounded-lg px-3 py-2.5 transition-colors ${
               picked?.id === t.id
@@ -200,19 +266,28 @@ export default function HubReportsPlaceholderPane() {
             >
               {busy === "generate" ? "生成中…" : "基于卷宗生成"}
             </button>
-            {(["md", "docx", "pdf", "pptx"] as const).map((fmt) => (
-              <button
-                key={fmt}
-                type="button"
-                disabled={!!busy || !activeProjectId}
-                className="px-2 py-1.5 rounded border border-edge text-xs text-slate-200 disabled:opacity-50"
-                data-testid={`hub-reports-export-${fmt}`}
-                title={fmt === "pptx" && picked.id !== "deck" ? "任意模板也可导出 PPTX（按标题分页）" : undefined}
-                onClick={() => void onExport(fmt)}
-              >
-                {busy === `export-${fmt}` ? `${fmt}…` : `导出 ${fmt.toUpperCase()}`}
-              </button>
-            ))}
+            {(["md", "docx", "pdf", "pptx"] as const).map((fmt) => {
+              const unavailable = exportCaps?.[fmt] === false;
+              return (
+                <button
+                  key={fmt}
+                  type="button"
+                  disabled={!!busy || !activeProjectId || unavailable}
+                  className="px-2 py-1.5 rounded border border-edge text-xs text-slate-200 disabled:opacity-50"
+                  data-testid={`hub-reports-export-${fmt}`}
+                  title={
+                    unavailable
+                      ? `未安装 ${fmt} 导出依赖`
+                      : fmt === "pptx" && picked.id !== "deck"
+                        ? "任意模板也可导出 PPTX（按标题分页）"
+                        : undefined
+                  }
+                  onClick={() => void onExport(fmt)}
+                >
+                  {busy === `export-${fmt}` ? `${fmt}…` : `导出 ${capLabel(fmt)}`}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -227,13 +302,29 @@ export default function HubReportsPlaceholderPane() {
               <div className="text-sm text-slate-100">{result.title}</div>
               <code className="text-[10px] text-slate-500">{result.path}</code>
             </div>
-            <span
-              className="text-[10px] text-amber-300 border border-amber-500/40 rounded px-1"
-              data-testid="hub-reports-disclaimer"
-            >
-              {result.disclaimer || "draft_not_claims"}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!!busy || !activeProjectId}
+                data-testid="hub-reports-save-shelf"
+                onClick={() => void onSaveShelf()}
+                className="text-[10px] px-2 py-1 rounded border border-accent/40 text-accent disabled:opacity-40"
+              >
+                {busy === "shelf" ? "保存中…" : "保存到货架"}
+              </button>
+              <span
+                className="text-[10px] text-amber-300 border border-amber-500/40 rounded px-1"
+                data-testid="hub-reports-disclaimer"
+              >
+                {result.disclaimer || "draft_not_claims"}
+              </span>
+            </div>
           </div>
+          {shelfMsg && (
+            <p className="text-[10px] text-teal-300" data-testid="hub-reports-shelf-msg">
+              {shelfMsg}
+            </p>
+          )}
           <div className="max-h-[40vh] overflow-y-auto border border-edge/40 rounded p-2 bg-ink/40">
             <WikiMarkdownReader
               page={{

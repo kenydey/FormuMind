@@ -2455,9 +2455,16 @@ export const api = {
     );
   },
   listWikiReportTemplates: () =>
-    get<{ templates: { id: string; title: string; blurb: string; slices: string }[] }>(
-      "/api/wiki/reports/templates",
-    ),
+    get<{
+      templates: { id: string; title: string; blurb: string; slices: string }[];
+      export?: {
+        md?: boolean;
+        docx?: boolean;
+        pdf?: boolean;
+        pptx?: boolean;
+        cjk_font?: string | null;
+      };
+    }>("/api/wiki/reports/templates"),
   generateWikiReport: (body: {
     project_id: string;
     template: string;
