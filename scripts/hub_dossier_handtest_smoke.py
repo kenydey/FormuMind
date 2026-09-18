@@ -187,7 +187,7 @@ def main() -> int:
             f"disclaimer={disclaimer!r}",
         )
 
-    # Soft export probe (may skip if optional deps missing)
+    # MD export is always available (no optional deps) — hard check for grayscale smoke.
     code, body = req(
         "POST",
         "/api/wiki/dossier/report/export",
@@ -196,19 +196,26 @@ def main() -> int:
             "template": "briefing",
             "format": "md",
             "ensure_dossier": True,
+            "use_llm": False,
         },
         timeout=90,
     )
-    if code == 200:
-        check("report export md", True)
-    elif code in (403, 404, 409):
-        check("report export md (optional)", False, f"status={code} (flag/deps)")
-    else:
-        # 501 / 400 when soft deps missing is acceptable for smoke
+    if code in (403, 404, 409):
         check(
-            "report export md (soft)",
-            code in (200, 400, 501, 422),
-            f"status={code} body={str(body)[:160]}",
+            "report export md (flags)",
+            False,
+            f"status={code} — set FORMUMIND_WIKI_DOSSIER_REPORT_ENABLED=true",
+        )
+    elif code != 200:
+        check("report export md", False, f"status={code} body={str(body)[:160]}")
+    else:
+        raw = body if isinstance(body, (bytes, bytearray)) else str(body).encode()
+        check("report export md bytes", len(raw) > 40, f"size={len(raw)}")
+        text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(body)
+        check(
+            "report export md content",
+            "#" in text or "简报" in text or "briefing" in text.lower(),
+            text[:120],
         )
 
     print("\n── Hub UI checklist (manual) ──")

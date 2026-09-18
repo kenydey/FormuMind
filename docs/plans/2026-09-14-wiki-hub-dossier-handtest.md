@@ -73,7 +73,8 @@ cd frontend && npm test -- --run \
 | R1 | Hub → **Reports** | 文案标明依赖 DossierPack / `wiki_dossier_report_enabled` |
 | R2 | 选 **briefing** → 生成 | 写入 `reports/project-*-briefing.md`；预览含溯源/`source_ids` |
 | R3 | 检查 disclaimer | 明确 **`draft_not_claims`** / 不得作 Claims |
-| R4 | 可选：feasibility / deck；导出 md | 导出成功或软依赖缺失时友好提示 |
+| R4 | 可选：feasibility / deck；导出 docx/pdf/pptx | 软依赖缺失时友好提示（按钮禁用 / 501） |
+| R5 | **灰度必测**：briefing → **导出 MD** | 必成功（无软依赖）；下载 `.md`；disclaimer=`draft_not_claims`（见 `2026-09-18-wiki-report-grayscale-smoke.md`） |
 
 ---
 
@@ -104,10 +105,10 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 
 ## 5. 通过标准
 
-- [ ] API smoke 脚本全绿（或明确标出未开旗标；无活栈时以 grayscale pytest 代替）
-- [ ] Hub W1–W7、R1–R3 手测通过（Reports 页徽标为「卷宗」而非「预留」）
+- [ ] API smoke 脚本全绿（或明确标出未开旗标；无活栈时以 grayscale pytest 代替）；**MD 导出必过**
+- [ ] Hub W1–W7、R1–R3、**R5 导出 MD** 手测通过（Reports 页徽标为「卷宗」而非「预留」）
 - [ ] C1–C3 边界无破窗
-- [x] `test_wiki_grayscale_gate.py`：开旗标 dossier/report + L2 bounds 不进 DOE + lint actions
+- [x] `test_wiki_grayscale_gate.py`：开旗标 dossier/report + L2 bounds 不进 DOE + lint actions + **generate→export MD**
 - [x] `test_wiki_dossier_claims_doe_regression.py` 全绿（CI / 本地 pytest）
 - [x] `test_wiki_optimize_dossier_hook.py`：optimize 完成通知 `optimize_completed`
 - [x] `test_wiki_attachment_s7.py`：附件 hydrate 进 S7/S5 + `attachment_uploaded` 钩子
