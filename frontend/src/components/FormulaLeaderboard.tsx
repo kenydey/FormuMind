@@ -550,9 +550,22 @@ export default function FormulaLeaderboard() {
     setSyncMsg(null);
     try {
       const r = await api.proposeMaterialsMany(materials, "formula");
-      setSyncMsg(
-        `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`,
-      );
+      const baseMsg = `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`;
+      const beforeN = useStore.getState().formulationValidateWarnings.length;
+      try {
+        const forms = useStore.getState().leaderboard;
+        const req = useStore.getState().requirement;
+        const res = await api.validateFormulations(forms, req);
+        const warnings = res.warnings ?? [];
+        useStore.setState({
+          leaderboard: res.formulations ?? forms,
+          formulationValidateWarnings: warnings,
+        });
+        useStore.getState().scheduleAutosave();
+        setSyncMsg(`${baseMsg} · 重校验 ${beforeN}→${warnings.length} 条`);
+      } catch {
+        setSyncMsg(`${baseMsg} · 重校验失败（告警未更新）`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setSyncMsg(`入库失败：${msg}`);
