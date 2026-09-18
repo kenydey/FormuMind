@@ -14,6 +14,7 @@ import {
   saveTextToProjectShelf,
   shelfFilename,
 } from "../utils/export";
+import { classifyValidateWarnings } from "../utils/validateWarningActions";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import VersionHistoryModal from "./VersionHistoryModal";
@@ -518,6 +519,7 @@ export default function FormulaLeaderboard() {
       formulationValidateWarnings: s.formulationValidateWarnings,
     }))
   );
+  const setOpenModal = useStore((s) => s.setOpenModal);
   const [viewMode, setViewMode] = useState<"cards" | "table" | "pareto" | "parallel">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const [showAiPrompt, setShowAiPrompt] = useState(false);
@@ -527,6 +529,38 @@ export default function FormulaLeaderboard() {
   const [saveBusyIndex, setSaveBusyIndex] = useState<number | null>(null);
   // AI 修改基准: null=leaderboard 级(默认 #1), 数字=仅以该卡为基准
   const [aiTargetIdx, setAiTargetIdx] = useState<number | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const warningActions = classifyValidateWarnings(formulationValidateWarnings);
+
+  async function syncIngredientsToMaterials() {
+    const materials = leaderboard.flatMap((f) =>
+      (f.ingredients ?? []).map((ing) => ({
+        name: ing.name,
+        role: ing.role || "",
+        cas_no: ing.cas_no || undefined,
+        smiles: ing.smiles || undefined,
+      }))
+    );
+    if (!materials.length) {
+      setSyncMsg("当前配方无组分可入库");
+      return;
+    }
+    setSyncBusy(true);
+    setSyncMsg(null);
+    try {
+      const r = await api.proposeMaterialsMany(materials, "formula");
+      setSyncMsg(
+        `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setSyncMsg(`入库失败：${msg}`);
+      useStore.setState({ error: msg });
+    } finally {
+      setSyncBusy(false);
+    }
+  }
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
   const doeBaseUid = requirement.active_formulation?.client_uid ?? null;
@@ -612,13 +646,49 @@ export default function FormulaLeaderboard() {
         <ListExportMenu forms={leaderboard} />
       </div>
       {formulationValidateWarnings.length > 0 && (
-        <div className="mb-3 text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2 space-y-1">
+        <div
+          className="mb-3 text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2 space-y-2"
+          data-testid="formula-validate-banner"
+        >
           <div className="font-medium text-amber-300">配方校验 / 目录补全提示</div>
           <ul className="list-disc list-inside text-[10px] text-amber-300/90 max-h-28 overflow-y-auto">
             {formulationValidateWarnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
           </ul>
+          {warningActions.hasCompliance && (
+            <p className="text-[10px] text-amber-200/80">
+              合规项（REACH / SVHC / RoHS）需人工确认，不会自动改配方。
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {warningActions.actions.includes("propose_missing") && (
+              <button
+                type="button"
+                disabled={syncBusy || leaderboard.length === 0}
+                data-testid="validate-banner-propose"
+                onClick={() => void syncIngredientsToMaterials()}
+                className="text-[10px] px-2 py-1 rounded border border-amber-400/50 text-amber-200 hover:bg-amber-500/10 disabled:opacity-40"
+              >
+                {syncBusy ? "入库中…" : "入库缺失组分"}
+              </button>
+            )}
+            {warningActions.actions.includes("open_materials") && (
+              <button
+                type="button"
+                data-testid="validate-banner-open-materials"
+                onClick={() => setOpenModal("materials")}
+                className="text-[10px] px-2 py-1 rounded border border-edge text-slate-300 hover:border-accent/40 hover:text-accent"
+              >
+                打开材料库
+              </button>
+            )}
+            {syncMsg && (
+              <span className="text-[10px] text-slate-400" data-testid="validate-banner-sync-msg">
+                {syncMsg}
+              </span>
+            )}
+          </div>
         </div>
       )}
       {leaderboard.length === 0 ? (
@@ -720,31 +790,20 @@ export default function FormulaLeaderboard() {
         </button>
         <button
           type="button"
-          disabled={leaderboard.length === 0}
+          disabled={leaderboard.length === 0 || syncBusy}
           data-testid="sync-ingredients-to-materials"
           title="将推荐配方中的组分提交到全局材料库（有 CAS/SMILES 自动入库，否则进待确认）"
-          onClick={() => {
-            const materials = leaderboard.flatMap((f) =>
-              (f.ingredients ?? []).map((ing) => ({
-                name: ing.name,
-                role: ing.role || "",
-                cas_no: ing.cas_no || undefined,
-                smiles: ing.smiles || undefined,
-              }))
-            );
-            if (!materials.length) return;
-            void api.proposeMaterialsMany(materials, "formula").then((r) => {
-              const msg = `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`;
-              window.alert(msg);
-            }).catch((e) => {
-              useStore.setState({ error: e instanceof Error ? e.message : String(e) });
-            });
-          }}
+          onClick={() => void syncIngredientsToMaterials()}
           className="border border-edge text-slate-300 rounded px-3 py-1.5 text-xs hover:border-accent/40 hover:text-accent disabled:opacity-40"
         >
-          入库缺失组分
+          {syncBusy ? "入库中…" : "入库缺失组分"}
         </button>
       </div>
+      {syncMsg && formulationValidateWarnings.length === 0 && (
+        <p className="mt-1 text-[10px] text-slate-500" data-testid="validate-footer-sync-msg">
+          {syncMsg}
+        </p>
+      )}
       {showAiPrompt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" data-testid="modal-ai-modify">
           <div className="bg-panel border border-edge rounded-xl p-6 w-[min(500px,92vw)]">
