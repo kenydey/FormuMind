@@ -76,9 +76,17 @@ describe("ArtifactDrawer", () => {
   });
 
   it("shows empty state when there are no artifacts", () => {
-    useStore.setState({ leaderboard: [] });
+    // wiki_report only appears with an active project — clear both.
+    useStore.setState({ leaderboard: [], activeProjectId: null });
     render(<ArtifactDrawer />);
     expect(screen.getByText(/暂无产物/)).toBeInTheDocument();
+  });
+
+  it("shows wiki_report entry when only an active project is set", () => {
+    useStore.setState({ leaderboard: [], activeProjectId: "proj-1" });
+    render(<ArtifactDrawer />);
+    expect(screen.getByTestId("artifact-card-wiki_report")).toBeInTheDocument();
+    expect(screen.queryByText(/暂无产物/)).not.toBeInTheDocument();
   });
 
   it("shows export shelf files on shelf tab", async () => {

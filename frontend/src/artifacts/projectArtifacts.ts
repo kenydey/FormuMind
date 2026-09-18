@@ -5,7 +5,8 @@ export type ArtifactKind =
   | "doe_plan"
   | "optimization"
   | "deep_report"
-  | "loop_report";
+  | "loop_report"
+  | "wiki_report";
 
 export type ProjectArtifact = {
   /** Stable id — one live singleton per kind. */
@@ -28,6 +29,8 @@ export type ArtifactSource = {
   deepReport: { citations?: unknown[] } | null;
   deepResearchBusy: boolean;
   loopReport: unknown | null;
+  /** When set, expose Hub dossier Report entry. */
+  activeProjectId?: string | null;
 };
 
 const MODAL_BY_KIND: Record<ArtifactKind, string | null> = {
@@ -36,6 +39,8 @@ const MODAL_BY_KIND: Record<ArtifactKind, string | null> = {
   optimization: "optimize",
   deep_report: null,
   loop_report: "loop",
+  // Opens Knowledge Hub (see openArtifact special-case for reports tab).
+  wiki_report: "knowledge",
 };
 
 export function modalForArtifact(id: ArtifactKind): string | null {
@@ -110,6 +115,18 @@ export function selectProjectArtifacts(s: ArtifactSource): ProjectArtifact[] {
       modal: MODAL_BY_KIND.loop_report,
       ready: Boolean(s.loopReport),
       busy: s.busy === "looping",
+    });
+  }
+
+  if (s.activeProjectId) {
+    out.push({
+      id: "wiki_report",
+      kind: "wiki_report",
+      title: "卷宗 Report",
+      subtitle: "Hub 文档生成 · 导出 MD/DOCX/PDF",
+      modal: MODAL_BY_KIND.wiki_report,
+      ready: true,
+      busy: false,
     });
   }
 

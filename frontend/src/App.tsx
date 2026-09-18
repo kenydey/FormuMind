@@ -55,6 +55,7 @@ export default function App() {
     deepReport,
     deepResearchBusy,
     loopReport,
+    activeProjectId,
   } = useStore(
     useShallow((s) => ({
       toggleHistory: s.toggleHistory,
@@ -71,6 +72,7 @@ export default function App() {
       deepReport: s.deepReport,
       deepResearchBusy: s.deepResearchBusy,
       loopReport: s.loopReport,
+      activeProjectId: s.activeProjectId,
     }))
   );
 
@@ -85,6 +87,7 @@ export default function App() {
         deepReport,
         deepResearchBusy,
         loopReport,
+        activeProjectId,
       }).length,
     [
       leaderboard,
@@ -95,6 +98,7 @@ export default function App() {
       deepReport,
       deepResearchBusy,
       loopReport,
+      activeProjectId,
     ],
   );
 

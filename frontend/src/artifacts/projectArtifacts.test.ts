@@ -10,6 +10,7 @@ const empty = {
   deepReport: null,
   deepResearchBusy: false,
   loopReport: null,
+  activeProjectId: null as string | null,
 };
 
 describe("selectProjectArtifacts", () => {
@@ -54,6 +55,20 @@ describe("selectProjectArtifacts", () => {
     expect(arts.find((a) => a.id === "doe_plan")?.subtitle).toBe("2 组实验");
     expect(arts.find((a) => a.id === "deep_report")?.modal).toBeNull();
   });
+
+  it("includes wiki_report entry when an active project is set", () => {
+    const arts = selectProjectArtifacts({
+      ...empty,
+      activeProjectId: "proj-1",
+    });
+    expect(arts).toHaveLength(1);
+    expect(arts[0]).toMatchObject({
+      id: "wiki_report",
+      title: "卷宗 Report",
+      modal: "knowledge",
+      ready: true,
+    });
+  });
 });
 
 describe("modalForArtifact", () => {
@@ -63,5 +78,6 @@ describe("modalForArtifact", () => {
     expect(modalForArtifact("optimization")).toBe("optimize");
     expect(modalForArtifact("loop_report")).toBe("loop");
     expect(modalForArtifact("deep_report")).toBeNull();
+    expect(modalForArtifact("wiki_report")).toBe("knowledge");
   });
 });
