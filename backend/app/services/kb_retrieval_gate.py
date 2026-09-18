@@ -11,21 +11,95 @@ dirty sources never become ``document_chunks`` — not only get filtered from
 top-k. Wiki exclusion applies at *retrieval* only; wiki must still be able to
 ingest.
 
+Process-local drop counters (``record_gate_drop`` / ``gate_drop_stats``) feed
+the Hub retrieval probe and ``GET /api/kb/stats`` so operators can see how
+often the gate fires. Not durable across restarts.
+
 LLM judge / SimHash / substrate checks are intentionally out of scope.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+import threading
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Literal
 from urllib.parse import urlparse
 
 from ..config import get_settings
 from .content_filter import DEFAULT_BLOCKED_DOMAINS, _WORD_RE
 
 logger = logging.getLogger(__name__)
+
+GateStage = Literal["retrieval", "ingest"]
+GateReason = Literal["blocked_domain", "garbage_snippet", "wiki_track"]
+
+_REASONS: tuple[GateReason, ...] = ("blocked_domain", "garbage_snippet", "wiki_track")
+_STAGES: tuple[GateStage, ...] = ("retrieval", "ingest")
+
+_lock = threading.Lock()
+_DROP_COUNTS: dict[str, int] = {
+    f"{stage}.{reason}": 0 for stage in _STAGES for reason in _REASONS
+}
+
+
+def _empty_stage_bucket() -> dict[str, int]:
+    return {r: 0 for r in _REASONS}
+
+
+def record_gate_drop(stage: GateStage, reason: str, n: int = 1) -> None:
+    """Increment process-local counters. Unknown reason/stage is ignored."""
+    if n <= 0:
+        return
+    if stage not in _STAGES:
+        return
+    if reason not in _REASONS:
+        return
+    # Ingest never applies wiki_track.
+    if stage == "ingest" and reason == "wiki_track":
+        return
+    key = f"{stage}.{reason}"
+    with _lock:
+        _DROP_COUNTS[key] = int(_DROP_COUNTS.get(key, 0)) + int(n)
+
+
+def gate_drop_stats() -> dict[str, dict[str, int]]:
+    """Lifetime counters nested as ``{retrieval|ingest: {reason: n}}``."""
+    with _lock:
+        snap = dict(_DROP_COUNTS)
+    out: dict[str, dict[str, int]] = {s: _empty_stage_bucket() for s in _STAGES}
+    for key, val in snap.items():
+        stage, _, reason = key.partition(".")
+        if stage in out and reason in out[stage]:
+            out[stage][reason] = int(val)
+    return out
+
+
+def gate_drop_snapshot() -> dict[str, int]:
+    """Flat ``stage.reason → n`` copy for before/after delta."""
+    with _lock:
+        return dict(_DROP_COUNTS)
+
+
+def gate_drop_delta(before: dict[str, int], after: dict[str, int] | None = None) -> dict[str, dict[str, int]]:
+    """Nested delta between two flat snapshots (default after = current)."""
+    end = after if after is not None else gate_drop_snapshot()
+    out: dict[str, dict[str, int]] = {s: _empty_stage_bucket() for s in _STAGES}
+    for key in _DROP_COUNTS:
+        stage, _, reason = key.partition(".")
+        if stage not in out or reason not in out[stage]:
+            continue
+        delta = int(end.get(key, 0)) - int(before.get(key, 0))
+        if delta > 0:
+            out[stage][reason] = delta
+    return out
+
+
+def reset_gate_drop_stats() -> None:
+    """Test helper — zero all counters."""
+    with _lock:
+        for key in list(_DROP_COUNTS):
+            _DROP_COUNTS[key] = 0
 
 
 @dataclass(frozen=True)
@@ -166,6 +240,7 @@ def gate_chunk_indices(
         reason = drop_reason_for_chunk(chunks[i], source_meta=meta, wiki_ids=wiki_ids)
         if reason:
             dropped += 1
+            record_gate_drop("retrieval", reason)
             continue
         kept.append(i)
         if len(kept) >= top_k:
@@ -211,6 +286,7 @@ def gate_ingest_rows(
 
     block = ingest_block_reason_for_source(source_id)
     if block:
+        record_gate_drop("ingest", block)
         logger.info(
             "kb ingest gate: source %s blocked (%s) — writing 0 chunks",
             source_id,
@@ -226,6 +302,8 @@ def gate_ingest_rows(
             garbage_n += 1
             continue
         kept.append(row)
+    if garbage_n:
+        record_gate_drop("ingest", "garbage_snippet", garbage_n)
     if garbage_n and not kept:
         logger.info(
             "kb ingest gate: source %s all %d chunk(s) garbage — writing 0",

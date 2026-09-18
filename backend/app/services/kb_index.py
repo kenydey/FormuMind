@@ -212,6 +212,9 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
         # Ingest-time quality gate (same rules as hybrid #111): blocked origin
         # never becomes document_chunks — clear any prior rows and stop early.
         if ingest_block_reason_for_source(source_id):
+            from .kb_retrieval_gate import record_gate_drop
+
+            record_gate_drop("ingest", "blocked_domain")
             get_chunk_store().replace_for_source(source_id, [])
             return 0
         with timing.span("chunk"):
@@ -876,11 +879,24 @@ def kb_stats() -> dict:
             "products_pending_structure": pending_products,
             "stale_chunks": stale,
             **_vector_health(total, embedded, stale),
+            "quality_gate_drops": _quality_gate_drops(),
         }
     except Exception as exc:
         return degrade_return(
             logger, exc, "kb stats failed",
             {"enabled": kb_enabled(), "sources": 0, "sources_by_kind": {},
              "chunks": 0, "embedded_chunks": 0, "embedding_available": False,
-             "products": 0},
+             "products": 0, "quality_gate_drops": _quality_gate_drops()},
         )
+
+
+def _quality_gate_drops() -> dict:
+    try:
+        from .kb_retrieval_gate import gate_drop_stats
+
+        return gate_drop_stats()
+    except Exception:
+        return {
+            "retrieval": {"blocked_domain": 0, "garbage_snippet": 0, "wiki_track": 0},
+            "ingest": {"blocked_domain": 0, "garbage_snippet": 0, "wiki_track": 0},
+        }

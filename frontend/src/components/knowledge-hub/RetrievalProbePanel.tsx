@@ -281,6 +281,27 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
               {result.params.rerank_applied ? "applied" : "off"}
             </span>
           </span>
+          {(() => {
+            const d = result.gate_drops?.retrieval;
+            if (!d) return null;
+            const n =
+              (d.blocked_domain || 0) + (d.garbage_snippet || 0) + (d.wiki_track || 0);
+            if (n <= 0) {
+              return (
+                <span data-testid="retrieval-probe-gate-drops" className="text-slate-600">
+                  本轮门禁丢弃=0
+                </span>
+              );
+            }
+            return (
+              <span data-testid="retrieval-probe-gate-drops" className="text-amber-300/90">
+                本轮门禁丢弃={n}
+                {d.blocked_domain ? ` · 域名${d.blocked_domain}` : ""}
+                {d.garbage_snippet ? ` · 垃圾${d.garbage_snippet}` : ""}
+                {d.wiki_track ? ` · wiki${d.wiki_track}` : ""}
+              </span>
+            );
+          })()}
           <label className="ml-auto flex items-center gap-1 cursor-pointer">
             <input
               type="checkbox"

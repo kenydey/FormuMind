@@ -71,8 +71,24 @@ def run_query_test(
     stats = kb_index.kb_stats()
     vector_mode = str(stats.get("vector_mode") or "empty")
 
-    def _done(hits: list[dict[str, Any]], *, rerank_applied: bool = False, warning: str | None = None):
-        return {
+    def _gate_payload(before: dict[str, int] | None = None) -> dict[str, Any]:
+        from .kb_retrieval_gate import gate_drop_delta, gate_drop_stats
+
+        total = gate_drop_stats()
+        run = gate_drop_delta(before or {}) if before is not None else {
+            "retrieval": {"blocked_domain": 0, "garbage_snippet": 0, "wiki_track": 0},
+            "ingest": {"blocked_domain": 0, "garbage_snippet": 0, "wiki_track": 0},
+        }
+        return {"gate_drops": run, "gate_drops_total": total}
+
+    def _done(
+        hits: list[dict[str, Any]],
+        *,
+        rerank_applied: bool = False,
+        warning: str | None = None,
+        gate_before: dict[str, int] | None = None,
+    ):
+        payload = {
             "query": q,
             "mode": mode,
             "params": {
@@ -87,6 +103,8 @@ def run_query_test(
             "hits": hits,
             "warning": warning,
         }
+        payload.update(_gate_payload(gate_before))
+        return payload
 
     if not kb_index.kb_enabled():
         return _done([], warning="知识库 v2 未启用")
@@ -123,6 +141,10 @@ def run_query_test(
                 }
             )
         return _done(hits)
+
+    from .kb_retrieval_gate import gate_drop_snapshot
+
+    gate_before = gate_drop_snapshot()
 
     want_rerank = False
     if mode == "hybrid_rerank":
@@ -175,7 +197,7 @@ def run_query_test(
         warning = None
         if mode == "hybrid_rerank" and not want_rerank:
             warning = "重排未启用（search_rerank_enabled=false 或请求覆盖为 false）"
-        return _done(prelim[:top_k], warning=warning)
+        return _done(prelim[:top_k], warning=warning, gate_before=gate_before)
 
     items, applied = llm_rerank_scored(q, evidence_pool, k=top_k)
     if not applied:
@@ -183,6 +205,7 @@ def run_query_test(
             prelim[:top_k],
             rerank_applied=False,
             warning="LLM 重排失败或未返回分数，已回退 hybrid 排序",
+            gate_before=gate_before,
         )
 
     hits = []
@@ -193,7 +216,7 @@ def run_query_test(
         row["rerank_score"] = round(float(item.score), 6)
         row["relevance"] = max(0.05, min(1.0, float(item.score)))
         hits.append(row)
-    return _done(hits, rerank_applied=True)
+    return _done(hits, rerank_applied=True, gate_before=gate_before)
 
 
 def run_golden_eval(
