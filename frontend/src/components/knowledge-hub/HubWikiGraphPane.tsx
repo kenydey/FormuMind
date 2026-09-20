@@ -4,11 +4,13 @@ import {
   api,
   formatApiError,
   type WikiPageGraphEdge,
+  type WikiPageGraphInsights,
   type WikiPageGraphMeta,
   type WikiPageGraphNode,
 } from "../../api";
 import { useStore } from "../../store";
 import { filterWikiPageGraph } from "../../wiki/wikiPageGraph";
+import HubWikiGraphInsights from "./HubWikiGraphInsights";
 import WikiPageGraphCanvas from "./WikiPageGraphCanvas";
 
 const FLAG_ATTR = "wiki_page_graph_enabled";
@@ -32,14 +34,18 @@ type Props = {
 export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: Props) {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
   const openSettings = useStore((s) => s.openSettings);
+  const envFlagsRevision = useStore((s) => s.envFlagsRevision);
 
   const [flagOn, setFlagOn] = useState<boolean | null>(null);
   const [flagsError, setFlagsError] = useState<string | null>(null);
   const [nodes, setNodes] = useState<WikiPageGraphNode[]>([]);
   const [edges, setEdges] = useState<WikiPageGraphEdge[]>([]);
   const [meta, setMeta] = useState<WikiPageGraphMeta | null>(null);
+  const [insights, setInsights] = useState<WikiPageGraphInsights | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [hideOrphan, setHideOrphan] = useState(false);
   const [kind, setKind] = useState("");
@@ -63,6 +69,7 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
       setNodes([]);
       setEdges([]);
       setMeta(null);
+      setInsights(null);
       setError("请先选择活动项目（页图按项目 scope 过滤）");
       setLoading(false);
       return;
@@ -79,10 +86,12 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
       setNodes(r.nodes ?? []);
       setEdges(r.edges ?? []);
       setMeta(r.meta ?? null);
+      setInsights(r.insights ?? null);
     } catch (e) {
       setNodes([]);
       setEdges([]);
       setMeta(null);
+      setInsights(null);
       setError(formatApiError(e));
     } finally {
       setLoading(false);
@@ -92,7 +101,7 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
   useEffect(() => {
     if (!active) return;
     loadFlags();
-  }, [active, loadFlags]);
+  }, [active, loadFlags, envFlagsRevision]);
 
   useEffect(() => {
     if (!active) return;
@@ -111,6 +120,47 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
 
   const showFlagCta =
     flagOn === false || (!!error && isFlagGateError(error)) || !!flagsError;
+
+  const runLint = useCallback(async () => {
+    setBusy("lint");
+    setActionMsg(null);
+    setError(null);
+    try {
+      const out = await api.runWikiLint({ limit: 200, detect_orphan: true });
+      setActionMsg(
+        `Lint：扫描 ${out.scanned ?? "?"} · 有旗标 ${out.flagged ?? "?"} · 孤儿 ${out.orphan_count ?? "?"}`,
+      );
+      await refresh();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh]);
+
+  const refreshDossier = useCallback(async () => {
+    if (!activeProjectId) {
+      setError("请先选择活动项目");
+      return;
+    }
+    setBusy("dossier");
+    setActionMsg(null);
+    setError(null);
+    try {
+      const out = await api.refreshWikiDossier({ project_id: activeProjectId });
+      setActionMsg(
+        out.path
+          ? `卷宗已刷新：${out.path}`
+          : "卷宗刷新完成",
+      );
+      if (out.path) onOpenPath(out.path);
+      await refresh();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [activeProjectId, onOpenPath, refresh]);
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-wiki-graph-pane">
@@ -189,6 +239,14 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
           {error}
         </div>
       )}
+      {actionMsg && (
+        <div
+          className="text-[10px] text-amber-200/90 border border-amber-500/30 rounded px-2 py-1"
+          data-testid="hub-wiki-graph-action-msg"
+        >
+          {actionMsg}
+        </div>
+      )}
 
       {meta && (
         <div
@@ -198,23 +256,36 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
           节点 {filtered.nodes.length}/{meta.node_count} · 边 {filtered.edges.length}/
           {meta.edge_count}
           {meta.broken_links != null ? ` · 断链 ${meta.broken_links}` : ""}
+          {meta.orphan_count != null ? ` · 孤立 ${meta.orphan_count}` : ""}
           {meta.elapsed_ms != null ? ` · ${meta.elapsed_ms}ms` : ""}
           {meta.truncated ? " · 已截断" : ""}
         </div>
       )}
 
-      <div className="relative flex-1 min-h-0">
-        {flagOn === true && !loading && filtered.nodes.length === 0 && !error && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center text-xs text-slate-500 pointer-events-none">
-            无链接可显示 — 可跑 Lint 或编译更多带 [[wikilink]] 的页
-          </div>
-        )}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_15rem] gap-2 flex-1 min-h-0">
+        <div className="relative min-h-0 min-w-0">
+          {flagOn === true && !loading && filtered.nodes.length === 0 && !error && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center text-xs text-slate-500 pointer-events-none">
+              无链接可显示 — 可跑 Lint 或编译更多带 [[wikilink]] 的页
+            </div>
+          )}
+          {flagOn === true && (
+            <WikiPageGraphCanvas
+              nodes={filtered.nodes}
+              edges={filtered.edges}
+              selectedPath={selectedPath}
+              onSelect={onOpenPath}
+            />
+          )}
+        </div>
         {flagOn === true && (
-          <WikiPageGraphCanvas
-            nodes={filtered.nodes}
-            edges={filtered.edges}
-            selectedPath={selectedPath}
-            onSelect={onOpenPath}
+          <HubWikiGraphInsights
+            insights={insights}
+            busy={busy}
+            canRefreshDossier={!!activeProjectId}
+            onOpenPath={onOpenPath}
+            onRunLint={() => void runLint()}
+            onRefreshDossier={() => void refreshDossier()}
           />
         )}
       </div>
