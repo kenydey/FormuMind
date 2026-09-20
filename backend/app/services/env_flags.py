@@ -227,6 +227,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("wiki_dossier_report_enabled", "卷宗 Report 生成",
             "基于 DossierPack 生成 briefing/feasibility 等研发草稿（P5，默认关）。",
             "kb", "依赖 wiki_project_dossier_enabled；LLM 润色另受 wiki_dossier_llm_narrative"),
+    EnvFlag("wiki_page_graph_enabled", "Wiki 页链接图",
+            "Hub Wiki「链接图」：按 [[wikilink]] 构图可视化（非配方/材料 KG）。默认关。",
+            "kb", "依赖 wiki_enabled；与 Neo4j/材料图谱分离"),
     EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
             "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"
             "默认关；不关闭 Raw chunk RAG，不新建向量库。",

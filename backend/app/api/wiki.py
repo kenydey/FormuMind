@@ -161,6 +161,37 @@ def run_lint_endpoint(body: WikiLintRunRequest | None = None) -> dict:
     return run_lint_pass(limit=req.limit, detect_orphan=req.detect_orphan)
 
 
+@router.get("/graph")
+def wiki_page_graph(
+    limit: int = Query(default=500, ge=1, le=2000),
+    kinds: str | None = Query(
+        default=None,
+        description="Comma-separated page kinds (e.g. material,concept,theme)",
+    ),
+    include_orphan: bool = Query(default=True),
+    project_id: str | None = Query(default=None),
+) -> dict:
+    """Wiki page [[wikilink]] graph for Hub canvas (not materials/formulation KG)."""
+    _require_wiki()
+    from ..services.wiki.page_graph import build_page_graph, page_graph_enabled
+
+    if not page_graph_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="wiki_page_graph_enabled is false（FORMUMIND_WIKI_PAGE_GRAPH_ENABLED）",
+        )
+    kind_list = [k.strip() for k in (kinds or "").split(",") if k.strip()] or None
+    try:
+        return build_page_graph(
+            limit=limit,
+            kinds=kind_list,
+            include_orphan=include_orphan,
+            project_id=project_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 class WikiSearchHit(BaseModel):
     id: str = ""
     path: str
