@@ -142,7 +142,7 @@ export function leaderboardToCsv(forms: Formulation[]): string {
         f.predicted.cost_cny_per_kg ?? "",
         f.predicted.voc_gpl ?? "",
         f.ingredients.length,
-        f.warnings.join("; "),
+        (f.warnings ?? []).join("; "),
       ]
         .map(csvCell)
         .join(",")
@@ -166,6 +166,22 @@ export function downloadLeaderboardCsv(forms: Formulation[]): void {
 
 export async function copyLeaderboardJson(forms: Formulation[]): Promise<void> {
   await navigator.clipboard.writeText(JSON.stringify(forms, null, 2));
+}
+
+/** Dim-4: persist text export onto the active project's file shelf. */
+export async function saveTextToProjectShelf(
+  projectId: string,
+  filename: string,
+  content: string,
+): Promise<void> {
+  const { api } = await import("../api");
+  await api.saveProjectExport(projectId, filename, content);
+}
+
+export function shelfFilename(prefix: string, ext: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const safe = prefix.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "export";
+  return `${safe}_${stamp}.${ext.replace(/^\./, "")}`;
 }
 
 export async function exportLeaderboardToPdf(forms: Formulation[]): Promise<void> {

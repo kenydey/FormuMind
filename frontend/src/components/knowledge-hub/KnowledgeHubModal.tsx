@@ -6,12 +6,14 @@ import HubMaterialsPane from "./HubMaterialsPane";
 import HubWikiPane from "./HubWikiPane";
 import HubGraphPane from "./HubGraphPane";
 import HubReportsPlaceholderPane from "./HubReportsPlaceholderPane";
+import RetrievalProbePanel from "./RetrievalProbePanel";
 
 const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
-  { id: "materials", label: "资料", hint: "检索证据 + 知识库文档" },
-  { id: "wiki", label: "Wiki", hint: "LLM 凝练页" },
-  { id: "graph", label: "图谱", hint: "KG / Neo4j 探针" },
-  { id: "reports", label: "文档生成", hint: "基于卷宗生成报告" },
+  { id: "materials", label: "资料", hint: "当前项目入库文档" },
+  { id: "wiki", label: "Wiki", hint: "当前项目编译页 / 卷宗" },
+  { id: "graph", label: "图谱", hint: "全局探针（未项目切分）" },
+  { id: "retrieval", label: "检索探针", hint: "多路召回分数 / Golden" },
+  { id: "reports", label: "文档生成", hint: "当前项目卷宗报告" },
 ];
 
 /** Knowledge Hub shell — right-rail materials governance entry (H0). */
@@ -31,14 +33,17 @@ export default function KnowledgeHubModal({
 
   return (
     <Modal
-      title="📚 知识库 · Knowledge Hub"
+      title="📚 知识库 · Knowledge Hub（按当前项目）"
       open={open}
       onClose={onClose}
       size="xl"
       testId="modal-knowledge-hub"
     >
       <div className="flex flex-col gap-3 h-[min(70vh,720px)]">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0" data-testid="hub-tab-cards">
+        <div
+          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 shrink-0"
+          data-testid="hub-tab-cards"
+        >
           {TABS.map((t) => {
             const active = tab === t.id;
             return (
@@ -60,6 +65,11 @@ export default function KnowledgeHubModal({
                       卷宗
                     </span>
                   )}
+                  {t.id === "retrieval" && (
+                    <span className="text-[9px] text-teal-300/90 border border-teal-500/30 rounded px-1">
+                      调优
+                    </span>
+                  )}
                 </div>
                 <p className="text-[10px] text-slate-500 mt-0.5">{t.hint}</p>
               </button>
@@ -70,6 +80,9 @@ export default function KnowledgeHubModal({
           {tab === "materials" && <HubMaterialsPane open={open} />}
           {tab === "wiki" && <HubWikiPane active={open && tab === "wiki"} />}
           {tab === "graph" && <HubGraphPane active={open && tab === "graph"} />}
+          {tab === "retrieval" && (
+            <RetrievalProbePanel active={open && tab === "retrieval"} />
+          )}
           {tab === "reports" && <HubReportsPlaceholderPane />}
         </div>
       </div>

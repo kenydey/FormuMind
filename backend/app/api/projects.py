@@ -1,7 +1,9 @@
 """Project workspace CRUD — NotebookLM-style persistent sessions."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from ..db.project_store import get_project_store
 from ..domain.project_workspace import (
@@ -11,8 +13,22 @@ from ..domain.project_workspace import (
     ProjectSummary,
     ProjectUpdateRequest,
 )
+from ..services import project_exports as exports_svc
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+class ExportFileOut(BaseModel):
+    name: str
+    size: int
+    updated_at: str
+    content_type: str
+
+
+class ExportTextBody(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=128)
+    content: str = Field(..., max_length=5_000_000)
+    content_type: str | None = None
 
 
 @router.get("", response_model=list[ProjectSummary])
@@ -69,6 +85,11 @@ def delete_project(
     result = get_project_store().delete(project_id, knowledge=knowledge)
     if result is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        n = exports_svc.purge_project_exports(project_id)
+        result = {**result, "exports_removed": n}
+    except Exception:
+        pass
     return {"ok": True, **result}
 
 
@@ -105,3 +126,65 @@ def migrate_local(req: MigrateLocalRequest) -> list[ProjectSummary]:
     if not req.snapshots:
         return []
     return get_project_store().migrate_legacy(req.snapshots)
+
+
+# ── Dim-4: project export file shelf ─────────────────────────────────────────
+
+
+@router.get("/{project_id}/exports", response_model=list[ExportFileOut])
+def list_project_exports(project_id: str) -> list[ExportFileOut]:
+    return [
+        ExportFileOut(
+            name=f.name,
+            size=f.size,
+            updated_at=f.updated_at,
+            content_type=f.content_type,
+        )
+        for f in exports_svc.list_exports(project_id)
+    ]
+
+
+@router.post("/{project_id}/exports", response_model=ExportFileOut)
+def save_project_export(project_id: str, body: ExportTextBody) -> ExportFileOut:
+    """Save UTF-8 text (CSV / JSON / Markdown) into the project export shelf."""
+    info = exports_svc.save_export_bytes(project_id, body.filename, body.content.encode("utf-8"))
+    return ExportFileOut(
+        name=info.name,
+        size=info.size,
+        updated_at=info.updated_at,
+        content_type=info.content_type,
+    )
+
+
+@router.post("/{project_id}/exports/upload", response_model=ExportFileOut)
+async def upload_project_export(
+    project_id: str,
+    file: UploadFile = File(...),
+    filename: str | None = Form(default=None),
+) -> ExportFileOut:
+    """Multipart binary upload (PDF / XLSX) into the project export shelf."""
+    raw = await file.read()
+    name = filename or file.filename or "export.bin"
+    info = exports_svc.save_export_bytes(project_id, name, raw)
+    return ExportFileOut(
+        name=info.name,
+        size=info.size,
+        updated_at=info.updated_at,
+        content_type=info.content_type,
+    )
+
+
+@router.get("/{project_id}/exports/{filename}")
+def download_project_export(project_id: str, filename: str) -> FileResponse:
+    path = exports_svc.resolve_export_path(project_id, filename)
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type=exports_svc.guess_content_type(path.name),
+    )
+
+
+@router.delete("/{project_id}/exports/{filename}")
+def delete_project_export(project_id: str, filename: str) -> dict:
+    exports_svc.delete_export(project_id, filename)
+    return {"ok": True, "filename": filename}

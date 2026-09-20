@@ -13,6 +13,7 @@ import {
 import NotificationStack from "./NotificationStack";
 import RelatedWikiList from "./RelatedWikiList";
 import WikiChatModeSelector from "./WikiChatModeSelector";
+import ThinkingTimeline from "./ThinkingTimeline";
 
 /**
  * Must stay in step with the stages `research_graph._emit` actually sends.
@@ -115,6 +116,7 @@ export default function ResearchPanel() {
     deepResearchBusy,
     deepResearchStage,
     task,
+    taskThinking,
     chatSessions,
     chatSessionsOpen,
     activeSessionId,
@@ -135,6 +137,7 @@ export default function ResearchPanel() {
       deepResearchBusy: s.deepResearchBusy,
       deepResearchStage: s.deepResearchStage,
       task: s.task,
+      taskThinking: s.taskThinking,
       chatSessions: s.chatSessions,
       chatSessionsOpen: s.chatSessionsOpen,
       activeSessionId: s.activeSessionId,
@@ -191,7 +194,14 @@ export default function ResearchPanel() {
 
   function renderNotificationDetail(kind: NotificationKind) {
     if (kind !== "deep-research") return undefined;
-    return <DeepResearchStages activeStageIdx={activeStageIdx} progressPct={progressPct} />;
+    return (
+      <div className="space-y-2">
+        <DeepResearchStages activeStageIdx={activeStageIdx} progressPct={progressPct} />
+        {deepResearchBusy && taskThinking.length > 0 && (
+          <ThinkingTimeline steps={taskThinking} title="思考链路" compact />
+        )}
+      </div>
+    );
   }
 
   useEffect(() => {

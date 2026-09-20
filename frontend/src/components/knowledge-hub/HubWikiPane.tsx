@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   api,
   formatApiError,
+  type WikiFlagAction,
   type WikiPageDetail,
   type WikiPageItem,
   type WikiSearchHit,
@@ -17,10 +18,12 @@ type DossierMeta = {
   template?: string;
 };
 
+type FlagPageItem = WikiPageItem & { actions?: WikiFlagAction[] };
+
 /** Wiki pane inside Knowledge Hub (read-only). S1 reader + P2 FTS search + P4 dossier. */
 export default function HubWikiPane({ active }: { active: boolean }) {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
-  const [pages, setPages] = useState<WikiPageItem[]>([]);
+  const [pages, setPages] = useState<FlagPageItem[]>([]);
   const [kind, setKind] = useState("");
   const [detail, setDetail] = useState<WikiPageDetail | null>(null);
   const [dossierMeta, setDossierMeta] = useState<DossierMeta | null>(null);
@@ -31,15 +34,22 @@ export default function HubWikiPane({ active }: { active: boolean }) {
   const [searchMode, setSearchMode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lintSummary, setLintSummary] = useState<string | null>(null);
 
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (!activeProjectId) {
+      setPages([]);
+      setError("请先选择活动项目：Wiki 仅显示当前项目关联页（卷宗/报告/本项目资料编译页）");
+      setLoading(false);
+      return;
+    }
     try {
       if (flagsOnly) {
-        const r = await api.listWikiFlags({ limit: 100 });
+        const r = await api.listWikiFlags({ limit: 100, project_id: activeProjectId });
         setPages(
           r.pages.map((p) => ({
             id: p.id,
@@ -51,10 +61,15 @@ export default function HubWikiPane({ active }: { active: boolean }) {
             flags: p.flags,
             revision: 1,
             updated_at: null,
+            actions: p.actions || [],
           })),
         );
       } else {
-        const r = await api.listWikiPages({ kind: kind || undefined, limit: 100 });
+        const r = await api.listWikiPages({
+          kind: kind || undefined,
+          limit: 100,
+          project_id: activeProjectId,
+        });
         setPages(r.pages ?? []);
       }
     } catch (e) {
@@ -63,7 +78,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [flagsOnly, kind]);
+  }, [flagsOnly, kind, activeProjectId]);
 
   const runOps = useCallback(
     async (label: string, fn: () => Promise<unknown>) => {
@@ -104,7 +119,12 @@ export default function HubWikiPane({ active }: { active: boolean }) {
     let cancelled = false;
     const t = window.setTimeout(() => {
       api
-        .searchWikiPages({ q, kind: kind || undefined, limit: 50 })
+        .searchWikiPages({
+          q,
+          kind: kind || undefined,
+          limit: 50,
+          project_id: activeProjectId || undefined,
+        })
         .then((r) => {
           if (cancelled) return;
           setSearchHits(r.hits ?? []);
@@ -121,7 +141,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [active, flagsOnly, query, kind]);
+  }, [active, flagsOnly, query, kind, activeProjectId]);
 
   const filtered = useMemo(() => {
     let list = pages;
@@ -239,9 +259,9 @@ export default function HubWikiPane({ active }: { active: boolean }) {
         const page = await api.getWikiDossier(activeProjectId);
         setDetail({
           id: page.page_id || page.path,
-          path: page.path,
           kind: "theme",
           title: page.title || page.path,
+          path: page.path,
           flags: page.flags || [],
           source_ids: [],
           markdown: page.markdown,
@@ -251,6 +271,43 @@ export default function HubWikiPane({ active }: { active: boolean }) {
       }
     });
   }, [activeProjectId, runOps]);
+
+  const runFlagAction = useCallback(
+    async (page: FlagPageItem, action: WikiFlagAction) => {
+      const id = action.id;
+      if (id === "open_page") {
+        await openPath(page.path);
+        return;
+      }
+      if (id === "mark_reviewed") {
+        await runOps("review", () => api.reviewWikiPage({ path: page.path, reviewed: true }));
+        return;
+      }
+      if (id === "compile_theme") {
+        const key = page.norm_key || page.path.split("/").pop()?.replace(/\.md$/i, "");
+        if (!key) return;
+        await runOps("theme", () => api.compileWikiTheme({ system_key: key, use_llm: false }));
+        return;
+      }
+      if (id === "refresh_dossier") {
+        const m = page.path.match(/^themes\/project-(.+)\.md$/i);
+        const pid = m?.[1] || activeProjectId;
+        if (!pid) {
+          setError("无法从 path 解析 project_id");
+          return;
+        }
+        await runOps("dossier-refresh", async () => {
+          await api.refreshWikiDossier({ project_id: pid });
+          await openPath(page.path);
+        });
+        return;
+      }
+      // Soft guidance actions — open page and surface hint
+      setLintSummary(`${action.label}：${action.hint || page.path}`);
+      await openPath(page.path);
+    },
+    [activeProjectId, openPath, runOps],
+  );
 
   const hitSnippet = (path: string) =>
     searchHits?.find((h) => h.path === path)?.snippet || null;
@@ -267,6 +324,14 @@ export default function HubWikiPane({ active }: { active: boolean }) {
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-wiki-pane">
+      <div
+        className="text-[10px] text-slate-400 border border-edge/50 rounded px-2 py-1"
+        data-testid="hub-wiki-project-scope"
+      >
+        {activeProjectId
+          ? `仅显示当前项目 Wiki · project_id=${activeProjectId}（卷宗/报告 + 本项目资料编译页）`
+          : "未选择活动项目 — Wiki 按项目隔离，请先打开/选择项目"}
+      </div>
       <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
         <select
           className="bg-ink border border-edge rounded px-2 py-1 text-slate-200"
@@ -318,6 +383,50 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           onClick={() => void refresh()}
         >
           刷新
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-amber-500/50 rounded text-amber-200 disabled:opacity-40"
+          disabled={!!busy}
+          title="扫描 stale / conflict / orphan 并写回 flags（W4）"
+          data-testid="hub-wiki-run-lint"
+          onClick={() => {
+            void (async () => {
+              setBusy("lint");
+              setError(null);
+              try {
+                const out = await api.runWikiLint({ limit: 200, detect_orphan: true });
+                setLintSummary(
+                  `Lint：扫描 ${out.scanned ?? "?"} · 有旗标 ${out.flagged ?? "?"} · 孤儿 ${out.orphan_count ?? "?"}`,
+                );
+                setFlagsOnly(true);
+                const r = await api.listWikiFlags({
+                  limit: 100,
+                  project_id: activeProjectId || undefined,
+                });
+                setPages(
+                  r.pages.map((p) => ({
+                    id: p.id,
+                    path: p.path,
+                    kind: p.kind,
+                    title: p.title,
+                    norm_key: "",
+                    source_ids: p.source_ids,
+                    flags: p.flags,
+                    revision: 1,
+                    updated_at: null,
+                    actions: p.actions || [],
+                  })),
+                );
+              } catch (e) {
+                setError(formatApiError(e));
+              } finally {
+                setBusy(null);
+              }
+            })();
+          }}
+        >
+          {busy === "lint" ? "Lint…" : "跑 Lint"}
         </button>
         <button
           type="button"
@@ -400,6 +509,14 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           {error}
         </div>
       )}
+      {lintSummary && (
+        <div
+          className="text-[10px] text-amber-200/90 border border-amber-500/30 rounded px-2 py-1"
+          data-testid="hub-wiki-lint-summary"
+        >
+          {lintSummary}
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 min-h-0 flex-1 overflow-hidden">
         <ul className="overflow-y-auto border border-edge/60 rounded divide-y divide-edge/40 text-sm">
           {loading && <li className="px-3 py-2 text-slate-500">加载中…</li>}
@@ -409,7 +526,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
             </li>
           )}
           {filtered.map((p) => (
-            <li key={p.id || p.path}>
+            <li key={p.id || p.path} data-testid={`hub-wiki-flag-row-${p.path}`}>
               <button
                 type="button"
                 className={`w-full text-left px-3 py-2 hover:bg-accent/5 ${
@@ -436,6 +553,29 @@ export default function HubWikiPane({ active }: { active: boolean }) {
                   </div>
                 )}
               </button>
+              {flagsOnly && (p as FlagPageItem).actions && (p as FlagPageItem).actions!.length > 0 && (
+                <div
+                  className="px-3 pb-2 flex flex-wrap gap-1"
+                  data-testid={`hub-wiki-flag-actions-${p.path}`}
+                >
+                  {(p as FlagPageItem).actions!.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="text-[10px] px-1.5 py-0.5 border border-edge/70 rounded text-slate-300 hover:border-accent/50 hover:text-accent disabled:opacity-40"
+                      title={a.hint || a.label}
+                      disabled={!!busy}
+                      data-testid={`hub-wiki-flag-action-${a.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void runFlagAction(p as FlagPageItem, a);
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>

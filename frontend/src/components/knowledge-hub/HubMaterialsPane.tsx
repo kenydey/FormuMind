@@ -25,6 +25,7 @@ export default function HubMaterialsPane({ open }: { open: boolean }) {
     ingestRow,
     deleteRow,
     toggleSourceSelected,
+    activeProjectId,
   } = useHubMaterialRows(open);
 
   const [detail, setDetail] = useState<{ title: string; sourceId: string } | null>(null);
@@ -46,6 +47,14 @@ export default function HubMaterialsPane({ open }: { open: boolean }) {
 
   return (
     <div className="flex flex-col gap-2 h-full min-h-0" data-testid="hub-materials-pane">
+      <div
+        className="text-[10px] text-slate-400 border border-edge/50 rounded px-2 py-1"
+        data-testid="hub-materials-project-scope"
+      >
+        {activeProjectId
+          ? `仅显示当前项目知识库 · project_id=${activeProjectId}（不含其他项目 / 全局语料）`
+          : "未选择活动项目 — 知识库按项目隔离，请先打开/选择项目"}
+      </div>
       <div className="flex flex-wrap items-center gap-2 shrink-0">
         <input
           type="search"

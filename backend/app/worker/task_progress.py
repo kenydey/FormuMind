@@ -48,6 +48,120 @@ class AsyncTaskAccepted(BaseModel):
     status_url: str
 
 
+def thinking_step(
+    step_id: str,
+    title: str,
+    *,
+    kind: str = "stage",
+    detail: str = "",
+    status: str = "running",
+) -> dict[str, Any]:
+    """One row for ``data.thinking`` (Dim-2 thinking timeline)."""
+    return {
+        "id": step_id,
+        "kind": kind if kind in ("stage", "thought", "tool") else "thought",
+        "title": title,
+        "detail": detail or "",
+        "status": status if status in ("pending", "running", "done", "error") else "running",
+    }
+
+
+def attach_thinking(data: dict[str, Any] | None, steps: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge a thinking snapshot into an existing progress ``data`` payload."""
+    out = dict(data or {})
+    out["thinking"] = list(steps)
+    return out
+
+
+class ThinkingTracker:
+    """Accumulate thinking steps and publish full snapshots on each emit.
+
+    Wire format stays compatible: callers still use stage/message/progress;
+    UI that understands ``data.thinking`` renders the timeline.
+    """
+
+    def __init__(self, task_id: str, *, kind: str | None = None) -> None:
+        self.task_id = task_id
+        self.kind = kind
+        self.steps: list[dict[str, Any]] = []
+
+    def _close_running(self, *, as_status: str = "done") -> None:
+        for step in self.steps:
+            if step.get("status") == "running":
+                step["status"] = as_status
+
+    def emit(
+        self,
+        stage: str,
+        message: str,
+        *,
+        progress: float = 0.0,
+        step_id: str | None = None,
+        title: str | None = None,
+        kind: str = "stage",
+        detail: str = "",
+        data: dict[str, Any] | None = None,
+        status: TaskProgressStatus = TaskProgressStatus.RUNNING,
+    ) -> TaskProgressEvent:
+        sid = step_id or stage or f"step-{len(self.steps) + 1}"
+        title_s = title or message or stage or sid
+        # Upsert: repeated emits for the same stage update in place (optimizer ticks).
+        existing = next((s for s in self.steps if s.get("id") == sid), None)
+        if existing is not None:
+            existing["title"] = title_s
+            existing["detail"] = detail or existing.get("detail") or ""
+            existing["status"] = "running"
+            existing["kind"] = kind if kind in ("stage", "thought", "tool") else existing.get("kind", "stage")
+            # Mark other previously-running steps done (keep this one running).
+            for step in self.steps:
+                if step is not existing and step.get("status") == "running":
+                    step["status"] = "done"
+        else:
+            self._close_running(as_status="done")
+            self.steps.append(
+                thinking_step(
+                    sid,
+                    title_s,
+                    kind=kind,
+                    detail=detail,
+                    status="running",
+                )
+            )
+        return publish_progress(
+            self.task_id,
+            status,
+            stage=stage,
+            message=message,
+            progress=progress,
+            data=attach_thinking(data, self.steps),
+            kind=self.kind,
+        )
+
+    def thought(
+        self,
+        title: str,
+        *,
+        stage: str = "",
+        message: str = "",
+        progress: float = 0.0,
+        detail: str = "",
+        step_id: str | None = None,
+    ) -> TaskProgressEvent:
+        return self.emit(
+            stage or (self.steps[-1]["id"] if self.steps else "thought"),
+            message or title,
+            progress=progress,
+            step_id=step_id or f"thought-{len(self.steps) + 1}",
+            title=title,
+            kind="thought",
+            detail=detail,
+        )
+
+    def finish(self, *, error: bool = False) -> None:
+        self._close_running(as_status="error" if error else "done")
+
+
+
 def channel_name(task_id: str) -> str:
     return f"task_progress:{task_id}"
 

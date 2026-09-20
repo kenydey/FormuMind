@@ -120,6 +120,13 @@ export interface AppState {
   projectLoading: boolean;
   requirementLocked: boolean;
   historyOpen: boolean;
+  /** Dim-1: live artifact drawer (symmetric to project history). */
+  artifactDrawerOpen: boolean;
+  activeArtifactId: import("../artifacts/projectArtifacts").ArtifactKind | null;
+  /** Dim-5: active formulation skill playbook id. */
+  activeSkillId: string | null;
+  activeSkill: import("../api").FormulationSkill | null;
+  pendingDoeDesign: string | null;
 
   searchQuery: string;
   sourceTypes: SearchSourceType[];
@@ -151,13 +158,15 @@ export interface AppState {
   formulationBusy: boolean;
   recommendStage: string;
   recommendMessage: string;
+  /** Dim-2 thinking timeline for the active long task (recommend / optimize / DOE / deep). */
+  taskThinking: import("../api").ThinkingStep[];
   /** Soft bias: prefer materials-catalog hits when recommending (never materials-only). */
   preferMaterialsCatalog: boolean;
   chatBusy: boolean;
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;
   /** Knowledge Hub card tab when openModal === "knowledge". */
-  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports";
+  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports" | "retrieval";
   // ── 多会话聊天 actions(2026-09-05 A1) ──
   setChatSessionsOpen: (open: boolean) => void;
   refreshChatSessions: () => Promise<void>;
@@ -170,6 +179,8 @@ export interface AppState {
   llmConfig: LLMConfig;
   settingsOpen: boolean;
   settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org";
+  /** When opening Settings → 环境变量, scroll/highlight this EnvFlag.attr (e.g. wiki_dossier_report_enabled). */
+  settingsEnvFocusAttr: string | null;
 
   setField: <K extends keyof Requirement>(key: K, value: Requirement[K]) => void;
   setDomain: (d: ProductDomain) => void;
@@ -258,8 +269,17 @@ export interface AppState {
   setPreferMaterialsCatalog: (v: boolean) => void;
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
-  openSettings: (tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
+  openSettings: (
+    tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org",
+    opts?: { focusEnvAttr?: string | null },
+  ) => void;
+  clearSettingsEnvFocus: () => void;
   setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
+  toggleArtifactDrawer: () => void;
+  openArtifact: (id: import("../artifacts/projectArtifacts").ArtifactKind) => void;
+  setActiveArtifactId: (id: import("../artifacts/projectArtifacts").ArtifactKind | null) => void;
+  applyFormulationSkill: (skill: import("../api").FormulationSkill) => void;
+  clearFormulationSkill: () => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
   cancelLoopTask: () => Promise<void>;

@@ -359,11 +359,22 @@ def test_narrative_llm_flag_and_failure_keeps_previous(env, monkeypatch):
     monkeypatch.setenv("FORMUMIND_WIKI_DOSSIER_LLM_NARRATIVE", "true")
     get_settings.cache_clear()
 
-    class _Fake:
+    class _BadProse:
         narrative = "| bad | table |"
 
+    class _Analysis:
+        key_points = ["盐雾目标来自要求表"]
+        tensions = []
+        soft_next_steps = ["核对基材"]
+
+    calls: list[str] = []
+
     def _fake_complete(system, user, model, retry=False):
-        return _Fake(), None
+        name = getattr(model, "__name__", str(model))
+        calls.append(name)
+        if "Analysis" in name:
+            return _Analysis(), None
+        return _BadProse(), None
 
     monkeypatch.setattr("app.services.llm.complete_structured", _fake_complete)
     narr2, meta2 = generate_section_narrative(
@@ -374,14 +385,22 @@ def test_narrative_llm_flag_and_failure_keeps_previous(env, monkeypatch):
     )
     assert narr2 == "保留旧叙述"
     assert meta2.get("error", "").startswith("validation:")
+    assert "analysis_ok" in (meta2.get("steps") or [])
+    assert len(calls) == 2  # two-step: analysis then prose
 
     class _Good:
         narrative = "基材为冷轧板，盐雾目标来自要求表，不得编造未列表数字。"
 
-    monkeypatch.setattr(
-        "app.services.llm.complete_structured",
-        lambda *a, **k: (_Good(), None),
-    )
+    calls.clear()
+
+    def _good_complete(system, user, model, retry=False):
+        name = getattr(model, "__name__", str(model))
+        calls.append(name)
+        if "Analysis" in name:
+            return _Analysis(), None
+        return _Good(), None
+
+    monkeypatch.setattr("app.services.llm.complete_structured", _good_complete)
     narr3, meta3 = generate_section_narrative(
         "S1_requirements",
         table_md="| salt_spray_hours | 500 |",
@@ -389,7 +408,10 @@ def test_narrative_llm_flag_and_failure_keeps_previous(env, monkeypatch):
         previous_narrative="保留旧叙述",
     )
     assert meta3.get("used_llm") is True
+    assert meta3.get("steps") == ["analysis_ok", "prose_ok"]
+    assert meta3.get("analysis", {}).get("key_points")
     assert "盐雾" in narr3
+    assert calls == ["SectionAnalysis", "SectionNarrative"]
 
     out = patch_dossier_sections(pid, ["S1"], use_llm=True)
     assert out["ok"] is True

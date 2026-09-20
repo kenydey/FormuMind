@@ -204,10 +204,19 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
     try:
         from ..db.chunk_store import get_chunk_store
         from .chunking import chunk_markdown
+        from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
         from . import ingest_timing as timing
 
         settings = get_settings()
+        # Ingest-time quality gate (same rules as hybrid #111): blocked origin
+        # never becomes document_chunks — clear any prior rows and stop early.
+        if ingest_block_reason_for_source(source_id):
+            from .kb_retrieval_gate import record_gate_drop
+
+            record_gate_drop("ingest", "blocked_domain")
+            get_chunk_store().replace_for_source(source_id, [])
+            return 0
         with timing.span("chunk"):
             chunks = chunk_markdown(
                 full_text,
@@ -226,6 +235,10 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
             }
             for c in chunks
         ]
+        rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
+        if not rows:
+            get_chunk_store().replace_for_source(source_id, [])
+            return 0
         # 2026-09-04 (双语分流): 嵌入前预标 lang(与 chunk_store 写入判定
         # 同源), 让嵌入模型选择(zh→bge / en→MiniLM)在写入前就正确。
         if rows:
@@ -551,6 +564,7 @@ def search_chunks(
     k: int = 6,
     *,
     project_id: str | None = None,
+    include_global: bool = False,
     langs: list[str] | None = None,
 ) -> list[Evidence]:
     """Retrieve the top-k KB chunks for a query (chemistry-aware hybrid).
@@ -575,7 +589,9 @@ def search_chunks(
         from ..db.chunk_store import get_chunk_store
 
         chunks = get_chunk_store().all_chunks(
-            limit=get_settings().kb_search_scan_limit, project_id=project_id
+            limit=get_settings().kb_search_scan_limit,
+            project_id=project_id,
+            include_global=include_global,
         )
         if not chunks:
             return []
@@ -656,6 +672,45 @@ def search_chunks(
         return [_chunk_to_evidence(c, meta, s) for s, c in scored[:k]]
     except Exception as exc:
         return degrade_return(logger, exc, "kb search failed", [])
+
+
+def search_chunks_hybrid(
+    query: str,
+    k: int = 4,
+    *,
+    alpha: float | None = None,
+    project_id: str | None = None,
+    include_global: bool = True,
+) -> list[Evidence]:
+    """Probe-aligned hybrid retrieval as Evidence (for recommend / research fuse).
+
+    Uses ``hybrid_search_scored`` with shared ``kb_hybrid_alpha`` when ``alpha``
+    is omitted. Safe empty list when KB is off or hybrid fails.
+    """
+    if not kb_enabled() or k <= 0 or not (query or "").strip():
+        return []
+    try:
+        from .hybrid_search import hybrid_search_scored
+
+        settings = get_settings()
+        if alpha is None:
+            alpha = float(settings.kb_hybrid_alpha)
+        scored = hybrid_search_scored(
+            query,
+            top_k=k,
+            alpha=alpha,
+            project_id=project_id or None,
+            include_global=bool(include_global),
+        )
+        if not scored:
+            return []
+        meta = _source_meta()
+        return [
+            _chunk_to_evidence(s.chunk, meta, float(s.hybrid_score))
+            for s in scored
+        ]
+    except Exception as exc:
+        return degrade_return(logger, exc, "kb hybrid search failed", [])
 
 
 def aggregate_parameter_space() -> dict[str, dict]:
@@ -824,11 +879,24 @@ def kb_stats() -> dict:
             "products_pending_structure": pending_products,
             "stale_chunks": stale,
             **_vector_health(total, embedded, stale),
+            "quality_gate_drops": _quality_gate_drops(),
         }
     except Exception as exc:
         return degrade_return(
             logger, exc, "kb stats failed",
             {"enabled": kb_enabled(), "sources": 0, "sources_by_kind": {},
              "chunks": 0, "embedded_chunks": 0, "embedding_available": False,
-             "products": 0},
+             "products": 0, "quality_gate_drops": _quality_gate_drops()},
         )
+
+
+def _quality_gate_drops() -> dict:
+    try:
+        from .kb_retrieval_gate import gate_drop_stats
+
+        return gate_drop_stats()
+    except Exception:
+        return {
+            "retrieval": {"blocked_domain": 0, "garbage_snippet": 0, "wiki_track": 0},
+            "ingest": {"blocked_domain": 0, "garbage_snippet": 0, "wiki_track": 0},
+        }

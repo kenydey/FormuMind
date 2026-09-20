@@ -179,6 +179,14 @@ export interface Formulation {
     incompatible_pairs: { a: string; b: string; relation: string }[];
     synergy_pairs: { a: string; b: string; relation: string }[];
     measured_materials?: string[];
+    measured_metric_hits?: {
+      material: string;
+      metric: string;
+      quality: "good" | "poor" | "presence" | string;
+      value?: number | null;
+      confidence?: number;
+      prop_id?: string;
+    }[];
     reasons: string[];
   } | null;
 }
@@ -423,13 +431,40 @@ export interface ActiveDoeResult extends AdaptiveDOEMetadata {
 
 export type TaskProgressStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 
+/** Dim-2 thinking timeline step (carried in TaskProgressEvent.data.thinking). */
+export type ThinkingStepKind = "stage" | "thought" | "tool";
+export type ThinkingStepStatus = "pending" | "running" | "done" | "error";
+
+export interface ThinkingStep {
+  id: string;
+  kind?: ThinkingStepKind;
+  title: string;
+  detail?: string;
+  status?: ThinkingStepStatus;
+}
+
 export interface TaskProgressEvent {
   status: TaskProgressStatus;
   stage?: string;
   message: string;
   progress?: number;
-  data?: Record<string, unknown>;
+  data?: Record<string, unknown> & { thinking?: ThinkingStep[] };
   elapsed_ms?: number | null;
+}
+
+/** Extract thinking steps from a progress event (full snapshot). */
+export function extractThinkingSteps(ev: TaskProgressEvent | null | undefined): ThinkingStep[] {
+  const raw = ev?.data?.thinking;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s): s is ThinkingStep => !!s && typeof s === "object" && typeof (s as ThinkingStep).id === "string")
+    .map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      title: s.title || s.id,
+      detail: s.detail || "",
+      status: s.status || "running",
+    }));
 }
 
 export interface AsyncTaskAccepted {
@@ -582,6 +617,33 @@ export interface ProjectPayloadVersion {
 export interface ProjectPayloadHistoryResponse {
   project_id: string;
   versions: ProjectPayloadVersion[];
+}
+
+/** Dim-4: project export shelf file metadata. */
+export interface ProjectExportFile {
+  name: string;
+  size: number;
+  updated_at: string;
+  content_type: string;
+}
+
+/** Dim-5: static formulation action skill (playbook). */
+export interface FormulationSkillChecklistItem {
+  id: string;
+  title: string;
+}
+
+export interface FormulationSkill {
+  id: string;
+  title: string;
+  summary: string;
+  when_to_use: string;
+  action: string;
+  modal: string | null;
+  icon: string;
+  tools: string[];
+  checklist: FormulationSkillChecklistItem[];
+  presets: Record<string, unknown>;
 }
 
 export interface BatchUpdateRequest {
@@ -1298,10 +1360,13 @@ export const api = {
     }),
   suggestFactors: (req: Requirement) =>
     post<{ factors: FactorCandidate[]; count: number }>("/api/doe/suggest-factors", req),
-  kbSources: (projectId?: string | null, limit = 100) =>
-    get<KBSourcesResponse>(
-      `/api/kb/sources?limit=${limit}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ""}`
-    ),
+  kbSources: (projectId?: string | null, limit = 100, opts?: { includeGlobal?: boolean }) => {
+    const q = new URLSearchParams();
+    q.set("limit", String(limit));
+    if (projectId) q.set("project_id", projectId);
+    if (opts?.includeGlobal) q.set("include_global", "true");
+    return get<KBSourcesResponse>(`/api/kb/sources?${q}`);
+  },
 
   deleteKbSource: (sourceId: string) =>
     del<{
@@ -1859,6 +1924,20 @@ export const api = {
       alpha,
     }),
 
+  /** Scored KB retrieval probe (POST /api/kb/query-test). */
+  kbQueryTest: (body: KbQueryTestRequest) =>
+    post<KbQueryTestResponse>("/api/kb/query-test", body),
+
+  /** Shared probe ↔ recommend retrieval knobs (GET /api/kb/retrieval-settings). */
+  kbRetrievalSettings: () => get<KbRetrievalSettings>("/api/kb/retrieval-settings"),
+
+  /** Curated golden retrieval questions (GET /api/kb/golden-questions). */
+  kbGoldenQuestions: () => get<KbGoldenQuestion[]>("/api/kb/golden-questions"),
+
+  /** Run golden eval batch (POST /api/kb/golden-eval/run). */
+  kbGoldenEvalRun: (body: KbGoldenEvalRequest) =>
+    post<KbGoldenEvalResponse>("/api/kb/golden-eval/run", body),
+
   // ── KG 维护: 统计 / 重建 / 挂源 ──
   kgStats: () => get<KgStats>("/api/kg/stats"),
 
@@ -2070,6 +2149,11 @@ export const api = {
 
   listProjects: () => get<import("./projectWorkspace").ProjectSummary[]>("/api/projects"),
 
+  listFormulationSkills: () => get<FormulationSkill[]>("/api/formulation-skills"),
+
+  getFormulationSkill: (id: string) =>
+    get<FormulationSkill>(`/api/formulation-skills/${encodeURIComponent(id)}`),
+
   getMeta: () =>
     get<{
       domains: string[];
@@ -2114,6 +2198,23 @@ export const api = {
       campaign_count: number;
       experiment_count: number;
     }>(`/api/projects/${encodeURIComponent(id)}/db-stats`),
+
+  listProjectExports: (id: string) =>
+    get<ProjectExportFile[]>(`/api/projects/${encodeURIComponent(id)}/exports`),
+
+  saveProjectExport: (id: string, filename: string, content: string) =>
+    post<ProjectExportFile>(`/api/projects/${encodeURIComponent(id)}/exports`, {
+      filename,
+      content,
+    }),
+
+  downloadProjectExportUrl: (id: string, filename: string) =>
+    `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`,
+
+  deleteProjectExport: (id: string, filename: string) =>
+    del<{ ok: boolean; filename: string }>(
+      `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`
+    ),
 
   getProjectHistory: (id: string, limit = 20) =>
     get<ProjectPayloadHistoryResponse>(
@@ -2213,9 +2314,13 @@ export const api = {
   },
 
   kgFeedbackStats: () =>
-    get<{ measured_total: number; measured_performance: number; by_campaign: Record<string, number> }>(
-      "/api/kg/feedback/stats"
-    ),
+    get<{
+      measured_total: number;
+      measured_performance: number;
+      measured_material?: number;
+      measured_domain?: number;
+      by_campaign: Record<string, number>;
+    }>("/api/kg/feedback/stats"),
 
   kgFeedbackReport: () =>
     get<{ measured_total: number; measured_performance: number; by_campaign: Record<string, number>; alert: string | null; recent_bias: unknown[] }>(
@@ -2247,19 +2352,31 @@ export const api = {
 
   orgDashboard: () => get<OrgDashboardStats>("/api/org/dashboard"),
 
-  listWikiPages: (params?: { kind?: string; limit?: number; offset?: number }) => {
+  listWikiPages: (params?: {
+    kind?: string;
+    limit?: number;
+    offset?: number;
+    project_id?: string | null;
+  }) => {
     const q = new URLSearchParams();
     if (params?.kind) q.set("kind", params.kind);
     if (params?.limit != null) q.set("limit", String(params.limit));
     if (params?.offset != null) q.set("offset", String(params.offset));
+    if (params?.project_id) q.set("project_id", params.project_id);
     const qs = q.toString();
     return get<WikiPagesResponse>(`/api/wiki/pages${qs ? `?${qs}` : ""}`);
   },
-  searchWikiPages: (params: { q: string; kind?: string; limit?: number }) => {
+  searchWikiPages: (params: {
+    q: string;
+    kind?: string;
+    limit?: number;
+    project_id?: string | null;
+  }) => {
     const q = new URLSearchParams();
     q.set("q", params.q);
     if (params.kind) q.set("kind", params.kind);
     if (params.limit != null) q.set("limit", String(params.limit));
+    if (params.project_id) q.set("project_id", params.project_id);
     return get<WikiSearchResponse>(`/api/wiki/search?${q}`);
   },
   compileWikiTheme: (body: { system_key?: string; topic?: string; use_llm?: boolean }) =>
@@ -2338,9 +2455,16 @@ export const api = {
     );
   },
   listWikiReportTemplates: () =>
-    get<{ templates: { id: string; title: string; blurb: string; slices: string }[] }>(
-      "/api/wiki/reports/templates",
-    ),
+    get<{
+      templates: { id: string; title: string; blurb: string; slices: string }[];
+      export?: {
+        md?: boolean;
+        docx?: boolean;
+        pdf?: boolean;
+        pptx?: boolean;
+        cjk_font?: string | null;
+      };
+    }>("/api/wiki/reports/templates"),
   generateWikiReport: (body: {
     project_id: string;
     template: string;
@@ -2407,12 +2531,21 @@ export const api = {
   getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
-  listWikiFlags: (params?: { limit?: number }) => {
+  listWikiFlags: (params?: { limit?: number; project_id?: string | null }) => {
     const q = new URLSearchParams();
     if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.project_id) q.set("project_id", params.project_id);
     const qs = q.toString();
     return get<WikiFlagsResponse>(`/api/wiki/flags${qs ? `?${qs}` : ""}`);
   },
+  runWikiLint: (body?: { limit?: number; detect_orphan?: boolean }) =>
+    post<{
+      ok: boolean;
+      scanned?: number;
+      flagged?: number;
+      orphan_count?: number;
+      results?: Record<string, string[]>;
+    }>("/api/wiki/lint/run", body ?? {}),
 
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 
@@ -3307,6 +3440,23 @@ export interface KBStats {
   /** The backend actually in effect, not the configured value. */
   rag_backend?: string;
   products?: number;
+  /** Process-local quality-gate drop counters (retrieval + ingest). */
+  quality_gate_drops?: KbGateDropStats;
+}
+
+/** Nested drop counters from kb_retrieval_gate. */
+export interface KbGateDropStats {
+  retrieval?: { blocked_domain?: number; garbage_snippet?: number; wiki_track?: number };
+  ingest?: { blocked_domain?: number; garbage_snippet?: number; wiki_track?: number };
+}
+
+/** Shared probe ↔ recommend knobs (GET /api/kb/retrieval-settings). */
+export interface KbRetrievalSettings {
+  kb_hybrid_alpha: number;
+  kb_recommend_use_hybrid: boolean;
+  kb_recommend_include_global: boolean;
+  kb_recommend_top_k: number;
+  kb_recommend_rerank_enabled: boolean;
 }
 
 /** Boolean feature flag backed by a FORMUMIND_* environment variable. */
@@ -3363,6 +3513,12 @@ export interface WikiSearchResponse {
   mode: string;
 }
 
+export interface WikiFlagAction {
+  id: string;
+  label: string;
+  hint?: string;
+}
+
 export interface WikiFlagItem {
   id: string;
   path: string;
@@ -3370,6 +3526,7 @@ export interface WikiFlagItem {
   title: string;
   flags: string[];
   source_ids: string[];
+  actions?: WikiFlagAction[];
 }
 
 export interface WikiFlagsResponse {
@@ -3686,12 +3843,101 @@ export interface KbSearchChunk {
   meta?: Record<string, unknown> | null;
 }
 
+export type KbQueryTestMode = "keyword" | "hybrid" | "hybrid_rerank";
+
+export interface KbQueryTestRequest {
+  query: string;
+  mode?: KbQueryTestMode;
+  top_k?: number;
+  alpha?: number;
+  project_id?: string | null;
+  include_global?: boolean;
+  rerank?: boolean | null;
+}
+
+export interface KbQueryTestHit {
+  rank: number;
+  chunk_id?: string | null;
+  source_id?: string | null;
+  ord?: number | null;
+  title: string;
+  snippet: string;
+  bm25_score?: number | null;
+  cosine_score?: number | null;
+  hybrid_score?: number | null;
+  relevance?: number | null;
+  rerank_score?: number | null;
+  rank_before_rerank?: number | null;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface KbQueryTestResponse {
+  query: string;
+  mode: string;
+  params: {
+    top_k: number;
+    alpha: number;
+    project_id?: string | null;
+    include_global?: boolean;
+    rerank_applied?: boolean;
+  };
+  vector_mode: string;
+  elapsed_ms: number;
+  hits: KbQueryTestHit[];
+  warning?: string | null;
+  /** Drops during this probe run (hybrid path). */
+  gate_drops?: KbGateDropStats;
+  /** Process-lifetime counters at response time. */
+  gate_drops_total?: KbGateDropStats;
+}
+
+export interface KbGoldenQuestion {
+  question: string;
+  expected_keywords: string[];
+  category: string;
+}
+
+export interface KbGoldenEvalRequest {
+  mode?: KbQueryTestMode;
+  top_k?: number;
+  alpha?: number;
+  project_id?: string | null;
+  include_global?: boolean;
+  rerank?: boolean | null;
+}
+
+export interface KbGoldenEvalResultRow {
+  question: string;
+  category: string;
+  passed: boolean;
+  matched_keyword?: string | null;
+  expected_keywords: string[];
+  hit_titles: Array<string | null | undefined>;
+  elapsed_ms?: number;
+  warning?: string | null;
+}
+
+export interface KbGoldenEvalResponse {
+  mode: string;
+  top_k: number;
+  alpha: number;
+  project_id?: string | null;
+  include_global?: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  results: KbGoldenEvalResultRow[];
+}
+
 /** GET /api/kg/calibration — ranking weights + relation hit counts. */
 export interface KgCalibrationResponse {
   kg_enabled: boolean;
   kg_inhibits_penalty: number;
   kg_synergizes_bonus: number;
   kg_measured_bonus: number;
+  kg_measured_metric_bonus?: number;
+  kg_measured_metric_penalty?: number;
+  kg_measured_metric_presence?: number;
   counts: { inhibits: number; substitutes: number; synergizes: number };
 }
 

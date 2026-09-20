@@ -17,8 +17,9 @@ class Supplier(BaseModel):
     """Structured supplier record harvested from PubChem ``Chemical Vendors``.
 
     Carries what the source actually exposes: vendor name, homepage URL and
-    product page. Stored as a JSON array in the ``suppliers_json`` column so
-    the catalog carries sourcing intelligence without a second table.
+    product page. Canonical persistence is ``suppliers`` + ``material_suppliers``
+    (alembic 0028); ``materials.suppliers_json`` remains a transitional
+    projection for older readers and is dual-written on upsert.
 
     Price / stock / delivery are intentionally NOT modelled — PubChem's vendor
     category provides no commercial terms (verified: it returns only

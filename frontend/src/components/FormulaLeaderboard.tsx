@@ -9,7 +9,12 @@ import {
   downloadLeaderboardCsv,
   exportFormulaToPdf,
   exportLeaderboardToPdf,
+  formulaToCsv,
+  leaderboardToCsv,
+  saveTextToProjectShelf,
+  shelfFilename,
 } from "../utils/export";
+import { classifyValidateWarnings } from "../utils/validateWarningActions";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import VersionHistoryModal from "./VersionHistoryModal";
@@ -17,18 +22,40 @@ import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
 import SimilarFormulationModal from "./SimilarFormulationModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
+import MeasuredMetricHitsBanner from "./MeasuredMetricHitsBanner";
 import ParetoFrontPlot from "./charts/ParetoFrontPlot";
 import ParallelCoordinates from "./charts/ParallelCoordinates";
 
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shelfMsg, setShelfMsg] = useState<string | null>(null);
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   const onCopy = async () => {
     await copyFormulaJson(form);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
     setOpen(false);
+  };
+
+  const onShelf = async (kind: "json" | "csv") => {
+    if (!activeProjectId) {
+      setShelfMsg("请先打开项目");
+      setTimeout(() => setShelfMsg(null), 2000);
+      return;
+    }
+    try {
+      const content = kind === "json" ? JSON.stringify(form, null, 2) : formulaToCsv(form);
+      const name = shelfFilename(slugSafe(form.name), kind);
+      await saveTextToProjectShelf(activeProjectId, name, content);
+      setShelfMsg("已保存到货架");
+      setTimeout(() => setShelfMsg(null), 2000);
+      setOpen(false);
+    } catch {
+      setShelfMsg("保存失败");
+      setTimeout(() => setShelfMsg(null), 2000);
+    }
   };
 
   return (
@@ -41,16 +68,18 @@ function ExportMenu({ form }: { form: Formulation }) {
         className="text-[10px] border border-edge text-slate-400 rounded px-1.5 py-0.5 hover:text-accent hover:border-accent/50"
         title="导出配方"
       >
-        {copied ? "已复制 ✓" : "导出 ▾"}
+        {shelfMsg || (copied ? "已复制 ✓" : "导出 ▾")}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
-          <div className="absolute right-0 mt-1 z-20 w-28 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
+          <div className="absolute right-0 mt-1 z-20 w-36 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
             {[
               { label: "复制 JSON", fn: onCopy },
               { label: "导出 CSV", fn: () => { downloadFormulaCsv(form); setOpen(false); } },
               { label: "导出 PDF", fn: () => { exportFormulaToPdf(form); setOpen(false); } },
+              { label: "保存 JSON 到货架", fn: () => void onShelf("json") },
+              { label: "保存 CSV 到货架", fn: () => void onShelf("csv") },
             ].map((item) => (
               <button
                 key={item.label}
@@ -65,6 +94,10 @@ function ExportMenu({ form }: { form: Formulation }) {
       )}
     </div>
   );
+}
+
+function slugSafe(name: string): string {
+  return name.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase() || "formula";
 }
 
 function FormulaCard({
@@ -239,7 +272,7 @@ function FormulaCard({
               编辑模式：直接修改组分后点「✓ 完成」退出(修改仅影响当前卡片)
             </div>
           )}
-          {form.warnings.length > 0 && (
+          {(form.warnings?.length ?? 0) > 0 && (
             <div className="text-[10px] text-amber-400">⚠ {form.warnings.join("; ")}</div>
           )}
           {form.kg_compat && !form.kg_compat.feasible && form.kg_compat.incompatible_pairs?.length > 0 && (
@@ -250,8 +283,15 @@ function FormulaCard({
               🔁 一键替代 — {String((form.kg_compat.incompatible_pairs[0] as any)?.a ?? form.ingredients[0]?.name)} 不相容，查找实测优先的替代料
             </button>
           )}
-          {form.kg_compat?.measured_materials && form.kg_compat.measured_materials.length > 0 && (
-            <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成</div>
+          {(form.kg_compat?.measured_metric_hits?.length ?? 0) > 0 ? (
+            <MeasuredMetricHitsBanner hits={form.kg_compat?.measured_metric_hits} />
+          ) : (
+            form.kg_compat?.measured_materials &&
+            form.kg_compat.measured_materials.length > 0 && (
+              <div className="text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded px-1.5 py-0.5">
+                ✓ 实测验证：{form.kg_compat.measured_materials.join("、")} 已获实测证据加成
+              </div>
+            )
           )}
           {/* 成本 / 碳足迹徽标 */}
           {form.predicted && (form.predicted.cost_cny_per_kg != null || form.predicted.voc_gpl != null) && (
@@ -382,8 +422,32 @@ function FormulaCard({
 function ListExportMenu({ forms }: { forms: Formulation[] }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shelfMsg, setShelfMsg] = useState<string | null>(null);
+  const activeProjectId = useStore((s) => s.activeProjectId);
 
   if (forms.length === 0) return null;
+
+  const onShelf = async (kind: "json" | "csv") => {
+    if (!activeProjectId) {
+      setShelfMsg("请先打开项目");
+      setTimeout(() => setShelfMsg(null), 2000);
+      return;
+    }
+    try {
+      const content = kind === "json" ? JSON.stringify(forms, null, 2) : leaderboardToCsv(forms);
+      await saveTextToProjectShelf(
+        activeProjectId,
+        shelfFilename(`leaderboard_${forms.length}`, kind),
+        content,
+      );
+      setShelfMsg("已保存到货架");
+      setTimeout(() => setShelfMsg(null), 2000);
+      setOpen(false);
+    } catch {
+      setShelfMsg("保存失败");
+      setTimeout(() => setShelfMsg(null), 2000);
+    }
+  };
 
   return (
     <div className="relative">
@@ -392,12 +456,12 @@ function ListExportMenu({ forms }: { forms: Formulation[] }) {
         onClick={() => setOpen((o) => !o)}
         className="text-[11px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50"
       >
-        {copied ? "已复制 ✓" : "导出列表 ▾"}
+        {shelfMsg || (copied ? "已复制 ✓" : "导出列表 ▾")}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 z-20 w-32 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
+          <div className="absolute right-0 mt-1 z-20 w-40 bg-panel border border-edge rounded shadow-lg text-[11px] overflow-hidden">
             {[
               {
                 label: "复制 JSON",
@@ -410,6 +474,8 @@ function ListExportMenu({ forms }: { forms: Formulation[] }) {
               },
               { label: "导出 CSV", fn: () => { downloadLeaderboardCsv(forms); setOpen(false); } },
               { label: "导出 PDF", fn: () => { void exportLeaderboardToPdf(forms); setOpen(false); } },
+              { label: "保存 JSON 到货架", fn: () => void onShelf("json") },
+              { label: "保存 CSV 到货架", fn: () => void onShelf("csv") },
             ].map((item) => (
               <button
                 key={item.label}
@@ -453,6 +519,7 @@ export default function FormulaLeaderboard() {
       formulationValidateWarnings: s.formulationValidateWarnings,
     }))
   );
+  const setOpenModal = useStore((s) => s.setOpenModal);
   const [viewMode, setViewMode] = useState<"cards" | "table" | "pareto" | "parallel">("cards");
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const [showAiPrompt, setShowAiPrompt] = useState(false);
@@ -462,6 +529,51 @@ export default function FormulaLeaderboard() {
   const [saveBusyIndex, setSaveBusyIndex] = useState<number | null>(null);
   // AI 修改基准: null=leaderboard 级(默认 #1), 数字=仅以该卡为基准
   const [aiTargetIdx, setAiTargetIdx] = useState<number | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const warningActions = classifyValidateWarnings(formulationValidateWarnings);
+
+  async function syncIngredientsToMaterials() {
+    const materials = leaderboard.flatMap((f) =>
+      (f.ingredients ?? []).map((ing) => ({
+        name: ing.name,
+        role: ing.role || "",
+        cas_no: ing.cas_no || undefined,
+        smiles: ing.smiles || undefined,
+      }))
+    );
+    if (!materials.length) {
+      setSyncMsg("当前配方无组分可入库");
+      return;
+    }
+    setSyncBusy(true);
+    setSyncMsg(null);
+    try {
+      const r = await api.proposeMaterialsMany(materials, "formula");
+      const baseMsg = `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`;
+      const beforeN = useStore.getState().formulationValidateWarnings.length;
+      try {
+        const forms = useStore.getState().leaderboard;
+        const req = useStore.getState().requirement;
+        const res = await api.validateFormulations(forms, req);
+        const warnings = res.warnings ?? [];
+        useStore.setState({
+          leaderboard: res.formulations ?? forms,
+          formulationValidateWarnings: warnings,
+        });
+        useStore.getState().scheduleAutosave();
+        setSyncMsg(`${baseMsg} · 重校验 ${beforeN}→${warnings.length} 条`);
+      } catch {
+        setSyncMsg(`${baseMsg} · 重校验失败（告警未更新）`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setSyncMsg(`入库失败：${msg}`);
+      useStore.setState({ error: msg });
+    } finally {
+      setSyncBusy(false);
+    }
+  }
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const objectiveMetrics = new Set(requirement.objectives.map((o) => o.metric));
   const doeBaseUid = requirement.active_formulation?.client_uid ?? null;
@@ -547,13 +659,49 @@ export default function FormulaLeaderboard() {
         <ListExportMenu forms={leaderboard} />
       </div>
       {formulationValidateWarnings.length > 0 && (
-        <div className="mb-3 text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2 space-y-1">
+        <div
+          className="mb-3 text-[11px] text-amber-400/90 border border-amber-500/30 bg-amber-500/5 rounded px-2.5 py-2 space-y-2"
+          data-testid="formula-validate-banner"
+        >
           <div className="font-medium text-amber-300">配方校验 / 目录补全提示</div>
           <ul className="list-disc list-inside text-[10px] text-amber-300/90 max-h-28 overflow-y-auto">
             {formulationValidateWarnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
           </ul>
+          {warningActions.hasCompliance && (
+            <p className="text-[10px] text-amber-200/80">
+              合规项（REACH / SVHC / RoHS）需人工确认，不会自动改配方。
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {warningActions.actions.includes("propose_missing") && (
+              <button
+                type="button"
+                disabled={syncBusy || leaderboard.length === 0}
+                data-testid="validate-banner-propose"
+                onClick={() => void syncIngredientsToMaterials()}
+                className="text-[10px] px-2 py-1 rounded border border-amber-400/50 text-amber-200 hover:bg-amber-500/10 disabled:opacity-40"
+              >
+                {syncBusy ? "入库中…" : "入库缺失组分"}
+              </button>
+            )}
+            {warningActions.actions.includes("open_materials") && (
+              <button
+                type="button"
+                data-testid="validate-banner-open-materials"
+                onClick={() => setOpenModal("materials")}
+                className="text-[10px] px-2 py-1 rounded border border-edge text-slate-300 hover:border-accent/40 hover:text-accent"
+              >
+                打开材料库
+              </button>
+            )}
+            {syncMsg && (
+              <span className="text-[10px] text-slate-400" data-testid="validate-banner-sync-msg">
+                {syncMsg}
+              </span>
+            )}
+          </div>
         </div>
       )}
       {leaderboard.length === 0 ? (
@@ -655,31 +803,20 @@ export default function FormulaLeaderboard() {
         </button>
         <button
           type="button"
-          disabled={leaderboard.length === 0}
+          disabled={leaderboard.length === 0 || syncBusy}
           data-testid="sync-ingredients-to-materials"
           title="将推荐配方中的组分提交到全局材料库（有 CAS/SMILES 自动入库，否则进待确认）"
-          onClick={() => {
-            const materials = leaderboard.flatMap((f) =>
-              (f.ingredients ?? []).map((ing) => ({
-                name: ing.name,
-                role: ing.role || "",
-                cas_no: ing.cas_no || undefined,
-                smiles: ing.smiles || undefined,
-              }))
-            );
-            if (!materials.length) return;
-            void api.proposeMaterialsMany(materials, "formula").then((r) => {
-              const msg = `组分入库：自动 ${r.upsert ?? 0} · 待确认 ${r.pending ?? 0} · 已存在 ${r.exists ?? 0}`;
-              window.alert(msg);
-            }).catch((e) => {
-              useStore.setState({ error: e instanceof Error ? e.message : String(e) });
-            });
-          }}
+          onClick={() => void syncIngredientsToMaterials()}
           className="border border-edge text-slate-300 rounded px-3 py-1.5 text-xs hover:border-accent/40 hover:text-accent disabled:opacity-40"
         >
-          入库缺失组分
+          {syncBusy ? "入库中…" : "入库缺失组分"}
         </button>
       </div>
+      {syncMsg && formulationValidateWarnings.length === 0 && (
+        <p className="mt-1 text-[10px] text-slate-500" data-testid="validate-footer-sync-msg">
+          {syncMsg}
+        </p>
+      )}
       {showAiPrompt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" data-testid="modal-ai-modify">
           <div className="bg-panel border border-edge rounded-xl p-6 w-[min(500px,92vw)]">

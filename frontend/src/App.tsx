@@ -1,14 +1,16 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import SourcesPanel from "./components/SourcesPanel";
 import ResearchPanel from "./components/ResearchPanel";
 import ActionsPanel from "./components/ActionsPanel";
 import HistoryPanel from "./components/HistoryPanel";
+import ArtifactDrawer from "./components/ArtifactDrawer";
 import SettingsModal from "./components/SettingsModal";
 import ProjectNotebookLMModal from "./components/ProjectNotebookLMModal";
 import DegradedBanner from "./components/DegradedBanner";
 import InfraHealthBanner from "./components/InfraHealthBanner";
 import TrainingDataBanner from "./components/TrainingDataBanner";
+import { selectProjectArtifacts } from "./artifacts/projectArtifacts";
 import { useStore } from "./store";
 
 function GearIcon() {
@@ -27,15 +29,77 @@ function ClockIcon() {
   );
 }
 
+function BoxIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  );
+}
+
 export default function App() {
-  const { toggleHistory, toggleSettings, projects, initProjects, hydrateLlmSettings } = useStore(
+  const {
+    toggleHistory,
+    toggleSettings,
+    toggleArtifactDrawer,
+    projects,
+    initProjects,
+    hydrateLlmSettings,
+    leaderboard,
+    formulationBusy,
+    doePlan,
+    busy,
+    optimizationHistory,
+    deepReport,
+    deepResearchBusy,
+    loopReport,
+    activeProjectId,
+  } = useStore(
     useShallow((s) => ({
       toggleHistory: s.toggleHistory,
       toggleSettings: s.toggleSettings,
+      toggleArtifactDrawer: s.toggleArtifactDrawer,
       projects: s.projects,
       initProjects: s.initProjects,
       hydrateLlmSettings: s.hydrateLlmSettings,
+      leaderboard: s.leaderboard,
+      formulationBusy: s.formulationBusy,
+      doePlan: s.doePlan,
+      busy: s.busy,
+      optimizationHistory: s.optimizationHistory,
+      deepReport: s.deepReport,
+      deepResearchBusy: s.deepResearchBusy,
+      loopReport: s.loopReport,
+      activeProjectId: s.activeProjectId,
     }))
+  );
+
+  const artifactCount = useMemo(
+    () =>
+      selectProjectArtifacts({
+        leaderboard,
+        formulationBusy,
+        doePlan,
+        busy,
+        optimizationHistory,
+        deepReport,
+        deepResearchBusy,
+        loopReport,
+        activeProjectId,
+      }).length,
+    [
+      leaderboard,
+      formulationBusy,
+      doePlan,
+      busy,
+      optimizationHistory,
+      deepReport,
+      deepResearchBusy,
+      loopReport,
+      activeProjectId,
+    ],
   );
 
   useEffect(() => {
@@ -59,6 +123,20 @@ export default function App() {
         >
           <GearIcon />
           <span>设置</span>
+        </button>
+        <button
+          onClick={toggleArtifactDrawer}
+          data-testid="btn-artifacts"
+          className="relative flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
+          title="产物工作区"
+        >
+          <BoxIcon />
+          <span>产物</span>
+          {artifactCount > 0 && (
+            <span className="absolute -top-1 -right-1 text-[9px] bg-accent2 text-ink rounded-full w-4 h-4 flex items-center justify-center font-mono">
+              {artifactCount > 9 ? "9+" : artifactCount}
+            </span>
+          )}
         </button>
         <button
           onClick={toggleHistory}
@@ -93,6 +171,7 @@ export default function App() {
       </main>
 
       <HistoryPanel />
+      <ArtifactDrawer />
       <SettingsModal />
       <ProjectNotebookLMModal />
     </div>

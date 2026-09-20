@@ -266,7 +266,18 @@ def retrieve_node(
     elif settings.kb_v2_enabled and settings.kb_recommend_top_k > 0:
         from ..services import kb_index
 
-        kb_hits = kb_index.search_chunks(query, k=settings.kb_recommend_top_k)
+        req = state.get("req")
+        if bool(getattr(settings, "kb_recommend_use_hybrid", True)):
+            project_id = (getattr(req, "project_id", None) or "").strip() or None
+            kb_hits = kb_index.search_chunks_hybrid(
+                query,
+                k=settings.kb_recommend_top_k,
+                alpha=float(getattr(settings, "kb_hybrid_alpha", 0.3)),
+                project_id=project_id,
+                include_global=bool(getattr(settings, "kb_recommend_include_global", True)),
+            )
+        else:
+            kb_hits = kb_index.search_chunks(query, k=settings.kb_recommend_top_k)
         if kb_hits:
             seen = {e.identifier or e.title for e in evidence}
             evidence = evidence + [
@@ -686,7 +697,7 @@ def resolve_grounded_evidence(
     pre_index: list[Evidence] | None = None,
     settings: Settings | None = None,
 ) -> GroundedEvidenceResult:
-    """ColBERT/BM25 retrieve → KB evidence SSOT (lightweight for recommend)."""
+    """ColBERT/BM25 retrieve → optional probe-aligned KB hybrid fuse → SSOT."""
     settings = settings or get_settings()
     q = build_research_query(query, req)
 
@@ -709,6 +720,7 @@ def resolve_grounded_evidence(
             e for e in evidence if (e.identifier or e.title) not in pre_keys
         ]
 
+    evidence = _fuse_recommend_kb_hybrid(evidence, q, req, settings)
     evidence = _filter_unindexed_external(evidence)
 
     return GroundedEvidenceResult(
@@ -719,6 +731,51 @@ def resolve_grounded_evidence(
         grade_reason=f"BM25/ColBERT retrieval: {len(evidence)} hits" if evidence else "No KB results",
         fallback_used=not bool(evidence),
     )
+
+
+def _fuse_recommend_kb_hybrid(
+    evidence: list[Evidence],
+    query: str,
+    req: Requirement | None,
+    settings: Settings,
+) -> list[Evidence]:
+    """Merge probe-stack hybrid chunk hits into recommend/research evidence.
+
+    Controlled by ``kb_recommend_use_hybrid`` + ``kb_recommend_top_k``. Uses the
+    same ``kb_hybrid_alpha`` / project scope knobs as Hub retrieval probe.
+    """
+    if not getattr(settings, "kb_v2_enabled", False):
+        return evidence
+    if int(getattr(settings, "kb_recommend_top_k", 0) or 0) <= 0:
+        return evidence
+    if not bool(getattr(settings, "kb_recommend_use_hybrid", True)):
+        return evidence
+
+    from ..services import kb_index
+
+    project_id = (getattr(req, "project_id", None) or "").strip() or None
+    include_global = bool(getattr(settings, "kb_recommend_include_global", True))
+    kb_hits = kb_index.search_chunks_hybrid(
+        query,
+        k=int(settings.kb_recommend_top_k),
+        alpha=float(getattr(settings, "kb_hybrid_alpha", 0.3)),
+        project_id=project_id,
+        include_global=include_global,
+    )
+    if not kb_hits:
+        return evidence
+
+    seen = {e.identifier or e.title for e in evidence}
+    merged = list(evidence) + [h for h in kb_hits if (h.identifier or h.title) not in seen]
+
+    if bool(getattr(settings, "kb_recommend_rerank_enabled", False)) and merged:
+        try:
+            from ..services.rag import llm_rerank
+
+            merged = llm_rerank(query, merged, k=len(merged))
+        except Exception as exc:
+            logger.debug("kb recommend rerank skipped: %s", exc)
+    return merged
 
 
 def graph_state_to_research_result(state: ResearchGraphState, req: Requirement) -> ResearchResult:

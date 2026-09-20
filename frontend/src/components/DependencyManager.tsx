@@ -123,6 +123,29 @@ function KnowledgeBaseCard({
           </span>
         ))}
       </div>
+      {(() => {
+        const g = stats.quality_gate_drops;
+        if (!g) return null;
+        const r = g.retrieval || {};
+        const i = g.ingest || {};
+        const parts = [
+          r.blocked_domain ? `检索拦域名 ${r.blocked_domain}` : null,
+          r.garbage_snippet ? `检索垃圾 ${r.garbage_snippet}` : null,
+          r.wiki_track ? `检索wiki ${r.wiki_track}` : null,
+          i.blocked_domain ? `入库拦域名 ${i.blocked_domain}` : null,
+          i.garbage_snippet ? `入库垃圾 ${i.garbage_snippet}` : null,
+        ].filter(Boolean);
+        if (parts.length === 0) return null;
+        return (
+          <div
+            className="mt-1 text-[10px] text-slate-500"
+            data-testid="kb-quality-gate-drops"
+            title="进程内质量门禁累计丢弃（重启清零）"
+          >
+            门禁丢弃 · {parts.join(" · ")}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -664,6 +687,12 @@ function KbDiagnosticsCard() {
             <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
               measured×{calibration.kg_measured_bonus}
             </span>
+            {calibration.kg_measured_metric_bonus != null && (
+              <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 font-mono">
+                metric×{calibration.kg_measured_metric_bonus}/
+                {calibration.kg_measured_metric_penalty ?? "—"}
+              </span>
+            )}
           </div>
           <div className="text-[10px] text-slate-500">
             关系命中 · inhibits {calibration.counts.inhibits} · substitutes{" "}
@@ -675,7 +704,12 @@ function KbDiagnosticsCard() {
         className="border border-edge/60 rounded p-2 mb-1 space-y-1.5 bg-ink/30"
         data-testid="kb-probe-panel"
       >
-        <div className="text-[10px] text-slate-500">KB 检索探针 · /api/kb/search · hybrid-search</div>
+        <div className="text-[10px] text-slate-500">
+          KB 检索探针 · /api/kb/search · hybrid-search
+          <span className="block text-teal-400/80 mt-0.5">
+            完整多路分数 / Golden 批跑见知识中枢 →「检索探针」
+          </span>
+        </div>
         <div className="flex flex-wrap gap-1">
           <input
             value={kbProbeQ}

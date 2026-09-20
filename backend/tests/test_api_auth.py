@@ -16,6 +16,9 @@ def auth_client(monkeypatch):
     monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "test")
     get_settings.cache_clear()
     reset_dev_token_cache()
+    settings = get_settings()
+    assert settings.api_auth_enabled is True
+    assert settings.api_token == "test-secret-token"
     with TestClient(app) as client:
         yield client
     get_settings.cache_clear()

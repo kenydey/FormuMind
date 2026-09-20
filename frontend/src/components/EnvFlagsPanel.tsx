@@ -1,28 +1,45 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, formatApiError, type EnvFlag } from "../api";
+import { useStore } from "../store";
 
 /** True/False toggle for one FORMUMIND_* environment variable. */
 function FlagToggle({
   flag,
   draft,
+  focused,
   onChange,
 }: {
   flag: EnvFlag;
   draft: boolean;
+  focused?: boolean;
   onChange: (value: boolean) => void;
 }) {
   const dirty = draft !== flag.value;
   const nonDefault = draft !== flag.default;
   return (
     <div
-      className={`flex items-start justify-between gap-3 rounded border px-3 py-2 ${
-        dirty ? "border-accent/50 bg-accent/5" : "border-edge/60"
+      data-testid={`env-flag-${flag.attr}`}
+      data-focused={focused ? "true" : undefined}
+      className={`flex items-start justify-between gap-3 rounded border px-3 py-2 transition-colors ${
+        focused
+          ? "border-accent ring-2 ring-accent/40 bg-accent/10"
+          : dirty
+            ? "border-accent/50 bg-accent/5"
+            : "border-edge/60"
       }`}
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm text-slate-200">{flag.label}</span>
           <code className="text-[10px] text-slate-500">{flag.env_key}</code>
+          {focused && (
+            <span
+              className="text-[10px] px-1 py-px rounded bg-accent/20 border border-accent/40 text-accent"
+              data-testid={`env-flag-focus-badge-${flag.attr}`}
+            >
+              来自 Reports
+            </span>
+          )}
           {nonDefault && (
             <span className="text-[10px] px-1 py-px rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">
               非默认
@@ -56,6 +73,8 @@ function FlagToggle({
 }
 
 export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number }) {
+  const focusAttr = useStore((s) => s.settingsEnvFocusAttr);
+  const clearSettingsEnvFocus = useStore((s) => s.clearSettingsEnvFocus);
   const [flags, setFlags] = useState<EnvFlag[]>([]);
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
@@ -83,6 +102,15 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
 
+  useEffect(() => {
+    if (!focusAttr || flags.length === 0) return;
+    const el = document.querySelector<HTMLElement>(`[data-testid="env-flag-${focusAttr}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = window.setTimeout(() => clearSettingsEnvFocus(), 4000);
+    return () => window.clearTimeout(t);
+  }, [focusAttr, flags, clearSettingsEnvFocus]);
+
   const groups = useMemo(() => {
     const map = new Map<string, { label: string; items: EnvFlag[] }>();
     for (const f of flags) {
@@ -107,6 +135,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
       setFlags(r.flags ?? []);
       setDrafts(Object.fromEntries((r.flags ?? []).map((f) => [f.attr, f.value])));
       setSavedMsg(`已更新 ${r.updated.length} 项 — 写入 .env 并即时生效`);
+      clearSettingsEnvFocus();
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -124,7 +153,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="env-flags-panel">
       <p className="text-xs text-slate-500">
         以下功能开关对应服务器的 <code className="text-slate-400">FORMUMIND_*</code> 环境变量。
         保存后写入进程环境与 <code className="text-slate-400">.env</code> 文件，
@@ -143,7 +172,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
         </div>
       )}
 
-      <div className="max-h-[52vh] overflow-y-auto pr-1 space-y-4">
+      <div className="max-h-[52vh] overflow-y-auto pr-1 space-y-4" data-testid="env-flags-scroll">
         {groups.map((g) => (
           <div key={g.label}>
             <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">
@@ -155,6 +184,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
                   key={f.attr}
                   flag={f}
                   draft={drafts[f.attr] ?? f.value}
+                  focused={focusAttr === f.attr}
                   onChange={(v) => {
                     setDrafts((prev) => ({ ...prev, [f.attr]: v }));
                     setSavedMsg(null);

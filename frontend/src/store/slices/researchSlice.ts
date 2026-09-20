@@ -1,9 +1,10 @@
-import { api, awaitTaskStream, formatApiError, progressToTaskStatus } from "../../api";
+import { api, awaitTaskStream, extractThinkingSteps, formatApiError, progressToTaskStatus } from "../../api";
 import type { ChatMessage, ComprehensiveReport, Formulation, ResearchResult } from "../../api";
 import { applyEnrichedLeaderboard } from "../formulationEnrich";
 import { undismiss } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
+import { withActiveProjectId } from "../../utils/withActiveProjectId";
 
 /** Long LLM jobs (recommend / AI-modify) emit progress sporadically.
  *  No wall-clock limit — a fixed 120s abort killed healthy 174–281s recommends
@@ -107,7 +108,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
     },
 
     runAiModifyFormula: async (prompt, baseIndex = 0) => {
-      const { requirement, sources, selectedSources, searchQuery, leaderboard } = get();
+      const { requirement, sources, selectedSources, searchQuery, leaderboard, activeProjectId } = get();
+      const req = withActiveProjectId(requirement, activeProjectId);
       const selected = sources.filter((e) =>
         selectedSources.includes(e.identifier || e.title)
       );
@@ -117,10 +119,11 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.formulationBusy = true;
         draft.recommendStage = "retrieve";
         draft.recommendMessage = "AI 修改配方中…";
+        draft.taskThinking = [];
         draft.error = null;
       });
       try {
-        const { task_id } = await api.modifyFormulations(requirement, prompt, {
+        const { task_id } = await api.modifyFormulations(req, prompt, {
           sources: payload,
           baseFormulas: leaderboard,
           baseFormulation: base,
@@ -134,6 +137,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
               draft.recommendStage = ev.stage ?? "";
               draft.recommendMessage = ev.message ?? "";
               draft.task = progressToTaskStatus(task_id, "recommend", ev);
+              const steps = extractThinkingSteps(ev);
+              if (steps.length) draft.taskThinking = steps;
             });
           },
           0,
@@ -163,6 +168,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.formulationBusy = false;
           draft.recommendStage = "";
           draft.recommendMessage = "";
+          draft.taskThinking = [];
         });
       }
     },
@@ -172,6 +178,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.formulationBusy = true;
         draft.recommendStage = "retrieve";
         draft.recommendMessage = "正在检索";
+        draft.taskThinking = [];
         draft.error = null;
       });
       const ctrl = new AbortController();
@@ -179,13 +186,14 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         (draft as unknown as Record<string, unknown>)._researchAbort = ctrl;
       });
       try {
-        const { requirement, sources, selectedSources, searchQuery, preferMaterialsCatalog } = get();
+        const { requirement, sources, selectedSources, searchQuery, preferMaterialsCatalog, activeProjectId } = get();
+        const req = withActiveProjectId(requirement, activeProjectId);
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
         const payload = selected.length > 0 ? selected : sources;
         const { task_id } = await api.submitRecommendResearch(
-          requirement,
+          req,
           payload,
           searchQuery.trim(),
           { preferMaterialsCatalog }
@@ -199,6 +207,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
               // 冷启动区分：首包 retrieve 阶段文案
               draft.recommendMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
               draft.task = progressToTaskStatus(task_id, "recommend", ev);
+              const steps = extractThinkingSteps(ev);
+              if (steps.length) draft.taskThinking = steps;
             });
           },
           0,
@@ -222,6 +232,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.formulationBusy = false;
           draft.recommendStage = "";
           draft.recommendMessage = "";
+          draft.taskThinking = [];
           delete (draft as unknown as Record<string, unknown>)._researchAbort;
         });
       }
@@ -245,7 +256,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.error = null;
       });
       try {
-        const { requirement, sources, selectedSources, searchQuery, preferMaterialsCatalog } = get();
+        const { requirement, sources, selectedSources, searchQuery, preferMaterialsCatalog, activeProjectId } = get();
+        const req = withActiveProjectId(requirement, activeProjectId);
         const selected = sources.filter((e) =>
           selectedSources.includes(e.identifier || e.title)
         );
@@ -253,7 +265,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
 
         // Prefer the full sync research endpoint (mechanism + recommended).
         try {
-          const research = await api.research(requirement, payload, searchQuery.trim());
+          const research = await api.research(req, payload, searchQuery.trim());
           await applyEnrichedLeaderboard(set, get, research.recommended ?? [], (draft) => {
             draft.research = { ...research, recommended: draft.leaderboard };
             draft.recommendMessage = "同步研究完成";
@@ -263,7 +275,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           // Fall through to recommendFormulations.
         }
 
-        const rec = await api.recommendFormulations(requirement, undefined, payload, 3, {
+        const rec = await api.recommendFormulations(req, undefined, payload, 3, {
           preferMaterialsCatalog,
         });
         const forms = (rec.scored?.length ? rec.scored : []) as Formulation[];
@@ -291,6 +303,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         draft.deepResearchBusy = true;
         draft.deepResearchStage = "retrieve";
         draft.deepResearchMessage = "正在检索";
+        draft.taskThinking = [];
         draft.error = null;
         undismiss(draft.notificationsDismissed, ["deep-research", "deep-report"]);
       });
@@ -311,6 +324,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
             draft.deepResearchStage = ev.stage ?? "";
             draft.deepResearchMessage = ev.stage === "retrieve" && !ev.message ? "模型冷启动中… 正在检索" : (ev.message ?? "");
             draft.task = progressToTaskStatus(task_id, "deep_research", ev);
+            const steps = extractThinkingSteps(ev);
+            if (steps.length) draft.taskThinking = steps;
           });
         }, 600_000, ctrl.signal);
         const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
@@ -343,6 +358,7 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           draft.deepResearchBusy = false;
           draft.deepResearchStage = "";
           draft.deepResearchMessage = "";
+          draft.taskThinking = [];
           delete (draft as unknown as Record<string, unknown>)._deepResearchAbort;
         });
       }

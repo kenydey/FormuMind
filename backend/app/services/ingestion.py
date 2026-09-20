@@ -101,6 +101,7 @@ def _ingest_parsed_text(
     filename: str,
     source_kind: str,
     persist: bool = True,
+    origin_url: str | None = None,
 ) -> IngestOutcome:
     settings = get_settings()
     guide: SourceGuideSchema | None = None
@@ -131,6 +132,7 @@ def _ingest_parsed_text(
             source_guide=guide,
             extraction_status=status,
             extraction_error=err,
+            origin_url=origin_url,
         )
         # Persistent KB v2: chunk (+embed when available) into document_chunks
         # so chat retrieval spans the whole corpus across restarts.
@@ -300,6 +302,24 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     """Fetch a web page and convert to Evidence chunks."""
     if not _is_safe_url(url):
         raise ValueError("URL must be a public http(s) address")
+
+    # Content-filter blocklist: skip marketplace / junk hosts before download.
+    from .kb_retrieval_gate import is_blocked_origin_url
+
+    if get_settings().content_filter_enabled and is_blocked_origin_url(url):
+        return IngestOutcome(
+            evidence=[
+                Evidence(
+                    source="web",
+                    identifier=url,
+                    title=url,
+                    snippet="该域名在内容质量黑名单中，已跳过入库",
+                    relevance=0.0,
+                )
+            ],
+            extraction_status="skipped",
+        )
+
     import httpx
 
     # follow_redirects=False + manual loop: every redirect target is re-checked
@@ -341,7 +361,13 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
             extraction_status="skipped",
         )
 
-    outcome = _ingest_parsed_text(text, filename=url, source_kind="web", persist=persist)
+    outcome = _ingest_parsed_text(
+        text,
+        filename=url,
+        source_kind="web",
+        persist=persist,
+        origin_url=url,
+    )
     if outcome.evidence:
         outcome.evidence[0].identifier = url
         outcome.evidence[0].title = url

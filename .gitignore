@@ -40,6 +40,9 @@ MolScribe/
 poc_ocsr/
 vendor/llm_wiki/
 
+# Third-party wiki clones for architecture eval only (GPL — never commit)
+vendor/
+
 # Dev backup residue (never commit)
 *.bak
 *.bak2

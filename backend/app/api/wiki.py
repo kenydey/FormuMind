@@ -57,9 +57,23 @@ def list_pages(
     kind: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    project_id: str | None = Query(
+        default=None,
+        description="When set, only dossier/reports for this project and wiki pages "
+        "whose source_ids belong to the project (strict; no global leak)",
+    ),
 ) -> WikiPagesResponse:
     _require_wiki()
-    rows = get_wiki_store().list_pages(kind=kind, limit=limit, offset=offset)
+    store = get_wiki_store()
+    if project_id:
+        from ..services.wiki.project_scope import filter_wiki_rows
+
+        # Over-fetch then filter — wiki has no project_id column.
+        scan = store.list_pages(kind=kind, limit=min(500, max(limit + offset, limit * 5)), offset=0)
+        scoped = filter_wiki_rows(scan, project_id)
+        rows = scoped[offset : offset + limit]
+        return WikiPagesResponse(pages=[_item(r) for r in rows], total=len(scoped))
+    rows = store.list_pages(kind=kind, limit=limit, offset=offset)
     return WikiPagesResponse(pages=[_item(r) for r in rows], total=len(rows))
 
 
@@ -87,6 +101,12 @@ def get_by_path(path: str = Query(min_length=1)) -> WikiPageDetail:
     return WikiPageDetail(**base.model_dump(), markdown=md)
 
 
+class WikiFlagAction(BaseModel):
+    id: str
+    label: str
+    hint: str = ""
+
+
 class WikiFlagItem(BaseModel):
     id: str
     path: str
@@ -94,19 +114,51 @@ class WikiFlagItem(BaseModel):
     title: str = ""
     flags: list[str] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
+    actions: list[WikiFlagAction] = Field(default_factory=list)
 
 
 class WikiFlagsResponse(BaseModel):
     pages: list[WikiFlagItem]
 
 
+class WikiLintRunRequest(BaseModel):
+    limit: int = Field(default=200, ge=1, le=500)
+    detect_orphan: bool = True
+
+
 @router.get("/flags", response_model=WikiFlagsResponse)
-def list_flagged(limit: int = Query(default=50, ge=1, le=200)) -> WikiFlagsResponse:
+def list_flagged(
+    limit: int = Query(default=50, ge=1, le=200),
+    project_id: str | None = Query(default=None),
+) -> WikiFlagsResponse:
     _require_wiki()
     from ..services.wiki.lint import list_flagged_pages
+    from ..services.wiki.project_scope import wiki_page_in_project, project_source_id_set
 
-    rows = list_flagged_pages(limit=limit)
+    rows = list_flagged_pages(limit=limit if not project_id else min(500, max(limit * 5, limit)))
+    if project_id:
+        allowed = project_source_id_set(project_id)
+        rows = [
+            r
+            for r in rows
+            if wiki_page_in_project(
+                path=r.get("path") or "",
+                page_source_ids=r.get("source_ids"),
+                project_id=project_id,
+                allowed_source_ids=allowed,
+            )
+        ][:limit]
     return WikiFlagsResponse(pages=[WikiFlagItem(**r) for r in rows])
+
+
+@router.post("/lint/run")
+def run_lint_endpoint(body: WikiLintRunRequest | None = None) -> dict:
+    """W4 ops: scan pages for stale/conflict/orphan and persist flags."""
+    _require_wiki()
+    from ..services.wiki.lint import run_lint_pass
+
+    req = body or WikiLintRunRequest()
+    return run_lint_pass(limit=req.limit, detect_orphan=req.detect_orphan)
 
 
 class WikiSearchHit(BaseModel):
@@ -132,6 +184,7 @@ def search_pages(
     q: str = Query(min_length=1),
     kind: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    project_id: str | None = Query(default=None),
 ) -> WikiSearchResponse:
     """Phase 2: metadata + body search (FTS5 when enabled, else keyword fallback)."""
     _require_wiki()
@@ -139,11 +192,12 @@ def search_pages(
     store = get_wiki_store()
     hits: list[WikiSearchHit] = []
     mode = "fallback"
+    fetch_limit = min(200, max(limit * 5, limit)) if project_id else limit
 
     if getattr(settings, "wiki_fts_enabled", True):
         from ..services.wiki.fts import search_fts
 
-        raw = search_fts(store._session_factory, q, kind=kind, limit=limit)
+        raw = search_fts(store._session_factory, q, kind=kind, limit=fetch_limit)
         if raw:
             mode = "fts"
             for r in raw:
@@ -171,7 +225,7 @@ def search_pages(
         if not tokens:
             tokens = [q_lower]
         scored: list[tuple[int, WikiSearchHit]] = []
-        for row in store.list_pages(kind=kind, limit=min(500, max(50, limit * 10))):
+        for row in store.list_pages(kind=kind, limit=min(500, max(50, fetch_limit * 10))):
             md = store.read_markdown(row.path) or ""
             _, body = parse_front_matter(md)
             blob = f"{row.title}\n{row.path}\n{row.norm_key}\n{body}".lower()
@@ -202,8 +256,23 @@ def search_pages(
                 )
             )
         scored.sort(key=lambda x: x[0], reverse=True)
-        hits = [h for _, h in scored[:limit]]
+        hits = [h for _, h in scored[:fetch_limit]]
         mode = "fallback"
+
+    if project_id:
+        from ..services.wiki.project_scope import project_source_id_set, wiki_page_in_project
+
+        allowed = project_source_id_set(project_id)
+        hits = [
+            h
+            for h in hits
+            if wiki_page_in_project(
+                path=h.path,
+                page_source_ids=h.source_ids,
+                project_id=project_id,
+                allowed_source_ids=allowed,
+            )
+        ][:limit]
 
     return WikiSearchResponse(hits=hits, total=len(hits), mode=mode)
 

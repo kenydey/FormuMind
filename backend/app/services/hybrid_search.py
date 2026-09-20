@@ -5,10 +5,12 @@ similarity via weighted linear combination.  No external service required —
 purely local.
 
 Task 2.5: hybrid 检索——BM25 + vector 混合排序 + 端点 + 3 测试
+Dim-3: hybrid_search_scored exposes per-channel scores for /api/kb/query-test.
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 from rank_bm25 import BM25Okapi
@@ -21,12 +23,21 @@ from .errors import degrade_return
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class ScoredChunk:
+    """Chunk plus normalized retrieval scores for the query-test probe."""
+
+    chunk: object
+    bm25_score: float
+    cosine_score: float
+    hybrid_score: float
+
+
 def _tokenize(text: str) -> list[str]:
     """Tokenize text for BM25, using jieba for Chinese when available."""
     text = (text or "").strip()
     if not text:
         return []
-    # Detect if text contains CJK characters
     has_cjk = any("\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf" for c in text)
     if has_cjk:
         try:
@@ -34,33 +45,51 @@ def _tokenize(text: str) -> list[str]:
 
             return list(jieba.cut(text))
         except ImportError:
-            logger.warning("jieba not installed; falling back to character-level tokenization for Chinese")
+            logger.warning(
+                "jieba not installed; falling back to character-level tokenization for Chinese"
+            )
             return list(text)
     return text.lower().split()
 
 
-def hybrid_search(
+def _to_response(c) -> DocumentChunkResponse:
+    return DocumentChunkResponse(
+        id=c.id,
+        source_id=c.source_id,
+        ord=c.ord,
+        text=c.text,
+        heading_path=c.heading_path or "",
+        page=c.page_no,
+        paragraph=c.paragraph_idx
+        if c.paragraph_idx is not None
+        else (c.meta or {}).get("paragraph_idx"),
+        offset_start=c.offset_start
+        if c.offset_start is not None
+        else (c.meta or {}).get("offset_start"),
+        offset_end=c.offset_end
+        if c.offset_end is not None
+        else (c.meta or {}).get("offset_end"),
+        meta=c.meta,
+    )
+
+
+def hybrid_search_scored(
     query: str,
     top_k: int = 10,
-    alpha: float = 0.3,
-) -> list[DocumentChunkResponse]:
-    """BM25 + vector hybrid retrieval over the persistent KB chunk store.
+    alpha: float | None = None,
+    *,
+    project_id: str | None = None,
+    include_global: bool = False,
+) -> list[ScoredChunk]:
+    """BM25 + vector hybrid retrieval with bm25/cosine/hybrid scores retained.
 
-    Parameters
-    ----------
-    query : str
-        Search query.
-    top_k : int
-        Max results to return (default 10).
-    alpha : float
-        BM25 weight in [0, 1]; (1-alpha) is the cosine weight.  Default 0.3
-        biases slightly toward semantic matches.
-
-    Returns
-    -------
-    list[DocumentChunkResponse]
-        Ranked chunks, or [] when the corpus is empty / KB is disabled.
+    ``include_global`` only applies when ``project_id`` is set (ChunkStore
+    semantics matching Hub source listing). When ``alpha`` is omitted, uses
+    ``settings.kb_hybrid_alpha`` so the retrieval probe and recommend path share
+    one knobs.
     """
+    if alpha is None:
+        alpha = float(get_settings().kb_hybrid_alpha)
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
@@ -72,14 +101,12 @@ def hybrid_search(
 
         chunks = get_chunk_store().all_chunks(
             limit=get_settings().kb_search_scan_limit,
+            project_id=project_id,
+            include_global=include_global,
         )
         if not chunks:
             return []
 
-        # ── BM25 sparse scores ──────────────────────────────────────────
-        # Filter out chunks whose text tokenizes to nothing — BM25Okapi
-        # raises when given empty token lists, and downstream cosine alignment
-        # requires chunks and corpus_tokens to stay in sync.
         tokenized = [(c, t) for c, t in zip(chunks, (_tokenize(c.text) for c in chunks)) if t]
         if not tokenized:
             return []
@@ -88,13 +115,8 @@ def hybrid_search(
         n = len(chunks)
 
         bm25 = BM25Okapi(corpus_tokens)
-        bm25_scores: np.ndarray = bm25.get_scores(_tokenize(query))
+        bm25_scores: np.ndarray = bm25.get_scores(_tokenize(query)).astype(float)
 
-        # ── cosine (dense) scores ───────────────────────────────────────
-        # 2026-09-04 (双语分流): chunks 可能由不同模型嵌入(zh→bge, en→
-        # MiniLM)——按 embedding_model 分组, 每组用对应模型编码查询各算
-        # 一次 cosine(bge 查询侧加指令前缀); 无向量/模型未编组 → 0.0,
-        # 交给 BM25 决定(与 search_chunks 同哲学)。
         cosine_scores = np.zeros(n, dtype=float)
         model_cols: set[str] = {
             c.embedding_model for c in chunks if getattr(c, "embedding_model", None)
@@ -111,7 +133,6 @@ def hybrid_search(
                 if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
                     cosine_scores[i] = kb_index._dot(qv, c.embedding)
 
-        # ── normalise each score vector to [0, 1] ────────────────────────
         bm25_max = float(bm25_scores.max()) if bm25_scores.size else 0.0
         if bm25_max > 0.0:
             bm25_scores = bm25_scores / bm25_max
@@ -120,57 +141,55 @@ def hybrid_search(
         if cosine_max > 0.0:
             cosine_scores = cosine_scores / cosine_max
 
-        # ── weighted combination ─────────────────────────────────────────
         combined = alpha * bm25_scores + (1.0 - alpha) * cosine_scores
 
-        # ── rank by combined score (descending) ──────────────────────────
-        ranked = [
-            (float(combined[i]), chunks[i])
-            for i in range(n)
-            if float(combined[i]) > 0.0
-        ]
-        ranked.sort(key=lambda pair: pair[0], reverse=True)
-        ranked = ranked[:top_k]
+        order = [i for i in range(n) if float(combined[i]) > 0.0]
+        order.sort(key=lambda i: float(combined[i]), reverse=True)
 
-        # Fallback for small corpora: BM25Okapi's IDF can go negative when a
-        # query term appears in all (or nearly all) documents, making every
-        # combined score ≤ 0 even for chunks that share tokens with the query.
-        # In that case, return the top matching chunks by raw combined score
-        # so single-chunk and small-corpus searches still produce results.
-        if not ranked:
+        if not order:
             qtoks = set(_tokenize(query))
-            fallback = [
-                (float(combined[i]), chunks[i])
-                for i in range(n)
-                if qtoks & set(corpus_tokens[i])
-            ]
-            fallback.sort(key=lambda pair: pair[0], reverse=True)
-            ranked = fallback[:top_k]
+            order = [i for i in range(n) if qtoks & set(corpus_tokens[i])]
+            order.sort(key=lambda i: float(combined[i]), reverse=True)
 
-        # ── convert to response objects ──────────────────────────────────
-        results: list[DocumentChunkResponse] = []
-        for _score, c in ranked:
-            results.append(
-                DocumentChunkResponse(
-                    id=c.id,
-                    source_id=c.source_id,
-                    ord=c.ord,
-                    text=c.text,
-                    heading_path=c.heading_path or "",
-                    page=c.page_no,
-                    paragraph=c.paragraph_idx
-                    if c.paragraph_idx is not None
-                    else (c.meta or {}).get("paragraph_idx"),
-                    offset_start=c.offset_start
-                    if c.offset_start is not None
-                    else (c.meta or {}).get("offset_start"),
-                    offset_end=c.offset_end
-                    if c.offset_end is not None
-                    else (c.meta or {}).get("offset_end"),
-                    meta=c.meta,
-                )
+        # Corpus quality gate (blocked origin_url / garbage / wiki) — shared by
+        # Hub retrieval probe and recommend hybrid fuse. Fills top_k after drops.
+        from .kb_retrieval_gate import gate_chunk_indices
+
+        order = gate_chunk_indices(chunks, order, top_k=top_k)
+
+        return [
+            ScoredChunk(
+                chunk=chunks[i],
+                bm25_score=round(float(bm25_scores[i]), 6),
+                cosine_score=round(float(cosine_scores[i]), 6),
+                hybrid_score=round(float(combined[i]), 6),
             )
-        return results
+            for i in order
+        ]
+    except Exception as exc:
+        return degrade_return(logger, exc, "hybrid search scored failed", [])
 
+
+def hybrid_search(
+    query: str,
+    top_k: int = 10,
+    alpha: float | None = None,
+) -> list[DocumentChunkResponse]:
+    """BM25 + vector hybrid retrieval over the persistent KB chunk store.
+
+    Existing callers keep the unscored DocumentChunkResponse list over the
+    global corpus (no project filter). ``alpha`` defaults to ``kb_hybrid_alpha``.
+    """
+    if alpha is None:
+        alpha = float(get_settings().kb_hybrid_alpha)
+    if alpha < 0.0 or alpha > 1.0:
+        raise ValueError(f"alpha must be in [0, 1], got {alpha}")
+
+    if not kb_index.kb_enabled() or not (query or "").strip() or top_k <= 0:
+        return []
+
+    try:
+        scored = hybrid_search_scored(query, top_k=top_k, alpha=alpha)
+        return [_to_response(s.chunk) for s in scored]
     except Exception as exc:
         return degrade_return(logger, exc, "hybrid search failed", [])

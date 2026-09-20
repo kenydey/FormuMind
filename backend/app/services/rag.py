@@ -482,3 +482,74 @@ def llm_rerank(
         reverse=True,
     )
     return [candidates[i] for i in order[:k]]
+
+
+@dataclass(frozen=True)
+class RerankScoredItem:
+    """One reranked evidence row with the LLM score (query-test probe)."""
+
+    evidence: Evidence
+    score: float
+    original_index: int
+
+
+def llm_rerank_scored(
+    query: str,
+    candidates: list[Evidence],
+    k: int = 6,
+    req: Requirement | None = None,
+) -> tuple[list[RerankScoredItem], bool]:
+    """Like ``llm_rerank`` but also returns per-candidate scores.
+
+    Returns ``(items, applied)``. When the LLM call fails or yields no usable
+    scores, ``applied`` is False and items preserve the input order (top-k).
+    """
+    if not candidates:
+        return [], False
+    if len(candidates) <= 1:
+        return [
+            RerankScoredItem(evidence=candidates[0], score=float(candidates[0].relevance), original_index=0)
+        ][:k], False
+
+    from . import llm as _llm
+
+    try:
+        data = _llm.complete_json(_rerank_prompt(query, candidates, req))
+    except Exception:
+        data = None
+
+    scores = (data or {}).get("scores") if isinstance(data, dict) else None
+    if not isinstance(scores, list):
+        return [
+            RerankScoredItem(evidence=c, score=float(c.relevance), original_index=i)
+            for i, c in enumerate(candidates[:k])
+        ], False
+
+    ranking: dict[int, float] = {}
+    for item in scores:
+        try:
+            idx = int(item["i"])
+            if 0 <= idx < len(candidates):
+                ranking[idx] = float(item["score"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not ranking:
+        return [
+            RerankScoredItem(evidence=c, score=float(c.relevance), original_index=i)
+            for i, c in enumerate(candidates[:k])
+        ], False
+
+    order = sorted(
+        range(len(candidates)),
+        key=lambda i: (ranking.get(i, -1.0), -i),
+        reverse=True,
+    )
+    items = [
+        RerankScoredItem(
+            evidence=candidates[i],
+            score=float(ranking.get(i, candidates[i].relevance)),
+            original_index=i,
+        )
+        for i in order[:k]
+    ]
+    return items, True

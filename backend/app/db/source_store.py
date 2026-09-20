@@ -134,14 +134,30 @@ class SourceStore:
             return None
         return SourceGuideSchema.model_validate(row.source_guide)
 
-    def list_for_project(self, project_id: str | None, *, limit: int = 100) -> list[SourceDocument]:
+    def list_for_project(
+        self,
+        project_id: str | None,
+        *,
+        limit: int = 100,
+        include_global: bool = False,
+    ) -> list[SourceDocument]:
+        """List sources for a project.
+
+        When ``project_id`` is set and ``include_global`` is False (default),
+        only rows stamped with that project are returned — Knowledge Hub /
+        project-scoped browse must not leak other projects or the shared
+        global corpus (``project_id IS NULL``).
+        """
         with self._session_factory() as session:
             q = session.query(SourceDocument).order_by(SourceDocument.created_at.desc())
             if project_id:
-                q = q.filter(
-                    (SourceDocument.project_id == project_id)
-                    | (SourceDocument.project_id.is_(None))
-                )
+                if include_global:
+                    q = q.filter(
+                        (SourceDocument.project_id == project_id)
+                        | (SourceDocument.project_id.is_(None))
+                    )
+                else:
+                    q = q.filter(SourceDocument.project_id == project_id)
             return q.limit(limit).all()
 
     def delete(self, source_id: str) -> bool:

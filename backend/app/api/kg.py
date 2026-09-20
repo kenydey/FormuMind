@@ -75,7 +75,7 @@ def stats() -> KGStats:
 def feedback_stats() -> dict:
     """Measured feedback crawl stats — how many measured_performance links landed."""
     from ..db.entity_store import get_entity_store
-    from ..db.models import KGEntityLink
+    from ..db.models import KGEntity, KGEntityLink
 
     if not kg_enabled():
         raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
@@ -87,6 +87,29 @@ def feedback_stats() -> dict:
             .filter(KGEntityLink.link_type == "measured_performance", KGEntityLink.extraction_method == "measured")
             .count()
         )
+        # Material-level vs domain-level (by src entity kind / id prefix)
+        material_q = (
+            session.query(KGEntityLink)
+            .join(KGEntity, KGEntity.id == KGEntityLink.src_entity_id)
+            .filter(
+                KGEntityLink.link_type == "measured_performance",
+                KGEntityLink.extraction_method == "measured",
+                KGEntity.kind.in_(("chemical", "material", "trade_product")),
+            )
+        )
+        measured_material = material_q.count()
+        # Also count mat: prefix even if kind drifted
+        measured_material_prefix = (
+            session.query(KGEntityLink)
+            .filter(
+                KGEntityLink.link_type == "measured_performance",
+                KGEntityLink.extraction_method == "measured",
+                KGEntityLink.src_entity_id.like("mat:%"),
+            )
+            .count()
+        )
+        measured_material = max(measured_material, measured_material_prefix)
+        measured_domain = max(0, measured_perf - measured_material)
         by_campaign: dict[str, int] = {}
         rows = (
             session.query(KGEntityLink.evidence_refs)
@@ -98,7 +121,13 @@ def feedback_stats() -> dict:
                 sid = r.get("source_id", "")
                 if sid.startswith("measured:campaign_"):
                     by_campaign[sid] = by_campaign.get(sid, 0) + 1
-    return {"measured_total": total, "measured_performance": measured_perf, "by_campaign": by_campaign}
+    return {
+        "measured_total": total,
+        "measured_performance": measured_perf,
+        "measured_material": measured_material,
+        "measured_domain": measured_domain,
+        "by_campaign": by_campaign,
+    }
 
 
 @router.get("/feedback/report")
@@ -165,6 +194,9 @@ def calibration() -> dict:
         "kg_inhibits_penalty": float(getattr(s, "kg_inhibits_penalty", 0.5)),
         "kg_synergizes_bonus": float(getattr(s, "kg_synergizes_bonus", 1.0)),
         "kg_measured_bonus": float(getattr(s, "kg_measured_bonus", 1.15)),
+        "kg_measured_metric_bonus": float(getattr(s, "kg_measured_metric_bonus", 1.12)),
+        "kg_measured_metric_penalty": float(getattr(s, "kg_measured_metric_penalty", 0.92)),
+        "kg_measured_metric_presence": float(getattr(s, "kg_measured_metric_presence", 1.05)),
         "counts": {"inhibits": inh, "substitutes": sub, "synergizes": syn},
     }
 

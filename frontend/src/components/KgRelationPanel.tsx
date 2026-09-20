@@ -66,6 +66,8 @@ export default function KgRelationPanel({ query }: { query: string }) {
   const [feedbackStats, setFeedbackStats] = useState<{
     measured_total: number;
     measured_performance: number;
+    measured_material?: number;
+    measured_domain?: number;
   } | null>(null);
   const [pathSrc, setPathSrc] = useState("");
   const [pathDst, setPathDst] = useState("");
@@ -106,6 +108,8 @@ export default function KgRelationPanel({ query }: { query: string }) {
         setFeedbackStats({
           measured_total: r.measured_total,
           measured_performance: r.measured_performance,
+          measured_material: r.measured_material,
+          measured_domain: r.measured_domain,
         });
       })
       .catch(() => {});
@@ -214,10 +218,16 @@ export default function KgRelationPanel({ query }: { query: string }) {
       )}
 
       {feedbackStats && feedbackStats.measured_total > 0 && (
-        <p className="mt-1 text-[10px] text-slate-500">
+        <p className="mt-1 text-[10px] text-slate-500" data-testid="kg-feedback-stats">
           实测反馈库：{feedbackStats.measured_total} 条
           {feedbackStats.measured_performance > 0 &&
             ` · 性能 ${feedbackStats.measured_performance}`}
+          {typeof feedbackStats.measured_material === "number" &&
+            feedbackStats.measured_material > 0 &&
+            ` · 材料级 ${feedbackStats.measured_material}`}
+          {typeof feedbackStats.measured_domain === "number" &&
+            feedbackStats.measured_domain > 0 &&
+            ` · 领域级 ${feedbackStats.measured_domain}`}
         </p>
       )}
 

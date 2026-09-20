@@ -180,6 +180,16 @@ ADR：[`../architecture/ADR-2026-09-13-wiki-compiled-memory.md`](../architecture
 | D. 思想借鉴 + FormuMind 自研窄切片 | **有条件通过**（先灰度，再最多 A/B） |
 | E. 不借鉴，只做现网灰度与文档清理 | **默认推荐** |
 
+<<<<<<< HEAD
+=======
+**拍板（2026-09-14）：选 E + D。**  
+已落地自研窄切片（不引入 `llm_wiki` 源码）：
+
+- **E**：`tests/test_wiki_grayscale_gate.py`（TestClient 开 dossier/report 旗标 + Claims/DOE 隔离 + lint/actions）；手测清单见 `2026-09-14-wiki-hub-dossier-handtest.md`。  
+- **D 阶段 A**：`dossier_narrative.generate_section_narrative` 两步（SectionAnalysis → 中文叙述），`validate_narrative` 不变。  
+- **D 阶段 B**：`lint.detect_orphans` / `run_lint_pass` + `POST /api/wiki/lint/run` + Hub「跑 Lint」与 Flag 动作芯片。
+
+>>>>>>> origin/main
 ---
 
 ## 8. 总结
