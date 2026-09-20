@@ -59,7 +59,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
             path: p.path,
             kind: p.kind,
             title: p.title,
-            norm_key: "",
+            norm_key: p.norm_key || "",
             source_ids: p.source_ids,
             flags: p.flags,
             revision: 1,
@@ -278,6 +278,8 @@ export default function HubWikiPane({ active }: { active: boolean }) {
   const runFlagAction = useCallback(
     async (page: FlagPageItem, action: WikiFlagAction) => {
       const id = action.id;
+      const target = (action.target || "").trim();
+
       if (id === "open_page") {
         await openPath(page.path);
         return;
@@ -305,9 +307,16 @@ export default function HubWikiPane({ active }: { active: boolean }) {
         });
         return;
       }
-      // Soft guidance actions — open page and surface hint
+      // S1: open candidate theme/dossier for manual [[wikilink]] (never auto-edit L1)
+      if (id === "link_from_theme" || id.startsWith("open_link_candidate")) {
+        const openTo = target || page.path;
+        setLintSummary(`${action.label}：${action.hint || openTo}`);
+        await openPath(openTo);
+        return;
+      }
+      // Soft guidance — open target (page) and surface hint
       setLintSummary(`${action.label}：${action.hint || page.path}`);
-      await openPath(page.path);
+      await openPath(target || page.path);
     },
     [activeProjectId, openPath, runOps],
   );
@@ -471,7 +480,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           type="button"
           className="px-2 py-1 border border-amber-500/50 rounded text-amber-200 disabled:opacity-40"
           disabled={!!busy}
-          title="扫描 stale / conflict / orphan 并写回 flags（W4）"
+          title="扫描 stale / conflict / orphan / broken 并写回 flags（W4/S1）"
           data-testid="hub-wiki-run-lint"
           onClick={() => {
             void (async () => {
@@ -480,7 +489,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
               try {
                 const out = await api.runWikiLint({ limit: 200, detect_orphan: true });
                 setLintSummary(
-                  `Lint：扫描 ${out.scanned ?? "?"} · 有旗标 ${out.flagged ?? "?"} · 孤儿 ${out.orphan_count ?? "?"}`,
+                  `Lint：扫描 ${out.scanned ?? "?"} · 有旗标 ${out.flagged ?? "?"} · 孤儿 ${out.orphan_count ?? "?"} · 断链页 ${out.broken_count ?? "?"}`,
                 );
                 setFlagsOnly(true);
                 const r = await api.listWikiFlags({
@@ -493,7 +502,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
                     path: p.path,
                     kind: p.kind,
                     title: p.title,
-                    norm_key: "",
+                    norm_key: p.norm_key || "",
                     source_ids: p.source_ids,
                     flags: p.flags,
                     revision: 1,
@@ -510,6 +519,50 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           }}
         >
           {busy === "lint" ? "Lint…" : "跑 Lint"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded text-slate-300 disabled:opacity-40"
+          disabled={!!busy}
+          title="仅重扫当前有 Flag 的页，清除已过时的 lint 旗标（S1）"
+          data-testid="hub-wiki-sweep-lint"
+          onClick={() => {
+            void (async () => {
+              setBusy("sweep");
+              setError(null);
+              try {
+                const out = await api.sweepWikiLint({ limit: 200, detect_orphan: true });
+                setLintSummary(
+                  `Sweep：重扫 ${out.scanned ?? "?"} · 清除 ${out.cleared ?? "?"} · 仍有旗标 ${out.still_flagged ?? "?"}`,
+                );
+                setFlagsOnly(true);
+                const r = await api.listWikiFlags({
+                  limit: 100,
+                  project_id: activeProjectId || undefined,
+                });
+                setPages(
+                  r.pages.map((p) => ({
+                    id: p.id,
+                    path: p.path,
+                    kind: p.kind,
+                    title: p.title,
+                    norm_key: p.norm_key || "",
+                    source_ids: p.source_ids,
+                    flags: p.flags,
+                    revision: 1,
+                    updated_at: null,
+                    actions: p.actions || [],
+                  })),
+                );
+              } catch (e) {
+                setError(formatApiError(e));
+              } finally {
+                setBusy(null);
+              }
+            })();
+          }}
+        >
+          {busy === "sweep" ? "Sweep…" : "清过期 Flag"}
         </button>
         <button
           type="button"

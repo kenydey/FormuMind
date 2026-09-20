@@ -23,6 +23,7 @@ vi.mock("../../api", async () => {
       compileWikiTheme: vi.fn(),
       reviewWikiPage: vi.fn(),
       runWikiLint: vi.fn(),
+      sweepWikiLint: vi.fn(),
       getEnvFlags: vi.fn(),
       getWikiPageGraph: vi.fn(),
     },
@@ -39,6 +40,14 @@ describe("HubWikiPane dossier controls", () => {
       scanned: 3,
       flagged: 1,
       orphan_count: 1,
+      broken_count: 0,
+    });
+    vi.mocked(api.sweepWikiLint).mockResolvedValue({
+      ok: true,
+      scanned: 2,
+      cleared: 1,
+      still_flagged: 1,
+      orphan_count: 0,
     });
     vi.mocked(api.getWikiDossier).mockRejectedValue(new Error("not found"));
     vi.mocked(api.ensureWikiDossier).mockResolvedValue({
@@ -134,12 +143,18 @@ describe("HubWikiPane dossier controls", () => {
           path: "materials/lonely.md",
           kind: "material",
           title: "lonely",
+          norm_key: "lonely",
           flags: ["orphan", "stale"],
           source_ids: [],
           actions: [
-            { id: "open_page", label: "打开页面", hint: "materials/lonely.md" },
-            { id: "check_sources", label: "核对 source_ids / Evidence", hint: "补文献" },
-            { id: "link_from_theme", label: "从综述/卷宗补链", hint: "增加 wikilink" },
+            { id: "open_page", label: "打开页面", hint: "materials/lonely.md", target: "materials/lonely.md" },
+            { id: "check_sources", label: "核对 Evidence", hint: "补文献", target: "materials/lonely.md" },
+            {
+              id: "link_from_theme",
+              label: "打开补链候选：Dossier",
+              hint: "在候选页手动增加 [[lonely]]",
+              target: "themes/project-demo.md",
+            },
           ],
         },
       ],
@@ -158,6 +173,7 @@ describe("HubWikiPane dossier controls", () => {
     render(<HubWikiPane active />);
     await screen.findByTestId("hub-wiki-pane");
     expect(screen.getByTestId("hub-wiki-run-lint")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-wiki-sweep-lint")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("hub-wiki-run-lint"));
     await waitFor(() => {
@@ -174,6 +190,83 @@ describe("HubWikiPane dossier controls", () => {
     await user.click(screen.getByTestId("hub-wiki-flag-action-open_page"));
     await waitFor(() => {
       expect(api.getWikiByPath).toHaveBeenCalledWith("materials/lonely.md");
+    });
+  });
+
+  it("link_from_theme opens candidate target path", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listWikiFlags).mockResolvedValue({
+      pages: [
+        {
+          id: "f1",
+          path: "materials/lonely.md",
+          kind: "material",
+          title: "lonely",
+          norm_key: "lonely",
+          flags: ["orphan"],
+          source_ids: ["s1"],
+          actions: [
+            {
+              id: "link_from_theme",
+              label: "打开补链候选：Dossier",
+              hint: "手动补链",
+              target: "themes/project-demo.md",
+            },
+          ],
+        },
+      ],
+    });
+    vi.mocked(api.getWikiByPath).mockImplementation(async (path: string) => ({
+      id: path,
+      path,
+      kind: path.startsWith("themes/") ? "theme" : "material",
+      title: path,
+      flags: [],
+      source_ids: [],
+      markdown: `# ${path}\n`,
+      revision: 1,
+    }));
+
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    await user.click(screen.getByTestId("hub-wiki-run-lint"));
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-flag-action-link_from_theme")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("hub-wiki-flag-action-link_from_theme"));
+    await waitFor(() => {
+      expect(api.getWikiByPath).toHaveBeenCalledWith("themes/project-demo.md");
+    });
+  });
+
+  it("sweep lint clears obsolete flags and refreshes list", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listWikiFlags).mockResolvedValue({
+      pages: [
+        {
+          id: "f2",
+          path: "materials/still.md",
+          kind: "material",
+          title: "still",
+          norm_key: "still",
+          flags: ["stale"],
+          source_ids: [],
+          actions: [{ id: "open_page", label: "打开页面", target: "materials/still.md" }],
+        },
+      ],
+    });
+
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    await user.click(screen.getByTestId("hub-wiki-sweep-lint"));
+    await waitFor(() => {
+      expect(api.sweepWikiLint).toHaveBeenCalledWith({ limit: 200, detect_orphan: true });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-lint-summary").textContent).toMatch(/Sweep/);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-flag-actions-materials/still.md")).toBeInTheDocument();
     });
   });
 
