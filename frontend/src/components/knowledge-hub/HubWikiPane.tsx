@@ -602,6 +602,69 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           type="button"
           className="px-2 py-1 border border-edge rounded disabled:opacity-40"
           disabled={!!busy}
+          title="重建确定性 catalog.md（从 wiki_pages；App 维护，禁止 LLM 覆盖）"
+          data-testid="hub-wiki-rebuild-catalog"
+          onClick={() => {
+            void (async () => {
+              setBusy("catalog");
+              setError(null);
+              try {
+                const out = await api.rebuildWikiCatalog({
+                  persist: true,
+                  limit: 500,
+                  project_id: activeProjectId || undefined,
+                });
+                setLintSummary(
+                  `Catalog：条目 ${out.entry_count ?? "?"} · ${out.persisted ? "已写 catalog.md" : "未落盘"}`,
+                );
+              } catch (e) {
+                setError(formatApiError(e));
+              } finally {
+                setBusy(null);
+              }
+            })();
+          }}
+        >
+          {busy === "catalog" ? "Catalog…" : "重建 Catalog"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy}
+          title="下载 catalog.md（确定性目录，供 L2 导航）"
+          data-testid="hub-wiki-download-catalog"
+          onClick={() => {
+            void (async () => {
+              setBusy("catalog-dl");
+              setError(null);
+              try {
+                const { blob, filename } = await api.downloadWikiCatalogMd({
+                  limit: 500,
+                  project_id: activeProjectId || undefined,
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setLintSummary(`已下载 ${filename}`);
+              } catch (e) {
+                setError(formatApiError(e));
+              } finally {
+                setBusy(null);
+              }
+            })();
+          }}
+        >
+          {busy === "catalog-dl" ? "下载…" : "下载 Catalog"}
+        </button>
+        <button
+          type="button"
+          className="px-2 py-1 border border-edge rounded disabled:opacity-40"
+          disabled={!!busy}
           title="重建 Wiki 摘要向量索引（需 wiki_embed_enabled）"
           data-testid="hub-wiki-rebuild-embed"
           onClick={() => void runOps("embed", () => api.rebuildWikiEmbed())}

@@ -149,7 +149,10 @@ describe("HubWikiGraphPane", () => {
     const onOpenPath = vi.fn();
     render(<HubWikiGraphPane active onOpenPath={onOpenPath} />);
     expect(await screen.findByTestId("hub-wiki-graph-insights")).toBeInTheDocument();
-    expect(screen.getByTestId("hub-wiki-graph-orphan-materials/lonely.md")).toBeInTheDocument();
+    // Insights shell mounts before graph payload resolves — wait for orphan row.
+    expect(
+      await screen.findByTestId("hub-wiki-graph-orphan-materials/lonely.md"),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("hub-wiki-graph-broken-0").textContent).toMatch(/ghost-x/);
 
     await user.click(screen.getByTestId("hub-wiki-graph-orphan-open-materials/lonely.md"));

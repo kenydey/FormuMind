@@ -2520,6 +2520,71 @@ export const api = {
     return { blob, filename: m?.[1] || `report.${body.format}` };
   },
   rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
+  /** S2: deterministic wiki catalog from wiki_pages (App-maintained; not SSOT). */
+  getWikiCatalog: (params?: {
+    limit?: number;
+    kinds?: string;
+    project_id?: string | null;
+    format?: "json";
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.kinds) q.set("kinds", params.kinds);
+    if (params?.project_id) q.set("project_id", params.project_id);
+    q.set("format", "json");
+    const qs = q.toString();
+    return get<{
+      ok: boolean;
+      path?: string;
+      generated_at?: string;
+      entry_count?: number;
+      entries?: Array<{
+        path: string;
+        kind: string;
+        title: string;
+        norm_key?: string;
+        flags?: string[];
+        source_ids?: string[];
+      }>;
+      markdown?: string;
+      persisted?: boolean;
+    }>(`/api/wiki/catalog${qs ? `?${qs}` : ""}`);
+  },
+  rebuildWikiCatalog: (body?: {
+    persist?: boolean;
+    limit?: number;
+    kinds?: string;
+    project_id?: string | null;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      generated_at?: string;
+      entry_count?: number;
+      markdown?: string;
+      persisted?: boolean;
+      disk_path?: string;
+    }>("/api/wiki/catalog/rebuild", body ?? { persist: true }),
+  downloadWikiCatalogMd: async (params?: {
+    limit?: number;
+    kinds?: string;
+    project_id?: string | null;
+  }) => {
+    const q = new URLSearchParams();
+    q.set("format", "md");
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.kinds) q.set("kinds", params.kinds);
+    if (params?.project_id) q.set("project_id", params.project_id);
+    const res = await fetch(`/api/wiki/catalog?${q.toString()}`, {
+      headers: { ...apiAuthHeaders() },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `catalog download failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    return { blob, filename: "catalog.md" };
+  },
   rebuildWikiEmbed: () =>
     post<{ ok: boolean; indexed?: number; embedded_vectors?: number; reason?: string }>(
       "/api/wiki/embed/rebuild",

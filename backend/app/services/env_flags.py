@@ -230,6 +230,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("wiki_page_graph_enabled", "Wiki 页链接图",
             "Hub Wiki「链接图」：按 [[wikilink]] 构图可视化（非配方/材料 KG）。默认关。",
             "kb", "依赖 wiki_enabled；与 Neo4j/材料图谱分离"),
+    EnvFlag("wiki_catalog_inject_themes", "主题编译注入 Catalog",
+            "L2 theme compile 时注入确定性 wiki catalog 片段作导航锚点（S2，默认关）。"
+            "Catalog 本身始终可 GET/rebuild，不依赖本开关。",
+            "kb", "依赖 wiki_enabled + wiki_llm_themes_enabled"),
     EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
             "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"
             "默认关；不关闭 Raw chunk RAG，不新建向量库。",
