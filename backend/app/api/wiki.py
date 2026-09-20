@@ -105,6 +105,7 @@ class WikiFlagAction(BaseModel):
     id: str
     label: str
     hint: str = ""
+    target: str = ""
 
 
 class WikiFlagItem(BaseModel):
@@ -112,6 +113,7 @@ class WikiFlagItem(BaseModel):
     path: str
     kind: str
     title: str = ""
+    norm_key: str = ""
     flags: list[str] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
     actions: list[WikiFlagAction] = Field(default_factory=list)
@@ -122,6 +124,11 @@ class WikiFlagsResponse(BaseModel):
 
 
 class WikiLintRunRequest(BaseModel):
+    limit: int = Field(default=200, ge=1, le=500)
+    detect_orphan: bool = True
+
+
+class WikiLintSweepRequest(BaseModel):
     limit: int = Field(default=200, ge=1, le=500)
     detect_orphan: bool = True
 
@@ -153,12 +160,22 @@ def list_flagged(
 
 @router.post("/lint/run")
 def run_lint_endpoint(body: WikiLintRunRequest | None = None) -> dict:
-    """W4 ops: scan pages for stale/conflict/orphan and persist flags."""
+    """W4 ops: scan pages for stale/conflict/orphan/broken and persist flags."""
     _require_wiki()
     from ..services.wiki.lint import run_lint_pass
 
     req = body or WikiLintRunRequest()
     return run_lint_pass(limit=req.limit, detect_orphan=req.detect_orphan)
+
+
+@router.post("/lint/sweep")
+def sweep_lint_endpoint(body: WikiLintSweepRequest | None = None) -> dict:
+    """S1: re-lint currently flagged pages so obsolete lint flags are cleared."""
+    _require_wiki()
+    from ..services.wiki.lint import sweep_flagged_pages
+
+    req = body or WikiLintSweepRequest()
+    return sweep_flagged_pages(limit=req.limit, detect_orphan=req.detect_orphan)
 
 
 @router.get("/graph")
