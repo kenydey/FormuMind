@@ -106,6 +106,10 @@ class WikiFlagAction(BaseModel):
     label: str
     hint: str = ""
     target: str = ""
+    # S5: explicit apply-broken payload (only set on apply_broken_fix_* chips)
+    broken: str = ""
+    replacement_path: str = ""
+    mode: str = ""
 
 
 class WikiFlagItem(BaseModel):
@@ -132,6 +136,12 @@ class WikiLintSweepRequest(BaseModel):
     limit: int = Field(default=200, ge=1, le=500)
     detect_orphan: bool = True
 
+
+class WikiApplyBrokenRequest(BaseModel):
+    path: str = Field(min_length=1)
+    broken: str = Field(min_length=1)
+    replacement_path: str = Field(min_length=1)
+    mode: str = Field(default="rewrite", description="rewrite | append_related")
 
 @router.get("/flags", response_model=WikiFlagsResponse)
 def list_flagged(
@@ -176,6 +186,27 @@ def sweep_lint_endpoint(body: WikiLintSweepRequest | None = None) -> dict:
 
     req = body or WikiLintSweepRequest()
     return sweep_flagged_pages(limit=req.limit, detect_orphan=req.detect_orphan)
+
+
+@router.post("/lint/apply-broken")
+def apply_broken_endpoint(body: WikiApplyBrokenRequest) -> dict:
+    """S5: explicit Hub click — rewrite broken [[wikilink]] or append ## Related."""
+    _require_wiki()
+    from ..services.wiki.lint import apply_broken_fix
+
+    try:
+        return apply_broken_fix(
+            path=body.path,
+            broken=body.broken,
+            replacement_path=body.replacement_path,
+            mode=body.mode,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/graph")
