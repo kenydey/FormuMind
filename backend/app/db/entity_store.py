@@ -433,6 +433,35 @@ class EntityStore:
                 q = q.filter(KGEntityLink.link_type.in_(link_types))
             return q.order_by(KGEntityLink.confidence.desc()).limit(limit).all()
 
+    def list_semantic_links(
+        self,
+        *,
+        link_types: list[str] | None = None,
+        limit: int = 5000,
+        valid_only: bool = True,
+    ) -> list[KGEntityLink]:
+        """Scan semantic (or filtered) links for Hub material graph projection."""
+        types = list(link_types) if link_types else list(SEMANTIC_LINK_TYPES)
+        if not types:
+            return []
+        with self._session_factory() as session:
+            q = session.query(KGEntityLink).filter(KGEntityLink.link_type.in_(types))
+            if valid_only:
+                q = q.filter(KGEntityLink.is_valid.is_(True))
+            return (
+                q.order_by(KGEntityLink.confidence.desc())
+                .limit(max(1, min(limit, 20000)))
+                .all()
+            )
+
+    def get_entities_by_ids(self, entity_ids: list[str]) -> dict[str, KGEntity]:
+        ids = [i for i in entity_ids if i]
+        if not ids:
+            return {}
+        with self._session_factory() as session:
+            rows = session.query(KGEntity).filter(KGEntity.id.in_(ids)).all()
+            return {r.id: r for r in rows}
+
     def refresh_counts(self, entity_ids: list[str] | None = None) -> None:
         with commit_session(self._session_factory) as session:
             q = session.query(KGEntity)

@@ -1941,6 +1941,15 @@ export const api = {
   // ── KG 维护: 统计 / 重建 / 挂源 ──
   kgStats: () => get<KgStats>("/api/kg/stats"),
 
+  /** Hub materials KG canvas (SQLite links; Neo4j not required). */
+  kgGraph: (params?: { relation_types?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.relation_types) q.set("relation_types", params.relation_types);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return get<KgMaterialGraphResponse>(`/api/kg/graph${qs ? `?${qs}` : ""}`);
+  },
+
   /** KG ranking weight calibration snapshot (GET /api/kg/calibration). */
   kgCalibration: () =>
     get<KgCalibrationResponse>("/api/kg/calibration"),
@@ -4113,6 +4122,41 @@ export interface KgStats {
   /** True when entities > 0 but kb_entity_links is still 0 (B10). */
   relation_layer_empty?: boolean;
   warnings?: string[];
+}
+
+/** Hub materials KG canvas (P2) — not Wiki page [[wikilink]] graph. */
+export interface KgMaterialGraphNode {
+  id: string;
+  label: string;
+  kind: string;
+  degree?: number;
+  degree_in?: number;
+  degree_out?: number;
+}
+
+export interface KgMaterialGraphEdge {
+  source: string;
+  target: string;
+  weight?: number;
+  relation_type?: string;
+  extraction_method?: string;
+}
+
+export interface KgMaterialGraphMeta {
+  node_count: number;
+  edge_count: number;
+  truncated?: boolean;
+  elapsed_ms?: number;
+  relation_types?: string[];
+  scanned_links?: number;
+  backend?: string;
+}
+
+export interface KgMaterialGraphResponse {
+  ok: boolean;
+  nodes: KgMaterialGraphNode[];
+  edges: KgMaterialGraphEdge[];
+  meta: KgMaterialGraphMeta;
 }
 
 export interface KgRebuildReport {
