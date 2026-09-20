@@ -177,7 +177,11 @@ function WikiMarkdownReader({ page, linkPages = [], onNavigatePath, className }:
         )}
       </header>
 
-      <MarkdownMessage content={rewritten || "_empty_"} components={components} />
+      <MarkdownMessage
+        content={rewritten || "_empty_"}
+        components={components}
+        enableMermaid
+      />
 
       {lightboxSrc && (
         <div

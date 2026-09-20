@@ -43,6 +43,9 @@ export default defineConfig({
           ) {
             return "vendor-markdown";
           }
+          if (id.includes("node_modules/mermaid") || id.includes("node_modules/@mermaid")) {
+            return "vendor-mermaid";
+          }
           return undefined;
         },
       },
