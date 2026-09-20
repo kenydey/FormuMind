@@ -1,6 +1,6 @@
 # 实施计划：可视化 Knowledge Graph（对标 llm_wiki 交互，FormuMind 自研）
 
-> 状态：**P1 已实现（待合入）**（2026-09-20）· P0 已合入 `#124`  
+> 状态：**P2 已实现（待合入）**（2026-09-20）· P0 `#124` / P1 `#125` 已合入  
 > 动机：希望拥有接近 `nashsu/llm_wiki` 的 **可交互图谱前端 + 图构建后端**  
 > 对照：`vendor/llm_wiki`（GPL，只读）· 前序 [`2026-09-20-llm-wiki-borrow-ranked-plans.md`](./2026-09-20-llm-wiki-borrow-ranked-plans.md) §S6  
 > 约束：**不复制 GPL 源码**；**不混**「Wiki 页链接图」与「配方/材料 KG」；不上 LanceDB；旗标灰度；不默认 LLM
@@ -228,12 +228,12 @@ GET /api/wiki/graph?limit=500&kinds=entity,concept,theme&include_orphan=1&projec
 
 ### P2 — 材料 KG 画布（复用壳）（约 3–5 人日）★★★
 
-| # | 任务 |
-|---|------|
-| 1 | `GET /api/kg/graph?relation_types=substitutes,measured_*&limit=`（从现有 links 投影） |
-| 2 | `HubGraphPane` 升级：表视图 | 画布视图 |
-| 3 | 点实体 → 打开 `KgRelationPanel` / resolve |
-| 4 | 明确 UI 标签「材料关系（配方 KG）」vs「Wiki 链接图」 |
+| # | 任务 | 状态 |
+|---|------|------|
+| 1 | `GET /api/kg/graph?relation_types=substitutes,measured_*&limit=`（SQLite links） | **本 PR** |
+| 2 | `HubGraphPane`：画布 \| 统计 | **本 PR** |
+| 3 | 点实体 → 侧栏 `KgRelationPanel` | **本 PR** |
+| 4 | UI 标签「材料关系（配方 KG）」vs Wiki「链接图」 | **本 PR** |
 
 **验收：** 关 Neo4j 仍可用 SQLite KG 画布；开 Neo4j 不强制。
 
