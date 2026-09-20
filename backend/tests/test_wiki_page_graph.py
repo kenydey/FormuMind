@@ -123,3 +123,45 @@ def test_graph_kind_filter(wiki_env):
     assert paths == {"materials/a.md"}
     # Theme target filtered out → counted toward broken/skip
     assert r.json()["meta"]["broken_links"] >= 1
+
+
+def test_graph_insights_orphans_broken_and_components(wiki_env):
+    wiki = wiki_env
+    _upsert(wiki, path="materials/a.md", kind="material", title="A", body_extra="See [[B]]")
+    _upsert(wiki, path="materials/b.md", kind="material", title="B", body_extra="[[ghost-x]]")
+    _upsert(wiki, path="materials/lonely.md", kind="material", title="Lonely")
+    _upsert(
+        wiki,
+        path="themes/project-demo.md",
+        kind="theme",
+        title="Dossier",
+        body_extra="[[A]]",
+    )
+    _upsert(wiki, path="reports/project-demo-brief.md", kind="report", title="Brief")
+
+    client = TestClient(app)
+    r = client.get("/api/wiki/graph", params={"limit": 100})
+    assert r.status_code == 200
+    body = r.json()
+    insights = body["insights"]
+    orphan_paths = {o["path"] for o in insights["orphans"]}
+    # Lonely has degree_in=0 and is not a structure skip → lint-aligned orphan
+    assert "materials/lonely.md" in orphan_paths
+    # Structure skips must not appear as lint orphans
+    assert "themes/project-demo.md" not in orphan_paths
+    assert "reports/project-demo-brief.md" not in orphan_paths
+    # A is linked from dossier → not orphan; B has inbound from A
+    assert "materials/a.md" not in orphan_paths
+    assert "materials/b.md" not in orphan_paths
+
+    broken_targets = {b["target"] for b in insights["broken"]}
+    assert "ghost-x" in broken_targets
+    assert body["meta"]["broken_links"] >= 1
+    assert body["meta"]["orphan_count"] >= 1
+    assert insights["components"]["count"] >= 1
+    assert insights["components"]["largest"] >= 1
+
+    isolate_paths = {i["path"] for i in insights["isolates"]}
+    assert "materials/lonely.md" in isolate_paths
+    # Brief report has no links → isolate, but not lint orphan
+    assert "reports/project-demo-brief.md" in isolate_paths

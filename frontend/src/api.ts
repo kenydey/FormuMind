@@ -3577,6 +3577,33 @@ export interface WikiPageGraphMeta {
   elapsed_ms?: number;
   project_id?: string | null;
   include_orphan?: boolean;
+  orphan_count?: number;
+  isolate_count?: number;
+  component_count?: number;
+  largest_component?: number;
+}
+
+export interface WikiPageGraphInsightPage {
+  path: string;
+  label: string;
+  kind: string;
+  degree_in?: number;
+  degree_out?: number;
+  degree?: number;
+}
+
+export interface WikiPageGraphBrokenLink {
+  source: string;
+  source_label: string;
+  target: string;
+  reason?: string;
+}
+
+export interface WikiPageGraphInsights {
+  orphans: WikiPageGraphInsightPage[];
+  isolates: WikiPageGraphInsightPage[];
+  broken: WikiPageGraphBrokenLink[];
+  components?: { count: number; largest: number };
 }
 
 export interface WikiPageGraphResponse {
@@ -3584,6 +3611,7 @@ export interface WikiPageGraphResponse {
   nodes: WikiPageGraphNode[];
   edges: WikiPageGraphEdge[];
   meta: WikiPageGraphMeta;
+  insights?: WikiPageGraphInsights;
 }
 
 export interface OcsrStatus {
