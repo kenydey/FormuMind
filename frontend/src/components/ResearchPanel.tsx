@@ -12,6 +12,7 @@ import {
 } from "./citationMarkdown";
 import NotificationStack from "./NotificationStack";
 import RelatedWikiList from "./RelatedWikiList";
+import SaveWikiDraftButton from "./SaveWikiDraftButton";
 import WikiChatModeSelector from "./WikiChatModeSelector";
 import ThinkingTimeline from "./ThinkingTimeline";
 
@@ -437,7 +438,23 @@ export default function ResearchPanel() {
                   </div>
                 )}
                 {m.role === "assistant" && !m.streaming && (
-                  <RelatedWikiList citations={m.citations} />
+                  <>
+                    <SaveWikiDraftButton
+                      message={m}
+                      question={
+                        [...chatHistory]
+                          .slice(0, i)
+                          .reverse()
+                          .find((x) => x.role === "user")?.content || ""
+                      }
+                      origin={
+                        /深度研究|deep.?research/i.test(m.content.slice(0, 80))
+                          ? "deep_research"
+                          : "chat"
+                      }
+                    />
+                    <RelatedWikiList citations={m.citations} />
+                  </>
                 )}
               </div>
             </div>

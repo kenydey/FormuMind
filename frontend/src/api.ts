@@ -2565,6 +2565,28 @@ export const api = {
       persisted?: boolean;
       disk_path?: string;
     }>("/api/wiki/catalog/rebuild", body ?? { persist: true }),
+
+  /** S4: save Chat/Deep Research answer as L2 queries/ draft (flag-gated). */
+  saveWikiDraft: (body: {
+    project_id: string;
+    question?: string;
+    answer_markdown: string;
+    title?: string;
+    source_ids?: string[];
+    citations?: Array<Record<string, unknown>>;
+    origin?: "chat" | "deep_research" | string;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      title?: string;
+      kind?: string;
+      flags?: string[];
+      project_id?: string;
+      disclaimer?: string;
+      updated_at?: string;
+    }>("/api/wiki/drafts/save", body),
+
   downloadWikiCatalogMd: async (params?: {
     limit?: number;
     kinds?: string;
