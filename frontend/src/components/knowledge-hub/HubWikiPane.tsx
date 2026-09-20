@@ -314,6 +314,47 @@ export default function HubWikiPane({ active }: { active: boolean }) {
         await openPath(openTo);
         return;
       }
+      // S5: explicit Hub click — rewrite / append Related for broken [[wikilink]]
+      if (id.startsWith("apply_broken_fix")) {
+        const broken = (action.broken || "").trim();
+        const replacement = (action.replacement_path || "").trim();
+        if (!broken || !replacement) {
+          setError("断链修复缺 broken / replacement_path");
+          return;
+        }
+        await runOps("apply-broken", async () => {
+          const out = await api.applyWikiBrokenFix({
+            path: page.path,
+            broken,
+            replacement_path: replacement,
+            mode: action.mode || "rewrite",
+          });
+          setLintSummary(
+            `已修复断链：[[${broken}]] → ${out.wikilink || replacement}（${out.mode || "ok"}）`,
+          );
+          setFlagsOnly(true);
+          const r = await api.listWikiFlags({
+            limit: 100,
+            project_id: activeProjectId || undefined,
+          });
+          setPages(
+            r.pages.map((p) => ({
+              id: p.id,
+              path: p.path,
+              kind: p.kind,
+              title: p.title,
+              norm_key: p.norm_key || "",
+              source_ids: p.source_ids,
+              flags: p.flags,
+              revision: 1,
+              updated_at: null,
+              actions: p.actions || [],
+            })),
+          );
+          await openPath(page.path);
+        });
+        return;
+      }
       // Soft guidance — open target (page) and surface hint
       setLintSummary(`${action.label}：${action.hint || page.path}`);
       await openPath(target || page.path);

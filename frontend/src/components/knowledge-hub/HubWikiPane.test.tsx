@@ -26,6 +26,7 @@ vi.mock("../../api", async () => {
       reviewWikiPage: vi.fn(),
       runWikiLint: vi.fn(),
       sweepWikiLint: vi.fn(),
+      applyWikiBrokenFix: vi.fn(),
       getEnvFlags: vi.fn(),
       getWikiPageGraph: vi.fn(),
     },
@@ -300,6 +301,74 @@ describe("HubWikiPane dossier controls", () => {
     expect(screen.getByTestId("hub-wiki-view-toggle")).toBeInTheDocument();
     await user.click(screen.getByTestId("hub-wiki-view-graph"));
     expect(await screen.findByTestId("hub-wiki-graph-pane")).toBeInTheDocument();
+  });
+
+  it("apply_broken_fix chip calls apply API and refreshes flags", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.applyWikiBrokenFix).mockResolvedValue({
+      ok: true,
+      path: "materials/a.md",
+      broken: "zinc phosphat",
+      replacement_path: "materials/zinc-phosphate.md",
+      wikilink: "[[material:zinc-phosphate|Zinc Phosphate]]",
+      mode: "rewrite",
+      flags: [],
+    });
+    const flagged = {
+      pages: [
+        {
+          id: "f-broken",
+          path: "materials/a.md",
+          kind: "material",
+          title: "A",
+          norm_key: "a",
+          flags: ["broken"],
+          source_ids: [] as string[],
+          actions: [
+            { id: "fix_broken", label: "查看断链", target: "materials/a.md", hint: "断链" },
+            {
+              id: "apply_broken_fix_1",
+              label: "改链→ Zinc Phosphate",
+              hint: "[[zinc phosphat]] → [[material:zinc-phosphate|Zinc Phosphate]]",
+              target: "materials/a.md",
+              broken: "zinc phosphat",
+              replacement_path: "materials/zinc-phosphate.md",
+              mode: "rewrite",
+            },
+          ],
+        },
+      ],
+    };
+    vi.mocked(api.listWikiFlags).mockResolvedValue(flagged);
+    vi.mocked(api.getWikiByPath).mockResolvedValue({
+      id: "f-broken",
+      path: "materials/a.md",
+      kind: "material",
+      title: "A",
+      flags: [],
+      source_ids: [],
+      markdown: "# A\n\nSee [[material:zinc-phosphate|Zinc Phosphate]]\n",
+      revision: 2,
+    });
+
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    await user.click(screen.getByTestId("hub-wiki-run-lint"));
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-flag-action-apply_broken_fix_1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("hub-wiki-flag-action-apply_broken_fix_1"));
+    await waitFor(() => {
+      expect(api.applyWikiBrokenFix).toHaveBeenCalledWith({
+        path: "materials/a.md",
+        broken: "zinc phosphat",
+        replacement_path: "materials/zinc-phosphate.md",
+        mode: "rewrite",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-lint-summary").textContent).toMatch(/已修复断链/);
+    });
   });
 
   it("rebuilds and downloads wiki catalog", async () => {
