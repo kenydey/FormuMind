@@ -20,6 +20,8 @@ vi.mock("../../api", async () => {
       searchWikiPages: vi.fn(),
       rebuildWikiFts: vi.fn(),
       rebuildWikiEmbed: vi.fn(),
+      rebuildWikiCatalog: vi.fn(),
+      downloadWikiCatalogMd: vi.fn(),
       compileWikiTheme: vi.fn(),
       reviewWikiPage: vi.fn(),
       runWikiLint: vi.fn(),
@@ -298,5 +300,47 @@ describe("HubWikiPane dossier controls", () => {
     expect(screen.getByTestId("hub-wiki-view-toggle")).toBeInTheDocument();
     await user.click(screen.getByTestId("hub-wiki-view-graph"));
     expect(await screen.findByTestId("hub-wiki-graph-pane")).toBeInTheDocument();
+  });
+
+  it("rebuilds and downloads wiki catalog", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.rebuildWikiCatalog).mockResolvedValue({
+      ok: true,
+      entry_count: 3,
+      persisted: true,
+      path: "catalog.md",
+    });
+    vi.mocked(api.downloadWikiCatalogMd).mockResolvedValue({
+      blob: new Blob(["# Wiki Catalog\n"], { type: "text/markdown" }),
+      filename: "catalog.md",
+    });
+    const createObjectURL = vi.fn(() => "blob:mock-catalog");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    expect(screen.getByTestId("hub-wiki-rebuild-catalog")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-wiki-download-catalog")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("hub-wiki-rebuild-catalog"));
+    await waitFor(() => {
+      expect(api.rebuildWikiCatalog).toHaveBeenCalledWith(
+        expect.objectContaining({ persist: true, project_id: "proj-hub-1" }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-wiki-lint-summary").textContent).toMatch(/Catalog/);
+    });
+
+    await user.click(screen.getByTestId("hub-wiki-download-catalog"));
+    await waitFor(() => {
+      expect(api.downloadWikiCatalogMd).toHaveBeenCalled();
+    });
+    expect(createObjectURL).toHaveBeenCalled();
   });
 });
