@@ -11,7 +11,7 @@ import RetrievalProbePanel from "./RetrievalProbePanel";
 const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
   { id: "materials", label: "资料", hint: "当前项目入库文档" },
   { id: "wiki", label: "Wiki", hint: "当前项目编译页 / 卷宗" },
-  { id: "graph", label: "图谱", hint: "全局探针（未项目切分）" },
+  { id: "graph", label: "图谱", hint: "材料关系（配方 KG）画布 / 统计" },
   { id: "retrieval", label: "检索探针", hint: "多路召回分数 / Golden" },
   { id: "reports", label: "文档生成", hint: "当前项目卷宗报告" },
 ];
