@@ -61,7 +61,7 @@
 
 ### ★★★★★ — 核心强相关（优先）
 
-#### S1. Wiki Review / Lint 行动闭环加强（Hub）
+#### S1. Wiki Review / Lint 行动闭环加强（Hub） — **已落地（本分支）**
 
 | 项 | 内容 |
 |----|------|
@@ -71,6 +71,7 @@
 | **不做** | 另建 `review-store` 产品；LLM 自动改 L1 |
 | **人日** | 2–4 |
 | **验收** | Flag 行一键动作；单测锁 Claims/DOE 仍隔离 |
+| **状态** | `broken` flag + `suggest_actions.target` + orphan 补链候选 + `POST /wiki/lint/sweep` + Hub「清过期 Flag」；无 L1 自动写链 |
 
 #### S2. 确定性 `wiki/catalog.md`（或 API `GET /wiki/catalog`）供 L2 编译导航
 
@@ -165,7 +166,7 @@
   → 不做 S★★ 以下
 ```
 
-**默认推荐：** 若本迭代精力有限，**先不新开 llm_wiki 切片**，把灰度手测与 #121 类收口做完；下一 Wiki 刀优先 **S1**。
+**默认推荐：** **S1 已落地**；下一 Wiki 刀优先 **S2 catalog**（或灰度手测收口）。
 
 ---
 
