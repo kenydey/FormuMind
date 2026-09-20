@@ -254,6 +254,28 @@ def resolve(q: str = Query(min_length=1)) -> EntityResolveResponse:
     return resolve_query(q)
 
 
+@router.get("/graph")
+def material_graph(
+    relation_types: str | None = Query(
+        default="substitutes,measured_*",
+        description="Comma-separated link types; supports measured_* prefix",
+    ),
+    limit: int = Query(default=500, ge=1, le=2000),
+) -> dict:
+    """Hub materials KG canvas projection (SQLite links; Neo4j not required)."""
+    if not kg_enabled():
+        raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
+    from ..services.kg.material_graph import build_material_graph, expand_relation_type_filters
+
+    types = expand_relation_type_filters(
+        [t.strip() for t in (relation_types or "").split(",") if t.strip()]
+    )
+    try:
+        return build_material_graph(relation_types=types, limit=limit)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/relations/{entity_id}", response_model=list[KGRelationView])
 def entity_relations(
     entity_id: str,
