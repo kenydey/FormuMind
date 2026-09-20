@@ -2553,8 +2553,20 @@ export const api = {
       scanned?: number;
       flagged?: number;
       orphan_count?: number;
+      broken_count?: number;
       results?: Record<string, string[]>;
     }>("/api/wiki/lint/run", body ?? {}),
+
+  /** S1: re-lint flagged pages and clear obsolete lint flags. */
+  sweepWikiLint: (body?: { limit?: number; detect_orphan?: boolean }) =>
+    post<{
+      ok: boolean;
+      scanned?: number;
+      cleared?: number;
+      still_flagged?: number;
+      orphan_count?: number;
+      results?: Record<string, string[]>;
+    }>("/api/wiki/lint/sweep", body ?? {}),
 
   /** Wiki page [[wikilink]] graph (P0 canvas). Requires wiki_page_graph_enabled. */
   getWikiPageGraph: (params?: {
@@ -3543,6 +3555,8 @@ export interface WikiFlagAction {
   id: string;
   label: string;
   hint?: string;
+  /** Optional path to open (S1 action target). */
+  target?: string;
 }
 
 export interface WikiFlagItem {
@@ -3550,6 +3564,7 @@ export interface WikiFlagItem {
   path: string;
   kind: string;
   title: string;
+  norm_key?: string;
   flags: string[];
   source_ids: string[];
   actions?: WikiFlagAction[];
