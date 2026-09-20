@@ -73,7 +73,7 @@
 | **验收** | Flag 行一键动作；单测锁 Claims/DOE 仍隔离 |
 | **状态** | `broken` flag + `suggest_actions.target` + orphan 补链候选 + `POST /wiki/lint/sweep` + Hub「清过期 Flag」；无 L1 自动写链 |
 
-#### S2. 确定性 `wiki/catalog.md`（或 API `GET /wiki/catalog`）供 L2 编译导航
+#### S2. 确定性 `wiki/catalog.md`（或 API `GET /wiki/catalog`）供 L2 编译导航 — **已落地（本分支）**
 
 | 项 | 内容 |
 |----|------|
@@ -83,6 +83,7 @@
 | **不做** | 第二 SSOT；Obsidian 双写 |
 | **人日** | 1–2 |
 | **验收** | 重建 catalog == DB 列表；编译注入可关 |
+| **状态** | `GET/POST /wiki/catalog[/rebuild]` + 落盘 `catalog.md`（不 upsert wiki_pages）；`wiki_catalog_inject_themes` 默认关；Hub「重建/下载 Catalog」 |
 
 ---
 
@@ -166,7 +167,11 @@
   → 不做 S★★ 以下
 ```
 
+<<<<<<< HEAD
 **默认推荐：** **S1 已落地**；下一 Wiki 刀优先 **S2 catalog**（或灰度手测收口）。
+=======
+**默认推荐：** **S1 / S2 已落地**；下一 Wiki 刀可选 **S3 Mermaid** 或灰度手测收口。
+>>>>>>> 36fc277 (docs(plans): mark llm_wiki S2 catalog done)
 
 ---
 
