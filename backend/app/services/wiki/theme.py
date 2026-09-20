@@ -116,6 +116,22 @@ def compile_theme(
         narrative.strip(),
     ]
 
+    # S2: optional deterministic catalog inject (flag default off).
+    if getattr(settings, "wiki_catalog_inject_themes", False):
+        try:
+            from .catalog import catalog_snippet_for_compile
+
+            snippet = catalog_snippet_for_compile(limit=40)
+            evidence_blocks.extend(
+                [
+                    "",
+                    "### Wiki catalog (deterministic)",
+                    snippet,
+                ]
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("wiki catalog inject skipped: %s", exc)
+
     extra = {
         "template": THEME_TEMPLATE,
         "llm_generated": "true" if llm_generated else "false",

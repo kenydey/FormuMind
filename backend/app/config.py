@@ -574,6 +574,8 @@ class Settings(BaseSettings):
     wiki_dossier_report_enabled: bool = False
     # Wiki page [[wikilink]] graph for Hub canvas (not materials KG). Default OFF.
     wiki_page_graph_enabled: bool = False
+    # S2: inject deterministic wiki catalog snippet into L2 theme compile. Default OFF.
+    wiki_catalog_inject_themes: bool = False
     # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
     # Default OFF — dual-track; never replaces Raw chunk RAG.
     wiki_embed_enabled: bool = False

@@ -555,6 +555,69 @@ def get_dossier_pack_endpoint(project_id: str, campaign_id: str | None = None) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class WikiCatalogRebuildRequest(BaseModel):
+    persist: bool = True
+    limit: int = Field(default=500, ge=1, le=500)
+    kinds: str | None = Field(
+        default=None,
+        description="Comma-separated kinds filter (e.g. material,system,theme)",
+    )
+    project_id: str | None = None
+
+
+@router.get("/catalog")
+def get_wiki_catalog(
+    format: str = Query(default="json", description="json | md"),
+    limit: int = Query(default=500, ge=1, le=500),
+    kinds: str | None = Query(default=None, description="Comma-separated kinds"),
+    project_id: str | None = Query(default=None),
+):
+    """S2: deterministic wiki catalog (App-maintained; not a second SSOT)."""
+    _require_wiki()
+    from fastapi.responses import Response
+
+    from ..services.wiki.catalog import build_catalog
+
+    kind_list = [k.strip() for k in (kinds or "").split(",") if k.strip()] or None
+    try:
+        out = build_catalog(limit=limit, kinds=kind_list, project_id=project_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    fmt = (format or "json").strip().lower()
+    if fmt in {"md", "markdown", "text"}:
+        return Response(
+            content=out["markdown"],
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="catalog.md"',
+                "X-FormuMind-Catalog-Entries": str(out["entry_count"]),
+            },
+        )
+    return out
+
+
+@router.post("/catalog/rebuild")
+def rebuild_wiki_catalog(body: WikiCatalogRebuildRequest | None = None) -> dict:
+    """S2: rebuild catalog.md from wiki_pages (disk write optional; never upserts wiki_pages)."""
+    _require_wiki()
+    from ..services.wiki.catalog import rebuild_catalog
+
+    req = body or WikiCatalogRebuildRequest()
+    kind_list = [k.strip() for k in (req.kinds or "").split(",") if k.strip()] or None
+    try:
+        return rebuild_catalog(
+            persist=req.persist,
+            limit=req.limit,
+            kinds=kind_list,
+            project_id=req.project_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/fts/rebuild")
 def rebuild_fts_endpoint() -> dict:
     """Rebuild Wiki FTS index from all pages (admin / ops)."""
