@@ -572,6 +572,8 @@ class Settings(BaseSettings):
     wiki_dossier_vertical_addendum: str = ""
     # Phase 5: generate Hub reports from DossierPack. Default OFF.
     wiki_dossier_report_enabled: bool = False
+    # Wiki page [[wikilink]] graph for Hub canvas (not materials KG). Default OFF.
+    wiki_page_graph_enabled: bool = False
     # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
     # Default OFF — dual-track; never replaces Raw chunk RAG.
     wiki_embed_enabled: bool = False

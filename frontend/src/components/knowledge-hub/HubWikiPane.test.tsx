@@ -23,6 +23,8 @@ vi.mock("../../api", async () => {
       compileWikiTheme: vi.fn(),
       reviewWikiPage: vi.fn(),
       runWikiLint: vi.fn(),
+      getEnvFlags: vi.fn(),
+      getWikiPageGraph: vi.fn(),
     },
   };
 });
@@ -173,5 +175,35 @@ describe("HubWikiPane dossier controls", () => {
     await waitFor(() => {
       expect(api.getWikiByPath).toHaveBeenCalledWith("materials/lonely.md");
     });
+  });
+
+  it("switches to graph view toggle", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getEnvFlags).mockResolvedValue({
+      flags: [
+        {
+          attr: "wiki_page_graph_enabled",
+          env_key: "FORMUMIND_WIKI_PAGE_GRAPH_ENABLED",
+          label: "Wiki 页链接图",
+          description: "",
+          category: "kb",
+          category_label: "kb",
+          hint: "",
+          value: true,
+          default: false,
+        },
+      ],
+    });
+    vi.mocked(api.getWikiPageGraph).mockResolvedValue({
+      ok: true,
+      nodes: [],
+      edges: [],
+      meta: { node_count: 0, edge_count: 0 },
+    });
+    render(<HubWikiPane active />);
+    await screen.findByTestId("hub-wiki-pane");
+    expect(screen.getByTestId("hub-wiki-view-toggle")).toBeInTheDocument();
+    await user.click(screen.getByTestId("hub-wiki-view-graph"));
+    expect(await screen.findByTestId("hub-wiki-graph-pane")).toBeInTheDocument();
   });
 });

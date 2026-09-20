@@ -2547,6 +2547,23 @@ export const api = {
       results?: Record<string, string[]>;
     }>("/api/wiki/lint/run", body ?? {}),
 
+  /** Wiki page [[wikilink]] graph (P0 canvas). Requires wiki_page_graph_enabled. */
+  getWikiPageGraph: (params?: {
+    limit?: number;
+    kinds?: string;
+    include_orphan?: boolean;
+    project_id?: string | null;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.kinds) q.set("kinds", params.kinds);
+    if (params?.include_orphan === false) q.set("include_orphan", "false");
+    if (params?.include_orphan === true) q.set("include_orphan", "true");
+    if (params?.project_id) q.set("project_id", params.project_id);
+    const qs = q.toString();
+    return get<WikiPageGraphResponse>(`/api/wiki/graph${qs ? `?${qs}` : ""}`);
+  },
+
   getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
 
   postEnvFlags: (updates: Record<string, boolean>) =>
@@ -3531,6 +3548,42 @@ export interface WikiFlagItem {
 
 export interface WikiFlagsResponse {
   pages: WikiFlagItem[];
+}
+
+/** Wiki page link graph (Hub canvas) — not materials KG. */
+export interface WikiPageGraphNode {
+  id: string;
+  path: string;
+  label: string;
+  kind: string;
+  flags?: string[];
+  degree?: number;
+  degree_in?: number;
+  degree_out?: number;
+}
+
+export interface WikiPageGraphEdge {
+  source: string;
+  target: string;
+  weight?: number;
+}
+
+export interface WikiPageGraphMeta {
+  node_count: number;
+  edge_count: number;
+  broken_links?: number;
+  truncated?: boolean;
+  scanned_pages?: number;
+  elapsed_ms?: number;
+  project_id?: string | null;
+  include_orphan?: boolean;
+}
+
+export interface WikiPageGraphResponse {
+  ok: boolean;
+  nodes: WikiPageGraphNode[];
+  edges: WikiPageGraphEdge[];
+  meta: WikiPageGraphMeta;
 }
 
 export interface OcsrStatus {

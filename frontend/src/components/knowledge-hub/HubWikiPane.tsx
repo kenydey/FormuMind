@@ -10,6 +10,7 @@ import {
 } from "../../api";
 import { useStore } from "../../store";
 import WikiMarkdownReader from "../WikiMarkdownReader";
+import HubWikiGraphPane from "./HubWikiGraphPane";
 
 type DossierMeta = {
   section_revisions?: Record<string, number>;
@@ -37,6 +38,8 @@ export default function HubWikiPane({ active }: { active: boolean }) {
   const [lintSummary, setLintSummary] = useState<string | null>(null);
 
   const [busy, setBusy] = useState<string | null>(null);
+  /** list = classic browser; graph = [[wikilink]] canvas (P0). */
+  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -332,6 +335,86 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           ? `仅显示当前项目 Wiki · project_id=${activeProjectId}（卷宗/报告 + 本项目资料编译页）`
           : "未选择活动项目 — Wiki 按项目隔离，请先打开/选择项目"}
       </div>
+      <div
+        className="flex items-center gap-1 text-xs shrink-0"
+        data-testid="hub-wiki-view-toggle"
+        role="tablist"
+        aria-label="Wiki 视图"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewMode === "list"}
+          className={`px-2 py-1 border rounded ${
+            viewMode === "list"
+              ? "border-accent/60 text-accent bg-accent/10"
+              : "border-edge text-slate-400"
+          }`}
+          data-testid="hub-wiki-view-list"
+          onClick={() => setViewMode("list")}
+        >
+          列表
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={viewMode === "graph"}
+          className={`px-2 py-1 border rounded ${
+            viewMode === "graph"
+              ? "border-accent/60 text-accent bg-accent/10"
+              : "border-edge text-slate-400"
+          }`}
+          data-testid="hub-wiki-view-graph"
+          title="Wiki 页 [[wikilink]] 链接图（非材料 KG）"
+          onClick={() => setViewMode("graph")}
+        >
+          链接图
+        </button>
+      </div>
+      {viewMode === "graph" ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 min-h-0 flex-1 overflow-hidden">
+          <HubWikiGraphPane
+            active={active}
+            selectedPath={detail?.path}
+            onOpenPath={(path) => void openPath(path)}
+          />
+          <div className="overflow-y-auto border border-edge/60 rounded p-3 text-sm min-h-[12rem]">
+            {detail ? (
+              <div className="space-y-2">
+                <div className="text-[10px] text-slate-500 mb-2 flex gap-2 flex-wrap">
+                  <span>{detail.kind}</span>
+                  <code>{detail.path}</code>
+                  {(detail.flags || []).map((f) => (
+                    <span
+                      key={f}
+                      className="text-amber-300 border border-amber-500/40 rounded px-1"
+                    >
+                      {f}
+                    </span>
+                  ))}
+                </div>
+                <WikiMarkdownReader
+                  page={{
+                    path: detail.path,
+                    title: detail.title,
+                    kind: detail.kind,
+                    flags: detail.flags,
+                    source_ids: detail.source_ids,
+                    markdown: detail.markdown,
+                    norm_key: detail.norm_key,
+                    updated_at: detail.updated_at,
+                  }}
+                  linkPages={linkPages}
+                  onNavigatePath={(path) => void openPath(path)}
+                />
+              </div>
+            ) : (
+              <p className="text-slate-500 text-xs">点击图中节点打开 Wiki 页</p>
+            )}
+          </div>
+        </div>
+      ) : (
+      <>
       <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
         <select
           className="bg-ink border border-edge rounded px-2 py-1 text-slate-200"
@@ -644,6 +727,8 @@ export default function HubWikiPane({ active }: { active: boolean }) {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
