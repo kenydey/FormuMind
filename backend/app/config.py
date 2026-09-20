@@ -576,6 +576,8 @@ class Settings(BaseSettings):
     wiki_page_graph_enabled: bool = False
     # S2: inject deterministic wiki catalog snippet into L2 theme compile. Default OFF.
     wiki_catalog_inject_themes: bool = False
+    # S4: allow Chat/Deep Research 「存为 Wiki 草稿」→ queries/. Default OFF.
+    wiki_chat_save_draft: bool = False
     # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
     # Default OFF — dual-track; never replaces Raw chunk RAG.
     wiki_embed_enabled: bool = False

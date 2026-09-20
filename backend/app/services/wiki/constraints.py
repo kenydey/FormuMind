@@ -11,12 +11,12 @@ from .schema import parse_front_matter
 
 logger = logging.getLogger(__name__)
 
-# L2 dossier / L2 theme / P5 report must never feed DOE constraint extraction.
-_DOE_SKIP_KINDS = frozenset({"theme", "report"})
+# L2 dossier / L2 theme / P5 report / S4 query drafts must never feed DOE.
+_DOE_SKIP_KINDS = frozenset({"theme", "report", "query", "draft"})
 
 
 def _is_doe_excluded_page(*, kind: str | None, path: str | None) -> bool:
-    """True when the page is L2 narrative / Report and must not feed DOE."""
+    """True when the page is L2 narrative / Report / query draft and must not feed DOE."""
     k = (kind or "").strip().lower()
     p = (path or "").strip().replace("\\", "/")
     if k in _DOE_SKIP_KINDS:
@@ -24,6 +24,8 @@ def _is_doe_excluded_page(*, kind: str | None, path: str | None) -> bool:
     if p.startswith("reports/"):
         return True
     if p.startswith("themes/project-"):
+        return True
+    if p.startswith("queries/") or p.startswith("themes/draft-"):
         return True
     return False
 

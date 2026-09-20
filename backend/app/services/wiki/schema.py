@@ -46,6 +46,11 @@ def theme_path(key: str) -> str:
     return f"themes/system-{safe_key(key)}.md"
 
 
+def query_draft_path(project_id: str, slug: str) -> str:
+    """S4 Chat/Research draft: ``queries/project-{id}-{slug}.md``."""
+    return f"queries/project-{safe_key(project_id)}-{safe_key(slug)}.md"
+
+
 def project_dossier_path(project_id: str) -> str:
     """L2 project dossier: ``themes/project-{id}.md`` (primary key = project_id)."""
     return f"themes/project-{safe_key(project_id)}.md"

@@ -586,6 +586,38 @@ def get_dossier_pack_endpoint(project_id: str, campaign_id: str | None = None) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class WikiDraftSaveRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    question: str = ""
+    answer_markdown: str = Field(min_length=1)
+    title: str | None = None
+    source_ids: list[str] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)
+    origin: str = Field(default="chat", description="chat | deep_research")
+
+
+@router.post("/drafts/save")
+def save_wiki_draft(body: WikiDraftSaveRequest) -> dict:
+    """S4: persist Chat/Deep Research answer as L2 ``queries/`` draft (flag-gated)."""
+    _require_wiki()
+    from ..services.wiki.draft_save import save_chat_draft
+
+    try:
+        return save_chat_draft(
+            project_id=body.project_id,
+            question=body.question or "",
+            answer_markdown=body.answer_markdown,
+            title=body.title,
+            source_ids=list(body.source_ids or []),
+            citations=list(body.citations or []),
+            origin=body.origin or "chat",
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 class WikiCatalogRebuildRequest(BaseModel):
     persist: bool = True
     limit: int = Field(default=500, ge=1, le=500)

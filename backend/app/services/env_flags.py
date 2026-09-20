@@ -234,6 +234,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "L2 theme compile 时注入确定性 wiki catalog 片段作导航锚点（S2，默认关）。"
             "Catalog 本身始终可 GET/rebuild，不依赖本开关。",
             "kb", "依赖 wiki_enabled + wiki_llm_themes_enabled"),
+    EnvFlag("wiki_chat_save_draft", "Chat 存为 Wiki 草稿",
+            "允许把 Chat / Deep Research 回答写入 queries/ L2 草稿（unreviewed；不进 Claims/DOE）。默认关。",
+            "kb", "依赖 wiki_enabled；需活动 project_id"),
     EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
             "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"
             "默认关；不关闭 Raw chunk RAG，不新建向量库。",
