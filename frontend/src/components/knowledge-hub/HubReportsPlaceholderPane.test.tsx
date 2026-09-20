@@ -50,6 +50,7 @@ describe("HubReportsPlaceholderPane", () => {
       settingsOpen: false,
       settingsTab: "llm",
       settingsEnvFocusAttr: null,
+      envFlagsRevision: 0,
     } as never);
     vi.mocked(api.generateWikiReport).mockReset();
     vi.mocked(api.exportWikiReport).mockReset();
@@ -202,5 +203,39 @@ describe("HubReportsPlaceholderPane", () => {
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useStore.getState().settingsTab).toBe("env");
     expect(useStore.getState().settingsEnvFocusAttr).toBe("wiki_dossier_report_enabled");
+  });
+
+  it("refetches flags when envFlagsRevision bumps and drops CTA", async () => {
+    vi.mocked(api.getEnvFlags)
+      .mockResolvedValueOnce({
+        flags: [
+          flag("wiki_enabled", true),
+          flag("wiki_project_dossier_enabled", false),
+          flag("wiki_dossier_report_enabled", false),
+        ],
+      })
+      .mockResolvedValueOnce({
+        flags: [
+          flag("wiki_enabled", true),
+          flag("wiki_project_dossier_enabled", true),
+          flag("wiki_dossier_report_enabled", true),
+        ],
+      });
+    render(<HubReportsPlaceholderPane />);
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-reports-flags-cta")).toBeInTheDocument();
+    });
+    expect(api.getEnvFlags).toHaveBeenCalledTimes(1);
+    useStore.getState().bumpEnvFlagsRevision();
+    await waitFor(() => {
+      expect(api.getEnvFlags).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("hub-reports-flags-cta")).not.toBeInTheDocument();
+      expect(screen.getByTestId("hub-reports-flags-ready")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("hub-reports-flag-wiki_dossier_report_enabled").textContent).toMatch(
+      /✓/,
+    );
   });
 });
