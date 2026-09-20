@@ -109,7 +109,7 @@
 | **人日** | 2–3 |
 | **验收** | 草稿 path 前缀隔离；DOE bounds 测仍忽略 drafts |
 
-#### S5. 结构 Lint：断链模糊建议 + 一键补 `related`
+#### S5. 结构 Lint：断链模糊建议 + 一键补 `related` — **已落地（本分支）**
 
 | 项 | 内容 |
 |----|------|
@@ -117,6 +117,8 @@
 | **为何匹配** | 降低卷宗/实体页孤岛，提升 Chat blend 命中 |
 | **落点** | `lint.py` + Hub 动作「建议链到…」 |
 | **人日** | 1–2 |
+| **验收** | 样例 theme 含 fuzzy 芯片；显式点击才 rewrite / 补 Related；Claims/DOE 不变 |
+| **状态** | `suggest_broken_fixes` + `POST /wiki/lint/apply-broken` + Hub「改链→」芯片；无 L1 数值/Claims 写入 |
 
 ---
 
@@ -161,17 +163,14 @@
 
 ```text
 现网：Dossier/Report 灰度可观测（已基本齐）
-  → S1 Review/Lint 行动闭环（运维，保信任边界）
-  → S2 catalog 导出（喂 L2，不碰 L1）
+  → S1 Review/Lint 行动闭环（运维，保信任边界）✓
+  → S2 catalog 导出（喂 L2，不碰 L1）✓
   →（可选）S3 Mermaid / S4 草稿落盘
+  → S5 断链模糊建议 + 显式改链 ✓
   → 不做 S★★ 以下
 ```
 
-<<<<<<< HEAD
-**默认推荐：** **S1 已落地**；下一 Wiki 刀优先 **S2 catalog**（或灰度手测收口）。
-=======
-**默认推荐：** **S1 / S2 已落地**；下一 Wiki 刀可选 **S3 Mermaid** 或灰度手测收口。
->>>>>>> 36fc277 (docs(plans): mark llm_wiki S2 catalog done)
+**默认推荐：** **S1 / S2 / S5 已落地**；下一 Wiki 刀可选 **S3 Mermaid** / **S4 草稿** 或灰度手测收口。
 
 ---
 
