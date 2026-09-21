@@ -4,6 +4,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
+import MermaidBlock from "./MermaidBlock";
 
 /**
  * Chemistry-aware Markdown renderer for assistant chat messages.
@@ -12,6 +13,7 @@ import "katex/dist/katex.min.css";
  * - LaTeX math via KaTeX ($$…$$ reaction equations)
  * - ```smiles fenced blocks render as 2D structure drawings (smiles-drawer),
  *   falling back to the raw string when the SMILES fails to parse.
+ * - Optional ```mermaid (Wiki Reader / Report; lazy + strict security).
  */
 
 function SmilesDrawing({ smiles }: { smiles: string }) {
@@ -63,14 +65,23 @@ export type MarkdownMessageProps = {
   content: string;
   /** Optional overrides merged over the default chemistry-aware components. */
   components?: Components;
+  /** S3: render ```mermaid fences (Wiki/Report). Default off for chat. */
+  enableMermaid?: boolean;
 };
 
-function MarkdownMessage({ content, components: extra }: MarkdownMessageProps) {
+function MarkdownMessage({
+  content,
+  components: extra,
+  enableMermaid = false,
+}: MarkdownMessageProps) {
   const base: Components = {
     code({ className, children, ...props }) {
       const text = String(children ?? "");
       if (/language-smiles/.test(className || "")) {
         return <SmilesDrawing smiles={text} />;
+      }
+      if (enableMermaid && /language-mermaid/.test(className || "")) {
+        return <MermaidBlock chart={text} />;
       }
       return (
         <code className={`${className || ""} text-[12px]`} {...props}>

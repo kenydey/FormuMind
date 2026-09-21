@@ -1,6 +1,6 @@
 # 评估更新：nashsu/llm_wiki v0.6.11 × FormuMind LLM Wiki（可借鉴方案排序）
 
-> 状态：**评审结论（2026-09-20）**  
+> 状态：**S1–S5 已落地收口（2026-09-21）** · 评审结论仍有效  
 > 对照：本地 `vendor/llm_wiki`（`git clone --depth 1`，**GPL-3.0，已在 `.gitignore`，勿入库**）  
 > 前序：[`2026-09-14-llm-wiki-integration-eval.md`](./2026-09-14-llm-wiki-integration-eval.md)  
 > ADR：[`../architecture/ADR-2026-09-13-wiki-compiled-memory.md`](../architecture/ADR-2026-09-13-wiki-compiled-memory.md)
@@ -13,8 +13,8 @@
 |------|------|
 | 整仓整合 / 复制源码？ | **否。** GPL-3 传染 + Tauri/LanceDB/Obsidian/「LLM 写全 Wiki」与 FM ADR 四线冲突。 |
 | 思想借鉴？ | **可，且须自研重写。** 只借协议/UX/信息架构，不借运行时栈。 |
-| 前序已吸收？ | **两步卷宗叙述 + 可操作 Lint** 已落地；本轮重评剩余切片。 |
-| 最高 ROI | 仍优先 **现网灰度（Dossier/Report）**；Wiki 增强选下表 **匹配度 ≥ ★★★★** 的 1～2 刀。 |
+| 前序已吸收？ | **两步卷宗叙述 + Lint/Catalog/草稿/断链/Mermaid（S1–S5）** 已自研落地。 |
+| 最高 ROI | 现网灰度（Dossier/Report）已手测绿；`llm_wiki` ★★★★★ / 运维向借刀 **告一段落**；★★★ 以下默认不排期。 |
 
 ---
 
@@ -89,7 +89,7 @@
 
 ### ★★★★ — 核心相关（灰度后值得）
 
-#### S3. Wiki Reader Mermaid（+ 可选 KaTeX 补强）
+#### S3. Wiki Reader Mermaid（+ 可选 KaTeX 补强） — **已落地（本分支）**
 
 | 项 | 内容 |
 |----|------|
@@ -98,6 +98,7 @@
 | **落点** | `WikiMarkdownReader` 懒加载 Mermaid；失败降级代码块 |
 | **人日** | 1–2 |
 | **验收** | 样例 theme 含 mermaid 可渲染；无 XSS |
+| **状态** | `MermaidBlock` lazy + `securityLevel: strict`；`MarkdownMessage enableMermaid` 仅 Wiki Reader 开；Chat 默认关；失败 → `wiki-mermaid-fallback` |
 
 #### S4. Chat / Deep Research 结果「存为 Wiki 草稿」（`queries/` 或 `themes/draft-*`） — **已落地（本分支）**
 
@@ -168,11 +169,11 @@
   → S2 catalog 导出（喂 L2，不碰 L1）✓
   → S4 Chat/Research → queries/ 草稿 ✓
   → S5 断链模糊建议 + 显式改链 ✓
-  →（可读性补刀）S3 Mermaid
-  → 不做 S★★ 以下；llm_wiki ★★★★★ / 运维向借刀告一段落
+  →（可读性补刀）S3 Mermaid ✓
+  → 不做 S★★ 以下
 ```
 
-**默认推荐：** **S1 / S2 / S4 / S5 已落地**；下一 Wiki 刀仅剩 **S3 Mermaid**（可读性）；★★★ 及以下不排期。
+**收口：** **S1–S5（含 S3 可读性）已齐**；`llm_wiki` ★★★★★ 与运维向借刀 **告一段落**；★★★（S6/S7）及以下默认不排期。
 
 ---
 
