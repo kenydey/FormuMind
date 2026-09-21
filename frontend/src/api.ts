@@ -2633,6 +2633,23 @@ export const api = {
       results?: Record<string, string[]>;
     }>("/api/wiki/lint/sweep", body ?? {}),
 
+  /** S5: explicit click — rewrite broken wikilink or append ## Related (no L1 Claims). */
+  applyWikiBrokenFix: (body: {
+    path: string;
+    broken: string;
+    replacement_path: string;
+    mode?: string;
+  }) =>
+    post<{
+      ok: boolean;
+      path?: string;
+      broken?: string;
+      replacement_path?: string;
+      wikilink?: string;
+      mode?: string;
+      flags?: string[];
+    }>("/api/wiki/lint/apply-broken", body),
+
   /** Wiki page [[wikilink]] graph (P0 canvas). Requires wiki_page_graph_enabled. */
   getWikiPageGraph: (params?: {
     limit?: number;
@@ -3622,6 +3639,12 @@ export interface WikiFlagAction {
   hint?: string;
   /** Optional path to open (S1 action target). */
   target?: string;
+  /** S5: broken [[target]] for apply-broken chips. */
+  broken?: string;
+  /** S5: existing wiki path to rewrite/append toward. */
+  replacement_path?: string;
+  /** S5: rewrite | append_related */
+  mode?: string;
 }
 
 export interface WikiFlagItem {

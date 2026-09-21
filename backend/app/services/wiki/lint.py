@@ -1,9 +1,10 @@
-"""Lightweight wiki lint (W4/S1) — stale / conflict / orphan / broken + actionable chips."""
+"""Lightweight wiki lint (W4/S1/S5) — stale / conflict / orphan / broken + actionable chips."""
 from __future__ import annotations
 
 import json
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 from ...config import get_settings
@@ -13,9 +14,10 @@ from .schema import parse_front_matter
 logger = logging.getLogger(__name__)
 
 _WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
-_ORPHAN_SKIP_KINDS = frozenset({"report"})
-_ORPHAN_SKIP_PREFIXES = ("themes/project-", "reports/")
+_ORPHAN_SKIP_KINDS = frozenset({"report", "query"})
+_ORPHAN_SKIP_PREFIXES = ("themes/project-", "reports/", "queries/")
 _LINT_MANAGED_FLAGS = frozenset({"stale", "conflict", "orphan", "missing", "broken"})
+_FUZZY_MIN_SCORE = 0.48
 
 
 def _bounds_from_meta(meta: dict[str, Any]) -> list[dict[str, Any]]:
@@ -99,6 +101,170 @@ def unresolved_wikilinks(md: str, alias_to_path: dict[str, str]) -> list[str]:
     return out
 
 
+def _normalize_link_token(raw: str) -> str:
+    key = (raw or "").strip().lower()
+    if ":" in key:
+        key = key.split(":", 1)[-1].strip()
+    if "/" in key:
+        key = key.rsplit("/", 1)[-1].replace(".md", "")
+    return key
+
+
+def _wikilink_for_row(row) -> str:
+    kind = (row.kind or "page").strip() or "page"
+    nk = (row.norm_key or "").strip()
+    title = (row.title or "").strip() or nk or (row.path or "page")
+    if nk:
+        return f"[[{kind}:{nk}|{title}]]"
+    return f"[[{title}]]"
+
+
+def suggest_broken_fixes(
+    broken: str,
+    *,
+    exclude_path: str = "",
+    limit: int = 3,
+    min_score: float = _FUZZY_MIN_SCORE,
+) -> list[dict[str, Any]]:
+    """Fuzzy-match an unresolved [[target]] against wiki titles / keys (S5)."""
+    token = _normalize_link_token(broken)
+    if not token or len(token) < 2:
+        return []
+    store = get_wiki_store()
+    rows = store.list_pages(limit=400)
+    scored: list[tuple[float, str, str, str]] = []
+    excl = (exclude_path or "").replace("\\", "/")
+    for r in rows:
+        p = (r.path or "").replace("\\", "/")
+        if not p or p == excl:
+            continue
+        kind = (r.kind or "").lower()
+        if kind in {"report", "query"}:
+            continue
+        if p.startswith("reports/") or p.startswith("queries/"):
+            continue
+        best = 0.0
+        for alias in _page_aliases(r):
+            ratio = SequenceMatcher(None, token, alias).ratio()
+            if token in alias or alias in token:
+                ratio = max(ratio, 0.72)
+            common = 0
+            for a, b in zip(token, alias):
+                if a != b:
+                    break
+                common += 1
+            if common >= 3:
+                ratio = max(ratio, min(0.9, 0.5 + 0.05 * common))
+            if ratio > best:
+                best = ratio
+        if best < min_score:
+            continue
+        scored.append((best, p, (r.title or "").strip() or p, _wikilink_for_row(r)))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    out: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for score, p, label, wikilink in scored:
+        if p in seen_paths:
+            continue
+        seen_paths.add(p)
+        out.append(
+            {
+                "broken": broken,
+                "path": p,
+                "label": label,
+                "wikilink": wikilink,
+                "score": round(float(score), 3),
+            }
+        )
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
+def apply_broken_fix(
+    *,
+    path: str,
+    broken: str,
+    replacement_path: str,
+    mode: str = "rewrite",
+) -> dict[str, Any]:
+    """Rewrite or append a related [[wikilink]] for a broken target (explicit user action).
+
+    Does not touch L1 numerical tables / Claims — only wiki markdown links.
+    """
+    settings = get_settings()
+    if not settings.wiki_enabled:
+        raise PermissionError("wiki_enabled is false")
+    store = get_wiki_store()
+    row = store.get_by_path(path)
+    if row is None:
+        raise LookupError(f"wiki page not found: {path}")
+    target = store.get_by_path(replacement_path)
+    if target is None:
+        raise LookupError(f"replacement page not found: {replacement_path}")
+
+    md = store.read_markdown(path) or ""
+    wikilink = _wikilink_for_row(target)
+    broken_tok = (broken or "").strip()
+    if not broken_tok:
+        raise ValueError("broken target required")
+
+    want = (mode or "rewrite").strip().lower()
+    if want not in {"rewrite", "append_related"}:
+        want = "rewrite"
+
+    applied_mode = "noop"
+    new_md = md
+
+    if want == "rewrite":
+        pattern = re.compile(
+            r"\[\[" + re.escape(broken_tok) + r"(?:[|#][^\]]*)?\]\]",
+            re.IGNORECASE,
+        )
+        new_md, n = pattern.subn(wikilink, md, count=1)
+        if n > 0:
+            applied_mode = "rewrite"
+
+    if applied_mode == "noop":
+        line = f"- {wikilink}  <!-- fixed from [[{broken_tok}]] -->"
+        if re.search(r"(?im)^##\s+Related\b", new_md):
+
+            def _inject(m: re.Match[str]) -> str:
+                return m.group(0) + line + "\n"
+
+            new_md2, n = re.subn(
+                r"(?im)^##\s+Related[^\n]*\n",
+                _inject,
+                new_md,
+                count=1,
+            )
+            new_md = new_md2 if n else (new_md.rstrip() + f"\n\n## Related\n{line}\n")
+        else:
+            new_md = new_md.rstrip() + f"\n\n## Related\n{line}\n"
+        applied_mode = "append_related"
+
+    store.upsert_page(
+        path=row.path,
+        kind=row.kind,
+        title=row.title or "",
+        norm_key=row.norm_key or "",
+        entity_id=row.entity_id,
+        markdown=new_md,
+        source_ids=list(row.source_ids or []),
+        flags=list(row.flags or []),
+    )
+    flags = lint_and_persist(path)
+    return {
+        "ok": True,
+        "path": path,
+        "broken": broken_tok,
+        "replacement_path": replacement_path,
+        "wikilink": wikilink,
+        "mode": applied_mode,
+        "flags": flags,
+    }
+
+
 def suggest_link_candidates(
     *,
     path: str,
@@ -143,6 +309,7 @@ def suggest_actions(
     norm_key: str = "",
     source_ids: list[str] | None = None,
     broken_targets: list[str] | None = None,
+    broken_fixes: list[dict[str, Any]] | None = None,
     link_candidates: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Hub-facing action chips for a flagged page (no side effects / no L1 writes)."""
@@ -188,6 +355,36 @@ def suggest_actions(
                 "target": path,
             }
         )
+        fixes = broken_fixes
+        if fixes is None and broken_targets:
+            fixes = []
+            for bt in (broken_targets or [])[:3]:
+                fixes.extend(suggest_broken_fixes(bt, exclude_path=path, limit=2))
+        seen_fix_paths: set[str] = set()
+        fix_i = 0
+        for fx in fixes or []:
+            rp = str(fx.get("path") or "").strip()
+            if not rp or rp in seen_fix_paths:
+                continue
+            seen_fix_paths.add(rp)
+            fix_i += 1
+            br = str(fx.get("broken") or (broken_targets or [""])[0] or "")
+            label = str(fx.get("label") or rp)
+            score = fx.get("score")
+            score_s = f" · score={score}" if score is not None else ""
+            actions.append(
+                {
+                    "id": f"apply_broken_fix_{fix_i}",
+                    "label": f"改链→ {label}",
+                    "hint": f"[[{br}]] → {fx.get('wikilink') or rp}{score_s}（显式点击才写）",
+                    "target": path,
+                    "broken": br,
+                    "replacement_path": rp,
+                    "mode": "rewrite",
+                }
+            )
+            if fix_i >= 3:
+                break
     if "orphan" in fl:
         cands = link_candidates
         if cands is None:
@@ -454,6 +651,20 @@ def list_flagged_pages(*, limit: int = 100) -> list[dict[str, Any]]:
             continue
         md = store.read_markdown(row.path) or ""
         broken = unresolved_wikilinks(md, aliases) if ("broken" in fl) else []
+        broken_fixes: list[dict[str, Any]] = []
+        if broken:
+            seen_rp: set[str] = set()
+            for bt in broken[:3]:
+                for fx in suggest_broken_fixes(bt, exclude_path=row.path or "", limit=2):
+                    rp = str(fx.get("path") or "")
+                    if not rp or rp in seen_rp:
+                        continue
+                    seen_rp.add(rp)
+                    broken_fixes.append(fx)
+                    if len(broken_fixes) >= 3:
+                        break
+                if len(broken_fixes) >= 3:
+                    break
         cands = (
             suggest_link_candidates(path=row.path or "", source_ids=list(row.source_ids or []))
             if "orphan" in fl
@@ -475,6 +686,7 @@ def list_flagged_pages(*, limit: int = 100) -> list[dict[str, Any]]:
                 norm_key=row.norm_key or "",
                 source_ids=list(row.source_ids or []),
                 broken_targets=broken,
+                broken_fixes=broken_fixes,
                 link_candidates=cands,
             ),
         }
