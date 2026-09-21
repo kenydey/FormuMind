@@ -61,7 +61,7 @@
 
 ### ★★★★★ — 核心强相关（优先）
 
-#### S1. Wiki Review / Lint 行动闭环加强（Hub） — **已落地（本分支）**
+#### S1. Wiki Review / Lint 行动闭环加强（Hub） — **已落地（#127）**
 
 | 项 | 内容 |
 |----|------|
@@ -73,7 +73,7 @@
 | **验收** | Flag 行一键动作；单测锁 Claims/DOE 仍隔离 |
 | **状态** | `broken` flag + `suggest_actions.target` + orphan 补链候选 + `POST /wiki/lint/sweep` + Hub「清过期 Flag」；无 L1 自动写链 |
 
-#### S2. 确定性 `wiki/catalog.md`（或 API `GET /wiki/catalog`）供 L2 编译导航 — **已落地（本分支）**
+#### S2. 确定性 `wiki/catalog.md`（或 API `GET /wiki/catalog`）供 L2 编译导航 — **已落地（#128）**
 
 | 项 | 内容 |
 |----|------|
@@ -99,7 +99,7 @@
 | **人日** | 1–2 |
 | **验收** | 样例 theme 含 mermaid 可渲染；无 XSS |
 
-#### S4. Chat / Deep Research 结果「存为 Wiki 草稿」（`queries/` 或 `themes/draft-*`）
+#### S4. Chat / Deep Research 结果「存为 Wiki 草稿」（`queries/` 或 `themes/draft-*`） — **已落地（本分支）**
 
 | 项 | 内容 |
 |----|------|
@@ -108,6 +108,7 @@
 | **落点** | 旗标 `wiki_chat_save_draft`；只写 L2 草稿 + `unreviewed`；**绝不**进 Claims |
 | **人日** | 2–3 |
 | **验收** | 草稿 path 前缀隔离；DOE bounds 测仍忽略 drafts |
+| **状态** | `POST /wiki/drafts/save` → `queries/project-{id}-*.md`；flags `unreviewed,draft`；DOE/Claims 单测锁；Chat「存为 Wiki 草稿」 |
 
 #### S5. 结构 Lint：断链模糊建议 + 一键补 `related` — **已落地（本分支）**
 
@@ -165,12 +166,13 @@
 现网：Dossier/Report 灰度可观测（已基本齐）
   → S1 Review/Lint 行动闭环（运维，保信任边界）✓
   → S2 catalog 导出（喂 L2，不碰 L1）✓
-  →（可选）S3 Mermaid / S4 草稿落盘
+  → S4 Chat/Research → queries/ 草稿 ✓
   → S5 断链模糊建议 + 显式改链 ✓
-  → 不做 S★★ 以下
+  →（可读性补刀）S3 Mermaid
+  → 不做 S★★ 以下；llm_wiki ★★★★★ / 运维向借刀告一段落
 ```
 
-**默认推荐：** **S1 / S2 / S5 已落地**；下一 Wiki 刀可选 **S3 Mermaid** / **S4 草稿** 或灰度手测收口。
+**默认推荐：** **S1 / S2 / S4 / S5 已落地**；下一 Wiki 刀仅剩 **S3 Mermaid**（可读性）；★★★ 及以下不排期。
 
 ---
 

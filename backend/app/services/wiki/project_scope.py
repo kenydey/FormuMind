@@ -25,7 +25,7 @@ def project_source_id_set(project_id: str, *, limit: int = 2000) -> set[str]:
 
 
 def wiki_path_owned_by_project(path: str, project_id: str) -> bool:
-    """True when path is this project's dossier or a project report."""
+    """True when path is this project's dossier, report, or S4 query draft."""
     pid = (project_id or "").strip()
     if not pid or not path:
         return False
@@ -36,6 +36,9 @@ def wiki_path_owned_by_project(path: str, project_id: str) -> bool:
     if rel.startswith(f"themes/project-{sk}."):
         return True
     if rel.startswith(f"reports/project-{sk}-"):
+        return True
+    # S4: Chat/Research drafts under queries/project-{id}-*
+    if rel.startswith(f"queries/project-{sk}-"):
         return True
     # Any explicit report path helper match for known templates is covered by prefix.
     _ = project_report_path  # imported for callers / docs symmetry
