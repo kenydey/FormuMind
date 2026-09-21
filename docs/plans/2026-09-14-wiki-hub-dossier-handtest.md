@@ -106,11 +106,12 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 
 ## 5. 通过标准
 
-- [ ] API smoke 脚本全绿（或明确标出未开旗标；无活栈时以 grayscale pytest 代替）；**MD 导出必过**
-- [ ] Hub W1–W7、R1–R3、**R5 导出 MD** 手测通过（Reports 页徽标为「卷宗」而非「预留」）
-- [ ] C1–C3 边界无破窗
+- [x] API smoke 脚本全绿（或明确标出未开旗标；无活栈时以 grayscale pytest 代替）；**MD 导出必过**（2026-09-21 合入 S5 #131 后复测：`hub_dossier_handtest_smoke.py` 全绿）
+- [x] Hub W1–W7、R1–R3、**R5 导出 MD** 手测通过（Reports 页徽标为「卷宗」而非「预留」）（2026-09-21 Playwright：卷宗 meta + briefing 生成 + 导出 MD，`draft_not_claims`）
+- [x] C1–C3 边界无破窗（`test_wiki_grayscale_gate.py` + `test_wiki_dossier_claims_doe_regression.py` 合入后复测全绿）
 - [x] `test_wiki_grayscale_gate.py`：开旗标 dossier/report + L2 bounds 不进 DOE + lint actions + **generate→export MD**
 - [x] `test_wiki_dossier_claims_doe_regression.py` 全绿（CI / 本地 pytest）
 - [x] `test_wiki_optimize_dossier_hook.py`：optimize 完成通知 `optimize_completed`
 - [x] `test_wiki_attachment_s7.py`：附件 hydrate 进 S7/S5 + `attachment_uploaded` 钩子
 - [x] 两步叙述 + Lint UX：`test_wiki_p4_dossier` narrative · `test_wiki_w3_w4` orphan/lint · HubWikiPane lint chips
+- [x] S5 断链模糊建议已合入 main（#131，2026-09-21）
