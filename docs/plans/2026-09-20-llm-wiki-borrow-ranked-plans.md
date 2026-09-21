@@ -166,16 +166,13 @@
 现网：Dossier/Report 灰度可观测（已基本齐）
   → S1 Review/Lint 行动闭环（运维，保信任边界）✓
   → S2 catalog 导出（喂 L2，不碰 L1）✓
-  →（可选）S3 Mermaid / S4 草稿落盘
+  → S4 Chat/Research → queries/ 草稿 ✓
   → S5 断链模糊建议 + 显式改链 ✓
-  → 不做 S★★ 以下
+  →（可读性补刀）S3 Mermaid
+  → 不做 S★★ 以下；llm_wiki ★★★★★ / 运维向借刀告一段落
 ```
 
-<<<<<<< HEAD
-**默认推荐：** **S1 / S2 / S5 已落地**；下一 Wiki 刀可选 **S3 Mermaid** / **S4 草稿** 或灰度手测收口。
-=======
-**默认推荐：** **S1/S2 已合入**；**S4 草稿落盘本分支**；S3 Mermaid 另 PR；下一可选 S5 断链模糊建议。
->>>>>>> dea7d50 (docs(plans): mark S4 chat draft save done; clear conflict markers)
+**默认推荐：** **S1 / S2 / S4 / S5 已落地**；下一 Wiki 刀仅剩 **S3 Mermaid**（可读性）；★★★ 及以下不排期。
 
 ---
 
