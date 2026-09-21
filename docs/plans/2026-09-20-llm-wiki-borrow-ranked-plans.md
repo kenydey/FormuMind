@@ -1,6 +1,6 @@
 # 评估更新：nashsu/llm_wiki v0.6.11 × FormuMind LLM Wiki（可借鉴方案排序）
 
-> 状态：**评审结论（2026-09-20）**  
+> 状态：**S1–S5 已落地收口（2026-09-21）** · 评审结论仍有效  
 > 对照：本地 `vendor/llm_wiki`（`git clone --depth 1`，**GPL-3.0，已在 `.gitignore`，勿入库**）  
 > 前序：[`2026-09-14-llm-wiki-integration-eval.md`](./2026-09-14-llm-wiki-integration-eval.md)  
 > ADR：[`../architecture/ADR-2026-09-13-wiki-compiled-memory.md`](../architecture/ADR-2026-09-13-wiki-compiled-memory.md)
@@ -13,8 +13,8 @@
 |------|------|
 | 整仓整合 / 复制源码？ | **否。** GPL-3 传染 + Tauri/LanceDB/Obsidian/「LLM 写全 Wiki」与 FM ADR 四线冲突。 |
 | 思想借鉴？ | **可，且须自研重写。** 只借协议/UX/信息架构，不借运行时栈。 |
-| 前序已吸收？ | **两步卷宗叙述 + 可操作 Lint** 已落地；本轮重评剩余切片。 |
-| 最高 ROI | 仍优先 **现网灰度（Dossier/Report）**；Wiki 增强选下表 **匹配度 ≥ ★★★★** 的 1～2 刀。 |
+| 前序已吸收？ | **两步卷宗叙述 + Lint/Catalog/草稿/断链/Mermaid（S1–S5）** 已自研落地。 |
+| 最高 ROI | 现网灰度（Dossier/Report）已手测绿；`llm_wiki` ★★★★★ / 运维向借刀 **告一段落**；★★★ 以下默认不排期。 |
 
 ---
 
