@@ -406,6 +406,13 @@ async def create_workbench_campaign(
         project_id=payload.project_id,
         owner_id=current_owner if current_owner != "default" else None,
     )
+    if payload.project_id:
+        try:
+            from ..services.workbench_training import _link_campaign_to_project
+
+            _link_campaign_to_project(str(payload.project_id), int(campaign.id))
+        except Exception:
+            pass
     rows = await store.list_rows(campaign.id)
     return _campaign_response(campaign, rows)
 

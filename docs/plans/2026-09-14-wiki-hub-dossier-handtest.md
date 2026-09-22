@@ -102,6 +102,7 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 
 - 进程内 E2E：`backend/tests/test_wiki_p5_export_e2e.py`
 - **活栈金样 smoke**（含 S4 草稿 → S8）：`scripts/golden_rd_loop_smoke.py`
+- **Workbench → S5 正式台账**：`scripts/workbench_dossier_s5_smoke.py` · [`2026-09-22-workbench-lab-dossier-s5.md`](./2026-09-22-workbench-lab-dossier-s5.md)
 
 ---
 
