@@ -2,7 +2,7 @@
 
 状态：**评审结论（严苛）— 不整合仓库；可选极窄「思想借鉴」重写**  
 日期：2026-09-14  
-对照对象：本地克隆 `vendor/llm_wiki`（GPL-3.0，**勿入库**）  
+对照对象：本地克隆 `vendor/llm_wiki`（GPL-3.0，**勿入库**；**2026-09-22 已删除本地克隆**，仅保留 `.gitignore` 槽位）  
 FormuMind 主轨：W0–W4 → S1/P2/P3/Ops → P4 Dossier → P5 Report → P4.6/#95/#96  
 ADR：[`../architecture/ADR-2026-09-13-wiki-compiled-memory.md`](../architecture/ADR-2026-09-13-wiki-compiled-memory.md)
 
