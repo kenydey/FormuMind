@@ -443,6 +443,47 @@ def _lab_slice(project_id: str, ws=None) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("dossier lab hydrate failed: %s", exc)
 
+    # Workbench campaign Completed rows → S5 when SQL ExperimentRow empty
+    # (e.g. ledger not yet flushed, or project_id mismatch during migration).
+    if not rows and ws is not None:
+        cid = getattr(ws, "workbench_campaign_id", None)
+        if cid is not None:
+            try:
+                from ...db.campaign_store import get_campaign_store
+
+                for brow in get_campaign_store().get_experiments_sync(int(cid)):
+                    measured = getattr(brow, "measurements", None) or {}
+                    if not isinstance(measured, dict) or not measured:
+                        continue
+                    factors = {
+                        **(getattr(brow, "planned_params", None) or {}),
+                        **(getattr(brow, "actual_params", None) or {}),
+                    }
+                    for metric, value in list(measured.items())[:8]:
+                        if value is None or value == "":
+                            continue
+                        rows.append(
+                            {
+                                "at": "",
+                                "item": getattr(brow, "item_id", None)
+                                or getattr(brow, "label", None)
+                                or str(getattr(brow, "id", "")),
+                                "planned": str(getattr(brow, "planned_params", None) or "")[:80],
+                                "actual": str(factors)[:80],
+                                "metric": str(metric),
+                                "value": value,
+                                "method": "",
+                                "attachment": "",
+                                "source": f"workbench:{cid}",
+                            }
+                        )
+                        if len(rows) >= 40:
+                            break
+                    if len(rows) >= 40:
+                        break
+            except Exception as exc:
+                logger.debug("dossier lab workbench hydrate failed: %s", exc)
+
     # ELN 不可达时：workspace.measured 作为 S5 金样/手测回退（不进 Claims）。
     if not rows and ws is not None:
         measured = getattr(ws, "measured", None) or {}
