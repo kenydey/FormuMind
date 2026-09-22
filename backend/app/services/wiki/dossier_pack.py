@@ -45,9 +45,10 @@ def build_project_dossier_pack(
     literature = _literature_slice(pid, ws)
     formula_rows = _formula_rows(ws)
     doe = _doe_slice(ws, campaign_int)
-    lab = _lab_slice(pid)
+    lab = _lab_slice(pid, ws)
     loop = _loop_slice(ws, campaign_int)
     artifacts = _artifacts_slice(ws, loop, project_id=pid)
+    query_drafts = _query_drafts_slice(pid)
 
     return {
         "schema_version": 1,
@@ -77,12 +78,14 @@ def build_project_dossier_pack(
         "lab": lab,
         "loop": loop,
         "artifacts": artifacts,
+        "query_drafts": query_drafts,
         "flags": {
             "missing_requirement": req is None,
             "empty_literature": not literature.get("rows"),
             "empty_doe": not (doe.get("plans") or doe.get("runs")),
             "empty_lab": not lab.get("rows"),
             "empty_loop": not (loop.get("history") or loop.get("candidates")),
+            "pending_query_drafts": bool(query_drafts.get("rows")),
         },
         "vertical_addendum": (get_settings().wiki_dossier_vertical_addendum or "").strip(),
     }
@@ -218,6 +221,38 @@ def _literature_slice(project_id: str, ws) -> dict[str, Any]:
     return {"rows": deduped[:50], "source_ids": list(dict.fromkeys(source_ids))[:80]}
 
 
+def _query_drafts_slice(project_id: str) -> dict[str, Any]:
+    """S4 ops: unreviewed ``queries/project-{id}-*`` drafts (L2, not Claims)."""
+    pid = (project_id or "").strip()
+    if not pid:
+        return {"rows": [], "count": 0}
+    rows: list[dict[str, Any]] = []
+    try:
+        from ...db.wiki_store import get_wiki_store
+        from .schema import safe_key
+
+        prefix = f"queries/project-{safe_key(pid)}-"
+        store = get_wiki_store()
+        for row in store.list_pages(limit=400):
+            path = (row.path or "").replace("\\", "/")
+            if not path.startswith(prefix):
+                continue
+            fl = list(row.flags or [])
+            rows.append(
+                {
+                    "path": path,
+                    "title": (row.title or path).strip(),
+                    "flags": fl,
+                    "unreviewed": "unreviewed" in fl,
+                }
+            )
+            if len(rows) >= 12:
+                break
+    except Exception as exc:
+        logger.debug("dossier query_drafts hydrate failed: %s", exc)
+    return {"rows": rows, "count": len(rows)}
+
+
 def _doe_slice(ws, campaign_id: int | None) -> dict[str, Any]:
     plans: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
@@ -331,7 +366,7 @@ def _doe_slice(ws, campaign_id: int | None) -> dict[str, Any]:
     return {"plans": plans, "runs": runs[:100]}
 
 
-def _lab_slice(project_id: str) -> dict[str, Any]:
+def _lab_slice(project_id: str, ws=None) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     try:
         from ...db.database import default_session_factory
@@ -407,6 +442,38 @@ def _lab_slice(project_id: str) -> dict[str, Any]:
                 )
     except Exception as exc:
         logger.debug("dossier lab hydrate failed: %s", exc)
+
+    # ELN 不可达时：workspace.measured 作为 S5 金样/手测回退（不进 Claims）。
+    if not rows and ws is not None:
+        measured = getattr(ws, "measured", None) or {}
+        if isinstance(measured, dict) and measured:
+            factors: dict[str, Any] = {}
+            if ws.doe_plan and ws.doe_plan.runs:
+                run = ws.doe_plan.runs[0]
+                factors = (
+                    getattr(run, "natural", None)
+                    or getattr(run, "coded", None)
+                    or getattr(run, "values", None)
+                    or {}
+                )
+                if hasattr(factors, "model_dump"):
+                    factors = factors.model_dump()
+            for metric, value in list(measured.items())[:8]:
+                if value is None or value == "":
+                    continue
+                rows.append(
+                    {
+                        "at": "",
+                        "item": "workspace.measured",
+                        "planned": str(ws.doe_plan.plan_id if ws.doe_plan else "")[:40],
+                        "actual": str(factors)[:80] if factors else "",
+                        "metric": str(metric),
+                        "value": value,
+                        "method": "",
+                        "attachment": "",
+                        "source": "workspace.measured",
+                    }
+                )
     return {"rows": rows}
 
 

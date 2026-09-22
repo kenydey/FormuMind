@@ -276,6 +276,15 @@ def render_section(section: str, pack: dict[str, Any]) -> str:
             lines.append("- Flag：尚无实验台账条目。")
         if flags.get("empty_loop"):
             lines.append("- Flag：尚无闭环 / 寻优历史。")
+        qd = pack.get("query_drafts") or {}
+        qrows = qd.get("rows") or []
+        if qrows:
+            lines.append(
+                f"- L2 草稿（`queries/`）：{len(qrows)} 篇待审 — "
+                + "、".join(f"[[{r.get('title') or r.get('path')}]]" for r in qrows[:4])
+                + ("…" if len(qrows) > 4 else "")
+            )
+            lines.append("  （草稿不进 Claims/DOE；审阅后可手动编入 S2/S8 或编译主题。）")
         if not lines:
             lines.append("- 主要切片已有数据；请人工 review 后勾选 reviewed。")
         lines.append("- 自动 patch 默认关闭（`wiki_dossier_auto_patch=false`）。")

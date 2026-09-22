@@ -100,7 +100,8 @@ cd backend && python -m pytest -q tests/test_wiki_dossier_claims_doe_regression.
 
 要求 → 检索入库 → DOE → 台账 → 闭环 → **刷新卷宗** → 五表非空 → 生成 briefing → 导出。
 
-参见：`backend/tests/test_wiki_p5_export_e2e.py`。
+- 进程内 E2E：`backend/tests/test_wiki_p5_export_e2e.py`
+- **活栈金样 smoke**（含 S4 草稿 → S8）：`scripts/golden_rd_loop_smoke.py`
 
 ---
 

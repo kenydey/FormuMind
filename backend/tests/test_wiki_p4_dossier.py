@@ -19,7 +19,10 @@ from app.services.wiki.dossier import (
     notify_dossier_event,
     patch_dossier_sections,
     refresh_dossier,
+    render_section,
 )
+from app.services.wiki.draft_save import save_chat_draft
+from app.services.wiki.dossier_pack import build_project_dossier_pack
 from app.services.wiki.dossier_narrative import (
     attach_narrative,
     extract_narrative_from_section,
@@ -134,6 +137,61 @@ def test_pack_hydrates_doe_from_workspace(env):
     md = env["wiki"].read_markdown(project_dossier_path(pid)) or ""
     assert "full_factorial" in md
     assert "0.12" in md
+
+
+def test_lab_slice_falls_back_to_workspace_measured(env):
+    pid = _make_project(env["projects"])
+    detail = env["projects"].get(pid)
+    assert detail is not None
+    plan = DOEPlan(
+        plan_id="doe-lab-fallback",
+        design="lhs",
+        factors=[DOEFactor(name="pH", low=3.5, high=5.5, unit="")],
+        runs=[DOERun(run_id=1, coded={"pH": 0.0}, natural={"pH": 4.5})],
+    )
+    ws = detail.workspace.model_copy(
+        update={
+            "doe_plan": plan,
+            "measured": {"salt_spray_hours": 680.0},
+        }
+    )
+    env["projects"].update(pid, ws.model_dump(mode="json"))
+
+    pack = build_project_dossier_pack(pid)
+    assert pack["flags"]["empty_lab"] is False
+    lab_rows = (pack.get("lab") or {}).get("rows") or []
+    assert any(r.get("source") == "workspace.measured" for r in lab_rows)
+    assert any(r.get("metric") == "salt_spray_hours" for r in lab_rows)
+
+
+def test_s8_lists_pending_query_drafts(env, monkeypatch):
+    monkeypatch.setenv("FORMUMIND_WIKI_CHAT_SAVE_DRAFT", "true")
+    get_settings.cache_clear()
+
+    pid = _make_project(env["projects"])
+    out = save_chat_draft(
+        project_id=pid,
+        question="硅烷浴 pH 窗口？",
+        answer_markdown="建议 pH 4.2–4.8；draft_not_claims。",
+        title="pH 窗口笔记",
+        origin="chat",
+    )
+    assert out["path"].startswith("queries/project-")
+
+    pack = build_project_dossier_pack(pid)
+    assert pack["flags"]["pending_query_drafts"] is True
+    qrows = (pack.get("query_drafts") or {}).get("rows") or []
+    assert any(r.get("path") == out["path"] for r in qrows)
+
+    s8 = render_section("S8_open_questions", pack)
+    assert "queries/" in s8
+    assert "L2 草稿" in s8
+
+    ensure_project_dossier(pid)
+    refresh_dossier(pid)
+    md = env["wiki"].read_markdown(project_dossier_path(pid)) or ""
+    assert "queries/" in md
+    assert "Claims/DOE" in md or "draft" in md.lower()
 
 
 def test_patch_isolates_sections(env):
