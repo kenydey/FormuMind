@@ -177,9 +177,14 @@
 
 ---
 
-## 5. 停表声明（2026-09-21）
+## 5. 停表声明（2026-09-21；克隆清除 2026-09-22）
 
-**`llm_wiki` 借刀轨道正式停表。** S1–S5 已自研落地；现网优先 **金样 R&D 闭环**（卷宗/Report 五表有料）与 **S4 草稿运营化**（`queries/` → 卷宗 S8）。
+**`llm_wiki` 借刀轨道正式停表。** S1–S5 已自研落地；**本地 `vendor/llm_wiki` 克隆已删除**（仅保留 gitignore 槽位；若需再评审可临时 `git clone --depth 1`，用完即删）。
+
+现网主航道改为：
+
+1. **灰度**：卷宗 / Report / S4 草稿旗标开启后的真人项目手测  
+2. **配方 / KG**：Workbench→S5、实测回流、指标感知推荐排序与榜单可观测  
 
 | 项 | 状态 |
 |----|------|
@@ -188,9 +193,12 @@
 | S3 Mermaid Reader | ✅ 已合 main |
 | S4 Chat→queries 草稿 | ✅ 已合 main；运营见 [`2026-09-21-s4-draft-ops-handtest.md`](./2026-09-21-s4-draft-ops-handtest.md) |
 | S5 断链模糊建议 | ✅ 已合 main |
-| S6 语义 lint / Louvain insights | ⏸ **不排期** |
-| S7 clipper / Tauri Agent / MCP | ⏸ **不排期** |
+| S6 Wiki 页图 / Louvain | ⏸ **不排期**（另线 page-graph 自研，非借刀主表） |
+| S7 垂直 prompt 包 / clipper·Tauri·MCP | ⏸ **不排期** |
 | 金样闭环 smoke | ✅ `scripts/golden_rd_loop_smoke.py` |
+| Workbench→S5 | ✅ #134 · `scripts/workbench_dossier_s5_smoke.py` |
+| **本地 vendor/llm_wiki** | 🗑️ **已删除（2026-09-22）** |
+| 主航道门禁 | ✅ [`2026-09-22-grayscale-kg-maintrack.md`](./2026-09-22-grayscale-kg-maintrack.md) |
 
 新开题须单独 ADR；默认不再从 `vendor/llm_wiki` 借刀。
 
@@ -209,15 +217,16 @@
 ### A. 本地路径
 
 ```text
-vendor/llm_wiki/     # v0.6.11；gitignore
+vendor/llm_wiki/     # 已删除；.gitignore 保留；勿入库 GPL
 backend/app/services/wiki/
 frontend/src/components/knowledge-hub/HubWikiPane.tsx
 ```
 
-### B. 克隆
+### B. 临时再克隆（仅评审，用完即删）
 
 ```bash
 git clone --depth 1 https://github.com/nashsu/llm_wiki.git vendor/llm_wiki
+# 评审结束后：rm -rf vendor/llm_wiki
 ```
 
 ### C. 前序已落地（勿重复开题）
