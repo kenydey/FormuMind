@@ -2,7 +2,7 @@
 
 状态：**P4.6 质量门配套（2026-09-14）**  
 蓝图：[`2026-09-14-wiki-project-dossier.md`](./2026-09-14-wiki-project-dossier.md) §P4.6  
-自动化：`scripts/hub_dossier_handtest_smoke.py` · 单测 `tests/test_wiki_dossier_claims_doe_regression.py`
+自动化：`scripts/hub_dossier_handtest_smoke.py` · `scripts/grayscale_kg_maintrack_smoke.py` · 单测 `tests/test_wiki_dossier_claims_doe_regression.py` / `tests/test_grayscale_kg_maintrack_gate.py`
 
 ---
 
