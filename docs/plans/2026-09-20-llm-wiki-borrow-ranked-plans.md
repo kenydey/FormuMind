@@ -177,7 +177,26 @@
 
 ---
 
-## 5. 法律与工程红线（重申）
+## 5. 停表声明（2026-09-21）
+
+**`llm_wiki` 借刀轨道正式停表。** S1–S5 已自研落地；现网优先 **金样 R&D 闭环**（卷宗/Report 五表有料）与 **S4 草稿运营化**（`queries/` → 卷宗 S8）。
+
+| 项 | 状态 |
+|----|------|
+| S1 Lint/Hub 行动 | ✅ 已合 main |
+| S2 catalog | ✅ 已合 main |
+| S3 Mermaid Reader | ✅ 已合 main |
+| S4 Chat→queries 草稿 | ✅ 已合 main；运营见 [`2026-09-21-s4-draft-ops-handtest.md`](./2026-09-21-s4-draft-ops-handtest.md) |
+| S5 断链模糊建议 | ✅ 已合 main |
+| S6 语义 lint / Louvain insights | ⏸ **不排期** |
+| S7 clipper / Tauri Agent / MCP | ⏸ **不排期** |
+| 金样闭环 smoke | ✅ `scripts/golden_rd_loop_smoke.py` |
+
+新开题须单独 ADR；默认不再从 `vendor/llm_wiki` 借刀。
+
+---
+
+## 6. 法律与工程红线（重申）
 
 1. `vendor/llm_wiki` **仅评审**；禁止 copy `src/lib/ingest.ts` 等进发行物。  
 2. 允许：读行为与文档，用 FormuMind 许可证 **重写** 协议/UX。  
@@ -185,7 +204,7 @@
 
 ---
 
-## 6. 附录
+## 7. 附录
 
 ### A. 本地路径
 
