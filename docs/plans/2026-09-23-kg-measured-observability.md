@@ -39,7 +39,16 @@
 
 ```bash
 cd frontend && npx vitest run src/components/kgMeasuredObservability.test.tsx \
-  src/components/KgFeedbackStatsStrip.test.tsx src/components/measuredMetricHits.test.tsx
+  src/components/KgFeedbackStatsStrip.test.tsx src/components/measuredMetricHits.test.tsx \
+  src/components/cardMeasuredChip.test.tsx
 cd backend && python -m pytest -q tests/test_grayscale_kg_maintrack_gate.py \
   tests/test_kg_provenance.py
+# Hub 活证（需 Vite→API）：
+cd frontend && node scripts/kg_measured_obs_ui_proof.mjs
 ```
+
+## 4. 环境说明
+
+- Hub · 图谱统计条已在无 ELN 环境下活证（`/api/kg/feedback/stats` 只读 SQLite KG）。
+- Workbench 台账创建仍依赖 Datalab ELN（`FORMUMIND_DATALAB_REQUIRED`）；本云 VM 无 Docker 时无法起 `:5001`，台账 strip / sync tip 以同源组件单测 + `test_sync_kg_written_*` 覆盖。
+- 运营真人 G1–G6 仍归 `2026-09-22-grayscale-kg-maintrack.md` 勾选。
