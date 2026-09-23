@@ -1,11 +1,12 @@
 # STORM 风格长篇技术报告编排 — 设计评审稿（FormuMind Wiki）
 
-> 状态：**实施中（P0–P2 MVP）** · 2026-09-23  
+> 状态：**实施中（P0–P4）** · 2026-09-23  
 > 对照：Stanford STORM（Pre-writing → Writing → Polish）；**禁止**整仓移植 GPL/`storm` 源码，仅借范式自研  
 > 约束：不破坏现有卷宗同步 Report / Wiki CRUD；旗标默认关；Claims 只 Raw；不默认 LLM 洗 L1  
 > 前序：[`2026-09-22-grayscale-kg-maintrack.md`](./2026-09-22-grayscale-kg-maintrack.md) · [`2026-09-20-llm-wiki-borrow-ranked-plans.md`](./2026-09-20-llm-wiki-borrow-ranked-plans.md)
 
-**MVP 落地（本 PR）：** `storm_schema` / `storm_outline` / `storm_draft` / `storm_polish` / `storm_orchestrator`；旗标 `wiki_storm_report_enabled`（默认 false）；Celery `formumind.wiki_storm_report` + `POST /api/wiki/storm/report`（202 + SSE）；确定性离线路径；同步 `POST /dossier/report` 零改动。
+**已落地：** P0 Schema · P1 Outline · P2 顺序 Celery/API · P3 `citation_binder`+soft rules · **P4** Hub Reports STORM CTA + SSE/`ThinkingTimeline`。  
+**未做：** P5 有限并行分章。
 
 ---
 

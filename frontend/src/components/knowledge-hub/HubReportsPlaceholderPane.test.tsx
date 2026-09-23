@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../../api";
+import { api, awaitTaskStream } from "../../api";
 import { useStore } from "../../store";
 import HubReportsPlaceholderPane from "./HubReportsPlaceholderPane";
 
@@ -31,7 +31,10 @@ vi.mock("../../api", async () => {
       exportWikiReport: vi.fn(),
       listWikiReportTemplates: vi.fn(),
       getEnvFlags: vi.fn(),
+      startWikiStormReport: vi.fn(),
+      getWikiStormReport: vi.fn(),
     },
+    awaitTaskStream: vi.fn(),
   };
 });
 
@@ -56,6 +59,9 @@ describe("HubReportsPlaceholderPane", () => {
     vi.mocked(api.exportWikiReport).mockReset();
     vi.mocked(api.listWikiReportTemplates).mockReset();
     vi.mocked(api.getEnvFlags).mockReset();
+    vi.mocked(api.startWikiStormReport).mockReset();
+    vi.mocked(api.getWikiStormReport).mockReset();
+    vi.mocked(awaitTaskStream).mockReset();
     vi.mocked(api.listWikiReportTemplates).mockResolvedValue({
       templates: [],
       export: { md: true, docx: true, pdf: false, pptx: false },
@@ -65,6 +71,7 @@ describe("HubReportsPlaceholderPane", () => {
         flag("wiki_enabled", true),
         flag("wiki_project_dossier_enabled", true),
         flag("wiki_dossier_report_enabled", true),
+        flag("wiki_storm_report_enabled", false),
       ],
     });
     saveTextToProjectShelf.mockReset();
@@ -237,5 +244,92 @@ describe("HubReportsPlaceholderPane", () => {
     expect(screen.getByTestId("hub-reports-flag-wiki_dossier_report_enabled").textContent).toMatch(
       /✓/,
     );
+  });
+
+  it("disables STORM generate until wiki_storm_report_enabled is on", async () => {
+    render(<HubReportsPlaceholderPane />);
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-reports-storm")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("hub-reports-flag-wiki_storm_report_enabled").textContent).toMatch(
+      /×/,
+    );
+    expect(screen.getByTestId("hub-reports-storm-generate")).toBeDisabled();
+    expect(screen.getByTestId("hub-reports-storm-open-env")).toBeInTheDocument();
+  });
+
+  it("runs STORM async flow and shows result", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getEnvFlags).mockResolvedValue({
+      flags: [
+        flag("wiki_enabled", true),
+        flag("wiki_project_dossier_enabled", true),
+        flag("wiki_dossier_report_enabled", true),
+        flag("wiki_storm_report_enabled", true),
+      ],
+    });
+    vi.mocked(api.startWikiStormReport).mockResolvedValue({
+      task_id: "storm-task-1",
+      stream_url: "/api/tasks/storm-task-1/stream",
+      status_url: "/api/tasks/storm-task-1",
+      disclaimer: "draft_not_claims",
+    });
+    vi.mocked(awaitTaskStream).mockImplementation(async (_id, onEvent) => {
+      onEvent?.({
+        status: "RUNNING",
+        stage: "drafting_section_1",
+        message: "正在撰写",
+        progress: 0.4,
+        data: {
+          thinking: [
+            {
+              id: "generating_outline",
+              title: "正在生成报告大纲…",
+              kind: "stage",
+              status: "done",
+            },
+            {
+              id: "drafting_section_1",
+              title: "正在撰写：技术背景",
+              kind: "stage",
+              status: "running",
+            },
+          ],
+        },
+      });
+      return {
+        status: "COMPLETED",
+        stage: "done",
+        message: "done",
+        progress: 1,
+        data: { path: "reports/project-proj-demo-storm.md" },
+      };
+    });
+    vi.mocked(api.getWikiStormReport).mockResolvedValue({
+      path: "reports/project-proj-demo-storm.md",
+      title: "STORM 长文 · 测试",
+      markdown: "# STORM\n\ndraft_not_claims",
+      flags: ["storm", "draft"],
+      disclaimer: "draft_not_claims",
+    });
+
+    render(<HubReportsPlaceholderPane />);
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-reports-storm-generate")).not.toBeDisabled();
+    });
+    await user.type(screen.getByTestId("hub-reports-storm-topic"), "盐雾 720h");
+    await user.click(screen.getByTestId("hub-reports-storm-generate"));
+    await waitFor(() => {
+      expect(api.startWikiStormReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_id: "proj-demo",
+          topic: "盐雾 720h",
+          use_llm: false,
+        }),
+      );
+    });
+    expect(await screen.findByTestId("hub-reports-result")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-reports-disclaimer")).toHaveTextContent("draft_not_claims");
+    expect(api.getWikiStormReport).toHaveBeenCalledWith("proj-demo");
   });
 });

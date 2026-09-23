@@ -2496,6 +2496,30 @@ export const api = {
       llm?: { used_llm?: boolean; error?: string | null };
       error?: string;
     }>("/api/wiki/dossier/report", body),
+  startWikiStormReport: (body: {
+    project_id: string;
+    topic?: string;
+    max_sections?: number;
+    perspectives?: string[];
+    use_llm?: boolean;
+    ensure_dossier?: boolean;
+    persist?: boolean;
+    campaign_id?: string;
+  }) =>
+    postAccepted("/api/wiki/storm/report", body).then((accepted) => ({
+      ...accepted,
+      disclaimer: "draft_not_claims" as const,
+    })),
+  getWikiStormReport: (projectId: string) =>
+    get<{
+      path: string;
+      title: string;
+      markdown: string;
+      flags?: string[];
+      source_ids?: string[];
+      disclaimer?: string;
+      updated_at?: string | null;
+    }>(`/api/wiki/storm/report/${encodeURIComponent(projectId)}`),
   exportWikiReport: async (body: {
     project_id: string;
     template: string;
