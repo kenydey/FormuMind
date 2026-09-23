@@ -9,7 +9,7 @@ import {
   type WikiPageGraphNode,
 } from "../../api";
 import { useStore } from "../../store";
-import { filterWikiPageGraph } from "../../wiki/wikiPageGraph";
+import { filterWikiPageGraph, type WikiPageGraphColorMode } from "../../wiki/wikiPageGraph";
 import HubWikiGraphInsights from "./HubWikiGraphInsights";
 import WikiPageGraphCanvas from "./WikiPageGraphCanvas";
 
@@ -49,6 +49,7 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
   const [query, setQuery] = useState("");
   const [hideOrphan, setHideOrphan] = useState(false);
   const [kind, setKind] = useState("");
+  const [colorMode, setColorMode] = useState<WikiPageGraphColorMode>("kind");
 
   const loadFlags = useCallback(() => {
     void api
@@ -215,6 +216,16 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
           />
           隐藏孤立
         </label>
+        <select
+          className="bg-ink border border-edge rounded px-2 py-1 text-slate-200"
+          value={colorMode}
+          onChange={(e) => setColorMode(e.target.value as WikiPageGraphColorMode)}
+          data-testid="hub-wiki-graph-color-mode"
+          title="节点着色：类型 / 弱连通社区"
+        >
+          <option value="kind">着色·类型</option>
+          <option value="community">着色·社区</option>
+        </select>
         <input
           type="search"
           className="bg-ink border border-edge rounded px-2 py-1 text-slate-200 min-w-[8rem] flex-1"
@@ -257,6 +268,8 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
           {meta.edge_count}
           {meta.broken_links != null ? ` · 断链 ${meta.broken_links}` : ""}
           {meta.orphan_count != null ? ` · 孤立 ${meta.orphan_count}` : ""}
+          {meta.community_count != null ? ` · 社区 ${meta.community_count}` : ""}
+          {meta.weighting ? ` · 边权 ${meta.weighting}` : ""}
           {meta.elapsed_ms != null ? ` · ${meta.elapsed_ms}ms` : ""}
           {meta.truncated ? " · 已截断" : ""}
         </div>
@@ -274,6 +287,7 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
               nodes={filtered.nodes}
               edges={filtered.edges}
               selectedPath={selectedPath}
+              colorMode={colorMode}
               onSelect={onOpenPath}
             />
           )}

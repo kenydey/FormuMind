@@ -1,9 +1,11 @@
 # 实施计划：可视化 Knowledge Graph（对标 llm_wiki 交互，FormuMind 自研）
 
-> 状态：**P2 已实现（待合入）**（2026-09-20）· P0 `#124` / P1 `#125` 已合入  
+> 状态：**P0–P2 已合入 · 可视化抛光（共享邻居边权 / 社区着色 / 悬停高亮）** · 2026-09-23  
 > 动机：希望拥有接近 `nashsu/llm_wiki` 的 **可交互图谱前端 + 图构建后端**  
 > 对照：`vendor/llm_wiki`（GPL，只读）· 前序 [`2026-09-20-llm-wiki-borrow-ranked-plans.md`](./2026-09-20-llm-wiki-borrow-ranked-plans.md) §S6  
 > 约束：**不复制 GPL 源码**；**不混**「Wiki 页链接图」与「配方/材料 KG」；不上 LanceDB；旗标灰度；不默认 LLM
+
+**本轮抛光：** 边权 `1 + shared_neighbors/…`；弱连通 `community` 着色；画布悬停高亮邻居 + 缩放；Hub「着色·类型|社区」。仍不做 Louvain / 四信号 / Neo4j SSOT。
 
 ---
 
@@ -221,7 +223,7 @@ GET /api/wiki/graph?limit=500&kinds=entity,concept,theme&include_orphan=1&projec
 |---|------|------|
 | 1 | 侧栏：孤立节点、断链样例、弱连通分量计数 | **本 PR** |
 | 2 | 动作：跑 Lint / 打开页 /（有 project）刷新卷宗 | **本 PR** |
-| 3 | 边权：共享邻居加权；可选 Louvain 着色 | 延后（非验收阻塞） |
+| 3 | 边权：共享邻居加权；可选 Louvain 着色 | **边权 + 弱连通社区着色已做**；Louvain 仍延后 |
 | 4 | `project_id` 邻域收紧（仅 dossier 链出） | P0 已有 project scope；进一步收紧延后 |
 
 **验收：** 孤立页列表与 lint orphan 大体一致；一点动作有响应。
