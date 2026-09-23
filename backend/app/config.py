@@ -576,6 +576,10 @@ class Settings(BaseSettings):
     wiki_storm_report_enabled: bool = False
     # Cap sections for STORM drafting (cost / latency guardrails).
     wiki_storm_max_sections: int = 6
+    # P5: draft ready sections (depends_on satisfied) in a thread pool. Default OFF.
+    wiki_storm_parallel: bool = False
+    # Max workers per wave when wiki_storm_parallel is on (clamped 1–8).
+    wiki_storm_parallel_workers: int = 3
     # Wiki page [[wikilink]] graph for Hub canvas (not materials KG). Default OFF.
     wiki_page_graph_enabled: bool = False
     # S2: inject deterministic wiki catalog snippet into L2 theme compile. Default OFF.

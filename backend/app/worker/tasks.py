@@ -1353,6 +1353,8 @@ def run_wiki_storm_report_task(self, payload: dict) -> dict:
             max_sections=payload.get("max_sections"),
             perspectives=payload.get("perspectives"),
             use_llm=bool(payload.get("use_llm", False)),
+            parallel=payload.get("parallel"),
+            max_workers=payload.get("max_workers"),
             ensure_dossier=bool(payload.get("ensure_dossier", True)),
             persist=bool(payload.get("persist", True)),
             campaign_id=payload.get("campaign_id"),

@@ -325,6 +325,7 @@ describe("HubReportsPlaceholderPane", () => {
           project_id: "proj-demo",
           topic: "盐雾 720h",
           use_llm: false,
+          parallel: false,
         }),
       );
     });

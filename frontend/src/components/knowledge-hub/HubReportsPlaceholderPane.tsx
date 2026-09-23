@@ -125,6 +125,7 @@ export default function HubReportsPlaceholderPane() {
   } | null>(null);
   const [stormTopic, setStormTopic] = useState("");
   const [stormUseLlm, setStormUseLlm] = useState(false);
+  const [stormParallel, setStormParallel] = useState(false);
   const [stormProgress, setStormProgress] = useState(0);
   const [stormStage, setStormStage] = useState("");
   const [stormThinking, setStormThinking] = useState<ThinkingStep[]>([]);
@@ -283,6 +284,7 @@ export default function HubReportsPlaceholderPane() {
         topic: stormTopic.trim(),
         max_sections: 6,
         use_llm: stormUseLlm,
+        parallel: stormParallel,
         ensure_dossier: true,
         persist: true,
       });
@@ -459,6 +461,16 @@ export default function HubReportsPlaceholderPane() {
             disabled={!stormReady || !!busy}
           />
           使用 LLM 分章（关则确定性离线草稿）
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-slate-400">
+          <input
+            type="checkbox"
+            checked={stormParallel}
+            onChange={(e) => setStormParallel(e.target.checked)}
+            data-testid="hub-reports-storm-parallel"
+            disabled={!stormReady || !!busy}
+          />
+          有限并行分章（depends_on 波次；覆盖服务端 wiki_storm_parallel）
         </label>
         {(busy === "storm" || stormThinking.length > 0) && (
           <div className="space-y-1.5" data-testid="hub-reports-storm-progress">

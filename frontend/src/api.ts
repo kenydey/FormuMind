@@ -2502,6 +2502,8 @@ export const api = {
     max_sections?: number;
     perspectives?: string[];
     use_llm?: boolean;
+    parallel?: boolean | null;
+    max_workers?: number;
     ensure_dossier?: boolean;
     persist?: boolean;
     campaign_id?: string;

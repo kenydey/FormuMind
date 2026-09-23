@@ -526,6 +526,11 @@ class StormReportRequest(BaseModel):
     max_sections: int | None = Field(default=None, ge=3, le=12)
     perspectives: list[str] = Field(default_factory=list)
     use_llm: bool = False
+    parallel: bool | None = Field(
+        default=None,
+        description="Override wiki_storm_parallel; None = use server flag",
+    )
+    max_workers: int | None = Field(default=None, ge=1, le=8)
     ensure_dossier: bool = True
     persist: bool = True
     campaign_id: str | None = None
@@ -557,6 +562,8 @@ def start_storm_report_endpoint(body: StormReportRequest, request: Request):
         "max_sections": body.max_sections,
         "perspectives": list(body.perspectives or []) or None,
         "use_llm": bool(body.use_llm),
+        "parallel": body.parallel,
+        "max_workers": body.max_workers,
         "ensure_dossier": bool(body.ensure_dossier),
         "persist": bool(body.persist),
         "campaign_id": body.campaign_id,

@@ -22,7 +22,7 @@ from app.services.wiki.constraints import (
 from app.services.wiki.report import generate_report
 from app.services.wiki.retrieve import blend_wiki_evidence, filter_raw_evidence, is_wiki_evidence
 from app.services.wiki.schema import project_report_path
-from app.services.wiki.storm_draft import draft_all_sections
+from app.services.wiki.storm_draft import draft_all_sections, plan_draft_waves
 from app.services.wiki.storm_orchestrator import run_storm_report
 from app.services.wiki.storm_outline import build_deterministic_outline, generate_outline
 from app.services.wiki.storm_polish import stitch_and_polish
@@ -204,6 +204,89 @@ def test_soft_rules_appendix_readonly(env):
     assert "附录：规则审查" in md
     assert "不**自动改配方" in md or "不自动改配方" in md
     assert "draft_not_claims" in md
+
+
+# ── P5 parallel waves ───────────────────────────────────────────────────
+
+
+def test_plan_draft_waves_respects_depends_on():
+    sections = [
+        SectionSpec(section_id="a", title="A", retrieval_queries=["q"], depends_on=[]),
+        SectionSpec(section_id="b", title="B", retrieval_queries=["q"], depends_on=[]),
+        SectionSpec(section_id="c", title="C", retrieval_queries=["q"], depends_on=["a"]),
+        SectionSpec(section_id="d", title="D", retrieval_queries=["q"], depends_on=["a", "b"]),
+    ]
+    waves = plan_draft_waves(sections)
+    assert len(waves) >= 2
+    wave0_ids = {s.section_id for s in waves[0]}
+    assert wave0_ids == {"a", "b"}
+    # c and d cannot start before a (and d needs b)
+    flat_after = [s.section_id for w in waves[1:] for s in w]
+    assert "c" in flat_after and "d" in flat_after
+    # d must not appear in a wave before both a and b are done
+    done: set[str] = set()
+    for w in waves:
+        ids = {s.section_id for s in w}
+        if "d" in ids:
+            assert "a" in done and "b" in done
+        done |= ids
+
+
+def test_plan_draft_waves_cycle_fallback():
+    sections = [
+        SectionSpec(section_id="a", title="A", retrieval_queries=["q"], depends_on=["b"]),
+        SectionSpec(section_id="b", title="B", retrieval_queries=["q"], depends_on=["a"]),
+    ]
+    waves = plan_draft_waves(sections)
+    assert sum(len(w) for w in waves) == 2
+    assert {s.section_id for w in waves for s in w} == {"a", "b"}
+
+
+def test_parallel_draft_emits_waves_and_completes(env):
+    pid = _make_project(env["projects"])
+    pack = _mini_pack(pid)
+    outline = build_deterministic_outline(pack, project_id=pid, max_sections=4)
+    # Force two roots so wave0 has size > 1 when possible
+    if len(outline.sections) >= 2:
+        outline.sections[0].depends_on = []
+        outline.sections[1].depends_on = []
+    stages: list[str] = []
+    drafts = draft_all_sections(
+        outline,
+        pack,
+        project_id=pid,
+        use_llm=False,
+        parallel=True,
+        max_workers=3,
+        progress_cb=lambda stage, msg, prog, data=None: stages.append(stage),
+    )
+    assert len(drafts) == len(outline.sections)
+    assert any(s.startswith("drafting_wave_") for s in stages)
+    assert any(s.startswith("drafting_section_") for s in stages)
+    # Dependent section still gets sliding summary from dep when declared
+    for spec in outline.sections:
+        if spec.depends_on:
+            body = drafts[spec.section_id].content_markdown
+            dep = spec.depends_on[0]
+            if dep in drafts and drafts[dep].summary:
+                assert "承上" in body or drafts[dep].summary[:12] in body
+
+
+def test_run_storm_report_parallel_meta(env):
+    pid = _make_project(env["projects"])
+    out = run_storm_report(
+        pid,
+        topic="并行测试",
+        max_sections=4,
+        use_llm=False,
+        parallel=True,
+        max_workers=2,
+        persist=False,
+    )
+    assert out["ok"] is True
+    assert out["meta"]["parallel"] is True
+    assert out["meta"]["parallel_workers"] == 2
+    assert out["section_count"] >= 3
 
 
 # ── Outline / draft ─────────────────────────────────────────────────────

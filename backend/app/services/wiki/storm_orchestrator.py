@@ -37,6 +37,8 @@ def run_storm_report(
     max_sections: int | None = None,
     perspectives: list[str] | None = None,
     use_llm: bool = False,
+    parallel: bool | None = None,
+    max_workers: int | None = None,
     ensure_dossier: bool = True,
     persist: bool = True,
     campaign_id: str | None = None,
@@ -56,6 +58,17 @@ def run_storm_report(
         else getattr(settings, "wiki_storm_max_sections", 6) or 6
     )
     max_sec = max(3, min(max_sec, 12))
+    parallel_use = (
+        bool(parallel)
+        if parallel is not None
+        else bool(getattr(settings, "wiki_storm_parallel", False))
+    )
+    workers = int(
+        max_workers
+        if max_workers is not None
+        else getattr(settings, "wiki_storm_parallel_workers", 3) or 3
+    )
+    workers = max(1, min(workers, 8))
 
     state = StormReportState(project_id=pid, task_id=task_id or "", stage="generating_outline")
 
@@ -87,6 +100,8 @@ def run_storm_report(
         pack,
         project_id=pid,
         use_llm=use_llm,
+        parallel=parallel_use,
+        max_workers=workers,
         progress_cb=progress_cb,
     )
     state.drafts = drafts
@@ -104,6 +119,8 @@ def run_storm_report(
         "citation_count": len(cite_ids),
         "use_llm": bool(use_llm),
         "outline_source": outline.source,
+        "parallel": parallel_use,
+        "parallel_workers": workers if parallel_use else 1,
     }
 
     out: dict[str, Any] = {

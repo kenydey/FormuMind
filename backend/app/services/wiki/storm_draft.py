@@ -233,41 +233,158 @@ def draft_section(
         return base
 
 
+def plan_draft_waves(sections: list[SectionSpec]) -> list[list[SectionSpec]]:
+    """Partition sections into waves where each wave's depends_on ⊆ prior waves.
+
+    Unknown / cyclic depends_on fall back to single-section waves in outline order
+    so drafting never deadlocks.
+    """
+    if not sections:
+        return []
+    by_id = {s.section_id: s for s in sections}
+    remaining = list(sections)
+    done: set[str] = set()
+    waves: list[list[SectionSpec]] = []
+    guard = 0
+    while remaining:
+        guard += 1
+        if guard > len(sections) + 2:
+            # Pathological cycle — drain one-by-one
+            waves.append([remaining.pop(0)])
+            done.add(waves[-1][0].section_id)
+            continue
+        ready: list[SectionSpec] = []
+        for s in remaining:
+            deps = [d for d in (s.depends_on or []) if d in by_id]
+            if all(d in done for d in deps):
+                ready.append(s)
+        if not ready:
+            # Missing dep or cycle — force next in outline order
+            ready = [remaining[0]]
+        ready_ids = {s.section_id for s in ready}
+        remaining = [s for s in remaining if s.section_id not in ready_ids]
+        waves.append(ready)
+        done.update(ready_ids)
+    return waves
+
+
+def _prev_summary_for(
+    spec: SectionSpec,
+    drafts: dict[str, SectionDraft],
+    *,
+    fallback: str = "",
+) -> str:
+    for dep in spec.depends_on or []:
+        if dep in drafts and drafts[dep].summary:
+            return drafts[dep].summary
+    return fallback
+
+
 def draft_all_sections(
     outline: ReportOutline,
     pack: dict[str, Any],
     *,
     project_id: str,
     use_llm: bool = False,
+    parallel: bool = False,
+    max_workers: int = 3,
     progress_cb: ProgressCb | None = None,
 ) -> dict[str, SectionDraft]:
-    """Sequential drafting (MVP): honor depends_on order via section list order."""
+    """Draft sections in depends_on waves; optionally parallel within each wave."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     drafts: dict[str, SectionDraft] = {}
-    n = max(len(outline.sections), 1)
-    prev_summary = ""
-    for i, spec in enumerate(outline.sections):
-        # Prefer summary from last declared dependency if available
-        for dep in spec.depends_on:
-            if dep in drafts and drafts[dep].summary:
-                prev_summary = drafts[dep].summary
-                break
-        stage = f"drafting_section_{i + 1}"
-        prog = 0.2 + 0.55 * (i / n)
-        if progress_cb:
+    sections = list(outline.sections)
+    n = max(len(sections), 1)
+    waves = plan_draft_waves(sections)
+    completed = 0
+    progress_lock = threading.Lock()
+    last_summary = ""
+
+    workers = max(1, min(int(max_workers or 1), 8))
+    use_pool = bool(parallel) and workers > 1
+
+    def _emit(spec: SectionSpec, index: int) -> None:
+        if not progress_cb:
+            return
+        stage = f"drafting_section_{index}"
+        prog = 0.2 + 0.55 * ((index - 1) / n)
+        with progress_lock:
             progress_cb(
                 stage,
                 f"正在撰写：{spec.title}",
                 prog,
-                {"section_id": spec.section_id, "index": i + 1, "total": n},
+                {
+                    "section_id": spec.section_id,
+                    "index": index,
+                    "total": n,
+                    "parallel": use_pool,
+                    "wave_size": None,
+                },
             )
-        draft = draft_section(
-            spec,
-            outline,
-            pack,
-            project_id=project_id,
-            prev_summary=prev_summary,
-            use_llm=use_llm,
-        )
-        drafts[spec.section_id] = draft
-        prev_summary = draft.summary or prev_summary
+
+    for wave_i, wave in enumerate(waves):
+        # Snapshot summaries from prior waves only (thread-safe for this wave)
+        summary_by_spec: dict[str, str] = {}
+        for spec in wave:
+            summary_by_spec[spec.section_id] = _prev_summary_for(
+                spec, drafts, fallback=last_summary
+            )
+
+        if progress_cb:
+            with progress_lock:
+                progress_cb(
+                    f"drafting_wave_{wave_i + 1}",
+                    f"分章波次 {wave_i + 1}/{len(waves)}（{len(wave)} 章）",
+                    0.2 + 0.55 * (completed / n),
+                    {
+                        "wave": wave_i + 1,
+                        "wave_total": len(waves),
+                        "section_ids": [s.section_id for s in wave],
+                        "parallel": use_pool and len(wave) > 1,
+                    },
+                )
+
+        if use_pool and len(wave) > 1:
+            with ThreadPoolExecutor(
+                max_workers=min(workers, len(wave)),
+                thread_name_prefix="storm-draft",
+            ) as pool:
+                futures = {}
+                for spec in wave:
+                    completed += 1
+                    idx = completed
+                    _emit(spec, idx)
+                    fut = pool.submit(
+                        draft_section,
+                        spec,
+                        outline,
+                        pack,
+                        project_id=project_id,
+                        prev_summary=summary_by_spec[spec.section_id],
+                        use_llm=use_llm,
+                    )
+                    futures[fut] = spec
+                for fut in as_completed(futures):
+                    spec = futures[fut]
+                    drafts[spec.section_id] = fut.result()
+        else:
+            for spec in wave:
+                completed += 1
+                _emit(spec, completed)
+                drafts[spec.section_id] = draft_section(
+                    spec,
+                    outline,
+                    pack,
+                    project_id=project_id,
+                    prev_summary=summary_by_spec[spec.section_id],
+                    use_llm=use_llm,
+                )
+
+        # Advance sliding fallback for next wave (outline order within wave)
+        for spec in wave:
+            if drafts[spec.section_id].summary:
+                last_summary = drafts[spec.section_id].summary
+
     return drafts
