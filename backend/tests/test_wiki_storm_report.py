@@ -160,6 +160,50 @@ def test_strip_unbound_citations():
     assert "src-lit-storm-1" in cites
     assert "draft_not_claims" in md
     assert "附录" in md
+    assert "规则审查" in md
+    assert "已剔除未绑定引用标记" in md or "[^99]" not in md
+
+
+def test_remap_local_citations_across_sections():
+    from app.services.wiki.storm_polish import remap_local_citations_to_global
+
+    # Section A local [^1]=src-a; Section B local [^1]=src-b → global [^1]/[^2]
+    body_b = "证据见 [^1] 与幻觉 [^3]。"
+    remapped = remap_local_citations_to_global(
+        body_b, ["src-b"], ["src-a", "src-b"]
+    )
+    assert "[^2]" in remapped
+    assert "[^1]" not in remapped or remapped.count("[^1]") == 0
+    assert "[^3]" not in remapped
+
+
+def test_soft_rules_appendix_readonly(env):
+    from app.services.wiki.storm_polish import collect_soft_rule_warnings
+
+    pack = _mini_pack("p1")
+    # Incompatible-ish recipe: free isocyanate + water often flagged; keep soft
+    pack["formula"] = {
+        "rows": [
+            {"name": "HDI isocyanate", "role": "hardener", "weight_pct": 20, "cas": ""},
+            {"name": "water", "role": "solvent", "weight_pct": 40, "cas": "7732-18-5"},
+            {"name": "GPTMS", "role": "silane", "weight_pct": 3, "cas": "2530-83-8"},
+        ]
+    }
+    warnings = collect_soft_rule_warnings(pack)
+    assert warnings
+    assert any("feasibility" in w or "acid_stability" in w for w in warnings)
+
+    outline = build_deterministic_outline(pack, project_id="p1", max_sections=3)
+    d = SectionDraft(
+        section_id=outline.sections[0].section_id,
+        content_markdown="## X\n\nok\n",
+        used_citations=[],
+        summary="s",
+    )
+    md, _ = stitch_and_polish(outline, {outline.sections[0].section_id: d}, pack)
+    assert "附录：规则审查" in md
+    assert "不**自动改配方" in md or "不自动改配方" in md
+    assert "draft_not_claims" in md
 
 
 # ── Outline / draft ─────────────────────────────────────────────────────

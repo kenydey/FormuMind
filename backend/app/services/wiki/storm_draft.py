@@ -193,19 +193,20 @@ def draft_section(
         return base
 
     try:
+        from ...services.citation_binder import format_citation_list
         from ...services.llm import complete_structured
+        from .storm_polish import evidence_to_anchors
+
+        anchors = evidence_to_anchors(evidence)
+        cite_block = format_citation_list(anchors) if anchors else "_无可引用的文献。_"
 
         system = (
             "你是工业配方技术报告撰稿人。只写当前章节 Markdown。"
             "禁止改写「确定性摘录」中的数字；可用「见表/见摘录」引用。"
-            "引用检索线索时使用 [^n]；不得编造 DOI/文献。"
+            "引用时严格使用下方可引用文献的 [^n]；不得编造 DOI/文献编号。"
             "另输出 150–200 字 summary 供下一章滑动窗口。"
             "输出严格 JSON：section_id, content_markdown, used_citations, summary。"
         )
-        ev_lines = "\n".join(
-            f"[^{i}] id={e.get('id')} | {e.get('title')} | {e.get('snippet')}"
-            for i, e in enumerate(evidence, 1)
-        ) or "（无检索命中）"
         user = (
             f"{_outline_tree(outline, spec.section_id)}\n\n"
             f"当前章节 id={spec.section_id} title={spec.title}\n"
@@ -213,7 +214,7 @@ def draft_section(
             f"目标字数: {spec.target_word_count}\n"
             f"上一章摘要: {prev_summary or '（首章）'}\n\n"
             f"{_pack_excerpt_for_section(spec, pack)}\n\n"
-            f"检索线索:\n{ev_lines}\n"
+            f"**可引用文献**（严格按照编号引用）：\n{cite_block}\n"
         )
         parsed, err = complete_structured(system, user, SectionDraft, retry=True)
         if parsed is None:
