@@ -1309,12 +1309,84 @@ def run_molscribe_recognize_task(self, payload: dict) -> dict:
     return validate_recognized_smiles(image_path)
 
 
+@celery_app.task(
+    bind=True,
+    name="formumind.wiki_storm_report",
+    soft_time_limit=1500,
+    time_limit=1800,
+)
+def run_wiki_storm_report_task(self, payload: dict) -> dict:
+    """STORM longform report: outline → sequential draft → polish → persist."""
+    from ..services.wiki.storm_orchestrator import run_storm_report
+
+    task_id = self.request.id
+    tracker = ThinkingTracker(task_id, kind="wiki_storm_report")
+    tracker.emit(
+        "generating_outline",
+        "正在生成 STORM 大纲…",
+        progress=0.08,
+        step_id="generating_outline",
+        title="正在生成报告大纲…",
+    )
+
+    def progress_cb(
+        stage: str,
+        message: str,
+        progress: float = 0.0,
+        data: dict | None = None,
+    ) -> None:
+        tracker.emit(
+            stage,
+            message,
+            progress=float(progress or 0.0),
+            step_id=stage or None,
+            title=message or stage or "STORM",
+            kind="stage",
+            detail=message,
+            data=data,
+        )
+
+    try:
+        result = run_storm_report(
+            str(payload.get("project_id") or ""),
+            topic=str(payload.get("topic") or ""),
+            max_sections=payload.get("max_sections"),
+            perspectives=payload.get("perspectives"),
+            use_llm=bool(payload.get("use_llm", False)),
+            ensure_dossier=bool(payload.get("ensure_dossier", True)),
+            persist=bool(payload.get("persist", True)),
+            campaign_id=payload.get("campaign_id"),
+            task_id=task_id,
+            progress_cb=progress_cb,
+        )
+        # Drop heavy markdown from terminal snapshot if enormous; keep path.
+        slim = {
+            k: v
+            for k, v in result.items()
+            if k != "markdown" or len(str(v or "")) < 50_000
+        }
+        tracker.finish()
+        persist_result(task_id, slim, failed=False)
+        _persist_terminal(task_id, "wiki_storm_report", slim)
+        return result
+    except Exception as exc:
+        logger.exception("wiki_storm_report task failed")
+        tracker.finish(error=True)
+        err = {"error": str(exc), "disclaimer": "draft_not_claims"}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(
+            task_id, "wiki_storm_report", err, failed=True, message=str(exc)
+        )
+        raise
+
+
 # Legacy names kept for imports
 optimize_task = run_optimize_task
 loop_task = run_loop_task
 deep_research_task = run_deep_research_task
 recommend_task = run_recommend_task
 ingest_patents_task = run_deep_research_task  # unused alias
+wiki_storm_report_task = run_wiki_storm_report_task
 
 
 @celery_app.task(name="formumind.noop")

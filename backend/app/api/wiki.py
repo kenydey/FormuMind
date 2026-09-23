@@ -1,7 +1,7 @@
 """LLM Wiki read APIs (W1)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
@@ -518,6 +518,81 @@ def generate_dossier_report_endpoint(body: DossierReportRequest) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class StormReportRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    topic: str = ""
+    max_sections: int | None = Field(default=None, ge=3, le=12)
+    perspectives: list[str] = Field(default_factory=list)
+    use_llm: bool = False
+    ensure_dossier: bool = True
+    persist: bool = True
+    campaign_id: str | None = None
+
+
+@router.post("/storm/report", status_code=202)
+def start_storm_report_endpoint(body: StormReportRequest, request: Request):
+    """STORM longform report (async). Flag-gated; does not mutate sync /dossier/report."""
+    import json as _json
+
+    from fastapi.responses import JSONResponse
+
+    from ..middleware.api_auth import get_current_owner
+    from ..worker.tasks import run_wiki_storm_report_task
+    from ._dispatch import submit
+
+    _require_wiki()
+    settings = get_settings()
+    if not getattr(settings, "wiki_project_dossier_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_project_dossier_enabled is false")
+    if not getattr(settings, "wiki_dossier_report_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_dossier_report_enabled is false")
+    if not getattr(settings, "wiki_storm_report_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_storm_report_enabled is false")
+
+    payload = {
+        "project_id": body.project_id,
+        "topic": body.topic or "",
+        "max_sections": body.max_sections,
+        "perspectives": list(body.perspectives or []) or None,
+        "use_llm": bool(body.use_llm),
+        "ensure_dossier": bool(body.ensure_dossier),
+        "persist": bool(body.persist),
+        "campaign_id": body.campaign_id,
+    }
+    resp = submit(
+        run_wiki_storm_report_task,
+        payload,
+        "wiki_storm_report",
+        owner_id=get_current_owner(request),
+    )
+    content = _json.loads(resp.body)
+    content["disclaimer"] = "draft_not_claims"
+    return JSONResponse(status_code=202, content=content)
+
+
+@router.get("/storm/report/{project_id}")
+def get_storm_report_endpoint(project_id: str) -> dict:
+    """Read persisted STORM longform page for a project (if any)."""
+    _require_wiki()
+    from ..services.wiki.schema import project_report_path
+
+    store = get_wiki_store()
+    path = project_report_path(project_id, "storm")
+    row = store.get_by_path(path)
+    if row is None:
+        raise HTTPException(status_code=404, detail="storm report not found")
+    md = store.read_markdown(row.path) or ""
+    return {
+        "path": row.path,
+        "title": row.title or "",
+        "markdown": md,
+        "flags": list(row.flags or []),
+        "source_ids": list(row.source_ids or []),
+        "disclaimer": "draft_not_claims",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
 
 
 @router.post("/dossier/report/export")

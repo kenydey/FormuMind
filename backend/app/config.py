@@ -572,6 +572,10 @@ class Settings(BaseSettings):
     wiki_dossier_vertical_addendum: str = ""
     # Phase 5: generate Hub reports from DossierPack. Default OFF.
     wiki_dossier_report_enabled: bool = False
+    # STORM longform report (async L2 draft). Default OFF — does not alter sync /dossier/report.
+    wiki_storm_report_enabled: bool = False
+    # Cap sections for STORM drafting (cost / latency guardrails).
+    wiki_storm_max_sections: int = 6
     # Wiki page [[wikilink]] graph for Hub canvas (not materials KG). Default OFF.
     wiki_page_graph_enabled: bool = False
     # S2: inject deterministic wiki catalog snippet into L2 theme compile. Default OFF.
