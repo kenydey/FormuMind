@@ -27,6 +27,8 @@ import ExperimentDiff from "./ExperimentDiff";
 import QCReportModal from "./QCReportModal";
 import CampaignRoundsModal from "./CampaignRoundsModal";
 import ContourPlot from "./charts/ContourPlot";
+import KgFeedbackStatsStrip from "./KgFeedbackStatsStrip";
+import { formatKgWrittenHint } from "./kgMeasuredObservability";
 
 interface LabWorkbenchProps {
   campaignId: number;
@@ -90,6 +92,8 @@ export default function LabWorkbench({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveHint, setSaveHint] = useState<string | null>(null);
+  /** Bump after sync so KgFeedbackStatsStrip re-fetches measured counts (G5). */
+  const [kgStatsRefreshKey, setKgStatsRefreshKey] = useState(0);
   const [biasSummary, setBiasSummary] = useState<NonNullable<import("../api").WorkbenchSyncResponse["prediction_bias"]> | null>(null);
   const [quality, setQuality] = useState<WorkbenchQuality | null>(null);
   const [reconciling, setReconciling] = useState(false);
@@ -517,8 +521,12 @@ export default function LabWorkbench({
       const hints: string[] = [];
       if (res.training_message) hints.push(res.training_message);
       if (res.loop_message) hints.push(res.loop_message);
-      if (res.kg_written) hints.push(`KG 回流 ${res.kg_written} 条实测证据`);
+      const kgHint = formatKgWrittenHint(res.kg_written);
+      if (kgHint) hints.push(kgHint);
       if (hints.length) setSaveHint(hints.join(" · "));
+      if (typeof res.kg_written === "number") {
+        setKgStatsRefreshKey((k) => k + 1);
+      }
       if (res.prediction_bias?.by_metric && Object.keys(res.prediction_bias.by_metric).length) {
         setBiasSummary(res.prediction_bias);
       } else {
@@ -620,8 +628,17 @@ export default function LabWorkbench({
           <p className="text-[11px] text-red-400 px-2 py-1 border-b border-edge/30">{error}</p>
         )}
         {saveHint && !error && (
-          <p className="text-[11px] text-emerald-400 px-2 py-1 border-b border-edge/30">{saveHint}</p>
+          <p
+            className="text-[11px] text-emerald-400 px-2 py-1 border-b border-edge/30"
+            data-testid="workbench-save-hint"
+            data-kg-written={
+              saveHint.includes("KG 回流") ? "true" : undefined
+            }
+          >
+            {saveHint}
+          </p>
         )}
+        <KgFeedbackStatsStrip refreshKey={kgStatsRefreshKey} />
         {biasSummary && !error && (
           <div className="px-2 py-1.5 border-b border-edge/30 bg-amber-500/5 text-[10px]">
             <div className="flex items-center justify-between">

@@ -122,6 +122,85 @@ def test_grayscale_dossier_report_and_kg_stats(env):
     assert isinstance(st["measured_domain"], int)
 
 
+def test_sync_kg_written_bumps_measured_material(env, monkeypatch):
+    """G5 code-side: workbench sync returns kg_written and stats.material grows."""
+    from app.db.campaign_store import SqliteCampaignStore, reset_campaign_store
+    from app.domain.schemas import DOEPlan, DOERun, ObjectiveSpec
+
+    entities: EntityStore = env["entities"]
+    factory = env["factory"]
+    with entities._session_factory() as s:
+        entities.upsert_entity(
+            s, id="dom", canonical_name="anticorrosion_coating", kind="domain"
+        )
+
+    monkeypatch.setenv("FORMUMIND_CAMPAIGN_BACKEND", "sqlite")
+    reset_campaign_store(SqliteCampaignStore(factory))
+    get_settings.cache_clear()
+    try:
+        before = TestClient(app).get("/api/kg/feedback/stats").json()["measured_material"]
+
+        plan = DOEPlan(
+            design="lhs",
+            factors=[],
+            runs=[
+                DOERun(
+                    run_id=1,
+                    coded={},
+                    natural={"GPTMS": 2.0, "cure_temperature_c": 80.0},
+                )
+            ],
+            notes="g5",
+            plan_id="g5obs",
+            domain=ProductDomain.anticorrosion_coating,
+        )
+        req = Requirement(
+            domain=ProductDomain.anticorrosion_coating,
+            objectives=[
+                ObjectiveSpec(
+                    metric="salt_spray_hours", weight=1.0, direction="maximize"
+                )
+            ],
+        )
+        client = TestClient(app)
+        created = client.post(
+            "/api/experiments/workbench/campaigns",
+            json={"plan": plan.model_dump(), "requirement": req.model_dump()},
+        )
+        assert created.status_code == 200, created.text
+        cid = created.json()["campaign_id"]
+        row = created.json()["rows"][0]
+
+        synced = client.put(
+            "/api/experiments/workbench/sync",
+            json={
+                "campaign_id": cid,
+                "rows": [
+                    {
+                        "id": row["id"],
+                        "status": "Completed",
+                        "actual_params": {"GPTMS": 2.0},
+                        "measurements": {"salt_spray_hours": 700.0},
+                    }
+                ],
+                "requirement": req.model_dump(),
+            },
+        )
+        assert synced.status_code == 200, synced.text
+        body = synced.json()
+        assert body.get("kg_written") is not None and body["kg_written"] >= 1
+
+        after = client.get("/api/kg/feedback/stats").json()
+        assert (
+            after["measured_material"] >= before + 1
+            or after["measured_performance"] >= 1
+        )
+        assert after["measured_performance"] >= 1
+    finally:
+        reset_campaign_store(None)
+        get_settings.cache_clear()
+
+
 def test_kg_measured_link_visible_in_stats(env):
     entities: EntityStore = env["entities"]
     with entities._session_factory() as s:

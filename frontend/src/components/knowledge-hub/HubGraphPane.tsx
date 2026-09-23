@@ -9,6 +9,7 @@ import {
 } from "../../api";
 import { useStore } from "../../store";
 import KgRelationPanel from "../KgRelationPanel";
+import KgFeedbackStatsStrip from "../KgFeedbackStatsStrip";
 import WikiPageGraphCanvas from "./WikiPageGraphCanvas";
 
 const DEFAULT_TYPES = "substitutes,measured_*";
@@ -203,6 +204,7 @@ export default function HubGraphPane({ active }: { active: boolean }) {
 
           {viewMode === "canvas" ? (
             <div className="flex flex-col gap-2 flex-1 min-h-0" data-testid="hub-graph-canvas-mode">
+              <KgFeedbackStatsStrip compact />
               <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
                 <label className="text-slate-400 flex items-center gap-1">
                   关系类型
