@@ -34,11 +34,23 @@ function RelationRow({ rel }: { rel: KGRelationView }) {
           ? "bg-teal-500/20 text-teal-300 border-teal-500/40"
           : "bg-slate-700/40 text-slate-400 border-slate-600/40";
   const methodLabel = method === "measured" ? "实测" : method === "vision_table" ? "表格" : method;
+  const sourceId = evidence?.source_id || "";
+  const campaignMatch = /^measured:campaign_(\d+)$/.exec(sourceId);
+  const campaignId = campaignMatch ? campaignMatch[1] : null;
   return (
     <li className="text-[10px] text-slate-400 leading-relaxed border-l border-violet-500/30 pl-2">
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="text-violet-300">{relationLabel(rel.relation_type)}</span>
         <span className={`inline-flex px-1 py-0 rounded border text-[8px] font-mono ${methodBadge}`}>{methodLabel}</span>
+        {campaignId && (
+          <span
+            className="inline-flex px-1 py-0 rounded border border-amber-500/30 text-[8px] font-mono text-amber-200/90"
+            data-testid="measured-campaign-ref"
+            title={`来自台账 campaign #${campaignId}`}
+          >
+            台账#{campaignId}
+          </span>
+        )}
         <span className="text-slate-500 mx-1">·</span>
         <span className="font-mono text-slate-500">{rel.source_entity_id.slice(0, 18)}</span>
         <span className="text-slate-600 mx-0.5">→</span>

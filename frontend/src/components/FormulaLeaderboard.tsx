@@ -23,6 +23,7 @@ import SimilarFormulationModal from "./SimilarFormulationModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
 import MeasuredMetricHitsBanner from "./MeasuredMetricHitsBanner";
+import { cardMeasuredChip } from "./kgMeasuredObservability";
 import ParetoFrontPlot from "./charts/ParetoFrontPlot";
 import ParallelCoordinates from "./charts/ParallelCoordinates";
 
@@ -158,6 +159,11 @@ function FormulaCard({
   const pvcVal = form.predicted?.["pvc_pct"];
   const cpvcVal = form.predicted?.["cpvc_pct"];
   const ratio = form.predicted?.["pvc_to_cpvc_ratio"];
+  // G6: compact measured chip visible on collapsed card header
+  const measuredChip = cardMeasuredChip(
+    form.kg_compat?.measured_metric_hits,
+    form.kg_compat?.measured_materials,
+  );
 
   return (
     <div ref={cardRef} className="border border-edge rounded-lg p-3 bg-ink/60">
@@ -172,6 +178,16 @@ function FormulaCard({
             />
           )}
           <span className="text-sm text-slate-200 truncate">{form.name}</span>
+          {measuredChip && (
+            <span
+              className={`text-[9px] px-1 py-0.5 rounded border shrink-0 ${measuredChip.className}`}
+              data-testid="card-measured-chip"
+              data-quality={measuredChip.quality}
+              title={measuredChip.title}
+            >
+              {measuredChip.label}
+            </span>
+          )}
           {form.source === "ai_modify" && (
             <span className="text-[9px] px-1 py-0.5 rounded border border-accent2/40 text-accent2 shrink-0">
               AI修改

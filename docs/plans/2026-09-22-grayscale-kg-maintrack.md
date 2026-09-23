@@ -46,8 +46,8 @@ python3 scripts/workbench_dossier_s5_smoke.py   # ELN 可达时
 | G2 | 活动项目 → Wiki「项目卷宗」→ 刷新 | S1–S6 有表；S5 优先 `experiment:*` |
 | G3 | Reports → briefing → 生成 → 导出 MD | `draft_not_claims`；MD 可下 |
 | G4 | Chat 存 Wiki 草稿 | `queries/` + S8 待审；Claims 无 wiki: |
-| G5 | Workbench sync Completed 测量 | 提示含 `KG 回流 N 条`（若有）；`GET /api/kg/feedback/stats` 的 `measured_material` 可增 |
-| G6 | 再跑推荐（chem_screen） | 榜卡可见指标感知实测徽标（有 hits 时） |
+| G5 | Workbench sync Completed 测量 | 提示含 `KG 回流 N 条`（若有）；`GET /api/kg/feedback/stats` 的 `measured_material` 可增；Workbench / Hub 图有 `kg-feedback-stats-strip` |
+| G6 | 再跑推荐（chem_screen） | 榜卡**折叠头**可见 `card-measured-chip`；展开区仍有指标感知条 |
 
 ---
 
@@ -57,4 +57,5 @@ python3 scripts/workbench_dossier_s5_smoke.py   # ELN 可达时
 - [x] 借刀计划标注克隆清除 + 主航道切换
 - [x] `test_grayscale_kg_maintrack_gate.py` 锁灰度 dossier/report + KG stats
 - [x] `scripts/grayscale_kg_maintrack_smoke.py` 活栈冒烟
+- [x] **代码侧 G5/G6 可观测**：`2026-09-23-kg-measured-observability.md`（tip / strip / 折叠芯片）
 - [ ] 真人项目勾完 G1–G6（运营）
