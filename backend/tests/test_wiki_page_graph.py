@@ -165,3 +165,37 @@ def test_graph_insights_orphans_broken_and_components(wiki_env):
     assert "materials/lonely.md" in isolate_paths
     # Brief report has no links → isolate, but not lint orphan
     assert "reports/project-demo-brief.md" in isolate_paths
+
+
+def test_shared_neighbor_weight_and_community(wiki_env):
+    """Triangle A↔B↔C↔A raises shared-neighbor weight; orphan alone = own community."""
+    wiki = wiki_env
+    # Mutual links: A-B, B-C, C-A → each edge has one shared neighbor
+    _upsert(wiki, path="materials/a.md", kind="material", title="A", body_extra="[[B]] [[C]]")
+    _upsert(wiki, path="materials/b.md", kind="material", title="B", body_extra="[[A]] [[C]]")
+    _upsert(wiki, path="materials/c.md", kind="material", title="C", body_extra="[[A]] [[B]]")
+    _upsert(wiki, path="materials/lonely.md", kind="material", title="Lonely")
+
+    client = TestClient(app)
+    r = client.get("/api/wiki/graph", params={"limit": 100, "include_orphan": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["meta"]["weighting"] == "shared_neighbors"
+    assert body["meta"]["community_count"] >= 2
+
+    by_path = {n["path"]: n for n in body["nodes"]}
+    assert "community" in by_path["materials/a.md"]
+    # Triangle members share one community; lonely is another
+    ca = by_path["materials/a.md"]["community"]
+    cb = by_path["materials/b.md"]["community"]
+    cc = by_path["materials/c.md"]["community"]
+    cl = by_path["materials/lonely.md"]["community"]
+    assert ca == cb == cc
+    assert cl != ca
+
+    weights = {(e["source"], e["target"]): e["weight"] for e in body["edges"]}
+    # Directed edges present; shared neighbor → weight > 1
+    w_ab = weights.get(("materials/a.md", "materials/b.md")) or weights.get(
+        ("materials/b.md", "materials/a.md")
+    )
+    assert w_ab is not None and w_ab > 1.0

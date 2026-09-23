@@ -42,6 +42,7 @@ const graphPayload = {
       label: "A",
       kind: "material",
       degree: 1,
+      community: 0,
     },
     {
       id: "materials/lonely.md",
@@ -49,14 +50,17 @@ const graphPayload = {
       label: "Lonely",
       kind: "material",
       degree: 0,
+      community: 1,
     },
   ],
-  edges: [{ source: "materials/a.md", target: "materials/a.md", weight: 1 }],
+  edges: [{ source: "materials/a.md", target: "materials/a.md", weight: 1.25 }],
   meta: {
     node_count: 2,
     edge_count: 1,
     broken_links: 1,
     orphan_count: 1,
+    community_count: 2,
+    weighting: "shared_neighbors",
     elapsed_ms: 3,
   },
   insights: {
@@ -179,5 +183,21 @@ describe("HubWikiGraphPane", () => {
     await waitFor(() => {
       expect(onOpenPath).toHaveBeenCalledWith("themes/project-proj-g1.md");
     });
+  });
+
+  it("switches canvas color mode to community", async () => {
+    const user = userEvent.setup();
+    render(<HubWikiGraphPane active onOpenPath={vi.fn()} />);
+    await screen.findByTestId("wiki-page-graph-canvas");
+    expect(screen.getByTestId("wiki-page-graph-canvas")).toHaveAttribute(
+      "data-color-mode",
+      "kind",
+    );
+    await user.selectOptions(screen.getByTestId("hub-wiki-graph-color-mode"), "community");
+    expect(screen.getByTestId("wiki-page-graph-canvas")).toHaveAttribute(
+      "data-color-mode",
+      "community",
+    );
+    expect(screen.getByTestId("hub-wiki-graph-meta").textContent).toMatch(/社区/);
   });
 });

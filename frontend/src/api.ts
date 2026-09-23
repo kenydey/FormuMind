@@ -3743,6 +3743,8 @@ export interface WikiPageGraphNode {
   degree?: number;
   degree_in?: number;
   degree_out?: number;
+  /** Weak-component community id (stable, size-ranked). */
+  community?: number;
 }
 
 export interface WikiPageGraphEdge {
@@ -3764,6 +3766,8 @@ export interface WikiPageGraphMeta {
   isolate_count?: number;
   component_count?: number;
   largest_component?: number;
+  community_count?: number;
+  weighting?: string;
 }
 
 export interface WikiPageGraphInsightPage {

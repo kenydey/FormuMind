@@ -78,6 +78,72 @@ def _weak_components(paths: set[str], edges: set[tuple[str, str]]) -> tuple[int,
     return len(sizes), max(sizes.values())
 
 
+def _community_ids(paths: set[str], edges: set[tuple[str, str]]) -> dict[str, int]:
+    """Assign stable community ids (0..N-1) via undirected weak components.
+
+    Sorted by community size desc then root path for deterministic coloring.
+    Isolates each get their own community id.
+    """
+    if not paths:
+        return {}
+    parent: dict[str, str] = {p: p for p in paths}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for a, b in edges:
+        if a in parent and b in parent:
+            union(a, b)
+
+    members: dict[str, list[str]] = {}
+    for p in paths:
+        members.setdefault(find(p), []).append(p)
+    # Deterministic order: larger communities first, then root path
+    ordered_roots = sorted(
+        members.keys(),
+        key=lambda r: (-len(members[r]), r),
+    )
+    out: dict[str, int] = {}
+    for i, root in enumerate(ordered_roots):
+        for p in members[root]:
+            out[p] = i
+    return out
+
+
+def _undirected_neighbors(
+    edge_set: set[tuple[str, str]],
+) -> dict[str, set[str]]:
+    neigh: dict[str, set[str]] = {}
+    for a, b in edge_set:
+        neigh.setdefault(a, set()).add(b)
+        neigh.setdefault(b, set()).add(a)
+    return neigh
+
+
+def _shared_neighbor_weight(
+    a: str,
+    b: str,
+    neigh: dict[str, set[str]],
+) -> float:
+    """weight = 1 + |N(a)∩N(b)| / (1 + max(|N(a)|, |N(b)|)).
+
+    Range roughly [1.0, 2.0); excludes endpoints from each other's sets.
+    """
+    na = neigh.get(a, set()) - {b}
+    nb = neigh.get(b, set()) - {a}
+    shared = len(na & nb)
+    denom = 1 + max(len(na), len(nb), 0)
+    return round(1.0 + shared / denom, 4)
+
+
 def build_page_graph(
     *,
     limit: int = 500,
@@ -185,6 +251,8 @@ def build_page_graph(
     orphans.sort(key=lambda x: (x["path"] or ""))
     isolates.sort(key=lambda x: (x["path"] or ""))
     comp_count, comp_largest = _weak_components({r.path for r in rows}, edge_set)
+    communities = _community_ids({r.path for r in rows}, edge_set)
+    neigh = _undirected_neighbors(edge_set)
 
     candidates = list(rows)
     if not include_orphan:
@@ -205,12 +273,17 @@ def build_page_graph(
             "degree": deg(r.path),
             "degree_in": int(in_degree.get(r.path, 0)),
             "degree_out": int(out_degree.get(r.path, 0)),
+            "community": int(communities.get(r.path, 0)),
         }
         for r in kept
     ]
 
     edges = [
-        {"source": a, "target": b, "weight": 1.0}
+        {
+            "source": a,
+            "target": b,
+            "weight": _shared_neighbor_weight(a, b, neigh),
+        }
         for a, b in sorted(edge_set)
         if a in kept_paths and b in kept_paths
     ]
@@ -233,6 +306,8 @@ def build_page_graph(
             "isolate_count": len(isolates),
             "component_count": comp_count,
             "largest_component": comp_largest,
+            "community_count": len({n["community"] for n in nodes}) if nodes else 0,
+            "weighting": "shared_neighbors",
         },
         "insights": {
             "orphans": orphans[:_INSIGHT_CAP],
