@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { api, formatApiError } from "../../api";
+import {
+  api,
+  awaitTaskStream,
+  extractThinkingSteps,
+  formatApiError,
+  type ThinkingStep,
+} from "../../api";
 import { useStore } from "../../store";
 import { saveTextToProjectShelf, shelfFilename } from "../../utils/export";
+import ThinkingTimeline from "../ThinkingTimeline";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 
 /** Grayscale keys required for Hub dossier → Report generate/export. */
@@ -12,12 +19,17 @@ const REPORT_FLAG_ATTRS = [
   "wiki_dossier_report_enabled",
 ] as const;
 
-type ReportFlagAttr = (typeof REPORT_FLAG_ATTRS)[number];
+/** Extra flag for STORM longform (in addition to REPORT_FLAG_ATTRS). */
+const STORM_FLAG_ATTR = "wiki_storm_report_enabled" as const;
 
-const REPORT_FLAG_LABEL: Record<ReportFlagAttr, string> = {
+type ReportFlagAttr = (typeof REPORT_FLAG_ATTRS)[number];
+type TrackedFlagAttr = ReportFlagAttr | typeof STORM_FLAG_ATTR;
+
+const REPORT_FLAG_LABEL: Record<TrackedFlagAttr, string> = {
   wiki_enabled: "Wiki",
   wiki_project_dossier_enabled: "卷宗",
   wiki_dossier_report_enabled: "Report",
+  wiki_storm_report_enabled: "STORM",
 };
 
 function isFlagGateError(message: string): boolean {
@@ -25,6 +37,7 @@ function isFlagGateError(message: string): boolean {
   return (
     m.includes("wiki_dossier_report_enabled") ||
     m.includes("wiki_project_dossier_enabled") ||
+    m.includes("wiki_storm_report_enabled") ||
     m.includes("wiki_enabled") ||
     (m.includes("enabled") && m.includes("false"))
   );
@@ -99,7 +112,7 @@ export default function HubReportsPlaceholderPane() {
   const [error, setError] = useState<string | null>(null);
   const [shelfMsg, setShelfMsg] = useState<string | null>(null);
   const [exportCaps, setExportCaps] = useState<ExportCaps | null>(null);
-  const [flagMap, setFlagMap] = useState<Partial<Record<ReportFlagAttr, boolean>> | null>(
+  const [flagMap, setFlagMap] = useState<Partial<Record<TrackedFlagAttr, boolean>> | null>(
     null,
   );
   const [flagsError, setFlagsError] = useState<string | null>(null);
@@ -110,6 +123,12 @@ export default function HubReportsPlaceholderPane() {
     disclaimer?: string;
     template: string;
   } | null>(null);
+  const [stormTopic, setStormTopic] = useState("");
+  const [stormUseLlm, setStormUseLlm] = useState(false);
+  const [stormParallel, setStormParallel] = useState(false);
+  const [stormProgress, setStormProgress] = useState(0);
+  const [stormStage, setStormStage] = useState("");
+  const [stormThinking, setStormThinking] = useState<ThinkingStep[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,10 +144,11 @@ export default function HubReportsPlaceholderPane() {
       .getEnvFlags()
       .then((body) => {
         if (cancelled) return;
-        const next: Partial<Record<ReportFlagAttr, boolean>> = {};
+        const next: Partial<Record<TrackedFlagAttr, boolean>> = {};
+        const tracked = [...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR] as const;
         for (const f of body.flags ?? []) {
-          if ((REPORT_FLAG_ATTRS as readonly string[]).includes(f.attr)) {
-            next[f.attr as ReportFlagAttr] = Boolean(f.value);
+          if ((tracked as readonly string[]).includes(f.attr)) {
+            next[f.attr as TrackedFlagAttr] = Boolean(f.value);
           }
         }
         setFlagMap(next);
@@ -137,8 +157,7 @@ export default function HubReportsPlaceholderPane() {
         const allOn = REPORT_FLAG_ATTRS.every((k) => next[k] === true);
         if (allOn) {
           setError((prev) => (prev && isFlagGateError(prev) ? null : prev));
-        }
-      })
+        }      })
       .catch((e) => {
         if (!cancelled) {
           setFlagMap(null);
@@ -156,11 +175,16 @@ export default function HubReportsPlaceholderPane() {
     return REPORT_FLAG_ATTRS.filter((k) => flagMap[k] !== true);
   }, [flagMap, flagsReady]);
   const reportPathReady = flagsReady && flagsMissing.length === 0;
+  const stormReady =
+    reportPathReady && flagMap?.[STORM_FLAG_ATTR] === true;
   const showFlagCta = (flagsReady && flagsMissing.length > 0) || (!!error && isFlagGateError(error));
 
   const goEnvSettings = () => {
     const focus =
-      (flagsMissing[0] as string | undefined) || "wiki_dossier_report_enabled";
+      (flagsMissing[0] as string | undefined) ||
+      (error?.includes("wiki_storm_report_enabled")
+        ? STORM_FLAG_ATTR
+        : "wiki_dossier_report_enabled");
     openSettings("env", { focusEnvAttr: focus });
   };
 
@@ -224,6 +248,32 @@ export default function HubReportsPlaceholderPane() {
     }
   };
 
+  const onStormExport = async (format: "md" | "docx" | "pdf" | "pptx") => {
+    if (!activeProjectId) return;
+    if (exportCaps && exportCaps[format] === false) {
+      setError(`当前环境未安装 ${format.toUpperCase()} 导出依赖`);
+      return;
+    }
+    setBusy(`storm-export-${format}`);
+    setError(null);
+    try {
+      const { blob, filename } = await api.exportWikiStormReport({
+        project_id: activeProjectId,
+        format,
+        regenerate: false,
+        topic: stormTopic.trim(),
+        use_llm: stormUseLlm,
+        parallel: stormParallel,
+        ensure_dossier: true,
+      });
+      triggerDownload(blob, filename);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onSaveShelf = async () => {
     if (!activeProjectId || !result?.markdown) return;
     setBusy("shelf");
@@ -236,6 +286,56 @@ export default function HubReportsPlaceholderPane() {
       );
       await saveTextToProjectShelf(activeProjectId, name, result.markdown);
       setShelfMsg(`已保存到货架：${name}`);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onStormGenerate = async () => {
+    if (!activeProjectId) {
+      setError("请先选择活动项目");
+      return;
+    }
+    setBusy("storm");
+    setError(null);
+    setShelfMsg(null);
+    setStormProgress(0.05);
+    setStormStage("queued");
+    setStormThinking([]);
+    try {
+      const accepted = await api.startWikiStormReport({
+        project_id: activeProjectId,
+        topic: stormTopic.trim(),
+        max_sections: 6,
+        use_llm: stormUseLlm,
+        parallel: stormParallel,
+        ensure_dossier: true,
+        persist: true,
+      });
+      await awaitTaskStream(
+        accepted.task_id,
+        (ev) => {
+          setStormProgress(ev.progress ?? 0);
+          setStormStage(ev.stage || ev.message || "");
+          const steps = extractThinkingSteps(ev);
+          if (steps.length) setStormThinking(steps);
+        },
+        0,
+        undefined,
+        180_000,
+      );
+      const page = await api.getWikiStormReport(activeProjectId);
+      setResult({
+        title: page.title || "STORM 长文",
+        path: page.path,
+        markdown: page.markdown,
+        disclaimer: page.disclaimer || accepted.disclaimer || "draft_not_claims",
+        template: "storm",
+      });
+      setStormProgress(1);
+      setStormStage("done");
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -263,7 +363,7 @@ export default function HubReportsPlaceholderPane() {
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
           <span className="text-slate-500">灰度旗标</span>
-          {REPORT_FLAG_ATTRS.map((attr) => {
+          {([...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR] as const).map((attr) => {
             const on = flagMap?.[attr];
             const mark = !flagsReady ? "?" : on ? "✓" : "×";
             const tone = !flagsReady
@@ -342,6 +442,108 @@ export default function HubReportsPlaceholderPane() {
             <p className="text-[10px] text-accent/80 mt-1">{t.dossierSections}</p>
           </button>
         ))}
+      </div>
+
+      <div
+        className="border border-violet-500/30 rounded-lg p-3 space-y-2 bg-violet-500/5"
+        data-testid="hub-reports-storm"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm text-slate-100">STORM 长文（异步）</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              大纲 → 分章 → 缝合；落盘 `reports/*-storm.md` · draft_not_claims · 需另开
+              wiki_storm_report_enabled
+            </p>
+          </div>
+          {!stormReady && flagsReady && (
+            <button
+              type="button"
+              className="text-[10px] px-2 py-1 rounded border border-accent/50 text-accent"
+              data-testid="hub-reports-storm-open-env"
+              onClick={() => openSettings("env", { focusEnvAttr: STORM_FLAG_ATTR })}
+            >
+              开启 STORM 旗标
+            </button>
+          )}
+        </div>
+        <label className="block text-[11px] text-slate-400">
+          主题（可选）
+          <input
+            value={stormTopic}
+            onChange={(e) => setStormTopic(e.target.value)}
+            placeholder="例如：硅烷转化膜盐雾 720h 技术可行性"
+            className="w-full mt-1 bg-ink border border-edge rounded px-2 py-1.5 text-sm text-slate-200"
+            data-testid="hub-reports-storm-topic"
+            disabled={!stormReady || !!busy}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-slate-400">
+          <input
+            type="checkbox"
+            checked={stormUseLlm}
+            onChange={(e) => setStormUseLlm(e.target.checked)}
+            data-testid="hub-reports-storm-use-llm"
+            disabled={!stormReady || !!busy}
+          />
+          使用 LLM 分章（关则确定性离线草稿）
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-slate-400">
+          <input
+            type="checkbox"
+            checked={stormParallel}
+            onChange={(e) => setStormParallel(e.target.checked)}
+            data-testid="hub-reports-storm-parallel"
+            disabled={!stormReady || !!busy}
+          />
+          有限并行分章（depends_on 波次；覆盖服务端 wiki_storm_parallel）
+        </label>
+        {(busy === "storm" || stormThinking.length > 0) && (
+          <div className="space-y-1.5" data-testid="hub-reports-storm-progress">
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span>{stormStage || "queued"}</span>
+              <span>{Math.round(stormProgress * 100)}%</span>
+            </div>
+            <div className="h-1.5 rounded bg-ink overflow-hidden border border-edge/40">
+              <div
+                className="h-full bg-violet-400/80 transition-all"
+                style={{ width: `${Math.min(100, Math.round(stormProgress * 100))}%` }}
+              />
+            </div>
+            <ThinkingTimeline steps={stormThinking} title="STORM 进度" compact />
+          </div>
+        )}
+        <button
+          type="button"
+          disabled={!!busy || !activeProjectId || !stormReady}
+          className="px-3 py-1.5 rounded bg-violet-500/90 text-ink text-sm disabled:opacity-50"
+          data-testid="hub-reports-storm-generate"
+          onClick={() => void onStormGenerate()}
+        >
+          {busy === "storm" ? "STORM 生成中…" : "生成 STORM 长文"}
+        </button>
+        <div className="flex flex-wrap gap-2" data-testid="hub-reports-storm-exports">
+          {(["md", "docx", "pdf", "pptx"] as const).map((fmt) => {
+            const unavailable = exportCaps?.[fmt] === false;
+            return (
+              <button
+                key={fmt}
+                type="button"
+                disabled={!!busy || !activeProjectId || !stormReady || unavailable}
+                className="px-2 py-1.5 rounded border border-violet-500/40 text-xs text-slate-200 disabled:opacity-50"
+                data-testid={`hub-reports-storm-export-${fmt}`}
+                title={
+                  unavailable
+                    ? `未安装 ${fmt} 导出依赖`
+                    : "导出已落盘的 STORM 长文（无则先生成）"
+                }
+                onClick={() => void onStormExport(fmt)}
+              >
+                {busy === `storm-export-${fmt}` ? `${fmt}…` : `导出 ${capLabel(fmt)}`}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {picked && (

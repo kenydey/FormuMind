@@ -2496,6 +2496,55 @@ export const api = {
       llm?: { used_llm?: boolean; error?: string | null };
       error?: string;
     }>("/api/wiki/dossier/report", body),
+  startWikiStormReport: (body: {
+    project_id: string;
+    topic?: string;
+    max_sections?: number;
+    perspectives?: string[];
+    use_llm?: boolean;
+    parallel?: boolean | null;
+    max_workers?: number;
+    ensure_dossier?: boolean;
+    persist?: boolean;
+    campaign_id?: string;
+  }) =>
+    postAccepted("/api/wiki/storm/report", body).then((accepted) => ({
+      ...accepted,
+      disclaimer: "draft_not_claims" as const,
+    })),
+  getWikiStormReport: (projectId: string) =>
+    get<{
+      path: string;
+      title: string;
+      markdown: string;
+      flags?: string[];
+      source_ids?: string[];
+      disclaimer?: string;
+      updated_at?: string | null;
+    }>(`/api/wiki/storm/report/${encodeURIComponent(projectId)}`),
+  exportWikiStormReport: async (body: {
+    project_id: string;
+    format: "md" | "docx" | "pdf" | "pptx";
+    regenerate?: boolean;
+    topic?: string;
+    use_llm?: boolean;
+    parallel?: boolean | null;
+    ensure_dossier?: boolean;
+  }) => {
+    const res = await fetch("/api/wiki/storm/report/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `storm export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `storm.${body.format}` };
+  },
   exportWikiReport: async (body: {
     project_id: string;
     template: string;
