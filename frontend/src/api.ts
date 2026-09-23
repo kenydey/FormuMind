@@ -2522,6 +2522,29 @@ export const api = {
       disclaimer?: string;
       updated_at?: string | null;
     }>(`/api/wiki/storm/report/${encodeURIComponent(projectId)}`),
+  exportWikiStormReport: async (body: {
+    project_id: string;
+    format: "md" | "docx" | "pdf" | "pptx";
+    regenerate?: boolean;
+    topic?: string;
+    use_llm?: boolean;
+    parallel?: boolean | null;
+    ensure_dossier?: boolean;
+  }) => {
+    const res = await fetch("/api/wiki/storm/report/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `storm export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `storm.${body.format}` };
+  },
   exportWikiReport: async (body: {
     project_id: string;
     template: string;

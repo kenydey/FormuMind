@@ -289,6 +289,34 @@ def test_run_storm_report_parallel_meta(env):
     assert out["section_count"] >= 3
 
 
+def test_export_storm_md(env):
+    from app.services.wiki.storm_orchestrator import export_storm_report
+
+    pid = _make_project(env["projects"])
+    run_storm_report(pid, topic="导出测试", max_sections=3, use_llm=False, persist=True)
+    out = export_storm_report(pid, "md", regenerate=False)
+    assert out["ok"] is True
+    assert out["format"] == "md"
+    assert out["filename"].endswith("-storm.md")
+    assert out["disclaimer"] == "draft_not_claims"
+    assert b"draft_not_claims" in out["bytes"]
+    assert "规则审查" in out["bytes"].decode("utf-8") or "附录" in out["bytes"].decode("utf-8")
+
+
+def test_api_storm_export_md(env):
+    pid = _make_project(env["projects"])
+    run_storm_report(pid, max_sections=3, use_llm=False, persist=True)
+    client = TestClient(app)
+    r = client.post(
+        "/api/wiki/storm/report/export",
+        json={"project_id": pid, "format": "md"},
+    )
+    assert r.status_code == 200, r.text
+    assert "draft_not_claims" in r.text
+    assert "storm" in (r.headers.get("content-disposition") or "").lower()
+    assert r.headers.get("X-FormuMind-Disclaimer") == "draft_not_claims"
+
+
 # ── Outline / draft ─────────────────────────────────────────────────────
 
 

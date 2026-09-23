@@ -248,6 +248,32 @@ export default function HubReportsPlaceholderPane() {
     }
   };
 
+  const onStormExport = async (format: "md" | "docx" | "pdf" | "pptx") => {
+    if (!activeProjectId) return;
+    if (exportCaps && exportCaps[format] === false) {
+      setError(`当前环境未安装 ${format.toUpperCase()} 导出依赖`);
+      return;
+    }
+    setBusy(`storm-export-${format}`);
+    setError(null);
+    try {
+      const { blob, filename } = await api.exportWikiStormReport({
+        project_id: activeProjectId,
+        format,
+        regenerate: false,
+        topic: stormTopic.trim(),
+        use_llm: stormUseLlm,
+        parallel: stormParallel,
+        ensure_dossier: true,
+      });
+      triggerDownload(blob, filename);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const onSaveShelf = async () => {
     if (!activeProjectId || !result?.markdown) return;
     setBusy("shelf");
@@ -496,6 +522,28 @@ export default function HubReportsPlaceholderPane() {
         >
           {busy === "storm" ? "STORM 生成中…" : "生成 STORM 长文"}
         </button>
+        <div className="flex flex-wrap gap-2" data-testid="hub-reports-storm-exports">
+          {(["md", "docx", "pdf", "pptx"] as const).map((fmt) => {
+            const unavailable = exportCaps?.[fmt] === false;
+            return (
+              <button
+                key={fmt}
+                type="button"
+                disabled={!!busy || !activeProjectId || !stormReady || unavailable}
+                className="px-2 py-1.5 rounded border border-violet-500/40 text-xs text-slate-200 disabled:opacity-50"
+                data-testid={`hub-reports-storm-export-${fmt}`}
+                title={
+                  unavailable
+                    ? `未安装 ${fmt} 导出依赖`
+                    : "导出已落盘的 STORM 长文（无则先生成）"
+                }
+                onClick={() => void onStormExport(fmt)}
+              >
+                {busy === `storm-export-${fmt}` ? `${fmt}…` : `导出 ${capLabel(fmt)}`}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {picked && (

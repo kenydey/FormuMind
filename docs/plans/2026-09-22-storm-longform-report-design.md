@@ -1,11 +1,12 @@
 # STORM 风格长篇技术报告编排 — 设计评审稿（FormuMind Wiki）
 
-> 状态：**P0–P5 完成（待合并）** · 2026-09-23  
+> 状态：**P0–P5 + 导出/冒烟完成（待合并）** · 2026-09-23  
 > 对照：Stanford STORM（Pre-writing → Writing → Polish）；**禁止**整仓移植 GPL/`storm` 源码，仅借范式自研  
 > 约束：不破坏现有卷宗同步 Report / Wiki CRUD；旗标默认关；Claims 只 Raw；不默认 LLM 洗 L1  
 > 前序：[`2026-09-22-grayscale-kg-maintrack.md`](./2026-09-22-grayscale-kg-maintrack.md) · [`2026-09-20-llm-wiki-borrow-ranked-plans.md`](./2026-09-20-llm-wiki-borrow-ranked-plans.md)
 
-**已落地：** P0 Schema · P1 Outline · P2 Celery/API · P3 citation_binder+soft rules · P4 Hub SSE · **P5** `plan_draft_waves` + `wiki_storm_parallel` 线程池有限并行（非 chord）。
+**已落地：** P0–P5 全切片 · Hub SSE · `POST /storm/report/export`（md/docx/pdf/pptx）· `scripts/wiki_storm_smoke.py`。  
+同步 `POST /dossier/report` 零改动。
 
 ---
 

@@ -602,6 +602,63 @@ def get_storm_report_endpoint(project_id: str) -> dict:
     }
 
 
+class StormReportExportRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    format: str = Field(default="md", description="md|docx|pdf|pptx")
+    regenerate: bool = False
+    topic: str = ""
+    use_llm: bool = False
+    parallel: bool | None = None
+    max_workers: int | None = Field(default=None, ge=1, le=8)
+    ensure_dossier: bool = True
+    campaign_id: str | None = None
+
+
+@router.post("/storm/report/export")
+def export_storm_report_endpoint(body: StormReportExportRequest):
+    """Export persisted STORM longform (or regenerate) as md/docx/pdf/pptx."""
+    _require_wiki()
+    from fastapi.responses import Response
+
+    from ..services.wiki.storm_orchestrator import export_storm_report
+
+    settings = get_settings()
+    if not getattr(settings, "wiki_project_dossier_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_project_dossier_enabled is false")
+    if not getattr(settings, "wiki_dossier_report_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_dossier_report_enabled is false")
+    if not getattr(settings, "wiki_storm_report_enabled", False):
+        raise HTTPException(status_code=409, detail="wiki_storm_report_enabled is false")
+
+    try:
+        out = export_storm_report(
+            body.project_id,
+            body.format,
+            regenerate=body.regenerate,
+            topic=body.topic or "",
+            use_llm=body.use_llm,
+            parallel=body.parallel,
+            max_workers=body.max_workers,
+            ensure_dossier=body.ensure_dossier,
+            campaign_id=body.campaign_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{out["filename"]}"',
+        "X-FormuMind-Report-Path": str(out.get("path") or ""),
+        "X-FormuMind-Disclaimer": str(out.get("disclaimer") or "draft_not_claims"),
+    }
+    return Response(content=out["bytes"], media_type=out["media_type"], headers=headers)
+
+
 @router.post("/dossier/report/export")
 def export_dossier_report_endpoint(body: DossierReportExportRequest):
     """P5.1: generate + export report as md/docx/pdf/pptx."""

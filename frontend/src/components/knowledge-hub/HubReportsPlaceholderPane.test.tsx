@@ -33,6 +33,7 @@ vi.mock("../../api", async () => {
       getEnvFlags: vi.fn(),
       startWikiStormReport: vi.fn(),
       getWikiStormReport: vi.fn(),
+      exportWikiStormReport: vi.fn(),
     },
     awaitTaskStream: vi.fn(),
   };
@@ -61,6 +62,7 @@ describe("HubReportsPlaceholderPane", () => {
     vi.mocked(api.getEnvFlags).mockReset();
     vi.mocked(api.startWikiStormReport).mockReset();
     vi.mocked(api.getWikiStormReport).mockReset();
+    vi.mocked(api.exportWikiStormReport).mockReset();
     vi.mocked(awaitTaskStream).mockReset();
     vi.mocked(api.listWikiReportTemplates).mockResolvedValue({
       templates: [],
@@ -255,6 +257,7 @@ describe("HubReportsPlaceholderPane", () => {
       /×/,
     );
     expect(screen.getByTestId("hub-reports-storm-generate")).toBeDisabled();
+    expect(screen.getByTestId("hub-reports-storm-export-md")).toBeDisabled();
     expect(screen.getByTestId("hub-reports-storm-open-env")).toBeInTheDocument();
   });
 

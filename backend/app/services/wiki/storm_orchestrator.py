@@ -188,3 +188,76 @@ def run_storm_report(
     if progress_cb:
         progress_cb("done", "STORM 长文已落盘", 1.0, {"path": path})
     return out
+
+
+def export_storm_report(
+    project_id: str,
+    fmt: str,
+    *,
+    regenerate: bool = False,
+    topic: str = "",
+    use_llm: bool = False,
+    parallel: bool | None = None,
+    max_workers: int | None = None,
+    ensure_dossier: bool = True,
+    campaign_id: str | None = None,
+) -> dict[str, Any]:
+    """Export persisted STORM markdown (or regenerate first) to md/docx/pdf/pptx."""
+    from .report_export import export_bytes, export_capabilities
+    from .schema import project_report_path, safe_key
+
+    _require_storm_enabled()
+    pid = (project_id or "").strip()
+    if not pid:
+        raise ValueError("project_id required")
+
+    caps = export_capabilities()
+    kind = (fmt or "md").strip().lower()
+    if kind in ("ppt", "deck"):
+        kind = "pptx"
+    if kind == "markdown":
+        kind = "md"
+    if kind not in caps or not caps.get(kind):
+        raise RuntimeError(f"export format unavailable: {fmt}; caps={caps}")
+
+    path = project_report_path(pid, "storm")
+    store = get_wiki_store()
+    row = store.get_by_path(path)
+    title = ""
+    markdown = ""
+
+    if regenerate or row is None:
+        generated = run_storm_report(
+            pid,
+            topic=topic,
+            use_llm=use_llm,
+            parallel=parallel,
+            max_workers=max_workers,
+            ensure_dossier=ensure_dossier,
+            persist=True,
+            campaign_id=campaign_id,
+        )
+        title = str(generated.get("title") or "STORM 长文")
+        markdown = str(generated.get("markdown") or "")
+        path = str(generated.get("path") or path)
+    else:
+        title = str(row.title or f"STORM · {pid}")
+        markdown = store.read_markdown(row.path) or ""
+        if not markdown.strip():
+            raise LookupError("storm report markdown empty")
+
+    payload, media_type, ext = export_bytes(markdown, kind, title=title)
+    filename = f"project-{safe_key(pid)}-storm.{ext}"
+    return {
+        "ok": True,
+        "format": kind,
+        "filename": filename,
+        "media_type": media_type,
+        "bytes": payload,
+        "path": path,
+        "title": title,
+        "size": len(payload),
+        "capabilities": caps,
+        "disclaimer": "draft_not_claims",
+        "regenerated": bool(regenerate or row is None),
+    }
