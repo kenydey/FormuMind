@@ -228,13 +228,19 @@ def run_golden_eval(
     include_global: bool = True,
     rerank: bool | None = None,
 ) -> dict[str, Any]:
-    """Run golden questions against query-test; keyword-hit@top_k pass/fail."""
+    """Run golden questions; keyword-hit@k plus Recall@k / MRR.
+
+    Recall@k = fraction of questions with ≥1 expected keyword in top-k texts.
+    MRR = mean reciprocal rank of the first hit that contains any expected keyword
+    (0 when none match in top-k).
+    """
     from ..resources.golden_retrieval import golden_questions
 
     if alpha is None:
         alpha = float(get_settings().kb_hybrid_alpha)
     results: list[dict[str, Any]] = []
     passed = 0
+    reciprocal_ranks: list[float] = []
     for entry in golden_questions:
         q = entry["question"]
         expected = list(entry.get("expected_keywords") or [])
@@ -247,36 +253,70 @@ def run_golden_eval(
             include_global=include_global,
             rerank=rerank,
         )
-        blob = " ".join(
-            f"{h.get('title') or ''} {h.get('snippet') or ''}" for h in payload.get("hits") or []
-        )
-        matched = next((kw for kw in expected if kw and kw in blob), None)
-        ok = matched is not None
+        hits = list(payload.get("hits") or [])
+        metrics = keyword_rank_metrics(hits, expected, top_k=top_k)
+        ok = bool(metrics["hit"])
         if ok:
             passed += 1
+        reciprocal_ranks.append(float(metrics["reciprocal_rank"]))
         results.append(
             {
                 "question": q,
                 "category": entry.get("min_relevance_category") or "",
                 "passed": ok,
-                "matched_keyword": matched,
+                "matched_keyword": metrics["matched_keyword"],
+                "first_hit_rank": metrics["first_hit_rank"],
+                "reciprocal_rank": metrics["reciprocal_rank"],
                 "expected_keywords": expected,
-                "hit_titles": [h.get("title") for h in (payload.get("hits") or [])[:top_k]],
+                "hit_titles": [h.get("title") for h in hits[:top_k]],
                 "elapsed_ms": payload.get("elapsed_ms"),
                 "warning": payload.get("warning"),
             }
         )
 
+    total = len(results)
+    recall_at_k = (passed / total) if total else 0.0
+    mrr = (sum(reciprocal_ranks) / total) if total else 0.0
     return {
         "mode": mode,
         "top_k": top_k,
         "alpha": alpha,
         "project_id": project_id,
         "include_global": include_global,
-        "total": len(results),
+        "total": total,
         "passed": passed,
-        "failed": len(results) - passed,
+        "failed": total - passed,
+        "recall_at_k": round(recall_at_k, 4),
+        "mrr": round(mrr, 4),
         "results": results,
+    }
+
+
+def keyword_rank_metrics(
+    hits: list[dict[str, Any]],
+    expected_keywords: list[str],
+    *,
+    top_k: int = 3,
+) -> dict[str, Any]:
+    """Pure helper: first-hit rank / RR / matched keyword for expected KWs."""
+    expected = [kw for kw in expected_keywords if kw]
+    first_rank: int | None = None
+    matched: str | None = None
+    for i, h in enumerate(hits[:top_k], start=1):
+        blob = f"{h.get('title') or ''} {h.get('snippet') or ''} {h.get('text') or ''}"
+        for kw in expected:
+            if kw in blob:
+                first_rank = i
+                matched = kw
+                break
+        if first_rank is not None:
+            break
+    rr = (1.0 / first_rank) if first_rank else 0.0
+    return {
+        "hit": first_rank is not None,
+        "first_hit_rank": first_rank,
+        "reciprocal_rank": rr,
+        "matched_keyword": matched,
     }
 
 

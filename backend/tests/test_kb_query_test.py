@@ -183,3 +183,8 @@ def test_golden_eval_run(stores):
     assert data["total"] >= 3
     assert "passed" in data
     assert len(data["results"]) == data["total"]
+    assert "mrr" in data and isinstance(data["mrr"], (int, float))
+    assert "recall_at_k" in data and isinstance(data["recall_at_k"], (int, float))
+    assert 0.0 <= data["mrr"] <= 1.0
+    assert 0.0 <= data["recall_at_k"] <= 1.0
+    assert data["recall_at_k"] == pytest.approx(data["passed"] / data["total"])
