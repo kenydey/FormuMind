@@ -402,10 +402,11 @@ def golden_eval_run(body: GoldenEvalRequest) -> dict:
 def relevance_shadow_stats(
     limit: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    """Aggregate topicality shadow batches (calibration only — does not enforce).
+    """Aggregate topicality shadow batches (calibration — enforce is separate).
 
     Use reject rates + shadow_only/topic_only/both overlap to decide when to
-    flip ``kb_relevance_shadow`` off. Kill-switch remains the flag itself.
+    flip ``kb_relevance_shadow`` off (W2 enforce). Kill-switch: set the flag
+    back to True.
     """
     from ..services.kb_ingest_audit import load_relevance_shadow_stats
 

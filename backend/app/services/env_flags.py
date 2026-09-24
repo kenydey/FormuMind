@@ -140,6 +140,11 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("kb_ingest_patent_exempt", "入库专利主题豁免",
             "True=专利跳过主题门（旧行为）。P0 默认 False：专利需 CPC/主题词命中。",
             "kb"),
+    EnvFlag("kb_relevance_shadow", "相关性闸影子模式",
+            "True（默认）= 只记录 topicality 将拒收率，不改入库。"
+            "False = 按关键词重叠分真闸（阈值 FORMUMIND_KB_INGEST_MIN_RELEVANCE）。"
+            "翻转前先看 GET /api/kb/relevance-shadow/stats。",
+            "kb", "默认勿关；校准后再关"),
     EnvFlag("workbench_auto_train", "台账自动回灌训练",
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",

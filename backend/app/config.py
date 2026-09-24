@@ -440,10 +440,11 @@ class Settings(BaseSettings):
     # 这两个配额按**项目**累计，到顶后自动入库停止新增（手动单篇入库不受限）。
     kb_project_source_quota: int = 300   # 0 = 不限；每项目资料总数上限
     kb_project_pdf_quota: int = 50       # 0 = 不限；每项目「走 PDF 下载+解析」篇数上限
-    # 相关性闸影子模式（2026-09-11）：relevance 实为名次代理
+    # 相关性闸影子模式（2026-09-11 / W2 2026-09-24）：relevance 实为名次代理
     # （_ranked = 1.0 - 0.02*位置），所以 kb_ingest_min_relevance=0.45 等价于
-    # 「名次 < 27.5」，首页全过、形同虚设。影子模式只记录「若改用真实 topicality
-    # 分会被拒多少条」，不改变入库行为，用于校准阈值后再正式启用。
+    # 「名次 < 27.5」，首页全过、形同虚设。True（默认）= 只记录「若改用真实
+    # topicality 分会被拒多少条」，不改变入库行为。False = 按 topicality 真闸
+    # （阈值仍读 kb_ingest_min_relevance）。翻转前先看 GET /api/kb/relevance-shadow/stats。
     kb_relevance_shadow: bool = True
     # 并发获取全文的线程数。**瓶颈是解析内存而不是网络**：每篇 PDF 都会走完整
     # 解析级联，pymupdf4llm 峰值约 350 MB、扫描件走 OCR 约 557 MB，所以在

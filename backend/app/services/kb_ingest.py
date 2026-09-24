@@ -257,31 +257,52 @@ def select_ingest_targets(
     threshold = float(getattr(settings, "kb_ingest_min_relevance", 0.45) or 0.45)
     if threshold <= 0:
         threshold = 0.45
+    from .literature import _keywords
+
+    query_has_kws = bool(_keywords(query or ""))
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
     for ev in evidence:
         if limit and len(targets) >= limit:
             break
+        topicality = _topicality(ev, query or "")
         if shadow:
-            score = _topicality(ev, query or "")
-            shadow_scores.append(score)
-            if score < threshold:
+            shadow_scores.append(topicality)
+            if topicality < threshold:
                 eid = (getattr(ev, "identifier", None) or "").strip()
                 if eid:
                     shadow_would_reject_ids.add(eid)
-        if min_rel > 0 and (ev.relevance or 0) < min_rel:
-            if write_audit:
-                write_ingest_audit(
-                    project_id=project_id,
-                    domain=str(domain) if domain else None,
-                    query=query,
-                    evidence_id=getattr(ev, "identifier", None),
-                    source=getattr(ev, "source", None),
-                    action="skip",
-                    reason="low_relevance",
-                    domain_match=getattr(ev, "domain_match", None),
-                )
-            continue
+            # Legacy rank-proxy gate stays active only while shadowing — it is
+            # nearly a no-op on page-one hits (relevance ≈ 1.0 - 0.02*pos).
+            if min_rel > 0 and (ev.relevance or 0) < min_rel:
+                if write_audit:
+                    write_ingest_audit(
+                        project_id=project_id,
+                        domain=str(domain) if domain else None,
+                        query=query,
+                        evidence_id=getattr(ev, "identifier", None),
+                        source=getattr(ev, "source", None),
+                        action="skip",
+                        reason="low_relevance",
+                        domain_match=getattr(ev, "domain_match", None),
+                    )
+                continue
+        else:
+            # Enforce: drop rows whose keyword-overlap score is below threshold.
+            # Skip when the query yields no keywords (score would be 0 for all).
+            if query_has_kws and topicality < threshold:
+                if write_audit:
+                    write_ingest_audit(
+                        project_id=project_id,
+                        domain=str(domain) if domain else None,
+                        query=query,
+                        evidence_id=getattr(ev, "identifier", None),
+                        source=getattr(ev, "source", None),
+                        action="skip",
+                        reason="low_topicality",
+                        domain_match=getattr(ev, "domain_match", None),
+                    )
+                continue
         if getattr(ev, "domain_match", None) == "none":
             if write_audit:
                 write_ingest_audit(
@@ -382,13 +403,12 @@ def _log_relevance_shadow(
     both_reject: int = 0,
     shadow_only_reject: int = 0,
 ) -> None:
-    """Record what a real topicality gate would have rejected — enforce nothing.
+    """Record what topicality enforce would reject while ``kb_relevance_shadow``.
 
-    Shadow mode exists so the threshold can be calibrated against real traffic
-    before it starts dropping rows: the current gate rejects nothing, and
-    switching it to a topicality score in one step would silently change ingest
-    volume. Persist a batch summary (JSONL + audit) so ops can read reject rates
-    without scraping process logs.
+    Shadow mode calibrates the threshold against real traffic before ops flip
+    ``kb_relevance_shadow=False`` (W2). Persist a batch summary (JSONL + audit)
+    so reject rates are readable without scraping process logs. When shadow is
+    off, :func:`select_ingest_targets` enforces topicality and skips this path.
     """
     ordered = sorted(scores)
     n = len(ordered)
