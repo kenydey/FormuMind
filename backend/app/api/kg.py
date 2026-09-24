@@ -143,7 +143,8 @@ def feedback_report() -> dict:
     alert = None
     if stats["measured_performance"] == 0:
         alert = "暂无实测回流证据：请在实验台账完成至少一行 Completed 并同步（sync 会写入 KG）"
-    # 最近 bias 趋势：从各 campaign 的 loop_history 末条 entry 抽 rmse_by_metric
+    # 最近 bias 趋势：扫描 loop_history，兼容 prediction_bias.by_metric 与
+    # 闭环条目的 rmse_by_metric（末条常为 sync 写入的 prediction_bias）。
     recent_bias: list[dict] = []
     try:
         from ..db.campaign_store import get_campaign_store
@@ -151,24 +152,71 @@ def feedback_report() -> dict:
 
         store = get_campaign_store()
         with store._session_factory() as session:
-            campaigns = session.query(CampaignModel).order_by(CampaignModel.id.desc()).limit(20).all()
-        for c in campaigns:
-            history = list(getattr(c, "loop_history", None) or [])
+            campaigns = (
+                session.query(CampaignModel)
+                .order_by(CampaignModel.id.desc())
+                .limit(20)
+                .all()
+            )
+            # Copy while session is open (JSON columns are eager; be explicit).
+            snapshots = [
+                {
+                    "id": getattr(c, "id", None),
+                    "name": getattr(c, "name", "") or "",
+                    "primary_metric": getattr(c, "primary_metric", None),
+                    "history": list(getattr(c, "loop_history", None) or []),
+                }
+                for c in campaigns
+            ]
+        for snap in snapshots:
+            history = snap["history"]
             if not history:
                 continue
-            last = history[-1]
-            rmse_map = last.get("rmse_by_metric") or {}
+            rmse_map: dict = {}
+            converged = False
+            # Prefer newest entry that carries usable RMSE.
+            for entry in reversed(history):
+                if not isinstance(entry, dict):
+                    continue
+                direct = entry.get("rmse_by_metric")
+                if isinstance(direct, dict) and direct:
+                    rmse_map = {
+                        k: float(v)
+                        for k, v in direct.items()
+                        if isinstance(v, (int, float))
+                    }
+                    converged = bool(entry.get("converged"))
+                    break
+                by_metric = entry.get("by_metric")
+                if isinstance(by_metric, dict) and by_metric:
+                    extracted: dict[str, float] = {}
+                    for metric, stats in by_metric.items():
+                        if isinstance(stats, dict) and stats.get("rmse") is not None:
+                            try:
+                                extracted[str(metric)] = float(stats["rmse"])
+                            except (TypeError, ValueError):
+                                continue
+                    if extracted:
+                        rmse_map = extracted
+                        converged = bool(entry.get("converged"))
+                        break
             if not rmse_map:
                 continue
-            trend = "improving" if (last.get("converged") or float(min(rmse_map.values())) < 0.2) else "unsettled"
-            recent_bias.append({
-                "campaign_id": getattr(c, "id", None),
-                "campaign_name": getattr(c, "name", ""),
-                "primary_metric": getattr(c, "primary_metric", None),
-                "rmse_by_metric": rmse_map,
-                "trend": trend,
-                "converged": bool(last.get("converged")),
-            })
+            try:
+                min_rmse = float(min(rmse_map.values()))
+            except (TypeError, ValueError):
+                min_rmse = 1.0
+            trend = "improving" if (converged or min_rmse < 0.2) else "unsettled"
+            recent_bias.append(
+                {
+                    "campaign_id": snap["id"],
+                    "campaign_name": snap["name"],
+                    "primary_metric": snap["primary_metric"],
+                    "rmse_by_metric": rmse_map,
+                    "trend": trend,
+                    "converged": converged,
+                }
+            )
     except Exception as exc:  # best-effort：任何异常都不应让报表 500
         logger.warning("feedback_report recent_bias extract failed: %s", exc)
         recent_bias = []

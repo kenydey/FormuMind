@@ -16,6 +16,11 @@ describe("formatKgWrittenHint", () => {
     expect(formatKgWrittenHint(undefined)).toBeNull();
     expect(formatKgWrittenHint(Number.NaN)).toBeNull();
   });
+
+  it("surfaces ingest failures (kg_written=-1)", () => {
+    expect(formatKgWrittenHint(-1)).toBe("KG 回流失败（详见服务日志）");
+    expect(formatKgWrittenHint(-1, "boom")).toBe("KG 回流失败：boom");
+  });
 });
 
 describe("cardMeasuredChip", () => {

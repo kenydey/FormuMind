@@ -521,8 +521,11 @@ export default function LabWorkbench({
       const hints: string[] = [];
       if (res.training_message) hints.push(res.training_message);
       if (res.loop_message) hints.push(res.loop_message);
-      const kgHint = formatKgWrittenHint(res.kg_written);
+      const kgHint = formatKgWrittenHint(res.kg_written, res.kg_error);
       if (kgHint) hints.push(kgHint);
+      if (res.quality && typeof res.quality.dropped_values === "number" && res.quality.dropped_values > 0) {
+        hints.push(`质控丢弃 ${res.quality.dropped_values} 个非法值`);
+      }
       if (hints.length) setSaveHint(hints.join(" · "));
       if (typeof res.kg_written === "number") {
         setKgStatsRefreshKey((k) => k + 1);

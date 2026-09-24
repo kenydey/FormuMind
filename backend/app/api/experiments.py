@@ -111,8 +111,11 @@ class WorkbenchSyncResponse(BaseModel):
     training_message: str = ""
     prediction_bias: dict | None = None
     kg_written: int | None = None
+    # None = skipped/disabled; >=0 = written count; -1 = ingest raised (UI refresh + tip)
+    kg_error: str | None = None
     loop_task_id: str | None = None
     loop_message: str = ""
+    quality: dict | None = None
 
 
 class CreateWorkbenchCampaignRequest(BaseModel):
@@ -508,12 +511,15 @@ async def sync_workbench(
     # P0 KG self-evolution: push measured results back into the KG (best-effort,
     # never blocks the sync response).
     kg_written: int | None = None
+    kg_error: str | None = None
     try:
         from ..services import kg_feedback
 
         kg_written = kg_feedback.ingest_measured_evidence(payload.campaign_id)
     except Exception as exc:  # pragma: no cover - defense in depth
         logger.warning("kg_feedback ingest failed (non-fatal): %s", exc)
+        kg_written = -1
+        kg_error = str(exc)[:240]
 
     loop_task_id, loop_message = dispatch_loop_after_sync(
         training_ingested=training_ingested,
@@ -530,8 +536,12 @@ async def sync_workbench(
         from ..services.wiki.dossier import notify_dossier_event_for_campaign
 
         notify_dossier_event_for_campaign(payload.campaign_id, "lab_recorded")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("dossier notify after sync failed (non-fatal): %s", exc)
+
+    quality = train_result.get("quality")
+    if quality is not None and not isinstance(quality, dict):
+        quality = None
 
     return WorkbenchSyncResponse(
         updated=updated,
@@ -543,8 +553,10 @@ async def sync_workbench(
         training_message=training_message,
         prediction_bias=train_result.get("prediction_bias"),
         kg_written=kg_written,
+        kg_error=kg_error,
         loop_task_id=loop_task_id,
         loop_message=loop_message,
+        quality=quality,
     )
 
 
@@ -1215,20 +1227,73 @@ async def search_experiments(
 
 
 def _parse_datalab_search(body: list[dict]) -> list[ExperimentSearchResult]:
+    """Map Datalab search hits onto local campaign/row ids when possible.
+
+    Previously always returned campaign_id=0 / row_id=0, which broke
+    Workbench「打开检索命中」→ selectWorkbenchCampaign(0).
+    """
+    import re
+
+    index: dict[str, tuple[int, int, str]] = {}
+    try:
+        from ..db.database import default_session_factory
+
+        with default_session_factory()() as session:
+            campaigns = session.query(Campaign).all()
+            for camp in campaigns:
+                name = str(getattr(camp, "name", "") or "")
+                for ref in camp.sample_refs or []:
+                    item_id = str(ref.get("item_id") or "").strip()
+                    if not item_id:
+                        continue
+                    rid = ref.get("id")
+                    try:
+                        row_id = int(rid) if rid is not None else 0
+                    except (TypeError, ValueError):
+                        row_id = 0
+                    index[item_id] = (int(camp.id), row_id, name)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("datalab search id map failed: %s", exc)
+
+    pat = re.compile(r"^formumind_c(\d+)_r(\d+)_")
     results: list[ExperimentSearchResult] = []
     for sample in body:
-        blocks = sample.get("blocks_obj", {})
-        params_block = blocks.get("formumind_params", {})
-        meas_block = blocks.get("formumind_measurements", {})
-        results.append(ExperimentSearchResult(
-            row_id=0,
-            campaign_id=0,
-            campaign_name="",
-            item_id=sample.get("item_id", ""),
-            status=str(sample.get("status", "Pending")),
-            planned_params=params_block.get("data", {}),
-            measurements=meas_block.get("data", {}),
-        ))
+        if not isinstance(sample, dict):
+            continue
+        blocks = sample.get("blocks_obj", {}) or {}
+        params_block = blocks.get("formumind_params", {}) or {}
+        meas_block = blocks.get("formumind_measurements", {}) or {}
+        item_id = str(sample.get("item_id") or "")
+        campaign_id, row_id, campaign_name = 0, 0, ""
+        if item_id in index:
+            campaign_id, row_id, campaign_name = index[item_id]
+        else:
+            m = pat.match(item_id)
+            if m:
+                campaign_id = int(m.group(1))
+                row_id = int(m.group(2))
+        # Prefer nested planned/actual if block uses workbench shape
+        pdata = params_block.get("data", {}) if isinstance(params_block, dict) else {}
+        planned = pdata.get("planned_params") if isinstance(pdata, dict) else None
+        if not isinstance(planned, dict):
+            planned = pdata if isinstance(pdata, dict) else {}
+        mdata = meas_block.get("data", {}) if isinstance(meas_block, dict) else {}
+        measurements = mdata if isinstance(mdata, dict) else {}
+        if isinstance(pdata, dict) and pdata.get("status"):
+            status = str(pdata.get("status"))
+        else:
+            status = str(sample.get("status", "Pending"))
+        results.append(
+            ExperimentSearchResult(
+                row_id=row_id,
+                campaign_id=campaign_id,
+                campaign_name=campaign_name,
+                item_id=item_id,
+                status=status,
+                planned_params=planned,
+                measurements=measurements,
+            )
+        )
     return results
 
 

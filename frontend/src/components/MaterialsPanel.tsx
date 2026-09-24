@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import Modal from "./Modal";
 import { api, type ChemicalHit, type MaterialCandidate, type MaterialImportPreview, type MaterialView, type Supplier } from "../api";
 import { formatChemicalLookupSourceMsg } from "../utils/chemicalLookup";
+import { useStore } from "../store";
 
 const ROLES = ["", "resin", "additive", "inhibitor", "solvent", "crosslinker", "surfactant", "catalyst"];
 const AVAIL_LABEL: Record<string, { text: string; cls: string }> = {
@@ -352,6 +353,33 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
             onChange={(e) => void onPickImportFile(e.target.files?.[0] ?? null, true)}
           />
         </label>
+        <a
+          href={api.materialsImportTemplateUrl("csv")}
+          download
+          className="text-[10px] border border-edge rounded-full px-3 py-1 text-slate-400 hover:border-accent/40 hover:text-accent"
+          data-testid="materials-import-template"
+          title="下载 CSV 导入模板"
+        >
+          下载模板
+        </a>
+        <button
+          type="button"
+          className="text-[10px] border border-edge rounded-full px-3 py-1 text-slate-400 hover:border-accent/40 hover:text-accent"
+          data-testid="materials-promote-requirement"
+          title="从当前需求材料字段提升到材料库/待入库"
+          onClick={() => {
+            const req = useStore.getState().requirement;
+            void api
+              .promoteFromRequirement(req)
+              .then((r) => {
+                setIoMsg(`需求提升：${JSON.stringify(r)}`);
+                return Promise.all([load(), loadCandidates()]);
+              })
+              .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+          }}
+        >
+          从需求提升
+        </button>
         <button
           type="button"
           disabled={importBusy || !importPreview}
@@ -599,13 +627,27 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                           {al.text}
                         </button>
                       </td>
-                      <td className="px-2 py-1.5 text-right">
+                      <td className="px-2 py-1.5 text-right space-x-1">
                         <button
                           type="button"
                           onClick={() => startEdit(m)}
                           className="text-[10px] text-slate-500 hover:text-accent"
                         >
                           编辑
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`materials-archive-${m.name}`}
+                          title="归档后默认列表隐藏（可再恢复）"
+                          className="text-[10px] text-slate-500 hover:text-amber-300"
+                          onClick={() =>
+                            void api
+                              .archiveMaterial(m.name, true)
+                              .then(() => load())
+                              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                          }
+                        >
+                          归档
                         </button>
                       </td>
                     </tr>

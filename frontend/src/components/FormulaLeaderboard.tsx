@@ -521,6 +521,7 @@ export default function FormulaLeaderboard() {
     saveFormulaToDoe,
     formulationBusy,
     formulationValidateWarnings,
+    relationInsights,
   } = useStore(
     useShallow((s) => ({
       leaderboard: s.leaderboard,
@@ -533,6 +534,7 @@ export default function FormulaLeaderboard() {
       saveFormulaToDoe: s.saveFormulaToDoe,
       formulationBusy: s.formulationBusy,
       formulationValidateWarnings: s.formulationValidateWarnings,
+      relationInsights: s.relationInsights,
     }))
   );
   const setOpenModal = useStore((s) => s.setOpenModal);
@@ -718,6 +720,25 @@ export default function FormulaLeaderboard() {
               </span>
             )}
           </div>
+        </div>
+      )}
+      {relationInsights && relationInsights.length > 0 && (
+        <div
+          className="mb-2 text-[10px] text-violet-300/90 border border-violet-500/30 bg-violet-500/5 rounded px-2 py-1.5 space-y-0.5"
+          data-testid="relation-insights-banner"
+        >
+          <div className="font-medium text-violet-200">KG 关系洞察 · {relationInsights.length}</div>
+          {relationInsights.slice(0, 6).map((ins, i) => (
+            <div key={i} className="text-slate-400 truncate" title={(ins.substitutes || []).join("、")}>
+              <span className="text-slate-300">{ins.component || "?"}</span>
+              {(ins.substitutes?.length ?? 0) > 0 && (
+                <span> → 替代 {ins.substitutes!.slice(0, 3).join("、")}</span>
+              )}
+              {(ins.relations?.length ?? 0) > 0 && (
+                <span className="text-slate-500"> · 关系 {ins.relations!.length}</span>
+              )}
+            </div>
+          ))}
         </div>
       )}
       {leaderboard.length === 0 ? (

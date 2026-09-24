@@ -158,6 +158,35 @@ function ExportShelfPanel({ projectId }: { projectId: string }) {
         >
           保存深度报告
         </button>
+        <label
+          className={`text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/40 cursor-pointer ${
+            busy ? "opacity-40 pointer-events-none" : ""
+          }`}
+          data-testid="shelf-upload-binary"
+          title="上传 PDF / XLSX 等到项目导出架"
+        >
+          上传文件
+          <input
+            type="file"
+            accept=".pdf,.xlsx,.xls,.docx,.pptx,.png,.jpg,.jpeg,.zip"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              setBusy(true);
+              setError(null);
+              void api
+                .uploadProjectExport(projectId, f)
+                .then(() => refresh())
+                .catch((err) => {
+                  setError(err instanceof Error ? err.message : "上传失败");
+                  setBusy(false);
+                });
+            }}
+          />
+        </label>
         <button
           type="button"
           disabled={busy}

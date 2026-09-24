@@ -338,6 +338,12 @@ export interface RecommendFormulationsResponse {
   returned_n?: number;
   diversity_applied?: boolean;
   tradeoff?: TradeOffAnalysis | null;
+  relation_insights?: Array<{
+    component?: string;
+    cas_no?: string | null;
+    substitutes?: string[];
+    relations?: Array<{ type?: string; target?: string; confidence?: number }>;
+  }>;
 }
 
 export interface TradeOffAnalysis {
@@ -670,9 +676,11 @@ export interface WorkbenchSyncResponse {
   training_message?: string;
   prediction_bias?: { n_rows: number; by_metric: Record<string, { n: number; mean_error: number; rmse: number; mae: number; max_abs: number }> } | null;
   kg_written?: number | null;
+  /** Present when kg ingest raised; paired with kg_written=-1. */
+  kg_error?: string | null;
   loop_task_id?: string | null;
   loop_message?: string;
-  quality?: { dropped_values: number; dropped: string[] };
+  quality?: { dropped_values?: number; dropped?: string[]; [k: string]: unknown };
 }
 
 export interface WorkbenchQuality {
@@ -1274,7 +1282,7 @@ export const api = {
     objectives?: ObjectiveSpec[],
     sources: Evidence[] = [],
     n = 3,
-    opts: { preferMaterialsCatalog?: boolean } = {}
+    opts: { preferMaterialsCatalog?: boolean; relationInsight?: boolean } = {}
   ) =>
     post<RecommendFormulationsResponse>("/api/formulations/recommend", {
       requirement: req,
@@ -1282,6 +1290,7 @@ export const api = {
       sources,
       n,
       prefer_materials_catalog: Boolean(opts.preferMaterialsCatalog),
+      relation_insight: opts.relationInsight !== false,
     }),
   chemicalLookup: (q: string) =>
     get<{
@@ -1863,6 +1872,14 @@ export const api = {
   archiveMaterial: (name: string, archived = true) =>
     post<MaterialView>("/api/materials/archive", { name, archived }),
 
+  promoteFromRequirement: (requirement: Requirement) =>
+    post<{
+      upserted?: number;
+      pending?: number;
+      skipped?: number;
+      [k: string]: unknown;
+    }>("/api/materials/promote-from-requirement", { requirement }),
+
   enrichMaterials: () =>
     post<{ enriched: number }>("/api/chemical/enrich-materials", {}),
 
@@ -2216,6 +2233,28 @@ export const api = {
       filename,
       content,
     }),
+
+  /** Multipart binary shelf upload (PDF / XLSX / etc.). */
+  uploadProjectExport: async (id: string, file: File, filename?: string) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (filename) fd.append("filename", filename);
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(id)}/exports/upload`,
+      { method: "POST", headers: apiAuthHeaders(), body: fd },
+    );
+    if (!res.ok) {
+      let detail = `${res.status}`;
+      try {
+        const j = await res.json();
+        detail = j.detail ? JSON.stringify(j.detail) : detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`uploadProjectExport failed: ${detail}`);
+    }
+    return (await res.json()) as ProjectExportFile;
+  },
 
   downloadProjectExportUrl: (id: string, filename: string) =>
     `/api/projects/${encodeURIComponent(id)}/exports/${encodeURIComponent(filename)}`,
@@ -3197,6 +3236,10 @@ export interface ChatMessage {
   phase?: string;
   /** Live tool status while streaming (e.g. 结构识别中). */
   toolStatus?: string | null;
+  /** Claim-check chips from SSE done (when chat_claim_check_enabled). */
+  sourcedClaims?: SourcedClaim[] | null;
+  /** Soft clarification prompt from SSE done (when chat_clarification_enabled). */
+  clarification?: ClarificationOption | null;
 }
 
 /** /api/chat/stream 的 SSE 事件(后端 data: JSON 一行一个)。 */
@@ -3216,10 +3259,10 @@ export type ChatStreamEvent =
       answer: string;
       citations?: Evidence[];
       kb_chunks_used?: number;
-      clarification?: unknown;
+      clarification?: ClarificationOption | null;
       rewritten_query?: string | null;
-      sourced_claims?: unknown;
-      structured?: unknown;
+      sourced_claims?: SourcedClaim[] | null;
+      structured?: StructuredAnswer | null;
       tools_used?: string[];
     }
   | { type: "error"; message: string };

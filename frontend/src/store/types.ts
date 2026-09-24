@@ -158,6 +158,13 @@ export interface AppState {
   formulationBusy: boolean;
   recommendStage: string;
   recommendMessage: string;
+  /** KG relation insights from last recommend with relation_insight=true. */
+  relationInsights: Array<{
+    component?: string;
+    cas_no?: string | null;
+    substitutes?: string[];
+    relations?: Array<{ type?: string; target?: string; confidence?: number }>;
+  }>;
   /** Dim-2 thinking timeline for the active long task (recommend / optimize / DOE / deep). */
   taskThinking: import("../api").ThinkingStep[];
   /** Soft bias: prefer materials-catalog hits when recommending (never materials-only). */
@@ -264,7 +271,7 @@ export interface AppState {
   loadSourceStatus: () => Promise<void>;
   hydrateLlmSettings: () => Promise<void>;
   uploadFiles: (files: File[]) => Promise<void>;
-  sendChat: (question: string, structure?: import("../api").StructureRecognitionResult | null) => Promise<void>;
+  sendChat: (question: string, structure?: import("../api").StructureRecognitionResult | null, opts?: { clarifiedEntities?: import("../api").ClarifiedEntity[] }) => Promise<void>;
   setOpenModal: (name: string | null) => void;
   setKnowledgeHubTab: (tab: AppState["knowledgeHubTab"]) => void;
   openKnowledgeHub: (tab?: AppState["knowledgeHubTab"]) => void;
