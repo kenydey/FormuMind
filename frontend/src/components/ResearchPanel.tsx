@@ -430,6 +430,65 @@ export default function ResearchPanel() {
                     </span>
                   </div>
                 )}
+                {m.role === "assistant" && !m.streaming && (m.sourcedClaims?.length ?? 0) > 0 && (
+                  <div className="mt-2 pt-2 border-t border-edge/60 space-y-1" data-testid="chat-sourced-claims">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wide">核验 · 断言</div>
+                    <div className="flex flex-wrap gap-1">
+                      {m.sourcedClaims!.map((c, j) => {
+                        const cls =
+                          c.status === "supported"
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : c.status === "weak"
+                              ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                              : "border-rose-500/40 bg-rose-500/10 text-rose-300";
+                        const label =
+                          c.status === "supported" ? "有据" : c.status === "weak" ? "弱支撑" : "无据";
+                        return (
+                          <span
+                            key={j}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
+                            title={c.text}
+                          >
+                            {label} · {(c.confidence * 100).toFixed(0)}% · {c.text.slice(0, 48)}
+                            {c.text.length > 48 ? "…" : ""}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {m.role === "assistant" && !m.streaming && m.clarification && (
+                  <div
+                    className="mt-2 pt-2 border-t border-edge/60 space-y-1.5"
+                    data-testid="chat-clarification"
+                  >
+                    <p className="text-[11px] text-amber-200/90">{m.clarification.question}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {(m.clarification.possible_meanings || []).map((meaning) => (
+                        <button
+                          key={meaning}
+                          type="button"
+                          disabled={chatBusy}
+                          className="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-200 hover:bg-amber-500/10 disabled:opacity-40"
+                          onClick={() => {
+                            const term = m.clarification?.ambiguous_term || meaning;
+                            void sendChat(`按「${meaning}」理解继续：${term}`, structInfo, {
+                              clarifiedEntities: [
+                                {
+                                  term,
+                                  resolved: meaning,
+                                  entity_id: m.clarification?.candidate_entity_ids?.[0],
+                                },
+                              ],
+                            });
+                          }}
+                        >
+                          {meaning}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {m.citations && m.citations.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-edge/60 flex flex-wrap">
                     {m.citations.map((c, j) => (

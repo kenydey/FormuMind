@@ -86,6 +86,7 @@ export const useStore = create<AppState>()(
       preferMaterialsCatalog: false,
       recommendStage: "",
       recommendMessage: "",
+      relationInsights: [],
       taskThinking: [],
       chatBusy: false,
       recommendSourceTypes: ["patents", "literature", "internet"] as SearchSourceType[],

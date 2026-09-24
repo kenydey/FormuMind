@@ -461,7 +461,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    sendChat: async (question, structure) => {
+    sendChat: async (question, structure, opts) => {
       const { sources, selectedSources, requirement } = get();
       const active = sources
         .filter((e) => selectedSources.includes(e.identifier || e.title))
@@ -494,6 +494,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               citations: m.citations,
             })),
           structure: structure ?? undefined,
+          clarified_entities: opts?.clarifiedEntities,
         };
         await api.chatStream(reqBody, (ev) => {
           const last = (d: { chatHistory: ChatMessage[] }) =>
@@ -540,6 +541,13 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                 m.toolStatus = null;
                 m.citations = ev.citations;
                 m.kbChunksUsed = ev.kb_chunks_used ?? 0;
+                m.sourcedClaims = Array.isArray(ev.sourced_claims)
+                  ? (ev.sourced_claims as import("../../api").SourcedClaim[])
+                  : null;
+                m.clarification =
+                  ev.clarification && typeof ev.clarification === "object"
+                    ? (ev.clarification as import("../../api").ClarificationOption)
+                    : null;
               }
               draft.error = null;
             });

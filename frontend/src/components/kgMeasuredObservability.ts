@@ -8,7 +8,13 @@ import {
 /** Workbench sync save-hint fragment when KG feedback wrote edges. */
 export function formatKgWrittenHint(
   kgWritten: number | null | undefined,
+  kgError?: string | null,
 ): string | null {
+  if (typeof kgWritten === "number" && kgWritten < 0) {
+    return kgError
+      ? `KG 回流失败：${kgError.slice(0, 80)}`
+      : "KG 回流失败（详见服务日志）";
+  }
   if (typeof kgWritten !== "number" || !Number.isFinite(kgWritten) || kgWritten <= 0) {
     return null;
   }

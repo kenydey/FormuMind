@@ -277,13 +277,19 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
 
         const rec = await api.recommendFormulations(req, undefined, payload, 3, {
           preferMaterialsCatalog,
+          relationInsight: true,
         });
         const forms = (rec.scored?.length ? rec.scored : []) as Formulation[];
         if (!forms.length) {
           throw new Error(rec.warnings?.[0] || "同步推荐未返回配方");
         }
+        const insightN = rec.relation_insights?.length ?? 0;
         await applyEnrichedLeaderboard(set, get, forms, (draft) => {
-          draft.recommendMessage = `同步推荐完成 · ${rec.engine || "offline"}`;
+          draft.recommendMessage =
+            insightN > 0
+              ? `同步推荐完成 · ${rec.engine || "offline"} · KG 关系洞察 ${insightN} 条`
+              : `同步推荐完成 · ${rec.engine || "offline"}`;
+          draft.relationInsights = rec.relation_insights ?? [];
         });
       } catch (e) {
         set((draft) => {
