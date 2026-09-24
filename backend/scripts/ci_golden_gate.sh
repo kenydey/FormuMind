@@ -29,12 +29,19 @@ export FORMUMIND_KB_V2_ENABLED="true"
 GOLDEN_DB="$BACKEND_DIR/.golden_eval.db"
 export FORMUMIND_DB_URL="sqlite:///$GOLDEN_DB"
 
-# Activate the project venv
+# Prefer local .venv (dev); CI installs deps onto PATH via pip — no .venv required.
 if [ -f "$BACKEND_DIR/.venv/bin/activate" ]; then
     # shellcheck source=/dev/null
     source "$BACKEND_DIR/.venv/bin/activate"
+elif command -v python3 >/dev/null 2>&1; then
+    echo "NOTE: no .venv at $BACKEND_DIR/.venv — using PATH python3 ($(command -v python3))"
 else
-    echo "ERROR: .venv not found at $BACKEND_DIR/.venv — run 'uv sync' first"
+    echo "ERROR: neither .venv nor python3 on PATH — run 'uv sync' or install Python 3.11+"
+    exit 1
+fi
+# Sanity: alembic / pytest must resolve (catches empty PATH with no deps).
+if ! python3 -c "import alembic, pytest" 2>/dev/null; then
+    echo "ERROR: alembic/pytest not importable — install backend deps (pip install -r requirements.txt -e '.[dev]' or uv sync)"
     exit 1
 fi
 
@@ -87,7 +94,13 @@ echo "OK"
 echo ""
 echo "=== [3/3] pytest tests/test_golden_eval.py ==="
 cd "$BACKEND_DIR"
-python3 -m pytest tests/test_golden_eval.py -q --tb=short --timeout=240 2>&1 || {
+# --timeout needs pytest-timeout (dev extra). Skip the flag when unavailable so
+# lean local runs still exercise the gate; CI installs .[dev] and keeps the cap.
+PYTEST_ARGS=(-q --tb=short)
+if python3 -c "import pytest_timeout" 2>/dev/null; then
+    PYTEST_ARGS+=(--timeout=240)
+fi
+python3 -m pytest tests/test_golden_eval.py "${PYTEST_ARGS[@]}" 2>&1 || {
     echo ""
     echo "FAIL: golden eval gate did not pass — CI blocked."
     exit 1
