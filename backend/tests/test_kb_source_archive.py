@@ -121,6 +121,17 @@ def test_archive_missing_source_404(env):
     assert r.status_code == 404
 
 
+def test_orphan_chunks_remain_searchable_without_source_row(env):
+    """Chem-QA fixtures seed chunks without SourceDocument — must not INNER JOIN them away."""
+    _, chk = env
+    chk.replace_for_source(
+        "orphan-src",
+        [{"text": "磷酸锌缓蚀颜料在环氧底漆中的作用机制与用量。"}],
+    )
+    assert len(chk.all_chunks()) == 1
+    assert len(chk.all_chunks(include_archived=True)) == 1
+
+
 def test_quota_still_counts_archived(env):
     src, chk = env
     sid = _seed(src, chk)

@@ -132,6 +132,8 @@ class ChunkStore:
     ) -> list[DocumentChunk]:
         # Returned ORM objects are detached (session closed); see get_by_source.
         # Soft-archived sources (W3) are excluded from retrieval by default.
+        # Use OUTER JOIN on the global path so orphan chunks (no SourceDocument
+        # row — common in unit tests / partial fixtures) still participate.
         from sqlalchemy import or_
 
         from .models import SourceDocument
@@ -140,9 +142,15 @@ class ChunkStore:
             q = session.query(DocumentChunk).order_by(
                 DocumentChunk.created_at.desc(), DocumentChunk.ord
             )
-            need_join = bool(project_id) or not include_archived
-            if need_join:
+            if project_id:
                 q = q.join(SourceDocument, DocumentChunk.source_id == SourceDocument.id)
+                if include_global:
+                    q = q.filter(
+                        (SourceDocument.project_id == project_id)
+                        | (SourceDocument.project_id.is_(None))
+                    )
+                else:
+                    q = q.filter(SourceDocument.project_id == project_id)
                 if not include_archived:
                     q = q.filter(
                         or_(
@@ -150,14 +158,17 @@ class ChunkStore:
                             SourceDocument.archived.is_(None),
                         )
                     )
-                if project_id:
-                    if include_global:
-                        q = q.filter(
-                            (SourceDocument.project_id == project_id)
-                            | (SourceDocument.project_id.is_(None))
-                        )
-                    else:
-                        q = q.filter(SourceDocument.project_id == project_id)
+            elif not include_archived:
+                q = q.outerjoin(
+                    SourceDocument, DocumentChunk.source_id == SourceDocument.id
+                )
+                q = q.filter(
+                    or_(
+                        SourceDocument.id.is_(None),
+                        SourceDocument.archived.is_(False),
+                        SourceDocument.archived.is_(None),
+                    )
+                )
             if limit:
                 q = q.limit(limit)
             return q.all()
