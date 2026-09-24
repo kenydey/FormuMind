@@ -252,13 +252,23 @@ def select_ingest_targets(
         limit = room if not limit else min(limit, room)
     shadow = bool(getattr(settings, "kb_relevance_shadow", True))
     shadow_scores: list[float] = []
+    shadow_would_reject_ids: set[str] = set()
+    topic_reject_ids: set[str] = set()
+    threshold = float(getattr(settings, "kb_ingest_min_relevance", 0.45) or 0.45)
+    if threshold <= 0:
+        threshold = 0.45
     targets: list[tuple[Evidence, str]] = []
     seen: set[str] = set()
     for ev in evidence:
         if limit and len(targets) >= limit:
             break
         if shadow:
-            shadow_scores.append(_topicality(ev, query or ""))
+            score = _topicality(ev, query or "")
+            shadow_scores.append(score)
+            if score < threshold:
+                eid = (getattr(ev, "identifier", None) or "").strip()
+                if eid:
+                    shadow_would_reject_ids.add(eid)
         if min_rel > 0 and (ev.relevance or 0) < min_rel:
             if write_audit:
                 write_ingest_audit(
@@ -297,6 +307,7 @@ def select_ingest_targets(
                     if x
                 )
                 if not topic_gate(text, kind=kind, domain=domain):
+                    topic_reject_ids.add(ident)
                     logger.warning(
                         "kb_ingest 主题预筛拦截: %s (%s)",
                         (ev.title or ev.identifier)[:90],
@@ -328,7 +339,17 @@ def select_ingest_targets(
                     domain_match=getattr(ev, "domain_match", None),
                 )
     if shadow and shadow_scores:
-        _log_relevance_shadow(shadow_scores)
+        both = shadow_would_reject_ids & topic_reject_ids
+        _log_relevance_shadow(
+            shadow_scores,
+            threshold=threshold,
+            project_id=project_id,
+            domain=str(domain) if domain else None,
+            query=query,
+            topic_only_reject=len(topic_reject_ids - shadow_would_reject_ids),
+            both_reject=len(both),
+            shadow_only_reject=len(shadow_would_reject_ids - topic_reject_ids),
+        )
     return targets
 
 
@@ -350,13 +371,24 @@ def _topicality(ev: Evidence, query: str) -> float:
     return sum(1 for k in kws if k in blob) / len(kws)
 
 
-def _log_relevance_shadow(scores: list[float]) -> None:
+def _log_relevance_shadow(
+    scores: list[float],
+    *,
+    threshold: float = 0.45,
+    project_id: str | None = None,
+    domain: str | None = None,
+    query: str | None = None,
+    topic_only_reject: int = 0,
+    both_reject: int = 0,
+    shadow_only_reject: int = 0,
+) -> None:
     """Record what a real topicality gate would have rejected — enforce nothing.
 
     Shadow mode exists so the threshold can be calibrated against real traffic
     before it starts dropping rows: the current gate rejects nothing, and
     switching it to a topicality score in one step would silently change ingest
-    volume. One log line per ingest run is enough to pick the cut afterwards.
+    volume. Persist a batch summary (JSONL + audit) so ops can read reject rates
+    without scraping process logs.
     """
     ordered = sorted(scores)
     n = len(ordered)
@@ -364,12 +396,37 @@ def _log_relevance_shadow(scores: list[float]) -> None:
     def _pct(p: float) -> float:
         return ordered[min(n - 1, int(p * n))]
 
+    would_reject = sum(1 for s in ordered if s < threshold)
     logger.info(
-        "relevance shadow: n=%s p10=%.2f p50=%.2f p90=%.2f | 按 topicality>=0.45 门槛将拒绝 %s/%s (%.1f%%)",
-        n, _pct(0.10), _pct(0.50), _pct(0.90),
-        sum(1 for s in ordered if s < 0.45), n,
-        (sum(1 for s in ordered if s < 0.45) / n * 100) if n else 0.0,
+        "relevance shadow: n=%s p10=%.2f p50=%.2f p90=%.2f | 按 topicality>=%.2f 门槛将拒绝 %s/%s (%.1f%%) "
+        "| overlap shadow_only=%s topic_only=%s both=%s",
+        n,
+        _pct(0.10),
+        _pct(0.50),
+        _pct(0.90),
+        threshold,
+        would_reject,
+        n,
+        (would_reject / n * 100) if n else 0.0,
+        shadow_only_reject,
+        topic_only_reject,
+        both_reject,
     )
+    try:
+        from .kb_ingest_audit import record_relevance_shadow_batch
+
+        record_relevance_shadow_batch(
+            scores=scores,
+            threshold=threshold,
+            project_id=project_id,
+            domain=domain,
+            query=query,
+            topic_only_reject=topic_only_reject,
+            both_reject=both_reject,
+            shadow_only_reject=shadow_only_reject,
+        )
+    except Exception:
+        logger.debug("relevance shadow persist skipped", exc_info=True)
 
 
 def _origin_lookup_keys(ev: Evidence) -> list[str]:

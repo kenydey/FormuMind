@@ -380,7 +380,7 @@ def golden_questions() -> list[GoldenQuestionItem]:
 
 @router.post("/golden-eval/run")
 def golden_eval_run(body: GoldenEvalRequest) -> dict:
-    """Run golden questions through query-test; keyword-hit@top_k pass/fail."""
+    """Run golden questions through query-test; keyword-hit@top_k + MRR/Recall@k."""
     if not kb_index.kb_enabled():
         raise HTTPException(status_code=409, detail="知识库 v2 未启用")
     from ..services.kb_query_test import run_golden_eval
@@ -397,6 +397,19 @@ def golden_eval_run(body: GoldenEvalRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+
+@router.get("/relevance-shadow/stats")
+def relevance_shadow_stats(
+    limit: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    """Aggregate topicality shadow batches (calibration only — does not enforce).
+
+    Use reject rates + shadow_only/topic_only/both overlap to decide when to
+    flip ``kb_relevance_shadow`` off. Kill-switch remains the flag itself.
+    """
+    from ..services.kb_ingest_audit import load_relevance_shadow_stats
+
+    return load_relevance_shadow_stats(limit=limit)
 
 
 # ── ingest ────────────────────────────────────────────────────────────────────
