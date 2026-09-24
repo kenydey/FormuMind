@@ -125,6 +125,7 @@ class KBSourceItem(BaseModel):
     project_id: str | None = None
     raw_text_chars: int = 0
     extraction_status: str = ""
+    archived: bool = False
 
 
 class KBSourcesResponse(BaseModel):
@@ -140,11 +141,18 @@ def list_sources(
         default=False,
         description="When project_id is set, also include global (project_id NULL) sources",
     ),
+    include_archived: bool = Query(
+        default=False,
+        description="Include soft-archived sources (default: hide)",
+    ),
 ) -> KBSourcesResponse:
     from ..db.source_store import get_source_store
 
     rows = get_source_store().list_for_project(
-        project_id, limit=limit, include_global=include_global
+        project_id,
+        limit=limit,
+        include_global=include_global,
+        include_archived=include_archived,
     )
     return KBSourcesResponse(
         sources=[
@@ -157,10 +165,42 @@ def list_sources(
                 project_id=r.project_id,
                 raw_text_chars=int(r.raw_text_chars or 0),
                 extraction_status=r.extraction_status or "",
+                archived=bool(getattr(r, "archived", False)),
             )
             for r in rows
         ],
         total=len(rows),
+    )
+
+
+class KBSourceArchiveRequest(BaseModel):
+    archived: bool = True
+
+
+class KBSourceArchiveResponse(BaseModel):
+    ok: bool
+    source_id: str
+    archived: bool
+
+
+@router.post(
+    "/sources/{source_id}/archive",
+    response_model=KBSourceArchiveResponse,
+    summary="软归档 / 恢复知识库文档（保留切块，检索默认排除）",
+)
+def archive_source(source_id: str, body: KBSourceArchiveRequest) -> KBSourceArchiveResponse:
+    """W3 soft-archive: hide from lists + retrieval without cascade delete."""
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用（FORMUMIND_KB_V2_ENABLED）")
+    from ..db.source_store import get_source_store
+
+    store = get_source_store()
+    if store.get(source_id) is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    if not store.set_archived(source_id, body.archived):
+        raise HTTPException(status_code=500, detail="归档失败")
+    return KBSourceArchiveResponse(
+        ok=True, source_id=source_id, archived=bool(body.archived)
     )
 
 

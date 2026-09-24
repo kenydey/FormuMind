@@ -158,32 +158,48 @@ def _ensure_campaign_columns(engine: Engine) -> None:
 def _ensure_source_document_columns(engine: Engine) -> None:
     """只读守护：source_documents 表必须具备 async-ingest 溯源列。"""
     _require_columns(engine, "source_documents", ("origin_url", "project_id"))
-    _ensure_source_acquisition_column(engine)
+    _ensure_source_soft_columns(engine)
     _ensure_document_chunk_columns(engine)
 
 
-def _ensure_source_acquisition_column(engine: Engine) -> None:
-    """软扩列 acquisition（nullable，无 backfill，兼容旧库）。
+_SOURCE_SOFT_COLUMNS: dict[str, tuple[str, str | None]] = {
+    # acquisition — PDF 配额统计路径
+    "acquisition": ("acquisition VARCHAR(16)", None),
+    # alembic 0029 — KB soft-archive (W3)
+    "archived": (
+        "archived BOOLEAN DEFAULT 0 NOT NULL",
+        "CREATE INDEX ix_source_documents_archived ON source_documents (archived)",
+    ),
+}
 
-    记录全文的获取路径（tei/html/pdf/text），供每项目 PDF 配额统计用。旧库
-    运行时会自动补列；已存在则静默——与 materials.archived 同一套做法。
-    """
+
+def _ensure_source_soft_columns(engine: Engine) -> None:
+    """软扩列 acquisition / archived（兼容无 alembic_version 的旧库）。"""
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
     if "source_documents" not in inspector.get_table_names():
         return
     existing = {c["name"] for c in inspector.get_columns("source_documents")}
-    if "acquisition" in existing:
-        return
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text('ALTER TABLE "source_documents" ADD COLUMN acquisition VARCHAR(16)')
-            )
-    except Exception as exc:
-        if "duplicate column" not in str(exc).lower():
-            raise
+    for col, (ddl, index_ddl) in _SOURCE_SOFT_COLUMNS.items():
+        if col in existing:
+            continue
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE "source_documents" ADD COLUMN {ddl}'))
+                if index_ddl:
+                    try:
+                        conn.execute(text(index_ddl))
+                    except Exception:
+                        pass
+        except Exception as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+
+def _ensure_source_acquisition_column(engine: Engine) -> None:
+    """Backward-compatible alias — prefer :func:`_ensure_source_soft_columns`."""
+    _ensure_source_soft_columns(engine)
 
 
 def _ensure_document_chunk_columns(engine: Engine) -> None:

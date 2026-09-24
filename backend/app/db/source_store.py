@@ -50,6 +50,7 @@ class SourceStore:
             extraction_status=extraction_status,
             extraction_error=extraction_error,
             acquisition=(acquisition or None),
+            archived=False,
             created_at=_utcnow(),
         )
         with commit_session(self._session_factory) as session:
@@ -61,7 +62,8 @@ class SourceStore:
 
         Used by the per-project quotas: ``kb_project_source_quota`` counts every
         row, ``kb_project_pdf_quota`` counts only ``acquisition == "pdf"`` (the
-        download+parse path that dominates memory).
+        download+parse path that dominates memory). Archived rows still count —
+        they occupy disk until hard-deleted.
         """
         if not project_id:
             return 0
@@ -70,6 +72,15 @@ class SourceStore:
             if acquisition is not None:
                 q = q.filter(SourceDocument.acquisition == acquisition)
             return q.count()
+
+    def set_archived(self, source_id: str, archived: bool = True) -> bool:
+        """Soft-archive or restore a source. Returns False if the row is missing."""
+        with commit_session(self._session_factory) as session:
+            doc = session.get(SourceDocument, source_id)
+            if doc is None:
+                return False
+            doc.archived = bool(archived)
+            return True
 
     def get(self, source_id: str) -> SourceDocument | None:
         with self._session_factory() as session:
@@ -140,6 +151,7 @@ class SourceStore:
         *,
         limit: int = 100,
         include_global: bool = False,
+        include_archived: bool = False,
     ) -> list[SourceDocument]:
         """List sources for a project.
 
@@ -147,7 +159,11 @@ class SourceStore:
         only rows stamped with that project are returned — Knowledge Hub /
         project-scoped browse must not leak other projects or the shared
         global corpus (``project_id IS NULL``).
+
+        Soft-archived rows are hidden unless ``include_archived`` is True.
         """
+        from sqlalchemy import or_
+
         with self._session_factory() as session:
             q = session.query(SourceDocument).order_by(SourceDocument.created_at.desc())
             if project_id:
@@ -158,6 +174,10 @@ class SourceStore:
                     )
                 else:
                     q = q.filter(SourceDocument.project_id == project_id)
+            if not include_archived:
+                q = q.filter(
+                    or_(SourceDocument.archived.is_(False), SourceDocument.archived.is_(None))
+                )
             return q.limit(limit).all()
 
     def delete(self, source_id: str) -> bool:

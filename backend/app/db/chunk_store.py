@@ -128,23 +128,36 @@ class ChunkStore:
         project_id: str | None = None,
         *,
         include_global: bool = False,
+        include_archived: bool = False,
     ) -> list[DocumentChunk]:
         # Returned ORM objects are detached (session closed); see get_by_source.
+        # Soft-archived sources (W3) are excluded from retrieval by default.
+        from sqlalchemy import or_
+
+        from .models import SourceDocument
+
         with self._session_factory() as session:
             q = session.query(DocumentChunk).order_by(
                 DocumentChunk.created_at.desc(), DocumentChunk.ord
             )
-            if project_id:
-                from .models import SourceDocument
-
+            need_join = bool(project_id) or not include_archived
+            if need_join:
                 q = q.join(SourceDocument, DocumentChunk.source_id == SourceDocument.id)
-                if include_global:
+                if not include_archived:
                     q = q.filter(
-                        (SourceDocument.project_id == project_id)
-                        | (SourceDocument.project_id.is_(None))
+                        or_(
+                            SourceDocument.archived.is_(False),
+                            SourceDocument.archived.is_(None),
+                        )
                     )
-                else:
-                    q = q.filter(SourceDocument.project_id == project_id)
+                if project_id:
+                    if include_global:
+                        q = q.filter(
+                            (SourceDocument.project_id == project_id)
+                            | (SourceDocument.project_id.is_(None))
+                        )
+                    else:
+                        q = q.filter(SourceDocument.project_id == project_id)
             if limit:
                 q = q.limit(limit)
             return q.all()
