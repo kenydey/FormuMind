@@ -35,8 +35,9 @@ function kbOnlyRow(d: KBSourceItem): HubMaterialRow {
     source: d.source_kind || "kb",
     identifier: d.origin_url || d.id,
     url: d.origin_url,
-    kb_status: d.extraction_status || "indexed",
+    kb_status: d.archived ? "archived" : d.extraction_status || "indexed",
     source_id: d.id,
+    archived: Boolean(d.archived),
   };
 }
 
@@ -66,6 +67,7 @@ export function useHubMaterialRows(open: boolean) {
   const [filter, setFilter] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   const refreshKb = useCallback(async () => {
     setLoading(true);
@@ -77,7 +79,9 @@ export function useHubMaterialRows(open: boolean) {
       return;
     }
     try {
-      const list = await api.kbSources(activeProjectId, 200);
+      const list = await api.kbSources(activeProjectId, 200, {
+        includeArchived,
+      });
       setKbDocs(list.sources ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -85,7 +89,7 @@ export function useHubMaterialRows(open: boolean) {
     } finally {
       setLoading(false);
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, includeArchived]);
 
   useEffect(() => {
     if (open) void refreshKb();
@@ -197,6 +201,32 @@ export function useHubMaterialRows(open: boolean) {
     }
   }
 
+  async function archiveRow(row: HubMaterialRow, archived: boolean) {
+    if (!row.source_id) return;
+    const key = row.row_key;
+    setBusyKey(key);
+    setMsg(null);
+    try {
+      if (archived) {
+        const ok = window.confirm(
+          `归档「${row.title}」？\n将从默认列表与检索中隐藏，切块保留，可随时恢复。`,
+        );
+        if (!ok) return;
+      }
+      await api.archiveKbSource(row.source_id, archived);
+      setMsg(
+        archived
+          ? `已归档 · ${row.source_id.slice(0, 8)}…（可恢复）`
+          : `已恢复 · ${row.source_id.slice(0, 8)}…`,
+      );
+      await refreshKb();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function deleteRow(row: HubMaterialRow) {
     const key = row.row_key;
     setBusyKey(key);
@@ -204,7 +234,7 @@ export function useHubMaterialRows(open: boolean) {
     try {
       if (row.source_id) {
         const ok = window.confirm(
-          `从知识库永久删除「${row.title}」？\n将移除切块与图谱提及，此操作不可撤销。`,
+          `从知识库永久删除「${row.title}」？\n将移除切块与图谱提及，此操作不可撤销。\n（一般请用「归档」）`,
         );
         if (!ok) return;
         await api.deleteKbSource(row.source_id);
@@ -236,8 +266,11 @@ export function useHubMaterialRows(open: boolean) {
     setMsg,
     refreshKb,
     ingestRow,
+    archiveRow,
     deleteRow,
     toggleSourceSelected,
     activeProjectId,
+    includeArchived,
+    setIncludeArchived,
   };
 }

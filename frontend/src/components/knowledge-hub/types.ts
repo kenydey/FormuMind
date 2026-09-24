@@ -17,6 +17,7 @@ export type HubMaterialRow = {
   relevance?: number;
   kb_status?: string;
   source_id?: string | null;
+  archived?: boolean;
   selected?: boolean;
   evidence?: Evidence;
 };

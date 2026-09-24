@@ -10,6 +10,7 @@ const STATUS_LABEL: Record<string, string> = {
   indexed: "已入库",
   skipped: "已在库",
   failed: "失败",
+  archived: "已归档",
 };
 
 export default function HubMaterialsPane({ open }: { open: boolean }) {
@@ -23,9 +24,12 @@ export default function HubMaterialsPane({ open }: { open: boolean }) {
     msg,
     refreshKb,
     ingestRow,
+    archiveRow,
     deleteRow,
     toggleSourceSelected,
     activeProjectId,
+    includeArchived,
+    setIncludeArchived,
   } = useHubMaterialRows(open);
 
   const [detail, setDetail] = useState<{ title: string; sourceId: string } | null>(null);
@@ -63,6 +67,17 @@ export default function HubMaterialsPane({ open }: { open: boolean }) {
           placeholder="筛选标题 / 公开号 / URL…"
           className="flex-1 min-w-[180px] bg-ink border border-edge rounded px-2 py-1.5 text-sm"
         />
+        <label
+          className="flex items-center gap-1 text-[11px] text-slate-400 select-none"
+          data-testid="hub-materials-include-archived"
+        >
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => setIncludeArchived(e.target.checked)}
+          />
+          显示已归档
+        </label>
         <button
           type="button"
           onClick={() => void refreshKb()}
@@ -91,7 +106,7 @@ export default function HubMaterialsPane({ open }: { open: boolean }) {
               <th className="px-2 py-1.5 w-24">来源</th>
               <th className="px-2 py-1.5">URL / 标识</th>
               <th className="px-2 py-1.5 w-16">状态</th>
-              <th className="px-2 py-1.5 w-44">操作</th>
+              <th className="px-2 py-1.5 w-56">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-edge/40">
@@ -175,13 +190,39 @@ export default function HubMaterialsPane({ open }: { open: boolean }) {
                       >
                         {busy ? "…" : row.source_id ? "再入库" : "入库全文"}
                       </button>
+                      {row.source_id && (
+                        <button
+                          type="button"
+                          data-testid={`hub-materials-archive-${row.source_id}`}
+                          className="text-amber-300/90 hover:underline disabled:opacity-40"
+                          disabled={busy}
+                          title={
+                            row.archived
+                              ? "恢复后重新进入默认列表与检索"
+                              : "软归档：隐藏于列表与检索，切块保留"
+                          }
+                          onClick={() => void archiveRow(row, !row.archived)}
+                        >
+                          {row.archived ? "恢复" : "归档"}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        className="text-rose-300/90 hover:underline disabled:opacity-40"
+                        data-testid={
+                          row.source_id
+                            ? `hub-materials-delete-${row.source_id}`
+                            : undefined
+                        }
+                        className="text-rose-300/70 hover:underline disabled:opacity-40"
                         disabled={busy}
+                        title={
+                          row.source_id
+                            ? "永久删除（不可撤销）；一般请用归档"
+                            : "移出会话列表"
+                        }
                         onClick={() => void deleteRow(row)}
                       >
-                        删除
+                        {row.source_id ? "永久删除" : "删除"}
                       </button>
                     </div>
                   </td>

@@ -716,6 +716,7 @@ export interface KBSourceItem {
   project_id?: string | null;
   raw_text_chars: number;
   extraction_status: string;
+  archived?: boolean;
 }
 
 export interface KBSourcesResponse {
@@ -1369,13 +1370,24 @@ export const api = {
     }),
   suggestFactors: (req: Requirement) =>
     post<{ factors: FactorCandidate[]; count: number }>("/api/doe/suggest-factors", req),
-  kbSources: (projectId?: string | null, limit = 100, opts?: { includeGlobal?: boolean }) => {
+  kbSources: (
+    projectId?: string | null,
+    limit = 100,
+    opts?: { includeGlobal?: boolean; includeArchived?: boolean },
+  ) => {
     const q = new URLSearchParams();
     q.set("limit", String(limit));
     if (projectId) q.set("project_id", projectId);
     if (opts?.includeGlobal) q.set("include_global", "true");
+    if (opts?.includeArchived) q.set("include_archived", "true");
     return get<KBSourcesResponse>(`/api/kb/sources?${q}`);
   },
+
+  archiveKbSource: (sourceId: string, archived = true) =>
+    post<{ ok: boolean; source_id: string; archived: boolean }>(
+      `/api/kb/sources/${encodeURIComponent(sourceId)}/archive`,
+      { archived },
+    ),
 
   deleteKbSource: (sourceId: string) =>
     del<{
