@@ -48,6 +48,7 @@ const EMPTY: SpecDraft = {
   price_cny_per_kg: "",
   voc_contrib: "",
   density_gcm3: "",
+  suppliers_json: [],
 };
 
 export default function MaterialsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -169,8 +170,12 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
       voc_contrib: s.voc_contrib != null ? String(s.voc_contrib) : "",
       density_gcm3: s.density_gcm3 != null ? String(s.density_gcm3) : "",
       suppliers_json: Array.isArray(s.suppliers_json)
-        ? (s.suppliers_json as Supplier[])
-        : undefined,
+        ? (s.suppliers_json as Supplier[]).map((row) => ({
+            name: row.name ?? "",
+            url: row.url ?? "",
+            product_url: row.product_url ?? "",
+          }))
+        : [],
     });
     setEditingName(m.name);
     setLookupMsg(null);
@@ -239,7 +244,13 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
         price_cny_per_kg: draft.price_cny_per_kg ? Number(draft.price_cny_per_kg) : null,
         voc_contrib: draft.voc_contrib ? Number(draft.voc_contrib) : null,
         density_gcm3: draft.density_gcm3 ? Number(draft.density_gcm3) : null,
-        suppliers_json: draft.suppliers_json ?? undefined,
+        suppliers_json: (draft.suppliers_json ?? [])
+          .map((s) => ({
+            name: (s.name ?? "").trim(),
+            url: (s.url ?? "").trim() || null,
+            product_url: (s.product_url ?? "").trim() || null,
+          }))
+          .filter((s) => s.name.length > 0),
       });
       setMode("closed");
       await load();
@@ -931,57 +942,110 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
                 </button>
               </div>
             </div>
-            {draft.suppliers_json && draft.suppliers_json.length > 0 && (
-              <div className="border border-edge rounded p-2 mt-2">
-                <div className="text-[10px] text-slate-500 mb-1">
-                  供应商信息（{draft.suppliers_json.length} 家 · 只读，保存后随材料入库）
+            <div className="border border-edge rounded p-2 mt-2" data-testid="materials-suppliers-editor">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="text-[10px] text-slate-500">
+                  供应商信息（{(draft.suppliers_json ?? []).length} 家 · 可编辑，保存时双写归一化表）
                 </div>
+                <button
+                  type="button"
+                  data-testid="materials-suppliers-add"
+                  onClick={() =>
+                    setDraft((d) => ({
+                      ...d,
+                      suppliers_json: [...(d.suppliers_json ?? []), { name: "", url: "", product_url: "" }],
+                    }))
+                  }
+                  className="text-[10px] border border-teal-500/40 text-teal-300 rounded px-2 py-0.5 hover:bg-teal-500/10"
+                >
+                  + 添加供应商
+                </button>
+              </div>
+              {(draft.suppliers_json ?? []).length === 0 ? (
+                <div className="text-[10px] text-slate-600 py-1">暂无供应商，可手动添加或化学查询填充</div>
+              ) : (
                 <table className="w-full text-[11px]">
                   <thead>
                     <tr className="text-slate-500 border-b border-edge/50">
                       <th className="text-left py-0.5 font-medium">名称</th>
                       <th className="text-left py-0.5 font-medium">官网</th>
                       <th className="text-left py-0.5 font-medium">产品页</th>
+                      <th className="w-8" />
                     </tr>
                   </thead>
                   <tbody>
-                    {draft.suppliers_json.map((s, i) => (
-                      <tr key={`${s.name}-${i}`} className="border-b border-edge/30">
-                        <td className="py-0.5 text-slate-200">{s.name}</td>
-                        <td className="py-0.5">
-                          {s.url ? (
-                            <a
-                              href={s.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-teal-300 hover:underline"
-                            >
-                              链接
-                            </a>
-                          ) : (
-                            <span className="text-slate-500">-</span>
-                          )}
+                    {(draft.suppliers_json ?? []).map((s, i) => (
+                      <tr key={`sup-${i}`} className="border-b border-edge/30">
+                        <td className="py-0.5 pr-1">
+                          <input
+                            data-testid={`materials-supplier-name-${i}`}
+                            value={s.name ?? ""}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setDraft((d) => {
+                                const rows = [...(d.suppliers_json ?? [])];
+                                rows[i] = { ...rows[i], name: v };
+                                return { ...d, suppliers_json: rows };
+                              });
+                            }}
+                            className="w-full bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                            placeholder="供应商名称"
+                          />
                         </td>
-                        <td className="py-0.5">
-                          {s.product_url ? (
-                            <a
-                              href={s.product_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-teal-300 hover:underline"
-                            >
-                              链接
-                            </a>
-                          ) : (
-                            <span className="text-slate-500">-</span>
-                          )}
+                        <td className="py-0.5 pr-1">
+                          <input
+                            data-testid={`materials-supplier-url-${i}`}
+                            value={s.url ?? ""}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setDraft((d) => {
+                                const rows = [...(d.suppliers_json ?? [])];
+                                rows[i] = { ...rows[i], url: v };
+                                return { ...d, suppliers_json: rows };
+                              });
+                            }}
+                            className="w-full bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                            placeholder="https://"
+                          />
+                        </td>
+                        <td className="py-0.5 pr-1">
+                          <input
+                            data-testid={`materials-supplier-product-${i}`}
+                            value={s.product_url ?? ""}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setDraft((d) => {
+                                const rows = [...(d.suppliers_json ?? [])];
+                                rows[i] = { ...rows[i], product_url: v };
+                                return { ...d, suppliers_json: rows };
+                              });
+                            }}
+                            className="w-full bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                            placeholder="产品页 URL"
+                          />
+                        </td>
+                        <td className="py-0.5 text-right">
+                          <button
+                            type="button"
+                            data-testid={`materials-supplier-remove-${i}`}
+                            title="删除"
+                            onClick={() =>
+                              setDraft((d) => ({
+                                ...d,
+                                suppliers_json: (d.suppliers_json ?? []).filter((_, j) => j !== i),
+                              }))
+                            }
+                            className="text-rose-400/80 hover:text-rose-300 px-1"
+                          >
+                            ×
+                          </button>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </Modal>
       )}
