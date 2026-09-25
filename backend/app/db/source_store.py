@@ -79,8 +79,59 @@ class SourceStore:
             doc = session.get(SourceDocument, source_id)
             if doc is None:
                 return False
-            doc.archived = bool(archived)
+            want = bool(archived)
+            doc.archived = want
+            if want:
+                if getattr(doc, "archived_at", None) is None:
+                    doc.archived_at = _utcnow()
+            else:
+                doc.archived_at = None
             return True
+
+    def list_archived_expired(self, *, days: int, limit: int = 500) -> list[SourceDocument]:
+        """Archived sources older than ``days`` (by archived_at, else created_at)."""
+        from datetime import timedelta
+
+        from sqlalchemy import and_, or_
+
+        if days < 1:
+            return []
+        cutoff = _utcnow() - timedelta(days=int(days))
+        with self._session_factory() as session:
+            # Prefer archived_at; fall back to created_at for legacy rows.
+            q = (
+                session.query(SourceDocument)
+                .filter(SourceDocument.archived.is_(True))
+                .filter(
+                    or_(
+                        and_(
+                            SourceDocument.archived_at.isnot(None),
+                            SourceDocument.archived_at < cutoff,
+                        ),
+                        and_(
+                            SourceDocument.archived_at.is_(None),
+                            SourceDocument.created_at < cutoff,
+                        ),
+                    )
+                )
+                .order_by(SourceDocument.created_at.asc())
+                .limit(limit)
+            )
+            return q.all()
+
+    def count_archived_split(self) -> tuple[int, int]:
+        """Return (active_sources, archived_sources)."""
+        from sqlalchemy import func
+
+        with self._session_factory() as session:
+            total = session.query(func.count(SourceDocument.id)).scalar() or 0
+            archived = (
+                session.query(func.count(SourceDocument.id))
+                .filter(SourceDocument.archived.is_(True))
+                .scalar()
+                or 0
+            )
+            return int(total) - int(archived), int(archived)
 
     def get(self, source_id: str) -> SourceDocument | None:
         with self._session_factory() as session:

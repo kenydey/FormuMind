@@ -104,14 +104,17 @@ def _sync_suppliers(session: Session, row: MaterialRow, spec: dict, *, overwrite
     existing_json = getattr(row, "suppliers_json", None) or []
     if not overwrite and existing_json:
         return
+    from ..config import get_settings
+
+    dual_write = bool(getattr(get_settings(), "materials_suppliers_json_dual_write", True))
     cleaned = sync_material_suppliers_from_json(
         session,
         row.id,
         raw,
         source="upsert",
-        clear_json_projection=False,
+        clear_json_projection=not dual_write,
     )
-    row.suppliers_json = cleaned or None
+    row.suppliers_json = (cleaned or None) if dual_write else None
 
 
 def _hydrate_supplier_json(session: Session, rows: list[MaterialRow]) -> None:

@@ -597,6 +597,13 @@ class Settings(BaseSettings):
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600
     kb_search_scan_limit: int = 5000
+    # W4: recommended age (days) for archived-source retention purge UI/stats.
+    # 0 = retention disabled (no auto purge; POST /retention/purge still needs
+    # explicit days+confirm for any physical delete).
+    kb_archive_retention_days: int = 0
+    # W4: when False, upsert writes normalized supplier links then clears
+    # materials.suppliers_json (read path still hydrates from link tables).
+    materials_suppliers_json_dual_write: bool = True
     kb_chat_top_k: int = 20
     # 双语资料分流(2026-09-04): 中文子库 bge / 英文子库 MiniLM 按查询
     # 语言路由, 乱码/未标 chunk 不参与双语检索; 默认关(现状全库单模型),

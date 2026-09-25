@@ -170,6 +170,11 @@ _SOURCE_SOFT_COLUMNS: dict[str, tuple[str, str | None]] = {
         "archived BOOLEAN DEFAULT 0 NOT NULL",
         "CREATE INDEX ix_source_documents_archived ON source_documents (archived)",
     ),
+    # alembic 0030 — retention clock (W4)
+    "archived_at": (
+        "archived_at DATETIME",
+        "CREATE INDEX ix_source_documents_archived_at ON source_documents (archived_at)",
+    ),
 }
 
 

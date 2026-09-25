@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0029(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head (``0029_source_documents_archived``)."""
+def test_revision_chain_head_is_0030(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head (``0030_source_documents_archived_at``)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0029(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0029"
+    assert heads[0] == "0030"
 
 
 def test_migrations_partial_columns_branch(

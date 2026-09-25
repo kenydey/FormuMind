@@ -234,6 +234,8 @@ class SourceDocument(Base):
     acquisition: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Soft archive (W3): hide from default lists + retrieval; keep rows/chunks.
     archived: Mapped[bool] = mapped_column(default=False, index=True)
+    # W4: when archived flipped on; used by retention purge (nullable for legacy).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

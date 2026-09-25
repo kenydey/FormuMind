@@ -153,6 +153,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "闭环 iterate 成功后自动把 next_doe adopt 进实验台账（createWorkbenchCampaign）。"
             "默认关；与 auto_loop_on_sync 独立——开闭环不等于自动改写台账。",
             "data", "默认勿开；确认台账策略后再开"),
+    EnvFlag("materials_suppliers_json_dual_write", "材料供应商 JSON 双写",
+            "True（默认）= upsert 时同时写 material_suppliers 与 suppliers_json。"
+            "False = 只写归一化表并清空 JSON 投影（读路径仍从 link 表回填）。",
+            "data", "关前确认无旧客户端只读 JSON"),
     EnvFlag("kg_enabled", "知识图谱 P0",
             "实体索引 + 枚举型 RAG：牌号/CAS/元素完备召回，增强 Chat/CRAG。", "kb"),
     EnvFlag("kg_entities_on_ingest", "入库实体提及",

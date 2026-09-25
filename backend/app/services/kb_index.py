@@ -835,14 +835,23 @@ def kb_stats() -> dict:
     from ..db.chunk_store import get_chunk_store
     from ..db.models import SourceDocument
     from ..db.source_store import get_source_store
+    from ..config import get_settings
 
     try:
+        settings = get_settings()
         total, embedded = get_chunk_store().counts()
+        try:
+            chunks_active, chunks_archived = get_chunk_store().counts_active_archived()
+        except Exception as exc:
+            chunks_active, chunks_archived = degrade_return(
+                logger, exc, "active/archived chunk count failed", (total, 0)
+            )
         try:
             stale = get_chunk_store().count_foreign_model(_embed_model_name())
         except Exception as exc:
             stale = degrade_return(logger, exc, "stale-vector count failed", 0)
-        with get_source_store()._session_factory() as session:
+        src_store = get_source_store()
+        with src_store._session_factory() as session:
             from sqlalchemy import func
 
             sources = session.query(func.count(SourceDocument.id)).scalar() or 0
@@ -850,6 +859,12 @@ def kb_stats() -> dict:
                 session.query(SourceDocument.source_kind, func.count(SourceDocument.id))
                 .group_by(SourceDocument.source_kind)
                 .all()
+            )
+        try:
+            sources_active, sources_archived = src_store.count_archived_split()
+        except Exception as exc:
+            sources_active, sources_archived = degrade_return(
+                logger, exc, "active/archived source count failed", (int(sources), 0)
             )
         try:
             from ..db.product_store import get_product_store
@@ -865,11 +880,23 @@ def kb_stats() -> dict:
             pending_products = degrade_return(
                 logger, exc, "pending-structure count failed", 0
             )
+        scan_limit = int(getattr(settings, "kb_search_scan_limit", 5000) or 5000)
+        pressure = (
+            min(1.0, float(chunks_active) / float(scan_limit)) if scan_limit > 0 else 0.0
+        )
+        retention_days = int(getattr(settings, "kb_archive_retention_days", 0) or 0)
+        dual_write = bool(
+            getattr(settings, "materials_suppliers_json_dual_write", True)
+        )
         return {
             "enabled": kb_enabled(),
             "sources": int(sources),
+            "sources_active": int(sources_active),
+            "sources_archived": int(sources_archived),
             "sources_by_kind": {k: int(v) for k, v in by_kind.items()},
             "chunks": total,
+            "chunks_active": int(chunks_active),
+            "chunks_archived": int(chunks_archived),
             "embedded_chunks": embedded,
             "embedding_available": _embedding_probe(),
             "products": products,
@@ -878,6 +905,11 @@ def kb_stats() -> dict:
             # is something to notice rather than something to discover later.
             "products_pending_structure": pending_products,
             "stale_chunks": stale,
+            "scan_limit": scan_limit,
+            "scan_pressure": round(pressure, 4),
+            "scan_near_cap": pressure >= 0.9,
+            "archive_retention_days": retention_days,
+            "suppliers_json_dual_write": dual_write,
             **_vector_health(total, embedded, stale),
             "quality_gate_drops": _quality_gate_drops(),
         }
@@ -885,8 +917,13 @@ def kb_stats() -> dict:
         return degrade_return(
             logger, exc, "kb stats failed",
             {"enabled": kb_enabled(), "sources": 0, "sources_by_kind": {},
-             "chunks": 0, "embedded_chunks": 0, "embedding_available": False,
-             "products": 0, "quality_gate_drops": _quality_gate_drops()},
+             "sources_active": 0, "sources_archived": 0,
+             "chunks": 0, "chunks_active": 0, "chunks_archived": 0,
+             "embedded_chunks": 0, "embedding_available": False,
+             "products": 0, "scan_limit": 5000, "scan_pressure": 0.0,
+             "scan_near_cap": False, "archive_retention_days": 0,
+             "suppliers_json_dual_write": True,
+             "quality_gate_drops": _quality_gate_drops()},
         )
 
 

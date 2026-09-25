@@ -185,6 +185,24 @@ class ChunkStore:
             )
             return int(total), int(embedded)
 
+    def counts_active_archived(self) -> tuple[int, int]:
+        """(active_chunks, archived_chunks) via SourceDocument.archived.
+
+        Orphan chunks (no source row) count as active — same as retrieval OUTER JOIN.
+        """
+        from .models import SourceDocument
+
+        with self._session_factory() as session:
+            total = session.query(func.count(DocumentChunk.id)).scalar() or 0
+            archived = (
+                session.query(func.count(DocumentChunk.id))
+                .join(SourceDocument, DocumentChunk.source_id == SourceDocument.id)
+                .filter(SourceDocument.archived.is_(True))
+                .scalar()
+                or 0
+            )
+            return int(total) - int(archived), int(archived)
+
     def count_foreign_model(self, model_name: str) -> int:
         """Embedded chunks produced by some *other* embedding model.
 
