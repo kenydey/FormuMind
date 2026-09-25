@@ -230,6 +230,8 @@ class FormulationExplain(BaseModel):
     bias_corrected: bool = False
     bias_corrected_metrics: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # Post-A′ #2: Requirement field → recommend/DOE wiring audit (display).
+    effect_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class Formulation(BaseModel):

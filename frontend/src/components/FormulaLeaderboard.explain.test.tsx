@@ -22,6 +22,15 @@ describe("FormulaExplainPanel", () => {
           bias_corrected: true,
           bias_corrected_metrics: ["salt_spray_hours"],
           notes: ["barrier"],
+          effect_trace: [
+            {
+              field: "objectives.salt_spray_hours",
+              kind: "objective",
+              label: "salt_spray_hours",
+              status: "wired",
+              consumers: ["recommend"],
+            },
+          ],
         }}
       />,
     );
@@ -31,6 +40,7 @@ describe("FormulaExplainPanel", () => {
     expect(screen.getByTestId("explain-misses")).toHaveTextContent("adhesion");
     expect(screen.getByTestId("explain-evidence")).toHaveTextContent("patent:US123");
     expect(screen.getByTestId("explain-supply")).toHaveTextContent("供应风险");
+    expect(screen.getByTestId("explain-effect-trace")).toHaveTextContent("生效");
   });
 
   it("shows score-only fallback", () => {

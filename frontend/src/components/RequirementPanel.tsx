@@ -8,6 +8,8 @@ import {
 } from "../utils/objectiveContract";
 import ConstraintsEditor from "./ConstraintsEditor";
 import LeversEditor from "./LeversEditor";
+import ConstraintEffectTrace from "./ConstraintEffectTrace";
+import { previewRequirementEffectTrace } from "../utils/requirementEffectTrace";
 
 function IntentParser() {
   const { applyIntent, intentBusy } = useStore(
@@ -595,6 +597,8 @@ export default function RequirementPanel({ embedded }: { embedded?: boolean }) {
         onUpdateCustom={updateCustomConstraint}
         locked={locked}
       />
+
+      <ConstraintEffectTrace items={previewRequirementEffectTrace(requirement)} />
 
       <div className="flex gap-2 mb-3">
         <button
