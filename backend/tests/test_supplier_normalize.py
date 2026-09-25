@@ -63,6 +63,45 @@ def test_upsert_dual_writes_normalized_tables(store):
         assert session.query(MaterialSupplierRow).count() == 2
 
 
+def test_upsert_clears_json_when_dual_write_off(store, monkeypatch):
+    """W4: materials_suppliers_json_dual_write=False → links only, JSON cleared."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("FORMUMIND_MATERIALS_SUPPLIERS_JSON_DUAL_WRITE", "false")
+    get_settings.cache_clear()
+    try:
+        ok = store.upsert(
+            "Barium sulfate",
+            {
+                "role": "filler",
+                "suppliers_json": [{"name": "Solo Vendor", "url": "https://solo.example"}],
+            },
+            origin="user",
+            overwrite=True,
+        )
+        assert ok is True
+        with store._session_factory() as session:
+            from app.db.material_store import norm_key
+            from app.db.models import MaterialRow
+
+            raw = (
+                session.query(MaterialRow)
+                .filter(MaterialRow.norm_key == norm_key("Barium sulfate"))
+                .one()
+            )
+            assert raw.suppliers_json is None
+            assert session.query(SupplierRow).count() >= 1
+            assert session.query(MaterialSupplierRow).count() >= 1
+        # Read path still hydrates from link tables.
+        row = store.get("Barium sulfate")
+        assert row is not None
+        assert row.suppliers_json == [
+            {"name": "Solo Vendor", "url": "https://solo.example", "product_url": None}
+        ]
+    finally:
+        get_settings.cache_clear()
+
+
 def test_backfill_from_legacy_json(store):
     # Simulate legacy row: JSON present, no links yet (write JSON via raw column).
     store.upsert("Epoxy resin", {"role": "resin"}, origin="seed", overwrite=True)
