@@ -801,8 +801,27 @@ export default function LabWorkbench({
               )}
             </span>
             <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
-              <input type="checkbox" checked={autoLoopOnSync} onChange={(e) => setAutoLoopOnSync(e.target.checked)} className="rounded border-edge" />
+              <input
+                type="checkbox"
+                checked={autoLoopOnSync}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  if (on) {
+                    const ok = window.confirm(
+                      "开启「保存后自动闭环」？\n\nCompleted 行保存后将触发 optimize + 下一轮 DOE。\n不会自动写 next_doe 到台账（需在闭环面板另开「自动采纳 DOE」）。",
+                    );
+                    if (!ok) return;
+                  }
+                  setAutoLoopOnSync(on);
+                }}
+                className="rounded border-edge"
+              />
               保存后自动分析收敛并建议下一轮
+              {autoLoopOnSync && (
+                <span className="text-amber-300/90" data-testid="workbench-auto-loop-on">
+                  · 已开
+                </span>
+              )}
             </label>
           </div>
           <div className="flex items-center gap-2 shrink-0">

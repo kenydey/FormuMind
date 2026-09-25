@@ -65,11 +65,24 @@ describe("LoopModal W5 retry / auto-adopt", () => {
     expect(retryLoop).toHaveBeenCalled();
   });
 
-  it("toggles auto-adopt checkbox", async () => {
+  it("toggles auto-adopt checkbox after confirm", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<LoopModal />);
     const box = (await screen.findByTestId("loop-auto-adopt")).querySelector("input")!;
     expect(box.checked).toBe(false);
     fireEvent.click(box);
+    expect(confirmSpy).toHaveBeenCalled();
     expect(useStore.getState().autoAdoptNextDoeOnLoop).toBe(true);
+    expect(await screen.findByTestId("loop-auto-adopt-warn")).toBeTruthy();
+    confirmSpy.mockRestore();
+  });
+
+  it("cancels auto-adopt when confirm rejected", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<LoopModal />);
+    const box = (await screen.findByTestId("loop-auto-adopt")).querySelector("input")!;
+    fireEvent.click(box);
+    expect(useStore.getState().autoAdoptNextDoeOnLoop).toBe(false);
+    confirmSpy.mockRestore();
   });
 });

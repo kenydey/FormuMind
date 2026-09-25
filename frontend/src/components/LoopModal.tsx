@@ -157,22 +157,53 @@ export default function LoopModal() {
           DOE。形成 实验→数据→优化→新实验 的数字闭环。
         </p>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <label className="flex items-center gap-1 text-[10px] text-slate-400 border border-edge rounded px-1.5 py-1">
-            <input type="checkbox" checked={autoLoopOnSync} onChange={(e) => setAutoLoopOnSync(e.target.checked)} className="accent-accent2" />
-            自主
-          </label>
           <label
             className="flex items-center gap-1 text-[10px] text-slate-400 border border-edge rounded px-1.5 py-1"
             data-testid="loop-auto-adopt"
-            title="闭环成功后自动把 next_doe 写入台账（默认关）"
+            title="闭环成功后自动把 next_doe 写入台账（默认关；开启需确认）"
           >
             <input
               type="checkbox"
               checked={autoAdoptNextDoeOnLoop}
-              onChange={(e) => setAutoAdoptNextDoeOnLoop(e.target.checked)}
+              onChange={(e) => {
+                const on = e.target.checked;
+                if (on) {
+                  const ok = window.confirm(
+                    "开启「自动采纳 DOE」？\n\n闭环成功后会把 next_doe 写入实验台账（不可静默撤销）。\n建议仅在已审 campaign 上开启；与「自主」闭环独立。",
+                  );
+                  if (!ok) return;
+                }
+                setAutoAdoptNextDoeOnLoop(on);
+              }}
               className="accent-accent2"
             />
             自动采纳 DOE
+          </label>
+          {autoAdoptNextDoeOnLoop && (
+            <span
+              className="text-[9px] text-amber-300/90 border border-amber-500/30 rounded px-1.5 py-0.5"
+              data-testid="loop-auto-adopt-warn"
+            >
+              将写入台账
+            </span>
+          )}
+          <label className="flex items-center gap-1 text-[10px] text-slate-400 border border-edge rounded px-1.5 py-1">
+            <input
+              type="checkbox"
+              checked={autoLoopOnSync}
+              onChange={(e) => {
+                const on = e.target.checked;
+                if (on) {
+                  const ok = window.confirm(
+                    "开启「自主」闭环？\n\n台账保存 Completed 后将自动触发 optimize + 下一轮 DOE。\n默认仍不自动采纳 DOE（需另开「自动采纳」）。",
+                  );
+                  if (!ok) return;
+                }
+                setAutoLoopOnSync(on);
+              }}
+              className="accent-accent2"
+            />
+            自主
           </label>
           {autoLoopOnSync && (
             <span className="flex items-center gap-1 text-[10px] text-slate-400">
