@@ -186,6 +186,145 @@ function KnowledgeBaseCard({
   );
 }
 
+/** Top-5 #5: dry-run → confirm purge of soft-archived sources past retention days. */
+function RetentionPurgeCard({
+  stats,
+  onPurged,
+}: {
+  stats: KBStats | null;
+  onPurged: () => void;
+}) {
+  const [days, setDays] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<
+    Array<{ source_id: string; title?: string | null; archived_at?: string | null }>
+  >([]);
+
+  const nearCap = Boolean(stats?.scan_near_cap);
+  const archived = stats?.sources_archived ?? 0;
+
+  async function runDry() {
+    setBusy(true);
+    setReport(null);
+    try {
+      const out = await api.kbRetentionPurge({ days, dry_run: true, confirm: false });
+      setCandidates(out.candidates || []);
+      setReport(
+        `预览：${out.candidate_count} 条归档源超过 ${out.days} 天` +
+          (out.candidate_count ? "（确认后才会物理删除）" : ""),
+      );
+    } catch (e) {
+      setReport(`预览失败: ${e instanceof Error ? e.message : String(e)}`);
+      setCandidates([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runPurge() {
+    if (candidates.length === 0) {
+      setReport("请先预览；当前无候选");
+      return;
+    }
+    const ok = window.confirm(
+      `确认物理删除 ${candidates.length} 条已软归档且超过 ${days} 天的知识库文档？\n此操作不可撤销（切块/提及一并清理）。`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setReport(null);
+    try {
+      const out = await api.kbRetentionPurge({
+        days,
+        dry_run: false,
+        confirm: true,
+      });
+      setReport(
+        out.ok
+          ? `已清理 ${out.purged_count} / ${out.candidate_count} 条`
+          : `清理部分失败：成功 ${out.purged_count}，错误 ${out.errors?.length ?? 0}`,
+      );
+      setCandidates([]);
+      onPurged();
+    } catch (e) {
+      setReport(`清理失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className={`border rounded p-2 ${
+        nearCap ? "border-amber-500/50 bg-amber-500/5" : "border-edge/60"
+      }`}
+      data-testid="kb-retention-purge"
+    >
+      <div className="flex items-center justify-between mb-1 gap-2">
+        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+          归档清理
+          {nearCap && <span className="text-amber-300 ml-1">· 扫描近上限</span>}
+          {archived > 0 && (
+            <span className="text-slate-500 ml-1 normal-case">（已归档 {archived}）</span>
+          )}
+        </div>
+      </div>
+      <p className="text-[10px] text-slate-500 mb-1.5">
+        仅删除<strong>已软归档</strong>且超龄源；默认先预览。不会自动 TTL。
+      </p>
+      <div className="flex flex-wrap items-center gap-2 text-[10px]">
+        <label className="flex items-center gap-1 text-slate-400">
+          超过
+          <input
+            type="number"
+            min={1}
+            max={3650}
+            value={days}
+            onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 1))}
+            className="w-14 bg-ink border border-edge rounded px-1 py-0.5 text-slate-300"
+            data-testid="kb-retention-days"
+          />
+          天
+        </label>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void runDry()}
+          className="px-1.5 py-0.5 rounded border border-edge text-slate-400 hover:text-slate-200 disabled:opacity-50"
+          data-testid="kb-retention-dry-run"
+        >
+          {busy ? "…" : "预览"}
+        </button>
+        <button
+          type="button"
+          disabled={busy || candidates.length === 0}
+          onClick={() => void runPurge()}
+          className="px-1.5 py-0.5 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 disabled:opacity-40"
+          data-testid="kb-retention-confirm"
+        >
+          确认清理
+        </button>
+      </div>
+      {report && (
+        <div className="mt-1 text-[10px] text-slate-400" data-testid="kb-retention-report">
+          {report}
+        </div>
+      )}
+      {candidates.length > 0 && (
+        <ul className="mt-1 max-h-24 overflow-auto text-[10px] text-slate-500 space-y-0.5">
+          {candidates.slice(0, 20).map((c) => (
+            <li key={c.source_id}>
+              {(c.title || c.source_id).slice(0, 60)}
+              {c.archived_at ? ` · ${c.archived_at.slice(0, 10)}` : ""}
+            </li>
+          ))}
+          {candidates.length > 20 && <li>…另有 {candidates.length - 20} 条</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Human labels for the extra groups, in display order.
 const EXTRA_LABELS: Record<string, string> = {
   llm: "大模型供应商 · LLM",
@@ -1268,6 +1407,12 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
 
       <ChemToolsCard status={chemTools} />
       <KnowledgeBaseCard stats={kbStats} onReindex={() => void reindexKb()} reindexing={kbReindexing} />
+      <RetentionPurgeCard
+        stats={kbStats}
+        onPurged={() => {
+          void api.kbStats().then(setKbStats).catch(() => undefined);
+        }}
+      />
 
       <KbDiagnosticsCard />
 
