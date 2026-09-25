@@ -70,6 +70,9 @@ _EVENT_SECTIONS: dict[str, list[str]] = {
     "attachment_uploaded": ["S7_artifacts", "S5_lab_ledger", "S8_open_questions"],
 }
 
+# Top-5′ #3: only mapped events may auto-patch (unknown → skip, never full 8).
+_SAFE_AUTO_PATCH_EVENTS: frozenset[str] = frozenset(_EVENT_SECTIONS.keys())
+
 
 def _require_dossier_enabled() -> None:
     settings = get_settings()
@@ -770,6 +773,9 @@ def notify_dossier_event(
 ) -> dict[str, Any]:
     """
     Event hook for auto patch. No-op unless ``wiki_dossier_auto_patch`` is true.
+
+    Top-5′ #3: only allowlisted events in ``_EVENT_SECTIONS`` fire; unknown
+    events are skipped (never fall back to all eight sections).
     Safe to call from project update / ingest / DOE / lab / loop paths.
     """
     settings = get_settings()
@@ -780,15 +786,29 @@ def notify_dossier_event(
     if not getattr(settings, "wiki_dossier_auto_patch", False):
         return {"ok": True, "skipped": True, "reason": "auto_patch_off", "event": event}
 
-    secs = sections or _EVENT_SECTIONS.get(event) or list(DOSSIER_SECTIONS)
+    ev = (event or "").strip()
+    if sections is None and ev not in _SAFE_AUTO_PATCH_EVENTS:
+        logger.info(
+            "dossier auto_patch skip unknown event=%s project=%s (allowlist only)",
+            ev,
+            project_id,
+        )
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "event_not_allowlisted",
+            "event": ev,
+        }
+
+    secs = sections or _EVENT_SECTIONS.get(ev) or list(DOSSIER_SECTIONS)
     try:
         out = refresh_dossier(project_id, campaign_id=campaign_id, sections=secs)
-        out["event"] = event
+        out["event"] = ev
         out["skipped"] = False
         return out
     except Exception as exc:
-        logger.warning("dossier auto_patch failed project=%s event=%s: %s", project_id, event, exc)
-        return {"ok": False, "error": str(exc), "event": event}
+        logger.warning("dossier auto_patch failed project=%s event=%s: %s", project_id, ev, exc)
+        return {"ok": False, "error": str(exc), "event": ev, "skipped": False}
 
 
 def notify_dossier_event_for_campaign(

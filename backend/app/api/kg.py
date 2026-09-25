@@ -262,25 +262,33 @@ def rebuild(body: KGRebuildBody | None = None) -> KGRebuildReport:
 
 
 class KgRelationsRebuildBody(BaseModel):
-    """关系重建请求: source_id 限定单源(None=全部含提及的源, LLM 慢)."""
+    """关系重建请求: source_id 限定单源(None=全部含提及的源)。
+
+    ``limit`` 成本帽（全库时最多处理多少源；默认 50）。
+    """
 
     source_id: str | None = None
+    limit: int | None = 50
 
 
 @router.post("/relations/rebuild")
 def rebuild_relations_api(body: KgRelationsRebuildBody | None = None):
-    """异步补语义关系(2026-09-05): 实体/提及已在库, 只重跑关系提取。
+    """异步补语义关系(2026-09-05 / Top-5′ #4): 实体/提及已在库, 只重跑关系提取。
 
-    关系层(LLM)可能数十秒~数十分钟, 走 celery 异步 + 202 accepted,
-    前端轮询 GET /api/tasks/{task_id}。同步 CLI 等价:
-    python -m app.services.kg.rebuild_relations --all
+    不依赖 ``kg_relation_extract_enabled``（该旗标只控制入库同步）。
+    关系层可能数十秒~数十分钟, 走 celery 异步 + 202 accepted,
+    前端轮询 GET /api/tasks/{task_id}。
     """
     if not kg_enabled():
         raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
     from ..worker.tasks import run_kg_relations_rebuild
     from ._dispatch import submit
 
-    payload = {"source_id": (body.source_id if body else None)}
+    b = body or KgRelationsRebuildBody()
+    lim = b.limit
+    if lim is not None:
+        lim = max(1, min(int(lim), 500))
+    payload = {"source_id": b.source_id, "limit": lim, "force": True}
     return submit(run_kg_relations_rebuild, payload, "kg_relations_rebuild")
 
 

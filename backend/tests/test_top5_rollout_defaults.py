@@ -23,11 +23,14 @@ def test_wiki_grayscale_product_defaults_on():
     assert s.wiki_project_dossier_enabled is True
     assert s.wiki_dossier_report_enabled is True
     assert s.wiki_chat_save_draft is True
+    assert s.wiki_storm_report_enabled is True
     # Trust boundaries stay off.
     assert s.wiki_dossier_auto_patch is False
     assert s.wiki_dossier_llm_narrative is False
     assert s.auto_loop_on_sync is False
     assert s.auto_adopt_next_doe_on_loop is False
+    assert s.kg_relations_on_ingest is False
+    assert s.kg_relation_extract_enabled is False
 
 
 def test_kb_search_deny_flag_registered():

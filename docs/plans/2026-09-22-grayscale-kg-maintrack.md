@@ -58,4 +58,5 @@ python3 scripts/workbench_dossier_s5_smoke.py   # ELN 可达时
 - [x] `test_grayscale_kg_maintrack_gate.py` 锁灰度 dossier/report + KG stats
 - [x] `scripts/grayscale_kg_maintrack_smoke.py` 活栈冒烟
 - [x] **代码侧 G5/G6 可观测**：`2026-09-23-kg-measured-observability.md`（tip / strip / 折叠芯片）
-- [ ] 真人项目勾完 G1–G6（运营）
+- [x] **自动化 G1–G4 证据（Top-5′ #1，2026-09-25）**：卷宗/Report 默认开 + smoke 覆盖 ensure/refresh/briefing/export + Chat 草稿/STORM 旗标断言；Workbench 真人 G5/G6 仍建议运营勾一次
+- [ ] 真人项目勾完 G5–G6（运营 · ELN 可达环境）

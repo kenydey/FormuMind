@@ -580,8 +580,10 @@ class Settings(BaseSettings):
     # Phase 5: generate Hub reports from DossierPack.
     # Top-5 #3：与卷宗一并默认 ON（draft_not_claims；可关）。
     wiki_dossier_report_enabled: bool = True
-    # STORM longform report (async L2 draft). Default OFF — does not alter sync /dossier/report.
-    wiki_storm_report_enabled: bool = False
+    # STORM longform report (async L2 draft). Top-5′ #2（2026-09-25）：
+    # 默认 ON（draft_not_claims；受 wiki_storm_max_sections 成本帽；可关）。
+    # 不改同步短 Report；并行分章仍默认关。
+    wiki_storm_report_enabled: bool = True
     # Cap sections for STORM drafting (cost / latency guardrails).
     wiki_storm_max_sections: int = 6
     # P5: draft ready sections (depends_on satisfied) in a thread pool. Default OFF.

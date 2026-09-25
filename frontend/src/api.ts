@@ -2129,9 +2129,10 @@ export const api = {
       note?: string;
     }>("/api/formulations/confirm-embodiment-draft", { draft }),
 
-  kgRelationsRebuild: (sourceId?: string) =>
+  kgRelationsRebuild: (sourceId?: string, opts?: { limit?: number }) =>
     post<{ task_id: string; status_url: string }>("/api/kg/relations/rebuild", {
       source_id: sourceId ?? null,
+      limit: opts?.limit ?? 50,
     }),
 
   // ── Neo4j 图谱适配层 ──

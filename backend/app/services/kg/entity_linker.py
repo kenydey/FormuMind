@@ -121,19 +121,31 @@ def rebuild_relations(
     source_ids: list[str] | None = None,
     *,
     settings: Settings | None = None,
+    limit: int | None = None,
+    force: bool = True,
 ) -> dict:
     """重跑关系提取，不重跑实体提及（mentions 已在库）。
 
-    闲时/按需补语义关系：实体提及快（入库同步），关系提取（尤其 LLM）慢，
-    这里只跑后者。``source_ids`` 限定范围，None = 所有含 mentions 的 source。
+    Top-5′ #4: 按需补齐路径默认 ``force=True``，**不**要求
+    ``kg_relation_extract_enabled``（该旗标只闸 *入库同步* 路径）。
+    ``limit`` 限制处理源数量（API 成本帽）；None = 不切帽。
     """
     settings = settings or get_settings()
-    if not settings.kg_enabled or not settings.kg_relation_extract_enabled:
-        return {"rebuilt_sources": 0, "relations_upserted": 0}
+    if not settings.kg_enabled:
+        return {"rebuilt_sources": 0, "relations_upserted": 0, "skipped": "kg_disabled"}
+    if not force and not settings.kg_relation_extract_enabled:
+        return {
+            "rebuilt_sources": 0,
+            "relations_upserted": 0,
+            "skipped": "relation_extract_disabled",
+        }
     store = get_entity_store()
     if source_ids is None:
         with store._session_factory() as session:
             source_ids = [r[0] for r in session.query(KGMention.source_id).distinct().all()]
+    total_candidates = len(source_ids)
+    if limit is not None and int(limit) > 0:
+        source_ids = list(source_ids)[: int(limit)]
     total = 0
     for sid in source_ids:
         store.delete_links_for_source(sid)
@@ -141,9 +153,16 @@ def rebuild_relations(
         n = 0
         with commit_session(store._session_factory) as session:
             for chunk in chunks:
-                n += _extract_relations_for_chunk(session, chunk, sid, settings)
+                n += _extract_relations_for_chunk(
+                    session, chunk, sid, settings, force=force
+                )
         total += n
-    return {"rebuilt_sources": len(source_ids), "relations_upserted": total}
+    return {
+        "rebuilt_sources": len(source_ids),
+        "relations_upserted": total,
+        "candidate_sources": total_candidates,
+        "limit": limit,
+    }
 
 
 def _link_chunk(session: Session, chunk, source_id: str, settings: Settings) -> tuple[int, set[str], int]:
@@ -267,7 +286,14 @@ def _link_chunk(session: Session, chunk, source_id: str, settings: Settings) -> 
     return mention_count, touched, link_count
 
 
-def _extract_relations_for_chunk(session: Session, chunk, source_id: str, settings: Settings) -> int:
+def _extract_relations_for_chunk(
+    session: Session,
+    chunk,
+    source_id: str,
+    settings: Settings,
+    *,
+    force: bool = False,
+) -> int:
     from .relation_extractor import extract_relations_from_chunk
 
     mentions = (
@@ -289,6 +315,7 @@ def _extract_relations_for_chunk(session: Session, chunk, source_id: str, settin
         source_id=source_id,
         chunk_id=chunk.id,
         settings=settings,
+        force=force,
     )
     store = get_entity_store()
     saved = 0

@@ -176,8 +176,50 @@ def main() -> int:
             f"measured_domain={body.get('measured_domain')}"
         )
 
+    # G4-ish: Chat 存草稿入口可达（旗标默认开）
+    code, flags = req("GET", "/api/settings/env-flags")
+    flag_map = {}
+    if code == 200 and isinstance(flags, dict):
+        flag_map = {f.get("attr"): f for f in (flags.get("flags") or [])}
+    for attr, want in (
+        ("wiki_chat_save_draft", True),
+        ("wiki_storm_report_enabled", True),
+        ("wiki_dossier_auto_patch", False),
+    ):
+        f = flag_map.get(attr) or {}
+        check(
+            f"flag default {attr}={want}",
+            bool(f.get("value")) is want or f.get("default") is want or f.get("value") == want,
+            str(f)[:160],
+        )
+
+    # STORM 旗标开时 API 接受（离线草稿，不强制跑完 LLM）
+    code, body = req(
+        "POST",
+        "/api/wiki/storm/report",
+        {
+            "project_id": pid,
+            "topic": "灰度冒烟 STORM",
+            "max_sections": 3,
+            "use_llm": False,
+        },
+    )
+    check(
+        "storm report accepted",
+        code in (200, 202) and isinstance(body, dict) and bool(body.get("task_id") or body.get("ok")),
+        str(body)[:240],
+    )
+
+    # KG relations rebuild accepts with limit (async)
+    code, body = req("POST", "/api/kg/relations/rebuild", {"limit": 5})
+    check(
+        "kg relations rebuild accepted",
+        code in (200, 202) and isinstance(body, dict) and bool(body.get("task_id")),
+        str(body)[:240],
+    )
+
     print(f"\nproject_id = {pid}")
-    print("Next: Hub Wiki 卷宗 / Reports / Workbench sync → KG 回流提示")
+    print("Next: Hub Wiki 卷宗 / Reports STORM / Workbench sync → KG 回流提示")
     print("Checklist: docs/plans/2026-09-22-grayscale-kg-maintrack.md")
 
     if FAILURES:

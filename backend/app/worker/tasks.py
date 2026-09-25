@@ -1399,19 +1399,22 @@ def noop_task(*args: object, **kwargs: object) -> str:
 
 @celery_app.task(bind=True, name="formumind.kg_relations_rebuild", soft_time_limit=5400, time_limit=7200)
 def run_kg_relations_rebuild(self, payload: dict) -> dict:
-    """补语义关系提取(2026-09-05): 实体/提及已在库, 只重跑关系(LLM 慢).
+    """补语义关系提取: 实体/提及已在库, 只重跑关系(LLM 慢).
 
-    SQLite kg 实体 715/提及 7 万, 但 kb_entity_links 为 0 —— 关系层从未
-    产出; rebuild_relations CLI 存在却无 API 入口。``source_id`` 限定单源,
-    None = 全部含提及的源。worker 侧异步跑, 完成结果写 celery result。
+    Top-5′ #4: ``force=True`` 默认，不要求 kg_relation_extract_enabled。
+    ``limit`` 限制源数量（默认 50）。
     """
     task_id = self.request.id
     try:
         from ..services.kg.entity_linker import rebuild_relations
 
         source_id = payload.get("source_id")
+        limit = payload.get("limit")
+        force = bool(payload.get("force", True))
         result = rebuild_relations(
             [source_id] if source_id else None,
+            limit=int(limit) if limit is not None else None,
+            force=force,
         )
         return {
             "task_id": task_id,

@@ -167,11 +167,12 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "文档切块入库后自动写入 kb_entities / kb_mentions（快，枚举 RAG 根基）。", "kb"),
     EnvFlag("kg_relations_on_ingest", "入库关系提取",
             "入库时抽取实体语义关系写入 kb_entity_links（慢，LLM 关系建议后置）。"
-            "关闭时实体/提及仍会写入，但关系层保持为空——Settings「补语义关系」"
-            "或 POST /api/kg/relations/rebuild 可事后补齐；/api/kg/stats 会告警。",
+            "关闭时实体/提及仍会写入——Settings「补语义关系」或 POST /api/kg/relations/rebuild "
+            "可事后补齐（不依赖本旗标 / kg_relation_extract_enabled；Top-5′ #4）。",
             "kb"),
     EnvFlag("kg_relation_extract_enabled", "KG 语义关系抽取",
-            "link_source 时从 chunk 文本抽取 substitutes/synergizes 等语义关系。", "kb"),
+            "link_source 入库同步时抽取 substitutes/synergizes 等。"
+            "异步 rebuild 可 force 绕过本旗标。", "kb"),
     EnvFlag("kg_llm_relation_extract", "KG LLM 关系抽取",
             "规则未命中时用 LLM 补充关系抽取（增加成本）。", "kb", "需有效 LLM key"),
     EnvFlag("kg_multimodal_fusion_enabled", "多模态图谱融合",
@@ -239,15 +240,16 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "允许对 Dossier 叙述段调用 LLM；表格数字仍确定性写入（默认关）。",
             "kb", "依赖 wiki_project_dossier_enabled"),
     EnvFlag("wiki_dossier_auto_patch", "卷宗事件自动更新",
-            "要求/入库/DOE/台账/闭环事件自动 patch 对应节（默认关，先手动 API）。",
-            "kb", "依赖 wiki_project_dossier_enabled"),
+            "要求/入库/DOE/台账/闭环等白名单事件自动 patch 对应节（默认关）。"
+            "仅 _EVENT_SECTIONS 映射事件生效；未知事件跳过（不全量刷 8 节）。",
+            "kb", "依赖 wiki_project_dossier_enabled；默认勿开，确认事件子集后再开"),
     EnvFlag("wiki_dossier_report_enabled", "卷宗 Report 生成",
             "基于 DossierPack 生成 briefing/feasibility 等研发草稿（P5，默认开 · Top-5 #3）。",
             "kb", "依赖 wiki_project_dossier_enabled；draft_not_claims；LLM 润色另受 wiki_dossier_llm_narrative"),
     EnvFlag("wiki_storm_report_enabled", "STORM 长文报告",
             "异步 STORM 风格多章长文（大纲→分章→缝合）；落 reports/*-storm.md；"
-            "L2 draft_not_claims，不进 Claims/DOE。默认关；不改同步短 Report。",
-            "kb", "依赖 wiki_enabled + wiki_project_dossier_enabled + wiki_dossier_report_enabled"),
+            "L2 draft_not_claims，不进 Claims/DOE。默认开（Top-5′ #2）；不改同步短 Report。",
+            "kb", "依赖 wiki_enabled + wiki_project_dossier_enabled + wiki_dossier_report_enabled；可关"),
     EnvFlag("wiki_storm_parallel", "STORM 分章有限并行",
             "depends_on 已满足的章节在同一波次用线程池并行起草（非 Celery chord）。"
             "默认关；仍受 wiki_storm_report_enabled 约束。",

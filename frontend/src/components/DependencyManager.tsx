@@ -565,14 +565,16 @@ function KbDiagnosticsCard() {
 
   async function runRelationsRebuild() {
     const all = window.confirm(
-      "补语义关系提取(实体已在库, 只重跑关系)。全库执行可能 10-60 分钟(LLM 逐句); 建议先对单条资料测试。确定全库执行?"
+      "补语义关系提取（实体已在库，只重跑关系）。\n默认最多处理 50 个源（成本帽）；全库可能很慢。\n入库同步关系仍默认关。确定启动？"
     );
     if (!all) return;
     setRelBusy(true);
     setReport(null);
     try {
-      const r = await api.kgRelationsRebuild(undefined);
-      setReport(`关系重建已后台启动 (task ${r.task_id.slice(0, 8)}…) — 可稍后刷新本卡查看产出`);
+      const r = await api.kgRelationsRebuild(undefined, { limit: 50 });
+      setReport(
+        `关系重建已后台启动 (task ${r.task_id.slice(0, 8)}…) — 默认 limit=50；可稍后刷新本卡查看产出`
+      );
       setRelTaskId(r.task_id);
       await refreshKgStats();
     } catch (e) {

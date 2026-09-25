@@ -278,10 +278,15 @@ def extract_relations_from_chunk(
     source_id: str,
     chunk_id: str,
     settings: Settings | None = None,
+    force: bool = False,
 ) -> list[ExtractedRelation]:
-    """Extract semantic relations using rules and optional LLM fallback."""
+    """Extract semantic relations using rules and optional LLM fallback.
+
+    ``force=True`` bypasses ``kg_relation_extract_enabled`` (used by async
+    rebuild; that flag only gates *ingest-time* linking).
+    """
     settings = settings or get_settings()
-    if not settings.kg_relation_extract_enabled:
+    if not force and not settings.kg_relation_extract_enabled:
         return []
     if len(mentions) < 2:
         return []

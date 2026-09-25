@@ -288,11 +288,13 @@ def test_event_section_matrix_routing(env, monkeypatch):
         # Must not request the full eight-section set for known events
         assert set(captured[0]) != set(dossier_mod.DOSSIER_SECTIONS)
 
-    # Unknown event → fall back to all sections
+    # Unknown event → allowlist skip (Top-5′ #3; never full eight-section refresh)
     captured.clear()
     out = notify_dossier_event(pid, "totally_unknown_event")
     assert out.get("ok") is True
-    assert set(captured[0]) == set(dossier_mod.DOSSIER_SECTIONS)
+    assert out.get("skipped") is True
+    assert out.get("reason") == "event_not_allowlisted"
+    assert captured == []
 
 
 def test_notify_doe_event_only_bumps_mapped_revisions(env, monkeypatch):

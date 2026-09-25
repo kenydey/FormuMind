@@ -452,8 +452,9 @@ export default function HubReportsPlaceholderPane() {
           <div>
             <h3 className="text-sm text-slate-100">STORM 长文（异步）</h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              大纲 → 分章 → 缝合；落盘 `reports/*-storm.md` · draft_not_claims · 需另开
-              wiki_storm_report_enabled
+              大纲 → 分章 → 缝合；落盘 `reports/*-storm.md` ·{" "}
+              <span className="text-amber-300/90">draft_not_claims</span>
+              （不进 Claims/DOE）· 默认已开旗标；受 max_sections 成本帽
             </p>
           </div>
           {!stormReady && flagsReady && (
