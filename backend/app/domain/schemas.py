@@ -218,6 +218,20 @@ class Ingredient(BaseModel):
         return self
 
 
+class FormulationExplain(BaseModel):
+    """Batch C: structured 「为何推荐」 display contract (no ranking effect)."""
+
+    objectives_hit: list[str] = Field(default_factory=list)
+    constraints_miss: list[str] = Field(default_factory=list)
+    evidence_refs: list[dict[str, str]] = Field(default_factory=list)
+    kg_signals: dict[str, Any] = Field(default_factory=dict)
+    supply_flags: list[str] = Field(default_factory=list)
+    uncertainty: list[str] = Field(default_factory=list)
+    bias_corrected: bool = False
+    bias_corrected_metrics: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class Formulation(BaseModel):
     name: str
     domain: ProductDomain
@@ -235,6 +249,8 @@ class Formulation(BaseModel):
     # Top-5‴ #2: metrics whose predicted values were soft-corrected by
     # prediction_bias.mean_error (flag-gated; empty when off).
     bias_corrected_metrics: list[str] = Field(default_factory=list)
+    # Batch C: structured explain for FormulaLeaderboard (optional on older rows).
+    explain: FormulationExplain | None = None
 
     def total_pct(self) -> float:
         return round(sum(i.weight_pct for i in self.ingredients), 4)

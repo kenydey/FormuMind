@@ -180,7 +180,7 @@ export interface AppState {
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;
   /** Knowledge Hub card tab when openModal === "knowledge". */
-  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports" | "retrieval";
+  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports" | "retrieval" | "quality";
   // ── 多会话聊天 actions(2026-09-05 A1) ──
   setChatSessionsOpen: (open: boolean) => void;
   refreshChatSessions: () => Promise<void>;

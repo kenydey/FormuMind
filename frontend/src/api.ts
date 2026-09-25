@@ -191,6 +191,27 @@ export interface Formulation {
   } | null;
   /** Top-5‴ #2: metrics soft-corrected by prediction_bias.mean_error. */
   bias_corrected_metrics?: string[];
+  /** Batch C: structured 「为何推荐」 (optional on older rows). */
+  explain?: FormulationExplain | null;
+}
+
+export interface FormulationExplain {
+  objectives_hit?: string[];
+  constraints_miss?: string[];
+  evidence_refs?: { source_type: string; source_id: string }[];
+  kg_signals?: {
+    feasible?: boolean;
+    status?: string;
+    measured_materials?: string[];
+    measured_metric_hits?: unknown[];
+    inhibits?: string[];
+    synergizes?: string[];
+  };
+  supply_flags?: string[];
+  uncertainty?: string[];
+  bias_corrected?: boolean;
+  bias_corrected_metrics?: string[];
+  notes?: string[];
 }
 
 export interface EvidenceEntityRef {
@@ -598,6 +619,17 @@ export interface WorkbenchCampaignResponse {
   primary_metric?: string | null;
   objectives_snapshot?: ObjectiveSpec[];
   loop_history?: Array<Record<string, unknown>>;
+  /** Batch B: idle|running|converged|paused|failed */
+  loop_status?: {
+    status?: string;
+    rounds?: number;
+    converged?: boolean;
+    paused?: boolean;
+    message?: string;
+    last_rmse_by_metric?: Record<string, number>;
+    last_error?: string | null;
+    doe_plan_id?: string | null;
+  } | null;
   rows: WorkbenchRow[];
 }
 
@@ -682,6 +714,7 @@ export interface WorkbenchSyncResponse {
   kg_error?: string | null;
   loop_task_id?: string | null;
   loop_message?: string;
+  loop_status?: WorkbenchCampaignResponse["loop_status"];
   quality?: { dropped_values?: number; dropped?: string[]; [k: string]: unknown };
 }
 
@@ -2363,6 +2396,13 @@ export const api = {
 
   kbStats: () => get<KBStats>("/api/kb/stats"),
 
+  kbQualityOps: (projectId?: string) =>
+    get<KBQualityOps>(
+      projectId
+        ? `/api/kb/quality-ops?project_id=${encodeURIComponent(projectId)}`
+        : "/api/kb/quality-ops",
+    ),
+
   kbReindex: () => post<KBReindexResult>("/api/kb/reindex", {}),
 
   /** W4: dry-run by default; physical delete needs confirm=true and dry_run=false. */
@@ -3768,6 +3808,30 @@ export interface EnvFlag {
   hint: string;
   value: boolean;
   default: boolean;
+  /** Batch E: stable | beta | experimental | disabled */
+  maturity?: string;
+}
+
+/** Batch D: GET /api/kb/quality-ops */
+export interface KBQualityOps {
+  project_id?: string | null;
+  kb_quality_score: number;
+  kb_quality_components?: Record<string, number>;
+  sources_active?: number;
+  sources_archived?: number;
+  chunks_active?: number;
+  chunks_archived?: number;
+  embedded_chunks?: number;
+  scan_limit?: number;
+  scan_pressure?: number;
+  scan_near_cap?: boolean;
+  vector_mode?: string;
+  vector_hint?: string;
+  topicality_would_reject_pct?: number | null;
+  fulltext_fail_pct?: number | null;
+  quality_gate_drops?: KbGateDropStats;
+  relevance_shadow?: Record<string, unknown>;
+  notes?: string[];
 }
 
 /** LLM Wiki read models (W1–W4). */

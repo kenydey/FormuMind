@@ -7,12 +7,14 @@ import HubWikiPane from "./HubWikiPane";
 import HubGraphPane from "./HubGraphPane";
 import HubReportsPlaceholderPane from "./HubReportsPlaceholderPane";
 import RetrievalProbePanel from "./RetrievalProbePanel";
+import HubQualityPane from "./HubQualityPane";
 
 const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
   { id: "materials", label: "资料", hint: "当前项目入库文档" },
   { id: "wiki", label: "Wiki", hint: "当前项目编译页 / 卷宗" },
   { id: "graph", label: "图谱", hint: "材料关系（配方 KG）画布 / 统计" },
   { id: "retrieval", label: "检索探针", hint: "多路召回分数 / Golden" },
+  { id: "quality", label: "质量运营", hint: "闸 · scan · 启发式评分" },
   { id: "reports", label: "文档生成", hint: "当前项目卷宗报告" },
 ];
 
@@ -41,7 +43,7 @@ export default function KnowledgeHubModal({
     >
       <div className="flex flex-col gap-3 h-[min(70vh,720px)]">
         <div
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 shrink-0"
+          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 shrink-0"
           data-testid="hub-tab-cards"
         >
           {TABS.map((t) => {
@@ -70,6 +72,11 @@ export default function KnowledgeHubModal({
                       调优
                     </span>
                   )}
+                  {t.id === "quality" && (
+                    <span className="text-[9px] text-amber-300/90 border border-amber-500/30 rounded px-1">
+                      运营
+                    </span>
+                  )}
                 </div>
                 <p className="text-[10px] text-slate-500 mt-0.5">{t.hint}</p>
               </button>
@@ -83,6 +90,7 @@ export default function KnowledgeHubModal({
           {tab === "retrieval" && (
             <RetrievalProbePanel active={open && tab === "retrieval"} />
           )}
+          {tab === "quality" && <HubQualityPane active={open && tab === "quality"} />}
           {tab === "reports" && <HubReportsPlaceholderPane />}
         </div>
       </div>

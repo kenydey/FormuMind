@@ -32,6 +32,18 @@ function FlagToggle({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm text-slate-200">{flag.label}</span>
           <code className="text-[10px] text-slate-500">{flag.env_key}</code>
+          {flag.maturity && flag.maturity !== "stable" && (
+            <span
+              className={`text-[10px] px-1 py-px rounded border ${
+                flag.maturity === "experimental"
+                  ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                  : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+              }`}
+              data-testid={`env-flag-maturity-${flag.attr}`}
+            >
+              {flag.maturity}
+            </span>
+          )}
           {focused && (
             <span
               className="text-[10px] px-1 py-px rounded bg-accent/20 border border-accent/40 text-accent"

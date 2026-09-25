@@ -160,6 +160,17 @@ def _score_and_validate(
         from ..services.kg_recommend_score import kg_compat_adjust
 
         kg_compat_adjust(form, objectives=list(objectives) if objectives else None)
+    # Batch C: always attach explain after score / optional KG adjust.
+    try:
+        from ..services.formulation_explain import attach_explain
+
+        attach_explain(
+            form,
+            objectives=list(objectives) if objectives else None,
+            requirement=req,
+        )
+    except Exception:
+        pass
     return form
 
 

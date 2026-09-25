@@ -35,6 +35,9 @@ class EnvFlag:
     description: str   # what it does + prerequisites
     category: str      # grouping key for the UI
     hint: str = ""     # activation caveat（需网络 / 需依赖 / 需重启…）
+    # Batch E: product maturity for PathWizard / Settings badges.
+    # stable | beta | experimental | disabled
+    maturity: str = "stable"
 
     @property
     def env_key(self) -> str:
@@ -152,11 +155,12 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("workbench_auto_train", "台账自动回灌训练",
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",
-            "Completed 行回灌训练后，后台触发 optimize + 下一轮 DOE（/api/loop/iterate）。", "data"),
+            "Completed 行回灌训练后，后台触发 optimize + 下一轮 DOE（/api/loop/iterate）。", "data",
+            maturity="beta"),
     EnvFlag("auto_adopt_next_doe_on_loop", "闭环后自动采纳下一轮 DOE",
             "闭环 iterate 成功后自动把 next_doe adopt 进实验台账（createWorkbenchCampaign）。"
             "默认关；与 auto_loop_on_sync 独立——开闭环不等于自动改写台账。",
-            "data", "默认勿开；确认台账策略后再开"),
+            "data", "默认勿开；确认台账策略后再开", maturity="experimental"),
     EnvFlag("materials_suppliers_json_dual_write", "材料供应商 JSON 双写",
             "True（默认）= upsert 时同时写 material_suppliers 与 suppliers_json。"
             "False = 只写归一化表并清空 JSON 投影（读路径仍从 link 表回填）。",
@@ -169,15 +173,16 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "入库时抽取实体语义关系写入 kb_entity_links（慢，LLM 关系建议后置）。"
             "关闭时实体/提及仍会写入——Settings「补语义关系」或 POST /api/kg/relations/rebuild "
             "可事后补齐（不依赖本旗标 / kg_relation_extract_enabled；Top-5′ #4）。",
-            "kb"),
+            "kb", maturity="beta"),
     EnvFlag("kg_relation_extract_enabled", "KG 语义关系抽取",
             "link_source 入库同步时抽取 substitutes/synergizes 等。"
-            "异步 rebuild 可 force 绕过本旗标。", "kb"),
+            "异步 rebuild 可 force 绕过本旗标。", "kb", maturity="beta"),
     EnvFlag("kg_llm_relation_extract", "KG LLM 关系抽取",
-            "规则未命中时用 LLM 补充关系抽取（增加成本）。", "kb", "需有效 LLM key"),
+            "规则未命中时用 LLM 补充关系抽取（增加成本）。", "kb", "需有效 LLM key",
+            maturity="experimental"),
     EnvFlag("kg_multimodal_fusion_enabled", "多模态图谱融合",
             "专利对比表格图片 → 配方/性能结构化边写入 kb_entity_links。", "kb",
-            "需 vision_extract + kg_enabled + LLM key"),
+            "需 vision_extract + kg_enabled + LLM key", maturity="experimental"),
     EnvFlag("kg_measured_feedback_enabled", "KG 实测反馈",
             "知识图谱中材料的实测证据（measured 关系）参与配方评分加成。", "kb",
             "需 kg_enabled"),
@@ -226,7 +231,7 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "入库编译后标记 stale/conflict 等 Flag（W4）。", "kb", "依赖 wiki_enabled"),
     EnvFlag("wiki_neo4j_project", "Wiki 投影到 Neo4j",
             "将 wiki entity_id 薄投影为 Neo4j Compound（默认关）。",
-            "kb", "需 neo4j_enabled"),
+            "kb", "需 neo4j_enabled", maturity="experimental"),
     EnvFlag("wiki_fts_enabled", "Wiki 全文检索 FTS",
             "对 Wiki 标题/path/flags/正文建 SQLite FTS5 索引（P2，默认开，确定性）。",
             "kb", "依赖 wiki_enabled"),
@@ -255,7 +260,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("wiki_storm_parallel", "STORM 分章有限并行",
             "depends_on 已满足的章节在同一波次用线程池并行起草（非 Celery chord）。"
             "默认关；仍受 wiki_storm_report_enabled 约束。",
-            "kb", "依赖 wiki_storm_report_enabled；worker 数见 wiki_storm_parallel_workers"),
+            "kb", "依赖 wiki_storm_report_enabled；worker 数见 wiki_storm_parallel_workers",
+            maturity="beta"),
     EnvFlag("wiki_page_graph_enabled", "Wiki 页链接图",
             "Hub Wiki「链接图」：按 [[wikilink]] 构图可视化（非配方/材料 KG）。"
             "默认开（Top-5‴ #5）；可关。",
@@ -275,7 +281,7 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("prediction_bias_soft_correct", "预测偏差软校准",
             "推荐/评分时用台账 prediction_bias.mean_error 校正 predicted（predicted−mean_error）。"
             "默认关；需 metric n≥prediction_bias_soft_correct_min_n。不改 measured / 台账行。",
-            "data", "先看 BiasTrend 再开；校准后榜卡显示「已校准」"),
+            "data", "先看 BiasTrend 再开；校准后榜卡显示「已校准」", maturity="beta"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",
             "上传/导入文档时用 LLM 提取全局参数空间与摘要（Source Guide）。",
             "kb", "需有效 LLM key"),
@@ -339,7 +345,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("neo4j_enabled", "Neo4j 图存储适配器",
             "启用可选 Neo4j Bolt 适配器（与 SQLite KG 并存）。关闭时所有 Neo4j API 返回空/禁用。",
             "infra",
-            "需 neo4j driver + 可达的 FORMUMIND_NEO4J_URI/USER/PASSWORD"),
+            "需 neo4j driver + 可达的 FORMUMIND_NEO4J_URI/USER/PASSWORD",
+            maturity="experimental"),
     EnvFlag("agent_bus_enabled", "多智能体事件总线",
             "启用 Redis Pub/Sub 事件总线（预留能力；Redis 不可达时静默 no-op）。",
             "infra", "需可达的 Redis"),
@@ -376,6 +383,7 @@ def list_env_flags() -> list[dict]:
                 "category": flag.category,
                 "category_label": CATEGORY_LABELS.get(flag.category, flag.category),
                 "hint": flag.hint,
+                "maturity": getattr(flag, "maturity", None) or "stable",
                 "value": bool(getattr(settings, flag.attr)),
                 "default": default,
             }
