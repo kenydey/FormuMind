@@ -70,6 +70,15 @@ export default function HubQualityPane({ active }: { active: boolean }) {
             <Stat label="scan 压力" value={data.scan_pressure?.toFixed?.(3) ?? data.scan_pressure} warn={data.scan_near_cap} />
             <Stat label="向量模式" value={data.vector_mode} />
             <Stat
+              label="hybrid p95"
+              value={
+                data.hybrid_search_latency?.p95_ms == null
+                  ? "—"
+                  : `${data.hybrid_search_latency.p95_ms}ms`
+              }
+              warn={Boolean(data.hybrid_search_latency?.ann_last)}
+            />
+            <Stat
               label="主题拒收%"
               value={
                 data.topicality_would_reject_pct == null

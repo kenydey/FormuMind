@@ -145,6 +145,15 @@ def build_quality_ops(*, project_id: str | None = None) -> dict[str, Any]:
         vector_mode=vector_mode,
     )
 
+    hybrid_lat: dict[str, Any] = {}
+    try:
+        from .hybrid_search import hybrid_latency_stats
+
+        hybrid_lat = hybrid_latency_stats()
+    except Exception as exc:
+        logger.debug("hybrid latency stats unavailable: %s", exc)
+        hybrid_lat = {"n": 0, "p50_ms": None, "p95_ms": None, "ann_last": False}
+
     return {
         "project_id": (project_id or "").strip() or None,
         "kb_quality_score": quality["score"],
@@ -162,6 +171,7 @@ def build_quality_ops(*, project_id: str | None = None) -> dict[str, Any]:
         "topicality_would_reject_pct": topicality_pct,
         "fulltext_fail_pct": fulltext_pct,
         "quality_gate_drops": gate_drops,
+        "hybrid_search_latency": hybrid_lat,
         "relevance_shadow": {
             "batch_count": int(shadow.get("batches") or 0),
             "samples": int(shadow.get("samples") or 0),
@@ -175,5 +185,7 @@ def build_quality_ops(*, project_id: str | None = None) -> dict[str, Any]:
             "kb_quality_score 为只读启发式，不改变入库/检索行为。",
             "topicality 真闸默认开启（kb_relevance_shadow=False）；shadow stats 仅供回滚校准。",
             "retention purge 默认 dry-run，不会自动物理删除。",
+            "hybrid_search_latency 来自持久化 KB hybrid（≠ 会话 rag.BM25FAISSStore）；"
+            "scan_near_cap 或 p95 超阈时启用 BM25 预筛 + 子集 cosine（不引 Qdrant）。",
         ],
     }
