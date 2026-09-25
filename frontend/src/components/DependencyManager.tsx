@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   awaitTaskStream,
@@ -7,6 +7,7 @@ import {
   type DependencyInstallResult,
   type KBStats,
 } from "../api";
+import { CANCEL_BUTTON_CLASS } from "../hooks/useTaskCancel";
 
 const CHEMTOOL_LABELS: Record<string, string> = {
   name_to_smiles: "名称→SMILES",
@@ -562,6 +563,9 @@ function KbDiagnosticsCard() {
   }
 
   const [relBusy, setRelBusy] = useState(false);
+  const [relTaskId, setRelTaskId] = useState<string | null>(null);
+  const [relStatus, setRelStatus] = useState<string | null>(null);
+  const relAbortRef = useRef<(AbortController & { taskId?: string }) | null>(null);
 
   async function runRelationsRebuild() {
     const all = window.confirm(
@@ -570,21 +574,57 @@ function KbDiagnosticsCard() {
     if (!all) return;
     setRelBusy(true);
     setReport(null);
+    setRelStatus("queued");
+    const ctrl = new AbortController() as AbortController & { taskId?: string };
+    relAbortRef.current = ctrl;
     try {
       const r = await api.kgRelationsRebuild(undefined, { limit: 50 });
-      setReport(
-        `关系重建已后台启动 (task ${r.task_id.slice(0, 8)}…) — 默认 limit=50；可稍后刷新本卡查看产出`
-      );
+      ctrl.taskId = r.task_id;
       setRelTaskId(r.task_id);
+      setReport(
+        `关系重建进行中 (task ${r.task_id.slice(0, 8)}…) — 默认 limit=50；可取消`
+      );
+      const final = await awaitTaskStream(
+        r.task_id,
+        (ev) => {
+          setRelStatus(`${ev.status}: ${ev.message ?? ev.stage ?? ""}`.slice(0, 120));
+        },
+        0,
+        ctrl.signal,
+        5 * 60 * 1000,
+      );
+      setRelStatus(`completed: ${final.message ?? ""}`.slice(0, 120));
+      setReport(
+        `✓ 关系重建完成 (task ${r.task_id.slice(0, 8)}…) — 已刷新统计`
+      );
       await refreshKgStats();
     } catch (e) {
-      setReport(`启动失败: ${e instanceof Error ? e.message : String(e)}`);
+      if (ctrl.signal.aborted) {
+        setRelStatus("cancelled");
+        setReport("关系重建已取消");
+      } else {
+        setReport(`关系重建失败: ${e instanceof Error ? e.message : String(e)}`);
+        setRelStatus("failed");
+      }
     } finally {
+      relAbortRef.current = null;
       setRelBusy(false);
     }
   }
-  const [relTaskId, setRelTaskId] = useState<string | null>(null);
-  const [relStatus, setRelStatus] = useState<string | null>(null);
+
+  async function cancelRelationsRebuild() {
+    const abort = relAbortRef.current;
+    if (!abort) return;
+    abort.abort();
+    const tid = abort.taskId || relTaskId;
+    if (tid) {
+      try {
+        await api.cancelTask(tid);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
 
   async function refreshRelStatus() {
     if (!relTaskId) return;
@@ -760,18 +800,38 @@ function KbDiagnosticsCard() {
           onClick={() => void runRelationsRebuild()}
           className="text-[10px] border border-edge rounded px-2 py-1 text-slate-300 hover:border-accent/40 hover:text-accent disabled:opacity-50"
           title="实体/提及已在库, 异步补语义关系(LLM 慢, 全库 10-60 分钟)"
+          data-testid="kg-relations-rebuild-btn"
         >
-          {relBusy ? "启动中…" : "🕸 补语义关系"}
+          {relBusy ? "关系重建中…" : "🕸 补语义关系"}
         </button>
-        {relTaskId && (
+        {relBusy && (
+          <button
+            type="button"
+            onClick={() => void cancelRelationsRebuild()}
+            className={CANCEL_BUTTON_CLASS}
+            data-testid="kg-relations-rebuild-cancel"
+          >
+            ✕ 取消
+          </button>
+        )}
+        {relTaskId && !relBusy && (
           <button
             type="button"
             onClick={() => void refreshRelStatus()}
             className="text-[10px] border border-edge rounded px-2 py-1 text-slate-500 hover:text-slate-300"
             title={relTaskId}
+            data-testid="kg-relations-rebuild-status"
           >
             {relStatus ? `状态: ${relStatus}` : "查状态"}
           </button>
+        )}
+        {relBusy && relStatus && (
+          <span
+            className="text-[10px] text-slate-500"
+            data-testid="kg-relations-rebuild-progress"
+          >
+            {relStatus}
+          </span>
         )}
         <button
           type="button"
