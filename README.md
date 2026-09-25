@@ -21,11 +21,24 @@ optimization improve as real data accumulates.
 ## Documentation
 
 New here? Start with the **5-minute quick-start** (with screenshots), then dive
-into the full guide for the API, configuration, and every v0.3 feature:
+into the full guide for the API, configuration, and current product features:
 
 - 🚀 Quick start — [English](docs/QUICKSTART.md) · [中文](docs/快速入门.md)
 - 📗 User Guide (English) — [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 - 📘 使用指南（中文）— [docs/使用指南.md](docs/使用指南.md)
+
+### Recent capabilities (2026-09)
+
+| Area | What landed |
+|------|-------------|
+| **Knowledge Hub** | Materials archive / retention, retrieval probe, **quality-ops** (scan pressure, topicality, hybrid p50/p95), Wiki pages + page graph, project dossier / STORM report |
+| **Recommend transparency** | `Formulation.explain`（为何推荐）: objectives hit, constraint miss, KG signals, **supply flags**, uncertainty, bias-corrected badge; **约束追踪** for which brief fields wire into scoring / DOE |
+| **Supply** | Manual supplier quotes on materials (`price` / lead time / MOQ / `stale_price`); badges on substitution candidates |
+| **Workbench flywheel** | Project-level **auto_loop_on_sync** and **prediction_bias_soft_correct** (OR global; both default **off**); campaign loop status + BiasTrend |
+| **Retrieval** | Persistent KB `hybrid_search` (BM25 + cosine, scan-gated BM25 prefilter) — **not** the same path as session `rag.BM25FAISSStore` |
+| **Main path** | Right-rail **PathWizard** (formula / substitute / knowledge) + env-flag maturity badges |
+
+Product defaults stay conservative: no auto TTL purge, dual-write of `suppliers_json` remains on, global auto_loop / auto_adopt / soft-correct stay **off** unless you opt in per project or env.
 
 ## Architecture
 
@@ -54,7 +67,8 @@ toolchain required — and "lights up" the real engine when it is installed:
 | Literature search | `arxiv`, `semanticscholar` | (offline returns no extra hits) |
 | Internet search | `duckduckgo-search` | (offline returns no extra hits) |
 | File ingestion | pymupdf4llm (layout-aware) → docling → marker → MinerU → RapidOCR → `markitdown` → `pypdf` | plain-text decoder |
-| RAG store | ColBERT/PyLate (GPU) · BM25+FAISS (CPU default) · sentence-transformers | in-memory TF-IDF index |
+| RAG (session chat) | ColBERT/PyLate (GPU) · **BM25+FAISS** (CPU) · sentence-transformers | in-memory TF-IDF |
+| RAG (persistent KB) | **hybrid BM25 + embedding cosine** over `document_chunks` (`/api/kb/hybrid-search`); scan-capped, optional BM25 prefilter when near cap / hot p95 | keyword-only when no embeddings |
 | Grounded Q&A | ChemCrow agent (chemistry questions) · paper-qa (semantic synthesis) | TF-IDF re-rank → configured LLM → snippet |
 | Property prediction | RDKit + DeepChem/ChemBERTa · MoLFormer (reserved) | transparent empirical surrogate |
 | VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
@@ -149,6 +163,12 @@ Enterprise ELN (Postgres + Datalab): `docker compose -f docker-compose.yml -f do
 | POST | `/api/train` | force a retrain over all stored experiments |
 | GET | `/api/models` | list trained models with `n_samples`, `R²`, `cv_R²`, `RMSE` |
 | GET | `/api/meta`, `/api/templates/{domain}` | metadata & baseline templates |
+| GET | `/api/kb/stats`, `/api/kb/quality-ops` | KB scan pressure / quality aggregate (Hub) |
+| POST | `/api/kb/hybrid-search`, `/api/kb/query-test` | persistent-KB hybrid retrieval + scored probe |
+| POST | `/api/kb/retention/purge` | dry-run / confirm purge of soft-archived sources (never auto) |
+| GET/POST | `/api/wiki/…` | Wiki pages, graph, dossier, STORM report (flag-gated) |
+| PUT | `/api/experiments/workbench/sync` | AG Grid ledger sync; optional project auto-loop |
+| GET | `/api/experiments/workbench/{id}/bias-trend` | prediction_bias trend for soft-correct decisions |
 | GET | `/health` | service + active-engine status |
 
 ## DOE feedback & model training (回灌)
