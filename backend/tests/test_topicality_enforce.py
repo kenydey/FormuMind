@@ -1,4 +1,4 @@
-"""W2: topicality enforce when kb_relevance_shadow=False (default stays shadow)."""
+"""W2: topicality enforce when kb_relevance_shadow=False (default is enforce as of Top-5 #1)."""
 from __future__ import annotations
 
 import pytest

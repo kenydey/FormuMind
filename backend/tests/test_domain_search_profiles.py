@@ -20,6 +20,7 @@ REQUIRED_FIELDS = (
     "ipc_codes",
     "keyword_allow",
     "keyword_deny",
+    "search_deny",
     "source_policy",
 )
 
