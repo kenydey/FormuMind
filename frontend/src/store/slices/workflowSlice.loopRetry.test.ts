@@ -16,13 +16,13 @@ vi.mock("../../api", async () => {
   const actual = await vi.importActual<typeof import("../../api")>("../../api");
   return {
     ...actual,
-    awaitTaskStream: (...args: unknown[]) => awaitTaskStream(...args),
+    awaitTaskStream,
     api: {
       ...actual.api,
-      loopIterate: (...args: unknown[]) => loopIterate(...args),
-      createWorkbenchCampaign: (...args: unknown[]) => createWorkbenchCampaign(...args),
+      loopIterate,
+      createWorkbenchCampaign,
       getEnvFlags: vi.fn(async () => ({ flags: [] })),
-      validateFormulations: vi.fn(async ({ formulations }) => ({
+      validateFormulations: vi.fn(async ({ formulations }: { formulations: unknown }) => ({
         formulations,
         warnings: [],
       })),
@@ -37,13 +37,9 @@ vi.mock("../formulationEnrich", () => ({
       _get: unknown,
       _forms: unknown,
       applyDraft: (d: Record<string, unknown>) => void,
-      opts?: { skipLeaderboardReplace?: boolean },
     ) => {
       set((draft) => {
         applyDraft(draft);
-        if (!opts?.skipLeaderboardReplace) {
-          // no-op leaderboard
-        }
       });
     },
   ),
@@ -140,7 +136,8 @@ describe("workflowSlice loop retry / auto-adopt (W5)", () => {
     useStore.setState({ autoAdoptNextDoeOnLoop: true } as never);
     await useStore.getState().followLoopTask("loop-ok-adopt");
     expect(createWorkbenchCampaign).toHaveBeenCalled();
-    const arg = createWorkbenchCampaign.mock.calls[0]?.[0];
-    expect(arg?.plan_id).toBe("plan-w5");
+    const calls = createWorkbenchCampaign.mock.calls as unknown as unknown[][];
+    const first = calls[0]?.[0] as { plan_id?: string } | undefined;
+    expect(first?.plan_id).toBe("plan-w5");
   });
 });
