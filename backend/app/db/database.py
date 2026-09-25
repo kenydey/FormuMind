@@ -270,6 +270,54 @@ def _ensure_material_columns(engine: Engine) -> None:
         MaterialCandidateRow.__table__.create(bind=engine, checkfirst=True)
         SupplierRow.__table__.create(bind=engine, checkfirst=True)
         MaterialSupplierRow.__table__.create(bind=engine, checkfirst=True)
+    _ensure_supplier_quote_columns(engine)
+
+
+_SUPPLIER_SOFT_COLUMNS: dict[str, str] = {
+    # alembic 0031 — A′ manual country
+    "country": "country VARCHAR(64)",
+}
+
+_MATERIAL_SUPPLIER_SOFT_COLUMNS: dict[str, str] = {
+    # alembic 0031 — A′ manual quote fields
+    "currency": "currency VARCHAR(8)",
+    "price_cny_per_kg": "price_cny_per_kg FLOAT",
+    "price_source": "price_source VARCHAR(32) DEFAULT 'manual' NOT NULL",
+    "price_observed_at": "price_observed_at DATETIME",
+    "moq": "moq VARCHAR(64)",
+    "pack_size": "pack_size VARCHAR(64)",
+    "lead_time_days": "lead_time_days INTEGER",
+}
+
+
+def _ensure_supplier_quote_columns(engine: Engine) -> None:
+    """Soft-add A′ manual commercial columns when alembic has not run."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "suppliers" in tables:
+        existing = {c["name"] for c in inspector.get_columns("suppliers")}
+        for col, ddl in _SUPPLIER_SOFT_COLUMNS.items():
+            if col in existing:
+                continue
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE suppliers ADD COLUMN {ddl}"))
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+    if "material_suppliers" in tables:
+        existing = {c["name"] for c in inspector.get_columns("material_suppliers")}
+        for col, ddl in _MATERIAL_SUPPLIER_SOFT_COLUMNS.items():
+            if col in existing:
+                continue
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE material_suppliers ADD COLUMN {ddl}"))
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
 
 def _ensure_owner_id_column(engine: Engine, table: str) -> None:

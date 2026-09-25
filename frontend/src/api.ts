@@ -4567,4 +4567,15 @@ export interface Supplier {
   name: string;
   url?: string | null;
   product_url?: string | null;
+  /** A′ manual commercial fields (no scrape). */
+  country?: string | null;
+  currency?: string | null;
+  price_cny_per_kg?: number | null;
+  price_source?: string | null;
+  price_observed_at?: string | null;
+  moq?: string | null;
+  pack_size?: string | null;
+  lead_time_days?: number | null;
+  /** Computed: price set but undated or older than retention window. */
+  stale_price?: boolean;
 }
