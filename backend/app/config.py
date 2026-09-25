@@ -477,6 +477,9 @@ class Settings(BaseSettings):
     kb_ingest_patent_exempt: bool = False  # P0: patents need CPC/topic hit (no blind exempt)
     workbench_auto_train: bool = True  # Completed workbench rows → ModelRegistry on sync
     auto_loop_on_sync: bool = False  # After sync ingests training rows, dispatch closed-loop task
+    # W5 / W3′（2026-09-25）：闭环成功后是否自动把 next_doe adopt 进台账。
+    # 默认关——避免静默改写实验台；需 Settings / LoopModal 显式打开。
+    auto_adopt_next_doe_on_loop: bool = False
     # Closed-loop RMSE plateau detection (Phase C L-2): skip optimize+DOE when flat.
     loop_convergence_enabled: bool = True
     loop_convergence_eps: float = 0.01

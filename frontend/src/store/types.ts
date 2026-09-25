@@ -100,6 +100,11 @@ export interface AppState {
   autoLoopOnSync: boolean;
   autoLoopMaxRounds: number;
   autoLoopRound: number;
+  /** W5: after successful loop, auto-adopt next_doe into workbench (default off). */
+  autoAdoptNextDoeOnLoop: boolean;
+  /** W5: last followLoopTask failed (non-cancel) — UI may offer retry. */
+  loopRetryAvailable: boolean;
+  lastLoopTaskId: string | null;
   campaignState: string | null;
   workbenchCampaignId: number | null;
   /** plan_id last written to workbench via createWorkbenchCampaign */
@@ -292,11 +297,14 @@ export interface AppState {
   clearFormulationSkill: () => void;
   runLoop: () => Promise<void>;
   followLoopTask: (taskId: string) => Promise<void>;
+  /** W5: clear loop failure and dispatch a fresh iterate. */
+  retryLoop: () => Promise<void>;
   cancelLoopTask: () => Promise<void>;
   runDoeCycle: () => Promise<void>;
   runNextRoundDoe: () => Promise<void>;
   setAutoLoopOnSync: (enabled: boolean) => void;
   setAutoLoopMaxRounds: (n: number) => void;
+  setAutoAdoptNextDoeOnLoop: (enabled: boolean) => void;
   applyIntent: (text: string) => Promise<string[]>;
 }
 

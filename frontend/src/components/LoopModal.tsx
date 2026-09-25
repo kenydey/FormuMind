@@ -23,9 +23,11 @@ function RmseTrend({ history, metric }: { history: Record<string, number>[]; met
 export default function LoopModal() {
   const {
     runLoop,
+    retryLoop,
     cancelLoopTask,
     busy,
     task,
+    error,
     loopReport,
     rmseHistory,
     doePlan,
@@ -36,19 +38,25 @@ export default function LoopModal() {
     autoLoopOnSync,
     autoLoopMaxRounds,
     autoLoopRound,
+    autoAdoptNextDoeOnLoop,
+    loopRetryAvailable,
     setOptimizeEngine,
     setLoopDoeEngine,
     setAutoLoopOnSync,
     setAutoLoopMaxRounds,
+    setAutoAdoptNextDoeOnLoop,
     adoptDoePlanToWorkbench,
     setOpenModal,
     workbenchCampaignId,
+    envFlagsRevision,
   } = useStore(
     useShallow((s) => ({
       runLoop: s.runLoop,
+      retryLoop: s.retryLoop,
       cancelLoopTask: s.cancelLoopTask,
       busy: s.busy,
       task: s.task,
+      error: s.error,
       loopReport: s.loopReport,
       rmseHistory: s.rmseHistory,
       doePlan: s.doePlan,
@@ -59,13 +67,17 @@ export default function LoopModal() {
       autoLoopOnSync: s.autoLoopOnSync,
       autoLoopMaxRounds: s.autoLoopMaxRounds,
       autoLoopRound: s.autoLoopRound,
+      autoAdoptNextDoeOnLoop: s.autoAdoptNextDoeOnLoop,
+      loopRetryAvailable: s.loopRetryAvailable,
       setOptimizeEngine: s.setOptimizeEngine,
       setLoopDoeEngine: s.setLoopDoeEngine,
       setAutoLoopOnSync: s.setAutoLoopOnSync,
       setAutoLoopMaxRounds: s.setAutoLoopMaxRounds,
+      setAutoAdoptNextDoeOnLoop: s.setAutoAdoptNextDoeOnLoop,
       adoptDoePlanToWorkbench: s.adoptDoePlanToWorkbench,
       setOpenModal: s.setOpenModal,
       workbenchCampaignId: s.workbenchCampaignId,
+      envFlagsRevision: s.envFlagsRevision,
     }))
   );
 
@@ -76,6 +88,24 @@ export default function LoopModal() {
   const [cyclePaused, setCyclePaused] = useState(false);
   const [cycleStatusBusy, setCycleStatusBusy] = useState(false);
   const [cycleStatusError, setCycleStatusError] = useState<string | null>(null);
+
+  // Hydrate FE toggle from Settings env-flag when flags change (W5).
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getEnvFlags()
+      .then((r) => {
+        if (cancelled) return;
+        const f = r.flags?.find((x) => x.attr === "auto_adopt_next_doe_on_loop");
+        if (f && typeof f.value === "boolean") {
+          setAutoAdoptNextDoeOnLoop(f.value);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [envFlagsRevision, setAutoAdoptNextDoeOnLoop]);
 
   useEffect(() => {
     if (workbenchCampaignId == null) {
@@ -130,6 +160,19 @@ export default function LoopModal() {
           <label className="flex items-center gap-1 text-[10px] text-slate-400 border border-edge rounded px-1.5 py-1">
             <input type="checkbox" checked={autoLoopOnSync} onChange={(e) => setAutoLoopOnSync(e.target.checked)} className="accent-accent2" />
             自主
+          </label>
+          <label
+            className="flex items-center gap-1 text-[10px] text-slate-400 border border-edge rounded px-1.5 py-1"
+            data-testid="loop-auto-adopt"
+            title="闭环成功后自动把 next_doe 写入台账（默认关）"
+          >
+            <input
+              type="checkbox"
+              checked={autoAdoptNextDoeOnLoop}
+              onChange={(e) => setAutoAdoptNextDoeOnLoop(e.target.checked)}
+              className="accent-accent2"
+            />
+            自动采纳 DOE
           </label>
           {autoLoopOnSync && (
             <span className="flex items-center gap-1 text-[10px] text-slate-400">
@@ -195,6 +238,24 @@ export default function LoopModal() {
         </span>
         {cycleStatusError && <span className="ml-2 text-rose-300">{cycleStatusError}</span>}
       </div>
+      {loopRetryAvailable && busy === "idle" && (
+        <div
+          className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-2"
+          data-testid="loop-retry-banner"
+        >
+          <span className="min-w-0">
+            闭环失败{error ? `：${error}` : ""}。可重试一轮（不重放失败 task）。
+          </span>
+          <button
+            type="button"
+            data-testid="loop-retry-btn"
+            onClick={() => void retryLoop()}
+            className="shrink-0 border border-rose-400/60 text-rose-100 hover:bg-rose-500/20 rounded px-2.5 py-1 text-[11px]"
+          >
+            重试闭环
+          </button>
+        </div>
+      )}
       {busy === "looping" && task && (
         <div className="text-[10px] text-slate-500 font-mono">
           {task.stage ? `${task.stage} · ` : ""}{task.elapsed_ms != null ? `${(task.elapsed_ms / 1000).toFixed(1)}s` : task.message || "进行中…"}

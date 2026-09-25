@@ -120,6 +120,9 @@ export default function LabWorkbench({
   const loopDoeEngine = useStore((s) => s.loopDoeEngine);
   const campaignState = useStore((s) => s.campaignState);
   const followLoopTask = useStore((s) => s.followLoopTask);
+  const retryLoop = useStore((s) => s.retryLoop);
+  const loopRetryAvailable = useStore((s) => s.loopRetryAvailable);
+  const storeError = useStore((s) => s.error);
   const refreshWorkbenchStats = useStore((s) => s.refreshWorkbenchStats);
   const recomputePredicted = useStore((s) => s.recomputePredicted);
   const refreshTrainingStatus = useStore((s) => s.refreshTrainingStatus);
@@ -640,6 +643,24 @@ export default function LabWorkbench({
           >
             {saveHint}
           </p>
+        )}
+        {loopRetryAvailable && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-rose-200 px-2 py-1.5 border-b border-rose-500/30 bg-rose-500/10"
+            data-testid="workbench-loop-retry"
+          >
+            <span className="min-w-0">
+              台账同步后闭环失败{storeError ? `：${storeError}` : ""}。可重试一轮。
+            </span>
+            <button
+              type="button"
+              data-testid="workbench-loop-retry-btn"
+              onClick={() => void retryLoop()}
+              className="shrink-0 border border-rose-400/50 rounded px-2 py-0.5 hover:bg-rose-500/20"
+            >
+              重试闭环
+            </button>
+          </div>
         )}
         <KgFeedbackStatsStrip refreshKey={kgStatsRefreshKey} />
         {biasSummary && !error && (

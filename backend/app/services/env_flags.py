@@ -149,6 +149,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",
             "Completed 行回灌训练后，后台触发 optimize + 下一轮 DOE（/api/loop/iterate）。", "data"),
+    EnvFlag("auto_adopt_next_doe_on_loop", "闭环后自动采纳下一轮 DOE",
+            "闭环 iterate 成功后自动把 next_doe adopt 进实验台账（createWorkbenchCampaign）。"
+            "默认关；与 auto_loop_on_sync 独立——开闭环不等于自动改写台账。",
+            "data", "默认勿开；确认台账策略后再开"),
     EnvFlag("kg_enabled", "知识图谱 P0",
             "实体索引 + 枚举型 RAG：牌号/CAS/元素完备召回，增强 Chat/CRAG。", "kb"),
     EnvFlag("kg_entities_on_ingest", "入库实体提及",

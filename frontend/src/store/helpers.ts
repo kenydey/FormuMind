@@ -79,6 +79,9 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   if (patch.autoLoopOnSync !== undefined) draft.autoLoopOnSync = patch.autoLoopOnSync;
   if (patch.autoLoopMaxRounds !== undefined) draft.autoLoopMaxRounds = patch.autoLoopMaxRounds;
   if (patch.autoLoopRound !== undefined) draft.autoLoopRound = patch.autoLoopRound;
+  if (patch.autoAdoptNextDoeOnLoop !== undefined) {
+    draft.autoAdoptNextDoeOnLoop = patch.autoAdoptNextDoeOnLoop;
+  }
 }
 
 export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
@@ -116,5 +119,6 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     autoLoopOnSync: state.autoLoopOnSync,
     autoLoopMaxRounds: state.autoLoopMaxRounds,
     autoLoopRound: state.autoLoopRound,
+    autoAdoptNextDoeOnLoop: state.autoAdoptNextDoeOnLoop,
   };
 }

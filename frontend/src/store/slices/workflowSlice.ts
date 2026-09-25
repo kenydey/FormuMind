@@ -138,6 +138,8 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       set((draft) => {
         draft.busy = "looping";
         draft.error = null;
+        draft.loopRetryAvailable = false;
+        draft.lastLoopTaskId = taskId;
       });
       try {
         const final = await awaitTaskStream(
@@ -162,6 +164,16 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
             },
             { skipLeaderboardReplace: skipReplace }
           );
+          // W5: optional auto-adopt of next_doe (default off via store + env-flag).
+          const { autoAdoptNextDoeOnLoop } = get();
+          if (
+            autoAdoptNextDoeOnLoop &&
+            !skipReplace &&
+            report.next_doe &&
+            report.next_doe.plan_id
+          ) {
+            await get().adoptDoePlanToWorkbench(report.next_doe);
+          }
           // 自主闭环：未收敛且开启自动时，限轮自动下一轮
           const { autoLoopOnSync, autoLoopMaxRounds, autoLoopRound } = get();
           if (autoLoopOnSync && !report.converged && autoLoopRound < autoLoopMaxRounds - 1) {
@@ -183,12 +195,21 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         const isCancelled = msg.includes("取消") || msg.includes("cancel");
         set((draft) => {
           draft.error = isCancelled ? "任务已取消" : msg;
+          draft.loopRetryAvailable = !isCancelled;
         });
       } finally {
         set((draft) => {
           draft.busy = "idle";
         });
       }
+    },
+
+    retryLoop: async () => {
+      set((draft) => {
+        draft.loopRetryAvailable = false;
+        draft.error = null;
+      });
+      await get().runLoop();
     },
 
     cancelLoopTask: async () => {
@@ -351,6 +372,13 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     setAutoLoopMaxRounds: (n: number) => {
       set((draft) => {
         draft.autoLoopMaxRounds = Math.max(1, Math.min(10, Math.round(n)));
+      });
+      get().scheduleAutosave();
+    },
+
+    setAutoAdoptNextDoeOnLoop: (enabled: boolean) => {
+      set((draft) => {
+        draft.autoAdoptNextDoeOnLoop = enabled;
       });
       get().scheduleAutosave();
     },
@@ -685,5 +713,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

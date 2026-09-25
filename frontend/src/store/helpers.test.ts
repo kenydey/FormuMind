@@ -51,6 +51,7 @@ function populatedState(): AppState {
     autoLoopOnSync: true,
     autoLoopMaxRounds: 5,
     autoLoopRound: 2,
+    autoAdoptNextDoeOnLoop: true,
   } as unknown as AppState;
 }
 

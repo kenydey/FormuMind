@@ -99,6 +99,7 @@ export interface ProjectWorkspacePayload {
   auto_loop_on_sync?: boolean;
   auto_loop_max_rounds?: number;
   auto_loop_round?: number;
+  auto_adopt_next_doe_on_loop?: boolean;
 }
 
 export interface StoreWorkspaceSlice {
@@ -135,6 +136,7 @@ export interface StoreWorkspaceSlice {
   autoLoopOnSync: boolean;
   autoLoopMaxRounds: number;
   autoLoopRound: number;
+  autoAdoptNextDoeOnLoop: boolean;
 }
 
 function adaptiveFromLoopReport(loop: LoopReport | null | undefined): AdaptiveDOEMetadata | null {
@@ -197,6 +199,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     auto_loop_on_sync: slice.autoLoopOnSync,
     auto_loop_max_rounds: slice.autoLoopMaxRounds,
     auto_loop_round: slice.autoLoopRound,
+    auto_adopt_next_doe_on_loop: slice.autoAdoptNextDoeOnLoop,
   };
 }
 
@@ -252,6 +255,7 @@ export function applyWorkspacePayload(
     autoLoopOnSync: ws.auto_loop_on_sync ?? false,
     autoLoopMaxRounds: ws.auto_loop_max_rounds ?? 5,
     autoLoopRound: ws.auto_loop_round ?? 0,
+    autoAdoptNextDoeOnLoop: ws.auto_adopt_next_doe_on_loop ?? false,
   };
 }
 

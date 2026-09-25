@@ -41,6 +41,7 @@ function baseSlice(over: Partial<StoreWorkspaceSlice> = {}): StoreWorkspaceSlice
     autoLoopOnSync: false,
     autoLoopMaxRounds: 3,
     autoLoopRound: 0,
+    autoAdoptNextDoeOnLoop: false,
     ...over,
   };
 }
