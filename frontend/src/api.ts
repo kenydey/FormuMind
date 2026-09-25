@@ -3368,7 +3368,15 @@ export interface PlatformHealth {
   database: { ok: boolean; scheme: string };
   task_broker: { required: boolean; reachable: boolean };
   parsers: Record<string, boolean>;
-  datalab: { required: boolean; reachable: boolean; hint?: string };
+  datalab: {
+    required: boolean;
+    reachable: boolean;
+    hint?: string;
+    campaign_backend?: string;
+    experiment_backend?: string;
+    /** eln | local | eln_required_down — Top-5″ soft-degrade badge */
+    ledger_mode?: "eln" | "local" | "eln_required_down" | string;
+  };
 }
 
 export interface SourceStatus {

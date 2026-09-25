@@ -4,10 +4,12 @@ import { api, type PlatformHealth } from "../api";
 /**
  * Surfaces /health degraded signals (Datalab ELN, Redis broker, DB, PDF parser)
  * that DegradedBanner does not cover (LLM key / online deps).
+ * Soft-degrade (Top-5″ #2): optional ELN down → amber「本地台账」advisory, not rose.
  */
 export default function InfraHealthBanner() {
   const [health, setHealth] = useState<PlatformHealth | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [localDismissed, setLocalDismissed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +26,7 @@ export default function InfraHealthBanner() {
             database: { ok: false, scheme: "unknown" },
             task_broker: { required: true, reachable: false },
             parsers: {},
-            datalab: { required: false, reachable: false },
+            datalab: { required: false, reachable: false, ledger_mode: "local" },
           });
         }
       }
@@ -38,7 +40,46 @@ export default function InfraHealthBanner() {
     };
   }, []);
 
-  if (dismissed || !health || health.status === "ok") return null;
+  if (!health) return null;
+
+  const softLocal =
+    health.status === "ok" &&
+    health.datalab?.ledger_mode === "local" &&
+    !health.datalab?.reachable &&
+    !health.datalab?.required;
+
+  if (health.status === "ok" && softLocal && !localDismissed) {
+    return (
+      <div
+        className="shrink-0 px-5 py-2 bg-amber-500/10 border-b border-amber-500/30 flex items-center gap-3 text-xs text-amber-200"
+        data-testid="infra-health-local-ledger"
+        role="status"
+      >
+        <span className="font-semibold">本地台账</span>
+        <span className="text-amber-100/80">
+          {health.datalab?.hint ||
+            "Datalab 不可达；实验台账使用本地 sqlite（soft-degrade）。需要 ELN 时启动 compose 并打开 DATALAB_REQUIRED。"}
+        </span>
+        <button
+          type="button"
+          onClick={() => void api.getHealth().then(setHealth).catch(() => undefined)}
+          className="ml-auto shrink-0 border border-amber-400/40 text-amber-100 rounded px-2.5 py-1 hover:bg-amber-400/15"
+        >
+          重新检测
+        </button>
+        <button
+          type="button"
+          onClick={() => setLocalDismissed(true)}
+          className="shrink-0 text-amber-200/60 hover:text-amber-100"
+          title="忽略"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  if (dismissed || health.status === "ok") return null;
 
   const reasons: string[] = [];
   if (!health.database?.ok) reasons.push("数据库不可用");
