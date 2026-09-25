@@ -80,6 +80,15 @@ function KnowledgeBaseCard({
         <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-400">
           文档 {stats.sources}
         </span>
+        {(stats.sources_archived ?? 0) > 0 && (
+          <span
+            className="px-1.5 py-0.5 rounded border border-slate-500/40 bg-slate-500/10 text-slate-400"
+            data-testid="kb-archive-split"
+            title={`活跃 ${stats.sources_active ?? "?"} · 已归档 ${stats.sources_archived}`}
+          >
+            活跃 {stats.sources_active ?? "?"} · 归档 {stats.sources_archived}
+          </span>
+        )}
         <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-400">
           切块 {stats.chunks}
         </span>
@@ -106,6 +115,33 @@ function KnowledgeBaseCard({
           {stats.vector_mode === "degraded" ? "⚠ " : ""}
           向量 {stats.embedded_chunks}/{stats.chunks}
         </span>
+        {typeof stats.scan_pressure === "number" && (stats.scan_limit ?? 0) > 0 && (
+          <span
+            className={`px-1.5 py-0.5 rounded border ${
+              stats.scan_near_cap
+                ? "border-amber-500/50 bg-amber-500/10 text-amber-300"
+                : "border-edge bg-ink/60 text-slate-500"
+            }`}
+            data-testid="kb-scan-pressure"
+            title={
+              stats.scan_near_cap
+                ? `活跃切块接近扫描上限（${stats.chunks_active ?? "?"}/${stats.scan_limit}）；可考虑归档清理`
+                : `活跃切块 / 扫描上限 = ${stats.chunks_active ?? "?"}/${stats.scan_limit}`
+            }
+          >
+            {stats.scan_near_cap ? "⚠ " : ""}
+            扫描 {(stats.scan_pressure * 100).toFixed(0)}%
+          </span>
+        )}
+        {stats.suppliers_json_dual_write === false && (
+          <span
+            className="px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300"
+            data-testid="kb-suppliers-json-off"
+            title="materials.suppliers_json 双写已关；写入只走归一化表"
+          >
+            供应商 JSON 单写
+          </span>
+        )}
         {(stats.products ?? 0) > 0 && (
           <span
             className="px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300"

@@ -2362,6 +2362,20 @@ export const api = {
 
   kbReindex: () => post<KBReindexResult>("/api/kb/reindex", {}),
 
+  /** W4: dry-run by default; physical delete needs confirm=true and dry_run=false. */
+  kbRetentionPurge: (body: {
+    days: number;
+    confirm?: boolean;
+    dry_run?: boolean;
+    limit?: number;
+  }) =>
+    post<RetentionPurgeResult>("/api/kb/retention/purge", {
+      days: body.days,
+      confirm: body.confirm ?? false,
+      dry_run: body.dry_run ?? true,
+      limit: body.limit ?? 200,
+    }),
+
   kgResolve: (q: string) =>
     get<KGEntityResolveResponse>(`/api/kg/resolve?q=${encodeURIComponent(q)}`),
 
@@ -3688,6 +3702,33 @@ export interface KBStats {
   products?: number;
   /** Process-local quality-gate drop counters (retrieval + ingest). */
   quality_gate_drops?: KbGateDropStats;
+  /** W4: active (non-archived) sources / chunks vs soft-archived. */
+  sources_active?: number;
+  sources_archived?: number;
+  chunks_active?: number;
+  chunks_archived?: number;
+  /** W4: kb_search_scan_limit and chunks_active / scan_limit (capped at 1). */
+  scan_limit?: number;
+  scan_pressure?: number;
+  scan_near_cap?: boolean;
+  /** W4: recommended retention days (0 = disabled; purge never auto-runs). */
+  archive_retention_days?: number;
+  /** W4: whether materials.suppliers_json is still dual-written. */
+  suppliers_json_dual_write?: boolean;
+  stale_chunks?: number;
+  products_pending_structure?: number;
+}
+
+/** W4: POST /api/kb/retention/purge result. */
+export interface RetentionPurgeResult {
+  ok: boolean;
+  dry_run: boolean;
+  days: number;
+  candidates: Array<{ source_id: string; title?: string | null; archived_at?: string | null }>;
+  candidate_count: number;
+  purged: string[];
+  purged_count: number;
+  errors: Array<{ source_id?: string; error?: string }>;
 }
 
 /** Nested drop counters from kb_retrieval_gate. */
