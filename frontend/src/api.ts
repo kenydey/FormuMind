@@ -189,6 +189,8 @@ export interface Formulation {
     }[];
     reasons: string[];
   } | null;
+  /** Top-5‴ #2: metrics soft-corrected by prediction_bias.mean_error. */
+  bias_corrected_metrics?: string[];
 }
 
 export interface EvidenceEntityRef {
@@ -4299,6 +4301,10 @@ export interface KbGoldenEvalResponse {
   total: number;
   passed: number;
   failed: number;
+  /** W1′ / Top-5‴ #3 — mean reciprocal rank over the batch. */
+  mrr?: number;
+  /** Alias of passed/total for the keyword-hit gate. */
+  recall_at_k?: number;
   results: KbGoldenEvalResultRow[];
 }
 

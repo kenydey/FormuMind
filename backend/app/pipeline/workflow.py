@@ -94,6 +94,24 @@ def _score_and_validate(
 
     form = enrich_formulation(form, network=enrich_network)
     form.predicted, form.predicted_std = predictor.predict_full(form, process, req=req)
+    # Top-5‴ #2: optional soft-correct from workbench prediction_bias (default off).
+    try:
+        from ..services.prediction_bias_correct import soft_correct_predicted
+
+        camp_id = getattr(req, "workbench_campaign_id", None) if req else None
+        pid = getattr(req, "project_id", None) if req else None
+        corrected, metrics = soft_correct_predicted(
+            form.predicted,
+            campaign_id=int(camp_id) if camp_id is not None else None,
+            project_id=str(pid) if pid else None,
+        )
+        if metrics:
+            form.predicted = corrected
+            form.bias_corrected_metrics = list(metrics)
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("prediction bias soft-correct skipped: %s", exc)
     voc_limit = req.voc_limit_gpl if req else None
     form.warnings = validate_formulation(form, voc_limit_gpl=voc_limit)
     voc_gpl = form.predicted.get("voc_gpl")
