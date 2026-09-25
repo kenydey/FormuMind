@@ -83,6 +83,15 @@ def stats() -> KBStats:
     return KBStats(**kb_index.kb_stats())
 
 
+@router.get("/quality-ops")
+def quality_ops(
+    project_id: str | None = Query(default=None, description="Optional project scope label"),
+) -> dict:
+    """Batch D: Hub quality ops panel — read-only aggregate of stats + shadow + score."""
+    from ..services.kb_quality_ops import build_quality_ops
+
+    return build_quality_ops(project_id=project_id)
+
 class RetentionPurgeRequest(BaseModel):
     """W4: purge soft-archived sources older than ``days``.
 

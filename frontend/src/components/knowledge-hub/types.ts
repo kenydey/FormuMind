@@ -22,7 +22,13 @@ export type HubMaterialRow = {
   evidence?: Evidence;
 };
 
-export type KnowledgeHubTab = "materials" | "wiki" | "graph" | "reports" | "retrieval";
+export type KnowledgeHubTab =
+  | "materials"
+  | "wiki"
+  | "graph"
+  | "reports"
+  | "retrieval"
+  | "quality";
 
 export function resolveOpenUrl(row: HubMaterialRow): string | null {
   const candidates = [row.oa_pdf_url, row.url, row.url_alt];
