@@ -53,6 +53,18 @@ class KBStats(BaseModel):
     products: int = 0
     #: Process-local quality-gate drop counters (retrieval + ingest).
     quality_gate_drops: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # W4 scan-pain / retention observability
+    sources_active: int = 0
+    sources_archived: int = 0
+    chunks_active: int = 0
+    chunks_archived: int = 0
+    scan_limit: int = 5000
+    scan_pressure: float = 0.0
+    scan_near_cap: bool = False
+    archive_retention_days: int = 0
+    suppliers_json_dual_write: bool = True
+    stale_chunks: int = 0
+    products_pending_structure: int = 0
 
 
 class ReindexResult(BaseModel):
@@ -69,6 +81,70 @@ class KBSearchResponse(BaseModel):
 @router.get("/stats", response_model=KBStats)
 def stats() -> KBStats:
     return KBStats(**kb_index.kb_stats())
+
+
+class RetentionPurgeRequest(BaseModel):
+    """W4: purge soft-archived sources older than ``days``.
+
+    Default is dry-run. Physical delete requires ``confirm=true`` and
+    ``dry_run=false``. ``days`` must be ≥ 1 (config ``kb_archive_retention_days``
+    is display-only and never auto-runs).
+    """
+
+    days: int = Field(..., ge=1, le=3650)
+    confirm: bool = False
+    dry_run: bool = True
+    limit: int = Field(default=200, ge=1, le=1000)
+
+
+class RetentionPurgeCandidate(BaseModel):
+    source_id: str
+    title: str | None = None
+    archived_at: str | None = None
+
+
+class RetentionPurgeResponse(BaseModel):
+    ok: bool
+    dry_run: bool
+    days: int
+    candidates: list[RetentionPurgeCandidate] = Field(default_factory=list)
+    candidate_count: int = 0
+    purged: list[str] = Field(default_factory=list)
+    purged_count: int = 0
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
+@router.post("/retention/purge", response_model=RetentionPurgeResponse)
+def retention_purge(body: RetentionPurgeRequest) -> RetentionPurgeResponse:
+    """Flag-gated hard-delete of expired soft-archived sources (default dry-run)."""
+    if not kb_index.kb_enabled():
+        raise HTTPException(status_code=409, detail="知识库 v2 未启用（FORMUMIND_KB_V2_ENABLED）")
+    from ..services.kb_retention import purge_expired_archived
+
+    try:
+        result = purge_expired_archived(
+            days=body.days,
+            dry_run=body.dry_run,
+            confirm=body.confirm,
+            limit=body.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("kb retention purge failed")
+        raise HTTPException(status_code=500, detail="清理失败") from exc
+    return RetentionPurgeResponse(
+        ok=bool(result.get("ok")),
+        dry_run=bool(result.get("dry_run")),
+        days=int(result.get("days") or body.days),
+        candidates=[
+            RetentionPurgeCandidate(**c) for c in (result.get("candidates") or [])
+        ],
+        candidate_count=int(result.get("candidate_count") or 0),
+        purged=list(result.get("purged") or []),
+        purged_count=int(result.get("purged_count") or 0),
+        errors=list(result.get("errors") or []),
+    )
 
 
 class KbRetrievalSettings(BaseModel):
