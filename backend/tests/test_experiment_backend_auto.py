@@ -63,7 +63,7 @@ def test_auto_unreachable_campaign_datalab_raises(monkeypatch):
 def test_auto_unreachable_optional_falls_back_sqlite(monkeypatch):
     """auto + unreachable + REQUIRED=false + campaign=sqlite → SqlExperimentStore.
 
-    CI/test isolation only — not a product "run without ELN" path.
+    Soft-degrade / CI path — product default is campaign=auto too.
     """
     s = _settings(
         experiment_backend="auto",

@@ -240,9 +240,11 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "允许对 Dossier 叙述段调用 LLM；表格数字仍确定性写入（默认关）。",
             "kb", "依赖 wiki_project_dossier_enabled"),
     EnvFlag("wiki_dossier_auto_patch", "卷宗事件自动更新",
-            "要求/入库/DOE/台账/闭环等白名单事件自动 patch 对应节（默认关）。"
-            "仅 _EVENT_SECTIONS 映射事件生效；未知事件跳过（不全量刷 8 节）。",
-            "kb", "依赖 wiki_project_dossier_enabled；默认勿开，确认事件子集后再开"),
+            "白名单事件自动 patch 对应节（默认关 · 产品化可开）。"
+            "允许：project_updated / literature_ingested / doe_updated / lab_recorded / "
+            "loop_updated / optimize_completed / attachment_uploaded；未知事件跳过（不全量 8 节）。"
+            "不改 Claims/DOE；表格仍确定性。",
+            "kb", "依赖 wiki_project_dossier_enabled；确认白名单后再开"),
     EnvFlag("wiki_dossier_report_enabled", "卷宗 Report 生成",
             "基于 DossierPack 生成 briefing/feasibility 等研发草稿（P5，默认开 · Top-5 #3）。",
             "kb", "依赖 wiki_project_dossier_enabled；draft_not_claims；LLM 润色另受 wiki_dossier_llm_narrative"),
@@ -319,10 +321,11 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("auto_retrain", "实验自动重训",
             "提交新实验数据后自动重训代理模型。", "data"),
     EnvFlag("datalab_required", "Datalab 硬依赖",
-            "Datalab ELN 是台账/推荐/优化的核心依赖；不可达时硬失败并在 /health 标 degraded。"
-            "产品默认开启。关闭仅用于 CI/单测隔离，不是正式「无 ELN」运行模式。",
+            "True = ELN 不可达时硬失败 + /health degraded（Docker ELN 栈推荐）。"
+            "False（产品默认 · Top-5″ #2）= 与 campaign/experiment_backend=auto 联用时"
+            "不可达回退 sqlite「本地台账」，不标硬降级。",
             "data",
-            "关闭后仍须显式 CAMPAIGN/EXPERIMENT_BACKEND=sqlite 才走本地库（仅测试）"),
+            "ELN 必装部署请开；笔记本/无 Docker 可保持关"),
     # ── 基础设施 ──────────────────────────────────────────────────────────
     EnvFlag("celery_eager", "任务同步执行",
             "后台任务在进程内同步执行（无需 Redis/Celery worker）。"

@@ -33,6 +33,14 @@ def test_wiki_grayscale_product_defaults_on():
     assert s.kg_relation_extract_enabled is False
 
 
+def test_datalab_soft_degrade_defaults():
+    """Top-5″ #2: Field defaults are auto + REQUIRED=false (conftest may override env)."""
+    fields = Settings.model_fields
+    assert fields["datalab_required"].default is False
+    assert fields["campaign_backend"].default == "auto"
+    assert fields["experiment_backend"].default == "auto"
+
+
 def test_kb_search_deny_flag_registered():
     attrs = {f.attr for f in FLAG_REGISTRY}
     assert "kb_search_deny_enabled" in attrs

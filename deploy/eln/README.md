@@ -65,14 +65,24 @@ FORMUMIND_REDIS_URL=redis://redis:6379/0
 
 ## Datalab 不可达行为
 
-`campaign_backend=datalab` / `DATALAB_REQUIRED=true`（产品默认）时：
+### 产品默认（soft-degrade · Top-5″ #2）
 
-- **不会** 静默回退 sqlite 台账，也**不是**正式「无 ELN」运行模式
+`campaign_backend=auto` / `experiment_backend=auto` / `DATALAB_REQUIRED=false`：
+
+- Datalab **可达** → ELN 为台账/训练 SSOT
+- Datalab **不可达** → 回退 sqlite「本地台账」；`GET /health` 仍可为 `ok`，`datalab.ledger_mode=local`，带 soft hint
+- 前端 InfraHealthBanner / Workbench 显示「本地台账」提示（非硬降级红条）
+
+### ELN 必装部署（Docker compose）
+
+`campaign_backend=datalab` / `DATALAB_REQUIRED=true`（compose 默认）：
+
+- **不会** 静默回退 sqlite 台账
 - API 返回 **503**，`detail` 含中文修复指引与 compose 启动命令
 - `GET /health` → `status: degraded`，`datalab.hint` 含启动指引
 - 前端 DOE / workbench / recommend 显示 ELN 错误（不会套 Redis 措辞）
 
-CI / 单测隔离可显式设置 `FORMUMIND_CAMPAIGN_BACKEND=sqlite`（pytest `conftest` 已设）；**不要**把该配置写进用户 Quickstart 或生产 `.env`。
+CI / 单测隔离可显式设置 `FORMUMIND_CAMPAIGN_BACKEND=sqlite`（pytest `conftest` 已设）。
 
 ## Datalab Headless API 契约（FormuMind payload）
 
