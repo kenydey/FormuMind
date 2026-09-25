@@ -40,6 +40,26 @@ export default function HubWikiPane({ active }: { active: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   /** list = classic browser; graph = [[wikilink]] canvas (P0). */
   const [viewMode, setViewMode] = useState<"list" | "graph">("list");
+  const [embedEnabled, setEmbedEnabled] = useState<boolean | null>(null);
+  const openSettings = useStore((s) => s.openSettings);
+  const envFlagsRevision = useStore((s) => s.envFlagsRevision);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getEnvFlags()
+      .then((body) => {
+        if (cancelled) return;
+        const f = (body.flags ?? []).find((x) => x.attr === "wiki_embed_enabled");
+        setEmbedEnabled(f ? Boolean(f.value) : null);
+      })
+      .catch(() => {
+        if (!cancelled) setEmbedEnabled(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [envFlagsRevision]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -705,13 +725,28 @@ export default function HubWikiPane({ active }: { active: boolean }) {
         <button
           type="button"
           className="px-2 py-1 border border-edge rounded disabled:opacity-40"
-          disabled={!!busy}
+          disabled={!!busy || embedEnabled === false}
           title="重建 Wiki 摘要向量索引（需 wiki_embed_enabled）"
           data-testid="hub-wiki-rebuild-embed"
           onClick={() => void runOps("embed", () => api.rebuildWikiEmbed())}
         >
           {busy === "embed" ? "Embed…" : "重建 Embed"}
         </button>
+        {embedEnabled === false && (
+          <button
+            type="button"
+            className="px-2 py-1 border border-amber-500/40 text-amber-200 rounded text-[10px]"
+            data-testid="hub-wiki-embed-open-env"
+            onClick={() => openSettings("env", { focusEnvAttr: "wiki_embed_enabled" })}
+          >
+            开启 Wiki Embed
+          </button>
+        )}
+        {embedEnabled === true && (
+          <span className="text-[10px] text-emerald-400/90" data-testid="hub-wiki-embed-on">
+            Embed✓
+          </span>
+        )}
         <button
           type="button"
           className="px-2 py-1 border border-edge rounded disabled:opacity-40"

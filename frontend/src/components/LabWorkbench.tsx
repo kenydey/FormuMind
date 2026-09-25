@@ -117,6 +117,8 @@ export default function LabWorkbench({
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
   const setAutoLoopOnSync = useStore((s) => s.setAutoLoopOnSync);
+  const wikiDossierAutoPatch = useStore((s) => s.wikiDossierAutoPatch);
+  const setWikiDossierAutoPatch = useStore((s) => s.setWikiDossierAutoPatch);
   const optimizeEngine = useStore((s) => s.optimizeEngine);
   const loopDoeEngine = useStore((s) => s.loopDoeEngine);
   const campaignState = useStore((s) => s.campaignState);
@@ -863,6 +865,30 @@ export default function LabWorkbench({
                   建议：已有 Completed+测量行时，可开「保存后自动闭环」做项目级飞轮（仍不自动采纳 DOE）。
                 </p>
               )}
+            <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={wikiDossierAutoPatch}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  if (on) {
+                    const ok = window.confirm(
+                      "开启本项目「卷宗事件自动更新」？\n\n仅白名单事件（入库/DOE/台账/闭环等）刷新对应节；未知事件跳过。\n全局旗标仍可关；不洗表格、不进 Claims/DOE。",
+                    );
+                    if (!ok) return;
+                  }
+                  setWikiDossierAutoPatch(on);
+                }}
+                className="rounded border-edge"
+                data-testid="workbench-dossier-auto-patch-checkbox"
+              />
+              本项目卷宗事件自动更新
+              {wikiDossierAutoPatch && (
+                <span className="text-amber-300/90" data-testid="workbench-dossier-auto-patch-on">
+                  · 已开
+                </span>
+              )}
+            </label>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <select

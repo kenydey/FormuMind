@@ -188,6 +188,15 @@ function FormulaCard({
               {measuredChip.label}
             </span>
           )}
+          {(form.bias_corrected_metrics?.length ?? 0) > 0 && (
+            <span
+              className="text-[9px] px-1 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-200 shrink-0"
+              data-testid="card-bias-corrected-chip"
+              title={`已软校准：${(form.bias_corrected_metrics || []).join("、")}`}
+            >
+              已校准
+            </span>
+          )}
           {form.source === "ai_modify" && (
             <span className="text-[9px] px-1 py-0.5 rounded border border-accent2/40 text-accent2 shrink-0">
               AI修改
@@ -522,6 +531,9 @@ export default function FormulaLeaderboard() {
     formulationBusy,
     formulationValidateWarnings,
     relationInsights,
+    runResearch,
+    runOptimize,
+    busy,
   } = useStore(
     useShallow((s) => ({
       leaderboard: s.leaderboard,
@@ -535,6 +547,9 @@ export default function FormulaLeaderboard() {
       formulationBusy: s.formulationBusy,
       formulationValidateWarnings: s.formulationValidateWarnings,
       relationInsights: s.relationInsights,
+      runResearch: s.runResearch,
+      runOptimize: s.runOptimize,
+      busy: s.busy,
     }))
   );
   const setOpenModal = useStore((s) => s.setOpenModal);
@@ -742,7 +757,32 @@ export default function FormulaLeaderboard() {
         </div>
       )}
       {leaderboard.length === 0 ? (
-        <p className="text-slate-500 text-sm">尚无配方。先运行检索推荐或寻优。</p>
+        <div
+          className="rounded-lg border border-dashed border-edge/60 px-3 py-4 space-y-2"
+          data-testid="leaderboard-empty"
+        >
+          <p className="text-slate-500 text-sm">尚无配方。先运行检索推荐或寻优。</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="text-xs px-2.5 py-1.5 rounded border border-accent/50 text-accent hover:bg-accent/10"
+              data-testid="leaderboard-empty-recommend"
+              disabled={formulationBusy}
+              onClick={() => void runResearch()}
+            >
+              去推荐
+            </button>
+            <button
+              type="button"
+              className="text-xs px-2.5 py-1.5 rounded border border-edge text-slate-300 hover:border-accent/40"
+              data-testid="leaderboard-empty-optimize"
+              disabled={busy === "optimizing"}
+              onClick={() => void runOptimize()}
+            >
+              打开寻优
+            </button>
+          </div>
+        </div>
       ) : viewMode === "pareto" ? (
         <ParetoFrontPlot
           formulations={leaderboard}

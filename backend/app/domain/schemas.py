@@ -232,6 +232,9 @@ class Formulation(BaseModel):
     # KG compatibility adjustment detail (second priority). Populated by
     # kg_recommend_score when KG is enabled; None otherwise.
     kg_compat: dict | None = None
+    # Top-5‴ #2: metrics whose predicted values were soft-corrected by
+    # prediction_bias.mean_error (flag-gated; empty when off).
+    bias_corrected_metrics: list[str] = Field(default_factory=list)
 
     def total_pct(self) -> float:
         return round(sum(i.weight_pct for i in self.ingredients), 4)

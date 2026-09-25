@@ -782,8 +782,10 @@ def notify_dossier_event(
     sections: list[str] | None = None,
 ) -> dict[str, Any]:
     """
-    Event hook for auto patch. No-op unless ``wiki_dossier_auto_patch`` is true.
+    Event hook for auto patch.
 
+    Fires when **global** ``wiki_dossier_auto_patch`` is true **or** the
+    project's workspace ``wiki_dossier_auto_patch`` is true (Top-5‴ #4).
     Top-5′ #3: only allowlisted events in ``_EVENT_SECTIONS`` fire; unknown
     events are skipped (never fall back to all eight sections).
     Safe to call from project update / ingest / DOE / lab / loop paths.
@@ -793,7 +795,21 @@ def notify_dossier_event(
         return {"ok": False, "skipped": True, "reason": "wiki_disabled", "event": event}
     if not getattr(settings, "wiki_project_dossier_enabled", False):
         return {"ok": False, "skipped": True, "reason": "dossier_disabled", "event": event}
-    if not getattr(settings, "wiki_dossier_auto_patch", False):
+
+    global_on = bool(getattr(settings, "wiki_dossier_auto_patch", False))
+    project_on = False
+    pid = (project_id or "").strip()
+    if not global_on and pid:
+        try:
+            from ...db.project_store import get_project_store
+
+            detail = get_project_store().get(pid)
+            ws = getattr(detail, "workspace", None) if detail is not None else None
+            project_on = bool(getattr(ws, "wiki_dossier_auto_patch", False))
+        except Exception as exc:
+            logger.debug("dossier auto_patch project flag read failed: %s", exc)
+            project_on = False
+    if not (global_on or project_on):
         return {"ok": True, "skipped": True, "reason": "auto_patch_off", "event": event}
 
     ev = (event or "").strip()
@@ -815,6 +831,7 @@ def notify_dossier_event(
         out = refresh_dossier(project_id, campaign_id=campaign_id, sections=secs)
         out["event"] = ev
         out["skipped"] = False
+        out["auto_patch_scope"] = "global" if global_on else "project"
         return out
     except Exception as exc:
         logger.warning("dossier auto_patch failed project=%s event=%s: %s", project_id, ev, exc)

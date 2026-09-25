@@ -52,6 +52,7 @@ function populatedState(): AppState {
     autoLoopMaxRounds: 5,
     autoLoopRound: 2,
     autoAdoptNextDoeOnLoop: true,
+    wikiDossierAutoPatch: false,
   } as unknown as AppState;
 }
 

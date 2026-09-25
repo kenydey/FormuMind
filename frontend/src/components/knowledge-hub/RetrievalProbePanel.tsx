@@ -11,8 +11,31 @@ import {
 import { useStore } from "../../store";
 
 const SAMPLE_QUERIES = ["硅烷偶联剂", "磷化液", "钝化膜 铬酸盐", "水性环氧 盐雾"] as const;
+const GOLDEN_TREND_KEY = "formumind.golden_mrr_trend";
 
 type ScopeMode = "project" | "project_global" | "global";
+type GoldenTrendPoint = { at: string; mrr: number; recall_at_k: number; passed: number; total: number };
+
+function loadGoldenTrend(): GoldenTrendPoint[] {
+  try {
+    const raw = localStorage.getItem(GOLDEN_TREND_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as GoldenTrendPoint[];
+    return Array.isArray(parsed) ? parsed.slice(-12) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushGoldenTrend(point: GoldenTrendPoint): GoldenTrendPoint[] {
+  const next = [...loadGoldenTrend(), point].slice(-12);
+  try {
+    localStorage.setItem(GOLDEN_TREND_KEY, JSON.stringify(next));
+  } catch {
+    /* quota */
+  }
+  return next;
+}
 
 function fmtScore(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
@@ -44,6 +67,7 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
   const [selected, setSelected] = useState<KbQueryTestHit | null>(null);
   const [showJson, setShowJson] = useState(false);
   const [golden, setGolden] = useState<KbGoldenEvalResponse | null>(null);
+  const [goldenTrend, setGoldenTrend] = useState<GoldenTrendPoint[]>(() => loadGoldenTrend());
 
   useEffect(() => {
     if (!active) return;
@@ -120,6 +144,17 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
         rerank: mode === "hybrid_rerank" ? true : null,
       });
       setGolden(payload);
+      if (typeof payload.mrr === "number" || typeof payload.recall_at_k === "number") {
+        setGoldenTrend(
+          pushGoldenTrend({
+            at: new Date().toISOString(),
+            mrr: Number(payload.mrr ?? 0),
+            recall_at_k: Number(payload.recall_at_k ?? (payload.total ? payload.passed / payload.total : 0)),
+            passed: payload.passed,
+            total: payload.total,
+          }),
+        );
+      }
     } catch (e) {
       setGolden(null);
       setError(formatApiError(e));
@@ -393,10 +428,40 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
           className="border border-edge/50 rounded p-2 space-y-1"
           data-testid="retrieval-probe-golden-results"
         >
-          <div className="text-[11px] text-slate-300">
-            Golden 批跑 · {golden.passed}/{golden.total} 通过
-            <span className="text-slate-500 ml-2">mode={golden.mode}</span>
+          <div className="text-[11px] text-slate-300 flex flex-wrap gap-x-3 gap-y-1 items-center">
+            <span>
+              Golden 批跑 · {golden.passed}/{golden.total} 通过
+            </span>
+            <span className="text-slate-500">mode={golden.mode}</span>
+            {typeof golden.mrr === "number" && (
+              <span className="font-mono text-accent" data-testid="retrieval-probe-golden-mrr">
+                MRR {golden.mrr.toFixed(3)}
+              </span>
+            )}
+            {typeof golden.recall_at_k === "number" && (
+              <span className="font-mono text-slate-300" data-testid="retrieval-probe-golden-recall">
+                Recall@{golden.top_k} {golden.recall_at_k.toFixed(3)}
+              </span>
+            )}
           </div>
+          {goldenTrend.length >= 2 && (
+            <p
+              className={`text-[10px] ${
+                goldenTrend[goldenTrend.length - 1].mrr + 0.02 <
+                goldenTrend[goldenTrend.length - 2].mrr
+                  ? "text-amber-300"
+                  : "text-slate-500"
+              }`}
+              data-testid="retrieval-probe-golden-trend"
+            >
+              趋势（近 {goldenTrend.length} 次）MRR{" "}
+              {goldenTrend.map((p) => p.mrr.toFixed(2)).join(" → ")}
+              {goldenTrend[goldenTrend.length - 1].mrr + 0.02 <
+              goldenTrend[goldenTrend.length - 2].mrr
+                ? " · ⚠ 较上次下降"
+                : ""}
+            </p>
+          )}
           <div className="max-h-40 overflow-auto space-y-1">
             {golden.results.map((row) => (
               <div

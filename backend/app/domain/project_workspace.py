@@ -55,6 +55,8 @@ class ProjectWorkspace(BaseModel):
     last_al_engine: str | None = None
     auto_loop_on_sync: bool = False
     auto_adopt_next_doe_on_loop: bool = False
+    # Top-5‴ #4: project-level dossier auto patch (global default still off).
+    wiki_dossier_auto_patch: bool = False
 
 
 class ProjectSummary(BaseModel):

@@ -82,6 +82,9 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   if (patch.autoAdoptNextDoeOnLoop !== undefined) {
     draft.autoAdoptNextDoeOnLoop = patch.autoAdoptNextDoeOnLoop;
   }
+  if (patch.wikiDossierAutoPatch !== undefined) {
+    draft.wikiDossierAutoPatch = patch.wikiDossierAutoPatch;
+  }
 }
 
 export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
@@ -120,5 +123,6 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     autoLoopMaxRounds: state.autoLoopMaxRounds,
     autoLoopRound: state.autoLoopRound,
     autoAdoptNextDoeOnLoop: state.autoAdoptNextDoeOnLoop,
+    wikiDossierAutoPatch: state.wikiDossierAutoPatch,
   };
 }

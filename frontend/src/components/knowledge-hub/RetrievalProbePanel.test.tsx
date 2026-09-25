@@ -100,4 +100,31 @@ describe("RetrievalProbePanel", () => {
     expect(btn).toBeDisabled();
     expect(kbQueryTest).not.toHaveBeenCalled();
   });
+
+  it("shows MRR and Recall@k after golden batch", async () => {
+    kbGoldenEvalRun.mockResolvedValue({
+      mode: "hybrid",
+      top_k: 3,
+      alpha: 0.3,
+      total: 2,
+      passed: 2,
+      failed: 0,
+      mrr: 0.75,
+      recall_at_k: 1.0,
+      results: [
+        {
+          question: "硅烷",
+          passed: true,
+          expected_keywords: ["硅烷"],
+          hit_titles: ["硅烷偶联剂"],
+        },
+      ],
+    });
+    render(<RetrievalProbePanel active />);
+    fireEvent.click(screen.getByTestId("retrieval-probe-golden"));
+    await waitFor(() => {
+      expect(screen.getByTestId("retrieval-probe-golden-mrr")).toHaveTextContent("MRR 0.750");
+    });
+    expect(screen.getByTestId("retrieval-probe-golden-recall")).toHaveTextContent("Recall@3 1.000");
+  });
 });
