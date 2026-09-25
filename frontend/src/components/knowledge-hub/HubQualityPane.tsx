@@ -6,6 +6,7 @@ import RetrievalProbePanel from "./RetrievalProbePanel";
 /** Batch D: Hub quality ops — read-only aggregate of gate / scan / shadow / score. */
 export default function HubQualityPane({ active }: { active: boolean }) {
   const projectId = useStore((s) => s.activeProjectId);
+  const setTab = useStore((s) => s.setKnowledgeHubTab);
   const [data, setData] = useState<KBQualityOps | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,6 +80,35 @@ export default function HubQualityPane({ active }: { active: boolean }) {
             <Stat label="嵌入块" value={data.embedded_chunks} />
             <Stat label="活跃块" value={data.chunks_active} />
             <Stat label="shadow 批" value={(data.relevance_shadow as any)?.batch_count} />
+          </div>
+        )}
+        {data?.scan_near_cap && (
+          <div
+            className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200"
+            data-testid="hub-quality-scan-cta"
+          >
+            <div className="font-medium">scan 接近上限</div>
+            <p className="text-amber-200/80 mt-0.5">
+              活跃切块接近 `kb_search_scan_limit`。建议：资料页归档低质源 → 依赖管理 dry-run retention purge（需确认，默认不物理删）。
+            </p>
+            <div className="flex flex-wrap gap-2 mt-1.5">
+              <button
+                type="button"
+                className="border border-amber-500/40 rounded px-2 py-0.5 hover:bg-amber-500/20"
+                data-testid="hub-quality-cta-materials"
+                onClick={() => setTab("materials")}
+              >
+                打开资料页归档
+              </button>
+              <button
+                type="button"
+                className="border border-amber-500/40 rounded px-2 py-0.5 hover:bg-amber-500/20"
+                data-testid="hub-quality-cta-retrieval"
+                onClick={() => setTab("retrieval")}
+              >
+                查看检索探针
+              </button>
+            </div>
           </div>
         )}
         {data?.kb_quality_components && (

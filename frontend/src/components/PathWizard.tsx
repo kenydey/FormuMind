@@ -45,10 +45,13 @@ export default function PathWizard() {
   const setOpenModal = useStore((s) => s.setOpenModal);
   const openKnowledgeHub = useStore((s) => s.openKnowledgeHub);
   const refreshWorkbenchStats = useStore((s) => s.refreshWorkbenchStats);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const hasProject = Boolean(activeProjectId);
 
   const current = useMemo(() => PATHS.find((p) => p.id === active) || null, [active]);
 
   function runStep(path: PathId, step: string) {
+    if (path === "knowledge" && !hasProject) return;
     if (path === "formula") {
       if (step.includes("需求")) setOpenModal("requirements");
       else if (step.includes("推荐")) setOpenModal("recommend");
@@ -90,15 +93,17 @@ export default function PathWizard() {
       <div className="grid grid-cols-1 gap-1.5">
         {PATHS.map((p) => {
           const on = active === p.id;
+          const blocked = p.id === "knowledge" && !hasProject;
           return (
             <button
               key={p.id}
               type="button"
               data-testid={`path-card-${p.id}`}
+              data-blocked={blocked ? "true" : "false"}
               onClick={() => setActive(on ? null : p.id)}
               className={`text-left rounded-lg border px-2.5 py-2 transition-colors ${
                 on ? "border-accent/60 bg-accent/10" : "border-edge hover:border-accent/40"
-              }`}
+              } ${blocked ? "opacity-80" : ""}`}
             >
               <div className="flex items-center gap-2">
                 <span>{p.icon}</span>
@@ -114,6 +119,11 @@ export default function PathWizard() {
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 mt-0.5">{p.desc}</p>
+              {blocked && (
+                <p className="text-[9px] text-amber-300/90 mt-0.5" data-testid="path-knowledge-need-project">
+                  需先打开/创建项目后才能走知识路径
+                </p>
+              )}
             </button>
           );
         })}
@@ -123,20 +133,30 @@ export default function PathWizard() {
           className="rounded-lg border border-edge/60 bg-ink/30 p-2 space-y-1"
           data-testid={`path-steps-${current.id}`}
         >
-          {current.steps.map((step, i) => (
-            <li key={step}>
-              <button
-                type="button"
-                data-testid={`path-step-${current.id}-${i}`}
-                onClick={() => runStep(current.id, step)}
-                className="w-full text-left text-[11px] px-2 py-1.5 rounded border border-transparent hover:border-accent/40 hover:bg-accent/5 text-slate-300"
-              >
-                <span className="text-slate-500 mr-2">{i + 1}.</span>
-                {step}
-                <span className="float-right text-[9px] text-accent2">打开</span>
-              </button>
-            </li>
-          ))}
+          {current.steps.map((step, i) => {
+            const disabled = current.id === "knowledge" && !hasProject;
+            return (
+              <li key={step}>
+                <button
+                  type="button"
+                  data-testid={`path-step-${current.id}-${i}`}
+                  disabled={disabled}
+                  onClick={() => runStep(current.id, step)}
+                  className={`w-full text-left text-[11px] px-2 py-1.5 rounded border border-transparent text-slate-300 ${
+                    disabled
+                      ? "opacity-40 cursor-not-allowed"
+                      : "hover:border-accent/40 hover:bg-accent/5"
+                  }`}
+                >
+                  <span className="text-slate-500 mr-2">{i + 1}.</span>
+                  {step}
+                  <span className="float-right text-[9px] text-accent2">
+                    {disabled ? "需项目" : "打开"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>
