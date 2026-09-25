@@ -99,6 +99,8 @@ export default function LabWorkbench({
   const [reconciling, setReconciling] = useState(false);
   const [loopRoundCount, setLoopRoundCount] = useState(0);
   const [loopConverged, setLoopConverged] = useState(false);
+  const [loopStatusLabel, setLoopStatusLabel] = useState<string>("idle");
+  const [loopStatusMessage, setLoopStatusMessage] = useState<string>("");
   const [apiSnapshot, setApiSnapshot] = useState<ReturnType<typeof effectiveObjectives> | undefined>();
 
   // ── Phase 2 modal state ──────────────────────────────────────
@@ -211,8 +213,15 @@ export default function LabWorkbench({
         setApiSnapshot(data.objectives_snapshot as any);
       }
       const history = data.loop_history ?? [];
-      setLoopRoundCount(history.length);
-      setLoopConverged(Boolean(history.length && (history[history.length - 1] as any)?.converged));
+      setLoopRoundCount(data.loop_status?.rounds ?? history.length);
+      setLoopConverged(
+        Boolean(
+          data.loop_status?.converged ??
+            (history.length && (history[history.length - 1] as any)?.converged),
+        ),
+      );
+      setLoopStatusLabel(String(data.loop_status?.status || "idle"));
+      setLoopStatusMessage(String(data.loop_status?.message || ""));
       setDirtyIds(new Set());
       setSelectedRow((prev) =>
         prev ? (data.rows.find((r) => r.id === prev.id) ?? null) : null
@@ -235,8 +244,15 @@ export default function LabWorkbench({
             setApiSnapshot(data.objectives_snapshot as any);
           }
           const history = data.loop_history ?? [];
-          setLoopRoundCount(history.length);
-          setLoopConverged(Boolean(history.length && (history[history.length - 1] as any)?.converged));
+          setLoopRoundCount(data.loop_status?.rounds ?? history.length);
+          setLoopConverged(
+            Boolean(
+              data.loop_status?.converged ??
+                (history.length && (history[history.length - 1] as any)?.converged),
+            ),
+          );
+          setLoopStatusLabel(String(data.loop_status?.status || "idle"));
+          setLoopStatusMessage(String(data.loop_status?.message || ""));
           // Phase 2.1: preload attachment counts for the 📎 badge column.
           void (async () => {
             const counts: Record<number, number> = {};
@@ -542,6 +558,14 @@ export default function LabWorkbench({
       const hints: string[] = [];
       if (res.training_message) hints.push(res.training_message);
       if (res.loop_message) hints.push(res.loop_message);
+      if (res.loop_status) {
+        setLoopRoundCount(res.loop_status.rounds ?? loopRoundCount);
+        setLoopConverged(Boolean(res.loop_status.converged));
+        setLoopStatusLabel(String(res.loop_status.status || "idle"));
+        setLoopStatusMessage(String(res.loop_status.message || ""));
+      } else if (res.loop_task_id) {
+        setLoopStatusLabel("running");
+      }
       const kgHint = formatKgWrittenHint(res.kg_written, res.kg_error);
       if (kgHint) hints.push(kgHint);
       if (res.quality && typeof res.quality.dropped_values === "number" && res.quality.dropped_values > 0) {
@@ -816,15 +840,34 @@ export default function LabWorkbench({
                 <span className="ml-2 text-amber-300">· {dirtyIds.size} 行未保存</span>
               )}
               {objectives.length} 项指标 · 支持 Excel 粘贴
-              {loopRoundCount > 0 && (
-                <span className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-medium ${
-                  loopConverged
-                    ? "border-amber-500/40 text-amber-300 bg-amber-500/10"
-                    : "border-violet-500/40 text-violet-300 bg-violet-500/10"
-                }`}>
-                  闭环 {loopRoundCount} 轮{loopConverged ? " · 已收敛" : ""}
+              {loopRoundCount > 0 || loopStatusLabel !== "idle" ? (
+                <span
+                  className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-medium ${
+                    loopStatusLabel === "converged" || loopConverged
+                      ? "border-amber-500/40 text-amber-300 bg-amber-500/10"
+                      : loopStatusLabel === "failed"
+                        ? "border-rose-500/40 text-rose-300 bg-rose-500/10"
+                        : loopStatusLabel === "paused"
+                          ? "border-slate-500/40 text-slate-300 bg-slate-500/10"
+                          : loopStatusLabel === "running"
+                            ? "border-sky-500/40 text-sky-300 bg-sky-500/10"
+                            : "border-violet-500/40 text-violet-300 bg-violet-500/10"
+                  }`}
+                  title={loopStatusMessage || undefined}
+                  data-testid="workbench-loop-status"
+                >
+                  闭环 {loopRoundCount} 轮
+                  {loopStatusLabel === "converged" || loopConverged
+                    ? " · 已收敛"
+                    : loopStatusLabel === "failed"
+                      ? " · 失败"
+                      : loopStatusLabel === "paused"
+                        ? " · 已暂停"
+                        : loopStatusLabel === "running"
+                          ? " · 进行中"
+                          : ""}
                 </span>
-              )}
+              ) : null}
             </span>
             <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
               <input

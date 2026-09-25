@@ -101,6 +101,8 @@ class WorkbenchCampaignResponse(BaseModel):
     primary_metric: str | None = None
     objectives_snapshot: list[dict[str, Any]] = Field(default_factory=list)
     loop_history: list[dict[str, Any]] = Field(default_factory=list)
+    # Batch B: idle|running|converged|paused|failed (+ rounds / rmse / message)
+    loop_status: dict[str, Any] | None = None
     rows: list[WorkbenchRowResponse]
 
 
@@ -115,6 +117,7 @@ class WorkbenchSyncResponse(BaseModel):
     kg_error: str | None = None
     loop_task_id: str | None = None
     loop_message: str = ""
+    loop_status: dict[str, Any] | None = None
     quality: dict | None = None
 
 
@@ -161,6 +164,13 @@ def _ingested_item_ids(campaign_id: int, rows: list[WorkbenchRow]) -> set[str]:
 
 def _campaign_response(campaign: Campaign, rows: list[WorkbenchRow]) -> WorkbenchCampaignResponse:
     ingested_items = _ingested_item_ids(campaign.id, rows)
+    loop_status = None
+    try:
+        from ..services.workbench_loop import campaign_loop_status
+
+        loop_status = campaign_loop_status(int(campaign.id))
+    except Exception:
+        loop_status = None
     return WorkbenchCampaignResponse(
         campaign_id=campaign.id,
         name=campaign.name,
@@ -170,6 +180,7 @@ def _campaign_response(campaign: Campaign, rows: list[WorkbenchRow]) -> Workbenc
         primary_metric=campaign.primary_metric,
         objectives_snapshot=campaign.objectives_snapshot or [],
         loop_history=campaign.loop_history or [],
+        loop_status=loop_status,
         rows=[_row_response(r, ingested_items) for r in rows],
     )
 
@@ -529,7 +540,18 @@ async def sync_workbench(
         optimize_engine=payload.optimize_engine or "auto",
         doe_engine=payload.doe_engine or "auto",
         campaign_state=payload.campaign_state,
+        project_id=getattr(_campaign, "project_id", None),
     )
+
+    loop_status = None
+    try:
+        from ..services.workbench_loop import campaign_loop_status
+
+        loop_status = campaign_loop_status(int(payload.campaign_id))
+        if loop_task_id:
+            loop_status = {**loop_status, "status": "running", "message": loop_message or loop_status.get("message")}
+    except Exception:
+        loop_status = None
 
     # P4.2: optional dossier S4/S5 patch after lab sync (default OFF).
     try:
@@ -556,6 +578,7 @@ async def sync_workbench(
         kg_error=kg_error,
         loop_task_id=loop_task_id,
         loop_message=loop_message,
+        loop_status=loop_status,
         quality=quality,
     )
 

@@ -12,16 +12,42 @@ from ..domain.schemas import LeverSpec, ProductDomain, Requirement
 logger = logging.getLogger(__name__)
 
 
+def _project_auto_loop_on(project_id: str | None) -> bool:
+    """Read workspace.auto_loop_on_sync for a project (best-effort)."""
+    pid = (project_id or "").strip()
+    if not pid:
+        return False
+    try:
+        from ..db.project_store import get_project_store
+
+        detail = get_project_store().get(pid)
+        ws = getattr(detail, "workspace", None) if detail is not None else None
+        return bool(getattr(ws, "auto_loop_on_sync", False))
+    except Exception as exc:
+        logger.debug("project auto_loop_on_sync read failed: %s", exc)
+        return False
+
+
 def should_trigger_loop_after_sync(
     training_ingested: int,
     *,
     trigger_loop: bool | None = None,
+    project_id: str | None = None,
 ) -> bool:
+    """Decide whether sync should dispatch a closed-loop task.
+
+    Explicit ``trigger_loop`` wins (Workbench checkbox / API clients).
+    When ``None``, fire if **global** ``auto_loop_on_sync`` **or** the
+    project's workspace ``auto_loop_on_sync`` is true (Batch B — mirrors
+    dossier auto_patch OR semantics). Global default remains False.
+    """
     if training_ingested <= 0:
         return False
     if trigger_loop is not None:
-        return trigger_loop
-    return bool(get_settings().auto_loop_on_sync)
+        return bool(trigger_loop)
+    if bool(get_settings().auto_loop_on_sync):
+        return True
+    return _project_auto_loop_on(project_id)
 
 
 def requirement_from_campaign(campaign: Any) -> Requirement:
@@ -68,6 +94,65 @@ def _campaign_loop_context(campaign_id: int) -> tuple[list[dict[str, float]], bo
     return prior_rmse, False, ""
 
 
+def campaign_loop_status(campaign_id: int) -> dict[str, Any]:
+    """Surface loop state for Workbench / Hub: idle|running|converged|paused|failed.
+
+    Derived from ``loop_history`` + Redis pause flag (no new tables).
+    ``running`` is inferred when the latest history entry lacks a terminal
+    ``converged``/``error`` and a Redis pause is not set — callers that know
+    an in-flight ``loop_task_id`` may override.
+    """
+    from ..db.campaign_store import get_campaign_store
+
+    camp = get_campaign_store().get_campaign_sync(int(campaign_id))
+    if camp is None:
+        return {"status": "idle", "rounds": 0, "converged": False, "message": "campaign_missing"}
+
+    history = list(getattr(camp, "loop_history", None) or [])
+    rounds = len(history)
+    paused = is_doecycle_paused(int(campaign_id))
+    last = history[-1] if history else None
+    last_rmse = dict((last or {}).get("rmse_by_metric") or {}) if last else {}
+    last_error = str((last or {}).get("error") or (last or {}).get("loop_error") or "")
+    converged = bool((last or {}).get("converged")) if last else False
+    message = str((last or {}).get("loop_message") or "")
+
+    if paused:
+        status = "paused"
+        if not message:
+            message = "DOE 周期已暂停"
+    elif last_error:
+        status = "failed"
+        if not message:
+            message = last_error
+    elif converged:
+        status = "converged"
+        if not message:
+            message = "闭环已收敛，建议停止迭代"
+    elif rounds > 0 and (last or {}).get("running"):
+        status = "running"
+        if not message:
+            message = "闭环任务进行中"
+    elif rounds > 0:
+        status = "idle"
+        if not message:
+            message = f"已完成 {rounds} 轮，可继续保存后触发"
+    else:
+        status = "idle"
+        message = message or "尚未启动闭环"
+
+    return {
+        "status": status,
+        "rounds": rounds,
+        "converged": converged,
+        "paused": paused,
+        "last_rmse_by_metric": last_rmse,
+        "last_error": last_error or None,
+        "message": message,
+        "doe_plan_id": (last or {}).get("doe_plan_id"),
+    }
+
+
 def dispatch_loop_after_sync(
     *,
     training_ingested: int,
@@ -78,10 +163,23 @@ def dispatch_loop_after_sync(
     doe_engine: str = "auto",
     campaign_state: str | None = None,
     n_suggest: int = 4,
+    project_id: str | None = None,
 ) -> tuple[str | None, str]:
     """Optionally fire closed-loop after sync; returns (task_id, user message)."""
-    if not should_trigger_loop_after_sync(training_ingested, trigger_loop=trigger_loop):
+    from ..db.campaign_store import get_campaign_store
+
+    campaign = get_campaign_store().get_campaign_sync(workbench_campaign_id)
+    pid = (project_id or "").strip() or (
+        str(getattr(campaign, "project_id", "") or "").strip() if campaign is not None else ""
+    )
+
+    if not should_trigger_loop_after_sync(
+        training_ingested, trigger_loop=trigger_loop, project_id=pid or None
+    ):
         return None, ""
+
+    if is_doecycle_paused(workbench_campaign_id):
+        return None, "闭环未启动：DOE 周期已暂停"
 
     prior_rmse, converged, conv_msg = _campaign_loop_context(workbench_campaign_id)
     if converged:
@@ -89,9 +187,6 @@ def dispatch_loop_after_sync(
 
     req = requirement
     if req is None:
-        from ..db.campaign_store import get_campaign_store
-
-        campaign = get_campaign_store().get_campaign_sync(workbench_campaign_id)
         if campaign is None:
             return None, "闭环未启动：Campaign 不存在"
         req = requirement_from_campaign(campaign)
