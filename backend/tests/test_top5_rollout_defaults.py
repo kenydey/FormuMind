@@ -24,11 +24,15 @@ def test_wiki_grayscale_product_defaults_on():
     assert s.wiki_dossier_report_enabled is True
     assert s.wiki_chat_save_draft is True
     assert s.wiki_storm_report_enabled is True
+    # Top-5‴ #1 / #5
+    assert Settings.model_fields["wiki_embed_enabled"].default is True
+    assert Settings.model_fields["wiki_page_graph_enabled"].default is True
     # Trust boundaries stay off.
     assert s.wiki_dossier_auto_patch is False
     assert s.wiki_dossier_llm_narrative is False
     assert s.auto_loop_on_sync is False
     assert s.auto_adopt_next_doe_on_loop is False
+    assert Settings.model_fields["prediction_bias_soft_correct"].default is False
     assert s.kg_relations_on_ingest is False
     assert s.kg_relation_extract_enabled is False
 

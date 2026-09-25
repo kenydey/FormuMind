@@ -257,7 +257,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "默认关；仍受 wiki_storm_report_enabled 约束。",
             "kb", "依赖 wiki_storm_report_enabled；worker 数见 wiki_storm_parallel_workers"),
     EnvFlag("wiki_page_graph_enabled", "Wiki 页链接图",
-            "Hub Wiki「链接图」：按 [[wikilink]] 构图可视化（非配方/材料 KG）。默认关。",
+            "Hub Wiki「链接图」：按 [[wikilink]] 构图可视化（非配方/材料 KG）。"
+            "默认开（Top-5‴ #5）；可关。",
             "kb", "依赖 wiki_enabled；与 Neo4j/材料图谱分离"),
     EnvFlag("wiki_catalog_inject_themes", "主题编译注入 Catalog",
             "L2 theme compile 时注入确定性 wiki catalog 片段作导航锚点（S2，默认关）。"
@@ -269,8 +270,12 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "kb", "依赖 wiki_enabled；需活动 project_id"),
     EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
             "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"
-            "默认关；不关闭 Raw chunk RAG，不新建向量库。",
+            "默认开（Top-5‴ #1）；不关闭 Raw chunk RAG，不新建向量库；Claims 仍滤 wiki。",
             "kb", "依赖 wiki_enabled；有 sentence-transformers 时带向量，否则关键词兜底"),
+    EnvFlag("prediction_bias_soft_correct", "预测偏差软校准",
+            "推荐/评分时用台账 prediction_bias.mean_error 校正 predicted（predicted−mean_error）。"
+            "默认关；需 metric n≥prediction_bias_soft_correct_min_n。不改 measured / 台账行。",
+            "data", "先看 BiasTrend 再开；校准后榜卡显示「已校准」"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",
             "上传/导入文档时用 LLM 提取全局参数空间与摘要（Source Guide）。",
             "kb", "需有效 LLM key"),

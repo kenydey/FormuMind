@@ -590,16 +590,21 @@ class Settings(BaseSettings):
     wiki_storm_parallel: bool = False
     # Max workers per wave when wiki_storm_parallel is on (clamped 1–8).
     wiki_storm_parallel_workers: int = 3
-    # Wiki page [[wikilink]] graph for Hub canvas (not materials KG). Default OFF.
-    wiki_page_graph_enabled: bool = False
+    # Wiki page [[wikilink]] graph for Hub canvas (not materials KG).
+    # Top-5‴ #5（2026-09-25）：默认 ON（可关；≠ 材料 KG / Neo4j）。
+    wiki_page_graph_enabled: bool = True
     # S2: inject deterministic wiki catalog snippet into L2 theme compile. Default OFF.
     wiki_catalog_inject_themes: bool = False
     # S4: allow Chat/Deep Research 「存为 Wiki 草稿」→ queries/.
     # Top-5 #3：默认 ON（unreviewed draft；不进 Claims/DOE；可关）。
     wiki_chat_save_draft: bool = True
     # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
-    # Default OFF — dual-track; never replaces Raw chunk RAG.
-    wiki_embed_enabled: bool = False
+    # Top-5‴ #1（2026-09-25）：默认 ON — 双轨；不关 Raw RAG；Claims 仍滤 wiki。
+    wiki_embed_enabled: bool = True
+    # Top-5‴ #2：下一轮 predicted 用台账 prediction_bias.mean_error 软校准。
+    # 默认关 —— 避免静默改分；需 Settings / 显式环境变量打开。
+    prediction_bias_soft_correct: bool = False
+    prediction_bias_soft_correct_min_n: int = 3
     # 每篇文档最多持久化多少切块。这是全文成功抓取之后**唯一**还会静默丢内容
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600
