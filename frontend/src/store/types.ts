@@ -102,6 +102,8 @@ export interface AppState {
   autoLoopRound: number;
   /** W5: after successful loop, auto-adopt next_doe into workbench (default off). */
   autoAdoptNextDoeOnLoop: boolean;
+  /** Top-5‴ #4: project-level dossier auto patch (global default still off). */
+  wikiDossierAutoPatch: boolean;
   /** W5: last followLoopTask failed (non-cancel) — UI may offer retry. */
   loopRetryAvailable: boolean;
   lastLoopTaskId: string | null;
@@ -305,6 +307,7 @@ export interface AppState {
   setAutoLoopOnSync: (enabled: boolean) => void;
   setAutoLoopMaxRounds: (n: number) => void;
   setAutoAdoptNextDoeOnLoop: (enabled: boolean) => void;
+  setWikiDossierAutoPatch: (enabled: boolean) => void;
   applyIntent: (text: string) => Promise<string[]>;
 }
 

@@ -383,6 +383,13 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       get().scheduleAutosave();
     },
 
+    setWikiDossierAutoPatch: (enabled: boolean) => {
+      set((draft) => {
+        draft.wikiDossierAutoPatch = enabled;
+      });
+      get().scheduleAutosave();
+    },
+
     applyIntent: async (text) => {
       set((draft) => {
         draft.intentBusy = true;
@@ -713,5 +720,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'setWikiDossierAutoPatch' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

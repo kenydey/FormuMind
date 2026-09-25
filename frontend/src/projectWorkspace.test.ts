@@ -42,6 +42,7 @@ function baseSlice(over: Partial<StoreWorkspaceSlice> = {}): StoreWorkspaceSlice
     autoLoopMaxRounds: 3,
     autoLoopRound: 0,
     autoAdoptNextDoeOnLoop: false,
+    wikiDossierAutoPatch: false,
     ...over,
   };
 }
