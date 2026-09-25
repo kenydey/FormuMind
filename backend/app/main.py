@@ -169,7 +169,10 @@ async def lifespan(_app: FastAPI):
         from .db.campaign_store import get_campaign_store
         from .db.store import get_experiment_store
 
-        if settings.campaign_backend.lower() == "datalab" or settings.experiment_backend.lower() == "datalab":
+        if settings.campaign_backend.lower() in ("datalab", "auto") or settings.experiment_backend.lower() in (
+            "datalab",
+            "auto",
+        ):
             get_campaign_store(settings)
             get_experiment_store(settings)
     except Exception as exc:
@@ -316,6 +319,13 @@ def health() -> dict:
         or cfg.experiment_backend.lower() == "datalab"
         or cfg.datalab_required
     )
+    # Soft-degrade ledger mode for UI badge (Top-5″ #2).
+    if datalab_ok:
+        ledger_mode = "eln"
+    elif datalab_required:
+        ledger_mode = "eln_required_down"
+    else:
+        ledger_mode = "local"
 
     db_ok = True
     db_scheme = "postgresql" if cfg.db_url.startswith("postgresql") else "sqlite"
@@ -353,12 +363,23 @@ def health() -> dict:
     if not db_ok or not broker_ok or not pdf_ok or (datalab_required and not datalab_ok):
         overall = "degraded"
 
-    datalab_payload: dict = {"required": datalab_required, "reachable": datalab_ok}
+    datalab_payload: dict = {
+        "required": datalab_required,
+        "reachable": datalab_ok,
+        "campaign_backend": cfg.campaign_backend,
+        "experiment_backend": cfg.experiment_backend,
+        "ledger_mode": ledger_mode,
+    }
     if datalab_required and not datalab_ok:
         hint = DATALAB_START_HINT
         if datalab_reason:
             hint = f"{hint} 原因：{datalab_reason}"
         datalab_payload["hint"] = hint
+    elif not datalab_ok and not datalab_required:
+        datalab_payload["hint"] = (
+            "Datalab 不可达；已启用本地 sqlite 台账（soft-degrade）。"
+            "需要 ELN 时启动 compose 并设 DATALAB_REQUIRED=true。"
+        )
 
     return {
         "status": overall,
@@ -434,6 +455,12 @@ def health_detailed() -> dict:
         or cfg.experiment_backend.lower() == "datalab"
         or cfg.datalab_required
     )
+    if datalab_ok:
+        ledger_mode = "eln"
+    elif datalab_required:
+        ledger_mode = "eln_required_down"
+    else:
+        ledger_mode = "local"
 
     db_ok = True
     db_scheme = "postgresql" if cfg.db_url.startswith("postgresql") else "sqlite"
@@ -480,6 +507,7 @@ def health_detailed() -> dict:
             "message": datalab_reason,
             "campaign_backend": cfg.campaign_backend,
             "experiment_backend": cfg.experiment_backend,
+            "ledger_mode": ledger_mode,
         },
         "installed_extras": (
             {pkg: None for pkg in ("chemcrow", "paperqa", "patent_client", "sentence_transformers", "rdkit", "psycopg2")}

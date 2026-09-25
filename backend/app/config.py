@@ -684,18 +684,21 @@ class Settings(BaseSettings):
     ingest_chunk_overlap: int = 200
 
     # DOE workbench / campaign persistence (Headless ELN).
-    # Product default is Datalab (core runtime dependency). Explicit ``sqlite`` is
-    # for CI/unit tests only — not a supported product/offline lab mode.
-    campaign_backend: str = "datalab"  # datalab | auto | sqlite
+    # Top-5″ #2（2026-09-25）：产品默认 soft-degrade —
+    # ``auto`` 探测 Datalab，可达则以其为 SSOT；不可达且 ``datalab_required=false``
+    # 时回退 sqlite「本地台账」。Docker ELN 栈仍显式 ``datalab`` + REQUIRED=true。
+    # 显式 ``sqlite`` 仍主要用于 CI/单测隔离。
+    campaign_backend: str = "auto"  # datalab | auto | sqlite
     datalab_api_url: str = "http://localhost:5001"
     datalab_api_token: str = ""  # DATALAB-API-KEY header（平台非 TESTING 模式必需）
     datalab_timeout_seconds: float = 30.0
     datalab_max_connections: int = 10
     datalab_max_keepalive_connections: int = 5
-    datalab_required: bool = True  # product default: ELN unreachable → hard fail / degraded
+    # Soft-degrade default: ELN optional. Set true for ELN-mandatory deploys.
+    datalab_required: bool = False
 
-    # Experiment training persistence (Headless ELN)
-    experiment_backend: str = "datalab"  # datalab | auto | sqlite（sqlite = CI only）
+    # Experiment training persistence (Headless ELN) — same auto semantics.
+    experiment_backend: str = "auto"  # datalab | auto | sqlite（sqlite = CI only）
 
     # API security — unset env defers to environment: off in dev/test, on in production.
     api_auth_enabled: bool | None = None

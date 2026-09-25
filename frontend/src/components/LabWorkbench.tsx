@@ -112,6 +112,7 @@ export default function LabWorkbench({
   const [versionRow, setVersionRow] = useState<WorkbenchRow | null>(null);
   const [showRounds, setShowRounds] = useState(false);
   const [showContour, setShowContour] = useState(false);
+  const [ledgerMode, setLedgerMode] = useState<"eln" | "local" | "eln_required_down" | string | null>(null);
 
   const workbenchObjectivesSnapshot = useStore((s) => s.workbenchObjectivesSnapshot);
   const autoLoopOnSync = useStore((s) => s.autoLoopOnSync);
@@ -140,6 +141,21 @@ export default function LabWorkbench({
     () => factorKeysFromPlan(doePlan ?? ({ factors: [] } as unknown as DOEPlan), rows),
     [doePlan, rows]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getHealth()
+      .then((h) => {
+        if (!cancelled) setLedgerMode(h.datalab?.ledger_mode ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLedgerMode(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // F19/F20：切换 campaignId 时立即清空上一路的状态，避免旧 campaign 的
   // attachmentCounts / apiSnapshot / loop 统计残留，并配合上方加载 effect 的
@@ -620,6 +636,14 @@ export default function LabWorkbench({
       )}
 
       <div className="shadow-sm rounded-lg border border-gray-200 dark:border-edge overflow-hidden bg-panel/30">
+        {ledgerMode === "local" && (
+          <div
+            className="px-2 py-1 border-b border-amber-500/30 bg-amber-500/5 text-[10px] text-amber-200"
+            data-testid="workbench-ledger-local"
+          >
+            本地台账（sqlite soft-degrade）· Datalab 未连接；数据不写入 ELN
+          </div>
+        )}
         {frozen && frozen.length > 0 && (
           <div className="px-2 py-1.5 border-b border-edge/30 bg-ink/30 text-[10px] text-slate-500">
             本 Campaign 指标已冻结（键 = metric）：
@@ -808,13 +832,14 @@ export default function LabWorkbench({
                   const on = e.target.checked;
                   if (on) {
                     const ok = window.confirm(
-                      "开启「保存后自动闭环」？\n\nCompleted 行保存后将触发 optimize + 下一轮 DOE。\n不会自动写 next_doe 到台账（需在闭环面板另开「自动采纳 DOE」）。",
+                      "开启「保存后自动闭环」？\n\nCompleted 行保存后将触发 optimize + 下一轮 DOE。\n不会自动写 next_doe 到台账（需在闭环面板另开「自动采纳 DOE」）。\n本开关按项目工作区持久化（非全局默认）。",
                     );
                     if (!ok) return;
                   }
                   setAutoLoopOnSync(on);
                 }}
                 className="rounded border-edge"
+                data-testid="workbench-auto-loop-checkbox"
               />
               保存后自动分析收敛并建议下一轮
               {autoLoopOnSync && (
@@ -823,6 +848,21 @@ export default function LabWorkbench({
                 </span>
               )}
             </label>
+            {!autoLoopOnSync &&
+              rows.some(
+                (r) =>
+                  r.status === "Completed" &&
+                  Object.keys(r.measurements ?? {}).some(
+                    (k) => (r.measurements as Record<string, unknown>)?.[k] != null,
+                  ),
+              ) && (
+                <p
+                  className="text-[10px] text-violet-300/90"
+                  data-testid="workbench-auto-loop-suggest"
+                >
+                  建议：已有 Completed+测量行时，可开「保存后自动闭环」做项目级飞轮（仍不自动采纳 DOE）。
+                </p>
+              )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <select

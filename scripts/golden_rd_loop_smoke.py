@@ -8,9 +8,11 @@ Usage:
   python3 scripts/golden_rd_loop_smoke.py
   FM_BASE=http://127.0.0.1:5173 python3 scripts/golden_rd_loop_smoke.py
   FM_ENABLE_DRAFT=0 python3 scripts/golden_rd_loop_smoke.py   # skip S4 draft step
+  FM_ENABLE_AUTO_PATCH=1 python3 scripts/golden_rd_loop_smoke.py  # productization path
 
 Companion: docs/plans/2026-09-14-wiki-hub-dossier-handtest.md §4
             docs/plans/2026-09-21-s4-draft-ops-handtest.md
+            docs/plans/2026-09-25-next-top5-datalab-autopatch-loop-tasks.md
 """
 from __future__ import annotations
 
@@ -25,6 +27,11 @@ ENABLE_DRAFT = os.environ.get("FM_ENABLE_DRAFT", "1").strip().lower() not in (
     "0",
     "false",
     "no",
+)
+ENABLE_AUTO_PATCH = os.environ.get("FM_ENABLE_AUTO_PATCH", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
 )
 FAILURES: list[str] = []
 
@@ -139,7 +146,7 @@ def main() -> int:
                 "wiki_dossier_report_enabled": True,
                 "wiki_doe_constraints": True,
                 "wiki_chat_blend": True,
-                "wiki_dossier_auto_patch": False,
+                "wiki_dossier_auto_patch": ENABLE_AUTO_PATCH,
                 "wiki_dossier_llm_narrative": False,
                 "wiki_chat_save_draft": ENABLE_DRAFT,
             }
@@ -150,6 +157,21 @@ def main() -> int:
         code == 200 and isinstance(body, dict) and "wiki_enabled" in (body.get("updated") or []),
         str(body)[:240],
     )
+    if ENABLE_AUTO_PATCH:
+        check(
+            "auto_patch flag requested on",
+            isinstance(body, dict)
+            and (
+                "wiki_dossier_auto_patch" in (body.get("updated") or [])
+                or any(
+                    isinstance(f, dict)
+                    and f.get("attr") == "wiki_dossier_auto_patch"
+                    and f.get("value") is True
+                    for f in (body.get("flags") or [])
+                )
+            ),
+            str(body)[:240],
+        )
 
     code, body = req(
         "POST",
@@ -237,6 +259,19 @@ def main() -> int:
         code == 200 and isinstance(body, dict) and body.get("ok") is not False,
         str(body)[:200],
     )
+
+    if ENABLE_AUTO_PATCH:
+        # Productization evidence: allowlisted event should not soft-skip.
+        code, body = req(
+            "POST",
+            "/api/wiki/dossier/refresh",
+            {"project_id": pid, "sections": ["S2_literature", "S8_open_questions"]},
+        )
+        check(
+            "auto_patch path: targeted refresh after flag on",
+            code == 200 and isinstance(body, dict),
+            str(body)[:200],
+        )
 
     code, pack = req("GET", f"/api/wiki/dossier/{pid}/pack")
     pack_ok = code == 200 and isinstance(pack, dict)

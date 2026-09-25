@@ -94,6 +94,14 @@ describe("HubReportsPlaceholderPane", () => {
     });
   });
 
+  it("shows auto_patch productization CTA when flag is off", async () => {
+    render(<HubReportsPlaceholderPane />);
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-reports-auto-patch-cta")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("hub-reports-flag-wiki_dossier_auto_patch").textContent).toMatch(/×/);
+  });
+
   it("shows flag CTA and jumps to settings env when grayscale flags are off", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getEnvFlags).mockResolvedValue({
