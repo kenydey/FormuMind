@@ -1,5 +1,6 @@
 # 下一步最值得升级的 Top-5（2026-09-25 · post #1–#4）
 
+> **用户决策（2026-09-25）：#1–#5 全部暂不做**（仅保留为 backlog，不排期实现）  
 > 基线：分支 `cursor/next-post-aprime-1to4-stale-trace-scan-softcorrect`（#1–#4 已交付；#5 Owner/KG 仪表上次跳过）  
 > 已交付勿重复：topicality 真闸、归档/retention、scan 压力、Wiki embed/pagegraph、B–E、A′ 手工供应、stale→explain/替代、约束追踪、hybrid p50/p95+BM25 预筛、项目 soft-correct  
 > 约束不变：不扩 Neo4j；不默认 auto TTL / 关 dual-write / 全局 auto_loop / auto_adopt / soft-correct；Claims/DOE 边界不破
