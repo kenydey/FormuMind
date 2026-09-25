@@ -58,6 +58,8 @@ class DomainSearchProfile:
     # as search terms — querying OpenAlex for "passivat" returned 5 unrelated
     # papers. These are real words the full-text index can match.
     venue_terms: tuple[str, ...] = ()
+    # Top-5 #2: retrieval-stage deny vocabulary (merged with ExpandedQuery.negative_terms).
+    search_deny: tuple[str, ...] = ()
 
 
 # Shared source policy: ChemRxiv + OpenAlex primary; arXiv removed.
@@ -84,6 +86,20 @@ _COMMON_DENY: tuple[str, ...] = (
     "hydrogen storage",
     "quasar",
     "interstellar",
+)
+
+# Retrieval-time deny stems (Top-5 #2): broader than keyword_deny — demote/block
+# Pull hits that drift via hypernym expansion (nuclear / battery / wafer …).
+_COMMON_SEARCH_DENY: tuple[str, ...] = _COMMON_DENY + (
+    "uranium",
+    "nuclear reactor",
+    "rebar concrete",
+    "hot-dip galvaniz",
+    "copper interconnect",
+    "semiconductor wafer",
+    "lithium-ion battery",
+    "photovoltaic cell",
+    "aerospace turbine",
 )
 
 
@@ -132,6 +148,15 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "photovoltaic",
             "high-entropy alloy",
         ),
+        search_deny=_COMMON_SEARCH_DENY
+        + (
+            "battery electrode",
+            "photovoltaic",
+            "high-entropy alloy",
+            "熔盐",
+            "核材料",
+            "钢筋",
+        ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
         venue_terms=("corrosion", "coating", "anticorrosive", "primer", "epoxy", "inhibitor"),
@@ -177,6 +202,14 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "cosmetic",
             "skin care",
         ),
+        search_deny=_COMMON_SEARCH_DENY
+        + (
+            "laundry detergent",
+            "dishwash",
+            "cosmetic",
+            "skin care",
+            "pulmonary",
+        ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         venue_terms=("degreasing", "cleaning", "detergent", "surfactant", "alkaline"),
     ),
@@ -220,6 +253,13 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
             "stent",
             "bone implant",
         ),
+        search_deny=_COMMON_SEARCH_DENY
+        + (
+            "biodegrad",
+            "stent",
+            "bone implant",
+            "dental",
+        ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
         venue_terms=("passivation", "conversion", "phosphating", "anodizing", "silane", "pretreatment"),
@@ -256,6 +296,12 @@ _PROFILES: dict[ProductDomain, DomainSearchProfile] = {
         + (
             "powder coating spray gun",
             "hot-dip galvaniz",
+        ),
+        search_deny=_COMMON_SEARCH_DENY
+        + (
+            "powder coating spray gun",
+            "hot-dip galvaniz",
+            "cathodic electrodeposition paint line",
         ),
         source_policy=_DEFAULT_SOURCE_POLICY,
         preferred_openalex_source_ids=_PREFERRED_COATING_JOURNALS,
@@ -308,6 +354,32 @@ def policy_tier(profile: DomainSearchProfile | None, key: str, *, default: str =
 
 def policy_allows(profile: DomainSearchProfile | None, key: str, *, default: str = "off") -> bool:
     return policy_tier(profile, key, default=default) != "off"
+
+
+def effective_search_deny(
+    profile: DomainSearchProfile | None,
+    *,
+    extra: list[str] | tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Merge profile.search_deny with optional ExpandedQuery.negative_terms."""
+    parts: list[str] = []
+    if profile is not None:
+        parts.extend(t for t in (profile.search_deny or ()) if t)
+        # Fall back to keyword_deny when search_deny empty (older profiles).
+        if not profile.search_deny:
+            parts.extend(t for t in (profile.keyword_deny or ()) if t)
+    if extra:
+        parts.extend(t for t in extra if t)
+    # Preserve order, casefold-dedupe by surface form.
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in parts:
+        k = t.casefold()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+    return tuple(out)
 
 
 def policy_page_size(profile: DomainSearchProfile | None, key: str, base: int, *, default: str = "off") -> int:

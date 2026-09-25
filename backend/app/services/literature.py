@@ -594,13 +594,19 @@ def _rank_score(e: Evidence, q_kw: set[str]) -> tuple[float, float]:
 
 def _rank_score_with_boost(e: Evidence, q_kw: set[str], qctx: dict) -> tuple[float, float]:
     base0, base1 = _rank_score(e, q_kw)
-    from .search_scoring import evidence_entity_boost, evidence_authority_bonus, domain_match_bonus
+    from .search_scoring import (
+        evidence_entity_boost,
+        evidence_authority_bonus,
+        domain_match_bonus,
+        search_deny_penalty,
+    )
 
     return (
         base0
         + evidence_entity_boost(e, qctx)
         + evidence_authority_bonus(e)
-        + domain_match_bonus(e),
+        + domain_match_bonus(e)
+        + search_deny_penalty(e),
         base1,
     )
 
@@ -650,11 +656,13 @@ def _merge_filter_rank(
             if e.domain_match is None:
                 apply_domain_match(e, domain)
 
-    from .domain_tagging import lexical_hits
+    from .domain_tagging import lexical_hits, search_deny_hits
     from ..domain.search_profiles import resolve_profile
     from ..domain.research_query import wrong_substrate_hit
+    from ..config import get_settings
 
     profile = resolve_profile(domain)
+    deny_on = bool(getattr(get_settings(), "kb_search_deny_enabled", True))
 
     def _keep(e: Evidence) -> bool:
         text = f"{e.title} {e.snippet} {e.identifier}"
@@ -682,6 +690,8 @@ def _merge_filter_rank(
             return False
         if profile is not None:
             _allow, deny = lexical_hits(text, profile)
+            if deny_on:
+                deny = max(deny, search_deny_hits(text, profile))
             if deny and _allow < 2:
                 return False
         if req is not None and wrong_substrate_hit(text, req, query=query):

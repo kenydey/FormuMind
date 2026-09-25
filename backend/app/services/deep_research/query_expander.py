@@ -133,19 +133,38 @@ def prepare_search_queries(
             expanded = expanded.model_copy(update={
                 "ipc_cpc_suggestions": list(ipc),
             }) if hasattr(expanded, "model_copy") else expanded
-        # Drop expanded synonyms that collide with profile keyword_deny.
-        if _prof is not None and _prof.keyword_deny:
-            deny = tuple(d.casefold() for d in _prof.keyword_deny if d)
-            def _ok(term: str) -> bool:
-                t = (term or "").casefold()
-                return bool(t) and not any(d in t for d in deny)
+        # Drop expanded synonyms that collide with profile keyword_deny / search_deny.
+        if _prof is not None:
+            from ...domain.search_profiles import effective_search_deny
 
-            eng = [t for t in expanded.english_synonyms if _ok(t)]
-            zh = [t for t in expanded.chinese_keywords if _ok(t)]
-            if eng != list(expanded.english_synonyms) or zh != list(expanded.chinese_keywords):
-                expanded = expanded.model_copy(
-                    update={"english_synonyms": eng, "chinese_keywords": zh}
+            deny = tuple(
+                d.casefold()
+                for d in effective_search_deny(
+                    _prof, extra=list(getattr(expanded, "negative_terms", None) or [])
                 )
+                if d
+            )
+            if deny:
+                def _ok(term: str) -> bool:
+                    t = (term or "").casefold()
+                    return bool(t) and not any(d in t for d in deny)
+
+                eng = [t for t in expanded.english_synonyms if _ok(t)]
+                zh = [t for t in expanded.chinese_keywords if _ok(t)]
+                neg = [t for t in (expanded.negative_terms or []) if t]
+                # Seed negative_terms with profile search_deny heads (cap).
+                for d in (_prof.search_deny or ())[:8]:
+                    if d and d not in neg:
+                        neg.append(d)
+                updates = {}
+                if eng != list(expanded.english_synonyms):
+                    updates["english_synonyms"] = eng
+                if zh != list(expanded.chinese_keywords):
+                    updates["chinese_keywords"] = zh
+                if neg != list(expanded.negative_terms or []):
+                    updates["negative_terms"] = neg[:12]
+                if updates:
+                    expanded = expanded.model_copy(update=updates)
     except Exception:
         pass
     return SearchQueries(
@@ -168,14 +187,16 @@ _EXPAND_PROMPT = """你是一位涂料与多相聚合物研发领域的专利与
   "intent": "一句话描述用户检索意图（中文）",
   "chinese_keywords": ["中文关键词1", "中文关键词2"],
   "english_synonyms": ["english term 1", "academic synonym 2"],
-  "ipc_cpc_suggestions": ["C09D", "C08G18/00"]
+  "ipc_cpc_suggestions": ["C09D", "C08G18/00"],
+  "negative_terms": ["应排除的漂移词1", "off-topic term 2"]
 }}
 
 要求：
 1. chinese_keywords 提取 3-8 个核心中文检索词；
 2. english_synonyms 给出 3-8 个英文学术同义词或 IUPAC/行业术语；
 3. ipc_cpc_suggestions 给出 2-5 个与主题相关的 IPC/CPC 分类号；
-4. 若输入为英文，chinese_keywords 可给出对应中文译名。"""
+4. negative_terms 给出 2-6 个易被上位词卷进来的离题词（如核材料/电池电极/生物医学植入），用于检索期负向收缩；
+5. 若输入为英文，chinese_keywords 可给出对应中文译名。"""
 
 
 class QueryExpander:
@@ -232,6 +253,9 @@ class QueryExpander:
                 ipc_cpc_suggestions=[
                     str(k) for k in (data.get("ipc_cpc_suggestions") or []) if k
                 ],
+                negative_terms=[
+                    str(k) for k in (data.get("negative_terms") or []) if k
+                ][:12],
             )
         except Exception as exc:
             return degrade_return(logger, exc, "operation failed", None)

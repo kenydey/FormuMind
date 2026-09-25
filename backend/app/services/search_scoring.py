@@ -62,3 +62,12 @@ def domain_match_bonus(ev: Evidence) -> float:
     except Exception:
         return 0.0
 
+
+def search_deny_penalty(ev: Evidence, domain=None, *, negative_terms=None) -> float:
+    """Top-5 #2: retrieve-time deny term penalty."""
+    try:
+        from .domain_tagging import search_deny_penalty as _pen
+        return _pen(ev, domain, negative_terms=negative_terms)
+    except Exception:
+        return 0.0
+

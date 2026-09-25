@@ -90,6 +90,10 @@ class ExpandedQuery(BaseModel):
     ipc_cpc_suggestions: list[str] = Field(
         default_factory=list, description="IPC/CPC 专利分类号建议"
     )
+    # Top-5 #2: terms that should demote / block drifted hits at retrieval time.
+    negative_terms: list[str] = Field(
+        default_factory=list, description="应排除的负向检索词（检索期 deny）"
+    )
 
 
 class RetrievalReport(BaseModel):
