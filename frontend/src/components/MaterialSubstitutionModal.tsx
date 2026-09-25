@@ -499,6 +499,31 @@ export default function MaterialSubstitutionModal({
                                 <span className="text-yellow-400"> · {c.availability}</span>
                               )}
                             </div>
+                            {(c.supply_badges?.length || c.stale_price || c.missing_price) && (
+                              <div className="flex flex-wrap gap-1 mt-0.5" data-testid="substitute-supply-badges">
+                                {(c.supply_badges?.length
+                                  ? c.supply_badges
+                                  : [
+                                      c.stale_price ? "stale_price" : null,
+                                      c.missing_price ? "missing_price" : null,
+                                      c.long_lead_time ? "long_lead_time" : null,
+                                    ].filter(Boolean) as string[]
+                                ).map((b) => (
+                                  <span
+                                    key={b}
+                                    className="text-[9px] px-1 rounded border border-amber-500/40 text-amber-300"
+                                  >
+                                    {b === "stale_price"
+                                      ? "价格偏旧"
+                                      : b === "missing_price"
+                                        ? "缺价"
+                                        : b === "long_lead_time"
+                                          ? "交期长"
+                                          : b}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </td>
                           <td className="text-right">{(c.structural_score * 100).toFixed(0)}%</td>
                           {SHOWN_METRICS.map((m) => (

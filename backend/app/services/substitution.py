@@ -347,14 +347,32 @@ def find_substitutes(
             "score_after": form.score,
             "source": "catalog",
         }
+        # Post-A′ #1: annotate stale/missing price; light demotion only.
+        try:
+            from .supply_flags import STALE_SCORE_PENALTY, supply_annotation_for_material
+
+            ann = supply_annotation_for_material(name)
+            cand["supply_badges"] = list(ann.get("badges") or [])
+            cand["stale_price"] = bool(ann.get("stale_price"))
+            cand["missing_price"] = bool(ann.get("missing_price"))
+            cand["long_lead_time"] = bool(ann.get("long_lead_time"))
+            if ann.get("stale_price") or ann.get("missing_price"):
+                cand["structural_score"] = round(
+                    max(0.0, float(cand["structural_score"]) - STALE_SCORE_PENALTY), 4
+                )
+        except Exception:
+            cand["supply_badges"] = []
+            cand["stale_price"] = False
         cand["requirement_fit"] = _requirement_fit(cand, req)
         candidates.append(cand)
 
-    # Feasible first; then requirement-fit; then structural / score.
+    # Feasible first; then requirement-fit; then prefer non-stale; then structural / score.
     candidates.sort(
         key=lambda c: (
             not c["feasible"],
             -float(c.get("requirement_fit") or 0.0),
+            bool(c.get("stale_price")),
+            bool(c.get("missing_price")),
             -c["structural_score"],
             -(c["score_after"] or 0.0),
             c["material"],

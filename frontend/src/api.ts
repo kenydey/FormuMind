@@ -212,6 +212,15 @@ export interface FormulationExplain {
   bias_corrected?: boolean;
   bias_corrected_metrics?: string[];
   notes?: string[];
+  /** Post-A′ #2: Requirement field wiring audit. */
+  effect_trace?: Array<{
+    field: string;
+    kind: string;
+    label: string;
+    status: "wired" | "display_only" | "unwired" | string;
+    consumers?: string[];
+    detail?: string;
+  }>;
 }
 
 export interface EvidenceEntityRef {
@@ -825,6 +834,11 @@ export interface SubstituteCandidate {
   score_after: number | null;
   source?: string;
   requirement_fit?: number;
+  /** Post-A′ #1: supply risk badges from material_suppliers. */
+  supply_badges?: string[];
+  stale_price?: boolean;
+  missing_price?: boolean;
+  long_lead_time?: boolean;
   evidence?: Array<{
     source_id?: string;
     chunk_id?: string | null;
@@ -3831,6 +3845,14 @@ export interface KBQualityOps {
   fulltext_fail_pct?: number | null;
   quality_gate_drops?: KbGateDropStats;
   relevance_shadow?: Record<string, unknown>;
+  /** Post-A′ #3: persistent hybrid_search latency (≠ session FAISS). */
+  hybrid_search_latency?: {
+    n?: number;
+    p50_ms?: number | null;
+    p95_ms?: number | null;
+    ann_last?: boolean;
+    note?: string;
+  };
   notes?: string[];
 }
 
