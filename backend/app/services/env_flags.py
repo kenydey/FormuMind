@@ -141,10 +141,14 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "True=专利跳过主题门（旧行为）。P0 默认 False：专利需 CPC/主题词命中。",
             "kb"),
     EnvFlag("kb_relevance_shadow", "相关性闸影子模式",
-            "True（默认）= 只记录 topicality 将拒收率，不改入库。"
-            "False = 按关键词重叠分真闸（阈值 FORMUMIND_KB_INGEST_MIN_RELEVANCE）。"
-            "翻转前先看 GET /api/kb/relevance-shadow/stats。",
-            "kb", "默认勿关；校准后再关"),
+            "False（默认，Top-5 #1）= 按 topicality 真闸（阈值 FORMUMIND_KB_INGEST_MIN_RELEVANCE）。"
+            "True = 只记录将拒收率、不改入库（校准/回滚）。"
+            "看 GET /api/kb/relevance-shadow/stats。",
+            "kb", "出问题可临时开回影子"),
+    EnvFlag("kb_search_deny_enabled", "检索期负向收缩",
+            "True（默认）= 应用域 search_deny + 扩展 negative_terms，压低/拦漂移命中。"
+            "False = 关闭检索期负向（入库 keyword_deny / topic_gate 仍生效）。",
+            "kb"),
     EnvFlag("workbench_auto_train", "台账自动回灌训练",
             "实验台账 Completed 行保存时自动写入 ModelRegistry 并触发重训。", "data"),
     EnvFlag("auto_loop_on_sync", "台账保存后自动闭环",
@@ -229,8 +233,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "允许手动编译 themes/ 体系综述（可选用 LLM 叙述；默认关）。",
             "kb", "依赖 wiki_enabled；需有效 LLM key 才生成叙述段"),
     EnvFlag("wiki_project_dossier_enabled", "项目卷宗 Wiki",
-            "按 project_id 维护 themes/project-*.md 八节卷宗 + .data.json（P4，默认关）。",
-            "kb", "依赖 wiki_enabled"),
+            "按 project_id 维护 themes/project-*.md 八节卷宗 + .data.json（P4，默认开 · Top-5 #3）。",
+            "kb", "依赖 wiki_enabled；可关"),
     EnvFlag("wiki_dossier_llm_narrative", "卷宗节叙述 LLM",
             "允许对 Dossier 叙述段调用 LLM；表格数字仍确定性写入（默认关）。",
             "kb", "依赖 wiki_project_dossier_enabled"),
@@ -238,8 +242,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "要求/入库/DOE/台账/闭环事件自动 patch 对应节（默认关，先手动 API）。",
             "kb", "依赖 wiki_project_dossier_enabled"),
     EnvFlag("wiki_dossier_report_enabled", "卷宗 Report 生成",
-            "基于 DossierPack 生成 briefing/feasibility 等研发草稿（P5，默认关）。",
-            "kb", "依赖 wiki_project_dossier_enabled；LLM 润色另受 wiki_dossier_llm_narrative"),
+            "基于 DossierPack 生成 briefing/feasibility 等研发草稿（P5，默认开 · Top-5 #3）。",
+            "kb", "依赖 wiki_project_dossier_enabled；draft_not_claims；LLM 润色另受 wiki_dossier_llm_narrative"),
     EnvFlag("wiki_storm_report_enabled", "STORM 长文报告",
             "异步 STORM 风格多章长文（大纲→分章→缝合）；落 reports/*-storm.md；"
             "L2 draft_not_claims，不进 Claims/DOE。默认关；不改同步短 Report。",
@@ -256,7 +260,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "Catalog 本身始终可 GET/rebuild，不依赖本开关。",
             "kb", "依赖 wiki_enabled + wiki_llm_themes_enabled"),
     EnvFlag("wiki_chat_save_draft", "Chat 存为 Wiki 草稿",
-            "允许把 Chat / Deep Research 回答写入 queries/ L2 草稿（unreviewed；不进 Claims/DOE）。默认关。",
+            "允许把 Chat / Deep Research 回答写入 queries/ L2 草稿（unreviewed；不进 Claims/DOE）。"
+            "默认开（Top-5 #3）；可关。",
             "kb", "依赖 wiki_enabled；需活动 project_id"),
     EnvFlag("wiki_embed_enabled", "Wiki 摘要进入检索栈",
             "将 Wiki 页摘要写入现有 document_chunks（source_kind=wiki）并参与 Chat 双轨检索；"

@@ -440,12 +440,11 @@ class Settings(BaseSettings):
     # 这两个配额按**项目**累计，到顶后自动入库停止新增（手动单篇入库不受限）。
     kb_project_source_quota: int = 300   # 0 = 不限；每项目资料总数上限
     kb_project_pdf_quota: int = 50       # 0 = 不限；每项目「走 PDF 下载+解析」篇数上限
-    # 相关性闸影子模式（2026-09-11 / W2 2026-09-24）：relevance 实为名次代理
-    # （_ranked = 1.0 - 0.02*位置），所以 kb_ingest_min_relevance=0.45 等价于
-    # 「名次 < 27.5」，首页全过、形同虚设。True（默认）= 只记录「若改用真实
-    # topicality 分会被拒多少条」，不改变入库行为。False = 按 topicality 真闸
-    # （阈值仍读 kb_ingest_min_relevance）。翻转前先看 GET /api/kb/relevance-shadow/stats。
-    kb_relevance_shadow: bool = True
+    # 相关性闸影子模式（2026-09-11 / W2；Top-5 #1 2026-09-25 默认翻转为真闸）：
+    # relevance 实为名次代理（_ranked = 1.0 - 0.02*位置）。False（默认）=
+    # 按 topicality 真闸（阈值 kb_ingest_min_relevance）。True = 只记录将拒收率，
+    # 不改入库（校准/回滚用）。看 GET /api/kb/relevance-shadow/stats。
+    kb_relevance_shadow: bool = False
     # 并发获取全文的线程数。**瓶颈是解析内存而不是网络**：每篇 PDF 都会走完整
     # 解析级联，pymupdf4llm 峰值约 350 MB、扫描件走 OCR 约 557 MB，所以在
     # 2.2 GB 的机器上 3 路并发已经接近上限。入库（切块+向量+写库）保持串行，
@@ -470,6 +469,9 @@ class Settings(BaseSettings):
     celery_soft_time_limit_s: int = 14400  # 4 小时：抛 SoftTimeLimitExceeded，任务可自报
     celery_hard_time_limit_s: int = 18000  # 5 小时：强杀，防止卡死的任务永久占槽（须 < task_stream_timeout_s 21600）
     kb_ingest_min_relevance: float = 0.45  # 0 = off; e.g. 0.5 filters low-relevance rows
+    # Top-5 #2（2026-09-25）：检索期负向收缩。True=合并 DomainSearchProfile.search_deny
+    # 与扩展 negative_terms，命中且 allow 不足时打 domain_match=none / 排序惩罚。
+    kb_search_deny_enabled: bool = True
     # 主题预筛(永久规则 2026-09):自动入库前按项目主题锚词过滤领域外文献
     # (磁性/储氢/电池/半导体/天文/纯力学等)。True=强制; 项目标题无领域锚词
     # 或显式置 false 时不过滤(显式手动路径不受影响)。
@@ -566,16 +568,18 @@ class Settings(BaseSettings):
     wiki_fts_enabled: bool = True
     # Phase 2: L2 theme LLM/template compiler. Default OFF.
     wiki_llm_themes_enabled: bool = False
-    # Phase 4: project dossier wiki (project_id primary key). Default OFF.
-    wiki_project_dossier_enabled: bool = False
+    # Phase 4: project dossier wiki (project_id primary key).
+    # Top-5 #3（2026-09-25）：产品化开闸 — 默认 ON（Claims/DOE 仍隔离；可关）。
+    wiki_project_dossier_enabled: bool = True
     # Phase 4: allow LLM narrative on dossier sections (tables stay deterministic).
     wiki_dossier_llm_narrative: bool = False
     # Phase 4: event-driven auto patch. Default OFF — manual API first.
     wiki_dossier_auto_patch: bool = False
     # Optional vertical prompt addendum id (e.g. "silane"); empty = none.
     wiki_dossier_vertical_addendum: str = ""
-    # Phase 5: generate Hub reports from DossierPack. Default OFF.
-    wiki_dossier_report_enabled: bool = False
+    # Phase 5: generate Hub reports from DossierPack.
+    # Top-5 #3：与卷宗一并默认 ON（draft_not_claims；可关）。
+    wiki_dossier_report_enabled: bool = True
     # STORM longform report (async L2 draft). Default OFF — does not alter sync /dossier/report.
     wiki_storm_report_enabled: bool = False
     # Cap sections for STORM drafting (cost / latency guardrails).
@@ -588,8 +592,9 @@ class Settings(BaseSettings):
     wiki_page_graph_enabled: bool = False
     # S2: inject deterministic wiki catalog snippet into L2 theme compile. Default OFF.
     wiki_catalog_inject_themes: bool = False
-    # S4: allow Chat/Deep Research 「存为 Wiki 草稿」→ queries/. Default OFF.
-    wiki_chat_save_draft: bool = False
+    # S4: allow Chat/Deep Research 「存为 Wiki 草稿」→ queries/.
+    # Top-5 #3：默认 ON（unreviewed draft；不进 Claims/DOE；可关）。
+    wiki_chat_save_draft: bool = True
     # Phase 3: embed wiki page summaries into document_chunks (source_kind=wiki).
     # Default OFF — dual-track; never replaces Raw chunk RAG.
     wiki_embed_enabled: bool = False
