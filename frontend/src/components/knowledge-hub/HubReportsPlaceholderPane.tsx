@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   api,
@@ -9,6 +9,7 @@ import {
 } from "../../api";
 import { useStore } from "../../store";
 import { saveTextToProjectShelf, shelfFilename } from "../../utils/export";
+import { CANCEL_BUTTON_CLASS } from "../../hooks/useTaskCancel";
 import ThinkingTimeline from "../ThinkingTimeline";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 
@@ -21,15 +22,18 @@ const REPORT_FLAG_ATTRS = [
 
 /** Extra flag for STORM longform (in addition to REPORT_FLAG_ATTRS). */
 const STORM_FLAG_ATTR = "wiki_storm_report_enabled" as const;
+/** Productization (default off) — Hub CTA only. */
+const AUTO_PATCH_FLAG_ATTR = "wiki_dossier_auto_patch" as const;
 
 type ReportFlagAttr = (typeof REPORT_FLAG_ATTRS)[number];
-type TrackedFlagAttr = ReportFlagAttr | typeof STORM_FLAG_ATTR;
+type TrackedFlagAttr = ReportFlagAttr | typeof STORM_FLAG_ATTR | typeof AUTO_PATCH_FLAG_ATTR;
 
 const REPORT_FLAG_LABEL: Record<TrackedFlagAttr, string> = {
   wiki_enabled: "Wiki",
   wiki_project_dossier_enabled: "卷宗",
   wiki_dossier_report_enabled: "Report",
   wiki_storm_report_enabled: "STORM",
+  wiki_dossier_auto_patch: "自动patch",
 };
 
 function isFlagGateError(message: string): boolean {
@@ -129,6 +133,7 @@ export default function HubReportsPlaceholderPane() {
   const [stormProgress, setStormProgress] = useState(0);
   const [stormStage, setStormStage] = useState("");
   const [stormThinking, setStormThinking] = useState<ThinkingStep[]>([]);
+  const stormAbortRef = useRef<(AbortController & { taskId?: string }) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,7 +150,7 @@ export default function HubReportsPlaceholderPane() {
       .then((body) => {
         if (cancelled) return;
         const next: Partial<Record<TrackedFlagAttr, boolean>> = {};
-        const tracked = [...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR] as const;
+        const tracked = [...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR, AUTO_PATCH_FLAG_ATTR] as const;
         for (const f of body.flags ?? []) {
           if ((tracked as readonly string[]).includes(f.attr)) {
             next[f.attr as TrackedFlagAttr] = Boolean(f.value);
@@ -157,7 +162,8 @@ export default function HubReportsPlaceholderPane() {
         const allOn = REPORT_FLAG_ATTRS.every((k) => next[k] === true);
         if (allOn) {
           setError((prev) => (prev && isFlagGateError(prev) ? null : prev));
-        }      })
+        }
+      })
       .catch((e) => {
         if (!cancelled) {
           setFlagMap(null);
@@ -177,6 +183,7 @@ export default function HubReportsPlaceholderPane() {
   const reportPathReady = flagsReady && flagsMissing.length === 0;
   const stormReady =
     reportPathReady && flagMap?.[STORM_FLAG_ATTR] === true;
+  const autoPatchOn = flagsReady && flagMap?.[AUTO_PATCH_FLAG_ATTR] === true;
   const showFlagCta = (flagsReady && flagsMissing.length > 0) || (!!error && isFlagGateError(error));
 
   const goEnvSettings = () => {
@@ -186,6 +193,20 @@ export default function HubReportsPlaceholderPane() {
         ? STORM_FLAG_ATTR
         : "wiki_dossier_report_enabled");
     openSettings("env", { focusEnvAttr: focus });
+  };
+
+  const cancelStorm = async () => {
+    const abort = stormAbortRef.current;
+    if (!abort) return;
+    abort.abort();
+    const tid = abort.taskId;
+    if (tid) {
+      try {
+        await api.cancelTask(tid);
+      } catch {
+        /* best-effort */
+      }
+    }
   };
 
   const onGenerate = async () => {
@@ -304,6 +325,8 @@ export default function HubReportsPlaceholderPane() {
     setStormProgress(0.05);
     setStormStage("queued");
     setStormThinking([]);
+    const ctrl = new AbortController() as AbortController & { taskId?: string };
+    stormAbortRef.current = ctrl;
     try {
       const accepted = await api.startWikiStormReport({
         project_id: activeProjectId,
@@ -314,6 +337,7 @@ export default function HubReportsPlaceholderPane() {
         ensure_dossier: true,
         persist: true,
       });
+      ctrl.taskId = accepted.task_id;
       await awaitTaskStream(
         accepted.task_id,
         (ev) => {
@@ -323,7 +347,7 @@ export default function HubReportsPlaceholderPane() {
           if (steps.length) setStormThinking(steps);
         },
         0,
-        undefined,
+        ctrl.signal,
         180_000,
       );
       const page = await api.getWikiStormReport(activeProjectId);
@@ -337,8 +361,11 @@ export default function HubReportsPlaceholderPane() {
       setStormProgress(1);
       setStormStage("done");
     } catch (e) {
-      setError(formatApiError(e));
+      const msg = formatApiError(e);
+      if (!ctrl.signal.aborted) setError(msg);
+      else setStormStage("cancelled");
     } finally {
+      stormAbortRef.current = null;
       setBusy(null);
     }
   };
@@ -363,14 +390,16 @@ export default function HubReportsPlaceholderPane() {
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
           <span className="text-slate-500">灰度旗标</span>
-          {([...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR] as const).map((attr) => {
+          {([...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR, AUTO_PATCH_FLAG_ATTR] as const).map((attr) => {
             const on = flagMap?.[attr];
             const mark = !flagsReady ? "?" : on ? "✓" : "×";
             const tone = !flagsReady
               ? "text-slate-500"
               : on
                 ? "text-emerald-300"
-                : "text-amber-300";
+                : attr === AUTO_PATCH_FLAG_ATTR
+                  ? "text-slate-500"
+                  : "text-amber-300";
             return (
               <span key={attr} className={tone} data-testid={`hub-reports-flag-${attr}`}>
                 {REPORT_FLAG_LABEL[attr]}
@@ -388,6 +417,29 @@ export default function HubReportsPlaceholderPane() {
         {flagsReady && reportPathReady && (
           <p className="text-[10px] text-emerald-400/90" data-testid="hub-reports-flags-ready">
             卷宗 Report 路径已开；可生成 / 导出 MD。
+          </p>
+        )}
+        {flagsReady && !autoPatchOn && (
+          <div
+            className="flex flex-wrap items-center gap-2"
+            data-testid="hub-reports-auto-patch-cta"
+          >
+            <p className="text-[10px] text-slate-500">
+              事件自动 patch 默认关（白名单：入库/DOE/台账/闭环等；未知事件跳过）。需要飞轮时再开。
+            </p>
+            <button
+              type="button"
+              className="text-[10px] px-2 py-1 rounded border border-edge text-slate-300 hover:border-accent/50 hover:text-accent"
+              data-testid="hub-reports-auto-patch-open-env"
+              onClick={() => openSettings("env", { focusEnvAttr: AUTO_PATCH_FLAG_ATTR })}
+            >
+              去设置开自动 patch
+            </button>
+          </div>
+        )}
+        {flagsReady && autoPatchOn && (
+          <p className="text-[10px] text-amber-300/90" data-testid="hub-reports-auto-patch-on">
+            自动 patch 已开 · 仅白名单事件刷新对应节（不洗表格 / 不进 Claims）
           </p>
         )}
         {showFlagCta && (
@@ -514,15 +566,27 @@ export default function HubReportsPlaceholderPane() {
             <ThinkingTimeline steps={stormThinking} title="STORM 进度" compact />
           </div>
         )}
-        <button
-          type="button"
-          disabled={!!busy || !activeProjectId || !stormReady}
-          className="px-3 py-1.5 rounded bg-violet-500/90 text-ink text-sm disabled:opacity-50"
-          data-testid="hub-reports-storm-generate"
-          onClick={() => void onStormGenerate()}
-        >
-          {busy === "storm" ? "STORM 生成中…" : "生成 STORM 长文"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!!busy || !activeProjectId || !stormReady}
+            className="px-3 py-1.5 rounded bg-violet-500/90 text-ink text-sm disabled:opacity-50"
+            data-testid="hub-reports-storm-generate"
+            onClick={() => void onStormGenerate()}
+          >
+            {busy === "storm" ? "STORM 生成中…" : "生成 STORM 长文"}
+          </button>
+          {busy === "storm" && (
+            <button
+              type="button"
+              className={CANCEL_BUTTON_CLASS}
+              data-testid="hub-reports-storm-cancel"
+              onClick={() => void cancelStorm()}
+            >
+              ✕ 取消
+            </button>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2" data-testid="hub-reports-storm-exports">
           {(["md", "docx", "pdf", "pptx"] as const).map((fmt) => {
             const unavailable = exportCaps?.[fmt] === false;

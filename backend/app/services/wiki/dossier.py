@@ -290,7 +290,17 @@ def render_section(section: str, pack: dict[str, Any]) -> str:
             lines.append("  （草稿不进 Claims/DOE；审阅后可手动编入 S2/S8 或编译主题。）")
         if not lines:
             lines.append("- 主要切片已有数据；请人工 review 后勾选 reviewed。")
-        lines.append("- 自动 patch 默认关闭（`wiki_dossier_auto_patch=false`）。")
+        ap = bool(getattr(get_settings(), "wiki_dossier_auto_patch", False))
+        if ap:
+            lines.append(
+                "- 自动 patch **已开**（白名单事件：project/literature/DOE/lab/loop/"
+                "optimize/attachment；未知事件跳过；不洗表格）。"
+            )
+        else:
+            lines.append(
+                "- 自动 patch 默认关闭（`wiki_dossier_auto_patch=false`）；"
+                "可在设置开启白名单事件更新。"
+            )
         return "\n".join(lines)
     raise ValueError(f"unknown dossier section: {section}")
 
