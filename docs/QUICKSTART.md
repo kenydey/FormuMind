@@ -90,17 +90,19 @@ the center, and the **Actions** toolbar on the right. The header holds
 
   | | Button | What it does |
   |---|---|---|
-  | 🧪 | Requirements | product domain, substrate, objectives |
-  | ⭐ | Recommend | AI-retrieved Top-N formulations |
+  | 🧪 | Requirements | domain, substrate, objectives (**constraint tracing**) |
+  | ⭐ | Recommend | AI Top-N (expand **Why recommended** on cards) |
   | 🎯 | **Inverse Design** | target properties → Pareto front of formulations |
-  | 🔁 | **Material Substitution** | replacements for a discontinued or costly ingredient |
+  | 🔁 | **Material Substitution** | replacements + predicted Δ (supply badges) |
   | 🔬 | DOE Design | generate a run table, export a worksheet |
-  | 📋 | Workbench | record actual parameters and measured values |
-  | 📄 | **QC Report** | upload a test report → extracted measurements bound to an experiment |
+  | 📋 | Workbench | measured ledger; optional project auto-loop / soft-correct (off by default) |
+  | 📄 | **QC Report** | upload a test report → extracted measurements |
   | 📈 | Optimization | Bayesian multi-objective loop |
   | ⚙️ | Process Optimization | cure / dispersion / film-thickness parameters |
   | 🔄 | Self-Driving Loop | data → retrain → optimize → next DOE, one click |
+  | 📚 | **Knowledge** | Hub: archive · quality-ops · Wiki · graph · dossier |
 
+  A **PathWizard** above the buttons short-cuts formula / substitute / knowledge.
   The three in bold are covered in steps 5b, 5c and 6b below.
 
 ---

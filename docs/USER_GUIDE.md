@@ -26,6 +26,8 @@ every feature and the end-to-end workflow.
 12. [Enabling the real engines](#12-enabling-the-real-engines)
 13. [FAQ & scope notes](#13-faq--scope-notes)
 
+> **2026-09 addenda (§5.21–§5.25):** Knowledge Hub (quality-ops / Wiki / dossier), recommendation explain + constraint effect tracing, manual supplier quotes & `stale_price`, project-level auto-loop & soft-correct, persistent hybrid search vs session FAISS.
+
 ---
 
 ## 1. Overview
@@ -52,13 +54,14 @@ cycle. As real experimental data accumulates, data-driven models progressively
 supersede the empirical surrogate, so recommendations and optimization move
 ever closer to measured reality.
 
-**Three product families:**
+**Product domains** (including autodeposition):
 
 | Domain | Key metrics |
 |--------|-------------|
 | `anticorrosion_coating` | salt-spray hours, film weight, adhesion, pencil hardness |
 | `degreaser` | cleaning efficiency, foam index, bath life |
 | `surface_treatment` | coating weight, salt-spray hours, adhesion-promotion index |
+| `autodeposition_coating` | coating weight, salt-spray hours, cost / VOC |
 
 ---
 
@@ -78,7 +81,8 @@ it is installed.
 | Internet search | `duckduckgo-search` | (offline returns no extra hits) |
 | **NotebookLM source** | `notebooklm-py` (browser-session auth) | (off → no extra hits) |
 | File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
-| RAG store | sentence-transformers embedding + chromadb | in-memory TF-IDF index |
+| RAG (session chat) | ColBERT/PyLate (GPU) · **BM25+FAISS** (CPU) · sentence-transformers | in-memory TF-IDF |
+| RAG (persistent KB) | **hybrid BM25 + embedding cosine** over `document_chunks` (`/api/kb/hybrid-search`); BM25 prefilter when near scan cap / hot p95 | keyword-only without embeddings |
 | Grounded Q&A | ChemCrow agent (chemistry questions) · paper-qa (semantic synthesis) | TF-IDF re-rank → configured LLM → snippet |
 | Property prediction | RDKit (8 descriptors) · MoLFormer (reserved) | transparent empirical surrogate |
 | Rheology / Tg | Fox equation + Mooney viscosity (knowledge-base `tg_k`) | skipped if data missing |
@@ -150,20 +154,19 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 - **Center (Research)**: a chat interface that answers questions **grounded in
   the loaded sources** (semantic embedding or TF-IDF re-rank → LLM answer), with
   citation chips linking back to the evidence used.
-- **Right (Actions)**: ten buttons that each open a focused **modal** —
-  🧪 Requirements (with the **✨ NL Intent** parser at the top),
-  ⭐ Recommend (AI-recommended Top-N + per-card 🔍 **IP analysis**),
-  🎯 **Inverse Design** (target properties → Pareto front, §5.15),
-  🔁 **Material Substitution** (replacements with predicted deviation, §5.16),
-  🔬 DOE Design (5 designs + 🧠 AI active selection, fill measured values,
-  retrain, model gauges),
-  📋 Workbench (record actual parameters and measured values),
-  📄 **QC Report** (upload a test report → per-measurement rows, §5.17),
-  📈 Optimization (Bayesian loop, convergence chart),
-  ⚙️ Process Optimization (cure temperature/time, dispersion RPM, film
-  thickness, bath temperature, pH, …),
-  🔄 Self-Driving Loop (data → retrain → optimize → next active-learning DOE
-  in one click). Status badges on each button show running / result counts.
+- **Right (Actions)**: a **PathWizard** at the top (formula / substitute / knowledge). Buttons open focused modals —
+  🧪 Requirements (**constraint effect tracing**: which brief fields feed scoring / DOE),
+  ⭐ Recommend (expand **Why recommended** on each card),
+  🎯 Inverse Design (§5.15),
+  🔁 Material Substitution (§5.16),
+  🔬 DOE Design,
+  📋 Workbench (project-level **auto-loop on sync** and **prediction soft-correct**, both default off),
+  📄 QC Report (§5.17),
+  📈 Optimization,
+  ⚙️ Process Optimization,
+  🔄 Self-Driving Loop,
+  📚 **Knowledge Hub** (archive · retrieval probe · quality-ops · Wiki · graph · dossier).
+  Status badges show running / result counts.
 - **Header**: ⚙ **Settings** (three tabs: **LLM**, **API keys**, **Dependencies**) and
   🕐 **History** (project snapshot drawer, with a live count badge).
 - **Two kinds of keys (do not confuse them)**:
@@ -464,8 +467,10 @@ deterministic offline path, so behaviour never breaks.
   absent, a grey badge with a `pip install -e '.[intel]'` hint is displayed
   instead.
 - **Semantic RAG** — with `sentence-transformers` installed (the `embedding`
-  extra), the RAG store upgrades from TF-IDF to MiniLM embeddings + chromadb,
-  significantly improving recall on synonyms (e.g. "epoxy" ↔ "bisphenol-A").
+  extra), **session** chat retrieval can use embeddings (BM25+FAISS / TF-IDF
+  fallback). The **persistent KB** uses a separate `hybrid_search` path
+  (BM25 + cosine; §5.21) — **not** chromadb and **not** the same store as
+  session FAISS.
 - **Compound enrichment** — set `FORMUMIND_ENRICH_COMPOUNDS=true` and, with
   **PubChemPy** installed, the platform backfills missing SMILES / molar-mass on
   the raw-material library at startup (curated values always win).
@@ -681,20 +686,29 @@ one-line summary when no author note was supplied:
 | `GET /api/formulations/versions/detail/{version_id}` | one version's full snapshot |
 | `GET /api/formulations/versions/{from_id}/diff/{to_id}` | structured diff |
 
-### 5.19 Editable material catalogue
+### 5.19 Editable material catalogue & manual supplier quotes
 
-The raw-material library used to be a module-level dict literal read from dozens
-of call sites. It is now a **seed library plus a database overlay**, exposed as
-an ordinary mapping so none of those call sites changed: curated seed chemistry
-always wins, and fields the seed never carries — `availability`, `supplier`,
-`functional_class`, `hansen_*`, `substitute_group` — are filled in from the
-database.
+The raw-material library is a **seed library plus a database overlay**, exposed
+as an ordinary mapping: curated seed chemistry always wins, and fields the seed
+never carries — `availability`, `supplier`, `functional_class`, `hansen_*`,
+`substitute_group` — are filled from the database.
+
+**Manual quotes (A′):** edit per-supplier `price_cny_per_kg`,
+`price_observed_at`, `lead_time_days`, `moq`, `pack_size`
+(`price_source=manual`). Missing observation dates or old prices annotate
+**`stale_price`**. Recommendation explain and substitution candidates surface
+these as supply badges (light demotion only — no silent hard penalty). Cost
+prediction still primarily uses catalogue engineering estimates (feeding quotes
+into `cost_cny_per_kg` is backlog).
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/materials` | search the catalogue (filter by role, functional class, substitute group) |
-| `POST /api/materials` | add or update a material |
+| `POST /api/materials` | add or update a material (optional `suppliers_json` quotes) |
 | `POST /api/materials/availability` | mark `available` / `restricted` / `discontinued` |
+
+> Canonical store is `suppliers` + `material_suppliers`; `materials.suppliers_json`
+> remains dual-written by default for compatibility; reads hydrate from links.
 
 ### 5.20 Referential integrity check
 
@@ -714,6 +728,64 @@ count.
 > SQLite does not enforce foreign keys unless `PRAGMA foreign_keys=ON` is set,
 > **per connection** — without it every `ForeignKey` declaration is decorative.
 > The engine sets it on every new connection.
+
+### 5.21 Knowledge Hub (📚)
+
+The right-rail **📚 Knowledge** button opens the Knowledge Hub (complements the
+left-pane session sources):
+
+| Tab | Purpose |
+|-----|---------|
+| **Materials** | Persistent sources/chunks; soft-archive / restore; archived excluded from retrieval by default |
+| **Retrieval probe** | `/api/kb/query-test` — BM25 / cosine / hybrid breakdown |
+| **Quality ops** | `/api/kb/quality-ops` — quality score, scan pressure, topicality stats, **hybrid p50/p95**, near-cap CTA |
+| **Wiki** | Compiled-memory pages; summaries can embed into dual-track retrieval (`wiki_embed_enabled`; Claims still filter wiki) |
+| **Graph** | Wiki wikilink graph (**not** materials KG / Neo4j) |
+| **Reports / dossier** | Project dossier tables + optional narrative; STORM longform (flag-gated) |
+
+**Gates (defaults):** topicality enforce on (`kb_relevance_shadow=False`);
+retention purge never auto-deletes (dry-run + confirm).
+
+| Path | Used for | Implementation |
+|------|----------|----------------|
+| Session RAG | Center chat | `rag.BM25FAISSStore` etc. |
+| Persistent KB | Hub / recommend fuse | `hybrid_search` over `document_chunks` (scan_limit 5000; BM25 prefilter when near cap / hot p95) |
+
+### 5.22 Recommendation explain & constraint tracing
+
+Formulations scored via `_score_and_validate` attach `Formulation.explain`:
+
+- objectives hit / constraints miss, evidence refs, KG signals, **supply flags**,
+  uncertainty, **bias-corrected** badge
+- **effect_trace**: which objectives / levers / VOC (etc.) are **wired**,
+  **display_only**, or unwired
+
+UI: leaderboard “Why recommended”; Requirements panel constraint chips.
+
+### 5.23 Workbench flywheel toggles (default off)
+
+On the **📋 Workbench** toolbar (persisted in the project workspace):
+
+| Toggle | Behavior |
+|--------|----------|
+| **Auto-loop after save** | Sync of Completed+measured rows may dispatch optimize + next-DOE suggestion; does **not** auto-write next DOE into the ledger |
+| **Project dossier auto-patch** | Allowlisted events refresh dossier sections |
+| **Project prediction soft-correct** | Apply `prediction_bias.mean_error` to **predicted** only; never measured / Claims / DOE |
+
+Also: BiasTrend panel and `loop_status`. Global env still defaults off; project OR global.
+
+### 5.24 PathWizard & flag maturity
+
+Right-rail **PathWizard** routes formula / substitute / knowledge. Settings and
+dependency flags carry `maturity` (stable / beta / experimental).
+
+### 5.25 Product-default constraints (memo)
+
+Still **off** unless explicitly enabled:
+
+- `auto_loop_on_sync` / `auto_adopt_next_doe_on_loop` / `prediction_bias_soft_correct`
+- `kg_relations_on_ingest`, archive TTL physical purge, stopping `suppliers_json` dual-write
+- Neo4j / external vector DBs (e.g. Qdrant) — not default until metrics demand them
 
 ---
 
@@ -831,6 +903,16 @@ The **Export ▾** menu on each leaderboard card offers:
 | GET | `/api/experiments` | list experiments (id + label) so reports and measurements can reference one |
 | POST | `/api/experiments` | feed back measured results → persist + (re)train |
 | POST | `/api/experiments/import-csv` | upload a filled-in worksheet → bulk-ingest + train |
+| POST | `/api/experiments/workbench/campaigns` | create workbench campaign from a DOE plan |
+| GET | `/api/experiments/workbench/{id}` | AG Grid ledger rows (+ `loop_status`) |
+| PUT | `/api/experiments/workbench/sync` | save ledger edits; optional project/global auto-loop |
+| GET | `/api/experiments/workbench/{id}/bias-trend` | prediction_bias trend (soft-correct decisions) |
+| GET | `/api/kb/stats` | active/archived sources & chunks, scan pressure |
+| GET | `/api/kb/quality-ops` | Hub quality aggregate (incl. hybrid p50/p95) |
+| POST | `/api/kb/hybrid-search` | persistent-KB hybrid retrieval |
+| POST | `/api/kb/query-test` | retrieval probe with per-channel scores |
+| POST | `/api/kb/retention/purge` | archived-source retention (default dry-run) |
+| GET/POST | `/api/wiki/…` | Wiki pages / graph / dossier / STORM (flag-gated) |
 | **POST/GET** | **`/api/formulations/versions`** | **save a formulation version / find lineages (§5.18)** |
 | **GET** | **`/api/formulations/versions/{from}/diff/{to}`** | **structured diff between two versions** |
 | POST | `/api/train` | force a retrain over all stored experiments |
@@ -1094,6 +1176,14 @@ defaults.
 | `FORMUMIND_TOP_N_FORMULAS` | `5` | leaderboard size |
 | `FORMUMIND_MIN_TRAIN_SAMPLES` | `4` | min samples before training a metric's model |
 | `FORMUMIND_AUTO_RETRAIN` | `true` | retrain automatically on new experiments |
+| `FORMUMIND_AUTO_LOOP_ON_SYNC` | `false` | auto closed-loop after ledger sync (or project checkbox OR) |
+| `FORMUMIND_AUTO_ADOPT_NEXT_DOE_ON_LOOP` | `false` | auto-adopt next DOE after loop (experimental; default off) |
+| `FORMUMIND_PREDICTION_BIAS_SOFT_CORRECT` | `false` | soft-correct predicted metrics (or project checkbox OR) |
+| `FORMUMIND_KB_SEARCH_SCAN_LIMIT` | `5000` | max chunks scanned by persistent hybrid_search |
+| `FORMUMIND_KB_HYBRID_ANN_GATE_P95_MS` | `800` | enable BM25 prefilter when hybrid p95 exceeds this |
+| `FORMUMIND_KB_RELEVANCE_SHADOW` | `false` | `false` = topicality enforce; `true` = shadow-only stats |
+| `FORMUMIND_MATERIALS_SUPPLIERS_JSON_DUAL_WRITE` | `true` | dual-write suppliers_json (compat window) |
+| `FORMUMIND_WIKI_ENABLED` / `WIKI_EMBED_ENABLED` / `WIKI_PAGE_GRAPH_ENABLED` | see `.env.example` | Wiki compiled memory / embed dual-track / page graph |
 | `FORMUMIND_FULLTEXT_ENRICH` | `false` | **The current full-text switch**: upgrade abstract-level hits to full text and index them (requires network; false by default to keep tests offline) |
 | `FORMUMIND_PATENT_PREFER_HTML` | `true` | Take patent text from the Google Patents landing page — one request, ~0.7 s, and no OCR. Set false to prefer the PDF |
 | `FORMUMIND_PDF_LOCAL_OCR` | `false` | Per-page OCR inside the local layout parser (pymupdf4llm). ⚠️ **The library defaults this on**, and that tier runs on every PDF ahead of everything else — so with Tesseract on the host, every page is OCR-ed first. Measured on a 6-page image-only PDF: 16.7 s on / 0.8 s off. Scans are unaffected: a document with no text layer is detected and handed to RapidOCR or MinerU. A **mixed** document (a few text pages plus scans) is not "a scan" — that test is `all()` over pages — so its text-layer-less pages are escalated to MinerU per page instead; with MinerU off, one warning per document names how many pages could not be read |
@@ -1158,7 +1248,7 @@ pip install -e ".[optimize]"     # optuna (optional CPU multi-objective; native 
 pip install -e ".[bo]"           # BoTorch + gpytorch + torch CPU (optional GP qNEHVI)
 pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
-pip install -e ".[embedding]"    # sentence-transformers (+ chromadb) → semantic RAG
+pip install -e ".[embedding]"    # sentence-transformers → embeddings (session RAG / KB hybrid)
 pip install -e ".[color]"        # colour-science (CIELAB / CIEDE2000)
 pip install -e ".[colbert,crag]"   # ColBERT index + LangGraph CRAG pipeline
 pip install -e ".[notebooklm]"   # notebooklm-py[browser] (NotebookLM source; run `notebooklm login` once)
