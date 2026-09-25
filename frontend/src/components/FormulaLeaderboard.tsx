@@ -23,6 +23,7 @@ import SimilarFormulationModal from "./SimilarFormulationModal";
 import FormulaTableView from "./FormulaTableView";
 import RecommendedFormulaTable from "./RecommendedFormulaTable";
 import MeasuredMetricHitsBanner from "./MeasuredMetricHitsBanner";
+import FormulaExplainPanel from "./FormulaExplainPanel";
 import { cardMeasuredChip } from "./kgMeasuredObservability";
 import ParetoFrontPlot from "./charts/ParetoFrontPlot";
 import ParallelCoordinates from "./charts/ParallelCoordinates";
@@ -318,6 +319,7 @@ function FormulaCard({
               </div>
             )
           )}
+          <FormulaExplainPanel explain={form.explain} score={form.score} />
           {/* 成本 / 碳足迹徽标 */}
           {form.predicted && (form.predicted.cost_cny_per_kg != null || form.predicted.voc_gpl != null) && (
             <div className="flex flex-wrap gap-1 text-[10px]">
