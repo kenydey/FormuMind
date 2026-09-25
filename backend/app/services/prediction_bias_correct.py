@@ -80,14 +80,31 @@ def soft_correct_predicted(
     campaign_id: int | None = None,
     project_id: str | None = None,
     by_metric: dict[str, dict[str, Any]] | None = None,
+    enabled: bool | None = None,
 ) -> tuple[dict[str, float], list[str]]:
     """Apply ``predicted − mean_error`` when flag on and n ≥ min_n.
 
     Returns ``(corrected_dict, list_of_corrected_metric_names)``.
     No-op when flag off or insufficient samples.
+
+    ``enabled``: explicit override. When ``None``, fire if **global**
+    ``prediction_bias_soft_correct`` **or** the project's workspace flag is
+    true (post-A′ #4 — mirrors auto_loop / dossier auto_patch OR).
     """
     settings = get_settings()
-    if not getattr(settings, "prediction_bias_soft_correct", False):
+    if enabled is None:
+        enabled = bool(getattr(settings, "prediction_bias_soft_correct", False))
+        if not enabled and project_id:
+            try:
+                from ..db.project_store import get_project_store
+
+                detail = get_project_store().get(str(project_id).strip())
+                ws = getattr(detail, "workspace", None) if detail is not None else None
+                enabled = bool(getattr(ws, "prediction_bias_soft_correct", False))
+            except Exception as exc:
+                logger.debug("project soft_correct flag read failed: %s", exc)
+                enabled = False
+    if not enabled:
         return dict(predicted or {}), []
     min_n = int(getattr(settings, "prediction_bias_soft_correct_min_n", 3) or 3)
     bias = by_metric if by_metric is not None else load_latest_bias_by_metric(

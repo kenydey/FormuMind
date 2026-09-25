@@ -5,7 +5,9 @@ from app.config import Settings, get_settings
 from app.services.prediction_bias_correct import soft_correct_predicted
 
 
-def test_soft_correct_noop_when_flag_off():
+def test_soft_correct_noop_when_flag_off(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_PREDICTION_BIAS_SOFT_CORRECT", "false")
+    get_settings.cache_clear()
     assert Settings.model_fields["prediction_bias_soft_correct"].default is False
     pred = {"salt_spray_hours": 800.0, "cost_cny_per_kg": 12.0}
     out, metrics = soft_correct_predicted(
@@ -16,6 +18,7 @@ def test_soft_correct_noop_when_flag_off():
     )
     assert metrics == []
     assert out == pred
+    get_settings.cache_clear()
 
 
 def test_soft_correct_subtracts_mean_error(monkeypatch):

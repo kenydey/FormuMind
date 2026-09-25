@@ -280,7 +280,8 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "kb", "依赖 wiki_enabled；有 sentence-transformers 时带向量，否则关键词兜底"),
     EnvFlag("prediction_bias_soft_correct", "预测偏差软校准",
             "推荐/评分时用台账 prediction_bias.mean_error 校正 predicted（predicted−mean_error）。"
-            "默认关；需 metric n≥prediction_bias_soft_correct_min_n。不改 measured / 台账行。",
+            "默认关；也可在项目 Workbench 开项目级 OR（不强迫全局）。"
+            "需 metric n≥prediction_bias_soft_correct_min_n。不改 measured / 台账行。",
             "data", "先看 BiasTrend 再开；校准后榜卡显示「已校准」", maturity="beta"),
     EnvFlag("source_guide_enabled", "导入文档 LLM 摘要",
             "上传/导入文档时用 LLM 提取全局参数空间与摘要（Source Guide）。",

@@ -57,6 +57,8 @@ class ProjectWorkspace(BaseModel):
     auto_adopt_next_doe_on_loop: bool = False
     # Top-5‴ #4: project-level dossier auto patch (global default still off).
     wiki_dossier_auto_patch: bool = False
+    # Post-A′ #4: project-level prediction soft-correct (global default still off).
+    prediction_bias_soft_correct: bool = False
 
 
 class ProjectSummary(BaseModel):

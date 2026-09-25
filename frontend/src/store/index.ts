@@ -42,6 +42,7 @@ export const useStore = create<AppState>()(
       autoLoopRound: 0,
       autoAdoptNextDoeOnLoop: false,
       wikiDossierAutoPatch: false,
+      predictionBiasSoftCorrect: false,
       loopRetryAvailable: false,
       lastLoopTaskId: null,
       campaignState: null,

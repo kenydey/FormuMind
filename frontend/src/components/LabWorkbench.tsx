@@ -121,6 +121,8 @@ export default function LabWorkbench({
   const setAutoLoopOnSync = useStore((s) => s.setAutoLoopOnSync);
   const wikiDossierAutoPatch = useStore((s) => s.wikiDossierAutoPatch);
   const setWikiDossierAutoPatch = useStore((s) => s.setWikiDossierAutoPatch);
+  const predictionBiasSoftCorrect = useStore((s) => s.predictionBiasSoftCorrect);
+  const setPredictionBiasSoftCorrect = useStore((s) => s.setPredictionBiasSoftCorrect);
   const optimizeEngine = useStore((s) => s.optimizeEngine);
   const loopDoeEngine = useStore((s) => s.loopDoeEngine);
   const campaignState = useStore((s) => s.campaignState);
@@ -929,6 +931,30 @@ export default function LabWorkbench({
               {wikiDossierAutoPatch && (
                 <span className="text-amber-300/90" data-testid="workbench-dossier-auto-patch-on">
                   · 已开
+                </span>
+              )}
+            </label>
+            <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={predictionBiasSoftCorrect}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  if (on) {
+                    const ok = window.confirm(
+                      "开启本项目「预测偏差软校准」？\n\n推荐/评分时会用台账 prediction_bias.mean_error 校正 predicted（predicted−mean_error）。\n不改 measured / 台账行 / Claims/DOE。\n全局旗标仍可关；本开关按项目工作区持久化。",
+                    );
+                    if (!ok) return;
+                  }
+                  setPredictionBiasSoftCorrect(on);
+                }}
+                className="rounded border-edge"
+                data-testid="workbench-soft-correct-checkbox"
+              />
+              本项目预测偏差软校准
+              {predictionBiasSoftCorrect && (
+                <span className="text-violet-300/90" data-testid="workbench-soft-correct-on">
+                  · 已开（会改 predicted）
                 </span>
               )}
             </label>

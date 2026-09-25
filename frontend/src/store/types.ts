@@ -104,6 +104,8 @@ export interface AppState {
   autoAdoptNextDoeOnLoop: boolean;
   /** Top-5‴ #4: project-level dossier auto patch (global default still off). */
   wikiDossierAutoPatch: boolean;
+  /** Post-A′ #4: project-level prediction soft-correct. */
+  predictionBiasSoftCorrect: boolean;
   /** W5: last followLoopTask failed (non-cancel) — UI may offer retry. */
   loopRetryAvailable: boolean;
   lastLoopTaskId: string | null;
@@ -308,6 +310,7 @@ export interface AppState {
   setAutoLoopMaxRounds: (n: number) => void;
   setAutoAdoptNextDoeOnLoop: (enabled: boolean) => void;
   setWikiDossierAutoPatch: (enabled: boolean) => void;
+  setPredictionBiasSoftCorrect: (enabled: boolean) => void;
   applyIntent: (text: string) => Promise<string[]>;
 }
 
