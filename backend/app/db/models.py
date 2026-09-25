@@ -373,12 +373,14 @@ class SupplierRow(Base):
     norm_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # A′：手工维护的供应商国家/地区（ISO 或自由文本，如 CN / US）。
+    country: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class MaterialSupplierRow(Base):
-    """Material ↔ supplier link with optional product page URL."""
+    """Material ↔ supplier link with optional product page URL + quote fields."""
 
     __tablename__ = "material_suppliers"
     __table_args__ = (
@@ -401,6 +403,14 @@ class MaterialSupplierRow(Base):
     )
     product_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="app", nullable=False)
+    # A′ manual commercial terms (no scrape). price_source defaults to "manual".
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    price_cny_per_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)
+    price_observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    moq: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pack_size: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
