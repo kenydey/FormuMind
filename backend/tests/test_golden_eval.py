@@ -59,8 +59,8 @@ def test_golden_eval_dataset_valid():
     """Golden eval dataset is well-formed and has enough entries."""
     from .golden_eval_dataset import golden_questions, sample_documents
 
-    assert len(golden_questions) >= 3, (
-        f"expected at least 3 golden questions, got {len(golden_questions)}"
+    assert len(golden_questions) >= 50, (
+        f"expected at least 50 golden questions (P1 #27), got {len(golden_questions)}"
     )
     for i, entry in enumerate(golden_questions):
         assert isinstance(entry, dict), f"entry[{i}] is not a dict"

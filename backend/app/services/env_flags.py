@@ -101,6 +101,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("model_persist_enabled", "代理模型落盘",
             "训练后的 surrogate 写入 data/models/，重启时按 data_hash 复用，支持版本回滚。",
             "data"),
+    EnvFlag("langfuse_enabled", "Langfuse LLM 追踪",
+            "向 Langfuse 发送 complete_json 等 generation span；默认关，无 key 时 fail-open。",
+            "ops", "需 FORMUMIND_LANGFUSE_PUBLIC_KEY / SECRET_KEY"),
     EnvFlag("kb_recommend_use_hybrid", "推荐融合探针 hybrid",
             "推荐/研究 KB 融合走与 Hub 检索探针同栈的 BM25+向量 hybrid（共享 kb_hybrid_alpha）。"
             "关闭则退回旧 search_chunks。",

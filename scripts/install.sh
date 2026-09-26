@@ -5,12 +5,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "==> Backend: Python virtualenv + editable install"
+echo "==> Backend: Python virtualenv + pinned requirements + editable extras"
 cd "$ROOT/backend"
 python3 -m venv .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install -U pip setuptools wheel
+# P1 #23: install the Docker/CI pin set first so extras cannot float past it,
+# then layer editable extras (dev+llm match install.sh product defaults).
+pip install -r requirements.txt
 pip install -e ".[dev,llm]"
 
 # Lightweight online retrieval (arxiv/ddgs also ship in requirements.txt for Docker).
