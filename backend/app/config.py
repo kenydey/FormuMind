@@ -167,17 +167,17 @@ class Settings(BaseSettings):
     # （`sentence-transformers/all-MiniLM-L6-v2`）。
     #
     # 默认值是**英文为主**的模型，而本平台检索的是中文专利 —— 这是当前检索质量
-    # 的一个真实短板。中文可选项：
-    #     BAAI/bge-small-zh-v1.5   体积小，中文优先
-    #     BAAI/bge-m3              多语种，但大得多
-    #     moka-ai/m3e-base         中文，中等体积
+    # 的一个真实短板。可选项见 `rag.EMBEDDING_MODEL_CATALOG` / GET /api/kb/stats：
+    #     BAAI/bge-small-zh-v1.5      体积小，中文优先
+    #     BAAI/bge-m3                 多语种，但大得多
+    #     Qwen/Qwen3-Embedding-0.6B   多语种高维升级档（换后必重建）
+    #     moka-ai/m3e-base            中文，中等体积
     #
     # ⚠️ 换模型会让**已有的全部向量作废**（不同模型的向量在不同语义空间，不可比较）。
     # 换完之后必须点「重建索引」；在那之前 `/api/kb/stats` 会报
     # `vector_mode == "stale"` 并给出待重建的切块数，而不是让检索悄悄退回关键词。
     #
-    # 默认值故意没有改动：这台机器上没装 sentence-transformers，无法实测中文模型
-    # 能否加载、维度是多少，所以不把一个未经验证的默认值推给已有部署。
+    # 默认值故意没有改动：不把未经验证的默认值推给已有部署。
     embedding_model: str = ""
 
     # ColBERT 持久知识库
@@ -616,6 +616,14 @@ class Settings(BaseSettings):
     # runs only on top-N BM25 candidates (in-process; no Qdrant).
     kb_hybrid_ann_gate_p95_ms: float = 800.0
     kb_hybrid_ann_candidate_pool: int = 800
+    # Option A stage-2: when ANN gate is on and embedding dim ≥ this, score the
+    # BM25 candidate subset via a process-local float32 matmul (still no Qdrant).
+    # Below the threshold keep the measured plain-_dot loop (JSON→matrix churn
+    # dominates at 384d). Higher-dim upgrades (bge-m3 / Qwen3-Embedding) benefit.
+    kb_hybrid_ann_matrix_min_dim: int = 512
+    # Hysteresis: after the gate fires, keep the ANN path for this many further
+    # hybrid queries even if p95 briefly cools (avoids flap; still in-process).
+    kb_hybrid_ann_sticky_queries: int = 3
     # W4: recommended age (days) for archived-source retention purge UI/stats.
     # 0 = retention disabled (no auto purge; POST /retention/purge still needs
     # explicit days+confirm for any physical delete).

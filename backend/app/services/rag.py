@@ -77,6 +77,41 @@ class TfidfStore:
 # reading this constant directly ignores the operator's setting.
 _EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
+# Operator-facing catalog for FORMUMIND_EMBEDDING_MODEL. Changing the model
+# invalidates existing vectors — reindex is required (kb_stats vector_mode=stale).
+# No auto-download here; names are documentation + /api/kb/stats hints only.
+EMBEDDING_MODEL_CATALOG: tuple[dict[str, str], ...] = (
+    {
+        "id": "sentence-transformers/all-MiniLM-L6-v2",
+        "label": "MiniLM-L6 (default, EN-first, 384d)",
+        "langs": "en",
+        "note": "Small CPU default; weak on Chinese patent text.",
+    },
+    {
+        "id": "BAAI/bge-small-zh-v1.5",
+        "label": "bge-small-zh (ZH, 512d)",
+        "langs": "zh",
+        "note": "Preferred Chinese default when bilingual routing is off.",
+    },
+    {
+        "id": "BAAI/bge-m3",
+        "label": "bge-m3 (multilingual, larger)",
+        "langs": "multi",
+        "note": "Strong multilingual; heavier download/RAM.",
+    },
+    {
+        "id": "Qwen/Qwen3-Embedding-0.6B",
+        "label": "Qwen3-Embedding-0.6B (multilingual)",
+        "langs": "multi",
+        "note": "Higher-dim multilingual upgrade; reindex required after switch.",
+    },
+    {
+        "id": "moka-ai/m3e-base",
+        "label": "m3e-base (ZH, mid-size)",
+        "langs": "zh",
+        "note": "Chinese mid-size alternative to bge-small-zh.",
+    },
+)
 
 # 中文子库嵌入模型(双语分流 2026-09-04)与 bge 查询指令。
 # document_chunks 按 lang 分组: zh → bge-small-zh-v1.5(同语中文检索
@@ -102,10 +137,31 @@ def embed_model_name(lang: str | None = None) -> str:
     return _EMBED_MODEL
 
 
+def embedding_model_catalog() -> list[dict[str, str]]:
+    """Return a copy of the recommended embedding model catalog."""
+    return [dict(row) for row in EMBEDDING_MODEL_CATALOG]
+
+
+def embedding_status() -> dict:
+    """Current model + catalog + reindex reminder for stats/meta surfaces."""
+    from ..config import get_settings
+
+    configured = (get_settings().embedding_model or "").strip()
+    return {
+        "embedding_model": embed_model_name(),
+        "embedding_model_configured": configured or None,
+        "embedding_catalog": embedding_model_catalog(),
+        "reindex_hint": (
+            "换模型后必须点「重建索引」；在此之前 vector_mode=stale，"
+            "异模型向量不参与余弦比较（comparable_embedding）。"
+        ),
+    }
+
+
 def bge_query_prefix(model_name: str | None = None) -> str:
     """bge 查询指令前缀; 非 bge 模型返回空串(文档侧绝不加)。"""
     name = model_name or embed_model_name()
-    if "bge" in name:
+    if "bge" in name.lower():
         return _BGE_QUERY_INSTRUCTION
     return ""
 

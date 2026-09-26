@@ -921,6 +921,7 @@ def kb_stats() -> dict:
             "suppliers_json_dual_write": dual_write,
             **_vector_health(total, embedded, stale),
             "quality_gate_drops": _quality_gate_drops(),
+            **_embedding_status_fields(),
         }
     except Exception as exc:
         return degrade_return(
@@ -932,7 +933,28 @@ def kb_stats() -> dict:
              "products": 0, "scan_limit": 5000, "scan_pressure": 0.0,
              "scan_near_cap": False, "archive_retention_days": 0,
              "suppliers_json_dual_write": True,
-             "quality_gate_drops": _quality_gate_drops()},
+             "quality_gate_drops": _quality_gate_drops(),
+             **_embedding_status_fields()},
+        )
+
+
+def _embedding_status_fields() -> dict:
+    """Current embedding model + upgrade catalog (Option A; no Qdrant)."""
+    try:
+        from .rag import embedding_status
+
+        return embedding_status()
+    except Exception as exc:
+        return degrade_return(
+            logger,
+            exc,
+            "embedding status failed",
+            {
+                "embedding_model": _embed_model_name(),
+                "embedding_model_configured": None,
+                "embedding_catalog": [],
+                "reindex_hint": "换模型后必须点「重建索引」。",
+            },
         )
 
 

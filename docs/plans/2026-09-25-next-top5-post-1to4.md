@@ -80,7 +80,8 @@
 
 **做**（两刀可拆，同属「触阈再动」）：
 1. Settings / 项目级 **显式**关闭 `materials_suppliers_json_dual_write`（确认文案 + 回读自 link 表）；不默认关  
-2. 当 `ann_last` 连续为真或 p95 仍超阈：对 embed 子集建进程内矩阵/简易 ANN（仍不引 Qdrant）；文档继续强调 ≠ 会话 FAISS
+2. ~~当 `ann_last` 连续为真或 p95 仍超阈：对 embed 子集建进程内矩阵/简易 ANN（仍不引 Qdrant）~~  
+   **已交付（Option A，2026-09-26）**：`kb_hybrid_ann_matrix_min_dim` + sticky hysteresis；`ann_matrix_last` / `ann_streak` 进 quality-ops；`FORMUMIND_EMBEDDING_MODEL` 目录含 Qwen3-Embedding（换后必重建）。**仍不做 Qdrant compose。**
 
 **价值**：减双写债 + 检索在压力下再挤一档，且都有闸。  
 **不做**：未确认就全局停 dual-write；默认上外部向量库。

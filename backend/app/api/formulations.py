@@ -36,6 +36,7 @@ _ALL_DESIGNS = _NATIVE_DESIGNS + [d for d in PYDOE_DESIGNS if d not in _NATIVE_D
 @router.get("/meta")
 def metadata() -> dict:
     from ..services.engines.status import engines_status
+    from ..services.rag import embedding_status
 
     return {
         "domains": [d.value for d in ProductDomain],
@@ -52,6 +53,8 @@ def metadata() -> dict:
         "role_catalog": ROLE_CATALOG,
         # Import probes — UI disables unavailable engines (auto always allowed).
         "engines": engines_status(),
+        # Option A: embedding upgrade catalog (no Qdrant; reindex after switch).
+        **embedding_status(),
     }
 
 

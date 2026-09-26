@@ -9,6 +9,11 @@ Dim-3: hybrid_search_scored exposes per-channel scores for /api/kb/query-test.
 
 Post-A′ #3: latency ring (p50/p95) + scan/p95-gated BM25 candidate prefilter
 before cosine (in-process; **not** Qdrant; **not** session ``rag.BM25FAISSStore``).
+
+Option A stage-2: when the ANN gate is on and embedding dim ≥
+``kb_hybrid_ann_matrix_min_dim``, score the BM25 candidate subset with a
+process-local float32 matmul (still no external vector DB). Sticky hysteresis
+keeps the gate warm for a few queries after p95 cools.
 """
 from __future__ import annotations
 
@@ -33,6 +38,9 @@ logger = logging.getLogger(__name__)
 _LATENCY_MS: deque[float] = deque(maxlen=128)
 _LATENCY_LOCK = threading.Lock()
 _LAST_ANN_ACTIVE = False
+_LAST_ANN_MATRIX = False
+_ANN_STREAK = 0
+_ANN_STICKY_REMAINING = 0
 
 
 @dataclass(frozen=True)
@@ -47,10 +55,13 @@ class ScoredChunk:
 
 def reset_latency_stats() -> None:
     """Test helper — clear the in-process latency ring."""
-    global _LAST_ANN_ACTIVE
+    global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _ANN_STREAK, _ANN_STICKY_REMAINING
     with _LATENCY_LOCK:
         _LATENCY_MS.clear()
         _LAST_ANN_ACTIVE = False
+        _LAST_ANN_MATRIX = False
+        _ANN_STREAK = 0
+        _ANN_STICKY_REMAINING = 0
 
 
 def record_hybrid_latency_ms(ms: float) -> None:
@@ -69,12 +80,16 @@ def hybrid_latency_stats() -> dict[str, Any]:
     with _LATENCY_LOCK:
         samples = list(_LATENCY_MS)
         ann = bool(_LAST_ANN_ACTIVE)
+        matrix = bool(_LAST_ANN_MATRIX)
+        streak = int(_ANN_STREAK)
     if not samples:
         return {
             "n": 0,
             "p50_ms": None,
             "p95_ms": None,
             "ann_last": ann,
+            "ann_matrix_last": matrix,
+            "ann_streak": streak,
             "note": "persistent hybrid_search ≠ rag.BM25FAISSStore (session RAG)",
         }
     arr = np.asarray(samples, dtype=float)
@@ -83,12 +98,27 @@ def hybrid_latency_stats() -> dict[str, Any]:
         "p50_ms": round(float(np.percentile(arr, 50)), 2),
         "p95_ms": round(float(np.percentile(arr, 95)), 2),
         "ann_last": ann,
+        "ann_matrix_last": matrix,
+        "ann_streak": streak,
         "note": "persistent hybrid_search ≠ rag.BM25FAISSStore (session RAG)",
     }
 
 
 def _should_use_ann_gate(*, corpus_n: int, settings) -> bool:
-    """Gate on scan pressure (near scan_limit) or elevated p95 latency."""
+    """Gate on scan pressure, elevated p95, or sticky hysteresis after a fire."""
+    scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
+    near_cap = corpus_n >= int(scan_limit * 0.9)
+    p95_thresh = float(getattr(settings, "kb_hybrid_ann_gate_p95_ms", 800.0) or 800.0)
+    stats = hybrid_latency_stats()
+    p95 = stats.get("p95_ms")
+    hot = p95 is not None and float(p95) >= p95_thresh and int(stats.get("n") or 0) >= 5
+    with _LATENCY_LOCK:
+        sticky = _ANN_STICKY_REMAINING > 0
+    return bool(near_cap or hot or sticky)
+
+
+def _ann_gate_base(*, corpus_n: int, settings) -> bool:
+    """Pressure/p95 only (no sticky) — used to refresh hysteresis budget."""
     scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
     near_cap = corpus_n >= int(scan_limit * 0.9)
     p95_thresh = float(getattr(settings, "kb_hybrid_ann_gate_p95_ms", 800.0) or 800.0)
@@ -143,12 +173,19 @@ def _cosine_on_indices(
     chunks: list,
     indices: list[int],
     cosine_scores: np.ndarray,
-) -> None:
-    """Fill cosine_scores only for ``indices`` (ANN / prefilter path)."""
+    *,
+    use_matrix: bool = False,
+    matrix_min_dim: int = 512,
+) -> bool:
+    """Fill cosine_scores only for ``indices`` (ANN / prefilter path).
+
+    Returns True when the float32 matmul path was used for at least one model.
+    """
     subset = [chunks[i] for i in indices]
     model_cols: set[str] = {
         c.embedding_model for c in subset if getattr(c, "embedding_model", None)
     }
+    used_matrix = False
     for mname in sorted(model_cols):
         from .rag import bge_query_prefix
 
@@ -157,10 +194,45 @@ def _cosine_on_indices(
             continue
         qv = vecs[0]
         dim = len(qv)
+        if use_matrix and dim >= int(matrix_min_dim):
+            if _cosine_matrix_for_model(qv, chunks, indices, cosine_scores, mname, dim):
+                used_matrix = True
+                continue
         for i in indices:
             c = chunks[i]
             if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
                 cosine_scores[i] = kb_index._dot(qv, c.embedding)
+    return used_matrix
+
+
+def _cosine_matrix_for_model(
+    qv: list[float],
+    chunks: list,
+    indices: list[int],
+    cosine_scores: np.ndarray,
+    mname: str,
+    dim: int,
+) -> bool:
+    """Score comparable rows for one model via ``mat @ q`` (normalized vectors)."""
+    rows: list[list[float]] = []
+    valid: list[int] = []
+    for i in indices:
+        c = chunks[i]
+        if c.embedding_model != mname or not kb_index.comparable_embedding(c, dim, mname):
+            continue
+        emb = getattr(c, "embedding", None)
+        if not emb or len(emb) != dim:
+            continue
+        rows.append(emb)
+        valid.append(i)
+    if not rows:
+        return False
+    mat = np.asarray(rows, dtype=np.float32)
+    q = np.asarray(qv, dtype=np.float32)
+    scores = mat @ q
+    for i, s in zip(valid, scores):
+        cosine_scores[i] = float(s)
+    return True
 
 
 def hybrid_search_scored(
@@ -178,10 +250,12 @@ def hybrid_search_scored(
     ``settings.kb_hybrid_alpha`` so the retrieval probe and recommend path share
     one knobs.
 
-    When scan is near cap or recent p95 exceeds threshold, cosine is only
-    computed on the top-N BM25 candidates (in-process ANN-style prefilter).
+    When scan is near cap or recent p95 exceeds threshold (or sticky
+    hysteresis), cosine is only computed on the top-N BM25 candidates. For
+    embedding dim ≥ ``kb_hybrid_ann_matrix_min_dim``, that subset is scored
+    with a process-local float32 matmul (Option A; still not Qdrant).
     """
-    global _LAST_ANN_ACTIVE
+    global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _ANN_STREAK, _ANN_STICKY_REMAINING
     settings = get_settings()
     if alpha is None:
         alpha = float(settings.kb_hybrid_alpha)
@@ -193,6 +267,8 @@ def hybrid_search_scored(
 
     t0 = time.perf_counter()
     ann_active = False
+    ann_matrix = False
+    ann_base = False
     try:
         from ..db.chunk_store import get_chunk_store
 
@@ -214,6 +290,7 @@ def hybrid_search_scored(
         bm25 = BM25Okapi(corpus_tokens)
         bm25_raw: np.ndarray = bm25.get_scores(_tokenize(query)).astype(float)
 
+        ann_base = _ann_gate_base(corpus_n=n, settings=settings)
         ann_active = _should_use_ann_gate(corpus_n=n, settings=settings)
         cosine_scores = np.zeros(n, dtype=float)
 
@@ -225,7 +302,17 @@ def hybrid_search_scored(
             pool = min(pool, n)
             # Top-BM25 indices for cosine (keep zeros elsewhere → BM25-only for tail).
             top_idx = np.argsort(-bm25_raw)[:pool].tolist()
-            _cosine_on_indices(query, chunks, top_idx, cosine_scores)
+            matrix_min = int(
+                getattr(settings, "kb_hybrid_ann_matrix_min_dim", 512) or 512
+            )
+            ann_matrix = _cosine_on_indices(
+                query,
+                chunks,
+                top_idx,
+                cosine_scores,
+                use_matrix=True,
+                matrix_min_dim=matrix_min,
+            )
         else:
             model_cols: set[str] = {
                 c.embedding_model for c in chunks if getattr(c, "embedding_model", None)
@@ -281,8 +368,20 @@ def hybrid_search_scored(
     finally:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         record_hybrid_latency_ms(elapsed_ms)
+        sticky_budget = int(
+            getattr(settings, "kb_hybrid_ann_sticky_queries", 3) or 3
+        )
         with _LATENCY_LOCK:
             _LAST_ANN_ACTIVE = ann_active
+            _LAST_ANN_MATRIX = ann_matrix
+            if ann_active:
+                _ANN_STREAK += 1
+            else:
+                _ANN_STREAK = 0
+            if ann_base:
+                _ANN_STICKY_REMAINING = max(0, sticky_budget)
+            elif _ANN_STICKY_REMAINING > 0:
+                _ANN_STICKY_REMAINING -= 1
 
 
 def hybrid_search(

@@ -3785,6 +3785,14 @@ export interface KBStats {
   suppliers_json_dual_write?: boolean;
   stale_chunks?: number;
   products_pending_structure?: number;
+  /** Active embedding model id (FORMUMIND_EMBEDDING_MODEL or default MiniLM). */
+  embedding_model?: string;
+  /** Explicit env override when set; null/undefined means default path. */
+  embedding_model_configured?: string | null;
+  /** Recommended upgrade catalog (MiniLM / bge / Qwen3-Embedding …). */
+  embedding_catalog?: Array<{ id: string; label: string; langs?: string; note?: string }>;
+  /** Reminder: model switch requires reindex. */
+  reindex_hint?: string;
 }
 
 /** W4: POST /api/kb/retention/purge result. */
@@ -3844,16 +3852,21 @@ export interface KBQualityOps {
   scan_near_cap?: boolean;
   vector_mode?: string;
   vector_hint?: string;
+  embedding_model?: string;
+  embedding_catalog?: Array<{ id: string; label: string; langs?: string; note?: string }>;
+  reindex_hint?: string;
   topicality_would_reject_pct?: number | null;
   fulltext_fail_pct?: number | null;
   quality_gate_drops?: KbGateDropStats;
   relevance_shadow?: Record<string, unknown>;
-  /** Post-A′ #3: persistent hybrid_search latency (≠ session FAISS). */
+  /** Post-A′ #3 / Option A: persistent hybrid_search latency (≠ session FAISS). */
   hybrid_search_latency?: {
     n?: number;
     p50_ms?: number | null;
     p95_ms?: number | null;
     ann_last?: boolean;
+    ann_matrix_last?: boolean;
+    ann_streak?: number;
     note?: string;
   };
   notes?: string[];
