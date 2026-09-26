@@ -264,19 +264,46 @@ def fetch_pdf(url: str, timeout: float = 20.0) -> bytes | None:
 def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
     """GET *url*, return (PDF bytes, reason).
 
-    reason ∈ {"ok", "status:403", "timeout", "not_pdf", "error:..."} — so
+    reason ∈ {"ok", "status:403", "timeout", "not_pdf", "ssrf", "error:..."} — so
     callers can distinguish a source refusing the request (403) from a real
     timeout instead of lumping both into one misleading "download timed out".
+
+    SSRF: initial URL and every redirect hop are checked with ``_is_safe_url``
+    (same manual-redirect loop as web fulltext). Auto ``follow_redirects`` is
+    off so a malicious OA 302 cannot pivot to an internal host.
     """
+    from .ingestion import _is_safe_url
+
+    if not _is_safe_url(url):
+        logger.warning("pdf fetch blocked by SSRF guard: %s", (url or "")[:200])
+        return None, "ssrf"
+    current_url = url
     try:
         with httpx.Client(
-            timeout=timeout, follow_redirects=True, headers=_HEADERS
+            timeout=timeout, follow_redirects=False, headers=_HEADERS
         ) as client:
-            r = client.get(url)
+            r = None
+            for _hop in range(4):  # initial + up to 3 redirects
+                r = client.get(current_url)
+                status = int(getattr(r, "status_code", 0))
+                if 300 <= status < 400:
+                    location = r.headers.get("location")
+                    if not location:
+                        break
+                    current_url = str(httpx.URL(current_url).join(location))
+                    if not _is_safe_url(current_url):
+                        logger.warning(
+                            "pdf redirect blocked by SSRF guard: %s", current_url[:200]
+                        )
+                        return None, "ssrf"
+                    continue
+                break
     except httpx.TimeoutException:
         return None, "timeout"
     except Exception as exc:
         return None, f"error:{type(exc).__name__}"
+    if r is None:
+        return None, "error:no_response"
     ct = r.headers.get("content-type", "")
     if r.status_code != 200:
         return None, f"status:{r.status_code}"

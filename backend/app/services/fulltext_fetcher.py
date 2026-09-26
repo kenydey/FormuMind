@@ -383,11 +383,38 @@ def _openalex_content_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
     tiers = [("grobid-xml", "TEI XML", "tei")]
     if allow_pdf:
         tiers.append(("pdf", "PDF", _ACQ_PDF))
+    # Prefer Authorization header over ?api_key= so a redirect cannot leak the
+    # key in the Location/query to a third party (OpenAlex accepts both).
+    auth_headers = {**_HEADERS, "Authorization": f"Bearer {api_key}"}
     for ext, label, acq in tiers:
         url = f"{base}.{ext}"
         try:
-            with httpx.Client(timeout=timeout, headers=_HEADERS, follow_redirects=True) as client:
-                r = client.get(url, params={"api_key": api_key})
+            with httpx.Client(
+                timeout=timeout, headers=auth_headers, follow_redirects=False
+            ) as client:
+                r = None
+                current_url = url
+                for _hop in range(4):
+                    r = client.get(current_url)
+                    status = int(getattr(r, "status_code", 0))
+                    if 300 <= status < 400:
+                        location = r.headers.get("location")
+                        if not location:
+                            break
+                        current_url = str(httpx.URL(current_url).join(location))
+                        # Pin content archive host — never follow off-site.
+                        host = (httpx.URL(current_url).host or "").lower()
+                        if host != "content.openalex.org":
+                            logger.warning(
+                                "OpenAlex content redirect off-host blocked: %s",
+                                current_url[:200],
+                            )
+                            r = None
+                            break
+                        continue
+                    break
+                if r is None:
+                    continue
         except Exception as exc:
             degrade_return(logger, exc, f"OpenAlex content {label} fetch failed", None)
             continue
