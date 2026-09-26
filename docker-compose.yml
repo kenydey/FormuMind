@@ -60,7 +60,8 @@ services:
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
       # Platform bearer auth (distinct from LLM vendor keys in Settings).
-      # Intranet: set FORMUMIND_API_AUTH_ENABLED=false in .env
+      # Intranet lab default OFF. Production ELN compose defaults ON
+      # (see docker-compose.eln.yml :-true).
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
       FORMUMIND_CAMPAIGN_BACKEND: datalab
       FORMUMIND_EXPERIMENT_BACKEND: datalab

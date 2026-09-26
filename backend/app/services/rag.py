@@ -272,6 +272,8 @@ class BM25FAISSStore:
         import numpy as np
 
         emb = self._get_embedder()
+        if emb is None:
+            return
         texts = [_doc_text(ev) for ev in evidence]
         vecs = np.asarray(emb.encode(texts, normalize_embeddings=True), dtype=np.float32)
         dim = int(vecs.shape[1])
@@ -280,24 +282,26 @@ class BM25FAISSStore:
             self._faiss_dim = dim
         self._faiss_index.add(vecs)
 
-    def _get_embedder(self) -> object:
+    def _get_embedder(self) -> object | None:
+        """Return a SentenceTransformer, or None when unavailable.
+
+        Never invents random vectors: a missing embedding package must degrade
+        to pure BM25 (FAISS index stays None), not BM25 + noise.
+        """
+        if self._embedder is False:
+            return None
         if self._embedder is None:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
-            except Exception:
-                # Last resort: random projection (still better than no FAISS)
-                import numpy as np
-                class _RandomProj:
-                    def __init__(self, dim=384):
-                        self._proj = np.random.randn(dim, 384).astype(np.float32)
-                    def encode(self, texts, normalize_embeddings=False):
-                        import numpy as np
-                        v = np.random.randn(len(texts), 384).astype(np.float32)
-                        if normalize_embeddings:
-                            v = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-8)
-                        return v
-                self._embedder = _RandomProj()
+            except Exception as exc:
+                logger.warning(
+                    "sentence-transformers unavailable — FAISS disabled, BM25 only (%s)",
+                    exc,
+                )
+                self._embedder = False
+                return None
         return self._embedder
 
 
@@ -311,7 +315,7 @@ def _minmax_norm(scores) -> list[float]:
 
 
 def _faiss_scores(index, dim, embedder, text: str, n_docs: int) -> list[float]:
-    if index is None or dim == 0:
+    if index is None or dim == 0 or embedder is None:
         return [0.0] * n_docs
     try:
         import numpy as np

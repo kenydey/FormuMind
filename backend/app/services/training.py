@@ -201,9 +201,12 @@ class ModelRegistry:
         for rec in self._records:
             if rec.domain != domain or metric not in rec.measured:
                 continue
-            rec_pid = rec.project_id or rec.domain.value
-            if project_id and rec_pid not in (pid, domain.value, ""):
-                continue
+            # Scoped project training must not pull empty-project rows (or other
+            # projects). Domain-level models use project_id="" / domain.value.
+            rec_pid = (rec.project_id or "").strip() or rec.domain.value
+            if project_id:
+                if rec_pid != pid:
+                    continue
             req = Requirement(domain=rec.domain)
             sub_raw = rec.factors.get("substrate")
             if sub_raw is not None:

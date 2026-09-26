@@ -8,11 +8,11 @@ from ....domain.schemas import DOEFactor, DOEPlan, DOERun
 
 
 #  pyDOE designs whose raw output is already unit-interval-scaled (each cell in
-#  [0, 1]): lhs/sobol sample the unit hypercube directly, and simplex_lattice's
-#  cells are mixture proportions. Every other pydoe design (ccd, bbdesign) is
-#  coded on a [-1, 1]-ish scale (ccd's rotatable axial points legitimately
-#  exceed +-1) and needs the (v + 1) / 2 remap below.
-_UNIT_SCALE_DESIGNS = frozenset({"lhs", "sobol", "simplex_lattice"})
+#  [0, 1]): lhs/sobol sample the unit hypercube directly. Mixture designs
+#  (simplex_*) are proportions that sum to 1 and need a dedicated mapping —
+#  independent per-factor decode() would destroy the sum=100% premise.
+_UNIT_SCALE_DESIGNS = frozenset({"lhs", "sobol"})
+_MIXTURE_DESIGNS = frozenset({"simplex_lattice", "simplex_centroid"})
 
 
 def _row_to_unit_interval(value: float, *, already_unit: bool) -> float:
@@ -33,6 +33,36 @@ def unit_to_coded(unit: float) -> float:
     return round(unit * 2.0 - 1.0, 4)
 
 
+def _mixture_row_to_run(
+    row: np.ndarray,
+    factors: list[DOEFactor],
+    *,
+    run_id: int,
+) -> DOERun:
+    """Map a simplex proportion row (sum≈1) onto natural lever units.
+
+    ``total = sum(factor.high)`` is the recipe mass/budget; each cell is a
+    share of that total so ``sum(natural) ≈ total``.
+    """
+    props = np.asarray(row, dtype=float).reshape(-1)
+    prop_sum = float(props.sum())
+    if prop_sum <= 0:
+        props = np.full(len(factors), 1.0 / max(len(factors), 1))
+        prop_sum = 1.0
+    else:
+        props = props / prop_sum
+    total = float(sum(f.high for f in factors))
+    coded: dict[str, float] = {}
+    natural: dict[str, float] = {}
+    for factor, p in zip(factors, props):
+        nat = round(float(p) * total, 4)
+        natural[factor.name] = nat
+        span = float(factor.high) - float(factor.low)
+        unit = (nat - float(factor.low)) / span if span > 0 else 0.5
+        coded[factor.name] = unit_to_coded(float(np.clip(unit, 0.0, 1.0)))
+    return DOERun(run_id=run_id, coded=coded, natural=natural)
+
+
 def matrix_to_doe_plan(
     matrix: np.ndarray,
     factors: list[DOEFactor],
@@ -49,17 +79,21 @@ def matrix_to_doe_plan(
             f"Matrix has {matrix.shape[1]} columns but {len(factors)} factors were supplied"
         )
 
-    already_unit = design in _UNIT_SCALE_DESIGNS
     runs: list[DOERun] = []
-    for idx, row in enumerate(matrix, start=1):
-        coded: dict[str, float] = {}
-        natural: dict[str, float] = {}
-        for factor, raw in zip(factors, row):
-            unit = _row_to_unit_interval(float(raw), already_unit=already_unit)
-            c = unit_to_coded(unit)
-            coded[factor.name] = c
-            natural[factor.name] = decode(c, factor)
-        runs.append(DOERun(run_id=idx, coded=coded, natural=natural))
+    if design in _MIXTURE_DESIGNS:
+        for idx, row in enumerate(matrix, start=1):
+            runs.append(_mixture_row_to_run(row, factors, run_id=idx))
+    else:
+        already_unit = design in _UNIT_SCALE_DESIGNS
+        for idx, row in enumerate(matrix, start=1):
+            coded: dict[str, float] = {}
+            natural: dict[str, float] = {}
+            for factor, raw in zip(factors, row):
+                unit = _row_to_unit_interval(float(raw), already_unit=already_unit)
+                c = unit_to_coded(unit)
+                coded[factor.name] = c
+                natural[factor.name] = decode(c, factor)
+            runs.append(DOERun(run_id=idx, coded=coded, natural=natural))
 
     note = f"engine={engine}; {design} design over {len(factors)} factors → {len(runs)} runs."
     if extra_notes:

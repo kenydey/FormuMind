@@ -77,6 +77,38 @@ def test_predict_with_std_returns_none_for_unknown(tmp_path):
     assert reg.predict_with_std(ProductDomain.anticorrosion_coating, "salt_spray_hours", [0.0] * 16) is None
 
 
+def test_scoped_project_dataset_excludes_empty_project_id(tmp_path):
+    """Empty project_id rows must not pollute a named project's training set."""
+    reg = ModelRegistry(path=str(tmp_path / "exp.json"))
+    domain = ProductDomain.anticorrosion_coating
+    empty_rows = [
+        ExperimentRecord(
+            domain=domain,
+            project_id="",
+            factors={"Zinc phosphate": 4.0, "Bisphenol-A epoxy (DGEBA)": 38.0, "Polyamide hardener": 14.0},
+            cure_temperature_c=80.0,
+            measured={"salt_spray_hours": 400.0},
+        )
+        for _ in range(6)
+    ]
+    proj_rows = [
+        ExperimentRecord(
+            domain=domain,
+            project_id="proj-a",
+            factors={"Zinc phosphate": 8.0, "Bisphenol-A epoxy (DGEBA)": 38.0, "Polyamide hardener": 14.0},
+            cure_temperature_c=80.0,
+            measured={"salt_spray_hours": 800.0},
+        )
+        for _ in range(6)
+    ]
+    reg.add(empty_rows + proj_rows, retrain=True)
+    data = reg._dataset(domain, "salt_spray_hours", project_id="proj-a")
+    assert data is not None
+    X, y = data
+    assert len(y) == 6
+    assert float(np.mean(y)) == pytest.approx(800.0)
+
+
 def test_predictor_blends_trained_model():
     """Feeding back high measured values must pull predictions above the prior."""
     registry.reset(persist=True)

@@ -70,3 +70,24 @@ def test_mixture_design_failure_raises_not_fallback(monkeypatch):
     monkeypatch.setattr("app.services.engines.pydoe_engine.build_pydoe_plan", boom)
     with pytest.raises(ValueError, match="混料"):
         build_doe_plan(FACTORS, "simplex_lattice", engine="pydoe", n=6)
+
+
+def test_simplex_lattice_mapping_preserves_mixture_sum():
+    """Mixture proportions must map to naturals that sum to Σ factor.high."""
+    import numpy as np
+
+    from app.services.engines.adapters.doe_adapter import matrix_to_doe_plan
+
+    factors = [
+        DOEFactor(name="A", low=0.0, high=40.0),
+        DOEFactor(name="B", low=0.0, high=30.0),
+        DOEFactor(name="C", low=0.0, high=30.0),
+    ]
+    # One simplex row: proportions sum to 1.
+    matrix = np.array([[0.5, 0.25, 0.25]], dtype=float)
+    plan = matrix_to_doe_plan(matrix, factors, "simplex_lattice", engine="test")
+    assert len(plan.runs) == 1
+    total = sum(f.high for f in factors)
+    nat_sum = sum(plan.runs[0].natural.values())
+    assert nat_sum == pytest.approx(total, abs=1e-3)
+    assert plan.runs[0].natural["A"] == pytest.approx(0.5 * total, abs=1e-3)

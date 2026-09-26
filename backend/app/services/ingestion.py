@@ -123,7 +123,8 @@ def _ingest_parsed_text(
 
     source_id: str | None = None
     if persist and text.strip():
-        source_id = get_source_store().create(
+        store = get_source_store()
+        source_id = store.create(
             filename=filename,
             title=Path(filename).stem if "." in filename else filename[:80],
             source_kind=source_kind,
@@ -138,7 +139,20 @@ def _ingest_parsed_text(
         # so chat retrieval spans the whole corpus across restarts.
         from .kb_index import index_source
 
-        index_source(source_id, text)
+        try:
+            # fail_soft=False: hard index errors must not leave an orphan
+            # SourceDocument with zero chunks (create already committed).
+            index_source(source_id, text, fail_soft=False)
+        except Exception as exc:
+            log_handled_exception(logger, exc, "index_source hard fail — deleting orphan source")
+            try:
+                store.delete(source_id)
+            except Exception as del_exc:
+                log_handled_exception(logger, del_exc, "orphan source delete failed")
+            source_id = None
+            status = "failed"
+            err = err or f"kb index failed: {type(exc).__name__}"
+            return IngestOutcome(evidence, source_id, guide, status)
         _register_guide_products(source_id, guide)
 
     return IngestOutcome(evidence, source_id, guide, status)
