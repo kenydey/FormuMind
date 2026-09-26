@@ -16,6 +16,7 @@ import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
 import ArtifactSplitLayout from "./ArtifactSplitLayout";
 import DoeHistoryPanel from "./DoeHistoryPanel";
 import ThinkingTimeline from "./ThinkingTimeline";
+import { engineOk, useEngineAvailability } from "../hooks/useEngineAvailability";
 
 function R2Gauge({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(1, value));
@@ -116,6 +117,9 @@ const AI_DESIGN = { value: "ai_active", label: "🧠 AI 主动选点" };
 export default function DoeResultsPanel() {
   const [factorHints, setFactorHints] = useState<FactorCandidate[] | null>(null);
   const [factorBusy, setFactorBusy] = useState(false);
+  const engines = useEngineAvailability();
+  const pydoeReady = engineOk(engines, "pydoe");
+  const baybeReady = engineOk(engines, "baybe");
   const {
     requirement, doePlan, models, modelHistory, trainMessage,
     busy, generateDoe, exportDoe, importCsv, error, clearError,
@@ -230,21 +234,37 @@ export default function DoeResultsPanel() {
             onChange={(e) => setDoeEngine(e.target.value as "auto" | "native" | "pydoe")}
             className="bg-ink border border-edge rounded px-2 py-1 text-xs"
             title="冷启动 DOE 引擎"
+            data-testid="doe-engine-select"
           >
             <option value="auto">DOE 引擎：自动</option>
             <option value="native">经典 native</option>
-            <option value="pydoe">增强 pydoe</option>
+            <option value="pydoe" disabled={!pydoeReady}>
+              {pydoeReady ? "增强 pydoe" : "增强 pydoe（未安装）"}
+            </option>
           </select>
+          {doeEngine === "pydoe" && !pydoeReady && (
+            <span className="text-[10px] text-amber-400" data-testid="doe-engine-warn">
+              当前选中 pydoe 但未安装
+            </span>
+          )}
           <select
             value={alEngine}
             onChange={(e) => setAlEngine(e.target.value as "auto" | "legacy" | "baybe")}
             className="bg-ink border border-edge rounded px-2 py-1 text-xs"
             title="主动学习引擎（AI 选点时生效）"
+            data-testid="al-engine-select"
           >
             <option value="auto">AL 引擎：自动</option>
             <option value="legacy">经典 EI</option>
-            <option value="baybe">baybe Campaign</option>
+            <option value="baybe" disabled={!baybeReady}>
+              {baybeReady ? "baybe Campaign" : "baybe Campaign（未安装）"}
+            </option>
           </select>
+          {alEngine === "baybe" && !baybeReady && (
+            <span className="text-[10px] text-amber-400" data-testid="al-engine-warn">
+              当前选中 baybe 但未安装
+            </span>
+          )}
           <select
             id="doe-design"
             defaultValue="ccd"

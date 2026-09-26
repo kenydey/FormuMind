@@ -2250,6 +2250,8 @@ export const api = {
       example_projects: { id: string; label: string; domain?: string }[];
       builtin_metrics?: string[];
       role_catalog?: string[];
+      /** Import probes for optional engines (baybe / pydoe / …). */
+      engines?: Record<string, { available: boolean; label: string }>;
     }>("/api/meta"),
 
   getDefaultLevers: (params: {
@@ -4145,6 +4147,8 @@ export interface DependencyInfo {
 export interface DependencyListResponse {
   dependencies: DependencyInfo[];
   online_core_missing: string[];
+  /** False in production by default — server refuses POST /dependencies/install. */
+  install_enabled?: boolean;
 }
 
 export interface DependencyInstallResult {

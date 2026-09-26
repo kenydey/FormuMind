@@ -35,6 +35,8 @@ _ALL_DESIGNS = _NATIVE_DESIGNS + [d for d in PYDOE_DESIGNS if d not in _NATIVE_D
 
 @router.get("/meta")
 def metadata() -> dict:
+    from ..services.engines.status import engines_status
+
     return {
         "domains": [d.value for d in ProductDomain],
         "substrates": [s.value for s in Substrate],
@@ -48,6 +50,8 @@ def metadata() -> dict:
         ],
         "builtin_metrics": BUILTIN_METRICS,
         "role_catalog": ROLE_CATALOG,
+        # Import probes — UI disables unavailable engines (auto always allowed).
+        "engines": engines_status(),
     }
 
 
