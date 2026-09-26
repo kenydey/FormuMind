@@ -162,8 +162,13 @@ def _ensure_source_document_columns(engine: Engine) -> None:
     _ensure_document_chunk_columns(engine)
 
 
+# Soft-column registry (P2 convergence with Alembic).
+# Each entry MUST have a matching revision id in ``alembic/versions``.
+# Soft ALTER remains for legacy DBs without ``alembic_version``; Alembic is
+# the source of truth for fresh/prod upgrades. See
+# ``tests/test_soft_columns_alembic_convergence.py``.
 _SOURCE_SOFT_COLUMNS: dict[str, tuple[str, str | None]] = {
-    # acquisition — PDF 配额统计路径
+    # acquisition — PDF 配额统计路径（pre-0029 soft; also in models / create_all）
     "acquisition": ("acquisition VARCHAR(16)", None),
     # alembic 0029 — KB soft-archive (W3)
     "archived": (
@@ -176,6 +181,41 @@ _SOURCE_SOFT_COLUMNS: dict[str, tuple[str, str | None]] = {
         "CREATE INDEX ix_source_documents_archived_at ON source_documents (archived_at)",
     ),
 }
+
+# table → {column → alembic revision that owns it (or "model/create_all")}
+SOFT_COLUMN_ALEMBIC_OWNERS: dict[str, dict[str, str]] = {
+    "source_documents": {
+        "acquisition": "model/create_all",
+        "archived": "0029_source_documents_archived",
+        "archived_at": "0030_source_documents_archived_at",
+    },
+    "materials": {
+        "archived": "0024_material_candidates",
+        "suppliers_json": "0027_materials_suppliers_json",
+    },
+    "suppliers": {
+        "country": "0031_supplier_manual_quote_fields",
+    },
+    "material_suppliers": {
+        "currency": "0031_supplier_manual_quote_fields",
+        "moq": "0031_supplier_manual_quote_fields",
+        "pack_size": "0031_supplier_manual_quote_fields",
+        "lead_time_days": "0031_supplier_manual_quote_fields",
+        "price_cny_per_kg": "0031_supplier_manual_quote_fields",
+        "price_source": "0031_supplier_manual_quote_fields",
+        "price_observed_at": "0031_supplier_manual_quote_fields",
+    },
+}
+
+
+def soft_column_inventory() -> dict[str, set[str]]:
+    """Return soft-ensured columns by table (for Alembic convergence tests)."""
+    return {
+        "source_documents": set(_SOURCE_SOFT_COLUMNS),
+        "materials": set(_MATERIAL_SOFT_COLUMNS),
+        "suppliers": set(_SUPPLIER_SOFT_COLUMNS),
+        "material_suppliers": set(_MATERIAL_SUPPLIER_SOFT_COLUMNS),
+    }
 
 
 def _ensure_source_soft_columns(engine: Engine) -> None:
