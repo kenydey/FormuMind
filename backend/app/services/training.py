@@ -71,28 +71,31 @@ class _RidgeModel:
         return self._rmse
 
 
+class _SklearnRFModel:
+    """Module-level so joblib/pickle can serialize trained surrogates (P1 #20)."""
+
+    backend = "sklearn-rf"
+
+    def __init__(self) -> None:
+        from sklearn.ensemble import RandomForestRegressor
+
+        self._m = RandomForestRegressor(n_estimators=200, random_state=0)
+
+    def fit(self, X, y):
+        self._m.fit(X, y)
+
+    def predict(self, X):
+        return self._m.predict(X)
+
+    def predict_std(self, X) -> float:
+        tree_preds = np.array([t.predict(X)[0] for t in self._m.estimators_])
+        return float(np.std(tree_preds))
+
+
 def _make_regressor():
     """Return (model, backend_name). Prefer sklearn, fall back to numpy ridge."""
     try:  # pragma: no cover - depends on optional extra
-        from sklearn.ensemble import RandomForestRegressor
-
-        class _SkModel:
-            backend = "sklearn-rf"
-
-            def __init__(self) -> None:
-                self._m = RandomForestRegressor(n_estimators=200, random_state=0)
-
-            def fit(self, X, y):
-                self._m.fit(X, y)
-
-            def predict(self, X):
-                return self._m.predict(X)
-
-            def predict_std(self, X) -> float:
-                tree_preds = np.array([t.predict(X)[0] for t in self._m.estimators_])
-                return float(np.std(tree_preds))
-
-        return _SkModel(), "sklearn-rf"
+        return _SklearnRFModel(), "sklearn-rf"
     except Exception:
         return _RidgeModel(), "numpy-ridge"
 

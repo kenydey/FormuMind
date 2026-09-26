@@ -58,19 +58,18 @@ def test_reload_uses_cached_artifact_without_retrain(artifacts_dir, tmp_path, mo
     reg1 = ModelRegistry(path=path)
     reg1.add(_records(12))
     info1 = next(i for i in reg1.info() if i.metric == "salt_spray_hours")
+    assert info1.version_id
     vid1 = info1.version_id
 
-    # Second registry: should load from disk (same data_hash).
     fit_calls = {"n": 0}
     real_make = __import__("app.services.training", fromlist=["_make_regressor"])._make_regressor
 
     def counting_make():
-        fit_calls["n"] += 1
         model, backend = real_make()
         orig_fit = model.fit
 
         def wrapped(X, y):
-            fit_calls["n"] += 10  # mark real fit
+            fit_calls["n"] += 1
             return orig_fit(X, y)
 
         model.fit = wrapped
@@ -81,9 +80,8 @@ def test_reload_uses_cached_artifact_without_retrain(artifacts_dir, tmp_path, mo
     info2 = next(i for i in reg2.info() if i.metric == "salt_spray_hours")
     assert info2.version_id == vid1
     assert info2.data_hash == info1.data_hash
-    # _make_regressor may be called for kfold elsewhere only on train; cache path
-    # should not call fit (+10). Allow probe calls without fit.
-    assert fit_calls["n"] < 10
+    # Cache hit must not call fit at all.
+    assert fit_calls["n"] == 0
 
 
 def test_rollback_switches_current(artifacts_dir, tmp_path):
