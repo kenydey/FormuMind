@@ -50,6 +50,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "chem": "化学引擎 · Chemistry",
     "data": "数据与训练 · Data",
     "infra": "基础设施 · Infra",
+    "ops": "可观测 · Ops",
 }
 
 FLAG_REGISTRY: tuple[EnvFlag, ...] = (
