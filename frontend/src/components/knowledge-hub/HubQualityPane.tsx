@@ -70,6 +70,14 @@ export default function HubQualityPane({ active }: { active: boolean }) {
             <Stat label="scan 压力" value={data.scan_pressure?.toFixed?.(3) ?? data.scan_pressure} warn={data.scan_near_cap} />
             <Stat label="向量模式" value={data.vector_mode} />
             <Stat
+              label="embedding"
+              value={
+                data.embedding_model
+                  ? String(data.embedding_model).split("/").pop()
+                  : "—"
+              }
+            />
+            <Stat
               label="hybrid p95"
               value={
                 data.hybrid_search_latency?.p95_ms == null
@@ -77,6 +85,17 @@ export default function HubQualityPane({ active }: { active: boolean }) {
                   : `${data.hybrid_search_latency.p95_ms}ms`
               }
               warn={Boolean(data.hybrid_search_latency?.ann_last)}
+            />
+            <Stat
+              label="ANN matrix"
+              value={
+                data.hybrid_search_latency?.ann_matrix_last
+                  ? `on·streak ${data.hybrid_search_latency?.ann_streak ?? 0}`
+                  : data.hybrid_search_latency?.ann_last
+                    ? "prefilter"
+                    : "off"
+              }
+              warn={Boolean(data.hybrid_search_latency?.ann_matrix_last)}
             />
             <Stat
               label="主题拒收%"

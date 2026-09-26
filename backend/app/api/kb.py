@@ -65,6 +65,11 @@ class KBStats(BaseModel):
     suppliers_json_dual_write: bool = True
     stale_chunks: int = 0
     products_pending_structure: int = 0
+    # Option A: configurable embedding upgrade path (FORMUMIND_EMBEDDING_MODEL).
+    embedding_model: str = ""
+    embedding_model_configured: str | None = None
+    embedding_catalog: list[dict[str, str]] = Field(default_factory=list)
+    reindex_hint: str = ""
 
 
 class ReindexResult(BaseModel):

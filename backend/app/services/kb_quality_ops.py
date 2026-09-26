@@ -152,7 +152,14 @@ def build_quality_ops(*, project_id: str | None = None) -> dict[str, Any]:
         hybrid_lat = hybrid_latency_stats()
     except Exception as exc:
         logger.debug("hybrid latency stats unavailable: %s", exc)
-        hybrid_lat = {"n": 0, "p50_ms": None, "p95_ms": None, "ann_last": False}
+        hybrid_lat = {
+            "n": 0,
+            "p50_ms": None,
+            "p95_ms": None,
+            "ann_last": False,
+            "ann_matrix_last": False,
+            "ann_streak": 0,
+        }
 
     return {
         "project_id": (project_id or "").strip() or None,
@@ -168,6 +175,9 @@ def build_quality_ops(*, project_id: str | None = None) -> dict[str, Any]:
         "scan_near_cap": bool(stats.get("scan_near_cap")),
         "vector_mode": vector_mode,
         "vector_hint": stats.get("vector_hint") or "",
+        "embedding_model": stats.get("embedding_model") or "",
+        "embedding_catalog": stats.get("embedding_catalog") or [],
+        "reindex_hint": stats.get("reindex_hint") or "",
         "topicality_would_reject_pct": topicality_pct,
         "fulltext_fail_pct": fulltext_pct,
         "quality_gate_drops": gate_drops,
@@ -186,6 +196,8 @@ def build_quality_ops(*, project_id: str | None = None) -> dict[str, Any]:
             "topicality 真闸默认开启（kb_relevance_shadow=False）；shadow stats 仅供回滚校准。",
             "retention purge 默认 dry-run，不会自动物理删除。",
             "hybrid_search_latency 来自持久化 KB hybrid（≠ 会话 rag.BM25FAISSStore）；"
-            "scan_near_cap 或 p95 超阈时启用 BM25 预筛 + 子集 cosine（不引 Qdrant）。",
+            "scan_near_cap / p95 超阈 / sticky 时启用 BM25 预筛；"
+            "高维子集走进程内 matmul（ann_matrix_last；不引 Qdrant）。",
+            "换 FORMUMIND_EMBEDDING_MODEL 后必须重建索引（vector_mode=stale）。",
         ],
     }

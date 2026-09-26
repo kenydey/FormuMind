@@ -93,6 +93,24 @@ function KnowledgeBaseCard({
         <span className="px-1.5 py-0.5 rounded border border-edge bg-ink/60 text-slate-400">
           切块 {stats.chunks}
         </span>
+        {stats.embedding_model && (
+          <span
+            className="px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/10 text-sky-300"
+            data-testid="kb-embedding-model"
+            title={
+              [
+                stats.reindex_hint || "换模型后必须重建索引",
+                stats.embedding_catalog?.length
+                  ? `可选：${stats.embedding_catalog.map((c) => c.id).join(", ")}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n")
+            }
+          >
+            模型 {stats.embedding_model.split("/").pop()}
+          </span>
+        )}
         {/* Keyed on vector_mode, not embedding_available. The library being
             importable says nothing about whether any chunk actually carries a
             vector — the model download can fail and every embedding silently
