@@ -738,6 +738,9 @@ class ModelInfo(BaseModel):
     data_hash: str | None = None  # hash of training rows for this (project, metric)
     feature_version: str | None = None  # features.feature_set_version()
     version_id: str | None = None  # artifact folder / filename stem
+    # P1 #19: absolute residual quantile from k-fold OOF (≈90% coverage half-width).
+    conformal_q90: float | None = None
+    uncertainty_calibrated: bool = False
 
 
 class TrainingReport(BaseModel):

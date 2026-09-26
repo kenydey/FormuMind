@@ -576,6 +576,9 @@ export interface ModelInfo {
   data_hash?: string | null;
   feature_version?: string | null;
   version_id?: string | null;
+  /** P1 #19: conformal absolute residual quantile (~90% half-width). */
+  conformal_q90?: number | null;
+  uncertainty_calibrated?: boolean;
 }
 
 export interface ModelVersionMeta {
