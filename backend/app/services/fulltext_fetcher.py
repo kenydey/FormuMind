@@ -213,7 +213,7 @@ def _resolve_oa_candidates(ev: Evidence, timeout: float) -> tuple[list[str], lis
         return [], []
     doi = m.group(1).rstrip(".,;)")
     settings = get_settings()
-    mailto = settings.openalex_mailto or "kenydey@gmail.com"
+    mailto = settings.openalex_mailto or "formumind@example.com"
     pdfs: list[str] = []
     landings: list[str] = []
     try:

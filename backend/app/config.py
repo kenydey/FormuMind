@@ -235,7 +235,10 @@ class Settings(BaseSettings):
     pdf_download_max: int = 3     # 每次研究最多下载几篇专利 PDF
 
     # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
-    openalex_mailto: str | None = "kenydey@gmail.com"  # OpenAlex 礼貌池标识
+    # Polite-pool contact for OpenAlex. Default is a non-personal placeholder —
+    # set FORMUMIND_OPENALEX_MAILTO to a real address you control (shared
+    # personal defaults caused 429s when many deployments reused one mailbox).
+    openalex_mailto: str | None = "formumind@example.com"
     # ── OpenAlex 多臂检索（2026-09-11）──────────────────────────────────────
     # OpenAlex 把空格分隔的词按 AND 连接并做词干化，而查询串由 LLM 扩展生成、
     # 长度每次不同 —— 实测同一主题的召回在 1 条到几千条之间抽奖（「铝合金碱性
@@ -266,7 +269,7 @@ class Settings(BaseSettings):
     # 而 OpenAlex 的文件由自己托管。缺 key 时该档自动跳过，行为与从前一致。
     openalex_api_key: str | None = None
     openalex_content_enabled: bool = True
-    unpaywall_mailto: str | None = "kenydey@gmail.com"  # Unpaywall 礼貌池 email
+    unpaywall_mailto: str | None = "formumind@example.com"  # Unpaywall polite-pool email
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
     uspto_api_key: str | None = None           # USPTO Open Data API key
