@@ -108,9 +108,15 @@ def test_evidence_domain_match_scoring():
 
 
 def test_ingest_skips_low_relevance(monkeypatch):
+    """Legacy rank-proxy gate only runs while ``kb_relevance_shadow`` is on.
+
+    Default is enforce (topicality); keep shadow here so this test still covers
+    the relevance-score skip path without fighting the topicality gate.
+    """
     monkeypatch.setenv("FORMUMIND_KB_INGEST_MIN_RELEVANCE", "0.45")
     get_settings.cache_clear()
     assert get_settings().kb_ingest_min_relevance == 0.45
+    monkeypatch.setattr(get_settings(), "kb_relevance_shadow", True, raising=False)
     lows = [
         Evidence(source="arXiv", identifier="a1", title="epoxy coating", snippet="corrosion", relevance=0.2),
         Evidence(source="arXiv", identifier="a2", title="epoxy coating resin", snippet="passivation", relevance=0.9),

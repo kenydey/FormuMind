@@ -38,6 +38,21 @@ describe("HubWikiPane dossier controls", () => {
     useStore.setState({ activeProjectId: "proj-hub-1" } as never);
     vi.mocked(api.listWikiPages).mockResolvedValue({ pages: [], total: 0 });
     vi.mocked(api.listWikiFlags).mockResolvedValue({ pages: [] });
+    vi.mocked(api.getEnvFlags).mockResolvedValue({
+      flags: [
+        {
+          attr: "wiki_embed_enabled",
+          env_key: "FORMUMIND_WIKI_EMBED_ENABLED",
+          label: "Wiki embed",
+          description: "",
+          category: "kb",
+          category_label: "kb",
+          hint: "",
+          value: false,
+          default: false,
+        },
+      ],
+    });
     vi.mocked(api.runWikiLint).mockResolvedValue({
       ok: true,
       scanned: 3,
