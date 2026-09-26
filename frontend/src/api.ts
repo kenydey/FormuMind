@@ -2250,6 +2250,8 @@ export const api = {
       example_projects: { id: string; label: string; domain?: string }[];
       builtin_metrics?: string[];
       role_catalog?: string[];
+      /** Import probes for optional engines (baybe / pydoe / …). */
+      engines?: Record<string, { available: boolean; label: string }>;
     }>("/api/meta"),
 
   getDefaultLevers: (params: {

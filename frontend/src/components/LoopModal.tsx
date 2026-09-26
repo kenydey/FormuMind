@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import SimPlaceholder from "./SimPlaceholder";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
+import { engineOk, useEngineAvailability } from "../hooks/useEngineAvailability";
 
 function RmseTrend({ history, metric }: { history: Record<string, number>[]; metric: string }) {
   const series = history.map((snap) => snap[metric]).filter((v) => v != null);
@@ -81,6 +82,8 @@ export default function LoopModal() {
     }))
   );
 
+  const engines = useEngineAvailability();
+  const baybeReady = engineOk(engines, "baybe");
   const loopConverged = Boolean(loopReport?.converged);
   const pendingAdopt =
     !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
@@ -217,21 +220,32 @@ export default function LoopModal() {
             onChange={(e) => setOptimizeEngine(e.target.value as "auto" | "baybe" | "legacy")}
             className="bg-ink border border-edge rounded px-2 py-1 text-[10px]"
             title="闭环寻优引擎"
+            data-testid="loop-optimize-engine"
           >
             <option value="auto">寻优：自动</option>
             <option value="legacy">寻优：经典链</option>
-            <option value="baybe">寻优：baybe</option>
+            <option value="baybe" disabled={!baybeReady}>
+              {baybeReady ? "寻优：baybe" : "寻优：baybe（未安装）"}
+            </option>
           </select>
           <select
             value={loopDoeEngine}
             onChange={(e) => setLoopDoeEngine(e.target.value as "auto" | "legacy" | "baybe")}
             className="bg-ink border border-edge rounded px-2 py-1 text-[10px]"
             title="下一批 DOE 引擎"
+            data-testid="loop-doe-engine"
           >
             <option value="auto">DOE：自动</option>
             <option value="legacy">DOE：经典 EI</option>
-            <option value="baybe">DOE：baybe</option>
+            <option value="baybe" disabled={!baybeReady}>
+              {baybeReady ? "DOE：baybe" : "DOE：baybe（未安装）"}
+            </option>
           </select>
+          {(optimizeEngine === "baybe" || loopDoeEngine === "baybe") && !baybeReady && (
+            <span className="text-[10px] text-amber-400" data-testid="loop-baybe-warn">
+              已选 baybe 但未安装
+            </span>
+          )}
           <button
             disabled={busy !== "idle" || loopConverged}
             onClick={runLoop}
