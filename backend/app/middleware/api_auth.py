@@ -83,8 +83,36 @@ def resolve_api_token(settings: Settings) -> str | None:
                 _TOKEN_PATH,
             )
             return existing
-        # Empty file from a failed write: fall through and retry next call.
-        return None
+        # Empty file from a failed/partial write: remove and regenerate once.
+        try:
+            _TOKEN_PATH.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.error("API auth: cannot clear empty token file %s: %s", _TOKEN_PATH, exc)
+            return None
+        logger.warning(
+            "API auth: empty token file at %s — regenerating",
+            _TOKEN_PATH,
+        )
+        try:
+            fd = os.open(
+                str(_TOKEN_PATH),
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            try:
+                os.write(fd, (token + "\n").encode("utf-8"))
+            finally:
+                os.close(fd)
+            os.chmod(_TOKEN_PATH, 0o600)
+            _DEV_TOKEN_CACHE = token
+            return token
+        except FileExistsError:
+            # Another worker won the recreate race — reuse whatever they wrote.
+            existing = _TOKEN_PATH.read_text(encoding="utf-8").strip()
+            if existing:
+                _DEV_TOKEN_CACHE = existing
+                return existing
+            return None
 
 
 def reset_dev_token_cache() -> None:
@@ -153,8 +181,14 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     pass
         token = resolve_api_token(settings)
+        # Auth is enabled (checked above). A missing token must never open the
+        # gate — empty-file / misconfig used to return None and silently pass.
         if token is None:
-            return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "API auth enabled but no token is configured"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         provided = _extract_token(request)
         if not provided or not secrets.compare_digest(provided, token):
             return JSONResponse(
