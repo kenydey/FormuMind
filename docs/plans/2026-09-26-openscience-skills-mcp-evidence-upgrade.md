@@ -1,6 +1,6 @@
 # FormuMind × 双 OpenScience：Skills / MCP / Evidence Synthesis 升级方案
 
-> 状态：**方案评审 · v2（整合 AIPOCH）**（2026-09-26）  
+> 状态：**已实现 · v2（整合 AIPOCH）**（2026-09-26）  
 > 依据：
 > 1. `synthetic-sciences/openscience` → `/tmp/openscience`（Bun/TS Research workbench）  
 > 2. `aipoch/open-science` → `/tmp/aipoch-open-science`（Electron 本地科研工作台，v0.33.3）  
