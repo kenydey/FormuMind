@@ -127,7 +127,7 @@ docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 Settings dialog (LLM / API keys / dependency manager) works without a platform
 bearer token. **Public deployment:** keep auth on (default), set
 `FORMUMIND_API_TOKEN`, and mirror it in the UI (Settings → API 访问令牌) or via
-`VITE_API_TOKEN` at frontend build time (see `docker-compose.yml`).
+the same value in Settings → API 访问令牌 (runtime; do not bake into the image).
 
 Host-network overlay (restricted Docker bridge): `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`
 

@@ -1206,8 +1206,9 @@ export function sanitizeEvidenceForApi(ev: Evidence): Evidence {
 const API_TOKEN_STORAGE_KEY = "formumind-api-token";
 
 export function getApiToken(): string | null {
-  const fromEnv = import.meta.env.VITE_API_TOKEN;
-  if (typeof fromEnv === "string" && fromEnv.trim()) return fromEnv.trim();
+  // Runtime-only: never bake FORMUMIND_API_TOKEN into the Vite bundle
+  // (build-arg VITE_API_TOKEN was removed — anyone who can download static
+  // assets could read a baked secret). Enter the token in Settings.
   try {
     const stored = localStorage.getItem(API_TOKEN_STORAGE_KEY);
     return stored?.trim() || null;

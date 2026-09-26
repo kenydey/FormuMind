@@ -67,8 +67,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        VITE_API_TOKEN: ${FORMUMIND_API_TOKEN:-}
+      # No VITE_API_TOKEN bake — enter token in Settings at runtime.
     networks:
       - formumind-eln
 

@@ -172,7 +172,7 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When
-    on, enter the same token at the top of Settings or bake `VITE_API_TOKEN` at build time.
+    on, enter the same token at the top of Settings (runtime localStorage; do not bake into the image).
   - **LLM / search API keys** (DeepSeek, Tavily, SerpAPI, …): configured under
     Settings → LLM or API keys, persisted in server `.env` — **not** the platform bearer.
 
@@ -1093,7 +1093,7 @@ docker compose --profile heavy up  # also start LAMMPS / HTPolyNet engines
 
 **Intranet / lab:** set `FORMUMIND_API_AUTH_ENABLED=false` in `.env` so Settings loads
 without a platform bearer token. **Public:** keep default `true`, set
-`FORMUMIND_API_TOKEN`, and mirror via `VITE_API_TOKEN` at frontend build (see
+`FORMUMIND_API_TOKEN`, and enter it in Settings → API access token (see
 `docker-compose.yml`) or Settings → API access token.
 
 Host-network overlay: `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`

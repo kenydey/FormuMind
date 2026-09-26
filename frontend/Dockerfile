@@ -1,7 +1,6 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-ARG VITE_API_TOKEN=
-ENV VITE_API_TOKEN=$VITE_API_TOKEN
+# Do not bake VITE_API_TOKEN — enter the platform bearer in Settings at runtime.
 
 # Install deps. Use `npm install` (not `npm ci`) because:
 #  - `npm ci` unpacks every optionalDependencies entry literally (aix, netbsd,
