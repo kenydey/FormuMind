@@ -435,6 +435,7 @@ export default function ResearchPanel() {
                     <div className="text-[10px] text-slate-500 uppercase tracking-wide">核验 · 断言</div>
                     <div className="flex flex-wrap gap-1">
                       {m.sourcedClaims!.map((c, j) => {
+                        if (!c) return null;
                         const cls =
                           c.status === "supported"
                             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
@@ -443,14 +444,15 @@ export default function ResearchPanel() {
                               : "border-rose-500/40 bg-rose-500/10 text-rose-300";
                         const label =
                           c.status === "supported" ? "有据" : c.status === "weak" ? "弱支撑" : "无据";
+                        const claimText = c.text ?? "";
                         return (
                           <span
                             key={j}
                             className={`text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
-                            title={c.text}
+                            title={claimText}
                           >
-                            {label} · {(c.confidence * 100).toFixed(0)}% · {c.text.slice(0, 48)}
-                            {c.text.length > 48 ? "…" : ""}
+                            {label} · {(Number(c.confidence) * 100).toFixed(0)}% · {claimText.slice(0, 48)}
+                            {claimText.length > 48 ? "…" : ""}
                           </span>
                         );
                       })}
@@ -507,7 +509,9 @@ export default function ResearchPanel() {
                           .find((x) => x.role === "user")?.content || ""
                       }
                       origin={
-                        /深度研究|deep.?research/i.test(m.content.slice(0, 80))
+                        /深度研究|deep.?research/i.test(
+                          String(m.content ?? "").slice(0, 80),
+                        )
                           ? "deep_research"
                           : "chat"
                       }

@@ -98,14 +98,24 @@ export default function FormulaExplainPanel({
           <div data-testid="explain-evidence">
             <div className="text-slate-500 mb-0.5">证据</div>
             <div className="flex flex-wrap gap-1">
-              {refs.slice(0, 8).map((r) => (
-                <span
-                  key={`${r.source_type}:${r.source_id}`}
-                  className="font-mono text-[9px] px-1 py-0.5 rounded bg-edge/50 text-slate-300"
-                >
-                  {r.source_type}:{r.source_id.slice(0, 24)}
-                </span>
-              ))}
+              {refs.slice(0, 8).map((r, i) => {
+                // Tolerate legacy shapes: plain string entries or missing keys
+                // persisted by older builds (localStorage store hydration).
+                const st =
+                  typeof r === "string"
+                    ? "ref"
+                    : String(r?.source_type ?? "ref");
+                const sidRaw =
+                  typeof r === "string" ? r : String(r?.source_id ?? "");
+                return (
+                  <span
+                    key={`${st}:${sidRaw || i}`}
+                    className="font-mono text-[9px] px-1 py-0.5 rounded bg-edge/50 text-slate-300"
+                  >
+                    {st}:{sidRaw.slice(0, 24)}
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}
