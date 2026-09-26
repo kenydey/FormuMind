@@ -1174,7 +1174,17 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
 
 
 
-@celery_app.task(bind=True, name="formumind.doe_cycle", soft_time_limit=1500, time_limit=1800, max_retries=3)
+@celery_app.task(
+    bind=True,
+    name="formumind.doe_cycle",
+    soft_time_limit=1500,
+    time_limit=1800,
+    max_retries=3,
+    autoretry_for=(TimeoutError, ConnectionError, OSError),
+    retry_backoff=True,
+    retry_backoff_max=120,
+    retry_jitter=True,
+)
 def run_doe_cycle_task(self, payload: dict) -> dict:
     """Execute one DOE cycle: generate experiments using Bayesian optimization.
     
@@ -1258,8 +1268,13 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
         tracker.finish(error=True)
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "doe_cycle", err, failed=True, message=str(exc))
-        
-        raise
+        # Contract errors: fail once. Transient/other: real retry (P1 #28).
+        if isinstance(exc, (ValueError, TypeError)):
+            raise
+        raise self.retry(
+            exc=exc,
+            countdown=min(60, 5 * (2 ** int(self.request.retries or 0))),
+        )
 
 @celery_app.task(bind=True, name="formumind.deps_install")
 def run_deps_install_task(self, payload: dict) -> dict:
