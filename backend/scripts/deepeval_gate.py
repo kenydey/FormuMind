@@ -3,10 +3,10 @@
 
 Default: skip (exit 0) unless FORMUMIND_DEEPEVAL=1. When enabled, requires
 ``deepeval`` installed and LLM credentials for the judge model. Failures exit
-
-Wave D: run with FORMUMIND_DEEPEVAL=1 on a **nightly** (non-blocking) job to
-collect faithfulness / answer-relevancy numbers before tightening CI.
 non-zero so CI can optionally enforce (job uses continue-on-error by default).
+
+Wave D: prefer FORMUMIND_DEEPEVAL=1 on a nightly non-blocking job to collect
+faithfulness / answer-relevancy before tightening PR CI.
 """
 from __future__ import annotations
 
