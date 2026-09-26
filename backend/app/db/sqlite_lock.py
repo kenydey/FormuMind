@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,13 @@ _LOCK_KEY = "formumind:sqlite_write"
 
 @contextlib.contextmanager
 def sqlite_write_lock(
-    redis_url: str | None, *, timeout: float = 300.0, blocking_timeout: float = 300.0
+    redis_url: str | None, *, timeout: float = 30.0, blocking_timeout: float = 30.0
 ) -> Iterator[None]:
-    """Hold a cross-process lock for the duration of a SQLite write transaction."""
+    """Hold a cross-process lock for the duration of a SQLite write transaction.
+
+    Reduced default timeout/blocking to 30s to fail fast and surface contention
+    rather than stalling callers for five minutes.
+    """
     if not redis_url:
         yield
         return
@@ -31,6 +36,7 @@ def sqlite_write_lock(
     # Acquire outside the yield so an exception raised by the caller's body is
     # never swallowed by the Redis error handler.
     lock = None
+    client = None
     try:
         import redis
 

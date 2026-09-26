@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import logging
+import os
+import shutil
+import tempfile
+import time
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -14,6 +19,8 @@ from ..services import colbert_store
 from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
 from ..services.parsing import ParserUnavailable
 from ..db.source_store import get_source_store
+from ..worker.tasks import dispatch_file_ingest
+from .tasks import accepted_response
 
 logger = logging.getLogger(__name__)
 
@@ -84,45 +91,86 @@ def _to_ingest_response(filename: str, outcome) -> IngestResponse:
     )
 
 
-@router.post("/ingest", response_model=IngestResponse)
+def _write_upload(content: bytes, filename: str, dest_dir: str) -> str:
+    """Persist one uploaded part to the temp dir the task will read from.
+
+    The name is flattened to a basename so a crafted filename cannot escape
+    the temp directory; the original name is still what the parser sniffs.
+    """
+    safe_name = os.path.basename(filename) or "upload"
+    path = os.path.join(dest_dir, safe_name)
+    with open(path, "wb") as fh:
+        fh.write(content)
+    return path
+
+
+@router.post("/ingest")
 async def ingest_document(file: UploadFile = File(...)):
+    """Queue a single-file ingest: 202 + task_id, results via SSE/poll.
+
+    Parsing (OCR on a scan) can run for minutes; doing it inside the request
+    is what let a proxy in front of uvicorn cut the connection and show the
+    user a 502 for work that had actually completed.
+    """
+    started = time.time()
     content = await file.read()
     filename = file.filename or "upload"
     _enforce_upload_size(content, filename)
-    # Parsing is synchronous and can run for seconds (docling) to minutes
-    # (cloud escalation). On the event loop that stalls every other request.
-    try:
-        outcome = await run_in_threadpool(ingest_file, filename, content)
-    except ParserUnavailable as exc:
-        raise HTTPException(status_code=422, detail=exc.hint) from exc
-    colbert_store.index_evidence(outcome.evidence)
-    return _to_ingest_response(filename, outcome)
+
+    upload_dir = tempfile.mkdtemp(prefix="formumind_upload_")
+    path = _write_upload(content, filename, upload_dir)
+    task_id = dispatch_file_ingest([{"name": filename, "path": path}], upload_dir=upload_dir)
+    if not task_id:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=503,
+            detail="后台任务队列不可用，无法提交解析任务（请检查 Redis / celery worker）",
+        )
+    logger.info(
+        "Ingest queued: %s (%d KiB) in %.0fms → task %s",
+        filename, len(content) // 1024, (time.time() - started) * 1000, task_id,
+    )
+    return accepted_response(task_id, "file_ingest")
 
 
-@router.post("/ingest/batch", response_model=BatchIngestResponse)
+@router.post("/ingest/batch")
 async def ingest_batch(files: list[UploadFile] = File(...)):
+    """Queue a multi-file ingest: 202 + task_id, results via SSE/poll."""
+    started = time.time()
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     if len(files) > 20:
         raise HTTPException(status_code=413, detail="最多同时上传20个文件")
-    pairs: list[tuple[str, bytes]] = []
-    for f in files:
-        content = await f.read()
-        name = f.filename or "upload"
-        _enforce_upload_size(content, name)
-        pairs.append((name, content))
+
+    upload_dir = tempfile.mkdtemp(prefix="formumind_upload_")
+    queued: list[dict] = []
+    seen: set[str] = set()
     try:
-        outcome = await run_in_threadpool(ingest_files_batch, pairs)
-    except ParserUnavailable as exc:
-        raise HTTPException(status_code=422, detail=exc.hint) from exc
-    colbert_store.index_evidence(outcome.evidence)
-    return BatchIngestResponse(
-        evidence=outcome.evidence,
-        total=len(outcome.evidence),
-        files_processed=len(files),
-        source_id=outcome.source_id,
-        extraction_status=outcome.extraction_status,
+        for f in files:
+            content = await f.read()
+            name = f.filename or "upload"
+            _enforce_upload_size(content, name)
+            digest = hashlib.sha256(content).hexdigest()
+            if digest in seen:  # byte-identical file picked twice in one dialog
+                continue
+            seen.add(digest)
+            queued.append({"name": name, "path": _write_upload(content, name, upload_dir)})
+    except HTTPException:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise
+
+    task_id = dispatch_file_ingest(queued, upload_dir=upload_dir)
+    if not task_id:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=503,
+            detail="后台任务队列不可用，无法提交解析任务（请检查 Redis / celery worker）",
+        )
+    logger.info(
+        "Ingest batch queued: %d file(s) in %.0fms → task %s",
+        len(queued), (time.time() - started) * 1000, task_id,
     )
+    return accepted_response(task_id, "file_ingest")
 
 
 @router.post("/ingest/url", response_model=IngestResponse)
