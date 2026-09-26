@@ -269,6 +269,30 @@ def list_models() -> list[ModelInfo]:
     return registry.info()
 
 
+@router.get("/models/versions")
+def list_model_versions(
+    project_id: str = Query(..., min_length=1),
+    metric: str = Query(..., min_length=1),
+) -> list[dict]:
+    """P1 #20: list disk-backed surrogate versions (newest first)."""
+    return registry.list_model_versions(project_id, metric)
+
+
+class ModelRollbackBody(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    metric: str = Field(..., min_length=1)
+    version_id: str = Field(..., min_length=1)
+
+
+@router.post("/models/rollback", response_model=ModelInfo)
+def rollback_model(body: ModelRollbackBody) -> ModelInfo:
+    """P1 #20: point current surrogate at a prior artifact and load it."""
+    info = registry.rollback_model(body.project_id, body.metric, body.version_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="model version not found")
+    return info
+
+
 class TrainingStatus(BaseModel):
     """B: 训练数据就绪度总览 — 让「寻优是预测器回声」透明化。"""
 

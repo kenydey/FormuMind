@@ -1,11 +1,21 @@
 import numpy as np
 import pytest
 
+from app.config import get_settings
 from app.domain import features
 from app.domain.schemas import ExperimentRecord, ProductDomain
 from app.pipeline import reconstruct
 from app.services import predictor
 from app.services.training import ModelRegistry, registry
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_artifacts(tmp_path, monkeypatch):
+    """Keep P1 model joblib artifacts out of the repo data/ tree."""
+    monkeypatch.setenv("FORMUMIND_MODEL_ARTIFACTS_DIR", str(tmp_path / "model_artifacts"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _coating_records(n=10, slope=80.0, intercept=200.0, seed=0):
