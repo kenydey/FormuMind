@@ -1055,6 +1055,38 @@ export const apiMethods = {
   getFormulationSkill: (id: string) =>
     get<FormulationSkill>(`/api/formulation-skills/${encodeURIComponent(id)}`),
 
+  listSkills: (kind?: string) =>
+    get<import("./types").SkillsCatalogResponse>(
+      kind ? `/api/skills?kind=${encodeURIComponent(kind)}` : "/api/skills",
+    ),
+
+  patchSkillsPrefs: (body: {
+    disabled_ids?: string[];
+    pinned_ids?: string[];
+    evidence_mode_default?: boolean;
+  }) =>
+    post<{ prefs: Record<string, unknown>; skills: import("./types").UnifiedSkill[] }>(
+      "/api/skills/prefs",
+      body,
+    ),
+
+  listConnectors: () => get<import("./types").ConnectorsResponse>("/api/connectors"),
+
+  toggleBuiltinConnector: (id: string, enabled: boolean) =>
+    post<{ builtin: import("./types").BuiltinConnector[] }>(
+      `/api/connectors/builtin/${encodeURIComponent(id)}/toggle`,
+      { enabled },
+    ),
+
+  replaceMcpServers: (servers: import("./types").McpServerConfig[]) =>
+    put<{ mcp: import("./types").McpServerConfig[] }>("/api/connectors/mcp", { servers }),
+
+  probeMcpServer: (id: string) =>
+    post<{ ok: boolean; tools?: string[]; error?: string | null }>(
+      `/api/connectors/mcp/${encodeURIComponent(id)}/probe`,
+      {},
+    ),
+
   getMeta: () =>
     get<{
       domains: string[];

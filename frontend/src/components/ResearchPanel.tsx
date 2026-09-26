@@ -15,6 +15,7 @@ import RelatedWikiList from "./RelatedWikiList";
 import SaveWikiDraftButton from "./SaveWikiDraftButton";
 import WikiChatModeSelector from "./WikiChatModeSelector";
 import ThinkingTimeline from "./ThinkingTimeline";
+import ChatComposerPlus from "./ChatComposerPlus";
 
 /**
  * Must stay in step with the stages `research_graph._emit` actually sends.
@@ -128,6 +129,13 @@ export default function ResearchPanel() {
     newChatSession,
     switchChatSession,
     deleteChatSession,
+    chatMode,
+    selectedChatSkills,
+    selectedConnectors,
+    setChatMode,
+    toggleSelectedChatSkill,
+    toggleSelectedConnector,
+    setChatDraftAppender,
   } = useStore(
     useShallow((s) => ({
       chatHistory: s.chatHistory,
@@ -149,6 +157,13 @@ export default function ResearchPanel() {
       newChatSession: s.newChatSession,
       switchChatSession: s.switchChatSession,
       deleteChatSession: s.deleteChatSession,
+      chatMode: s.chatMode,
+      selectedChatSkills: s.selectedChatSkills,
+      selectedConnectors: s.selectedConnectors,
+      setChatMode: s.setChatMode,
+      toggleSelectedChatSkill: s.toggleSelectedChatSkill,
+      toggleSelectedConnector: s.toggleSelectedConnector,
+      setChatDraftAppender: s.setChatDraftAppender,
     }))
   );
   const [draft, setDraft] = useState("");
@@ -157,6 +172,11 @@ export default function ResearchPanel() {
   const [sessionDetails, setSessionDetails] = useState<Record<string, SessionInfoResponse>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setChatDraftAppender((text: string) => setDraft((d) => d + text));
+    return () => setChatDraftAppender(null);
+  }, [setChatDraftAppender]);
 
   async function uploadStructure(file: File) {
     setStructBusy(true);
@@ -571,6 +591,41 @@ export default function ResearchPanel() {
             </button>
           </div>
         )}
+        {(chatMode === "evidence" ||
+          selectedChatSkills.length > 0 ||
+          selectedConnectors.length > 0) && (
+          <div className="flex flex-wrap gap-1 mb-1.5" data-testid="composer-selection-chips">
+            {chatMode === "evidence" && (
+              <button
+                type="button"
+                onClick={() => setChatMode("chat")}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-accent/40 text-accent"
+              >
+                文献综合 ×
+              </button>
+            )}
+            {selectedChatSkills.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => toggleSelectedChatSkill(id)}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-300"
+              >
+                skill:{id} ×
+              </button>
+            ))}
+            {selectedConnectors.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => toggleSelectedConnector(id)}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-300"
+              >
+                conn:{id} ×
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2 items-end">
           <input
             ref={fileInputRef}
@@ -582,6 +637,7 @@ export default function ResearchPanel() {
               if (f) uploadStructure(f);
             }}
           />
+          <ChatComposerPlus />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={structBusy || chatBusy}
@@ -606,7 +662,9 @@ export default function ResearchPanel() {
                 ? "请先加载资料…"
                 : selectedCount === 0
                   ? "请先勾选资料…"
-                  : "向资料提问…（Enter 发送，Shift+Enter 换行）"
+                  : chatMode === "evidence"
+                    ? "文献综合模式：先检索再写，结论须可追溯…"
+                    : "向资料提问…（Enter 发送，Shift+Enter 换行）"
             }
             className="flex-1 bg-ink border border-edge rounded px-2.5 py-1.5 text-sm resize-none focus:border-accent/50 outline-none disabled:opacity-50"
           />
