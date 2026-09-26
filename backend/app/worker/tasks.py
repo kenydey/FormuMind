@@ -792,6 +792,163 @@ def run_kb_ingest_task(self, payload: dict) -> dict:
     return _kb_ingest_impl(self.request.id, payload)
 
 
+# ── Async file ingest (upload → 202 → SSE) ───────────────────────────────────
+# Parsing a scanned PDF is minutes of OCR; holding the HTTP request open while
+# that runs is what let an intermediary in front of uvicorn cut the connection
+# (the client saw a 502 even though the backend finished the work). The route
+# now writes the upload to a temp dir, returns 202, and this task does the
+# parse + persist + index off the request path.
+
+@celery_app.task(bind=True, name="formumind.file_ingest")
+def run_file_ingest_task(self, payload: dict) -> dict:
+    return _file_ingest_impl(self.request.id, payload)
+
+
+def _file_ingest_impl(task_id: str, payload: dict) -> dict:
+    """Shared body for the Celery task and the eager-mode background thread."""
+    from ..services import colbert_store
+    from ..services.ingestion import ingest_files_batch
+
+    from pathlib import Path
+
+    files: list[tuple[str, bytes]] = []
+    for item in payload.get("files") or []:
+        path = Path(item["path"])
+        try:
+            files.append((item["name"], path.read_bytes()))
+        except OSError as exc:
+            logger.warning("file ingest: cannot read %s (%s)", path, exc)
+
+    # Content-hash dedup before parsing. The row's ``content_hash`` is taken
+    # over the *extracted text*, which is only known after a parse (minutes of
+    # OCR on a scan), so uploads are keyed by ``upload:sha256:<bytes>`` in
+    # ``origin_url`` instead — the same column already used to avoid
+    # re-downloading a fetched document. A retry then costs one hash, not a
+    # second OCR pass and a duplicate source_documents row.
+    duplicates: list[str] = []
+    origin_url_by_name: dict[str, str] = {}
+    try:
+        import hashlib
+
+        from ..db.source_store import get_source_store
+
+        store = get_source_store()
+        fresh: list[tuple[str, bytes]] = []
+        for name, content in files:
+            digest = hashlib.sha256(content).hexdigest()
+            key = f"upload:sha256:{digest}"
+            origin_url_by_name[name] = key
+            if store.find_by_origin_url(key):
+                logger.info("file ingest: duplicate upload skipped: %s (%s)", name, key)
+                duplicates.append(name)
+                continue
+            fresh.append((name, content))
+        files = fresh
+    except Exception as exc:  # dedup must never block an ingest
+        degrade_return(logger, exc, "file ingest dedup skipped", None)
+
+    if not files:
+        # Every file was already in the library: finishing cleanly with zero
+        # evidence is the honest answer, and the UI reports it as a skip
+        # instead of the old "入库失败" that a retry used to produce.
+        result = {
+            "evidence": [],
+            "total": 0,
+            "files_processed": 0,
+            "source_id": None,
+            "extraction_status": "skipped",
+            "duplicates": duplicates,
+        }
+        message = f"跳过 {len(duplicates)} 个重复文件（内容与库中已有资料一致）"
+        # Terminal snapshot first, result store second: the reverse order left a
+        # window where a concurrent GET saw a result in the progress meta while
+        # the disk snapshot was still `pending`, and it persisted that pending
+        # snapshot over the terminal one — after which SSE waited on pub/sub
+        # instead of replaying COMPLETED.
+        _persist_terminal(task_id, "file_ingest", result, message=message)
+        persist_result(task_id, result, failed=False)
+        return result
+
+    publish_progress(
+        task_id,
+        TaskProgressStatus.RUNNING,
+        stage="ingest",
+        message=f"解析 {len(files)} 个文件…",
+        progress=0.0,
+    )
+    try:
+        outcome = ingest_files_batch(files, origin_url_by_name=origin_url_by_name)
+        colbert_store.index_evidence(outcome.evidence)
+        result = {
+            "evidence": [e.model_dump() for e in outcome.evidence],
+            "total": len(outcome.evidence),
+            "files_processed": len(files),
+            "source_id": outcome.source_id,
+            "extraction_status": outcome.extraction_status,
+            "duplicates": duplicates,
+        }
+        message = (
+            f"文件入库完成：{len(outcome.evidence)} 条"
+            if outcome.evidence
+            else "文件入库完成（未提取到文本）"
+        )
+        if duplicates:
+            message += f"，跳过 {len(duplicates)} 个重复文件"
+        _persist_terminal(task_id, "file_ingest", result, message=message)
+        persist_result(task_id, result, failed=False)
+        return result
+    except Exception as exc:
+        logger.exception("file ingest task failed")
+        err = {"error": str(exc)}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "file_ingest", err, failed=True, message=str(exc))
+        raise
+    finally:
+        upload_dir = payload.get("dir")
+        if upload_dir:
+            try:
+                import shutil
+
+                shutil.rmtree(upload_dir, ignore_errors=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("file ingest: temp cleanup skipped: %s", exc)
+
+
+def dispatch_file_ingest(files: list[dict], *, upload_dir: str | None = None) -> str | None:
+    """Enqueue an upload ingest job; return the task id for SSE/status polling.
+
+    ``files`` is ``[{"name": ..., "path": ...}]`` — payloads stay on disk so a
+    multi-megabyte PDF is never serialised into the broker.
+    """
+    from ..config import get_settings
+
+    if not files:
+        return None
+    payload = {"files": files, "dir": upload_dir}
+    try:
+        if get_settings().celery_eager:
+            task_id = f"fileingest-{uuid.uuid4().hex[:16]}"
+            task_manager.register_celery_task(task_id, "file_ingest")
+            threading.Thread(
+                target=lambda: _safe_file_ingest(task_id, payload),
+                name="file-ingest",
+                daemon=True,
+            ).start()
+            return task_id
+        async_result = run_file_ingest_task.delay(payload)
+        task_manager.register_celery_task(async_result.id, "file_ingest")
+        return async_result.id
+    except Exception as exc:
+        return degrade_return(logger, exc, "file ingest dispatch failed", None)
+
+
+def _safe_file_ingest(task_id: str, payload: dict) -> None:
+    try:
+        _file_ingest_impl(task_id, payload)
+    except Exception as exc:  # already persisted as failed inside the impl
+        log_handled_exception(logger, exc, "file ingest background thread")
+
+
 def dispatch_kb_ingest(
     evidence_dicts: list[dict], *,
     project_id: str | None = None, query: str | None = None,

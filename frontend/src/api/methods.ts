@@ -9,6 +9,7 @@ import {
   put,
   readApiError,
 } from "./http";
+import { awaitTaskStream } from "./extras";
 import type {
   ActiveDoeResult,
   Attachment,
@@ -634,20 +635,32 @@ export const apiMethods = {
   notebooklmLogin: () =>
     post<NotebookLMLoginResult>("/api/notebooklm/login", {}),
 
+  // Uploads are queued (202) and parsed by a Celery worker: OCR on a scan runs
+  // for minutes and holding the request open is what made a proxy in front of
+  // uvicorn 502 a job that had actually succeeded. The SSE stream carries the
+  // final evidence back, so callers still get one resolved value.
   ingest: async (file: File): Promise<IngestResponse> => {
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch("/api/ingest", { method: "POST", headers: apiAuthHeaders(), body: fd });
-    if (!res.ok) throw new Error(`/api/ingest -> ${res.status}`);
-    return res.json();
+    if (res.status !== 202) throw await readApiError(res, "/api/ingest");
+    const accepted = (await res.json()) as { task_id: string };
+    const final = await awaitTaskStream(accepted.task_id, undefined, 0, undefined, 900_000);
+    return (final.data ?? {}) as unknown as IngestResponse;
   },
 
   ingestBatch: async (files: File[]): Promise<IngestResponse & { files_processed?: number }> => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f);
-    const res = await fetch("/api/ingest/batch", { method: "POST", headers: apiAuthHeaders(), body: fd });
-    if (!res.ok) throw new Error(`/api/ingest/batch -> ${res.status}`);
-    return res.json();
+    const res = await fetch("/api/ingest/batch", {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
+    if (res.status !== 202) throw await readApiError(res, "/api/ingest/batch");
+    const accepted = (await res.json()) as { task_id: string };
+    const final = await awaitTaskStream(accepted.task_id, undefined, 0, undefined, 900_000);
+    return (final.data ?? {}) as unknown as IngestResponse & { files_processed?: number };
   },
 
   ingestUrl: (url: string) =>

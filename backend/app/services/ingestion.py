@@ -174,14 +174,26 @@ def _register_guide_products(source_id: str | None, guide: SourceGuideSchema | N
         log_handled_exception(logger, exc, "guide product registration failed")
 
 
-def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> IngestOutcome:
-    """Parse an uploaded file and return ingest outcome."""
+def ingest_file(
+    filename: str,
+    content: bytes,
+    *,
+    persist: bool = True,
+    origin_url: str | None = None,
+) -> IngestOutcome:
+    """Parse an uploaded file and return ingest outcome.
+
+    ``origin_url`` is the provenance/dedup key stored on the row. Uploads pass
+    ``upload:sha256:<digest of the bytes>`` so a re-upload of the same file is
+    recognised *before* a second OCR pass — the content hash on the row is
+    computed over the extracted text, which is only known after parsing.
+    """
     from .parsing import parse_document
 
     ext = Path(filename).suffix.lower().lstrip(".")
 
     if ext in _IMAGE_EXTS:
-        return _ingest_image(filename, content, persist=persist)
+        return _ingest_image(filename, content, persist=persist, origin_url=origin_url)
 
     text = parse_document(content, ext).markdown
 
@@ -204,13 +216,25 @@ def ingest_file(filename: str, content: bytes, *, persist: bool = True) -> Inges
         )
         return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
 
-    return _ingest_parsed_text(text, filename=filename, source_kind="local", persist=persist)
+    return _ingest_parsed_text(
+        text,
+        filename=filename,
+        source_kind="local",
+        persist=persist,
+        origin_url=origin_url,
+    )
 
 
 _IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "webp", "gif", "bmp"})
 
 
-def _ingest_image(filename: str, content: bytes, *, persist: bool = True) -> IngestOutcome:
+def _ingest_image(
+    filename: str,
+    content: bytes,
+    *,
+    persist: bool = True,
+    origin_url: str | None = None,
+) -> IngestOutcome:
     """Image upload → VLM structured extraction → standard ingest pipeline."""
     from .vision_extract import extract_image, image_markdown
 
@@ -219,7 +243,11 @@ def _ingest_image(filename: str, content: bytes, *, persist: bool = True) -> Ing
     if extraction is not None and (extraction.markdown.strip() or extraction.molecules):
         text = image_markdown(extraction, filename)
         outcome = _ingest_parsed_text(
-            text, filename=filename, source_kind="image", persist=persist
+            text,
+            filename=filename,
+            source_kind="image",
+            persist=persist,
+            origin_url=origin_url,
         )
         if (
             persist
@@ -416,14 +444,24 @@ def ingest_text(text: str, title: str = "Pasted text", *, persist: bool = True) 
     return outcome
 
 
-def ingest_files_batch(files: list[tuple[str, bytes]], *, persist: bool = True) -> IngestOutcome:
+def ingest_files_batch(
+    files: list[tuple[str, bytes]],
+    *,
+    persist: bool = True,
+    origin_url_by_name: dict[str, str] | None = None,
+) -> IngestOutcome:
     from .parsing import ParserUnavailable
 
     all_evidence: list[Evidence] = []
     last_outcome: IngestOutcome | None = None
     for name, content in files:
         try:
-            outcome = ingest_file(name, content, persist=persist)
+            outcome = ingest_file(
+                name,
+                content,
+                persist=persist,
+                origin_url=(origin_url_by_name or {}).get(name),
+            )
         except ParserUnavailable as exc:
             # One unsupported file must not discard the other nineteen. Name
             # the file and the reason so it is obvious which one to fix.
