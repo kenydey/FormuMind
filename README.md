@@ -211,7 +211,7 @@ pip install -e ".[optimize]"     # optuna (optional CPU multi-objective; native 
 pip install -e ".[bo]"           # BoTorch GP optimizer (optional; requires torch CPU)
 pip install -e ".[baybe]"        # BayBE constrained Bayesian active learning (optional DOE)
 pip install -e ".[pydoe]"        # pyDOE classic designs (LHS/CCD/Box-Behnken/…)
-pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
+pip install -e ".[intel]"        # patent_client, paper-qa, pubchempy, arxiv, semanticscholar, duckduckgo-search (no chemcrow — de-ChemCrow 2026-09)
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
 pip install -e ".[embedding]"    # sentence-transformers semantic RAG
 pip install -e ".[colbert,crag]" # ColBERT index + LangGraph CRAG research pipeline
