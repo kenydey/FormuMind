@@ -215,6 +215,10 @@ class Settings(BaseSettings):
     # （MolWt/LogP/TPSA/HBD/HBA/芳环数）。需 rdkit；切换后已训模型需重训
     # （重启后 ModelRegistry 会从存储重训，故重启即可）。默认关闭保证兼容。
     chemtools_descriptor_features: bool = False
+    # P1 #20: persist trained surrogate artifacts under this directory so restarts
+    # can reload matching data_hash instead of always retraining from scratch.
+    model_persist_enabled: bool = True
+    model_artifacts_dir: str = "./data/models"
 
     # NotebookLM 作为检索 Source（notebooklm-py 直连库；浏览器会话认证）。
     # 需 `notebooklm` extra + 一次性 `notebooklm login` 生成会话文件。
@@ -308,6 +312,12 @@ class Settings(BaseSettings):
     search_rerank_enabled: bool = True
     search_rerank_top_k: int = 100       # 精排后至少保留条数（有足够结果时）
     search_rerank_llm_batch: int = 50    # 送入 LLM 评分的候选数（控制成本）
+    # P1 #15: cross-encoder rerank (sentence-transformers CrossEncoder).
+    # Default OFF — model download is heavy; enable when embedding extra is installed.
+    # Backend: auto prefers cross_encoder when enabled+available, else LLM.
+    cross_encoder_rerank_enabled: bool = False
+    cross_encoder_model: str = "BAAI/bge-reranker-base"
+    search_rerank_backend: str = "auto"  # auto | cross_encoder | llm
 
     # 深度研究：写报告的 LLM 能看到多少证据。原本硬编码 12 条 × 每条 300 字符
     # ≈ 3.6 KB，是「深度研究不够深」最大的单点原因——全文抓回来、切好块、入了

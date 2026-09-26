@@ -94,6 +94,13 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("search_rerank_enabled", "检索 LLM 精排",
             "对合并结果前若干条做 LLM 语义重排，其余按规则排序保留（总量上限 300）。",
             "retrieval", "需有效 LLM key"),
+    EnvFlag("cross_encoder_rerank_enabled", "Cross-Encoder 精排",
+            "用 BGE/Qwen 类 cross-encoder 替代/优先于 LLM 精排；失败显式标记未精排。"
+            "默认关（需 sentence-transformers + 模型下载）。",
+            "retrieval", "需 embedding extra"),
+    EnvFlag("model_persist_enabled", "代理模型落盘",
+            "训练后的 surrogate 写入 data/models/，重启时按 data_hash 复用，支持版本回滚。",
+            "data"),
     EnvFlag("kb_recommend_use_hybrid", "推荐融合探针 hybrid",
             "推荐/研究 KB 融合走与 Hub 检索探针同栈的 BM25+向量 hybrid（共享 kb_hybrid_alpha）。"
             "关闭则退回旧 search_chunks。",

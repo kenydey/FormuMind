@@ -51,8 +51,22 @@ def engines_status() -> dict[str, dict[str, object]]:
             "available": bool(_embedding_available()),
             "label": "句向量嵌入 (FAISS hybrid)",
         },
+        "cross_encoder": {
+            "available": bool(_cross_encoder_available()),
+            "label": "Cross-Encoder 精排 (bge-reranker)",
+        },
         "docling": {
             "available": _probe("docling"),
             "label": "Docling PDF 解析",
         },
     }
+
+
+def _cross_encoder_available() -> bool:
+    try:
+        from ..rag import cross_encoder_available
+
+        return bool(cross_encoder_available())
+    except Exception as exc:
+        log_handled_exception(logger, exc, "cross-encoder engine probe")
+        return False
