@@ -15,8 +15,9 @@ pip install -e ".[dev,llm]"
 
 # Lightweight online retrieval (arxiv/ddgs also ship in requirements.txt for Docker).
 pip install arxiv semanticscholar ddgs || true
-# chemcrow installed separately — versions <0.3.7 pin openai==0.27.8 (conflicts with openai>=1.30).
-pip install "chemcrow>=0.3.7" || echo "⚠️  chemcrow skipped — ChemCrow path uses offline fallback"
+# ChemCrow removed 2026-09 (de-ChemCrow). Do NOT pip install chemcrow here:
+# even recent wheels have pinned openai==0.27.8 and silently downgrade the
+# llm extra's openai>=1.30 (breaks openai.OpenAI / test_llm_tenacity).
 
 # Apply third-party library patches (e.g. pymupdf4llm RapidOCR attribute fix).
 # Idempotent — safe to run on every install.
