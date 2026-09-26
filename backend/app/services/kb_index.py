@@ -726,6 +726,42 @@ def search_chunks_hybrid(
         return degrade_return(logger, exc, "kb hybrid search failed", [])
 
 
+def retrieve_evidence(
+    query: str,
+    k: int = 6,
+    *,
+    project_id: str | None = None,
+    include_global: bool = False,
+    mode: str = "hybrid",
+    langs: list[str] | None = None,
+    alpha: float | None = None,
+) -> list[Evidence]:
+    """Single persistent-KB retrieval façade (Wave A — anti-Frankenstein).
+
+    Default ``mode=\"hybrid\"`` routes through ``hybrid_search_scored`` (same
+    stack as Hub probe / recommend). Use ``mode=\"legacy\"`` or pass ``langs``
+    for bilingual dual-model partitions that still need ``search_chunks``.
+    """
+    if not kb_enabled() or k <= 0 or not (query or "").strip():
+        return []
+    use_legacy = (mode or "hybrid").strip().lower() in ("legacy", "chunks", "search_chunks")
+    if langs is not None or use_legacy:
+        return search_chunks(
+            query,
+            k=k,
+            project_id=project_id,
+            include_global=include_global,
+            langs=langs,
+        )
+    return search_chunks_hybrid(
+        query,
+        k=k,
+        alpha=alpha,
+        project_id=project_id,
+        include_global=include_global,
+    )
+
+
 def aggregate_parameter_space() -> dict[str, dict]:
     """Fuse the LLM-extracted parameter spaces of all stored source guides.
 

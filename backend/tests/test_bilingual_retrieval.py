@@ -93,16 +93,19 @@ class _Ev:
 
 
 def _mk_search(monkeypatch, log: dict):
-    """mock kb_index.search_chunks: 记录 (query, langs), 返回按 langs 区分的假结果。"""
+    """mock kb_index.retrieve_evidence: 记录 (query, langs), 返回按 langs 区分的假结果。"""
     import app.services.kb_index as kb_index
 
-    def fake(query, k=6, *, project_id=None, langs=None):
+    def fake(query, k=6, *, project_id=None, mode="hybrid", langs=None, **kwargs):
         log["calls"].append((query, langs))
         base = "zh" if "如何" in query else "en"
         tag = (langs or [base])[0]
         return [_Ev(f"{tag}-{query[:4]}-{i}") for i in range(2)]
 
-    monkeypatch.setattr(kb_index, "search_chunks", fake)
+    monkeypatch.setattr(kb_index, "retrieve_evidence", fake)
+    monkeypatch.setattr(
+        "app.services.rag.embedding_space_unified", lambda: False
+    )
     monkeypatch.setattr(
         "app.services.query_translate.translate_query_zh_to_en",
         lambda q: "translated en query",

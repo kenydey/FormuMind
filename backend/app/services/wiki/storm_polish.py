@@ -15,6 +15,25 @@ ProgressCb = Callable[[str, str, float, dict | None], None]
 _CITE_RE = re.compile(r"\[\^(\d+)\]")
 
 
+def _parse_page(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _source_id_from_ident(ident: str) -> str:
+    """kb:src#c0 → src; plain ids unchanged."""
+    s = (ident or "").strip()
+    if s.startswith("kb:") and "#" in s:
+        return s[3:].split("#", 1)[0]
+    if s.startswith("kb:"):
+        return s[3:]
+    return s
+
+
 def evidence_to_anchors(evidence: list[dict[str, str]]) -> list[CitationAnchor]:
     """Map section retrieval hits → CitationAnchor (index 0 → [^1])."""
     anchors: list[CitationAnchor] = []
@@ -23,34 +42,68 @@ def evidence_to_anchors(evidence: list[dict[str, str]]) -> list[CitationAnchor]:
         if not sid:
             continue
         text = str(e.get("snippet") or e.get("title") or sid)[:200]
+        page = _parse_page(e.get("page"))
         anchors.append(
             CitationAnchor(
                 chunk_id=sid,
-                source_id=sid,
+                source_id=_source_id_from_ident(sid),
                 text=text,
+                page=page,
             )
         )
     return anchors
+
+
+def _page_for_source(source_id: str) -> int | None:
+    """Best-effort first chunk page_no for a source_id."""
+    try:
+        from ...db.chunk_store import get_chunk_store
+
+        sid = _source_id_from_ident(source_id)
+        rows = get_chunk_store().get_by_source(sid)
+        for row in rows or []:
+            page = getattr(row, "page_no", None)
+            if page is not None:
+                return int(page)
+    except Exception as exc:
+        logger.debug("chunk page lookup failed for %s: %s", source_id, exc)
+    return None
 
 
 def _anchors_from_source_ids(
     source_ids: list[str],
     pack: dict[str, Any],
 ) -> list[CitationAnchor]:
-    """Build anchors for the global citation pool (polish footnotes)."""
+    """Build anchors for the global citation pool (polish footnotes).
+
+    Wave A: attach page_no from document_chunks when available so footnotes
+    render as ``[^n]: Source: id, pp. N`` (aligned with chat context).
+    """
     lit_rows = (pack.get("literature") or {}).get("rows") or []
     title_by_id: dict[str, str] = {}
     snippet_by_id: dict[str, str] = {}
+    page_by_id: dict[str, int] = {}
     for r in lit_rows:
         if isinstance(r, dict) and r.get("source_id"):
             sid = str(r["source_id"])
             title_by_id[sid] = str(r.get("title") or sid)
             snippet_by_id[sid] = str(r.get("snippet") or "")[:200]
+            p = _parse_page(r.get("page") or r.get("page_no"))
+            if p is not None:
+                page_by_id[sid] = p
     anchors: list[CitationAnchor] = []
     for sid in source_ids:
         preview = snippet_by_id.get(sid) or title_by_id.get(sid) or sid
+        page = page_by_id.get(sid)
+        if page is None:
+            page = _page_for_source(sid)
         anchors.append(
-            CitationAnchor(chunk_id=sid, source_id=sid, text=preview[:200])
+            CitationAnchor(
+                chunk_id=sid,
+                source_id=_source_id_from_ident(sid),
+                text=preview[:200],
+                page=page,
+            )
         )
     return anchors
 
@@ -197,6 +250,78 @@ def _rules_appendix(warnings: list[str]) -> str:
     return "\n".join(lines)
 
 
+_NUMERIC_TOKEN = re.compile(r"(?<![A-Za-z])(\d+(?:\.\d+)?)(?![A-Za-z])")
+
+
+def collect_numeric_fidelity_warnings(markdown: str, pack: dict[str, Any]) -> list[str]:
+    """Wave C: flag body numbers that disagree with pack requirement/formula tables.
+
+    Soft only — appends warnings; never rewrites Claims / DOE bounds.
+    """
+    warnings: list[str] = []
+    pack_vals: list[tuple[str, float]] = []
+    for r in ((pack.get("requirements") or {}).get("rows") or []):
+        if not isinstance(r, dict):
+            continue
+        raw = r.get("value")
+        try:
+            pack_vals.append((str(r.get("metric") or "metric"), float(raw)))
+        except (TypeError, ValueError):
+            continue
+    for r in ((pack.get("formula") or {}).get("rows") or []):
+        if not isinstance(r, dict):
+            continue
+        raw = r.get("weight_pct")
+        try:
+            pack_vals.append((str(r.get("name") or "wt"), float(raw)))
+        except (TypeError, ValueError):
+            continue
+    if not pack_vals:
+        return warnings
+    # Strip appendix tables from comparison (body only).
+    body = (markdown or "").split("## 附录")[0]
+    body_nums = []
+    for m in _NUMERIC_TOKEN.finditer(body):
+        try:
+            body_nums.append(float(m.group(1)))
+        except ValueError:
+            continue
+    if not body_nums:
+        return warnings
+    for label, expected in pack_vals[:20]:
+        if expected <= 0:
+            continue
+        # Prefer exact or near match (±5%); else if a close but wrong neighbor exists, warn.
+        if any(abs(n - expected) / max(abs(expected), 1e-9) <= 0.05 for n in body_nums):
+            continue
+        near = [
+            n
+            for n in body_nums
+            if 0.05 < abs(n - expected) / max(abs(expected), 1e-9) <= 0.25
+        ]
+        if near:
+            warnings.append(
+                f"数值存疑：正文出现接近但非卷宗值的数字（{label} 卷宗={expected:g}，正文≈{near[0]:g}）"
+            )
+    return warnings[:12]
+
+
+def _numeric_appendix(warnings: list[str]) -> str:
+    lines = [
+        "## 附录：数值保真检查（只读）",
+        "",
+        "> 将正文数字与卷宗 L1 表交叉比对；不一致仅标记，不自动改写。",
+        "",
+    ]
+    if not warnings:
+        lines.append("- （无数值存疑）")
+    else:
+        for w in warnings:
+            lines.append(f"- {w}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _pack_appendix(pack: dict[str, Any]) -> str:
     lines = [
         "## 附录：卷宗确定性切片（L1）",
@@ -323,5 +448,8 @@ def stitch_and_polish(
 
     soft_warnings = collect_soft_rule_warnings(pack)
     parts.append(_rules_appendix(soft_warnings))
+    body_so_far = "\n".join(parts)
+    numeric_warnings = collect_numeric_fidelity_warnings(body_so_far, pack)
+    parts.append(_numeric_appendix(numeric_warnings))
     parts.append(_pack_appendix(pack))
     return "\n".join(parts).strip() + "\n", cite_pool

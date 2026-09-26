@@ -31,30 +31,66 @@ def _require_storm_enabled() -> None:
 
 
 def _pack_to_evidence(pack: dict[str, Any], cite_ids: list[str]) -> list:
-    """Map dossier pack / citation ids → Evidence for claim_checker (fail-open)."""
+    """Map dossier pack / citation ids → Evidence for claim_checker (fail-open).
+
+    Wave A: prefer real relevance / raw snippet / page over hardcoded 0.5.
+    """
     from ...domain.schemas import Evidence
 
     sources = pack.get("sources") or pack.get("evidence") or []
     by_id: dict[str, Any] = {}
     if isinstance(sources, list):
-        for row in sources:
+        for i, row in enumerate(sources):
             if not isinstance(row, dict):
                 continue
             sid = str(row.get("source_id") or row.get("id") or "").strip()
             if sid:
                 by_id[sid] = row
+                by_id.setdefault(f"_ord_{i}", row)
+    # Literature rows often carry better snippets than dossier summary.
+    for r in ((pack.get("literature") or {}).get("rows") or []):
+        if isinstance(r, dict) and r.get("source_id"):
+            sid = str(r["source_id"])
+            by_id.setdefault(sid, r)
+            prev = by_id.get(sid) or {}
+            if not prev.get("snippet") and r.get("snippet"):
+                by_id[sid] = {**prev, **{k: v for k, v in r.items() if v}}
+
     out: list[Evidence] = []
-    for sid in cite_ids or []:
+    for rank, sid in enumerate(cite_ids or []):
         row = by_id.get(str(sid)) or {}
         title = str(row.get("title") or sid)[:200]
-        snippet = str(row.get("snippet") or row.get("summary") or title)[:800]
+        # Prefer raw excerpt fields over compressed summary.
+        snippet = str(
+            row.get("snippet")
+            or row.get("text")
+            or row.get("excerpt")
+            or row.get("summary")
+            or title
+        )[:1200]
+        rel_raw = row.get("relevance")
+        if rel_raw is None:
+            rel_raw = row.get("score")
+        try:
+            relevance = float(rel_raw) if rel_raw is not None else max(0.2, 0.9 - 0.05 * rank)
+        except (TypeError, ValueError):
+            relevance = max(0.2, 0.9 - 0.05 * rank)
+        relevance = max(0.05, min(1.0, relevance))
+        page = row.get("page")
+        if page is None:
+            page = row.get("page_no")
+        try:
+            page_i = int(page) if page is not None else None
+        except (TypeError, ValueError):
+            page_i = None
         out.append(
             Evidence(
                 source=str(row.get("source_kind") or row.get("source") or "kb"),
                 identifier=str(sid),
                 title=title,
                 snippet=snippet,
-                relevance=0.5,
+                relevance=relevance,
+                page=page_i,
             )
         )
     if not out:
@@ -91,8 +127,94 @@ def _storm_claim_check(
         "claim_check_passed": result.claim_check_passed,
         "needs_regenerate": result.needs_regenerate,
         "claim_count": len(result.claims),
+        "failed_claim_texts": [
+            v.text for v in result.claims if v.verdict.value != "supported"
+        ][:8],
         "markdown": updated,
     }
+
+
+def _maybe_regenerate_failed_sections(
+    *,
+    outline: Any,
+    drafts: dict[str, Any],
+    pack: dict[str, Any],
+    project_id: str,
+    use_llm: bool,
+    claim_meta: dict[str, Any],
+    markdown: str,
+    cite_ids: list[str],
+    progress_cb: ProgressCb | None = None,
+) -> tuple[str, list[str], dict[str, Any]]:
+    """Wave B: one-shot section regenerate when needs_regenerate (flag-gated)."""
+    from ...config import get_settings
+
+    settings = get_settings()
+    if not bool(getattr(settings, "wiki_storm_claim_regenerate", False)):
+        return markdown, cite_ids, claim_meta
+    if not claim_meta.get("needs_regenerate"):
+        return markdown, cite_ids, claim_meta
+
+    failed_texts = claim_meta.get("failed_claim_texts") or []
+    if not failed_texts or not drafts:
+        return markdown, cite_ids, claim_meta
+
+    # Heuristic: regenerate the first section whose draft mentions a failed claim.
+    target_id = None
+    for sid, draft in drafts.items():
+        body = getattr(draft, "content_markdown", "") or ""
+        if any(t[:40] in body for t in failed_texts if t):
+            target_id = sid
+            break
+    if not target_id:
+        # Fall back to last content section (often risks / open questions).
+        secs = getattr(outline, "sections", None) or []
+        target_id = secs[-1].section_id if secs else None
+    if not target_id or target_id not in drafts:
+        claim_meta = {**claim_meta, "regenerate": {"applied": False, "reason": "no_target"}}
+        return markdown, cite_ids, claim_meta
+
+    try:
+        from .storm_draft import draft_section
+        from .storm_polish import stitch_and_polish
+
+        spec = next(s for s in outline.sections if s.section_id == target_id)
+        if progress_cb:
+            progress_cb("claim_regenerate", f"定向再生章节 {target_id}…", 0.88, None)
+        new_draft = draft_section(
+            spec,
+            outline,
+            pack,
+            project_id=project_id,
+            prev_summary="",
+            use_llm=use_llm,
+        )
+        # Soft prepend evidence-insufficiency note — draft_not_claims only.
+        note = (
+            "\n\n> 论断核验：本章已按证据不足提示改写一轮（`wiki_storm_claim_regenerate`）；"
+            "仍不进 Claims / DOE。\n"
+        )
+        new_draft.content_markdown = (new_draft.content_markdown or "") + note
+        drafts[target_id] = new_draft
+        markdown2, cite_ids2 = stitch_and_polish(outline, drafts, pack, progress_cb=None)
+        claim_meta2 = _storm_claim_check(outline.topic, markdown2, pack, cite_ids2)
+        if claim_meta2.get("markdown"):
+            markdown2 = str(claim_meta2.pop("markdown"))
+        claim_meta2["regenerate"] = {
+            "applied": True,
+            "section_id": target_id,
+            "rounds": 1,
+        }
+        # Never loop: even if still needs_regenerate, stop after one round.
+        claim_meta2["needs_regenerate"] = False
+        return markdown2, cite_ids2, claim_meta2
+    except Exception as exc:
+        logger.warning("STORM claim regenerate soft-failed: %s", exc)
+        claim_meta = {
+            **claim_meta,
+            "regenerate": {"applied": False, "error": str(exc)},
+        }
+        return markdown, cite_ids, claim_meta
 
 
 def run_storm_report(
@@ -180,6 +302,17 @@ def run_storm_report(
             claim_meta = _storm_claim_check(outline.topic, markdown, pack, cite_ids)
             if claim_meta.get("markdown"):
                 markdown = str(claim_meta.pop("markdown"))
+            markdown, cite_ids, claim_meta = _maybe_regenerate_failed_sections(
+                outline=outline,
+                drafts=drafts,
+                pack=pack,
+                project_id=pid,
+                use_llm=use_llm,
+                claim_meta=claim_meta,
+                markdown=markdown,
+                cite_ids=cite_ids,
+                progress_cb=progress_cb,
+            )
         except Exception as exc:
             logger.warning("STORM claim_check soft-failed (fail-open): %s", exc)
             claim_meta = {"applied": False, "error": str(exc)}

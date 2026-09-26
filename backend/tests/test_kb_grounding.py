@@ -47,8 +47,15 @@ def _kb_hit(ident: str = "kb:s1#c0") -> Evidence:
 def test_retrieve_node_merges_kb_chunks(monkeypatch, stores):
     from app.pipeline.research_graph import retrieve_node
 
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
+    get_settings.cache_clear()
+    hit = _kb_hit()
     monkeypatch.setattr(
-        "app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: [_kb_hit()]
+        "app.services.kb_index.search_chunks_hybrid",
+        lambda q, k=4, **kwargs: [hit],
+    )
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: [hit]
     )
     state = retrieve_node({"topic": "环氧防腐底漆", "query": "环氧防腐底漆"})
     ids = [e.identifier for e in state["evidence"]]
@@ -58,8 +65,16 @@ def test_retrieve_node_merges_kb_chunks(monkeypatch, stores):
 def test_retrieve_node_dedupes_kb_against_colbert(monkeypatch, stores):
     from app.pipeline.research_graph import retrieve_node
 
+    monkeypatch.setenv("FORMUMIND_KG_ENABLED", "false")
+    get_settings.cache_clear()
     hit = _kb_hit()
-    monkeypatch.setattr("app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: [hit])
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks_hybrid",
+        lambda q, k=4, **kwargs: [hit],
+    )
+    monkeypatch.setattr(
+        "app.services.kb_index.search_chunks", lambda q, k=4, project_id=None: [hit]
+    )
     state = retrieve_node(
         {"topic": "环氧防腐底漆", "query": "环氧防腐底漆", "pre_index": [hit]}
     )

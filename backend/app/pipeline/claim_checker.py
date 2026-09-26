@@ -50,8 +50,9 @@ def _token_set(text: str) -> set[str]:
     return {t.lower() for t in _TOKEN_RE.findall(text) if len(t) > 1}
 
 
-def extract_claims(text: str) -> list[str]:
+def extract_claims(text: str, *, max_claims: int | None = None) -> list[str]:
     """Pull checkable factual statements from markdown report text."""
+    limit = int(max_claims if max_claims is not None else _MAX_CLAIMS)
     claims: list[str] = []
     for line in text.splitlines():
         raw = line.strip()
@@ -69,7 +70,38 @@ def extract_claims(text: str) -> list[str]:
             p = para.strip()
             if len(p) >= _MIN_CLAIM_LEN and not p.startswith("#"):
                 claims.append(p[:600])
-    return claims[:_MAX_CLAIMS]
+    return claims[: max(1, limit)]
+
+
+_SECTION_HEADING_RE = re.compile(r"^#{1,3}\s+", re.MULTILINE)
+
+
+def extract_claims_by_section(
+    text: str,
+    *,
+    per_section: int = 8,
+    max_total: int | None = None,
+) -> list[str]:
+    """Wave B: sample claims per ``##`` section so long reports are not head-biased."""
+    body = text or ""
+    parts = _SECTION_HEADING_RE.split(body)
+    # split drops headings; first part may be preamble
+    sections = [p for p in parts if (p or "").strip()]
+    if not sections:
+        return extract_claims(body, max_claims=max_total)
+    out: list[str] = []
+    seen: set[str] = set()
+    cap_total = int(max_total if max_total is not None else _MAX_CLAIMS * 2)
+    for sec in sections:
+        for c in extract_claims(sec, max_claims=per_section):
+            key = c[:80]
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+            if len(out) >= cap_total:
+                return out
+    return out
 
 
 def _source_tags_for_indices(evidence: list[Evidence], indices: list[int]) -> list[str]:
@@ -194,7 +226,8 @@ def check_claims(
 ) -> ClaimCheckResult:
     """Verify report claims against grounded evidence (LLM with offline fallback)."""
     settings = settings or get_settings()
-    claims = extract_claims(report_markdown)
+    # Wave B: per-section sampling so long STORM reports are not head-biased.
+    claims = extract_claims_by_section(report_markdown, per_section=8, max_total=_MAX_CLAIMS)
     if not claims:
         return ClaimCheckResult(engine="offline")
 

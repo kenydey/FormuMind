@@ -1979,17 +1979,42 @@ def answer_question(
 
     settings = get_settings()
 
-    # 召回（粗排）→ LLM 精排（无 GPU 时 LLM rerank 替代 ColBERT 语义排序）。
+    # 召回（粗排）→ 可选 cross-encoder（默认关）→ 截断 top_k。
+    # 2026-09-04: chat 主路径不做 LLM 二次精排（deepseek 慢窗口 30–76s/问）。
+    # Wave B: optional local CE behind chat_cross_encoder_enabled + timeout.
     store = build_store()
     store.ingest(sources)
     candidates_n = min(settings.chat_rerank_candidates, max(1, len(sources)))
     recalled = store.query(question, k=candidates_n) or sources[:candidates_n]
 
-    # 2026-09-04: chat 主路径不做 LLM 二次精排。kb_augment(图谱/KB)与
-    # BM25 已两级排序, llm_rerank 再对 50 条候选打分在 deepseek 慢窗口
-    # 实测多花 30-76s/问(耗时探针 answer=93.5s 的大头), 收益边际。
-    # 深度研究/文献检索等长任务路径的 llm_rerank 不受影响。
     relevant = recalled[: settings.chat_rerank_top_k]
+    if bool(getattr(settings, "chat_cross_encoder_enabled", False)) and recalled:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+        timeout_s = float(getattr(settings, "cross_encoder_timeout_s", 2.5) or 2.5)
+        try:
+            from .rag import rerank_scored
+
+            max_cands = max(
+                1,
+                int(getattr(settings, "cross_encoder_max_candidates", 30) or 30),
+            )
+            pool = recalled[:max_cands]
+
+            def _ce():
+                return rerank_scored(
+                    question, pool, k=settings.chat_rerank_top_k, prefer="cross_encoder"
+                )
+
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_ce)
+                items, meta = fut.result(timeout=timeout_s)
+            if meta.get("applied") and items:
+                relevant = [it.evidence for it in items]
+        except FuturesTimeout:
+            log.debug("chat CE timed out after %.2fs — keeping BM25 order", timeout_s)
+        except Exception as exc:
+            log.debug("chat CE skipped: %s", exc)
 
     # Tier 2: paper-qa semantic synthesis with citations.
     if _paperqa_available() and sources:
