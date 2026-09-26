@@ -16,7 +16,7 @@ import re
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
-from .errors import degrade_return
+from .errors import degrade_return, log_handled_exception
 
 logger = logging.getLogger(__name__)
 
@@ -193,11 +193,17 @@ def ingest_full_document(source_id: str, text: str, metadata: dict | None = None
         return degrade_return(logger, exc, "ingest_full_document failed", 0)
 
 
-def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
+def index_source(
+    source_id: str, full_text: str, *, embed: bool = True, fail_soft: bool = True
+) -> int:
     """(Re)chunk one source document into persistent KB rows.
 
     Returns the number of chunks written; 0 when disabled or text is empty.
-    Never raises — KB indexing must not break ingestion.
+
+    By default (``fail_soft=True``) never raises — KB indexing must not break
+    callers that treat the SourceDocument as the primary artifact. Pass
+    ``fail_soft=False`` from ingest paths that create the SourceDocument in the
+    same request so a hard failure can roll back the orphan row.
     """
     if not kb_enabled() or not (full_text or "").strip():
         return 0
@@ -337,6 +343,9 @@ def index_source(source_id: str, full_text: str, *, embed: bool = True) -> int:
                 degrade_return(logger, dossier_exc, "dossier notify on ingest failed", None)
         return n
     except Exception as exc:
+        if not fail_soft:
+            log_handled_exception(logger, exc, "kb index_source failed (hard)")
+            raise
         return degrade_return(logger, exc, "kb index_source failed", 0)
 
 
