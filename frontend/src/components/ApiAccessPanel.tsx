@@ -37,7 +37,7 @@ export default function ApiAccessPanel({
       </div>
       <p className="text-[11px] text-amber-100/80 leading-relaxed">
         服务器已启用 API 鉴权。请在下方输入与后端{" "}
-        <code className="text-amber-200/90">FORMUMIND_API_TOKEN</code> 相同的令牌，否则设置、依赖列表等接口无法加载。
+        <code className="text-amber-200/90">FORMUMIND_API_TOKEN</code> 相同的令牌（保存在本机浏览器，不会打进前端构建产物），否则设置、依赖列表等接口无法加载。
         {multiUser && <span className="ml-1 text-amber-200/70">多用户模式已启用（FORMUMIND_MULTI_USER=true），令牌按 owner 隔离。</span>}
       </p>
       <div className="flex gap-2">

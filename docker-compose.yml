@@ -199,9 +199,8 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        # Pre-bake bearer token when API auth is on (optional; can also enter in Settings).
-        VITE_API_TOKEN: ${FORMUMIND_API_TOKEN:-}
+      # No VITE_API_TOKEN build arg — bake would embed the bearer in static JS.
+      # Enter FORMUMIND_API_TOKEN via Settings → API 访问令牌 at runtime.
     restart: unless-stopped
     ports:
       - "5173:80"

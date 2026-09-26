@@ -27,8 +27,8 @@ def auth_status(request: Request = None) -> dict:  # type: ignore[no-untyped-def
         "multi_user": os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() in ("1", "true", "yes"),
         "owner": owner,
         "hint": (
-            "Configure FORMUMIND_API_TOKEN on the server and enter the same token in Settings, "
-            "or set VITE_API_TOKEN when building the frontend."
+            "Configure FORMUMIND_API_TOKEN on the server and enter the same token "
+            "in Settings → API 访问令牌 (runtime only; do not bake into the frontend build)."
             if settings.api_auth_enabled
             else ""
         ),
