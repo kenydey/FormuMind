@@ -326,19 +326,18 @@ class BaybeCampaignEngine:
         except Exception as exc:  # gate must never break recommendation
             log.debug("Physical-constraint gate skipped ({}); allowing", exc)
 
-        # R2 (2026-09-04): 互斥为成分语义级(骨架成分, 非因子值), 而数值
-        # 搜索空间全连续(NumericalContinuousParameter)——BayBE constraints
-        # 数学层表达不了跨因子化学互斥, DiscreteExclude 不适用。把"被 gate
-        # 拦截的候选占比"写入 notes 成为可度量项: 持续高位(>30%)才值得
-        # 研究替代采样(如 genome 空间的候选池裁剪), 不假装能前移。
+        # R2/P2: 数值空间全连续 → DiscreteExclude 仍不适用, gate 占比可度量。
+        # genome 路径的 categorical mat_* 已注入 DiscreteExcludeConstraint
+        # (acid/metal/carbonate/alkali 高频互斥); 此处度量覆盖连续空间残差。
         n_total = len(plan.runs)
         n_gated = sum(1 for r in plan.runs if getattr(r, "infeasible", False))
         if n_total and n_gated:
             prev = (getattr(plan, "notes", "") or "").strip()
             note = (
                 f"gate 拦截 {n_gated}/{n_total} "
-                f"({n_gated / n_total * 100:.0f}%)——互斥为成分语义级, "
-                "连续因子空间 BayBE constraints 无法数学层表达(见 run.infeasible_reason)"
+                f"({n_gated / n_total * 100:.0f}%)——连续因子空间残差互斥仍靠 "
+                "post-hoc gate; genome categorical 已 DiscreteExclude 前移"
+                "(见 run.infeasible_reason)"
             )
             plan.notes = f"{prev}; {note}" if prev else note
 

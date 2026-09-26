@@ -105,18 +105,26 @@ def build_genome_searchspace(req: Requirement, genome, candidate_pools: dict[str
     treating them as unrelated labels, and is therefore what makes a predicted
     swap meaningful. Only a third of the seed catalog carries SMILES today, so
     categorical has to remain the fallback.
+
+    P2: high-frequency chemical exclusions (reactive metal × acid, carbonate ×
+    acid, strong alkali × acid) are injected as ``DiscreteExcludeConstraint``
+    across categorical ``mat_*`` slots so sampling budget is not spent on
+    combinations the post-hoc gate would mark infeasible. Continuous-only
+    numeric spaces still cannot express these and keep the post-hoc gate.
     """
     from baybe.constraints import ContinuousLinearConstraint
     from baybe.parameters import NumericalContinuousParameter
     from baybe.searchspace import SearchSpace
 
-    from ...domain import knowledge
+    from ....domain import knowledge
 
     parameters: list = []
     wt_names: list[str] = []
+    mat_params: list[tuple[str, list[str]]] = []
     for slot_key, pool in candidate_pools.items():
         if len(pool) > 1:
             parameters.append(_material_parameter(slot_key, pool, knowledge))
+            mat_params.append((f"mat_{slot_key}", list(pool)))
         low, high = _slot_bounds(genome, slot_key)
         wt_name = f"wt_{slot_key}"
         parameters.append(NumericalContinuousParameter(name=wt_name, bounds=(low, high)))
@@ -125,7 +133,7 @@ def build_genome_searchspace(req: Requirement, genome, candidate_pools: dict[str
     if not parameters:
         raise ValueError("genome search space has no parameters")
 
-    constraints = []
+    constraints: list = []
     if len(wt_names) >= 2:
         constraints.append(
             ContinuousLinearConstraint(
@@ -135,7 +143,109 @@ def build_genome_searchspace(req: Requirement, genome, candidate_pools: dict[str
                 rhs=100.0,
             )
         )
+    constraints.extend(discrete_exclude_constraints_for_pools(mat_params))
     return SearchSpace.from_product(parameters=parameters, constraints=constraints or None)
+
+
+# High-frequency incompatible material-class pairs for DiscreteExclude.
+# Drawn from acid_stability.toml hard rules (reactive metal / carbonate /
+# strong alkali must not co-exist with acidic species in the same bath).
+_ACID_NAME_HINTS = (
+    "acid",
+    "phosphoric",
+    "sulfuric",
+    "nitric",
+    "hydrochloric",
+    "acetic",
+    "植酸",
+    "磷酸",
+    "硫酸",
+    "硝酸",
+    "盐酸",
+)
+_REACTIVE_METAL_HINTS = (
+    "zinc dust",
+    "zn dust",
+    "aluminium powder",
+    "aluminum powder",
+    "镁粉",
+    "锌粉",
+)
+_CARBONATE_HINTS = ("carbonate", "bicarbonate", "碳酸")
+_ALKALI_HINTS = (
+    "sodium hydroxide",
+    "potassium hydroxide",
+    "naoh",
+    "koh",
+    "氢氧化钠",
+    "氢氧化钾",
+)
+
+
+def _name_matches(name: str, hints: tuple[str, ...]) -> bool:
+    low = (name or "").lower()
+    return any(h in low for h in hints)
+
+
+def high_freq_exclude_pair_sets() -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Return (left_hints, right_hints) used to classify incompatible materials."""
+    return [
+        (_REACTIVE_METAL_HINTS, _ACID_NAME_HINTS),
+        (_CARBONATE_HINTS, _ACID_NAME_HINTS),
+        (_ALKALI_HINTS, _ACID_NAME_HINTS),
+    ]
+
+
+def discrete_exclude_constraints_for_pools(
+    mat_params: list[tuple[str, list[str]]],
+) -> list:
+    """Build BayBE DiscreteExcludeConstraint list for categorical material slots.
+
+    Returns an empty list when baybe is unavailable, fewer than two mat params
+    exist, or no pool members match a high-frequency exclusion pair. Fail-open:
+    never raises into the recommend path.
+    """
+    if len(mat_params) < 2:
+        return []
+    try:
+        from baybe.constraints import DiscreteExcludeConstraint, SubSelectionCondition
+    except Exception:
+        return []
+
+    out: list = []
+    pair_sets = high_freq_exclude_pair_sets()
+    for i in range(len(mat_params)):
+        for j in range(i + 1, len(mat_params)):
+            p_a, pool_a = mat_params[i]
+            p_b, pool_b = mat_params[j]
+            for left_hints, right_hints in pair_sets:
+                left_a = [m for m in pool_a if _name_matches(m, left_hints)]
+                right_b = [m for m in pool_b if _name_matches(m, right_hints)]
+                if left_a and right_b:
+                    out.append(
+                        DiscreteExcludeConstraint(
+                            parameters=[p_a, p_b],
+                            combiner="AND",
+                            conditions=[
+                                SubSelectionCondition(selection=left_a),
+                                SubSelectionCondition(selection=right_b),
+                            ],
+                        )
+                    )
+                left_b = [m for m in pool_b if _name_matches(m, left_hints)]
+                right_a = [m for m in pool_a if _name_matches(m, right_hints)]
+                if left_b and right_a:
+                    out.append(
+                        DiscreteExcludeConstraint(
+                            parameters=[p_b, p_a],
+                            combiner="AND",
+                            conditions=[
+                                SubSelectionCondition(selection=left_b),
+                                SubSelectionCondition(selection=right_a),
+                            ],
+                        )
+                    )
+    return out
 
 
 def _material_parameter(slot_key: str, pool: list[str], knowledge_mod):
