@@ -193,13 +193,24 @@ def draft_section(
         return base
 
     try:
-        from ...services.citation_binder import format_citation_list
+        from ...services.citation_binder import build_citation_prompt
         from ...services.llm import complete_structured
         from .storm_polish import evidence_to_anchors
 
         anchors = evidence_to_anchors(evidence)
-        cite_block = format_citation_list(anchors) if anchors else "_无可引用的文献。_"
-
+        # P2: wire production STORM draft through build_citation_prompt
+        # (shared [^n] contract with chat / binder), then append JSON schema.
+        cite_frame = build_citation_prompt(
+            question=(
+                f"撰写技术报告章节「{spec.title}」：{spec.core_intent}"
+            ),
+            anchors=anchors,
+            system_instruction=(
+                "你是工业配方技术报告撰稿人。只写当前章节 Markdown。"
+                "禁止改写「确定性摘录」中的数字；可用「见表/见摘录」引用。"
+                "另输出 150–200 字 summary 供下一章滑动窗口。"
+            ),
+        )
         system = (
             "你是工业配方技术报告撰稿人。只写当前章节 Markdown。"
             "禁止改写「确定性摘录」中的数字；可用「见表/见摘录」引用。"
@@ -214,7 +225,7 @@ def draft_section(
             f"目标字数: {spec.target_word_count}\n"
             f"上一章摘要: {prev_summary or '（首章）'}\n\n"
             f"{_pack_excerpt_for_section(spec, pack)}\n\n"
-            f"**可引用文献**（严格按照编号引用）：\n{cite_block}\n"
+            f"{cite_frame}\n"
         )
         parsed, err = complete_structured(system, user, SectionDraft, retry=True)
         if parsed is None:

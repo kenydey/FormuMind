@@ -1632,7 +1632,8 @@ def _build_context(evidence: list[Evidence], *, max_chars: int | None = None) ->
         if paragraph is not None:
             loc_bits.append(f"¶{paragraph}")
         loc = f" ({', '.join(loc_bits)})" if loc_bits else ""
-        line = f"[{i+1}]{loc} ({tag} · {e.source}) {e.title}: {snippet}"
+        # P2: [^n] markers shared with citation_binder / STORM (not bare [n]).
+        line = f"[^{i+1}]{loc} ({tag} · {e.source}) {e.title}: {snippet}"
         bucket = wiki_parts if is_wiki else raw_parts
         if not _append(bucket, line):
             break
@@ -1740,7 +1741,8 @@ def _chat_prompt(
         )
     return (
         f"You are a formulation chemist. Answer the question using ONLY the provided sources. "
-        f"Cite sources by number [1], [2], etc.\n"
+        f"Cite sources with Markdown footnotes [^1], [^2], etc. (same contract as "
+        f"citation_binder / STORM).\n"
         f"{wiki_guidance}"
         f"Chemistry notation rules: keep reaction equations as LaTeX inside $$…$$; "
         f"keep molecular formulas as plain text with digits (Zn3(PO4)2); when giving a "
