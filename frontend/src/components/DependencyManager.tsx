@@ -1328,6 +1328,7 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
   const [chemTools, setChemTools] = useState<ChemToolsStatus | null>(null);
   const [kbStats, setKbStats] = useState<KBStats | null>(null);
   const [kbReindexing, setKbReindexing] = useState(false);
+  const [installEnabled, setInstallEnabled] = useState(true);
 
   async function refresh() {
     setLoading(true);
@@ -1336,6 +1337,7 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
       const r = await api.listDependencies();
       setDeps(r.dependencies ?? []);
       setCoreMissing(r.online_core_missing ?? []);
+      setInstallEnabled(r.install_enabled !== false);
     } catch (e) {
       setDeps([]);
       setCoreMissing([]);
@@ -1394,6 +1396,14 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
 
   async function run(names: string[], upgrade: boolean) {
     if (names.length === 0) return;
+    if (!installEnabled) {
+      setResult({
+        ok: false,
+        summary:
+          "服务端已禁用依赖安装（生产默认）。设置 FORMUMIND_DEPS_INSTALL_ENABLED=true 后重启后端。",
+      });
+      return;
+    }
     setBusy(true);
     setResult(null);
     setProgress(`${upgrade ? "更新" : "安装"}中：${names.join(", ")} …`);
@@ -1425,12 +1435,22 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
         检索软件可选依赖的安装状态，勾选后安装、或一键补齐在线模式所需依赖、或更新到最新版。
         安装在后端机器上执行（pip），完成后需重启后端服务生效。
       </p>
+      {!installEnabled && (
+        <div
+          className="text-[11px] text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded px-2 py-1.5"
+          data-testid="deps-install-disabled"
+        >
+          服务端已禁用 pip 安装（生产默认关闭）。如需启用：设置{" "}
+          <code className="font-mono">FORMUMIND_DEPS_INSTALL_ENABLED=true</code>{" "}
+          并重启后端。
+        </div>
+      )}
 
       {/* One-click + bulk actions */}
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => run(coreMissing, false)}
-          disabled={busy || coreMissing.length === 0}
+          disabled={busy || !installEnabled || coreMissing.length === 0}
           className="text-xs bg-accent/90 hover:bg-accent text-ink font-semibold rounded px-3 py-1.5 disabled:opacity-40"
           title="安装 LLM + 在线检索所需的全部缺失依赖"
         >
@@ -1440,14 +1460,14 @@ export default function DependencyManager({ reloadKey = 0 }: { reloadKey?: numbe
         </button>
         <button
           onClick={() => run([...selected], false)}
-          disabled={busy || selected.size === 0}
+          disabled={busy || !installEnabled || selected.size === 0}
           className="text-xs border border-edge text-slate-300 rounded px-3 py-1.5 hover:border-accent/40 hover:text-accent disabled:opacity-40"
         >
           安装选中（{selected.size}）
         </button>
         <button
           onClick={() => run([...selected], true)}
-          disabled={busy || selected.size === 0}
+          disabled={busy || !installEnabled || selected.size === 0}
           className="text-xs border border-edge text-slate-300 rounded px-3 py-1.5 hover:border-accent/40 hover:text-accent disabled:opacity-40"
         >
           更新选中到最新版

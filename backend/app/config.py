@@ -713,6 +713,9 @@ class Settings(BaseSettings):
     api_auth_enabled: bool | None = None
     api_token: str | None = None
     ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
+    # Server-side pip install via POST /api/dependencies/install. Unset → on in
+    # development/test, **off** in production (opposite of api_auth_enabled).
+    deps_install_enabled: bool | None = None
 
     @model_validator(mode="after")
     def _default_api_auth_for_environment(self) -> "Settings":
@@ -720,6 +723,16 @@ class Settings(BaseSettings):
             return self
         env = self.environment.strip().lower()
         object.__setattr__(self, "api_auth_enabled", env in ("production", "prod"))
+        return self
+
+    @model_validator(mode="after")
+    def _default_deps_install_for_environment(self) -> "Settings":
+        if self.deps_install_enabled is not None:
+            return self
+        env = self.environment.strip().lower()
+        object.__setattr__(
+            self, "deps_install_enabled", env not in ("production", "prod")
+        )
         return self
 
     def get_active_api_key(self) -> str | None:

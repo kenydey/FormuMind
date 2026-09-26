@@ -4147,6 +4147,8 @@ export interface DependencyInfo {
 export interface DependencyListResponse {
   dependencies: DependencyInfo[];
   online_core_missing: string[];
+  /** False in production by default — server refuses POST /dependencies/install. */
+  install_enabled?: boolean;
 }
 
 export interface DependencyInstallResult {
