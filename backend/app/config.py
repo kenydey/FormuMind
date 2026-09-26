@@ -658,9 +658,11 @@ class Settings(BaseSettings):
     # 语言路由, 乱码/未标 chunk 不参与双语检索; 默认关(现状全库单模型),
     # 生产经 FORMUMIND_KB_BILINGUAL=true 显式开启——开启前须先跑
     # scripts/backfill_chunk_lang.py + scripts/reembed_zh_chunks.py。
+    # P2: 设 FORMUMIND_EMBEDDING_MODEL=bge-m3 或 Qwen/Qwen3-Embedding-0.6B
+    # （多语种统一向量空间）后重建索引，跨语查询可直接 cosine，无需译英。
     kb_bilingual: bool = False
     # 中文问 → LLM 译英 → 英文子库二次检索(跨语通道); 失败自动降级
-    # 为仅中文子库。依赖 kb_bilingual。
+    # 为仅中文子库。依赖 kb_bilingual。统一多语种 embedding 时跳过此路径。
     kb_query_translate: bool = True
     # 检索命中的切块交给 LLM 之前保留多少字符。切块本身是 1600
     # （ingest_chunk_max_chars），此前这里硬编码 600，等于把已经入库的全文
@@ -668,7 +670,7 @@ class Settings(BaseSettings):
     kb_snippet_max_chars: int = 0
     # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
     kb_recommend_top_k: int = 4
-    # 探针 ↔ 推荐共享：BM25 权重 α（与 Hub 检索探针默认 0.3 对齐）。
+    # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.3）。
     kb_hybrid_alpha: float = 0.3
     # 推荐/研究 KB 融合走 hybrid_search_scored（探针同栈）；关则退回 search_chunks。
     kb_recommend_use_hybrid: bool = True

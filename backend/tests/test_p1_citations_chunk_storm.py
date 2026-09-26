@@ -23,7 +23,7 @@ def test_build_context_includes_page_paragraph_anchors():
         )
     ]
     ctx = _build_context(ev, max_chars=2000)
-    assert "[1] (p.3, ¶2)" in ctx
+    assert "[^1] (p.3, ¶2)" in ctx
 
 
 def test_chunk_to_evidence_carries_page():

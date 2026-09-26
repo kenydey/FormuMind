@@ -48,12 +48,31 @@ def search(
     try:
         if langs is None:
             return kb_index.search_chunks(question, k=k, project_id=project_id)
+        # Unified multilingual embedding: one vector space — search both lang
+        # partitions with the original query (no translate required for cosine).
+        if _unified_embedding_space():
+            if langs == ["zh"]:
+                return kb_index.search_chunks(
+                    question, k=k, project_id=project_id, langs=["zh", "en"]
+                )
+            return kb_index.search_chunks(
+                question, k=k, project_id=project_id, langs=langs
+            )
         if langs == ["zh"] and settings.kb_query_translate:
             return _zh_with_translation(question, k=k, project_id=project_id, settings=settings)
         return kb_index.search_chunks(question, k=k, project_id=project_id, langs=langs)
     except Exception:
         # 双语路径异常 → 降级全查(保行为)
         return kb_index.search_chunks(question, k=k, project_id=project_id)
+
+
+def _unified_embedding_space() -> bool:
+    try:
+        from .rag import embedding_space_unified
+
+        return bool(embedding_space_unified())
+    except Exception:
+        return False
 
 
 def _zh_with_translation(

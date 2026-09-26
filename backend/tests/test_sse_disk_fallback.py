@@ -67,6 +67,11 @@ def test_recommend_sse_completes_without_redis():
     assert "COMPLETED" in text
     assert "data:" in text
 
+    # Status snapshot must agree with SSE terminal (disk fallback path).
+    deadline = time.time() + 5.0
     st = client.get(handle["status_url"]).json()
+    while st.get("state") not in ("completed", "failed", "cancelled") and time.time() < deadline:
+        time.sleep(0.05)
+        st = client.get(handle["status_url"]).json()
     assert st["state"] == "completed"
     assert st["result"]["research"]["recommended"] is not None

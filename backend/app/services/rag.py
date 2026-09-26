@@ -142,6 +142,27 @@ def embedding_model_catalog() -> list[dict[str, str]]:
     return [dict(row) for row in EMBEDDING_MODEL_CATALOG]
 
 
+def embedding_space_unified() -> bool:
+    """True when a single multilingual (or operator-pinned) model owns all langs.
+
+    Default dual-model bilingual routing (zh→bge 512d / en→MiniLM 384d) cannot
+    cosine-compare across languages. Setting ``FORMUMIND_EMBEDDING_MODEL`` to a
+    catalog ``langs=multi`` entry (bge-m3 / Qwen3-Embedding) — or any explicit
+    model id — pins one vector space so zh queries can retrieve en chunks
+    without translation. Requires reindex after the switch.
+    """
+    from ..config import get_settings
+
+    configured = (get_settings().embedding_model or "").strip()
+    if not configured:
+        return False
+    for row in EMBEDDING_MODEL_CATALOG:
+        if row["id"] == configured:
+            return row.get("langs") == "multi"
+    # Unknown pinned model: still one encoder for every lang.
+    return True
+
+
 def embedding_status() -> dict:
     """Current model + catalog + reindex reminder for stats/meta surfaces."""
     from ..config import get_settings
@@ -151,9 +172,12 @@ def embedding_status() -> dict:
         "embedding_model": embed_model_name(),
         "embedding_model_configured": configured or None,
         "embedding_catalog": embedding_model_catalog(),
+        "embedding_space_unified": embedding_space_unified(),
         "reindex_hint": (
             "换模型后必须点「重建索引」；在此之前 vector_mode=stale，"
             "异模型向量不参与余弦比较（comparable_embedding）。"
+            "多语种统一向量空间请设 FORMUMIND_EMBEDDING_MODEL=bge-m3 或 "
+            "Qwen/Qwen3-Embedding-0.6B 后重建。"
         ),
     }
 
@@ -254,12 +278,14 @@ class BM25FAISSStore:
     for dense semantic matching. Falls back to pure BM25 when FAISS or
     an embedding model is unavailable.
 
-    Hybrid score: ``BM25(0.6) + FAISS_cosine(0.4)``.
+    Hybrid score: ``BM25(α) + FAISS_cosine(1-α)`` where α defaults to
+    ``settings.kb_hybrid_alpha`` (same knob as persistent ``hybrid_search_scored``).
     """
 
     backend: str = "bm25_faiss"
     docs: list[Evidence] = field(default_factory=list)
-    bm25_weight: float = 0.6
+    # None → read settings.kb_hybrid_alpha at query time (shared with Hub probe).
+    bm25_weight: float | None = None
 
     def __post_init__(self) -> None:
         self._corpus: list[list[str]] = []
@@ -267,6 +293,18 @@ class BM25FAISSStore:
         self._faiss_index: object | None = None
         self._faiss_dim: int = 0
         self._embedder: object | None = None
+
+    def _resolved_bm25_weight(self) -> float:
+        if self.bm25_weight is not None:
+            w = float(self.bm25_weight)
+        else:
+            try:
+                from ..config import get_settings
+
+                w = float(get_settings().kb_hybrid_alpha)
+            except Exception:
+                w = 0.3
+        return min(1.0, max(0.0, w))
 
     # ── ingest ──────────────────────────────────────────────────────────
 
@@ -313,8 +351,8 @@ class BM25FAISSStore:
         faiss_scores = _faiss_scores(self._faiss_index, self._faiss_dim,
                                      self._embedder, text, len(self.docs))
 
-        # Hybrid scoring
-        w = self.bm25_weight
+        # Hybrid scoring — α shared with hybrid_search_scored / Hub probe.
+        w = self._resolved_bm25_weight()
         hybrid = [w * b + (1 - w) * f for b, f in zip(bm25_scores, faiss_scores)]
 
         # Top-k by hybrid score
