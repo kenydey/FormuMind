@@ -7,6 +7,7 @@ from typing import Any
 FORMULATION_SKILLS: list[dict[str, Any]] = [
     {
         "id": "silane_recommend",
+        "kind": "playbook",
         "title": "硅烷偶联推荐",
         "summary": "优先材料库 + CRAG 检索，产出 Top-N 硅烷/环氧偶联配方候选。",
         "when_to_use": "需要快速从知识库拉出可落地的偶联剂/底漆配方时。",
@@ -26,6 +27,7 @@ FORMULATION_SKILLS: list[dict[str, Any]] = [
     },
     {
         "id": "ccd_doe_screen",
+        "kind": "playbook",
         "title": "CCD 筛选 DOE",
         "summary": "经典中心复合设计，适合 3–5 因子冷启动筛选。",
         "when_to_use": "有候选因子区间、尚无足够实测数据时。",
@@ -45,6 +47,7 @@ FORMULATION_SKILLS: list[dict[str, Any]] = [
     },
     {
         "id": "bayesian_optimize",
+        "kind": "playbook",
         "title": "贝叶斯寻优",
         "summary": "多目标 DOE 寻优闭环，收敛历史曲线进产物区。",
         "when_to_use": "已有若干实测点，需要 surrogate 驱动下一轮建议时。",
@@ -63,6 +66,7 @@ FORMULATION_SKILLS: list[dict[str, Any]] = [
     },
     {
         "id": "self_driving_loop",
+        "kind": "playbook",
         "title": "自驱动闭环",
         "summary": "数据→重训→寻优→下一批 DOE 一键迭代。",
         "when_to_use": "台账已有进度，希望自动推进下一轮实验时。",
@@ -79,6 +83,7 @@ FORMULATION_SKILLS: list[dict[str, Any]] = [
     },
     {
         "id": "deep_literature",
+        "kind": "playbook",
         "title": "深度文献综述",
         "summary": "多智能体深度研究：广域检索 + KB + 带引用报告。",
         "when_to_use": "立项前需要带引用的综合研究报告时。",
