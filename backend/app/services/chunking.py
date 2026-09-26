@@ -234,13 +234,21 @@ def _split_blocks(body: str) -> list[str]:
 
 
 def _is_atomic(block: str) -> bool:
+    """Blocks that must not be split on blank lines (tables / code / math).
+
+    P1 #17: MinerU / HTML pipelines often emit ``<table>…</table>``; treating
+    them as atomic prevents blank-line splits from shredding rows.
+    """
     first = block.lstrip()
+    lower = first[:64].lower()
     return (
         first.startswith("|")
         or first.startswith("```")
         or first.startswith("$$")
         or first.startswith("\\[")
         or first.startswith("\\begin{")
+        or lower.startswith("<table")
+        or "<table" in block[:200].lower()
     )
 
 

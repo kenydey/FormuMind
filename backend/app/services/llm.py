@@ -1623,7 +1623,16 @@ def _build_context(evidence: list[Evidence], *, max_chars: int | None = None) ->
             continue
         is_wiki = (e.source or "") == "wiki" or (e.identifier or "").startswith("wiki:")
         tag = "Wiki编译结论" if is_wiki else "原始摘录"
-        line = f"[{i+1}] ({tag} · {e.source}) {e.title}: {snippet}"
+        # P1 #16: page/paragraph anchors aligned with CitationAnchor.to_citation_text.
+        loc_bits: list[str] = []
+        page = getattr(e, "page", None)
+        paragraph = getattr(e, "paragraph", None)
+        if page is not None:
+            loc_bits.append(f"p.{page}")
+        if paragraph is not None:
+            loc_bits.append(f"¶{paragraph}")
+        loc = f" ({', '.join(loc_bits)})" if loc_bits else ""
+        line = f"[{i+1}]{loc} ({tag} · {e.source}) {e.title}: {snippet}"
         bucket = wiki_parts if is_wiki else raw_parts
         if not _append(bucket, line):
             break

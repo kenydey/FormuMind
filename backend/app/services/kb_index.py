@@ -457,12 +457,16 @@ def _chunk_to_evidence(chunk, source_meta: dict, score: float) -> Evidence:
         title = f"{title} · {chunk.heading_path}"
     if getattr(chunk, "page_no", None):
         title = f"{title} · P{chunk.page_no}"
+    page = getattr(chunk, "page_no", None)
+    paragraph = getattr(chunk, "paragraph_idx", None)
     return Evidence(
         source=meta.get("source_kind") or "kb",
         identifier=f"kb:{chunk.source_id}#c{chunk.ord}",
         title=title[:200],
         snippet=chunk_snippet(chunk.text),
         relevance=max(0.05, min(1.0, round(score, 4))),
+        page=int(page) if page is not None else None,
+        paragraph=int(paragraph) if paragraph is not None else None,
     )
 
 

@@ -167,12 +167,16 @@ def run_query_test(
     for idx, sc in enumerate(scored):
         c = sc.chunk
         title = _title_for_chunk(c, source_meta)
+        page = getattr(c, "page_no", None)
+        paragraph = getattr(c, "paragraph_idx", None)
         ev = Evidence(
             source=(source_meta.get(c.source_id) or {}).get("source_kind") or "kb",
             identifier=f"kb:{c.source_id}#c{c.ord}",
             title=title,
             snippet=kb_index.chunk_snippet(c.text),
             relevance=max(0.05, min(1.0, float(sc.hybrid_score))),
+            page=int(page) if page is not None else None,
+            paragraph=int(paragraph) if paragraph is not None else None,
         )
         evidence_pool.append(ev)
         prelim.append(
