@@ -202,12 +202,24 @@ def test_search_seed_corpus_filtered_by_query():
 
 
 def test_ingest_text_file():
-    content = b"Zinc phosphate is a corrosion inhibitor.\n\nEpoxy resin provides film formation."
-    r = client.post("/api/ingest", files={"file": ("note.txt", content, "text/plain")})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["filename"] == "note.txt"
-    assert body["total"] >= 1
+    import uuid
+
+    from tests.test_ingest_async_helpers import poll_task
+
+    suffix = uuid.uuid4().hex[:8]
+    content = (
+        f"Zinc phosphate is a corrosion inhibitor {suffix}.\n\n"
+        f"Epoxy resin provides film formation {suffix}."
+    ).encode()
+    r = client.post(
+        "/api/ingest",
+        files={"file": (f"note-{suffix}.txt", content, "text/plain")},
+    )
+    assert r.status_code == 202, r.text
+    task = poll_task(client, r.json()["task_id"])
+    assert task["state"] == "completed"
+    body = task.get("result") or {}
+    assert body.get("total", 0) >= 1
     assert body["evidence"][0]["source"] == "local"
 
 
