@@ -68,6 +68,23 @@ def build_deterministic_outline(
     metric_q = metrics[0] if metrics else "salt_spray_hours"
     mat_q = materials[0] if materials else "baseline formula"
 
+    has_lit = bool((pack.get("literature") or {}).get("rows") or (pack.get("literature") or {}).get("source_ids"))
+    has_formula = bool((pack.get("formula") or {}).get("rows"))
+    has_doe = bool(
+        (pack.get("doe") or {}).get("rows")
+        or (pack.get("lab") or {}).get("rows")
+        or (pack.get("experiments") or {}).get("rows")
+        or (pack.get("campaign") or {}).get("rows")
+    )
+    has_loop = bool(
+        (pack.get("loop") or {}).get("rows")
+        or (pack.get("optimization") or {}).get("rows")
+        or (pack.get("models") or {}).get("rows")
+    )
+    # Wave C: perspective-differentiated retrieval queries (not full interview loop).
+    cost_q = f"{mat_q} 成本 供应"
+    salt_q = f"{mat_q} {metric_q} 机理"
+
     candidates: list[SectionSpec] = [
         SectionSpec(
             section_id="sec_background",
@@ -77,8 +94,8 @@ def build_deterministic_outline(
             target_word_count=700,
             focal_entities=metrics[:4],
             retrieval_queries=[
-                f"{topic_s} 技术要求",
-                f"{metric_q} 目标窗口",
+                f"{topic_s} 技术要求 {metric_q}",
+                f"{metric_q} 目标窗口 验收",
             ],
             depends_on=[],
         ),
@@ -87,11 +104,11 @@ def build_deterministic_outline(
             title="文献与证据地图",
             level=1,
             core_intent="汇总项目文献/专利证据，标明可溯源 source_id。",
-            target_word_count=800,
+            target_word_count=800 if has_lit else 500,
             focal_entities=list((pack.get("literature") or {}).get("source_ids") or [])[:4],
             retrieval_queries=[
-                f"{topic_s} 文献综述",
-                f"{mat_q} 盐雾 机理",
+                f"{topic_s} 文献 专利 综述",
+                salt_q,
             ],
             depends_on=["sec_background"],
         ),
@@ -100,11 +117,11 @@ def build_deterministic_outline(
             title="基准配方与物料角色",
             level=1,
             core_intent="描述基准浴/膜配方组分、角色与关键 CAS。",
-            target_word_count=700,
+            target_word_count=700 if has_formula else 450,
             focal_entities=materials[:4],
             retrieval_queries=[
-                f"{mat_q} 配方 组成",
-                f"{topic_s} 硅烷 偶联剂",
+                f"{mat_q} 配方 组成 CAS",
+                cost_q,
             ],
             depends_on=["sec_background"],
         ),
@@ -112,12 +129,14 @@ def build_deterministic_outline(
             section_id="sec_doe_lab",
             title="DOE 与实验台账解读",
             level=1,
-            core_intent="解读 DOE 因子窗口与已测台账，指出缺口。",
-            target_word_count=900,
+            core_intent="解读 DOE 因子窗口与已测台账，指出缺口。"
+            if has_doe
+            else "卷宗暂无 DOE/台账行：说明缺口与建议补测，勿编造数据。",
+            target_word_count=900 if has_doe else 400,
             focal_entities=[metric_q],
             retrieval_queries=[
-                f"{topic_s} DOE 因子",
-                f"{metric_q} 实验测量",
+                f"{topic_s} DOE 因子 设计",
+                f"{metric_q} 实验 测量 台账",
             ],
             depends_on=["sec_formula"],
         ),
@@ -125,12 +144,14 @@ def build_deterministic_outline(
             section_id="sec_loop",
             title="寻优闭环与模型态势",
             level=1,
-            core_intent="总结闭环 RMSE/候选与下一步实验建议。",
-            target_word_count=700,
+            core_intent="总结闭环 RMSE/候选与下一步实验建议。"
+            if has_loop
+            else "卷宗暂无闭环/模型行：给出可执行的下一步实验建议。",
+            target_word_count=700 if has_loop else 400,
             focal_entities=[],
             retrieval_queries=[
-                f"{topic_s} 优化 闭环",
-                f"{metric_q} 预测偏差",
+                f"{topic_s} 优化 闭环 RMSE",
+                f"{metric_q} 预测 偏差 校准",
             ],
             depends_on=["sec_doe_lab"],
         ),
@@ -142,12 +163,28 @@ def build_deterministic_outline(
             target_word_count=600,
             focal_entities=[],
             retrieval_queries=[
-                f"{topic_s} 风险 VOC",
-                f"{topic_s} 开放问题",
+                f"{topic_s} 风险 VOC 合规",
+                f"{topic_s} 开放问题 数据缺口",
             ],
             depends_on=["sec_loop", "sec_literature"],
         ),
     ]
+    # Wave C: drop thin DOE/loop chapters when pack has no supporting rows
+    # (keep at least background + literature + risks).
+    drop: set[str] = set()
+    if not has_doe:
+        drop.add("sec_doe_lab")
+    if not has_loop and "sec_doe_lab" in drop:
+        drop.add("sec_loop")
+    if drop:
+        candidates = [s for s in candidates if s.section_id not in drop]
+        for s in candidates:
+            if s.section_id == "sec_loop" and "sec_doe_lab" in drop:
+                s.depends_on = ["sec_formula"]
+            if s.section_id == "sec_risks":
+                s.depends_on = [d for d in s.depends_on if d not in drop]
+                if "sec_loop" in drop and "sec_formula" not in s.depends_on:
+                    s.depends_on.append("sec_formula")
     max_n = max(3, min(int(max_sections or 6), 12))
     sections = candidates[:max_n]
     # Drop depends_on pointing outside kept set

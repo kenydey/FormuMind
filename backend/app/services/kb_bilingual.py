@@ -38,32 +38,40 @@ def search(
     from .lang_router import target_langs
 
     settings = settings or get_settings()
+    # Wave A: default persistent retrieval is hybrid (same stack as Hub probe).
+    # Dual-model bilingual partitions still need langs-filtered search_chunks.
     try:
         if not settings.kb_bilingual:
-            return kb_index.search_chunks(question, k=k, project_id=project_id)
+            return kb_index.retrieve_evidence(
+                question, k=k, project_id=project_id, mode="hybrid"
+            )
         langs = target_langs(question, bilingual=True)
     except Exception:
-        return kb_index.search_chunks(question, k=k, project_id=project_id)
+        return kb_index.retrieve_evidence(
+            question, k=k, project_id=project_id, mode="hybrid"
+        )
 
     try:
         if langs is None:
-            return kb_index.search_chunks(question, k=k, project_id=project_id)
-        # Unified multilingual embedding: one vector space — search both lang
-        # partitions with the original query (no translate required for cosine).
+            return kb_index.retrieve_evidence(
+                question, k=k, project_id=project_id, mode="hybrid"
+            )
+        # Unified multilingual embedding: one vector space — hybrid over both
+        # langs without translate (hybrid scores the full project scan).
         if _unified_embedding_space():
-            if langs == ["zh"]:
-                return kb_index.search_chunks(
-                    question, k=k, project_id=project_id, langs=["zh", "en"]
-                )
-            return kb_index.search_chunks(
-                question, k=k, project_id=project_id, langs=langs
+            return kb_index.retrieve_evidence(
+                question, k=k, project_id=project_id, mode="hybrid"
             )
         if langs == ["zh"] and settings.kb_query_translate:
             return _zh_with_translation(question, k=k, project_id=project_id, settings=settings)
-        return kb_index.search_chunks(question, k=k, project_id=project_id, langs=langs)
+        return kb_index.retrieve_evidence(
+            question, k=k, project_id=project_id, mode="legacy", langs=langs
+        )
     except Exception:
-        # 双语路径异常 → 降级全查(保行为)
-        return kb_index.search_chunks(question, k=k, project_id=project_id)
+        # 双语路径异常 → 降级 hybrid 全查
+        return kb_index.retrieve_evidence(
+            question, k=k, project_id=project_id, mode="hybrid"
+        )
 
 
 def _unified_embedding_space() -> bool:
@@ -81,14 +89,18 @@ def _zh_with_translation(
     from . import kb_index
     from .query_translate import translate_query_zh_to_en
 
-    hits = kb_index.search_chunks(question, k=k, project_id=project_id, langs=["zh"])
+    hits = kb_index.retrieve_evidence(
+        question, k=k, project_id=project_id, mode="legacy", langs=["zh"]
+    )
     try:
         tr = translate_query_zh_to_en(question)
     except Exception:
         tr = None
     if not tr:
         return hits  # 翻译失败 → 仅中文子库(严格降级)
-    hits_en = kb_index.search_chunks(tr, k=k, project_id=project_id, langs=["en"])
+    hits_en = kb_index.retrieve_evidence(
+        tr, k=k, project_id=project_id, mode="legacy", langs=["en"]
+    )
     seen = {h.identifier for h in hits}
     hits = hits + [h for h in hits_en if h.identifier not in seen]
     return hits[:k]

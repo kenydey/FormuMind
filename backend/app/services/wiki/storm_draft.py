@@ -84,49 +84,82 @@ def collect_section_evidence(
     pack: dict[str, Any],
     *,
     project_id: str,
-    top_k: int = 4,
+    top_k: int | None = None,
+    exclude_ids: set[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Best-effort retrieval for section queries; never raises."""
+    """Best-effort retrieval for section queries; never raises.
+
+    Wave A: hybrid façade + thicker caps (settings.wiki_storm_section_*).
+    Wave D: ``exclude_ids`` skips chunks already used by earlier sections.
+    """
+    from ...config import get_settings
+
+    settings = get_settings()
+    query_k = max(1, int(getattr(settings, "wiki_storm_section_query_k", 6) or 6))
+    cap = int(top_k if top_k is not None else getattr(settings, "wiki_storm_section_evidence_cap", 10) or 10)
+    cap = max(1, min(cap, 24))
+    skip = exclude_ids or set()
     hits: list[dict[str, str]] = []
     # Prefer pack literature as grounded ids
-    for r in ((pack.get("literature") or {}).get("rows") or [])[:top_k]:
+    for r in ((pack.get("literature") or {}).get("rows") or [])[:cap]:
         if isinstance(r, dict) and r.get("source_id"):
             hits.append(
                 {
                     "id": str(r.get("source_id")),
                     "title": str(r.get("title") or r.get("source_id")),
-                    "snippet": str(r.get("snippet") or "")[:240],
+                    "snippet": str(r.get("snippet") or "")[:400],
+                    "relevance": str(r.get("relevance") or r.get("score") or ""),
+                    "page": str(r.get("page") or r.get("page_no") or ""),
                 }
             )
     try:
         from ...services import kb_index
 
         if kb_index.kb_enabled():
+            pool: list = []
             for q in (spec.retrieval_queries or [])[:3]:
-                for ev in kb_index.search_chunks(q, k=2, project_id=project_id) or []:
-                    ident = getattr(ev, "identifier", None) or getattr(ev, "id", None) or ""
-                    hits.append(
-                        {
-                            "id": str(ident),
-                            "title": str(getattr(ev, "title", "") or ident)[:120],
-                            "snippet": str(getattr(ev, "snippet", "") or "")[:240],
-                        }
+                pool.extend(
+                    kb_index.retrieve_evidence(
+                        q, k=query_k, project_id=project_id, mode="hybrid"
                     )
-                    if len(hits) >= top_k * 2:
-                        break
+                    or []
+                )
+            if pool and bool(getattr(settings, "wiki_storm_section_rerank", False)):
+                try:
+                    from ...services.rag import rerank_scored
+
+                    q0 = (spec.retrieval_queries or ["section"])[0]
+                    ranked, _meta = rerank_scored(
+                        q0, pool, k=min(cap * 2, len(pool)), prefer="cross_encoder"
+                    )
+                    pool = [it.evidence for it in ranked] if ranked else pool
+                except Exception as exc:
+                    logger.debug("storm section rerank soft-failed: %s", exc)
+            for ev in pool:
+                ident = getattr(ev, "identifier", None) or getattr(ev, "id", None) or ""
+                page = getattr(ev, "page", None)
+                hits.append(
+                    {
+                        "id": str(ident),
+                        "title": str(getattr(ev, "title", "") or ident)[:120],
+                        "snippet": str(getattr(ev, "snippet", "") or "")[:400],
+                        "relevance": str(getattr(ev, "relevance", "") or ""),
+                        "page": str(page) if page is not None else "",
+                    }
+                )
     except Exception as exc:
         logger.debug("storm section retrieve soft-failed: %s", exc)
 
-    # de-dupe by id
+    # de-dupe by id (prefer first / higher-ranked); skip cross-section pool
     seen: set[str] = set()
     out: list[dict[str, str]] = []
     for h in hits:
         key = h.get("id") or h.get("title") or ""
-        if key in seen:
+        if not key or key in seen or key in skip:
             continue
         seen.add(str(key))
         out.append(h)
-        if len(out) >= top_k:
+        if len(out) >= cap:
             break
     return out
 
@@ -176,6 +209,34 @@ def draft_section_deterministic(
     )
 
 
+def _glossary_from_pack(pack: dict[str, Any]) -> list[str]:
+    """Wave C: compact terminology list for prompt injection (not Claims)."""
+    terms: list[str] = []
+    for r in ((pack.get("formula") or {}).get("rows") or [])[:12]:
+        if isinstance(r, dict) and r.get("name"):
+            cas = (r.get("cas") or "").strip()
+            role = (r.get("role") or "").strip()
+            label = str(r["name"])
+            if cas:
+                label = f"{label} (CAS {cas})"
+            if role:
+                label = f"{label} [{role}]"
+            terms.append(label)
+    for r in ((pack.get("requirements") or {}).get("rows") or [])[:8]:
+        if isinstance(r, dict) and r.get("metric"):
+            terms.append(str(r["metric"]))
+    # stable unique
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in terms:
+        k = t.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+    return out[:20]
+
+
 def draft_section(
     spec: SectionSpec,
     outline: ReportOutline,
@@ -184,11 +245,24 @@ def draft_section(
     project_id: str,
     prev_summary: str = "",
     use_llm: bool = False,
+    exclude_ids: set[str] | None = None,
 ) -> SectionDraft:
-    evidence = collect_section_evidence(spec, pack, project_id=project_id)
+    evidence = collect_section_evidence(
+        spec, pack, project_id=project_id, exclude_ids=exclude_ids
+    )
     base = draft_section_deterministic(
         spec, outline, pack, prev_summary=prev_summary, evidence=evidence
     )
+    glossary = _glossary_from_pack(pack)
+    if glossary and base.content_markdown:
+        gloss_line = "；".join(glossary[:12])
+        inject = f"\n\n> 规范术语（勿同物异名）：{gloss_line}\n"
+        # Insert after first heading block
+        parts = base.content_markdown.split("\n", 2)
+        if len(parts) >= 2:
+            base.content_markdown = parts[0] + "\n" + parts[1] + inject + (parts[2] if len(parts) > 2 else "")
+        else:
+            base.content_markdown = base.content_markdown + inject
     if not use_llm:
         return base
 
@@ -312,9 +386,30 @@ def draft_all_sections(
     completed = 0
     progress_lock = threading.Lock()
     last_summary = ""
+    # Wave D: global evidence pool — later sections skip earlier chunk ids.
+    used_evidence_ids: set[str] = set()
+    used_lock = threading.Lock()
 
     workers = max(1, min(int(max_workers or 1), 8))
     use_pool = bool(parallel) and workers > 1
+
+    def _draft_one(spec: SectionSpec, prev: str) -> SectionDraft:
+        with used_lock:
+            exclude = set(used_evidence_ids)
+        d = draft_section(
+            spec,
+            outline,
+            pack,
+            project_id=project_id,
+            prev_summary=prev,
+            use_llm=use_llm,
+            exclude_ids=exclude,
+        )
+        with used_lock:
+            for cid in d.used_citations or []:
+                if cid:
+                    used_evidence_ids.add(str(cid))
+        return d
 
     def _emit(spec: SectionSpec, index: int) -> None:
         if not progress_cb:
@@ -368,13 +463,7 @@ def draft_all_sections(
                     idx = completed
                     _emit(spec, idx)
                     fut = pool.submit(
-                        draft_section,
-                        spec,
-                        outline,
-                        pack,
-                        project_id=project_id,
-                        prev_summary=summary_by_spec[spec.section_id],
-                        use_llm=use_llm,
+                        _draft_one, spec, summary_by_spec[spec.section_id]
                     )
                     futures[fut] = spec
                 for fut in as_completed(futures):
@@ -384,13 +473,8 @@ def draft_all_sections(
             for spec in wave:
                 completed += 1
                 _emit(spec, completed)
-                drafts[spec.section_id] = draft_section(
-                    spec,
-                    outline,
-                    pack,
-                    project_id=project_id,
-                    prev_summary=summary_by_spec[spec.section_id],
-                    use_llm=use_llm,
+                drafts[spec.section_id] = _draft_one(
+                    spec, summary_by_spec[spec.section_id]
                 )
 
         # Advance sliding fallback for next wave (outline order within wave)

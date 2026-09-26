@@ -7,14 +7,14 @@ from app.services import kb_bilingual
 def test_unified_space_skips_translate(monkeypatch):
     log: dict = {"calls": []}
 
-    def fake(query, k=6, project_id=None, langs=None, **kwargs):
-        log["calls"].append((query, langs))
+    def fake_retrieve(query, k=6, project_id=None, mode="hybrid", langs=None, **kwargs):
+        log["calls"].append((query, mode, langs))
         from app.domain.schemas import Evidence
 
         return [
             Evidence(
                 source="t",
-                identifier=f"{(langs or ['x'])[0]}-{i}",
+                identifier=f"u-{i}",
                 title="t",
                 snippet="s",
                 relevance=1.0,
@@ -22,7 +22,7 @@ def test_unified_space_skips_translate(monkeypatch):
             for i in range(2)
         ]
 
-    monkeypatch.setattr("app.services.kb_index.search_chunks", fake)
+    monkeypatch.setattr("app.services.kb_index.retrieve_evidence", fake_retrieve)
     monkeypatch.setattr(
         "app.services.rag.embedding_space_unified", lambda: True
     )
@@ -33,15 +33,15 @@ def test_unified_space_skips_translate(monkeypatch):
 
     out = kb_bilingual.search("如何提高耐盐雾", k=5, settings=_S())
     assert out
-    # Single call with both lang partitions; no translated en query.
-    assert log["calls"] == [("如何提高耐盐雾", ["zh", "en"])]
+    # Unified space → single hybrid call; no translated en query / langs filter.
+    assert log["calls"] == [("如何提高耐盐雾", "hybrid", None)]
 
 
 def test_dual_space_still_translates(monkeypatch):
     log: dict = {"calls": []}
 
-    def fake(query, k=6, project_id=None, langs=None, **kwargs):
-        log["calls"].append((query, langs))
+    def fake_retrieve(query, k=6, project_id=None, mode="hybrid", langs=None, **kwargs):
+        log["calls"].append((query, langs, mode))
         from app.domain.schemas import Evidence
 
         tag = (langs or ["x"])[0]
@@ -56,7 +56,7 @@ def test_dual_space_still_translates(monkeypatch):
             for i in range(2)
         ]
 
-    monkeypatch.setattr("app.services.kb_index.search_chunks", fake)
+    monkeypatch.setattr("app.services.kb_index.retrieve_evidence", fake_retrieve)
     monkeypatch.setattr(
         "app.services.rag.embedding_space_unified", lambda: False
     )
@@ -72,7 +72,7 @@ def test_dual_space_still_translates(monkeypatch):
     kb_bilingual.search("如何提高耐盐雾", k=5, settings=_S())
     assert len(log["calls"]) == 2
     assert log["calls"][0][1] == ["zh"]
-    assert log["calls"][1] == ("salt spray resistance", ["en"])
+    assert log["calls"][1] == ("salt spray resistance", ["en"], "legacy")
 
 
 def test_embedding_space_unified_catalog(monkeypatch):

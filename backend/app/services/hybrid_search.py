@@ -272,13 +272,23 @@ def hybrid_search_scored(
     try:
         from ..db.chunk_store import get_chunk_store
 
+        scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
         chunks = get_chunk_store().all_chunks(
-            limit=settings.kb_search_scan_limit,
+            limit=scan_limit,
             project_id=project_id,
             include_global=include_global,
         )
         if not chunks:
             return []
+        if len(chunks) >= scan_limit:
+            logger.warning(
+                "hybrid_search scan at cap: n=%d limit=%d project_id=%s "
+                "include_global=%s — recall may truncate older chunks",
+                len(chunks),
+                scan_limit,
+                project_id or "-",
+                include_global,
+            )
 
         tokenized = [(c, t) for c, t in zip(chunks, (_tokenize(c.text) for c in chunks)) if t]
         if not tokenized:
@@ -338,7 +348,22 @@ def hybrid_search_scored(
         if cosine_max > 0.0:
             cosine_scores = cosine_scores / cosine_max
 
-        combined = alpha * bm25_scores + (1.0 - alpha) * cosine_scores
+        fusion = (getattr(settings, "kb_hybrid_fusion", None) or "weighted").strip().lower()
+        if fusion == "rrf":
+            # Wave D: Reciprocal Rank Fusion (k=60). Scores stored as RRF mass
+            # for hybrid_score; channel scores remain normalized BM25/cosine.
+            rrf_k = 60.0
+            bm25_rank = np.argsort(-bm25_scores)
+            cos_rank = np.argsort(-cosine_scores)
+            bm25_pos = {int(idx): rank for rank, idx in enumerate(bm25_rank)}
+            cos_pos = {int(idx): rank for rank, idx in enumerate(cos_rank)}
+            combined = np.zeros(n, dtype=float)
+            for i in range(n):
+                combined[i] = 1.0 / (rrf_k + bm25_pos[i] + 1) + 1.0 / (
+                    rrf_k + cos_pos[i] + 1
+                )
+        else:
+            combined = alpha * bm25_scores + (1.0 - alpha) * cosine_scores
 
         order = [i for i in range(n) if float(combined[i]) > 0.0]
         order.sort(key=lambda i: float(combined[i]), reverse=True)

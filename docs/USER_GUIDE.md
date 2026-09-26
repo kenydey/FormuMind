@@ -1187,9 +1187,15 @@ defaults.
 | `FORMUMIND_FULLTEXT_ENRICH` | `false` | **The current full-text switch**: upgrade abstract-level hits to full text and index them (requires network; false by default to keep tests offline) |
 | `FORMUMIND_PATENT_PREFER_HTML` | `true` | Take patent text from the Google Patents landing page — one request, ~0.7 s, and no OCR. Set false to prefer the PDF |
 | `FORMUMIND_PDF_LOCAL_OCR` | `false` | Per-page OCR inside the local layout parser (pymupdf4llm). ⚠️ **The library defaults this on**, and that tier runs on every PDF ahead of everything else — so with Tesseract on the host, every page is OCR-ed first. Measured on a 6-page image-only PDF: 16.7 s on / 0.8 s off. Scans are unaffected: a document with no text layer is detected and handed to RapidOCR or MinerU. A **mixed** document (a few text pages plus scans) is not "a scan" — that test is `all()` over pages — so its text-layer-less pages are escalated to MinerU per page instead; with MinerU off, one warning per document names how many pages could not be read |
+| `FORMUMIND_MINERU_ENABLED` | `false` | **Cloud MinerU escalate** (mineru.net). Default off — pages upload to a third party. Enable with token for dense tables/formulas/scans. Uses the built-in `hybrid` cascade (`mineru-open-sdk`), **not** `langchain-mineru` / Chroma |
+| `FORMUMIND_MINERU_API_KEY` / `MINERU_TOKEN` | — | Precision extract token from [mineru.net](https://mineru.net/apiManage/token) |
 | `FORMUMIND_MINERU_PAGE_TIMEOUT_S` | `90` | Wait budget for a **single** escalated page. Escalation is sequential, so timeouts accumulate page by page — raising this on a bad connection only doubles the waiting |
 | `FORMUMIND_MINERU_TIMEOUT_S` | `300` | Wait budget for sending a **whole** scanned document to MinerU |
 | `FORMUMIND_MINERU_MAX_PAGE_FAILURES` | `3` | Consecutive page failures before escalation is abandoned for that document (`0` disables). Without it one unreachable network is retried per page, paying the full timeout up to 20 times |
+| `FORMUMIND_EMBEDDING_MODEL` | _(empty)_ | Optional pin. Empty = bilingual MiniLM + bge-small-zh routing. For a **single multilingual space** (zh query ↔ en chunks without translate), set `BAAI/bge-m3` or `Qwen/Qwen3-Embedding-0.6B`, install `pip install -e '.[embedding]'`, then **Rebuild index**. Do not change this casually — stale vectors are excluded until reindex |
+| `FORMUMIND_KB_HYBRID_FUSION` | `weighted` | `weighted` (α·BM25+(1-α)·cosine) or `rrf` (reciprocal rank fusion A/B). Default stays weighted |
+| `FORMUMIND_CHAT_CROSS_ENCODER_ENABLED` | `false` | Optional local CE on chat after session BM25 recall. Default off (CPU latency); failures keep BM25 order |
+| `FORMUMIND_WIKI_STORM_CLAIM_REGENERATE` | `false` | When claim_check sets `needs_regenerate`, rewrite one failed section once (still `draft_not_claims`) |
 | `FORMUMIND_ARXIV_PREFER_SOURCE` | `true` | Fetch arXiv LaTeX source instead of the PDF: measured 53 s → 1.2 s on the same 100-page paper |
 | `FORMUMIND_PDF_DOWNLOAD` | `false` | **Legacy** patent PDF download, superseded by full-text enrichment; kept for compatibility |
 | `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |
@@ -1296,6 +1302,22 @@ FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID=<your-notebook-id>
 > convenience, not a production crawl.
 
 ---
+
+## 12b. RAG foundation (parse → chunk → hybrid → chat / Wiki)
+
+Garbage in, garbage out: **document parse quality bounds retrieval**. FormuMind’s
+single ingest path is `parsing.parse_document` → **hybrid** (local layout, then
+per-page MinerU cloud escalate when enabled, then RapidOCR). Do **not** add a
+parallel `langchain-mineru` + Chroma + `RetrievalQA` stack — that forks the
+vector store and breaks `[^n]` / Claims Raw-only contracts.
+
+Recommended ops (not silent code defaults):
+
+1. Enable MinerU only when you accept third-party upload (`FORMUMIND_MINERU_ENABLED` + token).
+2. For multilingual cosine without query-translate: set `FORMUMIND_EMBEDDING_MODEL`
+   to `BAAI/bge-m3` or `Qwen/Qwen3-Embedding-0.6B`, install `.[embedding]`, **Rebuild index**.
+3. Chat / STORM persistent KB retrieval shares `hybrid_search_scored` (α / optional RRF).
+4. STORM reports remain `draft_not_claims` — claim regenerate never feeds DOE bounds.
 
 ## 13. FAQ & scope notes
 
