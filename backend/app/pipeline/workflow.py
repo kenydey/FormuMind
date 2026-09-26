@@ -441,4 +441,5 @@ def run_optimization(
         history=history,
         top_formulations=top,
         engine=getattr(opt, "engine", "numpy-ucb"),
+        measurement_source="predictor_virtual",
     )

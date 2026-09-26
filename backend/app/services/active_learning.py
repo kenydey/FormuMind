@@ -241,9 +241,19 @@ def active_learning_doe(
                         chemical_feasibility=result.chemical_feasibility,
                         physical_constraints=result.physical_constraints,
                     )
-            except Exception:
+                # P1 #18: package importable but engine reports unavailable.
+                logger.warning(
+                    "BayBE reported unavailable; falling back to legacy DOE (engine=%s)",
+                    eng,
+                )
+            except Exception as exc:
                 if eng == "baybe":
                     raise
+                # P1 #18: engine=auto must not swallow BayBE failures silently.
+                logger.warning(
+                    "BayBE active-learning failed, falling back to legacy DOE: %s",
+                    exc,
+                )
 
     plan = _legacy_active_learning_doe(req, existing, n_suggest, design, doe_engine=doe_engine)
     from ..pipeline.workflow import _cache_plan

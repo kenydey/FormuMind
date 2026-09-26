@@ -72,8 +72,15 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("thermo", "thermo", "science", "物性估算（密度 → VOC g/L 接地）"),
     Dependency("ChemFormula", "chemformula", "science", "化学式解析与校验"),
     # ── Optimizers ─────────────────────────────────────────────────────────
-    Dependency("optuna", "optuna", "optimize", "Optuna NSGA-II 多目标寻优"),
-    Dependency("botorch", "botorch", "bo", "BoTorch 高斯过程贝叶斯寻优（含 CPU torch）"),
+    # Honesty (P1 #21): code uses TPESampler on a scalar objective — not NSGA-II.
+    # True Pareto multi-objective lives on the BayBE path (qNEHVI / ParetoObjective).
+    Dependency("optuna", "optuna", "optimize", "Optuna TPE 标量寻优（非 NSGA-II）"),
+    Dependency(
+        "botorch",
+        "botorch",
+        "bo",
+        "BoTorch GP + LogEI 标量寻优（非 Pareto；多目标见 BayBE）",
+    ),
     Dependency("gpytorch", "gpytorch", "bo", "BoTorch GP 内核依赖"),
     # ── Color ──────────────────────────────────────────────────────────────
     Dependency("colour-science", "colour", "color", "CIELAB / ΔE₀₀ 色差计算"),
