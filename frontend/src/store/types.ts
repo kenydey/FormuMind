@@ -194,7 +194,13 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org";
+  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors";
+  chatComposerPlusEnabled: boolean;
+  chatMode: "chat" | "evidence";
+  selectedChatSkills: string[];
+  selectedConnectors: string[];
+  /** Append text into ResearchPanel draft (set by panel via store). */
+  chatDraftAppender: ((text: string) => void) | null;
   /** When opening Settings → 环境变量, scroll/highlight this EnvFlag.attr (e.g. wiki_dossier_report_enabled). */
   settingsEnvFocusAttr: string | null;
   /** Bumped after EnvFlags save so Hub Reports (and peers) refetch flag status. */
@@ -293,7 +299,13 @@ export interface AppState {
   ) => void;
   clearSettingsEnvFocus: () => void;
   bumpEnvFlagsRevision: () => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors") => void;
+  setChatMode: (mode: "chat" | "evidence") => void;
+  toggleSelectedChatSkill: (id: string) => void;
+  toggleSelectedConnector: (id: string) => void;
+  clearComposerSelections: () => void;
+  setChatDraftAppender: (fn: ((text: string) => void) | null) => void;
+  appendChatDraftRef: (text: string) => void;
   toggleArtifactDrawer: () => void;
   openArtifact: (id: import("../artifacts/projectArtifacts").ArtifactKind) => void;
   setActiveArtifactId: (id: import("../artifacts/projectArtifacts").ArtifactKind | null) => void;

@@ -20,14 +20,36 @@ def test_ingest_text():
 
 
 def test_ingest_batch():
+    import uuid
+
+    from tests.test_ingest_async_helpers import poll_task
+
+    suffix = uuid.uuid4().hex[:8]
     payload = [
-        ("files", ("a.txt", b"Hello world from batch file one with enough length.", "text/plain")),
-        ("files", ("b.txt", b"Second batch file about corrosion inhibitors and epoxy.", "text/plain")),
+        (
+            "files",
+            (
+                f"a-{suffix}.txt",
+                f"Hello world from batch file one with enough length {suffix}.".encode(),
+                "text/plain",
+            ),
+        ),
+        (
+            "files",
+            (
+                f"b-{suffix}.txt",
+                f"Second batch file about corrosion inhibitors and epoxy {suffix}.".encode(),
+                "text/plain",
+            ),
+        ),
     ]
     r = client.post("/api/ingest/batch", files=payload)
-    assert r.status_code == 200
-    assert r.json()["files_processed"] == 2
-    assert r.json()["total"] >= 1
+    assert r.status_code == 202, r.text
+    body = poll_task(client, r.json()["task_id"])
+    assert body["state"] == "completed"
+    result = body.get("result") or {}
+    assert result.get("files_processed") == 2
+    assert result.get("total", 0) >= 1
 
 
 def test_ingest_url_rejects_localhost():

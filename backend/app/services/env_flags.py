@@ -51,9 +51,29 @@ CATEGORY_LABELS: dict[str, str] = {
     "data": "数据与训练 · Data",
     "infra": "基础设施 · Infra",
     "ops": "可观测 · Ops",
+    "agent": "技能与证据 · Skills / Evidence",
 }
 
 FLAG_REGISTRY: tuple[EnvFlag, ...] = (
+    # ── Skills / Evidence / Connectors ────────────────────────────────────
+    EnvFlag("chat_composer_plus_enabled", "中栏 Composer + 菜单",
+            "问答输入区显示 + 菜单（附件 / Skills / Evidence 模式 / Connectors）。",
+            "agent"),
+    EnvFlag("chat_skills_runtime_enabled", "对话技能运行时",
+            "允许加载 SKILL.md 对话技能并注入提示词（设置页 Skills）。",
+            "agent"),
+    EnvFlag("evidence_doi_verify_enabled", "Evidence DOI 校验",
+            "回答中的 DOI 经 Crossref 校验；失败/撤稿关联会写入脚注警告。",
+            "agent", "需网络"),
+    EnvFlag("evidence_reviewer_enabled", "Evidence 轻量 Reviewer",
+            "Evidence/问答结束后做断言↔引用复核（默认关）。",
+            "agent"),
+    EnvFlag("connectors_builtin_enabled", "内置文献/化学 Connectors",
+            "Settings 中 Literature / Chemistry 只读连接器；可在中栏 + 勾选。",
+            "agent", "需网络"),
+    EnvFlag("mcp_client_enabled", "自定义 MCP Client",
+            "允许配置 stdio MCP 服务器（默认关；写类工具名启发式拒绝）。",
+            "agent", "高级；默认关", maturity="experimental"),
     # ── 检索 ──────────────────────────────────────────────────────────────
     EnvFlag("gpu_enabled", "GPU 加速 ColBERT 检索",
             "启用后使用 PyLate ColBERT 作为知识库检索后端（需 CUDA GPU ≥ 4GB VRAM）。"

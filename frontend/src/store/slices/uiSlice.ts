@@ -58,7 +58,45 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
         draft.envFlagsRevision = (draft.envFlagsRevision || 0) + 1;
       }),
 
-    setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org") =>
+    setChatMode: (mode: "chat" | "evidence") =>
+      set((draft) => {
+        draft.chatMode = mode;
+      }),
+
+    toggleSelectedChatSkill: (id: string) =>
+      set((draft) => {
+        const setIds = new Set(draft.selectedChatSkills);
+        if (setIds.has(id)) setIds.delete(id);
+        else setIds.add(id);
+        draft.selectedChatSkills = [...setIds];
+      }),
+
+    toggleSelectedConnector: (id: string) =>
+      set((draft) => {
+        const setIds = new Set(draft.selectedConnectors);
+        if (setIds.has(id)) setIds.delete(id);
+        else setIds.add(id);
+        draft.selectedConnectors = [...setIds];
+      }),
+
+    clearComposerSelections: () =>
+      set((draft) => {
+        draft.selectedChatSkills = [];
+        draft.selectedConnectors = [];
+        draft.chatMode = "chat";
+      }),
+
+    setChatDraftAppender: (fn) =>
+      set((draft) => {
+        draft.chatDraftAppender = fn;
+      }),
+
+    appendChatDraftRef: (text: string) => {
+      const fn = get().chatDraftAppender;
+      if (fn) fn(text);
+    },
+
+    setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors") =>
       set((draft) => {
         draft.settingsTab = tab;
         if (tab !== "env") draft.settingsEnvFocusAttr = null;
@@ -142,6 +180,12 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     | "clearSettingsEnvFocus"
     | "bumpEnvFlagsRevision"
     | "setSettingsTab"
+    | "setChatMode"
+    | "toggleSelectedChatSkill"
+    | "toggleSelectedConnector"
+    | "clearComposerSelections"
+    | "setChatDraftAppender"
+    | "appendChatDraftRef"
     | "toggleArtifactDrawer"
     | "openArtifact"
     | "setActiveArtifactId"

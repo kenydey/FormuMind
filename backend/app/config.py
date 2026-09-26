@@ -550,6 +550,15 @@ class Settings(BaseSettings):
     chat_structured_enabled: bool = True
     chat_clarification_enabled: bool = True
     chat_claim_check_enabled: bool = True
+    # Skills / Evidence / Connectors / MCP (OpenScience-inspired upgrade, default conservative).
+    chat_composer_plus_enabled: bool = True
+    chat_skills_runtime_enabled: bool = True
+    # off | paperqa | hybrid_strict — global default; per-request mode overrides when set.
+    evidence_synthesis_mode: str = "off"
+    evidence_doi_verify_enabled: bool = True
+    evidence_reviewer_enabled: bool = False
+    connectors_builtin_enabled: bool = True
+    mcp_client_enabled: bool = False
     # Chat native chem tool-calling (OpenAI-compatible tools → chemtools / SureChemBL / OCSR).
     chat_chem_tools_enabled: bool = True
     chat_chem_tools_max_rounds: int = 4

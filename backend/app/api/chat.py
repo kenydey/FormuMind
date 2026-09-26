@@ -210,6 +210,18 @@ def chat(req: ChatRequestValidated):
             project_id=req.project_id,
             include_entity_resolution=req.include_entity_resolution,
         )
+        try:
+            from ..services.connectors_builtin import gather_connector_evidence
+
+            extra = gather_connector_evidence(
+                retrieval_query,
+                list(req.selected_connectors or []),
+                settings=settings,
+            )
+            if extra:
+                sources = sources + [_sanitize_evidence(e) for e in extra]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("connector enrich skipped: %s", exc)
         _mark("kb_augment")
 
         clarification = detect_clarification(
@@ -222,6 +234,13 @@ def chat(req: ChatRequestValidated):
 
         structured: StructuredAnswer | None = None
         citations: list[Evidence]
+        from ..services.evidence_synthesis import (
+            evidence_mode_active,
+            try_paperqa_answer,
+            postprocess_evidence_answer,
+        )
+
+        use_evidence = evidence_mode_active(req.mode, settings)
 
         if req.response_format == "structured" and settings.chat_structured_enabled:
             structured, struct_err = generate_structured_answer(
@@ -247,19 +266,38 @@ def chat(req: ChatRequestValidated):
                 answer = _ensure_answer(answer)
             _mark("answer")
         else:
-            answer, citations = answer_question(
-                question,
-                sources,
-                domain=req.domain,
-                history=history,
-                structure=req.structure,
-            )
-            answer = _ensure_answer(answer)
+            pq = try_paperqa_answer(question, sources) if use_evidence else None
+            if pq:
+                answer, citations = pq
+                answer = _ensure_answer(answer)
+            else:
+                answer, citations = answer_question(
+                    question,
+                    sources,
+                    domain=req.domain,
+                    history=history,
+                    structure=req.structure,
+                )
+                answer = _ensure_answer(answer)
             _mark("answer")
 
         if clarification and clarification.possible_meanings and "按" not in answer:
             hint = clarification.possible_meanings[0]
             answer = f"{answer}\n\n（默认按「{hint}」理解；如需其他含义请说明。）"
+
+        doi_results = None
+        evidence_reviewer = None
+        if use_evidence or req.selected_skills:
+            answer, emeta = postprocess_evidence_answer(answer, settings=settings)
+            doi_results = emeta.get("doi_results")
+            try:
+                from ..services.evidence_reviewer import review_answer
+
+                evidence_reviewer = review_answer(
+                    question, answer, _claims_evidence(citations), settings=settings
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("reviewer skipped: %s", exc)
 
         sourced_claims = build_sourced_claims(
             question,
@@ -282,6 +320,9 @@ def chat(req: ChatRequestValidated):
             clarification=clarification,
             rewritten_query=rewritten_query,
             sourced_claims=sourced_claims,
+            mode=req.mode,
+            doi_results=doi_results,
+            evidence_reviewer=evidence_reviewer,
         )
     except HTTPException:
         raise
@@ -332,6 +373,18 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         project_id=req.project_id,
         include_entity_resolution=req.include_entity_resolution,
     )
+    try:
+        from ..services.connectors_builtin import gather_connector_evidence
+
+        extra = gather_connector_evidence(
+            retrieval_query,
+            list(req.selected_connectors or []),
+            settings=settings,
+        )
+        if extra:
+            sources = sources + [_sanitize_evidence(e) for e in extra]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("stream connector enrich skipped: %s", exc)
 
     clarification = detect_clarification(
         question, history, req.clarified_entities, settings=settings
@@ -347,6 +400,18 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     prompt = _chat_prompt(
         question, relevant, req.domain, history=history, structure=req.structure
     )
+    try:
+        from ..services.evidence_synthesis import enrich_chat_prompt
+
+        if getattr(settings, "chat_skills_runtime_enabled", True):
+            prompt = enrich_chat_prompt(
+                prompt,
+                mode=req.mode,
+                skill_ids=list(req.selected_skills or []),
+                settings=settings,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("evidence prompt enrich skipped: %s", exc)
     return {
         "question": question,
         "prompt": prompt,
@@ -356,6 +421,8 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         "kg_stats": kg_stats,
         "clarification": clarification,
         "rewritten_query": rewritten_query,
+        "mode": req.mode,
+        "selected_skills": list(req.selected_skills or []),
     }
 
 
@@ -363,6 +430,34 @@ def _sse(obj: dict) -> str:
     import json
 
     return f"data: {json.dumps(obj, ensure_ascii=False, default=str)}\n\n"
+
+
+def _finalize_evidence_fields(
+    question: str,
+    answer: str,
+    citations: list,
+    *,
+    settings,
+    mode: str | None,
+    selected_skills: list[str] | None,
+) -> tuple[str, dict | None, dict | None]:
+    """DOI annotate + optional reviewer; returns (answer, doi_results, reviewer)."""
+    from ..services.evidence_synthesis import evidence_mode_active, postprocess_evidence_answer
+
+    doi_results = None
+    reviewer = None
+    if evidence_mode_active(mode, settings) or selected_skills:
+        answer, emeta = postprocess_evidence_answer(answer, settings=settings)
+        doi_results = emeta.get("doi_results")
+        try:
+            from ..services.evidence_reviewer import review_answer
+
+            reviewer = review_answer(
+                question, answer, _claims_evidence(citations), settings=settings
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("stream reviewer skipped: %s", exc)
+    return answer, doi_results, reviewer
 
 
 @router.post("/chat/stream")
@@ -406,12 +501,70 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "kb_used": kb_used,
                     "rewritten_query": plan["rewritten_query"],
                     "source_count": len(sources),
+                    "mode": plan.get("mode") or req.mode,
                 }
             )
         except Exception as exc:
             logger.warning("chat/stream 准备失败: %s", exc)
             yield _sse({"type": "error", "message": f"检索失败: {str(exc)[:200]}"})
             return
+
+        # Evidence mode: try PaperQA async before token stream.
+        try:
+            from ..services.evidence_synthesis import (
+                evidence_mode_active,
+                try_paperqa_answer_async,
+            )
+
+            if evidence_mode_active(req.mode, settings):
+                pq = await try_paperqa_answer_async(question, sources)
+                if pq:
+                    answer, citations = pq
+                    answer = _ensure_answer(answer)
+                    yield _sse({"type": "phase", "phase": "answering"})
+                    yield _sse({"type": "token", "delta": answer})
+                    yield _sse({"type": "phase", "phase": "claims"})
+                    answer, doi_results, reviewer = _finalize_evidence_fields(
+                        question,
+                        answer,
+                        citations,
+                        settings=settings,
+                        mode=req.mode,
+                        selected_skills=list(req.selected_skills or []),
+                    )
+                    claims = None
+                    if settings.chat_claim_check_enabled and answer:
+                        try:
+                            claims = await asyncio.to_thread(
+                                build_sourced_claims,
+                                question,
+                                answer,
+                                _claims_evidence(citations),
+                                structured=None,
+                                settings=settings,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("chat/stream paperqa claims: %s", exc)
+                    yield _sse(
+                        {
+                            "type": "done",
+                            "answer": answer,
+                            "citations": [_sanitize_evidence(c) for c in citations],
+                            "rag_backend": "paperqa",
+                            "kb_chunks_used": kb_used,
+                            "entity_resolution": plan["entity_resolution"],
+                            "kg_retrieval_stats": plan["kg_stats"],
+                            "clarification": plan["clarification"],
+                            "rewritten_query": plan["rewritten_query"],
+                            "sourced_claims": claims,
+                            "mode": req.mode,
+                            "doi_results": doi_results,
+                            "evidence_reviewer": reviewer,
+                        }
+                    )
+                    return
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("paperqa stream path skipped: %s", exc)
 
         # 结构化请求 → 整包答案(非 token 流)。
         try:
@@ -687,6 +840,18 @@ async def chat_stream(req: "ChatRequestValidated"):
             if not answer:
                 answer = result_holder.get("text") or ""
 
+            citations = [
+                _sanitize_evidence(c) for c in plan["sources"][: min(8, len(plan["sources"]))]
+            ]
+            answer, doi_results, reviewer = _finalize_evidence_fields(
+                question,
+                answer,
+                citations,
+                settings=settings,
+                mode=req.mode,
+                selected_skills=list(req.selected_skills or []),
+            )
+
             # claims 收尾(12s 硬超时 → offline 降级)。
             yield _sse({"type": "phase", "phase": "claims"})
             claims = None
@@ -708,9 +873,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                 {
                     "type": "done",
                     "answer": answer,
-                    "citations": [
-                        _sanitize_evidence(c) for c in plan["sources"][: min(8, len(plan["sources"]))]
-                    ],
+                    "citations": citations,
                     "rag_backend": active_rag_backend(),
                     "kb_chunks_used": kb_used,
                     "entity_resolution": plan["entity_resolution"],
@@ -718,6 +881,9 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "clarification": plan["clarification"],
                     "rewritten_query": plan["rewritten_query"],
                     "sourced_claims": claims,
+                    "mode": req.mode,
+                    "doi_results": doi_results,
+                    "evidence_reviewer": reviewer,
                 }
             )
         except Exception as exc:  # noqa: BLE001

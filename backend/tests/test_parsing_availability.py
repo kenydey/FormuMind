@@ -125,18 +125,23 @@ def test_missing_parser_raises_rather_than_returning_empty(
 def test_upload_with_no_parser_is_a_422_not_a_200(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """422 with a fixable message, not 200 with an empty knowledge base."""
-    from app.api import ingest as ingest_api
+    """Async ingest queues 202; ParserUnavailable fails the task (not silent 200)."""
+    from app.services import ingestion
+    from tests.test_ingest_async_helpers import poll_task
 
     def explode(*_args, **_kwargs):
         raise parsing.ParserUnavailable("pdf", "未安装任何 PDF 解析器")
 
-    monkeypatch.setattr(ingest_api, "ingest_file", explode)
-    response = TestClient(app).post(
+    monkeypatch.setattr(ingestion, "ingest_files_batch", explode)
+    client = TestClient(app)
+    response = client.post(
         "/api/ingest", files={"file": ("spec.pdf", b"%PDF-1.4", "application/pdf")}
     )
-    assert response.status_code == 422
-    assert "解析器" in response.json()["detail"]
+    assert response.status_code == 202, response.text
+    task = poll_task(client, response.json()["task_id"])
+    assert task["state"] == "failed"
+    detail = str(task.get("message") or "") + str(task.get("result") or "")
+    assert "解析器" in detail or "ParserUnavailable" in detail or "pdf" in detail.lower()
 
 
 def test_empty_extraction_from_a_working_parser_is_not_an_error(

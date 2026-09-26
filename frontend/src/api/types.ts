@@ -714,6 +714,67 @@ export interface FormulationSkill {
   tools: string[];
   checklist: FormulationSkillChecklistItem[];
   presets: Record<string, unknown>;
+  kind?: string;
+}
+
+/** Unified Skills catalog (playbooks + chat skills). */
+export interface UnifiedSkill {
+  id: string;
+  kind: "playbook" | "chat_skill" | string;
+  title: string;
+  summary: string;
+  when_to_use?: string;
+  description?: string;
+  action: string;
+  modal: string | null;
+  icon: string;
+  tools: string[];
+  allowed_tools?: string[];
+  checklist: FormulationSkillChecklistItem[];
+  presets: Record<string, unknown>;
+  activation_policy: string;
+  origin?: string;
+  category?: string;
+  enabled: boolean;
+  pinned: boolean;
+  entry?: boolean;
+}
+
+export interface SkillsCatalogResponse {
+  skills: UnifiedSkill[];
+  prefs: {
+    disabled_ids?: string[];
+    pinned_ids?: string[];
+    evidence_mode_default?: boolean;
+    disabled_connector_ids?: string[];
+  };
+}
+
+export interface BuiltinConnector {
+  id: string;
+  display_name: string;
+  kind: string;
+  description: string;
+  use_when: string;
+  sources: string[];
+  readonly: boolean;
+  enabled: boolean;
+}
+
+export interface McpServerConfig {
+  id: string;
+  command: string;
+  args?: string[];
+  enabled?: boolean;
+  env?: Record<string, string>;
+  transport?: string;
+}
+
+export interface ConnectorsResponse {
+  builtin: BuiltinConnector[];
+  mcp: McpServerConfig[];
+  mcp_client_enabled: boolean;
+  connectors_builtin_enabled: boolean;
 }
 
 export interface BatchUpdateRequest {
@@ -1398,6 +1459,10 @@ export interface ChatRequest {
   attachment_source_ids?: string[];
   /** 结构图识别结果（uploadStructure 返回），相似材料名注入检索。 */
   structure?: StructureRecognitionResult | null;
+  mode?: "chat" | "evidence";
+  selected_skills?: string[];
+  selected_connectors?: string[];
+  ref_doc_ids?: string[];
 }
 
 /** POST /api/chemical/structure 返回：图 → SMILES + MolJSON + 相似材料。 */

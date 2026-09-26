@@ -12,6 +12,8 @@ import WikiChatModeSelector from "./WikiChatModeSelector";
 import OcsrPanel from "./OcsrPanel";
 import NotebookLMPanel from "./NotebookLMPanel";
 import OrganizationDashboard from "./OrganizationDashboard";
+import SkillsSettingsPanel from "./SkillsSettingsPanel";
+import ConnectorsSettingsPanel from "./ConnectorsSettingsPanel";
 import { useStore } from "../store";
 import {
   api,
@@ -177,6 +179,8 @@ export default function SettingsModal() {
         {([
           ["llm", "大模型"],
           ["api", "API 配置"],
+          ["skills", "Skills"],
+          ["connectors", "MCP"],
           ["env", "环境变量"],
           ["recommend", "推荐"],
           ["notebooklm", "NotebookLM"],
@@ -210,6 +214,10 @@ export default function SettingsModal() {
         <DependencyManager reloadKey={reloadKey} />
       ) : settingsTab === "api" ? (
         <ApiSettingsPanel reloadKey={reloadKey} />
+      ) : settingsTab === "skills" ? (
+        <SkillsSettingsPanel reloadKey={reloadKey} />
+      ) : settingsTab === "connectors" ? (
+        <ConnectorsSettingsPanel reloadKey={reloadKey} />
       ) : settingsTab === "env" ? (
         <EnvFlagsPanel reloadKey={reloadKey} />
       ) : settingsTab === "notebooklm" ? (
