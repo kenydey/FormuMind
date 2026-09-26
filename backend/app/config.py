@@ -121,6 +121,8 @@ class Settings(BaseSettings):
     # models are rebuilt from this dataset on startup, so no model binaries are
     # stored. ``experiments_path`` is retained for one-time migration of legacy
     # JSON datasets into the database.
+    # Default SQLite is for single-process / CI. Production multi-worker /
+    # multi-host must set FORMUMIND_DB_URL=postgresql://... (P1 #25).
     db_url: str = "sqlite:///./data/formumind.db"
     experiments_path: str = "./data/experiments.json"
     # Minimum measured samples before a trained model is used for a metric.
@@ -607,6 +609,12 @@ class Settings(BaseSettings):
     # Default on — draft reports get a verification appendix when claims look
     # weak; checker failures never block the report.
     wiki_storm_claim_check: bool = True
+    # P1 #26: Langfuse tracing (MIT). Default OFF — no network without keys.
+    # When enabled + keys present, llm.complete_json / search rerank emit spans.
+    langfuse_enabled: bool = False
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
     # Wiki page [[wikilink]] graph for Hub canvas (not materials KG).
     # Top-5‴ #5（2026-09-25）：默认 ON（可关；≠ 材料 KG / Neo4j）。
     wiki_page_graph_enabled: bool = True

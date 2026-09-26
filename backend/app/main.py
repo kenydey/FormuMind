@@ -107,6 +107,20 @@ async def lifespan(_app: FastAPI):
         from .middleware.api_auth import resolve_api_token
 
         resolve_api_token(settings)
+    # P1 #25: production + SQLite is a foot-gun under multi-worker write load.
+    try:
+        env = (settings.environment or "").strip().lower()
+        db = (settings.db_url or "").strip().lower()
+        if env in ("production", "prod") and db.startswith("sqlite"):
+            logger.warning(
+                "FORMUMIND_ENVIRONMENT=%s with SQLite db_url=%s — "
+                "set FORMUMIND_DB_URL=postgresql://... for multi-process production "
+                "(see docs/USER_GUIDE.md / deploy notes).",
+                settings.environment,
+                settings.db_url,
+            )
+    except Exception as exc:
+        log_handled_exception(logger, exc, "lifespan: sqlite production warning failed")
     # ------------------------------------------------------------------
     # Recover stalled outbox rows (best-effort, must not block startup).
     # Runs in a daemon thread; under celery_eager re-dispatch is skipped so

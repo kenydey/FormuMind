@@ -108,7 +108,8 @@ def _r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return 1.0 - ss_res / ss_tot
 
 
-def _kfold_r2(X: np.ndarray, y: np.ndarray, k: int = 5) -> float | None:
+def _kfold_oof(X: np.ndarray, y: np.ndarray, k: int = 5) -> np.ndarray | None:
+    """Out-of-fold predictions via k-fold; None when the set is too small."""
     n = len(y)
     if n < k or n < 5:
         return None
@@ -121,7 +122,34 @@ def _kfold_r2(X: np.ndarray, y: np.ndarray, k: int = 5) -> float | None:
         model, _ = _make_regressor()
         model.fit(X[train], y[train])
         preds[f] = model.predict(X[f])
+    return preds
+
+
+def _kfold_r2(X: np.ndarray, y: np.ndarray, k: int = 5) -> float | None:
+    preds = _kfold_oof(X, y, k=k)
+    if preds is None:
+        return None
     return _r2(y, preds)
+
+
+def _conformal_q90(X: np.ndarray, y: np.ndarray, k: int = 5) -> float | None:
+    """Split-conformal absolute residual quantile (~90% coverage half-width).
+
+    Uses k-fold OOF residuals so EI/UCB uncertainty is not pure tree-std or
+    ridge RMSE (both systematically miscalibrated on small DOE sets).
+    """
+    preds = _kfold_oof(X, y, k=k)
+    if preds is None:
+        return None
+    resid = np.abs(y - preds)
+    n = len(resid)
+    # Finite-sample corrected level for 90% marginal coverage.
+    q_level = min(1.0, (1.0 - 0.10) * (1.0 + 1.0 / n))
+    return float(np.quantile(resid, q_level))
+
+
+# z≈1.645 maps 90% two-sided normal coverage half-width ↔ σ.
+_CONFORMAL_TO_STD = 1.64485362695
 
 
 class _Trained:
@@ -270,6 +298,7 @@ class ModelRegistry:
             return None
         model, info_dict = loaded
         try:
+            cq = info_dict.get("conformal_q90")
             info = ModelInfo(
                 domain=domain,
                 project_id=pid,
@@ -283,6 +312,8 @@ class ModelRegistry:
                 data_hash=info_dict.get("data_hash") or data_hash,
                 feature_version=info_dict.get("feature_version") or feature_version,
                 version_id=info_dict.get("version_id"),
+                conformal_q90=float(cq) if cq is not None else None,
+                uncertainty_calibrated=bool(info_dict.get("uncertainty_calibrated")),
             )
         except Exception as exc:
             logger.warning("cached ModelInfo invalid for %s/%s: %s", pid, metric, exc)
@@ -314,6 +345,14 @@ class ModelRegistry:
             model, backend = _make_regressor()
             model.fit(X, y)
             trained_at = _utcnow_iso()
+            oof = _kfold_oof(X, y)
+            cv_r2 = round(_r2(y, oof), 4) if oof is not None else None
+            q90: float | None = None
+            if oof is not None:
+                resid = np.abs(y - oof)
+                n = len(resid)
+                q_level = min(1.0, 0.9 * (1.0 + 1.0 / n))
+                q90 = float(np.quantile(resid, q_level))
             info = ModelInfo(
                 domain=domain,
                 project_id=pid,
@@ -321,11 +360,13 @@ class ModelRegistry:
                 backend=backend,
                 n_samples=len(y),
                 r2=round(_r2(y, np.asarray(model.predict(X))), 4),
-                cv_r2=(round(v, 4) if (v := _kfold_r2(X, y)) is not None else None),
+                cv_r2=cv_r2,
                 rmse=round(math.sqrt(np.mean((y - np.asarray(model.predict(X))) ** 2)), 4),
                 trained_at=trained_at,
                 data_hash=data_hash,
                 feature_version=feat_ver,
+                conformal_q90=round(q90, 6) if q90 is not None else None,
+                uncertainty_calibrated=bool(q90 is not None and q90 > 0),
             )
             if self._persist_enabled():
                 try:
@@ -370,6 +411,7 @@ class ModelRegistry:
                 return None
             if not model_store.set_current_version(project_id, metric, version_id):
                 return None
+            cq = info_dict.get("conformal_q90")
             info = ModelInfo(
                 domain=domain,
                 project_id=project_id,
@@ -383,6 +425,8 @@ class ModelRegistry:
                 data_hash=info_dict.get("data_hash"),
                 feature_version=info_dict.get("feature_version"),
                 version_id=version_id,
+                conformal_q90=float(cq) if cq is not None else None,
+                uncertainty_calibrated=bool(info_dict.get("uncertainty_calibrated")),
             )
             self._models[(project_id, metric)] = _Trained(model, info)
             return info
@@ -415,7 +459,12 @@ class ModelRegistry:
         *,
         project_id: str = "",
     ) -> tuple[float, float, int] | None:
-        """Return (prediction, std, n_samples) for a trained metric, else None."""
+        """Return (prediction, std, n_samples) for a trained metric, else None.
+
+        P1 #19: when ``conformal_q90`` is available, ``std`` is at least
+        ``q90 / 1.645`` so EI/UCB never trusts under-dispersed tree-std or
+        constant ridge RMSE alone.
+        """
         with self._lock:
             pid = project_id or domain.value
             trained = self._models.get((pid, metric))
@@ -425,8 +474,40 @@ class ModelRegistry:
                 return None
             arr = np.array([feature_vec], dtype=float)
             pred = float(trained.model.predict(arr)[0])
-            std = float(trained.model.predict_std(arr))
+            raw_std = float(trained.model.predict_std(arr))
+            q90 = trained.info.conformal_q90
+            if q90 is not None and q90 > 0:
+                calibrated = float(q90) / _CONFORMAL_TO_STD
+                std = max(raw_std, calibrated)
+            else:
+                std = raw_std
             return pred, std, trained.info.n_samples
+
+    def predict_interval(
+        self,
+        domain: ProductDomain,
+        metric: str,
+        feature_vec: list[float],
+        *,
+        project_id: str = "",
+    ) -> tuple[float, float, float, int] | None:
+        """Return (pred, lo, hi, n) using conformal half-width when available."""
+        with self._lock:
+            pid = project_id or domain.value
+            trained = self._models.get((pid, metric))
+            if trained is None and project_id:
+                trained = self._models.get((domain.value, metric))
+            if trained is None:
+                return None
+            arr = np.array([feature_vec], dtype=float)
+            pred = float(trained.model.predict(arr)[0])
+            q90 = trained.info.conformal_q90
+            if q90 is None or q90 <= 0:
+                raw = float(trained.model.predict_std(arr))
+                half = raw * _CONFORMAL_TO_STD
+            else:
+                half = float(q90)
+            return pred, pred - half, pred + half, trained.info.n_samples
 
     def info(self) -> list[ModelInfo]:
         with self._lock:
