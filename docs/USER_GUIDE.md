@@ -1169,7 +1169,7 @@ defaults.
 | `FORMUMIND_NOTEBOOKLM_ENABLED` | `false` | enable the NotebookLM retrieval source |
 | `FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID` | empty | the fixed notebook id to query |
 | `FORMUMIND_NOTEBOOKLM_STORAGE_PATH` | `./data/notebooklm_auth.json` | session file written by `notebooklm login` |
-| `FORMUMIND_DB_URL` | `sqlite:///./data/formumind.db` | experiment database; can point at Postgres |
+| `FORMUMIND_DB_URL` | `sqlite:///./data/formumind.db` | **Production must use Postgres** (`postgresql://user:pass@host:5432/formumind`). SQLite is for single-process / CI only — multi-worker write load risks `database is locked`. |
 | `FORMUMIND_REDIS_URL` | `redis://localhost:6379/0` | Celery broker |
 | `FORMUMIND_CELERY_EAGER` | `true` | run tasks in-process without a broker. **Operator-owned** — see below |
 | `FORMUMIND_OPTIMIZE_ITERATIONS` | `24` | optimization iterations |
@@ -1219,8 +1219,11 @@ clear the stored value.
   zero-config, file-backed).
 - On startup, a legacy `experiments.json` is **automatically migrated** into
   SQLite (idempotent; the original file is kept as an audit trail).
-- For multi-process deployments, point `FORMUMIND_DB_URL` at Postgres — no code
-  changes required.
+- **Production DB (P1 #25):** set `FORMUMIND_DB_URL=postgresql://...` for any
+  multi-process / multi-host deploy. SQLite remains the default for local CI
+  and single-worker demos; the API logs a warning when
+  `FORMUMIND_ENVIRONMENT=production` still points at SQLite. No code changes
+  are required to switch engines — SQLAlchemy URL only.
 - **SQLite runs in WAL journal mode** (set on every connection). Under the
   default `delete` mode readers and writers are mutually exclusive, so one long
   ingest transaction blocks every unrelated read until it commits — that is what

@@ -925,24 +925,39 @@ def complete_json(prompt: str) -> dict | None:
     Tolerates ```` ```json ```` markdown fences. Returns None when no LLM is
     configured or the reply is not valid JSON. Shared by the IP-analysis and
     intent-parsing agents so the fence-stripping logic lives in one place.
+
+    P1 #26: optional Langfuse generation span (fail-open).
     """
     import json
 
-    raw = _call_llm(prompt)
-    if not raw:
-        return None
-    text = raw.strip()
-    if "```" in text:
-        # Take the content of the first fenced block.
-        text = text.split("```", 2)[1] if text.count("```") >= 2 else text
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else None
-    except Exception as exc:
-        return degrade_return(log, exc, "operation failed", None)
+    from .llm_trace import trace_generation
+
+    with trace_generation(
+        "complete_json",
+        input_preview=prompt,
+        metadata={"kind": "json"},
+    ) as span:
+        raw = _call_llm(prompt)
+        if not raw:
+            span["error"] = "empty_llm_response"
+            return None
+        text = raw.strip()
+        if "```" in text:
+            # Take the content of the first fenced block.
+            text = text.split("```", 2)[1] if text.count("```") >= 2 else text
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                span["output"] = data
+                return data
+            span["error"] = "json_not_object"
+            return None
+        except Exception as exc:
+            span["error"] = str(exc)
+            return degrade_return(log, exc, "operation failed", None)
 
 
 def _strip_json_fences(text: str) -> str:
