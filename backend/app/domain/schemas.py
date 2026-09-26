@@ -352,6 +352,9 @@ class Evidence(BaseModel):
     domain_tags: list[str] = Field(default_factory=list)
     domain_match: Literal["strong", "weak", "none"] | None = None
     taxonomy_source: Literal["arxiv", "openalex", "chemrxiv", "cpc", "lexical", "none"] | None = None
+    # P1 #16: page/paragraph anchors for citation lines (align CitationAnchor).
+    page: int | None = None
+    paragraph: int | None = None
 
 
 class ParameterBoundary(BaseModel):
@@ -576,6 +579,11 @@ class OptimizationResult(BaseModel):
     # "optuna-tpe", "summit-sobo", "botorch-ei"). Default preserves
     # backward compatibility.
     engine: str = "numpy-ucb"
+    # P1 #22: history/observe values source. Virtual loops feed the optimizer
+    # with predictor scores — not lab measurements — so the curve is self-
+    # consistency of the surrogate, not real improvement.
+    # "predictor_virtual" | "lab" | "skipped"
+    measurement_source: str = "predictor_virtual"
 
 
 class TaskState(str, Enum):

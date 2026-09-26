@@ -38,6 +38,10 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     task_track_started=True,
+    # P1 #28: ack after success so a killed worker redelivers in-flight work;
+    # prefetch=1 avoids hoarding long DOE/KB jobs onto one busy child.
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
     # Was 600 / 900 (10 / 15 min), which killed every large knowledge-base
     # build. The rest of the stack had already been told these runs may take as
     # long as they take — no client wall-clock limit, a 6 h SSE deadline,

@@ -413,6 +413,8 @@ export interface OptimizationResult {
   history: number[];
   top_formulations: Formulation[];
   engine?: string;
+  /** predictor_virtual = in-loop surrogate scores (not lab); lab | skipped */
+  measurement_source?: string;
 }
 
 export interface RunExplanation {

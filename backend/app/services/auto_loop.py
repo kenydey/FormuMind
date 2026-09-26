@@ -88,6 +88,7 @@ def _stub_optimization(req: Requirement) -> OptimizationResult:
         history=[],
         top_formulations=[],
         engine="skipped-converged",
+        measurement_source="skipped",
     )
 
 

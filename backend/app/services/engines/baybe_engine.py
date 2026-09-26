@@ -469,4 +469,5 @@ class BaybeCampaignEngine:
             history=history or [0.0],
             top_formulations=top,
             engine="baybe",
+            measurement_source="predictor_virtual",
         )

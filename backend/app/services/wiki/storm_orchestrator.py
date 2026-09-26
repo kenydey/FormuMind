@@ -30,6 +30,71 @@ def _require_storm_enabled() -> None:
         raise PermissionError("wiki_storm_report_enabled is false")
 
 
+def _pack_to_evidence(pack: dict[str, Any], cite_ids: list[str]) -> list:
+    """Map dossier pack / citation ids → Evidence for claim_checker (fail-open)."""
+    from ...domain.schemas import Evidence
+
+    sources = pack.get("sources") or pack.get("evidence") or []
+    by_id: dict[str, Any] = {}
+    if isinstance(sources, list):
+        for row in sources:
+            if not isinstance(row, dict):
+                continue
+            sid = str(row.get("source_id") or row.get("id") or "").strip()
+            if sid:
+                by_id[sid] = row
+    out: list[Evidence] = []
+    for sid in cite_ids or []:
+        row = by_id.get(str(sid)) or {}
+        title = str(row.get("title") or sid)[:200]
+        snippet = str(row.get("snippet") or row.get("summary") or title)[:800]
+        out.append(
+            Evidence(
+                source=str(row.get("source_kind") or row.get("source") or "kb"),
+                identifier=str(sid),
+                title=title,
+                snippet=snippet,
+                relevance=0.5,
+            )
+        )
+    if not out:
+        # Fallback: use pack narrative bits so offline checker still runs.
+        summary = str(pack.get("summary") or pack.get("topic") or "storm report")[:800]
+        out.append(
+            Evidence(
+                source="dossier",
+                identifier="dossier:pack",
+                title="DossierPack",
+                snippet=summary,
+                relevance=0.3,
+            )
+        )
+    return out
+
+
+def _storm_claim_check(
+    topic: str,
+    markdown: str,
+    pack: dict[str, Any],
+    cite_ids: list[str],
+) -> dict[str, Any]:
+    """Run claim_checker; return meta (+ optional rewritten markdown)."""
+    from ...pipeline.claim_checker import append_verification_footer, check_claims
+
+    evidence = _pack_to_evidence(pack, cite_ids)
+    result = check_claims(topic or "STORM report", markdown, evidence)
+    updated = append_verification_footer(markdown, result)
+    return {
+        "applied": True,
+        "engine": result.engine,
+        "pass_rate": result.pass_rate,
+        "claim_check_passed": result.claim_check_passed,
+        "needs_regenerate": result.needs_regenerate,
+        "claim_count": len(result.claims),
+        "markdown": updated,
+    }
+
+
 def run_storm_report(
     project_id: str,
     *,
@@ -109,6 +174,15 @@ def run_storm_report(
     markdown, cite_ids = stitch_and_polish(
         outline, drafts, pack, progress_cb=progress_cb
     )
+    claim_meta: dict[str, Any] = {"applied": False}
+    if getattr(settings, "wiki_storm_claim_check", True):
+        try:
+            claim_meta = _storm_claim_check(outline.topic, markdown, pack, cite_ids)
+            if claim_meta.get("markdown"):
+                markdown = str(claim_meta.pop("markdown"))
+        except Exception as exc:
+            logger.warning("STORM claim_check soft-failed (fail-open): %s", exc)
+            claim_meta = {"applied": False, "error": str(exc)}
     path = project_report_path(pid, "storm")
     state.final_path = path
     state.final_markdown = markdown
@@ -121,6 +195,7 @@ def run_storm_report(
         "outline_source": outline.source,
         "parallel": parallel_use,
         "parallel_workers": workers if parallel_use else 1,
+        "claim_check": claim_meta,
     }
 
     out: dict[str, Any] = {

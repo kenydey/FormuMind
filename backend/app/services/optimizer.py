@@ -266,6 +266,9 @@ class BotorchOptimizer:
     calibrated uncertainty, unlike the numpy UCB stand-in or Optuna's TPE. Keeps
     the same scalar suggest/observe/ranked interface, so the workflow swaps it in
     transparently. Any per-step modelling failure degrades to a random draw.
+
+    Honesty (P1 #21): this is **scalarized** LogEI on a weighted score — not a
+    Pareto/qNEHVI multi-objective optimizer. True Pareto remains on the BayBE path.
     """
 
     factors: list[Factor]

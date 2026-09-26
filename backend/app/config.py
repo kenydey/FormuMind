@@ -593,6 +593,10 @@ class Settings(BaseSettings):
     wiki_storm_parallel: bool = False
     # Max workers per wave when wiki_storm_parallel is on (clamped 1–8).
     wiki_storm_parallel_workers: int = 3
+    # P1 #16: after stitch_and_polish, run claim_checker (fail-open footer).
+    # Default on — draft reports get a verification appendix when claims look
+    # weak; checker failures never block the report.
+    wiki_storm_claim_check: bool = True
     # Wiki page [[wikilink]] graph for Hub canvas (not materials KG).
     # Top-5‴ #5（2026-09-25）：默认 ON（可关；≠ 材料 KG / Neo4j）。
     wiki_page_graph_enabled: bool = True
