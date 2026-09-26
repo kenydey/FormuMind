@@ -14,6 +14,7 @@ services:
     ports: !reset []
     environment:
       FORMUMIND_REDIS_URL: redis://127.0.0.1:6379/0
+      # Intranet host-network default OFF; ELN compose defaults ON.
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
 
   worker:

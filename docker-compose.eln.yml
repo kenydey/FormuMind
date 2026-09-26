@@ -37,7 +37,9 @@ services:
       # Datalab 平台非 TESTING 模式，每个端点都要求 DATALAB-API-KEY 头，缺失即 401。
       # 值放 .env（已 gitignore），不要写死在本文件里。
       FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
-      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
+      # production ELN: default auth ON (override with FORMUMIND_API_AUTH_ENABLED=false).
+      # Local docker-compose.yml keeps :-false for intranet lab use.
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,7 +57,7 @@ services:
       # Datalab 平台非 TESTING 模式，每个端点都要求 DATALAB-API-KEY 头，缺失即 401。
       # 值放 .env（已 gitignore），不要写死在本文件里。
       FORMUMIND_DATALAB_API_TOKEN: ${FORMUMIND_DATALAB_API_TOKEN:-}
-      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
+      FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
