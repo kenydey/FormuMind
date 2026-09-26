@@ -16,6 +16,7 @@ class SkillChecklistItem(BaseModel):
 
 class FormulationSkillOut(BaseModel):
     id: str
+    kind: str = "playbook"
     title: str
     summary: str
     when_to_use: str = ""

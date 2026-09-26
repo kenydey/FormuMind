@@ -60,6 +60,9 @@ class SourcedClaim(BaseModel):
     status: ClaimStatus = "unsupported"
 
 
+ChatMode = Literal["chat", "evidence"]
+
+
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     sources: list[Evidence] = Field(default_factory=list, max_length=50)
@@ -73,6 +76,11 @@ class ChatRequest(BaseModel):
     # 结构图识别结果（POST /api/chemical/structure 的返回）——相似材料名
     # 注入检索 query；smiles/moljson 仅作上下文提示，可缺省。
     structure: dict | None = None
+    # Skills / Evidence / Connectors (composer + picker)
+    mode: ChatMode = "chat"
+    selected_skills: list[str] = Field(default_factory=list, max_length=12)
+    selected_connectors: list[str] = Field(default_factory=list, max_length=8)
+    ref_doc_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class StructureContext(BaseModel):
@@ -113,3 +121,6 @@ class ChatResponse(BaseModel):
     clarification: ClarificationOption | None = None
     rewritten_query: str | None = None
     sourced_claims: list[SourcedClaim] | None = None
+    mode: ChatMode | None = None
+    doi_results: list[dict] | None = None
+    evidence_reviewer: dict | None = None

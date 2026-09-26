@@ -480,6 +480,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       });
       try {
         const { chatHistory, activeProjectId } = get();
+        const st = get();
         const reqBody: Parameters<typeof api.chat>[0] = {
           question,
           sources: active,
@@ -495,6 +496,9 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             })),
           structure: structure ?? undefined,
           clarified_entities: opts?.clarifiedEntities,
+          mode: st.chatMode || "chat",
+          selected_skills: st.selectedChatSkills || [],
+          selected_connectors: st.selectedConnectors || [],
         };
         await api.chatStream(reqBody, (ev) => {
           const last = (d: { chatHistory: ChatMessage[] }) =>
