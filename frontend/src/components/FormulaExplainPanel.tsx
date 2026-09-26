@@ -17,12 +17,13 @@ export default function FormulaExplainPanel({
   const supply = explain?.supply_flags ?? [];
   const uncertainty = explain?.uncertainty ?? [];
   const notes = explain?.notes ?? [];
+  const effectTrace = explain?.effect_trace ?? [];
 
   return (
     <details
       className="rounded border border-edge/50 bg-ink/30 px-2 py-1.5"
       data-testid="formula-explain-panel"
-      open={Boolean(misses.length || supply.length || explain?.bias_corrected)}
+      open={Boolean(misses.length || supply.length || explain?.bias_corrected || effectTrace.some((t) => t.status === "unwired"))}
     >
       <summary className="cursor-pointer text-[11px] text-slate-300 select-none list-none flex items-center gap-2">
         <span className="text-accent2">为何推荐</span>
@@ -45,6 +46,30 @@ export default function FormulaExplainPanel({
         )}
         {misses.length > 0 && (
           <Section title="约束未满足" tone="amber" items={misses} testId="explain-misses" />
+        )}
+        {effectTrace.length > 0 && (
+          <div data-testid="explain-effect-trace">
+            <div className="text-slate-500 mb-0.5">约束追踪</div>
+            <div className="flex flex-wrap gap-1">
+              {effectTrace.slice(0, 12).map((t) => (
+                <span
+                  key={t.field}
+                  title={t.detail || t.consumers?.join(",") || undefined}
+                  className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                    t.status === "wired"
+                      ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/10"
+                      : t.status === "unwired"
+                        ? "border-rose-500/30 text-rose-300 bg-rose-500/10"
+                        : "border-slate-500/30 text-slate-400 bg-slate-500/10"
+                  }`}
+                  data-testid={`effect-trace-${t.status}`}
+                >
+                  {t.label}
+                  {t.status === "wired" ? " · 生效" : t.status === "unwired" ? " · 未接线" : " · 仅展示"}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
         {kg && (
           <div data-testid="explain-kg">

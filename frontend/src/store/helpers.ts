@@ -85,6 +85,9 @@ export function applyPatchToDraft(draft: AppState, patch: Partial<StoreWorkspace
   if (patch.wikiDossierAutoPatch !== undefined) {
     draft.wikiDossierAutoPatch = patch.wikiDossierAutoPatch;
   }
+  if (patch.predictionBiasSoftCorrect !== undefined) {
+    draft.predictionBiasSoftCorrect = patch.predictionBiasSoftCorrect;
+  }
 }
 
 export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
@@ -124,5 +127,6 @@ export function workspaceSlice(state: AppState): StoreWorkspaceSlice {
     autoLoopRound: state.autoLoopRound,
     autoAdoptNextDoeOnLoop: state.autoAdoptNextDoeOnLoop,
     wikiDossierAutoPatch: state.wikiDossierAutoPatch,
+    predictionBiasSoftCorrect: state.predictionBiasSoftCorrect,
   };
 }

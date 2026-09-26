@@ -102,6 +102,8 @@ export interface ProjectWorkspacePayload {
   auto_adopt_next_doe_on_loop?: boolean;
   /** Top-5‴ #4: project-level dossier auto patch (global default still off). */
   wiki_dossier_auto_patch?: boolean;
+  /** Post-A′ #4: project-level prediction soft-correct (global default still off). */
+  prediction_bias_soft_correct?: boolean;
 }
 
 export interface StoreWorkspaceSlice {
@@ -140,6 +142,8 @@ export interface StoreWorkspaceSlice {
   autoLoopRound: number;
   autoAdoptNextDoeOnLoop: boolean;
   wikiDossierAutoPatch: boolean;
+  /** Post-A′ #4: project-level soft-correct of predicted metrics. */
+  predictionBiasSoftCorrect: boolean;
 }
 
 function adaptiveFromLoopReport(loop: LoopReport | null | undefined): AdaptiveDOEMetadata | null {
@@ -204,6 +208,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     auto_loop_round: slice.autoLoopRound,
     auto_adopt_next_doe_on_loop: slice.autoAdoptNextDoeOnLoop,
     wiki_dossier_auto_patch: slice.wikiDossierAutoPatch,
+    prediction_bias_soft_correct: slice.predictionBiasSoftCorrect,
   };
 }
 
@@ -261,6 +266,7 @@ export function applyWorkspacePayload(
     autoLoopRound: ws.auto_loop_round ?? 0,
     autoAdoptNextDoeOnLoop: ws.auto_adopt_next_doe_on_loop ?? false,
     wikiDossierAutoPatch: ws.wiki_dossier_auto_patch ?? false,
+    predictionBiasSoftCorrect: ws.prediction_bias_soft_correct ?? false,
   };
 }
 

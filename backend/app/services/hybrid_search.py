@@ -6,11 +6,18 @@ purely local.
 
 Task 2.5: hybrid 检索——BM25 + vector 混合排序 + 端点 + 3 测试
 Dim-3: hybrid_search_scored exposes per-channel scores for /api/kb/query-test.
+
+Post-A′ #3: latency ring (p50/p95) + scan/p95-gated BM25 candidate prefilter
+before cosine (in-process; **not** Qdrant; **not** session ``rag.BM25FAISSStore``).
 """
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from rank_bm25 import BM25Okapi
@@ -22,6 +29,11 @@ from .errors import degrade_return
 
 logger = logging.getLogger(__name__)
 
+# Ring buffer of recent hybrid_search wall times (ms). Process-local only.
+_LATENCY_MS: deque[float] = deque(maxlen=128)
+_LATENCY_LOCK = threading.Lock()
+_LAST_ANN_ACTIVE = False
+
 
 @dataclass(frozen=True)
 class ScoredChunk:
@@ -31,6 +43,59 @@ class ScoredChunk:
     bm25_score: float
     cosine_score: float
     hybrid_score: float
+
+
+def reset_latency_stats() -> None:
+    """Test helper — clear the in-process latency ring."""
+    global _LAST_ANN_ACTIVE
+    with _LATENCY_LOCK:
+        _LATENCY_MS.clear()
+        _LAST_ANN_ACTIVE = False
+
+
+def record_hybrid_latency_ms(ms: float) -> None:
+    try:
+        v = float(ms)
+    except (TypeError, ValueError):
+        return
+    if v < 0:
+        return
+    with _LATENCY_LOCK:
+        _LATENCY_MS.append(v)
+
+
+def hybrid_latency_stats() -> dict[str, Any]:
+    """p50/p95 over the recent ring; empty → zeros."""
+    with _LATENCY_LOCK:
+        samples = list(_LATENCY_MS)
+        ann = bool(_LAST_ANN_ACTIVE)
+    if not samples:
+        return {
+            "n": 0,
+            "p50_ms": None,
+            "p95_ms": None,
+            "ann_last": ann,
+            "note": "persistent hybrid_search ≠ rag.BM25FAISSStore (session RAG)",
+        }
+    arr = np.asarray(samples, dtype=float)
+    return {
+        "n": int(arr.size),
+        "p50_ms": round(float(np.percentile(arr, 50)), 2),
+        "p95_ms": round(float(np.percentile(arr, 95)), 2),
+        "ann_last": ann,
+        "note": "persistent hybrid_search ≠ rag.BM25FAISSStore (session RAG)",
+    }
+
+
+def _should_use_ann_gate(*, corpus_n: int, settings) -> bool:
+    """Gate on scan pressure (near scan_limit) or elevated p95 latency."""
+    scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
+    near_cap = corpus_n >= int(scan_limit * 0.9)
+    p95_thresh = float(getattr(settings, "kb_hybrid_ann_gate_p95_ms", 800.0) or 800.0)
+    stats = hybrid_latency_stats()
+    p95 = stats.get("p95_ms")
+    hot = p95 is not None and float(p95) >= p95_thresh and int(stats.get("n") or 0) >= 5
+    return bool(near_cap or hot)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -73,6 +138,31 @@ def _to_response(c) -> DocumentChunkResponse:
     )
 
 
+def _cosine_on_indices(
+    query: str,
+    chunks: list,
+    indices: list[int],
+    cosine_scores: np.ndarray,
+) -> None:
+    """Fill cosine_scores only for ``indices`` (ANN / prefilter path)."""
+    subset = [chunks[i] for i in indices]
+    model_cols: set[str] = {
+        c.embedding_model for c in subset if getattr(c, "embedding_model", None)
+    }
+    for mname in sorted(model_cols):
+        from .rag import bge_query_prefix
+
+        vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
+        if not vecs or not vecs[0]:
+            continue
+        qv = vecs[0]
+        dim = len(qv)
+        for i in indices:
+            c = chunks[i]
+            if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
+                cosine_scores[i] = kb_index._dot(qv, c.embedding)
+
+
 def hybrid_search_scored(
     query: str,
     top_k: int = 10,
@@ -87,20 +177,27 @@ def hybrid_search_scored(
     semantics matching Hub source listing). When ``alpha`` is omitted, uses
     ``settings.kb_hybrid_alpha`` so the retrieval probe and recommend path share
     one knobs.
+
+    When scan is near cap or recent p95 exceeds threshold, cosine is only
+    computed on the top-N BM25 candidates (in-process ANN-style prefilter).
     """
+    global _LAST_ANN_ACTIVE
+    settings = get_settings()
     if alpha is None:
-        alpha = float(get_settings().kb_hybrid_alpha)
+        alpha = float(settings.kb_hybrid_alpha)
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
     if not kb_index.kb_enabled() or not (query or "").strip() or top_k <= 0:
         return []
 
+    t0 = time.perf_counter()
+    ann_active = False
     try:
         from ..db.chunk_store import get_chunk_store
 
         chunks = get_chunk_store().all_chunks(
-            limit=get_settings().kb_search_scan_limit,
+            limit=settings.kb_search_scan_limit,
             project_id=project_id,
             include_global=include_global,
         )
@@ -115,24 +212,37 @@ def hybrid_search_scored(
         n = len(chunks)
 
         bm25 = BM25Okapi(corpus_tokens)
-        bm25_scores: np.ndarray = bm25.get_scores(_tokenize(query)).astype(float)
+        bm25_raw: np.ndarray = bm25.get_scores(_tokenize(query)).astype(float)
 
+        ann_active = _should_use_ann_gate(corpus_n=n, settings=settings)
         cosine_scores = np.zeros(n, dtype=float)
-        model_cols: set[str] = {
-            c.embedding_model for c in chunks if getattr(c, "embedding_model", None)
-        }
-        for mname in sorted(model_cols):
-            from .rag import bge_query_prefix
 
-            vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
-            if not vecs or not vecs[0]:
-                continue
-            qv = vecs[0]
-            dim = len(qv)
-            for i, c in enumerate(chunks):
-                if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
-                    cosine_scores[i] = kb_index._dot(qv, c.embedding)
+        if ann_active:
+            pool = max(
+                top_k * 4,
+                int(getattr(settings, "kb_hybrid_ann_candidate_pool", 800) or 800),
+            )
+            pool = min(pool, n)
+            # Top-BM25 indices for cosine (keep zeros elsewhere → BM25-only for tail).
+            top_idx = np.argsort(-bm25_raw)[:pool].tolist()
+            _cosine_on_indices(query, chunks, top_idx, cosine_scores)
+        else:
+            model_cols: set[str] = {
+                c.embedding_model for c in chunks if getattr(c, "embedding_model", None)
+            }
+            for mname in sorted(model_cols):
+                from .rag import bge_query_prefix
 
+                vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
+                if not vecs or not vecs[0]:
+                    continue
+                qv = vecs[0]
+                dim = len(qv)
+                for i, c in enumerate(chunks):
+                    if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
+                        cosine_scores[i] = kb_index._dot(qv, c.embedding)
+
+        bm25_scores = bm25_raw.copy()
         bm25_max = float(bm25_scores.max()) if bm25_scores.size else 0.0
         if bm25_max > 0.0:
             bm25_scores = bm25_scores / bm25_max
@@ -168,6 +278,11 @@ def hybrid_search_scored(
         ]
     except Exception as exc:
         return degrade_return(logger, exc, "hybrid search scored failed", [])
+    finally:
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        record_hybrid_latency_ms(elapsed_ms)
+        with _LATENCY_LOCK:
+            _LAST_ANN_ACTIVE = ann_active
 
 
 def hybrid_search(
@@ -179,6 +294,8 @@ def hybrid_search(
 
     Existing callers keep the unscored DocumentChunkResponse list over the
     global corpus (no project filter). ``alpha`` defaults to ``kb_hybrid_alpha``.
+
+    Note: this is **not** the session-level ``rag.BM25FAISSStore`` used by chat.
     """
     if alpha is None:
         alpha = float(get_settings().kb_hybrid_alpha)

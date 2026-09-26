@@ -62,12 +62,25 @@ def _kg_signals(form: Formulation) -> dict[str, Any]:
 
 
 def _supply_flags(form: Formulation) -> list[str]:
-    flags: list[str] = []
-    for w in form.warnings or []:
-        low = w.lower()
-        if any(k in low for k in ("供应", "缺货", "交期", "discontinued", "restricted", "supply")):
-            flags.append(w)
-    return flags[:8]
+    """Merge warning heuristics with A′ supplier commercial annotations."""
+    try:
+        from .supply_flags import collect_formulation_supply_flags
+
+        names = [getattr(ing, "name", "") for ing in (form.ingredients or [])]
+        return collect_formulation_supply_flags(
+            names,
+            existing_warnings=form.warnings or [],
+        )
+    except Exception:
+        flags: list[str] = []
+        for w in form.warnings or []:
+            low = w.lower()
+            if any(
+                k in low
+                for k in ("供应", "缺货", "交期", "discontinued", "restricted", "supply", "stale")
+            ):
+                flags.append(w)
+        return flags[:8]
 
 
 def _uncertainty(form: Formulation) -> list[str]:
@@ -174,6 +187,15 @@ def build_formulation_explain(
         if w not in notes:
             notes.append(w)
 
+    effect_trace: list[dict[str, Any]] = []
+    if requirement is not None:
+        try:
+            from .requirement_effect_trace import build_requirement_effect_trace
+
+            effect_trace = build_requirement_effect_trace(requirement)
+        except Exception:
+            effect_trace = []
+
     explain = FormulationExplain(
         objectives_hit=hits,
         constraints_miss=misses,
@@ -184,6 +206,7 @@ def build_formulation_explain(
         bias_corrected=bool(bias),
         bias_corrected_metrics=bias,
         notes=notes,
+        effect_trace=effect_trace,
     )
     form.explain = explain
     return explain

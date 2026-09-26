@@ -56,6 +56,8 @@ def test_build_quality_ops_shape(monkeypatch):
     assert payload["topicality_would_reject_pct"] == 20.0
     assert payload["relevance_shadow"]["batch_count"] == 2
     assert payload["notes"]
+    assert "hybrid_search_latency" in payload
+    assert "BM25FAISSStore" in " ".join(payload["notes"])
 
 
 def test_quality_ops_endpoint():
@@ -66,3 +68,4 @@ def test_quality_ops_endpoint():
     assert "kb_quality_score" in body
     assert "scan_pressure" in body
     assert "relevance_shadow" in body
+    assert "hybrid_search_latency" in body

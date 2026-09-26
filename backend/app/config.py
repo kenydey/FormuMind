@@ -609,6 +609,10 @@ class Settings(BaseSettings):
     # 的地方：200 × 1600 ≈ 32 万字符，长专利/综述会被截断。
     kb_max_chunks_per_source: int = 600
     kb_search_scan_limit: int = 5000
+    # Post-A′ #3: when scan near cap OR recent hybrid p95 ≥ this (ms), cosine
+    # runs only on top-N BM25 candidates (in-process; no Qdrant).
+    kb_hybrid_ann_gate_p95_ms: float = 800.0
+    kb_hybrid_ann_candidate_pool: int = 800
     # W4: recommended age (days) for archived-source retention purge UI/stats.
     # 0 = retention disabled (no auto purge; POST /retention/purge still needs
     # explicit days+confirm for any physical delete).
