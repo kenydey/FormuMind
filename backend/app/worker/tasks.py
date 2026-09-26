@@ -185,11 +185,20 @@ class TaskManager:
 
         meta = get_task_meta(task_id)
         kind = self._kinds.get(task_id) or (meta or {}).get("kind", "")
+        persisted = load_persisted_task(task_id)
+        # Prefer disk terminal over stale non-terminal Redis/file meta.
+        # SSE already reads disk terminals when Redis is down; status must match
+        # or clients see COMPLETED on the stream while GET still returns pending.
+        if persisted and persisted.state in (
+            TaskState.completed,
+            TaskState.failed,
+            TaskState.cancelled,
+        ):
+            return persisted
         if meta:
             status = _status_from_progress(task_id, kind)
             _persist_task(task_id, status)
             return status
-        persisted = load_persisted_task(task_id)
         if persisted:
             return persisted
         if task_id in self._kinds:
