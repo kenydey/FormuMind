@@ -10,21 +10,62 @@ import pytest
 from app.services import llm
 
 
-@pytest.fixture(autouse=True)
-def _stub_openai_module():
-    """The transport does ``from openai import OpenAI``. Provide a stub module
-    when the optional SDK isn't installed so ``patch("openai.OpenAI", ...)``
-    resolves and the retry logic is exercised offline."""
-    if "openai" in sys.modules:
-        yield
-        return
+def _install_openai_stub() -> object | None:
+    """Force a patchable ``openai.OpenAI`` into ``sys.modules``.
+
+    Returns the previous ``sys.modules['openai']`` entry (or ``None``) so the
+    caller can restore it. Always installs a fresh stub — never trust a real
+    install: chemcrow can pin ``openai==0.27.8`` which has no ``OpenAI`` class,
+    and ``patch("openai.OpenAI")`` then raises ``AttributeError`` during setup
+    (before any retry logic runs).
+    """
+    previous = sys.modules.get("openai")
     stub = types.ModuleType("openai")
     stub.OpenAI = object  # replaced per-test via patch("openai.OpenAI", ...)
     sys.modules["openai"] = stub
+    return previous
+
+
+def _restore_openai_module(previous: object | None) -> None:
+    if previous is None:
+        sys.modules.pop("openai", None)
+    else:
+        sys.modules["openai"] = previous  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True)
+def _stub_openai_module():
+    """Keep ``patch("openai.OpenAI", ...)`` hermetic for every test.
+
+    The transport does ``from openai import OpenAI`` at call time. Offline CI
+    may lack the SDK; full-suite runs may already have a legacy openai (0.27.x,
+    no ``OpenAI``) imported by chemcrow paths. Always stub + restore so these
+    unit tests do not depend on import order or the installed openai major.
+    """
+    previous = _install_openai_stub()
     try:
         yield
     finally:
-        sys.modules.pop("openai", None)
+        _restore_openai_module(previous)
+
+
+def test_openai_stub_overrides_legacy_sdk_without_OpenAI():
+    """Regression: openai 0.27.x already in sys.modules must not break patch."""
+    legacy = types.ModuleType("openai")
+    assert not hasattr(legacy, "OpenAI")
+    sys.modules["openai"] = legacy
+    previous = _install_openai_stub()
+    try:
+        mock_client = MagicMock()
+        with patch("openai.OpenAI", return_value=mock_client) as factory:
+            from openai import OpenAI
+
+            assert OpenAI() is mock_client
+            factory.assert_called_once_with()
+    finally:
+        _restore_openai_module(previous)
+    # Helper restored the legacy module we planted (not the autouse stub).
+    assert sys.modules.get("openai") is legacy
 
 
 class _FakeMessage:
