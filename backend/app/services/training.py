@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -29,6 +30,11 @@ logger = logging.getLogger(__name__)
 from ..domain import features
 from ..domain.schemas import ExperimentRecord, ModelInfo, ProductDomain, Requirement, Substrate
 from ..pipeline import reconstruct  # lightweight: form-from-factors, no cycle
+from . import model_store
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 class _RidgeModel:
@@ -65,28 +71,31 @@ class _RidgeModel:
         return self._rmse
 
 
+class _SklearnRFModel:
+    """Module-level so joblib/pickle can serialize trained surrogates (P1 #20)."""
+
+    backend = "sklearn-rf"
+
+    def __init__(self) -> None:
+        from sklearn.ensemble import RandomForestRegressor
+
+        self._m = RandomForestRegressor(n_estimators=200, random_state=0)
+
+    def fit(self, X, y):
+        self._m.fit(X, y)
+
+    def predict(self, X):
+        return self._m.predict(X)
+
+    def predict_std(self, X) -> float:
+        tree_preds = np.array([t.predict(X)[0] for t in self._m.estimators_])
+        return float(np.std(tree_preds))
+
+
 def _make_regressor():
     """Return (model, backend_name). Prefer sklearn, fall back to numpy ridge."""
     try:  # pragma: no cover - depends on optional extra
-        from sklearn.ensemble import RandomForestRegressor
-
-        class _SkModel:
-            backend = "sklearn-rf"
-
-            def __init__(self) -> None:
-                self._m = RandomForestRegressor(n_estimators=200, random_state=0)
-
-            def fit(self, X, y):
-                self._m.fit(X, y)
-
-            def predict(self, X):
-                return self._m.predict(X)
-
-            def predict_std(self, X) -> float:
-                tree_preds = np.array([t.predict(X)[0] for t in self._m.estimators_])
-                return float(np.std(tree_preds))
-
-        return _SkModel(), "sklearn-rf"
+        return _SklearnRFModel(), "sklearn-rf"
     except Exception:
         return _RidgeModel(), "numpy-ridge"
 
@@ -225,6 +234,61 @@ class ModelRegistry:
     def _metrics_for(self, domain: ProductDomain) -> set[str]:
         return {m for rec in self._records if rec.domain == domain for m in rec.measured}
 
+    def _training_rows(self, domain: ProductDomain, metric: str, project_id: str) -> list[ExperimentRecord]:
+        pid = project_id or domain.value
+        rows: list[ExperimentRecord] = []
+        for rec in self._records:
+            if rec.domain != domain or metric not in rec.measured:
+                continue
+            rec_pid = (rec.project_id or "").strip() or rec.domain.value
+            if project_id:
+                if rec_pid != pid:
+                    continue
+            rows.append(rec)
+        return rows
+
+    def _persist_enabled(self) -> bool:
+        return bool(getattr(get_settings(), "model_persist_enabled", True))
+
+    def _try_load_cached(
+        self,
+        domain: ProductDomain,
+        pid: str,
+        metric: str,
+        data_hash: str,
+        feature_version: str,
+    ) -> _Trained | None:
+        if not self._persist_enabled():
+            return None
+        loaded = model_store.load_model(
+            pid,
+            metric,
+            data_hash=data_hash,
+            feature_version=feature_version,
+        )
+        if loaded is None:
+            return None
+        model, info_dict = loaded
+        try:
+            info = ModelInfo(
+                domain=domain,
+                project_id=pid,
+                metric=metric,
+                backend=str(info_dict.get("backend") or "cached"),
+                n_samples=int(info_dict.get("n_samples") or 0),
+                r2=float(info_dict.get("r2") or 0.0),
+                cv_r2=info_dict.get("cv_r2"),
+                rmse=float(info_dict.get("rmse") or 0.0),
+                trained_at=info_dict.get("trained_at"),
+                data_hash=info_dict.get("data_hash") or data_hash,
+                feature_version=info_dict.get("feature_version") or feature_version,
+                version_id=info_dict.get("version_id"),
+            )
+        except Exception as exc:
+            logger.warning("cached ModelInfo invalid for %s/%s: %s", pid, metric, exc)
+            return None
+        return _Trained(model, info)
+
     def _retrain_all(self) -> None:
         self._models = {}
         keys: set[tuple[str, str]] = set()
@@ -232,6 +296,7 @@ class ModelRegistry:
             pid = rec.project_id or rec.domain.value
             for m in rec.measured:
                 keys.add((pid, m))
+        feat_ver = features.feature_set_version()
         for pid, metric in keys:
             domain = next((r.domain for r in self._records if (r.project_id or r.domain.value) == pid), None)
             if domain is None:
@@ -239,9 +304,16 @@ class ModelRegistry:
             data = self._dataset(domain, metric, project_id=pid)
             if data is None:
                 continue
+            rows = self._training_rows(domain, metric, project_id=pid)
+            data_hash = model_store.compute_data_hash(rows, metric)
+            cached = self._try_load_cached(domain, pid, metric, data_hash, feat_ver)
+            if cached is not None:
+                self._models[(pid, metric)] = cached
+                continue
             X, y = data
             model, backend = _make_regressor()
             model.fit(X, y)
+            trained_at = _utcnow_iso()
             info = ModelInfo(
                 domain=domain,
                 project_id=pid,
@@ -251,13 +323,69 @@ class ModelRegistry:
                 r2=round(_r2(y, np.asarray(model.predict(X))), 4),
                 cv_r2=(round(v, 4) if (v := _kfold_r2(X, y)) is not None else None),
                 rmse=round(math.sqrt(np.mean((y - np.asarray(model.predict(X))) ** 2)), 4),
+                trained_at=trained_at,
+                data_hash=data_hash,
+                feature_version=feat_ver,
             )
+            if self._persist_enabled():
+                try:
+                    vid = model_store.save_model(
+                        pid,
+                        metric,
+                        model,
+                        info.model_dump(mode="json"),
+                    )
+                    info = info.model_copy(update={"version_id": vid})
+                except Exception as exc:
+                    logger.warning("model persist failed for %s/%s: %s", pid, metric, exc)
             self._models[(pid, metric)] = _Trained(model, info)
 
     def train(self) -> list[ModelInfo]:
         with self._lock:
             self._retrain_all()
             return [t.info for t in self._models.values()]
+
+    def list_model_versions(self, project_id: str, metric: str) -> list[dict]:
+        """P1 #20: disk versions for one surrogate (newest first)."""
+        return model_store.list_versions(project_id, metric)
+
+    def rollback_model(self, project_id: str, metric: str, version_id: str) -> ModelInfo | None:
+        """Load a prior artifact into memory and mark it current."""
+        with self._lock:
+            loaded = model_store.load_model(project_id, metric, version_id=version_id)
+            if loaded is None:
+                return None
+            model, info_dict = loaded
+            domain_raw = info_dict.get("domain")
+            try:
+                domain = ProductDomain(domain_raw) if domain_raw else None
+            except Exception:
+                domain = None
+            if domain is None:
+                domain = next(
+                    (r.domain for r in self._records if (r.project_id or r.domain.value) == project_id),
+                    None,
+                )
+            if domain is None:
+                return None
+            if not model_store.set_current_version(project_id, metric, version_id):
+                return None
+            info = ModelInfo(
+                domain=domain,
+                project_id=project_id,
+                metric=metric,
+                backend=str(info_dict.get("backend") or "cached"),
+                n_samples=int(info_dict.get("n_samples") or 0),
+                r2=float(info_dict.get("r2") or 0.0),
+                cv_r2=info_dict.get("cv_r2"),
+                rmse=float(info_dict.get("rmse") or 0.0),
+                trained_at=info_dict.get("trained_at"),
+                data_hash=info_dict.get("data_hash"),
+                feature_version=info_dict.get("feature_version"),
+                version_id=version_id,
+            )
+            self._models[(project_id, metric)] = _Trained(model, info)
+            return info
 
     # --- inference -----------------------------------------------------
     def predict(

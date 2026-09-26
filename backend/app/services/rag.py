@@ -507,41 +507,15 @@ def llm_rerank(
     grounded only on the most relevant prior art. On any failure (no LLM,
     malformed JSON) it returns ``candidates[:k]`` — i.e. the upstream store's
     ordering is preserved, so this is a zero-risk enhancement.
+
+    Prefer :func:`rerank_scored` when callers need an explicit ``applied`` flag
+    (P1 #15). Failures with ``len(candidates) > 1`` log a warning so keep-order
+    is no longer silent.
     """
-    if not candidates:
-        return []
-    if len(candidates) <= 1:
-        return candidates[:k]
-
-    from . import llm as _llm
-
-    try:
-        data = _llm.complete_json(_rerank_prompt(query, candidates, req))
-    except Exception:
-        data = None
-
-    scores = (data or {}).get("scores") if isinstance(data, dict) else None
-    if not isinstance(scores, list):
-        return candidates[:k]
-
-    ranking: dict[int, float] = {}
-    for item in scores:
-        try:
-            idx = int(item["i"])
-            if 0 <= idx < len(candidates):
-                ranking[idx] = float(item["score"])
-        except (KeyError, TypeError, ValueError):
-            continue
-    if not ranking:
-        return candidates[:k]
-
-    # Score-desc; unscored candidates keep original relative order at the tail.
-    order = sorted(
-        range(len(candidates)),
-        key=lambda i: (ranking.get(i, -1.0), -i),
-        reverse=True,
-    )
-    return [candidates[i] for i in order[:k]]
+    items, applied = llm_rerank_scored(query, candidates, k=k, req=req)
+    if not applied and len(candidates) > 1:
+        logger.warning("llm_rerank not applied; keeping upstream order")
+    return [it.evidence for it in items]
 
 
 @dataclass(frozen=True)
@@ -613,3 +587,160 @@ def llm_rerank_scored(
         for i in order[:k]
     ]
     return items, True
+
+
+# ── P1 #15: Cross-encoder rerank (optional; default off) ─────────────────────
+
+_CE_CACHE: dict[str, object] = {}
+
+
+def cross_encoder_available() -> bool:
+    """True when sentence-transformers CrossEncoder can be imported."""
+    try:
+        from sentence_transformers import CrossEncoder  # noqa: F401
+
+        return True
+    except Exception as exc:
+        log_handled_exception(logger, exc, "cross-encoder availability probe")
+        return False
+
+
+def _load_cross_encoder(name: str):
+    if name not in _CE_CACHE:
+        from sentence_transformers import CrossEncoder
+
+        _CE_CACHE[name] = CrossEncoder(name)
+    return _CE_CACHE[name]
+
+
+def _passthrough_scored(
+    candidates: list[Evidence], k: int
+) -> list[RerankScoredItem]:
+    return [
+        RerankScoredItem(
+            evidence=c,
+            score=float(c.relevance),
+            original_index=i,
+        )
+        for i, c in enumerate(candidates[:k])
+    ]
+
+
+def rerank_cross_encoder_scored(
+    query: str,
+    candidates: list[Evidence],
+    k: int = 6,
+    *,
+    model_name: str | None = None,
+) -> tuple[list[RerankScoredItem], bool]:
+    """Score (query, doc) pairs with a CrossEncoder; return top-k + applied flag.
+
+    On any failure returns upstream order with ``applied=False`` (never silent
+    success). Does not download models unless explicitly invoked.
+    """
+    if not candidates:
+        return [], False
+    if len(candidates) <= 1:
+        return _passthrough_scored(candidates, k), False
+
+    from ..config import get_settings
+
+    settings = get_settings()
+    name = (model_name or settings.cross_encoder_model or "").strip() or (
+        "BAAI/bge-reranker-base"
+    )
+    try:
+        model = _load_cross_encoder(name)
+        pairs = [
+            [query, f"{(c.title or '').strip()} {(c.snippet or '').strip()}".strip()]
+            for c in candidates
+        ]
+        raw = model.predict(pairs)
+        scores = [float(s) for s in list(raw)]
+    except Exception as exc:
+        logger.warning("cross-encoder rerank failed (%s); marking not applied", exc)
+        return _passthrough_scored(candidates, k), False
+
+    if len(scores) != len(candidates):
+        logger.warning(
+            "cross-encoder score length mismatch (%s vs %s); not applied",
+            len(scores),
+            len(candidates),
+        )
+        return _passthrough_scored(candidates, k), False
+
+    order = sorted(
+        range(len(candidates)),
+        key=lambda i: (scores[i], -i),
+        reverse=True,
+    )
+    items = [
+        RerankScoredItem(
+            evidence=candidates[i],
+            score=float(scores[i]),
+            original_index=i,
+        )
+        for i in order[:k]
+    ]
+    return items, True
+
+
+def rerank_scored(
+    query: str,
+    candidates: list[Evidence],
+    k: int = 6,
+    req: Requirement | None = None,
+    *,
+    prefer: str | None = None,
+) -> tuple[list[RerankScoredItem], dict]:
+    """Unified rerank with explicit backend + applied marking (P1 #15).
+
+    ``prefer``: ``auto`` | ``cross_encoder`` | ``llm`` (default from settings
+    ``search_rerank_backend``). Returns ``(items, meta)`` where meta includes
+    ``applied``, ``backend``, ``reason``.
+    """
+    from ..config import get_settings
+
+    settings = get_settings()
+    backend = (prefer or settings.search_rerank_backend or "auto").strip().lower()
+    if backend not in ("auto", "cross_encoder", "llm"):
+        backend = "auto"
+
+    if not candidates:
+        return [], {"applied": False, "backend": "none", "reason": "empty"}
+
+    want_ce = backend == "cross_encoder" or (
+        backend == "auto" and bool(settings.cross_encoder_rerank_enabled)
+    )
+    if want_ce and cross_encoder_available():
+        items, applied = rerank_cross_encoder_scored(query, candidates, k=k)
+        if applied:
+            return items, {
+                "applied": True,
+                "backend": "cross_encoder",
+                "reason": "ok",
+                "model": settings.cross_encoder_model,
+            }
+        if backend == "cross_encoder":
+            return items, {
+                "applied": False,
+                "backend": "cross_encoder",
+                "reason": "cross_encoder_failed",
+            }
+        # auto: fall through to LLM
+
+    if backend in ("auto", "llm"):
+        items, applied = llm_rerank_scored(query, candidates, k=k, req=req)
+        if applied:
+            return items, {"applied": True, "backend": "llm", "reason": "ok"}
+        return items, {
+            "applied": False,
+            "backend": "llm",
+            "reason": "llm_rerank_failed",
+        }
+
+    return _passthrough_scored(candidates, k), {
+        "applied": False,
+        "backend": "none",
+        "reason": "cross_encoder_unavailable",
+    }

@@ -733,6 +733,11 @@ class ModelInfo(BaseModel):
     r2: float
     cv_r2: float | None = None
     rmse: float
+    # P1 #20: versioning for disk-backed surrogates (joblib under data/models/).
+    trained_at: str | None = None  # ISO-8601 UTC
+    data_hash: str | None = None  # hash of training rows for this (project, metric)
+    feature_version: str | None = None  # features.feature_set_version()
+    version_id: str | None = None  # artifact folder / filename stem
 
 
 class TrainingReport(BaseModel):

@@ -571,6 +571,21 @@ export interface ModelInfo {
   r2: number;
   cv_r2: number | null;
   rmse: number;
+  /** P1 #20: ISO-8601 UTC when this artifact was trained. */
+  trained_at?: string | null;
+  data_hash?: string | null;
+  feature_version?: string | null;
+  version_id?: string | null;
+}
+
+export interface ModelVersionMeta {
+  version_id: string;
+  path?: string;
+  is_current?: boolean;
+  data_hash?: string;
+  feature_version?: string;
+  trained_at?: string;
+  backend?: string;
 }
 
 export interface TrainingReport {
@@ -1786,6 +1801,16 @@ export const api = {
   syncWorkbench: (body: BatchUpdateRequest) =>
     put<WorkbenchSyncResponse>("/api/experiments/workbench/sync", body),
   models: () => get<ModelInfo[]>("/api/models"),
+  modelVersions: (projectId: string, metric: string) =>
+    get<ModelVersionMeta[]>(
+      `/api/models/versions?project_id=${encodeURIComponent(projectId)}&metric=${encodeURIComponent(metric)}`
+    ),
+  rollbackModel: (projectId: string, metric: string, versionId: string) =>
+    post<ModelInfo>("/api/models/rollback", {
+      project_id: projectId,
+      metric,
+      version_id: versionId,
+    }),
   trainingStatus: () => get<TrainingStatus>("/api/training-status"),
   doeExportUrl: (planId: string, format: "csv" | "xlsx" = "csv") =>
     `/api/doe/${planId}/export?format=${format}`,

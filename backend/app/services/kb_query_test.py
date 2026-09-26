@@ -12,7 +12,7 @@ from ..config import get_settings
 from ..domain.schemas import Evidence
 from . import kb_index
 from .hybrid_search import hybrid_search_scored
-from .rag import llm_rerank_scored
+from .rag import rerank_scored
 
 QueryTestMode = Literal["keyword", "hybrid", "hybrid_rerank"]
 
@@ -203,12 +203,16 @@ def run_query_test(
             warning = "重排未启用（search_rerank_enabled=false 或请求覆盖为 false）"
         return _done(prelim[:top_k], warning=warning, gate_before=gate_before)
 
-    items, applied = llm_rerank_scored(q, evidence_pool, k=top_k)
-    if not applied:
+    items, meta = rerank_scored(q, evidence_pool, k=top_k)
+    if not meta.get("applied"):
+        backend = meta.get("backend") or "none"
+        reason = meta.get("reason") or "failed"
         return _done(
             prelim[:top_k],
             rerank_applied=False,
-            warning="LLM 重排失败或未返回分数，已回退 hybrid 排序",
+            warning=(
+                f"重排未应用（backend={backend}, reason={reason}），已回退 hybrid 排序"
+            ),
             gate_before=gate_before,
         )
 
@@ -219,6 +223,7 @@ def run_query_test(
         row["rank"] = new_rank
         row["rerank_score"] = round(float(item.score), 6)
         row["relevance"] = max(0.05, min(1.0, float(item.score)))
+        row["rerank_backend"] = meta.get("backend")
         hits.append(row)
     return _done(hits, rerank_applied=True, gate_before=gate_before)
 

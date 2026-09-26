@@ -1103,11 +1103,21 @@ def iter_search(
     from ..config import get_settings
 
     settings = get_settings()
+    rerank_meta: dict = {"applied": False, "backend": "none"}
     if settings.search_rerank_enabled and len(final) > 1:
-        from .rag import llm_rerank
+        from .rag import rerank_scored
 
         batch = min(len(final), settings.search_rerank_llm_batch, total_limit)
-        head = llm_rerank(rank_q, final[:batch], k=batch, req=req)
+        scored, rerank_meta = rerank_scored(
+            rank_q, final[:batch], k=batch, req=req
+        )
+        head = [it.evidence for it in scored]
+        if not rerank_meta.get("applied"):
+            logger.warning(
+                "search rerank not applied (backend=%s reason=%s); keeping rule order",
+                rerank_meta.get("backend"),
+                rerank_meta.get("reason"),
+            )
         _notify()
         head_keys = {e.identifier or e.title for e in head}
         tail = [
@@ -1121,6 +1131,8 @@ def iter_search(
 
     filter_report.kept = len(final)
     filter_payload = filter_report.as_dict()
+    filter_payload["rerank_applied"] = bool(rerank_meta.get("applied"))
+    filter_payload["rerank_backend"] = rerank_meta.get("backend") or "none"
     if progress_cb is not None:
         try:
             progress_cb(
