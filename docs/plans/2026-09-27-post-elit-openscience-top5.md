@@ -147,7 +147,7 @@ Electron · ACP 多 backend · Notebook/SSH/Slurm · Skills Marketplace · 全�
 ## 请评估
 
 1. 是否锁定 **F-Quality = 1** 与/或 **F-Lit+ = 2→5** / **F-IP = 3**？  
-2. 是否插队 **F-Chem**（SMILES + fetch-outcome）或 **F-Lab**（analytical-method-validation）？  
+2. 是否插队 **F-Chem**（SynSci SMILES + fetch-outcome）/ **F-Chem-A**（AIPOCH GHS+similarity）或 **F-Lab**（analytical-method-validation）？  
 3. Top-5 内想先做哪几项（可点名子集）？  
 4. Golden Bench 目标题量：20 种子 or 直接冲 50？  
 5. 确认后回复「写详细方案再开工」或点名子集。
