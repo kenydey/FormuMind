@@ -28,7 +28,8 @@ export type KnowledgeHubTab =
   | "graph"
   | "reports"
   | "retrieval"
-  | "quality";
+  | "quality"
+  | "library";
 
 export function resolveOpenUrl(row: HubMaterialRow): string | null {
   const candidates = [row.oa_pdf_url, row.url, row.url_alt];

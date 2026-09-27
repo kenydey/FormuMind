@@ -1666,6 +1666,53 @@ export const apiMethods = {
       coverage: { candidate_count: number; frozen_count: number };
     }>(`/api/wiki/literature/${encodeURIComponent(projectId)}`),
 
+  getLiteratureLibrary: (
+    projectId: string,
+    params?: {
+      q?: string;
+      tag?: string;
+      collection_id?: string;
+      screening?: string;
+    },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.tag) qs.set("tag", params.tag);
+    if (params?.collection_id) qs.set("collection_id", params.collection_id);
+    if (params?.screening) qs.set("screening", params.screening);
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return get<{
+      project_id: string;
+      items: Array<{
+        id: string;
+        title?: string;
+        doi?: string | null;
+        chemrxiv_id?: string | null;
+        authors?: string[];
+        year?: number | null;
+        tags?: string[];
+        notes?: string;
+        screening?: string;
+        snippet?: string;
+        url?: string | null;
+        collection_ids?: string[];
+        has_fulltext?: boolean;
+      }>;
+      collections: Array<{
+        id: string;
+        name: string;
+        item_ids: string[];
+      }>;
+      frozen: {
+        at: number;
+        actor: string;
+        item_ids: string[];
+        digest: string;
+      } | null;
+      coverage: { candidate_count: number; frozen_count: number };
+    }>(`/api/wiki/literature/${encodeURIComponent(projectId)}/library${suffix}`);
+  },
+
   captureLiteratureManifest: (body: { project_id: string; query?: string }) =>
     post<Record<string, unknown>>("/api/wiki/literature/capture", body),
 
@@ -1707,7 +1754,19 @@ export const apiMethods = {
 
   patchLiteratureItem: (
     itemId: string,
-    body: { project_id: string; screening: string },
+    body: {
+      project_id: string;
+      screening?: string;
+      title?: string;
+      doi?: string | null;
+      authors?: string[];
+      year?: number | null;
+      url?: string | null;
+      tags?: string[];
+      notes?: string;
+      collection_ids?: string[];
+      chemrxiv_id?: string | null;
+    },
   ) =>
     fetch(`/api/wiki/literature/items/${encodeURIComponent(itemId)}`, {
       method: "PATCH",
@@ -1717,6 +1776,109 @@ export const apiMethods = {
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     }),
+
+  createLiteratureCollection: (body: { project_id: string; name: string }) =>
+    post<Record<string, unknown>>("/api/wiki/literature/collections", body),
+
+  patchLiteratureCollection: (
+    collectionId: string,
+    body: { project_id: string; name?: string; item_ids?: string[] },
+  ) =>
+    fetch(`/api/wiki/literature/collections/${encodeURIComponent(collectionId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }),
+
+  deleteLiteratureCollection: (
+    collectionId: string,
+    body: { project_id: string },
+  ) =>
+    fetch(`/api/wiki/literature/collections/${encodeURIComponent(collectionId)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }),
+
+  importLiteratureIds: (body: {
+    project_id: string;
+    text: string;
+    actor?: string;
+  }) =>
+    post<{
+      added: string[];
+      skipped: string[];
+      failures: Array<{ token?: string; reason?: string; detail?: string }>;
+    }>("/api/wiki/literature/import-ids", body),
+
+  getLiteratureDuplicates: (projectId: string) =>
+    get<{
+      groups: Array<{
+        id: string;
+        title: string;
+        item_ids: string[];
+        match: "identifier" | "metadata";
+      }>;
+    }>(`/api/wiki/literature/${encodeURIComponent(projectId)}/duplicates`),
+
+  mergeLiteratureItems: (body: {
+    project_id: string;
+    item_ids: string[];
+    strategy?: string;
+  }) =>
+    post<{ survivor_id: string; merged_ids: string[] }>(
+      "/api/wiki/literature/merge",
+      body,
+    ),
+
+  exportLiteratureBib: async (
+    projectId: string,
+    params?: { scope?: string; collection_id?: string },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.scope) qs.set("scope", params.scope);
+    if (params?.collection_id) qs.set("collection_id", params.collection_id);
+    const suffix = qs.toString() ? `?${qs}` : "";
+    const res = await fetch(
+      `/api/wiki/literature/${encodeURIComponent(projectId)}/export.bib${suffix}`,
+      { headers: { ...apiAuthHeaders() } },
+    );
+    if (!res.ok) throw new Error(await res.text());
+    return res.text();
+  },
+
+  exportLiteratureRis: async (
+    projectId: string,
+    params?: { scope?: string; collection_id?: string },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.scope) qs.set("scope", params.scope);
+    if (params?.collection_id) qs.set("collection_id", params.collection_id);
+    const suffix = qs.toString() ? `?${qs}` : "";
+    const res = await fetch(
+      `/api/wiki/literature/${encodeURIComponent(projectId)}/export.ris${suffix}`,
+      { headers: { ...apiAuthHeaders() } },
+    );
+    if (!res.ok) throw new Error(await res.text());
+    return res.text();
+  },
+
+  importLiteratureCitation: (body: {
+    project_id: string;
+    format: "bibtex" | "ris";
+    text: string;
+  }) =>
+    post<{
+      added: string[];
+      skipped: string[];
+      failures: Array<{ token?: string; reason?: string; detail?: string }>;
+    }>("/api/wiki/literature/import", body),
 
   exportWikiRoCrate: async (body: {
     project_id: string;
