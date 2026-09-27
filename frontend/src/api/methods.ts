@@ -1137,6 +1137,60 @@ export const apiMethods = {
   replaceMcpServers: (servers: import("./types").McpServerConfig[]) =>
     put<{ mcp: import("./types").McpServerConfig[] }>("/api/connectors/mcp", { servers }),
 
+  importMcpJson: (body: {
+    json_text?: string;
+    config?: Record<string, unknown>;
+    dry_run?: boolean;
+  }) =>
+    post<import("./types").McpImportResponse>("/api/connectors/mcp/import", {
+      dry_run: true,
+      ...body,
+    }),
+
+  importMcpGithub: (body: {
+    url: string;
+    ref?: string;
+    path?: string;
+    dry_run?: boolean;
+  }) =>
+    post<import("./types").McpImportResponse>("/api/connectors/mcp/import/github", {
+      dry_run: true,
+      ...body,
+    }),
+
+  importMcpUpload: async (file: File, dry_run = true) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const q = dry_run ? "true" : "false";
+    const res = await fetch(`/api/connectors/mcp/import/upload?dry_run=${q}`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw await readApiError(res, "/api/connectors/mcp/import/upload");
+    return (await res.json()) as import("./types").McpImportResponse;
+  },
+
+  confirmMcpImport: (import_id: string) =>
+    post<import("./types").McpImportResponse>("/api/connectors/mcp/import/confirm", {
+      import_id,
+    }),
+
+  setMcpServerEnabled: (id: string, enabled: boolean) =>
+    fetch(`/api/connectors/mcp/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ enabled }),
+    }).then(async (res) => {
+      if (!res.ok) throw await readApiError(res, `/api/connectors/mcp/${id}`);
+      return (await res.json()) as { mcp: import("./types").McpServerConfig[] };
+    }),
+
+  deleteMcpServer: (id: string) =>
+    del<{ mcp: import("./types").McpServerConfig[] }>(
+      `/api/connectors/mcp/${encodeURIComponent(id)}`,
+    ),
+
   probeMcpServer: (id: string) =>
     post<{ ok: boolean; tools?: string[]; error?: string | null }>(
       `/api/connectors/mcp/${encodeURIComponent(id)}/probe`,

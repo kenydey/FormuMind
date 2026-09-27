@@ -795,6 +795,35 @@ export interface McpServerConfig {
   transport?: string;
 }
 
+export interface McpServerPreview {
+  id: string;
+  command: string;
+  args: string[];
+  env_keys: string[];
+  transport: string;
+  enabled: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface McpImportPreview {
+  servers: McpServerPreview[];
+  source: string;
+  source_url: string;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface McpImportResponse {
+  ok: boolean;
+  dry_run: boolean;
+  import_id?: string | null;
+  imported: boolean;
+  detail: string;
+  preview?: McpImportPreview;
+  mcp?: McpServerConfig[];
+}
+
 export interface ConnectorsResponse {
   builtin: BuiltinConnector[];
   mcp: McpServerConfig[];
