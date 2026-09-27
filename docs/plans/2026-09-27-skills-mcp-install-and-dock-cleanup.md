@@ -1,6 +1,6 @@
 # Skills / MCP 进阶：移除技能坞 · 泛化配方推荐 · 一键安装（GitHub / 本地）
 
-> 状态：**Phase A 已合入分支 · Phase B 实现中**（Skills GitHub/zip/paste 一键安装）  
+> 状态：**Phase A–C 已实现**（坞清理 · Skills 安装 · MCP 导入）  
 > 前置：#161 Skills/Evidence/Connectors/MCP 骨架已合入 main  
 > 对照：AIPOCH `github-import.ts` / SynSci-OS `skill/install/*` / Claude Science 安装体验  
 > 目标：回答三问并给出可落地路径——(1) 右栏技能坞能否移除 (2) 「硅烷偶联推荐」是什么、如何改为泛配方 (3) Skills/MCP 如何支持 GitHub / 本地上传 / 一键安装
@@ -209,11 +209,11 @@ POST /api/connectors/mcp/confirm     { import_id }
 3. ~~安装后自动出现在 catalog；`origin=github|local`；Composer `+` 可见（若启用）。~~  
 4. ~~测试：恶意 `allowed_tools: shell` 被拒；github mock dry_run→install。~~
 
-### Phase C — MCP 导入体验（1–1.5 周）
+### Phase C — MCP 导入体验（1–1.5 周）**【本 PR 实现】**
 
-1. JSON / 上传 / GitHub mcp.json 导入 + Probe。  
-2. Settings MCP UI 与 Skills 同构的「添加」菜单。  
-3. 旗标 `mcp_client_enabled` 仍默认关；导入后需显式启用服务器。
+1. ~~JSON / 上传 / GitHub mcp.json 导入 + Probe。~~ → `mcp_import.py`  
+2. ~~Settings MCP UI 与 Skills 同构的「添加」菜单。~~  
+3. ~~旗标 `mcp_client_enabled` 仍默认关；导入后需显式启用服务器。~~（导入不依赖旗标；Probe 仍需旗标）
 
 ### Phase D — 打磨（按需）
 
@@ -272,5 +272,6 @@ flowchart LR
 | Chat Skill 加载 | `backend/app/services/chat_skills.py` · `skills_store.py` |
 | Skills 安装管线 | `backend/app/services/skill_install.py` · `api/skills.py` (`/install/*`) |
 | MCP prefs | `backend/app/services/mcp_client.py` · `api/connectors.py` |
+| MCP 导入 | `backend/app/services/mcp_import.py` · `/api/connectors/mcp/import*` |
 | AIPOCH GitHub 安装 | `/tmp/aipoch-open-science/src/main/skills/github-import.ts` |
 | SynSci 安装审查 | `/tmp/openscience/backend/cli/src/skill/install/` |

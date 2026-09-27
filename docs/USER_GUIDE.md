@@ -177,7 +177,10 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   **Settings → Skills**; start them from the center **「+」**. Under **Settings → Skills →
   + Add**, install chat skills from GitHub, a local zip/SKILL.md upload, or paste —
   dry-run preview + security review, then one-click confirm. Origin badges:
-  bundled / github / local; user-installed skills can be uninstalled.
+  bundled / github / local; user-installed skills can be uninstalled. Under
+  **Settings → MCP → + Add**, import Claude/Cursor `mcpServers` JSON (paste,
+  upload, or GitHub `mcp.json`) with the same preview → confirm flow. Imported
+  servers default to disabled; Probe still requires `mcp_client_enabled`.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When
