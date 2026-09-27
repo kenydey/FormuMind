@@ -38,7 +38,7 @@ def test_skills_catalog_includes_playbooks_and_chat_skills(tmp_path, monkeypatch
     assert "chat_skill" in kinds
     ids = {s["id"] for s in body["skills"]}
     assert "literature-review" in ids
-    assert "silane_recommend" in ids
+    assert "formula_recommend" in ids
 
 
 def test_skills_prefs_disable(tmp_path, monkeypatch):

@@ -1083,6 +1083,86 @@ export const apiMethods = {
       body,
     ),
 
+  installSkillPaste: (body: { markdown: string; name?: string; dry_run?: boolean }) =>
+    post<import("./types").SkillInstallResponse>("/api/skills/install/paste", {
+      dry_run: true,
+      ...body,
+    }),
+
+  installSkillGithub: (body: {
+    url: string;
+    ref?: string;
+    path?: string;
+    dry_run?: boolean;
+  }) =>
+    post<import("./types").SkillInstallResponse>("/api/skills/install/github", {
+      dry_run: true,
+      ...body,
+    }),
+
+  installSkillUpload: async (file: File, dry_run = true) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const q = dry_run ? "true" : "false";
+    const res = await fetch(`/api/skills/install/upload?dry_run=${q}`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw await readApiError(res, "/api/skills/install/upload");
+    return (await res.json()) as import("./types").SkillInstallResponse;
+  },
+
+  confirmSkillInstall: (install_id: string) =>
+    post<import("./types").SkillInstallResponse>("/api/skills/install/confirm", {
+      install_id,
+    }),
+
+  uninstallSkill: (skill_id: string) =>
+    del<{ ok: boolean; skill_id: string; catalog?: import("./types").SkillsCatalogResponse }>(
+      `/api/skills/installed/${encodeURIComponent(skill_id)}`,
+    ),
+
+  listInstalledSkills: () =>
+    get<{ skills: Array<Record<string, unknown>> }>("/api/skills/installed"),
+
+  checkSkillUpdate: (skill_id: string) =>
+    get<{
+      skill_id: string;
+      update_available: boolean;
+      checkable: boolean;
+      reason: string;
+      local_sha: string;
+      remote_sha: string;
+      source_url: string;
+    }>(`/api/skills/installed/${encodeURIComponent(skill_id)}/check-update`),
+
+  updateSkill: (skill_id: string, dry_run = true) =>
+    post<import("./types").SkillInstallResponse>(
+      `/api/skills/installed/${encodeURIComponent(skill_id)}/update`,
+      { dry_run },
+    ),
+
+  listSkillPacks: () =>
+    get<{
+      packs: Array<{
+        id: string;
+        pack_dir: string;
+        title: string;
+        summary: string;
+        description: string;
+        category: string;
+        installed: boolean;
+        origin: string;
+      }>;
+    }>("/api/skills/packs"),
+
+  installSkillPack: (pack_id: string, dry_run = true) =>
+    post<import("./types").SkillInstallResponse>(
+      `/api/skills/packs/${encodeURIComponent(pack_id)}/install`,
+      { dry_run },
+    ),
+
   listConnectors: () => get<import("./types").ConnectorsResponse>("/api/connectors"),
 
   toggleBuiltinConnector: (id: string, enabled: boolean) =>
@@ -1093,6 +1173,60 @@ export const apiMethods = {
 
   replaceMcpServers: (servers: import("./types").McpServerConfig[]) =>
     put<{ mcp: import("./types").McpServerConfig[] }>("/api/connectors/mcp", { servers }),
+
+  importMcpJson: (body: {
+    json_text?: string;
+    config?: Record<string, unknown>;
+    dry_run?: boolean;
+  }) =>
+    post<import("./types").McpImportResponse>("/api/connectors/mcp/import", {
+      dry_run: true,
+      ...body,
+    }),
+
+  importMcpGithub: (body: {
+    url: string;
+    ref?: string;
+    path?: string;
+    dry_run?: boolean;
+  }) =>
+    post<import("./types").McpImportResponse>("/api/connectors/mcp/import/github", {
+      dry_run: true,
+      ...body,
+    }),
+
+  importMcpUpload: async (file: File, dry_run = true) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const q = dry_run ? "true" : "false";
+    const res = await fetch(`/api/connectors/mcp/import/upload?dry_run=${q}`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw await readApiError(res, "/api/connectors/mcp/import/upload");
+    return (await res.json()) as import("./types").McpImportResponse;
+  },
+
+  confirmMcpImport: (import_id: string) =>
+    post<import("./types").McpImportResponse>("/api/connectors/mcp/import/confirm", {
+      import_id,
+    }),
+
+  setMcpServerEnabled: (id: string, enabled: boolean) =>
+    fetch(`/api/connectors/mcp/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ enabled }),
+    }).then(async (res) => {
+      if (!res.ok) throw await readApiError(res, `/api/connectors/mcp/${id}`);
+      return (await res.json()) as { mcp: import("./types").McpServerConfig[] };
+    }),
+
+  deleteMcpServer: (id: string) =>
+    del<{ mcp: import("./types").McpServerConfig[] }>(
+      `/api/connectors/mcp/${encodeURIComponent(id)}`,
+    ),
 
   probeMcpServer: (id: string) =>
     post<{ ok: boolean; tools?: string[]; error?: string | null }>(

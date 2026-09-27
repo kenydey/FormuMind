@@ -1,11 +1,12 @@
-"""Unified Skills API — playbooks + chat skills + preferences."""
+"""Unified Skills API — playbooks + chat skills + preferences + install."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from ..resources.formulation_skills import get_formulation_skill, list_formulation_skills
 from ..services import chat_skills as chat_skills_svc
+from ..services import skill_install as install_svc
 from ..services.skills_store import is_enabled, load_prefs, save_prefs
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -42,6 +43,23 @@ class SkillsPrefsPatch(BaseModel):
 class SkillsCatalogResponse(BaseModel):
     skills: list[SkillOut]
     prefs: dict
+
+
+class PasteInstallBody(BaseModel):
+    markdown: str
+    name: str | None = None
+    dry_run: bool = True
+
+
+class GithubInstallBody(BaseModel):
+    url: str
+    ref: str | None = None
+    path: str | None = None
+    dry_run: bool = True
+
+
+class ConfirmInstallBody(BaseModel):
+    install_id: str
 
 
 def _playbook_rows() -> list[dict]:
@@ -89,9 +107,13 @@ def _annotate(rows: list[dict]) -> list[SkillOut]:
                 entry=bool(r.get("entry", True)),
             )
         )
-    # pinned first, then kind, then id
     out.sort(key=lambda s: (not s.pinned, s.kind, s.id))
     return out
+
+
+def _catalog_payload() -> SkillsCatalogResponse:
+    rows = _playbook_rows() + chat_skills_svc.list_chat_skills(include_body=False)
+    return SkillsCatalogResponse(skills=_annotate(rows), prefs=load_prefs())
 
 
 @router.get("", response_model=SkillsCatalogResponse)
@@ -106,6 +128,137 @@ def catalog(kind: str | None = None) -> SkillsCatalogResponse:
 def patch_prefs(body: SkillsPrefsPatch) -> dict:
     prefs = save_prefs(body.model_dump(exclude_none=True))
     return {"prefs": prefs, "skills": _annotate(_playbook_rows() + chat_skills_svc.list_chat_skills())}
+
+
+# ── Install (must be registered before /{skill_id}) ─────────────────────────
+
+
+@router.get("/installed")
+def list_installed() -> dict:
+    return {"skills": install_svc.list_installed()}
+
+
+def _install_error(payload: dict) -> HTTPException:
+    msg = str(payload.get("detail") or "安装失败")
+    return HTTPException(status_code=400, detail={"message": msg, **payload})
+
+
+@router.post("/install/paste")
+def install_paste(body: PasteInstallBody) -> dict:
+    result = install_svc.install_from_paste(
+        body.markdown, name=body.name, dry_run=body.dry_run
+    )
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
+@router.post("/install/github")
+def install_github(body: GithubInstallBody) -> dict:
+    result = install_svc.install_from_github(
+        body.url, ref=body.ref, path=body.path, dry_run=body.dry_run
+    )
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
+@router.post("/install/upload")
+async def install_upload(
+    file: UploadFile = File(...),
+    dry_run: bool = True,
+) -> dict:
+    data = await file.read()
+    name = (file.filename or "").lower()
+    if name.endswith(".md") or name.endswith(".markdown"):
+        try:
+            markdown = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"无法解码 markdown: {exc}") from exc
+        result = install_svc.install_from_paste(markdown, dry_run=dry_run)
+    else:
+        result = install_svc.install_from_zip(data, dry_run=dry_run)
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
+@router.post("/install/confirm")
+def install_confirm(body: ConfirmInstallBody) -> dict:
+    result = install_svc.confirm_install(body.install_id)
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
+@router.delete("/installed/{skill_id}")
+def uninstall(skill_id: str) -> dict:
+    try:
+        out = install_svc.uninstall_skill(skill_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    out["catalog"] = _catalog_payload().model_dump()
+    return out
+
+
+@router.get("/installed/{skill_id}/check-update")
+def check_update(skill_id: str) -> dict:
+    try:
+        return install_svc.check_skill_update(skill_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class UpdateSkillBody(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/installed/{skill_id}/update")
+def update_skill(skill_id: str, body: UpdateSkillBody | None = None) -> dict:
+    dry = True if body is None else body.dry_run
+    result = install_svc.update_skill_from_upstream(skill_id, dry_run=dry)
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
+@router.get("/packs")
+def list_packs() -> dict:
+    return {"packs": install_svc.list_skill_packs()}
+
+
+class PackInstallBody(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/packs/{pack_id}/install")
+def install_pack(pack_id: str, body: PackInstallBody | None = None) -> dict:
+    dry = True if body is None else body.dry_run
+    result = install_svc.install_skill_pack(pack_id, dry_run=dry)
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
 
 
 @router.get("/{skill_id}", response_model=SkillOut)

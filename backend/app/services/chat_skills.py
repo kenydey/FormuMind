@@ -1,6 +1,7 @@
 """Chat skill packs (SKILL.md) — discovery, parse, inject."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -22,7 +23,7 @@ ALLOWED_CHAT_TOOLS = frozenset(
 )
 
 
-def _parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
+def parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
     match = _FRONTMATTER_RE.match(raw.replace("\r\n", "\n"))
     if not match:
         return {}, raw
@@ -39,6 +40,19 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
     return fields, body
 
 
+def _origin_for_user_skill(skill_md: Path, default: str) -> str:
+    meta = skill_md.parent / ".formumind-install.json"
+    if meta.is_file():
+        try:
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            origin = str(data.get("origin") or "").strip()
+            if origin in {"github", "local", "user", "pack"}:
+                return "local" if origin == "user" else origin
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+    return default
+
+
 def _load_skill_dir(root: Path, *, origin: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for skill_md in sorted(root.glob("*/SKILL.md")):
@@ -47,10 +61,11 @@ def _load_skill_dir(root: Path, *, origin: str) -> list[dict[str, Any]]:
         except OSError as exc:
             logger.warning("skill read failed %s: %s", skill_md, exc)
             continue
-        fields, body = _parse_frontmatter(raw)
+        fields, body = parse_frontmatter(raw)
         name = fields.get("name") or skill_md.parent.name
         tools_raw = fields.get("allowed_tools") or ""
         tools = [t.strip() for t in re.split(r"[\s,]+", tools_raw) if t.strip()]
+        resolved_origin = origin if origin == "bundled" else _origin_for_user_skill(skill_md, origin)
         out.append(
             {
                 "id": name,
@@ -63,7 +78,7 @@ def _load_skill_dir(root: Path, *, origin: str) -> list[dict[str, Any]]:
                 "activation_policy": fields.get("activation_policy") or "user-controlled",
                 "allowed_tools": validate_allowed_tools(tools),
                 "entry": (fields.get("entry") or "true").lower() != "false",
-                "origin": origin,
+                "origin": resolved_origin,
                 "location": str(skill_md),
                 "body": body,
                 "icon": "📘",
@@ -85,7 +100,7 @@ def list_chat_skills(*, include_body: bool = False) -> list[dict[str, Any]]:
     by_id: dict[str, dict[str, Any]] = {}
     pairs = (
         (Path(__file__).resolve().parents[1] / "resources" / "chat_skills", "bundled"),
-        (Path("./data").resolve() / "skills", "user"),
+        (Path("./data").resolve() / "skills", "local"),
     )
     for root, origin in pairs:
         if not root.is_dir():
