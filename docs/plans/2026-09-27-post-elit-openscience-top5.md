@@ -118,6 +118,17 @@
 | **F-Lab** | Analytical method validation skill（**4**/可行 **4**）· `compare` 先冻结判据（**3**/可行 **5**）· statistical-conventions（**3**/可行 **5**） | `skills/chemistry/analytical-method-validation` · `research/compare` · `core/statistical-conventions` | 涂料 QC / 盐雾等试验报告纪律；与 `method-writer`/DOE 衔接 |
 | **F-Ops** | Export `EXPORTED`/`PARTIAL`/`NOT EXPORTED` 终态（**3**/可行 **5**）· skill-load SHA 审计（**3**/可行 **4**）· install Layer-2 注入拒绝（**3**/可行 **4**）· provenance reason 细分类（**3**/可行 **4**） | `skills/research/export` · skill-runtime / install review · `provenance/envelope.ts` | 钢印包装与 Skills 运营抛光，贴 D2 RO-Crate |
 
+### AIPOCH 向补充打包（未挤进 Top-5，可插队）
+
+来自 AIPOCH 深挖：Top-5 中 2/4/5 已覆盖其最高优先；下列为同栈延伸，**不改变 Top-5 排序**。
+
+| 桶 | 项（必要性约分） | 源 | 说明 |
+|----|------------------|----|------|
+| **F-Lit-Deep** | 批量 Library jobs / journal（**3**/可行 **3**）· 多源 full-text finder（**3**/可行 **4**）· 本地 PDF passage index（**3**/可行 **3**）· Agent PDF inbox（**3**/可行 **3**） | `batch-jobs.ts` · `full-text-finder.ts` · `full-text-index.ts` · `agent-pdf-acquisition.ts` | 50–200 篇涂料战役的补全/全文；passage index 可加强 locator，**不**引 pdf-structure |
+| **F-Cite-Out** | CSL 样式 / `format_references`（**3**/可行 **4**）· LaTeX+bib 轻量包（**3**/可行 **5**）· DOCX `{{cite}}`（**2**/可行 **3**） | `citation-formatter.ts` · `latex-bundle.ts` · `citation-document.ts` | 期刊向书目；贴 method-writer / RO-Crate |
+| **F-Chem-A** | PubChem **完整 GHS** + **similarity**（**4**/可行 **4**）· molecule preview（**3**/可行 **3**）· Rhea（**2**/可行 **3**）· ZINC 可购（**2**/可行 **3**） | `connectors/descriptors/chemistry.ts` · `molecule/*` · `zinc.ts` | 配方日用：危害分类 / 取代基搜索；优于再接一层 ChEMBL |
+| **F-Stamp-UX** | `citations`/`sources` always-on activationPolicy（**3**/可行 **5**）· RO-Crate complete 附 PDF 字节（**3**/可行 **3**）· prepared-literature sidecar（**3**/可行 **4**） | `activation-policy.ts` · `ro-crate-export.ts` · `prepared-literature-sidecar.ts` | 钢印会话强制引用纪律；包内绑死文献 digest |
+
 ## 候补（未进前 5）
 
 | 项 | 原因 |
@@ -126,9 +137,12 @@
 | **Fetch-outcome 诚实**（空≠故障） | 钢印诚实度增益大、改动小；可并进任意连接器波 |
 | **Analytical method validation** skill | 涂料 QC 强相关；与 Golden Bench / method-writer 互补 |
 | Export PARTIAL 终态 / skill SHA / provenance reason 细分类 | D2 抛光；必要性中等 |
+| **PubChem 完整 GHS + similarity**（AIPOCH） | 配方日用强；建议作 **F-Chem-A** 首选（比再接 ChEMBL 更贴主路径） |
 | ChEMBL connector | PubChem/ChEBI/SureChEMBL 已覆盖主路径；助剂 bioactivity 场景可开 |
-| LaTeX bibliography / `latex-bundle` 轻量包 | 写作便利；method-writer 已够用（可作 F6） |
-| RO-Crate complete（附 PDF 字节） | D2 lite 已够交换 |
+| 批量 Library jobs / 多源 OA finder / PDF passage index | 文献战役吞吐；可并进 F-Lit+ 后续切片 |
+| LaTeX / CSL bibliography（AIPOCH） | 写作便利；method-writer 已够用（可作 F6） |
+| RO-Crate complete（附 PDF 字节）· literature sidecar | D2 lite 已够交换；伙伴交付时可开 |
+| `citations`/`sources` always-on | 一行策略开关；可并进任意钢印波 |
 | Library ↔ PaperQA 双向同步加深 | E-Lit 已同源 Manifest；边际 |
 | PMID/PMCID 导入 | 偏生医；涂料主路径 ChemRxiv/DOI 已够 |
 | SynSci `experimental-design` / `hypotheses` / `reproduce` | FM 已有 DOE；reproduce 偏 notebook/HPC |
