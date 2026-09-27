@@ -185,6 +185,22 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   Domain Packs** without changing the default formula-recommend playbook. Type `/`
   in the chat composer to pick enabled skills; GitHub-installed skills support
   update checks via pinned SHA.
+- **Wave A (OpenScience) — report steel-stamp, Evidence fix-loop, MCP in chat**:
+  - **Publication preflight**: before exporting a STORM report, FormuMind runs
+    citation / placeholder / bare-numeric checks. Open **blocking** findings
+    return HTTP 409 until you fix the markdown or override with actor+reason
+    (`POST /api/wiki/preflight/override` then finalize). Draft generation still
+    writes to disk (with `preflight` meta). Flag: `publication_preflight_enabled`
+    (default on for export).
+  - **Evidence reviewer fix-loop**: when `evidence_reviewer_enabled` and
+    `evidence_reviewer_fix_loop_enabled` are on, a non-pass review appends an
+    `[Auditor]` note and re-prompts the LLM (sync ≤3 rounds, stream ≤1). Chat
+    stays fail-open; response includes `reviewer_fix`.
+  - **MCP in composer**: enabled MCP servers appear under **「+」→ MCP servers**
+    (max 4). Selection injects a generated `mcp-<id>` skill doc into the prompt.
+    Explicit `/mcp <server> <tool> {json}` calls run readonly tools; write-like
+    tools require **session approval** (`POST /api/connectors/mcp/{id}/approve-session`)
+    — not a permanent global grant.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When

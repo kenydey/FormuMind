@@ -1962,6 +1962,7 @@ def answer_question(
     *,
     history: list | None = None,
     structure: dict | None = None,
+    prompt_prefix: str | None = None,
 ) -> tuple[str, list[Evidence]]:
     """Answer a user question grounded in the provided sources.
 
@@ -2024,6 +2025,8 @@ def answer_question(
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
     prompt = _chat_prompt(question, relevant, domain, history=history, structure=structure)
+    if prompt_prefix and str(prompt_prefix).strip():
+        prompt = f"{str(prompt_prefix).strip()}\n\n---\n\n{prompt}"
     # 问答主回答: 小 token 预算 + 关闭 thinking(2026-09-04 深度排查):
     # 1) 16384 预算会让推理模型拖满, 单次 2 分钟+(136-143s 慢响应根因);
     # 2) deepseek v4 默认 thinking 在长 KB 上下文下把推理草稿写进 content

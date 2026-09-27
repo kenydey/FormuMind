@@ -557,6 +557,10 @@ class Settings(BaseSettings):
     evidence_synthesis_mode: str = "off"
     evidence_doi_verify_enabled: bool = True
     evidence_reviewer_enabled: bool = False
+    # Bounded reviewer→LLM repair loop after evidence_reviewer (default off).
+    evidence_reviewer_fix_loop_enabled: bool = False
+    # Wiki/STORM export steel-stamp (citation/placeholder/numeric). Default on for export.
+    publication_preflight_enabled: bool = True
     connectors_builtin_enabled: bool = True
     mcp_client_enabled: bool = False
     # Chat native chem tool-calling (OpenAI-compatible tools → chemtools / SureChemBL / OCSR).

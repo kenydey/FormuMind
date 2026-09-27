@@ -80,10 +80,19 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
         draft.selectedConnectors = [...setIds];
       }),
 
+    toggleSelectedMcpServer: (id: string) =>
+      set((draft) => {
+        const setIds = new Set(draft.selectedMcpServers);
+        if (setIds.has(id)) setIds.delete(id);
+        else if (setIds.size < 4) setIds.add(id);
+        draft.selectedMcpServers = [...setIds];
+      }),
+
     clearComposerSelections: () =>
       set((draft) => {
         draft.selectedChatSkills = [];
         draft.selectedConnectors = [];
+        draft.selectedMcpServers = [];
         draft.chatMode = "chat";
       }),
 
@@ -185,6 +194,7 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     | "setChatMode"
     | "toggleSelectedChatSkill"
     | "toggleSelectedConnector"
+    | "toggleSelectedMcpServer"
     | "clearComposerSelections"
     | "setChatDraftAppender"
     | "appendChatDraftRef"

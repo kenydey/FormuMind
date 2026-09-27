@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { api, type BuiltinConnector, type UnifiedSkill } from "../api";
+import { api, type BuiltinConnector, type McpServerConfig, type UnifiedSkill } from "../api";
 import { useStore } from "../store";
 
 export default function ChatComposerPlus() {
   const [open, setOpen] = useState(false);
   const [skills, setSkills] = useState<UnifiedSkill[]>([]);
   const [connectors, setConnectors] = useState<BuiltinConnector[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -14,9 +15,11 @@ export default function ChatComposerPlus() {
     chatMode,
     selectedChatSkills,
     selectedConnectors,
+    selectedMcpServers,
     setChatMode,
     toggleSelectedChatSkill,
     toggleSelectedConnector,
+    toggleSelectedMcpServer,
     applyFormulationSkill,
     sources,
     selectedSources,
@@ -27,9 +30,11 @@ export default function ChatComposerPlus() {
       chatMode: s.chatMode,
       selectedChatSkills: s.selectedChatSkills,
       selectedConnectors: s.selectedConnectors,
+      selectedMcpServers: s.selectedMcpServers,
       setChatMode: s.setChatMode,
       toggleSelectedChatSkill: s.toggleSelectedChatSkill,
       toggleSelectedConnector: s.toggleSelectedConnector,
+      toggleSelectedMcpServer: s.toggleSelectedMcpServer,
       applyFormulationSkill: s.applyFormulationSkill,
       sources: s.sources,
       selectedSources: s.selectedSources,
@@ -40,7 +45,10 @@ export default function ChatComposerPlus() {
   useEffect(() => {
     if (!open) return;
     void api.listSkills().then((r) => setSkills(r.skills.filter((x) => x.enabled)));
-    void api.listConnectors().then((r) => setConnectors(r.builtin.filter((c) => c.enabled)));
+    void api.listConnectors().then((r) => {
+      setConnectors(r.builtin.filter((c) => c.enabled));
+      setMcpServers((r.mcp || []).filter((m) => m.enabled));
+    });
   }, [open]);
 
   useEffect(() => {
@@ -192,6 +200,36 @@ export default function ChatComposerPlus() {
               })}
             </div>
           </div>
+
+          {mcpServers.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">
+                MCP servers
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {mcpServers.map((m) => {
+                  const on = selectedMcpServers.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      data-testid={`mcp-server-${m.id}`}
+                      onClick={() => toggleSelectedMcpServer(m.id)}
+                      className={`px-1.5 py-0.5 rounded border ${
+                        on ? "border-violet-500/50 text-violet-300" : "border-edge text-slate-400"
+                      }`}
+                      title={m.command}
+                    >
+                      {m.id}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-slate-600 mt-1">
+                最多 4 个；写类工具需会话审批
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

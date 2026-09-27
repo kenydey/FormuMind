@@ -499,6 +499,8 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           mode: st.chatMode || "chat",
           selected_skills: st.selectedChatSkills || [],
           selected_connectors: st.selectedConnectors || [],
+          selected_mcp_servers: st.selectedMcpServers || [],
+          chat_session_id: st.activeSessionId || undefined,
         };
         await api.chatStream(reqBody, (ev) => {
           const last = (d: { chatHistory: ChatMessage[] }) =>
@@ -536,6 +538,11 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               }
             });
           } else if (ev.type === "done") {
+            const perm = (ev as { mcp_permission_required?: {
+              server_id: string;
+              tool_name: string;
+              session_id?: string | null;
+            } | null }).mcp_permission_required;
             set((draft) => {
               const m = last(draft);
               if (m?.role === "assistant") {
@@ -552,9 +559,41 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                   ev.clarification && typeof ev.clarification === "object"
                     ? (ev.clarification as import("../../api").ClarificationOption)
                     : null;
+                if (perm?.server_id && perm?.tool_name) {
+                  m.content +=
+                    `\n\n> ⚠️ MCP 工具 \`${perm.server_id}/${perm.tool_name}\` 需要会话审批后才能执行。`;
+                }
               }
               draft.error = null;
             });
+            if (perm?.server_id && perm?.tool_name) {
+              const sid = st.activeSessionId || `ephemeral-${Date.now()}`;
+              const ok =
+                typeof window !== "undefined" &&
+                window.confirm(
+                  `批准本会话调用 MCP 写类工具？\n${perm.server_id} / ${perm.tool_name}`,
+                );
+              if (ok) {
+                void api
+                  .approveMcpSession(perm.server_id, {
+                    session_id: sid,
+                    tool_name: perm.tool_name,
+                    until_session_end: true,
+                  })
+                  .then(() => {
+                    set((draft) => {
+                      const m = last(draft);
+                      if (m?.role === "assistant") {
+                        m.content +=
+                          "\n\n> ✅ 已批准本会话；请重新发送带 `/mcp …` 的指令以重试。";
+                      }
+                    });
+                  })
+                  .catch(() => {
+                    /* ignore approve failures in UI */
+                  });
+              }
+            }
             get().scheduleAutosave();
             // 多会话: 每轮完成自动落库(2026-09-05 A1)
             void get().persistChatSession();

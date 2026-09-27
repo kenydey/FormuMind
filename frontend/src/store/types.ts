@@ -199,6 +199,7 @@ export interface AppState {
   chatMode: "chat" | "evidence";
   selectedChatSkills: string[];
   selectedConnectors: string[];
+  selectedMcpServers: string[];
   /** Append text into ResearchPanel draft (set by panel via store). */
   chatDraftAppender: ((text: string) => void) | null;
   /** When opening Settings → 环境变量, scroll/highlight this EnvFlag.attr (e.g. wiki_dossier_report_enabled). */
@@ -303,6 +304,7 @@ export interface AppState {
   setChatMode: (mode: "chat" | "evidence") => void;
   toggleSelectedChatSkill: (id: string) => void;
   toggleSelectedConnector: (id: string) => void;
+  toggleSelectedMcpServer: (id: string) => void;
   clearComposerSelections: () => void;
   setChatDraftAppender: (fn: ((text: string) => void) | null) => void;
   appendChatDraftRef: (text: string) => void;

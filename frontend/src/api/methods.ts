@@ -1165,6 +1165,15 @@ export const apiMethods = {
 
   listConnectors: () => get<import("./types").ConnectorsResponse>("/api/connectors"),
 
+  approveMcpSession: (
+    serverId: string,
+    body: { session_id: string; tool_name?: string; until_session_end?: boolean },
+  ) =>
+    post<{ ok: boolean; session_id: string; server_id: string; tool_name: string }>(
+      `/api/connectors/mcp/${encodeURIComponent(serverId)}/approve-session`,
+      body,
+    ),
+
   toggleBuiltinConnector: (id: string, enabled: boolean) =>
     post<{ builtin: import("./types").BuiltinConnector[] }>(
       `/api/connectors/builtin/${encodeURIComponent(id)}/toggle`,

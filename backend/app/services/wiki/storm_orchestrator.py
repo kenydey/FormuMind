@@ -320,6 +320,20 @@ def run_storm_report(
     state.final_path = path
     state.final_markdown = markdown
     state.stage = "done"
+    preflight_meta: dict[str, Any] = {}
+    try:
+        from ..publication_preflight import annotate_storm_meta, review_markdown
+
+        preflight_meta = annotate_storm_meta(markdown, total_anchors=len(cite_ids) or None)
+        # Persist review state for export gate (does not block draft write).
+        review_markdown(
+            pid, "storm", markdown, total_anchors=len(cite_ids) or None
+        )
+        if (preflight_meta.get("preflight") or {}).get("open_blocking", 0) > 0:
+            preflight_meta["preflight"]["blocked"] = True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("storm preflight annotate soft-failed: %s", exc)
+        preflight_meta = {}
     state.meta = {
         "outline_path": outline_rel,
         "section_count": len(outline.sections),
@@ -329,6 +343,7 @@ def run_storm_report(
         "parallel": parallel_use,
         "parallel_workers": workers if parallel_use else 1,
         "claim_check": claim_meta,
+        **preflight_meta,
     }
 
     out: dict[str, Any] = {
@@ -352,6 +367,8 @@ def run_storm_report(
     flags = ["unreviewed", "report", "draft", "storm"]
     if use_llm:
         flags.append("llm_draft")
+    if (preflight_meta.get("preflight") or {}).get("blocked"):
+        flags.append("preflight_blocked")
     title = f"STORM 长文 · {outline.topic}"
     extra = {
         "template": "report_storm",
@@ -364,6 +381,7 @@ def run_storm_report(
         "disclaimer": "draft_not_claims",
         "storm_section_count": len(outline.sections),
         "storm_outline_source": outline.source,
+        **preflight_meta,
     }
     md = dump_page(
         kind="report",
@@ -453,6 +471,21 @@ def export_storm_report(
         markdown = store.read_markdown(row.path) or ""
         if not markdown.strip():
             raise LookupError("storm report markdown empty")
+
+    # Publication preflight steel-stamp on export (draft persist is fail-open).
+    try:
+        from ..publication_preflight import export_allowed
+
+        allowed, detail = export_allowed(pid, "storm", markdown, settings=get_settings())
+        if not allowed:
+            # Carried as PermissionError args[1] for API 409 detail.
+            err = PermissionError("publication_preflight_blocked")
+            err.preflight = detail  # type: ignore[attr-defined]
+            raise err
+    except PermissionError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("preflight export check soft-failed: %s", exc)
 
     payload, media_type, ext = export_bytes(markdown, kind, title=title)
     filename = f"project-{safe_key(pid)}-storm.{ext}"

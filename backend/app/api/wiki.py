@@ -643,7 +643,15 @@ def export_storm_report_endpoint(body: StormReportExportRequest):
             campaign_id=body.campaign_id,
         )
     except PermissionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        detail: dict | str = str(exc)
+        preflight = getattr(exc, "preflight", None)
+        if preflight is not None:
+            detail = {
+                "error": "publication_preflight_blocked",
+                "message": str(exc),
+                "preflight": preflight,
+            }
+        raise HTTPException(status_code=409, detail=detail) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -868,3 +876,101 @@ def review_page_endpoint(body: WikiReviewUpdate) -> dict:
         raise HTTPException(status_code=404, detail=f"wiki page not found: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ── Publication preflight (Wave A steel-stamp) ─────────────────────────────
+
+
+class PreflightReviewRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    kind: str = Field(default="storm", description="storm|dossier")
+    markdown: str | None = None
+    total_anchors: int | None = Field(default=None, ge=0)
+
+
+class PreflightOverrideRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    kind: str = Field(default="storm")
+    finding_id: str = Field(min_length=1)
+    actor: str = Field(min_length=1, max_length=120)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class PreflightFinalizeRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    kind: str = Field(default="storm")
+    markdown: str | None = None
+    actor: str = Field(default="user", max_length=120)
+
+
+def _preflight_markdown(project_id: str, kind: str, markdown: str | None) -> str:
+    if markdown is not None and markdown.strip():
+        return markdown
+    from ..services.wiki.schema import project_report_path
+
+    store = get_wiki_store()
+    path = project_report_path(project_id, "storm" if kind == "storm" else kind)
+    row = store.get_by_path(path)
+    if row is None:
+        raise HTTPException(status_code=404, detail="report not found for preflight")
+    return store.read_markdown(row.path) or ""
+
+
+@router.post("/preflight/review")
+def preflight_review_endpoint(body: PreflightReviewRequest) -> dict:
+    """Run citation/placeholder/numeric checks and persist findings."""
+    _require_wiki()
+    from ..services.publication_preflight import review_markdown
+
+    md = _preflight_markdown(body.project_id, body.kind, body.markdown)
+    return review_markdown(
+        body.project_id,
+        body.kind,
+        md,
+        total_anchors=body.total_anchors,
+    )
+
+
+@router.post("/preflight/override")
+def preflight_override_endpoint(body: PreflightOverrideRequest) -> dict:
+    """Override a finding with required actor + reason audit trail."""
+    _require_wiki()
+    from ..services.publication_preflight import override_finding
+
+    try:
+        return override_finding(
+            body.project_id,
+            body.kind,
+            body.finding_id,
+            actor=body.actor,
+            reason=body.reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/preflight/finalize")
+def preflight_finalize_endpoint(body: PreflightFinalizeRequest) -> dict:
+    """assertReady: hash match + no open blocking → finalize."""
+    _require_wiki()
+    from ..services.publication_preflight import assert_ready
+
+    md = _preflight_markdown(body.project_id, body.kind, body.markdown)
+    result = assert_ready(body.project_id, body.kind, md, actor=body.actor)
+    if not result.get("ready"):
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.get("/preflight/{project_id}")
+def preflight_get_endpoint(
+    project_id: str,
+    kind: str = Query(default="storm"),
+) -> dict:
+    """Return last persisted preflight state for a project."""
+    _require_wiki()
+    from ..services.publication_preflight import get_state
+
+    return get_state(project_id, kind)

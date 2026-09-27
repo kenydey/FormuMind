@@ -167,6 +167,10 @@ def probe_server(server: dict[str, Any], *, timeout_s: float = 8.0) -> dict[str,
         sess.close()
 
 
+def is_writeish_tool(tool_name: str) -> bool:
+    return _is_writeish(tool_name)
+
+
 def call_tool_readonly(
     server_id: str,
     tool_name: str,
@@ -177,7 +181,49 @@ def call_tool_readonly(
     if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
         return {"ok": False, "error": "mcp_client_enabled is off"}
     if _is_writeish(tool_name):
-        return {"ok": False, "error": f"write-like tool denied: {tool_name}"}
+        return {
+            "ok": False,
+            "error": f"write-like tool denied: {tool_name}",
+            "mcp_permission_required": {
+                "server_id": server_id,
+                "tool_name": tool_name,
+            },
+        }
+    return _call_tool(server_id, tool_name, arguments)
+
+
+def call_tool_with_session(
+    server_id: str,
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    session_id: str | None = None,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """Call tool; writeish requires prior session grant via approve-session."""
+    if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
+        return {"ok": False, "error": "mcp_client_enabled is off"}
+    if _is_writeish(tool_name):
+        from .mcp_session_grants import is_granted
+
+        if not session_id or not is_granted(session_id, server_id, tool_name):
+            return {
+                "ok": False,
+                "error": "mcp_permission_required",
+                "mcp_permission_required": {
+                    "server_id": server_id,
+                    "tool_name": tool_name,
+                    "session_id": session_id,
+                },
+            }
+    return _call_tool(server_id, tool_name, arguments)
+
+
+def _call_tool(
+    server_id: str,
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     server = next((s for s in _prefs_servers() if s.get("id") == server_id and s.get("enabled")), None)
     if not server:
         return {"ok": False, "error": "server not found or disabled"}
