@@ -1,6 +1,6 @@
 # Skills / MCP 进阶：移除技能坞 · 泛化配方推荐 · 一键安装（GitHub / 本地）
 
-> 状态：**Phase A 实现中**（产品已确认：删坞 + Active Strip · 配方推荐域自适应 · 安装留 Phase B/C）  
+> 状态：**Phase A 已合入分支 · Phase B 实现中**（Skills GitHub/zip/paste 一键安装）  
 > 前置：#161 Skills/Evidence/Connectors/MCP 骨架已合入 main  
 > 对照：AIPOCH `github-import.ts` / SynSci-OS `skill/install/*` / Claude Science 安装体验  
 > 目标：回答三问并给出可落地路径——(1) 右栏技能坞能否移除 (2) 「硅烷偶联推荐」是什么、如何改为泛配方 (3) Skills/MCP 如何支持 GitHub / 本地上传 / 一键安装
@@ -202,12 +202,12 @@ POST /api/connectors/mcp/confirm     { import_id }
 
 **验收**：右栏无技能市场；新用户默认看到「配方推荐」而非硅烷；推荐 Modal 仍按当前域出候选。
 
-### Phase B — Skills 一键安装（1.5–2 周）
+### Phase B — Skills 一键安装（1.5–2 周）**【本 PR 实现】**
 
-1. 后端 install 管线（github / zip / paste）+ dry_run + ledger + 安全审查。  
-2. Settings Skills UI：`+ 添加` 三入口 + 预览卡片 + 一键安装/卸载。  
-3. 安装后自动出现在 catalog；`origin=github|local`；Composer `+` 可见（若启用）。  
-4. 测试：恶意 `allowed_tools: shell` 被拒；公开示例 repo 可 dry_run→install。
+1. ~~后端 install 管线（github / zip / paste）+ dry_run + ledger + 安全审查。~~ → `skill_install.py`  
+2. ~~Settings Skills UI：`+ 添加` 三入口 + 预览卡片 + 一键安装/卸载。~~  
+3. ~~安装后自动出现在 catalog；`origin=github|local`；Composer `+` 可见（若启用）。~~  
+4. ~~测试：恶意 `allowed_tools: shell` 被拒；github mock dry_run→install。~~
 
 ### Phase C — MCP 导入体验（1–1.5 周）
 
