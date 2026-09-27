@@ -16,7 +16,11 @@ from ..domain.chat_schemas import (
 )
 from ..domain.kg_schemas import EntityResolutionSummary, KGRetrieveStats
 from ..domain.schemas import Evidence
-from ..services.chat_claims import build_sourced_claims
+from ..services.chat_claims import (
+    build_sources_audit,
+    build_sourced_claims,
+    verify_answer_claims,
+)
 from ..services.chat_clarify import apply_assumption_to_structured, detect_clarification
 from ..services.chat_context import rewrite_query, trim_history
 from ..services.chat_structured import generate_structured_answer
@@ -166,6 +170,48 @@ def _claims_evidence(evidence: list[Evidence]) -> list[Evidence]:
         return filter_raw_evidence(evidence)
     except Exception:
         return evidence
+
+
+def _claims_and_audit(
+    question: str,
+    answer: str,
+    citations: list[Evidence],
+    *,
+    structured: StructuredAnswer | None = None,
+    settings=None,
+):
+    """Run claim verification once → sourced_claims + sources_audit (Wave D)."""
+    from ..config import get_settings
+
+    settings = settings or get_settings()
+    evidence = _claims_evidence(citations)
+    verified = verify_answer_claims(
+        question,
+        answer,
+        evidence,
+        structured=structured,
+        settings=settings,
+    )
+    sourced_claims = build_sourced_claims(
+        question,
+        answer,
+        evidence,
+        structured=structured,
+        settings=settings,
+        verified=verified,
+    )
+    sources_audit = None
+    if verified is not None and bool(
+        getattr(settings, "sources_audit_enabled", True)
+    ):
+        try:
+            sources_audit = build_sources_audit(
+                evidence, verified=verified, enabled=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("sources_audit skipped: %s", exc)
+            sources_audit = None
+    return sourced_claims, sources_audit
 
 
 def _ensure_answer(text: str | None, *, fallback: str = "暂无可用回答。") -> str:
@@ -372,10 +418,10 @@ def chat(req: ChatRequestValidated):
             except Exception as exc:  # noqa: BLE001
                 logger.debug("mcp chat selection skipped: %s", exc)
 
-        sourced_claims = build_sourced_claims(
+        sourced_claims, sources_audit = _claims_and_audit(
             question,
             answer,
-            _claims_evidence(citations),
+            citations,
             structured=structured,
             settings=settings,
         )
@@ -403,6 +449,7 @@ def chat(req: ChatRequestValidated):
             clarification=clarification,
             rewritten_query=rewritten_query,
             sourced_claims=sourced_claims,
+            sources_audit=sources_audit,
             mode=req.mode,
             doi_results=doi_results,
             citation_expand=citation_expand,
@@ -668,19 +715,17 @@ async def chat_stream(req: "ChatRequestValidated"):
                             structure=req.structure,
                         )
                     )
-                    claims = None
-                    if settings.chat_claim_check_enabled and answer:
-                        try:
-                            claims = await asyncio.to_thread(
-                                build_sourced_claims,
-                                question,
-                                answer,
-                                _claims_evidence(citations),
-                                structured=None,
-                                settings=settings,
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("chat/stream paperqa claims: %s", exc)
+                    claims, sources_audit = None, None
+                    try:
+                        claims, sources_audit = await asyncio.to_thread(
+                            _claims_and_audit,
+                            question,
+                            answer,
+                            citations,
+                            settings=settings,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("chat/stream paperqa claims: %s", exc)
                     evidence_provenance = None
                     try:
                         from ..services.scholar_helpers import build_evidence_provenance
@@ -706,6 +751,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "clarification": plan["clarification"],
                             "rewritten_query": plan["rewritten_query"],
                             "sourced_claims": claims,
+                            "sources_audit": sources_audit,
                             "mode": req.mode,
                             "doi_results": doi_results,
                             "citation_expand": citation_expand,
@@ -856,26 +902,25 @@ async def chat_stream(req: "ChatRequestValidated"):
                     else:
                         answer = (result_holder.get("text") or "".join(parts)).strip()
                         yield _sse({"type": "phase", "phase": "claims"})
-                        claims = None
-                        if settings.chat_claim_check_enabled and answer:
-                            try:
-                                claims = await asyncio.to_thread(
-                                    build_sourced_claims,
-                                    question,
-                                    answer,
-                                    _claims_evidence(plan["sources"]),
-                                    structured=None,
-                                    settings=settings,
-                                )
-                            except Exception as exc:  # noqa: BLE001
-                                logger.warning("chat/stream claims 失败: %s", exc)
+                        cites = [
+                            _sanitize_evidence(c)
+                            for c in plan["sources"][: min(8, len(plan["sources"]))]
+                        ]
+                        claims, sources_audit = None, None
+                        try:
+                            claims, sources_audit = await asyncio.to_thread(
+                                _claims_and_audit,
+                                question,
+                                answer,
+                                cites,
+                                settings=settings,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("chat/stream claims 失败: %s", exc)
                         done_payload = {
                             "type": "done",
                             "answer": answer,
-                            "citations": [
-                                _sanitize_evidence(c)
-                                for c in plan["sources"][: min(8, len(plan["sources"]))]
-                            ],
+                            "citations": cites,
                             "rag_backend": active_rag_backend(),
                             "kb_chunks_used": kb_used,
                             "entity_resolution": plan["entity_resolution"],
@@ -883,6 +928,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "clarification": plan["clarification"],
                             "rewritten_query": plan["rewritten_query"],
                             "sourced_claims": claims,
+                            "sources_audit": sources_audit,
                             "tools_used": tools_used or result_holder.get("tools_used") or [],
                         }
                         yield _sse(done_payload)
@@ -891,27 +937,26 @@ async def chat_stream(req: "ChatRequestValidated"):
                     answer = (result_holder.get("text") or "".join(parts)).strip()
                     tools_used = result_holder.get("tools_used") or tools_used
                     yield _sse({"type": "phase", "phase": "claims"})
-                    claims = None
-                    if settings.chat_claim_check_enabled and answer:
-                        try:
-                            claims = await asyncio.to_thread(
-                                build_sourced_claims,
-                                question,
-                                answer,
-                                _claims_evidence(plan["sources"]),
-                                structured=None,
-                                settings=settings,
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("chat/stream claims 失败: %s", exc)
+                    cites = [
+                        _sanitize_evidence(c)
+                        for c in plan["sources"][: min(8, len(plan["sources"]))]
+                    ]
+                    claims, sources_audit = None, None
+                    try:
+                        claims, sources_audit = await asyncio.to_thread(
+                            _claims_and_audit,
+                            question,
+                            answer,
+                            cites,
+                            settings=settings,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("chat/stream claims 失败: %s", exc)
                     yield _sse(
                         {
                             "type": "done",
                             "answer": answer,
-                            "citations": [
-                                _sanitize_evidence(c)
-                                for c in plan["sources"][: min(8, len(plan["sources"]))]
-                            ],
+                            "citations": cites,
                             "rag_backend": active_rag_backend(),
                             "kb_chunks_used": kb_used,
                             "entity_resolution": plan["entity_resolution"],
@@ -919,6 +964,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "clarification": plan["clarification"],
                             "rewritten_query": plan["rewritten_query"],
                             "sourced_claims": claims,
+                            "sources_audit": sources_audit,
                             "tools_used": tools_used,
                         }
                     )
@@ -1013,20 +1059,17 @@ async def chat_stream(req: "ChatRequestValidated"):
 
             # claims 收尾(12s 硬超时 → offline 降级)。
             yield _sse({"type": "phase", "phase": "claims"})
-            claims = None
-            if settings.chat_claim_check_enabled and answer:
-                try:
-                    claims = await asyncio.to_thread(
-                        build_sourced_claims,
-                        question,
-                        answer,
-                        _claims_evidence(plan["sources"]),
-                        structured=None,
-                        settings=settings,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("chat/stream claims 失败: %s", exc)
-                    claims = None
+            claims, sources_audit = None, None
+            try:
+                claims, sources_audit = await asyncio.to_thread(
+                    _claims_and_audit,
+                    question,
+                    answer,
+                    citations,
+                    settings=settings,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("chat/stream claims 失败: %s", exc)
 
             evidence_provenance = None
             try:
@@ -1052,6 +1095,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "clarification": plan["clarification"],
                     "rewritten_query": plan["rewritten_query"],
                     "sourced_claims": claims,
+                    "sources_audit": sources_audit,
                     "mode": req.mode,
                     "doi_results": doi_results,
                     "citation_expand": citation_expand,

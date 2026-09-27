@@ -94,10 +94,19 @@ function DeepResearchStages({
 }
 
 function CitationChip({ ev }: { ev: Evidence }) {
+  const pageLabel =
+    ev.page != null && Number.isFinite(Number(ev.page))
+      ? `pp. ${ev.page}`
+      : "页码未知";
+  const pageTone =
+    ev.page != null && Number.isFinite(Number(ev.page))
+      ? "text-accent/80"
+      : "text-slate-500";
   return (
     <span
       className="inline-flex items-center gap-1 bg-accent/10 border border-accent/30 text-accent rounded px-1.5 py-0.5 text-[10px] mr-1 mb-1"
       title={ev.snippet}
+      data-testid="citation-chip"
     >
       {ev.is_seed_corpus && (
         <span className="text-amber-400/90 shrink-0" title="离线示例摘要">
@@ -105,6 +114,9 @@ function CitationChip({ ev }: { ev: Evidence }) {
         </span>
       )}
       <span className="truncate max-w-[140px]">{ev.title}</span>
+      <span className={`shrink-0 ${pageTone}`} title={pageLabel}>
+        {pageLabel}
+      </span>
     </span>
   );
 }
@@ -449,6 +461,57 @@ export default function ResearchPanel() {
                     >
                       知识库 ×{m.kbChunksUsed}
                     </span>
+                  </div>
+                )}
+                {m.role === "assistant" && !m.streaming && m.sourcesAudit && (
+                  <div
+                    className="mt-2 pt-2 border-t border-edge/60 space-y-1"
+                    data-testid="chat-sources-audit"
+                  >
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wide">
+                      Sources 审计 · claim→passage
+                    </div>
+                    <div className="flex flex-wrap gap-1 text-[10px] text-slate-400">
+                      {(["supported", "partial", "unsupported", "contradicted"] as const).map(
+                        (k) => (
+                          <span key={k} className="px-1.5 py-0.5 rounded border border-edge">
+                            {k} {m.sourcesAudit?.summary?.[k] ?? 0}
+                          </span>
+                        ),
+                      )}
+                    </div>
+                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                      {(m.sourcesAudit.rows || []).slice(0, 8).map((row, j) => {
+                        const g = row.grade || "unsupported";
+                        const tone =
+                          g === "supported"
+                            ? "border-emerald-500/40 text-emerald-300"
+                            : g === "partial"
+                              ? "border-amber-500/40 text-amber-300"
+                              : g === "contradicted"
+                                ? "border-rose-500/40 text-rose-300"
+                                : "border-edge text-slate-400";
+                        const loc = (row.locators || [])[0];
+                        const locLabel =
+                          loc?.page != null
+                            ? `pp. ${loc.page}`
+                            : loc?.paragraph != null
+                              ? `¶${loc.paragraph}`
+                              : "locator?";
+                        return (
+                          <div
+                            key={`${j}-${(row.claim || "").slice(0, 24)}`}
+                            className={`text-[10px] px-1.5 py-1 rounded border ${tone}`}
+                          >
+                            <span className="font-medium mr-1">{g}</span>
+                            <span className="text-slate-500 mr-1">{locLabel}</span>
+                            <span className="text-slate-300">
+                              {(row.claim || "").slice(0, 120)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
                 {m.role === "assistant" && !m.streaming && m.evidenceProvenance && (

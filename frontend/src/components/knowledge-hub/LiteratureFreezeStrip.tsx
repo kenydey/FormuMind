@@ -15,6 +15,7 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
   const [includeKw, setIncludeKw] = useState("epoxy,coating");
   const [excludeKw, setExcludeKw] = useState("");
   const [showScreen, setShowScreen] = useState(false);
+  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!projectId) {
@@ -112,6 +113,28 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
         </button>
         <button
           type="button"
+          disabled={!!busy || cand < 1}
+          className="px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-200 hover:bg-sky-500/10 disabled:opacity-40"
+          data-testid="literature-enrich-oa-btn"
+          onClick={() =>
+            run("enrich-oa", async () => {
+              const res = await api.enrichLiteratureOa({
+                project_id: projectId,
+                scope: "missing_fulltext",
+                limit: 20,
+                actor: "hub",
+              });
+              setEnrichMsg(
+                `补全文 ${res.fetched ?? 0}/${res.attempted ?? 0}` +
+                  (res.skipped ? ` · 跳过 ${res.skipped}` : ""),
+              );
+            })
+          }
+        >
+          补全文
+        </button>
+        <button
+          type="button"
           className="px-1.5 py-0.5 rounded border border-edge text-slate-400"
           data-testid="literature-screen-toggle"
           onClick={() => setShowScreen((v) => !v)}
@@ -119,6 +142,11 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
           筛选
         </button>
       </div>
+      {enrichMsg && (
+        <div className="text-[10px] text-sky-300/90" data-testid="literature-enrich-msg">
+          {enrichMsg}
+        </div>
+      )}
 
       {showScreen && (
         <div className="space-y-1 border-t border-edge/60 pt-1.5" data-testid="literature-screen-form">

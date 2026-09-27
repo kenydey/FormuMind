@@ -39,6 +39,10 @@ _NUMERIC_LINE_RE = re.compile(
     r"p\s*[<=>]\s*\d)",
     re.I,
 )
+# Footnote def body may carry "pp. 3" / "P3" / "¶2" from CitationAnchor.to_citation_text.
+_FOOTNOTE_PAGE_RE = re.compile(r"(?:pp?\.\s*|P)(\d+)", re.I)
+_FOOTNOTE_PARA_RE = re.compile(r"¶\s*(\d+)")
+_INLINE_CITE_RE = re.compile(r"\[\^(\d+)\]")
 
 
 @dataclass
@@ -97,10 +101,59 @@ def _infer_total_anchors(markdown: str, total_anchors: int | None) -> int:
     return max(cited) if cited else 0
 
 
+def _footnote_locator_map(markdown: str) -> dict[int, dict[str, int | None]]:
+    """Parse footnote definitions for page/paragraph locators (best-effort).
+
+    ``_FOOTNOTE_DEF_RE`` only matches the ``[^n]: `` prefix; read the rest of
+    that line for ``pp. N`` / ``¶N``.
+    """
+    out: dict[int, dict[str, int | None]] = {}
+    text = markdown or ""
+    for m in _FOOTNOTE_DEF_RE.finditer(text):
+        try:
+            n = int(m.group(1))
+        except (TypeError, ValueError):
+            continue
+        # Remainder of the definition line after the matched prefix.
+        line_end = text.find("\n", m.end())
+        rest = text[m.end() : line_end if line_end >= 0 else None]
+        page_m = _FOOTNOTE_PAGE_RE.search(rest)
+        para_m = _FOOTNOTE_PARA_RE.search(rest)
+        out[n] = {
+            "page": int(page_m.group(1)) if page_m else None,
+            "paragraph": int(para_m.group(1)) if para_m else None,
+        }
+    return out
+
+
+def _locator_preflight_mode(settings: Any | None) -> str:
+    """Resolve off | warning | blocking from bool flags (EnvFlag is bool-only).
+
+    Also accepts legacy string ``citation_locator_preflight`` for tests/compat.
+    """
+    if settings is None:
+        return "warning"
+    legacy = getattr(settings, "citation_locator_preflight", None)
+    if isinstance(legacy, str) and legacy.strip():
+        mode = legacy.strip().lower()
+        if mode in ("off", "false", "0", "none"):
+            return "off"
+        if mode in ("blocking", "block", "error"):
+            return "blocking"
+        if mode in ("warning", "warn", "major"):
+            return "warning"
+    if not bool(getattr(settings, "citation_locator_preflight_enabled", True)):
+        return "off"
+    if bool(getattr(settings, "citation_locator_preflight_blocking", False)):
+        return "blocking"
+    return "warning"
+
+
 def run_checks(
     markdown: str,
     *,
     total_anchors: int | None = None,
+    settings: Any | None = None,
 ) -> list[Finding]:
     """Pure checks → open findings (no persistence)."""
     text = markdown or ""
@@ -198,6 +251,39 @@ def run_checks(
             )
         )
 
+    # Wave D — locator honesty: numeric + [^n] but footnote has no page/¶.
+    loc_mode = _locator_preflight_mode(settings)
+    if loc_mode != "off":
+        severity: Severity = "blocking" if loc_mode == "blocking" else "major"
+        loc_map = _footnote_locator_map(text)
+        for i, line in enumerate(body_wo_defs.splitlines(), start=1):
+            if not _NUMERIC_LINE_RE.search(line):
+                continue
+            if line.strip().startswith("#"):
+                continue
+            cites = [int(x) for x in _INLINE_CITE_RE.findall(line)]
+            if not cites:
+                continue
+            missing = []
+            for n in cites:
+                loc = loc_map.get(n) or {}
+                if loc.get("page") is None and loc.get("paragraph") is None:
+                    missing.append(n)
+            if not missing:
+                continue
+            findings.append(
+                Finding(
+                    id=uuid.uuid4().hex[:12],
+                    check="locator_missing",
+                    severity=severity,
+                    status="open",
+                    title="数值引用缺少页码/段落 locator",
+                    detail=(line.strip()[:160]),
+                    evidence=[f"[^{n}]" for n in missing[:8]],
+                    location={"line": i},
+                )
+            )
+
     return findings
 
 
@@ -255,13 +341,14 @@ def review_markdown(
     cite_source_ids: list[str] | None = None,
     settings: Any | None = None,
 ) -> dict[str, Any]:
-    findings = run_checks(markdown, total_anchors=total_anchors)
+    from ..config import get_settings
+
+    s = settings or get_settings()
+    findings = run_checks(markdown, total_anchors=total_anchors, settings=s)
     # Wave B: merge frozen-corpus / screening findings
     try:
-        from ..config import get_settings
         from .literature_manifest import preflight_corpus_findings
 
-        s = settings or get_settings()
         for raw in preflight_corpus_findings(
             project_id,
             markdown,
@@ -464,7 +551,14 @@ def state_to_dict(state: PreflightState) -> dict[str, Any]:
 
 def annotate_storm_meta(markdown: str, *, total_anchors: int | None = None) -> dict[str, Any]:
     """Lightweight check for persist meta (does not block write)."""
-    findings = run_checks(markdown, total_anchors=total_anchors)
+    try:
+        from ..config import get_settings
+
+        findings = run_checks(
+            markdown, total_anchors=total_anchors, settings=get_settings()
+        )
+    except Exception:  # noqa: BLE001
+        findings = run_checks(markdown, total_anchors=total_anchors)
     return {
         "preflight": {
             "content_hash": content_hash(markdown),

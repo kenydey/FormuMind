@@ -1690,6 +1690,21 @@ export const apiMethods = {
     apply?: boolean;
   }) => post<Record<string, unknown>>("/api/wiki/literature/screen", body),
 
+  enrichLiteratureOa: (body: {
+    project_id: string;
+    scope?: "candidates" | "frozen" | "missing_fulltext";
+    limit?: number;
+    actor?: string;
+  }) =>
+    post<{
+      attempted: number;
+      fetched: number;
+      persisted: number;
+      skipped: number;
+      failures?: Array<{ item_id?: string; doi?: string; reason?: string }>;
+      manifest?: Record<string, unknown>;
+    }>("/api/wiki/literature/enrich-oa", body),
+
   patchLiteratureItem: (
     itemId: string,
     body: { project_id: string; screening: string },

@@ -124,6 +124,8 @@ class ChatResponse(BaseModel):
     clarification: ClarificationOption | None = None
     rewritten_query: str | None = None
     sourced_claims: list[SourcedClaim] | None = None
+    # Wave D — claim→passage audit table (supported/partial/unsupported/contradicted).
+    sources_audit: dict | None = None
     mode: ChatMode | None = None
     doi_results: list[dict] | None = None
     citation_expand: list[dict] | None = None

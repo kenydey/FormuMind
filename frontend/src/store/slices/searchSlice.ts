@@ -563,6 +563,10 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                   ev.evidence_provenance && typeof ev.evidence_provenance === "object"
                     ? (ev.evidence_provenance as import("../../api").EvidenceProvenance)
                     : null;
+                m.sourcesAudit =
+                  ev.sources_audit && typeof ev.sources_audit === "object"
+                    ? (ev.sources_audit as import("../../api").SourcesAudit)
+                    : null;
                 if (perm?.server_id && perm?.tool_name) {
                   m.content +=
                     `\n\n> ⚠️ MCP 工具 \`${perm.server_id}/${perm.tool_name}\` 需要会话审批后才能执行。`;

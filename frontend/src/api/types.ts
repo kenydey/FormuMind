@@ -255,6 +255,9 @@ export interface Evidence {
   domain_tags?: string[];
   domain_match?: "strong" | "weak" | "none" | null;
   taxonomy_source?: string | null;
+  /** Page / paragraph locators (Wave D locator honesty). */
+  page?: number | null;
+  paragraph?: number | null;
 }
 
 /** SureChEMBL P3 / P3.1 embodiment draft (review gate; never auto-promote). */
@@ -1289,6 +1292,31 @@ export interface ChatMessage {
   clarification?: ClarificationOption | null;
   /** Wave C structured provenance from SSE done. */
   evidenceProvenance?: EvidenceProvenance | null;
+  /** Wave D claim→passage audit table. */
+  sourcesAudit?: SourcesAudit | null;
+}
+
+export interface SourcesAuditRow {
+  claim?: string;
+  grade?: "supported" | "partial" | "unsupported" | "contradicted" | string;
+  chunk_ids?: string[];
+  locators?: Array<{
+    chunk_id?: string;
+    page?: number | null;
+    paragraph?: number | null;
+  }>;
+  note?: string | null;
+}
+
+export interface SourcesAudit {
+  schema_version?: number;
+  rows?: SourcesAuditRow[];
+  summary?: {
+    supported?: number;
+    partial?: number;
+    unsupported?: number;
+    contradicted?: number;
+  };
 }
 
 export interface EvidenceProvenance {
@@ -1324,6 +1352,7 @@ export type ChatStreamEvent =
       clarification?: ClarificationOption | null;
       rewritten_query?: string | null;
       sourced_claims?: SourcedClaim[] | null;
+      sources_audit?: SourcesAudit | null;
       structured?: StructuredAnswer | null;
       tools_used?: string[];
       doi_results?: Record<string, unknown>[] | null;
@@ -1577,6 +1606,7 @@ export interface ChatResponse {
   clarification?: ClarificationOption | null;
   rewritten_query?: string | null;
   sourced_claims?: SourcedClaim[] | null;
+  sources_audit?: SourcesAudit | null;
   mode?: "chat" | "evidence" | null;
   doi_results?: Record<string, unknown>[] | null;
   citation_expand?: Record<string, unknown>[] | null;

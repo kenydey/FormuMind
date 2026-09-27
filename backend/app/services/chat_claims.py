@@ -1,13 +1,19 @@
-"""Claim-level sourcing for chat answers."""
+"""Claim-level sourcing for chat answers (+ Wave D sources_audit)."""
 from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from ..config import Settings, get_settings
 from ..domain.chat_schemas import SourcedClaim, StructuredAnswer
 from ..domain.schemas import Evidence
-from ..pipeline.claim_checker import ClaimVerdict, verify_claim_offline, verify_claims_llm
+from ..pipeline.claim_checker import (
+    ClaimVerdict,
+    VerifiedClaim,
+    verify_claim_offline,
+    verify_claims_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +37,15 @@ def _claim_executor() -> _cf.ThreadPoolExecutor:
     return _CLAIM_EXECUTOR
 
 
-def build_sourced_claims(
+def verify_answer_claims(
     question: str,
     answer: str,
     sources: list[Evidence],
     structured: StructuredAnswer | None = None,
     *,
     settings: Settings | None = None,
-) -> list[SourcedClaim] | None:
+) -> list[VerifiedClaim] | None:
+    """Run claim verification once; None when claim-check disabled."""
     settings = settings or get_settings()
     if not settings.chat_claim_check_enabled:
         return None
@@ -48,20 +55,35 @@ def build_sourced_claims(
         return []
 
     try:
-        # 2026-09-04: deepseek 慢窗口会让 claims 的 LLM 验证挂 60-120s+
-        # (实测 150s+ 卡死整次问答)——12s 硬超时, 超时降级 offline 验证,
-        # 主回答不受影响。共享池(见模块级 _CLAIM_EXECUTOR)封顶线程数。
         _ex = _claim_executor()
         _fut = None
         try:
             _fut = _ex.submit(verify_claims_llm, question, claims, sources)
-            verified = _fut.result(timeout=12)
+            return list(_fut.result(timeout=12))
         except Exception:
             if _fut is not None:
-                _fut.cancel()  # 运行中取消无效, 但可清队列中未启动任务
+                _fut.cancel()
             raise
     except Exception:
-        verified = [verify_claim_offline(c, sources) for c in claims]
+        return [verify_claim_offline(c, sources) for c in claims]
+
+
+def build_sourced_claims(
+    question: str,
+    answer: str,
+    sources: list[Evidence],
+    structured: StructuredAnswer | None = None,
+    *,
+    settings: Settings | None = None,
+    verified: list[VerifiedClaim] | None = None,
+) -> list[SourcedClaim] | None:
+    settings = settings or get_settings()
+    if verified is None:
+        verified = verify_answer_claims(
+            question, answer, sources, structured=structured, settings=settings
+        )
+    if verified is None:
+        return None
 
     out: list[SourcedClaim] = []
     for v in verified:
@@ -77,6 +99,66 @@ def build_sourced_claims(
             )
         )
     return out
+
+
+def build_sources_audit(
+    sources: list[Evidence],
+    *,
+    verified: list[VerifiedClaim] | None = None,
+    sourced_claims: list[SourcedClaim] | None = None,
+    enabled: bool = True,
+) -> dict[str, Any] | None:
+    """Wave D — claim→passage audit table (fail-open when disabled)."""
+    if not enabled:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    if verified is not None:
+        for v in verified:
+            chunk_ids = _indices_to_chunk_ids(v.evidence_indices, sources)
+            grade = _audit_grade_from_verdict(v.verdict)
+            rows.append(
+                {
+                    "claim": v.text,
+                    "grade": grade,
+                    "chunk_ids": chunk_ids,
+                    "locators": _locators_for_chunks(chunk_ids, sources),
+                    "note": (v.reason or "").strip()[:240] or None,
+                }
+            )
+    elif sourced_claims is not None:
+        for sc in sourced_claims:
+            grade = _audit_grade_from_status(sc.status)
+            rows.append(
+                {
+                    "claim": sc.text,
+                    "grade": grade,
+                    "chunk_ids": list(sc.chunk_ids or []),
+                    "locators": _locators_for_chunks(list(sc.chunk_ids or []), sources),
+                    "note": None,
+                }
+            )
+    else:
+        return {
+            "schema_version": 1,
+            "rows": [],
+            "summary": {
+                "supported": 0,
+                "partial": 0,
+                "unsupported": 0,
+                "contradicted": 0,
+            },
+        }
+
+    summary = {"supported": 0, "partial": 0, "unsupported": 0, "contradicted": 0}
+    for row in rows:
+        g = str(row.get("grade") or "unsupported")
+        if g in summary:
+            summary[g] += 1
+        else:
+            summary["unsupported"] += 1
+
+    return {"schema_version": 1, "rows": rows, "summary": summary}
 
 
 def _extract_claims(answer: str, structured: StructuredAnswer | None) -> list[str]:
@@ -99,8 +181,53 @@ def _indices_to_chunk_ids(indices: list[int], sources: list[Evidence]) -> list[s
 
 
 def _map_verdict(verdict: ClaimVerdict) -> str:
+    """Legacy SourcedClaim status (conflicting stays weak for back-compat)."""
     if verdict == ClaimVerdict.supported:
         return "supported"
     if verdict in (ClaimVerdict.insufficient, ClaimVerdict.conflicting):
         return "weak"
     return "unsupported"
+
+
+def _audit_grade_from_verdict(verdict: ClaimVerdict) -> str:
+    if verdict == ClaimVerdict.supported:
+        return "supported"
+    if verdict == ClaimVerdict.insufficient:
+        return "partial"
+    if verdict == ClaimVerdict.conflicting:
+        return "contradicted"
+    return "unsupported"
+
+
+def _audit_grade_from_status(status: str) -> str:
+    if status == "supported":
+        return "supported"
+    if status == "weak":
+        return "partial"
+    return "unsupported"
+
+
+def _locators_for_chunks(
+    chunk_ids: list[str], sources: list[Evidence]
+) -> list[dict[str, Any]]:
+    by_id: dict[str, Evidence] = {}
+    for ev in sources:
+        ident = ev.identifier or ""
+        if ident.startswith("kb:"):
+            by_id[ident[3:]] = ev
+        if ident:
+            by_id[ident] = ev
+    out: list[dict[str, Any]] = []
+    for cid in chunk_ids:
+        ev = by_id.get(cid)
+        if ev is None:
+            out.append({"chunk_id": cid, "page": None, "paragraph": None})
+            continue
+        out.append(
+            {
+                "chunk_id": cid,
+                "page": ev.page,
+                "paragraph": ev.paragraph,
+            }
+        )
+    return out
