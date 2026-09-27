@@ -750,11 +750,13 @@ def enrich_search_results(
     max_docs: int | None = None,
     persist: bool = True,
     project_id: str | None = None,
+    force: bool = False,
 ) -> tuple[list[Evidence], FulltextReport]:
     """Replace the top fetchable Evidence rows with full-text chunks in place.
 
     Order is preserved; rows that fail to fetch (or beyond ``max_docs``) pass
-    through unchanged.  Strict no-op when ``fulltext_enrich`` is disabled.
+    through unchanged.  Strict no-op when ``fulltext_enrich`` is disabled
+    (unless ``force=True``, used by Wave D literature OA enrich).
 
     ``project_id`` scopes the per-project PDF quota: once a project has
     ``kb_project_pdf_quota`` documents acquired via the download+parse path, the
@@ -764,7 +766,7 @@ def enrich_search_results(
     """
     settings = get_settings()
     report = FulltextReport()
-    if not settings.fulltext_enrich or not evidence:
+    if (not settings.fulltext_enrich and not force) or not evidence:
         return evidence, report
 
     limit = max_docs if max_docs is not None else settings.fulltext_max_docs

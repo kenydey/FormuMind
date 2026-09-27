@@ -1006,6 +1006,13 @@ class LiteratureItemPatch(BaseModel):
     screening: str = Field(min_length=1, max_length=32)
 
 
+class LiteratureEnrichOaRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    scope: str = Field(default="missing_fulltext", max_length=32)
+    limit: int = Field(default=20, ge=1, le=40)
+    actor: str = Field(default="user", max_length=120)
+
+
 @router.get("/literature/{project_id}")
 def literature_get_endpoint(project_id: str) -> dict:
     _require_wiki()
@@ -1085,3 +1092,24 @@ def literature_item_patch_endpoint(item_id: str, body: LiteratureItemPatch) -> d
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/literature/enrich-oa")
+def literature_enrich_oa_endpoint(body: LiteratureEnrichOaRequest) -> dict:
+    """Wave D — batch OA fulltext into literature manifest (fail-open)."""
+    _require_wiki()
+    from ..services.literature_oa_enrich import enrich_manifest_oa
+
+    scope = (body.scope or "missing_fulltext").strip()
+    if scope not in ("candidates", "frozen", "missing_fulltext"):
+        raise HTTPException(status_code=400, detail="invalid scope")
+    try:
+        return enrich_manifest_oa(
+            body.project_id,
+            scope=scope,  # type: ignore[arg-type]
+            limit=body.limit,
+            actor=body.actor,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
