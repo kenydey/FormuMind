@@ -79,7 +79,7 @@ def test_search_task_survives_process_restart(monkeypatch, tmp_path):
     """Simulate uvicorn --reload: in-memory registry cleared but poll still works."""
     from app.worker import tasks as tasks_mod
 
-    monkeypatch.setattr(tasks_mod, "_TASK_PERSIST_DIR", tmp_path)
+    monkeypatch.setattr(tasks_mod, "_task_persist_dir", lambda: tmp_path)
 
     r = client.post(
         "/api/search/stream",

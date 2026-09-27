@@ -50,6 +50,7 @@ from .api import tech_reports as tech_reports_router
 from .api import memories as memories_router
 from .api import mcp_approvals as mcp_approvals_router
 from .api import provenance as provenance_router
+from .api import review_runs as review_runs_router
 from .api import artifact_versions as artifact_versions_router
 from .api import projects as projects_router
 from .api import formulation_skills as formulation_skills_router
@@ -275,6 +276,7 @@ app.include_router(tech_reports_router.router)
 app.include_router(memories_router.router)
 app.include_router(mcp_approvals_router.router)
 app.include_router(provenance_router.router)
+app.include_router(review_runs_router.router)
 app.include_router(artifact_versions_router.router)
 app.include_router(materials_router.router, prefix="/api")
 app.include_router(kg_router.router, prefix="/api")

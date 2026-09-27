@@ -607,6 +607,11 @@ class Settings(BaseSettings):
     paperqa_enabled: bool = True
     paperqa_llm_model: str = ""  # empty → inherit chat llm_model
     paperqa_embedding: str = ""  # empty → OpenAI emb if key else skip/default
+    # Wave 5 — query-aware evidence compression tier 1 (default on; fail-open).
+    query_compress_enabled: bool = True
+    query_compress_token_budget: int = 12000
+    # Wave 5 — tier 2 LLM rewrite layer (default off; LLM calls cost money).
+    query_compress_llm_enabled: bool = False
     # Wave B — project literature manifest / frozen corpus.
     literature_manifest_enabled: bool = True
     frozen_corpus_required_for_export: bool = False

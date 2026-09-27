@@ -31,17 +31,20 @@ from .task_progress import (
 
 logger = logging.getLogger(__name__)
 
-_TASK_PERSIST_DIR = Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
+def _task_persist_dir() -> Path:
+    # 延迟读取：测试用 monkeypatch.setenv 时模块已导入，import 期常量会绕过隔离。
+    return Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
 
 
 def _persist_task(task_id: str, status: TaskStatus) -> None:
     try:
-        _TASK_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+        persist_dir = _task_persist_dir()
+        persist_dir.mkdir(parents=True, exist_ok=True)
         data = status.model_dump()
         data["state"] = data["state"].value if hasattr(data["state"], "value") else data["state"]
         # 原子写：先写 .tmp 再 rename，避免进程崩溃时留下半截 JSON（W5）。
-        target = _TASK_PERSIST_DIR / f"{task_id}.json"
-        tmp = _TASK_PERSIST_DIR / f".{task_id}.tmp"
+        target = persist_dir / f"{task_id}.json"
+        tmp = persist_dir / f".{task_id}.tmp"
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, target)
     except Exception as exc:
@@ -49,7 +52,7 @@ def _persist_task(task_id: str, status: TaskStatus) -> None:
 
 
 def load_persisted_task(task_id: str) -> TaskStatus | None:
-    path = _TASK_PERSIST_DIR / f"{task_id}.json"
+    path = _task_persist_dir() / f"{task_id}.json"
     if not path.exists():
         return None
     try:

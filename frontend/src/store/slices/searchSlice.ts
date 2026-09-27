@@ -543,6 +543,11 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               tool_name: string;
               session_id?: string | null;
             } | null }).mcp_permission_required;
+            // W5-4 (P1-28): fix-loop 跑过时 done 事件带 reviewer_fix.run_id，
+            // 挂到消息上供 ReviewerCard 展示审计卡片。
+            const reviewerFix = (ev as { reviewer_fix?: {
+              run_id?: string | null;
+            } | null }).reviewer_fix;
             set((draft) => {
               const m = last(draft);
               if (m?.role === "assistant") {
@@ -552,6 +557,10 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                 m.toolStatus = null;
                 m.citations = ev.citations;
                 m.kbChunksUsed = ev.kb_chunks_used ?? 0;
+                m.reviewRunId =
+                  reviewerFix && typeof reviewerFix === "object"
+                    ? (reviewerFix.run_id ?? null)
+                    : null;
                 m.sourcedClaims = Array.isArray(ev.sourced_claims)
                   ? (ev.sourced_claims as import("../../api").SourcedClaim[])
                   : null;

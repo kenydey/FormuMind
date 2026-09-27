@@ -1298,6 +1298,8 @@ export interface ChatMessage {
   citations?: Evidence[];
   /** Persistent-KB chunks that grounded this assistant answer. */
   kbChunksUsed?: number;
+  /** W5-4 (P1-28): review run id from the SSE done event's reviewer_fix (if the fix-loop ran). */
+  reviewRunId?: string | null;
   /** SSE 流式问答中: 该条 assistant 消息仍在接收(逐 token 累积)。 */
   streaming?: boolean;
   /** SSE 阶段指示: retrieval | tools | answering | claims(仅 streaming 时有意义)。 */
@@ -2689,6 +2691,49 @@ export interface SessionPlanPendingItem {
 export interface SessionPlanPendingResponse {
   items: SessionPlanPendingItem[];
   total: number;
+}
+
+/**
+ * W5-4 (P1-28): review-run summary from GET /api/reviews/runs.
+ * stale contract (shared with W5-3): `stale: boolean | "unverified"`.
+ */
+export interface ReviewRunSummary {
+  run_id: string;
+  session_key?: string | null;
+  project_id?: string | null;
+  status?: string | null;
+  outcome?: string | null;
+  stale?: boolean | "unverified" | null;
+  stale_reason?: string | null;
+  warn_count?: number;
+  fail_count?: number;
+  unaddressed_count?: number;
+  started_at?: number | null;
+  finished_at?: number | null;
+}
+
+export interface ReviewRunDisposition {
+  status?: string | null;
+  reflag_count?: number;
+  disposition?: string | null;
+}
+
+export interface ReviewRunDetail extends ReviewRunSummary {
+  dispositions?: Record<string, ReviewRunDisposition> | null;
+}
+
+export interface RerunReviewRequest {
+  question: string;
+  answer: string;
+  citations?: unknown[];
+  project_id?: string | null;
+  max_rounds?: number;
+}
+
+export interface RerunReviewResult {
+  review?: Record<string, unknown> | null;
+  fix?: Record<string, unknown> | null;
+  final_answer?: string | null;
 }
 
 /** W4-1/W4-4: artifact lineage (logical file) for version management. */

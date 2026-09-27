@@ -17,6 +17,28 @@ def llm_rubric_enabled(settings: Any) -> bool:
     return bool(getattr(settings, "evidence_reviewer_llm_enabled", False))
 
 
+class ReviewerModelError(Exception):
+    """reviewer 专用模型（evidence_reviewer_model）调用失败。
+
+    P1-19：配置了专用小模型时，调用失败 / 返回非法 → 明确抛错，
+    不静默回退启发式（避免"以为审了"）。
+    """
+
+
+def reviewer_model_name(settings: Any) -> str | None:
+    """解析 reviewer 专用模型名。
+
+    未配置（空字符串）→ None（沿用全局 llm_model，保持向后兼容）。
+    """
+    try:
+        name = getattr(settings, "evidence_reviewer_model", None)
+    except Exception:  # noqa: BLE001
+        name = None
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # P1-11 reviewer 工具边界
 #
@@ -186,10 +208,14 @@ def review_answer_llm(
     """LLM rubric 判定 pass。
 
     citations 取前 20 条（title/doi/snippet[:300]），调用 llm.complete_json。
-    任何异常 / 输出非法 / LLM 未配置 → 返回 None，由调用方回退启发式。
+    未配置专用模型时：任何异常 / 输出非法 / LLM 未配置 → 返回 None，
+    由调用方回退启发式（fail-open）。
+    P1-19：配置了 evidence_reviewer_model 时，调用失败 / 输出非法 →
+    抛 ReviewerModelError（明确报错，不静默回退，避免"以为审了"）。
     """
     if not (answer or "").strip():
         return None
+    model = reviewer_model_name(settings)
     try:
         from . import llm as _llm
 
@@ -203,11 +229,19 @@ def review_answer_llm(
             answer=answer or "",
             citations_block=citations_block,
         )
-        data = _llm.complete_json(prompt)
-        return _validate_llm_review(data)
+        data = _llm.complete_json(prompt, model=model)
+    except ReviewerModelError:
+        raise
     except Exception as exc:  # noqa: BLE001
+        if model:
+            logger.error("reviewer 模型 %r 调用失败: %s", model, exc)
+            raise ReviewerModelError(f"reviewer 模型 {model!r} 调用失败: {exc}") from exc
         logger.debug("evidence reviewer LLM skipped: %s", exc)
         return None
+    review = _validate_llm_review(data)
+    if review is None and model:
+        raise ReviewerModelError(f"reviewer 模型 {model!r} 返回非法结果")
+    return review
 
 
 def _map_llm_review(llm_review: dict[str, Any]) -> dict[str, Any]:
@@ -257,7 +291,11 @@ def review_answer(
     *,
     settings: Any,
 ) -> dict[str, Any] | None:
-    """Heuristic + optional LLM rubric pass. Fail-open (returns None on errors)."""
+    """Heuristic + optional LLM rubric pass. Fail-open (returns None on errors).
+
+    P1-19：配置了 evidence_reviewer_model 时，LLM 失败抛 ReviewerModelError
+   （不回退启发式）；未配置时保持 fail-open。
+    """
     assert_reviewer_tool_boundary()  # P1-11：reviewer 流水线不经过工具分发
     if not reviewer_enabled(settings) or not (answer or "").strip():
         return None

@@ -113,6 +113,10 @@ import type {
   SourceStatus,
   SourceTablesResponse,
   ProvenanceLineageResponse,
+  RerunReviewRequest,
+  RerunReviewResult,
+  ReviewRunDetail,
+  ReviewRunSummary,
   StructureRecognitionResult,
   SubstitutionReport,
   SupplyRiskReport,
@@ -2262,5 +2266,32 @@ export const apiMethods = {
       `/api/artifacts/versions/${encodeURIComponent(versionId)}/diff?${qs}`,
     );
   },
+
+  /** W5-4 (P1-28): list review runs, newest first. */
+  listReviewRuns: (params?: {
+    sessionKey?: string;
+    projectId?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.sessionKey) qs.set("session_key", params.sessionKey);
+    if (params?.projectId) qs.set("project_id", params.projectId);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return get<{ items: ReviewRunSummary[] }>(`/api/reviews/runs${suffix}`);
+  },
+
+  /** W5-4 (P1-28): review run detail incl. stale + action log. */
+  getReviewRun: (runId: string) =>
+    get<ReviewRunDetail>(
+      `/api/reviews/runs/${encodeURIComponent(runId)}`,
+    ),
+
+  /** W5-4 (P1-28): manual re-audit of a run's question/answer. */
+  rerunReviewRun: (runId: string, body: RerunReviewRequest) =>
+    post<RerunReviewResult>(
+      `/api/reviews/runs/${encodeURIComponent(runId)}/rerun`,
+      body,
+    ),
 };
 

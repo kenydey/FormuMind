@@ -44,7 +44,7 @@ def test_57_unfounded_claim_not_convicted(monkeypatch: pytest.MonkeyPatch):
     """§5.7：查不到来源 → 不定罪、不 warn → pass。"""
     calls: dict = {}
 
-    def fake(prompt: str):
+    def fake(prompt: str, *, model=None):
         calls["prompt"] = prompt
         return {"status": "pass", "findings": [], "notes": ["无可查证断言"]}
 
@@ -67,7 +67,7 @@ def test_57_unfounded_claim_not_convicted(monkeypatch: pytest.MonkeyPatch):
 def test_58_fabricated_doi_convicted(monkeypatch: pytest.MonkeyPatch):
     """§5.8：编造具体标识符且全会话无 trace → failure。"""
 
-    def fake(prompt: str):
+    def fake(prompt: str, *, model=None):
         return {
             "status": "failure",
             "findings": [
@@ -156,7 +156,7 @@ def test_reviewer_disabled_returns_none(monkeypatch: pytest.MonkeyPatch):
 def test_citations_capped_at_20_and_snippet_truncated(monkeypatch: pytest.MonkeyPatch):
     captured: dict = {}
 
-    def fake(prompt: str):
+    def fake(prompt: str, *, model=None):
         captured["prompt"] = prompt
         return {"status": "pass", "findings": [], "notes": []}
 
@@ -180,7 +180,7 @@ def test_review_answer_llm_empty_answer_returns_none():
 def test_severity_normalized_to_minor(monkeypatch: pytest.MonkeyPatch):
     """非法 severity → minor；notes 非 list → []。"""
 
-    def fake(prompt: str):
+    def fake(prompt: str, *, model=None):
         return {
             "status": "warning",
             "findings": [

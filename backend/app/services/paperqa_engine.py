@@ -14,6 +14,13 @@ from typing import Any, Iterator
 
 from ..domain.schemas import Evidence
 from ..services.errors import degrade_return, optional_import
+from .query_aware_compression import (
+    compress_evidence,
+    llm_compress_evidence,
+    query_compress_enabled,
+    query_compress_llm_enabled,
+    query_compress_token_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +162,17 @@ async def answer_with_paperqa_async(
     s = settings or _settings()
     if not paperqa_available(s) or not sources:
         return None
+    # W5-1 (P2-1): query-aware evidence compression before synthesis.
+    # Tier 1 is cheap and fail-open; the kill-switch defaults ON.
+    # Tier 2 (LLM rewrite) runs first when enabled, then tier 1 budget-fits.
+    if query_compress_enabled(s):
+        before = len(sources)
+        if query_compress_llm_enabled(s):
+            sources = llm_compress_evidence(question, sources, settings=s)
+        sources = compress_evidence(
+            question, sources, token_budget=query_compress_token_budget(s)
+        )
+        logger.debug("query compression: %d -> %d evidence", before, len(sources))
     bundle = _resolve_llm_bundle(s)
     try:
         from paperqa import Docs, Doc, Text

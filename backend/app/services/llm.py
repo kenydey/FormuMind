@@ -889,7 +889,11 @@ def _complete_gemini(prompt: str, api_key: str, model: str) -> str | None:
 
 
 def _call_llm(
-    prompt: str, max_tokens: int | None = None, *, disable_thinking: bool = False
+    prompt: str,
+    max_tokens: int | None = None,
+    *,
+    disable_thinking: bool = False,
+    model: str | None = None,
 ) -> str | None:
     """Route to the configured provider; return None on any failure.
 
@@ -904,7 +908,9 @@ def _call_llm(
     api_key = settings.get_active_api_key()
     if not api_key:
         return None
-    model = effective_setting(settings, "llm_model")
+    # P1-19: per-caller 模型覆盖（reviewer 小模型用）；为空 → 全局 llm_model（向后兼容）。
+    if not isinstance(model, str) or not model.strip():
+        model = effective_setting(settings, "llm_model")
     max_tokens = max_tokens if max_tokens is not None else settings.llm_max_tokens
 
     if provider == "anthropic":
@@ -919,7 +925,7 @@ def _call_llm(
     )
 
 
-def complete_json(prompt: str) -> dict | None:
+def complete_json(prompt: str, *, model: str | None = None) -> dict | None:
     """Call the configured LLM and parse its reply as a JSON object.
 
     Tolerates ```` ```json ```` markdown fences. Returns None when no LLM is
@@ -927,6 +933,7 @@ def complete_json(prompt: str) -> dict | None:
     intent-parsing agents so the fence-stripping logic lives in one place.
 
     P1 #26: optional Langfuse generation span (fail-open).
+    P1-19: ``model`` 覆盖全局 llm_model（reviewer 小模型用）；None → 全局配置。
     """
     import json
 
@@ -935,9 +942,9 @@ def complete_json(prompt: str) -> dict | None:
     with trace_generation(
         "complete_json",
         input_preview=prompt,
-        metadata={"kind": "json"},
+        metadata={"kind": "json", "model": model or "default"},
     ) as span:
-        raw = _call_llm(prompt)
+        raw = _call_llm(prompt, model=model)
         if not raw:
             span["error"] = "empty_llm_response"
             return None

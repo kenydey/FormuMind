@@ -19,10 +19,15 @@ logger = logging.getLogger(__name__)
 META_TTL_SECONDS = 86400
 RESULT_TTL_SECONDS = 86400
 
-_TASK_DIR = Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
-_PROGRESS_DIR = Path(
-    os.environ.get("FORMUMIND_TASK_PROGRESS_DIR", str(_TASK_DIR / "progress"))
-)
+def _task_dir() -> Path:
+    # 延迟读取：测试用 monkeypatch.setenv 时模块已导入，import 期常量会绕过隔离。
+    return Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
+
+
+def _default_progress_dir() -> Path:
+    return Path(
+        os.environ.get("FORMUMIND_TASK_PROGRESS_DIR", str(_task_dir() / "progress"))
+    )
 
 
 class TaskProgressStatus(str, Enum):
@@ -175,8 +180,9 @@ def _result_key(task_id: str) -> str:
 
 
 def _progress_dir() -> Path:
-    _PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
-    return _PROGRESS_DIR
+    d = _default_progress_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _meta_path(task_id: str) -> Path:

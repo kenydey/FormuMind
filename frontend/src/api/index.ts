@@ -39,6 +39,7 @@ export { orgApi } from "./domains/org";
 export { projectsApi } from "./domains/projects";
 export { provenanceApi } from "./domains/provenance";
 export { researchApi } from "./domains/research";
+export { reviewsApi } from "./domains/reviews";
 export { reportsApi } from "./domains/reports";
 export { searchApi } from "./domains/search";
 export { sessionApi } from "./domains/session";

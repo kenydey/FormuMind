@@ -114,6 +114,68 @@ def mark_unaddressed(claims: dict[str, ClaimDisposition]) -> dict[str, ClaimDisp
 
 
 # ---------------------------------------------------------------------------
+# P1-29 stale review 检测（W5-3）
+#
+# review 结论与被审 scope 绑定：创建 run 时记录 scope_kind + scope_digest；
+# load_review_run 加载时重算 digest，漂移 → stale=True（原 outcome 视为不可信，
+# 由 W5-4 前端撤下展示）；无法验证 → stale="unverified"（诚实标记）。
+# contract（W5-4 前端消费）：{"stale": bool | "unverified", "stale_reason": str | None}
+# ---------------------------------------------------------------------------
+_SCOPE_QA = "qa"
+_SCOPE_ARTIFACT = "artifact"
+
+
+def _canonical_json(obj: Any) -> str:
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _scope_hash(obj: Any) -> str:
+    return hashlib.sha256(_canonical_json(obj).encode("utf-8")).hexdigest()
+
+
+def _artifact_content_digest(version_id: str) -> str | None:
+    """当前 artifact version 的 content sha256；失败返回 None（fail-open）。"""
+    try:
+        from .artifact_versions import verify_version
+
+        return verify_version(version_id).get("actual_sha256")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _compute_scope_digest(scope: dict[str, Any]) -> tuple[str, str | None]:
+    """返回 (scope_kind, scope_digest)。
+
+    artifact kind：digest = 创建时 artifact content sha256（复用 W4-1
+    verify_version）。qa kind：digest = sha256(project_id|question|answer)。
+    scope_digest 为 None 表示创建时即无法记录（加载时 → "unverified"）。
+    """
+    version_id = scope.get("artifact_version_id")
+    if version_id:
+        return _SCOPE_ARTIFACT, _artifact_content_digest(str(version_id))
+    return _SCOPE_QA, _scope_hash(
+        {
+            "project_id": scope.get("project_id"),
+            "question": scope.get("question") or "",
+            "answer": scope.get("answer") or "",
+        }
+    )
+
+
+def _record_scope(run: dict[str, Any], scope: dict[str, Any] | None) -> dict[str, Any]:
+    """把 scope 绑定写入 run（创建时 / fix-loop 结束时重算）。"""
+    out = dict(run)
+    if not scope:
+        out["scope_kind"] = None
+        out["scope_digest"] = None
+        out["artifact_version_id"] = None
+        return out
+    kind, digest = _compute_scope_digest(scope)
+    out["scope_kind"] = kind
+    out["scope_digest"] = digest
+    out["artifact_version_id"] = scope.get("artifact_version_id")
+    return out
+# ---------------------------------------------------------------------------
 # P1-13 ReviewRun 生命周期状态机
 #
 # status: running | complete | error；outcome: pass | flagged | null。
@@ -131,9 +193,15 @@ def new_review_run(
     *,
     session_key: str | None = None,
     project_id: str | None = None,
+    scope: dict[str, Any] | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
+    """创建 review run。P1-29: scope 绑定——``scope`` 可含
+    ``artifact_version_id`` / ``question`` / ``answer`` / ``project_id``，
+    创建时计算 scope_kind + scope_digest 并记录，供 load 时 stale 检测。
+    """
     run_id = f"{session_key or 'na'}-{int(time.time() * 1000)}"
-    return {
+    run = {
         "run_id": run_id,
         "session_key": session_key,
         "project_id": project_id,
@@ -141,7 +209,13 @@ def new_review_run(
         "outcome": "null",
         "started_at": time.time(),
         "finished_at": None,
+        # P1-19 reviewer 模型标签（审计成本可查；None = 沿用全局 llm_model）
+        "model": model,
+        # P1-29 stale contract（W5-4 前端消费）
+        "stale": False,
+        "stale_reason": None,
     }
+    return _record_scope(run, scope)
 
 
 def save_review_run(run: dict[str, Any]) -> None:
@@ -153,15 +227,66 @@ def save_review_run(run: dict[str, Any]) -> None:
         )
 
 
-def load_review_run(run_id: str) -> dict[str, Any] | None:
+def load_review_run(
+    run_id: str, *, scope: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """加载 review run 并做 P1-29 stale 检测。
+
+    - 文件不存在 → None（保持旧行为）。
+    - 文件损坏 → ``{"run_id", "stale": "unverified", "stale_reason": ...}``
+      （诚实标记"未验证"，不伪装新鲜）。
+    - scope_digest 漂移 → ``stale=True`` + ``stale_reason``（原 outcome
+      视为不可信，由前端撤下展示）。
+    - 无法验证（legacy run 无 scope_digest / qa kind 未提供 scope /
+      artifact version 丢失）→ ``stale="unverified"``。
+
+    只读，不回写文件；永不抛错（fail-open）。
+    """
     path = _run_path(run_id)
     if not path.is_file():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return dict(data)
+        run = dict(json.loads(path.read_text(encoding="utf-8")))
     except Exception:  # noqa: BLE001
-        return None
+        return {
+            "run_id": run_id,
+            "stale": "unverified",
+            "stale_reason": "run file unreadable or corrupt",
+        }
+    try:
+        stale, reason = _check_stale(run, scope)
+    except Exception:  # noqa: BLE001
+        stale, reason = "unverified", "stale check failed"
+    run["stale"] = stale
+    run["stale_reason"] = reason
+    return run
+
+
+def _check_stale(
+    run: dict[str, Any], scope: dict[str, Any] | None
+) -> tuple[Any, str | None]:
+    """重算 scope digest 并与创建时记录比对。返回 (stale, stale_reason)。"""
+    stored = run.get("scope_digest")
+    kind = run.get("scope_kind")
+    if not stored or not kind:
+        return "unverified", "no scope digest recorded (legacy run)"
+    if kind == _SCOPE_ARTIFACT:
+        version_id = run.get("artifact_version_id")
+        current = _artifact_content_digest(str(version_id)) if version_id else None
+        if current is None:
+            return "unverified", f"artifact version unavailable: {version_id}"
+        if current != stored:
+            return True, f"artifact content changed since review (version {version_id})"
+        return False, None
+    # qa kind：用调用方提供的当前 scope 重算比对
+    if not scope:
+        return "unverified", "scope inputs not provided; cannot verify freshness"
+    merged = dict(scope)
+    merged.setdefault("project_id", run.get("project_id"))
+    _, current = _compute_scope_digest(merged)
+    if current != stored:
+        return True, "question/answer/project scope changed since review"
+    return False, None
 
 
 def finish_review_run(
@@ -287,6 +412,7 @@ def run_fix_loop(
     repair_fn: Callable[[str, str], str],
     max_rounds: int = 3,
     project_id: str | None = None,
+    artifact_version_id: str | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """Run bounded repair. Returns (final_answer, reviewer_fix meta).
 
@@ -294,6 +420,8 @@ def run_fix_loop(
     Fail-open: on any error returns original answer + partial meta.
     P1-13: 永不抛错；ReviewRun（running/complete/error × pass/flagged/null）
     与 disposition 同目录 JSON 持久化。
+    P1-29: run 绑定 scope（artifact_version_id / question+answer+project），
+    load 时可做 stale 检测；scope 以最终答案重算（被审的是最终答案）。
     """
     if not fix_loop_enabled(settings) or not review:
         return answer, None
@@ -305,7 +433,18 @@ def run_fix_loop(
             "status": "pass",
         }
 
-    run = new_review_run(project_id=project_id)
+    from .evidence_reviewer import reviewer_model_name
+
+    run = new_review_run(
+        project_id=project_id,
+        model=reviewer_model_name(settings),
+        scope={
+            "project_id": project_id,
+            "question": question,
+            "answer": answer,
+            "artifact_version_id": artifact_version_id,
+        },
+    )
     try:
         with _fix_loop_active():
             key = session_key(question, answer, project_id)
@@ -352,6 +491,15 @@ def run_fix_loop(
             if unaddressed and project_id:
                 _write_soft_note(project_id, unaddressed, last_review)
 
+            run = _record_scope(
+                run,
+                {
+                    "project_id": project_id,
+                    "question": question,
+                    "answer": current,
+                    "artifact_version_id": artifact_version_id,
+                },
+            )
             run = finish_review_run(run, outcome=_outcome_for_status(last_review.get("status")))
             save_review_run(run)
             return current, {

@@ -17,6 +17,7 @@ import WikiChatModeSelector from "./WikiChatModeSelector";
 import ThinkingTimeline from "./ThinkingTimeline";
 import ChatComposerPlus from "./ChatComposerPlus";
 import ChatSlashMenu from "./ChatSlashMenu";
+import ReviewerCard from "./ReviewerCard";
 
 /**
  * Must stay in step with the stages `research_graph._emit` actually sends.
@@ -513,6 +514,18 @@ export default function ResearchPanel() {
                       })}
                     </div>
                   </div>
+                )}
+                {/* W5-4 (P1-28): reviewer 审计卡片 —— fix-loop 跑过的回答挂 run 审计 */}
+                {m.role === "assistant" && !m.streaming && m.reviewRunId && (
+                  <ReviewerCard
+                    runId={m.reviewRunId}
+                    question={(() => {
+                      const prev = chatHistory[i - 1];
+                      return prev && prev.role === "user" ? prev.content : "";
+                    })()}
+                    answer={m.content}
+                    citations={m.citations}
+                  />
                 )}
                 {m.role === "assistant" && !m.streaming && m.evidenceProvenance && (
                   <div
