@@ -128,11 +128,26 @@ def postprocess_evidence_answer(
     *,
     settings: Any,
 ) -> tuple[str, dict[str, Any]]:
-    meta: dict[str, Any] = {"doi_results": [], "reviewer": None}
+    meta: dict[str, Any] = {
+        "doi_results": [],
+        "reviewer": None,
+        "citation_expand": [],
+    }
     doi_on = bool(getattr(settings, "evidence_doi_verify_enabled", True))
     if doi_on:
-        from .scholar_helpers import annotate_answer_dois
+        from .scholar_helpers import annotate_answer_dois, expand_top_dois, extract_dois
 
         answer, doi_results = annotate_answer_dois(answer, enabled=True)
         meta["doi_results"] = doi_results
+        if bool(getattr(settings, "citation_expand_enabled", True)):
+            seeds = [r["doi"] for r in doi_results if r.get("status") == "ok"] or extract_dois(
+                answer
+            )
+            meta["citation_expand"] = expand_top_dois(
+                seeds,
+                max_seeds=3,
+                n_backward=12,
+                n_forward=8,
+                enabled=True,
+            )
     return answer, meta

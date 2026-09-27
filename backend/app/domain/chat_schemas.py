@@ -126,6 +126,8 @@ class ChatResponse(BaseModel):
     sourced_claims: list[SourcedClaim] | None = None
     mode: ChatMode | None = None
     doi_results: list[dict] | None = None
+    citation_expand: list[dict] | None = None
+    evidence_provenance: dict | None = None
     evidence_reviewer: dict | None = None
     reviewer_fix: dict | None = None
     mcp_permission_required: dict | None = None
