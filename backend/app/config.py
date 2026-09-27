@@ -573,6 +573,9 @@ class Settings(BaseSettings):
     evidence_reviewer_enabled: bool = False
     # Bounded reviewer→LLM repair loop after evidence_reviewer (default off).
     evidence_reviewer_fix_loop_enabled: bool = False
+    # Wave 1 — LLM rubric reviewer (default off; falls back to heuristics).
+    evidence_reviewer_llm_enabled: bool = False
+    evidence_reviewer_model: str = ""  # empty → inherit chat llm_model
     # Wiki/STORM export steel-stamp (citation/placeholder/numeric). Default on for export.
     publication_preflight_enabled: bool = True
     # Wave B — PaperQA engine kill-switch (orthogonal to evidence_synthesis_mode).
@@ -587,7 +590,18 @@ class Settings(BaseSettings):
     screening_auto_freeze: bool = False
     literature_screening_required_for_export: bool = False
     connectors_builtin_enabled: bool = True
+    # Wave D2 — MCP 调用重试（默认 2 次指数退避；仅超时/连接类错误）。
     mcp_client_enabled: bool = False
+    # Wave D2 — MCP 调用重试（默认 2 次指数退避；仅超时/连接类错误）。
+    mcp_tool_retries: int = 2
+    mcp_retry_backoff_s: float = 0.5
+    # Wave 1 — retrieval MMR diversity rerank (default off).
+    search_mmr_enabled: bool = False
+    search_mmr_lambda: float = 0.7
+    # Wave 1 — session-level search cache TTL seconds (0=disabled).
+    search_cache_ttl_s: int = 600
+    # Wave 1 — artifact reproducibility audit as preflight check (default off).
+    preflight_artifact_audit_enabled: bool = False
     # Chat native chem tool-calling (OpenAI-compatible tools → chemtools / SureChemBL / OCSR).
     chat_chem_tools_enabled: bool = True
     chat_chem_tools_max_rounds: int = 4

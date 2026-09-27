@@ -52,3 +52,49 @@ def select_diverse_mmr(
         selected.append(remaining.pop(best_idx))
 
     return selected, True
+
+
+def _text_jaccard(a: set[str], b: set[str]) -> float:
+    """Token 集合 Jaccard 相似度（任一为空 → 0）。"""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def select_diverse_mmr_text(
+    items: list[Evidence],
+    n: int,
+    *,
+    lambda_score: float = 0.7,
+) -> list[Evidence]:
+    """检索结果文本 MMR 多样性重排（Wave 1 · P0-10）。
+
+    输入是 ``_merge_filter_rank`` 排好序的 Evidence 列表；相似度 = title+snippet
+    token Jaccard（分词复用 ``literature._keywords`` 的中英双语分词器）。
+    分数用「排名倒数归一化」（排位越前分数越高），因此 ``lambda_score=1.0``
+    时退化为原序返回。``n >= len(items)`` 时做全量 MMR 重排（返回原集合的
+    多样性排序）；``n`` 更小时只取前 n 个。返回新列表，不改变输入。
+    """
+    if n <= 0 or not items:
+        return []
+
+    from .literature import _keywords  # 延迟导入：避免循环依赖
+
+    tokens = [_keywords(f"{e.title or ''} {e.snippet or ''}") for e in items]
+    total = len(items)
+    rank_scores = [1.0 - i / total for i in range(total)]
+    k = min(n, total)
+
+    remaining = list(range(total))
+    selected = [remaining.pop(0)]
+    while len(selected) < k and remaining:
+        best_pos = 0
+        best_mmr = float("-inf")
+        for pos, idx in enumerate(remaining):
+            max_sim = max(_text_jaccard(tokens[idx], tokens[s]) for s in selected)
+            mmr = lambda_score * rank_scores[idx] + (1.0 - lambda_score) * (1.0 - max_sim)
+            if mmr > best_mmr:
+                best_mmr = mmr
+                best_pos = pos
+        selected.append(remaining.pop(best_pos))
+    return [items[i] for i in selected]

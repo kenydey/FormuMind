@@ -29,13 +29,41 @@ def evidence_mode_active(mode: str | None, settings: Any) -> bool:
     return str(flag).strip().lower() not in ("", "off", "false", "0")
 
 
+def _project_instructions_block(project_id: str | None) -> str:
+    """读取项目级 agent_context 并拼成 prompt 块(W1-3 P0-5; fail-open)。
+
+    - project_id 为空 / store 异常 / context 为空 → 返回 ""(不注入)。
+    - 防御性读取: 任何异常只记 debug, 不中断主流程。
+    """
+    if not project_id:
+        return ""
+    try:
+        from ..db.project_store import get_project_store
+
+        detail = get_project_store().get(project_id)
+        ctx = ""
+        if detail is not None:
+            ctx = (getattr(detail.workspace, "agent_context", "") or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("project agent_context inject skipped: %s", exc)
+        return ""
+    if not ctx:
+        return ""
+    return "## Project instructions（项目级，不可被 skill 覆盖）\n" + ctx
+
+
 def build_evidence_prompt_prefix(
     *,
     skill_ids: list[str] | None = None,
     mcp_server_ids: list[str] | None = None,
     settings: Any = None,
+    project_id: str | None = None,
 ) -> str:
     parts = [LITERATURE_DISCIPLINE]
+    # W1-3: 项目级指示放在 discipline 之后、skill block 之前。
+    project_block = _project_instructions_block(project_id)
+    if project_block:
+        parts.append(project_block)
     try:
         from .chat_skills import skill_prompt_block
 
@@ -106,17 +134,23 @@ def enrich_chat_prompt(
     skill_ids: list[str] | None,
     settings: Any,
     mcp_server_ids: list[str] | None = None,
+    project_id: str | None = None,
 ) -> str:
+    # W1-3: 项目级指示在非 evidence 模式下也应生效(早退前先拼接)。
+    project_block = _project_instructions_block(project_id)
     if (
         not evidence_mode_active(mode, settings)
         and not skill_ids
         and not mcp_server_ids
     ):
+        if project_block:
+            return f"{project_block}\n\n---\n\n{base_prompt}"
         return base_prompt
     prefix = build_evidence_prompt_prefix(
         skill_ids=skill_ids,
         mcp_server_ids=mcp_server_ids,
         settings=settings,
+        project_id=project_id,
     )
     if not prefix:
         return base_prompt

@@ -8,14 +8,17 @@ domains, so research always returns cited evidence.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import logging
 import re
+import threading
 import time
 from typing import TYPE_CHECKING, Sequence
 from ..domain.research_query import build_research_query
 from ..domain.schemas import Evidence, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
 from .errors import degrade_return, optional_import
+from .literature_identity import identity_keys
 
 if TYPE_CHECKING:
     from .content_filter import FilterReport
@@ -27,6 +30,62 @@ _SOURCE_TIMEOUT_SEC = 25
 
 # Shared executor for per-source fetch timeouts (avoid creating a pool per call).
 _FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+
+# Wave 1 · 会话级检索缓存（P0-13）：同 query/source/limit 指纹在 TTL 内直接
+# 复用上次结果，避免重复检索烧 token 与耗时。TTL 取配置 search_cache_ttl_s
+#（秒，0=关闭，默认 600）；容量 128，超限淘汰最旧条目；threading.Lock 保护。
+_SEARCH_CACHE: dict[str, tuple[float, list[Evidence], dict]] = {}
+_SEARCH_CACHE_LOCK = threading.Lock()
+_SEARCH_CACHE_MAX_SIZE = 128
+
+
+def _search_cache_key(
+    query: str,
+    source_types: "list[str] | None",
+    total_limit: int,
+    per_source_cap: int,
+    domain,
+) -> str:
+    """sha256(query | 排序后 source_types | total_limit | per_source_cap | domain)。"""
+    payload = "|".join(
+        [
+            str(query or ""),
+            ",".join(sorted(str(s) for s in (source_types or []))),
+            str(total_limit),
+            str(per_source_cap),
+            str(domain or ""),
+        ]
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _search_cache_get(key: str, ttl_s: int) -> "tuple[list[Evidence], dict] | None":
+    """TTL 内命中返回 (final, payload)；过期/缺失返回 None。"""
+    try:
+        with _SEARCH_CACHE_LOCK:
+            rec = _SEARCH_CACHE.get(key)
+            if rec is None:
+                return None
+            ts, final, payload = rec
+            if time.monotonic() - ts > ttl_s:
+                _SEARCH_CACHE.pop(key, None)
+                return None
+            return final, payload
+    except Exception:
+        return None
+
+
+def _search_cache_put(key: str, final: list[Evidence], payload: dict) -> None:
+    """写入缓存；容量超限时淘汰时间戳最旧的条目。fail-open：异常不炸主流程。"""
+    try:
+        with _SEARCH_CACHE_LOCK:
+            if key not in _SEARCH_CACHE and len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX_SIZE:
+                oldest = min(_SEARCH_CACHE, key=lambda k: _SEARCH_CACHE[k][0])
+                _SEARCH_CACHE.pop(oldest, None)
+            _SEARCH_CACHE[key] = (time.monotonic(), final, payload)
+    except Exception:
+        logger.debug("search cache put failed", exc_info=True)
 
 
 # Curated seed corpus — representative, paraphrased abstracts used offline.
@@ -747,6 +806,29 @@ def _dedupe_evidence(items: list[Evidence]) -> list[Evidence]:
     return out
 
 
+def _evidence_identity_keys(e: Evidence) -> set[str]:
+    """Evidence 的跨轮次身份键：doi/arXiv 归一化 + 标题回退键。
+
+    供 ``iter_search`` 的轮次间去重使用——同一文献在不同 source/轮次以
+    不同写法（``DOI:…`` / ``https://doi.org/…`` / 大小写差异）出现时也能
+    被识别。Evidence 无 year/author 字段，故不建 tiyr 复合键；无任何身份
+    键时回退到 ``raw:<identifier|title>``（等价旧行为）。
+    """
+    try:
+        keys = identity_keys(
+            {
+                "title": e.title or "",
+                "doi": e.identifier or "",
+                "arxiv": e.identifier or "",
+            }
+        )
+    except Exception:
+        keys = set()
+    if not keys:
+        keys = {"raw:" + str(e.identifier or e.title or "").strip().casefold()}
+    return keys
+
+
 def openalex_arms(
     terms: "list[str] | tuple[str, ...]",
     limit: int,
@@ -971,6 +1053,28 @@ def _build_streams(
     return streams
 
 
+def _final_progress_meta(filter_payload: dict, sources_done: "list[str] | None" = None) -> dict:
+    """iter_search 终态 progress meta 形状（缓存命中与正常结束共用）。"""
+    return {
+        "source": None,
+        "new_count": 0,
+        "sources_done": sources_done or [],
+        "sources_pending": [],
+        "final": True,
+        "filter_report": filter_payload,
+    }
+
+
+def _emit_final_progress(progress_cb, final: list[Evidence], meta: dict) -> None:
+    """终态 progress 回调：兼容只接受 (partial,) 的旧回调签名。"""
+    if progress_cb is None:
+        return
+    try:
+        progress_cb(final, meta)
+    except TypeError:
+        progress_cb(final)
+
+
 def iter_search(
     query: str,
     source_types: list[str],
@@ -987,7 +1091,26 @@ def iter_search(
     Each round pulls the next page from every still-active source concurrently.
     ``progress_cb`` (if given) is invoked after **each source** completes (not only
     at round end), so the UI can render results while the search keeps going.
+
+    Wave 1 · 会话缓存（P0-13）：入口先查 ``_SEARCH_CACHE``，TTL 内命中直接
+    返回缓存结果并仍触发一次终态 ``progress_cb``，保持前端行为一致。
     """
+    from ..config import get_settings
+
+    _cache_settings = get_settings()
+    cache_ttl_s = int(getattr(_cache_settings, "search_cache_ttl_s", 600) or 0)
+    domain_hint = getattr(req, "domain", None) if req is not None else None
+    cache_key = _search_cache_key(query, source_types, total_limit, per_source_cap, domain_hint)
+    if cache_ttl_s > 0:
+        hit = _search_cache_get(cache_key, cache_ttl_s)
+        if hit is not None:
+            cached_final, cached_payload = hit
+            logger.info("search cache hit query=%r", (query or "")[:60])
+            _emit_final_progress(
+                progress_cb, cached_final, _final_progress_meta(cached_payload)
+            )
+            return cached_final, cached_payload
+
     q = build_research_query(query, req)
     western_terms: list[str] = []
     if (query or "").strip():
@@ -1064,9 +1187,14 @@ def iter_search(
                 except Exception:
                     page = []
                 st["cursor"] += page_size
-                new = [e for e in page if (e.identifier or e.title) not in seen_ids]
-                for e in new:
-                    seen_ids.add(e.identifier or e.title)
+                # 轮次间去重改用身份键（W1-4）：doi 大小写/前缀写法差异不再重复抓取。
+                new: list[Evidence] = []
+                for e in page:
+                    e_keys = _evidence_identity_keys(e)
+                    if e_keys & seen_ids:
+                        continue
+                    seen_ids.update(e_keys)
+                    new.append(e)
                 raw.extend(new)
                 if not st["paged"] or not new:
                     st["done"] = True
@@ -1083,6 +1211,25 @@ def iter_search(
     final, rule_report = _merge_filter_rank(
         raw, rank_q, total_limit, domain=getattr(req, "domain", None) if req else None, req=req
     )
+
+    # Wave 1 · 检索 MMR 多样性重排（P0-10）：放在 _merge_filter_rank 之后、
+    # llm_quality_judge 之前，先做多样性可省 judge token。flag 默认关闭。
+    mmr_applied = False
+    try:
+        if getattr(settings, "search_mmr_enabled", False) and len(final) > 1:
+            from .recommend_diversity import select_diverse_mmr_text
+
+            mmr_lambda = float(getattr(settings, "search_mmr_lambda", 0.7) or 0.7)
+            reranked = select_diverse_mmr_text(
+                final, min(len(final), total_limit), lambda_score=mmr_lambda
+            )
+            if reranked:
+                final = reranked
+                mmr_applied = True
+                logger.info("search MMR applied n=%d lambda=%.2f", len(final), mmr_lambda)
+    except Exception:
+        # fail-open：MMR 失败不影响主流程，保持 rule 排序。
+        logger.debug("search MMR failed; keeping rule order", exc_info=True)
 
     # LLM 后处理（quality judge + rerank）可能耗时数百秒（DeepSeek 慢 + 长
     # prompt），期间无 source 完成事件，前端 stall 时钟（300s）会误判任务中止。
@@ -1133,21 +1280,15 @@ def iter_search(
     filter_payload = filter_report.as_dict()
     filter_payload["rerank_applied"] = bool(rerank_meta.get("applied"))
     filter_payload["rerank_backend"] = rerank_meta.get("backend") or "none"
-    if progress_cb is not None:
-        try:
-            progress_cb(
-                final,
-                {
-                    "source": None,
-                    "new_count": 0,
-                    "sources_done": [s["name"] for s in streams],
-                    "sources_pending": [],
-                    "final": True,
-                    "filter_report": filter_payload,
-                },
-            )
-        except TypeError:
-            progress_cb(final)
+    filter_payload["mmr_applied"] = mmr_applied
+    _emit_final_progress(
+        progress_cb,
+        final,
+        _final_progress_meta(filter_payload, [s["name"] for s in streams]),
+    )
+    # Wave 1 · 会话缓存写入（P0-13）：TTL=0 时关闭写入。
+    if cache_ttl_s > 0:
+        _search_cache_put(cache_key, final, filter_payload)
     return final, filter_payload
 
 

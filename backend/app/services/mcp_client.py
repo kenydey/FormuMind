@@ -71,6 +71,68 @@ def _is_writeish(name: str) -> bool:
     return any(tok in n for tok in _WRITEISH)
 
 
+def _sleep(seconds: float) -> None:
+    """sleep 的薄封装，便于测试替换。"""
+    time.sleep(seconds)
+
+
+def _retry_params(settings: Any = None) -> tuple[int, float]:
+    """读取重试配置；settings 缺失或读取失败时用保守默认值。"""
+    candidates: list[Any] = []
+    if settings is not None:
+        candidates.append(settings)
+    else:
+        try:
+            from ..config import get_settings
+
+            candidates.append(get_settings())
+        except Exception:  # noqa: BLE001
+            pass
+    for s in candidates:
+        try:
+            retries = getattr(s, "mcp_tool_retries", 2)
+            backoff_s = getattr(s, "mcp_retry_backoff_s", 0.5)
+            return (
+                max(0, int(retries) if retries is not None else 2),
+                max(0.0, float(backoff_s) if backoff_s is not None else 0.5),
+            )
+        except (TypeError, ValueError):  # noqa: BLE001
+            continue
+    return 2, 0.5
+
+
+def _with_retry(
+    fn,
+    *,
+    retries: int = 2,
+    backoff_s: float = 0.5,
+    retry_on: tuple[type[BaseException], ...] = (TimeoutError, ConnectionError),
+):
+    """带指数退避的重试：仅 retry_on 类错误（超时/连接）重试。
+
+    退避序列为 backoff_s * 3**attempt（默认 0.5s → 1.5s）。
+    业务错误（如 JSON-RPC error → RuntimeError）直接抛出，不重试。
+    重试耗尽后抛出最后一次异常，由调用方转为 fail-open 的 error 返回。
+    """
+    attempt = 0
+    while True:
+        try:
+            return fn()
+        except retry_on as exc:
+            if attempt >= retries:
+                raise
+            delay = backoff_s * (3**attempt)
+            logger.warning(
+                "MCP 调用失败，%.1fs 后第 %d/%d 次重试：%s",
+                delay,
+                attempt + 1,
+                retries,
+                exc,
+            )
+            _sleep(delay)
+            attempt += 1
+
+
 class _StdioSession:
     def __init__(self, command: str, args: list[str], env: dict[str, str] | None = None):
         self.command = command
@@ -151,20 +213,58 @@ class _StdioSession:
             raise TimeoutError(f"MCP timeout on {method}")
 
 
-def probe_server(server: dict[str, Any], *, timeout_s: float = 8.0) -> dict[str, Any]:
+def probe_server(
+    server: dict[str, Any],
+    *,
+    timeout_s: float = 8.0,
+    settings: Any = None,
+) -> dict[str, Any]:
+    """探测 MCP server，返回完整工具描述符。
+
+    返回 {"ok", "tools", "names", "error"}；tools 为
+    [{"name", "description", "inputSchema"}]，names 为纯名称列表（兼容旧调用方）。
+    仅超时/连接类错误走指数退避重试（_with_retry），业务错误直接返回 error。
+    """
     if (server.get("transport") or "stdio") != "stdio":
-        return {"ok": False, "error": "only stdio transport supported in MVP", "tools": []}
-    sess = _StdioSession(server["command"], list(server.get("args") or []), server.get("env"))
+        return {
+            "ok": False,
+            "error": "only stdio transport supported in MVP",
+            "tools": [],
+            "names": [],
+        }
+    retries, backoff_s = _retry_params(settings)
+
+    def _probe_once() -> dict[str, Any]:
+        sess = _StdioSession(
+            server["command"], list(server.get("args") or []), server.get("env")
+        )
+        try:
+            sess.start(timeout_s=timeout_s)
+            result = sess._request("tools/list", {}, timeout_s=timeout_s) or {}
+            raw = result.get("tools") if isinstance(result, dict) else []
+            descriptors: list[dict[str, Any]] = []
+            names: list[str] = []
+            for t in raw or []:
+                if not isinstance(t, dict) or not t.get("name"):
+                    continue
+                name = str(t["name"])
+                names.append(name)
+                schema = t.get("inputSchema")
+                descriptors.append(
+                    {
+                        "name": name,
+                        "description": str(t.get("description") or ""),
+                        "inputSchema": schema if isinstance(schema, dict) else {},
+                    }
+                )
+            return {"ok": True, "tools": descriptors, "names": names, "error": None}
+        finally:
+            sess.close()
+
     try:
-        sess.start(timeout_s=timeout_s)
-        result = sess._request("tools/list", {}, timeout_s=timeout_s) or {}
-        tools = result.get("tools") if isinstance(result, dict) else []
-        names = [t.get("name") for t in (tools or []) if isinstance(t, dict)]
-        return {"ok": True, "tools": names, "error": None}
+        return _with_retry(_probe_once, retries=retries, backoff_s=backoff_s)
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "tools": [], "error": str(exc)[:300]}
-    finally:
-        sess.close()
+        return {"ok": False, "tools": [], "names": [], "error": str(exc)[:300]}
 
 
 def is_writeish_tool(tool_name: str) -> bool:
@@ -223,20 +323,30 @@ def _call_tool(
     server_id: str,
     tool_name: str,
     arguments: dict[str, Any] | None = None,
+    *,
+    settings: Any = None,
 ) -> dict[str, Any]:
     server = next((s for s in _prefs_servers() if s.get("id") == server_id and s.get("enabled")), None)
     if not server:
         return {"ok": False, "error": "server not found or disabled"}
-    sess = _StdioSession(server["command"], list(server.get("args") or []), server.get("env"))
-    try:
-        sess.start()
-        result = sess._request(
-            "tools/call",
-            {"name": tool_name, "arguments": arguments or {}},
-            timeout_s=20.0,
+    retries, backoff_s = _retry_params(settings)
+
+    def _call_once() -> Any:
+        sess = _StdioSession(
+            server["command"], list(server.get("args") or []), server.get("env")
         )
+        try:
+            sess.start()
+            return sess._request(
+                "tools/call",
+                {"name": tool_name, "arguments": arguments or {}},
+                timeout_s=20.0,
+            )
+        finally:
+            sess.close()
+
+    try:
+        result = _with_retry(_call_once, retries=retries, backoff_s=backoff_s)
         return {"ok": True, "result": result}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)[:300]}
-    finally:
-        sess.close()

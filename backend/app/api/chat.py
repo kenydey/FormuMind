@@ -299,6 +299,7 @@ def chat(req: ChatRequestValidated):
                     skill_ids=list(req.selected_skills or []),
                     mcp_server_ids=list(req.selected_mcp_servers or []),
                     settings=settings,
+                    project_id=req.project_id,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug("sync skill/mcp prefix skipped: %s", exc)
@@ -545,6 +546,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
                 skill_ids=list(req.selected_skills or []),
                 mcp_server_ids=list(req.selected_mcp_servers or []),
                 settings=settings,
+                project_id=req.project_id,
             )
     except Exception as exc:  # noqa: BLE001
         logger.debug("evidence prompt enrich skipped: %s", exc)

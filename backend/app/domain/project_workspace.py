@@ -59,6 +59,9 @@ class ProjectWorkspace(BaseModel):
     wiki_dossier_auto_patch: bool = False
     # Post-A′ #4: project-level prediction soft-correct (global default still off).
     prediction_bias_soft_correct: bool = False
+    # W1-3 (P0-5): 项目级 agent 上下文 —— 存于 SQLite JSON payload, 无需迁移;
+    #   为空则所有 prompt 注入逻辑跳过(向后兼容旧数据)。
+    agent_context: str = ""
 
 
 class ProjectSummary(BaseModel):

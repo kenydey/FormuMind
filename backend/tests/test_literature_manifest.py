@@ -120,3 +120,22 @@ def test_export_allowed_blocks_without_freeze(tmp_data):
         f.get("check") == "corpus" and f.get("status") == "open"
         for f in (state.get("findings") or [])
     )
+
+
+# ── W1-5（P0-8）回归测试 ─────────────────────────────────────────
+
+
+def test_update_item_screening_marks_human(tmp_data):
+    """P0-8：update_item_screening 标记 source=human + by/at，旧调用兼容。"""
+    _seed("p7")
+    out = lm.update_item_screening("p7", "a", "match", actor="alice")
+    item = next(i for i in out["items"] if i["id"] == "a")
+    assert item["screening"] == "match"
+    assert item["screening_source"] == "human"
+    assert item["screening_by"] == "alice"
+    assert item["screening_at"]
+    # 旧签名（不传 actor）仍可用，默认 actor=user
+    lm.update_item_screening("p7", "a", "uncertain")
+    item2 = next(i for i in lm.load_manifest("p7")["items"] if i["id"] == "a")
+    assert item2["screening_source"] == "human"
+    assert item2["screening_by"] == "user"

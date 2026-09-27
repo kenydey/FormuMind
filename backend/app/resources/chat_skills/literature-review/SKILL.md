@@ -40,6 +40,14 @@ When the user asks about silane coupling, epoxy primers, interfacial adhesion, o
 - Separate lab-scale reports from industrial practice when evidence differs.
 - Call out missing data instead of filling gaps with plausible numbers.
 
+## Retrieval loop protocol
+
+- `search_budget=20`：单次 literature review 最多 20 次检索调用；`max_parallel=3`。
+- 缺口驱动重搜：每轮先列出未覆盖缺口（`uncovered_gaps`），缺口清单驱动下一轮 query；无新缺口即停。
+- 停止条件（满足任一即停）：budget 耗尽 / 缺口覆盖率达标 / 连续两轮无新结果。
+- 禁止重复发送已查过的 query（query 指纹去重）。
+- 分阶段执行：先 search 取元数据+摘要，read 只对入选条目取全文。
+
 ## Output shape
 
 - Prose with inline citations (`[^n]` or (Author Year) matching provided sources).

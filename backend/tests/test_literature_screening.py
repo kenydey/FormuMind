@@ -121,3 +121,169 @@ def test_screening_disabled(tmp_data):
 
     with pytest.raises(PermissionError):
         ls.screen_project("p2", {}, settings=Off())
+
+
+# ── W1-5（P0-4/P0-7/P0-8）回归测试 ───────────────────────────────
+
+
+def test_short_circuit_insufficient_evidence():
+    """P0-4 短路三条件：无 title / 无 snippet+abstract → uncertain + 标记。"""
+    # 1. 无 title
+    disp, model = ls._classify_with_model(
+        {"title": "  ", "snippet": "epoxy"},
+        include_keywords=["epoxy"],
+        exclude_keywords=[],
+    )
+    assert disp == "uncertain"
+    assert model == "insufficient-evidence"
+    # 2. 有 title 但无 snippet 也无 abstract
+    disp, model = ls._classify_with_model(
+        {"title": "epoxy coating", "snippet": "", "doi": "10.1/z"},
+        include_keywords=["epoxy"],
+        exclude_keywords=[],
+    )
+    assert disp == "uncertain"
+    assert model == "insufficient-evidence"
+    # 3. 有 title + abstract（无 snippet）不走短路，正常命中
+    disp, model = ls._classify_with_model(
+        {"title": "epoxy coating", "abstract": "adhesion test"},
+        include_keywords=["epoxy"],
+        exclude_keywords=[],
+    )
+    assert disp == "match"
+    assert model is None
+    # 旧签名保持 str 返回
+    assert (
+        ls.classify_item(
+            {"title": ""}, include_keywords=[], exclude_keywords=[]
+        )
+        == "uncertain"
+    )
+
+
+def test_screen_project_marks_insufficient_evidence_decision(tmp_data):
+    """P0-4：screen_project 的 decision 带 model=insufficient-evidence。"""
+    man = lm.empty_manifest("p9")
+    man["items"] = [
+        {"id": "a", "title": "", "snippet": "x", "screening": "unset"},
+        {"id": "b", "title": "t", "snippet": "", "screening": "unset"},
+    ]
+    lm.save_manifest(man)
+    out = ls.screen_project(
+        "p9", {"include_keywords": ["epoxy"]}, apply=True, settings=_S()
+    )
+    by = {d["id"]: d for d in out["decisions"]}
+    assert by["a"]["screening"] == "uncertain"
+    assert by["a"]["model"] == "insufficient-evidence"
+    assert by["b"]["screening"] == "uncertain"
+    assert by["b"]["model"] == "insufficient-evidence"
+
+
+def test_screen_project_skips_unchanged_digest(tmp_data, monkeypatch):
+    """P0-7：二次 screen_project digest 未变且规则未变 → 跳过，不调 classify。"""
+    _seed()
+    criteria = {"include_keywords": ["epoxy"], "exclude_keywords": ["mouse"]}
+    out1 = ls.screen_project("p2", criteria, apply=True, settings=_S())
+    assert out1["applied"]
+    # 规则版本落盘到 manifest 顶层
+    assert lm.load_manifest("p2").get("screening_rule_version")
+
+    calls: list = []
+    orig = ls._classify_with_model
+
+    def spy(item, **kw):
+        calls.append(item.get("id"))
+        return orig(item, **kw)
+
+    monkeypatch.setattr(ls, "_classify_with_model", spy)
+    out2 = ls.screen_project("p2", criteria, apply=True, settings=_S())
+    assert calls == []
+    assert all(d.get("skipped_digest") for d in out2["decisions"])
+    assert out2["summary"] == out1["summary"]
+
+    # 改一条 title → digest 变化 → 只重筛这一条
+    man = lm.load_manifest("p2")
+    man["items"][0]["title"] = "Waterborne epoxy coating adhesion v2"
+    lm.save_manifest(man)
+    out3 = ls.screen_project("p2", criteria, apply=True, settings=_S())
+    assert calls == ["1"]
+    by3 = {d["id"]: d for d in out3["decisions"]}
+    assert not by3["1"].get("skipped_digest")
+    assert by3["2"].get("skipped_digest")
+    assert by3["3"].get("skipped_digest")
+
+
+def test_screen_project_digest_skip_on_rule_change(tmp_data):
+    """P0-7：规则变化（include 关键字不同）→ 不跳过，全部重筛。"""
+    _seed()
+    ls.screen_project(
+        "p2",
+        {"include_keywords": ["epoxy"], "exclude_keywords": ["mouse"]},
+        apply=True,
+        settings=_S(),
+    )
+    out = ls.screen_project(
+        "p2",
+        {"include_keywords": ["polyurethane"], "exclude_keywords": ["mouse"]},
+        apply=True,
+        settings=_S(),
+    )
+    assert not any(d.get("skipped_digest") for d in out["decisions"])
+    # 规则版本已更新
+    assert lm.load_manifest("p2")["screening_rule_version"] == ls._screening_rule_version(
+        {"include_keywords": ["polyurethane"], "exclude_keywords": ["mouse"]}
+    )
+
+
+def test_human_override_not_overwritten(tmp_data):
+    """P0-8：人工 override 不被后续 screen_project 覆盖。"""
+    _seed()
+    ls.screen_project(
+        "p2",
+        {"include_keywords": ["epoxy"], "exclude_keywords": []},
+        apply=True,
+        settings=_S(),
+    )
+    lm.update_item_screening("p2", "1", "no_match", actor="tester")
+    item = next(i for i in lm.load_manifest("p2")["items"] if i["id"] == "1")
+    assert item["screening_source"] == "human"
+    assert item["screening_by"] == "tester"
+    assert item["screening_at"]
+
+    # criteria 本会判成 match，但 human 保护跳过
+    out = ls.screen_project(
+        "p2",
+        {"include_keywords": ["epoxy"], "exclude_keywords": []},
+        apply=True,
+        settings=_S(),
+    )
+    by = {d["id"]: d for d in out["decisions"]}
+    assert by["1"]["screening"] == "no_match"
+    assert by["1"].get("skipped_human") is True
+    kept = next(i for i in lm.load_manifest("p2")["items"] if i["id"] == "1")
+    assert kept["screening"] == "no_match"
+    assert kept["screening_source"] == "human"
+
+
+def test_human_override_force_overwrites(tmp_data):
+    """P0-8：criteria 显式 force=True → 覆盖人工判定，source 回 heuristic。"""
+    _seed()
+    ls.screen_project(
+        "p2",
+        {"include_keywords": ["epoxy"], "exclude_keywords": []},
+        apply=True,
+        settings=_S(),
+    )
+    lm.update_item_screening("p2", "1", "no_match", actor="tester")
+    out = ls.screen_project(
+        "p2",
+        {"include_keywords": ["epoxy"], "exclude_keywords": [], "force": True},
+        apply=True,
+        settings=_S(),
+    )
+    by = {d["id"]: d for d in out["decisions"]}
+    assert by["1"]["screening"] == "match"
+    assert "skipped_human" not in by["1"]
+    item = next(i for i in lm.load_manifest("p2")["items"] if i["id"] == "1")
+    assert item["screening"] == "match"
+    assert item["screening_source"] == "heuristic"

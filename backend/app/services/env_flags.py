@@ -92,6 +92,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("evidence_reviewer_fix_loop_enabled", "Evidence Reviewer 修正循环",
             "Reviewer 未通过时附 [Auditor] 反馈并有界重试（同步最多 3 轮；默认关）。",
             "agent"),
+    EnvFlag("evidence_reviewer_llm_enabled", "Evidence Reviewer LLM 判定",
+            "启用 LLM rubric 判定（§5.7/§5.8/§5.4 反幻觉规则）；失败时回退启发式（默认关）。",
+            "agent"),
     EnvFlag("publication_preflight_enabled", "报告导出钢印 Preflight",
             "Wiki/STORM 导出前检查未绑定引用、占位符与裸数值；blocking 时 409。",
             "agent"),
@@ -120,6 +123,9 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "允许配置 stdio MCP 服务器（默认关；写类工具名启发式拒绝）。",
             "agent", "高级；默认关", maturity="experimental"),
     # ── 检索 ──────────────────────────────────────────────────────────────
+    EnvFlag("search_mmr_enabled", "检索 MMR 多样性重排",
+            "融合排序后用 MMR 打散近重复文献（默认关）。",
+            "agent"),
     EnvFlag("gpu_enabled", "GPU 加速 ColBERT 检索",
             "启用后使用 PyLate ColBERT 作为知识库检索后端（需 CUDA GPU ≥ 4GB VRAM）。"
             "关闭时使用 BM25 + FAISS 混合检索（纯 CPU，不限硬件，零 AVX2 要求）。",

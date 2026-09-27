@@ -205,6 +205,22 @@ def capture_from_project(
         logger.debug("capture workspace sources skipped: %s", exc)
 
     man["items"] = list(by_id.values())
+    # W1-4 钩子：跨源候选 union-find 去重（literature_identity 未就绪时跳过，fail-open）
+    try:
+        from .literature_identity import dedupe_items as _dedupe_items
+    except ImportError:
+        _dedupe_items = None
+    if _dedupe_items is not None:
+        try:
+            deduped, merged = _dedupe_items(man["items"])
+            if merged:
+                logger.info("capture dedupe merged %d items", len(merged))
+                man["events"] = (man.get("events") or [])[-180:] + [
+                    {"type": "deduped", "at": time.time(), "merged": len(merged)}
+                ]
+            man["items"] = deduped
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("capture dedupe skipped: %s", exc)
     man["captured_at"] = time.time()
     man.setdefault("retrievals", []).append(
         {
@@ -293,7 +309,10 @@ def update_item_screening(
     project_id: str,
     item_id: str,
     screening: str,
+    *,
+    actor: str = "user",
 ) -> dict[str, Any]:
+    """人工改动单条筛选结论；P0-8：标记 screening_source="human" 以免被自动筛选覆盖。"""
     if screening not in {"match", "no_match", "uncertain", "unset"}:
         raise ValueError("invalid screening disposition")
     man = load_manifest(project_id)
@@ -301,6 +320,9 @@ def update_item_screening(
     for item in man.get("items") or []:
         if str(item.get("id")) == item_id:
             item["screening"] = screening
+            item["screening_source"] = "human"
+            item["screening_by"] = (actor or "user").strip() or "user"
+            item["screening_at"] = time.time()
             found = True
             break
     if not found:

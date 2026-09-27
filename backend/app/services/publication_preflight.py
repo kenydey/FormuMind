@@ -56,6 +56,8 @@ class Finding:
     evidence: list[str] = field(default_factory=list)
     location: dict[str, Any] = field(default_factory=dict)
     resolution: dict[str, Any] | None = None
+    # 内容变更后旧 finding 失配 → 标 stale，要求人工重新确认
+    stale: bool = False
 
 
 @dataclass
@@ -154,6 +156,7 @@ def run_checks(
     *,
     total_anchors: int | None = None,
     settings: Any | None = None,
+    audit_artifact_dict: dict[str, Any] | None = None,
 ) -> list[Finding]:
     """Pure checks → open findings (no persistence)."""
     text = markdown or ""
@@ -284,6 +287,34 @@ def run_checks(
                 )
             )
 
+    # W1-9 预留钩子：artifact 可复现性审计（默认关闭，fail-open）
+    if audit_artifact_dict is not None and bool(
+        getattr(settings, "preflight_artifact_audit_enabled", False)
+    ):
+        try:
+            from .artifact_audit import audit_artifact  # W1-9 未实施时跳过
+        except ImportError:  # noqa: BLE001
+            audit_artifact = None  # type: ignore[assignment]
+        if audit_artifact is not None:
+            try:
+                for af in audit_artifact(audit_artifact_dict) or []:
+                    if getattr(af, "status", None) != "fail":
+                        continue
+                    findings.append(
+                        Finding(
+                            id=uuid.uuid4().hex[:12],
+                            check="audit",
+                            severity="major",
+                            status="open",
+                            title=f"Artifact 审计失败：{getattr(af, 'check', '?')}",
+                            detail=str(getattr(af, "detail", ""))[:300],
+                            evidence=[],
+                            location={},
+                        )
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("artifact audit skipped: %s", exc)
+
     return findings
 
 
@@ -300,7 +331,12 @@ def _load_state(project_id: str, kind: str) -> PreflightState:
         return PreflightState(project_id=project_id, kind=kind)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        findings = [Finding(**f) for f in (raw.get("findings") or [])]
+        # 兼容旧 JSON：缺 stale 字段 → False
+        findings = []
+        for f in raw.get("findings") or []:
+            data = dict(f)
+            data["stale"] = bool(data.get("stale", False))
+            findings.append(Finding(**data))
         return PreflightState(
             project_id=project_id,
             kind=kind,
@@ -332,6 +368,51 @@ def _save_state(state: PreflightState) -> None:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _finding_key(f: Finding) -> tuple[str, str, str]:
+    """增量合并的匹配键：同一类检查 + 同标题 + 同详情视为同一问题。"""
+    return (f.check, f.title, f.detail)
+
+
+def _merge_findings(
+    old_findings: list[Finding],
+    new_findings: list[Finding],
+    *,
+    content_changed: bool,
+) -> list[Finding]:
+    """增量合并新旧 findings。
+
+    - 按 (check, title, detail) 匹配：旧 finding 若已被 override/resolve，
+      新 finding 继承其 status 与 resolution（重新 review 不丢人工处置）。
+    - 内容 hash 变化导致失配、且曾有人处置（overridden/resolved）的旧 finding：
+      标 stale=True 并重置为 open，要求人工重新确认。
+    - 仍为 open 且失配的旧 finding 视为已修复 → 丢弃。
+    """
+    by_key: dict[tuple[str, str, str], list[Finding]] = {}
+    for f in old_findings:
+        by_key.setdefault(_finding_key(f), []).append(f)
+    matched_old_ids: set[str] = set()
+    merged: list[Finding] = []
+    for nf in new_findings:
+        bucket = by_key.get(_finding_key(nf))
+        old = bucket.pop(0) if bucket else None  # 消费一次，避免重复继承
+        if old is not None:
+            matched_old_ids.add(old.id)
+            if old.status in ("overridden", "resolved"):
+                nf.status = old.status
+                nf.resolution = old.resolution
+                nf.stale = False
+        merged.append(nf)
+    for old in old_findings:
+        if old.id in matched_old_ids:
+            continue
+        if content_changed and old.status in ("overridden", "resolved"):
+            old.stale = True
+            old.status = "open"
+            merged.append(old)
+        # open 失配 = 问题已修复，不带回
+    return merged
+
+
 def review_markdown(
     project_id: str,
     kind: str,
@@ -340,11 +421,17 @@ def review_markdown(
     total_anchors: int | None = None,
     cite_source_ids: list[str] | None = None,
     settings: Any | None = None,
+    audit_artifact_dict: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from ..config import get_settings
 
     s = settings or get_settings()
-    findings = run_checks(markdown, total_anchors=total_anchors, settings=s)
+    findings = run_checks(
+        markdown,
+        total_anchors=total_anchors,
+        settings=s,
+        audit_artifact_dict=audit_artifact_dict,
+    )
     # Wave B: merge frozen-corpus / screening findings
     try:
         from .literature_manifest import preflight_corpus_findings
@@ -358,17 +445,24 @@ def review_markdown(
             findings.append(Finding(**raw))
     except Exception as exc:  # noqa: BLE001
         logger.debug("corpus preflight merge skipped: %s", exc)
+    new_hash = content_hash(markdown)
+    old = _load_state(project_id, kind)
+    content_changed = bool(old.content_hash) and old.content_hash != new_hash
+    merged = _merge_findings(old.findings, findings, content_changed=content_changed)
+    stale_count = sum(1 for f in merged if f.stale)
     state = PreflightState(
         project_id=project_id,
         kind=kind,
-        content_hash=content_hash(markdown),
-        findings=findings,
-        events=[
+        content_hash=new_hash,
+        findings=merged,
+        events=old.events
+        + [
             {
                 "type": "generated",
                 "actor": "system",
                 "at": time.time(),
-                "count": len(findings),
+                "count": len(merged),
+                "stale": stale_count,
             }
         ],
         finalization=None,
@@ -394,6 +488,7 @@ def override_finding(
     if hit is None:
         raise LookupError("finding not found")
     hit.status = "overridden"
+    hit.stale = False  # 人工重新确认，清除 stale 标记
     hit.resolution = {
         "kind": "overridden",
         "actor": actor,
@@ -407,6 +502,52 @@ def override_finding(
             "at": time.time(),
             "findingID": finding_id,
             "reason": reason,
+        }
+    )
+    state.finalization = None
+    _save_state(state)
+    return state_to_dict(state)
+
+
+def resolve_finding(
+    project_id: str,
+    kind: str,
+    finding_id: str,
+    *,
+    actor: str,
+    note: str,
+) -> dict[str, Any]:
+    """人工确认已处理：open → resolved。
+
+    blocking finding 要求 note 非空，否则 ValueError。
+    """
+    actor = (actor or "").strip()
+    note = (note or "").strip()
+    if not actor:
+        raise ValueError("resolve 需要 actor")
+    state = _load_state(project_id, kind)
+    hit = next((f for f in state.findings if f.id == finding_id), None)
+    if hit is None:
+        raise LookupError("finding not found")
+    if hit.status != "open":
+        raise ValueError(f"只能 resolve open 状态的 finding（当前 {hit.status}）")
+    if hit.severity == "blocking" and not note:
+        raise ValueError("blocking finding 的 resolve 需要填写 note")
+    hit.status = "resolved"
+    hit.stale = False  # 人工重新确认，清除 stale 标记
+    hit.resolution = {
+        "kind": "resolved",
+        "actor": actor,
+        "note": note,
+        "at": time.time(),
+    }
+    state.events.append(
+        {
+            "type": "resolved",
+            "actor": actor,
+            "at": time.time(),
+            "findingID": finding_id,
+            "note": note,
         }
     )
     state.finalization = None
@@ -434,8 +575,14 @@ def assert_ready(
     open_blocking = [
         f for f in state.findings if f.severity == "blocking" and f.status == "open"
     ]
-    if open_blocking:
-        errors.append(f"{len(open_blocking)} 条 open blocking findings")
+    stale_blocking = [f for f in open_blocking if f.stale]
+    fresh_blocking = [f for f in open_blocking if not f.stale]
+    if fresh_blocking:
+        errors.append(f"{len(fresh_blocking)} 条 open blocking findings")
+    if stale_blocking:
+        errors.append(
+            f"{len(stale_blocking)} 条 blocking findings 内容已变更（stale），请重新确认"
+        )
     if errors:
         return {
             "ok": False,
@@ -514,11 +661,17 @@ def export_allowed(
     open_blocking = [
         f for f in state.findings if f.severity == "blocking" and f.status == "open"
     ]
+    stale_blocking = [f for f in open_blocking if f.stale]
     if open_blocking:
+        errors = [f"{len(open_blocking)} open blocking findings"]
+        if stale_blocking:
+            errors.append(
+                f"其中 {len(stale_blocking)} 条内容已变更（stale），请重新确认"
+            )
         return False, {
             "ok": False,
             "ready": False,
-            "errors": [f"{len(open_blocking)} open blocking findings"],
+            "errors": errors,
             "state": state_to_dict(state),
         }
     # Finalize lazily on successful export gate
