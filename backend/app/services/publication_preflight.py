@@ -252,8 +252,25 @@ def review_markdown(
     markdown: str,
     *,
     total_anchors: int | None = None,
+    cite_source_ids: list[str] | None = None,
+    settings: Any | None = None,
 ) -> dict[str, Any]:
     findings = run_checks(markdown, total_anchors=total_anchors)
+    # Wave B: merge frozen-corpus / screening findings
+    try:
+        from ..config import get_settings
+        from .literature_manifest import preflight_corpus_findings
+
+        s = settings or get_settings()
+        for raw in preflight_corpus_findings(
+            project_id,
+            markdown,
+            settings=s,
+            cite_source_ids=cite_source_ids,
+        ):
+            findings.append(Finding(**raw))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("corpus preflight merge skipped: %s", exc)
     state = PreflightState(
         project_id=project_id,
         kind=kind,
@@ -351,6 +368,44 @@ def assert_ready(
     return {"ok": True, "ready": True, "errors": [], "state": state_to_dict(state)}
 
 
+def _merge_corpus_into_state(
+    state: PreflightState,
+    markdown: str,
+    *,
+    settings: Any,
+) -> PreflightState:
+    """Refresh Wave B corpus findings without wiping human overrides."""
+    try:
+        from .literature_manifest import preflight_corpus_findings
+
+        fresh = preflight_corpus_findings(
+            state.project_id, markdown, settings=settings
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("corpus merge skipped: %s", exc)
+        return state
+    # Drop previous open corpus/* findings; keep overrides / other checks
+    kept = [
+        f
+        for f in state.findings
+        if f.check not in {"corpus", "corpus_cite", "unscreened_open"}
+        or f.status == "overridden"
+    ]
+    for raw in fresh:
+        # Skip if same check+detail already overridden
+        if any(
+            f.check == raw["check"]
+            and f.detail == raw.get("detail")
+            and f.status == "overridden"
+            for f in state.findings
+        ):
+            continue
+        kept.append(Finding(**raw))
+    state.findings = kept
+    _save_state(state)
+    return state
+
+
 def export_allowed(
     project_id: str,
     kind: str,
@@ -364,8 +419,11 @@ def export_allowed(
     state = _load_state(project_id, kind)
     h = content_hash(markdown)
     if not state.content_hash or state.content_hash != h:
-        review_markdown(project_id, kind, markdown)
+        review_markdown(project_id, kind, markdown, settings=settings)
         state = _load_state(project_id, kind)
+    else:
+        # Content unchanged: refresh corpus gates; preserve overrides.
+        state = _merge_corpus_into_state(state, markdown, settings=settings)
     open_blocking = [
         f for f in state.findings if f.severity == "blocking" and f.status == "open"
     ]

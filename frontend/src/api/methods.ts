@@ -1647,6 +1647,62 @@ export const apiMethods = {
       disclaimer?: string;
       updated_at?: string | null;
     }>(`/api/wiki/storm/report/${encodeURIComponent(projectId)}`),
+  getLiteratureManifest: (projectId: string) =>
+    get<{
+      project_id: string;
+      items: Array<{
+        id: string;
+        title?: string;
+        doi?: string | null;
+        screening?: string;
+        snippet?: string;
+      }>;
+      frozen: {
+        at: number;
+        actor: string;
+        item_ids: string[];
+        digest: string;
+      } | null;
+      coverage: { candidate_count: number; frozen_count: number };
+    }>(`/api/wiki/literature/${encodeURIComponent(projectId)}`),
+
+  captureLiteratureManifest: (body: { project_id: string; query?: string }) =>
+    post<Record<string, unknown>>("/api/wiki/literature/capture", body),
+
+  freezeLiteratureManifest: (body: {
+    project_id: string;
+    item_ids?: string[];
+    actor?: string;
+  }) => post<Record<string, unknown>>("/api/wiki/literature/freeze", body),
+
+  unfreezeLiteratureManifest: (body: { project_id: string; actor?: string }) =>
+    post<Record<string, unknown>>("/api/wiki/literature/unfreeze", body),
+
+  screenLiteratureManifest: (body: {
+    project_id: string;
+    criteria: {
+      include_keywords?: string[];
+      exclude_keywords?: string[];
+      require_doi?: boolean;
+      year_min?: number;
+      year_max?: number;
+    };
+    apply?: boolean;
+  }) => post<Record<string, unknown>>("/api/wiki/literature/screen", body),
+
+  patchLiteratureItem: (
+    itemId: string,
+    body: { project_id: string; screening: string },
+  ) =>
+    fetch(`/api/wiki/literature/items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }),
+
   exportWikiStormReport: async (body: {
     project_id: string;
     format: "md" | "docx" | "pdf" | "pptx";

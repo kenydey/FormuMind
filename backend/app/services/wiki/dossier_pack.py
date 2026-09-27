@@ -43,6 +43,16 @@ def build_project_dossier_pack(
         campaign_int = ws.workbench_campaign_id
 
     literature = _literature_slice(pid, ws)
+    # Wave B: prefer frozen corpus when present
+    try:
+        from ..literature_manifest import literature_slice_from_frozen, manifest_enabled
+
+        if manifest_enabled(get_settings()):
+            frozen_slice = literature_slice_from_frozen(pid)
+            if frozen_slice:
+                literature = frozen_slice
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("frozen literature slice skipped: %s", exc)
     formula_rows = _formula_rows(ws)
     doe = _doe_slice(ws, campaign_int)
     lab = _lab_slice(pid, ws)
