@@ -32,13 +32,27 @@ def evidence_mode_active(mode: str | None, settings: Any) -> bool:
 def build_evidence_prompt_prefix(
     *,
     skill_ids: list[str] | None = None,
+    mcp_server_ids: list[str] | None = None,
     settings: Any = None,
 ) -> str:
     parts = [LITERATURE_DISCIPLINE]
     try:
         from .chat_skills import skill_prompt_block
 
-        block = skill_prompt_block(list(skill_ids or []))
+        ids = list(skill_ids or [])
+        if mcp_server_ids:
+            try:
+                from .mcp_skill_docs import ensure_mcp_skill_docs, mcp_skill_ids
+
+                ensure_mcp_skill_docs(
+                    server_ids=list(mcp_server_ids),
+                    settings=settings,
+                    probe=True,
+                )
+                ids.extend(mcp_skill_ids(list(mcp_server_ids)))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("mcp skill-doc inject skipped: %s", exc)
+        block = skill_prompt_block(ids)
         if block:
             parts.append(block)
         elif evidence_mode_active("evidence", settings):
@@ -97,10 +111,19 @@ def enrich_chat_prompt(
     mode: str | None,
     skill_ids: list[str] | None,
     settings: Any,
+    mcp_server_ids: list[str] | None = None,
 ) -> str:
-    if not evidence_mode_active(mode, settings) and not skill_ids:
+    if (
+        not evidence_mode_active(mode, settings)
+        and not skill_ids
+        and not mcp_server_ids
+    ):
         return base_prompt
-    prefix = build_evidence_prompt_prefix(skill_ids=skill_ids, settings=settings)
+    prefix = build_evidence_prompt_prefix(
+        skill_ids=skill_ids,
+        mcp_server_ids=mcp_server_ids,
+        settings=settings,
+    )
     if not prefix:
         return base_prompt
     return f"{prefix}\n\n---\n\n{base_prompt}"

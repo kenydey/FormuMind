@@ -242,6 +242,21 @@ def chat(req: ChatRequestValidated):
 
         use_evidence = evidence_mode_active(req.mode, settings)
 
+        prompt_prefix = ""
+        try:
+            if getattr(settings, "chat_skills_runtime_enabled", True) and (
+                use_evidence or req.selected_skills or req.selected_mcp_servers
+            ):
+                from ..services.evidence_synthesis import build_evidence_prompt_prefix
+
+                prompt_prefix = build_evidence_prompt_prefix(
+                    skill_ids=list(req.selected_skills or []),
+                    mcp_server_ids=list(req.selected_mcp_servers or []),
+                    settings=settings,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("sync skill/mcp prefix skipped: %s", exc)
+
         if req.response_format == "structured" and settings.chat_structured_enabled:
             structured, struct_err = generate_structured_answer(
                 question,
@@ -262,6 +277,7 @@ def chat(req: ChatRequestValidated):
                     domain=req.domain,
                     history=history,
                     structure=req.structure,
+                    prompt_prefix=prompt_prefix or None,
                 )
                 answer = _ensure_answer(answer)
             _mark("answer")
@@ -277,6 +293,7 @@ def chat(req: ChatRequestValidated):
                     domain=req.domain,
                     history=history,
                     structure=req.structure,
+                    prompt_prefix=prompt_prefix or None,
                 )
                 answer = _ensure_answer(answer)
             _mark("answer")
@@ -287,7 +304,10 @@ def chat(req: ChatRequestValidated):
 
         doi_results = None
         evidence_reviewer = None
-        if use_evidence or req.selected_skills:
+        reviewer_fix = None
+        mcp_permission_required = None
+        mcp_tool_results = None
+        if use_evidence or req.selected_skills or req.selected_mcp_servers:
             answer, emeta = postprocess_evidence_answer(answer, settings=settings)
             doi_results = emeta.get("doi_results")
             try:
@@ -298,6 +318,56 @@ def chat(req: ChatRequestValidated):
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("reviewer skipped: %s", exc)
+            if evidence_reviewer and (evidence_reviewer.get("status") or "pass") != "pass":
+                try:
+                    from ..services.reviewer_fix_loop import run_fix_loop
+
+                    def _repair(_q: str, auditor: str) -> str:
+                        repaired, _ = answer_question(
+                            f"{question}\n\n{auditor}\n\n请输出修订后的完整回答：",
+                            sources,
+                            domain=req.domain,
+                            history=history,
+                            structure=req.structure,
+                        )
+                        return _ensure_answer(repaired)
+
+                    answer, reviewer_fix = run_fix_loop(
+                        question=question,
+                        answer=answer,
+                        citations=_claims_evidence(citations),
+                        review=evidence_reviewer,
+                        settings=settings,
+                        repair_fn=_repair,
+                        max_rounds=3,
+                        project_id=req.project_id,
+                    )
+                    if reviewer_fix and reviewer_fix.get("findings"):
+                        evidence_reviewer = reviewer_fix["findings"]
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("reviewer fix-loop skipped: %s", exc)
+
+        # MCP skill-doc inject is handled in evidence_synthesis; optional tool call path
+        if req.selected_mcp_servers:
+            try:
+                from ..services.mcp_skill_docs import ensure_mcp_skill_docs
+                from ..services.mcp_chat_tools import maybe_run_selected_mcp
+
+                ensure_mcp_skill_docs(
+                    server_ids=list(req.selected_mcp_servers or []),
+                    settings=settings,
+                    probe=True,
+                )
+                mcp_out = maybe_run_selected_mcp(
+                    question,
+                    list(req.selected_mcp_servers or []),
+                    session_id=req.chat_session_id,
+                    settings=settings,
+                )
+                mcp_tool_results = mcp_out.get("results")
+                mcp_permission_required = mcp_out.get("mcp_permission_required")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("mcp chat selection skipped: %s", exc)
 
         sourced_claims = build_sourced_claims(
             question,
@@ -323,6 +393,9 @@ def chat(req: ChatRequestValidated):
             mode=req.mode,
             doi_results=doi_results,
             evidence_reviewer=evidence_reviewer,
+            reviewer_fix=reviewer_fix,
+            mcp_permission_required=mcp_permission_required,
+            mcp_tool_results=mcp_tool_results,
         )
     except HTTPException:
         raise
@@ -408,6 +481,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
                 prompt,
                 mode=req.mode,
                 skill_ids=list(req.selected_skills or []),
+                mcp_server_ids=list(req.selected_mcp_servers or []),
                 settings=settings,
             )
     except Exception as exc:  # noqa: BLE001
@@ -423,6 +497,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         "rewritten_query": rewritten_query,
         "mode": req.mode,
         "selected_skills": list(req.selected_skills or []),
+        "selected_mcp_servers": list(req.selected_mcp_servers or []),
     }
 
 
@@ -440,12 +515,21 @@ def _finalize_evidence_fields(
     settings,
     mode: str | None,
     selected_skills: list[str] | None,
-) -> tuple[str, dict | None, dict | None]:
-    """DOI annotate + optional reviewer; returns (answer, doi_results, reviewer)."""
+    project_id: str | None = None,
+    sources: list | None = None,
+    domain: str | None = None,
+    history: list | None = None,
+    structure: dict | None = None,
+) -> tuple[str, dict | None, dict | None, dict | None]:
+    """DOI annotate + optional reviewer + 1-round fix-loop.
+
+    Returns (answer, doi_results, reviewer, reviewer_fix).
+    """
     from ..services.evidence_synthesis import evidence_mode_active, postprocess_evidence_answer
 
     doi_results = None
     reviewer = None
+    reviewer_fix = None
     if evidence_mode_active(mode, settings) or selected_skills:
         answer, emeta = postprocess_evidence_answer(answer, settings=settings)
         doi_results = emeta.get("doi_results")
@@ -457,7 +541,35 @@ def _finalize_evidence_fields(
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("stream reviewer skipped: %s", exc)
-    return answer, doi_results, reviewer
+        if reviewer and (reviewer.get("status") or "pass") != "pass":
+            try:
+                from ..services.reviewer_fix_loop import run_fix_loop
+
+                def _repair(_q: str, auditor: str) -> str:
+                    repaired, _ = answer_question(
+                        f"{question}\n\n{auditor}\n\n请输出修订后的完整回答：",
+                        list(sources or citations),
+                        domain=domain,
+                        history=history,
+                        structure=structure,
+                    )
+                    return _ensure_answer(repaired)
+
+                answer, reviewer_fix = run_fix_loop(
+                    question=question,
+                    answer=answer,
+                    citations=_claims_evidence(citations),
+                    review=reviewer,
+                    settings=settings,
+                    repair_fn=_repair,
+                    max_rounds=1,  # stream: at most 1 round
+                    project_id=project_id,
+                )
+                if reviewer_fix and reviewer_fix.get("findings"):
+                    reviewer = reviewer_fix["findings"]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("stream fix-loop skipped: %s", exc)
+    return answer, doi_results, reviewer, reviewer_fix
 
 
 @router.post("/chat/stream")
@@ -524,13 +636,18 @@ async def chat_stream(req: "ChatRequestValidated"):
                     yield _sse({"type": "phase", "phase": "answering"})
                     yield _sse({"type": "token", "delta": answer})
                     yield _sse({"type": "phase", "phase": "claims"})
-                    answer, doi_results, reviewer = _finalize_evidence_fields(
+                    answer, doi_results, reviewer, reviewer_fix = _finalize_evidence_fields(
                         question,
                         answer,
                         citations,
                         settings=settings,
                         mode=req.mode,
                         selected_skills=list(req.selected_skills or []),
+                        project_id=req.project_id,
+                        sources=list(sources),
+                        domain=req.domain,
+                        history=list(req.history or []),
+                        structure=req.structure,
                     )
                     claims = None
                     if settings.chat_claim_check_enabled and answer:
@@ -560,6 +677,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "mode": req.mode,
                             "doi_results": doi_results,
                             "evidence_reviewer": reviewer,
+                            "reviewer_fix": reviewer_fix,
                         }
                     )
                     return
@@ -843,13 +961,18 @@ async def chat_stream(req: "ChatRequestValidated"):
             citations = [
                 _sanitize_evidence(c) for c in plan["sources"][: min(8, len(plan["sources"]))]
             ]
-            answer, doi_results, reviewer = _finalize_evidence_fields(
+            answer, doi_results, reviewer, reviewer_fix = _finalize_evidence_fields(
                 question,
                 answer,
                 citations,
                 settings=settings,
                 mode=req.mode,
                 selected_skills=list(req.selected_skills or []),
+                project_id=req.project_id,
+                sources=list(plan["sources"]),
+                domain=req.domain,
+                history=list(req.history or []),
+                structure=req.structure,
             )
 
             # claims 收尾(12s 硬超时 → offline 降级)。
@@ -884,6 +1007,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "mode": req.mode,
                     "doi_results": doi_results,
                     "evidence_reviewer": reviewer,
+                    "reviewer_fix": reviewer_fix,
                 }
             )
         except Exception as exc:  # noqa: BLE001

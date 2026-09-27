@@ -80,7 +80,10 @@ class ChatRequest(BaseModel):
     mode: ChatMode = "chat"
     selected_skills: list[str] = Field(default_factory=list, max_length=12)
     selected_connectors: list[str] = Field(default_factory=list, max_length=8)
+    selected_mcp_servers: list[str] = Field(default_factory=list, max_length=4)
     ref_doc_ids: list[str] = Field(default_factory=list, max_length=20)
+    # Opaque chat/session id for MCP writeish session grants (optional).
+    chat_session_id: str | None = Field(default=None, max_length=80)
 
 
 class StructureContext(BaseModel):
@@ -124,3 +127,6 @@ class ChatResponse(BaseModel):
     mode: ChatMode | None = None
     doi_results: list[dict] | None = None
     evidence_reviewer: dict | None = None
+    reviewer_fix: dict | None = None
+    mcp_permission_required: dict | None = None
+    mcp_tool_results: list[dict] | None = None
