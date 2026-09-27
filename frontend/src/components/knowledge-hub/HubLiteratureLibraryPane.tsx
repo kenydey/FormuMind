@@ -44,6 +44,9 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
   const [err, setErr] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
   const [dupGroups, setDupGroups] = useState<DupGroup[]>([]);
+  const [exportScope, setExportScope] = useState<"library" | "frozen" | "collection">(
+    "library",
+  );
   const [draft, setDraft] = useState<{
     title: string;
     doi: string;
@@ -52,6 +55,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
     tags: string;
     notes: string;
     screening: string;
+    collectionIds: string[];
   } | null>(null);
 
   useEffect(() => {
@@ -123,6 +127,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
       tags: (selected.tags || []).join(", "),
       notes: selected.notes || "",
       screening: selected.screening || "unset",
+      collectionIds: [...(selected.collection_ids || [])],
     });
   }, [selected]);
 
@@ -211,15 +216,29 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         >
           补全文
         </button>
+        <select
+          className="text-xs bg-panel border border-edge rounded px-2 py-1"
+          value={exportScope}
+          onChange={(e) =>
+            setExportScope(e.target.value as "library" | "frozen" | "collection")
+          }
+          data-testid="hub-library-export-scope"
+          title="导出范围"
+        >
+          <option value="library">导出：全部库</option>
+          <option value="frozen">导出：仅冻结</option>
+          <option value="collection">导出：当前集合</option>
+        </select>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || (exportScope === "collection" && !collectionId)}
           className="text-xs px-2 py-1 rounded border border-edge hover:border-accent/50"
           onClick={() =>
             run("导出 BibTeX", async () => {
               const text = await api.exportLiteratureBib(projectId, {
-                scope: collectionId ? "collection" : "library",
-                collection_id: collectionId || undefined,
+                scope: exportScope,
+                collection_id:
+                  exportScope === "collection" ? collectionId || undefined : undefined,
               });
               downloadText(`${projectId}-library.bib`, text, "application/x-bibtex");
             })
@@ -229,13 +248,14 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || (exportScope === "collection" && !collectionId)}
           className="text-xs px-2 py-1 rounded border border-edge hover:border-accent/50"
           onClick={() =>
             run("导出 RIS", async () => {
               const text = await api.exportLiteratureRis(projectId, {
-                scope: collectionId ? "collection" : "library",
-                collection_id: collectionId || undefined,
+                scope: exportScope,
+                collection_id:
+                  exportScope === "collection" ? collectionId || undefined : undefined,
               });
               downloadText(`${projectId}-library.ris`, text, "application/x-research-info-systems");
             })
@@ -524,6 +544,36 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
                   <option value="uncertain">uncertain</option>
                 </select>
               </label>
+              <fieldset className="space-y-1" data-testid="hub-library-collections">
+                <legend className="text-slate-500">所属集合</legend>
+                {collections.length === 0 ? (
+                  <p className="text-[10px] text-slate-600">暂无集合 — 先点「+ 集合」</p>
+                ) : (
+                  collections.map((c) => {
+                    const checked = draft.collectionIds.includes(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-1.5 text-[11px] text-slate-300"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setDraft({
+                              ...draft,
+                              collectionIds: checked
+                                ? draft.collectionIds.filter((id) => id !== c.id)
+                                : [...draft.collectionIds, c.id],
+                            });
+                          }}
+                        />
+                        <span className="truncate">{c.name}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </fieldset>
               <button
                 type="button"
                 disabled={busy}
@@ -546,6 +596,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
                         .filter(Boolean),
                       notes: draft.notes,
                       screening: draft.screening,
+                      collection_ids: draft.collectionIds,
                     }),
                   )
                 }

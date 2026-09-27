@@ -62,9 +62,10 @@ describe("HubLiteratureLibraryPane", () => {
           screening: "unset",
           tags: [],
           authors: [],
+          collection_ids: ["c1"],
         },
       ],
-      collections: [],
+      collections: [{ id: "c1", name: "Coatings", item_ids: ["a"] }],
       frozen: null,
       coverage: { candidate_count: 1, frozen_count: 0 },
     });
@@ -74,5 +75,9 @@ describe("HubLiteratureLibraryPane", () => {
     });
     expect(screen.getByText(/Epoxy paper/)).toBeInTheDocument();
     expect(getLiteratureLibrary).toHaveBeenCalled();
+    const collBox = screen.getByTestId("hub-library-collections");
+    expect(collBox).toBeInTheDocument();
+    expect(collBox.textContent).toMatch(/Coatings/);
+    expect(screen.getByTestId("hub-library-export-scope")).toBeInTheDocument();
   });
 });
