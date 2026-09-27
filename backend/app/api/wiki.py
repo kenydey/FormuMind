@@ -1003,7 +1003,19 @@ class LiteratureScreenRequest(BaseModel):
 
 class LiteratureItemPatch(BaseModel):
     project_id: str = Field(min_length=1)
-    screening: str = Field(min_length=1, max_length=32)
+    screening: str | None = Field(default=None, max_length=32)
+    title: str | None = Field(default=None, max_length=240)
+    doi: str | None = None
+    authors: list[str] | None = None
+    year: int | None = None
+    url: str | None = Field(default=None, max_length=500)
+    oa_pdf_url: str | None = Field(default=None, max_length=500)
+    tags: list[str] | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+    collection_ids: list[str] | None = None
+    chemrxiv_id: str | None = Field(default=None, max_length=120)
+    openalex_id: str | None = Field(default=None, max_length=120)
+    snippet: str | None = Field(default=None, max_length=800)
 
 
 class LiteratureEnrichOaRequest(BaseModel):
@@ -1011,6 +1023,39 @@ class LiteratureEnrichOaRequest(BaseModel):
     scope: str = Field(default="missing_fulltext", max_length=32)
     limit: int = Field(default=20, ge=1, le=40)
     actor: str = Field(default="user", max_length=120)
+
+
+class LiteratureCollectionCreate(BaseModel):
+    project_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=120)
+
+
+class LiteratureCollectionPatch(BaseModel):
+    project_id: str = Field(min_length=1)
+    name: str | None = Field(default=None, max_length=120)
+    item_ids: list[str] | None = None
+
+
+class LiteratureCollectionDelete(BaseModel):
+    project_id: str = Field(min_length=1)
+
+
+class LiteratureImportIdsRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=100_000)
+    actor: str = Field(default="user", max_length=120)
+
+
+class LiteratureMergeRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    item_ids: list[str] = Field(min_length=2, max_length=20)
+    strategy: str = Field(default="most-complete", max_length=32)
+
+
+class LiteratureCitationImportRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    format: str = Field(min_length=3, max_length=16)
+    text: str = Field(min_length=1, max_length=2_000_000)
 
 
 @router.get("/literature/{project_id}")
@@ -1021,6 +1066,30 @@ def literature_get_endpoint(project_id: str) -> dict:
     if not manifest_enabled(get_settings()):
         raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
     return load_manifest(project_id)
+
+
+@router.get("/literature/{project_id}/library")
+def literature_library_endpoint(
+    project_id: str,
+    q: str = "",
+    tag: str = "",
+    collection_id: str = "",
+    screening: str = "",
+) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import list_library
+
+    try:
+        return list_library(
+            project_id,
+            q=q,
+            tag=tag,
+            collection_id=collection_id,
+            screening=screening,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/literature/capture")
@@ -1084,12 +1153,212 @@ def literature_screen_endpoint(body: LiteratureScreenRequest) -> dict:
 @router.patch("/literature/items/{item_id}")
 def literature_item_patch_endpoint(item_id: str, body: LiteratureItemPatch) -> dict:
     _require_wiki()
-    from ..services.literature_manifest import update_item_screening
+    from ..services.literature_manifest import patch_library_item
 
+    payload = body.model_dump(exclude_unset=True)
+    project_id = str(payload.pop("project_id"))
+    # screening-only patches do not require literature_library_enabled
+    library_keys = set(payload) - {"screening"}
+    require_library = bool(library_keys)
     try:
-        return update_item_screening(body.project_id, item_id, body.screening)
+        return patch_library_item(
+            project_id,
+            item_id,
+            payload,
+            settings=get_settings(),
+            require_library=require_library,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/literature/collections")
+def literature_collection_create_endpoint(body: LiteratureCollectionCreate) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import create_collection
+
+    try:
+        return create_collection(body.project_id, body.name, settings=get_settings())
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/literature/collections/{collection_id}")
+def literature_collection_patch_endpoint(
+    collection_id: str, body: LiteratureCollectionPatch
+) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import patch_collection
+
+    try:
+        return patch_collection(
+            body.project_id,
+            collection_id,
+            name=body.name,
+            item_ids=body.item_ids,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/literature/collections/{collection_id}")
+def literature_collection_delete_endpoint(
+    collection_id: str, body: LiteratureCollectionDelete
+) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import delete_collection
+
+    try:
+        return delete_collection(
+            body.project_id, collection_id, settings=get_settings()
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/literature/import-ids")
+def literature_import_ids_endpoint(body: LiteratureImportIdsRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_import_ids import import_ids
+
+    try:
+        return import_ids(
+            body.project_id,
+            body.text,
+            actor=body.actor,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/literature/{project_id}/duplicates")
+def literature_duplicates_endpoint(project_id: str) -> dict:
+    _require_wiki()
+    from ..services.literature_duplicates import list_duplicates
+
+    try:
+        return list_duplicates(project_id, settings=get_settings())
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/literature/merge")
+def literature_merge_endpoint(body: LiteratureMergeRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_duplicates import merge_items
+
+    try:
+        return merge_items(
+            body.project_id,
+            body.item_ids,
+            strategy=body.strategy or "most-complete",
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/literature/{project_id}/export.bib")
+def literature_export_bib_endpoint(
+    project_id: str,
+    scope: str = "library",
+    collection_id: str = "",
+):
+    _require_wiki()
+    from fastapi.responses import Response
+
+    from ..services.literature_citation_io import export_bibtex
+
+    if scope not in ("library", "frozen", "collection"):
+        raise HTTPException(status_code=400, detail="invalid scope")
+    try:
+        text = export_bibtex(
+            project_id,
+            scope=scope,  # type: ignore[arg-type]
+            collection_id=collection_id,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=text,
+        media_type="application/x-bibtex",
+        headers={
+            "Content-Disposition": f'attachment; filename="{project_id}-library.bib"',
+        },
+    )
+
+
+@router.get("/literature/{project_id}/export.ris")
+def literature_export_ris_endpoint(
+    project_id: str,
+    scope: str = "library",
+    collection_id: str = "",
+):
+    _require_wiki()
+    from fastapi.responses import Response
+
+    from ..services.literature_citation_io import export_ris
+
+    if scope not in ("library", "frozen", "collection"):
+        raise HTTPException(status_code=400, detail="invalid scope")
+    try:
+        text = export_ris(
+            project_id,
+            scope=scope,  # type: ignore[arg-type]
+            collection_id=collection_id,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=text,
+        media_type="application/x-research-info-systems",
+        headers={
+            "Content-Disposition": f'attachment; filename="{project_id}-library.ris"',
+        },
+    )
+
+
+@router.post("/literature/import")
+def literature_citation_import_endpoint(body: LiteratureCitationImportRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_citation_io import import_citation
+
+    fmt = (body.format or "").strip().lower()
+    if fmt not in ("bibtex", "ris"):
+        raise HTTPException(status_code=400, detail="format must be bibtex|ris")
+    try:
+        return import_citation(
+            body.project_id,
+            format=fmt,  # type: ignore[arg-type]
+            text=body.text,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

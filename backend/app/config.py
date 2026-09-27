@@ -582,6 +582,8 @@ class Settings(BaseSettings):
     # Wave B — project literature manifest / frozen corpus.
     literature_manifest_enabled: bool = True
     frozen_corpus_required_for_export: bool = False
+    # Wave E-Lit — Hub Literature Library catalog (default off; soak then enable).
+    literature_library_enabled: bool = False
     # Wave B — light smart screening (default off).
     literature_screening_enabled: bool = False
     screening_auto_freeze: bool = False
