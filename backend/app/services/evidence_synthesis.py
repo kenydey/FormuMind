@@ -74,17 +74,11 @@ def try_paperqa_answer(
 ) -> tuple[str, list[Evidence]] | None:
     """Async-safe PaperQA attempt for stream/sync callers."""
     try:
-        from .llm import _paperqa_available, _paperqa_answer
-        import asyncio
+        from .paperqa_engine import answer_with_paperqa, paperqa_available
 
-        if not _paperqa_available() or not sources:
+        if not paperqa_available() or not sources:
             return None
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(_paperqa_answer(question, sources))
-        # Running loop: schedule via new loop in thread is handled by caller
-        return None
+        return answer_with_paperqa(question, sources)
     except Exception as exc:  # noqa: BLE001
         logger.debug("paperqa evidence skipped: %s", exc)
         return None
@@ -95,11 +89,11 @@ async def try_paperqa_answer_async(
     sources: list[Evidence],
 ) -> tuple[str, list[Evidence]] | None:
     try:
-        from .llm import _paperqa_available, _paperqa_answer
+        from .paperqa_engine import answer_with_paperqa_async, paperqa_available
 
-        if not _paperqa_available() or not sources:
+        if not paperqa_available() or not sources:
             return None
-        return await _paperqa_answer(question, sources)
+        return await answer_with_paperqa_async(question, sources)
     except Exception as exc:  # noqa: BLE001
         logger.debug("paperqa async skipped: %s", exc)
         return None
