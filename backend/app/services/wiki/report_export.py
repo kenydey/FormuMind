@@ -5,9 +5,12 @@ CJK-capable system font when available (DroidSansFallback / WenQuanYi).
 """
 from __future__ import annotations
 
+import html as _html
 import io
 import logging
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +28,15 @@ _CJK_FONT_CANDIDATES = (
 
 
 def export_capabilities() -> dict[str, Any]:
-    caps = {"md": True, "docx": False, "pdf": False, "pptx": False, "cjk_font": None}
+    caps = {
+        "md": True,
+        "html": True,
+        "docx": False,
+        "pdf": False,
+        "pptx": False,
+        "pandoc": False,
+        "cjk_font": None,
+    }
     try:
         import docx  # noqa: F401
 
@@ -45,7 +56,47 @@ def export_capabilities() -> dict[str, Any]:
         caps["pptx"] = True
     except Exception:
         pass
+    if shutil.which("pandoc"):
+        caps["pandoc"] = True
+        # pandoc covers docx; pdf only if a LaTeX engine exists (checked lazily).
+        caps["docx"] = True
     return caps
+
+
+def _pandoc_convert(markdown: str, *, to: str, title: str) -> bytes | None:
+    """Convert via pandoc when available. Returns None when unavailable/failed.
+
+    Pure fail-open helper: never raises, so callers fall back to native libs.
+    """
+    if not shutil.which("pandoc"):
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "pandoc",
+                "-f",
+                "markdown",
+                "-t",
+                to,
+                "--metadata",
+                f"title={title}",
+            ],
+            input=(markdown or "").encode("utf-8"),
+            capture_output=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        logger.warning("pandoc convert to %s failed: %s", to, exc)
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        logger.warning(
+            "pandoc convert to %s failed (rc=%s): %s",
+            to,
+            proc.returncode,
+            (proc.stderr or b"")[:300],
+        )
+        return None
+    return bytes(proc.stdout)
 
 
 def _find_cjk_font() -> str | None:
@@ -107,11 +158,15 @@ def _iter_blocks(markdown: str) -> list[tuple[str, str]]:
 
 
 def markdown_to_docx(markdown: str, *, title: str = "FormuMind Report") -> bytes:
+    # Prefer pandoc when installed (better typography); fall back to python-docx.
+    via_pandoc = _pandoc_convert(markdown, to="docx", title=title)
+    if via_pandoc is not None:
+        return via_pandoc
     try:
         from docx import Document
         from docx.shared import Pt
     except ImportError as exc:
-        raise RuntimeError("python-docx not installed") from exc
+        raise RuntimeError("python-docx not installed and pandoc unavailable") from exc
 
     doc = Document()
     doc.core_properties.title = title
@@ -148,10 +203,14 @@ def markdown_to_docx(markdown: str, *, title: str = "FormuMind Report") -> bytes
 
 
 def markdown_to_pdf(markdown: str, *, title: str = "FormuMind Report") -> bytes:
+    # Prefer pandoc when installed (needs a LaTeX engine; fails open to fpdf2).
+    via_pandoc = _pandoc_convert(markdown, to="pdf", title=title)
+    if via_pandoc is not None:
+        return via_pandoc
     try:
         from fpdf import FPDF
     except ImportError as exc:
-        raise RuntimeError("fpdf2 not installed") from exc
+        raise RuntimeError("fpdf2 not installed and pandoc unavailable") from exc
 
     font_path = _find_cjk_font()
     pdf = FPDF(format="A4", unit="mm")
@@ -224,6 +283,70 @@ def markdown_to_pdf(markdown: str, *, title: str = "FormuMind Report") -> bytes:
     if isinstance(out, (bytes, bytearray)):
         return bytes(out)
     return str(out).encode("latin-1", errors="ignore")
+
+
+_HTML_CSS = """
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  max-width:900px;margin:24px auto;padding:0 20px;color:#222;line-height:1.7}
+h1{font-size:24px;border-bottom:2px solid #1a6fd4;padding-bottom:8px}
+h2{font-size:19px;color:#1a6fd4;margin-top:28px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+th,td{border:1px solid #bbb;padding:6px 10px;text-align:left}
+th{background:#eef4fc}
+.disclaimer{background:#fff8e1;border:1px solid #e6c200;padding:10px 14px;
+  font-size:13px;margin:16px 0}
+ul{padding-left:22px}
+hr{border:none;border-top:1px solid #ccc;margin:24px 0}
+""".strip()
+
+
+def _md_table_to_html(content: str) -> str:
+    rows = [r.strip().strip("|") for r in content.splitlines() if r.strip()]
+    parsed = [[c.strip() for c in r.split("|")] for r in rows]
+    parsed = [r for r in parsed if r and not all(set(c) <= {"-", ":", " "} for c in r)]
+    if not parsed:
+        return ""
+    out = ["<table>"]
+    for ri, row in enumerate(parsed):
+        tag = "th" if ri == 0 else "td"
+        cells = "".join(f"<{tag}>{_html.escape(c)}</{tag}>" for c in row)
+        out.append(f"<tr>{cells}</tr>")
+    out.append("</table>")
+    return "\n".join(out)
+
+
+def markdown_to_html(markdown: str, *, title: str = "FormuMind Report") -> bytes:
+    """Render markdown to a standalone HTML document (stdlib only, inline CSS)."""
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="zh-CN"><head><meta charset="utf-8">',
+        f"<title>{_html.escape(title)}</title>",
+        f"<style>{_HTML_CSS}</style>",
+        "</head><body>",
+        f"<h1>{_html.escape(title)}</h1>",
+        '<div class="disclaimer">研发草稿 · draft_not_claims · 不得作为 Claims 证据</div>',
+    ]
+    for kind, content in _iter_blocks(markdown):
+        if kind == "heading":
+            parts.append(f"<h2>{_html.escape(content[:200])}</h2>")
+        elif kind == "para":
+            paras = "".join(
+                f"<p>{_html.escape(p)}</p>" for p in content.split("\n\n") if p.strip()
+            )
+            parts.append(paras or f"<p>{_html.escape(content)}</p>")
+        elif kind == "list":
+            items = "".join(
+                f"<li>{_html.escape(i)}</li>" for i in content.splitlines() if i.strip()
+            )
+            parts.append(f"<ul>{items}</ul>")
+        elif kind == "table":
+            tbl = _md_table_to_html(content)
+            if tbl:
+                parts.append(tbl)
+        elif kind == "hr":
+            parts.append("<hr>")
+    parts.append("</body></html>")
+    return "\n".join(parts).encode("utf-8")
 
 
 def _split_slides(markdown: str) -> list[tuple[str, list[str]]]:
@@ -311,6 +434,8 @@ def export_bytes(
         )
     if kind == "pdf":
         return (markdown_to_pdf(markdown, title=title), "application/pdf", "pdf")
+    if kind == "html":
+        return (markdown_to_html(markdown, title=title), "text/html; charset=utf-8", "html")
     if kind in ("pptx", "ppt", "deck"):
         return (
             markdown_to_pptx(markdown, title=title),

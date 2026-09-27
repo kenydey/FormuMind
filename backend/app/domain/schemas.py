@@ -355,6 +355,20 @@ class Evidence(BaseModel):
     # P1 #16: page/paragraph anchors for citation lines (align CitationAnchor).
     page: int | None = None
     paragraph: int | None = None
+    # W2-2 (P1-7): two-stage search→read — whether the full text is already
+    # persisted locally (read stage can skip the download). None = unknown.
+    has_fulltext: bool | None = None
+
+
+class Passage(BaseModel):
+    """A page-anchored full-text passage from the read stage (W2-2 / P1-7)."""
+
+    source_id: str = ""
+    page_no: int | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    section_title: str = ""
+    text: str = ""
 
 
 class ParameterBoundary(BaseModel):

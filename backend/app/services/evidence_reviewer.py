@@ -18,6 +18,30 @@ def llm_rubric_enabled(settings: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# P1-11 reviewer 工具边界
+#
+# reviewer 会话禁止调用任何工具：当前实现仅调用 llm.complete_json 做判定，
+# 无工具分发能力（api/chat.py 的 review_answer / run_fix_loop 调用链已核查，
+# repair_fn 调的是 chat LLM，不属于 reviewer 工具）。
+# 白名单为空即"全部拒绝"；assert_reviewer_tool_boundary() 在流水线入口调用，
+# 既是文档化边界，也是防未来回归的断言。
+# ---------------------------------------------------------------------------
+REVIEWER_ALLOWED_TOOLS: frozenset[str] = frozenset()
+
+
+def assert_reviewer_tool_boundary(tool_name: str | None = None) -> None:
+    """断言 reviewer 工具边界。
+
+    无参数调用 = 声明本流水线不经过工具分发（review 入口调用）；
+    带 tool_name = 校验单次工具调用，白名单为空时一律拒绝。
+    """
+    if tool_name is None:
+        return
+    if tool_name not in REVIEWER_ALLOWED_TOOLS:
+        raise PermissionError(f"reviewer 工具调用被拒绝：{tool_name!r} 不在白名单内")
+
+
+# ---------------------------------------------------------------------------
 # LLM rubric prompt（模板，非代码逻辑）
 #
 # 落实 aipoch rubric：
@@ -62,6 +86,10 @@ REVIEWER_RUBRIC_PROMPT = """你是 Evidence Reviewer：一名严格但公平的"
 
 ## Finding 的证据约束（§5.9）
 finding.evidence 只能引用"实际读到的记录"：即下方 CITATIONS 列表中的条目，或回答正文中的具体句子。不得引用你没见过的来源。
+
+## 防自证（P1-27）
+- review 结论不得引用被 review 对象自身的陈述作为证据：回答中的断言不能用回答中的另一句话来"证明"（循环论证无效）。
+- §5.9 允许引用回答原文仅用于定位被审查的句子，不得为其真实性背书；若某 finding.evidence 只有回答自引而无 CITATIONS 外部记录，该 finding 视为无效。
 
 ## 输出契约（§5.11）
 - 只输出一个 JSON 对象，不要输出除 JSON 外的任何文字，不要用 markdown 代码围栏。
@@ -230,6 +258,7 @@ def review_answer(
     settings: Any,
 ) -> dict[str, Any] | None:
     """Heuristic + optional LLM rubric pass. Fail-open (returns None on errors)."""
+    assert_reviewer_tool_boundary()  # P1-11：reviewer 流水线不经过工具分发
     if not reviewer_enabled(settings) or not (answer or "").strip():
         return None
     # LLM rubric 优先：开关开且 LLM 成功 → 用 LLM 结果；否则回退启发式

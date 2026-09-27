@@ -46,7 +46,7 @@ When the user asks about silane coupling, epoxy primers, interfacial adhesion, o
 - 缺口驱动重搜：每轮先列出未覆盖缺口（`uncovered_gaps`），缺口清单驱动下一轮 query；无新缺口即停。
 - 停止条件（满足任一即停）：budget 耗尽 / 缺口覆盖率达标 / 连续两轮无新结果。
 - 禁止重复发送已查过的 query（query 指纹去重）。
-- 分阶段执行：先 search 取元数据+摘要，read 只对入选条目取全文。
+- 分阶段执行：先 search 取元数据+摘要（结果带 `has_fulltext` 标记），read 只对入选条目调用 `read_passages` 取带页码的 passage；未标记全文的条目不主动下载（除非 `fulltext_enrich` 开启）。
 
 ## Output shape
 

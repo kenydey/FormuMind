@@ -399,6 +399,23 @@ def save_formulation_version(body: SaveVersionRequest) -> VersionView:
     except Exception as exc:
         log.exception("save formulation version failed")
         raise HTTPException(status_code=500, detail="配方版本保存失败") from exc
+
+    # W2-6 (P1-2): link formulation version -> claim (change summary).
+    # Fail-open: provenance must never break version saving.
+    try:
+        from ..services import provenance as _prov
+
+        if (body.change_summary or "").strip():
+            _prov.link(
+                "formulation",
+                row.id,
+                "claim",
+                _prov.claim_id_for_text(body.change_summary),
+                "summarised_by",
+            )
+    except Exception:
+        pass
+
     return _to_view(row)
 
 

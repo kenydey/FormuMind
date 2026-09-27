@@ -113,6 +113,170 @@ def mark_unaddressed(claims: dict[str, ClaimDisposition]) -> dict[str, ClaimDisp
     return out
 
 
+# ---------------------------------------------------------------------------
+# P1-13 ReviewRun 生命周期状态机
+#
+# status: running | complete | error；outcome: pass | flagged | null。
+# 与 disposition 同目录（./data/reviews/runs/）JSON 持久化，run 永不抛错。
+# ---------------------------------------------------------------------------
+_REVIEW_RUN_OUTCOMES = {"pass", "flagged", "null"}
+
+
+def _run_path(run_id: str) -> Path:
+    safe = re.sub(r"[^\w.\-]+", "_", run_id)[:80] or "anon"
+    return _data_root() / "reviews" / "runs" / f"{safe}.json"
+
+
+def new_review_run(
+    *,
+    session_key: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    run_id = f"{session_key or 'na'}-{int(time.time() * 1000)}"
+    return {
+        "run_id": run_id,
+        "session_key": session_key,
+        "project_id": project_id,
+        "status": "running",
+        "outcome": "null",
+        "started_at": time.time(),
+        "finished_at": None,
+    }
+
+
+def save_review_run(run: dict[str, Any]) -> None:
+    path = _run_path(str(run.get("run_id") or "anon"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCK:
+        path.write_text(
+            json.dumps(run, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+
+def load_review_run(run_id: str) -> dict[str, Any] | None:
+    path = _run_path(run_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return dict(data)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def finish_review_run(
+    run: dict[str, Any], *, outcome: str = "null", error: bool = False
+) -> dict[str, Any]:
+    out = dict(run)
+    out["outcome"] = outcome if outcome in _REVIEW_RUN_OUTCOMES else "null"
+    out["status"] = "error" if error else "complete"
+    out["finished_at"] = time.time()
+    return out
+
+
+def _outcome_for_status(status: str | None) -> str:
+    s = (status or "").lower()
+    if s == "pass":
+        return "pass"
+    if s in {"warning", "failure", "warn", "fail", "flagged"}:
+        return "flagged"
+    return "null"
+
+
+# ---------------------------------------------------------------------------
+# P1-12 turn-stop 自动审计：防抖 + per-turn 幂等 + 修正轮抑制
+#
+# maybe_auto_review 供 turn-stop 钩子调用（chat.py 接线由主流程完成）：
+# - 开关 auto_audit_enabled 默认关，按会话 opt-in；
+# - 防抖：turn stop 后 100ms 内若有更新的 turn 到达，只触发最后一次；
+# - 幂等：同一 turn_id 只触发一次；
+# - 抑制：run_fix_loop 执行期间（修正轮）不触发，防自循环。
+# ---------------------------------------------------------------------------
+_AUTO_DEBOUNCE_S = 0.1
+_AUTO_LOCK = threading.Lock()
+_AUTO_STATE: dict[str, dict[str, Any]] = {}
+_FIX_LOOP_DEPTH = 0
+_FIX_LOOP_GUARD = threading.Lock()
+
+
+def auto_audit_enabled(settings: Any) -> bool:
+    return bool(getattr(settings, "auto_audit_enabled", False))
+
+
+from contextlib import contextmanager  # noqa: E402
+
+
+@contextmanager
+def _fix_loop_active():
+    """标记 fix-loop 执行中；期间 maybe_auto_review 一律抑制。"""
+    global _FIX_LOOP_DEPTH
+    with _FIX_LOOP_GUARD:
+        _FIX_LOOP_DEPTH += 1
+    try:
+        yield
+    finally:
+        with _FIX_LOOP_GUARD:
+            _FIX_LOOP_DEPTH -= 1
+
+
+def maybe_auto_review(
+    turn_id: str,
+    *,
+    question: str,
+    answer: str,
+    citations: list[Any],
+    settings: Any,
+    repair_fn: Callable[[str, str], str] | None = None,
+    session_id: str | None = None,
+    project_id: str | None = None,
+    max_rounds: int = 1,
+) -> dict[str, Any] | None:
+    """turn-stop 自动审计入口。
+
+    返回 None = 未触发（关闭/重复/防抖取代/修正轮抑制/无错）；
+    否则返回 {"turn_id", "review", "fix"}。
+    """
+    if not auto_audit_enabled(settings) or not (turn_id or "").strip():
+        return None
+    scope = session_id or project_id or "default"
+    with _AUTO_LOCK:
+        if _FIX_LOOP_DEPTH > 0:
+            return None  # 修正轮抑制
+        st = _AUTO_STATE.setdefault(scope, {"pending": None, "fired": set()})
+        if turn_id in st["fired"]:
+            return None  # per-turn 幂等
+        st["pending"] = turn_id
+    time.sleep(_AUTO_DEBOUNCE_S)
+    with _AUTO_LOCK:
+        st = _AUTO_STATE.get(scope)
+        if not st or st.get("pending") != turn_id:
+            return None  # 防抖：被更新的 turn 取代
+        st["fired"].add(turn_id)
+        st["pending"] = None
+    try:
+        from .evidence_reviewer import review_answer
+
+        review = review_answer(question, answer, citations, settings=settings)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("auto review skipped: %s", exc)
+        return None
+    if not review or (review.get("status") or "pass") == "pass":
+        return {"turn_id": turn_id, "review": review, "fix": None}
+    fix = None
+    if repair_fn is not None:
+        _, fix = run_fix_loop(
+            question=question,
+            answer=answer,
+            citations=citations,
+            review=review,
+            settings=settings,
+            repair_fn=repair_fn,
+            max_rounds=max_rounds,
+            project_id=project_id,
+        )
+    return {"turn_id": turn_id, "review": review, "fix": fix}
+
+
 def run_fix_loop(
     *,
     question: str,
@@ -128,6 +292,8 @@ def run_fix_loop(
 
     ``repair_fn(question, auditor_augmented_prompt_hint) -> new_answer``.
     Fail-open: on any error returns original answer + partial meta.
+    P1-13: 永不抛错；ReviewRun（running/complete/error × pass/flagged/null）
+    与 disposition 同目录 JSON 持久化。
     """
     if not fix_loop_enabled(settings) or not review:
         return answer, None
@@ -139,65 +305,83 @@ def run_fix_loop(
             "status": "pass",
         }
 
-    key = session_key(question, answer, project_id)
-    dispositions = load_dispositions(key)
-    current = answer
-    last_review = review
-    rounds_done = 0
-    history_findings: list[dict[str, Any]] = [review]
-
+    run = new_review_run(project_id=project_id)
     try:
-        from .evidence_reviewer import review_answer
+        with _fix_loop_active():
+            key = session_key(question, answer, project_id)
+            run["session_key"] = key
+            run["run_id"] = f"{key}-{int(time.time() * 1000)}"
+            save_review_run(run)  # running 状态先落盘
+            dispositions = load_dispositions(key)
+            current = answer
+            last_review = review
+            rounds_done = 0
+            history_findings: list[dict[str, Any]] = [review]
 
-        for _ in range(max(1, int(max_rounds))):
-            if (last_review.get("status") or "pass") == "pass":
-                break
-            auditor = build_auditor_note(last_review)
-            try:
-                repaired = repair_fn(question, auditor)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("fix-loop repair_fn failed: %s", exc)
-                break
-            if not (repaired or "").strip() or repaired.strip() == current.strip():
-                break
-            current = repaired
-            rounds_done += 1
-            nxt = review_answer(question, current, citations, settings=settings) or last_review
-            history_findings.append(nxt)
-            dispositions = _update_dispositions(dispositions, nxt)
-            last_review = nxt
-            if (nxt.get("status") or "pass") == "pass":
+            from .evidence_reviewer import review_answer
+
+            for _ in range(max(1, int(max_rounds))):
+                if (last_review.get("status") or "pass") == "pass":
+                    break
+                auditor = build_auditor_note(last_review)
+                try:
+                    repaired = repair_fn(question, auditor)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("fix-loop repair_fn failed: %s", exc)
+                    break
+                if not (repaired or "").strip() or repaired.strip() == current.strip():
+                    break
+                current = repaired
+                rounds_done += 1
+                nxt = review_answer(question, current, citations, settings=settings) or last_review
+                history_findings.append(nxt)
                 dispositions = _update_dispositions(dispositions, nxt)
-                break
+                last_review = nxt
+                if (nxt.get("status") or "pass") == "pass":
+                    dispositions = _update_dispositions(dispositions, nxt)
+                    break
 
-        if (last_review.get("status") or "pass") != "pass":
-            dispositions = mark_unaddressed(dispositions)
-        save_dispositions(key, dispositions)
+            if (last_review.get("status") or "pass") != "pass":
+                dispositions = mark_unaddressed(dispositions)
+            save_dispositions(key, dispositions)
 
-        unaddressed = [
-            k for k, v in dispositions.items() if v.get("disposition") == "unaddressed"
-        ]
-        # Soft note for preflight merge (optional MVP)
-        if unaddressed and project_id:
-            _write_soft_note(project_id, unaddressed, last_review)
+            unaddressed = [
+                k for k, v in dispositions.items() if v.get("disposition") == "unaddressed"
+            ]
+            # Soft note for preflight merge (optional MVP)
+            if unaddressed and project_id:
+                _write_soft_note(project_id, unaddressed, last_review)
 
-        return current, {
-            "rounds": rounds_done,
-            "findings": last_review,
-            "findings_history": history_findings,
-            "dispositions": dispositions,
-            "status": last_review.get("status"),
-            "unaddressed": unaddressed,
-            "session_key": key,
-        }
+            run = finish_review_run(run, outcome=_outcome_for_status(last_review.get("status")))
+            save_review_run(run)
+            return current, {
+                "rounds": rounds_done,
+                "findings": last_review,
+                "findings_history": history_findings,
+                "dispositions": dispositions,
+                "status": last_review.get("status"),
+                "unaddressed": unaddressed,
+                "session_key": key,
+                "run_id": run["run_id"],
+                "run_status": run["status"],
+                "run_outcome": run["outcome"],
+            }
     except Exception as exc:  # noqa: BLE001
         logger.debug("fix-loop failed open: %s", exc)
+        try:
+            run = finish_review_run(run, outcome="null", error=True)
+            save_review_run(run)
+        except Exception:  # noqa: BLE001
+            logger.debug("review run persist failed")
         return answer, {
-            "rounds": rounds_done,
-            "findings": last_review,
-            "dispositions": dispositions,
+            "rounds": 0,
+            "findings": review,
+            "dispositions": {},
             "status": "error",
             "error": str(exc)[:200],
+            "run_id": run.get("run_id"),
+            "run_status": "error",
+            "run_outcome": "null",
         }
 
 

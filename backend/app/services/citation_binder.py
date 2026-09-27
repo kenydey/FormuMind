@@ -295,6 +295,19 @@ def bind_citations(
 
     footnotes = build_footnotes_section(anchors, used_indices)
 
+    # W2-6 (P1-2): link the claim (answer text) to its evidence sources.
+    # Fail-open: provenance must never break citation binding.
+    try:
+        from . import provenance as _prov
+
+        _prov.record_claim_sources(
+            clean_answer,
+            [a.source_id for _, a in used_pairs],
+            relation="cites",
+        )
+    except Exception:
+        pass
+
     return CitationBinding(
         answer=clean_answer,
         footnotes=footnotes,

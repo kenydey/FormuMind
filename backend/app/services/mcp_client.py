@@ -271,6 +271,58 @@ def is_writeish_tool(tool_name: str) -> bool:
     return _is_writeish(tool_name)
 
 
+def _approval_gate(
+    server_id: str,
+    tool_name: str,
+    *,
+    settings: Any = None,
+) -> dict[str, Any] | None:
+    """W2-7 MCP 逐工具审批门禁。返回 None 表示放行，否则返回 error dict。
+
+    flag ``mcp_approval_enabled`` 默认关；审批模块异常时按 ask(deny) 处理，
+    绝不让工具在审批崩溃时静默放行。
+    """
+    enabled = False
+    try:
+        s = settings
+        if s is None:
+            from ..config import get_settings
+
+            s = get_settings()
+        enabled = bool(getattr(s, "mcp_approval_enabled", False))
+    except Exception:  # noqa: BLE001
+        enabled = False
+    if not enabled:
+        return None
+    try:
+        from .mcp_approval import evaluate_call
+
+        verdict = evaluate_call(server_id, tool_name)
+    except Exception:  # noqa: BLE001
+        logger.exception("MCP 审批模块异常，按 ask(deny) 处理：%s/%s", server_id, tool_name)
+        return {
+            "ok": False,
+            "error": "mcp_approval_unavailable",
+            "mcp_approval_required": {
+                "server_id": server_id,
+                "tool_name": tool_name,
+            },
+        }
+    if verdict.get("verdict") == "allow":
+        return None
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": str(verdict.get("reason") or "mcp_approval_denied"),
+        "mcp_approval_required": {
+            "server_id": server_id,
+            "tool_name": tool_name,
+        },
+    }
+    if verdict.get("request_id") is not None:
+        payload["mcp_approval_required"]["request_id"] = verdict["request_id"]
+    return payload
+
+
 def call_tool_readonly(
     server_id: str,
     tool_name: str,
@@ -326,6 +378,9 @@ def _call_tool(
     *,
     settings: Any = None,
 ) -> dict[str, Any]:
+    gate = _approval_gate(server_id, tool_name, settings=settings)
+    if gate is not None:
+        return gate
     server = next((s for s in _prefs_servers() if s.get("id") == server_id and s.get("enabled")), None)
     if not server:
         return {"ok": False, "error": "server not found or disabled"}

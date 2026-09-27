@@ -138,13 +138,24 @@ def enrich_chat_prompt(
 ) -> str:
     # W1-3: 项目级指示在非 evidence 模式下也应生效(早退前先拼接)。
     project_block = _project_instructions_block(project_id)
+    # W2-4 (P1-1): agent memory recall — project scope, then global fallback.
+    # build_memory_block is fail-open and returns "" when disabled/empty.
+    try:
+        from .agent_memory import build_memory_block
+
+        mem_block = build_memory_block("project", project_id, base_prompt[:2000])
+        if not mem_block:
+            mem_block = build_memory_block("global", None, base_prompt[:2000])
+    except Exception:
+        mem_block = ""
     if (
         not evidence_mode_active(mode, settings)
         and not skill_ids
         and not mcp_server_ids
     ):
-        if project_block:
-            return f"{project_block}\n\n---\n\n{base_prompt}"
+        head = "\n\n---\n\n".join(b for b in (project_block, mem_block) if b)
+        if head:
+            return f"{head}\n\n---\n\n{base_prompt}"
         return base_prompt
     prefix = build_evidence_prompt_prefix(
         skill_ids=skill_ids,
@@ -152,6 +163,8 @@ def enrich_chat_prompt(
         settings=settings,
         project_id=project_id,
     )
+    if mem_block:
+        prefix = f"{prefix}\n\n{mem_block}" if prefix else mem_block
     if not prefix:
         return base_prompt
     return f"{prefix}\n\n---\n\n{base_prompt}"

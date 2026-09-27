@@ -645,6 +645,13 @@ def run_optimize_task(self, payload: dict) -> dict:
         tracker.finish()
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "optimize", data)
+        # P1-34: output receipt (fail-open, never breaks the run).
+        try:
+            from ..services.tech_report import write_output_receipt
+
+            write_output_receipt("optimize", task_id, inputs=payload, outputs=data)
+        except Exception:
+            pass
         # P4.2: optional dossier S6/S7 patch when optimize completes (default OFF).
         _notify_dossier_optimize_completed(payload)
         return data
@@ -1426,7 +1433,14 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
         tracker.finish()
         persist_result(task_id, result, failed=False)
         _persist_terminal(task_id, "doe_cycle", result, failed=False)
-        
+        # P1-34: output receipt (fail-open, never breaks the run).
+        try:
+            from ..services.tech_report import write_output_receipt
+
+            write_output_receipt("doe_cycle", task_id, inputs=payload, outputs=result)
+        except Exception:
+            pass
+
         return result
         
     except Exception as exc:

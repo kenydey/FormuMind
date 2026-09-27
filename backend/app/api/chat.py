@@ -439,6 +439,17 @@ def chat(req: ChatRequestValidated):
         _mark("claims")
         logger.info("chat 耗时分解: %s", " | ".join(_marks))
 
+        # W2-8 (P1-12): turn-stop 自动审计；evidence 路径已内联 review 的 turn 跳过。
+        if evidence_reviewer is None:
+            _fire_auto_review(
+                question=question,
+                answer=answer,
+                citations=_claims_evidence(citations),
+                settings=settings,
+                session_id=req.chat_session_id,
+                project_id=req.project_id,
+            )
+
         return ChatResponse(
             answer=answer,
             citations=[_sanitize_evidence(c) for c in citations],
@@ -569,6 +580,41 @@ def _sse(obj: dict) -> str:
     import json
 
     return f"data: {json.dumps(obj, ensure_ascii=False, default=str)}\n\n"
+
+
+def _fire_auto_review(
+    *,
+    question: str,
+    answer: str,
+    citations: list,
+    settings,
+    session_id: str | None,
+    project_id: str | None,
+) -> None:
+    """W2-8 (P1-12): turn-stop 自动审计，后台线程触发，不阻塞响应。
+
+    maybe_auto_review 内部做开关/幂等/防抖/修正轮抑制，这里只负责不阻塞。
+    """
+    try:
+        if not bool(getattr(settings, "auto_audit_enabled", False)):
+            return
+        import threading as _th
+        import uuid as _uuid
+
+        from ..services.reviewer_fix_loop import maybe_auto_review
+
+        kwargs = dict(
+            turn_id=_uuid.uuid4().hex,
+            question=question,
+            answer=answer,
+            citations=citations,
+            settings=settings,
+            session_id=session_id,
+            project_id=project_id,
+        )
+        _th.Thread(target=maybe_auto_review, kwargs=kwargs, daemon=True).start()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("auto review skipped: %s", exc)
 
 
 def _finalize_evidence_fields(
@@ -1106,6 +1152,16 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "reviewer_fix": reviewer_fix,
                 }
             )
+            # W2-8 (P1-12): turn-stop 自动审计；evidence 路径已内联 review 的 turn 跳过。
+            if reviewer is None:
+                _fire_auto_review(
+                    question=question,
+                    answer=answer,
+                    citations=_claims_evidence(citations),
+                    settings=settings,
+                    session_id=req.chat_session_id,
+                    project_id=req.project_id,
+                )
         except Exception as exc:  # noqa: BLE001
             logger.exception("chat/stream failed")
             yield _sse({"type": "error", "message": "问答处理失败"})

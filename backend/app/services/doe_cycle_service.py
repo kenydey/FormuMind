@@ -147,6 +147,22 @@ def run_doe_cycle(requirement: Requirement) -> Dict[str, Any]:
             
             logger.info(f"Saved {len(experiment_ids)} experiments to database")
             
+
+            # W2-6 (P1-2): link each saved experiment (run) to the formulation
+            # candidates it was generated from. Fail-open: never break the cycle.
+            try:
+                from . import provenance as _prov
+
+                _fids = [
+                    _prov.formulation_id_for(f)
+                    for f in (candidate_formulations or [])[:5]
+                ]
+                for _eid in experiment_ids:
+                    for _fid in _fids:
+                        _prov.link("run", _eid, "formulation", _fid, "tests")
+            except Exception:
+                pass
+
             return {
                 "experiment_ids": experiment_ids,
                 "status": "success",

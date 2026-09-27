@@ -15,7 +15,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Sequence
 from ..domain.research_query import build_research_query
-from ..domain.schemas import Evidence, ProductDomain, Requirement
+from ..domain.schemas import Evidence, Passage, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
 from .errors import degrade_return, optional_import
 from .literature_identity import identity_keys
@@ -1277,6 +1277,24 @@ def iter_search(
         final = final[:total_limit]
 
     filter_report.kept = len(final)
+    # W2-2 (P1-7): mark which hits already have full text persisted, so the
+    # read stage can skip the download. Fail-open: marking never breaks search.
+    try:
+        from ..db.source_store import get_source_store
+        from .patent_ids import canonical_origin_url
+
+        _store = get_source_store()
+        for _e in final:
+            try:
+                _origin = canonical_origin_url(
+                    _e.identifier, url=getattr(_e, "url", None)
+                )
+                _doc = _store.find_by_origin_url(_origin) if _origin else None
+                _e.has_fulltext = bool(_doc and getattr(_doc, "full_text", None))
+            except Exception:
+                _e.has_fulltext = False
+    except Exception:
+        logger.debug("has_fulltext marking failed", exc_info=True)
     filter_payload = filter_report.as_dict()
     filter_payload["rerank_applied"] = bool(rerank_meta.get("applied"))
     filter_payload["rerank_backend"] = rerank_meta.get("backend") or "none"
@@ -1290,6 +1308,92 @@ def iter_search(
     if cache_ttl_s > 0:
         _search_cache_put(cache_key, final, filter_payload)
     return final, filter_payload
+
+
+def read_passages(
+    evidence: Evidence,
+    *,
+    max_pages: int = 5,
+    max_chars: int = 12000,
+    project_id: str | None = None,
+) -> tuple[list[Passage], dict]:
+    """W2-2 (P1-7): second stage of search→read — fetch full text for one hit.
+
+    Search returns metadata + snippets only; call this on shortlisted hits to
+    get page-anchored passages. Never raises — fail-open returns ``([], meta)``
+    with ``meta["reason"]`` explaining why.
+    """
+    meta: dict = {"ok": False, "truncated": False, "source_id": None, "reason": ""}
+    try:
+        if evidence is None or not getattr(evidence, "identifier", None):
+            meta["reason"] = "no_identifier"
+            return [], meta
+        from ..config import get_settings
+        from ..db.source_store import get_source_store
+        from .chunking import chunk_markdown
+        from .patent_ids import canonical_origin_url
+
+        settings = get_settings()
+        store = get_source_store()
+        origin = canonical_origin_url(
+            evidence.identifier, url=getattr(evidence, "url", None)
+        )
+        doc = store.find_by_origin_url(origin) if origin else None
+        if doc is None or not getattr(doc, "full_text", None):
+            # On-demand fetch, gated by fulltext_enrich — no silent downloads.
+            if not getattr(settings, "fulltext_enrich", False):
+                meta["reason"] = "no_fulltext"
+                return [], meta
+            from .fulltext_fetcher import enrich_search_results
+
+            try:
+                enrich_search_results([evidence], max_docs=1, project_id=project_id)
+            except Exception as fetch_exc:  # noqa: BLE001
+                logger.debug("read_passages on-demand fetch failed: %s", fetch_exc)
+            # Re-obtain the store: the fetch may have persisted via another session.
+            store = get_source_store()
+            doc = store.find_by_origin_url(origin) if origin else None
+            if doc is None or not getattr(doc, "full_text", None):
+                meta["reason"] = "fetch_failed"
+                return [], meta
+        meta["source_id"] = doc.id
+        chunks = chunk_markdown(
+            doc.full_text,
+            max_chars=int(getattr(settings, "ingest_chunk_max_chars", 1600) or 1600),
+            overlap=int(getattr(settings, "ingest_chunk_overlap", 200) or 200),
+        )
+        passages: list[Passage] = []
+        seen_pages: set = set()
+        total = 0
+        for c in chunks:
+            ctext = c.text or ""
+            if len(ctext.strip()) <= 30:
+                continue
+            if c.page_no is not None:
+                if c.page_no not in seen_pages and len(seen_pages) >= max_pages:
+                    meta["truncated"] = True
+                    break
+                seen_pages.add(c.page_no)
+            if total + len(ctext) > max_chars and passages:
+                meta["truncated"] = True
+                break
+            passages.append(
+                Passage(
+                    source_id=doc.id,
+                    page_no=c.page_no,
+                    char_start=getattr(c, "offset_start", None),
+                    char_end=getattr(c, "offset_end", None),
+                    section_title=getattr(c, "heading_path", "") or "",
+                    text=ctext,
+                )
+            )
+            total += len(ctext)
+        meta["ok"] = True
+        return passages, meta
+    except Exception as exc:  # noqa: BLE001 — read stage never breaks callers
+        logger.debug("read_passages failed: %s", exc, exc_info=True)
+        meta["reason"] = "error"
+        return [], meta
 
 
 def search_by_types(

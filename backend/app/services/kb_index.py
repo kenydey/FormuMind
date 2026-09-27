@@ -20,6 +20,22 @@ from .errors import degrade_return, log_handled_exception
 
 logger = logging.getLogger(__name__)
 
+
+def _sync_source_fts(source_id: str, rows: list[dict], settings) -> None:
+    """W2-1 (P1-6): mirror KB chunk rows into the chunk-level FTS5 index.
+
+    Fail-open by construction (``index_source_chunks`` never raises); an empty
+    ``rows`` clears stale FTS rows for the source.
+    """
+    if not getattr(settings, "source_fts_enabled", True):
+        return
+    try:
+        from .source_fts import index_source_chunks
+
+        index_source_chunks(source_id, rows or [])
+    except Exception as exc:  # noqa: BLE001 — belt and suspenders
+        degrade_return(logger, exc, "source FTS sync failed", None)
+
 _TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]")
 
 
@@ -222,6 +238,7 @@ def index_source(
 
             record_gate_drop("ingest", "blocked_domain")
             get_chunk_store().replace_for_source(source_id, [])
+            _sync_source_fts(source_id, [], settings)
             return 0
         with timing.span("chunk"):
             chunks = chunk_markdown(
@@ -244,6 +261,7 @@ def index_source(
         rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
         if not rows:
             get_chunk_store().replace_for_source(source_id, [])
+            _sync_source_fts(source_id, [], settings)
             return 0
         # 2026-09-04 (双语分流): 嵌入前预标 lang(与 chunk_store 写入判定
         # 同源), 让嵌入模型选择(zh→bge / en→MiniLM)在写入前就正确。
@@ -300,6 +318,8 @@ def index_source(
                     row["embedding"] = vec
                     row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
         n = get_chunk_store().replace_for_source(source_id, rows)
+        # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
+        _sync_source_fts(source_id, rows, settings)
         if n and settings.kg_enabled and (
             settings.kg_entities_on_ingest or settings.kg_relations_on_ingest
         ):

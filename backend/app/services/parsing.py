@@ -21,10 +21,11 @@ parser produced the output so provenance can be persisted.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..config import get_settings
 from .errors import log_handled_exception, optional_import
@@ -53,10 +54,40 @@ class ParserUnavailable(RuntimeError):
 class ParseResult:
     markdown: str
     parser: str  # docling | marker | mineru | markitdown | pypdf | docx | text | none
+    # W2-3: structured table assets extracted after a successful parse
+    # (table_contract.TableAsset). Empty when extraction is disabled/failed.
+    tables: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return bool(self.markdown.strip())
+
+
+def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
+    """W2-3 wiring: table-contract extraction on the successful parse path.
+
+    Fail-open by contract: any error leaves ``result`` untouched (tables=[]).
+    The sidecar key is the content sha256, which equals
+    ``SourceDocument.content_hash``, so assets rejoin documents without any
+    DB schema change. Gate: ``table_extract_enabled`` (default True).
+    """
+    try:
+        if not result.ok:
+            return result
+        if not getattr(get_settings(), "table_extract_enabled", True):
+            return result
+        from . import table_contract as _tc
+        blocks = _tc.blocks_from_markdown(result.markdown or "")
+        if not blocks:
+            return result
+        source_id = hashlib.sha256(content).hexdigest()
+        assets = _tc.extract_tables(source_id, blocks, parser=result.parser)
+        result.tables = assets
+        if assets:
+            _tc.save_tables(source_id, assets)
+    except Exception:
+        logger.exception("table_contract: extraction failed (fail-open)")
+    return result
 
 
 # ── individual parsers (return markdown/text or None) ────────────────────────
@@ -405,7 +436,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                 text = fn(content, ext)
                 if text and text.strip():
                     timing.note(parser=name)
-                    return ParseResult(text, name)
+                    return _maybe_extract_tables(ParseResult(text, name), content)
             timing.note(parser="none")
             return ParseResult("", "none")
 
@@ -413,7 +444,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
             text = fn(content, ext)
             if text and text.strip():
                 timing.note(parser=name)
-                return ParseResult(text, name)
+                return _maybe_extract_tables(ParseResult(text, name), content)
         timing.note(parser="none")
         return ParseResult("", "none")
 

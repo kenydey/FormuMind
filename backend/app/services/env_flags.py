@@ -195,6 +195,26 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("fulltext_enrich", "检索全文获取",
             "把排名靠前的专利/OA 文献/网页命中升级为全文分块并持久化入知识库。",
             "kb", "需网络；每次深度研究会下载最多 8 篇全文"),
+    EnvFlag("source_fts_enabled", "全文 chunk FTS5 索引",
+            "全文 chunk 建 FTS5 索引（页码/章节/字符偏移），支撑按页定位的 passage 检索；"
+            "索引失败 fail-open，不影响 KB 写入。",
+            "kb"),
+    EnvFlag("table_extract_enabled", "表格结构抽取",
+            "PDF 表格抽取为 TableAsset（recipe/performance/tds_sds 分类，caption 归属）；"
+            "sidecar JSON 持久化，不改 DB 结构。",
+            "kb"),
+    EnvFlag("agent_memory_enabled", "Agent 记忆系统",
+            "跨会话长期记忆（全局/项目/about-you），FTS5+bm25 自动召回（6000 字符预算）；"
+            "写入门控拒绝密钥与 prompt 注入。",
+            "agent"),
+    EnvFlag("mcp_approval_enabled", "MCP 逐工具审批",
+            "MCP 工具调用逐工具审批（allow/ask/block）；ask 无决策默认 deny 并审计；"
+            "审批 UI 后置，前端对接前保持关闭。",
+            "agent"),
+    EnvFlag("auto_audit_enabled", "turn-stop 自动审计",
+            "turn 结束后自动触发 reviewer 审计（100ms 防抖、per-turn 幂等）；"
+            "默认关闭，按会话 opt-in。",
+            "agent"),
     EnvFlag("patent_prefer_html", "专利用落地页正文",
             "专利全文取 Google Patents 落地页的 abstract/description/claims，而不是先下 PDF。"
             "一次请求约 0.7 秒且完全不需要 OCR；中日文专利还附带英文机器翻译对照。"

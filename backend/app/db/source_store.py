@@ -1,14 +1,18 @@
 """SQLite-backed source document store."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..domain.schemas import SourceGuideSchema
 from .models import SourceDocument
 from .session_utils import commit_session
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -195,6 +199,42 @@ class SourceStore:
         if row is None or not row.source_guide:
             return None
         return SourceGuideSchema.model_validate(row.source_guide)
+
+    def update_fields(self, source_id: str, **fields: Any) -> bool:
+        """Guarded partial update of a SourceDocument row.
+
+        P2-10 provenance write-protection: the reserved fields
+        (``source_url``/``retrieved_at``/``content_hash`` and the model-level
+        equivalents ``origin_url``/``created_at`` — see
+        ``services.provenance.RESERVED_SOURCE_FIELDS``) record where a piece of
+        evidence came from and must not be rewritten by agents or callers. An
+        update request naming any of them is rejected with a warning.
+        Only real ``SourceDocument`` columns are applied; unknown names raise
+        ``ValueError``. Returns False when the row is missing.
+        """
+        from ..services.provenance import RESERVED_SOURCE_FIELDS
+
+        bad = RESERVED_SOURCE_FIELDS.intersection(fields)
+        if bad:
+            logger.warning(
+                "source_store.update_fields rejected reserved field(s) %s for %s",
+                sorted(bad),
+                source_id,
+            )
+            raise ValueError(
+                f"reserved source fields are write-protected: {sorted(bad)}"
+            )
+        columns = set(SourceDocument.__table__.columns.keys())
+        unknown = set(fields) - columns
+        if unknown:
+            raise ValueError(f"unknown SourceDocument field(s): {sorted(unknown)}")
+        with commit_session(self._session_factory) as session:
+            doc = session.get(SourceDocument, source_id)
+            if doc is None:
+                return False
+            for name, value in fields.items():
+                setattr(doc, name, value)
+            return True
 
     def list_for_project(
         self,

@@ -431,6 +431,26 @@ class Settings(BaseSettings):
     fulltext_max_docs: int = 8
     fulltext_timeout_s: float = 20.0
 
+    # W2-1 (P1-6)：全文 chunk 级 FTS5 索引（页码/章节/字符偏移），默认开启；
+    # 索引失败 fail-open，不影响 KB 写入。
+    source_fts_enabled: bool = True
+
+    # W2-3 (P1-18)：PDF 表格结构抽取契约（recipe/performance/tds_sds 分类）。
+    # 默认开启；解析失败 fail-open，TableAsset 以 sidecar JSON 持久化。
+    table_extract_enabled: bool = True
+
+    # W2-4 (P1-1)：Agent 记忆系统（全局/项目/about-you 三域，FTS5 召回）。
+    # 默认关闭，浸泡后开启；写入门控拒绝密钥与 prompt 注入。
+    agent_memory_enabled: bool = False
+
+    # W2-7 (P1-3)：MCP 逐工具审批三态（allow/ask/block）。
+    # 默认关闭；ask 无决策时默认 deny 并写审计日志，前端审批 UI 后置。
+    mcp_approval_enabled: bool = False
+
+    # W2-8 (P1-12)：turn-stop 自动审计（reviewer）。
+    # 默认关闭，按会话 opt-in；evidence 路径已内联 review 的 turn 不重复触发。
+    auto_audit_enabled: bool = False
+
     # 专利全文优先用 Google Patents 落地页的 HTML 正文，而不是 PDF。
     # 三条理由，都实测过：
     #   1. 一次请求（~0.7 s）而不是两次；
