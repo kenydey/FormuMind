@@ -1,6 +1,7 @@
 # Post–Wave D2 OpenScience Top-5（含完整 Literature Library）
 
-> 状态：**仅评估，未开工**（2026-09-27）  
+> 状态：**E-Lit 1→2→3 已开工**（ChemRxiv，不含 arXiv；2026-09-27）  
+
 > 源：`/tmp/openscience`（SynSci）· `/tmp/aipoch-open-science`（AIPOCH）  
 > 对照：FormuMind `main` 已合入 Wave A–D2（#164–#168）
 
