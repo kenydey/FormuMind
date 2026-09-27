@@ -1,6 +1,6 @@
 # Post–Wave C OpenScience Top-5 — **已锁定**
 
-> 状态：**策略已锁定**（2026-09-27）  
+> 状态：**主波已合入 · 次波已实施**（2026-09-27）  
 > 施工方案：[`2026-09-27-wave-d-sources-locator-oa.md`](./2026-09-27-wave-d-sources-locator-oa.md)  
 > 源：`/tmp/openscience`（SynSci）· `/tmp/aipoch-open-science`（AIPOCH）
 
@@ -36,4 +36,4 @@
 
 ## 下一步
 
-回复 **「开工」** / **「按方案实施主波 D1–D3」** 开始主波实施；次波 D4∥D5 待主波合入后另开。
+主波 D1–D3 已合入 (#167)；次波 D4∥D5 见 `cursor/wave-d2-rocrate-peerreview`。
