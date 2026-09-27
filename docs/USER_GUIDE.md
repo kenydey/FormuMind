@@ -232,6 +232,17 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
     model not to invent footnotes and to respect retraction / correction notices.
   - **ChEBI connector**: chemistry lookups enrich PubChem with ChEBI (EBI OLS)
     when `connectors_builtin_enabled` is on — fail-open beside PubChem.
+- **Wave D (OpenScience) — sources audit, locator honesty, freeze OA enrich**:
+  - **Sources audit**: ChatResponse / SSE may include `sources_audit` (claim →
+    grade `supported`/`partial`/`unsupported`/`contradicted` + locators). Bundled
+    `sources` skill (resolve claim↔passage). Flag `sources_audit_enabled` (default on).
+  - **Locator honesty**: Citation chips show `pp. N` or **页码未知**. Export
+    preflight can flag numeric lines whose `[^n]` footnotes lack page/¶
+    (`citation_locator_preflight`: `off` / `warning` / `blocking`, default warning).
+  - **Freeze OA enrich**: Knowledge Hub freeze strip **补全文** batches Unpaywall/PMC
+    fetch into the literature manifest (`POST /api/wiki/literature/enrich-oa`).
+    Successful persist invalidates freeze (re-freeze after). Flag
+    `literature_oa_enrich_enabled` (default on).
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When
