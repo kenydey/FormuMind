@@ -270,6 +270,7 @@ flowchart LR
 | Settings Skills/MCP | `SkillsSettingsPanel.tsx` · `ConnectorsSettingsPanel.tsx` |
 | Composer + | `ChatComposerPlus.tsx` |
 | Chat Skill 加载 | `backend/app/services/chat_skills.py` · `skills_store.py` |
+| Skills 安装管线 | `backend/app/services/skill_install.py` · `api/skills.py` (`/install/*`) |
 | MCP prefs | `backend/app/services/mcp_client.py` · `api/connectors.py` |
 | AIPOCH GitHub 安装 | `/tmp/aipoch-open-science/src/main/skills/github-import.ts` |
 | SynSci 安装审查 | `/tmp/openscience/backend/cli/src/skill/install/` |
