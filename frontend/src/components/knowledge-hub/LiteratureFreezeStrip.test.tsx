@@ -2,33 +2,37 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import LiteratureFreezeStrip from "./LiteratureFreezeStrip";
 
-const capture = vi.fn(async () => ({}));
-const freeze = vi.fn(async () => ({}));
-const screenApi = vi.fn(async () => ({}));
-const getMan = vi.fn(async () => ({
-  project_id: "p1",
-  items: [{ id: "a", title: "Epoxy", screening: "unset" }],
-  frozen: null,
-  coverage: { candidate_count: 1, frozen_count: 0 },
-}));
+const capture = vi.fn();
+const freeze = vi.fn();
+const screenApi = vi.fn();
+const getMan = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
-    getLiteratureManifest: (...a: unknown[]) => getMan(...a),
-    captureLiteratureManifest: (...a: unknown[]) => capture(...a),
-    freezeLiteratureManifest: (...a: unknown[]) => freeze(...a),
+    getLiteratureManifest: (projectId: string) => getMan(projectId),
+    captureLiteratureManifest: (body: unknown) => capture(body),
+    freezeLiteratureManifest: (body: unknown) => freeze(body),
     unfreezeLiteratureManifest: vi.fn(async () => ({})),
-    screenLiteratureManifest: (...a: unknown[]) => screenApi(...a),
+    screenLiteratureManifest: (body: unknown) => screenApi(body),
   },
   formatApiError: (e: unknown) => String(e),
 }));
 
 describe("LiteratureFreezeStrip", () => {
   beforeEach(() => {
-    capture.mockClear();
-    freeze.mockClear();
-    screenApi.mockClear();
-    getMan.mockClear();
+    capture.mockReset();
+    freeze.mockReset();
+    screenApi.mockReset();
+    getMan.mockReset();
+    capture.mockResolvedValue({});
+    freeze.mockResolvedValue({});
+    screenApi.mockResolvedValue({});
+    getMan.mockResolvedValue({
+      project_id: "p1",
+      items: [{ id: "a", title: "Epoxy", screening: "unset" }],
+      frozen: null,
+      coverage: { candidate_count: 1, frozen_count: 0 },
+    });
   });
 
   it("loads stats and capture/freeze", async () => {
