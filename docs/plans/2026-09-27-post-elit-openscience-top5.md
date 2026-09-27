@@ -108,28 +108,46 @@
 | **F-IP** | **3** | 专利纪律，可与 F-Quality 并行（几乎纯 Skill） |
 | **F-Full** | 1∥3 → 2→5→4 | 质量+IP 先落，再加深 Library |
 
+### SynSci 向补充打包（未挤进 Top-5，可插队）
+
+来自 SynSci 深挖：约 25 项边界内可借；下列三桶与主表互补，**不改变 Top-5 排序**，但若你更偏配方 QC / 化学诚实度，可点名并入 Wave F。
+
+| 桶 | 项（必要性约分） | 源 | 说明 |
+|----|------------------|----|------|
+| **F-Chem** | SMILES 校验门（**4**/可行 **5**）· Connector fetch-outcome 空结果≠故障（**4**/可行 **5**）· ChEMBL（**3**/可行 **4**） | `skills/chemistry/smiles-validation` · `connectors/fetch-outcome.ts` · `chembl.ts` | 结构/连接器诚实度；ChEMBL 对功能助剂有用，主路径已有 PubChem/ChEBI/SureChEMBL |
+| **F-Lab** | Analytical method validation skill（**4**/可行 **4**）· `compare` 先冻结判据（**3**/可行 **5**）· statistical-conventions（**3**/可行 **5**） | `skills/chemistry/analytical-method-validation` · `research/compare` · `core/statistical-conventions` | 涂料 QC / 盐雾等试验报告纪律；与 `method-writer`/DOE 衔接 |
+| **F-Ops** | Export `EXPORTED`/`PARTIAL`/`NOT EXPORTED` 终态（**3**/可行 **5**）· skill-load SHA 审计（**3**/可行 **4**）· install Layer-2 注入拒绝（**3**/可行 **4**）· provenance reason 细分类（**3**/可行 **4**） | `skills/research/export` · skill-runtime / install review · `provenance/envelope.ts` | 钢印包装与 Skills 运营抛光，贴 D2 RO-Crate |
+
 ## 候补（未进前 5）
 
 | 项 | 原因 |
 |----|------|
-| LaTeX bibliography / `latex-bundle` 轻量包 | 写作便利；method-writer 已够用，必要性中等（可行性高，可作 F6） |
-| RO-Crate complete（附 PDF 字节） | D2 lite 已够交换；必要中等 |
+| **SMILES 校验门**（SynSci） | 必要性高、可行极高；未进 Top-5 因偏「化学工具」而非钢印/文献主轴——**建议作 F-Chem 首选插队** |
+| **Fetch-outcome 诚实**（空≠故障） | 钢印诚实度增益大、改动小；可并进任意连接器波 |
+| **Analytical method validation** skill | 涂料 QC 强相关；与 Golden Bench / method-writer 互补 |
+| Export PARTIAL 终态 / skill SHA / provenance reason 细分类 | D2 抛光；必要性中等 |
+| ChEMBL connector | PubChem/ChEBI/SureChEMBL 已覆盖主路径；助剂 bioactivity 场景可开 |
+| LaTeX bibliography / `latex-bundle` 轻量包 | 写作便利；method-writer 已够用（可作 F6） |
+| RO-Crate complete（附 PDF 字节） | D2 lite 已够交换 |
 | Library ↔ PaperQA 双向同步加深 | E-Lit 已同源 Manifest；边际 |
-| PMID/PMCID 导入 | 偏生医；涂料主路径 ChemRxiv/DOI 已够（毒理场景另开） |
-| SynSci `experimental-design` skill | FM 已有 DOE API/域模型；Skill 叠加边际 |
+| PMID/PMCID 导入 | 偏生医；涂料主路径 ChemRxiv/DOI 已够 |
+| SynSci `experimental-design` / `hypotheses` / `reproduce` | FM 已有 DOE；reproduce 偏 notebook/HPC |
 | SynSci `paper-lookup` 18 API 全家桶 | 与现检索栈重叠；维护面大 |
-| AIPOCH figure-composer / paper-narrative | 绑 Notebook/Artifact 版本，栈错位 |
-| Zotero 同步（SynSci pyzotero） | 协议/冲突成本高 |
-| ChEMBL connector | PubChem/ChEBI/SureChEMBL 已覆盖 |
+| SynSci literature-review 预算轮次加强 | FM 已有 AIPOCH 改编版；可后置加「exclusion ledger」 |
+| AIPOCH figure-composer / paper-narrative | 绑 Notebook/Artifact，栈错位 |
+| Zotero（SynSci pyzotero） | 协议/冲突成本高 |
+| BindingDB / ZINC / docking / MD / BioNeMo | 药化/计算栈，边界外或弱相关 |
 | 全量 pdf-structure / PDF 批注工作台 | UX/栈面过大 |
+| Harbor / DrugDiscoveryBench 全科学基准 | 生物学榜单，不当产品门禁 |
 
 ## 明确不借（重申）
 
-Electron · ACP 多 backend · Notebook/SSH/Slurm · Skills Marketplace · 全量 Specialist · 整包 `pdf-structure` · `.science` 主路径 · **arXiv** · AIPOCH 生物结构预测 skills（AlphaFold 等）
+Electron · ACP 多 backend · Notebook/SSH/Slurm · Skills Marketplace · 全量 Specialist · 整包 `pdf-structure` · `.science` 主路径 · **arXiv** · AIPOCH 生物结构预测 skills（AlphaFold 等）· SynSci Harbor 生物 leaderboard 当产品 KPI
 
 ## 请评估
 
 1. 是否锁定 **F-Quality = 1** 与/或 **F-Lit+ = 2→5** / **F-IP = 3**？  
-2. Top-5 内想先做哪几项（可点名子集）？  
-3. Golden Bench 目标题量：20 种子 or 直接冲 50？  
-4. 确认后回复「写详细方案再开工」或点名子集。
+2. 是否插队 **F-Chem**（SMILES + fetch-outcome）或 **F-Lab**（analytical-method-validation）？  
+3. Top-5 内想先做哪几项（可点名子集）？  
+4. Golden Bench 目标题量：20 种子 or 直接冲 50？  
+5. 确认后回复「写详细方案再开工」或点名子集。
