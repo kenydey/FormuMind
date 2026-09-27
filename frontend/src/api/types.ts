@@ -1287,6 +1287,21 @@ export interface ChatMessage {
   sourcedClaims?: SourcedClaim[] | null;
   /** Soft clarification prompt from SSE done (when chat_clarification_enabled). */
   clarification?: ClarificationOption | null;
+  /** Wave C structured provenance from SSE done. */
+  evidenceProvenance?: EvidenceProvenance | null;
+}
+
+export interface EvidenceProvenance {
+  doi_status?: Array<{
+    doi?: string;
+    status?: string;
+    notice_kind?: string;
+    title?: string | null;
+    retracted?: boolean | null;
+  }>;
+  evidence_availability?: "supported" | "partial" | "unavailable" | "unknown" | string;
+  notes?: string[];
+  counts?: Record<string, number>;
 }
 
 /** /api/chat/stream 的 SSE 事件(后端 data: JSON 一行一个)。 */
@@ -1311,6 +1326,14 @@ export type ChatStreamEvent =
       sourced_claims?: SourcedClaim[] | null;
       structured?: StructuredAnswer | null;
       tools_used?: string[];
+      doi_results?: Record<string, unknown>[] | null;
+      citation_expand?: Record<string, unknown>[] | null;
+      evidence_provenance?: EvidenceProvenance | null;
+      mcp_permission_required?: {
+        server_id: string;
+        tool_name: string;
+        session_id?: string | null;
+      } | null;
     }
   | { type: "error"; message: string };
 
@@ -1556,6 +1579,8 @@ export interface ChatResponse {
   sourced_claims?: SourcedClaim[] | null;
   mode?: "chat" | "evidence" | null;
   doi_results?: Record<string, unknown>[] | null;
+  citation_expand?: Record<string, unknown>[] | null;
+  evidence_provenance?: EvidenceProvenance | null;
   evidence_reviewer?: Record<string, unknown> | null;
   reviewer_fix?: Record<string, unknown> | null;
   mcp_permission_required?: {

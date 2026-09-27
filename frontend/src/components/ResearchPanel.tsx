@@ -451,6 +451,50 @@ export default function ResearchPanel() {
                     </span>
                   </div>
                 )}
+                {m.role === "assistant" && !m.streaming && m.evidenceProvenance && (
+                  <div
+                    className="mt-2 pt-2 border-t border-edge/60 space-y-1"
+                    data-testid="chat-evidence-provenance"
+                  >
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wide">
+                      Provenance · 证据诚实度
+                    </div>
+                    <div className="flex flex-wrap gap-1 items-center">
+                      {(() => {
+                        const av = m.evidenceProvenance?.evidence_availability || "unknown";
+                        const tone =
+                          av === "supported"
+                            ? "border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
+                            : av === "partial"
+                              ? "border-amber-500/40 text-amber-300 bg-amber-500/10"
+                              : av === "unavailable"
+                                ? "border-rose-500/40 text-rose-300 bg-rose-500/10"
+                                : "border-edge text-slate-400";
+                        const label =
+                          av === "supported"
+                            ? "充分"
+                            : av === "partial"
+                              ? "部分"
+                              : av === "unavailable"
+                                ? "无据/不足"
+                                : "未知";
+                        return (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${tone}`}>
+                            {label}
+                          </span>
+                        );
+                      })()}
+                      {(m.evidenceProvenance.notes || []).slice(0, 4).map((n) => (
+                        <span
+                          key={n}
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400"
+                        >
+                          {n}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {m.role === "assistant" && !m.streaming && (m.sourcedClaims?.length ?? 0) > 0 && (
                   <div className="mt-2 pt-2 border-t border-edge/60 space-y-1" data-testid="chat-sourced-claims">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wide">核验 · 断言</div>

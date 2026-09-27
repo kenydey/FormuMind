@@ -303,6 +303,8 @@ def chat(req: ChatRequestValidated):
             answer = f"{answer}\n\n（默认按「{hint}」理解；如需其他含义请说明。）"
 
         doi_results = None
+        citation_expand = None
+        evidence_provenance = None
         evidence_reviewer = None
         reviewer_fix = None
         mcp_permission_required = None
@@ -310,6 +312,7 @@ def chat(req: ChatRequestValidated):
         if use_evidence or req.selected_skills or req.selected_mcp_servers:
             answer, emeta = postprocess_evidence_answer(answer, settings=settings)
             doi_results = emeta.get("doi_results")
+            citation_expand = emeta.get("citation_expand") or None
             try:
                 from ..services.evidence_reviewer import review_answer
 
@@ -376,6 +379,16 @@ def chat(req: ChatRequestValidated):
             structured=structured,
             settings=settings,
         )
+        try:
+            from ..services.scholar_helpers import build_evidence_provenance
+
+            evidence_provenance = build_evidence_provenance(
+                doi_results=doi_results,
+                sourced_claims=sourced_claims,
+                enabled=bool(getattr(settings, "evidence_provenance_enabled", True)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("evidence_provenance skipped: %s", exc)
         _mark("claims")
         logger.info("chat 耗时分解: %s", " | ".join(_marks))
 
@@ -392,6 +405,8 @@ def chat(req: ChatRequestValidated):
             sourced_claims=sourced_claims,
             mode=req.mode,
             doi_results=doi_results,
+            citation_expand=citation_expand,
+            evidence_provenance=evidence_provenance,
             evidence_reviewer=evidence_reviewer,
             reviewer_fix=reviewer_fix,
             mcp_permission_required=mcp_permission_required,
@@ -520,19 +535,21 @@ def _finalize_evidence_fields(
     domain: str | None = None,
     history: list | None = None,
     structure: dict | None = None,
-) -> tuple[str, dict | None, dict | None, dict | None]:
+) -> tuple[str, dict | None, dict | None, dict | None, list | None]:
     """DOI annotate + optional reviewer + 1-round fix-loop.
 
-    Returns (answer, doi_results, reviewer, reviewer_fix).
+    Returns (answer, doi_results, reviewer, reviewer_fix, citation_expand).
     """
     from ..services.evidence_synthesis import evidence_mode_active, postprocess_evidence_answer
 
     doi_results = None
+    citation_expand = None
     reviewer = None
     reviewer_fix = None
     if evidence_mode_active(mode, settings) or selected_skills:
         answer, emeta = postprocess_evidence_answer(answer, settings=settings)
         doi_results = emeta.get("doi_results")
+        citation_expand = emeta.get("citation_expand") or None
         try:
             from ..services.evidence_reviewer import review_answer
 
@@ -569,7 +586,7 @@ def _finalize_evidence_fields(
                     reviewer = reviewer_fix["findings"]
             except Exception as exc:  # noqa: BLE001
                 logger.debug("stream fix-loop skipped: %s", exc)
-    return answer, doi_results, reviewer, reviewer_fix
+    return answer, doi_results, reviewer, reviewer_fix, citation_expand
 
 
 @router.post("/chat/stream")
@@ -636,18 +653,20 @@ async def chat_stream(req: "ChatRequestValidated"):
                     yield _sse({"type": "phase", "phase": "answering"})
                     yield _sse({"type": "token", "delta": answer})
                     yield _sse({"type": "phase", "phase": "claims"})
-                    answer, doi_results, reviewer, reviewer_fix = _finalize_evidence_fields(
-                        question,
-                        answer,
-                        citations,
-                        settings=settings,
-                        mode=req.mode,
-                        selected_skills=list(req.selected_skills or []),
-                        project_id=req.project_id,
-                        sources=list(sources),
-                        domain=req.domain,
-                        history=list(req.history or []),
-                        structure=req.structure,
+                    answer, doi_results, reviewer, reviewer_fix, citation_expand = (
+                        _finalize_evidence_fields(
+                            question,
+                            answer,
+                            citations,
+                            settings=settings,
+                            mode=req.mode,
+                            selected_skills=list(req.selected_skills or []),
+                            project_id=req.project_id,
+                            sources=list(sources),
+                            domain=req.domain,
+                            history=list(req.history or []),
+                            structure=req.structure,
+                        )
                     )
                     claims = None
                     if settings.chat_claim_check_enabled and answer:
@@ -662,6 +681,19 @@ async def chat_stream(req: "ChatRequestValidated"):
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.warning("chat/stream paperqa claims: %s", exc)
+                    evidence_provenance = None
+                    try:
+                        from ..services.scholar_helpers import build_evidence_provenance
+
+                        evidence_provenance = build_evidence_provenance(
+                            doi_results=doi_results,
+                            sourced_claims=claims,
+                            enabled=bool(
+                                getattr(settings, "evidence_provenance_enabled", True)
+                            ),
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                     yield _sse(
                         {
                             "type": "done",
@@ -676,6 +708,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "sourced_claims": claims,
                             "mode": req.mode,
                             "doi_results": doi_results,
+                            "citation_expand": citation_expand,
+                            "evidence_provenance": evidence_provenance,
                             "evidence_reviewer": reviewer,
                             "reviewer_fix": reviewer_fix,
                         }
@@ -961,18 +995,20 @@ async def chat_stream(req: "ChatRequestValidated"):
             citations = [
                 _sanitize_evidence(c) for c in plan["sources"][: min(8, len(plan["sources"]))]
             ]
-            answer, doi_results, reviewer, reviewer_fix = _finalize_evidence_fields(
-                question,
-                answer,
-                citations,
-                settings=settings,
-                mode=req.mode,
-                selected_skills=list(req.selected_skills or []),
-                project_id=req.project_id,
-                sources=list(plan["sources"]),
-                domain=req.domain,
-                history=list(req.history or []),
-                structure=req.structure,
+            answer, doi_results, reviewer, reviewer_fix, citation_expand = (
+                _finalize_evidence_fields(
+                    question,
+                    answer,
+                    citations,
+                    settings=settings,
+                    mode=req.mode,
+                    selected_skills=list(req.selected_skills or []),
+                    project_id=req.project_id,
+                    sources=list(plan["sources"]),
+                    domain=req.domain,
+                    history=list(req.history or []),
+                    structure=req.structure,
+                )
             )
 
             # claims 收尾(12s 硬超时 → offline 降级)。
@@ -992,6 +1028,18 @@ async def chat_stream(req: "ChatRequestValidated"):
                     logger.warning("chat/stream claims 失败: %s", exc)
                     claims = None
 
+            evidence_provenance = None
+            try:
+                from ..services.scholar_helpers import build_evidence_provenance
+
+                evidence_provenance = build_evidence_provenance(
+                    doi_results=doi_results,
+                    sourced_claims=claims,
+                    enabled=bool(getattr(settings, "evidence_provenance_enabled", True)),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
             yield _sse(
                 {
                     "type": "done",
@@ -1006,6 +1054,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "sourced_claims": claims,
                     "mode": req.mode,
                     "doi_results": doi_results,
+                    "citation_expand": citation_expand,
+                    "evidence_provenance": evidence_provenance,
                     "evidence_reviewer": reviewer,
                     "reviewer_fix": reviewer_fix,
                 }

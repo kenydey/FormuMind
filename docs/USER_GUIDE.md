@@ -215,6 +215,23 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
     keywords mark items `match` / `no_match` / `uncertain`. Optional
     `screening_auto_freeze` writes matches into the frozen corpus. Flag
     `literature_screening_enabled` defaults off.
+- **Wave C (OpenScience) — citation expand, provenance, citations skill, ChEBI**:
+  - **Citation graph expand**: Evidence answers can attach OpenAlex
+    backward/forward neighbors for seed DOIs (`citation_expand` on ChatResponse).
+    DOI verify adds `notice_kind`
+    (`none` / `notice` / `retracted_work` / `corrected` / `unknown`) from Crossref
+    update links. Flag `citation_expand_enabled` (default on); DOI verify still uses
+    `evidence_doi_verify_enabled`.
+  - **Structured provenance**: ChatResponse / SSE done include
+    `evidence_provenance` with `doi_status`, `evidence_availability`
+    (`supported` / `partial` / `unavailable` / `unknown`), and short notes.
+    Research chat shows a **Provenance · 证据诚实度** strip (availability +
+    retracted / unresolved counts). Flag `evidence_provenance_enabled` (default on).
+  - **Citations skill**: bundled `citations` Chat Skill (resolve-before-cite).
+    Enable under **Settings → Skills**; pick via `/` in the composer. Reminds the
+    model not to invent footnotes and to respect retraction / correction notices.
+  - **ChEBI connector**: chemistry lookups enrich PubChem with ChEBI (EBI OLS)
+    when `connectors_builtin_enabled` is on — fail-open beside PubChem.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When

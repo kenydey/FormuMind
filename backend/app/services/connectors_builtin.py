@@ -29,12 +29,12 @@ CONNECTOR_CATALOG: list[dict[str, Any]] = [
         "id": "chemistry",
         "display_name": "Chemistry",
         "kind": "builtin",
-        "description": "PubChem small-molecule lookup (formula, SMILES, CID).",
+        "description": "PubChem + ChEBI small-molecule / ontology lookup.",
         "use_when": (
             "Use for small-molecule identity — PubChem properties, SMILES, "
-            "formula, CID resolution."
+            "formula, CID; and ChEBI roles/ontology labels for formulation ingredients."
         ),
-        "sources": ["PubChem"],
+        "sources": ["PubChem", "ChEBI"],
         "readonly": True,
     },
 ]
@@ -98,48 +98,70 @@ def lookup_chemistry(query: str, *, limit: int = 5) -> list[Evidence]:
     q = (query or "").strip()
     if not q:
         return []
+    out: list[Evidence] = []
     try:
-        from .chemistry_pubchem import lookup_compound  # type: ignore
+        from .compounds import lookup_compound
 
         hit = lookup_compound(q)
-        if not hit:
-            return []
-        title = hit.get("name") or hit.get("iupac") or q
-        snip = (
-            f"CID={hit.get('cid')}; formula={hit.get('formula')}; "
-            f"MW={hit.get('mw')}; SMILES={hit.get('smiles')}"
-        )
-        return [
-            Evidence(
-                source="pubchem",
-                identifier=str(hit.get("cid") or title),
-                title=str(title),
-                snippet=snip,
-                relevance=0.9,
+        if hit and (hit.get("formula") or hit.get("cas") or hit.get("cid") or hit.get("smiles")):
+            title = hit.get("iupac_name") or hit.get("zh_name") or hit.get("name") or q
+            snip = (
+                f"CID={hit.get('cid')}; CAS={hit.get('cas')}; formula={hit.get('formula')}; "
+                f"MW={hit.get('mw') or hit.get('molecular_weight')}; "
+                f"SMILES={hit.get('smiles') or hit.get('isomeric_smiles')}"
             )
-        ]
-    except Exception:
-        pass
-    # Fallback: lightweight PubChemPy if available
-    try:
-        import pubchempy as pcp
-
-        comps = pcp.get_compounds(q, "name")[:limit]
-        out: list[Evidence] = []
-        for c in comps:
             out.append(
                 Evidence(
                     source="pubchem",
-                    identifier=str(c.cid),
-                    title=c.iupac_name or q,
-                    snippet=f"formula={c.molecular_formula}; MW={c.molecular_weight}; SMILES={c.isomeric_smiles}",
-                    relevance=0.85,
+                    identifier=str(hit.get("cid") or hit.get("cas") or title),
+                    title=str(title),
+                    snippet=snip,
+                    relevance=0.9,
                 )
             )
-        return out
+    except Exception:
+        pass
+    if not out:
+        # Fallback: lightweight PubChemPy if available
+        try:
+            import pubchempy as pcp
+
+            comps = pcp.get_compounds(q, "name")[:limit]
+            for c in comps:
+                out.append(
+                    Evidence(
+                        source="pubchem",
+                        identifier=str(c.cid),
+                        title=c.iupac_name or q,
+                        snippet=(
+                            f"formula={c.molecular_formula}; MW={c.molecular_weight}; "
+                            f"SMILES={c.isomeric_smiles}"
+                        ),
+                        relevance=0.85,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("chemistry pubchem connector: %s", exc)
+
+    # Wave C: ChEBI ontology enrichment (fail-open; append alongside PubChem)
+    try:
+        from .chemistry_chebi import lookup_chebi
+
+        for row in lookup_chebi(q, limit=min(3, limit)):
+            cid = row.get("chebi_id") or row.get("name") or q
+            desc = row.get("description") or ""
+            out.append(
+                Evidence(
+                    source="chebi",
+                    identifier=str(cid),
+                    title=str(row.get("name") or q),
+                    snippet=f"ChEBI {cid}; {desc}".strip("; "),
+                    relevance=0.8,
+                )
+            )
     except Exception as exc:  # noqa: BLE001
-        logger.debug("chemistry connector: %s", exc)
-        return []
+        logger.debug("chemistry chebi connector: %s", exc)
+    return out[: max(limit, 5)]
 
 
 def gather_connector_evidence(

@@ -556,6 +556,10 @@ class Settings(BaseSettings):
     # off | paperqa | hybrid_strict — global default; per-request mode overrides when set.
     evidence_synthesis_mode: str = "off"
     evidence_doi_verify_enabled: bool = True
+    # Wave C — OpenAlex citation-graph expand on Evidence answers (fail-open).
+    citation_expand_enabled: bool = True
+    # Wave C — structured evidence_provenance on ChatResponse (default on).
+    evidence_provenance_enabled: bool = True
     evidence_reviewer_enabled: bool = False
     # Bounded reviewer→LLM repair loop after evidence_reviewer (default off).
     evidence_reviewer_fix_loop_enabled: bool = False
