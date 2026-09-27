@@ -1,16 +1,30 @@
-"""Static formulation action skills (Dim-5) — coatings playbooks, not MCP agents."""
+"""Static formulation action skills (Dim-5) — playbooks bound to Actions, not MCP agents."""
 from __future__ import annotations
 
 from typing import Any
 
+# Domain-adaptive retrieval hints for playbooks that used to hardcode silane / coatings.
+DOMAIN_SEARCH_HINTS: dict[str, str] = {
+    "anticorrosion_coating": "防腐涂料 底漆 缓蚀",
+    "degreaser": "脱脂剂 表面活性剂 清洗",
+    "surface_treatment": "表面处理 转化膜 附着力",
+    "autodeposition_coating": "自沉积涂料 酸致凝聚",
+}
+DEFAULT_SEARCH_HINT = "配方 组分 工艺"
+
+# Legacy bookmark / prefs id → current id (one release of compatibility).
+_SKILL_ALIASES: dict[str, str] = {
+    "silane_recommend": "formula_recommend",
+}
+
 # Bound to existing FormuMind Actions / Research entry points — no LangGraph.
 FORMULATION_SKILLS: list[dict[str, Any]] = [
     {
-        "id": "silane_recommend",
+        "id": "formula_recommend",
         "kind": "playbook",
-        "title": "硅烷偶联推荐",
-        "summary": "优先材料库 + CRAG 检索，产出 Top-N 硅烷/环氧偶联配方候选。",
-        "when_to_use": "需要快速从知识库拉出可落地的偶联剂/底漆配方时。",
+        "title": "配方推荐",
+        "summary": "按当前产品域优先材料库 + CRAG 检索，产出 Top-N 配方候选（不锁死单一化学体系）。",
+        "when_to_use": "需要从知识库快速拉出可落地的配方候选时。",
         "action": "recommend",
         "modal": "recommend",
         "icon": "⭐",
@@ -22,7 +36,8 @@ FORMULATION_SKILLS: list[dict[str, Any]] = [
         ],
         "presets": {
             "prefer_materials_catalog": True,
-            "search_hint": "硅烷偶联剂 环氧 底漆",
+            # Resolved at apply-time from ProductDomain (see resolve_search_hint).
+            "search_hint_mode": "domain",
         },
     },
     {
@@ -97,10 +112,40 @@ FORMULATION_SKILLS: list[dict[str, Any]] = [
             {"id": "report", "title": "综合报告"},
         ],
         "presets": {
-            "search_hint": "金属表面处理 防腐涂料 综述",
+            # Domain theme + 「综述」; no hard-coded coatings/silane query.
+            "search_hint_mode": "domain_literature",
         },
     },
 ]
+
+
+def resolve_search_hint(
+    presets: dict[str, Any] | None,
+    *,
+    domain: str | None = None,
+) -> str | None:
+    """Resolve playbook search hint from presets + optional ProductDomain value.
+
+    Modes:
+    - ``domain`` / ``domain_literature``: map domain → hint (literature appends 综述)
+    - explicit non-empty ``search_hint`` string still wins when mode is absent
+    """
+    presets = presets or {}
+    mode = str(presets.get("search_hint_mode") or "").strip()
+    explicit = presets.get("search_hint")
+    if isinstance(explicit, str) and explicit.strip() and not mode:
+        return explicit.strip()
+
+    if mode in {"domain", "domain_literature"}:
+        key = (domain or "").strip()
+        base = DOMAIN_SEARCH_HINTS.get(key) or DEFAULT_SEARCH_HINT
+        if mode == "domain_literature":
+            return f"{base} 综述"
+        return base
+
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    return None
 
 
 def list_formulation_skills() -> list[dict[str, Any]]:
@@ -108,7 +153,8 @@ def list_formulation_skills() -> list[dict[str, Any]]:
 
 
 def get_formulation_skill(skill_id: str) -> dict[str, Any] | None:
+    resolved = _SKILL_ALIASES.get(skill_id, skill_id)
     for s in FORMULATION_SKILLS:
-        if s["id"] == skill_id:
+        if s["id"] == resolved:
             return dict(s)
     return None

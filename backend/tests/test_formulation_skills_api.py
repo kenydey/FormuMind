@@ -25,14 +25,36 @@ def test_list_formulation_skills(tmp_path, monkeypatch):
     body = r.json()
     assert len(body) >= 3
     ids = {s["id"] for s in body}
-    assert "silane_recommend" in ids
+    assert "formula_recommend" in ids
+    assert "silane_recommend" not in ids
     assert "ccd_doe_screen" in ids
-    sample = next(s for s in body if s["id"] == "silane_recommend")
+    sample = next(s for s in body if s["id"] == "formula_recommend")
     assert sample["action"] == "recommend"
     assert sample["modal"] == "recommend"
+    assert sample["title"] == "配方推荐"
     assert "kb_hybrid" in sample["tools"]
     assert sample["checklist"][0]["id"] == "retrieve"
     assert sample["presets"].get("prefer_materials_catalog") is True
+    assert sample["presets"].get("search_hint_mode") == "domain"
+
+
+def test_silane_recommend_alias(tmp_path, monkeypatch):
+    db_path = tmp_path / "skills_alias.db"
+    monkeypatch.setenv("FORMUMIND_DB_URL", f"sqlite:///{db_path.as_posix()}")
+    import app.db.database as db_mod
+    import app.db.project_store as ps_mod
+    import app.config as cfg
+
+    db_mod._default.clear()
+    ps_mod._store = None
+    cfg.get_settings.cache_clear()
+    make_engine(f"sqlite:///{db_path.as_posix()}")
+    client = TestClient(app)
+
+    r = client.get("/api/formulation-skills/silane_recommend")
+    assert r.status_code == 200
+    assert r.json()["id"] == "formula_recommend"
+    assert r.json()["title"] == "配方推荐"
 
 
 def test_get_formulation_skill(tmp_path, monkeypatch):
