@@ -1,8 +1,23 @@
 # Post–E-Lit OpenScience Top-5（下一波候选）
 
-> 状态：**仅评估，未开工**（2026-09-27）  
+> 状态：**仅评估，未开工**（2026-09-27；二次复核：克隆深挖 + FM `chemtools` GHS 仅 H200–H208）  
 > 源：`/tmp/openscience`（SynSci）· `/tmp/aipoch-open-science`（AIPOCH）  
 > 对照：FormuMind 已合入 Wave A–D2（#164–#168）+ **E-Lit**（#169，ChemRxiv，不含 arXiv）
+
+## 决策快表（供勾选）
+
+| 优先级 | 项 | 必要×可行 | 推荐包 | 一句话 |
+|--------|----|-----------|--------|--------|
+| **P0** | 涂料 Evidence Golden Bench | 5×3=15 | **F-Quality** | 钢印回归门禁 |
+| **P0** | Patent Mining Skill | 4×4=16 | **F-IP** | 专利纪律，几乎纯 Skill，可与 P0 质量并行 |
+| **P1** | Library Agent Tools | 4×4=16 | **F-Lit+** | Agent 操台账，贴钢印链路 |
+| **P1** | Smart Screening LLM | 4×3=12 | **F-Lit+** | 准则化筛文（成本敏感） |
+| **P1** | Metadata Enrich | 3×5=15 | **F-Lit+** | 裸 DOI 回填，最快见效 |
+| **插队·Chem** | PubChem **完整 GHS**（非仅爆炸物） | 4×4=16 | **F-Chem-A** | FM 现仅 H200–H208；SDS/VOC 危害缺口 |
+| **插队·Chem** | SMILES 校验门 + fetch-outcome | 4×5=20 | **F-Chem** | 改动小、诚实度高 |
+| **插队·Lab** | Analytical method validation skill | 4×4=16 | **F-Lab** | 涂料 QC / ICH 纪律 |
+
+> 同分时：先做「纯 Skill / 小改动诚实度」，再做「出题/LLM 成本」项。
 
 ## 产品边界
 
