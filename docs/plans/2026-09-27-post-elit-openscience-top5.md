@@ -184,6 +184,10 @@
 | **Cheminformatics definitions** / **statistical-power** / **uncertainty-and-units** | SynSci 残差；定义·样本量·单位诚实，Skill 为主可快插 |
 | Harness composition manifests / research-contract preregistration | 钢印指纹与试验前契约；可贴 F-Quality |
 | Analysis-report / acceptance-checks / review lifecycle | 报告与复核纪律抛光 |
+| **Reviewer rubric / stale-review / attachment authority**（AIPOCH） | 钢印复核契约与 PDF 字节权威；可并进 F-Quality |
+| Artifact-bound literature · reproducibility receipts · citation fidelity | 报告级语料绑定与导出保真；可贴 D2/STORM |
+| DataCite / Zenodo | 研究数据 DOI；主路径边际 |
+| Smart screening rule history | 并进 Smart Screening 切片 |
 | Export PARTIAL 终态 / skill SHA / provenance reason 细分类 | D2 抛光；必要性中等 |
 | **PubChem 完整 GHS + similarity**（AIPOCH） | 配方日用强；建议作 **F-Chem-A** 首选（比再接 ChEMBL 更贴主路径） |
 | ChEMBL connector | PubChem/ChEBI/SureChEMBL 已覆盖主路径；助剂 bioactivity 场景可开 |
