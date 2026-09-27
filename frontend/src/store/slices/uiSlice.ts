@@ -1,5 +1,6 @@
 import { modalForArtifact, type ArtifactKind } from "../../artifacts/projectArtifacts";
 import type { FormulationSkill } from "../../api";
+import { resolveSearchHint } from "../../lib/domainSearchHints";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -154,8 +155,9 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
       ) {
         get().setOptimizeEngine(presets.optimize_engine);
       }
-      if (typeof presets.search_hint === "string" && presets.search_hint.trim()) {
-        get().setSearchQuery(presets.search_hint.trim());
+      {
+        const hint = resolveSearchHint(presets, get().requirement?.domain);
+        if (hint) get().setSearchQuery(hint);
       }
       if (skill.modal) {
         get().setOpenModal(skill.modal);

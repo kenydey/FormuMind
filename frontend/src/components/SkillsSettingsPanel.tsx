@@ -41,8 +41,8 @@ export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: num
   return (
     <div className="space-y-4" data-testid="skills-settings-panel">
       <p className="text-xs text-slate-500 leading-relaxed">
-        统一管理<strong className="text-slate-300">配方行动包</strong>（打开 DOE/寻优等）与
-        <strong className="text-slate-300">对话技能</strong>（SKILL.md，注入问答提示）。关闭后中栏「+」不可选用。
+        统一管理<strong className="text-slate-300">配方行动包</strong>（推荐/DOE/寻优等，默认「配方推荐」按当前产品域自适应）与
+        <strong className="text-slate-300">对话技能</strong>（SKILL.md，注入问答提示）。在设置启停，中栏「+」启动；右栏仅在活跃时显示清单条。关闭后中栏「+」不可选用。
       </p>
       {error && (
         <p className="text-xs text-rose-300 border border-rose-500/30 rounded px-2 py-1">{error}</p>
