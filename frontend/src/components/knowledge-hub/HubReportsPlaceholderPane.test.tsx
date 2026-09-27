@@ -34,6 +34,16 @@ vi.mock("../../api", async () => {
       startWikiStormReport: vi.fn(),
       getWikiStormReport: vi.fn(),
       exportWikiStormReport: vi.fn(),
+      getLiteratureManifest: vi.fn().mockResolvedValue({
+        project_id: "proj-demo",
+        items: [],
+        frozen: null,
+        coverage: { candidate_count: 0, frozen_count: 0 },
+      }),
+      captureLiteratureManifest: vi.fn(),
+      freezeLiteratureManifest: vi.fn(),
+      unfreezeLiteratureManifest: vi.fn(),
+      screenLiteratureManifest: vi.fn(),
     },
     awaitTaskStream: vi.fn(),
   };

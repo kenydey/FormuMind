@@ -1,0 +1,442 @@
+"""Project-scoped literature manifest + frozen corpus (Wave B / AIPOCH subset)."""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import re
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_LOCK = threading.Lock()
+SCHEMA_VERSION = 1
+
+
+def _data_root() -> Path:
+    return Path("./data").resolve()
+
+
+def _safe_project(project_id: str) -> str:
+    return re.sub(r"[^\w.\-]+", "_", (project_id or "").strip())[:120] or "unknown"
+
+
+def manifest_path(project_id: str) -> Path:
+    return _data_root() / "literature" / _safe_project(project_id) / "manifest.json"
+
+
+def manifest_enabled(settings: Any) -> bool:
+    return bool(getattr(settings, "literature_manifest_enabled", True))
+
+
+def empty_manifest(project_id: str) -> dict[str, Any]:
+    return {
+        "project_id": project_id,
+        "schema_version": SCHEMA_VERSION,
+        "captured_at": None,
+        "content_hash": "",
+        "retrievals": [],
+        "items": [],
+        "frozen": None,
+        "coverage": {"candidate_count": 0, "frozen_count": 0},
+        "events": [],
+    }
+
+
+def compute_digest(item_ids: list[str], items: list[dict[str, Any]]) -> str:
+    by_id = {str(i.get("id")): i for i in items}
+    parts: list[str] = []
+    for iid in sorted(set(item_ids)):
+        row = by_id.get(iid) or {}
+        parts.append(
+            f"{iid}|{row.get('doi') or ''}|{row.get('title') or ''}"
+        )
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def content_hash_manifest(manifest: dict[str, Any]) -> str:
+    payload = {
+        "items": manifest.get("items") or [],
+        "frozen": manifest.get("frozen"),
+        "retrievals": manifest.get("retrievals") or [],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def load_manifest(project_id: str) -> dict[str, Any]:
+    path = manifest_path(project_id)
+    if not path.is_file():
+        return empty_manifest(project_id)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return empty_manifest(project_id)
+        raw.setdefault("project_id", project_id)
+        raw.setdefault("items", [])
+        raw.setdefault("retrievals", [])
+        raw.setdefault("events", [])
+        raw.setdefault("coverage", {"candidate_count": 0, "frozen_count": 0})
+        return raw
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("literature manifest load failed: %s", exc)
+        return empty_manifest(project_id)
+
+
+def save_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    pid = str(manifest.get("project_id") or "")
+    path = manifest_path(pid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    items = list(manifest.get("items") or [])
+    frozen = manifest.get("frozen")
+    frozen_count = len((frozen or {}).get("item_ids") or []) if frozen else 0
+    manifest["coverage"] = {
+        "candidate_count": len(items),
+        "frozen_count": frozen_count,
+    }
+    manifest["content_hash"] = content_hash_manifest(manifest)
+    manifest["schema_version"] = SCHEMA_VERSION
+    with _LOCK:
+        path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    return manifest
+
+
+def get_frozen(project_id: str) -> dict[str, Any] | None:
+    man = load_manifest(project_id)
+    frozen = man.get("frozen")
+    if not frozen or not (frozen.get("item_ids") or []):
+        return None
+    return man
+
+
+def frozen_items(project_id: str) -> list[dict[str, Any]]:
+    man = get_frozen(project_id)
+    if not man:
+        return []
+    ids = set(man["frozen"]["item_ids"])
+    return [i for i in (man.get("items") or []) if i.get("id") in ids]
+
+
+def _item_from_source_doc(doc: Any) -> dict[str, Any]:
+    sid = str(getattr(doc, "id", "") or "")
+    title = (getattr(doc, "title", None) or getattr(doc, "origin_url", None) or sid)[:240]
+    guide = getattr(doc, "source_guide", None) or {}
+    snippet = ""
+    doi = None
+    if isinstance(guide, dict):
+        snippet = str(guide.get("summary") or "")[:400]
+        doi = guide.get("doi")
+    return {
+        "id": sid or title,
+        "title": title,
+        "doi": doi,
+        "source": "project_source",
+        "snippet": snippet,
+        "evidence_class": "project_source",
+        "screening": "unset",
+    }
+
+
+def _item_from_evidence(ev: Any) -> dict[str, Any]:
+    ident = str(getattr(ev, "identifier", "") or getattr(ev, "title", "") or "")
+    title = str(getattr(ev, "title", None) or ident)[:240]
+    snippet = str(getattr(ev, "snippet", None) or "")[:400]
+    doi = getattr(ev, "doi", None)
+    return {
+        "id": ident or title,
+        "title": title,
+        "doi": doi,
+        "source": str(getattr(ev, "source", "") or "search_hit"),
+        "snippet": snippet,
+        "evidence_class": "search_hit",
+        "screening": "unset",
+    }
+
+
+def capture_from_project(
+    project_id: str,
+    *,
+    query: str = "",
+    settings: Any = None,
+) -> dict[str, Any]:
+    """Capture candidates from project sources + workspace search hits."""
+    if settings is not None and not manifest_enabled(settings):
+        raise PermissionError("literature_manifest_enabled is false")
+    man = load_manifest(project_id)
+    by_id: dict[str, dict[str, Any]] = {str(i["id"]): i for i in (man.get("items") or [])}
+    new_ids: list[str] = []
+
+    try:
+        from ..db.source_store import get_source_store
+
+        for doc in get_source_store().list_for_project(project_id, limit=80):
+            item = _item_from_source_doc(doc)
+            if not item["id"]:
+                continue
+            prev = by_id.get(item["id"])
+            if prev and prev.get("screening") not in (None, "unset"):
+                item["screening"] = prev["screening"]
+            by_id[item["id"]] = item
+            new_ids.append(item["id"])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("capture source_store skipped: %s", exc)
+
+    try:
+        from ..db.project_store import get_project_store
+
+        detail = get_project_store().get(project_id)
+        ws = getattr(detail, "workspace", None) if detail else None
+        for ev in (getattr(ws, "sources", None) or [])[:40]:
+            item = _item_from_evidence(ev)
+            if not item["id"]:
+                continue
+            prev = by_id.get(item["id"])
+            if prev and prev.get("screening") not in (None, "unset"):
+                item["screening"] = prev["screening"]
+            by_id[item["id"]] = item
+            new_ids.append(item["id"])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("capture workspace sources skipped: %s", exc)
+
+    man["items"] = list(by_id.values())
+    man["captured_at"] = time.time()
+    man.setdefault("retrievals", []).append(
+        {
+            "query": query or "",
+            "at": time.time(),
+            "candidate_ids": sorted(set(new_ids)),
+        }
+    )
+    man["events"] = (man.get("events") or [])[-180:] + [
+        {"type": "captured", "at": time.time(), "count": len(man["items"])}
+    ]
+    # Capture invalidates freeze (corpus may have changed)
+    if man.get("frozen"):
+        man["frozen"] = None
+        man["events"].append({"type": "unfrozen", "at": time.time(), "reason": "recapture"})
+    return save_manifest(man)
+
+
+def freeze(
+    project_id: str,
+    *,
+    item_ids: list[str] | None = None,
+    actor: str = "user",
+    settings: Any = None,
+) -> dict[str, Any]:
+    if settings is not None and not manifest_enabled(settings):
+        raise PermissionError("literature_manifest_enabled is false")
+    man = load_manifest(project_id)
+    items = list(man.get("items") or [])
+    if not items:
+        raise ValueError("no candidates — capture first")
+    by_id = {str(i["id"]): i for i in items}
+    if item_ids:
+        chosen = [i for i in item_ids if i in by_id]
+    else:
+        # Default: all match|unset and not no_match
+        chosen = [
+            str(i["id"])
+            for i in items
+            if (i.get("screening") or "unset") in {"match", "unset", "uncertain"}
+            and (i.get("screening") or "") != "no_match"
+        ]
+        # Prefer match over unset if any match exists
+        matches = [
+            str(i["id"])
+            for i in items
+            if (i.get("screening") or "") == "match"
+        ]
+        if matches:
+            chosen = matches
+    if not chosen:
+        raise ValueError("no freezeable item_ids")
+    if len(chosen) > len(items):
+        raise ValueError("frozen count exceeds candidates")
+    digest = compute_digest(chosen, items)
+    man["frozen"] = {
+        "at": time.time(),
+        "actor": (actor or "user").strip() or "user",
+        "item_ids": sorted(set(chosen)),
+        "digest": digest,
+    }
+    man["events"] = (man.get("events") or [])[-180:] + [
+        {
+            "type": "frozen",
+            "at": time.time(),
+            "actor": man["frozen"]["actor"],
+            "count": len(chosen),
+            "digest": digest[:16],
+        }
+    ]
+    return save_manifest(man)
+
+
+def unfreeze(project_id: str, *, actor: str = "user", settings: Any = None) -> dict[str, Any]:
+    if settings is not None and not manifest_enabled(settings):
+        raise PermissionError("literature_manifest_enabled is false")
+    man = load_manifest(project_id)
+    man["frozen"] = None
+    man["events"] = (man.get("events") or [])[-180:] + [
+        {"type": "unfrozen", "at": time.time(), "actor": actor or "user"}
+    ]
+    return save_manifest(man)
+
+
+def update_item_screening(
+    project_id: str,
+    item_id: str,
+    screening: str,
+) -> dict[str, Any]:
+    if screening not in {"match", "no_match", "uncertain", "unset"}:
+        raise ValueError("invalid screening disposition")
+    man = load_manifest(project_id)
+    found = False
+    for item in man.get("items") or []:
+        if str(item.get("id")) == item_id:
+            item["screening"] = screening
+            found = True
+            break
+    if not found:
+        raise LookupError("item not found")
+    # Changing screening clears freeze
+    if man.get("frozen"):
+        man["frozen"] = None
+        man["events"] = (man.get("events") or []) + [
+            {"type": "unfrozen", "at": time.time(), "reason": "screening_change"}
+        ]
+    return save_manifest(man)
+
+
+def literature_slice_from_frozen(project_id: str) -> dict[str, Any] | None:
+    """Return dossier-style literature slice if frozen; else None."""
+    items = frozen_items(project_id)
+    if not items:
+        return None
+    man = load_manifest(project_id)
+    rows = []
+    source_ids = []
+    for it in items:
+        sid = str(it.get("id") or "")
+        if sid:
+            source_ids.append(sid)
+        rows.append(
+            {
+                "cluster": "frozen_corpus",
+                "title": (it.get("title") or sid)[:120],
+                "source_id": sid,
+                "snippet": (it.get("snippet") or "")[:80],
+                "l1": "",
+                "doi": it.get("doi"),
+            }
+        )
+    return {
+        "rows": rows,
+        "source_ids": source_ids,
+        "frozen": True,
+        "digest": (man.get("frozen") or {}).get("digest"),
+        "count": len(rows),
+    }
+
+
+def preflight_corpus_findings(
+    project_id: str,
+    markdown: str,
+    *,
+    settings: Any,
+    cite_source_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Extra preflight findings for frozen corpus (dicts compatible with Finding fields)."""
+    import uuid
+
+    findings: list[dict[str, Any]] = []
+    if not manifest_enabled(settings):
+        return findings
+    man = load_manifest(project_id)
+    frozen = man.get("frozen")
+    require = bool(getattr(settings, "frozen_corpus_required_for_export", False))
+    if require and not frozen:
+        findings.append(
+            {
+                "id": uuid.uuid4().hex[:12],
+                "check": "corpus",
+                "severity": "blocking",
+                "status": "open",
+                "title": "导出要求已冻结文献语料",
+                "detail": "frozen_corpus_required_for_export=true 但尚无 freeze",
+                "evidence": [],
+                "location": {},
+            }
+        )
+        return findings
+    if not frozen:
+        return findings
+
+    frozen_ids = set(frozen.get("item_ids") or [])
+    items = {str(i.get("id")): i for i in (man.get("items") or [])}
+    dois = {
+        str(i.get("doi")).lower()
+        for i in items.values()
+        if i.get("id") in frozen_ids and i.get("doi")
+    }
+
+    # corpus_cite: cited source ids not in frozen
+    for sid in cite_source_ids or []:
+        if sid and sid not in frozen_ids:
+            findings.append(
+                {
+                    "id": uuid.uuid4().hex[:12],
+                    "check": "corpus_cite",
+                    "severity": "blocking",
+                    "status": "open",
+                    "title": f"引用源不在冻结语料: {sid[:80]}",
+                    "detail": "source_id not in frozen.item_ids",
+                    "evidence": [sid],
+                    "location": {},
+                }
+            )
+
+    # DOI mentions in footnotes vs frozen dois (best-effort)
+    for m in re.finditer(r"10\.\d{4,9}/[^\s\]\)\"']+", markdown or "", re.I):
+        doi = m.group(0).lower().rstrip(".,;")
+        if dois and doi not in dois:
+            findings.append(
+                {
+                    "id": uuid.uuid4().hex[:12],
+                    "check": "corpus_cite",
+                    "severity": "blocking",
+                    "status": "open",
+                    "title": f"DOI 不在冻结语料: {doi}",
+                    "detail": doi,
+                    "evidence": [doi],
+                    "location": {},
+                }
+            )
+
+    if bool(getattr(settings, "literature_screening_required_for_export", False)):
+        unset = [
+            i
+            for i in (man.get("items") or [])
+            if (i.get("screening") or "unset") == "unset"
+            and str(i.get("id")) in frozen_ids
+        ]
+        if unset:
+            findings.append(
+                {
+                    "id": uuid.uuid4().hex[:12],
+                    "check": "unscreened_open",
+                    "severity": "major",
+                    "status": "open",
+                    "title": f"{len(unset)} 条冻结条目尚未筛选",
+                    "detail": "literature_screening_required_for_export",
+                    "evidence": [str(u.get("id")) for u in unset[:8]],
+                    "location": {},
+                }
+            )
+    return findings

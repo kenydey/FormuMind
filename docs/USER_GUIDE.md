@@ -201,6 +201,20 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
     Explicit `/mcp <server> <tool> {json}` calls run readonly tools; write-like
     tools require **session approval** (`POST /api/connectors/mcp/{id}/approve-session`)
     — not a permanent global grant.
+- **Wave B (OpenScience) — PaperQA, frozen literature, light screening**:
+  - **PaperQA engine**: Evidence mode can use PaperQA with the **active chat LLM**
+    (DeepSeek / OpenAI-compatible), not only an OpenAI key. Failures fall through
+    to hybrid RAG. Kill-switch: `paperqa_enabled` (default on). Optional
+    `paperqa_llm_model` / `paperqa_embedding`.
+  - **Literature freeze**: Knowledge Hub → Reports shows a **文献冻结** strip.
+    Capture project sources + search hits into a manifest, then Freeze. STORM /
+    dossier packs prefer the frozen set. APIs under `/api/wiki/literature/*`.
+    Flags: `literature_manifest_enabled` (default on);
+    `frozen_corpus_required_for_export` (default off — turn on after soak).
+  - **Light screening**: expand **筛选** on the freeze strip; inclusion/exclusion
+    keywords mark items `match` / `no_match` / `uncertain`. Optional
+    `screening_auto_freeze` writes matches into the frozen corpus. Flag
+    `literature_screening_enabled` defaults off.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When

@@ -1900,59 +1900,27 @@ def synthesize_research(
 
 
 def _paperqa_available() -> bool:
-    if not optional_import("paperqa"):
-        return False
-    settings = get_settings()
-    # paper-qa 默认走 OpenAI（llm=gpt-4o + embedding=text-embedding-3-small），
-    # 二者都需要 OPENAI key。DeepSeek-only 环境（本项目）没有 OPENAI key，
-    # 直接跳过 Tier 2，避免 litellm 每次空跑 3 次重试并报 "Missing credentials"
-    # （随后才 fall through 到 Tier 3）。配置了 OPENAI key 时自动恢复该路径。
-    return bool(effective_setting(settings, "openai_api_key"))
+    """Thin wrapper — logic lives in ``paperqa_engine`` (Wave B)."""
+    from .paperqa_engine import paperqa_available
+
+    return paperqa_available()
 
 
 async def _paperqa_answer(
     question: str, sources: list[Evidence]
 ) -> tuple[str, list[Evidence]] | None:
-    """Answer via paper-qa's semantic retrieval + cited synthesis."""
-    try:  # pragma: no cover - requires paper-qa + embeddings/LLM
-        from paperqa import Docs, Doc, Text
+    from .paperqa_engine import answer_with_paperqa_async
 
-        docs = Docs()
-        by_key: dict[str, Evidence] = {}
-        for i, ev in enumerate(sources):
-            text = f"{ev.title}. {ev.snippet}".strip()
-            if not text:
-                continue
-            key = ev.identifier or ev.title or str(i)
-            doc = Doc(docname=key, citation=ev.source, dockey=str(i))
-            await docs.aadd_texts([Text(text=text, name=key, doc=doc)], doc)
-            by_key[key] = ev
-        answer = await docs.aquery(question)
-        text = getattr(answer, "answer", None) or str(answer)
-        cited = [by_key[k] for k in by_key if k in (getattr(answer, "context", "") or "")]
-        return text, (cited or sources[:6])
-    except Exception as exc:
-        return degrade_return(log, exc, "operation failed", None)
+    return await answer_with_paperqa_async(question, sources)
 
 
 def _run_paperqa(
     question: str, sources: list[Evidence]
 ) -> tuple[str, list[Evidence]] | None:
-    """Run the async paper-qa tier from the sync ``answer_question``.
+    """Sync PaperQA tier for ``answer_question`` (fail-open)."""
+    from .paperqa_engine import answer_with_paperqa
 
-    In a plain sync context (tests, research_graph, deep_research engine) there is
-    no running loop, so ``asyncio.run`` is safe. Inside an async endpoint
-    (chat.py) a loop is already running and ``asyncio.run`` would raise — paper-qa
-    is a best-effort tier there, so return None and let the caller fall through to
-    the LLM tier (Tier 3).
-    """
-    import asyncio
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(_paperqa_answer(question, sources))
-    return None
+    return answer_with_paperqa(question, sources)
 
 
 def answer_question(

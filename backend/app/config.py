@@ -561,6 +561,17 @@ class Settings(BaseSettings):
     evidence_reviewer_fix_loop_enabled: bool = False
     # Wiki/STORM export steel-stamp (citation/placeholder/numeric). Default on for export.
     publication_preflight_enabled: bool = True
+    # Wave B — PaperQA engine kill-switch (orthogonal to evidence_synthesis_mode).
+    paperqa_enabled: bool = True
+    paperqa_llm_model: str = ""  # empty → inherit chat llm_model
+    paperqa_embedding: str = ""  # empty → OpenAI emb if key else skip/default
+    # Wave B — project literature manifest / frozen corpus.
+    literature_manifest_enabled: bool = True
+    frozen_corpus_required_for_export: bool = False
+    # Wave B — light smart screening (default off).
+    literature_screening_enabled: bool = False
+    screening_auto_freeze: bool = False
+    literature_screening_required_for_export: bool = False
     connectors_builtin_enabled: bool = True
     mcp_client_enabled: bool = False
     # Chat native chem tool-calling (OpenAI-compatible tools → chemtools / SureChemBL / OCSR).

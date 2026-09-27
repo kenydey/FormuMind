@@ -974,3 +974,114 @@ def preflight_get_endpoint(
     from ..services.publication_preflight import get_state
 
     return get_state(project_id, kind)
+
+
+# ── Literature manifest / screening (Wave B) ───────────────────────────────
+
+
+class LiteratureCaptureRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    query: str = ""
+
+
+class LiteratureFreezeRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    item_ids: list[str] | None = None
+    actor: str = Field(default="user", max_length=120)
+
+
+class LiteratureUnfreezeRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    actor: str = Field(default="user", max_length=120)
+
+
+class LiteratureScreenRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    criteria: dict = Field(default_factory=dict)
+    apply: bool = True
+
+
+class LiteratureItemPatch(BaseModel):
+    project_id: str = Field(min_length=1)
+    screening: str = Field(min_length=1, max_length=32)
+
+
+@router.get("/literature/{project_id}")
+def literature_get_endpoint(project_id: str) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import load_manifest, manifest_enabled
+
+    if not manifest_enabled(get_settings()):
+        raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
+    return load_manifest(project_id)
+
+
+@router.post("/literature/capture")
+def literature_capture_endpoint(body: LiteratureCaptureRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import capture_from_project
+
+    try:
+        return capture_from_project(
+            body.project_id, query=body.query or "", settings=get_settings()
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/literature/freeze")
+def literature_freeze_endpoint(body: LiteratureFreezeRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import freeze
+
+    try:
+        return freeze(
+            body.project_id,
+            item_ids=body.item_ids,
+            actor=body.actor,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/literature/unfreeze")
+def literature_unfreeze_endpoint(body: LiteratureUnfreezeRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import unfreeze
+
+    try:
+        return unfreeze(body.project_id, actor=body.actor, settings=get_settings())
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/literature/screen")
+def literature_screen_endpoint(body: LiteratureScreenRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_screening import screen_project
+
+    try:
+        return screen_project(
+            body.project_id,
+            body.criteria or {},
+            apply=body.apply,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.patch("/literature/items/{item_id}")
+def literature_item_patch_endpoint(item_id: str, body: LiteratureItemPatch) -> dict:
+    _require_wiki()
+    from ..services.literature_manifest import update_item_screening
+
+    try:
+        return update_item_screening(body.project_id, item_id, body.screening)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
