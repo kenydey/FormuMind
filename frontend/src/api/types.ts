@@ -750,6 +750,31 @@ export interface SkillsCatalogResponse {
   };
 }
 
+export interface SkillInstallPreview {
+  name: string;
+  description: string;
+  summary: string;
+  allowed_tools: string[];
+  rejected_tools: string[];
+  origin: string;
+  source_url: string;
+  pinned_sha: string;
+  file_count: number;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface SkillInstallResponse {
+  ok: boolean;
+  dry_run: boolean;
+  install_id?: string | null;
+  skill_id?: string | null;
+  installed: boolean;
+  detail: string;
+  preview?: SkillInstallPreview;
+  catalog?: SkillsCatalogResponse;
+}
+
 export interface BuiltinConnector {
   id: string;
   display_name: string;

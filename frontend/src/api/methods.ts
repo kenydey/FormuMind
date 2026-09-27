@@ -1083,6 +1083,49 @@ export const apiMethods = {
       body,
     ),
 
+  installSkillPaste: (body: { markdown: string; name?: string; dry_run?: boolean }) =>
+    post<import("./types").SkillInstallResponse>("/api/skills/install/paste", {
+      dry_run: true,
+      ...body,
+    }),
+
+  installSkillGithub: (body: {
+    url: string;
+    ref?: string;
+    path?: string;
+    dry_run?: boolean;
+  }) =>
+    post<import("./types").SkillInstallResponse>("/api/skills/install/github", {
+      dry_run: true,
+      ...body,
+    }),
+
+  installSkillUpload: async (file: File, dry_run = true) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const q = dry_run ? "true" : "false";
+    const res = await fetch(`/api/skills/install/upload?dry_run=${q}`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw await readApiError(res, "/api/skills/install/upload");
+    return (await res.json()) as import("./types").SkillInstallResponse;
+  },
+
+  confirmSkillInstall: (install_id: string) =>
+    post<import("./types").SkillInstallResponse>("/api/skills/install/confirm", {
+      install_id,
+    }),
+
+  uninstallSkill: (skill_id: string) =>
+    del<{ ok: boolean; skill_id: string; catalog?: import("./types").SkillsCatalogResponse }>(
+      `/api/skills/installed/${encodeURIComponent(skill_id)}`,
+    ),
+
+  listInstalledSkills: () =>
+    get<{ skills: Array<Record<string, unknown>> }>("/api/skills/installed"),
+
   listConnectors: () => get<import("./types").ConnectorsResponse>("/api/connectors"),
 
   toggleBuiltinConnector: (id: string, enabled: boolean) =>
