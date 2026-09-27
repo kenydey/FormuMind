@@ -1718,6 +1718,27 @@ export const apiMethods = {
       return res.json();
     }),
 
+  exportWikiRoCrate: async (body: {
+    project_id: string;
+    kind?: "storm" | "dossier";
+    actor?: string;
+    include_fulltext_bytes?: boolean;
+  }) => {
+    const res = await fetch("/api/wiki/export/ro-crate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `ro-crate export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || "formumind-ro-crate.zip" };
+  },
+
   exportWikiStormReport: async (body: {
     project_id: string;
     format: "md" | "docx" | "pdf" | "pptx";

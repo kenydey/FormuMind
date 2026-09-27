@@ -110,6 +110,9 @@ export default function HubReportsPlaceholderPane() {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
   const openSettings = useStore((s) => s.openSettings);
   const envFlagsRevision = useStore((s) => s.envFlagsRevision);
+  const appendChatDraftRef = useStore((s) => s.appendChatDraftRef);
+  const toggleSelectedChatSkill = useStore((s) => s.toggleSelectedChatSkill);
+  const selectedChatSkills = useStore((s) => s.selectedChatSkills);
   const [picked, setPicked] = useState<(typeof TEMPLATES)[number] | null>(null);
   const [prompt, setPrompt] = useState("");
   const [useLlm, setUseLlm] = useState(false);
@@ -263,6 +266,56 @@ export default function HubReportsPlaceholderPane() {
         ensure_dossier: true,
       });
       triggerDownload(blob, filename);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onRoCrateExport = async () => {
+    if (!activeProjectId) {
+      setError("请先选择活动项目");
+      return;
+    }
+    setBusy("ro-crate");
+    setError(null);
+    try {
+      const { blob, filename } = await api.exportWikiRoCrate({
+        project_id: activeProjectId,
+        kind: "storm",
+        actor: "hub",
+      });
+      triggerDownload(blob, filename);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onPeerReviewDraft = async () => {
+    if (!activeProjectId) {
+      setError("请先选择活动项目");
+      return;
+    }
+    setBusy("peer-review");
+    setError(null);
+    try {
+      const report = await api.getWikiStormReport(activeProjectId);
+      const md = (report.markdown || "").trim();
+      if (!md) {
+        setError("尚无 STORM 草稿，请先生成");
+        return;
+      }
+      const excerpt = md.length > 6000 ? `${md.slice(0, 6000)}\n\n…(截断)` : md;
+      if (!selectedChatSkills.includes("peer-review")) {
+        toggleSelectedChatSkill("peer-review");
+      }
+      appendChatDraftRef(
+        `请按 peer-review 技能审阅以下 STORM 草稿，输出 BLOCKING / OBSERVATION 与校准推荐（勿直接改稿）：\n\n${excerpt}\n`,
+      );
+      setShelfMsg("已注入中栏草稿并勾选 peer-review；请到研究对话发送。");
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -610,6 +663,26 @@ export default function HubReportsPlaceholderPane() {
               </button>
             );
           })}
+          <button
+            type="button"
+            disabled={!!busy || !activeProjectId || !stormReady}
+            className="px-2 py-1.5 rounded border border-sky-500/40 text-xs text-sky-200 disabled:opacity-50"
+            data-testid="hub-reports-storm-export-rocrate"
+            title="轻量 RO-Crate 钢印包（需 ro_crate_export_enabled）"
+            onClick={() => void onRoCrateExport()}
+          >
+            {busy === "ro-crate" ? "RO-Crate…" : "导出 RO-Crate"}
+          </button>
+          <button
+            type="button"
+            disabled={!!busy || !activeProjectId || !stormReady}
+            className="px-2 py-1.5 rounded border border-amber-500/40 text-xs text-amber-200 disabled:opacity-50"
+            data-testid="hub-reports-storm-peer-review"
+            title="将 STORM 草稿注入中栏并勾选 peer-review 技能（不自动改稿）"
+            onClick={() => void onPeerReviewDraft()}
+          >
+            {busy === "peer-review" ? "准备审稿…" : "审稿一遍"}
+          </button>
         </div>
       </div>
 

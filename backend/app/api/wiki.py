@@ -1113,3 +1113,42 @@ def literature_enrich_oa_endpoint(body: LiteratureEnrichOaRequest) -> dict:
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class RoCrateExportRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    kind: str = Field(default="storm", max_length=32)
+    actor: str = Field(default="user", max_length=120)
+    include_fulltext_bytes: bool = False
+
+
+@router.post("/export/ro-crate")
+def export_ro_crate_endpoint(body: RoCrateExportRequest):
+    """Wave D2 — lightweight RO-Crate steel-stamp package (zip)."""
+    _require_wiki()
+    from fastapi.responses import Response
+
+    from ..services.ro_crate_export import build_lightweight_ro_crate
+
+    kind = (body.kind or "storm").strip()
+    if kind not in ("storm", "dossier"):
+        raise HTTPException(status_code=400, detail="kind must be storm|dossier")
+    try:
+        raw, filename = build_lightweight_ro_crate(
+            body.project_id,
+            kind=kind,  # type: ignore[arg-type]
+            actor=body.actor,
+            settings=get_settings(),
+            include_fulltext_bytes=bool(body.include_fulltext_bytes),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=raw,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
