@@ -1,6 +1,6 @@
 # Skills / MCP 进阶：移除技能坞 · 泛化配方推荐 · 一键安装（GitHub / 本地）
 
-> 状态：**Phase A–C 已实现**（坞清理 · Skills 安装 · MCP 导入）  
+> 状态：**Phase A–D 已实现**（坞清理 · Skills/MCP 安装 · 更新/域包/slash）  
 > 前置：#161 Skills/Evidence/Connectors/MCP 骨架已合入 main  
 > 对照：AIPOCH `github-import.ts` / SynSci-OS `skill/install/*` / Claude Science 安装体验  
 > 目标：回答三问并给出可落地路径——(1) 右栏技能坞能否移除 (2) 「硅烷偶联推荐」是什么、如何改为泛配方 (3) Skills/MCP 如何支持 GitHub / 本地上传 / 一键安装
@@ -215,11 +215,11 @@ POST /api/connectors/mcp/confirm     { import_id }
 2. ~~Settings MCP UI 与 Skills 同构的「添加」菜单。~~  
 3. ~~旗标 `mcp_client_enabled` 仍默认关；导入后需显式启用服务器。~~（导入不依赖旗标；Probe 仍需旗标）
 
-### Phase D — 打磨（按需）
+### Phase D — 打磨（按需）**【本 PR 实现】**
 
-- 技能更新（按 pinned_sha 检查 upstream）  
-- 域包：`coatings-silane` 作为可选 GitHub 示例包（演示「硅烷」应以外挂包存在）  
-- 中栏 `/` slash 列出已安装 skills（对齐 Claude）
+- ~~技能更新（按 pinned_sha 检查 upstream）~~ → `check-update` / `update`  
+- ~~域包：`coatings-silane` 作为可选示例包~~ → `resources/skill_packs/` + Settings 安装  
+- ~~中栏 `/` slash 列出已安装 skills~~ → `ChatSlashMenu`
 
 ---
 

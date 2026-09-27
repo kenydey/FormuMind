@@ -16,6 +16,7 @@ import SaveWikiDraftButton from "./SaveWikiDraftButton";
 import WikiChatModeSelector from "./WikiChatModeSelector";
 import ThinkingTimeline from "./ThinkingTimeline";
 import ChatComposerPlus from "./ChatComposerPlus";
+import ChatSlashMenu from "./ChatSlashMenu";
 
 /**
  * Must stay in step with the stages `research_graph._emit` actually sends.
@@ -626,7 +627,7 @@ export default function ResearchPanel() {
             ))}
           </div>
         )}
-        <div className="flex gap-2 items-end">
+        <div className="relative flex gap-2 items-end">
           <input
             ref={fileInputRef}
             type="file"
@@ -646,6 +647,7 @@ export default function ResearchPanel() {
           >
             {structBusy ? "识别中…" : "📷"}
           </button>
+          <ChatSlashMenu draft={draft} onApply={setDraft} />
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -664,9 +666,10 @@ export default function ResearchPanel() {
                   ? "请先勾选资料…"
                   : chatMode === "evidence"
                     ? "文献综合模式：先检索再写，结论须可追溯…"
-                    : "向资料提问…（Enter 发送，Shift+Enter 换行）"
+                    : "向资料提问…（/ 选技能，Enter 发送，Shift+Enter 换行）"
             }
             className="flex-1 bg-ink border border-edge rounded px-2.5 py-1.5 text-sm resize-none focus:border-accent/50 outline-none disabled:opacity-50"
+            data-testid="chat-draft-input"
           />
           <button
             onClick={submit}

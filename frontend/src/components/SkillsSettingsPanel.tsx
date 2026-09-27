@@ -9,8 +9,20 @@ import {
 
 type AddMode = null | "github" | "upload" | "paste";
 
+type SkillPack = {
+  id: string;
+  pack_dir: string;
+  title: string;
+  summary: string;
+  description: string;
+  category: string;
+  installed: boolean;
+  origin: string;
+};
+
 export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: number }) {
   const [skills, setSkills] = useState<UnifiedSkill[]>([]);
+  const [packs, setPacks] = useState<SkillPack[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>(null);
@@ -19,13 +31,16 @@ export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: num
   const [preview, setPreview] = useState<SkillInstallPreview | null>(null);
   const [installId, setInstallId] = useState<string | null>(null);
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
     setError(null);
-    return api
-      .listSkills()
-      .then((res) => setSkills(res.skills))
+    return Promise.all([api.listSkills(), api.listSkillPacks()])
+      .then(([res, packRes]) => {
+        setSkills(res.skills);
+        setPacks(packRes.packs);
+      })
       .catch((e) => setError(formatApiError(e)));
   }, []);
 
@@ -51,6 +66,7 @@ export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: num
     if (res.installed && res.catalog) {
       setSkills(res.catalog.skills);
       resetInstallUi();
+      void api.listSkillPacks().then((r) => setPacks(r.packs)).catch(() => undefined);
     }
   }
 
@@ -140,6 +156,52 @@ export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: num
       const res = await api.uninstallSkill(skill.id);
       if (res.catalog) setSkills(res.catalog.skills);
       else await load();
+      void api.listSkillPacks().then((r) => setPacks(r.packs));
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkUpdate(skill: UnifiedSkill) {
+    setBusy(true);
+    setUpdateMsg(null);
+    setError(null);
+    try {
+      const info = await api.checkSkillUpdate(skill.id);
+      if (!info.checkable) {
+        setUpdateMsg(`${skill.id}: ${info.reason}`);
+      } else if (info.update_available) {
+        setUpdateMsg(`${skill.id}: 有更新（${info.local_sha.slice(0, 8)} → ${info.remote_sha.slice(0, 8)}）`);
+      } else {
+        setUpdateMsg(`${skill.id}: 已是最新`);
+      }
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function beginUpdate(skill: UnifiedSkill) {
+    setBusy(true);
+    setError(null);
+    try {
+      applyInstallResponse(await api.updateSkill(skill.id, true));
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function installPack(pack: SkillPack) {
+    setBusy(true);
+    setError(null);
+    try {
+      const dry = await api.installSkillPack(pack.id, true);
+      applyInstallResponse(dry);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -305,6 +367,50 @@ export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: num
       {error && (
         <p className="text-xs text-rose-300 border border-rose-500/30 rounded px-2 py-1">{error}</p>
       )}
+      {updateMsg && (
+        <p className="text-xs text-sky-300/90 border border-sky-500/30 rounded px-2 py-1" data-testid="skills-update-msg">
+          {updateMsg}
+        </p>
+      )}
+
+      <div data-testid="skills-packs">
+        <h3 className="text-xs uppercase tracking-widest text-accent2 mb-2">可选域包 · Domain Packs</h3>
+        <p className="text-[11px] text-slate-500 mb-2">
+          硅烷等专项能力以外挂域包存在，不占用默认「配方推荐」。安装后出现在对话技能，中栏「/」可选用。
+        </p>
+        {packs.length === 0 ? (
+          <p className="text-[11px] text-slate-600">暂无域包</p>
+        ) : (
+          <ul className="space-y-2">
+            {packs.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-start gap-3 rounded border border-edge/60 bg-ink/40 px-2.5 py-2"
+                data-testid={`skill-pack-${p.id}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-200">{p.title}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">{p.summary}</div>
+                  <div className="text-[10px] text-slate-600 mt-1">
+                    pack · {p.id}
+                    {p.installed ? " · 已安装" : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || p.installed}
+                  onClick={() => void installPack(p)}
+                  className="text-[11px] px-2 py-1 rounded border border-accent/40 text-accent disabled:opacity-40 shrink-0"
+                  data-testid={`skill-pack-install-${p.id}`}
+                >
+                  {p.installed ? "已安装" : "安装"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <Section
         title="配方行动包 · Playbooks"
         rows={playbooks}
@@ -318,6 +424,8 @@ export default function SkillsSettingsPanel({ reloadKey = 0 }: { reloadKey?: num
         busy={busy}
         onToggle={toggle}
         onUninstall={uninstall}
+        onCheckUpdate={checkUpdate}
+        onUpdate={beginUpdate}
       />
     </div>
   );
@@ -328,7 +436,7 @@ function originBadge(origin?: string) {
   const tone =
     o === "github"
       ? "border-sky-500/40 text-sky-300"
-      : o === "local"
+      : o === "local" || o === "pack"
         ? "border-emerald-500/40 text-emerald-300"
         : "border-edge text-slate-500";
   return (
@@ -344,12 +452,16 @@ function Section({
   busy,
   onToggle,
   onUninstall,
+  onCheckUpdate,
+  onUpdate,
 }: {
   title: string;
   rows: UnifiedSkill[];
   busy: boolean;
   onToggle: (s: UnifiedSkill, enabled: boolean) => void;
   onUninstall: (s: UnifiedSkill) => void;
+  onCheckUpdate?: (s: UnifiedSkill) => void;
+  onUpdate?: (s: UnifiedSkill) => void;
 }) {
   return (
     <div>
@@ -385,6 +497,28 @@ function Section({
                   />
                   启用
                 </label>
+                {s.origin === "github" && onCheckUpdate && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onCheckUpdate(s)}
+                    className="text-[10px] text-sky-300/80"
+                    data-testid={`skill-check-update-${s.id}`}
+                  >
+                    检查更新
+                  </button>
+                )}
+                {s.origin === "github" && onUpdate && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onUpdate(s)}
+                    className="text-[10px] text-accent"
+                    data-testid={`skill-update-${s.id}`}
+                  >
+                    更新
+                  </button>
+                )}
                 {s.origin && s.origin !== "bundled" && s.kind === "chat_skill" && (
                   <button
                     type="button"

@@ -14,6 +14,20 @@ vi.mock("../api", async () => {
     api: {
       ...actual.api,
       listSkills: (...args: unknown[]) => listSkills(...args),
+      listSkillPacks: vi.fn(async () => ({
+        packs: [
+          {
+            id: "coatings-silane",
+            pack_dir: "coatings-silane",
+            title: "硅烷域包",
+            summary: "optional",
+            description: "optional",
+            category: "domain",
+            installed: false,
+            origin: "pack",
+          },
+        ],
+      })),
       installSkillPaste: (...args: unknown[]) => installSkillPaste(...args),
       confirmSkillInstall: (...args: unknown[]) => confirmSkillInstall(...args),
       patchSkillsPrefs: vi.fn(),

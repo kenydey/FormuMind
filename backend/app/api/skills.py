@@ -214,6 +214,53 @@ def uninstall(skill_id: str) -> dict:
     return out
 
 
+@router.get("/installed/{skill_id}/check-update")
+def check_update(skill_id: str) -> dict:
+    try:
+        return install_svc.check_skill_update(skill_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class UpdateSkillBody(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/installed/{skill_id}/update")
+def update_skill(skill_id: str, body: UpdateSkillBody | None = None) -> dict:
+    dry = True if body is None else body.dry_run
+    result = install_svc.update_skill_from_upstream(skill_id, dry_run=dry)
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
+@router.get("/packs")
+def list_packs() -> dict:
+    return {"packs": install_svc.list_skill_packs()}
+
+
+class PackInstallBody(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/packs/{pack_id}/install")
+def install_pack(pack_id: str, body: PackInstallBody | None = None) -> dict:
+    dry = True if body is None else body.dry_run
+    result = install_svc.install_skill_pack(pack_id, dry_run=dry)
+    payload = install_svc.result_to_dict(result)
+    if not result.ok:
+        raise _install_error(payload)
+    if result.installed:
+        payload["catalog"] = _catalog_payload().model_dump()
+    return payload
+
+
 @router.get("/{skill_id}", response_model=SkillOut)
 def get_skill(skill_id: str) -> SkillOut:
     pb = get_formulation_skill(skill_id)

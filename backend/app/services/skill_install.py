@@ -591,6 +591,150 @@ def list_installed() -> list[dict[str, Any]]:
     return out
 
 
+def _load_install_meta(skill_id: str) -> dict[str, Any]:
+    mp = install_meta_path(skill_id)
+    if not mp.is_file():
+        # try resolve by frontmatter name
+        for row in list_installed():
+            if row["id"] == skill_id:
+                mp2 = Path(row["path"]).parent / ".formumind-install.json"
+                if mp2.is_file():
+                    return json.loads(mp2.read_text(encoding="utf-8"))
+        return {}
+    try:
+        return json.loads(mp.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def check_skill_update(
+    skill_id: str,
+    *,
+    fetch: FetchFn | None = None,
+) -> dict[str, Any]:
+    """Compare installed github skill pinned_sha / content hash with upstream."""
+    rows = {r["id"]: r for r in list_installed()}
+    row = rows.get(skill_id)
+    if not row:
+        raise FileNotFoundError(f"未安装: {skill_id}")
+    meta = _load_install_meta(skill_id) or {
+        "origin": row.get("origin"),
+        "source_url": row.get("source_url"),
+        "pinned_sha": row.get("pinned_sha"),
+    }
+    origin = str(meta.get("origin") or row.get("origin") or "")
+    source_url = str(meta.get("source_url") or row.get("source_url") or "")
+    local_sha = str(meta.get("pinned_sha") or row.get("pinned_sha") or "")
+    local_content = str(meta.get("content_sha256") or "")
+
+    if origin != "github" or not source_url:
+        return {
+            "skill_id": skill_id,
+            "update_available": False,
+            "checkable": False,
+            "reason": "仅 github 来源且含 source_url 可检查更新",
+            "local_sha": local_sha,
+            "remote_sha": "",
+            "source_url": source_url,
+        }
+
+    loc = parse_github_skill_url(source_url)
+    markdown, remote_sha = fetch_github_skill_markdown(loc, fetch=fetch)
+    remote_content = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+    if remote_sha and local_sha:
+        available = remote_sha != local_sha
+    else:
+        available = bool(local_content) and remote_content != local_content
+    return {
+        "skill_id": skill_id,
+        "update_available": available,
+        "checkable": True,
+        "reason": "upstream newer" if available else "up to date",
+        "local_sha": local_sha or local_content,
+        "remote_sha": remote_sha or remote_content,
+        "source_url": source_url,
+    }
+
+
+def update_skill_from_upstream(
+    skill_id: str,
+    *,
+    dry_run: bool = True,
+    fetch: FetchFn | None = None,
+) -> InstallResult:
+    """Re-fetch github skill and reinstall (same review gates)."""
+    info = check_skill_update(skill_id, fetch=fetch)
+    if not info.get("checkable"):
+        prev = SkillPreview(name=skill_id)
+        prev.errors.append(str(info.get("reason") or "不可更新"))
+        return InstallResult(ok=False, dry_run=dry_run, preview=prev, detail=prev.errors[0])
+    source_url = str(info.get("source_url") or "")
+    return install_from_github(source_url, dry_run=dry_run, fetch=fetch)
+
+
+def skill_packs_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "resources" / "skill_packs"
+
+
+def list_skill_packs() -> list[dict[str, Any]]:
+    root = skill_packs_root()
+    if not root.is_dir():
+        return []
+    installed_ids = {r["id"] for r in list_installed()}
+    # also bundled chat skills count as "present"
+    from . import chat_skills as cs
+
+    present = installed_ids | {s["id"] for s in cs.list_chat_skills(include_body=False)}
+    out: list[dict[str, Any]] = []
+    for skill_md in sorted(root.glob("*/SKILL.md")):
+        fields, body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+        name = fields.get("name") or skill_md.parent.name
+        out.append(
+            {
+                "id": name,
+                "pack_dir": skill_md.parent.name,
+                "title": fields.get("summary") or fields.get("description") or name,
+                "summary": fields.get("summary") or fields.get("description") or "",
+                "description": fields.get("description") or "",
+                "category": fields.get("category") or "domain",
+                "installed": name in present,
+                "origin": "pack",
+            }
+        )
+    return out
+
+
+def install_skill_pack(pack_id: str, *, dry_run: bool = True) -> InstallResult:
+    """Install optional domain pack shipped under resources/skill_packs."""
+    root = skill_packs_root()
+    # allow pack_dir or skill name
+    candidates = [
+        root / pack_id / "SKILL.md",
+    ]
+    for skill_md in root.glob("*/SKILL.md"):
+        fields, _ = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+        if (fields.get("name") or skill_md.parent.name) == pack_id:
+            candidates.insert(0, skill_md)
+    path = next((p for p in candidates if p.is_file()), None)
+    if path is None:
+        prev = SkillPreview(name=pack_id)
+        prev.errors.append(f"未知域包: {pack_id}")
+        return InstallResult(ok=False, dry_run=dry_run, preview=prev, detail=prev.errors[0])
+    markdown = path.read_text(encoding="utf-8")
+    preview = review_skill_markdown(markdown)
+    # Packs are allowed even if name matches — but not bundled always-on.
+    # Re-run without bundled overwrite block for pack ids that are only in packs:
+    # review_skill_markdown blocks bundled ids; packs should use unique names.
+    return _finalize(
+        markdown=markdown,
+        preview=preview,
+        dry_run=dry_run,
+        origin="pack",
+        source_url=f"pack:{path.parent.name}",
+        pinned_sha=hashlib.sha256(markdown.encode("utf-8")).hexdigest()[:16],
+    )
+
+
 def result_to_dict(result: InstallResult) -> dict[str, Any]:
     d: dict[str, Any] = {
         "ok": result.ok,

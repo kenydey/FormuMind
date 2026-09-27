@@ -181,6 +181,10 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   **Settings → MCP → + Add**, import Claude/Cursor `mcpServers` JSON (paste,
   upload, or GitHub `mcp.json`) with the same preview → confirm flow. Imported
   servers default to disabled; Probe still requires `mcp_client_enabled`.
+  Optional domain packs (e.g. `coatings-silane`) install from **Settings → Skills →
+  Domain Packs** without changing the default formula-recommend playbook. Type `/`
+  in the chat composer to pick enabled skills; GitHub-installed skills support
+  update checks via pinned SHA.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When

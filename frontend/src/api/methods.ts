@@ -1126,6 +1126,43 @@ export const apiMethods = {
   listInstalledSkills: () =>
     get<{ skills: Array<Record<string, unknown>> }>("/api/skills/installed"),
 
+  checkSkillUpdate: (skill_id: string) =>
+    get<{
+      skill_id: string;
+      update_available: boolean;
+      checkable: boolean;
+      reason: string;
+      local_sha: string;
+      remote_sha: string;
+      source_url: string;
+    }>(`/api/skills/installed/${encodeURIComponent(skill_id)}/check-update`),
+
+  updateSkill: (skill_id: string, dry_run = true) =>
+    post<import("./types").SkillInstallResponse>(
+      `/api/skills/installed/${encodeURIComponent(skill_id)}/update`,
+      { dry_run },
+    ),
+
+  listSkillPacks: () =>
+    get<{
+      packs: Array<{
+        id: string;
+        pack_dir: string;
+        title: string;
+        summary: string;
+        description: string;
+        category: string;
+        installed: boolean;
+        origin: string;
+      }>;
+    }>("/api/skills/packs"),
+
+  installSkillPack: (pack_id: string, dry_run = true) =>
+    post<import("./types").SkillInstallResponse>(
+      `/api/skills/packs/${encodeURIComponent(pack_id)}/install`,
+      { dry_run },
+    ),
+
   listConnectors: () => get<import("./types").ConnectorsResponse>("/api/connectors"),
 
   toggleBuiltinConnector: (id: string, enabled: boolean) =>

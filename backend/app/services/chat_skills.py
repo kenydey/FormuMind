@@ -46,7 +46,7 @@ def _origin_for_user_skill(skill_md: Path, default: str) -> str:
         try:
             data = json.loads(meta.read_text(encoding="utf-8"))
             origin = str(data.get("origin") or "").strip()
-            if origin in {"github", "local", "user"}:
+            if origin in {"github", "local", "user", "pack"}:
                 return "local" if origin == "user" else origin
         except (OSError, json.JSONDecodeError, TypeError):
             pass
