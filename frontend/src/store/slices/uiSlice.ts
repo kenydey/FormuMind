@@ -194,6 +194,7 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     | "setChatMode"
     | "toggleSelectedChatSkill"
     | "toggleSelectedConnector"
+    | "toggleSelectedMcpServer"
     | "clearComposerSelections"
     | "setChatDraftAppender"
     | "appendChatDraftRef"
