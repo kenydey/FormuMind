@@ -1,6 +1,6 @@
 # Skills / MCP 进阶：移除技能坞 · 泛化配方推荐 · 一键安装（GitHub / 本地）
 
-> 状态：**方案评审**（2026-09-27）  
+> 状态：**Phase A 实现中**（产品已确认：删坞 + Active Strip · 配方推荐域自适应 · 安装留 Phase B/C）  
 > 前置：#161 Skills/Evidence/Connectors/MCP 骨架已合入 main  
 > 对照：AIPOCH `github-import.ts` / SynSci-OS `skill/install/*` / Claude Science 安装体验  
 > 目标：回答三问并给出可落地路径——(1) 右栏技能坞能否移除 (2) 「硅烷偶联推荐」是什么、如何改为泛配方 (3) Skills/MCP 如何支持 GitHub / 本地上传 / 一键安装
@@ -192,13 +192,13 @@ POST /api/connectors/mcp/confirm     { import_id }
 
 ## 5. 分阶段落地
 
-### Phase A — 坞移除 + 配方推荐泛化（0.5–1 周）**【先做 · 高感知】**
+### Phase A — 坞移除 + 配方推荐泛化（0.5–1 周）**【已确认 · 本 PR 实现】**
 
-1. 删除 `ActionSkillsDock` 自 `ActionsPanel`；测例迁移/删除。  
-2. （可选）`ActivePlaybookStrip`：仅活跃 playbook + checklist。  
-3. `silane_recommend` → `formula_recommend`（标题「配方推荐」；hint 域自适应；alias 旧 id）。  
-4. `deep_literature` hint 去防腐硬编码。  
-5. 文案：USER_GUIDE / 设置页说明「行动包在设置管理，中栏 + 启动」。
+1. ~~删除 `ActionSkillsDock` 自 `ActionsPanel`；测例迁移/删除。~~ → `ActivePlaybookStrip`  
+2. ~~`ActivePlaybookStrip`：仅活跃 playbook + checklist。~~  
+3. ~~`silane_recommend` → `formula_recommend`（标题「配方推荐」；hint 域自适应；alias 旧 id）。~~  
+4. ~~`deep_literature` hint 去防腐硬编码。~~ → `search_hint_mode=domain_literature`  
+5. ~~文案：USER_GUIDE / 设置页说明「行动包在设置管理，中栏 + 启动」。~~
 
 **验收**：右栏无技能市场；新用户默认看到「配方推荐」而非硅烷；推荐 Modal 仍按当前域出候选。
 
@@ -266,7 +266,7 @@ flowchart LR
 | 主题 | 路径 |
 |------|------|
 | 硅烷 Playbook | `backend/app/resources/formulation_skills.py` |
-| 技能坞 | `frontend/src/components/ActionSkillsDock.tsx` · `ActionsPanel.tsx` |
+| 活跃清单条（替坞） | `frontend/src/components/ActivePlaybookStrip.tsx` · `ActionsPanel.tsx` |
 | Settings Skills/MCP | `SkillsSettingsPanel.tsx` · `ConnectorsSettingsPanel.tsx` |
 | Composer + | `ChatComposerPlus.tsx` |
 | Chat Skill 加载 | `backend/app/services/chat_skills.py` · `skills_store.py` |

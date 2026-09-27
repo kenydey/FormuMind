@@ -153,22 +153,28 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   the top of the panel.
 - **Center (Research)**: a chat interface that answers questions **grounded in
   the loaded sources** (semantic embedding or TF-IDF re-rank → LLM answer), with
-  citation chips linking back to the evidence used.
-- **Right (Actions)**: a **PathWizard** at the top (formula / substitute / knowledge). Buttons open focused modals —
-  🧪 Requirements (**constraint effect tracing**: which brief fields feed scoring / DOE),
-  ⭐ Recommend (expand **Why recommended** on each card),
+  citation chips linking back to the evidence used. The composer **「+」** picker
+  selects chat skills, connectors, Evidence mode, and starts **formulation
+  playbooks** (recommend / DOE / optimize, …).
+- **Right (Actions)**: a **PathWizard** at the top (formula / substitute / knowledge).
+  When a playbook is active, a compact **checklist strip** appears (no skills
+  marketplace dock). Buttons open focused modals —
+  🧪 Requirements,
+  ⭐ Recommend (default playbook is **Formula recommend**, with domain-adaptive
+  search hints — not locked to silane coupling),
   🎯 Inverse Design (§5.15),
   🔁 Material Substitution (§5.16),
   🔬 DOE Design,
-  📋 Workbench (project-level **auto-loop on sync** and **prediction soft-correct**, both default off),
+  📋 Workbench,
   📄 QC Report (§5.17),
   📈 Optimization,
   ⚙️ Process Optimization,
   🔄 Self-Driving Loop,
-  📚 **Knowledge Hub** (archive · retrieval probe · quality-ops · Wiki · graph · dossier).
+  📚 **Knowledge Hub**.
   Status badges show running / result counts.
-- **Header**: ⚙ **Settings** (three tabs: **LLM**, **API keys**, **Dependencies**) and
-  🕐 **History** (project snapshot drawer, with a live count badge).
+- **Header**: ⚙ **Settings** (includes **Skills**, **MCP/Connectors**, LLM, API keys,
+  Dependencies, …) and 🕐 **History**. Enable/disable playbooks and chat skills under
+  **Settings → Skills**; start them from the center **「+」**.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When
