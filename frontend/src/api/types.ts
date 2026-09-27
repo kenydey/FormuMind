@@ -1516,6 +1516,8 @@ export interface ChatRequest {
   mode?: "chat" | "evidence";
   selected_skills?: string[];
   selected_connectors?: string[];
+  selected_mcp_servers?: string[];
+  chat_session_id?: string;
   ref_doc_ids?: string[];
 }
 
@@ -1552,6 +1554,17 @@ export interface ChatResponse {
   clarification?: ClarificationOption | null;
   rewritten_query?: string | null;
   sourced_claims?: SourcedClaim[] | null;
+  mode?: "chat" | "evidence" | null;
+  doi_results?: Record<string, unknown>[] | null;
+  evidence_reviewer?: Record<string, unknown> | null;
+  reviewer_fix?: Record<string, unknown> | null;
+  mcp_permission_required?: {
+    server_id: string;
+    tool_name: string;
+    session_id?: string | null;
+    arguments?: Record<string, unknown>;
+  } | null;
+  mcp_tool_results?: Record<string, unknown>[] | null;
 }
 
 export type KGRelationType =

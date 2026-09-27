@@ -209,3 +209,28 @@ def call_mcp(body: McpCallRequest) -> dict:
         body.arguments,
         settings=settings,
     )
+
+
+class McpApproveSessionBody(BaseModel):
+    session_id: str = Field(min_length=1, max_length=80)
+    tool_name: str | None = Field(default=None, max_length=120)
+    until_session_end: bool = True
+
+
+@router.post("/mcp/{server_id}/approve-session")
+def approve_mcp_session(server_id: str, body: McpApproveSessionBody) -> dict:
+    """Grant writeish MCP tools for one chat session (not global permanent)."""
+    settings = get_settings()
+    if not bool(getattr(settings, "mcp_client_enabled", False)):
+        raise HTTPException(status_code=503, detail="mcp_client_enabled is off")
+    from ..services.mcp_session_grants import approve_session
+
+    try:
+        return approve_session(
+            body.session_id,
+            server_id,
+            tool_name=body.tool_name,
+            until_session_end=body.until_session_end,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

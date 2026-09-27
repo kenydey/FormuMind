@@ -108,6 +108,7 @@ export const useStore = create<AppState>()(
       chatMode: "chat" as const,
       selectedChatSkills: [] as string[],
       selectedConnectors: [] as string[],
+      selectedMcpServers: [] as string[],
       chatDraftAppender: null as ((text: string) => void) | null,
       loopReport: null,
       rmseHistory: [],
