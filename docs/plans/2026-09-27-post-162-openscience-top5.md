@@ -1,31 +1,25 @@
-# Post-162 OpenScience Top-5 — Wave B in progress
+# Post-162 OpenScience Top-5 — Wave C implemented
 
-Status: **Wave A done (PR #164)** · **Wave B implementing** (PaperQA · Frozen Manifest · Light Screening).
+Status: **Wave A/B merged** · **Wave C implemented** (citation expand · provenance · citations skill · ChEBI).
 
 ## Locked product decisions
 
 - Wiki/STORM **export** gated by publication preflight; draft persist fail-open.
-- Chat remains fail-open (findings + optional fix-loop; no send block).
-- Custom MCP into chat + session Ask approval ship together in Wave A.
-- Wave B: PaperQA decoupling, literature manifest / frozen corpus, light smart screening.
-- RO-Crate / full AIPOCH Reviewer/ACP / Evidence bench deferred to **Wave C**.
+- Chat remains fail-open.
+- Wave C: OpenAlex citation expand + retraction directionality, structured provenance, Citations skill, ChEBI connector.
+- Deferred further: RO-Crate, full Literature Library / PDF runner, full ACP Reviewer, Evidence golden bench.
 
-## Wave A deliverables
+## Wave A / B (done)
 
-| ID | Item | Flags |
-|----|------|-------|
-| A1 | `publication_preflight` + `/api/wiki/preflight/*` + STORM export 409 | `publication_preflight_enabled` (default true) |
-| A2 | `reviewer_fix_loop` after `evidence_reviewer` | `evidence_reviewer_fix_loop_enabled` (default false) |
-| A3 | MCP skill-docs, `selected_mcp_servers`, approve-session, Composer UI | `mcp_client_enabled` |
+See prior PRs #164 / #165.
 
-## Wave B deliverables
+## Wave C deliverables
 
 | ID | Item | Flags |
 |----|------|-------|
-| B2 | `paperqa_engine` decoupled; chat LLM / OpenAI-compat; fail-open | `paperqa_enabled` (default true) |
-| B1 | `literature_manifest` + freeze + dossier/STORM prefer frozen; preflight `corpus*` | `literature_manifest_enabled` (true); `frozen_corpus_required_for_export` (false) |
-| B3 | Light screening heuristics → manifest; optional auto-freeze | `literature_screening_enabled` (false); `screening_auto_freeze` (false) |
+| C1 | `expand_citations` + `notice_kind` in `scholar_helpers` | `citation_expand_enabled` (true) |
+| C2 | `evidence_provenance` on ChatResponse + UI strip | `evidence_provenance_enabled` (true) |
+| C3 | `citations` Chat Skill (resolve-before-cite) | `chat_skills_runtime_enabled` |
+| C4 | ChEBI enrichment on chemistry connector | `connectors_builtin_enabled` |
 
-## Explicitly out of Wave B (Wave C)
-
-RO-Crate, full Literature Library / PDF evidence runner, full AIPOCH Reviewer/ACP, Evidence golden bench.
+Plan: [`2026-09-27-wave-c-citation-provenance.md`](./2026-09-27-wave-c-citation-provenance.md).
