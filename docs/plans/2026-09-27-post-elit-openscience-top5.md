@@ -1,6 +1,6 @@
 # Post–E-Lit OpenScience Top-5（下一波候选）
 
-> 状态：**仅评估，未开工**（2026-09-27；**产品边界已校正为全化学品**；二次复核：克隆深挖 + FM `chemtools` GHS 仅 H200–H208）  
+> 状态：**仅评估，未开工**（2026-09-27；**产品边界已校正为全化学品**；二次复核 + **第三次全量目录**：克隆深挖 + FM `chemtools` GHS 仅 H200–H208）  
 > 源：`/tmp/openscience`（SynSci）· `/tmp/aipoch-open-science`（AIPOCH）  
 > 对照：FormuMind 已合入 Wave A–D2（#164–#168）+ **E-Lit**（#169，ChemRxiv，不含 arXiv）
 
@@ -210,10 +210,145 @@
 
 Electron · ACP 多 backend · Notebook/SSH/Slurm · Skills Marketplace · 全量 Specialist · 整包 `pdf-structure` · `.science` 主路径 · **arXiv** · AIPOCH 生物结构预测 skills（AlphaFold 等）· SynSci Harbor 生物 leaderboard 当产品 KPI
 
+---
+
+## 全量评估目录（第三次深扫 · 按必要×可行排序）
+
+> **口径不变**：必要性 / 可行性各 1–5；**产品 = 全化学品配方 R&D**（全部 `ProductDomain`）+ Evidence 钢印。  
+> **范围**：边界内「值得升级 / 新开发」的全部候选（含已入 Top-5 / 插队桶者，标 **已入账**）；生物学 / Electron / Notebook·HPC / 药化 docking 全家桶见文末「边界外」。  
+> **不改变**上文 Top-5 排序与打包名；本表供勾选扩面。  
+> **FM 对照要点**：`chemtools` GHS **仅 H200–H208**；pair 相似度仅本地 RDKit；Library 有 Manifest/Freeze/关键词筛/OA/ChemRxiv，**无** LLM 准则筛、Agent tools、元数据批补；Skills 仅 citations / literature-review / method-writer / peer-review / sources；无 `evals/chem_evidence/`。
+
+### Tier S — 得分 ≥ 16（优先评估）
+
+| # | 项 | 源 | 必要 | 可行 | 分 | 落点 / 备注 |
+|---|----|----|------|------|----|-------------|
+| S1 | **Connector fetch-outcome**（空结果≠故障） | SynSci `connectors/fetch-outcome.ts` | 4 | 5 | **20** | **已入账 F-Chem**；改连接器返回契约，钢印诚实度 |
+| S2 | **SMILES 校验门**（解析/价态/声称改动核验） | SynSci `skills/chemistry/smiles-validation` | 4 | 5 | **20** | **已入账 F-Chem**；LLM 生成结构防呆 |
+| S3 | **Cheminformatics definitions**（HBD/HBA/TPSA/InChI/canonical 口径） | SynSci `skills/chemistry/cheminformatics-definitions` | 4 | 5 | **20** | **已入账残差**；≠ SMILES 语法门；Skill 为主 |
+| S4 | **Reviewer rubric: trace-not-recompute** | AIPOCH `reviewer/rubric.ts` | 4 | 5 | **20** | **已入账残差**；artifact≻prose、伪造引用失败 |
+| S5 | **Patent Mining / FTO 纪律 Skill** | SynSci `skills/research/patent-mining` | 4 | 4 | **16** | **Top-5 #3 / F-IP** |
+| S6 | **Library Agent Tools**（薄 MCP/Chat tools） | AIPOCH `library-mcp-server.ts` | 4 | 4 | **16** | **Top-5 #4 / F-Lit+** |
+| S7 | **PubChem 完整 GHS**（`pubchem_get_safety`） | AIPOCH `connectors/descriptors/chemistry.ts` | 4 | 4 | **16** | **已入账 F-Chem-A**；补齐非爆炸物危害 |
+| S8 | **PubChem similarity search**（库级 2D Tanimoto） | AIPOCH `pubchem_similarity_search` | 4 | 4 | **16** | **已入账 F-Chem-A**；FM 仅本地 pair，缺库搜索 |
+| S9 | **Analytical method validation** skill | SynSci `skills/chemistry/analytical-method-validation` | 4 | 4 | **16** | **已入账 F-Lab**；化学品 QC / ICH Q2·Q14 |
+| S10 | **Statistical power / MDE** | SynSci `skills/research/statistical-power` | 4 | 4 | **16** | **已入账残差**；DOE/QC 样本量先验 |
+| S11 | **Uncertainty & units** | SynSci `skills/physics/uncertainty-and-units` | 4 | 4 | **16** | **已入账残差**；浓度/膜厚/VOC 等 ± 与单位 |
+| S12 | **Checksum-bound PDF attachment authority** | AIPOCH `attachment-authority.ts` | 4 | 4 | **16** | **已入账残差**；字节漂移废 lease |
+| S13 | **Artifact-bound literature corpus** | AIPOCH `artifacts/literature-manifest.ts` | 4 | 4 | **16** | **已入账残差**；报告版绑定检索范围 |
+
+### Tier A — 得分 15（强推荐）
+
+| # | 项 | 源 | 必要 | 可行 | 分 | 落点 / 备注 |
+|---|----|----|------|------|----|-------------|
+| A1 | **化学品 Evidence Golden Bench** | SynSci harness × FM golden | 5 | 3 | **15** | **Top-5 #1 / F-Quality**；`evals/chem_evidence/` |
+| A2 | **Metadata Enrich**（裸 DOI 回填） | AIPOCH `metadata-enricher.ts` | 3 | 5 | **15** | **Top-5 #5 / F-Lit+** |
+| A3 | **Analysis-report** skill | SynSci `skills/core/analysis-report` | 3 | 5 | **15** | **已入账残差**；贴 method-writer |
+| A4 | **Export PARTIAL 终态** | SynSci `skills/research/export` | 3 | 5 | **15** | **已入账 F-Ops** |
+| A5 | **`citations`/`sources` always-on** | AIPOCH `activation-policy.ts` | 3 | 5 | **15** | **已入账 F-Stamp-UX** |
+| A6 | **DataCite + Zenodo** 研究数据 DOI | AIPOCH `literature-doi` / `zenodo.ts` | 3 | 5 | **15** | **已入账残差**；配方研究数据寄存 |
+| A7 | **`compare` 先冻结判据** | SynSci `skills/research/compare` | 3 | 5 | **15** | **已入账 F-Lab** |
+| A8 | **statistical-conventions** skill | SynSci `skills/core/statistical-conventions` | 3 | 5 | **15** | **已入账 F-Lab** |
+| A9 | **LaTeX+bib 轻量包** | AIPOCH `latex-bundle.ts` | 3 | 5 | **15** | **已入账 F-Cite-Out** |
+| A10 | **Library 标识符查重组硬化**（exact scheme union） | AIPOCH `duplicates.ts` | 3 | 5 | **15** | **第三次新记**；E-Lit 有合并，缺可辩护分组审计 |
+
+### Tier B — 得分 12（值得排期）
+
+| # | 项 | 源 | 必要 | 可行 | 分 | 落点 / 备注 |
+|---|----|----|------|------|----|-------------|
+| B1 | **Smart Screening LLM** | AIPOCH `smart-collections.ts` | 4 | 3 | **12** | **Top-5 #2 / F-Lit+** |
+| B2 | **Harness composition manifests** | SynSci `docs/notes/harness-manifests.md` | 4 | 3 | **12** | **已入账残差**；prompt/tool schema 指纹 |
+| B3 | **Research-contract preregistration** | SynSci research-workflows / session | 4 | 3 | **12** | **已入账残差**；试验前冻结分析计划 |
+| B4 | **Reproducibility receipts**（表/图 compare，无 replay） | AIPOCH `artifact-reproducibility*` | 4 | 3 | **12** | **已入账残差**；DOE 图表 matched·different |
+| B5 | **ChEMBL connector** | SynSci/AIPOCH chembl | 3 | 4 | **12** | **已入账 F-Chem**；助剂 bioactivity；次于 GHS |
+| B6 | **Skill-load SHA 审计** | SynSci skill-runtime | 3 | 4 | **12** | **已入账 F-Ops** |
+| B7 | **Install Layer-2 注入拒绝** | SynSci install review | 3 | 4 | **12** | **已入账 F-Ops** |
+| B8 | **Provenance reason 细分类** | SynSci `provenance/envelope.ts` | 3 | 4 | **12** | **已入账 F-Ops** |
+| B9 | **Acceptance-checks** skill | SynSci `skills/core/acceptance-checks` | 3 | 4 | **12** | **已入账残差**；工艺窗出口检查 |
+| B10 | **Provenance review lifecycle** | SynSci `science/provenance/review.ts` | 3 | 4 | **12** | **已入账残差**；open→addressed→confirmed |
+| B11 | **Stale-review on scope drift** | AIPOCH `reviewer/stale-reviews.ts` | 3 | 4 | **12** | **已入账残差** |
+| B12 | **Citation fidelity**（导出保 locator） | AIPOCH `citation-fidelity*` | 3 | 4 | **12** | **已入账残差**；≠ CSL 排版 |
+| B13 | **Smart screening rule history** | AIPOCH `smart-rule-history.ts` | 3 | 4 | **12** | **已入账残差**；并进 B1 |
+| B14 | **多源 full-text finder** | AIPOCH `full-text-finder.ts` | 3 | 4 | **12** | **已入账 F-Lit-Deep** |
+| B15 | **CSL / format_references** | AIPOCH `citation-formatter.ts` | 3 | 4 | **12** | **已入账 F-Cite-Out** |
+| B16 | **prepared-literature sidecar** | AIPOCH sidecar | 3 | 4 | **12** | **已入账 F-Stamp-UX** |
+| B17 | **冲突感知 metadata supplement** | AIPOCH `duplicate-metadata.ts` | 3 | 4 | **12** | **第三次新记**；合并时保留冲突标记 |
+| B18 | **Crossref/PMID reference-resolver 加深** | AIPOCH `reference-resolver.ts` | 3 | 4 | **12** | **第三次新记**；DOI 失败走 PMID/Crossref |
+| B19 | **RIS/BibTeX citation-exchange 保真** | AIPOCH `citation-exchange.ts` | 3 | 4 | **12** | **第三次新记**；E-Lit 已有导出，缺边界校正 |
+| B20 | **PubChem synonyms / batch get_compounds** | AIPOCH chemistry tools | 3 | 4 | **12** | **第三次新记**；原料同义与批量属性 |
+| B21 | **Dimensional analysis / pint 单位** | SynSci `skills/physics/dimensional-analysis` | 3 | 4 | **12** | **第三次新记**；工艺窗量纲一致性 |
+| B22 | **ScholarEval 加深 peer-review** | SynSci `skills/scholar-evaluation` | 3 | 4 | **12** | **第三次新记**；FM 已有 peer-review，可加结构化维度 |
+| B23 | **RDKit Chat Skill 包**（高级操作纪律） | SynSci `skills/chemistry/rdkit` | 3 | 4 | **12** | **第三次新记**；FM 有 chemtools API，缺对话纪律 |
+| B24 | **Literature-review exclusion ledger** | SynSci/AIPOCH lit-review 加强 | 3 | 4 | **12** | **第三次新记**；系统综述排除账本 |
+| B25 | **Hypotheses → DOE 可证伪帧** | SynSci `skills/core/hypotheses` | 3 | 4 | **12** | **第三次新记**；贴现有 DOE，非取代 |
+| B26 | **`/review` 证据优先复核工作流** | SynSci `skills/research/review` | 3 | 4 | **12** | **第三次新记**；与 reviewer rubric 互补 |
+
+### Tier C — 得分 9（可后置）
+
+| # | 项 | 源 | 必要 | 可行 | 分 | 落点 / 备注 |
+|---|----|----|------|------|----|-------------|
+| C1 | **批量 Library jobs / journal** | AIPOCH `batch-jobs.ts` | 3 | 3 | **9** | **已入账 F-Lit-Deep** |
+| C2 | **本地 PDF passage index** | AIPOCH `full-text-index.ts` | 3 | 3 | **9** | **已入账 F-Lit-Deep**；加强 locator |
+| C3 | **Agent PDF inbox** | AIPOCH `agent-pdf-acquisition.ts` | 3 | 3 | **9** | **已入账 F-Lit-Deep** |
+| C4 | **Molecule preview** | AIPOCH `connectors/molecule` | 3 | 3 | **9** | **已入账 F-Chem-A**；UI 成本 |
+| C5 | **RO-Crate complete（附 PDF 字节）** | AIPOCH `ro-crate-export.ts` | 3 | 3 | **9** | **已入账 F-Stamp-UX**；D2 lite 已够 |
+| C6 | **Document reader**（有界 PDF 抽取给 Agent） | AIPOCH `document-reader.ts` | 3 | 3 | **9** | **第三次新记**；可贴 C2 |
+| C7 | **matchms 光谱鉴定** skill | SynSci `skills/chemistry/matchms` | 3 | 3 | **9** | **第三次新记**；QC 质谱/光谱比对；偏实验室 |
+| C8 | **配方多目标 / Pareto 纪律**（改编非药化） | SynSci multi-objective-optimization 思路 | 3 | 3 | **9** | **第三次新记**；FM 已有 tradeoff；Skill 纪律层 |
+| C9 | **Scientific output comparison** | AIPOCH `scientific-output-comparison.ts` | 3 | 3 | **9** | **第三次新记**；与 receipts 重叠时可合并 |
+
+### Tier D — 得分 6–8（边际）
+
+| # | 项 | 源 | 必要 | 可行 | 分 | 备注 |
+|---|----|----|------|------|----|------|
+| D1 | Library catalog capacity / scale guards | AIPOCH `catalog-capacity*` | 2 | 4 | 8 | 大库防护；非主路径 |
+| D2 | figure-style skill | AIPOCH `figure-style` | 2 | 4 | 8 | 写作抛光 |
+| D3 | ChEBI ontology relations 加深 | AIPOCH `chebi_get_ontology` | 2 | 4 | 8 | FM 已有 ChEBI lookup |
+| D4 | DOCX `{{cite}}` | AIPOCH `citation-document.ts` | 2 | 3 | 6 | **已入账 F-Cite-Out** 低优先 |
+| D5 | Rhea 反应 | AIPOCH rhea_* | 2 | 3 | 6 | **已入账 F-Chem-A** 弱相关 |
+| D6 | ZINC 可购 | AIPOCH/SynSci zinc | 2 | 3 | 6 | **已入账**；配方原料可购性弱匹配 |
+| D7 | PubChem bioassay summary | AIPOCH | 2 | 3 | 6 | 偏药理 |
+| D8 | openFDA / Drugs@FDA | AIPOCH drug-regulatory | 2 | 3 | 6 | 偏药政；特种化学品弱 |
+| D9 | Market-research-reports（50+ 页 LaTeX） | SynSci | 2 | 3 | 6 | 重；竞品扫优先走 Smart Screening |
+| D10 | pymatgen 材料信息学 | SynSci | 2 | 3 | 6 | 固体材料伸展，非配方主轴 |
+| D11 | execution-hygiene | SynSci | 2 | 3 | 6 | 偏长作业/HPC |
+| D12 | ISO standards readiness | SynSci | 2 | 3 | 6 | 合规文案；非钢印主轴 |
+| D13 | PMID/PMCID 导入 | AIPOCH/SynSci | 2 | 3 | 6 | 偏生医；ChemRxiv/DOI 优先 |
+
+### 边界外 / 明确不借（第三次重申，不评分）
+
+| 类别 | 代表 | 原因 |
+|------|------|------|
+| 桌面 / 运行时 | Electron · ACP 多 backend · WSL sandbox · Prisma 桌面库 | 栈错位 |
+| 计算环境 | Notebook/SSH/Slurm/HPC · remote-compute · cloud-compute 全家桶 | 产品边界外 |
+| 生态 | Skills Marketplace · 全量 Specialist · skill-installer | 运营面过大 |
+| 文献栈错位 | **arXiv** · 全量 `pdf-structure` · PDF 批注工作台 · Zotero | 已定 ChemRxiv；UX/协议成本 |
+| 生物 / 结构预测 | AlphaFold/Boltz/ESMFold/OpenFold · scvi · 基因组学连接器 | 非化学品配方 |
+| 药化计算 | docking / MD / DiffDock / BindingDB 主路径 · BioNeMo · denovo-design | 弱相关或栈重 |
+| 榜单 | Harbor / DrugDiscoveryBench / cadence 生物 KPI | 不当产品门禁 |
+| 重叠已厚 | paper-lookup 18 API 全家桶 · 再接一层与 OpenAlex 重复的文献源 | 维护面＞增益 |
+
+### 第三次深扫相对二次的增量（仅新记）
+
+| 增量 | 建议归桶 |
+|------|----------|
+| Library 查重组硬化 · 冲突感知 merge · reference-resolver · citation-exchange 保真 | 并进 **F-Lit+** / Metadata Enrich |
+| PubChem synonyms / batch properties | 并进 **F-Chem-A** |
+| Dimensional analysis · ScholarEval · RDKit Skill · exclusion ledger · Hypotheses · `/review` | Skill 快插；可贴 F-Lab / F-Quality / F-Lit+ |
+| Document reader · matchms · 配方 Pareto 纪律 · scientific-output-comparison | Tier C；按实验室/DOE 偏好点名 |
+
+### 建议勾选方式
+
+1. 先锁定打包：**F-Quality** / **F-Lit+** / **F-IP** / **F-Chem** / **F-Chem-A** / **F-Lab**（可多选）。  
+2. 在 Tier S→B 内点名子集（或「Tier S 全做」）。  
+3. Tier C/D 默认不排期，除非你点名。  
+4. 确认后回复「写详细方案再开工」或「先做 Sx,Ay,…」。
+
 ## 请评估
 
 1. 是否锁定 **F-Quality = 1** 与/或 **F-Lit+ = 2→5** / **F-IP = 3**？  
 2. 是否插队 **F-Chem**（SynSci SMILES + fetch-outcome）/ **F-Chem-A**（AIPOCH GHS+similarity）或 **F-Lab**（analytical-method-validation，全化学品 QC/ICH）？  
 3. Top-5 内想先做哪几项（可点名子集）？  
-4. Golden Bench 目标题量：20 种子 or 直接冲 50？（种子按 `ProductDomain` 分桶，非 coatings-only）  
-5. 确认后回复「写详细方案再开工」或点名子集。
+4. 是否采纳 **全量目录** 中第三次增量（查重硬化 / PubChem synonyms / dimensional-analysis / exclusion ledger 等）？  
+5. Golden Bench 目标题量：20 种子 or 直接冲 50？（种子按 `ProductDomain` 分桶，非 coatings-only）  
+6. 确认后回复「写详细方案再开工」或点名子集（可用 S#/A#/B#）。
