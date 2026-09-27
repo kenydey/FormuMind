@@ -5,6 +5,7 @@ export const wikiApi = {
   compileWikiTheme: apiMethods.compileWikiTheme,
   ensureWikiDossier: apiMethods.ensureWikiDossier,
   exportWikiReport: apiMethods.exportWikiReport,
+  exportWikiRoCrate: apiMethods.exportWikiRoCrate,
   exportWikiStormReport: apiMethods.exportWikiStormReport,
   getWikiByPath: apiMethods.getWikiByPath,
   getWikiCatalog: apiMethods.getWikiCatalog,

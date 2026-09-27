@@ -244,6 +244,13 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
     fetch into the literature manifest (`POST /api/wiki/literature/enrich-oa`).
     Successful persist invalidates freeze (re-freeze after). Flag
     `literature_oa_enrich_enabled` (default on).
+  - **Lightweight RO-Crate** (Wave D2): Hub STORM **导出 RO-Crate** builds a zip with
+    `ro-crate-metadata.json`, report markdown, literature manifest, preflight, and
+    `steel-stamp.json` honesty summary (no replay claim). Flag
+    `ro_crate_export_enabled` (default off).
+  - **Peer-review skill**: bundled `peer-review` (BLOCKING / OBSERVATION). Hub
+    **审稿一遍** injects the STORM draft into the chat composer and selects the skill
+    — does not auto-rewrite.
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When
