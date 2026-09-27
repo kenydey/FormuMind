@@ -22,6 +22,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
       doe_plan: payload.doe_plan,
       active_constraints: payload.active_constraints,
       measured: payload.measured,
+      agent_context: payload.agent_context,
     });
   }
 

@@ -80,3 +80,18 @@ def report_capabilities() -> dict:
     from ..services.wiki.report_export import export_capabilities
 
     return export_capabilities()
+
+
+@router.get("/reports/checklist/{run_id}")
+def get_review_checklist(run_id: str) -> dict:
+    """Return the structured review checklist for a ReviewRun (P1-32).
+
+    Builds from the persisted run + session dispositions (fail-open);
+    404 when the run does not exist.
+    """
+    from ..services.review_checklist import build_checklist
+
+    checklist = build_checklist(run_id)
+    if checklist is None:
+        raise HTTPException(status_code=404, detail=f"review run not found: {run_id}")
+    return checklist

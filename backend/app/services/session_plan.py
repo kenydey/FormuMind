@@ -187,6 +187,41 @@ def get_plan(plan_id: str) -> Plan | None:
     return _load_plan(plan_id)
 
 
+def list_pending_plans() -> list[dict[str, Any]]:
+    """Summaries of plans still awaiting approval, oldest first.
+
+    Fail-open per file: unreadable or checksum-mismatched files are skipped
+    with a warning instead of aborting the listing.
+    """
+    root = _data_root() / "session_plans"
+    items: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return items
+    for path in sorted(root.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            stored = data.pop("sha256", None)
+            if stored != _checksum(data):
+                raise ValueError(f"plan file checksum mismatch: {path.name}")
+            plan = Plan.from_dict(data)
+        except Exception:
+            logger.warning("session plan list: skipping unreadable file %s", path.name)
+            continue
+        if plan.status != PLAN_PENDING:
+            continue
+        items.append(
+            {
+                "plan_id": plan.plan_id,
+                "session_id": plan.session_id,
+                "created_at": plan.created_at,
+                "phase_names": [p.name for p in plan.phases],
+                "step_count": sum(len(p.steps) for p in plan.phases),
+            }
+        )
+    items.sort(key=lambda it: it["created_at"])
+    return items
+
+
 def decide_plan(plan_id: str, approved: bool, *, actor: str | None = None) -> Plan:
     """Approve or reject a plan. Irreversible: deciding twice raises ValueError."""
     plan = _load_plan(plan_id)

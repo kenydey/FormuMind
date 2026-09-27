@@ -44,6 +44,7 @@ export function evidenceToCitationAnchors(citations?: Evidence[]): CitationAncho
       title: c.title || c.identifier || c.source || `引用 ${id}`,
       snippet: c.snippet || "",
       url: urlCandidate,
+      page: c.page ?? null,
     };
   });
 }

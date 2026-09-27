@@ -6,12 +6,18 @@ export interface CitationAnchor {
   title: string;
   snippet: string;
   url?: string;
+  /** W3-14: 页码定位(后端 Passage page_no / Evidence.page)。 */
+  page?: number | null;
+  /** W3-14: KB source id —— 有值且传入 onJumpToSource 时页码 badge 可点击跳转。 */
+  sourceId?: string | null;
 }
 
 interface CitationRendererProps {
   answer: string;
   footnotes: string;
   anchors: CitationAnchor[];
+  /** W3-14: 页码 badge 点击跳转(打开 SourceDetail 并滚动到对应 chunk)。 */
+  onJumpToSource?: (sourceId: string, page: number | null) => void;
 }
 
 interface TextPart {
@@ -103,6 +109,7 @@ export default function CitationRenderer({
   answer,
   footnotes,
   anchors,
+  onJumpToSource,
 }: CitationRendererProps) {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
@@ -163,8 +170,31 @@ export default function CitationRenderer({
               >
                 {entry.anchor && (
                   <div className="citation-anchor-card bg-ink/60 border border-edge/50 rounded p-2 mb-1 text-xs">
-                    <div className="font-semibold text-slate-200">
-                      {entry.anchor.title}
+                    <div className="font-semibold text-slate-200 flex items-center gap-1.5">
+                      <span className="min-w-0 truncate">{entry.anchor.title}</span>
+                      {/* W3-14: 页码 badge */}
+                      {entry.anchor.page != null &&
+                        (onJumpToSource && entry.anchor.sourceId ? (
+                          <button
+                            type="button"
+                            data-testid={`citation-page-jump-${entry.id}`}
+                            onClick={() =>
+                              onJumpToSource(entry.anchor!.sourceId!, entry.anchor!.page ?? null)
+                            }
+                            className="shrink-0 text-[9px] font-mono px-1.5 py-px rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20"
+                            title={`跳转到第 ${entry.anchor.page} 页切块`}
+                          >
+                            p.{entry.anchor.page}
+                          </button>
+                        ) : (
+                          <span
+                            className="shrink-0 text-[9px] font-mono px-1.5 py-px rounded border border-edge text-slate-500"
+                            data-testid={`citation-page-badge-${entry.id}`}
+                            title={`页码 ${entry.anchor.page}`}
+                          >
+                            p.{entry.anchor.page}
+                          </span>
+                        ))}
                     </div>
                     <div className="text-slate-400 mt-0.5">
                       {entry.anchor.snippet}

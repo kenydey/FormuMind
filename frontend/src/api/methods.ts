@@ -38,6 +38,7 @@ import type {
   IngestResponse,
   IntentResult,
   KBQualityOps,
+  MemoryListResponse,
   KBReindexResult,
   KBSourcesResponse,
   KBStats,
@@ -102,8 +103,12 @@ import type {
   SessionInfoResponse,
   SessionListResponse,
   SessionLoadResponse,
+  SessionPlan,
+  SessionPlanPendingResponse,
   SimilarFormulationResponse,
   SourceStatus,
+  SourceTablesResponse,
+  ProvenanceLineageResponse,
   StructureRecognitionResult,
   SubstitutionReport,
   SupplyRiskReport,
@@ -1243,6 +1248,21 @@ export const apiMethods = {
       {},
     ),
 
+  /** W3-11: pending MCP tool approval requests (feeds the approval dialog). */
+  getMcpApprovalPending: () =>
+    get<import("./types").McpApprovalPendingResponse>("/api/mcp/approvals/pending"),
+
+  /** W3-11: submit an allow/deny decision for an MCP approval request. */
+  decideMcpApproval: (
+    requestId: number,
+    decision: "allow" | "deny",
+    scope: import("./types").McpApprovalDecisionScope = "once",
+  ) =>
+    post<{ ok: boolean; request_id: number; decision: string; scope: string }>(
+      `/api/mcp/approvals/${requestId}/decide`,
+      { decision, scope },
+    ),
+
   getMeta: () =>
     get<{
       domains: string[];
@@ -1786,6 +1806,39 @@ export const apiMethods = {
     return { blob, filename: m?.[1] || `report.${body.format}` };
   },
   rebuildWikiFts: () => post<{ ok: boolean; indexed?: number }>("/api/wiki/fts/rebuild", {}),
+  /** W3-13: 技术报告导出 — POST /api/reports/export {kind, format, project_id} → 文件下载。 */
+  exportTechReport: async (body: {
+    kind: "formulation" | "doe" | "optimization";
+    format: "docx" | "pdf" | "html" | "md";
+    project_id: string;
+  }) => {
+    const res = await fetch("/api/reports/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text || `tech report export failed (${res.status})`;
+      try {
+        const j = JSON.parse(text);
+        if (j?.detail?.error === "publication_preflight_blocked") {
+          detail = "发布预检未通过，导出被拒绝（publication preflight blocked）";
+        }
+      } catch {
+        /* keep raw text */
+      }
+      const err = new Error(detail) as Error & { status?: number };
+      err.status = res.status;
+      throw err;
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `${body.kind}_report.${body.format}` };
+  },
+  getReportCapabilities: () =>
+    get<Record<string, boolean | string | null>>("/api/reports/capabilities"),
   /** S2: deterministic wiki catalog from wiki_pages (App-maintained; not SSOT). */
   getWikiCatalog: (params?: {
     limit?: number;
@@ -2118,5 +2171,55 @@ export const apiMethods = {
 
   installDependencies: (names: string[], upgrade = false) =>
     postAccepted("/api/dependencies/install", { names, upgrade }),
+
+  // W3-8: agent memory management (router defined in backend/app/api/memories.py)
+  listMemories: (opts?: {
+    scope?: string;
+    scope_id?: string;
+    q?: string;
+    page?: number;
+    page_size?: number;
+  }) => {
+    const p = new URLSearchParams();
+    if (opts?.scope) p.set("scope", opts.scope);
+    if (opts?.scope_id) p.set("scope_id", opts.scope_id);
+    if (opts?.q) p.set("q", opts.q);
+    if (opts?.page) p.set("page", String(opts.page));
+    if (opts?.page_size) p.set("page_size", String(opts.page_size));
+    const qs = p.toString();
+    return get<MemoryListResponse>(`/api/memories${qs ? `?${qs}` : ""}`);
+  },
+
+  deleteMemory: (id: number) =>
+    del<{ ok: boolean; id: number }>(`/api/memories/${id}`),
+
+  /** W3-7: table assets extracted from a source (kind badge + row preview). */
+  getSourceTables: (sourceId: string) =>
+    get<SourceTablesResponse>(`/api/sources/${encodeURIComponent(sourceId)}/tables`),
+
+  /** W3-9: fetch a session plan by id. */
+  getSessionPlan: (planId: string) =>
+    get<SessionPlan>(`/api/session-plans/${encodeURIComponent(planId)}`),
+
+  /** W3-9: approve/reject a session plan. Irreversible server-side (409 on re-decide). */
+  decideSessionPlan: (planId: string, approved: boolean, actor?: string) =>
+    post<SessionPlan>(`/api/session-plans/${encodeURIComponent(planId)}/decide`, {
+      approved,
+      actor: actor ?? null,
+    }),
+
+  /** W3-9: plans awaiting approval, oldest first (drives the approval center). */
+  listPendingSessionPlans: () =>
+    get<SessionPlanPendingResponse>("/api/session-plans/pending"),
+
+  /** W3-10: upstream provenance edges for a node (BFS, fail-open). */
+  getProvenanceLineage: (nodeType: string, nodeId: string, depth = 3) => {
+    const qs = new URLSearchParams({
+      node_type: nodeType,
+      node_id: nodeId,
+      depth: String(depth),
+    });
+    return get<ProvenanceLineageResponse>(`/api/provenance/lineage?${qs}`);
+  },
 };
 

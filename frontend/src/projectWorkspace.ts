@@ -104,6 +104,8 @@ export interface ProjectWorkspacePayload {
   wiki_dossier_auto_patch?: boolean;
   /** Post-A′ #4: project-level prediction soft-correct (global default still off). */
   prediction_bias_soft_correct?: boolean;
+  /** W1-3 (P0-5): 项目级 agent 上下文, 注入 prompt. */
+  agent_context?: string;
 }
 
 export interface StoreWorkspaceSlice {
@@ -144,6 +146,8 @@ export interface StoreWorkspaceSlice {
   wikiDossierAutoPatch: boolean;
   /** Post-A′ #4: project-level soft-correct of predicted metrics. */
   predictionBiasSoftCorrect: boolean;
+  /** W1-3 (P0-5): 项目级 agent 上下文, 注入 prompt. */
+  agentContext: string;
 }
 
 function adaptiveFromLoopReport(loop: LoopReport | null | undefined): AdaptiveDOEMetadata | null {
@@ -209,6 +213,7 @@ export function buildWorkspacePayload(slice: StoreWorkspaceSlice): ProjectWorksp
     auto_adopt_next_doe_on_loop: slice.autoAdoptNextDoeOnLoop,
     wiki_dossier_auto_patch: slice.wikiDossierAutoPatch,
     prediction_bias_soft_correct: slice.predictionBiasSoftCorrect,
+    agent_context: slice.agentContext,
   };
 }
 
@@ -267,6 +272,7 @@ export function applyWorkspacePayload(
     autoAdoptNextDoeOnLoop: ws.auto_adopt_next_doe_on_loop ?? false,
     wikiDossierAutoPatch: ws.wiki_dossier_auto_patch ?? false,
     predictionBiasSoftCorrect: ws.prediction_bias_soft_correct ?? false,
+    agentContext: ws.agent_context ?? "",
   };
 }
 

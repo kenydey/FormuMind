@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# W3-3 (P1-24): fulltext_enrich emits one Evidence row per fetched chunk with
+# identifier "{original_identifier}#p{N}". The fragment is stripped for store
+# lookups so a document enrich already persisted is reused, not re-fetched.
+_ENRICH_CHUNK_ID_RE = re.compile(r"^(?P<base>.+)#p(?P<idx>\d+)$")
+
 # Per-source network ceiling — prevents one hung API from blocking the whole search.
 _SOURCE_TIMEOUT_SEC = 25
 
@@ -1322,6 +1327,13 @@ def read_passages(
     Search returns metadata + snippets only; call this on shortlisted hits to
     get page-anchored passages. Never raises — fail-open returns ``([], meta)``
     with ``meta["reason"]`` explaining why.
+
+    W3-3 (P1-24): when ``fulltext_enrich`` already produced the source's chunks
+    (enrich emits one Evidence row per chunk as ``{identifier}#p{N}``), the
+    persisted document is reused — the fetcher is not called again. The enrich
+    stage and the read stage share the ``max_chars`` budget pool: characters
+    the enrich stage already delivered (the chunk row's snippet) count against
+    the read budget. Returned passages carry ``origin`` = "enrich" | "ondemand".
     """
     meta: dict = {"ok": False, "truncated": False, "source_id": None, "reason": ""}
     try:
@@ -1335,10 +1347,17 @@ def read_passages(
 
         settings = get_settings()
         store = get_source_store()
+        # W3-3 (P1-24): strip the enrich chunk-row fragment for the store lookup
+        # so a document enrich already persisted is reused, not re-fetched.
+        identifier = evidence.identifier or ""
+        _frag = _ENRICH_CHUNK_ID_RE.match(identifier)
+        enrich_chunk_row = _frag is not None
+        lookup_identifier = _frag.group("base") if _frag else identifier
         origin = canonical_origin_url(
-            evidence.identifier, url=getattr(evidence, "url", None)
+            lookup_identifier, url=getattr(evidence, "url", None)
         )
         doc = store.find_by_origin_url(origin) if origin else None
+        fetched_now = False
         if doc is None or not getattr(doc, "full_text", None):
             # On-demand fetch, gated by fulltext_enrich — no silent downloads.
             if not getattr(settings, "fulltext_enrich", False):
@@ -1347,7 +1366,14 @@ def read_passages(
             from .fulltext_fetcher import enrich_search_results
 
             try:
-                enrich_search_results([evidence], max_docs=1, project_id=project_id)
+                # Fetch by the base identifier so the persisted origin_url stays
+                # consistent with later (fragment-stripped) lookups.
+                fetch_evidence = (
+                    evidence.model_copy(update={"identifier": lookup_identifier})
+                    if enrich_chunk_row
+                    else evidence
+                )
+                enrich_search_results([fetch_evidence], max_docs=1, project_id=project_id)
             except Exception as fetch_exc:  # noqa: BLE001
                 logger.debug("read_passages on-demand fetch failed: %s", fetch_exc)
             # Re-obtain the store: the fetch may have persisted via another session.
@@ -1356,7 +1382,21 @@ def read_passages(
             if doc is None or not getattr(doc, "full_text", None):
                 meta["reason"] = "fetch_failed"
                 return [], meta
+            fetched_now = True
         meta["source_id"] = doc.id
+        # W3-3 (P1-24): enrich and read share the max_chars budget pool —
+        # characters the enrich stage already delivered (this chunk row's
+        # snippet) count against the read truncation budget.
+        enrich_consumed = (
+            len(getattr(evidence, "snippet", None) or "") if enrich_chunk_row else 0
+        )
+        budget = max(0, max_chars - enrich_consumed)
+        meta["enrich_consumed_chars"] = enrich_consumed
+        from_enrich = (not fetched_now) and (
+            enrich_chunk_row
+            or (getattr(doc, "extraction_status", None) or "") == "fulltext"
+        )
+        passage_origin = "enrich" if from_enrich else "ondemand"
         chunks = chunk_markdown(
             doc.full_text,
             max_chars=int(getattr(settings, "ingest_chunk_max_chars", 1600) or 1600),
@@ -1374,7 +1414,7 @@ def read_passages(
                     meta["truncated"] = True
                     break
                 seen_pages.add(c.page_no)
-            if total + len(ctext) > max_chars and passages:
+            if total + len(ctext) > budget and passages:
                 meta["truncated"] = True
                 break
             passages.append(
@@ -1385,6 +1425,7 @@ def read_passages(
                     char_end=getattr(c, "offset_end", None),
                     section_title=getattr(c, "heading_path", "") or "",
                     text=ctext,
+                    origin=passage_origin,
                 )
             )
             total += len(ctext)

@@ -18,6 +18,8 @@ import { classifyValidateWarnings } from "../utils/validateWarningActions";
 import Modal from "./Modal";
 import IPReportModal from "./IPReportModal";
 import VersionHistoryModal from "./VersionHistoryModal";
+import ProvenanceLineage from "./ProvenanceLineage"; // W3-10
+import TechReportExportButton from "./TechReportExportButton"; // W3-13
 import MaterialSubstitutionModal from "./MaterialSubstitutionModal";
 import SimilarFormulationModal from "./SimilarFormulationModal";
 import FormulaTableView from "./FormulaTableView";
@@ -146,6 +148,7 @@ function FormulaCard({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [substituteOpen, setSubstituteOpen] = useState<string | null>(null);
   const [similarOpen, setSimilarOpen] = useState(false);
+  const [provenanceOpen, setProvenanceOpen] = useState(false); // W3-10
   const expanded = open || forceOpen;
 
   // Color swatch from CIELAB values when available (CSS Color Level 4 lab()).
@@ -407,6 +410,14 @@ function FormulaCard({
             >
               🕘 修订历史
             </button>
+            {/* W3-10: 证据谱系（provenance lineage） */}
+            <button
+              onClick={(e) => { e.stopPropagation(); setProvenanceOpen(true); }}
+              className="flex-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent hover:border-accent/50"
+              title="查看该配方的证据谱系：结论 ← 文献 / 实验运行"
+            >
+              🔗 证据谱系
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); setSimilarOpen(true); }}
               className="flex-1 text-[10px] border border-edge text-slate-400 rounded px-2 py-1 hover:text-accent2 hover:border-accent2/50"
@@ -441,6 +452,15 @@ function FormulaCard({
       )}
       {similarOpen && (
         <SimilarFormulationModal formulation={form} onClose={() => setSimilarOpen(false)} />
+      )}
+      {/* W3-10: 证据谱系入口 */}
+      {provenanceOpen && (
+        <ProvenanceLineage
+          nodeType="formulation"
+          nodeId={form.client_uid ?? form.name}
+          title={form.name}
+          onClose={() => setProvenanceOpen(false)}
+        />
       )}
     </div>
   );
@@ -692,6 +712,7 @@ export default function FormulaLeaderboard() {
           </button>
         </div>
         <ListExportMenu forms={leaderboard} />
+        <TechReportExportButton kind="formulation" />
       </div>
       {formulationValidateWarnings.length > 0 && (
         <div

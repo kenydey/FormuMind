@@ -49,6 +49,13 @@ def submit_plan(body: SubmitPlanBody) -> dict:
     return _to_out(plan)
 
 
+@router.get("/pending", response_model=dict)
+def list_pending() -> dict:
+    """Plans awaiting approval, oldest first (drives the frontend approval center)."""
+    items = plan_svc.list_pending_plans()
+    return {"items": items, "total": len(items)}
+
+
 @router.get("/{plan_id}", response_model=dict)
 def get_plan(plan_id: str) -> dict:
     try:

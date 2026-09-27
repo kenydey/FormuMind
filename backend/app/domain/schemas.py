@@ -369,6 +369,11 @@ class Passage(BaseModel):
     char_end: int | None = None
     section_title: str = ""
     text: str = ""
+    # W3-3 (P1-24): how the passage text was obtained — "enrich" when
+    # fulltext_enrich already had the full text (reused, no new fetch),
+    # "ondemand" when this read call fetched it (or pulled a pre-existing
+    # local document from the store outside the enrich pipeline).
+    origin: str = ""
 
 
 class ParameterBoundary(BaseModel):

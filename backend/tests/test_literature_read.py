@@ -166,3 +166,129 @@ def test_iter_search_marks_has_fulltext(monkeypatch):
     by_id = {e.identifier: e for e in final}
     assert by_id["10.1/doi1"].has_fulltext is True
     assert by_id["10.1/doi2"].has_fulltext is False
+
+
+# ---------------------------------------------------------------------------
+# W3-3 (P1-24): fulltext_enrich shares the passages budget with the read stage.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _enrich_on(monkeypatch):
+    monkeypatch.setenv("FORMUMIND_FULLTEXT_ENRICH", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+class _FulltextDoc(_Doc):
+    # extraction_status="fulltext" is what _persist_fulltext writes — marks a
+    # document produced by the enrich pipeline.
+    extraction_status = "fulltext"
+
+
+def test_enrich_chunk_row_reuses_persisted_doc_no_refetch(
+    monkeypatch, _store_with_doc, _enrich_on
+):
+    """Enrich chunk-row id '{id}#p{N}' hits the already-persisted doc: the
+    fetcher must NOT be called again, and passages are marked origin='enrich'."""
+    calls = []
+
+    def fake_enrich(*a, **k):
+        calls.append((a, k))
+        return [], {}
+
+    monkeypatch.setattr(
+        "app.services.fulltext_fetcher.enrich_search_results", fake_enrich
+    )
+    ev = _ev(identifier="10.1016/j.porgcoat.2019.105338#p2")
+    passages, meta = literature.read_passages(ev)
+    assert calls == []
+    assert meta["ok"] is True and passages
+    assert all(p.origin == "enrich" for p in passages)
+
+
+def test_enrich_consumed_chars_share_read_budget(
+    monkeypatch, _store_with_doc, _enrich_on
+):
+    """Chars the enrich stage already delivered (the chunk row's snippet)
+    count against the read max_chars budget."""
+    monkeypatch.setattr(
+        "app.services.fulltext_fetcher.enrich_search_results",
+        lambda *a, **k: ([], {}),
+    )
+    snippet = "x" * 1500
+    ev = _ev(identifier="10.1016/j.porgcoat.2019.105338#p0", snippet=snippet)
+    passages, meta = literature.read_passages(ev, max_chars=3000)
+    assert meta["enrich_consumed_chars"] == 1500
+    total = sum(len(p.text) for p in passages)
+    # Without the deduction the ~3490-char full text would yield two passages
+    # (~2300 chars) within 3000 chars; with the shared budget (3000-1500=1500)
+    # only the first ~1140-char chunk fits.
+    assert total <= 3000 - 1500
+    assert meta["truncated"] is True
+    assert all(p.origin == "enrich" for p in passages)
+
+
+def test_passage_origin_ondemand_and_enrich(monkeypatch, _enrich_on):
+    """Origin marking: this call's on-demand fetch -> 'ondemand'; a document
+    already produced by enrich (extraction_status='fulltext') -> 'enrich'."""
+    # --- on-demand fetch path ---
+    shared = _Store(None)
+    monkeypatch.setattr(
+        "app.db.source_store.get_source_store", lambda: shared
+    )
+
+    def fake_enrich(evidence, **kw):
+        shared._doc = _Doc()  # persisted without enrich status marker
+
+    monkeypatch.setattr(
+        "app.services.fulltext_fetcher.enrich_search_results", fake_enrich
+    )
+    try:
+        passages, meta = literature.read_passages(_ev())
+    finally:
+        get_settings.cache_clear()
+    assert meta["ok"] is True and passages
+    assert all(p.origin == "ondemand" for p in passages)
+
+    # --- enrich-produced document reused via base identifier ---
+    monkeypatch.setattr(
+        "app.services.fulltext_fetcher.enrich_search_results",
+        lambda *a, **k: ([], {}),
+    )
+    monkeypatch.setattr(
+        "app.db.source_store.get_source_store",
+        lambda: _Store(_FulltextDoc()),
+    )
+    passages, meta = literature.read_passages(_ev())
+    assert meta["ok"] is True and passages
+    assert all(p.origin == "enrich" for p in passages)
+
+
+def test_enrich_off_behavior_unchanged(monkeypatch, _enrich_off):
+    """Gate semantics unchanged when fulltext_enrich is off: no fetch is
+    attempted, and pre-existing local docs read exactly as before."""
+    calls = []
+    monkeypatch.setattr(
+        "app.services.fulltext_fetcher.enrich_search_results",
+        lambda *a, **k: calls.append(1) or ([], {}),
+    )
+    # Chunk-row id, empty store, enrich off -> gate refuses, no fetch.
+    monkeypatch.setattr(
+        "app.db.source_store.get_source_store", lambda: _Store(None)
+    )
+    passages, meta = literature.read_passages(
+        _ev(identifier="10.1016/j.porgcoat.2019.105338#p1")
+    )
+    assert passages == [] and meta["reason"] == "no_fulltext"
+    assert calls == []
+
+    # Pre-existing local doc, enrich off -> same passages as before W3-3.
+    monkeypatch.setattr(
+        "app.db.source_store.get_source_store", lambda: _Store(_Doc())
+    )
+    passages, meta = literature.read_passages(_ev())
+    assert meta["ok"] is True and calls == []
+    assert [p.page_no for p in passages] == [1, 2, 3]
+    assert meta.get("enrich_consumed_chars") == 0

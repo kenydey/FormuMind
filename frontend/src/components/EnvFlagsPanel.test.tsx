@@ -83,4 +83,29 @@ describe("EnvFlagsPanel focus anchor", () => {
     });
     expect(useStore.getState().envFlagsRevision).toBe(1);
   });
+
+  it("W3-12: renders auto_audit_enabled toggle from backend registry", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getEnvFlags).mockResolvedValue({
+      flags: [
+        flag("auto_audit_enabled", false, "agent", "智能体"),
+        flag("mcp_approval_enabled", false, "agent", "智能体"),
+      ],
+    });
+    vi.mocked(api.postEnvFlags).mockResolvedValue({
+      updated: ["auto_audit_enabled"],
+      rejected: [],
+      flags: [flag("auto_audit_enabled", true, "agent", "智能体")],
+    });
+    render(<EnvFlagsPanel />);
+    const row = await screen.findByTestId("env-flag-auto_audit_enabled");
+    expect(row).toBeInTheDocument();
+    // toggle True then save → postEnvFlags called with the update
+    const trueBtn = row.querySelectorAll("button")[0];
+    await user.click(trueBtn!);
+    await user.click(screen.getByRole("button", { name: /保存并生效/ }));
+    await waitFor(() => {
+      expect(api.postEnvFlags).toHaveBeenCalledWith({ auto_audit_enabled: true });
+    });
+  });
 });

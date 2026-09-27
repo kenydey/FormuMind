@@ -15,6 +15,7 @@ import { useStore } from "../store";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
 import ArtifactSplitLayout from "./ArtifactSplitLayout";
 import DoeHistoryPanel from "./DoeHistoryPanel";
+import TechReportExportButton from "./TechReportExportButton";
 import ThinkingTimeline from "./ThinkingTimeline";
 import { engineOk, useEngineAvailability } from "../hooks/useEngineAvailability";
 
@@ -293,6 +294,7 @@ export default function DoeResultsPanel() {
           >
             {busy === "doe" ? "闭环中…" : "运行 DOE 闭环"}
           </button>
+          <TechReportExportButton kind="doe" />
           <button
             type="button"
             disabled={factorBusy}
@@ -342,7 +344,10 @@ export default function DoeResultsPanel() {
               )}
               {optChartData.length > 1 && (
                 <div className="h-24 rounded border border-edge/40 bg-ink/40 p-2">
-                  <div className="text-[10px] text-slate-500 mb-1">优化收敛曲线（最佳得分）</div>
+                  <div className="text-[10px] text-slate-500 mb-1 flex items-center justify-between">
+                    <span>优化收敛曲线（最佳得分）</span>
+                    <TechReportExportButton kind="optimization" />
+                  </div>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={optChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                       <XAxis dataKey="iter" hide />

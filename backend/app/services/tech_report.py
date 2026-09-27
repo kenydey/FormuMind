@@ -227,11 +227,18 @@ _GATHER = {
 }
 
 
-def assemble_report(kind: str, *, project_id: str) -> dict[str, Any]:
+def assemble_report(
+    kind: str,
+    *,
+    project_id: str,
+    checklist: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Assemble a de-academized technical report as Markdown (fail-open).
 
-    Returns ``{"kind","project_id","title","markdown","missing","generated_at"}``.
-    Unknown kind → ValueError. Missing data → noted in ``missing``, never raised.
+    Returns ``{"kind","project_id","title","markdown","missing","generated_at",
+    "checklist_summary"}``. Unknown kind → ValueError. Missing data → noted
+    in ``missing``, never raised. ``checklist`` (optional, P1-33) is a
+    ``review_checklist.build_checklist`` payload rendered as an appendix.
     """
     if kind not in _GATHER:
         raise ValueError(f"unknown report kind: {kind!r} (expected one of {REPORT_KINDS})")
@@ -252,14 +259,27 @@ def assemble_report(kind: str, *, project_id: str) -> dict[str, Any]:
     missing_block = ""
     if missing:
         missing_block = "## 数据缺失说明\n\n" + "\n".join(f"- {m}" for m in missing) + "\n\n"
+    checklist_block = ""
+    checklist_summary: dict[str, Any] | None = None
+    if checklist:
+        try:
+            from .review_checklist import render_checklist_markdown
+
+            rendered = render_checklist_markdown(checklist)
+            if rendered:
+                checklist_block = rendered + "\n\n"
+            checklist_summary = checklist.get("summary")
+        except Exception as exc:  # noqa: BLE001 — appendix must never break assembly
+            logger.warning("checklist appendix skipped: %s", exc)
     refs = "## 引用清单\n\n> 本报告由系统数据确定性组装；引用请回链 source_ids / 测量行。\n"
     return {
         "kind": kind,
         "project_id": project_id,
         "title": title,
-        "markdown": header + (body or "> 暂无可用数据\n\n") + missing_block + refs,
+        "markdown": header + (body or "> 暂无可用数据\n\n") + missing_block + checklist_block + refs,
         "missing": missing,
         "generated_at": _utcnow_iso(),
+        "checklist_summary": checklist_summary,
     }
 
 

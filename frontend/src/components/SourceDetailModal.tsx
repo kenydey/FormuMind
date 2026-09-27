@@ -4,22 +4,28 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "./Modal";
+import TableBadges from "./TableBadges";
+import "./CitationRenderer.css"; // W3-14: 复用 citation-flash 高亮动画
 import { api, type KbChunk } from "../api";
 
 export default function SourceDetailModal({
   title,
   sourceId,
   onClose,
+  focusPage = null,
 }: {
   title: string;
   sourceId: string;
   onClose: () => void;
+  /** W3-14: 打开后自动滚动到该页码的首个切块(页码 badge 跳转)。 */
+  focusPage?: number | null;
 }) {
   const [chunks, setChunks] = useState<KbChunk[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [linkReport, setLinkReport] = useState<string | null>(null);
+  const [flashIdx, setFlashIdx] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -37,6 +43,23 @@ export default function SourceDetailModal({
   useEffect(() => {
     if (sourceId) void load();
   }, [sourceId, load]);
+
+  // W3-14: 切块加载完成后, 跳转到 focusPage 的首个切块并高亮。
+  useEffect(() => {
+    if (busy || !chunks || focusPage == null) return;
+    const idx = chunks.findIndex((c) => c.page === focusPage);
+    if (idx < 0) return;
+    setFlashIdx(idx);
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(`source-chunk-${focusPage}-${idx}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("citation-flash");
+        window.setTimeout(() => el.classList.remove("citation-flash"), 2000);
+      }
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [busy, chunks, focusPage]);
 
   async function linkToKg() {
     setLinking(true);
@@ -75,6 +98,8 @@ export default function SourceDetailModal({
           {linkReport && <span className="text-[11px] text-emerald-400">{linkReport}</span>}
         </div>
         {error && <div className="text-xs text-rose-400 bg-rose-500/10 rounded p-2">{error}</div>}
+        {/* W3-7: 表格抽取 badge（kind 标签 + 行列预览） */}
+        <TableBadges sourceId={sourceId} />
         {busy ? (
           <div className="text-xs text-slate-500 py-8 text-center">切块加载中…</div>
         ) : chunks && chunks.length > 0 ? (
@@ -91,7 +116,14 @@ export default function SourceDetailModal({
                       ? `+${c.offset}`
                       : "";
               return (
-                <div key={c.chunk_id ?? i} className="border border-edge rounded p-2 bg-ink/30">
+                <div
+                  key={c.chunk_id ?? i}
+                  id={`source-chunk-${c.page ?? "na"}-${i}`}
+                  data-testid={`source-chunk-${i}`}
+                  className={`border rounded p-2 bg-ink/30 transition-colors ${
+                    flashIdx === i ? "border-accent/60" : "border-edge"
+                  }`}
+                >
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[9px] font-mono text-slate-600">#{i + 1}</span>
                     {loc && <span className="text-[9px] font-mono text-slate-500">{loc}</span>}

@@ -44,6 +44,7 @@ function baseSlice(over: Partial<StoreWorkspaceSlice> = {}): StoreWorkspaceSlice
     autoAdoptNextDoeOnLoop: false,
     wikiDossierAutoPatch: false,
     predictionBiasSoftCorrect: false,
+    agentContext: "",
     ...over,
   };
 }

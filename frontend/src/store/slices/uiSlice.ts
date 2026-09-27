@@ -106,7 +106,7 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
       if (fn) fn(text);
     },
 
-    setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors") =>
+    setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors" | "memory" | "project") =>
       set((draft) => {
         draft.settingsTab = tab;
         if (tab !== "env") draft.settingsEnvFocusAttr = null;

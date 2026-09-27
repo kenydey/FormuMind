@@ -549,7 +549,27 @@ def llm_rerank(
     Prefer :func:`rerank_scored` when callers need an explicit ``applied`` flag
     (P1 #15). Failures with ``len(candidates) > 1`` log a warning so keep-order
     is no longer silent.
+
+    W3-2 (P1-21): when ``settings.rerank_plugin_enabled`` is on and ``k`` is
+    within the plugin cap, routing goes through the optional cross-encoder
+    plugin chain (:mod:`rerank_plugin`); default off, behaviour unchanged.
     """
+    try:
+        from ..config import get_settings
+
+        _plugin_on = bool(getattr(get_settings(), "rerank_plugin_enabled", False))
+    except Exception:
+        _plugin_on = False
+    if _plugin_on and k <= 50:
+        try:
+            from .rerank_plugin import rerank_candidates
+
+            reranked, _applied = rerank_candidates(query, candidates, k=k, req=req)
+            return reranked
+        except Exception as exc:
+            logger.warning(
+                "rerank plugin failed (%s); using legacy llm path", exc
+            )
     items, applied = llm_rerank_scored(query, candidates, k=k, req=req)
     if not applied and len(candidates) > 1:
         logger.warning("llm_rerank not applied; keeping upstream order")

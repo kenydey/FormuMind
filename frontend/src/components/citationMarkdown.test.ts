@@ -46,6 +46,7 @@ describe("citationMarkdown", () => {
         title: "Alpha",
         snippet: "snip",
         url: "https://example.com/a",
+        page: null,
       },
     ]);
   });

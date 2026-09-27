@@ -194,7 +194,12 @@ export default function SourcesPanel() {
   );
   const fileInput = useRef<HTMLInputElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
-  const [detailDoc, setDetailDoc] = useState<{ title: string; sourceId: string } | null>(null);
+  const [detailDoc, setDetailDoc] = useState<{
+    title: string;
+    sourceId: string;
+    /** W3-14: 页码 badge 跳转 — 打开后滚动到该页切块。 */
+    focusPage?: number | null;
+  } | null>(null);
   const [draftReview, setDraftReview] = useState<EmbodimentDraft | null>(null);
   const [schActionBusy, setSchActionBusy] = useState<string | null>(null);
   const [schActionMsg, setSchActionMsg] = useState<string | null>(null);
@@ -716,6 +721,25 @@ export default function SourcesPanel() {
                     🔎
                   </button>
                 )}
+                {/* W3-14: 页码 badge —— 点击打开资料详情并滚动到该页切块 */}
+                {e.page != null && (rowKb?.source_id || mappedSourceId) && (
+                  <button
+                    type="button"
+                    data-testid={`page-jump-${e.identifier || e.title}`}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      setDetailDoc({
+                        title: e.title || e.identifier || "资料",
+                        sourceId: (rowKb?.source_id || mappedSourceId)!,
+                        focusPage: e.page,
+                      });
+                    }}
+                    className="shrink-0 text-[9px] font-mono px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/20"
+                    title={`跳转到第 ${e.page} 页切块`}
+                  >
+                    p.{e.page}
+                  </button>
+                )}
               </div>
             );
           })
@@ -797,6 +821,7 @@ export default function SourcesPanel() {
         <SourceDetailModal
           title={detailDoc.title}
           sourceId={detailDoc.sourceId}
+          focusPage={detailDoc.focusPage ?? null}
           onClose={() => setDetailDoc(null)}
         />
       )}

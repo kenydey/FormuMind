@@ -451,6 +451,11 @@ class Settings(BaseSettings):
     # 默认关闭，按会话 opt-in；evidence 路径已内联 review 的 turn 不重复触发。
     auto_audit_enabled: bool = False
 
+    # W3-2 (P1-21)：交叉编码器 rerank 插件。
+    # 默认关闭；模型名为空时不加载模型，直接走 llm/原序回退。
+    rerank_plugin_enabled: bool = False
+    rerank_model: str = ""
+
     # 专利全文优先用 Google Patents 落地页的 HTML 正文，而不是 PDF。
     # 三条理由，都实测过：
     #   1. 一次请求（~0.7 s）而不是两次；

@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import json
 import logging
 import os
 import shutil
 import tempfile
 import time
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
@@ -227,4 +230,296 @@ def get_source(source_id: str):
         extraction_status=row.extraction_status,
         extraction_error=row.extraction_error,
         created_at=row.created_at,
+    )
+
+
+@router.get("/sources/{source_id}/tables", response_model=dict)
+def get_source_tables(source_id: str):
+    """Table assets extracted from a source (W2-3 table contract; W3-7 UI).
+
+    Passes through the raw sidecar payload so W3-1 PropertySet fields
+    (``property_set``) survive without schema changes. Fail-open: a missing
+    or corrupt sidecar yields an empty table list, never a 500.
+    """
+    from ..services import table_contract as _tc
+
+    tables: list[dict] = []
+    try:
+        path = _tc._tables_path(source_id)
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            raw = payload.get("tables", [])
+            if isinstance(raw, list):
+                tables = [t for t in raw if isinstance(t, dict)]
+    except Exception:
+        logger.exception("get_source_tables failed (fail-open)")
+    return {"source_id": source_id, "tables": tables}
+
+
+# ── W3-5 (P1-36/37): paper detail aggregation + batch export ────────────────
+
+_DETAIL_MAX_CHUNKS = 200
+_DETAIL_CHUNK_TEXT_LIMIT = 4000
+_EXPORT_MAX_SOURCES = 10
+
+
+class DetailChunk(BaseModel):
+    ord: int
+    page_no: int | None = None
+    heading_path: str = ""
+    text: str = ""
+    chars: int = 0
+
+
+class DetailTableSummary(BaseModel):
+    table_id: str
+    page_no: int = 1
+    caption: str = ""
+    kind: str = "other"
+    n_rows: int = 0
+    n_cols: int = 0
+    # W3-1 (P1-19) normalizer output, read raw from the sidecar when present.
+    property_set: dict[str, Any] | None = None
+
+
+class SourceDetailResponse(BaseModel):
+    id: str
+    filename: str
+    title: str
+    source_kind: str
+    raw_text_chars: int
+    extraction_status: str
+    created_at: datetime
+    has_fulltext: bool
+    total_chunks: int
+    chunks_truncated: bool
+    chunks: list[DetailChunk]
+    tables: list[DetailTableSummary]
+    provenance_upstream: list[dict[str, Any]]
+
+
+class SourceExportRequest(BaseModel):
+    source_ids: list[str] = Field(default_factory=list)
+    format: Literal["docx", "pdf", "html", "md"] = "docx"
+
+
+def _detail_session_factory(store):
+    """Indirection for test injection (fail-open path)."""
+    return store._session_factory
+
+
+def _read_detail_chunks(store, source_id: str) -> tuple[list[DetailChunk], int]:
+    """Fail-open chunk read. Returns (chunks, total_count)."""
+    try:
+        from sqlalchemy import func, select
+
+        from ..db.models import DocumentChunk
+
+        sf = _detail_session_factory(store)
+        with sf() as session:
+            total = (
+                session.execute(
+                    select(func.count())
+                    .select_from(DocumentChunk)
+                    .where(DocumentChunk.source_id == source_id)
+                ).scalar()
+                or 0
+            )
+            rows = (
+                session.execute(
+                    select(DocumentChunk)
+                    .where(DocumentChunk.source_id == source_id)
+                    .order_by(DocumentChunk.ord)
+                    .limit(_DETAIL_MAX_CHUNKS)
+                )
+                .scalars()
+                .all()
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("source detail: chunk read failed (fail-open)", exc_info=True)
+        return [], 0
+    chunks: list[DetailChunk] = []
+    for r in rows:
+        raw = r.text or ""
+        text = (
+            raw[:_DETAIL_CHUNK_TEXT_LIMIT] + "…"
+            if len(raw) > _DETAIL_CHUNK_TEXT_LIMIT
+            else raw
+        )
+        chunks.append(
+            DetailChunk(
+                ord=r.ord,
+                page_no=r.page_no,
+                heading_path=r.heading_path or "",
+                text=text,
+                chars=len(raw),
+            )
+        )
+    return chunks, total
+
+
+def _read_property_sets(source_id: str) -> dict[str, dict[str, Any]]:
+    """Raw sidecar read for W3-1 (P1-19) PropertySet output. {} when absent."""
+    try:
+        import json
+
+        from ..services import table_contract
+
+        path = table_contract._tables_path(source_id)  # noqa: SLF001
+        if not path.exists():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        out: dict[str, dict[str, Any]] = {}
+        for ps in payload.get("property_sets", []) or []:
+            if isinstance(ps, dict) and ps.get("table_id"):
+                out[str(ps["table_id"])] = ps
+        return out
+    except Exception:  # noqa: BLE001
+        logger.warning("source detail: property_set read failed (fail-open)", exc_info=True)
+        return {}
+
+
+def _read_detail_tables(source_id: str) -> list[DetailTableSummary]:
+    try:
+        from ..services import table_contract
+
+        assets = table_contract.load_tables(source_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("source detail: table read failed (fail-open)", exc_info=True)
+        return []
+    prop_sets = _read_property_sets(source_id)
+    summaries: list[DetailTableSummary] = []
+    for a in assets or []:
+        try:
+            summaries.append(
+                DetailTableSummary(
+                    table_id=a.table_id,
+                    page_no=a.page_no,
+                    caption=a.caption or "",
+                    kind=a.kind or "other",
+                    n_rows=len(a.rows or []),
+                    n_cols=len(a.headers or []),
+                    property_set=prop_sets.get(a.table_id),
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("source detail: bad table asset skipped", exc_info=True)
+    return summaries
+
+
+def _read_upstream_edges(source_id: str) -> list[dict[str, Any]]:
+    try:
+        from ..services import provenance
+
+        edges = provenance.lineage("source", source_id, depth=3)
+        return [dict(e) for e in (edges or [])]
+    except Exception:  # noqa: BLE001
+        logger.warning("source detail: lineage read failed (fail-open)", exc_info=True)
+        return []
+
+
+@router.get("/sources/{source_id}/detail", response_model=SourceDetailResponse)
+def get_source_detail(source_id: str):
+    """P1-36: one-call paper detail — metadata + chunks + tables + lineage."""
+    row = get_source_store().get(source_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    chunks, total = _read_detail_chunks(get_source_store(), source_id)
+    return SourceDetailResponse(
+        id=row.id,
+        filename=row.filename,
+        title=row.title,
+        source_kind=row.source_kind,
+        raw_text_chars=row.raw_text_chars,
+        extraction_status=row.extraction_status,
+        created_at=row.created_at,
+        has_fulltext=bool(getattr(row, "full_text", None)),
+        total_chunks=total,
+        chunks_truncated=total > len(chunks),
+        chunks=chunks,
+        tables=_read_detail_tables(source_id),
+        provenance_upstream=_read_upstream_edges(source_id),
+    )
+
+
+def _assemble_sources_markdown(docs, missing: list[str]) -> str:
+    from ..services import table_contract
+
+    lines = ["# 文献批量导出", ""]
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    note = f"导出时间：{stamp}；共 {len(docs)} 篇"
+    if missing:
+        note += f"；{len(missing)} 篇未找到已跳过"
+    lines.append(note)
+    refs: list[str] = []
+    for i, doc in enumerate(docs, 1):
+        lines += ["", f"## {i}. {doc.title or doc.filename}", ""]
+        lines.append(f"- 文件名：{doc.filename}")
+        lines.append(f"- 类型：{doc.source_kind}")
+        lines.append(f"- 入库时间：{doc.created_at}")
+        lines.append(f"- 全文字符数：{doc.raw_text_chars}")
+        guide = doc.source_guide if isinstance(doc.source_guide, dict) else {}
+        summary = (guide.get("summary") or "").strip()
+        if summary:
+            lines += ["", "### 摘要", "", summary]
+        entities = [str(e) for e in (guide.get("key_entities") or [])][:30]
+        if entities:
+            lines += ["", "### 关键实体", "", "、".join(entities)]
+        try:
+            tables = table_contract.load_tables(doc.id)
+        except Exception:  # noqa: BLE001
+            tables = []
+        if tables:
+            kinds: dict[str, int] = {}
+            for t in tables:
+                kinds[t.kind or "other"] = kinds.get(t.kind or "other", 0) + 1
+            lines += [
+                "",
+                "### 表格",
+                "",
+                "共 %d 张：" % len(tables)
+                + "、".join(f"{k}×{v}" for k, v in sorted(kinds.items())),
+            ]
+        refs.append(f"[{i}] {doc.title or doc.filename}（source_id={doc.id}）")
+    lines += ["", "## 引用清单", ""]
+    lines += [f"- {r}" for r in refs]
+    return "\n".join(lines) + "\n"
+
+
+@router.post("/sources/export")
+def export_sources(body: SourceExportRequest) -> Response:
+    """P1-37: export up to 10 sources as one docx/pdf/html/md file."""
+    from ..services.wiki.report_export import export_bytes
+
+    ids = [s.strip() for s in (body.source_ids or []) if s and s.strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="source_ids 不能为空")
+    if len(ids) > _EXPORT_MAX_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一次最多导出 {_EXPORT_MAX_SOURCES} 篇",
+        )
+    store = get_source_store()
+    docs, missing = [], []
+    for sid in ids:
+        row = store.get(sid)
+        if row is None:
+            missing.append(sid)
+        else:
+            docs.append(row)
+    if not docs:
+        raise HTTPException(status_code=404, detail="Source not found")
+    markdown = _assemble_sources_markdown(docs, missing)
+    try:
+        payload, media_type, ext = export_bytes(
+            markdown, body.format, title="文献批量导出"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="sources_export.{ext}"'},
     )

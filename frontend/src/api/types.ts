@@ -834,6 +834,24 @@ export interface ConnectorsResponse {
   connectors_builtin_enabled: boolean;
 }
 
+/** W3-11: one row of GET /api/mcp/approvals/pending. */
+export interface McpApprovalPendingItem {
+  request_id: number;
+  server_id: string;
+  tool_name: string;
+  session_id?: string | null;
+  project_id?: string | null;
+  age_s: number;
+}
+
+export interface McpApprovalPendingResponse {
+  items: McpApprovalPendingItem[];
+  total: number;
+}
+
+/** Backend accepts a wider scope union than the dialog offers. */
+export type McpApprovalDecisionScope = "once" | "session" | "project" | "global";
+
 export interface BatchUpdateRequest {
   campaign_id: number;
   rows: Array<{
@@ -2565,4 +2583,110 @@ export interface Supplier {
   lead_time_days?: number | null;
   /** Computed: price set but undated or older than retention window. */
   stale_price?: boolean;
+}
+
+/** W3-8: agent memory row (GET /api/memories). */
+export interface MemoryItem {
+  id: number;
+  scope: "global" | "project" | "user";
+  scope_id: string;
+  key: string;
+  value: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryListResponse {
+  items: MemoryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** W3-7: table extraction badge (GET /api/sources/{id}/tables). Degrades gracefully when fields are absent. */
+export interface TablePropertyView {
+  name: string;
+  name_normalized?: string;
+  value?: number | string | null;
+  unit?: string;
+  unit_normalized?: string;
+  raw_text?: string;
+}
+
+export interface PropertySetView {
+  table_id: string;
+  source_id?: string;
+  kind?: string;
+  properties: TablePropertyView[];
+  warnings?: string[];
+}
+
+export interface TableAssetView {
+  table_id: string;
+  source_id?: string;
+  page_no?: number;
+  caption?: string;
+  /** recipe | performance | tds_sds | other */
+  kind?: string;
+  headers?: string[];
+  rows?: (string | number | null)[][];
+  /** W3-1 PropertySet, present when the normalizer has run. */
+  property_set?: PropertySetView | null;
+  [key: string]: unknown;
+}
+
+export interface SourceTablesResponse {
+  source_id: string;
+  tables: TableAssetView[];
+}
+
+/** W3-10: provenance lineage (GET /api/provenance/lineage). */
+export interface ProvenanceEdge {
+  from_type: string;
+  from_id: string;
+  to_type: string;
+  to_id: string;
+  relation: string;
+}
+
+export interface ProvenanceLineageResponse {
+  node_type: string;
+  node_id: string;
+  depth: number;
+  edges: ProvenanceEdge[];
+}
+
+/** W3-9: session plan (GET /api/session-plans/{id}, POST /api/session-plans/{id}/decide). */
+export interface SessionPlanStep {
+  desc: string;
+  status: string;
+}
+
+export interface SessionPlanPhase {
+  name: string;
+  steps: SessionPlanStep[];
+}
+
+export interface SessionPlan {
+  plan_id: string;
+  session_id: string;
+  phases: SessionPlanPhase[];
+  status: "pending" | "approved" | "rejected";
+  created_at?: string;
+  decided_at?: string | null;
+  decided_by?: string | null;
+}
+
+/** W3-9: one row of GET /api/session-plans/pending. */
+export interface SessionPlanPendingItem {
+  plan_id: string;
+  session_id: string;
+  created_at: number;
+  phase_names: string[];
+  step_count: number;
+}
+
+export interface SessionPlanPendingResponse {
+  items: SessionPlanPendingItem[];
+  total: number;
 }

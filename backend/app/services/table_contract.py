@@ -16,7 +16,10 @@ by-products; this module turns them into *structured assets* with provenance:
   as JSON next to SourceDocument metadata (``data/source_tables/<key>.json``);
   the DB schema is untouched. The parse-time key is the content sha256, which
   equals ``SourceDocument.content_hash``, so assets rejoin documents without
-  any schema change.
+  any schema change. W3-1: ``save_tables`` accepts optional ``property_sets``
+  (normalised :class:`table_normalize.PropertySet` dicts) persisted under the
+  ``"property_sets"`` key of the same sidecar; :func:`load_property_sets`
+  reads them back.
 """
 from __future__ import annotations
 
@@ -411,8 +414,18 @@ def _tables_path(key: str) -> Path:
     return _tables_root() / f"{safe}.json"
 
 
-def save_tables(source_id: str, tables: list[TableAsset]) -> Path | None:
-    """Persist assets as JSON sidecar. Fail-open: returns None on any error."""
+def save_tables(
+    source_id: str,
+    tables: list[TableAsset],
+    *,
+    property_sets: list[dict] | None = None,
+) -> Path | None:
+    """Persist assets as JSON sidecar. Fail-open: returns None on any error.
+
+    W3-1: ``property_sets`` (normalised ``PropertySet.to_dict()`` dicts) are
+    stored under the ``"property_sets"`` key of the same sidecar — no DB
+    schema change, old sidecars without the key keep loading fine.
+    """
     if not source_id:
         return None
     try:
@@ -423,6 +436,8 @@ def save_tables(source_id: str, tables: list[TableAsset]) -> Path | None:
             "extracted_at": _utcnow_iso(),
             "tables": [t.to_dict() for t in tables],
         }
+        if property_sets is not None:
+            payload["property_sets"] = property_sets
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
     except Exception:
@@ -440,4 +455,23 @@ def load_tables(source_id: str) -> list[TableAsset]:
         return [TableAsset.from_dict(d) for d in payload.get("tables", [])]
     except Exception:
         logger.exception("table_contract: load_tables failed (fail-open)")
+        return []
+
+
+def load_property_sets(source_id: str) -> list[dict]:
+    """Load normalised PropertySet dicts (W3-1) for a source id.
+
+    Returns plain dicts (use ``table_normalize.PropertySet.from_dict`` to
+    rehydrate); empty list when the sidecar is missing or has no
+    ``"property_sets"`` key. Never raises.
+    """
+    try:
+        path = _tables_path(source_id)
+        if not path.exists():
+            return []
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        sets = payload.get("property_sets") or []
+        return [dict(s) for s in sets if isinstance(s, dict)]
+    except Exception:
+        logger.exception("table_contract: load_property_sets failed (fail-open)")
         return []

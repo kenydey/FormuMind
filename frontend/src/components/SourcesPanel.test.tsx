@@ -145,4 +145,55 @@ describe("SourcesPanel", () => {
     render(<SourcesPanel />);
     expect(screen.getByText("🔬 正在评估")).toBeTruthy();
   });
+
+  it("W3-14: shows page badge and jumps to the chunk on click", async () => {
+    vi.spyOn(api, "kbChunksBySource").mockResolvedValue([
+      { chunk_id: "c1", text: "p5 text", page: 5 },
+    ] as never);
+    setState({
+      sources: [
+        { title: "文献 A", identifier: "lit-1", source: "literature", page: 5 },
+      ] as never,
+      selectedSources: ["lit-1"],
+      kbIngest: {
+        docs: [{ identifier: "lit-1", status: "indexed", source_id: "src-42", error: null }],
+        done: 1,
+        total: 1,
+        indexed: 1,
+        failed: 0,
+        message: "完成",
+        active: false,
+      } as never,
+    });
+    render(<SourcesPanel />);
+    const badge = await screen.findByTestId("page-jump-lit-1");
+    expect(badge).toHaveTextContent("p.5");
+    badge.click();
+    // 资料详情弹窗打开并请求切块(带 focusPage=5 滚动到对应 chunk)
+    await waitFor(() => {
+      expect(screen.getByTestId("modal-source-detail")).toBeInTheDocument();
+    });
+    expect(api.kbChunksBySource).toHaveBeenCalledWith("src-42");
+  });
+
+  it("W3-14: no page badge when evidence has no page", () => {
+    setState({
+      sources: [
+        { title: "文献 B", identifier: "lit-2", source: "literature" },
+      ] as never,
+      selectedSources: ["lit-2"],
+      kbIngest: {
+        docs: [{ identifier: "lit-2", status: "indexed", source_id: "src-43", error: null }],
+        done: 1,
+        total: 1,
+        indexed: 1,
+        failed: 0,
+        message: "完成",
+        active: false,
+      } as never,
+    });
+    render(<SourcesPanel />);
+    expect(screen.getByText("文献 B")).toBeTruthy();
+    expect(screen.queryByTestId("page-jump-lit-2")).toBeNull();
+  });
 });

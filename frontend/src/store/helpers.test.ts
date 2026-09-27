@@ -54,6 +54,7 @@ function populatedState(): AppState {
     autoAdoptNextDoeOnLoop: true,
     wikiDossierAutoPatch: false,
     predictionBiasSoftCorrect: false,
+    agentContext: "epoxy primer project notes",
   } as unknown as AppState;
 }
 

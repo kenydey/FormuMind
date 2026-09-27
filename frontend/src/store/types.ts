@@ -106,6 +106,8 @@ export interface AppState {
   wikiDossierAutoPatch: boolean;
   /** Post-A′ #4: project-level prediction soft-correct. */
   predictionBiasSoftCorrect: boolean;
+  /** W1-3 (P0-5): 项目级 agent 上下文, 注入 prompt. */
+  agentContext: string;
   /** W5: last followLoopTask failed (non-cancel) — UI may offer retry. */
   loopRetryAvailable: boolean;
   lastLoopTaskId: string | null;
@@ -194,7 +196,7 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors";
+  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors" | "memory" | "project";
   chatComposerPlusEnabled: boolean;
   chatMode: "chat" | "evidence";
   selectedChatSkills: string[];
@@ -300,7 +302,7 @@ export interface AppState {
   ) => void;
   clearSettingsEnvFocus: () => void;
   bumpEnvFlagsRevision: () => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors") => void;
+  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors" | "memory" | "project") => void;
   setChatMode: (mode: "chat" | "evidence") => void;
   toggleSelectedChatSkill: (id: string) => void;
   toggleSelectedConnector: (id: string) => void;
@@ -325,6 +327,8 @@ export interface AppState {
   setAutoAdoptNextDoeOnLoop: (enabled: boolean) => void;
   setWikiDossierAutoPatch: (enabled: boolean) => void;
   setPredictionBiasSoftCorrect: (enabled: boolean) => void;
+  /** W3-6: 项目级 agent 上下文. */
+  setAgentContext: (value: string) => void;
   applyIntent: (text: string) => Promise<string[]>;
 }
 

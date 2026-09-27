@@ -149,3 +149,49 @@ describe("CitationRenderer", () => {
     expect(footnote.classList.contains("citation-footnote-highlight")).toBe(false);
   });
 });
+
+describe("CitationRenderer page badges (W3-14)", () => {
+  it("shows static page badge when no jump handler", () => {
+    const answer = "A claim.[^1]";
+    const footnotes = "[^1]: cited text";
+    render(
+      <CitationRenderer
+        answer={answer}
+        footnotes={footnotes}
+        anchors={[{ id: "1", title: "Paper", snippet: "snip", page: 7 }]}
+      />
+    );
+    const badge = screen.getByTestId("citation-page-badge-1");
+    expect(badge).toHaveTextContent("p.7");
+  });
+
+  it("clickable badge calls onJumpToSource with sourceId+page", () => {
+    const onJump = vi.fn();
+    const answer = "A claim.[^1]";
+    const footnotes = "[^1]: cited text";
+    render(
+      <CitationRenderer
+        answer={answer}
+        footnotes={footnotes}
+        anchors={[{ id: "1", title: "Paper", snippet: "snip", page: 3, sourceId: "src-9" }]}
+        onJumpToSource={onJump}
+      />
+    );
+    fireEvent.click(screen.getByTestId("citation-page-jump-1"));
+    expect(onJump).toHaveBeenCalledWith("src-9", 3);
+  });
+
+  it("no badge when page is absent", () => {
+    const answer = "A claim.[^1]";
+    const footnotes = "[^1]: cited text";
+    render(
+      <CitationRenderer
+        answer={answer}
+        footnotes={footnotes}
+        anchors={[{ id: "1", title: "Paper", snippet: "snip" }]}
+      />
+    );
+    expect(screen.queryByTestId("citation-page-badge-1")).toBeNull();
+    expect(screen.queryByTestId("citation-page-jump-1")).toBeNull();
+  });
+});

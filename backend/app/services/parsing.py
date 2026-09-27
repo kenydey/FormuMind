@@ -70,6 +70,10 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
     The sidecar key is the content sha256, which equals
     ``SourceDocument.content_hash``, so assets rejoin documents without any
     DB schema change. Gate: ``table_extract_enabled`` (default True).
+
+    W3-1: extracted assets are additionally normalised into PropertySets
+    (``table_normalize``) and persisted under the ``"property_sets"`` key of
+    the same sidecar JSON — also fail-open.
     """
     try:
         if not result.ok:
@@ -77,6 +81,7 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
         if not getattr(get_settings(), "table_extract_enabled", True):
             return result
         from . import table_contract as _tc
+        from . import table_normalize as _tn
         blocks = _tc.blocks_from_markdown(result.markdown or "")
         if not blocks:
             return result
@@ -84,7 +89,14 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
         assets = _tc.extract_tables(source_id, blocks, parser=result.parser)
         result.tables = assets
         if assets:
-            _tc.save_tables(source_id, assets)
+            # W3-1: normalise tables → PropertySets, persisted in the same
+            # sidecar JSON. Fail-open: normalisation never blocks extraction.
+            try:
+                prop_dicts = [p.to_dict() for p in _tn.normalize_tables(assets)]
+            except Exception:
+                logger.exception("table_normalize: failed (fail-open)")
+                prop_dicts = None
+            _tc.save_tables(source_id, assets, property_sets=prop_dicts)
     except Exception:
         logger.exception("table_contract: extraction failed (fail-open)")
     return result

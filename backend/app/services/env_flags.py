@@ -215,6 +215,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "turn 结束后自动触发 reviewer 审计（100ms 防抖、per-turn 幂等）；"
             "默认关闭，按会话 opt-in。",
             "agent"),
+    EnvFlag("rerank_plugin_enabled", "交叉编码器精排",
+            "检索后用 cross-encoder 重排候选（可选插件）；缺包或模型加载失败时"
+            "自动回退到 LLM rerank/原序，不阻塞检索。",
+            "retrieval"),
     EnvFlag("patent_prefer_html", "专利用落地页正文",
             "专利全文取 Google Patents 落地页的 abstract/description/claims，而不是先下 PDF。"
             "一次请求约 0.7 秒且完全不需要 OCR；中日文专利还附带英文机器翻译对照。"

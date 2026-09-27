@@ -397,6 +397,14 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       get().scheduleAutosave();
     },
 
+    /** W3-6: 项目级 agent 上下文(多行文本), 保存走现有项目设置 API(autosave → PUT /api/projects/{id}). */
+    setAgentContext: (value: string) => {
+      set((draft) => {
+        draft.agentContext = value;
+      });
+      get().scheduleAutosave();
+    },
+
     applyIntent: async (text) => {
       set((draft) => {
         draft.intentBusy = true;
@@ -727,5 +735,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'setWikiDossierAutoPatch' | 'setPredictionBiasSoftCorrect' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'setWikiDossierAutoPatch' | 'setPredictionBiasSoftCorrect' | 'setAgentContext' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

@@ -14,6 +14,8 @@ import NotebookLMPanel from "./NotebookLMPanel";
 import OrganizationDashboard from "./OrganizationDashboard";
 import SkillsSettingsPanel from "./SkillsSettingsPanel";
 import ConnectorsSettingsPanel from "./ConnectorsSettingsPanel";
+import MemoryPanel from "./MemoryPanel";
+import ProjectSettingsPanel from "./ProjectSettingsPanel";
 import { useStore } from "../store";
 import {
   api,
@@ -181,6 +183,8 @@ export default function SettingsModal() {
           ["api", "API 配置"],
           ["skills", "Skills"],
           ["connectors", "MCP"],
+          ["memory", "记忆"],
+          ["project", "项目"],
           ["env", "环境变量"],
           ["recommend", "推荐"],
           ["notebooklm", "NotebookLM"],
@@ -218,6 +222,10 @@ export default function SettingsModal() {
         <SkillsSettingsPanel reloadKey={reloadKey} />
       ) : settingsTab === "connectors" ? (
         <ConnectorsSettingsPanel reloadKey={reloadKey} />
+      ) : settingsTab === "memory" ? (
+        <MemoryPanel reloadKey={reloadKey} />
+      ) : settingsTab === "project" ? (
+        <ProjectSettingsPanel />
       ) : settingsTab === "env" ? (
         <EnvFlagsPanel reloadKey={reloadKey} />
       ) : settingsTab === "notebooklm" ? (

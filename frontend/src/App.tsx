@@ -7,6 +7,8 @@ import HistoryPanel from "./components/HistoryPanel";
 import ArtifactDrawer from "./components/ArtifactDrawer";
 import SettingsModal from "./components/SettingsModal";
 import ProjectNotebookLMModal from "./components/ProjectNotebookLMModal";
+import McpApprovalCenter from "./components/McpApprovalCenter";
+import SessionPlanApprovalCenter from "./components/SessionPlanApprovalCenter";
 import DegradedBanner from "./components/DegradedBanner";
 import InfraHealthBanner from "./components/InfraHealthBanner";
 import TrainingDataBanner from "./components/TrainingDataBanner";
@@ -174,6 +176,8 @@ export default function App() {
       <ArtifactDrawer />
       <SettingsModal />
       <ProjectNotebookLMModal />
+      <McpApprovalCenter />
+      <SessionPlanApprovalCenter />
     </div>
   );
 }
