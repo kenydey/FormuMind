@@ -238,7 +238,8 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
     `sources` skill (resolve claim↔passage). Flag `sources_audit_enabled` (default on).
   - **Locator honesty**: Citation chips show `pp. N` or **页码未知**. Export
     preflight can flag numeric lines whose `[^n]` footnotes lack page/¶
-    (`citation_locator_preflight`: `off` / `warning` / `blocking`, default warning).
+    (`citation_locator_preflight_enabled`, default on → warning;
+    `citation_locator_preflight_blocking` upgrades to blocking).
   - **Freeze OA enrich**: Knowledge Hub freeze strip **补全文** batches Unpaywall/PMC
     fetch into the literature manifest (`POST /api/wiki/literature/enrich-oa`).
     Successful persist invalidates freeze (re-freeze after). Flag

@@ -127,13 +127,24 @@ def _footnote_locator_map(markdown: str) -> dict[int, dict[str, int | None]]:
 
 
 def _locator_preflight_mode(settings: Any | None) -> str:
-    raw = "warning"
-    if settings is not None:
-        raw = str(getattr(settings, "citation_locator_preflight", "warning") or "warning")
-    mode = raw.strip().lower()
-    if mode in ("off", "false", "0", "none"):
+    """Resolve off | warning | blocking from bool flags (EnvFlag is bool-only).
+
+    Also accepts legacy string ``citation_locator_preflight`` for tests/compat.
+    """
+    if settings is None:
+        return "warning"
+    legacy = getattr(settings, "citation_locator_preflight", None)
+    if isinstance(legacy, str) and legacy.strip():
+        mode = legacy.strip().lower()
+        if mode in ("off", "false", "0", "none"):
+            return "off"
+        if mode in ("blocking", "block", "error"):
+            return "blocking"
+        if mode in ("warning", "warn", "major"):
+            return "warning"
+    if not bool(getattr(settings, "citation_locator_preflight_enabled", True)):
         return "off"
-    if mode in ("blocking", "block", "error"):
+    if bool(getattr(settings, "citation_locator_preflight_blocking", False)):
         return "blocking"
     return "warning"
 

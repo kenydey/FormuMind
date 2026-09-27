@@ -562,8 +562,10 @@ class Settings(BaseSettings):
     evidence_provenance_enabled: bool = True
     # Wave D — claim→passage sources_audit table on ChatResponse (default on).
     sources_audit_enabled: bool = True
-    # Wave D — preflight locator honesty: off | warning | blocking.
-    citation_locator_preflight: str = "warning"
+    # Wave D — preflight locator honesty (EnvFlag registry is bool-only).
+    # enabled=false → off; enabled+!blocking → warning; both true → blocking.
+    citation_locator_preflight_enabled: bool = True
+    citation_locator_preflight_blocking: bool = False
     # Wave D — batch OA enrich into literature manifest (default on).
     literature_oa_enrich_enabled: bool = True
     evidence_reviewer_enabled: bool = False

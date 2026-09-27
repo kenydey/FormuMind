@@ -12,7 +12,11 @@ def test_locator_missing_warning():
         "[^1]: Smith 2023, epoxy coating study\n"
     )
     findings = run_checks(
-        md, settings=SimpleNamespace(citation_locator_preflight="warning")
+        md,
+        settings=SimpleNamespace(
+            citation_locator_preflight_enabled=True,
+            citation_locator_preflight_blocking=False,
+        ),
     )
     locs = [f for f in findings if f.check == "locator_missing"]
     assert len(locs) == 1
@@ -25,7 +29,11 @@ def test_locator_present_passes():
         "[^1]: Source: doc.pdf, pp. 4, ¶2\n"
     )
     findings = run_checks(
-        md, settings=SimpleNamespace(citation_locator_preflight="warning")
+        md,
+        settings=SimpleNamespace(
+            citation_locator_preflight_enabled=True,
+            citation_locator_preflight_blocking=False,
+        ),
     )
     assert not [f for f in findings if f.check == "locator_missing"]
 
@@ -33,7 +41,11 @@ def test_locator_present_passes():
 def test_locator_blocking_mode():
     md = "Adhesion 20 wt%.[^2]\n\n[^2]: Jones 2020\n"
     findings = run_checks(
-        md, settings=SimpleNamespace(citation_locator_preflight="blocking")
+        md,
+        settings=SimpleNamespace(
+            citation_locator_preflight_enabled=True,
+            citation_locator_preflight_blocking=True,
+        ),
     )
     locs = [f for f in findings if f.check == "locator_missing"]
     assert locs and locs[0].severity == "blocking"
@@ -42,6 +54,10 @@ def test_locator_blocking_mode():
 def test_locator_off():
     md = "Adhesion 20 wt%.[^2]\n\n[^2]: Jones 2020\n"
     findings = run_checks(
-        md, settings=SimpleNamespace(citation_locator_preflight="off")
+        md,
+        settings=SimpleNamespace(
+            citation_locator_preflight_enabled=False,
+            citation_locator_preflight_blocking=False,
+        ),
     )
     assert not [f for f in findings if f.check == "locator_missing"]
