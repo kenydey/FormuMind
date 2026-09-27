@@ -560,6 +560,12 @@ class Settings(BaseSettings):
     citation_expand_enabled: bool = True
     # Wave C — structured evidence_provenance on ChatResponse (default on).
     evidence_provenance_enabled: bool = True
+    # Wave D — claim→passage sources_audit table on ChatResponse (default on).
+    sources_audit_enabled: bool = True
+    # Wave D — preflight locator honesty: off | warning | blocking.
+    citation_locator_preflight: str = "warning"
+    # Wave D — batch OA enrich into literature manifest (default on).
+    literature_oa_enrich_enabled: bool = True
     evidence_reviewer_enabled: bool = False
     # Bounded reviewer→LLM repair loop after evidence_reviewer (default off).
     evidence_reviewer_fix_loop_enabled: bool = False
