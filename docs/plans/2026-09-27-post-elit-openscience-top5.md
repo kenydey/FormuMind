@@ -159,6 +159,21 @@
 | **F-Chem-A** | PubChem **完整 GHS** + **similarity**（**4**/可行 **4**）· molecule preview（**3**/可行 **3**）· Rhea（**2**/可行 **3**）· ZINC 可购（**2**/可行 **3**） | `connectors/descriptors/chemistry.ts` · `molecule/*` · `zinc.ts` | 配方日用：危害分类 / 取代基搜索；优于再接一层 ChEMBL |
 | **F-Stamp-UX** | `citations`/`sources` always-on activationPolicy（**3**/可行 **5**）· RO-Crate complete 附 PDF 字节（**3**/可行 **3**）· prepared-literature sidecar（**3**/可行 **4**） | `activation-policy.ts` · `ro-crate-export.ts` · `prepared-literature-sidecar.ts` | 钢印会话强制引用纪律；包内绑死文献 digest |
 
+### AIPOCH 残差（Top-5 / 上表未覆盖 · 二次扫描）
+
+排除已列 Top-5 与 F-Lit-Deep/Cite-Out/Chem-A/Stamp-UX 后，仍值得单独记账的 8 项（**不改变 Top-5**）：
+
+| # | 项 | 必要 | 可行 | 源 | 说明 |
+|---|----|------|------|----|------|
+| 1 | Reviewer rubric: trace-not-recompute | 4 | 5 | `reviewer/rubric.ts` | Wave A 有 reviewer；缺「artifact≻prose / 伪造引用失败」契约 |
+| 2 | Checksum-bound PDF attachment authority | 4 | 4 | `attachment-authority.ts` · `session-pdf-source-resolver.ts` | 字节漂移则 lease 失效；≠ locator 芯片 |
+| 3 | Artifact-bound literature corpus | 4 | 4 | `artifacts/literature-manifest.ts` · `shared/artifact-literature.ts` | 报告版本绑定检索范围 + citation locators；≠ project Manifest |
+| 4 | Reproducibility receipts（table/image compare，无 replay） | 4 | 3 | `artifact-reproducibility*.ts` · `output-comparison.ts` | DOE/图表 matched·different·missing-evidence；不做 notebook 重放 |
+| 5 | DataCite + Zenodo 研究数据连接器 | 3 | 5 | `literature-doi.ts` datacite_* · `zenodo.ts` | 数据集/软件 DOI；涂料数据寄存 |
+| 6 | Stale-review on turn scope drift | 3 | 4 | `reviewer/stale-reviews.ts` | 证据范围变化时作废旧评审 |
+| 7 | Citation fidelity（跨导出保 locator/occurrence） | 3 | 4 | `citation-fidelity.test.ts` · `citation-document.ts` | ≠ CSL 排版；防钢印导出丢语义 |
+| 8 | Smart screening rule history | 3 | 4 | `smart-rule-history.ts` | 准则版本审计；可贴 Smart Screening |
+
 ## 候补（未进前 5）
 
 | 项 | 原因 |
