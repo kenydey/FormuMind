@@ -133,6 +133,21 @@
 | **F-Lab** | Analytical method validation skill（**4**/可行 **4**）· `compare` 先冻结判据（**3**/可行 **5**）· statistical-conventions（**3**/可行 **5**） | `skills/chemistry/analytical-method-validation` · `research/compare` · `core/statistical-conventions` | 涂料 QC / 盐雾等试验报告纪律；与 `method-writer`/DOE 衔接 |
 | **F-Ops** | Export `EXPORTED`/`PARTIAL`/`NOT EXPORTED` 终态（**3**/可行 **5**）· skill-load SHA 审计（**3**/可行 **4**）· install Layer-2 注入拒绝（**3**/可行 **4**）· provenance reason 细分类（**3**/可行 **4**） | `skills/research/export` · skill-runtime / install review · `provenance/envelope.ts` | 钢印包装与 Skills 运营抛光，贴 D2 RO-Crate |
 
+### SynSci 残差（Top-5 / 上表未覆盖 · 二次扫描）
+
+排除已列 Top-5 与 F-Chem/Lab/Ops 后，仍值得单独记账的 8 项（**不改变 Top-5**）：
+
+| # | 项 | 必要 | 可行 | 源 | 说明 |
+|---|----|------|------|----|------|
+| 1 | Cheminformatics definitions | 4 | 5 | `skills/chemistry/cheminformatics-definitions` | 钉死 HBD/HBA/TPSA/InChI/canonical SMILES 口径（≠ SMILES 语法门） |
+| 2 | Statistical power / MDE | 4 | 4 | `skills/research/statistical-power` | DOE/QC 先验样本量；≠ statistical-conventions |
+| 3 | Uncertainty & units | 4 | 4 | `skills/physics/uncertainty-and-units` | 膜厚/VOC/盐雾等 ± 与单位诚实 |
+| 4 | Harness composition manifests | 4 | 3 | `docs/notes/harness-manifests.md` | prompt/tool schema 指纹进钢印（≠ Golden 出题） |
+| 5 | Research-contract preregistration | 4 | 3 | `session/research.ts` · research-workflows | 试验前冻结分析计划 artifact |
+| 6 | Analysis-report skill | 3 | 5 | `skills/core/analysis-report` | 条款→步骤图 + 决策日志；贴 method-writer |
+| 7 | Provenance review lifecycle | 3 | 4 | `science/provenance/review.ts` | open→addressed→confirmed；修正不自关 |
+| 8 | Acceptance-checks skill | 3 | 4 | `skills/core/acceptance-checks` | 把工艺窗写成可运行出口检查 |
+
 ### AIPOCH 向补充打包（未挤进 Top-5，可插队）
 
 来自 AIPOCH 深挖：Top-5 中 2/4/5 已覆盖其最高优先；下列为同栈延伸，**不改变 Top-5 排序**。
@@ -151,6 +166,9 @@
 | **SMILES 校验门**（SynSci） | 必要性高、可行极高；未进 Top-5 因偏「化学工具」而非钢印/文献主轴——**建议作 F-Chem 首选插队** |
 | **Fetch-outcome 诚实**（空≠故障） | 钢印诚实度增益大、改动小；可并进任意连接器波 |
 | **Analytical method validation** skill | 涂料 QC 强相关；与 Golden Bench / method-writer 互补 |
+| **Cheminformatics definitions** / **statistical-power** / **uncertainty-and-units** | SynSci 残差；定义·样本量·单位诚实，Skill 为主可快插 |
+| Harness composition manifests / research-contract preregistration | 钢印指纹与试验前契约；可贴 F-Quality |
+| Analysis-report / acceptance-checks / review lifecycle | 报告与复核纪律抛光 |
 | Export PARTIAL 终态 / skill SHA / provenance reason 细分类 | D2 抛光；必要性中等 |
 | **PubChem 完整 GHS + similarity**（AIPOCH） | 配方日用强；建议作 **F-Chem-A** 首选（比再接 ChEMBL 更贴主路径） |
 | ChEMBL connector | PubChem/ChEBI/SureChEMBL 已覆盖主路径；助剂 bioactivity 场景可开 |
