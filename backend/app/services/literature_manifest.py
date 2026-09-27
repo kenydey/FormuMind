@@ -336,6 +336,75 @@ def update_item_screening(
     return save_manifest(man)
 
 
+def set_item_locator(
+    project_id: str,
+    item_id: str,
+    locator: dict[str, Any] | None,
+    *,
+    actor: str = "user",
+) -> dict[str, Any]:
+    """W4-6 · P0-15: 给 manifest item 写引用定位器 ``{"page","figure","table"}``。
+
+    * 只保留非空字段；``locator`` 为空/全空 → 清除已有 locator。
+    * locator 是**标注元数据**（非 corpus 成员变更）：不清除 freeze，
+      freeze 摘要（``compute_digest`` 只覆盖 id|doi|title）不受影响；
+      freeze 后仍可精化定位器，供 W4-2 ``evidence_json`` 读取。
+    * 非法 page（如非数字字符串）→ ValueError。
+    """
+    man = load_manifest(project_id)
+    norm = _normalize_locator(locator)  # raises ValueError on bad input
+    found = False
+    for item in man.get("items") or []:
+        if str(item.get("id")) == str(item_id):
+            if norm:
+                item["locator"] = norm
+            else:
+                item.pop("locator", None)
+            item["locator_by"] = (actor or "user").strip() or "user"
+            item["locator_at"] = time.time()
+            found = True
+            break
+    if not found:
+        raise LookupError("item not found")
+    man["events"] = (man.get("events") or [])[-180:] + [
+        {"type": "locator_set", "at": time.time(), "item_id": str(item_id)}
+    ]
+    return save_manifest(man)
+
+
+def get_item_locator(project_id: str, item_id: str) -> dict[str, Any] | None:
+    """W4-6 · P0-15: 读 manifest item 的 locator（无 → None）。"""
+    man = load_manifest(project_id)
+    for item in man.get("items") or []:
+        if str(item.get("id")) == str(item_id):
+            loc = item.get("locator")
+            return dict(loc) if isinstance(loc, dict) else None
+    return None
+
+
+def _normalize_locator(locator: dict[str, Any] | None) -> dict[str, Any]:
+    """校验并紧凑化 locator dict；非法输入抛 ValueError。"""
+    if not locator:
+        return {}
+    if not isinstance(locator, dict):
+        raise ValueError("locator must be a dict")
+    out: dict[str, Any] = {}
+    page = locator.get("page")
+    if page is not None:
+        try:
+            page_i = int(page)
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid locator.page: {page!r}")
+        if page_i < 1:
+            raise ValueError(f"invalid locator.page: {page!r}")
+        out["page"] = page_i
+    for key in ("figure", "table"):
+        val = locator.get(key)
+        if val is not None and str(val).strip():
+            out[key] = str(val).strip()
+    return out
+
+
 def literature_slice_from_frozen(project_id: str) -> dict[str, Any] | None:
     """Return dossier-style literature slice if frozen; else None."""
     items = frozen_items(project_id)

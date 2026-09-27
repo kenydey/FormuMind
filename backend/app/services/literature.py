@@ -663,14 +663,20 @@ def _rank_score_with_boost(e: Evidence, q_kw: set[str], qctx: dict) -> tuple[flo
         evidence_authority_bonus,
         domain_match_bonus,
         search_deny_penalty,
+        age_normalized_citation_score,
     )
+    from .citation_date_guard import future_pub_date_penalty
 
     return (
         base0
         + evidence_entity_boost(e, qctx)
         + evidence_authority_bonus(e)
         + domain_match_bonus(e)
-        + search_deny_penalty(e),
+        + search_deny_penalty(e)
+        # W4-6 · P0-19: citedBy 按论文年龄归一化（引用速率而非总量）
+        + age_normalized_citation_score(e)
+        # W4-6 · P0-18: 未来出版日期降权（防幻觉/坏元数据）
+        + future_pub_date_penalty(e),
         base1,
     )
 

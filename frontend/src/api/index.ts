@@ -19,6 +19,7 @@ export {
 } from "./http";
 export { apiMethods } from "./methods";
 export * from "./extras";
+export { artifactsApi } from "./domains/artifacts";
 export { chatApi } from "./domains/chat";
 export { chemistryApi } from "./domains/chemistry";
 export { doeApi } from "./domains/doe";

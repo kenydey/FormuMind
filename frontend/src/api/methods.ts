@@ -12,6 +12,10 @@ import {
 import { awaitTaskStream } from "./extras";
 import type {
   ActiveDoeResult,
+  ArtifactDiffResponse,
+  ArtifactLineage,
+  ArtifactVersion,
+  ArtifactVersionListResponse,
   Attachment,
   BatchUpdateRequest,
   ChatRequest,
@@ -1676,6 +1680,14 @@ export const apiMethods = {
         doi?: string | null;
         screening?: string;
         snippet?: string;
+        /** W4-5: 后端实际返回的扩展字段（可选）。 */
+        source?: string;
+        evidence_class?: string;
+        has_fulltext?: boolean;
+        enrich_status?: string;
+        oa_pdf_url?: string;
+        /** W4-6: 引用定位器（只读展示）。 */
+        locator?: { page?: number; figure?: string; table?: string };
       }>;
       frozen: {
         at: number;
@@ -2220,6 +2232,35 @@ export const apiMethods = {
       depth: String(depth),
     });
     return get<ProvenanceLineageResponse>(`/api/provenance/lineage?${qs}`);
+  },
+
+  /** W4-1/W4-4: create an artifact lineage (logical file). */
+  createArtifactLineage: (projectId: string, name: string, kind = "report") =>
+    post<ArtifactLineage>("/api/artifacts/lineages", {
+      project_id: projectId,
+      name,
+      kind,
+    }),
+
+  /** W4-1/W4-4: versions + basedOnVersionId derivation graph of a lineage. */
+  listArtifactVersions: (lineageId: string) =>
+    get<ArtifactVersionListResponse>(
+      `/api/artifacts/lineages/${encodeURIComponent(lineageId)}/versions`,
+    ),
+
+  /** W4-4: restore = new staging version, content copied from the old one. */
+  restoreArtifactVersion: (versionId: string, actor?: string) =>
+    post<ArtifactVersion>(
+      `/api/artifacts/versions/${encodeURIComponent(versionId)}/restore`,
+      { actor: actor ?? null },
+    ),
+
+  /** W4-3/W4-4: diff two versions (ops: equal | insert | delete). */
+  getArtifactVersionDiff: (versionId: string, againstId: string) => {
+    const qs = new URLSearchParams({ against: againstId });
+    return get<ArtifactDiffResponse>(
+      `/api/artifacts/versions/${encodeURIComponent(versionId)}/diff?${qs}`,
+    );
   },
 };
 

@@ -358,6 +358,10 @@ class Evidence(BaseModel):
     # W2-2 (P1-7): two-stage search→read — whether the full text is already
     # persisted locally (read stage can skip the download). None = unknown.
     has_fulltext: bool | None = None
+    # W4-6 (P0-19): citation count + publication year for age-normalized
+    # ranking (new papers not drowned by old ones). None = unknown.
+    cited_by: int | None = None
+    pub_year: int | None = None
 
 
 class Passage(BaseModel):

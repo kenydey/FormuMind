@@ -13,6 +13,8 @@ import { CANCEL_BUTTON_CLASS } from "../../hooks/useTaskCancel";
 import ThinkingTimeline from "../ThinkingTimeline";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 import LiteratureFreezeStrip from "./LiteratureFreezeStrip";
+import ManifestDetailPanel from "../ManifestDetailPanel";
+import ArtifactVersionsPanel from "../ArtifactVersionsPanel";
 
 /** Grayscale keys required for Hub dossier → Report generate/export. */
 const REPORT_FLAG_ATTRS = [
@@ -439,6 +441,8 @@ export default function HubReportsPlaceholderPane() {
         也可从顶栏「产物」抽屉打开本页。
       </p>
       <LiteratureFreezeStrip projectId={activeProjectId} />
+      <ManifestDetailPanel projectId={activeProjectId} />
+      <ArtifactVersionsPanel projectId={activeProjectId} />
       <div
         className="rounded-lg border border-edge/70 bg-ink/40 px-3 py-2 space-y-1.5"
         data-testid="hub-reports-flags"

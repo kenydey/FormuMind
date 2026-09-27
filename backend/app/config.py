@@ -613,6 +613,8 @@ class Settings(BaseSettings):
     # Wave B — light smart screening (default off).
     literature_screening_enabled: bool = False
     screening_auto_freeze: bool = False
+    # Wave 4 — artifact version lineage / immutable snapshots (P1-16, default on).
+    artifact_versions_enabled: bool = True
     literature_screening_required_for_export: bool = False
     connectors_builtin_enabled: bool = True
     # Wave D2 — MCP 调用重试（默认 2 次指数退避；仅超时/连接类错误）。

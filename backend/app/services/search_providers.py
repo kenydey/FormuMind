@@ -50,6 +50,16 @@ def _ranked(i: int, offset: int = 0) -> float:
     return round(max(0.1, 1.0 - (offset + i) * 0.02), 3)
 
 
+def _safe_int(value: object) -> int | None:
+    """Best-effort int coercion for OpenAlex numeric fields (None-safe)."""
+    if value is None:
+        return None
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _get_with_retry(client, url: str, params: dict):
     """GET, retrying the documented broad-boolean rate limit.
 
@@ -215,6 +225,9 @@ def _openalex_work_to_evidence(
         relevance=relevance,
         is_oa=oa.get("is_oa"),
         oa_pdf_url=best.get("pdf_url") or None,
+        # W4-6 (P0-19): carry citation count + year for age-normalized ranking.
+        cited_by=_safe_int(w.get("cited_by_count")),
+        pub_year=_safe_int(w.get("publication_year")),
     )
     tags: list[str] = list(ev.domain_tags or [])
     if venue_pref_hit and "venue_pref_hit" not in tags:

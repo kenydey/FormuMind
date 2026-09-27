@@ -63,6 +63,38 @@ def domain_match_bonus(ev: Evidence) -> float:
         return 0.0
 
 
+def age_normalized_citation_score(ev: Evidence) -> float:
+    """W4-6 · P0-19: citedBy 按论文年龄归一化 —— 新论文不被老论文淹没。
+
+    用引用速率（次/年）而非引用总量参与排序融合：
+    ``rate = cited_by / max(1, age_years)``，再经 ``log1p`` 压到小加成。
+    无 cited_by/pub_year 时返回 0.0（不惩罚未知）。
+    """
+    import math
+    from datetime import date
+
+    cited = getattr(ev, "cited_by", None)
+    if cited is None:
+        return 0.0
+    try:
+        cited = int(cited)
+    except (TypeError, ValueError):
+        return 0.0
+    if cited <= 0:
+        return 0.0
+    current_year = date.today().year
+    age_years = 1
+    year = getattr(ev, "pub_year", None)
+    if year is not None:
+        try:
+            age_years = max(1, current_year - int(year) + 1)
+        except (TypeError, ValueError):
+            pass
+    rate = cited / age_years
+    # rate=10 → ~0.048；rate=100 → ~0.092；上限 0.12（与 authority bonus 同量级）
+    return min(0.12, 0.02 * math.log1p(rate))
+
+
 def search_deny_penalty(ev: Evidence, domain=None, *, negative_terms=None) -> float:
     """Top-5 #2: retrieve-time deny term penalty."""
     try:

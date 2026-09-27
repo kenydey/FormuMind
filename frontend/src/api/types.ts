@@ -2690,3 +2690,49 @@ export interface SessionPlanPendingResponse {
   items: SessionPlanPendingItem[];
   total: number;
 }
+
+/** W4-1/W4-4: artifact lineage (logical file) for version management. */
+export interface ArtifactLineage {
+  lineage_id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  created_at: number;
+  version_ids: string[];
+}
+
+/** W4-1/W4-4: one immutable artifact version snapshot. */
+export interface ArtifactVersion {
+  version_id: string;
+  lineage_id: string;
+  based_on_version_id: string | null;
+  status: "staging" | "pending" | "finalized";
+  sha256: string;
+  content_bytes: number;
+  created_at: number;
+  actor?: string | null;
+  finalized_at?: number | null;
+  evidence_frozen?: boolean;
+}
+
+/** W4-1: GET /api/artifacts/lineages/{id}/versions. */
+export interface ArtifactVersionListResponse {
+  lineage: ArtifactLineage;
+  versions: ArtifactVersion[];
+  graph: Array<{ version_id: string; based_on_version_id: string | null }>;
+}
+
+/** W4-3/W4-4: one diff op from GET /api/artifacts/versions/{id}/diff. */
+export interface ArtifactDiffOp {
+  type: "equal" | "insert" | "delete";
+  old_text: string;
+  new_text: string;
+}
+
+/** W4-3/W4-4: version diff response contract. */
+export interface ArtifactDiffResponse {
+  version_id: string;
+  against_id: string;
+  truncated: boolean;
+  ops: ArtifactDiffOp[];
+}
