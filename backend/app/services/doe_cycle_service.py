@@ -21,9 +21,39 @@ from typing import Any
 from ..domain.schemas import ExperimentRecord, Requirement
 from ..db.database import default_session_factory
 from ..db.session_utils import commit_session
-from ..db.models import ExperimentRow
+from ..db.models import DOECycleRunRow, ExperimentRow
 
 logger = logging.getLogger(__name__)
+
+
+def record_cycle_run(
+    *,
+    project_id: str,
+    domain: str,
+    engine: str,
+    prior_measurement_count: int,
+    experiment_count: int,
+    status: str,
+) -> None:
+    """Wave 3-2: persist one closed-loop cycle execution for observability.
+
+    Fail-open: a recording failure must never break the cycle itself.
+    """
+    try:
+        factory = default_session_factory()
+        with commit_session(factory) as session:
+            session.add(
+                DOECycleRunRow(
+                    project_id=project_id or "",
+                    domain=domain or "",
+                    engine=engine or "",
+                    prior_measurement_count=prior_measurement_count,
+                    experiment_count=experiment_count,
+                    status=status,
+                )
+            )
+    except Exception as e:  # noqa: BLE001 - observability must not break cycles
+        logger.warning("Failed to record DOE cycle run: %s", e)
 
 
 def load_prior_measurements(requirement: Requirement) -> list[ExperimentRecord]:
@@ -80,12 +110,15 @@ def build_candidate_formulations(requirement: Requirement) -> list:
 def generate_experiment_dicts(
     requirement: Requirement,
     prior_measurements: list[ExperimentRecord],
-) -> list[dict[str, Any]]:
+) -> tuple[str, list[dict[str, Any]]]:
     """Step 2 (execution dispatch): generate the next experiment points.
 
     BayBE is seeded with ``prior_measurements`` so round N+1 learns from
     round N. When BayBE is unavailable, falls back to LHS (which itself
     falls back to registry records inside ``active_learning_doe``).
+
+    Returns ``(engine, dicts)`` where engine is ``"baybe"`` or ``"lhs"``
+    (Wave 3-2: observability).
     """
     try:
         from ..services.engines.baybe_engine import BaybeCampaignEngine
@@ -103,7 +136,7 @@ def generate_experiment_dicts(
 def _generate_via_lhs(
     requirement: Requirement,
     prior_measurements: list[ExperimentRecord],
-) -> list[dict[str, Any]]:
+) -> tuple[str, list[dict[str, Any]]]:
     from ..services.active_learning import active_learning_doe
 
     active_result = active_learning_doe(
@@ -117,14 +150,14 @@ def _generate_via_lhs(
     )
     experiment_dicts = [_run_to_dict(run) for run in active_result.plan.runs]
     logger.info("Generated %d experiments via LHS fallback", len(experiment_dicts))
-    return experiment_dicts
+    return "lhs", experiment_dicts
 
 
 def _generate_via_baybe(
     requirement: Requirement,
     prior_measurements: list[ExperimentRecord],
     baybe_engine: Any,
-) -> list[dict[str, Any]]:
+) -> tuple[str, list[dict[str, Any]]]:
     active_result = baybe_engine.recommend(
         req=requirement,
         measurements=prior_measurements,  # closed-loop: seed with real data
@@ -134,7 +167,7 @@ def _generate_via_baybe(
     )
     experiment_dicts = [_run_to_dict(run) for run in active_result.plan.runs]
     logger.info("Generated %d experiments via Baybe", len(experiment_dicts))
-    return experiment_dicts
+    return "baybe", experiment_dicts
 
 
 def _run_to_dict(run: Any) -> dict[str, Any]:
@@ -225,24 +258,48 @@ def run_doe_cycle(requirement: Requirement) -> dict[str, Any]:
 
     # 0. Closed-loop feedback: round N's measured results seed round N+1.
     prior_measurements = load_prior_measurements(requirement)
+    n_prior = len(prior_measurements)
+    project_id = requirement.project_id or ""
+    domain = requirement.domain.value if requirement.domain else ""
+
+    def _record(engine: str, n_experiments: int, status: str) -> None:
+        # Wave 3-2: every terminal path leaves an observability row.
+        record_cycle_run(
+            project_id=project_id,
+            domain=domain,
+            engine=engine,
+            prior_measurement_count=n_prior,
+            experiment_count=n_experiments,
+            status=status,
+        )
 
     # 1. Candidate formulations (Top-12).
     candidate_formulations = build_candidate_formulations(requirement)
     if not candidate_formulations:
         logger.error("No candidate formulations available")
+        _record("", 0, "error")
         return {"experiment_ids": [], "status": "error", "message": "No candidates"}
 
     # 2. Next experiment points (BayBE seeded with priors, else LHS).
     try:
-        experiment_dicts = generate_experiment_dicts(requirement, prior_measurements)
+        engine, experiment_dicts = generate_experiment_dicts(
+            requirement, prior_measurements
+        )
     except Exception as e:
+        _record("", 0, "error")
         return {"experiment_ids": [], "status": "error", "message": f"Generation failed: {e}"}
 
     # 3. Persist as pending + provenance links.
     try:
-        return persist_experiments(
+        result = persist_experiments(
             requirement, experiment_dicts, candidate_formulations
         )
     except Exception as e:
         logger.error("Failed to save experiments: %s", e)
+        _record(engine, 0, "error")
         return {"experiment_ids": [], "status": "error", "message": f"Save failed: {e}"}
+    _record(engine, result.get("count", 0), "success")
+    # Wave 3-2: enrich the task result with observability fields.
+    result["engine"] = engine
+    result["prior_measurement_count"] = n_prior
+    return result

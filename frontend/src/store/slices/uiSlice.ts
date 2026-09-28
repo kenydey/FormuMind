@@ -1,6 +1,7 @@
 import { modalForArtifact, type ArtifactKind } from "../../artifacts/projectArtifacts";
 import type { FormulationSkill } from "../../api";
 import { resolveSearchHint } from "../../lib/domainSearchHints";
+import { normalizeSettingsTab, isRelocatedSettingsTab } from "../settingsTabs";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
 
@@ -39,15 +40,24 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
       }),
 
     openSettings: (
-      tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" = "llm",
+      tab: string = "model",
       opts?: { focusEnvAttr?: string | null },
-    ) =>
+    ) => {
+      // Wave 0: 搬出设置页的旧 tab 保留深链 —— 记忆→知识库，项目→历史面板，看板→独立入口。
+      if (isRelocatedSettingsTab(tab)) {
+        if (tab === "memory") get().openKnowledgeHub("memory");
+        else if (tab === "project") {
+          if (!get().historyOpen) get().toggleHistory();
+        } else get().toggleOrg();
+        return;
+      }
+      const focusAttr = tab === "env" || tab === "advanced" ? opts?.focusEnvAttr : null;
       set((draft) => {
         draft.settingsOpen = true;
-        draft.settingsTab = tab;
-        draft.settingsEnvFocusAttr =
-          tab === "env" && opts?.focusEnvAttr ? String(opts.focusEnvAttr) : null;
-      }),
+        draft.settingsTab = normalizeSettingsTab(tab);
+        draft.settingsEnvFocusAttr = focusAttr ? String(focusAttr) : null;
+      });
+    },
 
     clearSettingsEnvFocus: () =>
       set((draft) => {
@@ -106,10 +116,16 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
       if (fn) fn(text);
     },
 
-    setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors" | "memory" | "project") =>
+    setSettingsTab: (tab: string) =>
       set((draft) => {
-        draft.settingsTab = tab;
-        if (tab !== "env") draft.settingsEnvFocusAttr = null;
+        draft.settingsTab = normalizeSettingsTab(tab);
+        if (draft.settingsTab !== "advanced") draft.settingsEnvFocusAttr = null;
+      }),
+
+    orgOpen: false as boolean,
+    toggleOrg: () =>
+      set((draft) => {
+        draft.orgOpen = !draft.orgOpen;
       }),
 
     toggleArtifactDrawer: () =>
@@ -191,6 +207,8 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     | "clearSettingsEnvFocus"
     | "bumpEnvFlagsRevision"
     | "setSettingsTab"
+    | "orgOpen"
+    | "toggleOrg"
     | "setChatMode"
     | "toggleSelectedChatSkill"
     | "toggleSelectedConnector"

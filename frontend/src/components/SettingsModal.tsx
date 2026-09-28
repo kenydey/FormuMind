@@ -11,11 +11,8 @@ import FormulationModeSelector from "./FormulationModeSelector";
 import WikiChatModeSelector from "./WikiChatModeSelector";
 import OcsrPanel from "./OcsrPanel";
 import NotebookLMPanel from "./NotebookLMPanel";
-import OrganizationDashboard from "./OrganizationDashboard";
 import SkillsSettingsPanel from "./SkillsSettingsPanel";
 import ConnectorsSettingsPanel from "./ConnectorsSettingsPanel";
-import MemoryPanel from "./MemoryPanel";
-import ProjectSettingsPanel from "./ProjectSettingsPanel";
 import { useStore } from "../store";
 import {
   api,
@@ -179,20 +176,14 @@ export default function SettingsModal() {
     <Modal title="设置 · Settings" open={settingsOpen} onClose={toggleSettings} testId="modal-settings">
       <div className="flex gap-1 mb-4 border-b border-edge">
         {([
-          ["llm", "大模型"],
-          ["api", "API 配置"],
-          ["skills", "Skills"],
-          ["connectors", "MCP"],
-          ["memory", "记忆"],
-          ["project", "项目"],
-          ["env", "环境变量"],
-          ["recommend", "推荐"],
-          ["notebooklm", "NotebookLM"],
-          ["org", "组织看板"],
-          ["deps", "依赖管理"],
+          ["model", "模型与 API"],
+          ["capabilities", "Skills 与连接"],
+          ["prefs", "偏好"],
+          ["advanced", "高级"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
+            data-testid={`settings-tab-${id}`}
             onClick={() => setSettingsTab(id)}
             className={`text-sm px-3 py-1.5 -mb-px border-b-2 transition-colors ${
               settingsTab === id
@@ -207,32 +198,25 @@ export default function SettingsModal() {
 
       <ApiAccessPanel onTokenSaved={onTokenSaved} />
 
-      {loadError && settingsTab === "llm" && (
+      {loadError && settingsTab === "model" && (
         <div className="mb-3 text-xs rounded px-3 py-2 border border-rose-500/40 text-rose-400 bg-rose-500/10">
           无法加载大模型配置：{loadError}
           {isAuthError(loadError) && " — 请先在上方填写 API 访问令牌。"}
         </div>
       )}
 
-      {settingsTab === "deps" ? (
-        <DependencyManager reloadKey={reloadKey} />
-      ) : settingsTab === "api" ? (
-        <ApiSettingsPanel reloadKey={reloadKey} />
-      ) : settingsTab === "skills" ? (
-        <SkillsSettingsPanel reloadKey={reloadKey} />
-      ) : settingsTab === "connectors" ? (
-        <ConnectorsSettingsPanel reloadKey={reloadKey} />
-      ) : settingsTab === "memory" ? (
-        <MemoryPanel reloadKey={reloadKey} />
-      ) : settingsTab === "project" ? (
-        <ProjectSettingsPanel />
-      ) : settingsTab === "env" ? (
-        <EnvFlagsPanel reloadKey={reloadKey} />
-      ) : settingsTab === "notebooklm" ? (
-        <NotebookLMPanel reloadKey={reloadKey} />
-      ) : settingsTab === "org" ? (
-        <OrganizationDashboard />
-      ) : settingsTab === "recommend" ? (
+      {settingsTab === "advanced" ? (
+        <div className="space-y-4">
+          <EnvFlagsPanel reloadKey={reloadKey} />
+          <DependencyManager reloadKey={reloadKey} />
+        </div>
+      ) : settingsTab === "capabilities" ? (
+        <div className="space-y-4">
+          <SkillsSettingsPanel reloadKey={reloadKey} />
+          <ConnectorsSettingsPanel reloadKey={reloadKey} />
+          <NotebookLMPanel reloadKey={reloadKey} />
+        </div>
+      ) : settingsTab === "prefs" ? (
         <div className="space-y-4">
           <FormulationModeSelector />
           <WikiChatModeSelector />
@@ -243,9 +227,10 @@ export default function SettingsModal() {
         <p className="text-xs text-slate-500 py-4 text-center">正在加载供应商列表…</p>
       ) : (
         <div className="space-y-4">
+          <ApiSettingsPanel reloadKey={reloadKey} />
           <p className="text-xs text-slate-500">
             文本任务与视觉任务分开配置，系统按任务类型自动调用对应模型。API Key 保存在服务器{" "}
-            <code className="text-slate-400">.env</code> 中，也可在「API 配置」Tab 统一管理。
+            <code className="text-slate-400">.env</code> 中。
           </p>
 
           <div>

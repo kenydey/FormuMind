@@ -89,7 +89,7 @@ export default function SaveWikiDraftButton({
             type="button"
             className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200"
             data-testid="save-wiki-draft-open-env"
-            onClick={() => openSettings("env", { focusEnvAttr: "wiki_chat_save_draft" })}
+            onClick={() => openSettings("advanced", { focusEnvAttr: "wiki_chat_save_draft" })}
           >
             去设置开启
           </button>

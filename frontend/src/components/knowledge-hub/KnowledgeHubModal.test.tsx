@@ -41,3 +41,19 @@ describe("KnowledgeHubModal retrieval tab", () => {
     expect(screen.getByTestId("hub-tab-retrieval").textContent).toMatch(/检索探针/);
   });
 });
+
+describe("KnowledgeHubModal memory tab (Wave 0: moved from Settings)", () => {
+  beforeEach(() => {
+    useStore.setState({
+      knowledgeHubTab: "memory",
+      activeProjectId: "proj-demo",
+    } as never);
+  });
+
+  it("shows the memory management pane", () => {
+    render(<KnowledgeHubModal open onClose={() => undefined} />);
+    const tab = screen.getByTestId("hub-tab-memory");
+    expect(tab.textContent).toMatch(/记忆/);
+    expect(screen.getByTestId("memory-panel")).toBeInTheDocument();
+  });
+});

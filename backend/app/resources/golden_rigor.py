@@ -23,9 +23,16 @@ evidence 的 text 中找到（直接出现或经明确单位换算）。
 from __future__ import annotations
 
 # 数据集版本（单调递增；变更必须同步更新 CHANGELOG 并经 review）。
-DATASET_VERSION = 2
+DATASET_VERSION = 3
 
 # CHANGELOG:
+#   v3 (2026-09-28, Wave 3 round3): 32 → 44 组。新增 12 组对抗用例
+#      （"adversarial": True），answer 为 trap 答案（模拟 naive 系统输出），
+#       每组带可判定的小期望：expect_abstain（4 组：证据不足应拒答）、
+#       expected_value（4 组：数字陷阱——量级/单位/归属）、
+#       expect_contradiction_flag（4 组：矛盾来源应标出而非和稀泥）。
+#       门禁对对抗集单独计分（rigor_gate.py），不污染 32 组通过线。
+#       场景描述使用通用化学表述，不含任何品牌名。
 #   v2 (2026-09-28, Wave 3 round2): 12 → 32 组。新增场景：水性单涂层防腐体系、
 #       电化学腐蚀机理、锆钛系无铬转化膜、硅烷偶联剂前处理、DOE 参数优化（响应面）、
 #       FTO/专利规避检索、钼酸盐缓蚀剂、环氧聚酯粉末固化、C5 海洋大气配套、EIS 涂层评价、
@@ -917,6 +924,329 @@ golden_rigor_pairs: list[dict] = [
         "key_claims": [
             {"text": "替换必要技术特征规避", "keywords": ["规避", "必要技术特征"]},
             {"text": "重新验证盐雾与附着力", "keywords": ["重新验证", "盐雾"]},
+        ],
+    },
+    # ------------------------------------------------------------------
+    # 对抗用例（v3）：answer 为 trap（模拟 naive 系统输出），
+    # 期望行为由 expect_* 字段声明，供新对抗指标判定。
+    # ------------------------------------------------------------------
+    {
+        "adversarial": True,
+        "expect_abstain": True,
+        "question": "HW-300 新型水性环氧底漆的中性盐雾小时数是多少？",
+        "answer": (
+            "HW-300 水性环氧底漆中性盐雾可达 1500 小时[^1]，"
+            "满足重防腐要求[^2]。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-hw300",
+                "title": "HW-300 水性环氧底漆技术数据表",
+                "doi": "",
+                "text": "HW-300 水性环氧底漆耐盐雾性能优异，适用于中等腐蚀环境。",
+                "page": 1,
+            },
+            {
+                "identifier": "nss-method-note",
+                "title": "盐雾试验方法说明",
+                "doi": "",
+                "text": "中性盐雾试验按 GB/T 1771 执行，温度 35°C 连续喷雾。",
+                "page": 2,
+            },
+        ],
+        "key_claims": [
+            {"text": "盐雾 1500 小时", "keywords": ["盐雾", "1500小时"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_abstain": True,
+        "question": "磷化 A 线槽液总酸度控制范围？",
+        "answer": (
+            "磷化 A 线槽液总酸度控制在 18-22 点，"
+            "游离酸度 0.8-1.2 点[^1]，槽液温度 35-40°C[^2]。"
+        ),
+        "evidence": [
+            {
+                "identifier": "line-b-sop",
+                "title": "磷化 B 线作业指导书",
+                "doi": "",
+                "text": "B 线槽液总酸度 18-22 点，游离酸度 0.8-1.2 点。",
+                "page": 3,
+            },
+            {
+                "identifier": "line-a-sop",
+                "title": "磷化 A 线作业指导书",
+                "doi": "",
+                "text": "A 线采用低温磷化工艺，槽液温度 35-40°C。",
+                "page": 2,
+            },
+        ],
+        "key_claims": [
+            {"text": "A 线总酸度 18-22 点", "keywords": ["总酸度", "22点"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_abstain": True,
+        "question": "钼酸盐缓蚀剂在海水循环系统中的投加量？",
+        "answer": (
+            "钼酸盐在海水循环系统中投加量为 200-400mg/L[^1]，"
+            "pH 控制 7.5-8.5。"
+        ),
+        "evidence": [
+            {
+                "identifier": "inhibitor-fw-note",
+                "title": "缓蚀剂淡水应用说明",
+                "doi": "",
+                "text": "钼酸盐在淡水循环水中投加量 200-400mg/L，pH 7.5-8.5。",
+                "page": 2,
+            },
+            {
+                "identifier": "seawater-corrosion-note",
+                "title": "海水腐蚀特性说明",
+                "doi": "",
+                "text": "海水氯离子浓度约 19000mg/L，对碳钢腐蚀性强于淡水。",
+                "page": 1,
+            },
+        ],
+        "key_claims": [
+            {"text": "海水投加量 200-400mg/L", "keywords": ["投加量", "400mg"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_abstain": True,
+        "question": "环氧富锌涂层在 -40°C 下的冲击强度？",
+        "answer": (
+            "环氧富锌涂层在 -40°C 下冲击强度为 50kg·cm，"
+            "无裂纹[^1]，满足低温要求[^2]。"
+        ),
+        "evidence": [
+            {
+                "identifier": "zinc-rich-tds-rt",
+                "title": "环氧富锌底漆技术数据表",
+                "doi": "",
+                "text": "常温冲击强度 50kg·cm，正反冲无裂纹。",
+                "page": 2,
+            },
+            {
+                "identifier": "low-temp-test-general",
+                "title": "涂层低温试验通则",
+                "doi": "",
+                "text": "低温试验一般在 -40°C 下进行，评价涂层脆性。",
+                "page": 1,
+            },
+        ],
+        "key_claims": [
+            {"text": "-40°C 冲击 50kg·cm", "keywords": ["-40°C", "冲击"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 50, "unit": "kg·cm"},
+        "question": "EP-880 环氧底漆的冲击强度？",
+        "answer": (
+            "EP-880 环氧底漆冲击强度为 500kg·cm[^2]，正反冲无裂纹。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-ep880-impact",
+                "title": "EP-880 双组分环氧底漆技术数据表",
+                "doi": "",
+                "text": "冲击强度 50kg·cm（正反冲无裂纹）。",
+                "page": 2,
+            },
+            {
+                "identifier": "tds-ot990-impact",
+                "title": "OT-990 高固含环氧底漆技术数据表",
+                "doi": "",
+                "text": "冲击强度 500kg·cm（正反冲无裂纹）。",
+                "page": 2,
+            },
+        ],
+        "key_claims": [
+            {"text": "冲击强度 500kg·cm", "keywords": ["冲击强度", "500kg"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 80, "unit": "μm"},
+        "question": "WB-210 水性环氧底漆推荐干膜厚度？",
+        "answer": (
+            "WB-210 推荐干膜厚度 80~125mm[^1]，分两道施工。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-wb210-dft",
+                "title": "WB-210 水性环氧底漆施工指南",
+                "doi": "",
+                "text": "推荐干膜厚度 80~125μm，分两道施工。",
+                "page": 2,
+            },
+        ],
+        "key_claims": [
+            {"text": "干膜 80~125mm", "keywords": ["干膜", "125mm"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 10, "unit": "min"},
+        "question": "环氧聚酯粉末涂料在 180-200°C 下固化保温多久？",
+        "answer": (
+            "环氧聚酯粉末涂料在 180-200°C 下保温 10-15 小时[^1]。"
+        ),
+        "evidence": [
+            {
+                "identifier": "powder-cure-note",
+                "title": "环氧聚酯粉末涂料固化说明",
+                "doi": "",
+                "text": "固化条件 180-200°C，保温 10-15 分钟。",
+                "page": 1,
+            },
+        ],
+        "key_claims": [
+            {"text": "保温 10-15 小时", "keywords": ["保温", "15小时"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 3.8, "unit": "pH"},
+        "question": "锆钛系转化膜工作液 pH 控制范围？",
+        "answer": (
+            "锆钛系转化膜工作液 pH 控制在 8.5~9.5[^2]。"
+        ),
+        "evidence": [
+            {
+                "identifier": "zt-ph-note",
+                "title": "锆钛转化膜工艺说明",
+                "doi": "",
+                "text": "锆钛系转化膜工作液 pH 控制在 3.8-4.2。",
+                "page": 3,
+            },
+            {
+                "identifier": "wb-flashrust-note",
+                "title": "水性底漆闪锈控制说明",
+                "doi": "",
+                "text": "水性底漆体系 pH 维持在 8.5~9.5 可抑制闪锈。",
+                "page": 3,
+            },
+        ],
+        "key_claims": [
+            {"text": "pH 8.5~9.5", "keywords": ["pH", "9.5"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_contradiction_flag": True,
+        "contradiction_evidence": [1, 2],
+        "question": "钼酸盐缓蚀剂投加量上限是多少？",
+        "answer": (
+            "钼酸盐投加量为 200-400mg/L，缓蚀率 95% 以上[^1][^2]，"
+            "可放心使用。"
+        ),
+        "evidence": [
+            {
+                "identifier": "inhibitor-dose-a",
+                "title": "缓蚀剂应用试验报告 A",
+                "doi": "",
+                "text": "钼酸盐投加量 200-400mg/L，缓蚀率 95% 以上。",
+                "page": 5,
+            },
+            {
+                "identifier": "inhibitor-dose-b",
+                "title": "缓蚀剂应用试验报告 B",
+                "doi": "",
+                "text": "钼酸盐投加量超过 250mg/L 时，局部点蚀风险显著上升，建议不超过 250mg/L。",
+                "page": 7,
+            },
+        ],
+        "key_claims": [
+            {"text": "投加量 200-400mg/L", "keywords": ["投加量", "400mg"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_contradiction_flag": True,
+        "contradiction_evidence": [1, 2],
+        "question": "某环氧配套体系耐盐雾性能如何？",
+        "answer": (
+            "该配套体系中性盐雾 1000 小时无锈蚀扩展[^1]，性能优异。"
+        ),
+        "evidence": [
+            {
+                "identifier": "sys-test-c",
+                "title": "配套体系测试报告 C",
+                "doi": "",
+                "text": "中性盐雾 1000 小时，划线处无锈蚀扩展。",
+                "page": 3,
+            },
+            {
+                "identifier": "lit-sys-review",
+                "title": "环氧配套体系文献综述",
+                "doi": "",
+                "text": "同类环氧配套体系在 720 小时盐雾后即出现锈蚀扩展，文献值与厂商报告存在差距。",
+                "page": 12,
+            },
+        ],
+        "key_claims": [
+            {"text": "盐雾 1000 小时无锈蚀", "keywords": ["盐雾", "1000小时"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_contradiction_flag": True,
+        "contradiction_evidence": [1, 2],
+        "question": "EP-880 环氧底漆在 180°C 下多久能完全固化？",
+        "answer": (
+            "EP-880 在 180°C 下 20 分钟可完全固化[^1][^2]。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-ep880-cure",
+                "title": "EP-880 技术数据表",
+                "doi": "",
+                "text": "180°C 下 20 分钟可完全固化。",
+                "page": 1,
+            },
+            {
+                "identifier": "cure-kinetics-paper",
+                "title": "环氧固化动力学研究",
+                "doi": "",
+                "text": "180°C 下固化 20 分钟交联度仅 78%，完全固化需 40 分钟。",
+                "page": 8,
+            },
+        ],
+        "key_claims": [
+            {"text": "180°C 20 分钟完全固化", "keywords": ["180°C", "20分钟"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expect_contradiction_flag": True,
+        "contradiction_evidence": [1, 2],
+        "question": "水性环氧底漆 VOC 限值是多少？",
+        "answer": (
+            "水性环氧底漆 VOC 限值为 150g/L[^2]，符合要求。"
+        ),
+        "evidence": [
+            {
+                "identifier": "voc-std-2020",
+                "title": "水性环氧底漆 VOC 限量标准",
+                "doi": "",
+                "text": "水性环氧类底漆 VOC 限值为 100g/L。",
+                "page": 3,
+            },
+            {
+                "identifier": "voc-old-lit",
+                "title": "水性涂料 VOC 早期研究",
+                "doi": "",
+                "text": "早期研究认为水性环氧底漆 VOC 在 150g/L 以内即可接受。",
+                "page": 4,
+            },
+        ],
+        "key_claims": [
+            {"text": "VOC 限值 150g/L", "keywords": ["VOC", "150g"]},
         ],
     },
 ]

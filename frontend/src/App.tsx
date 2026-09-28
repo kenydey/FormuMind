@@ -6,6 +6,7 @@ import ActionsPanel from "./components/ActionsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import ArtifactDrawer from "./components/ArtifactDrawer";
 import SettingsModal from "./components/SettingsModal";
+import OrgDashboardModal from "./components/OrgDashboardModal";
 import ProjectNotebookLMModal from "./components/ProjectNotebookLMModal";
 import McpApprovalCenter from "./components/McpApprovalCenter";
 import SessionPlanApprovalCenter from "./components/SessionPlanApprovalCenter";
@@ -41,10 +42,21 @@ function BoxIcon() {
   );
 }
 
+function ChartIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  );
+}
+
 export default function App() {
   const {
     toggleHistory,
     toggleSettings,
+    toggleOrg,
     toggleArtifactDrawer,
     projects,
     initProjects,
@@ -62,6 +74,7 @@ export default function App() {
     useShallow((s) => ({
       toggleHistory: s.toggleHistory,
       toggleSettings: s.toggleSettings,
+      toggleOrg: s.toggleOrg,
       toggleArtifactDrawer: s.toggleArtifactDrawer,
       projects: s.projects,
       initProjects: s.initProjects,
@@ -127,6 +140,15 @@ export default function App() {
           <span>设置</span>
         </button>
         <button
+          onClick={toggleOrg}
+          data-testid="btn-org"
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
+          title="组织看板"
+        >
+          <ChartIcon />
+          <span>看板</span>
+        </button>
+        <button
           onClick={toggleArtifactDrawer}
           data-testid="btn-artifacts"
           className="relative flex items-center gap-1.5 text-xs text-slate-400 hover:text-accent border border-edge hover:border-accent/40 rounded px-2.5 py-1.5 transition-colors"
@@ -175,6 +197,7 @@ export default function App() {
       <HistoryPanel />
       <ArtifactDrawer />
       <SettingsModal />
+      <OrgDashboardModal />
       <ProjectNotebookLMModal />
       <McpApprovalCenter />
       <SessionPlanApprovalCenter />

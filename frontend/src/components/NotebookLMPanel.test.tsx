@@ -33,7 +33,7 @@ describe("NotebookLMPanel", () => {
     expect(screen.getAllByText(/notebooklm-py/).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /依赖管理/ }));
     await waitFor(() => {
-      expect(useStore.getState().openSettings).toHaveBeenCalledWith("deps");
+      expect(useStore.getState().openSettings).toHaveBeenCalledWith("advanced");
     });
   });
 });

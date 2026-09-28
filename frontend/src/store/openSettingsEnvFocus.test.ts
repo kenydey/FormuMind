@@ -5,18 +5,18 @@ describe("openSettings env focus", () => {
   beforeEach(() => {
     useStore.setState({
       settingsOpen: false,
-      settingsTab: "llm",
+      settingsTab: "model",
       settingsEnvFocusAttr: null,
     } as never);
   });
 
   it("openSettings env with focusEnvAttr stores the attr", () => {
-    useStore.getState().openSettings("env", {
+    useStore.getState().openSettings("advanced", {
       focusEnvAttr: "wiki_dossier_report_enabled",
     });
     const s = useStore.getState();
     expect(s.settingsOpen).toBe(true);
-    expect(s.settingsTab).toBe("env");
+    expect(s.settingsTab).toBe("advanced");
     expect(s.settingsEnvFocusAttr).toBe("wiki_dossier_report_enabled");
   });
 
@@ -29,10 +29,10 @@ describe("openSettings env focus", () => {
   it("setSettingsTab away from env clears focus", () => {
     useStore.setState({
       settingsOpen: true,
-      settingsTab: "env",
+      settingsTab: "advanced",
       settingsEnvFocusAttr: "wiki_project_dossier_enabled",
     } as never);
-    useStore.getState().setSettingsTab("llm");
+    useStore.getState().setSettingsTab("model");
     expect(useStore.getState().settingsEnvFocusAttr).toBeNull();
   });
 

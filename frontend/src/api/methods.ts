@@ -2171,6 +2171,27 @@ export const apiMethods = {
       degraded?: boolean;
     }>(`/api/experiments/hooks/doecyle-status/${campaignId}`),
 
+  getDoeCycleRuns: (projectId: string) =>
+    get<{
+      items: Array<{
+        id: number;
+        project_id: string;
+        domain: string;
+        engine: string;
+        prior_measurement_count: number;
+        experiment_count: number;
+        status: string;
+        created_at: string;
+      }>;
+      summary: {
+        cycle_count: number;
+        total_experiments: number;
+        measured_count: number;
+        last_engine: string;
+        last_status: string;
+      };
+    }>(`/api/doe/cycle-runs?project_id=${encodeURIComponent(projectId)}`),
+
   getOcsr: () => get<{ status: OcsrStatus }>("/api/settings/ocsr"),
 
   getSettings: () => get<LLMSettingsResponse>("/api/settings"),

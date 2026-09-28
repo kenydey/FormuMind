@@ -18,14 +18,48 @@ result (double safety net) and never mutates the caller's items.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import threading
 from typing import Any
 
 from ..domain.schemas import Evidence
 from .search_scoring import age_normalized_citation_score
 
 logger = logging.getLogger(__name__)
+
+# --- Wave 3-2: lightweight in-process observability ---------------------------
+# Process-local cumulative counters for tier-2 (LLM) evidence compression.
+# No new storage: served via GET /api/ops/evidence-stats. Counters only move
+# forward; a process restart resets them (documented on the endpoint).
+_EVIDENCE_STATS: dict[str, int] = {
+    "tier2_attempts": 0,  # llm_compress_evidence entry (flag was on at call site)
+    "tier2_triggers": 0,  # long items present -> exactly one batched LLM call
+    "llm_calls": 0,  # == tier2_triggers by construction (one call per trigger)
+    "tokens_before": 0,  # estimated tokens of long snippets sent for rewrite
+    "tokens_after": 0,  # estimated tokens of the returned summaries
+}
+_STATS_LOCK = threading.Lock()
+
+
+def get_evidence_stats() -> dict[str, int]:
+    """Return a snapshot copy of the tier-2 compression counters."""
+    with _STATS_LOCK:
+        return dict(_EVIDENCE_STATS)
+
+
+def reset_evidence_stats() -> None:
+    """Zero all counters. Tests only — never called in production paths."""
+    with _STATS_LOCK:
+        for key in _EVIDENCE_STATS:
+            _EVIDENCE_STATS[key] = 0
+
+
+def _bump_stats(**deltas: int) -> None:
+    with _STATS_LOCK:
+        for key, delta in deltas.items():
+            _EVIDENCE_STATS[key] = _EVIDENCE_STATS.get(key, 0) + delta
 
 # Default budget when the caller does not pass one (also the settings
 # fallback for ``query_compress_token_budget``).
@@ -337,6 +371,9 @@ def llm_compress_evidence(
     an empty/invalid LLM reply, or zero usable summaries falls back to the
     tier-1 ``compress_evidence`` result.
     """
+    # Wave 3-2: count every entry (the call site only calls us when the flag
+    # is on). Bump before the try so even a fail-open fallback counts.
+    _bump_stats(tier2_attempts=1)
     try:
         return _llm_compress_evidence(question, sources, settings=settings)
     except Exception as exc:  # noqa: BLE001 - fail-open contract
@@ -356,6 +393,8 @@ def _llm_compress_evidence(
 ) -> list[Evidence]:
     if not sources:
         return []
+    # Wave 3-2: log a query hash, never the raw question text.
+    qhash = hashlib.sha256(question.encode("utf-8", "ignore")).hexdigest()[:12]
     long_items = [
         ev
         for ev in sources
@@ -363,6 +402,10 @@ def _llm_compress_evidence(
     ]
     if not long_items:
         # No long texts: nothing for the LLM to do — skip the call entirely.
+        logger.info(
+            "tier2 evidence compression: query=%s triggered=false reason=no_long_items",
+            qhash,
+        )
         return list(sources)
     batch = long_items[:MAX_LLM_SUMMARY_ITEMS]
 
@@ -393,6 +436,24 @@ def _llm_compress_evidence(
             summary_by_id[sid] = text.strip()
     if not summary_by_id:
         raise ValueError("LLM compression produced no usable summaries")
+    # Wave 3-2: one batched LLM call per trigger; record token economics.
+    tokens_before = sum(estimate_tokens(ev.snippet or "") for ev in batch)
+    tokens_after = sum(estimate_tokens(s) for s in summary_by_id.values())
+    _bump_stats(
+        tier2_triggers=1,
+        llm_calls=1,
+        tokens_before=tokens_before,
+        tokens_after=tokens_after,
+    )
+    logger.info(
+        "tier2 evidence compression: query=%s triggered=true items=%d/%d "
+        "tokens_before=%d tokens_after=%d llm_calls=1",
+        qhash,
+        len(summary_by_id),
+        len(batch),
+        tokens_before,
+        tokens_after,
+    )
     logger.debug(
         "LLM evidence compression: %d/%d long items summarized",
         len(summary_by_id),

@@ -699,6 +699,29 @@ class DOEPlanRow(Base):
     )
 
 
+class DOECycleRunRow(Base):
+    """Wave 3-2: one row per closed-loop DOE cycle execution.
+
+    Observability for the DOE -> measure -> next-cycle loop: which engine
+    produced the batch (``baybe`` | ``lhs``), how many prior measurements
+    seeded it, and how many experiments it suggested. Auto-created by
+    ``Base.metadata.create_all(checkfirst=True)`` — no manual migration.
+    """
+
+    __tablename__ = "doe_cycle_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    domain: Mapped[str] = mapped_column(String(64), default="")
+    engine: Mapped[str] = mapped_column(String(16), default="")  # baybe | lhs
+    prior_measurement_count: Mapped[int] = mapped_column(Integer, default=0)
+    experiment_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="")  # success | error
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (Index("ix_doe_cycle_runs_project", "project_id"),)
+
+
 class InferredSystemRow(Base):
     """LLM-inferred formulation-system constraints, persisted for reuse (P2).
 

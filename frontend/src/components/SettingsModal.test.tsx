@@ -51,7 +51,7 @@ describe("SettingsModal — LLM tab", () => {
     vi.spyOn(api, "getAuthStatus").mockResolvedValue({ auth_required: false, hint: "" });
     useStore.setState({
       settingsOpen: true,
-      settingsTab: "llm",
+      settingsTab: "model",
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },
     } as Partial<AppState> as AppState);
   });
@@ -98,5 +98,44 @@ describe("SettingsModal — LLM tab", () => {
     const textProvider = providerSelects[0] as HTMLSelectElement;
     const ids = Array.from(textProvider.options).map((o) => o.value);
     expect(ids).toContain("custom");
+  });
+});
+
+describe("SettingsModal — Wave 0 tab reorganization", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(api, "getSettings").mockResolvedValue(SETTINGS);
+    vi.spyOn(api, "getAuthStatus").mockResolvedValue({ auth_required: false, hint: "" });
+    useStore.setState({
+      settingsOpen: true,
+      settingsTab: "model",
+      llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    } as Partial<AppState> as AppState);
+  });
+
+  it("renders exactly the four new tabs", () => {
+    render(<SettingsModal />);
+    for (const id of ["model", "capabilities", "prefs", "advanced"]) {
+      expect(screen.getByTestId(`settings-tab-${id}`)).toBeInTheDocument();
+    }
+    for (const id of ["llm", "api", "skills", "connectors", "memory", "project", "env", "recommend", "notebooklm", "org", "deps"]) {
+      expect(screen.queryByTestId(`settings-tab-${id}`)).not.toBeInTheDocument();
+    }
+  });
+
+  it("merges API config into the model tab", async () => {
+    render(<SettingsModal />);
+    await waitFor(() => expect(screen.getByText(/文本模型 · Text/)).toBeTruthy());
+    // ApiSettingsPanel content lives on the same tab now
+    expect(screen.getByTestId("settings-tab-model")).toHaveTextContent("模型与 API");
+  });
+
+  it("relocated legacy tabs deep-link to their new homes", () => {
+    const s0 = useStore.getState();
+    s0.openSettings("memory");
+    expect(useStore.getState().openModal).toBe("knowledge");
+    expect(useStore.getState().knowledgeHubTab).toBe("memory");
+    useStore.getState().openSettings("org");
+    expect(useStore.getState().orgOpen).toBe(true);
   });
 });

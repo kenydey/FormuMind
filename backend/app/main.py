@@ -30,6 +30,7 @@ from .api import chemistry as chemistry_router
 from .api import doe, experiments, formulations, optimize, research, tasks
 from .api import search as search_router, ingest as ingest_router, chat as chat_router, settings as settings_router
 from .api import qc as qc_router
+from .api import ops as ops_router
 from .api import session as session_router
 from .api import ip_analysis as ip_router
 from .api import loop as loop_router
@@ -303,6 +304,7 @@ app.include_router(surechembl_router.router, prefix="/api")
 app.include_router(org_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(qc_router.router, prefix="/api")
+app.include_router(ops_router.router)
 app.include_router(ip_router.router)
 app.include_router(loop_router.router)
 app.include_router(design_router.router)

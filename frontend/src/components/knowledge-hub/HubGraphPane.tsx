@@ -194,7 +194,7 @@ export default function HubGraphPane({ active }: { active: boolean }) {
                   type="button"
                   className="text-[11px] px-2 py-1 border border-amber-400/50 rounded text-amber-100"
                   data-testid="hub-graph-open-env"
-                  onClick={() => openSettings("env", { focusEnvAttr: "kg_enabled" })}
+                  onClick={() => openSettings("advanced", { focusEnvAttr: "kg_enabled" })}
                 >
                   打开环境变量（kg_enabled）
                 </button>

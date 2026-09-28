@@ -13,8 +13,23 @@
    如 mm<->μm、h<->min）后，必须在所引 passage/snippet 原文出现；无来源数字记 fail。
    数字只在其引用 passage 中核验，不回退全证据池；答案含数字但无有效引用时直接 fail。
 
+4. ``abstention_correctness`` —— 对抗用例（``pair_meta["expect_abstain"]=True``）：
+   证据不足以回答时，答案是否拒答或明确声明证据不足。含拒答标记记 1.0，
+   否则 0.0。非对抗 pair 记 ``not_applicable``（1.0，不参与判定）。
+5. ``contradiction_flagged`` —— 对抗用例（``pair_meta["expect_contradiction_flag"]=True``）：
+   证据间结论冲突时，答案是否明确标出矛盾（含标记词）且引用冲突双方
+   （``pair_meta["contradiction_evidence"]``）。缺标记或漏引冲突方记 0.0。
+   非对抗 pair 记 ``not_applicable``。
+6. ``value_correctness`` —— 对抗用例（``pair_meta["expected_value"]={"value","unit"}``）：
+   答案中的数值经单位归一化后是否与期望值一致（防"数字在引用中有但张冠李戴"，
+   这是 ``numeric_consistency`` 覆盖不到的）。非对抗 pair 记 ``not_applicable``。
+
+新指标在 ``evaluate_rigor`` 中通过 ``pair_meta`` 传入；``not_applicable`` 的
+指标不参与 ``passed`` 判定。旧三项行为、阈值保持不变。
+
 每项输出 ``{"score": float | None, "failures": [{"claim", "reason"}]}``；
 ``score`` 为 None 表示该指标内部异常（fail-open：记 error，不炸主流程）。
+对抗指标额外返回 ``"not_applicable": True`` 表示本 pair 不适用。
 
 输入约定（与 ``citation_binder`` / W4-2 冻结 evidence 兼容的最小结构）::
 
@@ -35,12 +50,16 @@ from typing import Any
 __all__ = [
     "CITATION_RE",
     "DEFAULT_THRESHOLDS",
+    "ADVERSARIAL_METRICS",
     "evaluate_rigor",
     "extract_citation_indices",
     "extract_numbers",
+    "metric_abstention_correctness",
     "metric_citation_veracity",
+    "metric_contradiction_flagged",
     "metric_coverage",
     "metric_numeric_consistency",
+    "metric_value_correctness",
 ]
 
 # 默认阈值（与 config.py::evals_rigor_thresholds 保持一致；gate 以 config 为准）。
@@ -168,6 +187,7 @@ _UNIT_ALIASES: dict[str, str] = {
     "g": "g", "克": "g",
     "kg": "kg", "千克": "kg",
     "mg": "mg", "毫克": "mg",
+    "kg·cm": "kgcm", "kgcm": "kgcm",  # 冲击强度常用复合单位
     "ml": "ml", "毫升": "ml",
     "l": "l", "升": "l",
     "年": "yr",
@@ -177,6 +197,7 @@ _CONVERSIONS: dict[str, tuple[str, float]] = {
     "h": ("h", 1.0), "min": ("h", 1.0 / 60.0), "s": ("h", 1.0 / 3600.0),
     "mpa": ("mpa", 1.0), "kpa": ("mpa", 1e-3), "pa": ("mpa", 1e-6),
     "g": ("g", 1.0), "kg": ("g", 1000.0), "mg": ("g", 1e-3),
+    "kgcm": ("kgcm", 1.0),
     "ml": ("ml", 1.0), "l": ("ml", 1000.0),
 }
 _UNIT_PATTERN = "|".join(
@@ -184,6 +205,11 @@ _UNIT_PATTERN = "|".join(
 )
 _NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")", re.IGNORECASE)
 _PH_RE = re.compile(r"[pP][Hh]\s*(\d+(?:\.\d+)?)")
+# pH 范围表达："pH 控制在 3.8-4.2" / "pH 8.5~9.5"（pH token 与数字不紧邻）。
+# 限制中间非数字字符 ≤12，避免跨句误抓。
+_PH_RANGE_RE = re.compile(
+    r"[pP][Hh][^\d.]{0,12}?(\d+(?:\.\d+)?)\s*[~～\-–—]\s*(\d+(?:\.\d+)?)"
+)
 _RANGE_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*[-\u2013\u2014~\u301c]\s*(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")",
     re.IGNORECASE,
@@ -220,6 +246,9 @@ def extract_numbers(text: str) -> list[tuple[float, str]]:
         _add(float(m.group(1)), _canon_unit(m.group(2)))
     for m in _PH_RE.finditer(src):
         _add(float(m.group(1)), "ph")
+    for m in _PH_RANGE_RE.finditer(src):
+        _add(float(m.group(1)), "ph")
+        _add(float(m.group(2)), "ph")
     return out
 
 
@@ -272,11 +301,149 @@ def metric_numeric_consistency(
     return {"score": round(score, 4), "failures": failures}
 
 
+# ---------------------------------------------------------------------------
+# 对抗指标（Wave 3 round3）：只在 pair_meta 声明对应期望时生效，
+# 否则返回 not_applicable（score 1.0，不参与 passed 判定）。
+# ---------------------------------------------------------------------------
+
+ADVERSARIAL_METRICS = (
+    "abstention_correctness",
+    "contradiction_flagged",
+    "value_correctness",
+)
+
+_ABSTAIN_MARKERS = (
+    "证据不足", "无法确定", "无法回答", "信息不足", "不能确定",
+    "暂无数据", "没有足够", "不足以回答", "无法给出",
+    "insufficient evidence", "cannot determine", "not enough evidence",
+    "unable to determine",
+)
+
+_CONTRADICTION_MARKERS = (
+    "不一致", "矛盾", "冲突", "相反", "有差异", "存在分歧", "相悖",
+    "contradict", "inconsist", "conflict", "disagree", "divergen",
+)
+
+
+def _na() -> dict[str, Any]:
+    return {"score": 1.0, "failures": [], "not_applicable": True}
+
+
+def metric_abstention_correctness(
+    answer: str, pair_meta: dict[str, Any] | None
+) -> dict[str, Any]:
+    """该拒答时是否拒答/声明证据不足。"""
+    if not (pair_meta or {}).get("expect_abstain"):
+        return _na()
+    norm = _norm(answer)
+    if any(_norm(m) in norm for m in _ABSTAIN_MARKERS):
+        return {"score": 1.0, "failures": []}
+    return {
+        "score": 0.0,
+        "failures": [
+            {
+                "claim": "(expected abstention)",
+                "reason": (
+                    "现有证据不足以回答该问题，期望拒答或明确声明证据不足，"
+                    "但答案给出了确定性结论"
+                ),
+            }
+        ],
+    }
+
+
+def metric_contradiction_flagged(
+    answer: str,
+    evidence: list[dict[str, Any]],
+    pair_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """证据结论冲突时，答案是否明确标出矛盾且引用冲突双方。"""
+    meta = pair_meta or {}
+    if not meta.get("expect_contradiction_flag"):
+        return _na()
+    want = [int(x) for x in (meta.get("contradiction_evidence") or [])]
+    norm = _norm(answer)
+    has_marker = any(_norm(m) in norm for m in _CONTRADICTION_MARKERS)
+    cited = set(extract_citation_indices(answer))
+    missing = [n for n in want if n not in cited]
+    failures: list[dict[str, str]] = []
+    if not has_marker:
+        failures.append(
+            {
+                "claim": "(expected contradiction flag)",
+                "reason": (
+                    "证据间结论存在冲突，但答案未明确标出矛盾 "
+                    "（和稀泥/只报一面）"
+                ),
+            }
+        )
+    for n in missing:
+        failures.append(
+            {
+                "claim": f"[^{n}]",
+                "reason": "冲突证据方未被引用（只引单方 = 掩盖矛盾）",
+            }
+        )
+    return {"score": 1.0 if not failures else 0.0, "failures": failures}
+
+
+def metric_value_correctness(
+    answer: str, pair_meta: dict[str, Any] | None
+) -> dict[str, Any]:
+    """答案数值（单位归一化后）是否与期望值一致。
+
+    覆盖 numeric_consistency 的盲区：数字在所引 passage 中存在、
+    但张冠李戴（量级/单位/归属错误）的 trap。
+    """
+    meta = pair_meta or {}
+    exp = meta.get("expected_value")
+    if not isinstance(exp, dict):
+        return _na()
+    try:
+        target_v = float(exp["value"])
+    except (TypeError, ValueError):
+        return {
+            "score": None,
+            "failures": [],
+            "error": f"bad expected_value: {exp!r}",
+        }
+    target_u = _canon_unit(str(exp.get("unit") or ""))
+    if target_u is None:
+        return {
+            "score": None,
+            "failures": [],
+            "error": f"unknown unit in expected_value: {exp.get('unit')!r}",
+        }
+    nums = extract_numbers(answer)
+    if not nums:
+        return {
+            "score": 0.0,
+            "failures": [
+                {"claim": "(expected value)", "reason": "答案未给出任何带单位数值"}
+            ],
+        }
+    target = (target_v, target_u)
+    if any(_numbers_match(n, target) for n in nums):
+        return {"score": 1.0, "failures": []}
+    return {
+        "score": 0.0,
+        "failures": [
+            {
+                "claim": f"{target_v:g}{target_u}(expected)",
+                "reason": (
+                    "答案数值与期望值不一致（可能张冠李戴/单位/量级错误）"
+                ),
+            }
+        ],
+    }
+
+
 def evaluate_rigor(
     answer: str,
     evidence: list[dict[str, Any]] | None,
     key_claims: list[dict[str, Any]] | None = None,
     thresholds: dict[str, float] | None = None,
+    pair_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ev = [e for e in (evidence or []) if isinstance(e, dict)]
     th = dict(DEFAULT_THRESHOLDS)
@@ -288,6 +455,9 @@ def evaluate_rigor(
         ("citation_veracity", metric_citation_veracity, (answer, ev)),
         ("coverage", metric_coverage, (answer, ev, key_claims)),
         ("numeric_consistency", metric_numeric_consistency, (answer, ev)),
+        ("abstention_correctness", metric_abstention_correctness, (answer, pair_meta)),
+        ("contradiction_flagged", metric_contradiction_flagged, (answer, ev, pair_meta)),
+        ("value_correctness", metric_value_correctness, (answer, pair_meta)),
     ):
         try:
             metrics[name] = fn(*args)
@@ -299,7 +469,8 @@ def evaluate_rigor(
             }
 
     passed = all(
-        m["score"] is not None and m["score"] >= th[name]
+        m.get("not_applicable")
+        or (m["score"] is not None and m["score"] >= th.get(name, 1.0))
         for name, m in metrics.items()
     )
     return {**metrics, "passed": passed, "thresholds": th}

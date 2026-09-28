@@ -198,7 +198,7 @@ export default function HubReportsPlaceholderPane() {
       (error?.includes("wiki_storm_report_enabled")
         ? STORM_FLAG_ATTR
         : "wiki_dossier_report_enabled");
-    openSettings("env", { focusEnvAttr: focus });
+    openSettings("advanced", { focusEnvAttr: focus });
   };
 
   const cancelStorm = async () => {
@@ -490,7 +490,7 @@ export default function HubReportsPlaceholderPane() {
               type="button"
               className="text-[10px] px-2 py-1 rounded border border-edge text-slate-300 hover:border-accent/50 hover:text-accent"
               data-testid="hub-reports-auto-patch-open-env"
-              onClick={() => openSettings("env", { focusEnvAttr: AUTO_PATCH_FLAG_ATTR })}
+              onClick={() => openSettings("advanced", { focusEnvAttr: AUTO_PATCH_FLAG_ATTR })}
             >
               去设置开自动 patch
             </button>
@@ -573,7 +573,7 @@ export default function HubReportsPlaceholderPane() {
               type="button"
               className="text-[10px] px-2 py-1 rounded border border-accent/50 text-accent"
               data-testid="hub-reports-storm-open-env"
-              onClick={() => openSettings("env", { focusEnvAttr: STORM_FLAG_ATTR })}
+              onClick={() => openSettings("advanced", { focusEnvAttr: STORM_FLAG_ATTR })}
             >
               开启 STORM 旗标
             </button>

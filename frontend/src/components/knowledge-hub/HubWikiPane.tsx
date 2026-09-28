@@ -737,7 +737,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
             type="button"
             className="px-2 py-1 border border-amber-500/40 text-amber-200 rounded text-[10px]"
             data-testid="hub-wiki-embed-open-env"
-            onClick={() => openSettings("env", { focusEnvAttr: "wiki_embed_enabled" })}
+            onClick={() => openSettings("advanced", { focusEnvAttr: "wiki_embed_enabled" })}
           >
             开启 Wiki Embed
           </button>

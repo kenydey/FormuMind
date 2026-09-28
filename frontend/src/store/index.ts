@@ -102,7 +102,7 @@ export const useStore = create<AppState>()(
       requirementSnapshot: null,
       llmConfig: { provider: "anthropic", model: "claude-sonnet-4-6" },
       settingsOpen: false,
-      settingsTab: "llm",
+      settingsTab: "model" as const,
       settingsEnvFocusAttr: null as string | null,
       envFlagsRevision: 0,
       chatComposerPlusEnabled: true,

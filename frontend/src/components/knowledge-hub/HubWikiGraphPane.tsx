@@ -184,7 +184,7 @@ export default function HubWikiGraphPane({ active, selectedPath, onOpenPath }: P
             type="button"
             className="text-[11px] px-2 py-1 border border-amber-400/50 rounded text-amber-100"
             data-testid="hub-wiki-graph-open-env"
-            onClick={() => openSettings("env", { focusEnvAttr: FLAG_ATTR })}
+            onClick={() => openSettings("advanced", { focusEnvAttr: FLAG_ATTR })}
           >
             打开环境变量设置
           </button>

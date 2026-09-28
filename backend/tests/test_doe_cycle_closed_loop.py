@@ -155,7 +155,8 @@ def test_generate_passes_measurements_to_baybe(monkeypatch):
 
     fake_cls = _mock_baybe(monkeypatch)
     rec = _record()
-    dicts = mod.generate_experiment_dicts(_requirement(), [rec])
+    engine, dicts = mod.generate_experiment_dicts(_requirement(), [rec])
+    assert engine == "baybe"
     assert len(dicts) == 1
     assert dicts[0]["natural_factors"] == {"resin_wt_pct": 63.0}
     inst = fake_cls.instances[-1]

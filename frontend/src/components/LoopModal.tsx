@@ -50,6 +50,7 @@ export default function LoopModal() {
     setOpenModal,
     workbenchCampaignId,
     envFlagsRevision,
+    activeProjectId,
   } = useStore(
     useShallow((s) => ({
       runLoop: s.runLoop,
@@ -79,6 +80,7 @@ export default function LoopModal() {
       setOpenModal: s.setOpenModal,
       workbenchCampaignId: s.workbenchCampaignId,
       envFlagsRevision: s.envFlagsRevision,
+      activeProjectId: s.activeProjectId,
     }))
   );
 
@@ -91,6 +93,33 @@ export default function LoopModal() {
   const [cyclePaused, setCyclePaused] = useState(false);
   const [cycleStatusBusy, setCycleStatusBusy] = useState(false);
   const [cycleStatusError, setCycleStatusError] = useState<string | null>(null);
+  // Wave 3-2: per-project closed-loop cycle statistics (fail-open).
+  const [cycleStats, setCycleStats] = useState<{
+    cycle_count: number;
+    total_experiments: number;
+    measured_count: number;
+    last_engine: string;
+    last_status: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setCycleStats(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getDoeCycleRuns(activeProjectId)
+      .then((r) => {
+        if (!cancelled) setCycleStats(r.summary);
+      })
+      .catch(() => {
+        if (!cancelled) setCycleStats(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId]);
 
   // Hydrate FE toggle from Settings env-flag when flags change (W5).
   useEffect(() => {
@@ -283,6 +312,33 @@ export default function LoopModal() {
         </span>
         {cycleStatusError && <span className="ml-2 text-rose-300">{cycleStatusError}</span>}
       </div>
+      {cycleStats && (
+        <div
+          className="rounded-lg border border-edge bg-ink/60 px-3 py-2 text-[11px] text-slate-400"
+          data-testid="doe-cycle-stats"
+        >
+          <div className="font-semibold text-slate-300 mb-1">循环统计</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono">
+            <span>闭环轮数：<span className="text-slate-200">{cycleStats.cycle_count}</span></span>
+            <span>累计建议实验：<span className="text-slate-200">{cycleStats.total_experiments}</span></span>
+            <span>已测量：<span className="text-slate-200">{cycleStats.measured_count}</span></span>
+            <span>
+              上次引擎：<span className="text-slate-200">{cycleStats.last_engine || "—"}</span>
+            </span>
+            <span>
+              上次状态：
+              <span className={cycleStats.last_status === "success" ? "text-emerald-400" : "text-rose-300"}>
+                {cycleStats.last_status || "—"}
+              </span>
+            </span>
+            <span>
+              收敛：<span className={loopConverged ? "text-amber-300" : "text-slate-200"}>
+                {loopConverged ? "已收敛" : "未收敛"}
+              </span>
+            </span>
+          </div>
+        </div>
+      )}
       {loopRetryAvailable && busy === "idle" && (
         <div
           className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-2"

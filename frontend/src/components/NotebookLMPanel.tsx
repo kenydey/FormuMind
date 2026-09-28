@@ -135,7 +135,7 @@ export default function NotebookLMPanel({ reloadKey = 0 }: { reloadKey?: number 
           {!status.lib_installed && (
             <button
               type="button"
-              onClick={() => openSettings("deps")}
+              onClick={() => openSettings("advanced")}
               className="text-xs border border-accent/40 text-accent rounded px-2.5 py-1.5 hover:bg-accent/10"
             >
               去依赖管理安装 notebooklm-py →

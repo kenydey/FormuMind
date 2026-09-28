@@ -772,6 +772,30 @@ def retrieve_evidence(
             include_global=include_global,
             langs=langs,
         )
+    # Round 3 Wave 1 — agentic iterative retrieval. Root-cause note: the plan
+    # named paperqa_engine as the split point, but paperqa_engine only
+    # *synthesizes* from provided sources; this façade is the actual single-shot
+    # retrieval entry, so the split belongs here. Downstream rerank /
+    # compression / synthesis are untouched. Fail-open: any loop error falls
+    # back to the single-shot path below.
+    try:
+        from .agent_search_loop import agent_search, agent_search_enabled
+
+        if agent_search_enabled():
+            def _single_shot(q: str, kk: int, **kw: object) -> list:
+                return search_chunks_hybrid(
+                    q, k=kk, alpha=alpha,
+                    project_id=kw.get("project_id"),
+                    include_global=bool(kw.get("include_global")),
+                )
+
+            result = agent_search(
+                query, _single_shot, k=k,
+                project_id=project_id, include_global=include_global,
+            )
+            return result.evidence
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("agent search split failed, single-shot fallback: %s", exc)
     return search_chunks_hybrid(
         query,
         k=k,

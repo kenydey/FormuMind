@@ -9,6 +9,7 @@ import HubReportsPlaceholderPane from "./HubReportsPlaceholderPane";
 import RetrievalProbePanel from "./RetrievalProbePanel";
 import HubQualityPane from "./HubQualityPane";
 import HubCollectionsPane from "./HubCollectionsPane";
+import HubMemoryPane from "./HubMemoryPane";
 
 const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
   { id: "materials", label: "资料", hint: "当前项目入库文档" },
@@ -18,6 +19,7 @@ const TABS: { id: KnowledgeHubTab; label: string; hint: string }[] = [
   { id: "quality", label: "质量运营", hint: "闸 · scan · 启发式评分" },
   { id: "collections", label: "集合", hint: "Smart Collections 定时文献集合" },
   { id: "reports", label: "文档生成", hint: "当前项目卷宗报告" },
+  { id: "memory", label: "记忆", hint: "Agent 长期记忆管理" },
 ];
 
 /** Knowledge Hub shell — right-rail materials governance entry (H0). */
@@ -45,7 +47,7 @@ export default function KnowledgeHubModal({
     >
       <div className="flex flex-col gap-3 h-[min(70vh,720px)]">
         <div
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 shrink-0"
+          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 shrink-0"
           data-testid="hub-tab-cards"
         >
           {TABS.map((t) => {
@@ -97,6 +99,7 @@ export default function KnowledgeHubModal({
             <HubCollectionsPane active={open && tab === "collections"} />
           )}
           {tab === "reports" && <HubReportsPlaceholderPane />}
+          {tab === "memory" && <HubMemoryPane />}
         </div>
       </div>
     </Modal>

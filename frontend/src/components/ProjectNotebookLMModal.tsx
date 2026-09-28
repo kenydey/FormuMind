@@ -176,7 +176,7 @@ export default function ProjectNotebookLMModal() {
             type="button"
             onClick={() => {
               setOpenModal(null);
-              openSettings("deps");
+              openSettings("advanced");
             }}
             className="text-xs border border-accent/40 text-accent rounded px-2.5 py-1.5 hover:bg-accent/10"
           >
@@ -219,7 +219,7 @@ export default function ProjectNotebookLMModal() {
             type="button"
             onClick={() => {
               setOpenModal(null);
-              openSettings("notebooklm");
+              openSettings("capabilities");
             }}
             className="text-sm border border-edge text-slate-400 hover:text-slate-200 rounded px-3 py-1.5"
           >

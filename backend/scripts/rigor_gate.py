@@ -8,6 +8,10 @@
 * exit 1 — 有指标均值低于阈值（打印失败明细）；
 * exit 2 — 基础设施异常（import 失败 / 全部 pair 评估出错）。
 
+对抗用例（``"adversarial": True`` 的 pair）在独立章节单独计分：
+报告每个 trap 被新对抗指标检出（FLAGGED）还是漏网（MISSED），
+只报告、不影响 exit code，不污染 32 组标准集的通过线。
+
 单 pair 评估异常记 error 并跳过（fail-open），不直接炸门禁；
 可用 ``FORMUMIND_RIGOR_GATE=0`` 跳过（默认开启）。
 """
@@ -104,12 +108,16 @@ def main() -> int:
         return 2
 
     metric_names = ("citation_veracity", "coverage", "numeric_consistency")
+    # 对抗集单独计分：不参与 32 组通过线判定，只报告 trap 检出情况。
+    adv_metric_names = ("abstention_correctness", "contradiction_flagged", "value_correctness")
+    standard_pairs = [p for p in golden_rigor_pairs if not p.get("adversarial")]
+    adversarial_pairs = [p for p in golden_rigor_pairs if p.get("adversarial")]
     sums = {m: 0.0 for m in metric_names}
     counts = {m: 0 for m in metric_names}
     errors: list[str] = []
     failed_pairs: list[str] = []
 
-    for i, pair in enumerate(golden_rigor_pairs):
+    for i, pair in enumerate(standard_pairs):
         label = pair.get("question", f"pair[{i}]")[:40]
         try:
             result = evaluate_rigor(
@@ -158,8 +166,8 @@ def main() -> int:
             f"{m}: mean={mean:.4f} over {counts[m]} pairs, "
             f"threshold={th} -> {'PASS' if ok else 'FAIL'}"
         )
-    # 趋势追踪（只记录、不影响门禁判定）
-    _record_history(means, dict(counts), len(golden_rigor_pairs))
+    # 趋势追踪（只记录、不影响门禁判定；仅统计标准集）
+    _record_history(means, dict(counts), len(standard_pairs))
     if errors:
         print(f"warnings: {len(errors)} evaluation errors (skipped):")
         for e in errors[:10]:
@@ -168,9 +176,58 @@ def main() -> int:
         print(f"failed pairs: {len(failed_pairs)}")
     print(
         f"rigor_gate: {'PASS' if overall_ok and not failed_pairs else 'FAIL'} "
-        f"({len(golden_rigor_pairs)} pairs)"
+        f"({len(standard_pairs)} standard pairs)"
     )
-    return 0 if (overall_ok and not failed_pairs) else 1
+    main_rc = 0 if (overall_ok and not failed_pairs) else 1
+
+    # ---- 对抗集：单独计分，只报告不影响 exit code ----
+    if adversarial_pairs:
+        print("=" * 60)
+        print(f"adversarial set: {len(adversarial_pairs)} trap pairs (report only)")
+        detected = {m: 0 for m in adv_metric_names}
+        applicable = {m: 0 for m in adv_metric_names}
+        for i, pair in enumerate(adversarial_pairs):
+            label = pair.get("question", f"adv[{i}]")[:40]
+            try:
+                result = evaluate_rigor(
+                    pair.get("answer", ""),
+                    pair.get("evidence", []),
+                    pair.get("key_claims", []),
+                    thresholds=thresholds,
+                    pair_meta=pair,
+                )
+            except Exception as exc:
+                print(f"[adv{i}] {label}: evaluate raised {type(exc).__name__}: {exc}")
+                continue
+            parts: list[str] = []
+            for m in adv_metric_names:
+                mr = result[m]
+                if mr.get("not_applicable"):
+                    continue
+                applicable[m] += 1
+                # trap 被指标打 0 分 = 成功检出；得 1 分 = 漏网
+                if mr.get("score") == 0.0:
+                    detected[m] += 1
+                    parts.append(f"{m}=FLAGGED")
+                else:
+                    parts.append(f"{m}=MISSED(score={mr.get('score')})")
+                for f in mr["failures"]:
+                    parts.append(f"    - {f['reason']}")
+            # 旧指标在 trap 上的表现（纵深防御参考）
+            old_fired = [
+                m for m in metric_names
+                if result[m].get("score") is not None and result[m]["score"] < thresholds.get(m, 1.0)
+            ]
+            if old_fired:
+                parts.append(f"[old metrics also fired: {','.join(old_fired)}]")
+            print(f"[adv{i}] {label}: {'; '.join(parts) if parts else 'no applicable adversarial metric'}")
+        print("-" * 60)
+        for m in adv_metric_names:
+            if applicable[m]:
+                print(
+                    f"{m}: detected {detected[m]}/{applicable[m]} traps"
+                )
+    return main_rc
 
 
 if __name__ == "__main__":

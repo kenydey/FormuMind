@@ -61,7 +61,7 @@ export default function DegradedBanner() {
         {reasons.join(" · ")} —— 当前部分功能（深度研究、在线检索、跨源交叉验证）以离线兜底运行。
       </span>
       <button
-        onClick={() => openSettings(needsDeps ? "deps" : needsAuth ? "api" : "llm")}
+        onClick={() => openSettings(needsDeps ? "advanced" : "model")}
         className="ml-auto shrink-0 border border-amber-400/40 text-amber-200 rounded px-2.5 py-1 hover:bg-amber-400/15"
       >
         {needsAuth ? "去配置令牌" : needsDeps ? "去安装依赖" : "去配置大模型"} →

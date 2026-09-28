@@ -28,13 +28,46 @@ def _all_strings(obj) -> list[str]:
 
 
 def test_dataset_version_is_positive_int():
-    assert isinstance(DATASET_VERSION, int) and DATASET_VERSION >= 1
+    assert isinstance(DATASET_VERSION, int) and DATASET_VERSION >= 3
 
 
 def test_dataset_has_30_or_more_pairs():
     assert len(golden_rigor_pairs) >= 30, (
         f"expected 30+ pairs, got {len(golden_rigor_pairs)}"
     )
+
+
+def test_adversarial_pairs_present():
+    adv = [p for p in golden_rigor_pairs if p.get("adversarial")]
+    assert 10 <= len(adv) <= 15, f"expected 10-15 adversarial pairs, got {len(adv)}"
+
+
+def test_adversarial_pairs_have_decidable_expectations():
+    from app.evals.rigor_rubric import _canon_unit
+
+    for i, p in enumerate(golden_rigor_pairs):
+        if not p.get("adversarial"):
+            continue
+        tag = f"adversarial pair[{i}]"
+        has_abstain = bool(p.get("expect_abstain"))
+        has_value = isinstance(p.get("expected_value"), dict)
+        has_contra = bool(p.get("expect_contradiction_flag"))
+        assert has_abstain or has_value or has_contra, (
+            f"{tag} 必须声明 expect_abstain / expected_value / "
+            "expect_contradiction_flag 之一"
+        )
+        if has_value:
+            ev = p["expected_value"]
+            assert isinstance(ev.get("value"), (int, float)), f"{tag} expected_value.value 非数值"
+            assert _canon_unit(str(ev.get("unit") or "")) is not None, (
+                f"{tag} expected_value.unit 无法归一化: {ev.get('unit')!r}"
+            )
+        if has_contra:
+            ce = p.get("contradiction_evidence") or []
+            n_ev = len(p["evidence"])
+            assert ce and all(1 <= int(x) <= n_ev for x in ce), (
+                f"{tag} contradiction_evidence 非法: {ce!r}"
+            )
 
 
 def test_no_duplicate_questions():

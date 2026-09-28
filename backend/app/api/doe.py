@@ -152,6 +152,91 @@ class DoeHistoryResponse(BaseModel):
     page_size: int
 
 
+class DoeCycleRunItem(BaseModel):
+    id: int
+    project_id: str = ""
+    domain: str = ""
+    engine: str = ""
+    prior_measurement_count: int = 0
+    experiment_count: int = 0
+    status: str = ""
+    created_at: str = ""
+
+
+class DoeCycleRunsResponse(BaseModel):
+    items: list[DoeCycleRunItem] = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
+
+
+@router.get("/doe/cycle-runs", response_model=DoeCycleRunsResponse)
+def doe_cycle_runs(
+    project_id: str = Query(...),
+    limit: int = Query(20, ge=1, le=100),
+) -> DoeCycleRunsResponse:
+    """Wave 3-2: closed-loop cycle execution history for observability.
+
+    ``project_id`` is required (fail-closed): cycle stats are meaningless
+    and potentially cross-project without it.
+    """
+    if not project_id.strip():
+        raise HTTPException(status_code=422, detail="project_id must be non-empty")
+    from ..db.database import default_session_factory
+    from ..db.models import DOECycleRunRow
+
+    factory = default_session_factory()
+    with factory() as session:
+        rows = (
+            session.query(DOECycleRunRow)
+            .filter(DOECycleRunRow.project_id == project_id)
+            .order_by(DOECycleRunRow.id.desc())
+            .limit(limit)
+            .all()
+        )
+        items = [
+            DoeCycleRunItem(
+                id=r.id,
+                project_id=r.project_id,
+                domain=r.domain,
+                engine=r.engine,
+                prior_measurement_count=r.prior_measurement_count,
+                experiment_count=r.experiment_count,
+                status=r.status,
+                created_at=r.created_at.isoformat() if r.created_at else "",
+            )
+            for r in rows
+        ]
+        cycle_count = (
+            session.query(DOECycleRunRow)
+            .filter(DOECycleRunRow.project_id == project_id)
+            .count()
+        )
+    total_experiments = sum(i.experiment_count for i in items)
+    last = items[0] if items else None
+    # 累计测量数：registry 中本项目已有测量（跨 domain 求和，fail-open）。
+    measured_count = 0
+    try:
+        from ..domain.schemas import ProductDomain
+        from ..services.training import registry
+
+        for d in ProductDomain:
+            try:
+                measured_count += len(registry.records_for(d, project_id=project_id))
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.warning("cycle-runs measured_count failed: %s", exc)
+    return DoeCycleRunsResponse(
+        items=items,
+        summary={
+            "cycle_count": cycle_count,
+            "total_experiments": total_experiments,
+            "measured_count": measured_count,
+            "last_engine": last.engine if last else "",
+            "last_status": last.status if last else "",
+        },
+    )
+
+
 @router.get("/doe/history", response_model=DoeHistoryResponse)
 def doe_history(
     campaign_id: int | None = Query(None),

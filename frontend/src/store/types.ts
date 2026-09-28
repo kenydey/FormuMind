@@ -184,7 +184,7 @@ export interface AppState {
   recommendSourceTypes: SearchSourceType[];
   openModal: string | null;
   /** Knowledge Hub card tab when openModal === "knowledge". */
-  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports" | "retrieval" | "quality" | "collections";
+  knowledgeHubTab: "materials" | "wiki" | "graph" | "reports" | "retrieval" | "quality" | "collections" | "memory";
   // ── 多会话聊天 actions(2026-09-05 A1) ──
   setChatSessionsOpen: (open: boolean) => void;
   refreshChatSessions: () => Promise<void>;
@@ -196,7 +196,11 @@ export interface AppState {
   requirementSnapshot: Requirement | null;
   llmConfig: LLMConfig;
   settingsOpen: boolean;
-  settingsTab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors" | "memory" | "project";
+  /** Wave 0: 4 tab（model / capabilities / prefs / advanced）。旧 id 由 normalizeSettingsTab 映射。 */
+  settingsTab: import("./settingsTabs").SettingsTab;
+  /** 组织看板独立入口（Wave 0 从设置页搬出）。 */
+  orgOpen: boolean;
+  toggleOrg: () => void;
   chatComposerPlusEnabled: boolean;
   chatMode: "chat" | "evidence";
   selectedChatSkills: string[];
@@ -297,12 +301,12 @@ export interface AppState {
   setLlmConfig: (config: Partial<LLMConfig>) => void;
   toggleSettings: () => void;
   openSettings: (
-    tab?: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org",
+    tab?: import("./settingsTabs").SettingsTab | string,
     opts?: { focusEnvAttr?: string | null },
   ) => void;
   clearSettingsEnvFocus: () => void;
   bumpEnvFlagsRevision: () => void;
-  setSettingsTab: (tab: "llm" | "deps" | "api" | "env" | "recommend" | "notebooklm" | "org" | "skills" | "connectors" | "memory" | "project") => void;
+  setSettingsTab: (tab: import("./settingsTabs").SettingsTab | string) => void;
   setChatMode: (mode: "chat" | "evidence") => void;
   toggleSelectedChatSkill: (id: string) => void;
   toggleSelectedConnector: (id: string) => void;

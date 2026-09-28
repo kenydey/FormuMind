@@ -629,6 +629,16 @@ class Settings(BaseSettings):
     # has long (>=1500 char) evidence. Override via
     # FORMUMIND_QUERY_COMPRESS_LLM_ENABLED=false to disable.
     query_compress_llm_enabled: bool = True
+    # Round 3 Wave 1 — agentic iterative retrieval (retrieve -> assess gap ->
+    # rewrite -> retrieve). Default OFF until golden A/B decides (see
+    # tests/test_agent_search_loop.py). Downstream rerank/compression/
+    # synthesis are untouched; the loop only changes the retrieval stage.
+    # Override via FORMUMIND_AGENT_SEARCH_ENABLED=true to enable.
+    agent_search_enabled: bool = False
+    agent_search_max_iters: int = 3
+    agent_search_time_budget_s: float = 20.0
+    # LLM-based gap assessment (cost); heuristic is used when False.
+    agent_search_llm_assess: bool = False
     # Wave B — project literature manifest / frozen corpus.
     literature_manifest_enabled: bool = True
     frozen_corpus_required_for_export: bool = False
