@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..services.errors import degrade_return
 from .models import KBProduct
+from .db_common import escape_like
 from .session_utils import commit_session
 
 logger = logging.getLogger(__name__)
@@ -36,9 +37,6 @@ _MAX_LINK_ATTEMPTS_PER_UPSERT = 5
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
-def _escape_like(term: str) -> str:
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _apply_mention(row: KBProduct, m: dict, source_id: str | None) -> None:
@@ -280,7 +278,7 @@ class ProductStore:
             query = session.query(KBProduct)
             term = (q or "").strip()
             if term:
-                like = f"%{_escape_like(term)}%"
+                like = f"%{escape_like(term)}%"
                 query = query.filter(
                     or_(
                         KBProduct.trade_name.ilike(like, escape="\\"),
@@ -306,7 +304,7 @@ class ProductStore:
                 conds.append(KBProduct.cas == cas)
             if term:
                 conds.append(
-                    KBProduct.generic_name.ilike(f"%{_escape_like(term)}%", escape="\\")
+                    KBProduct.generic_name.ilike(f"%{escape_like(term)}%", escape="\\")
                 )
             if not conds:
                 return []

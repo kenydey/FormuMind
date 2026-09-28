@@ -2,7 +2,7 @@
  * W5-4 (P1-28): ReviewerCard 测试 —— mock reviewsApi：
  * 计数渲染、stale 提示、重审调用。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reviewsApi } from "../api";
@@ -185,5 +185,44 @@ describe("ReviewerCard 回归（F-2 / F-4 / F-9 / F-11）", () => {
     await slow;
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.getByTestId("reviewer-card-warn")).toHaveTextContent("7");
+  });
+
+  it("F-4: 重审耗时中 runId 切换，重审的旧结果不覆盖新数据", async () => {
+    let resolveRerun!: (v: unknown) => void;
+    rerunReviewRun.mockImplementation(
+      () =>
+        new Promise<unknown>((res) => {
+          resolveRerun = res;
+        }) as never,
+    );
+    getReviewRun.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === "run-b"
+          ? { ...RUN, run_id: "run-b", warn_count: 5 }
+          : { ...RUN, run_id: id, warn_count: 2 },
+      ) as never,
+    );
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ReviewerCard runId="run-a" question="q?" answer="a." citations={[]} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("reviewer-card-warn")).toHaveTextContent("2"),
+    );
+    await user.click(screen.getByTestId("reviewer-card-rerun")); // 重审挂起
+    rerender(<ReviewerCard runId="run-b" question="q?" answer="a." />); // 新回答到达
+    await waitFor(() =>
+      expect(screen.getByTestId("reviewer-card-warn")).toHaveTextContent("5"),
+    );
+    await act(async () => {
+      resolveRerun({
+        review: { status: "pass" },
+        fix: { run_id: "stale-new-run", rounds: 1 },
+        final_answer: "a.",
+      });
+    });
+    // 旧重审结果被丢弃：仍显示 run-b 的数据，且不得再加载旧 run
+    expect(screen.getByTestId("reviewer-card-warn")).toHaveTextContent("5");
+    expect(getReviewRun).not.toHaveBeenCalledWith("stale-new-run");
   });
 });

@@ -262,3 +262,59 @@ def test_b13_patch_filters_merge_not_replace(data_dir):
     assert "date_from" not in filters
     assert filters["date_to"] == 2025
     assert filters["domain_allowlist"] == ["a.com"]
+
+
+def test_b13_patch_filters_explicit_clear(data_dir):
+    """filters 显式清空语义：显式 null / 显式空列表清掉该键，其他键保留。"""
+    c = _client()
+    r = c.post(
+        "/api/collections",
+        json={
+            "project_id": "p-b13",
+            "name": "c",
+            "query": "q",
+            "filters": {
+                "date_from": 2020,
+                "date_to": 2025,
+                "domain_allowlist": ["a.com", "b.org"],
+            },
+        },
+    )
+    assert r.status_code == 201, r.text
+    cid = r.json()["collection_id"]
+
+    # 显式 null 清 domain_allowlist：date_* 保留
+    r = c.patch(
+        f"/api/collections/{cid}",
+        params={"project_id": "p-b13"},
+        json={"filters": {"domain_allowlist": None}},
+    )
+    assert r.status_code == 200, r.text
+    filters = r.json()["filters"]
+    assert "domain_allowlist" not in filters
+    assert filters["date_from"] == 2020
+    assert filters["date_to"] == 2025
+
+    # 显式空列表同样清掉该键（归一化层丢弃空 allowlist）
+    r = c.patch(
+        f"/api/collections/{cid}",
+        params={"project_id": "p-b13"},
+        json={"filters": {"domain_allowlist": []}},
+    )
+    assert r.status_code == 200, r.text
+    filters = r.json()["filters"]
+    assert "domain_allowlist" not in filters
+    assert filters["date_from"] == 2020
+    assert filters["date_to"] == 2025
+
+    # 逐个显式清空后可再写回：合并语义不锁死
+    r = c.patch(
+        f"/api/collections/{cid}",
+        params={"project_id": "p-b13"},
+        json={"filters": {"domain_allowlist": ["c.net"]}},
+    )
+    assert r.status_code == 200, r.text
+    filters = r.json()["filters"]
+    assert filters["domain_allowlist"] == ["c.net"]
+    assert filters["date_from"] == 2020
+    assert filters["date_to"] == 2025

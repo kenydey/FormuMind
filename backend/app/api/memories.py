@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..services import agent_memory
+from ..db.db_common import escape_like as _escape_like
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
@@ -26,10 +27,6 @@ def _session_factory() -> sessionmaker[Session]:
     from ..db.database import default_session_factory
 
     return default_session_factory()
-
-
-def _escape_like(s: str) -> str:
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @router.get("", response_model=dict)

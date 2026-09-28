@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import LiteratureFreezeStrip from "./LiteratureFreezeStrip";
 
 const capture = vi.fn();
@@ -191,5 +191,76 @@ describe("LiteratureFreezeStrip 回归（F-5）", () => {
         expect.objectContaining({ version: "v12345678" }),
       ),
     );
+  });
+});
+
+describe("LiteratureFreezeStrip 回归（F-4）", () => {
+  beforeEach(() => {
+    capture.mockReset();
+    getMan.mockReset();
+    getPresets.mockReset();
+    getVersions.mockReset();
+    capture.mockResolvedValue({});
+    getPresets.mockResolvedValue({ presets: [] });
+    getVersions.mockResolvedValue({
+      versions: [],
+      history: [],
+      current_rule_name: null,
+      current_rule_version: null,
+    });
+  });
+
+  it("动作耗时中切换 project，旧 project 的刷新不覆盖新 project 数据", async () => {
+    const manA = {
+      project_id: "pA",
+      items: [],
+      frozen: null,
+      coverage: { candidate_count: 5, frozen_count: 0 },
+    };
+    const manB = {
+      project_id: "pB",
+      items: [],
+      frozen: null,
+      coverage: { candidate_count: 9, frozen_count: 0 },
+    };
+    getMan.mockImplementation((pid: string) =>
+      Promise.resolve(pid === "pA" ? manA : manB),
+    );
+    let resolveCapture!: () => void;
+    capture.mockImplementation(
+      () =>
+        new Promise<void>((res) => {
+          resolveCapture = res;
+        }),
+    );
+    const { rerender } = render(<LiteratureFreezeStrip projectId="pA" />);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("literature-freeze-stats").textContent,
+      ).toMatch(/候选 5/),
+    );
+    // pA 上点 Capture，动作挂起
+    fireEvent.click(screen.getByTestId("literature-capture-btn"));
+    await waitFor(() => expect(capture).toHaveBeenCalled());
+    // 切换到 pB
+    rerender(<LiteratureFreezeStrip projectId="pB" />);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("literature-freeze-stats").textContent,
+      ).toMatch(/候选 9/),
+    );
+    const pACallsBefore = getMan.mock.calls.filter((c) => c[0] === "pA").length;
+    // pA 的 capture 完成：旧闭包 reload(pA) 不得再发起、不得覆盖 pB 面板
+    await act(async () => {
+      resolveCapture();
+    });
+    expect(
+      screen.getByTestId("literature-freeze-stats").textContent,
+    ).toMatch(/候选 9/);
+    expect(getMan.mock.calls.filter((c) => c[0] === "pA").length).toBe(
+      pACallsBefore,
+    );
+    // 动作完成后的刷新针对的是当前 project（pB），而非旧 project
+    expect(getMan).toHaveBeenLastCalledWith("pB");
   });
 });

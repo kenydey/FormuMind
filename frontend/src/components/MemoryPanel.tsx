@@ -24,6 +24,9 @@ export default function MemoryPanel({ reloadKey }: { reloadKey?: number }) {
   const [deleting, setDeleting] = useState<number | null>(null);
   /** F-4: 序号守卫 —— 筛选/翻页快速切换时旧请求不覆盖新数据。 */
   const loadSeq = useRef(0);
+  /** F-4: onDelete 闭包里的 load 可能绑定旧 scope/q/page；loadRef 始终指向最新 load，
+   *  避免删除完成后的刷新把旧筛选的数据写回新视图。 */
+  const loadRef = useRef<() => Promise<void>>(async () => {});
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -53,6 +56,9 @@ export default function MemoryPanel({ reloadKey }: { reloadKey?: number }) {
     void load();
   }, [load, reloadKey]);
 
+  // F-4: 每轮渲染同步最新 load，供 onDelete 等动作回调使用（幂等赋值）。
+  loadRef.current = load;
+
   function onScopeChange(next: ScopeFilter) {
     setScope(next);
     setPage(1);
@@ -68,7 +74,9 @@ export default function MemoryPanel({ reloadKey }: { reloadKey?: number }) {
     setDeleting(item.id);
     try {
       await api.deleteMemory(item.id);
-      await load();
+      // F-4: 删除耗时中筛选/翻页可能已变化 —— 用最新 load 刷新当前视图，
+      // 旧闭包的 load 不再直接调用，避免旧筛选数据覆盖新视图。
+      await loadRef.current();
     } catch (e) {
       setError(formatApiError(e));
     } finally {

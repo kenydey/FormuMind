@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MemoryPanel from "./MemoryPanel";
 import type { MemoryListResponse } from "../api";
@@ -89,5 +89,50 @@ describe("MemoryPanel", () => {
     listMemories.mockRejectedValue(new Error("boom"));
     render(<MemoryPanel />);
     await waitFor(() => expect(screen.getByText(/加载失败/)).toBeInTheDocument());
+  });
+});
+
+describe("MemoryPanel 回归（F-4）", () => {
+  beforeEach(() => {
+    listMemories.mockReset();
+    deleteMemory.mockReset();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+  });
+
+  it("删除耗时中切换筛选，旧筛选的刷新不覆盖新视图数据", async () => {
+    const globalRes = pageResponse([SEED[0]], 1);
+    const projectRes = pageResponse([SEED[1]], 1);
+    listMemories.mockImplementation((params: { scope?: string }) =>
+      Promise.resolve(params?.scope === "project" ? projectRes : globalRes),
+    );
+    let resolveDelete!: (v: unknown) => void;
+    deleteMemory.mockImplementation(
+      () => new Promise((res) => { resolveDelete = res; }),
+    );
+    render(<MemoryPanel />);
+    await waitFor(() => expect(listMemories).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText("gk")).toBeInTheDocument());
+    // 开始删除（挂起）
+    fireEvent.click(
+      within(screen.getByTestId("memory-item-1")).getByRole("button", {
+        name: "删除记忆 gk",
+      }),
+    );
+    await waitFor(() => expect(deleteMemory).toHaveBeenCalledWith(1));
+    // 切换到"项目"筛选
+    fireEvent.click(screen.getByRole("button", { name: "项目" }));
+    await waitFor(() =>
+      expect(screen.getByText("p1 偏好水性")).toBeInTheDocument(),
+    );
+    // 删除完成：旧闭包 load（scope=""）不得覆盖新筛选视图
+    await act(async () => {
+      resolveDelete({ ok: true, id: 1 });
+    });
+    expect(screen.getByText("p1 偏好水性")).toBeInTheDocument();
+    expect(screen.queryByText("gk")).not.toBeInTheDocument();
+    // 刷新用的是最新筛选（project），而不是旧的 scope=""
+    const lastCall =
+      listMemories.mock.calls[listMemories.mock.calls.length - 1][0];
+    expect(lastCall?.scope).toBe("project");
   });
 });

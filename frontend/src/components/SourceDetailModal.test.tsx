@@ -60,6 +60,51 @@ describe("SourceDetailModal focusPage (W3-14)", () => {
   });
 });
 
+describe("SourceDetailModal 渲染层虚拟化 (P-6)", () => {
+  beforeEach(() => {
+    vi.mocked(api.kbChunksBySource).mockReset();
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      chunk_id: `c${i}`,
+      text: `内容${i}`,
+      page: Math.floor(i / 10) + 1,
+    }));
+
+  const chunkCards = () =>
+    [...document.body.querySelectorAll("[data-testid]")].filter((el) =>
+      /^source-chunk-\d+$/.test(el.getAttribute("data-testid") ?? ""),
+    );
+
+  it("600 个 chunk 只挂载 50 个 DOM 行（远小于 600）", async () => {
+    vi.mocked(api.kbChunksBySource).mockResolvedValue(many(600) as never);
+    render(
+      <SourceDetailModal title="Doc" sourceId="src-big" onClose={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("source-chunk-0")).toBeInTheDocument(),
+    );
+    // 分页把挂载上限锁在 50：pager/按钮的 testid 不计入
+    expect(chunkCards()).toHaveLength(50);
+    expect(screen.queryByTestId("source-chunk-50")).not.toBeInTheDocument();
+  });
+
+  it("chunk 卡片带 content-visibility/contain-intrinsic-size（零依赖渲染隔离）", async () => {
+    vi.mocked(api.kbChunksBySource).mockResolvedValue(many(120) as never);
+    render(
+      <SourceDetailModal title="Doc" sourceId="src-x" onClose={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("source-chunk-0")).toBeInTheDocument(),
+    );
+    const card = screen.getByTestId("source-chunk-0");
+    expect(card.style.contentVisibility).toBe("auto");
+    expect(card.style.containIntrinsicSize).toBe("0 220px");
+  });
+});
+
 describe("SourceDetailModal 切块分页 (P-6)", () => {
   beforeEach(() => {
     vi.mocked(api.kbChunksBySource).mockReset();

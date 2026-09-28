@@ -11,6 +11,25 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+# 一次性数据迁移标记（与 alembic schema 版本机制分离）：
+# - alembic 管 schema（列/表结构），且不会在启动时自动执行；
+# - fm_data_migrations 记录数据清洗类一次性任务，由 migrate.py 自查自写，
+#   标记检查 → 清洗 → 写标记在同一事务内提交，避免"洗一半崩了下次跳过"。
+_DATA_MIGRATION_TABLE = "fm_data_migrations"
+_DOE_METADATA_CLEANUP = "doe_metadata_cleanup_v1"
+
+
+def _data_migration_table():
+    """fm_data_migrations 表定义（name 主键防并发双写）。"""
+    from sqlalchemy import Column, MetaData, String, Table
+
+    return Table(
+        _DATA_MIGRATION_TABLE,
+        MetaData(),
+        Column("name", String(128), primary_key=True),
+        Column("done_at", String(32), nullable=False),
+    )
+
 
 def migrate_from_stores(json_path: str, target_store) -> int:
     """Copy records from a JSON store into *target_store* if the latter is empty.
@@ -53,9 +72,20 @@ def clean_doe_metadata_from_factors() -> int:
 
     旧代码曾把嵌套 dict（`_doe_metadata`）塞进 factors 并持久化；新写入已只
     存数值（doe_cycle_service），但历史行仍带脏数据，下游按 dict[str, float]
-    消费时会 TypeError。本函数幂等，只改确实含非数值值的行。
-    返回清洗的行数。
+    消费时会 TypeError。
+
+    一次性执行：首次运行时全表扫描清洗，并在同一事务内写入
+    fm_data_migrations 标记；之后每次启动直接跳过，不再扫描 experiments 表。
+    幂等：清洗本身只改确实含非数值值的行（键集合变化才写回），标记丢失重跑
+    也不会破坏数据；并发双跑时 name 主键保证标记唯一，后提交者回滚重试即
+    可（清洗幂等，重跑无害）。
+    返回清洗的行数（已标记跳过时返回 0）。
     """
+    from datetime import datetime, timezone
+
+    from sqlalchemy.exc import IntegrityError, OperationalError
+    from sqlalchemy import select
+
     from .database import default_session_factory
     from .models import ExperimentRow
 
@@ -71,9 +101,26 @@ def clean_doe_metadata_from_factors() -> int:
                 return None
         return None
 
-    cleaned = 0
+    marker_table = _data_migration_table()
     factory = default_session_factory()
     with factory() as session:
+        # 标记表不存在即建（幂等；并发建表竞态时忽略已存在错误）
+        try:
+            marker_table.create(session.get_bind(), checkfirst=True)
+        except OperationalError as exc:
+            if "already exists" not in str(exc).lower():
+                raise
+            session.rollback()
+
+        already = session.execute(
+            select(marker_table.c.name).where(
+                marker_table.c.name == _DOE_METADATA_CLEANUP
+            )
+        ).first()
+        if already is not None:
+            return 0
+
+        cleaned = 0
         rows = session.query(ExperimentRow).all()
         for row in rows:
             factors = row.factors or {}
@@ -88,7 +135,20 @@ def clean_doe_metadata_from_factors() -> int:
             if set(scrubbed) != set(factors):
                 row.factors = scrubbed
                 cleaned += 1
-        session.commit()
+
+        # 清洗与标记写入同一事务提交：中途崩溃整体回滚，下次重跑而非跳过。
+        # 并发双跑时后提交者撞 name 主键 → 回滚（对方已做完等价幂等清洗）。
+        try:
+            session.execute(
+                marker_table.insert().values(
+                    name=_DOE_METADATA_CLEANUP,
+                    done_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                )
+            )
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            log.info("doe_metadata cleanup marker already written by peer; skipped")
     if cleaned:
         log.info("cleaned _doe_metadata/non-numeric factors from %d rows", cleaned)
     return cleaned

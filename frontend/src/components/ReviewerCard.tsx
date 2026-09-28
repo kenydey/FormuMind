@@ -97,6 +97,9 @@ export default function ReviewerCard({
   }, [runId, load]);
 
   async function rerun() {
+    // F-4: 重审耗时中 runId prop 可能已切换（新回答到达）——快照 seq，
+    // 若被 prop 驱动的 load 取代则整轮作废，避免重审的旧结果覆盖新 runId 的数据。
+    const seq = loadSeq.current;
     setRerunning(true);
     setError(null);
     setNotice(null);
@@ -107,6 +110,7 @@ export default function ReviewerCard({
         citations: citations ?? [],
         project_id: run?.project_id ?? null,
       });
+      if (loadSeq.current !== seq) return; // runId 已切换，本轮重审结果作废
       const newRunId = (res.fix as { run_id?: string } | null)?.run_id;
       if (newRunId) {
         setActiveRunId(newRunId);
@@ -117,7 +121,7 @@ export default function ReviewerCard({
         flashNotice("已是最新，无需重审");
       }
     } catch (e) {
-      setError(formatApiError(e));
+      if (loadSeq.current === seq) setError(formatApiError(e));
     } finally {
       setRerunning(false);
     }

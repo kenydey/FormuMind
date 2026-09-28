@@ -26,6 +26,7 @@ from ..services.supplier_normalize import (
 )
 from .models import MaterialRow
 from .session_utils import commit_session
+from .db_common import escape_like
 
 # Spec keys that map 1:1 onto columns. Order is irrelevant; membership is not.
 _SPEC_FIELDS = (
@@ -49,9 +50,6 @@ _TEXT_WIDTHS = {
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
-def _escape_like(term: str) -> str:
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def norm_key(name: str) -> str:
@@ -272,7 +270,7 @@ class MaterialStore:
             query = session.query(MaterialRow)
             term = (q or "").strip()
             if term:
-                like = f"%{_escape_like(term)}%"
+                like = f"%{escape_like(term)}%"
                 query = query.filter(
                     or_(
                         MaterialRow.name.ilike(like, escape="\\"),

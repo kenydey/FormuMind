@@ -820,8 +820,13 @@ export const apiMethods = {
     del<{ ok: boolean }>(`/api/session/delete/${sessionId}`),
 
   // ── KB 诊断: 切块详情 / 完整性 ──
-  kbChunksBySource: (sourceId: string) =>
-    get<KbChunk[]>(`/api/kb/chunks/by-source/${sourceId}`),
+  kbChunksBySource: (sourceId: string, limit?: number, offset?: number) => {
+    const qs = new URLSearchParams();
+    if (limit !== undefined) qs.set("limit", String(limit));
+    if (offset !== undefined) qs.set("offset", String(offset));
+    const suffix = qs.toString() ? `?${qs}` : "";
+    return get<KbChunk[]>(`/api/kb/chunks/by-source/${sourceId}${suffix}`);
+  },
 
   kbIntegrity: () =>
     get<KbIntegrityResponse>("/api/kb/integrity"),

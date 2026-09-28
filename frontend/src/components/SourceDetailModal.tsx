@@ -2,7 +2,7 @@
  * 资料详情(B1/B2, 2026-09-05): 查看该文档在 KB 中的全部切块(页码/段落,
  * 回答引用可追溯) + 一键「链入知识图谱」提取实体建立关系。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import Modal from "./Modal";
 import TableBadges from "./TableBadges";
 import "./CitationRenderer.css"; // W3-14: 复用 citation-flash 高亮动画
@@ -29,14 +29,34 @@ export default function SourceDetailModal({
   /** P-6: 切块客户端分页（后端 by-source 接口无分页参数）——600+ chunk 时防全量 DOM。 */
   const CHUNK_PAGE_SIZE = 50;
   const [page, setPage] = useState(0);
+  /**
+   * P-6 渲染层：零依赖虚拟化。分页已将挂载节点上限锁在 50，
+   * 每张卡再加 content-visibility:auto，浏览器跳过视口外卡片的
+   * 布局/绘制（滚动容器内生效），contain-intrinsic-size 给出预估
+   * 高度避免滚动条跳动。focusPage 的 scrollIntoView 不受影响
+   * （浏览器在滚动到时自动渲染被跳过的子树）。
+   */
+  const CHUNK_CARD_STYLE: CSSProperties = {
+    contentVisibility: "auto",
+    containIntrinsicSize: "0 220px",
+  };
 
   const load = useCallback(async () => {
     setBusy(true);
     setError(null);
     setPage(0);
     try {
-      const res = await api.kbChunksBySource(sourceId);
-      setChunks(Array.isArray(res) ? res : (res as { chunks?: KbChunk[] }).chunks ?? []);
+      // B1 接线缺口修复：后端 by-source 默认 limit=200，>200 chunk 的文档会被截断。
+      // 循环拉取全量（后端上限 2000/页），再走客户端分页。
+      const all: KbChunk[] = [];
+      const PAGE = 2000;
+      for (;;) {
+        const res = await api.kbChunksBySource(sourceId, PAGE, all.length);
+        const batch = Array.isArray(res) ? res : (res as { chunks?: KbChunk[] }).chunks ?? [];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      setChunks(all);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -165,6 +185,7 @@ export default function SourceDetailModal({
                     key={c.chunk_id ?? gi}
                     id={`source-chunk-${c.page ?? "na"}-${gi}`}
                     data-testid={`source-chunk-${gi}`}
+                    style={CHUNK_CARD_STYLE}
                     className={`border rounded p-2 bg-ink/30 transition-colors ${
                       flashIdx === gi ? "border-accent/60" : "border-edge"
                     }`}

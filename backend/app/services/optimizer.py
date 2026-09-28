@@ -22,6 +22,35 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+class _ObservedHistoryMixin:
+    """Shared ``best``/``ranked`` over the observed ``(_X, _y)`` history.
+
+    Extracted (code review 2026-09-28): ``BayesianOptimizer``,
+    ``OptunaOptimizer``, ``SummitOptimizer`` and ``BotorchOptimizer`` all
+    carried a character-identical copy of these two members. Every adapter
+    appends to ``self._X``/``self._y`` in ``observe()``, so one base
+    implementation keeps them in lockstep.
+
+    Not a dataclass itself: the subclass ``@dataclass``es declare their own
+    fields, and dataclass field collection ignores plain (non-dataclass)
+    base-class annotations, so subclass construction is unchanged.
+    """
+
+    _X: list[list[float]]
+    _y: list[float]
+
+    @property
+    def best(self) -> tuple[list[float], float] | None:
+        if not self._y:
+            return None
+        i = int(np.argmax(self._y))
+        return self._X[i], self._y[i]
+
+    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
+        order = np.argsort(self._y)[::-1][:top_n]
+        return [(self._X[i], self._y[i]) for i in order]
+
+
 @dataclass
 class Factor:
     name: str
@@ -33,7 +62,7 @@ class Factor:
 
 
 @dataclass
-class BayesianOptimizer:
+class BayesianOptimizer(_ObservedHistoryMixin):
     """Sequential model-based optimizer over a box-constrained space."""
 
     factors: list[Factor]
@@ -81,16 +110,7 @@ class BayesianOptimizer:
         self._X.append(list(x))
         self._y.append(float(y))
 
-    @property
-    def best(self) -> tuple[list[float], float] | None:
-        if not self._y:
-            return None
-        i = int(np.argmax(self._y))
-        return self._X[i], self._y[i]
 
-    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
-        order = np.argsort(self._y)[::-1][:top_n]
-        return [(self._X[i], self._y[i]) for i in order]
 
     @property
     def engine(self) -> str:
@@ -137,7 +157,7 @@ def _botorch_available() -> bool:
 
 
 @dataclass
-class OptunaOptimizer:
+class OptunaOptimizer(_ObservedHistoryMixin):
     """Optuna ask/tell optimizer (TPE sampler) over the scalar objective.
 
     A pure-CPU, pip-installable upgrade over the random-UCB search: the TPE
@@ -183,16 +203,7 @@ class OptunaOptimizer:
         self._X.append(list(x))
         self._y.append(float(y))
 
-    @property
-    def best(self) -> tuple[list[float], float] | None:
-        if not self._y:
-            return None
-        i = int(np.argmax(self._y))
-        return self._X[i], self._y[i]
 
-    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
-        order = np.argsort(self._y)[::-1][:top_n]
-        return [(self._X[i], self._y[i]) for i in order]
 
     @property
     def engine(self) -> str:
@@ -200,7 +211,7 @@ class OptunaOptimizer:
 
 
 @dataclass
-class SummitOptimizer:
+class SummitOptimizer(_ObservedHistoryMixin):
     """Summit single-objective Bayesian optimizer (SOBO) adapter.
 
     Wraps Summit's domain/strategy API behind the same sequential
@@ -241,16 +252,7 @@ class SummitOptimizer:
         self._X.append(list(x))
         self._y.append(float(y))
 
-    @property
-    def best(self) -> tuple[list[float], float] | None:
-        if not self._y:
-            return None
-        i = int(np.argmax(self._y))
-        return self._X[i], self._y[i]
 
-    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
-        order = np.argsort(self._y)[::-1][:top_n]
-        return [(self._X[i], self._y[i]) for i in order]
 
     @property
     def engine(self) -> str:
@@ -258,7 +260,7 @@ class SummitOptimizer:
 
 
 @dataclass
-class BotorchOptimizer:
+class BotorchOptimizer(_ObservedHistoryMixin):
     """BoTorch Gaussian-process optimizer with Expected-Improvement acquisition.
 
     Fits a ``SingleTaskGP`` to the observed (x, score) pairs and maximises a
@@ -321,16 +323,7 @@ class BotorchOptimizer:
         self._X.append(list(x))
         self._y.append(float(y))
 
-    @property
-    def best(self) -> tuple[list[float], float] | None:
-        if not self._y:
-            return None
-        i = int(np.argmax(self._y))
-        return self._X[i], self._y[i]
 
-    def ranked(self, top_n: int) -> list[tuple[list[float], float]]:
-        order = np.argsort(self._y)[::-1][:top_n]
-        return [(self._X[i], self._y[i]) for i in order]
 
     @property
     def engine(self) -> str:

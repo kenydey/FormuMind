@@ -31,12 +31,26 @@ content. ``create_version`` holds the lineage lock across the version write
 + ``version_ids`` append (no orphan versions). All file writes are atomic
 (same-dir temp file + flush/fsync + ``os.replace``).
 
+Cross-process transactions (A-route): the threading locks above are
+process-local. Every read → validate → write transaction additionally holds
+an exclusive ``fcntl.flock`` on a per-version / per-lineage sibling
+``.txn.lock`` file for its whole critical section (``create_version`` incl.
+restore copy-on-write, ``set_version_content``, ``_transition``,
+``finalize_version`` incl. the fail-open evidence freeze, which is local
+disk IO only — no LLM / network calls inside any transaction). Lock order is
+globally fixed — xproc file lock → threading RLock → ``_LOCK`` →
+single-write fcntl in ``_atomic_write_bytes`` — never inverted, so no
+deadlock. Granularity matches the thread locks (version vs lineage), so
+unrelated artifacts never block each other; single-process deployments just
+pay one extra flock per transaction.
+
 Performance (P-2): ``verify_version()`` caches the content digest per
 ``version_id`` (process-local), stat-validated by mtime_ns + size so on-disk
 tampering is still detected; content-write transactions invalidate the entry.
 """
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -83,6 +97,53 @@ def _lineage_lock(lineage_id: str) -> threading.RLock:
             lock = threading.RLock()
             _LINEAGE_LOCKS[lineage_id] = lock
         return lock
+
+
+# ── A-route: cross-process transaction locks ─────────────────────────────────
+# threading.RLock is process-local. In multi-worker / multi-process
+# deployments the full read → validate → write transaction must be mutually
+# excluded across processes, otherwise:
+#   proc A finalize reads pending → enters freeze_evidence (slow);
+#   proc B set_version_content reads version.json (still pending) → guard
+#   passes on the stale object → writes content.bin back, silently breaking
+#   finalized immutability.
+# Granularity mirrors the thread locks (per-version vs per-lineage) so
+# unrelated artifacts never block each other. Ordering is fixed globally:
+# xproc file lock → threading RLock → _LOCK → _atomic_write_bytes' fcntl;
+# the xproc lock is never nested on the same path, so no self-deadlock.
+
+
+@contextlib.contextmanager
+def _xproc_file_lock(lock_path: Path):
+    """Hold an exclusive cross-process lock for one transaction.
+
+    ``fcntl.flock(LOCK_EX)`` on a sibling lock file; degraded to a no-op on
+    non-POSIX platforms (threading locks + atomic writes remain).
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a") as fh:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            pass  # 非 POSIX：退化为仅线程锁 + 原子写
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+
+
+def _version_txn_lock_path(version_id: str) -> Path:
+    """Sibling lock file serializing cross-process transactions on one version."""
+    return _version_dir(version_id) / ".txn.lock"
+
+
+def _lineage_txn_lock_path(lineage_id: str) -> Path:
+    """Sibling lock file serializing cross-process transactions on one lineage."""
+    p = _lineage_path(lineage_id)
+    return p.with_name(p.name + ".txn.lock")
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -405,37 +466,42 @@ def create_version(
     B-1: the version write + lineage ``version_ids`` append run as ONE atomic
     transaction under the lineage lock — concurrent creates can no longer
     lose ``version_ids`` (orphan versions).
+
+    A-route: the whole transaction additionally holds the per-lineage
+    cross-process lock, so concurrent creates/restores from *other processes*
+    can no longer last-writer-win the ``version_ids`` list.
     """
-    with _lineage_lock(lineage_id):
-        lineage = _load_lineage(lineage_id)
-        if lineage is None:
-            raise KeyError(f"lineage not found: {lineage_id}")
-        if based_on_version_id is not None:
-            base = _load_version(based_on_version_id)
-            if base is None:
-                raise KeyError(f"based-on version not found: {based_on_version_id}")
-            if base.lineage_id != lineage_id:
-                raise ValueError("based_on_version_id must belong to the same lineage")
+    with _xproc_file_lock(_lineage_txn_lock_path(lineage_id)):
+        with _lineage_lock(lineage_id):
+            lineage = _load_lineage(lineage_id)
+            if lineage is None:
+                raise KeyError(f"lineage not found: {lineage_id}")
+            if based_on_version_id is not None:
+                base = _load_version(based_on_version_id)
+                if base is None:
+                    raise KeyError(f"based-on version not found: {based_on_version_id}")
+                if base.lineage_id != lineage_id:
+                    raise ValueError("based_on_version_id must belong to the same lineage")
+                if content is None:
+                    content = _read_content(based_on_version_id)
             if content is None:
-                content = _read_content(based_on_version_id)
-        if content is None:
-            content = b""
-        version = Version(
-            version_id=uuid.uuid4().hex[:16],
-            lineage_id=lineage_id,
-            based_on_version_id=based_on_version_id,
-            status=STATUS_STAGING,
-            actor=actor,
-        )
-        with _version_lock(version.version_id):
-            _save_version(version, content=content)
-            lineage.version_ids.append(version.version_id)
-            _save_lineage(lineage)
-        logger.info(
-            "artifact version created: %s (lineage %s, based_on=%s)",
-            version.version_id, lineage_id, based_on_version_id,
-        )
-        return version
+                content = b""
+            version = Version(
+                version_id=uuid.uuid4().hex[:16],
+                lineage_id=lineage_id,
+                based_on_version_id=based_on_version_id,
+                status=STATUS_STAGING,
+                actor=actor,
+            )
+            with _version_lock(version.version_id):
+                _save_version(version, content=content)
+                lineage.version_ids.append(version.version_id)
+                _save_lineage(lineage)
+            logger.info(
+                "artifact version created: %s (lineage %s, based_on=%s)",
+                version.version_id, lineage_id, based_on_version_id,
+            )
+            return version
 
 
 def get_version(version_id: str) -> Version | None:
@@ -456,13 +522,17 @@ def set_version_content(version_id: str, content: bytes) -> Version:
     B-1: load → guard → save is one atomic transaction under the version lock,
     so a concurrent ``submit``/``finalize`` can no longer be rolled back by a
     stale in-memory object.
+
+    A-route: additionally serialized across processes via the per-version
+    xproc lock (file lock acquired before the thread lock).
     """
-    with _version_lock(version_id):
-        version = _load_version(version_id)
-        if version is None:
-            raise KeyError(f"version not found: {version_id}")
-        _save_version(version, content=content)  # raises on non-staging (fresh object)
-        return version
+    with _xproc_file_lock(_version_txn_lock_path(version_id)):
+        with _version_lock(version_id):
+            version = _load_version(version_id)
+            if version is None:
+                raise KeyError(f"version not found: {version_id}")
+            _save_version(version, content=content)  # raises on non-staging (fresh object)
+            return version
 
 
 def _transition(version_id: str, to_status: str) -> Version:
@@ -471,18 +541,22 @@ def _transition(version_id: str, to_status: str) -> Version:
     The transition legality check runs on a freshly loaded record while
     holding the version lock, so a concurrent writer cannot slip a status
     regression between the check and the write.
+
+    A-route: additionally serialized across processes via the per-version
+    xproc lock (file lock acquired before the thread lock).
     """
-    with _version_lock(version_id):
-        version = _load_version(version_id)
-        if version is None:
-            raise KeyError(f"version not found: {version_id}")
-        if to_status not in _ALLOWED_TRANSITIONS.get(version.status, ()):
-            raise ValueError(
-                f"illegal transition {version.status} → {to_status} for version {version_id}"
-            )
-        version.status = to_status
-        _save_version(version)
-        return version
+    with _xproc_file_lock(_version_txn_lock_path(version_id)):
+        with _version_lock(version_id):
+            version = _load_version(version_id)
+            if version is None:
+                raise KeyError(f"version not found: {version_id}")
+            if to_status not in _ALLOWED_TRANSITIONS.get(version.status, ()):
+                raise ValueError(
+                    f"illegal transition {version.status} → {to_status} for version {version_id}"
+                )
+            version.status = to_status
+            _save_version(version)
+            return version
 
 
 def submit_version(version_id: str) -> Version:
@@ -501,27 +575,33 @@ def finalize_version(version_id: str) -> Version:
     B-1: the whole transition + freeze + re-save runs under the version lock,
     so a concurrent ``submit``/``set_version_content`` can neither roll the
     status back nor rewrite content after finalization.
+
+    A-route: additionally serialized across processes via the per-version
+    xproc lock (file lock acquired before the thread lock). The evidence
+    freeze is local disk IO only (manifest JSON, provenance graph, receipt
+    write — no LLM / network calls), so holding the lock across it is safe.
     """
-    with _version_lock(version_id):
-        version = _load_version(version_id)
-        if version is None:
-            raise KeyError(f"version not found: {version_id}")
-        if STATUS_FINALIZED not in _ALLOWED_TRANSITIONS.get(version.status, ()):
-            raise ValueError(
-                f"illegal transition {version.status} → {STATUS_FINALIZED} "
-                f"for version {version_id}"
-            )
-        version.status = STATUS_FINALIZED
-        version.finalized_at = _utcnow()
-        _save_version(version)
-        try:
-            freeze_evidence(version.version_id, version.to_dict())
-            version.evidence_frozen = True
+    with _xproc_file_lock(_version_txn_lock_path(version_id)):
+        with _version_lock(version_id):
+            version = _load_version(version_id)
+            if version is None:
+                raise KeyError(f"version not found: {version_id}")
+            if STATUS_FINALIZED not in _ALLOWED_TRANSITIONS.get(version.status, ()):
+                raise ValueError(
+                    f"illegal transition {version.status} → {STATUS_FINALIZED} "
+                    f"for version {version_id}"
+                )
+            version.status = STATUS_FINALIZED
+            version.finalized_at = _utcnow()
             _save_version(version)
-        except Exception:  # fail-open: a freeze failure must never block finalize
-            logger.exception("freeze_evidence failed for %s (fail-open)", version_id)
-        logger.info("artifact version finalized: %s", version_id)
-        return version
+            try:
+                freeze_evidence(version.version_id, version.to_dict())
+                version.evidence_frozen = True
+                _save_version(version)
+            except Exception:  # fail-open: a freeze failure must never block finalize
+                logger.exception("freeze_evidence failed for %s (fail-open)", version_id)
+            logger.info("artifact version finalized: %s", version_id)
+            return version
 
 
 def freeze_evidence(version_id: str, version_dict: dict[str, Any]) -> dict[str, Any]:

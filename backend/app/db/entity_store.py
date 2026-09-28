@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker, attributes
 
 from .models import KGEntity, KGEntityLink, KGMention
 from .session_utils import commit_session
+from .db_common import escape_like
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,6 @@ EXTRACTED_LINK_TYPES = SEMANTIC_LINK_TYPES | STRUCTURAL_LINK_TYPES
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
-def _escape_like(term: str) -> str:
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class EntityStore:
@@ -503,7 +501,7 @@ class EntityStore:
         term = (q or "").strip()
         if not term:
             return []
-        like = f"%{_escape_like(term.lower())}%"
+        like = f"%{escape_like(term.lower())}%"
         with self._session_factory() as session:
             query = session.query(KGEntity).filter(
                 or_(

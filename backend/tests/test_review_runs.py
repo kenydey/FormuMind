@@ -45,7 +45,8 @@ _seed_run.counter = 0
 
 
 def test_list_empty(api_client):
-    r = api_client.get("/api/reviews/runs")
+    # F-2 fail-closed: 列表必须带 project_id
+    r = api_client.get("/api/reviews/runs", params={"project_id": "proj-1"})
     assert r.status_code == 200, r.text
     assert r.json() == {"items": []}
 
@@ -62,20 +63,49 @@ def test_list_filter_and_order(api_client):
         p = svc._run_path(r["run_id"])
         os.utime(p, (base + i, base + i))
 
+    # F-2 fail-closed：无 project_id 的列表请求直接 400，不再返回全项目数据
     r = api_client.get("/api/reviews/runs")
+    assert r.status_code == 400
+
+    r = api_client.get("/api/reviews/runs", params={"project_id": "proj-1"})
     assert r.status_code == 200
     ids = [it["run_id"] for it in r.json()["items"]]
-    assert ids == [r3["run_id"], r2["run_id"], r1["run_id"]]
+    assert ids == [r2["run_id"], r1["run_id"]]
 
-    r = api_client.get("/api/reviews/runs", params={"session_key": "key-1"})
-    assert {it["run_id"] for it in r.json()["items"]} == {
-        r1["run_id"],
-        r3["run_id"],
-    }
+    r = api_client.get(
+        "/api/reviews/runs",
+        params={"session_key": "key-1", "project_id": "proj-1"},
+    )
+    assert [it["run_id"] for it in r.json()["items"]] == [r1["run_id"]]
     r = api_client.get("/api/reviews/runs", params={"project_id": "proj-2"})
     assert [it["run_id"] for it in r.json()["items"]] == [r3["run_id"]]
-    r = api_client.get("/api/reviews/runs", params={"limit": 1})
+    r = api_client.get(
+        "/api/reviews/runs", params={"project_id": "proj-1", "limit": 1}
+    )
     assert len(r.json()["items"]) == 1
+
+
+def test_list_requires_project_id_fail_closed(api_client):
+    """F-2: 缺 project_id（缺失/空串/空白/仅 session_key）→ 400 拒绝，
+    禁止过滤跳过导致的全项目审计记录越界。"""
+    _seed_run(session_key="key-1", project_id="proj-1")
+    _seed_run(session_key="key-9", project_id="proj-9")
+    for params in (
+        {},
+        {"project_id": ""},
+        {"project_id": "   "},
+        {"session_key": "key-1"},
+    ):
+        r = api_client.get("/api/reviews/runs", params=params)
+        assert r.status_code == 400, params
+        assert "project_id" in r.json()["detail"], params
+    # 合法调用：带 project_id 正常返回，且只含本项目
+    r = api_client.get("/api/reviews/runs", params={"project_id": "proj-1"})
+    assert r.status_code == 200
+    assert len(r.json()["items"]) == 1
+    assert all(
+        it["project_id"] == "proj-1" for it in r.json()["items"]
+    )
 
 
 def test_detail_ok_with_counts_and_stale_defaults(api_client):

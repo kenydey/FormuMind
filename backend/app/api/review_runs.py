@@ -75,7 +75,15 @@ def list_review_runs(
     project_id: str | None = None,
     limit: int = 50,
 ) -> dict:
-    """List persisted review runs, newest first. Fail-open per file."""
+    """List persisted review runs for one project, newest first.
+
+    F-2 fail-closed: ``project_id`` is required. Without it the project
+    filter would be skipped and runs from *all* projects would leak, so the
+    request is rejected instead of silently widened.
+    Fail-open per file (a single corrupt JSON does not break the list).
+    """
+    if not (project_id or "").strip():
+        raise HTTPException(status_code=400, detail="project_id is required")
     limit = max(1, min(int(limit or 50), _LIST_LIMIT_MAX))
     # _run_path 是 service 内部路径构造；复用它避免重复实现 sanitize 规则。
     runs_dir = reviewer_fix_loop._run_path("probe").parent  # noqa: SLF001
@@ -95,7 +103,7 @@ def list_review_runs(
                 continue
             if session_key and run.get("session_key") != session_key:
                 continue
-            if project_id and run.get("project_id") != project_id:
+            if run.get("project_id") != project_id:
                 continue
             items.append(_summarize_run(run))
             if len(items) >= limit:

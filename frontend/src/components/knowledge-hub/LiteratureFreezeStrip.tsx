@@ -37,6 +37,12 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
   const [rollbackVersion, setRollbackVersion] = useState("");
   /** F-4: 序号守卫 —— project 快速切换时旧请求不覆盖新数据。 */
   const loadSeq = useRef(0);
+  /** F-4: run() 动作耗时中 project 可能切换；reloadRef 始终指向最新 projectId 的
+   *  reload，避免动作完成后的刷新用旧闭包把旧 project 的 manifest 写回新面板
+   *  （旧闭包的 seq 反而是最新，会绕过序号守卫）。 */
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
+  /** F-4: 零散 setState（评估结果等）用 projectId 快照比对，丢弃过期 project 的写入。 */
+  const projectIdRef = useRef<string | null>(projectId);
 
   const kwCriteria = () => ({
     include_keywords: includeKw
@@ -88,6 +94,10 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
     void reload();
   }, [reload]);
 
+  // F-4: 每轮渲染同步最新引用，供 run()/动作回调使用（幂等赋值，StrictMode 安全）。
+  reloadRef.current = reload;
+  projectIdRef.current = projectId;
+
   if (!projectId) {
     return (
       <div
@@ -109,7 +119,9 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
     setError(null);
     try {
       await fn();
-      await reload();
+      // F-4: 动作耗时中 project 可能已切换 —— 用最新 reload（当前 projectId）刷新，
+      // 旧 project 的 reload 闭包不再直接调用，避免旧数据覆盖新面板。
+      await reloadRef.current();
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -296,10 +308,13 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
               data-testid="literature-eval-btn"
               onClick={() =>
                 run("evaluate", async () => {
+                  const pid = projectId;
                   const r = await api.evaluateScreening({
-                    project_id: projectId,
+                    project_id: pid,
                     criteria: kwCriteria(),
                   });
+                  // F-4: 评估耗时中 project 已切换时，丢弃旧 project 的评估结果。
+                  if (projectIdRef.current !== pid) return;
                   setEvalRes(r);
                 })
               }
