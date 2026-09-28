@@ -386,7 +386,7 @@ def search_patents_by_query(
     if us:
         batches.append(us)
     if effective_setting(settings, "serpapi_api_key"):
-        batches.append(search_serpapi_patents(query, want, 0, settings=settings, domain=domain))
+        batches.append(search_serpapi_patents(query, want, 0, settings=settings))
     cq = (chinese_query or "").strip()
     if cq:
         batches.append(search_google_patents_cn(cq, want, 0, settings=settings))

@@ -386,3 +386,23 @@ def test_serpapi_web_results_are_classified_as_web_not_literature(monkeypatch):
         f"general web hit counted as literature: source={ev.source!r}"
     )
     get_settings.cache_clear()
+
+
+def test_search_patents_by_query_serpapi_path_no_nameerror(_keys, monkeypatch):
+    """回归：配置了 SerpAPI key 时，search_patents_by_query 曾引用未定义的
+    `domain`（NameError 被 degrade_return 吞掉，整条专利检索链路静默死亡）。"""
+    from app.services import literature
+
+    _keys(serpapi="sk-serp")
+    hit = Evidence(
+        source="Google Patents", identifier="US1", title="T", snippet="s", relevance=0.9
+    )
+    monkeypatch.setattr(
+        "app.services.search_providers.search_serpapi_patents",
+        lambda q, l=5, o=0, **kw: [hit],
+    )
+    monkeypatch.setattr("app.services.literature._search_epo_patents", lambda *a, **k: [])
+    monkeypatch.setattr("app.services.literature._online_search", lambda *a, **k: None)
+
+    out = literature.search_patents_by_query("epoxy coating", limit=3)
+    assert any(e.identifier == "US1" for e in out)

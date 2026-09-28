@@ -630,6 +630,9 @@ class Settings(BaseSettings):
     screening_auto_freeze: bool = False
     # W6-2 — manifest 超过该条目数时筛选走后台 job（默认 500）。
     screening_async_threshold: int = 500
+    # W6-3 — Smart Collections 自动刷新：GET /api/collections 顺带触发到期
+    # 集合的后台刷新（默认开；关闭后只剩手动 refresh 与 celery beat 任务）。
+    smart_collections_auto_refresh: bool = True
     # Wave 4 — artifact version lineage / immutable snapshots (P1-16, default on).
     artifact_versions_enabled: bool = True
     literature_screening_required_for_export: bool = False

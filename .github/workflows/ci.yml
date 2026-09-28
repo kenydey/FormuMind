@@ -49,6 +49,12 @@ jobs:
         # run in-process without a Redis service on the runner.
         run: pytest -m "not golden_eval" -q
 
+      - name: Rigor gate (W6-1)
+        # Deterministic evals rubric over the chemistry golden Q&A set
+        # (citation veracity / claim coverage / numeric consistency).
+        # No LLM cost; fails the build if rigor metrics regress.
+        run: python scripts/rigor_gate.py
+
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
   # still required — failures block merge once calibrated.
   golden:
