@@ -408,6 +408,22 @@ class Settings(BaseSettings):
     mineru_max_pages_per_doc: int = 10
     # 本地预检体积上限（服务端为 200MB）。超限直接不发，省一次往返与配额。
     mineru_max_upload_mb: int = 200
+    # ── Phase 1：云端公式/表格识别显式开关 ─────────────────────────────
+    # SDK 只在显式设置时才发送 enable_formula/enable_table；不传则走服务端
+    # 默认，公式识别可能静默关闭（本地管线的 mfr_enable 陷阱的云端等价物）。
+    # 这里默认全开并在调用时打日志，关掉必须是有意为之。
+    mineru_formula_enabled: bool = True
+    mineru_table_enabled: bool = True
+    # ── Phase 1：mineru_cloud 一等后端的按页质量自适应 ────────────────
+    # 整份文档的页面都有可用文本层时跳过云端调用（省配额）；False = 显式
+    # 指定 mineru_cloud 时也全量走云端。
+    mineru_cloud_adaptive_skip: bool = True
+    # 单页可用字符数阈值：低于此值视为"脏页"（扫描/表格页），值得升级。
+    mineru_cloud_min_chars_per_page: int = 50
+    # ── Phase 1：公式守门员 ──────────────────────────────────────────
+    # 仅统计 MinerU 漏网的公式（计数器+日志），默认不开 LLM 纠错。
+    # 开启后对漏网块做单块 DeepSeek LaTeX/SMILES 归一化（每块 1 次调用）。
+    formula_gatekeeper_llm_enabled: bool = False
     # 内容哈希缓存目录：同一份文件重复解析既费钱又费时。
     mineru_cache_dir: str = "./data/mineru_cache"
     # ═══ 入库收尾自动清理（省空间）════
@@ -639,6 +655,33 @@ class Settings(BaseSettings):
     agent_search_time_budget_s: float = 20.0
     # LLM-based gap assessment (cost); heuristic is used when False.
     agent_search_llm_assess: bool = False
+    # Phase 2 — retrieval_by_children: score sentence-level children at query
+    # time, present the parent block. Default OFF until golden A/B decides
+    # (see tests/test_phase2_children_ab.py). Override via
+    # FORMUMIND_KB_CHILDREN_RETRIEVAL_ENABLED=true.
+    kb_children_retrieval_enabled: bool = False
+    # Candidate multiplier for the parent pool before children re-rank.
+    kb_children_candidate_mult: int = 3
+    # Phase 2 — patent tag stitching: when a hit carries meta.patent_tags
+    # (claim_no/example_no), pull sibling chunks with the same tag into
+    # context (Claims<->Examples stitching, zero LLM cost).
+    kb_patent_stitch_enabled: bool = True
+    kb_patent_stitch_max_siblings: int = 2
+    # Phase 4 — Text2SQL hybrid routing in the chat chain. When True and the
+    # question carries structured signals, deterministic SQL rows are
+    # prepended to the answer prompt (fail-open: SQL failure falls back to
+    # the pure-literature path and never blocks the answer). Single boolean
+    # kill-switch via FORMUMIND_TEXT2SQL_ROUTING_ENABLED=false.
+    text2sql_routing_enabled: bool = True
+    # Phase 3 — page thumbnails + VLM chart fallback (opt-in, default OFF).
+    # Thumbnails are rendered at ingest (PyMuPDF, PDF only) into
+    # <db_dir>/thumbnails/<source_id>/ and fed to the vision role only when
+    # vlm_fallback_enabled. Zero cost when disabled.
+    page_thumbnail_enabled: bool = False
+    page_thumbnail_dpi: int = 40
+    vlm_fallback_enabled: bool = False
+    # Max page images per VLM call (cost gate: ~1100 tokens/image at 40 DPI).
+    vlm_max_pages: int = 4
     # Wave B — project literature manifest / frozen corpus.
     literature_manifest_enabled: bool = True
     frozen_corpus_required_for_export: bool = False

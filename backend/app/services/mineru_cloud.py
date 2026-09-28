@@ -191,8 +191,13 @@ def _normalise(result, images_by_path: dict[str, bytes]) -> MinerUDocument:
 
 
 def parse_bytes(
-    content: bytes, *, ext: str = "pdf", ocr: bool = False,
+    content: bytes,
+    *,
+    ext: str = "pdf",
+    ocr: bool = False,
     timeout: float | None = None,
+    formula: bool | None = None,
+    table: bool | None = None,
 ) -> MinerUDocument | None:
     """Parse *content* through MinerU, or return None and let the caller cope.
 
@@ -233,7 +238,9 @@ def parse_bytes(
             logger.info("mineru: cache hit (%s)", key[:12])
             return cached
 
-    document = _extract(content, ext=ext, ocr=ocr, timeout=timeout)
+    document = _extract(
+        content, ext=ext, ocr=ocr, timeout=timeout, formula=formula, table=table
+    )
     if document is not None and not settings.prune_mineru_cache:
         # Only successes are cached. Caching a failure would turn one network
         # blip into a permanently broken document.
@@ -242,7 +249,12 @@ def parse_bytes(
 
 
 def parse_pages_batch(
-    contents: list[bytes], *, ext: str = "pdf", timeout: float | None = None,
+    contents: list[bytes],
+    *,
+    ext: str = "pdf",
+    timeout: float | None = None,
+    formula: bool | None = None,
+    table: bool | None = None,
 ) -> list[MinerUDocument | None]:
     """Parse several single-page PDFs in one batch submission.
 
@@ -302,7 +314,12 @@ def parse_pages_batch(
 
     try:
         client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
-        documents = list(client.extract_batch(paths, timeout=int(wait)))
+        eff_formula, eff_table = _extract_options(formula=formula, table=table)
+        documents = list(
+            client.extract_batch(
+                paths, formula=eff_formula, table=eff_table, timeout=int(wait)
+            )
+        )
     except mineru.AuthError as exc:
         logger.error("mineru: token rejected (%s) — check 设置 → API 配置", exc)
         return results
@@ -340,14 +357,48 @@ def parse_pages_batch(
     return results
 
 
+def _extract_options(
+    *, formula: bool | None, table: bool | None
+) -> tuple[bool, bool]:
+    """Resolve formula/table recognition flags.
+
+    The SDK only sends ``enable_formula``/``enable_table`` when explicitly
+    set — omitting them leaves recognition at the server default, which is
+    the cloud equivalent of the local pipeline's mfr_enable trap (§8.2).
+    Explicit True/False from the caller wins; otherwise the config defaults
+    (both on) apply. The effective pair is logged by the caller.
+    """
+    settings = get_settings()
+    eff_formula = formula if formula is not None else bool(
+        getattr(settings, "mineru_formula_enabled", True)
+    )
+    eff_table = table if table is not None else bool(
+        getattr(settings, "mineru_table_enabled", True)
+    )
+    return eff_formula, eff_table
+
+
 def _extract(
-    content: bytes, *, ext: str, ocr: bool, timeout: float | None = None
+    content: bytes,
+    *,
+    ext: str,
+    ocr: bool,
+    timeout: float | None = None,
+    formula: bool | None = None,
+    table: bool | None = None,
 ) -> MinerUDocument | None:
     import mineru  # type: ignore
 
     settings = get_settings()
     token = str(effective_setting(settings, "mineru_api_key") or "")
     wait = float(settings.mineru_timeout_s if timeout is None else timeout)
+    eff_formula, eff_table = _extract_options(formula=formula, table=table)
+    logger.info(
+        "mineru: extract options formula=%s table=%s ocr=%s",
+        eff_formula,
+        eff_table,
+        bool(ocr),
+    )
 
     handle, temp_path = tempfile.mkstemp(suffix=f".{ext}")
     try:
@@ -355,7 +406,13 @@ def _extract(
             fh.write(content)
 
         client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
-        result = client.extract(temp_path, ocr=ocr or None, timeout=int(wait))
+        result = client.extract(
+            temp_path,
+            ocr=ocr or None,
+            formula=eff_formula,
+            table=eff_table,
+            timeout=int(wait),
+        )
         if getattr(result, "state", "") != "done":
             logger.warning(
                 "mineru: task finished in state %r (%s)",

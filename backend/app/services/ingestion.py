@@ -195,7 +195,8 @@ def ingest_file(
     if ext in _IMAGE_EXTS:
         return _ingest_image(filename, content, persist=persist, origin_url=origin_url)
 
-    text = parse_document(content, ext).markdown
+    parsed = parse_document(content, ext)
+    text = parsed.markdown
 
     if not text or not text.strip():
         # Two very different failures used to look identical here. A missing
@@ -216,13 +217,30 @@ def ingest_file(
         )
         return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
 
-    return _ingest_parsed_text(
+    outcome = _ingest_parsed_text(
         text,
         filename=filename,
         source_kind="local",
         persist=persist,
         origin_url=origin_url,
     )
+    # Phase 1: MinerU structured products → extraction_tables/formulas.
+    # Fail-open: a structured-persist failure must never break the ingest
+    # that already succeeded.
+    if persist and outcome.source_id and getattr(parsed, "structured", None) is not None:
+        try:
+            from .mineru_structured import persist_structured
+
+            persist_structured(outcome.source_id, parsed.structured)
+        except Exception:
+            logger.exception("structured persist failed (fail-open)")
+    # Phase 3: opt-in page thumbnails (PDF only). Fail-open inside the hook;
+    # zero overhead when page_thumbnail_enabled is False (default).
+    if persist and outcome.source_id:
+        from .page_thumbnails import maybe_store_page_thumbnails
+
+        maybe_store_page_thumbnails(content, ext, outcome.source_id)
+    return outcome
 
 
 _IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "webp", "gif", "bmp"})
@@ -413,6 +431,14 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     if outcome.evidence:
         outcome.evidence[0].identifier = url
         outcome.evidence[0].title = url
+    # Phase 3: opt-in page thumbnails for fetched PDFs (fail-open, zero
+    # overhead when disabled).
+    if persist and outcome.source_id and (
+        "pdf" in content_type or body.lstrip()[:4] == b"%PDF"
+    ):
+        from .page_thumbnails import maybe_store_page_thumbnails
+
+        maybe_store_page_thumbnails(body, "pdf", outcome.source_id)
     return outcome
 
 

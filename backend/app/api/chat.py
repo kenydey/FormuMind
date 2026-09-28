@@ -338,6 +338,24 @@ def chat(req: ChatRequestValidated):
         except Exception as exc:  # noqa: BLE001
             logger.debug("sync skill/mcp prefix skipped: %s", exc)
 
+        # Phase 4 — Text2SQL hybrid routing: prepend deterministic SQL rows
+        # to the answer prompt. Fail-open: hook never raises, SQL failure
+        # falls back to the pure-literature path (prompt_prefix unchanged).
+        sql_block, sql_prov = "", {"data_sources": ["kb_evidence"]}
+        try:
+            from ..services.text2sql import structured_data_block
+
+            sql_block, sql_prov = structured_data_block(
+                retrieval_query, settings=settings, project_id=req.project_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("text2sql chain hook skipped: %s", exc)
+        if sql_block:
+            prompt_prefix = (
+                f"{sql_block}\n\n{prompt_prefix}" if prompt_prefix else sql_block
+            )
+        data_sources = list(sql_prov.get("data_sources") or ["kb_evidence"])
+
         if req.response_format == "structured" and settings.chat_structured_enabled:
             structured, struct_err = generate_structured_answer(
                 question,
@@ -503,6 +521,7 @@ def chat(req: ChatRequestValidated):
             reviewer_fix=reviewer_fix,
             mcp_permission_required=mcp_permission_required,
             mcp_tool_results=mcp_tool_results,
+            data_sources=data_sources,
         )
     except HTTPException:
         raise
@@ -580,6 +599,20 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     prompt = _chat_prompt(
         question, relevant, req.domain, history=history, structure=req.structure
     )
+    # Phase 4 — Text2SQL hybrid routing (same hook as /api/chat): prepend
+    # deterministic SQL rows. Fail-open, never blocks the stream.
+    sql_block, sql_prov = "", {"data_sources": ["kb_evidence"]}
+    try:
+        from ..services.text2sql import structured_data_block
+
+        sql_block, sql_prov = structured_data_block(
+            retrieval_query, settings=settings, project_id=req.project_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("stream text2sql hook skipped: %s", exc)
+    if sql_block:
+        prompt = f"{sql_block}\n\n{prompt}"
+    data_sources = list(sql_prov.get("data_sources") or ["kb_evidence"])
     try:
         from ..services.evidence_synthesis import enrich_chat_prompt
 
@@ -606,6 +639,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         "mode": req.mode,
         "selected_skills": list(req.selected_skills or []),
         "selected_mcp_servers": list(req.selected_mcp_servers or []),
+        "data_sources": data_sources,
     }
 
 
@@ -824,6 +858,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "citations": [_sanitize_evidence(c) for c in citations],
                             "rag_backend": "paperqa",
                             "kb_chunks_used": kb_used,
+                            "data_sources": plan.get("data_sources"),
                             "entity_resolution": plan["entity_resolution"],
                             "kg_retrieval_stats": plan["kg_stats"],
                             "clarification": plan["clarification"],
@@ -874,6 +909,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                         "citations": [_sanitize_evidence(c) for c in citations],
                         "rag_backend": active_rag_backend(),
                         "kb_chunks_used": kb_used,
+                        "data_sources": plan.get("data_sources"),
                         "structured": structured,
                         "clarification": plan["clarification"],
                         "rewritten_query": plan["rewritten_query"],
@@ -1001,6 +1037,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "citations": cites,
                             "rag_backend": active_rag_backend(),
                             "kb_chunks_used": kb_used,
+                            "data_sources": plan.get("data_sources"),
                             "entity_resolution": plan["entity_resolution"],
                             "kg_retrieval_stats": plan["kg_stats"],
                             "clarification": plan["clarification"],
@@ -1037,6 +1074,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "citations": cites,
                             "rag_backend": active_rag_backend(),
                             "kb_chunks_used": kb_used,
+                            "data_sources": plan.get("data_sources"),
                             "entity_resolution": plan["entity_resolution"],
                             "kg_retrieval_stats": plan["kg_stats"],
                             "clarification": plan["clarification"],
@@ -1168,6 +1206,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "citations": citations,
                     "rag_backend": active_rag_backend(),
                     "kb_chunks_used": kb_used,
+                    "data_sources": plan.get("data_sources"),
                     "entity_resolution": plan["entity_resolution"],
                     "kg_retrieval_stats": plan["kg_stats"],
                     "clarification": plan["clarification"],

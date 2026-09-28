@@ -8,8 +8,8 @@ Covers:
 3. page provenance — ``<!-- page:N -->`` markers from pypdf/docling are
    consumed into ``Chunk.page_no`` and stripped from chunk text, for both the
    structured and the plain-text (pypdf) paths;
-4. MinerU OCR/formula knobs — ``pdf_ocr`` routes to the OCR pipe, enable
-   kwargs degrade for older magic-pdf;
+4. MinerU tier (cloud backend) — formula/table recognition explicitly
+   enabled, adaptive skip on clean documents, fail-open cascade;
 5. page_no persists through kb_index into document_chunks rows.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import types
 import pytest
 
 from app.config import get_settings
-from app.services import parsing
+from app.services import mineru_cloud, mineru_structured, parsing
 from app.services.chunking import Chunk, chunk_markdown
 
 
@@ -180,87 +180,49 @@ def test_pypdf_empty_pages_stay_none(monkeypatch):
 # ── MinerU knobs ─────────────────────────────────────────────────────────────
 
 
-def _install_fake_mineru(monkeypatch, *, accepts_enable_kwargs: bool):
-    calls: dict = {}
-    magic_pdf = types.ModuleType("magic_pdf")
-    data = types.ModuleType("magic_pdf.data")
-    drw = types.ModuleType("magic_pdf.data.data_reader_writer")
-    dataset = types.ModuleType("magic_pdf.data.dataset")
-    model = types.ModuleType("magic_pdf.model")
-    dabcm = types.ModuleType("magic_pdf.model.doc_analyze_by_custom_model")
-
-    class FileBasedDataWriter:
-        def __init__(self, d):
-            pass
-
-    class PymuDocDataset:
-        def __init__(self, content):
-            pass
-
-    class _Result:
-        def get_markdown(self, d):
-            return "mineru 输出 $$Zn_3(PO_4)_2$$"
-
-    class _Infer:
-        def pipe_txt_mode(self, writer):
-            calls["pipe"] = "txt"
-            return _Result()
-
-        def pipe_ocr_mode(self, writer):
-            calls["pipe"] = "ocr"
-            return _Result()
-
-    def doc_analyze(ds, ocr=False, **kwargs):
-        if kwargs and not accepts_enable_kwargs:
-            raise TypeError("unexpected kwargs")
-        calls["ocr"] = ocr
-        calls["kwargs"] = dict(kwargs)
-        return _Infer()
-
-    drw.FileBasedDataWriter = FileBasedDataWriter
-    dataset.PymuDocDataset = PymuDocDataset
-    dabcm.doc_analyze = doc_analyze
-    data.data_reader_writer = drw
-    data.dataset = dataset
-    model.doc_analyze_by_custom_model = dabcm
-    magic_pdf.data = data
-    magic_pdf.model = model
-
-    for name, mod in {
-        "magic_pdf": magic_pdf,
-        "magic_pdf.data": data,
-        "magic_pdf.data.data_reader_writer": drw,
-        "magic_pdf.data.dataset": dataset,
-        "magic_pdf.model": model,
-        "magic_pdf.model.doc_analyze_by_custom_model": dabcm,
-    }.items():
-        monkeypatch.setitem(sys.modules, name, mod)
-    return calls
+# ── mineru tier (cloud backend, Phase 1) ─────────────────────────────────────
+# The old magic-pdf local path was retired — magic_pdf was never installed in
+# this deployment, so the tier was a dead branch. The mineru tier is now the
+# cloud SDK with formula/table recognition explicitly enabled (the cloud
+# equivalent of the old enable-kwargs contract). These tests pin the new
+# contracts through parse_document(prefer="mineru").
 
 
 def test_mineru_requests_formula_and_table(monkeypatch):
-    calls = _install_fake_mineru(monkeypatch, accepts_enable_kwargs=True)
+    calls: dict = {}
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(mineru_structured, "_doc_is_clean", lambda content: False)
+
+    def fake_parse(content, **kw):
+        calls.update(kw)
+        return mineru_cloud.MinerUDocument(blocks=[
+            mineru_cloud.MinerUBlock(type="text", page_idx=0, text="x"),
+        ])
+
+    monkeypatch.setattr(mineru_cloud, "parse_bytes", fake_parse)
     result = parsing.parse_document(b"%PDF-fake", "pdf", prefer="mineru")
     assert result.parser == "mineru"
-    assert calls["kwargs"] == {"formula_enable": True, "table_enable": True}
-    assert calls["pipe"] == "txt"
+    assert calls.get("formula") is True
+    assert calls.get("table") is True
 
 
-def test_mineru_ocr_flag_switches_pipe(monkeypatch):
-    monkeypatch.setenv("FORMUMIND_PDF_OCR", "true")
-    get_settings.cache_clear()
-    calls = _install_fake_mineru(monkeypatch, accepts_enable_kwargs=True)
+def test_mineru_clean_document_falls_through(monkeypatch):
+    """Adaptive skip: a clean document never reaches the cloud; the tier
+    yields so the cascade below it still runs (fail-open)."""
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (True, ""))
+    monkeypatch.setattr(mineru_structured, "_doc_is_clean", lambda content: True)
+    monkeypatch.setattr(parsing, "_parse_rapidocr", lambda content: "local text")
     result = parsing.parse_document(b"%PDF-fake", "pdf", prefer="mineru")
-    assert result.parser == "mineru"
-    assert calls["ocr"] is True
-    assert calls["pipe"] == "ocr"
+    assert result.parser == "rapidocr"
+    assert result.markdown == "local text"
 
 
-def test_mineru_old_api_degrades(monkeypatch):
-    calls = _install_fake_mineru(monkeypatch, accepts_enable_kwargs=False)
+def test_mineru_unavailable_degrades_to_next_tier(monkeypatch):
+    """Whatever the cloud does, a dead tier never breaks the cascade."""
+    monkeypatch.setattr(mineru_cloud, "mineru_available", lambda: (False, "off"))
+    monkeypatch.setattr(parsing, "_parse_rapidocr", lambda content: "local text")
     result = parsing.parse_document(b"%PDF-fake", "pdf", prefer="mineru")
-    assert result.parser == "mineru"
-    assert calls["kwargs"] == {}
+    assert result.parser == "rapidocr"
 
 
 # ── math-atomic chunking ─────────────────────────────────────────────────────

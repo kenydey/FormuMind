@@ -57,6 +57,10 @@ class ParseResult:
     # W2-3: structured table assets extracted after a successful parse
     # (table_contract.TableAsset). Empty when extraction is disabled/failed.
     tables: list = field(default_factory=list)
+    # Phase 1: layout-aware structured products (MinerUStructured) from the
+    # mineru tier — blocks with page/kind, tables, formulas. None for the
+    # text chain. Consumed by ingestion → extraction_tables/formulas.
+    structured: object = None
 
     @property
     def ok(self) -> bool:
@@ -203,41 +207,32 @@ def _parse_marker(content: bytes) -> str | None:
         return None
 
 
-def _parse_mineru(content: bytes) -> str | None:
-    """MinerU (magic-pdf 本地): highest-fidelity PDF → Markdown（需 GPU）。
+def _parse_mineru(content: bytes):
+    """MinerU first-class backend (Phase 1): cloud SDK, structured.
 
-    无 GPU 部署请走 hybrid 的云端 MinerU（``hybrid_parse._escalate_page``）；
-    本地 magic-pdf 在 CPU 上慢到不可用，仅作有 GPU 主机的离线高保真选项。
+    The old magic-pdf local path is retired — ``magic_pdf`` was never
+    installed in this deployment (verified 2026-09-28), so this tier was a
+    dead branch. The real backend is the MinerU cloud SDK: formula/table
+    recognition is explicitly enabled (see ``mineru_cloud._extract_options``
+    — the cloud equivalent of the local pipeline's mfr_enable trap, §8.2).
 
-    Chemistry-aware knobs: ``FORMUMIND_PDF_OCR`` routes scanned documents
-    through the OCR pipeline; formula/table recognition is requested when the
-    installed magic-pdf supports it (equations come back as LaTeX).
+    Returns a ParseResult carrying the structured blocks (tables/formulas
+    land in ``extraction_tables``/``extraction_formulas`` via ingestion);
+    None when the cloud is unavailable, unconfigured, or the document is
+    clean (adaptive skip) — the cascade then falls through, fail-open.
+
+    Uploading to mineru.net is a third-party transfer: this tier only fires
+    when ``mineru_enabled`` is set with a token. In the auto order it sits
+    in the same 4th position the dead tier occupied — the default chain is
+    structurally unchanged; unconfigured it behaves exactly as before
+    (returns None immediately).
     """
-    try:
-        import tempfile
-        from pathlib import Path
+    from . import mineru_structured
 
-        from magic_pdf.data.data_reader_writer import FileBasedDataWriter  # type: ignore
-        from magic_pdf.data.dataset import PymuDocDataset  # type: ignore
-        from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze  # type: ignore
-
-        ocr = bool(get_settings().pdf_ocr)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ds = PymuDocDataset(content)
-            try:
-                infer = doc_analyze(ds, ocr=ocr, formula_enable=True, table_enable=True)
-            except TypeError:  # older magic-pdf without the enable kwargs
-                infer = doc_analyze(ds, ocr=ocr)
-            writer = FileBasedDataWriter(tmpdir)
-            pipe = getattr(infer, "pipe_ocr_mode", None) if ocr else None
-            result = pipe(writer) if pipe else infer.pipe_txt_mode(writer)
-            md = result.get_markdown(str(Path(tmpdir)))
-        return md or None
-    except ImportError:
+    structured = mineru_structured.parse_structured(content)
+    if structured is None or not structured.markdown.strip():
         return None
-    except Exception as exc:
-        log_handled_exception(logger, exc, "mineru parse failed")
-        return None
+    return ParseResult(structured.markdown, "mineru", structured=structured)
 
 
 def _looks_like_undecoded_binary(text: str) -> bool:
@@ -452,10 +447,19 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
         if ext == "pdf":
             order = _pdf_tier_order(prefer if prefer is not None else get_settings().pdf_parser)
             for name, fn in order:
-                text = fn(content, ext)
+                out = fn(content, ext)
+                # Tiers may return a full ParseResult (mineru_cloud) or plain
+                # text; both are accepted so existing tiers stay untouched.
+                if isinstance(out, ParseResult):
+                    result = out
+                    text = out.markdown
+                else:
+                    text = out
+                    result = None
                 if text and text.strip():
                     timing.note(parser=name)
-                    return _maybe_extract_tables(ParseResult(text, name), content)
+                    final = result if result is not None else ParseResult(text, name)
+                    return _maybe_extract_tables(final, content)
             timing.note(parser="none")
             return ParseResult("", "none")
 
@@ -502,7 +506,10 @@ def parser_availability() -> dict[str, bool]:
         "hybrid": optional_import("pymupdf4llm"),
         "docling": optional_import("docling"),
         "marker": optional_import("marker"),
-        "mineru": optional_import("magic_pdf"),
+        # Phase 1: the mineru tier is the cloud SDK backend — "available" now
+        # means SDK importable AND enabled with a token (the old magic_pdf
+        # local path was never installed; availability key set is unchanged).
+        "mineru": optional_import("mineru") and bool(get_settings().mineru_enabled),
         "rapidocr": optional_import("rapidocr_onnxruntime"),
         "markitdown": optional_import("markitdown"),
         "pypdf": optional_import("pypdf"),

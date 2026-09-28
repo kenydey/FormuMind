@@ -126,3 +126,6 @@ class ChatResponse(BaseModel):
     reviewer_fix: dict | None = None
     mcp_permission_required: dict | None = None
     mcp_tool_results: list[dict] | None = None
+    # Phase 4 — which data sources contributed to the answer, for the
+    # frontend/eval to distinguish: "structured_sql" vs "kb_evidence".
+    data_sources: list[str] | None = None

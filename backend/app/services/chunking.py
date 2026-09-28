@@ -26,11 +26,23 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _MAX_HEADING_PATH = 80
 
 PAGE_MARKER_RE = re.compile(r"^\s*<!--\s*page:(\d+)\s*-->\s*$")
+BLOCK_MARKER_RE = re.compile(
+    r"^\s*<!--\s*block:(text|table|formula|figure|code|image)\s*-->\s*$"
+)
 
 
 def page_marker(page_no: int) -> str:
     """The canonical inter-page marker PDF parsers emit (chunker strips it)."""
     return f"<!-- page:{page_no} -->"
+
+
+def block_marker(kind: str) -> str:
+    """Block-kind marker layout-aware parsers emit (MinerU tier, Phase 1).
+
+    Lets the chunker use the detected block type instead of the markdown
+    heuristic. Stripped from chunk text like page markers.
+    """
+    return f"<!-- block:{kind} -->"
 
 
 @dataclass
@@ -41,6 +53,12 @@ class Chunk:
     paragraph_idx: int | None = None
     offset_start: int | None = None
     offset_end: int | None = None
+    # Layout provenance (Phase 0): normalized page-fraction bbox, filled by
+    # layout-aware parsers (MinerU, Phase 1); None for the text chain.
+    bbox: list | None = None
+    # Block kind: text | table | formula | figure | code. Heuristic on
+    # markdown for the text chain; layout parsers overwrite it.
+    block_type: str = "text"
 
 
 # ── legacy plain-text splitter (moved verbatim from ingestion) ───────────────
@@ -201,6 +219,12 @@ def _split_blocks(body: str) -> list[str]:
             flush()
             blocks.append(stripped)
             continue
+        if BLOCK_MARKER_RE.match(line):
+            # block-kind markers likewise become standalone blocks; the
+            # chunker consumes them into Chunk.block_type and strips them.
+            flush()
+            blocks.append(stripped)
+            continue
         if _math_selfclosed(stripped):
             flush()
             blocks.append(stripped)
@@ -233,6 +257,31 @@ def _split_blocks(body: str) -> list[str]:
     return blocks
 
 
+def _classify_block_type(block: str) -> str:
+    """Heuristic block kind for the text chain: table | formula | figure | code | text.
+
+    Mirrors ``_is_atomic``'s classification; layout-aware parsers (MinerU,
+    Phase 1) overwrite this with detected values. Kept deliberately coarse —
+    the text chain has no real geometry, so this only separates "probably a
+    table/formula" from running text for retrieval-time filtering.
+    """
+    first = block.lstrip()
+    lower = first[:64].lower()
+    if first.startswith("|") or lower.startswith("<table"):
+        return "table"
+    if (
+        first.startswith("$$")
+        or first.startswith("\\[")
+        or first.startswith("\\begin{")
+    ):
+        return "formula"
+    if first.startswith("```"):
+        return "code"
+    if first.startswith("!["):
+        return "figure"
+    return "text"
+
+
 def _is_atomic(block: str) -> bool:
     """Blocks that must not be split on blank lines (tables / code / math).
 
@@ -249,6 +298,13 @@ def _is_atomic(block: str) -> bool:
         or first.startswith("\\begin{")
         or lower.startswith("<table")
         or "<table" in block[:200].lower()
+    )
+
+
+def _strip_block_markers(md: str) -> str:
+    """Remove ``<!-- block:K -->`` lines (plain-text fallback paths)."""
+    return "\n".join(
+        line for line in md.split("\n") if not BLOCK_MARKER_RE.match(line)
     )
 
 
@@ -285,24 +341,28 @@ def chunk_markdown(
             char_pos = 0
             para_idx = 0
             for page_no, seg in pages:
+                seg = _strip_block_markers(seg)
                 for c in chunk_plain_text(seg, max_chars=max_chars, overlap=overlap):
                     chunks.append(Chunk(
                         c, "", page_no,
                         paragraph_idx=para_idx,
                         offset_start=char_pos,
                         offset_end=char_pos + len(c),
+                        block_type=_classify_block_type(c),
                     ))
                     para_idx += 1
                     char_pos += len(c)
             return chunks
         chunks: list[Chunk] = []
         char_pos = 0
+        md = _strip_block_markers(md)
         for i, c in enumerate(chunk_plain_text(md, max_chars=max_chars, overlap=overlap)):
             chunks.append(Chunk(
                 c,
                 paragraph_idx=i,
                 offset_start=char_pos,
                 offset_end=char_pos + len(c),
+                block_type=_classify_block_type(c),
             ))
             char_pos += len(c)
         return chunks
@@ -311,6 +371,9 @@ def chunk_markdown(
     page: int | None = None
     para_counter = 0
     char_pos = 0
+    # Block kind announced by a layout-aware parser via <!-- block:K -->.
+    # Overrides the markdown heuristic for the next emitted chunk only.
+    pending_block: str | None = None
     for path, body in sections:
         current = ""
         current_page = page
@@ -322,6 +385,10 @@ def chunk_markdown(
                 if not current.strip():
                     current_page = page
                 continue
+            bm = BLOCK_MARKER_RE.match(block)
+            if bm:
+                pending_block = bm.group(1)
+                continue
             if _is_atomic(block):
                 if current.strip():
                     clen = len(current.strip())
@@ -330,16 +397,20 @@ def chunk_markdown(
                         paragraph_idx=current_para,
                         offset_start=char_pos,
                         offset_end=char_pos + clen,
+                        block_type=pending_block or "text",
                     ))
                     char_pos += clen
                     current = ""
+                    pending_block = None
                 alen = len(block)
                 chunks.append(Chunk(
                     block, path, page,
                     paragraph_idx=para_counter,
                     offset_start=char_pos,
                     offset_end=char_pos + alen,
+                    block_type=pending_block or _classify_block_type(block),
                 ))
+                pending_block = None
                 para_counter += 1
                 char_pos += alen
                 current_page = page
@@ -358,8 +429,10 @@ def chunk_markdown(
                     paragraph_idx=current_para,
                     offset_start=char_pos,
                     offset_end=char_pos + clen,
+                    block_type=pending_block or "text",
                 ))
                 char_pos += clen
+                pending_block = None
             current_page = page
             current_para = para_counter
             if len(block) > max_chars:
@@ -369,8 +442,10 @@ def chunk_markdown(
                         paragraph_idx=para_counter,
                         offset_start=char_pos,
                         offset_end=char_pos + len(c),
+                        block_type=pending_block or _classify_block_type(c),
                     ))
                     char_pos += len(c)
+                pending_block = None
                 para_counter += 1
                 current = ""
                 continue
@@ -384,6 +459,8 @@ def chunk_markdown(
                 paragraph_idx=current_para,
                 offset_start=char_pos,
                 offset_end=char_pos + clen,
+                block_type=pending_block or "text",
             ))
             char_pos += clen
+            pending_block = None
     return chunks

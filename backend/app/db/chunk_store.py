@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import DocumentChunk
+from .db_common import validate_bbox
 from .session_utils import commit_session
 
 
@@ -46,7 +47,8 @@ class ChunkStore:
         ``IntegrityError`` here rather than at the caller's commit.
 
         Each chunk dict: {text, heading_path?, page_no?, paragraph_idx?,
-        offset_start?, offset_end?, meta?, embedding?, embedding_model?}.
+        offset_start?, offset_end?, meta?, embedding?, embedding_model?,
+        bbox?, block_type?}.
 
         offset_start/offset_end/paragraph_idx are persisted both as column-level
         values and inside ``meta`` (for back-compat until all consumers migrate).
@@ -69,6 +71,10 @@ class ChunkStore:
             if not meta:
                 meta = None
             text = chunk.get("text", "") or ""
+            # Phase 0 layout provenance: validate bbox at the write boundary so
+            # a malformed box never lands in the table silently.
+            raw_bbox = chunk.get("bbox")
+            bbox = validate_bbox(raw_bbox) if raw_bbox is not None else None
             session.add(
                 DocumentChunk(
                     id=str(uuid.uuid4()),
@@ -77,6 +83,8 @@ class ChunkStore:
                     text=text,
                     heading_path=(chunk.get("heading_path") or "")[:120],
                     page_no=chunk.get("page_no"),
+                    bbox=bbox,
+                    block_type=chunk.get("block_type") or "text",
                     offset_start=chunk.get("offset_start"),
                     offset_end=chunk.get("offset_end"),
                     paragraph_idx=chunk.get("paragraph_idx"),

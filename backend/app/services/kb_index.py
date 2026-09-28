@@ -17,6 +17,7 @@ import re
 from ..config import get_settings
 from ..domain.schemas import Evidence
 from .errors import degrade_return, log_handled_exception
+from .metadata_tags import extract_patent_tags
 
 logger = logging.getLogger(__name__)
 
@@ -247,17 +248,25 @@ def index_source(
                 overlap=settings.ingest_chunk_overlap,
             )
             chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
-        rows: list[dict] = [
-            {
-                "text": c.text,
-                "heading_path": c.heading_path,
-                "page_no": c.page_no,
-                "paragraph_idx": c.paragraph_idx,
-                "offset_start": c.offset_start,
-                "offset_end": c.offset_end,
-            }
-            for c in chunks
-        ]
+        rows: list[dict] = []
+        for c in chunks:
+            # Phase 0: rule-based patent tags (claim_no / example_no /
+            # section_title) for claims↔examples stitching at query time.
+            # Zero LLM cost; only attached when something matched.
+            tags = extract_patent_tags(c.text, c.heading_path)
+            rows.append(
+                {
+                    "text": c.text,
+                    "heading_path": c.heading_path,
+                    "page_no": c.page_no,
+                    "paragraph_idx": c.paragraph_idx,
+                    "offset_start": c.offset_start,
+                    "offset_end": c.offset_end,
+                    "bbox": c.bbox,
+                    "block_type": c.block_type,
+                    "meta": {"patent_tags": tags} if tags else None,
+                }
+            )
         rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
         if not rows:
             get_chunk_store().replace_for_source(source_id, [])
@@ -713,27 +722,44 @@ def search_chunks_hybrid(
     alpha: float | None = None,
     project_id: str | None = None,
     include_global: bool = True,
+    children: bool = False,
 ) -> list[Evidence]:
     """Probe-aligned hybrid retrieval as Evidence (for recommend / research fuse).
 
     Uses ``hybrid_search_scored`` with shared ``kb_hybrid_alpha`` when ``alpha``
     is omitted. Safe empty list when KB is off or hybrid fails.
+
+    ``children=True``: Phase 2 retrieval_by_children — score sentence-level
+    children at query time, present the parent block (see
+    services/children_retrieval.py). Parent pool is k * candidate_mult.
     """
     if not kb_enabled() or k <= 0 or not (query or "").strip():
         return []
     try:
+        from .children_retrieval import children_rerank
         from .hybrid_search import hybrid_search_scored
 
         settings = get_settings()
         if alpha is None:
             alpha = float(settings.kb_hybrid_alpha)
-        scored = hybrid_search_scored(
-            query,
-            top_k=k,
-            alpha=alpha,
-            project_id=project_id or None,
-            include_global=bool(include_global),
-        )
+        if children:
+            mult = max(1, int(getattr(settings, "kb_children_candidate_mult", 3) or 3))
+            scored = hybrid_search_scored(
+                query,
+                top_k=k * mult,
+                alpha=alpha,
+                project_id=project_id or None,
+                include_global=bool(include_global),
+            )
+            scored = children_rerank(query, scored, candidate_mult=mult, top_k=k)
+        else:
+            scored = hybrid_search_scored(
+                query,
+                top_k=k,
+                alpha=alpha,
+                project_id=project_id or None,
+                include_global=bool(include_global),
+            )
         if not scored:
             return []
         meta = _source_meta()
@@ -745,6 +771,99 @@ def search_chunks_hybrid(
         return degrade_return(logger, exc, "kb hybrid search failed", [])
 
 
+_IDENT_RE = re.compile(r"^kb:([^#]+)#c(\d+)$")
+
+
+def format_inline_citation(ev: "Evidence", n: int) -> str:
+    """Render one evidence as an inline citation: ``[n] title · 第p页``.
+
+    Reuses ``CitationLocator`` (P0-15) — no new citation infra. ``page`` comes
+    from ``_chunk_to_evidence`` (P1 #16 page anchors).
+    """
+    from ..domain.citations import CitationLocator
+
+    loc = CitationLocator(page=ev.page)
+    base = f"[{n}] {ev.title}"
+    if loc is not None and loc.page:
+        return f"{base} · 第{loc.page}页"
+    return base
+
+
+def format_evidence_citations(evidence: list) -> str:
+    """Numbered inline-citation block for synthesis prompts."""
+    return "\n".join(
+        format_inline_citation(ev, i + 1) for i, ev in enumerate(evidence or [])
+    )
+
+
+def _stitch_patent_siblings(
+    evidence: list, *, max_siblings: int, meta: dict
+) -> list:
+    """Phase 2 — patent tag context stitching (Claims<->Examples).
+
+    When a hit chunk carries ``meta.patent_tags`` (claim_no/example_no stamped
+    at ingest by ``metadata_tags.extract_patent_tags``), pull sibling chunks
+    from the same source with the same tag into the context. Zero LLM cost:
+    plain attribute match. Fail-open on any store error.
+    """
+    if not evidence or max_siblings <= 0:
+        return list(evidence)
+    try:
+        from ..db.chunk_store import get_chunk_store
+
+        store = get_chunk_store()
+    except Exception as exc:
+        return degrade_return(logger, exc, "patent stitch store failed", list(evidence))
+    out = list(evidence)
+    seen = {ev.identifier for ev in out if ev.identifier}
+    source_cache: dict[str, list] = {}
+    for ev in evidence:
+        m = _IDENT_RE.match(ev.identifier or "")
+        if not m:
+            continue
+        source_id = m.group(1)
+        try:
+            ord_no = int(m.group(2))
+        except ValueError:
+            continue
+        if source_id not in source_cache:
+            try:
+                source_cache[source_id] = store.get_by_source(source_id)
+            except Exception as exc:
+                degrade_return(logger, exc, "patent stitch fetch failed", None)
+                source_cache[source_id] = []
+        rows = source_cache[source_id]
+        self_row = next((r for r in rows if r.ord == ord_no), None)
+        if self_row is None:
+            continue
+        tags = (self_row.meta or {}).get("patent_tags") or {}
+        keys = [
+            (k, tags.get(k))
+            for k in ("claim_no", "example_no")
+            if tags.get(k) is not None
+        ]
+        if not keys:
+            continue
+        added = 0
+        for r in rows:
+            if added >= max_siblings:
+                break
+            if r.ord == ord_no:
+                continue
+            rtags = (r.meta or {}).get("patent_tags") or {}
+            if not any(rtags.get(k) == v for k, v in keys):
+                continue
+            ident = f"kb:{r.source_id}#c{r.ord}"
+            if ident in seen:
+                continue
+            seen.add(ident)
+            sib = _chunk_to_evidence(r, meta, max(0.05, (ev.relevance or 0.0) * 0.9))
+            sib.title = f"{sib.title} · 同专利串联"
+            out.append(sib)
+            added += 1
+    return out
+
+
 def retrieve_evidence(
     query: str,
     k: int = 6,
@@ -754,12 +873,16 @@ def retrieve_evidence(
     mode: str = "hybrid",
     langs: list[str] | None = None,
     alpha: float | None = None,
+    children: bool | None = None,
 ) -> list[Evidence]:
     """Single persistent-KB retrieval façade (Wave A — anti-Frankenstein).
 
     Default ``mode=\"hybrid\"`` routes through ``hybrid_search_scored`` (same
     stack as Hub probe / recommend). Use ``mode=\"legacy\"`` or pass ``langs``
     for bilingual dual-model partitions that still need ``search_chunks``.
+
+    ``children=None`` → ``kb_children_retrieval_enabled`` setting (Phase 2).
+    Patent tag stitching (Phase 2) applies when ``kb_patent_stitch_enabled``.
     """
     if not kb_enabled() or k <= 0 or not (query or "").strip():
         return []
@@ -772,6 +895,9 @@ def retrieve_evidence(
             include_global=include_global,
             langs=langs,
         )
+    settings = get_settings()
+    if children is None:
+        children = bool(getattr(settings, "kb_children_retrieval_enabled", False))
     # Round 3 Wave 1 — agentic iterative retrieval. Root-cause note: the plan
     # named paperqa_engine as the split point, but paperqa_engine only
     # *synthesizes* from provided sources; this façade is the actual single-shot
@@ -787,22 +913,42 @@ def retrieve_evidence(
                     q, k=kk, alpha=alpha,
                     project_id=kw.get("project_id"),
                     include_global=bool(kw.get("include_global")),
+                    children=bool(children),
                 )
 
             result = agent_search(
                 query, _single_shot, k=k,
                 project_id=project_id, include_global=include_global,
             )
-            return result.evidence
+            evidence = result.evidence
+        else:
+            evidence = search_chunks_hybrid(
+                query,
+                k=k,
+                alpha=alpha,
+                project_id=project_id,
+                include_global=include_global,
+                children=bool(children),
+            )
     except Exception as exc:  # noqa: BLE001
         logger.debug("agent search split failed, single-shot fallback: %s", exc)
-    return search_chunks_hybrid(
-        query,
-        k=k,
-        alpha=alpha,
-        project_id=project_id,
-        include_global=include_global,
-    )
+        evidence = search_chunks_hybrid(
+            query,
+            k=k,
+            alpha=alpha,
+            project_id=project_id,
+            include_global=include_global,
+            children=bool(children),
+        )
+    if getattr(settings, "kb_patent_stitch_enabled", True):
+        evidence = _stitch_patent_siblings(
+            evidence,
+            max_siblings=int(
+                getattr(settings, "kb_patent_stitch_max_siblings", 2) or 2
+            ),
+            meta=_source_meta(),
+        )
+    return evidence
 
 
 def aggregate_parameter_space() -> dict[str, dict]:

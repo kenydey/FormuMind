@@ -31,9 +31,31 @@ __all__ = [
     "agent_search",
     "agent_search_enabled",
     "assess_gap",
+    "assess_gap_plus",
     "extract_facets",
+    "extract_numeric_facets",
     "rewrite_query",
 ]
+
+# Numeric completeness checkpoint (Phase 2): a query like "耐蚀性 > 72h" is not
+# answered by evidence that merely mentions 耐蚀性 without the number. Numbers
+# with units are extracted deterministically and must appear in the evidence.
+_NUM_UNIT_RE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:g/L|mg/L|mol/L|°C|℃|%|wt%|wt\.%|ppm|ppb|MPa|kPa|Pa|"
+    r"N·m|N|μm|um|mm|cm|mL|L|kg|g|h|小时|分钟|min|s|V|A|pH)",
+    re.IGNORECASE,
+)
+
+
+def extract_numeric_facets(query: str) -> list[str]:
+    """Numbers-with-units in the query that evidence must reproduce."""
+    seen: list[str] = []
+    for m in _NUM_UNIT_RE.finditer(query or ""):
+        t = _norm(m.group(0))
+        if t and t not in seen:
+            seen.append(t)
+    return seen
+
 
 # Tokens too short / too generic to be a facet. Kept tiny and deterministic.
 _FACET_STOPWORDS = {
@@ -103,6 +125,26 @@ def assess_gap(facets: list[str], evidence: list[Evidence]) -> list[str]:
     return [f for f in facets if f not in covered]
 
 
+def assess_gap_plus(
+    facets: list[str], evidence: list[Evidence], query: str = ""
+) -> list[str]:
+    """Facet coverage + numeric completeness (Phase 2, deterministic).
+
+    Backward compatible with ``assess_gap``: everything ``assess_gap`` flags
+    is still flagged. Additionally, numbers-with-units extracted from the
+    query (e.g. "72h", "50g/L") must appear in the evidence text; a missing
+    number is reported as ``"num:<value>"`` so the rewrite loop can target it.
+    """
+    uncovered = assess_gap(facets, evidence)
+    if not query:
+        return uncovered
+    texts = [_evidence_text(ev) for ev in evidence]
+    for num in extract_numeric_facets(query):
+        if not any(num in t for t in texts):
+            uncovered.append(f"num:{num}")
+    return uncovered
+
+
 def rewrite_query(original: str, uncovered_facets: list[str]) -> str:
     """Deterministic rewrite: original question + uncovered facet terms."""
     extra = " ".join(uncovered_facets).strip()
@@ -153,7 +195,8 @@ def agent_search(
     if time_budget_s is None:
         time_budget_s = float(_agent_cfg(settings, "agent_search_time_budget_s", 20.0))
     if assess_fn is None:
-        assess_fn = assess_gap
+        # Phase 2: query-aware default — facet coverage + numeric completeness.
+        assess_fn = lambda f, e: assess_gap_plus(f, e, query)  # noqa: E731
 
     facets = extract_facets(query)
     merged: list[Evidence] = []

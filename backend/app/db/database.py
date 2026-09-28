@@ -243,8 +243,8 @@ def _ensure_source_soft_columns(engine: Engine) -> None:
 
 
 def _ensure_document_chunk_columns(engine: Engine) -> None:
-    """只读守护：document_chunks 表必须具备溯源 / 实体元数据列。"""
-    _require_columns(engine, "document_chunks", ("page_no", "meta"))
+    """只读守护：document_chunks 表必须具备溯源 / 实体元数据 / 版式列。"""
+    _require_columns(engine, "document_chunks", ("page_no", "meta", "bbox", "block_type"))
 
 
 def _ensure_kb_entity_link_columns(engine: Engine) -> None:

@@ -263,6 +263,19 @@ class DocumentChunk(Base):
     # Source-page provenance (from <!-- page:N --> parser markers); citations
     # can point at the exact page of the original PDF.
     page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Layout provenance (Phase 0, ragflow/kotaemon eval): normalized bounding
+    # box [xmin, ymin, xmax, ymax] as page width/height fractions (0-1 floats),
+    # so frontend rendering is DPI/zoom independent. NULL until a layout-aware
+    # parser (MinerU, Phase 1) fills it — the pymupdf4llm text chain only
+    # carries page_no.
+    bbox: Mapped[list | None] = mapped_column(
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="页面百分比 bbox [xmin,ymin,xmax,ymax]",
+    )
+    # Block kind from the parser/chunker: text | table | formula | figure | code.
+    # Heuristic on markdown for the text chain; layout parsers overwrite it.
+    block_type: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     # Anchor columns: promoted from meta JSON for efficient SQL range/grouping queries.
     # offset_start/end give the raw byte range of this chunk's text in source order;
     # paragraph_idx orders multi-paragraph sections.
@@ -288,6 +301,53 @@ class DocumentChunk(Base):
         nullable=True,
         comment="化学/产品实体元数据",
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ExtractionTable(Base):
+    """Structured table extracted from a source document (Phase 0 foundation).
+
+    Filled by layout-aware parsers (MinerU, Phase 1); the text chain does not
+    populate it. One row per detected table with its caption, markdown body
+    and page/bbox provenance for "which page, which region" lookups.
+    """
+
+    __tablename__ = "extraction_tables"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bbox: Mapped[list | None] = mapped_column(
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="页面百分比 bbox [xmin,ymin,xmax,ymax]",
+    )
+    caption: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    markdown_text: Mapped[str] = mapped_column(Text, default="")
+    n_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_cols: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ExtractionFormula(Base):
+    """LaTeX formula extracted from a source document (Phase 0 foundation).
+
+    Filled by layout-aware parsers (MinerU MFR, Phase 1). ``formula_no`` keeps
+    the in-document equation number (e.g. "(3)") for cross-referencing.
+    """
+
+    __tablename__ = "extraction_formulas"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bbox: Mapped[list | None] = mapped_column(
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),
+        nullable=True,
+        comment="页面百分比 bbox [xmin,ymin,xmax,ymax]",
+    )
+    latex: Mapped[str] = mapped_column(Text, default="")
+    formula_no: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

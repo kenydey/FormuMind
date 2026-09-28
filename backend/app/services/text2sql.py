@@ -1,0 +1,467 @@
+"""Zero-dependency Text2SQL hybrid routing (Phase 4).
+
+Borrows the *intellectual property* of LangChain's SQL path — the
+``SQLITE_PROMPT`` template idea, DDL + 3 sample rows schema rendering
+(``SQLDatabase.get_table_info``), and the QUERY_CHECKER error checklist —
+as plain text and small functions. Adds the hard guardrails LangChain never
+had (SELECT-only validation, server-side LIMIT, statement timeout) and a
+self-built intent router.
+
+Deliberately NOT introduced: any ``langchain*`` dependency, the legacy
+``AgentExecutor`` multi-round loop, or a second RAG engine. One-shot LLM
+SQL generation is enough because FormuMind's table layout is fixed.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import sqlite3
+import time
+from typing import Any, Callable
+
+from pydantic import BaseModel, Field
+from sqlalchemy import inspect
+from sqlalchemy.engine import Engine
+from sqlalchemy.schema import CreateTable
+
+from ..db.database import make_engine  # noqa: F401  (re-export for tests/consumers)
+from ..db.models import Base, DOEPlanRow, ExperimentRow, FormulationVersion, MeasurementRow
+
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Whitelist: only experiment/formulation tables are queryable.
+# ---------------------------------------------------------------------------
+
+ALLOWED_TABLES: tuple[str, ...] = (
+    "experiments",
+    "measurements",
+    "formulation_versions",
+    "doe_plans",
+)
+
+_TABLE_MODELS = {
+    "experiments": ExperimentRow,
+    "measurements": MeasurementRow,
+    "formulation_versions": FormulationVersion,
+    "doe_plans": DOEPlanRow,
+}
+
+DEFAULT_TOP_K = 50
+SQL_TIMEOUT_S = 10.0
+SCHEMA_SAMPLE_ROWS = 3
+
+# DML/DDL and anything that escapes the sandbox. Checked after stripping
+# string literals so a label like 'delete me' does not false-positive.
+_FORBIDDEN = re.compile(
+    r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|REPLACE|ATTACH|DETACH"
+    r"|PRAGMA|VACUUM|GRANT|REVOKE|COPY|CALL|EXECUTE)\b",
+    re.IGNORECASE,
+)
+_STRING_LITERAL = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+_LIMIT_CLAUSE = re.compile(r"\bLIMIT\s+(\d+)\b", re.IGNORECASE)
+
+
+class Text2SQLError(ValueError):
+    """Raised when generated SQL fails a hard guardrail."""
+
+
+class _GeneratedSQL(BaseModel):
+    sql: str = Field(description="Single SQLite SELECT statement")
+
+
+# ---------------------------------------------------------------------------
+# 1. Schema rendering (DDL + N sample rows per table)
+# ---------------------------------------------------------------------------
+
+
+def render_schema(engine: Engine, sample_rows: int = SCHEMA_SAMPLE_ROWS) -> str:
+    """Render whitelisted tables as DDL + sample rows for the prompt."""
+    insp = inspect(engine)
+    blocks: list[str] = []
+    for table_name in ALLOWED_TABLES:
+        if table_name not in insp.get_table_names():
+            continue
+        table = _TABLE_MODELS[table_name].__table__
+        ddl = str(CreateTable(table).compile(engine)).strip()
+        with engine.connect() as conn:
+            rows = (
+                conn.exec_driver_sql(f"SELECT * FROM {table_name} LIMIT {sample_rows}")
+                .mappings()
+                .all()
+            )
+        sample = "\n".join(str(dict(r)) for r in rows) or "(empty)"
+        blocks.append(f"{ddl};\n-- sample rows ({table_name}):\n{sample}")
+    return "\n\n".join(blocks)
+
+
+# ---------------------------------------------------------------------------
+# 2. SQLite-specific prompt (borrows SQLITE_PROMPT ideas: LIMIT + date('now'))
+# ---------------------------------------------------------------------------
+
+_SQLITE_SYSTEM = (
+    "你是 SQLite SQL 生成器。只输出一条 SQL 语句，不要解释、不要 markdown 代码块、不要注释。\n"
+    "数据库是 SQLite。可用表结构如下：\n{schema}\n\n"
+    "规则：\n"
+    "1. 只允许 SELECT 查询，禁止任何增删改、DDL 或 PRAGMA。\n"
+    "2. 如果问题问\"前 N\"，用 LIMIT N；否则默认 LIMIT {top_k}。\n"
+    "3. 相对日期（如\"上个月\"）用 SQLite 日期函数表达，例如 date('now', '-1 month')。\n"
+    "4. 表名和列名必须来自上面的表结构，不要编造不存在的列。\n"
+    "5. 需要跨表时用 JOIN，measurements.experiment_id 关联 experiments.id。\n"
+    "6. 输出纯 SQL 文本，以分号结尾或不带分号均可。\n"
+    "{project_scope_rule}"
+)
+
+
+def build_sqlite_prompt(
+    question: str, schema_text: str, top_k: int = DEFAULT_TOP_K,
+    project_id: str | None = None,
+) -> tuple[str, str]:
+    """Return (system, user) prompt pair for one-shot SQL generation."""
+    scope_rule = (
+        f"7. 必须按 project_id = '{project_id}' 过滤：experiments/formulation_versions "
+        "用本表 project_id；measurements/doe_plans 先 JOIN experiments（experiment_id）再用 experiments.project_id 过滤。\n"
+        if project_id
+        else ""
+    )
+    system = _SQLITE_SYSTEM.format(
+        schema=schema_text, top_k=top_k, project_scope_rule=scope_rule
+    )
+    return system, f"问题：{question}\nSQL:"
+
+
+def _default_complete(system: str, user: str) -> str | None:
+    """Default LLM call via the platform's structured completion."""
+    from .llm import complete_structured
+
+    parsed, err = complete_structured(system, user, _GeneratedSQL, retry=False)
+    if err or parsed is None:
+        log.warning("text2sql LLM generation failed: %s", err)
+        return None
+    return parsed.sql
+
+
+def generate_sql(
+    question: str,
+    schema_text: str,
+    *,
+    top_k: int = DEFAULT_TOP_K,
+    project_id: str | None = None,
+    complete_fn: Callable[[str, str], str | None] | None = None,
+) -> str | None:
+    """One-shot SQL generation. Returns cleaned SQL text or None on failure."""
+    system, user = build_sqlite_prompt(
+        question, schema_text, top_k=top_k, project_id=project_id
+    )
+    raw = (complete_fn or _default_complete)(system, user)
+    if not raw:
+        return None
+    sql = raw.strip()
+    # Strip markdown fences if the model wrapped the answer anyway.
+    sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*```$", "", sql)
+    return sql.strip()
+
+
+# ---------------------------------------------------------------------------
+# 3. Hard guardrails (what LangChain's prompt-only "protection" never had)
+# ---------------------------------------------------------------------------
+
+
+def validate_select_only(sql: str) -> str:
+    """Reject anything that is not a single SELECT/WITH statement."""
+    cleaned = sql.strip().rstrip(";").strip()
+    if not cleaned:
+        raise Text2SQLError("empty SQL")
+    first = cleaned.split(None, 1)[0].upper() if cleaned.split() else ""
+    if first not in ("SELECT", "WITH"):
+        raise Text2SQLError(f"only SELECT/WITH allowed, got: {first or '<empty>'}")
+    # Multi-statement smuggling.
+    if ";" in cleaned:
+        raise Text2SQLError("multiple statements not allowed")
+    # Strip string literals before the keyword scan.
+    code_only = _STRING_LITERAL.sub("''", cleaned)
+    hit = _FORBIDDEN.search(code_only)
+    if hit:
+        raise Text2SQLError(f"forbidden keyword: {hit.group(1).upper()}")
+    return cleaned
+
+
+def require_project_scope(sql: str, project_id: str | None) -> str:
+    """Deterministic guardrail: every SQL must filter on the given project.
+
+    Prompt rules alone are advisory; the model may drop the filter. When a
+    project_id is in scope the generated SQL must contain a literal
+    ``project_id = '<id>'`` predicate (on the base table or via a JOIN to
+    ``experiments``). Missing scope -> Text2SQLError, and the caller
+    fail-opens to the literature path rather than leaking cross-project rows.
+    """
+    if not project_id:
+        return sql
+    # Match on the raw text (not literal-stripped): the threat here is the
+    # model forgetting the filter, not an attacker smuggling it in.
+    pid = re.escape(str(project_id))
+    if not re.search(rf"project_id\s*=\s*['\"]{pid}['\"]", sql):
+        raise Text2SQLError("SQL missing project_id scope filter")
+    return sql
+
+
+def enforce_limit(sql: str, max_rows: int = DEFAULT_TOP_K) -> str:
+    """Guarantee a LIMIT no larger than max_rows (server-side, not prompt)."""
+    m = _LIMIT_CLAUSE.search(sql)
+    if m:
+        existing = int(m.group(1))
+        if existing > max_rows:
+            sql = _LIMIT_CLAUSE.sub(f"LIMIT {max_rows}", sql, count=1)
+        return sql
+    return sql.rstrip().rstrip(";") + f" LIMIT {max_rows}"
+
+
+def _run_with_timeout(raw_conn: Any, sql: str, timeout_s: float) -> Any:
+    """Execute on a raw sqlite3 connection, aborting past timeout_s."""
+    if isinstance(raw_conn, sqlite3.Connection):
+        deadline = time.monotonic() + timeout_s
+
+        def _handler() -> int:
+            return 1 if time.monotonic() > deadline else 0
+
+        raw_conn.set_progress_handler(_handler, 1000)
+        try:
+            return raw_conn.execute(sql)
+        finally:
+            raw_conn.set_progress_handler(None, 0)
+    log.warning("text2sql: non-sqlite driver, statement timeout not enforced")
+    return raw_conn.execute(sql)
+
+
+def execute_sql(
+    engine: Engine,
+    sql: str,
+    *,
+    max_rows: int = DEFAULT_TOP_K,
+    timeout_s: float = SQL_TIMEOUT_S,
+) -> list[dict]:
+    """Validate, clamp LIMIT, execute with timeout, return rows as dicts."""
+    cleaned = validate_select_only(sql)
+    final_sql = enforce_limit(cleaned, max_rows)
+    with engine.connect() as conn:
+        raw: Any = conn.connection
+        driver = getattr(raw, "driver_connection", raw)
+        try:
+            cursor = _run_with_timeout(driver, final_sql, timeout_s)
+        except sqlite3.OperationalError as exc:
+            if "interrupted" in str(exc).lower():
+                raise Text2SQLError(f"SQL timed out after {timeout_s}s") from exc
+            raise
+        rows = cursor.fetchmany(max_rows)
+        cols = [d[0] for d in (cursor.description or [])]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Lightweight self-check (QUERY_CHECKER's 8 error classes, distilled)
+# ---------------------------------------------------------------------------
+
+
+def self_check(sql: str, question: str) -> list[str]:
+    """Return warning strings; empty means the checklist is clean.
+
+    Advisory only — never blocks execution (hard guardrails already ran).
+    """
+    warnings: list[str] = []
+    upper = sql.upper()
+    if "SELECT *" in upper:
+        warnings.append("SELECT * used; prefer explicit columns")
+    if "WHERE" not in upper and "JOIN" in upper:
+        warnings.append("JOIN without WHERE may explode row count")
+    if any(w in question for w in ("上个月", "最近", "今年", "去年")) and "DATE(" not in upper:
+        warnings.append("question mentions relative time but SQL has no date() filter")
+    if "LIMIT" not in upper:
+        warnings.append("no LIMIT clause (will be clamped server-side)")
+    if upper.count("SELECT") > 2 and "WITH" not in upper:
+        warnings.append("nested SELECTs without CTE; consider WITH for readability")
+    return warnings
+
+
+# ---------------------------------------------------------------------------
+# 4. Hybrid routing: structured (Text2SQL) vs unstructured (ColBERT RAG)
+# ---------------------------------------------------------------------------
+
+_STRUCTURED_SIGNALS = (
+    "查询", "统计", "大于", "小于", "平均", "最高", "最低", "总数",
+    "上个月", "最近", "今年", "去年", "多少", "列表", "排序", "对比",
+    ">", "<", "≥", "≤", "top",
+)
+_DOMAIN_SIGNALS = (
+    "实验", "配方", "测量", "耐蚀", "腐蚀", "盐雾", "DOE", "除油",
+    "性能", "指标", "批次", "版本",
+)
+
+
+def classify_intent(question: str) -> dict:
+    """Rule-based intent classification. Returns {route, reason}.
+
+    route is "structured" (Text2SQL over experiment/formulation tables) or
+    "unstructured" (ColBERT retrieval over the knowledge base).
+    """
+    q = question or ""
+    has_struct = any(s in q for s in _STRUCTURED_SIGNALS)
+    has_domain = any(s in q for s in _DOMAIN_SIGNALS)
+    if has_struct and has_domain:
+        return {
+            "route": "structured",
+            "reason": "含结构化查询信号（数值比较/统计/时间范围）且涉及实验数据域",
+        }
+    if has_struct and not has_domain:
+        # e.g. "查询耐蚀性提升的方法" — structured verb but no data-domain noun.
+        return {"route": "unstructured", "reason": "结构化信号弱（无实验数据域），走文献检索"}
+    return {"route": "unstructured", "reason": "描述性问题，走非结构化检索"}
+
+
+def fuse_context(
+    question: str,
+    sql_text: str | None,
+    rows: list[dict],
+    evidence: list[Any],
+) -> str:
+    """Merge deterministic SQL rows + descriptive literature evidence."""
+    parts = [f"问题：{question}"]
+    if sql_text:
+        parts.append(f"结构化查询 SQL：{sql_text}")
+    if rows:
+        lines = ["确定性数据结果（来自实验数据库，精确值）："]
+        for i, row in enumerate(rows, 1):
+            kv = "；".join(f"{k}={v}" for k, v in row.items())
+            lines.append(f"  {i}. {kv}")
+        parts.append("\n".join(lines))
+    else:
+        parts.append("结构化查询：无匹配数据。")
+    if evidence:
+        lines = ["相关文献证据（描述性）："]
+        for i, ev in enumerate(evidence, 1):
+            snippet = getattr(ev, "text", None) or getattr(ev, "snippet", None) or str(ev)
+            title = getattr(ev, "title", None) or getattr(ev, "doc_title", None) or ""
+            lines.append(f"  [{i}] {title}: {str(snippet)[:300]}")
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
+def hybrid_answer(
+    question: str,
+    engine: Engine,
+    *,
+    project_id: str | None = None,
+    complete_fn: Callable[[str, str], str | None] | None = None,
+    retrieve_fn: Callable[..., list[Any]] | None = None,
+    max_rows: int = DEFAULT_TOP_K,
+    timeout_s: float = SQL_TIMEOUT_S,
+) -> dict:
+    """Route the question, gather both sides, return a fused context.
+
+    Structured path is fail-open: if SQL generation or execution fails, the
+    answer still carries the literature evidence instead of an error.
+    """
+    decision = classify_intent(question)
+    sql_text: str | None = None
+    rows: list[dict] = []
+    if decision["route"] == "structured":
+        try:
+            schema_text = render_schema(engine)
+            gen = generate_sql(
+                question, schema_text, project_id=project_id, complete_fn=complete_fn
+            )
+            if gen:
+                sql_text = enforce_limit(
+                    require_project_scope(validate_select_only(gen), project_id),
+                    max_rows,
+                )
+                rows = execute_sql(
+                    engine, sql_text, max_rows=max_rows, timeout_s=timeout_s
+                )
+        except Exception as exc:  # fail-open: fall back to evidence only
+            log.warning("text2sql structured path failed, falling back: %s", exc)
+            sql_text = None
+            rows = []
+    evidence: list[Any] = []
+    try:
+        retrieve = retrieve_fn
+        if retrieve is None:
+            from .kb_index import retrieve_evidence as _retrieve
+
+            retrieve = _retrieve
+        evidence = retrieve(question, k=6, project_id=project_id) or []
+    except Exception as exc:
+        log.warning("text2sql evidence retrieval failed: %s", exc)
+    return {
+        "route": decision["route"],
+        "route_reason": decision["reason"],
+        "sql": sql_text,
+        "rows": rows,
+        "evidence_count": len(evidence),
+        "fused_context": fuse_context(question, sql_text, rows, evidence),
+    }
+
+
+def structured_data_block(
+    question: str,
+    *,
+    settings=None,
+    engine: Engine | None = None,
+    project_id: str | None = None,
+    complete_fn: Callable[[str, str], str | None] | None = None,
+    max_rows: int = DEFAULT_TOP_K,
+    timeout_s: float = SQL_TIMEOUT_S,
+) -> tuple[str, dict]:
+    """SQL-only half of :func:`hybrid_answer`, for the live chat chain.
+
+    Classifies intent; on a structured route it runs the Text2SQL path and
+    returns ``(prompt_block, provenance)`` where ``prompt_block`` is the
+    "deterministic data" section to prepend to the answer prompt and
+    ``provenance`` carries ``route`` / ``sql`` / ``row_count`` /
+    ``data_sources`` (``"structured_sql"`` vs ``"kb_evidence"``).
+
+    Never raises: any failure (routing disabled, SQL generation/execution
+    error, guardrail rejection) yields ``("", provenance)`` so the caller
+    falls back to the pure-literature path and the answer is never blocked.
+    Unlike :func:`hybrid_answer`, this does NOT re-run literature retrieval —
+    the chat chain already did that.
+    """
+    provenance: dict = {
+        "route": "unstructured",
+        "sql": None,
+        "row_count": 0,
+        "data_sources": ["kb_evidence"],
+    }
+    try:
+        from ..config import get_settings
+
+        settings = settings or get_settings()
+        if not getattr(settings, "text2sql_routing_enabled", True):
+            provenance["route"] = "disabled"
+            return "", provenance
+        decision = classify_intent(question)
+        if decision["route"] != "structured":
+            return "", provenance
+        if engine is None:
+            from ..db.database import default_session_factory
+
+            engine = default_session_factory().bind
+        schema_text = render_schema(engine)
+        gen = generate_sql(
+            question, schema_text, project_id=project_id, complete_fn=complete_fn
+        )
+        if not gen:
+            # Generation failed: honest fallback, not "no matching data".
+            raise Text2SQLError("empty SQL generated")
+        sql_text = enforce_limit(
+            require_project_scope(validate_select_only(gen), project_id), max_rows
+        )
+        rows = execute_sql(engine, sql_text, max_rows=max_rows, timeout_s=timeout_s)
+        provenance.update(route="structured", sql=sql_text, row_count=len(rows))
+        provenance["data_sources"] = ["structured_sql", "kb_evidence"]
+        return fuse_context(question, sql_text, rows, []), provenance
+    except Exception as exc:  # fail-open: never block the answer
+        log.warning("text2sql chain hook failed, falling back: %s", exc)
+        provenance["route"] = "fallback"
+        return "", provenance
