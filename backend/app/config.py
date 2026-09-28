@@ -621,8 +621,14 @@ class Settings(BaseSettings):
     # Wave 5 — query-aware evidence compression tier 1 (default on; fail-open).
     query_compress_enabled: bool = True
     query_compress_token_budget: int = 12000
-    # Wave 5 — tier 2 LLM rewrite layer (default off; LLM calls cost money).
-    query_compress_llm_enabled: bool = False
+    # Wave 5 — tier 2 LLM rewrite layer.
+    # Default ON since 2026-09-28 (Wave 1 ablation): under tight token budgets
+    # tier-1's mechanical 400-char truncation drops buried key numbers
+    # (rigor numeric_consistency 0.0), while tier-2 query-focused summaries
+    # preserve them (1.0) at the cost of 1 batched LLM call per query that
+    # has long (>=1500 char) evidence. Override via
+    # FORMUMIND_QUERY_COMPRESS_LLM_ENABLED=false to disable.
+    query_compress_llm_enabled: bool = True
     # Wave B — project literature manifest / frozen corpus.
     literature_manifest_enabled: bool = True
     frozen_corpus_required_for_export: bool = False

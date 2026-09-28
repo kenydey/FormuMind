@@ -243,7 +243,10 @@ def query_compress_token_budget(settings: Any) -> int:
 
 
 def query_compress_llm_enabled(settings: Any) -> bool:
-    """W5-1 tier-2 kill-switch. Defaults OFF (LLM calls cost money)."""
+    """W5-1 tier-2 kill-switch. Defaults ON (2026-09-28 Wave 1 ablation).
+
+    Override with ``FORMUMIND_QUERY_COMPRESS_LLM_ENABLED=false``.
+    """
     return bool(getattr(settings, "query_compress_llm_enabled", False))
 
 

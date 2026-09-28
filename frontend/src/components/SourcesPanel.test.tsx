@@ -173,7 +173,7 @@ describe("SourcesPanel", () => {
     await waitFor(() => {
       expect(screen.getByTestId("modal-source-detail")).toBeInTheDocument();
     });
-    expect(api.kbChunksBySource).toHaveBeenCalledWith("src-42");
+    expect(api.kbChunksBySource).toHaveBeenCalledWith("src-42", 2000, 0);
   });
 
   it("W3-14: no page badge when evidence has no page", () => {

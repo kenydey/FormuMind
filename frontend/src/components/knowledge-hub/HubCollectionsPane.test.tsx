@@ -27,7 +27,7 @@ const refresh = vi.mocked(collectionsApi.refresh);
 
 const SUMMARY = {
   collection_id: "col_1",
-  name: "VIANT 防腐",
+  name: "水性防腐",
   query: "waterborne conversion coating",
   filters: { date_from: 2020 },
   screening_preset: null,
@@ -72,7 +72,7 @@ describe("HubCollectionsPane", () => {
     render(<HubCollectionsPane active />);
     await waitFor(() => expect(list).toHaveBeenCalledWith("proj-1"));
     expect(screen.getByTestId("hub-collection-col_1")).toBeTruthy();
-    expect(screen.getByText("VIANT 防腐")).toBeTruthy();
+    expect(screen.getByText("水性防腐")).toBeTruthy();
     // 上次快照摘要：共 3 · +2 · −1
     expect(screen.getByText(/上次：共 3/)).toBeTruthy();
   });

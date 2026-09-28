@@ -162,7 +162,7 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
         <input
           data-testid="hub-collections-name"
           className="w-full rounded bg-ink/60 border border-edge/60 px-2 py-1 text-xs text-slate-200"
-          placeholder="名称，如 VIANT 防腐文献"
+          placeholder="名称，如 水性防腐文献"
           value={fName}
           onChange={(e) => setFName(e.target.value)}
         />

@@ -58,11 +58,18 @@ def fake_llm_ok(prompt, **kwargs):
     }
 
 
-def test_llm_flag_defaults_off():
-    assert Settings.model_fields["query_compress_llm_enabled"].default is False
-    # Helper: missing attribute (old settings objects) also reads as off.
+def test_llm_flag_defaults_on():
+    # 2026-09-28 Wave 1 ablation decision: tier2 defaults ON.
+    # Override via FORMUMIND_QUERY_COMPRESS_LLM_ENABLED=false.
+    assert Settings.model_fields["query_compress_llm_enabled"].default is True
+    # Helper: missing attribute (old settings objects) still reads as off
+    # (getattr default False) — explicit opt-in for legacy callers.
     assert qac.query_compress_llm_enabled(SimpleNamespace()) is False
     assert qac.query_compress_llm_enabled(make_settings()) is True
+    assert (
+        qac.query_compress_llm_enabled(make_settings(query_compress_llm_enabled=False))
+        is False
+    )
 
 
 def test_summary_preserves_citation_anchor():

@@ -37,7 +37,7 @@ def test_api_crud_and_refresh(data_dir, no_search):
         "/api/collections",
         json={
             "project_id": "p1",
-            "name": "VIANT",
+            "name": "Coating",
             "query": "waterborne conversion coating",
             "filters": {"date_from": 2020},
             "schedule": {"enabled": True, "interval_hours": 12},
@@ -53,15 +53,15 @@ def test_api_crud_and_refresh(data_dir, no_search):
 
     r = c.get(f"/api/collections/{cid}", params={"project_id": "p1"})
     assert r.status_code == 200
-    assert r.json()["name"] == "VIANT"
+    assert r.json()["name"] == "Coating"
 
     r = c.patch(
         f"/api/collections/{cid}",
         params={"project_id": "p1"},
-        json={"name": "VIANT v2"},
+        json={"name": "Coating v2"},
     )
     assert r.status_code == 200
-    assert r.json()["name"] == "VIANT v2"
+    assert r.json()["name"] == "Coating v2"
 
     r = c.post(f"/api/collections/{cid}/refresh", params={"project_id": "p1"})
     assert r.status_code == 200

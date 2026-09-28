@@ -47,7 +47,7 @@ def search_hits(monkeypatch):
 def test_crud_lifecycle(data_dir):
     col = sc.create_collection(
         "p1",
-        name="VIANT papers",
+        name="Chrome-free conversion coating papers",
         query="waterborne conversion coating",
         filters={"date_from": 2020, "domain_allowlist": ["sciencedirect.com"]},
         screening_preset="corrosion_coating",
@@ -60,16 +60,16 @@ def test_crud_lifecycle(data_dir):
 
     listed = sc.list_collections("p1")
     assert len(listed) == 1
-    assert listed[0]["name"] == "VIANT papers"
+    assert listed[0]["name"] == "Chrome-free conversion coating papers"
     assert listed[0]["snapshot_count"] == 0
 
     got = sc.get_collection("p1", col["collection_id"])
     assert got["query"] == "waterborne conversion coating"
 
     updated = sc.update_collection(
-        "p1", col["collection_id"], name="VIANT v2", schedule={"enabled": False}
+        "p1", col["collection_id"], name="Coating papers v2", schedule={"enabled": False}
     )
-    assert updated["name"] == "VIANT v2"
+    assert updated["name"] == "Coating papers v2"
     assert updated["schedule"]["enabled"] is False
     assert updated["schedule"]["interval_hours"] == 48  # preserved
 

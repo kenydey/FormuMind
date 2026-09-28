@@ -117,6 +117,15 @@ async def lifespan(_app: FastAPI):
         from .middleware.api_auth import resolve_api_token
 
         resolve_api_token(settings)
+    # ------------------------------------------------------------------
+    # Wave 4: fail-fast on truly required startup configuration (bad db_url
+    # scheme, unwritable sqlite data dir, datalab_required without a URL).
+    # Cheap and deterministic — runs unconditionally, never blocks on network.
+    # ------------------------------------------------------------------
+    from .startup_checks import run_startup_checks
+
+    for warning in run_startup_checks(settings):
+        logger.warning("startup check: %s", warning)
     # P1 #25: production + SQLite is a foot-gun under multi-worker write load.
     try:
         env = (settings.environment or "").strip().lower()

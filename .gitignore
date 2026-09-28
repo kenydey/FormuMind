@@ -68,3 +68,4 @@ deploy/molscribe/hf-cache/
 # Local git worktrees (superpowers)
 .worktrees/
 
+backend/evals-history.jsonl

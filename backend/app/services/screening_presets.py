@@ -74,7 +74,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "conversion_coating": {
         "title": "转化膜",
-        "description": "锆 / 钛 / 硅烷等无铬转化膜文献（含 VIANT 相关）",
+        "description": "锆 / 钛 / 硅烷等无铬转化膜文献",
         "criteria": _criteria(
             include=[
                 "conversion coating",

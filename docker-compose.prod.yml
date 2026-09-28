@@ -1,0 +1,47 @@
+# FormuMind — production override.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What this changes vs. the base file (which stays dev-friendly):
+#   - FORMUMIND_ENVIRONMENT=production on backend + worker
+#       (also auto-enables API auth via config; set explicitly anyway)
+#   - API bearer auth ON — the stack refuses to start without a resolvable
+#     FORMUMIND_API_TOKEN (lifespan fail-fast, see app/startup_checks.py).
+#     Put the token in .env (gitignored), never in this file.
+#   - Frontend bound to 127.0.0.1 only — put a reverse proxy / TLS in front
+#     for external access.
+#   - restart policy tightened to `always` for the long-running services.
+#
+# Healthchecks, volume mounts and service separation all come from the base
+# file and are intentionally NOT repeated here.
+
+services:
+  backend:
+    restart: always
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_API_AUTH_ENABLED: "true"
+
+  worker:
+    restart: always
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_API_AUTH_ENABLED: "true"
+
+  molscribe:
+    restart: always
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+      FORMUMIND_API_AUTH_ENABLED: "true"
+
+  frontend:
+    restart: always
+    ports:
+      - "127.0.0.1:5173:80"
+
+  redis:
+    restart: always
+
+  kg:
+    restart: always
