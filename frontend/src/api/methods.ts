@@ -1724,7 +1724,90 @@ export const apiMethods = {
       year_max?: number;
     };
     apply?: boolean;
+    /** W6-2: 预设名 / 命名规则版本 */
+    preset?: string;
+    rule_name?: string;
   }) => post<Record<string, unknown>>("/api/wiki/literature/screen", body),
+
+  /** W6-2: screening 规则套件 */
+  getScreeningPresets: () =>
+    get<{
+      presets: Array<{
+        name: string;
+        title: string;
+        description: string;
+        criteria: Record<string, unknown>;
+      }>;
+    }>("/api/wiki/literature/screening/presets"),
+
+  getScreeningRuleVersions: (projectId: string) =>
+    get<{
+      versions: Array<{
+        name: string;
+        version: string;
+        criteria: Record<string, unknown>;
+        created_by: string;
+        created_at: number;
+        changelog: string;
+      }>;
+      history: Array<{
+        at: number;
+        actor: string;
+        action: string;
+        name: string;
+        version: string;
+        changelog: string;
+      }>;
+      current_rule_name?: string | null;
+      current_rule_version?: string | null;
+    }>(
+      `/api/wiki/literature/screening/rule-versions?project_id=${encodeURIComponent(projectId)}`,
+    ),
+
+  saveScreeningRuleVersion: (body: {
+    project_id: string;
+    name: string;
+    criteria: Record<string, unknown>;
+    changelog?: string;
+    created_by?: string;
+  }) =>
+    post<Record<string, unknown>>(
+      "/api/wiki/literature/screening/rule-versions",
+      body,
+    ),
+
+  rollbackScreeningRuleVersion: (body: {
+    project_id: string;
+    version?: string;
+    name?: string;
+    actor?: string;
+  }) =>
+    post<Record<string, unknown>>(
+      "/api/wiki/literature/screening/rule-versions/rollback",
+      body,
+    ),
+
+  evaluateScreening: (body: {
+    project_id: string;
+    criteria?: Record<string, unknown> | null;
+  }) =>
+    post<{
+      evaluated: boolean;
+      reason?: string;
+      labeled_count?: number;
+      confusion?: { tp: number; fp: number; tn: number; fn: number };
+      metrics?: { precision: number; recall: number; f1: number };
+      include_ablation?: Array<{
+        keyword: string;
+        recall_without: number;
+        recall_delta: number;
+      }>;
+      exclude_ablation?: Array<{
+        keyword: string;
+        precision_without: number;
+        precision_delta: number;
+      }>;
+    }>("/api/wiki/literature/screening/evaluate", body),
 
   enrichLiteratureOa: (body: {
     project_id: string;

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, formatApiError } from "../../api";
+import { api, awaitTaskStream, formatApiError } from "../../api";
 
 type Props = {
   projectId: string | null;
 };
 
 type Manifest = Awaited<ReturnType<typeof api.getLiteratureManifest>>;
+type RuleVersion = Awaited<
+  ReturnType<typeof api.getScreeningRuleVersions>
+>["versions"][number];
+type RuleHistory = Awaited<
+  ReturnType<typeof api.getScreeningRuleVersions>
+>["history"][number];
+type EvalResult = Awaited<ReturnType<typeof api.evaluateScreening>>;
 
 /** Compact Wave B strip: capture / freeze / light screening for project literature. */
 export default function LiteratureFreezeStrip({ projectId }: Props) {
@@ -16,6 +23,27 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
   const [excludeKw, setExcludeKw] = useState("");
   const [showScreen, setShowScreen] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
+  // W6-2: 规则套件
+  const [presets, setPresets] = useState<Array<{ name: string; title: string }>>(
+    [],
+  );
+  const [preset, setPreset] = useState("");
+  const [ruleName, setRuleName] = useState("");
+  const [versions, setVersions] = useState<RuleVersion[]>([]);
+  const [history, setHistory] = useState<RuleHistory[]>([]);
+  const [currentRuleName, setCurrentRuleName] = useState<string | null>(null);
+  const [evalRes, setEvalRes] = useState<EvalResult | null>(null);
+
+  const kwCriteria = () => ({
+    include_keywords: includeKw
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+    exclude_keywords: excludeKw
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+  });
 
   const reload = useCallback(async () => {
     if (!projectId) {
@@ -28,6 +56,21 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
       setError(null);
     } catch (e) {
       setError(formatApiError(e));
+    }
+    // W6-2: 预设与规则版本（fail-open，不阻塞主面板）
+    try {
+      const p = await api.getScreeningPresets();
+      setPresets(p.presets.map((x) => ({ name: x.name, title: x.title })));
+    } catch {
+      /* ignore */
+    }
+    try {
+      const rv = await api.getScreeningRuleVersions(projectId);
+      setVersions(rv.versions);
+      setHistory(rv.history.slice(-8).reverse());
+      setCurrentRuleName(rv.current_rule_name ?? null);
+    } catch {
+      /* ignore */
     }
   }, [projectId]);
 
@@ -150,6 +193,23 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
 
       {showScreen && (
         <div className="space-y-1 border-t border-edge/60 pt-1.5" data-testid="literature-screen-form">
+          {/* W6-2: 预设选择器 */}
+          <label className="flex gap-1 items-center text-slate-400">
+            预设
+            <select
+              className="flex-1 bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+              value={preset}
+              onChange={(e) => setPreset(e.target.value)}
+              data-testid="literature-screen-preset"
+            >
+              <option value="">（无，使用下方关键词）</option>
+              {presets.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex gap-1 items-center text-slate-400">
             纳入
             <input
@@ -168,32 +228,179 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
               data-testid="literature-exclude-kw"
             />
           </label>
-          <button
-            type="button"
-            disabled={!!busy}
-            className="px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-200 disabled:opacity-40"
-            data-testid="literature-screen-btn"
-            onClick={() =>
-              run("screen", () =>
-                api.screenLiteratureManifest({
-                  project_id: projectId,
-                  apply: true,
-                  criteria: {
-                    include_keywords: includeKw
-                      .split(/[,，]/)
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                    exclude_keywords: excludeKw
-                      .split(/[,，]/)
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  },
-                }),
-              )
-            }
-          >
-            运行筛选
-          </button>
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              disabled={!!busy}
+              className="px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-200 disabled:opacity-40"
+              data-testid="literature-screen-btn"
+              onClick={() =>
+                run("screen", async () => {
+                  const res = await api.screenLiteratureManifest({
+                    project_id: projectId,
+                    apply: true,
+                    preset: preset || undefined,
+                    rule_name: ruleName.trim() || undefined,
+                    criteria: kwCriteria(),
+                  });
+                  // W6-2: 大 manifest 走后台 job，等流结束再刷新
+                  const taskId = res.task_id as string | undefined;
+                  if (res.async && taskId) {
+                    await awaitTaskStream(taskId);
+                  }
+                })
+              }
+            >
+              运行筛选
+            </button>
+            {/* W6-2: 命名规则版本保存 */}
+            <input
+              className="bg-ink border border-edge rounded px-1 py-0.5 text-slate-200 w-28"
+              placeholder="规则版本名"
+              value={ruleName}
+              onChange={(e) => setRuleName(e.target.value)}
+              data-testid="literature-rule-name"
+            />
+            <button
+              type="button"
+              disabled={!!busy || !ruleName.trim()}
+              className="px-1.5 py-0.5 rounded border border-edge text-slate-300 disabled:opacity-40"
+              data-testid="literature-rule-save-btn"
+              onClick={() =>
+                run("save-rule", () =>
+                  api.saveScreeningRuleVersion({
+                    project_id: projectId,
+                    name: ruleName.trim(),
+                    criteria: kwCriteria(),
+                    created_by: "hub",
+                  }),
+                )
+              }
+            >
+              保存版本
+            </button>
+            <button
+              type="button"
+              disabled={!!busy}
+              className="px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200 disabled:opacity-40"
+              data-testid="literature-eval-btn"
+              onClick={() =>
+                run("evaluate", async () => {
+                  const r = await api.evaluateScreening({
+                    project_id: projectId,
+                    criteria: kwCriteria(),
+                  });
+                  setEvalRes(r);
+                })
+              }
+            >
+              效果评估
+            </button>
+          </div>
+          {/* W6-2: 规则版本下拉 + 回滚 */}
+          {versions.length > 0 && (
+            <div
+              className="flex gap-1 items-center text-slate-400"
+              data-testid="literature-rule-versions"
+            >
+              <span>
+                规则版本{currentRuleName ? `（当前 ${currentRuleName}）` : ""}
+              </span>
+              <select
+                className="flex-1 bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                id="literature-rule-version-select"
+                data-testid="literature-rule-version-select"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  选择历史版本回滚…
+                </option>
+                {versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    {v.name} · {v.version.slice(0, 8)}
+                    {v.changelog ? ` · ${v.changelog.slice(0, 20)}` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!!busy}
+                className="px-1.5 py-0.5 rounded border border-edge text-slate-300 disabled:opacity-40"
+                data-testid="literature-rule-rollback-btn"
+                onClick={() => {
+                  const sel = document.getElementById(
+                    "literature-rule-version-select",
+                  ) as HTMLSelectElement | null;
+                  const version = sel?.value;
+                  if (!version) return;
+                  void run("rollback", () =>
+                    api.rollbackScreeningRuleVersion({
+                      project_id: projectId,
+                      version,
+                      actor: "hub",
+                    }),
+                  );
+                }}
+              >
+                回滚
+              </button>
+            </div>
+          )}
+          {/* W6-2: 变更历史时间线（只读） */}
+          {history.length > 0 && (
+            <ul
+              className="text-slate-500 space-y-0.5"
+              data-testid="literature-rule-history"
+            >
+              {history.map((h, i) => (
+                <li key={`${h.at}-${i}`}>
+                  {new Date(h.at * 1000).toLocaleString("zh-CN", {
+                    hour12: false,
+                  })}{" "}
+                  {h.actor} {h.action === "rolled_back" ? "回滚到" : "保存"}{" "}
+                  {h.name}
+                  {h.changelog ? `：${h.changelog.slice(0, 40)}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* W6-2: 评估结果 */}
+          {evalRes && (
+            <div
+              className="text-slate-400 space-y-0.5"
+              data-testid="literature-eval-result"
+            >
+              {evalRes.evaluated ? (
+                <>
+                  <p>
+                    人工标注 {evalRes.labeled_count} 条 · P=
+                    {evalRes.metrics?.precision.toFixed(2)} R=
+                    {evalRes.metrics?.recall.toFixed(2)} F1=
+                    {evalRes.metrics?.f1.toFixed(2)} · 混淆矩阵 TP
+                    {evalRes.confusion?.tp}/FP{evalRes.confusion?.fp}/TN
+                    {evalRes.confusion?.tn}/FN{evalRes.confusion?.fn}
+                  </p>
+                  {(evalRes.include_ablation ?? []).slice(0, 3).length > 0 && (
+                    <p>
+                      最伤 recall 的关键词：
+                      {(evalRes.include_ablation ?? [])
+                        .slice(0, 3)
+                        .map(
+                          (a) =>
+                            `${a.keyword}(${a.recall_delta.toFixed(2)})`,
+                        )
+                        .join(" ")}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p>
+                  样本不足（人工标注 {evalRes.labeled_count ?? 0}{" "}
+                  条，需 ≥5 条）无法评估
+                </p>
+              )}
+            </div>
+          )}
           {man?.items && man.items.length > 0 && (
             <ul className="max-h-24 overflow-auto text-slate-400 space-y-0.5">
               {man.items.slice(0, 12).map((it) => (

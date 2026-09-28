@@ -999,6 +999,28 @@ class LiteratureScreenRequest(BaseModel):
     project_id: str = Field(min_length=1)
     criteria: dict = Field(default_factory=dict)
     apply: bool = True
+    preset: str | None = None
+    rule_name: str | None = None
+
+
+class ScreeningRuleVersionRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=120)
+    criteria: dict = Field(default_factory=dict)
+    changelog: str = Field(default="", max_length=500)
+    created_by: str = Field(default="user", max_length=120)
+
+
+class ScreeningRollbackRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    version: str | None = None
+    name: str | None = None
+    actor: str = Field(default="user", max_length=120)
+
+
+class ScreeningEvaluateRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    criteria: dict | None = None
 
 
 class LiteratureItemPatch(BaseModel):
@@ -1068,14 +1090,121 @@ def literature_unfreeze_endpoint(body: LiteratureUnfreezeRequest) -> dict:
 @router.post("/literature/screen")
 def literature_screen_endpoint(body: LiteratureScreenRequest) -> dict:
     _require_wiki()
-    from ..services.literature_screening import screen_project
+    from ..services.literature_screening import (
+        screen_project,
+        screening_async_threshold,
+    )
 
     try:
+        # W6-2：大 manifest 走后台 job，进度经 /api/tasks/{id} 可查
+        if body.apply:
+            from ..services.literature_manifest import load_manifest
+
+            settings = get_settings()
+            item_count = len(load_manifest(body.project_id).get("items") or [])
+            if item_count > screening_async_threshold(settings):
+                from ..worker.tasks import dispatch_screening_job
+
+                task_id = dispatch_screening_job(
+                    body.project_id,
+                    body.criteria or {},
+                    preset=body.preset,
+                    rule_name=body.rule_name,
+                )
+                if task_id:
+                    return {
+                        "async": True,
+                        "task_id": task_id,
+                        "stream_url": f"/api/tasks/{task_id}/stream",
+                        "item_count": item_count,
+                        "project_id": body.project_id,
+                    }
+                # dispatch 失败（fail-open）→ 回落同步
         return screen_project(
             body.project_id,
             body.criteria or {},
             apply=body.apply,
             settings=get_settings(),
+            preset=body.preset,
+            rule_name=body.rule_name,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ── Screening rule suite (W6-2) ────────────────────────────────────────────
+
+
+@router.get("/literature/screening/presets")
+def screening_presets_endpoint() -> dict:
+    _require_wiki()
+    from ..services.screening_presets import list_presets
+
+    return {"presets": list_presets()}
+
+
+@router.get("/literature/screening/rule-versions")
+def screening_rule_versions_endpoint(project_id: str) -> dict:
+    _require_wiki()
+    from ..services.literature_screening import list_rule_versions
+
+    try:
+        return list_rule_versions(project_id, settings=get_settings())
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/literature/screening/rule-versions")
+def screening_rule_version_save_endpoint(body: ScreeningRuleVersionRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_screening import save_rule_version
+
+    try:
+        return save_rule_version(
+            body.project_id,
+            name=body.name,
+            criteria=body.criteria or {},
+            created_by=body.created_by,
+            changelog=body.changelog,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/literature/screening/rule-versions/rollback")
+def screening_rule_version_rollback_endpoint(body: ScreeningRollbackRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_screening import rollback_rule_version
+
+    try:
+        return rollback_rule_version(
+            body.project_id,
+            version=body.version,
+            name=body.name,
+            actor=body.actor,
+            settings=get_settings(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/literature/screening/evaluate")
+def screening_evaluate_endpoint(body: ScreeningEvaluateRequest) -> dict:
+    _require_wiki()
+    from ..services.literature_screening import evaluate_screening
+
+    try:
+        return evaluate_screening(
+            body.project_id, body.criteria, settings=get_settings()
         )
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

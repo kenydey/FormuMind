@@ -1690,3 +1690,133 @@ def warm_celery_producer(timeout: float = 60.0) -> None:
         logging.getLogger(__name__).exception(
             "celery producer warmup failed (non-fatal)"
         )
+
+
+# ── smart collections scheduled refresh (W6-3 / P2-3) ─────────────────────────
+#
+# Thin wrapper over services.smart_collections.refresh_due_collections.
+# Intended for celery beat (opt-in, see celery_app.py); the sweeper itself is
+# fail-open per collection and can also be called from tests directly.
+
+
+@celery_app.task(bind=True, name="formumind.collection_refresh")
+def run_collection_refresh_task(self, payload: dict) -> dict:
+    """Refresh due smart collections for one project. payload: {project_id}."""
+    from ..services import smart_collections as sc
+
+    project_id = str((payload or {}).get("project_id") or "").strip()
+    if not project_id:
+        raise ValueError("project_id is required")
+    try:
+        results = sc.refresh_due_collections(project_id, actor="scheduler")
+    except Exception as exc:  # noqa: BLE001
+        return degrade_return(logger, exc, "collection refresh failed", {"results": []})
+    return {"project_id": project_id, "results": results}
+
+
+# ── Async literature screening (W6-2) ─────────────────────────────────────────
+# Manifest > screening_async_threshold() 条目时走后台 job，进度经 task 进度
+# 管线（/api/tasks/{id}/stream）可查；小 manifest 保持同步直跑。
+
+
+def _screening_impl(task_id: str, payload: dict) -> dict:
+    """Shared body for the Celery task and the eager-mode background thread."""
+    from ..config import get_settings
+    from ..services import literature_screening as ls
+
+    project_id = str(payload.get("project_id") or "")
+    last = {"n": 0}
+
+    def _cb(done: int, total: int) -> None:
+        # 节流：每 25 条或收尾才 publish，避免 redis 风暴
+        if done >= total or done - last["n"] >= 25:
+            last["n"] = done
+            publish_progress(
+                task_id,
+                TaskProgressStatus.RUNNING,
+                stage="screening",
+                message=f"文献筛选 {done}/{total}",
+                progress=(done / total) if total else 0.0,
+                kind="screening",
+            )
+
+    try:
+        result = ls.screen_project(
+            project_id,
+            payload.get("criteria") or {},
+            apply=True,
+            settings=get_settings(),
+            preset=payload.get("preset"),
+            rule_name=payload.get("rule_name"),
+            progress_cb=_cb,
+        )
+        out = {
+            "project_id": project_id,
+            "summary": result.get("summary"),
+            "decisions": len(result.get("decisions") or []),
+            "preset": payload.get("preset"),
+            "rule_name": payload.get("rule_name"),
+        }
+        persist_result(task_id, out, failed=False)
+        _persist_terminal(task_id, "screening", out)
+        return out
+    except Exception as exc:
+        err = {"error": str(exc), "project_id": project_id}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "screening", err, failed=True)
+        log_handled_exception(logger, exc, "screening background job")
+        raise
+
+
+@celery_app.task(bind=True, name="formumind.screening")
+def run_screening_task(self, payload: dict) -> dict:
+    return _screening_impl(self.request.id, payload)
+
+
+def _safe_screening(task_id: str, payload: dict) -> None:
+    try:
+        _screening_impl(task_id, payload)
+    except Exception as exc:  # already persisted as failed inside the impl
+        log_handled_exception(logger, exc, "screening background thread")
+
+
+def dispatch_screening_job(
+    project_id: str,
+    criteria: dict,
+    *,
+    preset: str | None = None,
+    rule_name: str | None = None,
+    actor: str = "user",
+) -> str | None:
+    """Enqueue a background screening job; return task id for SSE/status polling.
+
+    Returns None when screening is disabled or dispatch itself fails (fail-open:
+    the caller can fall back to synchronous screening).
+    """
+    from ..config import get_settings
+    from ..services import literature_screening as ls
+
+    if not ls.screening_enabled(get_settings()):
+        return None
+    payload = {
+        "project_id": project_id,
+        "criteria": criteria or {},
+        "preset": preset,
+        "rule_name": rule_name,
+        "actor": actor,
+    }
+    try:
+        if get_settings().celery_eager:
+            task_id = f"screening-{uuid.uuid4().hex[:16]}"
+            task_manager.register_celery_task(task_id, "screening")
+            threading.Thread(
+                target=lambda: _safe_screening(task_id, payload),
+                name="screening",
+                daemon=True,
+            ).start()
+            return task_id
+        async_result = run_screening_task.delay(payload)
+        task_manager.register_celery_task(async_result.id, "screening")
+        return async_result.id
+    except Exception as exc:
+        return degrade_return(logger, exc, "screening dispatch failed", None)

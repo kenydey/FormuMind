@@ -601,6 +601,16 @@ class Settings(BaseSettings):
     # Wave 1 — LLM rubric reviewer (default off; falls back to heuristics).
     evidence_reviewer_llm_enabled: bool = False
     evidence_reviewer_model: str = ""  # empty → inherit chat llm_model
+    # Wave 6 — evals 严谨性 rubric 门禁阈值（P1-38；scripts/rigor_gate.py 默认开启）。
+    # 可用环境变量 FORMUMIND_EVALS_RIGOR_THRESHOLDS 以 JSON 覆盖子项。
+    evals_rigor_thresholds: dict[str, float] = Field(
+        default={
+            "citation_veracity": 1.0,
+            "coverage": 0.8,
+            "numeric_consistency": 1.0,
+        },
+        description="Rigor rubric gate thresholds per metric",
+    )
     # Wiki/STORM export steel-stamp (citation/placeholder/numeric). Default on for export.
     publication_preflight_enabled: bool = True
     # Wave B — PaperQA engine kill-switch (orthogonal to evidence_synthesis_mode).
@@ -618,6 +628,8 @@ class Settings(BaseSettings):
     # Wave B — light smart screening (default off).
     literature_screening_enabled: bool = False
     screening_auto_freeze: bool = False
+    # W6-2 — manifest 超过该条目数时筛选走后台 job（默认 500）。
+    screening_async_threshold: int = 500
     # Wave 4 — artifact version lineage / immutable snapshots (P1-16, default on).
     artifact_versions_enabled: bool = True
     literature_screening_required_for_export: bool = False

@@ -1,0 +1,282 @@
+"""W6-1 · P1-38: evals 严谨性 rubric。
+
+三项确定性（无 LLM、纯本地）指标，用于回归门禁：
+
+1. ``citation_veracity`` —— 答案中每个 ``[^n]`` 引用必须命中本次证据集合
+   （按位置 1..len(evidence)），且被引证据至少有一个可解析来源
+   （identifier / title / doi / url 四取一非空）。孤儿引用记 fail。
+2. ``coverage`` —— golden 标注的关键 claim 覆盖占比。claim 被"覆盖"当且仅当
+   其关键词在答案中出现（>=50%）且答案带有至少一个有效引用。
+   未覆盖但证据中有支撑的 claim 记 fail（"有证据没引用"）。
+3. ``numeric_consistency`` —— 答案中带单位的数字，经单位归一化（含明确换算，
+   如 mm<->μm、h<->min）后，必须在所引 passage/snippet 原文出现；无来源数字记 fail。
+
+每项输出 ``{"score": float | None, "failures": [{"claim", "reason"}]}``；
+``score`` 为 None 表示该指标内部异常（fail-open：记 error，不炸主流程）。
+
+输入约定（与 ``citation_binder`` / W4-2 冻结 evidence 兼容的最小结构）::
+
+    evidence = [
+        {"identifier": "...", "title": "...", "doi": "...", "url": "...",
+         "text": "<passage/snippet 原文>", "page": 3, "figure": "2", "table": None},
+        ...
+    ]
+    key_claims = [{"text": "...", "keywords": ["盐雾", "1000小时"]}, ...]
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from typing import Any
+
+__all__ = [
+    "CITATION_RE",
+    "DEFAULT_THRESHOLDS",
+    "evaluate_rigor",
+    "extract_citation_indices",
+    "extract_numbers",
+    "metric_citation_veracity",
+    "metric_coverage",
+    "metric_numeric_consistency",
+]
+
+# 默认阈值（与 config.py::evals_rigor_thresholds 保持一致；gate 以 config 为准）。
+DEFAULT_THRESHOLDS: dict[str, float] = {
+    "citation_veracity": 1.0,
+    "coverage": 0.8,
+    "numeric_consistency": 1.0,
+}
+
+CITATION_RE = re.compile(r"\[\^(\d+)\]")
+
+_SOURCE_KEYS = ("identifier", "title", "doi", "url")
+
+
+def _norm(text: str) -> str:
+    t = (text or "").lower()
+    t = re.sub(r"[\s\u3000\-–—_.,;:!?，。；：！？、（）()\[\]【】\"'“”‘’·/\\]+", "", t)
+    return t
+
+
+def extract_citation_indices(answer: str) -> list[int]:
+    seen: list[int] = []
+    for m in CITATION_RE.finditer(answer or ""):
+        n = int(m.group(1))
+        if n not in seen:
+            seen.append(n)
+    return seen
+
+
+def metric_citation_veracity(
+    answer: str, evidence: list[dict[str, Any]]
+) -> dict[str, Any]:
+    indices = extract_citation_indices(answer)
+    failures: list[dict[str, str]] = []
+    valid = 0
+    for n in indices:
+        if n < 1 or n > len(evidence):
+            failures.append(
+                {
+                    "claim": f"[^{n}]",
+                    "reason": (
+                        f"orphan citation: [^{n}]超出本次证据集合范围 "
+                        f"(共{len(evidence)}条证据)"
+                    ),
+                }
+            )
+            continue
+        item = evidence[n - 1] or {}
+        if not any(str(item.get(k) or "").strip() for k in _SOURCE_KEYS):
+            failures.append(
+                {
+                    "claim": f"[^{n}]",
+                    "reason": "cited evidence has no resolvable source "
+                    "(identifier/title/doi/url 全空)",
+                }
+            )
+            continue
+        valid += 1
+    score = 1.0 if not indices else valid / len(indices)
+    return {"score": round(score, 4), "failures": failures}
+
+
+def _claim_hit_ratio(claim: dict[str, Any], text_norm: str) -> float:
+    kws = [k for k in (claim.get("keywords") or []) if str(k).strip()]
+    if not kws:
+        return 1.0
+    hits = sum(1 for k in kws if _norm(str(k)) in text_norm)
+    return hits / len(kws)
+
+
+def metric_coverage(
+    answer: str,
+    evidence: list[dict[str, Any]],
+    key_claims: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    claims = [c for c in (key_claims or []) if isinstance(c, dict)]
+    if not claims:
+        return {"score": 1.0, "failures": []}
+    answer_norm = _norm(answer)
+    evidence_norm = [_norm(str(e.get("text") or "")) for e in evidence]
+    has_valid_citation = any(
+        1 <= n <= len(evidence) for n in extract_citation_indices(answer)
+    )
+    failures: list[dict[str, str]] = []
+    covered = 0
+    for claim in claims:
+        text = str(claim.get("text") or claim.get("keywords") or "")
+        if _claim_hit_ratio(claim, answer_norm) >= 0.5 and has_valid_citation:
+            covered += 1
+            continue
+        supported = any(
+            _claim_hit_ratio(claim, ev) >= 0.5 for ev in evidence_norm
+        )
+        reason = (
+            "claim 有证据支撑但答案未覆盖/未引用"
+            if supported
+            else "答案未覆盖该关键 claim（证据中亦无支撑）"
+        )
+        failures.append({"claim": text, "reason": reason})
+    score = covered / len(claims)
+    return {"score": round(score, 4), "failures": failures}
+
+
+_UNIT_ALIASES: dict[str, str] = {
+    "°c": "c", "℃": "c",
+    "μm": "um", "微米": "um", "um": "um",
+    "mm": "mm", "毫米": "mm",
+    "cm": "cm", "厘米": "cm",
+    "m": "m", "米": "m",
+    "h": "h", "小时": "h", "hr": "h", "hrs": "h",
+    "min": "min", "分钟": "min",
+    "s": "s", "秒": "s",
+    "%": "pct", "％": "pct",
+    "ph": "ph",
+    "mpa": "mpa", "kpa": "kpa", "pa": "pa",
+    "g": "g", "克": "g",
+    "kg": "kg", "千克": "kg",
+    "mg": "mg", "毫克": "mg",
+    "ml": "ml", "毫升": "ml",
+    "l": "l", "升": "l",
+    "年": "yr",
+}
+_CONVERSIONS: dict[str, tuple[str, float]] = {
+    "um": ("um", 1.0), "mm": ("um", 1000.0), "cm": ("um", 10000.0), "m": ("um", 1e6),
+    "h": ("h", 1.0), "min": ("h", 1.0 / 60.0), "s": ("h", 1.0 / 3600.0),
+    "mpa": ("mpa", 1.0), "kpa": ("mpa", 1e-3), "pa": ("mpa", 1e-6),
+    "g": ("g", 1.0), "kg": ("g", 1000.0), "mg": ("g", 1e-3),
+    "ml": ("ml", 1.0), "l": ("ml", 1000.0),
+}
+_UNIT_PATTERN = "|".join(
+    sorted((re.escape(u) for u in _UNIT_ALIASES), key=len, reverse=True)
+)
+_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")", re.IGNORECASE)
+_PH_RE = re.compile(r"[pP][Hh]\s*(\d+(?:\.\d+)?)")
+_RANGE_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*[-\u2013\u2014~\u301c]\s*(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")",
+    re.IGNORECASE,
+)
+
+
+def _canon_unit(raw: str) -> str | None:
+    return _UNIT_ALIASES.get(raw.strip().lower())
+
+
+def _to_base(value: float, unit: str) -> tuple[str, float]:
+    base, factor = _CONVERSIONS.get(unit, (unit, 1.0))
+    return base, value * factor
+
+
+def extract_numbers(text: str) -> list[tuple[float, str]]:
+    out: list[tuple[float, str]] = []
+    seen: set[tuple[float, str]] = set()
+
+    def _add(v: float, u: str | None) -> None:
+        if u is None:
+            return
+        key = (v, u)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    src = text or ""
+    for m in _RANGE_RE.finditer(src):
+        u = _canon_unit(m.group(3))
+        _add(float(m.group(1)), u)
+        _add(float(m.group(2)), u)
+    for m in _NUM_RE.finditer(src):
+        _add(float(m.group(1)), _canon_unit(m.group(2)))
+    for m in _PH_RE.finditer(src):
+        _add(float(m.group(1)), "ph")
+    return out
+
+
+def _numbers_match(a: tuple[float, str], b: tuple[float, str]) -> bool:
+    (av, au), (bv, bu) = a, b
+    if au == bu:
+        return math.isclose(av, bv, rel_tol=1e-6, abs_tol=1e-9)
+    ab, avv = _to_base(av, au)
+    bb, bvv = _to_base(bv, bu)
+    return ab == bb and math.isclose(avv, bvv, rel_tol=1e-6, abs_tol=1e-9)
+
+
+def metric_numeric_consistency(
+    answer: str, evidence: list[dict[str, Any]]
+) -> dict[str, Any]:
+    answer_nums = extract_numbers(answer)
+    if not answer_nums:
+        return {"score": 1.0, "failures": []}
+    indices = extract_citation_indices(answer)
+    cited = [evidence[n - 1] for n in indices if 1 <= n <= len(evidence)]
+    pool = cited or evidence
+    pool_nums: list[tuple[float, str]] = []
+    for item in pool:
+        pool_nums.extend(extract_numbers(str(item.get("text") or "")))
+    failures: list[dict[str, str]] = []
+    ok = 0
+    for v, u in answer_nums:
+        if any(_numbers_match((v, u), p) for p in pool_nums):
+            ok += 1
+        else:
+            failures.append(
+                {
+                    "claim": f"{v:g}{u}",
+                    "reason": "答案中的数字在所引证据原文中无来源（亦无明确换算对应）",
+                }
+            )
+    score = ok / len(answer_nums)
+    return {"score": round(score, 4), "failures": failures}
+
+
+def evaluate_rigor(
+    answer: str,
+    evidence: list[dict[str, Any]] | None,
+    key_claims: list[dict[str, Any]] | None = None,
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    ev = [e for e in (evidence or []) if isinstance(e, dict)]
+    th = dict(DEFAULT_THRESHOLDS)
+    if thresholds:
+        th.update({k: float(v) for k, v in thresholds.items() if k in th})
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for name, fn, args in (
+        ("citation_veracity", metric_citation_veracity, (answer, ev)),
+        ("coverage", metric_coverage, (answer, ev, key_claims)),
+        ("numeric_consistency", metric_numeric_consistency, (answer, ev)),
+    ):
+        try:
+            metrics[name] = fn(*args)
+        except Exception as exc:
+            metrics[name] = {
+                "score": None,
+                "failures": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    passed = all(
+        m["score"] is not None and m["score"] >= th[name]
+        for name, m in metrics.items()
+    )
+    return {**metrics, "passed": passed, "thresholds": th}

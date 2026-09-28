@@ -188,6 +188,16 @@ export async function put<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+export async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readApiError(res, path);
+  return res.json();
+}
+
 export async function del<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: "DELETE", headers: apiAuthHeaders() });
   if (!res.ok) throw await readApiError(res, path);
