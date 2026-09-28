@@ -46,9 +46,12 @@ def test_veracity_cited_evidence_without_source_fails():
     assert "resolvable source" in m["failures"][0]["reason"]
 
 
-def test_veracity_no_citations_vacuous_pass():
+def test_veracity_no_citations_fails():
+    # B-6 修复：零引用不再给满分（此前 vacuous 1.0 让门禁看不见无引用答案）
     m = metric_citation_veracity("没有引用的陈述。", _ev(_src()))
-    assert m["score"] == 1.0 and m["failures"] == []
+    assert m["score"] == 0.0
+    assert len(m["failures"]) == 1
+    assert "没有" in m["failures"][0]["reason"] and "引用" in m["failures"][0]["reason"]
 
 
 def test_extract_citation_indices_dedup_order():
@@ -207,3 +210,51 @@ def test_config_rigor_thresholds_defaults(monkeypatch):
         assert th["numeric_consistency"] == 1.0
     finally:
         get_settings.cache_clear()
+
+
+# ── B-6 回归：无引用数字不再回退全 evidence 池 ──────────────────────────────
+
+
+def test_b6_numeric_no_citations_fails_without_pool_fallback():
+    # 答案有数字但零引用：此前 `pool = cited or evidence` 回退全池，
+    # 未引用证据含相同数字即判一致 → score=1.0；现直接 fail。
+    ans = "盐雾 1000 小时后无锈蚀。"
+    ev = _ev(_src(text="中性盐雾 1000 小时，样板无锈蚀。"))
+    m = metric_numeric_consistency(ans, ev)
+    assert m["score"] == 0.0
+    assert len(m["failures"]) == 1
+    assert "无有效引用" in m["failures"][0]["reason"]
+
+
+def test_b6_numeric_orphan_citations_only_fails():
+    # 引用全部越界（无有效引用）同样 fail，不回退
+    ans = "盐雾 1000 小时后无锈蚀[^9]。"
+    ev = _ev(_src(text="中性盐雾 1000 小时，样板无锈蚀。"))
+    m = metric_numeric_consistency(ans, ev)
+    assert m["score"] == 0.0
+
+
+def test_b6_numeric_no_numbers_still_vacuous_pass():
+    # 无数字答案：保持 vacuous pass（不受 B-6 影响）
+    m = metric_numeric_consistency("无数字的陈述。", _ev(_src()))
+    assert m["score"] == 1.0 and m["failures"] == []
+
+
+def test_b6_evaluate_rigor_gate_catches_unsourced_numbers():
+    # 门禁级回归：无引用数字答案整体 passed 必须为 False
+    ans = "盐雾 1000 小时后无锈蚀。"
+    ev = _ev(_src(text="中性盐雾 1000 小时，样板无锈蚀。"))
+    r = evaluate_rigor(ans, ev, None)
+    assert r["passed"] is False
+    assert r["citation_veracity"]["score"] == 0.0
+    assert r["numeric_consistency"]["score"] == 0.0
+
+
+def test_b6_valid_citation_path_unchanged():
+    # 正常引用路径不受影响：数字在所引 passage 中命中 → 1.0
+    ans = "盐雾 1000 小时后无锈蚀[^1]。"
+    ev = _ev(_src(text="中性盐雾 1000 小时，样板无锈蚀。"))
+    m = metric_numeric_consistency(ans, ev)
+    assert m["score"] == 1.0 and m["failures"] == []
+    v = metric_citation_veracity(ans, ev)
+    assert v["score"] == 1.0 and v["failures"] == []

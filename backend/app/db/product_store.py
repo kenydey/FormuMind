@@ -203,10 +203,6 @@ class ProductStore:
             except Exception as exc:
                 degrade_return(logger, exc, "product structure link failed", None)
 
-    def _link_structure(self, key: str, trade: str, grade: str, generic: str) -> None:
-        """Single-product structure link (kept for callers outside the ingest path)."""
-        self._link_structures([(key, trade, grade, generic)])
-
     def products_needing_structure(self, limit: int = 500) -> list[tuple[str, str, str, str]]:
         """Registered products carrying neither a CAS nor a SMILES.
 

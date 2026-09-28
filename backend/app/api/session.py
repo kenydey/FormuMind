@@ -14,7 +14,6 @@ from ..services.session.memory_service import (
     close_session_memory,
     SessionMemoryService
 )
-from ..domain.schemas import Requirement
 
 logger = logging.getLogger(__name__)
 

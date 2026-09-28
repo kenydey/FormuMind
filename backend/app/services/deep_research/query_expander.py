@@ -65,11 +65,6 @@ def build_chinese_query(expanded: ExpandedQuery, topic: str = "") -> str:
     return " ".join(dict.fromkeys(chinese)) if chinese else ""
 
 
-def build_search_queries(expanded: ExpandedQuery, topic: str = "") -> str:
-    """Backward-compatible alias — returns rank query."""
-    return build_rank_query(expanded, topic)
-
-
 _CHEM_ENTITY_MAX_TERMS = 4
 
 

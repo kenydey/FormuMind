@@ -3,15 +3,14 @@ DOE cycle service for closed-loop automation.
 
 Implements the run_doe_cycle task that executes one iteration of the
 Bayesian optimization closed-loop:
-1. Get candidate formulations from recommendation service (Top-20)
+1. Get candidate formulations from recommendation service (Top-12)
 2. Use Baybe engine to generate next experiment points
 3. Write experiments to database with pending status
 """
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, List
-from uuid import UUID
+from typing import Dict, Any
 
 from ..domain.schemas import Requirement
 from ..db.database import default_session_factory
@@ -31,15 +30,19 @@ def run_doe_cycle(requirement: Requirement) -> Dict[str, Any]:
         Dict with experiment IDs and status
     """
     logger.info(f"Starting DOE cycle for requirement: {requirement.domain}")
-    
-    # 1. Get candidate formulations from recommendation service (Top-20)
+
+    # 1. Get candidate formulations from recommendation service (Top-12)。
+    # 注意：RecommendFormulationsRequest 的 n 约束为 le=12；n=20 会恒抛
+    # ValidationError 并被吞掉导致恒回退 baseline（P1 B-9）。
     try:
         from ..api.formulations import RecommendFormulationsRequest, recommend_formulations as recommendation_recommend_formulations
-        req_obj = RecommendFormulationsRequest(requirement=requirement, n=20)
+        req_obj = RecommendFormulationsRequest(requirement=requirement, n=12)
         rec_result = recommendation_recommend_formulations(req_obj)
         candidate_formulations = rec_result.formulations
         logger.info(f"Got {len(candidate_formulations)} candidate formulations")
     except Exception as e:
+        # Fail-open：回退单条 baseline，但必须打 error 级日志，避免静默降级
+        # （Top-12 候选从未生效的故障模式）。
         logger.error(f"Failed to get recommendations: {e}")
         # Fallback: use baseline formulation if recommendation fails
         from ..domain import knowledge
@@ -119,23 +122,24 @@ def run_doe_cycle(requirement: Requirement) -> Dict[str, Any]:
         with commit_session(factory) as session:
             experiment_ids = []
             for exp_dict in experiment_dicts:
-                # Prepare factors with DOE metadata for tracking
+                # 只持久化数值型 factors。注意：不要把嵌套 dict（如旧代码的
+                # "_doe_metadata"）塞进 ExperimentRow.factors —— 下游消费者
+                # 按 dict[str, float] 使用（similarity 里的 `cv > 0` 会直接
+                # TypeError；SimilarFormulationMatch 的 factors 字段也会校验
+                # 失败），且 db/store 的 _coerce_factor_floats 本就丢弃这类
+                # metadata blob，没有任何消费者会读回它。
                 base_factors = exp_dict["natural_factors"].copy()
                 doe_metadata = {
-                    "_doe_metadata": {
-                        "ai_suggested": exp_dict["ai_suggested"],
-                        "infeasible": exp_dict["infeasible"],
-                        "infeasible_reason": exp_dict["infeasible_reason"] or ""
-                    }
+                    "ai_suggested": exp_dict["ai_suggested"],
+                    "infeasible": exp_dict["infeasible"],
+                    "infeasible_reason": exp_dict["infeasible_reason"] or "",
                 }
-                # Merge metadata into factors (will be ignored by consumers that don't know about it)
-                factors_with_metadata = {**base_factors, **doe_metadata}
-                
+
                 experiment = ExperimentRow(
                     item_id=None,
                     domain=requirement.domain.value,
                     project_id=(requirement.project_id or ""),
-                    factors=factors_with_metadata,
+                    factors=base_factors,
                     cure_temperature_c=None,
                     measured={},
                     source="lab",
@@ -143,6 +147,11 @@ def run_doe_cycle(requirement: Requirement) -> Dict[str, Any]:
                 )
                 session.add(experiment)
                 session.flush()  # Get the ID
+                logger.debug(
+                    "Saved experiment %s doe_metadata=%s",
+                    experiment.id,
+                    doe_metadata,
+                )
                 experiment_ids.append(str(experiment.id))
             
             logger.info(f"Saved {len(experiment_ids)} experiments to database")

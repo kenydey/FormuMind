@@ -9,14 +9,16 @@ Workbench row data is stored in Datalab (SSOT) via :class:`DatalabCampaignStore`
 """
 from __future__ import annotations
 
+import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select, true
 
 from ..config import get_settings
 from ..db.campaign_store import get_campaign_store
@@ -958,7 +960,6 @@ async def download_workbench_row_attachment(
     """
     import re
 
-    from ..db.campaign_store import get_campaign_store
     from ..db.datalab_client import get_file_bytes
     from ..db.measurement_store import get_measurement_store
 
@@ -1070,7 +1071,6 @@ async def upload_workbench_row_attachment(
             status_code=409,
             detail="该实验行尚未回灌为训练数据——请先保存台账（Completed 且有实测值）",
         )
-    from ..db.datalab_client import upload_file as datalab_upload_file
     from ..db.measurement_store import get_measurement_store
 
     settings = get_settings()
@@ -1238,38 +1238,67 @@ async def search_experiments(
             except Exception as exc:
                 logger.debug("datalab search failed, falling back to local scan: %s", exc)
 
-    # Local SQLite scan
+    # Local SQLite scan — P-8: filter refs in SQL via json_each/json_extract
+    # instead of pulling every campaign's full sample_refs JSON into Python.
+    # The SQL predicate mirrors the old Python one: q (case-insensitive) is a
+    # substring of " ".join(tags) + " " + note. json_extract unescapes JSON
+    # string escaping, so CJK keywords match correctly (a LIKE on the raw JSON
+    # text would miss ensure_ascii-escaped characters).
     results: list[ExperimentSearchResult] = []
     from ..db.database import default_session_factory
     with default_session_factory()() as session:
-        campaigns = session.query(Campaign).all()
-        for camp in campaigns:
-            refs = camp.sample_refs or []
-            for ref in refs:
-                # 空 q：返回全部行（与 Datalab 搜索路径一致，A12 行为不一致修复）
-                if q:
-                    tags = " ".join(ref.get("tags") or [])
-                    note = str(ref.get("note") or "")
-                    text = f"{tags} {note}".lower()
-                    if q.lower() not in text:
-                        continue
-                # ref["id"] 可能缺失：容错跳过而非 KeyError
-                rid = ref.get("id")
-                if rid is None:
+        je = func.json_each(Campaign.sample_refs).table_valued("key", "value")
+        tags_each = func.json_each(
+            func.json_extract(je.c.value, "$.tags")
+        ).table_valued("value")
+        tags_concat = (
+            select(func.group_concat(tags_each.c.value, " "))
+            .select_from(tags_each)
+            .scalar_subquery()
+        )
+        ref_text = func.lower(
+            func.coalesce(tags_concat, "")
+            + " "
+            + func.coalesce(func.json_extract(je.c.value, "$.note"), "")
+        )
+        stmt = (
+            select(Campaign.id, Campaign.name, je.c.value)
+            .select_from(Campaign)
+            .join(je, true())
+        )
+        if q:
+            stmt = stmt.where(func.instr(ref_text, q.lower()) > 0)
+        for camp_id, camp_name, ref_json in session.execute(stmt):
+            try:
+                ref = json.loads(ref_json) if isinstance(ref_json, str) else {}
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(ref, dict):
+                continue
+            # 空 q：返回全部行（与 Datalab 搜索路径一致，A12 行为不一致修复）
+            if q:
+                tags = " ".join(ref.get("tags") or [])
+                note = str(ref.get("note") or "")
+                text = f"{tags} {note}".lower()
+                if q.lower() not in text:
                     continue
-                try:
-                    row_id = int(rid)
-                except (TypeError, ValueError):
-                    continue
-                results.append(ExperimentSearchResult(
-                    row_id=row_id,
-                    campaign_id=camp.id,
-                    campaign_name=camp.name,
-                    item_id=str(ref.get("item_id", "")),
-                    status=str(ref.get("status", "Pending")),
-                    planned_params=ref.get("planned_params", {}),
-                    measurements=ref.get("measurements", {}),
-                ))
+            # ref["id"] 可能缺失：容错跳过而非 KeyError
+            rid = ref.get("id")
+            if rid is None:
+                continue
+            try:
+                row_id = int(rid)
+            except (TypeError, ValueError):
+                continue
+            results.append(ExperimentSearchResult(
+                row_id=row_id,
+                campaign_id=camp_id,
+                campaign_name=camp_name,
+                item_id=str(ref.get("item_id", "")),
+                status=str(ref.get("status", "Pending")),
+                planned_params=ref.get("planned_params", {}),
+                measurements=ref.get("measurements", {}),
+            ))
     return results
 
 
@@ -1286,19 +1315,36 @@ def _parse_datalab_search(body: list[dict]) -> list[ExperimentSearchResult]:
         from ..db.database import default_session_factory
 
         with default_session_factory()() as session:
-            campaigns = session.query(Campaign).all()
-            for camp in campaigns:
-                name = str(getattr(camp, "name", "") or "")
-                for ref in camp.sample_refs or []:
-                    item_id = str(ref.get("item_id") or "").strip()
-                    if not item_id:
-                        continue
-                    rid = ref.get("id")
-                    try:
-                        row_id = int(rid) if rid is not None else 0
-                    except (TypeError, ValueError):
-                        row_id = 0
-                    index[item_id] = (int(camp.id), row_id, name)
+            # P-8: 只把 (item_id, id, campaign) 三列拉回 Python，而非全表
+            # Campaign ORM + 完整 sample_refs JSON。item_id 的空值过滤在 SQL
+            # 侧完成（trim 后长度 > 0），语义与旧 Python 循环一致。
+            je = func.json_each(Campaign.sample_refs).table_valued("value")
+            item_id_expr = func.json_extract(je.c.value, "$.item_id")
+            stmt = (
+                select(
+                    item_id_expr.label("item_id"),
+                    func.json_extract(je.c.value, "$.id").label("rid"),
+                    Campaign.id,
+                    Campaign.name,
+                )
+                .select_from(Campaign)
+                .join(je, true())
+                .where(
+                    func.length(
+                        func.trim(func.coalesce(item_id_expr, ""))
+                    )
+                    > 0
+                )
+            )
+            for item_id_raw, rid, camp_id, camp_name in session.execute(stmt):
+                item_id = str(item_id_raw or "").strip()
+                if not item_id:
+                    continue
+                try:
+                    row_id = int(rid) if rid is not None else 0
+                except (TypeError, ValueError):
+                    row_id = 0
+                index[item_id] = (int(camp_id), row_id, str(camp_name or ""))
     except Exception as exc:  # pragma: no cover
         logger.debug("datalab search id map failed: %s", exc)
 

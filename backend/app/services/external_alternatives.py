@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import os
 import re
-import time
 from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
 
-from ..domain.knowledge import RAW_MATERIALS
-from ..db.material_store import norm_key
+from .chem_common import _match_catalog, cache_get, cache_put
 from .errors import degrade_return
 
 _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
@@ -34,37 +32,15 @@ def external_substitutes_enabled() -> bool:
 
 
 def _cache_get(key: str) -> list[dict[str, Any]] | None:
-    entry = _CACHE.get(key)
-    if not entry:
-        return None
-    ts, payload = entry
-    if time.time() - ts > _TTL_SEC:
-        _CACHE.pop(key, None)
-        return None
-    return payload
+    return cache_get(_CACHE, key, _TTL_SEC)
 
 
 def _cache_put(key: str, payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    _CACHE[key] = (time.time(), payload)
-    return payload
+    return cache_put(_CACHE, key, payload)
 
 
 def clear_external_cache() -> None:
     _CACHE.clear()
-
-
-def _match_catalog(cas: str, smiles: str, name: str) -> tuple[bool, str | None]:
-    cas_n = (cas or "").strip()
-    smiles_n = (smiles or "").strip()
-    name_n = norm_key(name or "")
-    for cat_name, spec in RAW_MATERIALS.items():
-        if cas_n and str(spec.get("cas_no") or "").strip() == cas_n:
-            return True, cat_name
-        if smiles_n and str(spec.get("smiles") or "").strip() == smiles_n:
-            return True, cat_name
-        if name_n and norm_key(cat_name) == name_n:
-            return True, cat_name
-    return False, None
 
 
 def resolve_slot_identity(
@@ -120,24 +96,6 @@ def _http_get_json(url: str, *, timeout: float = 12.0) -> dict[str, Any] | None:
             return resp.json()
     except Exception as exc:
         return degrade_return(logger, exc, "pubchem GET failed", None)
-
-
-def _cid_from_smiles(smiles: str) -> int | None:
-    encoded = quote(smiles.strip(), safe="")
-    data = _http_get_json(f"{_PUBCHEM}/compound/smiles/{encoded}/cids/JSON")
-    if not data:
-        return None
-    cids = (data.get("IdentifierList") or {}).get("CID") or []
-    return int(cids[0]) if cids else None
-
-
-def _cid_from_name(name: str) -> int | None:
-    encoded = quote(name.strip(), safe="")
-    data = _http_get_json(f"{_PUBCHEM}/compound/name/{encoded}/cids/JSON")
-    if not data:
-        return None
-    cids = (data.get("IdentifierList") or {}).get("CID") or []
-    return int(cids[0]) if cids else None
 
 
 def _cas_map_for_cids(cids: list[int]) -> dict[int, str]:

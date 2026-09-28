@@ -93,14 +93,22 @@ def _evidence_hosts(ev: Any) -> set[str]:
     return hosts
 
 
+def _host_allowed(host: str, wanted: str) -> bool:
+    """域名边界匹配：精确相等，或为其子域名（``sub.example.com`` 匹配白名单
+    ``example.com``）。禁止子串匹配 —— 否则白名单 ``example.com`` 会误命中
+    ``evil-example.com``（B-14）。
+    """
+    return host == wanted or host.endswith("." + wanted)
+
+
 def filter_evidence_by_domain(
     evidence: list[Any],
     allowlist: list[str] | None,
 ) -> list[Any]:
     """按域名白名单过滤。``allowlist`` 为空/None → 不过滤。
 
-    匹配 ``url`` / ``url_alt`` 的 host（子串匹配，大小写不敏感）；URL 缺失时
-    回退匹配 ``source`` 名称子串（如 "openalex"）。
+    匹配 ``url`` / ``url_alt`` 的 host（精确或子域名边界匹配，大小写不敏感）；
+    URL 缺失时回退匹配 ``source`` 名称子串（如 "openalex"）。
     """
     wanted = [str(d).strip().lower() for d in (allowlist or []) if str(d).strip()]
     if not wanted:
@@ -109,8 +117,9 @@ def filter_evidence_by_domain(
     for ev in evidence:
         hosts = _evidence_hosts(ev)
         source = str(getattr(ev, "source", "") or "").lower()
-        haystack = " ".join([*hosts, source])
-        if any(w in haystack for w in wanted):
+        host_hit = any(_host_allowed(h, w) for h in hosts for w in wanted)
+        source_hit = any(w in source for w in wanted)
+        if host_hit or source_hit:
             out.append(ev)
     return out
 

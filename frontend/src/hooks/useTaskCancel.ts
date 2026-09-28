@@ -10,8 +10,6 @@ export const CANCELABLE_TASK_KINDS = [
   "kg_relations_rebuild",
 ] as const;
 
-export type CancelableTaskKind = (typeof CANCELABLE_TASK_KINDS)[number];
-
 /** 统一冷启动文案：首包 retrieve 无 message 时显示模型冷启动中 */
 export function coldStartMessage(stage: string | undefined, message: string | undefined, fallback: string): string {
   if (message) return message;

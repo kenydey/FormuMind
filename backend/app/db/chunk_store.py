@@ -110,17 +110,23 @@ class ChunkStore:
         self.bump_generation()
         return written
 
-    def get_by_source(self, source_id: str) -> list[DocumentChunk]:
+    def get_by_source(
+        self, source_id: str, *, limit: int | None = None, offset: int = 0
+    ) -> list[DocumentChunk]:
         # Returned ORM objects are detached (session closed); attribute access
         # works because expire_on_commit=False keeps values loaded. Callers
         # must not trigger lazy loads.
+        # P-6: SQL-level pagination — previously .all() loaded every chunk.
         with self._session_factory() as session:
-            return (
+            q = (
                 session.query(DocumentChunk)
                 .filter(DocumentChunk.source_id == source_id)
                 .order_by(DocumentChunk.ord)
-                .all()
+                .offset(offset)
             )
+            if limit is not None:
+                q = q.limit(limit)
+            return q.all()
 
     def all_chunks(
         self,

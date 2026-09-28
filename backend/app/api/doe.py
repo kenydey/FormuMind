@@ -10,15 +10,12 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 import logging
-import json
 import re
-import uuid
 
 from ..domain.schemas import ActiveDoeResult, DOEPlan, ExperimentRecord, Requirement
 from ..pipeline import workflow
 from ..services import io_export
 from ..services.active_learning import active_learning_doe
-from ..services.engines.baybe_engine import BaybeCampaignEngine
 from ..worker.tasks import run_doe_cycle_task
 from ._dispatch import submit
 from ._idempotency import enqueue_outbox

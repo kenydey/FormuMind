@@ -11,35 +11,20 @@ single-character tokens.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
+
+from ..cjk_fts import _TOKEN, _cjk_expand, _match_query
 
 logger = logging.getLogger(__name__)
 
 _FTS_TABLE = "wiki_pages_fts"
 _FTS_META = "wiki_fts_meta"
 _FTS_SCHEMA = "2"
-_TOKEN = re.compile(r"[a-zA-Z0-9\u4e00-\u9fff]{1,}")
-_SPECIAL = re.compile(r"[^\w\u4e00-\u9fff]+", re.UNICODE)
-_CJK = re.compile(r"[\u4e00-\u9fff]")
-
-
-def _is_cjk(ch: str) -> bool:
-    return "\u4e00" <= ch <= "\u9fff"
-
-
-def _cjk_expand(s: str) -> str:
-    """Insert spaces around CJK so unicode61 tokenizes each character."""
-    parts: list[str] = []
-    for ch in s or "":
-        if _is_cjk(ch):
-            parts.append(f" {ch} ")
-        else:
-            parts.append(ch)
-    return re.sub(r"\s+", " ", "".join(parts)).strip()
+# _TOKEN / _cjk_expand / _token_to_match / _match_query now come from
+# services/cjk_fts.py (shared with agent_memory, source_fts).
 
 
 def ensure_fts(session_factory: sessionmaker[Session]) -> None:
@@ -198,45 +183,6 @@ def rebuild_all(session_factory: sessionmaker[Session], store: Any) -> int:
         )
         n += 1
     return n
-
-
-def _token_to_match(token: str) -> str | None:
-    """Turn one user token into an FTS5 expression (CJK → per-char AND)."""
-    pieces: list[str] = []
-    buf: list[str] = []
-
-    def flush_latin() -> None:
-        if not buf:
-            return
-        safe = _SPECIAL.sub(" ", "".join(buf)).strip()
-        buf.clear()
-        if safe:
-            pieces.append(f'"{safe}"')
-
-    for ch in token:
-        if _is_cjk(ch):
-            flush_latin()
-            pieces.append(f'"{ch}"')
-        else:
-            buf.append(ch)
-    flush_latin()
-    if not pieces:
-        return None
-    return " AND ".join(pieces)
-
-
-def _match_query(q: str) -> str | None:
-    tokens = [t for t in _TOKEN.findall(q or "") if t.strip()]
-    if not tokens:
-        return None
-    parts: list[str] = []
-    for t in tokens[:12]:
-        expr = _token_to_match(t)
-        if expr:
-            parts.append(f"({expr})" if " AND " in expr else expr)
-    if not parts:
-        return None
-    return " AND ".join(parts)
 
 
 def search_fts(

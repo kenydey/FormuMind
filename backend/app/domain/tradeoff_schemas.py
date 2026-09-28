@@ -73,9 +73,3 @@ class VerificationDoe(BaseModel):
     note: str
     # Ready-to-adopt DOE plan (frontend pushes via adoptDoePlanToWorkbench).
     doe_plan: DOEPlan
-
-
-class RecommendMeta(BaseModel):
-    requested_n: int = 0
-    returned_n: int = 0
-    diversity_applied: bool = False

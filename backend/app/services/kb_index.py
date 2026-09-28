@@ -657,7 +657,6 @@ def search_chunks(
         vec_by_model: dict[str, list[float]] = {}
         if embedded:
             from .rag import bge_query_prefix, embed_model_name
-            from .lang_router import model_for_lang
 
             if langs:
                 seen: set[str] = set()

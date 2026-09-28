@@ -18,6 +18,7 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_ENV_FILE",
     "FORMUMIND_TASK_DIR",
     "FORMUMIND_TASK_PROGRESS_DIR",
+    "FORMUMIND_TABLES_DIR",
     # P1 owner Phase2 多用户开关
     "FORMUMIND_MULTI_USER",
     "FORMUMIND_API_TOKENS_JSON",
@@ -647,6 +648,8 @@ class Settings(BaseSettings):
     search_mmr_lambda: float = 0.7
     # Wave 1 — session-level search cache TTL seconds (0=disabled).
     search_cache_ttl_s: int = 600
+    # B-15 — per-round deadline for iter_search multi-source paging (seconds).
+    search_round_deadline_s: float = 240
     # Wave 1 — artifact reproducibility audit as preflight check (default off).
     preflight_artifact_audit_enabled: bool = False
     # Chat native chem tool-calling (OpenAI-compatible tools → chemtools / SureChemBL / OCSR).

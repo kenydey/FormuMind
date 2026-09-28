@@ -57,7 +57,6 @@ def resolve_document(doc_type: str, identifier: str, *, timeout: float | None = 
         raise ValueError("identifier 不能为空")
     timeout = timeout or getattr(get_settings(), "ingest_fetch_timeout", 30.0)
 
-    from . import fulltext_fetcher
     from .ingestion import IngestOutcome, ingest_text, ingest_url
 
     try:

@@ -11,16 +11,14 @@ import tempfile
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
-from fastapi.concurrency import run_in_threadpool
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..domain.schemas import Evidence, SourceGuideSchema
 from ..services import colbert_store
-from ..services.ingestion import ingest_file, ingest_files_batch, ingest_text, ingest_url
-from ..services.parsing import ParserUnavailable
+from ..services.ingestion import ingest_text, ingest_url
 from ..db.source_store import get_source_store
 from ..worker.tasks import dispatch_file_ingest
 from .tasks import accepted_response
@@ -36,14 +34,6 @@ class IngestResponse(BaseModel):
     total: int
     source_id: str | None = None
     source_guide: SourceGuideSchema | None = None
-    extraction_status: str = "skipped"
-
-
-class BatchIngestResponse(BaseModel):
-    evidence: list[Evidence]
-    total: int
-    files_processed: int
-    source_id: str | None = None
     extraction_status: str = "skipped"
 
 
@@ -74,13 +64,28 @@ class IngestTaskRequest(BaseModel):
     identifier: str = Field(min_length=3)
 
 
-def _enforce_upload_size(content: bytes, filename: str) -> None:
+async def _read_upload_capped(file: UploadFile, filename: str) -> bytes:
+    """分块读取上传文件，累计字节数；超限即停并抛 413。
+
+    B-17：此前先 ``await file.read()`` 全量读入内存再检查大小，大文件可致
+    内存耗尽（DoS）。此处按 1MiB 分块读，一旦累计字节超过
+    ``ingest_max_upload_bytes`` 立刻 413，不再继续读后续字节。
+    """
     limit = get_settings().ingest_max_upload_bytes
-    if len(content) > limit:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File {filename!r} exceeds upload limit ({limit // (1024 * 1024)} MiB)",
-        )
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File {filename!r} exceeds upload limit ({limit // (1024 * 1024)} MiB)",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _to_ingest_response(filename: str, outcome) -> IngestResponse:
@@ -116,9 +121,8 @@ async def ingest_document(file: UploadFile = File(...)):
     user a 502 for work that had actually completed.
     """
     started = time.time()
-    content = await file.read()
+    content = await _read_upload_capped(file, file.filename or "upload")
     filename = file.filename or "upload"
-    _enforce_upload_size(content, filename)
 
     upload_dir = tempfile.mkdtemp(prefix="formumind_upload_")
     path = _write_upload(content, filename, upload_dir)
@@ -150,9 +154,8 @@ async def ingest_batch(files: list[UploadFile] = File(...)):
     seen: set[str] = set()
     try:
         for f in files:
-            content = await f.read()
             name = f.filename or "upload"
-            _enforce_upload_size(content, name)
+            content = await _read_upload_capped(f, name)
             digest = hashlib.sha256(content).hexdigest()
             if digest in seen:  # byte-identical file picked twice in one dialog
                 continue

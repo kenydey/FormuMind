@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
 
 def _cmd_inferred_hot(args: argparse.Namespace) -> int:

@@ -38,12 +38,14 @@ export default function McpApprovalDialog({ open, request, onDecide, onClose }: 
   const [error, setError] = useState<string | null>(null);
 
   if (!open || !request) return null;
+  // F-7: 守卫后用 const 别名，闭包内直接 req.id（TS 不保留解构参数在闭包中的收窄，故不用非空断言）
+  const req = request;
 
   async function decide(decision: McpApprovalDecision, scope: McpApprovalScope) {
     setBusy(true);
     setError(null);
     try {
-      await onDecide(request!.id, decision, scope);
+      await onDecide(req.id, decision, scope);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

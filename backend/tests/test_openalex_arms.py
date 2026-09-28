@@ -162,7 +162,9 @@ def test_broad_arm_fires_only_when_the_others_come_back_thin(monkeypatch):
         "broad": [_ev("10.1/broad1", arm="broad")],
     })
     out = literature.openalex_arms(TERMS, 25, offset=0, domain="surface_treatment", req=_req())
-    assert [a for a, _ in seen] == ["precise", "recall", "broad"]
+    # P-4: primary arms run in parallel, so completion order is not
+    # deterministic; assert the set of fired arms instead.
+    assert sorted(a for a, _ in seen) == ["broad", "precise", "recall"]
     assert any("arm:broad" in (e.domain_tags or []) for e in out)
 
 

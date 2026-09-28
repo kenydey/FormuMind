@@ -116,3 +116,74 @@ describe("ReviewerCard", () => {
     );
   });
 });
+
+const auditModalProps = vi.fn();
+vi.mock("./ReviewerAuditModal", () => ({
+  default: (props: Record<string, unknown>) => {
+    auditModalProps(props);
+    return <div data-testid="mock-audit-modal" />;
+  },
+}));
+
+describe("ReviewerCard 回归（F-2 / F-4 / F-9 / F-11）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getReviewRun.mockResolvedValue({ ...RUN });
+    auditModalProps.mockClear();
+  });
+
+  it("F-9: 重审返回 rounds=0（无 run_id）时提示已是最新", async () => {
+    rerunReviewRun.mockResolvedValue({
+      review: { status: "pass" },
+      fix: { rounds: 0 },
+      final_answer: "a.",
+    });
+    const user = userEvent.setup();
+    render(
+      <ReviewerCard runId="key-1-123" question="q?" answer="a." citations={[]} />,
+    );
+    await waitFor(() => expect(getReviewRun).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByTestId("reviewer-card-rerun"));
+    const notice = await screen.findByTestId("reviewer-card-notice");
+    expect(notice).toHaveTextContent("已是最新，无需重审");
+    // 无新 run，不切换 activeRunId，只重载旧 run
+    expect(getReviewRun).toHaveBeenLastCalledWith("key-1-123");
+  });
+
+  it("F-11: question 为空时重审按钮禁用（防后端 400）", async () => {
+    render(<ReviewerCard runId="key-1-123" question="" answer="a." />);
+    await waitFor(() => expect(getReviewRun).toHaveBeenCalled());
+    expect(screen.getByTestId("reviewer-card-rerun")).toBeDisabled();
+    expect(rerunReviewRun).not.toHaveBeenCalled();
+  });
+
+  it("F-2: 打开审计弹窗时透传 projectId", async () => {
+    const user = userEvent.setup();
+    render(
+      <ReviewerCard runId="key-1-123" question="q?" answer="a." citations={[]} />,
+    );
+    await waitFor(() => expect(getReviewRun).toHaveBeenCalled());
+    await user.click(screen.getByTestId("reviewer-card-audit"));
+    await waitFor(() => expect(auditModalProps).toHaveBeenCalled());
+    expect(auditModalProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ projectId: "proj-1" }),
+    );
+  });
+
+  it("F-4: runId 快速切换时旧请求不覆盖新数据", async () => {
+    const slow = new Promise((res) => setTimeout(() => res({ ...RUN, run_id: "slow", warn_count: 99 }), 50));
+    getReviewRun.mockImplementationOnce(() => slow as never);
+    getReviewRun.mockResolvedValueOnce({ ...RUN, run_id: "fast", warn_count: 7 });
+    const { rerender } = render(
+      <ReviewerCard runId="slow" question="q?" answer="a." />,
+    );
+    rerender(<ReviewerCard runId="fast" question="q?" answer="a." />);
+    await waitFor(() =>
+      expect(screen.getByTestId("reviewer-card-warn")).toHaveTextContent("7"),
+    );
+    // slow 迟到返回时不得覆盖 fast 的数据
+    await slow;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId("reviewer-card-warn")).toHaveTextContent("7");
+  });
+});

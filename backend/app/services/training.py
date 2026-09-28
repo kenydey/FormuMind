@@ -125,29 +125,6 @@ def _kfold_oof(X: np.ndarray, y: np.ndarray, k: int = 5) -> np.ndarray | None:
     return preds
 
 
-def _kfold_r2(X: np.ndarray, y: np.ndarray, k: int = 5) -> float | None:
-    preds = _kfold_oof(X, y, k=k)
-    if preds is None:
-        return None
-    return _r2(y, preds)
-
-
-def _conformal_q90(X: np.ndarray, y: np.ndarray, k: int = 5) -> float | None:
-    """Split-conformal absolute residual quantile (~90% coverage half-width).
-
-    Uses k-fold OOF residuals so EI/UCB uncertainty is not pure tree-std or
-    ridge RMSE (both systematically miscalibrated on small DOE sets).
-    """
-    preds = _kfold_oof(X, y, k=k)
-    if preds is None:
-        return None
-    resid = np.abs(y - preds)
-    n = len(resid)
-    # Finite-sample corrected level for 90% marginal coverage.
-    q_level = min(1.0, (1.0 - 0.10) * (1.0 + 1.0 / n))
-    return float(np.quantile(resid, q_level))
-
-
 # z≈1.645 maps 90% two-sided normal coverage half-width ↔ σ.
 _CONFORMAL_TO_STD = 1.64485362695
 
@@ -258,9 +235,6 @@ class ModelRegistry:
         if len(rows) < self.min_samples:
             return None
         return np.array(rows, dtype=float), np.array(ys, dtype=float)
-
-    def _metrics_for(self, domain: ProductDomain) -> set[str]:
-        return {m for rec in self._records if rec.domain == domain for m in rec.measured}
 
     def _training_rows(self, domain: ProductDomain, metric: str, project_id: str) -> list[ExperimentRecord]:
         pid = project_id or domain.value

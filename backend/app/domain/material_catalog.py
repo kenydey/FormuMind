@@ -140,10 +140,6 @@ class MaterialCatalog(MutableMapping[str, dict]):
 
     # ── persistence ────────────────────────────────────────────────────────
 
-    def seed_specs(self) -> dict[str, dict]:
-        """The curated literal, untouched by any overlay (used to seed the DB)."""
-        return self._seed
-
     def persist(self, name: str) -> bool:
         """Write one material back to the store. No-op when the store is off."""
         store = self._store_or_none()

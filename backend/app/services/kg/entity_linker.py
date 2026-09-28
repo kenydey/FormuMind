@@ -30,10 +30,6 @@ def _trade_entity_id(norm_key: str) -> str:
     return f"tp:{norm_key}"
 
 
-def _element_entity_id(symbol: str) -> str:
-    return f"elem:{symbol.upper()}"
-
-
 def _catalog_entity_id(catalog_key: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9]+", "_", catalog_key.lower())[:80]
     return f"chem:catalog:{safe}"

@@ -77,6 +77,8 @@ class DeepResearchEngine:
         self._http = httpx.Client(
             timeout=30.0,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            # 离线引擎不走代理：避免沙箱 NO_PROXY 含 IPv6 括号格式时 httpx 解析崩溃
+            trust_env=False,
         )
         self._openalex_mailto: str | None = self._settings.openalex_mailto
         self._epo_consumer_key: str | None = self._settings.epo_consumer_key

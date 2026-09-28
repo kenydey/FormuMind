@@ -4,11 +4,12 @@ from __future__ import annotations
 import logging
 from .errors import degrade_return
 import re
-import time
 from typing import Any
 from urllib.parse import quote
 
 from ..domain.knowledge import RAW_MATERIALS
+
+from .chem_common import cache_get, cache_put
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +19,11 @@ _TTL_SEC = 86400
 
 
 def _cache_get(key: str) -> dict[str, Any] | None:
-    entry = _CACHE.get(key)
-    if not entry:
-        return None
-    ts, payload = entry
-    if time.time() - ts > _TTL_SEC:
-        _CACHE.pop(key, None)
-        return None
-    return payload
+    return cache_get(_CACHE, key, _TTL_SEC)
 
 
 def _cache_put(key: str, payload: dict[str, Any]) -> dict[str, Any]:
-    _CACHE[key] = (time.time(), payload)
-    return payload
+    return cache_put(_CACHE, key, payload)
 
 
 def _zh_from_query(q: str) -> str:

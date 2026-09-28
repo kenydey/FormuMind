@@ -7,5 +7,3 @@ export const reviewsApi = {
   getReviewRun: apiMethods.getReviewRun,
   rerunReviewRun: apiMethods.rerunReviewRun,
 } as const;
-
-export type ReviewsApi = typeof reviewsApi;

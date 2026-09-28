@@ -240,6 +240,13 @@ async def lifespan(_app: FastAPI):
         get_experiment_store().close()
     except Exception as exc:
         log_handled_exception(logger, exc, "lifespan shutdown: store close failed")
+    try:
+        # B-12：关闭 MCP 子进程（client 缓存 + reader 线程），异常安全不阻断 shutdown
+        from .services.mcp_client import shutdown_all_sessions
+
+        shutdown_all_sessions()
+    except Exception as exc:
+        log_handled_exception(logger, exc, "lifespan shutdown: MCP sessions close failed")
 
 
 app = FastAPI(

@@ -34,6 +34,33 @@ os.environ.setdefault(
 )
 
 
+# Snapshot os.environ before any test module is imported. Some third-party
+# libraries (magika via markitdown, litellm) call
+# ``dotenv.load_dotenv(dotenv.find_dotenv())`` at import time, which dumps the
+# repo-root .env into os.environ permanently. Test isolation requires the
+# repo-root .env to stay out of os.environ (FORMUMIND_ENV_FILE points at a
+# temp file for exactly this reason), so import-time additions are reverted
+# in pytest_collection_finish below.
+_OS_ENVIRON_BASELINE = dict(os.environ)
+
+
+def _revert_environ_pollution() -> None:
+    for key in list(os.environ):
+        if key.startswith("FORMUMIND_") and key not in _OS_ENVIRON_BASELINE:
+            del os.environ[key]
+    try:
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+    except Exception:
+        pass
+
+
+def pytest_collection_finish(session):
+    """Undo import-time os.environ pollution (see _OS_ENVIRON_BASELINE)."""
+    _revert_environ_pollution()
+
+
 def pytest_configure():
     """Keep Settings cache + Celery eager flag aligned with the test env.
 
@@ -73,4 +100,11 @@ def _reset_rate_limits_before_test():
         celery_app.conf.task_always_eager = bool(get_settings().celery_eager)
     except Exception:
         pass
+    # Drop the cached Settings so env mutations via monkeypatch.setenv in one
+    # test file cannot leak into the next (lru_cache otherwise holds a stale
+    # object after monkeypatch reverts the env vars). Also revert os.environ
+    # pollution from libraries that load_dotenv() at import time inside a test
+    # (lazy imports); import-time pollution is handled in
+    # pytest_collection_finish.
+    _revert_environ_pollution()
 

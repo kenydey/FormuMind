@@ -28,10 +28,6 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _sha256_text(text: str) -> str:
-    return _sha256_bytes((text or "").encode("utf-8"))
-
-
 def _load_report_markdown(project_id: str, kind: Kind) -> tuple[str, dict[str, Any]]:
     """Return (markdown, meta) for storm or dossier report."""
     from ..db.wiki_store import get_wiki_store

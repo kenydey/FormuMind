@@ -12,7 +12,6 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
-
 class Supplier(BaseModel):
     """Structured supplier record harvested from PubChem ``Chemical Vendors``.
 
@@ -428,15 +427,6 @@ class SourceGuideSchema(BaseModel):
             faqs=["该文献结构化提取未成功，请人工审核"],
             status="degraded",
         )
-
-
-class IngestResult(BaseModel):
-    filename: str
-    evidence: list[Evidence]
-    total: int
-    source_id: str | None = None
-    source_guide: SourceGuideSchema | None = None
-    extraction_status: Literal["ok", "skipped", "failed", "degraded"] = "skipped"
 
 
 from .tradeoff_schemas import TradeOffAnalysis  # noqa: E402
@@ -902,12 +892,6 @@ class ReviewVerdict(BaseModel):
     findings: list[AgentFinding] = Field(default_factory=list)
     recommendations: list[Recommendation] = Field(default_factory=list)  # merged + deduped
     engine: str  # "deterministic" | "deterministic+llm"
-
-
-class AgentReviewRequest(BaseModel):
-    formulation: Formulation
-    requirement: Requirement | None = None
-    explain: bool = True  # enable optional LLM explanation polish (skipped when no key)
 
 
 class DatalabSampleResponse(BaseModel):

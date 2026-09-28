@@ -205,3 +205,26 @@ describe("ArtifactVersionsPanel (W4-4)", () => {
     );
   });
 });
+
+describe("ArtifactVersionsPanel 回归（F-6）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("未知 status 兜底 staging 样式并显示未知，不渲染异常", async () => {
+    const user = userEvent.setup();
+    const weird = { ...V2, version_id: "v9999999999999999", status: "archived" };
+    vi.mocked(api.listArtifactVersions).mockResolvedValue({
+      ...LIST,
+      versions: [weird],
+      graph: [{ version_id: weird.version_id, based_on_version_id: null }],
+    } as never);
+    render(<ArtifactVersionsPanel projectId="proj-1" />);
+    await user.type(screen.getByTestId("artifact-lineage-input"), "lin00000000000001");
+    await user.click(screen.getByTestId("artifact-lineage-load"));
+    const row = await screen.findByTestId(`artifact-version-row-${weird.version_id}`);
+    // 兜底 staging 的 amber 样式
+    expect(row.innerHTML).toMatch(/text-amber-300/);
+    expect(row).toHaveTextContent("未知");
+  });
+});

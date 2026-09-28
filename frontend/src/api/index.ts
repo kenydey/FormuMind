@@ -19,34 +19,7 @@ export {
 } from "./http";
 export { apiMethods } from "./methods";
 export * from "./extras";
-export { artifactsApi } from "./domains/artifacts";
-export { chatApi } from "./domains/chat";
-export { chemistryApi } from "./domains/chemistry";
-export { doeApi } from "./domains/doe";
-export { experimentsApi } from "./domains/experiments";
-export { formulationsApi } from "./domains/formulations";
-export { ingestApi } from "./domains/ingest";
-export { kbApi } from "./domains/kb";
-export { kgApi } from "./domains/kg";
-export { loopApi } from "./domains/loop";
-export { materialsApi } from "./domains/materials";
-export { memoryApi } from "./domains/memory";
-export { metaApi } from "./domains/meta";
-export { miscApi } from "./domains/misc";
-export { modelsApi } from "./domains/models";
-export { notebooklmApi } from "./domains/notebooklm";
-export { orgApi } from "./domains/org";
-export { projectsApi } from "./domains/projects";
-export { provenanceApi } from "./domains/provenance";
-export { researchApi } from "./domains/research";
 export { reviewsApi } from "./domains/reviews";
-export { reportsApi } from "./domains/reports";
-export { searchApi } from "./domains/search";
-export { sessionApi } from "./domains/session";
-export { sessionPlansApi } from "./domains/sessionPlans";
-export { surechemblApi } from "./domains/surechembl";
-export { tasksApi } from "./domains/tasks";
-export { wikiApi } from "./domains/wiki";
 
 import { apiMethods } from "./methods";
 

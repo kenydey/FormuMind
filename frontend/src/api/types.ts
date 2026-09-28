@@ -67,38 +67,6 @@ export interface Requirement {
   active_formulation?: Formulation | null;
 }
 
-export interface ChemicalLookupResult {
-  query: string;
-  cas: string;
-  iupac_name: string;
-  zh_name: string;
-  formula: string;
-  smiles?: string;
-  molar_mass?: number;
-  found?: boolean;
-  source?: string;
-  providers_tried?: string[];
-  surechembl?: {
-    chemical_id?: string | null;
-    global_frequency?: number | null;
-    inchi_key?: string | null;
-    source_url?: string | null;
-    alternates?: Array<{
-      chemical_id?: string | null;
-      name?: string | null;
-      smiles?: string | null;
-      global_frequency?: number | null;
-    }>;
-  };
-  /** Structured supplier list harvested from PubChem ``Chemical Vendors``.
-   *  Only name / homepage / product page — PubChem exposes no commercial terms. */
-  suppliers?: Array<{
-    name: string;
-    url?: string | null;
-    product_url?: string | null;
-  }>;
-}
-
 /** Full dossier from /api/chemical/profile — superset of the lookup payload. */
 export interface ChemicalProfile {
   query: string;

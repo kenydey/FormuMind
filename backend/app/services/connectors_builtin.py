@@ -5,6 +5,7 @@ Not MCP processes; exposed via Settings + optional chat enrichment.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 from typing import Any
 
@@ -55,20 +56,6 @@ def list_connectors(*, settings: Any = None) -> list[dict[str, Any]]:
         row["enabled"] = enabled_flag and c["id"] not in disabled
         rows.append(row)
     return rows
-
-
-def set_connector_enabled(connector_id: str, enabled: bool) -> list[dict[str, Any]]:
-    from .skills_store import load_prefs, save_prefs
-
-    prefs = load_prefs()
-    disabled = set(prefs.get("disabled_connector_ids") or [])
-    if enabled:
-        disabled.discard(connector_id)
-    else:
-        disabled.add(connector_id)
-    save_prefs({"disabled_connector_ids": sorted(disabled)})
-    # save_prefs only knows certain keys — extend store
-    return list_connectors()
 
 
 def search_literature(query: str, *, limit: int = 8) -> list[Evidence]:
@@ -175,12 +162,30 @@ def gather_connector_evidence(
     if settings is not None and not bool(getattr(settings, "connectors_builtin_enabled", True)):
         return []
     enabled = {c["id"] for c in list_connectors(settings=settings) if c.get("enabled")}
+    wanted = [cid for cid in connector_ids if cid in enabled]
+    if not wanted:
+        return []
+
+    def _run(cid: str) -> list[Evidence]:
+        # P-10: connectors run in parallel (both are network-bound).
+        try:
+            if cid == "literature":
+                return search_literature(question)
+            if cid == "chemistry":
+                return lookup_chemistry(question)
+        except Exception as exc:  # noqa: BLE001 — one dead connector must not kill the other
+            logger.debug("connector %s failed: %s", cid, exc)
+        return []
+
     out: list[Evidence] = []
-    for cid in connector_ids:
-        if cid not in enabled:
-            continue
-        if cid == "literature":
-            out.extend(search_literature(question))
-        elif cid == "chemistry":
-            out.extend(lookup_chemistry(question))
+    if len(wanted) == 1:
+        return _run(wanted[0])
+    # Collect in connector_ids order for deterministic output.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(wanted)) as ex:
+        futures = [ex.submit(_run, cid) for cid in wanted]
+        for fut in futures:
+            try:
+                out.extend(fut.result() or [])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("connector future failed: %s", exc)
     return out

@@ -16,7 +16,7 @@ the SDK is missing or the API call fails.
 """
 from __future__ import annotations
 
-from .errors import degrade_return, optional_import, reraise_if_fatal
+from .errors import degrade_return, reraise_if_fatal
 import json
 import logging
 from pathlib import Path
@@ -751,79 +751,6 @@ def complete_chat_with_tools(
                 "tool_calls": _finalize_tool_calls(acc),
             }
         return {"kind": "message", "content": content.strip()}
-    except Exception as exc:
-        reraise_if_fatal(exc)
-        if _is_auth_error(exc):
-            raise LLMConfigError(str(exc)) from exc
-        raise LLMTransientError(str(exc)) from exc
-
-
-def iter_chat_with_tools_stream(
-    *,
-    messages: list[dict],
-    tools: list[dict] | None,
-    api_key: str,
-    model: str,
-    max_tokens: int,
-    base_url: str | None = None,
-    on_text_delta: Callable[[str], None] | None = None,
-    disable_thinking: bool = False,
-    tool_choice: str | dict = "auto",
-) -> dict:
-    """Stream OpenAI-compatible chat; aggregate tool_calls if present.
-
-    Text deltas are forwarded via *on_text_delta* only when the completion
-    has no tool_calls (final answer path). Same return shape as
-    :func:`complete_chat_with_tools`.
-    """
-    try:
-        from openai import OpenAI  # type: ignore
-    except ImportError as exc:
-        raise LLMConfigError("未安装 openai SDK，请执行 pip install -e '.[llm]'") from exc
-    kwargs: dict = {"api_key": api_key, "timeout": _llm_timeout_seconds()}
-    if base_url:
-        kwargs["base_url"] = base_url
-    client = OpenAI(**kwargs)
-    create_kwargs: dict = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": messages,
-        "stream": True,
-    }
-    if tools:
-        create_kwargs["tools"] = tools
-        create_kwargs["tool_choice"] = tool_choice
-    if disable_thinking and _is_deepseek_model(model):
-        create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-    parts: list[str] = []
-    acc: dict[int, dict] = {}
-    try:
-        for chunk in client.chat.completions.create(**create_kwargs):
-            choice = chunk.choices[0] if chunk.choices else None
-            if choice is None:
-                continue
-            delta = choice.delta
-            piece = getattr(delta, "content", None) or ""
-            if piece:
-                parts.append(piece)
-            tcs = getattr(delta, "tool_calls", None)
-            if tcs:
-                _merge_tool_call_deltas(acc, list(tcs))
-            elif piece and not acc and on_text_delta:
-                on_text_delta(piece)
-        content = "".join(parts)
-        if acc:
-            return {
-                "kind": "tool_calls",
-                "content": content,
-                "tool_calls": _finalize_tool_calls(acc),
-            }
-        text = content.strip()
-        if not text:
-            raise LLMTransientError("API 流式返回空响应")
-        return {"kind": "message", "content": text}
-    except LLMConfigError:
-        raise
     except Exception as exc:
         reraise_if_fatal(exc)
         if _is_auth_error(exc):
@@ -1822,27 +1749,6 @@ def _call_with_deadline(fn: Callable[[], str | None], seconds: float) -> str | N
         return None
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
-
-
-def _offline_synthesis(req: Requirement, evidence: list[Evidence], recommended: list) -> tuple[str, str]:
-    """Deterministic rule-based synthesis — works without any API key."""
-    domain_names = {
-        ProductDomain.anticorrosion_coating: "防腐蚀涂料",
-        ProductDomain.degreaser: "脱脂剂",
-        ProductDomain.surface_treatment: "表面处理剂",
-        ProductDomain.autodeposition_coating: "自沉积涂料",
-    }
-    d = domain_names.get(req.domain, req.domain.value)
-    top = recommended[0] if recommended else None
-    mech = (
-        f"{d}的核心机理：{'环氧树脂与固化剂形成交联网络，缓蚀剂（磷酸锌等）在界面形成致密保护膜，阻断腐蚀电化学反应。' if req.domain == ProductDomain.anticorrosion_coating else '表面活性剂降低油-水界面张力，使油污乳化脱落；碱性助剂（磷酸钠、碳酸钠）皂化动植物油脂。' if req.domain == ProductDomain.degreaser else '磷化/铬化/硅烷偶联形成转化膜，提升基材与后续涂层的附着力与耐蚀性。' if req.domain == ProductDomain.surface_treatment else '酸性浴中聚合物分散体在金属表面酸致凝聚沉积：HF 刻蚀基材溶出铁离子，Fe³⁺（FeF3）与氧化剂（H2O2）维持界面凝聚驱动力，涂层在 pH 2-4 浴中自沉积生长。'}"
-    )
-    chat = f"## {d} 配方研究报告\n\n**机理**：{mech}\n\n"
-    if top:
-        chat += f"**推荐配方**：{top.name}，预测耐盐雾 {top.predicted.get('salt_spray_hours', '—')} h，成本 {top.predicted.get('cost_cny_per_kg', '—')} CNY/kg。\n"
-    if evidence:
-        chat += f"\n**检索到 {len(evidence)} 条参考文献**，相关度最高：{evidence[0].title}。"
-    return mech, chat
 
 
 # ── Backward-compatible helpers used by existing pipeline ────────────────────

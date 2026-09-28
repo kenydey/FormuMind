@@ -676,15 +676,6 @@ def baseline_formulation(req: Requirement) -> Formulation:
     return TEMPLATE_BUILDERS[req.domain](req)
 
 
-def variant_formulations(req: Requirement, n: int = 3) -> list[Formulation]:
-    """Produce n distinct baseline variants by perturbing key levers.
-
-    Deprecated for direct use — call ``offline_recommend_fallback`` or
-    ``llm.recommend_formulations`` instead.
-    """
-    return offline_recommend_fallback(req, n)
-
-
 def offline_recommend_fallback(req: Requirement, n: int = 3) -> list[Formulation]:
     """Deterministic offline recommend fallback (no LLM). Not the primary product path."""
     base = baseline_formulation(req)

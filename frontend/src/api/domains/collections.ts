@@ -82,5 +82,3 @@ export const collectionsApi = {
   refresh: (projectId: string, id: string): Promise<CollectionSnapshot> =>
     post(withProject(`/api/collections/${id}/refresh`, projectId), {}),
 } as const;
-
-export type CollectionsApi = typeof collectionsApi;

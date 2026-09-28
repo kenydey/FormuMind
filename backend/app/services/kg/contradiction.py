@@ -25,7 +25,6 @@ Strength = normalized measured deviation × literature confidence.
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 
 from ...config import get_settings
 from ...db.entity_store import get_entity_store

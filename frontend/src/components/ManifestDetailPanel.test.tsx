@@ -230,3 +230,49 @@ describe("buildManifestMarkdown", () => {
     expect(md).toContain("> abstract one");
   });
 });
+
+describe("ManifestDetailPanel 回归（F-3 / F-4）", () => {
+  beforeEach(() => {
+    getMan.mockReset();
+    saveExport.mockReset();
+  });
+
+  it("F-3: frozen 缺 item_ids（旧数据/损坏）不白屏，引用列表为空", async () => {
+    getMan.mockResolvedValue({
+      project_id: "p1",
+      items: ITEMS,
+      frozen: { at: 1727000000, actor: "hub", digest: "d9" }, // 无 item_ids
+      coverage: { candidate_count: 3, frozen_count: 0 },
+    });
+    render(<ManifestDetailPanel projectId="p1" />);
+    await waitFor(() => screen.getByTestId("manifest-coverage"));
+    // 不白屏；item_ids 缺失 → 冻结范围为空
+    expect(screen.getByTestId("manifest-item-list").textContent).toMatch(/暂无条目/);
+  });
+
+  it("F-4: project 快速切换时旧 manifest 不覆盖新数据", async () => {
+    let release!: (v: unknown) => void;
+    const slow = new Promise((res) => {
+      release = res;
+    });
+    getMan.mockImplementationOnce(() => slow);
+    getMan.mockResolvedValue({
+      project_id: "p2",
+      items: [],
+      frozen: null,
+      coverage: { candidate_count: 0, frozen_count: 0 },
+    });
+    const { rerender } = render(<ManifestDetailPanel projectId="p1" />);
+    rerender(<ManifestDetailPanel projectId="p2" />);
+    await waitFor(() => screen.getByTestId("manifest-coverage"));
+    release({
+      project_id: "p1",
+      items: ITEMS,
+      frozen: null,
+      coverage: { candidate_count: 3, frozen_count: 0 },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    // 迟到的 p1 数据不得覆盖 p2
+    expect(screen.getByTestId("manifest-item-list").textContent).toMatch(/暂无条目/);
+  });
+});

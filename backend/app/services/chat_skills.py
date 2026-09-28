@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -96,22 +97,95 @@ def validate_allowed_tools(tools: list[str]) -> list[str]:
     return [t for t in tools if t in ALLOWED_CHAT_TOOLS]
 
 
-def list_chat_skills(*, include_body: bool = False) -> list[dict[str, Any]]:
+# P-3: process-wide cache for the parsed skill list. The chat prompt path
+# calls list_chat_skills on every message; re-reading + parsing every
+# SKILL.md each time is pure waste. Invalidated by filesystem mtime:
+# directory mtimes catch install/uninstall/rename, file mtimes catch
+# in-place edits and .formumind-install.json (origin) changes.
+# Callers get shallow copies, so popping "body" never corrupts the cache.
+_SKILLS_CACHE: dict[str, Any] = {"key": None, "rows": None}
+_SKILLS_CACHE_LOCK = threading.Lock()
+
+
+def _skill_roots() -> list[Path]:
+    return [
+        Path(__file__).resolve().parents[1] / "resources" / "chat_skills",
+        Path("./data").resolve() / "skills",
+    ]
+
+
+def _skills_cache_key() -> tuple | None:
+    """Fingerprint of (path, mtime_ns) for dirs + SKILL.md + install meta.
+
+    Returns None when the fingerprint itself cannot be built (fail-safe:
+    bypass the cache and re-read from disk).
+    """
+    try:
+        stamps: list[tuple[str, int]] = []
+        for root in _skill_roots():
+            try:
+                is_dir = root.is_dir()
+            except OSError:
+                continue
+            if not is_dir:
+                stamps.append((str(root), -1))
+                continue
+            try:
+                stamps.append((str(root), root.stat().st_mtime_ns))
+            except OSError:
+                stamps.append((str(root), -1))
+            for pattern in ("*/SKILL.md", "*/.formumind-install.json"):
+                try:
+                    files = sorted(root.glob(pattern))
+                except OSError:
+                    continue
+                for f in files:
+                    try:
+                        stamps.append((str(f), f.stat().st_mtime_ns))
+                    except OSError:
+                        continue
+        return tuple(stamps)
+    except Exception:  # noqa: BLE001 — fail-safe: no caching
+        return None
+
+
+def invalidate_chat_skills_cache() -> None:
+    """Explicit invalidation (e.g. after skill install/uninstall flows)."""
+    with _SKILLS_CACHE_LOCK:
+        _SKILLS_CACHE["key"] = None
+        _SKILLS_CACHE["rows"] = None
+
+
+def _load_all_chat_skills() -> list[dict[str, Any]]:
+    """Full parse (with body), sorted — the cacheable superset."""
     by_id: dict[str, dict[str, Any]] = {}
-    pairs = (
-        (Path(__file__).resolve().parents[1] / "resources" / "chat_skills", "bundled"),
-        (Path("./data").resolve() / "skills", "local"),
-    )
-    for root, origin in pairs:
+    for root, origin in (
+        (_skill_roots()[0], "bundled"),
+        (_skill_roots()[1], "local"),
+    ):
         if not root.is_dir():
             continue
         for skill in _load_skill_dir(root, origin=origin):
             by_id[skill["id"]] = skill
-    rows = list(by_id.values())
-    if not include_body:
-        for r in rows:
-            r.pop("body", None)
-    return sorted(rows, key=lambda r: r["id"])
+    return sorted(by_id.values(), key=lambda r: r["id"])
+
+
+def list_chat_skills(*, include_body: bool = False) -> list[dict[str, Any]]:
+    key = _skills_cache_key()
+    rows: list[dict[str, Any]] | None = None
+    if key is not None:
+        with _SKILLS_CACHE_LOCK:
+            if _SKILLS_CACHE["key"] == key and _SKILLS_CACHE["rows"] is not None:
+                rows = _SKILLS_CACHE["rows"]
+    if rows is None:
+        rows = _load_all_chat_skills()
+        if key is not None:
+            with _SKILLS_CACHE_LOCK:
+                _SKILLS_CACHE["key"] = key
+                _SKILLS_CACHE["rows"] = rows
+    if include_body:
+        return [dict(r) for r in rows]
+    return [{k: v for k, v in r.items() if k != "body"} for r in rows]
 
 
 def get_chat_skill(skill_id: str, *, include_body: bool = True) -> dict[str, Any] | None:

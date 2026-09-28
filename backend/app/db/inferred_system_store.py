@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from loguru import logger
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..domain.schemas import InferredSystem

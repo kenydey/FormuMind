@@ -23,7 +23,6 @@ by-products; this module turns them into *structured assets* with provenance:
 """
 from __future__ import annotations
 
-import hashlib
 import html as _html
 import json
 import logging

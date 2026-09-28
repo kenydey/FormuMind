@@ -178,3 +178,32 @@ def test_rerun_ok_reuses_fix_loop(api_client, monkeypatch):
     assert calls["review_args"] == ("q?", "a.", [])
     assert calls["fix_args"]["max_rounds"] == 2
     assert calls["fix_args"]["project_id"] == "proj-1"
+
+
+# ── B-7 回归：ReviewerModelError → 503 显式错误，不伪装"已审" ─────────────
+
+
+def test_rerun_reviewer_model_error_503(api_client, monkeypatch):
+    """配置专用 reviewer 模型后 review_answer 抛 ReviewerModelError →
+    rerun 必须返回 503 显式错误，而不是直接 500 / 假装已审。"""
+    from app.services.evidence_reviewer import ReviewerModelError
+
+    import app.services.evidence_reviewer as reviewer_mod
+
+    run = _seed_run(project_id="proj-1")
+
+    def _boom(question, answer, citations, *, settings):
+        raise ReviewerModelError("reviewer 模型 'mini' 调用失败: timeout")
+
+    monkeypatch.setattr(reviewer_mod, "review_answer", _boom)
+    monkeypatch.setattr(api_mod, "get_settings", lambda: SimpleNamespace())
+
+    r = api_client.post(
+        f"/api/reviews/runs/{run['run_id']}/rerun",
+        json={"question": "q?", "answer": "a.", "citations": []},
+    )
+    assert r.status_code == 503, r.text
+    body = r.json()
+    assert "reviewer model failed" in body["detail"]
+    # 显式错误响应，不是"已审"的 review/fix 形状
+    assert "review" not in body and "fix" not in body

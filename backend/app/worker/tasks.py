@@ -215,85 +215,6 @@ class TaskManager:
             )
         return None
 
-    def submit_optimization(self, *args, **kwargs) -> str:
-        req = args[0] if args else kwargs.get("req")
-        payload = {
-            "requirement": req.model_dump() if hasattr(req, "model_dump") else req,
-            "iterations": kwargs.get("iterations"),
-            "engine": kwargs.get("engine", "auto"),
-            "campaign_state": kwargs.get("campaign_state"),
-            "workbench_campaign_id": kwargs.get("workbench_campaign_id"),
-        }
-        async_result = run_optimize_task.delay(payload)
-        self.register_celery_task(async_result.id, "optimize")
-        return async_result.id
-
-    def submit_loop(self, *args, **kwargs) -> str:
-        req = args[0] if args else kwargs.get("req")
-        payload = {
-            "requirement": req.model_dump() if hasattr(req, "model_dump") else req,
-            "iterations": kwargs.get("iterations") or 24,
-            "n_suggest": kwargs.get("n_suggest", 4),
-            "optimize_engine": kwargs.get("optimize_engine", "auto"),
-            "doe_engine": kwargs.get("doe_engine", "auto"),
-            "workbench_campaign_id": kwargs.get("workbench_campaign_id"),
-            "campaign_state": kwargs.get("campaign_state"),
-            # prior_rmse_history 必须透传：run_loop_iterate_impl 用它做收敛检测，
-            # 丢弃会导致每轮都从空历史开始（W3 根因）。
-            "prior_rmse_history": kwargs.get("prior_rmse_history") or [],
-        }
-        async_result = run_loop_task.delay(payload)
-        self.register_celery_task(async_result.id, "loop")
-        return async_result.id
-
-    def submit_comprehensive_research(self, topic: str, req=None, source_types=None) -> str:
-        payload = {
-            "topic": topic,
-            "requirement": req.model_dump() if req else None,
-            "sources": [],
-            "query": topic,
-        }
-        async_result = run_deep_research_task.delay(payload)
-        self.register_celery_task(async_result.id, "deep_research")
-        return async_result.id
-
-    def submit_recommend(self, req, sources=None, query: str = "") -> str:
-        payload = {
-            "topic": query or (req.headline() if req else ""),
-            "requirement": req.model_dump() if hasattr(req, "model_dump") else req,
-            "sources": [s.model_dump() if hasattr(s, "model_dump") else s for s in (sources or [])],
-            "query": query or (req.headline() if req else ""),
-        }
-        async_result = run_recommend_task.delay(payload)
-        self.register_celery_task(async_result.id, "recommend")
-        return async_result.id
-
-    def submit_search(
-        self,
-        query,
-        source_types,
-        req=None,
-        total_limit=300,
-        per_source_cap=50,
-        notebooklm_notebook_id=None,
-    ) -> str:
-        payload = {
-            "query": query,
-            "source_types": source_types,
-            "requirement": req.model_dump() if req else None,
-            "total_limit": total_limit,
-            "per_source_cap": per_source_cap,
-            "notebooklm_notebook_id": notebooklm_notebook_id,
-        }
-        async_result = run_search_task.delay(payload)
-        self.register_celery_task(async_result.id, "search")
-        return async_result.id
-
-    def submit_dependency_install(self, names: list[str], upgrade: bool = False) -> str:
-        async_result = run_deps_install_task.delay({"names": names, "upgrade": upgrade})
-        self.register_celery_task(async_result.id, "deps")
-        return async_result.id
-
     def cancel(self, task_id: str) -> bool:
         """Best-effort revoke + persist CANCELLED. Returns True if task was pending/running."""
         meta_status = None
@@ -340,24 +261,6 @@ task_manager = TaskManager()
 
 def cancel_task(task_id: str) -> bool:
     return task_manager.cancel(task_id)
-
-
-def _progress_cb(task_id: str):
-    tracker = ThinkingTracker(task_id)
-
-    def cb(stage: str, message: str, partial: dict | None = None) -> None:
-        tracker.emit(
-            stage,
-            message,
-            progress=_stage_progress(stage) if stage else 0.0,
-            step_id=stage or None,
-            title=_thinking_title(stage, message),
-            kind="stage",
-            detail=message,
-            data=partial,
-        )
-
-    return cb
 
 
 def _thinking_title(stage: str, message: str) -> str:
@@ -1347,9 +1250,6 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
         raise
 
 
-
-
-
 @celery_app.task(
     bind=True,
     name="formumind.doe_cycle",
@@ -1691,27 +1591,6 @@ def warm_celery_producer(timeout: float = 60.0) -> None:
             "celery producer warmup failed (non-fatal)"
         )
 
-
-# ── smart collections scheduled refresh (W6-3 / P2-3) ─────────────────────────
-#
-# Thin wrapper over services.smart_collections.refresh_due_collections.
-# Intended for celery beat (opt-in, see celery_app.py); the sweeper itself is
-# fail-open per collection and can also be called from tests directly.
-
-
-@celery_app.task(bind=True, name="formumind.collection_refresh")
-def run_collection_refresh_task(self, payload: dict) -> dict:
-    """Refresh due smart collections for one project. payload: {project_id}."""
-    from ..services import smart_collections as sc
-
-    project_id = str((payload or {}).get("project_id") or "").strip()
-    if not project_id:
-        raise ValueError("project_id is required")
-    try:
-        results = sc.refresh_due_collections(project_id, actor="scheduler")
-    except Exception as exc:  # noqa: BLE001
-        return degrade_return(logger, exc, "collection refresh failed", {"results": []})
-    return {"project_id": project_id, "results": results}
 
 
 # ── Async literature screening (W6-2) ─────────────────────────────────────────

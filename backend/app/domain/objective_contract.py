@@ -65,14 +65,6 @@ def objective_metrics(objectives: list[ObjectiveSpec]) -> list[str]:
     return [o.metric for o in objectives if o.metric]
 
 
-def primary_objective_metric(objectives: list[ObjectiveSpec], domain: ProductDomain) -> str:
-    if objectives:
-        return objectives[0].metric
-    from ..pipeline.workflow import OBJECTIVE
-
-    return OBJECTIVE[domain]
-
-
 def empty_measurements_template(objectives: list[ObjectiveSpec]) -> dict[str, None]:
     return {o.metric: None for o in objectives}
 
@@ -138,15 +130,6 @@ def objectives_from_snapshot(snapshot: list | None, domain: ProductDomain) -> li
 
         return [normalize_objective(o) for o in default_objectives(domain)]
     return [normalize_objective(ObjectiveSpec(**item)) for item in snapshot]
-
-
-def measurements_dict_for_row(raw: dict | None, metrics: list[str]) -> dict:
-    """Build a measurements dict containing only allowed metric keys."""
-    out: dict = {}
-    for m in metrics:
-        if raw and m in raw:
-            out[m] = raw[m]
-    return out
 
 
 def align_dataframe_measurement_columns(df, metrics: list[str], *, log=None):

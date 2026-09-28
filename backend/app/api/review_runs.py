@@ -13,11 +13,15 @@ routers.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..services import reviewer_fix_loop
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/reviews", tags=["reviews"])
 
@@ -127,7 +131,10 @@ def rerun_review(run_id: str, body: RerunRequest) -> dict:
 
     run 本体不存问答原文（P1-13 只存元数据），因此 question/answer 由调用方
     （聊天会话）提供。repair 沿用配置 LLM 改写答案，失败回退原答案
-    （fail-open）；review_answer / run_fix_loop 本身永不抛错。
+    （fail-open）；run_fix_loop 本身永不抛错。
+    B-7：配置了 evidence_reviewer_model 后 review_answer 可能抛
+    ReviewerModelError（Wave 5 显错契约）→ 转为 503 显式错误响应，
+    绝不伪装成"已审"（文档"永不抛错"对该路径已不成立）。
     """
     run = reviewer_fix_loop.load_review_run(run_id)
     if not run:
@@ -138,13 +145,21 @@ def rerun_review(run_id: str, body: RerunRequest) -> dict:
         )
     settings = get_settings()
     try:
-        from ..services.evidence_reviewer import review_answer
+        from ..services.evidence_reviewer import ReviewerModelError, review_answer
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500, detail=f"reviewer unavailable: {exc}"
         ) from exc
 
-    review = review_answer(body.question, body.answer, body.citations, settings=settings)
+    try:
+        review = review_answer(
+            body.question, body.answer, body.citations, settings=settings
+        )
+    except ReviewerModelError as exc:
+        logger.error("rerun reviewer 模型失败: %s", exc)
+        raise HTTPException(
+            status_code=503, detail=f"reviewer model failed: {exc}"
+        ) from exc
 
     answer_snapshot = body.answer
 

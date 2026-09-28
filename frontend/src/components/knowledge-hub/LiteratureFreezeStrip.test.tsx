@@ -155,3 +155,41 @@ describe("LiteratureFreezeStrip", () => {
     ).toContain("首版");
   });
 });
+
+describe("LiteratureFreezeStrip 回归（F-5）", () => {
+  beforeEach(() => {
+    getVersions.mockReset();
+    getVersions.mockResolvedValue({
+      versions: [{ version: "v12345678", name: "r1", changelog: "init" }],
+      history: [],
+      current_rule_name: "r1",
+      current_rule_version: "v12345678",
+    });
+    getMan.mockReset();
+    getMan.mockResolvedValue({
+      project_id: "p1",
+      items: [],
+      frozen: null,
+      coverage: { candidate_count: 0, frozen_count: 0 },
+    });
+    rollbackVersion.mockReset();
+    rollbackVersion.mockResolvedValue({ summary: {} });
+  });
+
+  it("回滚 select 为受控组件：未选择时按钮禁用，选中后回滚用该值", async () => {
+    render(<LiteratureFreezeStrip projectId="p1" />);
+    fireEvent.click(screen.getByTestId("literature-screen-toggle"));
+    const select = await screen.findByTestId("literature-rule-version-select");
+    const btn = screen.getByTestId("literature-rule-rollback-btn");
+    expect(btn).toBeDisabled();
+    fireEvent.change(select, { target: { value: "v12345678" } });
+    expect(select).toHaveValue("v12345678");
+    expect(btn).not.toBeDisabled();
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(rollbackVersion).toHaveBeenCalledWith(
+        expect.objectContaining({ version: "v12345678" }),
+      ),
+    );
+  });
+});

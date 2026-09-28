@@ -242,11 +242,6 @@ def _ensure_source_soft_columns(engine: Engine) -> None:
                 raise
 
 
-def _ensure_source_acquisition_column(engine: Engine) -> None:
-    """Backward-compatible alias — prefer :func:`_ensure_source_soft_columns`."""
-    _ensure_source_soft_columns(engine)
-
-
 def _ensure_document_chunk_columns(engine: Engine) -> None:
     """只读守护：document_chunks 表必须具备溯源 / 实体元数据列。"""
     _require_columns(engine, "document_chunks", ("page_no", "meta"))

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { formatApiError } from "../../api";
 import {
   collectionsApi,
@@ -23,6 +23,8 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  /** F-12: 删除进行中守卫 —— 防双击连发导致第二次 404 弹错。 */
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   // create form
   const [fName, setFName] = useState("");
@@ -34,7 +36,8 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
   const [fSchedOn, setFSchedOn] = useState(true);
   const [fInterval, setFInterval] = useState("24");
 
-  const load = async () => {
+  // F-10: load 包 useCallback，去掉 eslint-disable
+  const load = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     setError(null);
@@ -46,12 +49,11 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
     if (active) void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, projectId]);
+  }, [active, load]);
 
   const openDetail = async (id: string) => {
     if (!projectId) return;
@@ -84,7 +86,15 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
           interval_hours: Math.max(1, Number(fInterval) || 24),
         },
       });
-      setList((prev) => [col, ...prev]);
+      // F-1: POST /api/collections 响应（create_collection 直接 return dict(col)）
+      // 没有 snapshot_count / last_snapshot（只在 list 的 _summarize 里加）——
+      // 前端按 CollectionSummary 的形状补默认值，否则列表行 snapshots 显示空白。
+      const summary: CollectionSummary = {
+        ...col,
+        snapshot_count: col.snapshots?.length ?? 0,
+        last_snapshot: null,
+      };
+      setList((prev) => [summary, ...prev]);
       setFName("");
       setFQuery("");
       setFDateFrom("");
@@ -115,7 +125,8 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
   };
 
   const doDelete = async (id: string) => {
-    if (!projectId) return;
+    if (!projectId || deleting) return;
+    setDeleting(id);
     try {
       await collectionsApi.remove(projectId, id);
       setList((prev) => prev.filter((c) => c.collection_id !== id));
@@ -125,6 +136,8 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
       }
     } catch (e) {
       setError(formatApiError(e));
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -253,11 +266,12 @@ export default function HubCollectionsPane({ active }: { active: boolean }) {
                   {refreshing ? "刷新中…" : "刷新"}
                 </button>
                 <button
-                  className="rounded border border-edge/60 px-2 py-0.5 text-[11px] text-rose-300 hover:bg-rose-950/40"
+                  className="rounded border border-edge/60 px-2 py-0.5 text-[11px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-40"
+                  disabled={deleting === c.collection_id}
                   onClick={() => void doDelete(c.collection_id)}
                   data-testid={`hub-collection-delete-${c.collection_id}`}
                 >
-                  删除
+                  {deleting === c.collection_id ? "删除中…" : "删除"}
                 </button>
               </div>
             </div>

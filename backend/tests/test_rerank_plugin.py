@@ -61,6 +61,14 @@ def _fake_st(monkeypatch, scores=None, load_error=None):
     return FakeCE
 
 
+@pytest.fixture(autouse=True)
+def _clear_model_cache():
+    """B-16: _MODEL_CACHE is process-wide — isolate tests from each other."""
+    rerank_plugin.invalidate_rerank_model_cache()
+    yield
+    rerank_plugin.invalidate_rerank_model_cache()
+
+
 # ── NullReranker ──────────────────────────────────────────────────────────
 
 

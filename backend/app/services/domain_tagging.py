@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from ..domain.schemas import Evidence, ProductDomain
-from ..domain.search_profiles import DomainSearchProfile, get_profile, resolve_profile
+from ..domain.search_profiles import DomainSearchProfile, resolve_profile
 
 Match = Literal["strong", "weak", "none"]
 Taxonomy = Literal["arxiv", "openalex", "chemrxiv", "cpc", "lexical", "none"]
@@ -162,7 +162,3 @@ def search_deny_penalty(
         return 0.0
     # Cap so authority/entity boosts can still salvage strong allow hits.
     return -min(0.25, 0.08 * hits)
-
-
-def profile_or_none(domain: Any) -> DomainSearchProfile | None:
-    return resolve_profile(domain)

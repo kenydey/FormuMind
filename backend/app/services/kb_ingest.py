@@ -190,8 +190,6 @@ def topic_gate(
     return False
 
 
-
-
 def _doc_meta(ev: Evidence, kind: str | None) -> dict[str, Any]:
     return {
         "identifier": ev.identifier,
@@ -545,13 +543,6 @@ def _index_one(
     else:
         doc.update(status="failed", error="入库失败（存储或索引异常）")
     emit(doc)
-
-
-def _ingest_one(ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *, project_id: str | None = None) -> None:
-    """Advance one document through the state machine (mutates *doc*)."""
-    text = _fetch_one(ev, kind, timeout, emit, doc)
-    if text:
-        _index_one(text, ev, kind, emit, doc, project_id=project_id)
 
 
 def _backfill_product_structures() -> dict:

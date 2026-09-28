@@ -232,9 +232,6 @@ def generate_outline(
     try:
         from ...services.llm import complete_structured
 
-        class _OutlineLLM(ReportOutline):
-            """Same shape; LLM fills sections."""
-
         system = (
             "你是工业配方 R&D 报告大纲编辑。输出严格 JSON，符合 schema。"
             "每章必须有 retrieval_queries（至少 1 条）与 core_intent。"

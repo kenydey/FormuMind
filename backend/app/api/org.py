@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter
@@ -14,8 +16,48 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/org", tags=["org"])
 
+# P-1: dashboard aggregates full JSON columns (measured/factors/loop_history)
+# per request. Cache the computed payload process-wide with a 120s TTL;
+# experiment/campaign/project writes should call invalidate_org_dashboard_cache().
+_ORG_DASHBOARD_TTL_S = 120.0
+_dashboard_cache: dict = {"at": 0.0, "payload": None}
+_dashboard_lock = threading.Lock()
+
+
+def invalidate_org_dashboard_cache() -> None:
+    """Drop the cached dashboard payload (call after org-level writes)."""
+    with _dashboard_lock:
+        _dashboard_cache["at"] = 0.0
+        _dashboard_cache["payload"] = None
+
+
+def _dashboard_cache_get() -> dict | None:
+    with _dashboard_lock:
+        if (
+            _dashboard_cache["payload"] is not None
+            and time.monotonic() - _dashboard_cache["at"] < _ORG_DASHBOARD_TTL_S
+        ):
+            return _dashboard_cache["payload"]
+    return None
+
+
+def _dashboard_cache_put(payload: dict) -> None:
+    with _dashboard_lock:
+        _dashboard_cache["at"] = time.monotonic()
+        _dashboard_cache["payload"] = payload
+
+
 @router.get("/dashboard")
 def org_dashboard() -> dict:
+    cached = _dashboard_cache_get()
+    if cached is not None:
+        return cached
+    payload = _compute_org_dashboard()
+    _dashboard_cache_put(payload)
+    return payload
+
+
+def _compute_org_dashboard() -> dict:
     with get_db_session() as session:
         total_experiments = session.execute(select(func.count()).select_from(ExperimentRow)).scalar() or 0
         total_campaigns = session.execute(select(func.count()).select_from(Campaign)).scalar() or 0

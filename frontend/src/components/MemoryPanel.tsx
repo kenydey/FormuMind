@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatApiError, type MemoryItem } from "../api";
 
 type ScopeFilter = "" | "global" | "project" | "user";
@@ -22,8 +22,11 @@ export default function MemoryPanel({ reloadKey }: { reloadKey?: number }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
+  /** F-4: 序号守卫 —— 筛选/翻页快速切换时旧请求不覆盖新数据。 */
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -33,14 +36,16 @@ export default function MemoryPanel({ reloadKey }: { reloadKey?: number }) {
         page,
         page_size: PAGE_SIZE,
       });
+      if (loadSeq.current !== seq) return;
       setItems(res.items);
       setTotal(res.total);
     } catch (e) {
+      if (loadSeq.current !== seq) return;
       setItems([]);
       setTotal(0);
       setError(formatApiError(e));
     } finally {
-      setLoading(false);
+      if (loadSeq.current === seq) setLoading(false);
     }
   }, [scope, q, page]);
 

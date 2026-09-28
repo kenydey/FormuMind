@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import queue
 import re
 import subprocess
 import threading
@@ -210,7 +211,20 @@ def _with_retry(
             attempt += 1
 
 
+# reader 线程 → 等待队列的"连接死亡"哨兵（stdout EOF/读异常时投递）。
+_EOF: Any = object()
+
+
 class _StdioSession:
+    # B-5 修复（2026-09-28）：_request 的 timeout 原先形同虚设——阻塞式
+    # stdout.readline() 在子进程不输出换行时永久阻塞，且全程持有 _lock，
+    # 同一 session 的其他请求一并饿死。现改为：
+    #   - 独立 daemon reader 线程阻塞读 stdout，按响应 id 路由到各请求的队列；
+    #   - _request 只在队列上按剩余时间 queue.get(timeout=...)，锁只保护
+    #     写操作 + id 分配 + pending 注册，不覆盖等待；
+    #   - 超时后从 pending 摘除该请求（迟到响应被 reader 丢弃），调用方
+    #     不再永久阻塞；stdout EOF 时 reader 唤醒所有等待者报连接死亡。
+
     def __init__(self, command: str, args: list[str], env: dict[str, str] | None = None):
         self.command = command
         self.args = args
@@ -219,6 +233,8 @@ class _StdioSession:
         self._id = 0
         self._lock = threading.Lock()
         self._started = False
+        self._pending: dict[int, queue.SimpleQueue] = {}
+        self._reader: threading.Thread | None = None
 
     def start(self, timeout_s: float = 8.0) -> None:
         import os
@@ -234,6 +250,7 @@ class _StdioSession:
             env=env,
             bufsize=1,
         )
+        self._start_reader()
         self._request(
             "initialize",
             {
@@ -247,6 +264,50 @@ class _StdioSession:
         self._notify("notifications/initialized", {})
         self._started = True
 
+    def _start_reader(self) -> None:
+        """启动 stdout reader 线程（幂等：已有存活 reader 则不重复启动）。"""
+        if self._reader is not None and self._reader.is_alive():
+            return
+        t = threading.Thread(
+            target=self._reader_loop,
+            name=f"mcp-reader-{self.command}",
+            daemon=True,
+        )
+        self._reader = t
+        t.start()
+
+    def _reader_loop(self) -> None:
+        """阻塞读 stdout 行，按 id 路由到各请求的等待队列。
+
+        EOF/异常时用 _EOF 哨兵唤醒所有等待者（按连接死亡处理），
+        迟到（已超时摘除）的响应直接丢弃。
+        """
+        proc = self._proc
+        stdout = proc.stdout if proc is not None else None
+        try:
+            while True:
+                line = stdout.readline() if stdout is not None else ""
+                if not line:
+                    break  # EOF：server 退出/管道断开
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # 非 JSON 行（如 server 日志混入 stdout）跳过
+                msg_id = msg.get("id")
+                with self._lock:
+                    target = self._pending.get(msg_id)
+                if target is not None:
+                    target.put(msg)
+                # 无匹配（无 id / 请求已超时摘除）→ 丢弃，不阻塞他人
+        except Exception:  # noqa: BLE001
+            logger.debug("MCP reader loop 异常退出", exc_info=True)
+        finally:
+            with self._lock:
+                pending = list(self._pending.values())
+                self._pending.clear()
+            for q in pending:
+                q.put(_EOF)
+
     def alive(self) -> bool:
         """连接是否可用：已成功启动、未关闭、进程未退出。"""
         if not self._started:
@@ -255,17 +316,32 @@ class _StdioSession:
         return proc is None or proc.poll() is None
 
     def close(self) -> None:
-        if self._proc and self._proc.poll() is None:
-            try:
-                self._proc.terminate()
-                self._proc.wait(timeout=2)
-            except Exception:  # noqa: BLE001
-                try:
-                    self._proc.kill()
-                except Exception:  # noqa: BLE001
-                    pass
+        proc, reader = self._proc, self._reader
         self._proc = None
+        self._reader = None
         self._started = False
+        # 先唤醒所有等待中的请求（按连接死亡处理），再回收进程/线程
+        with self._lock:
+            pending = list(self._pending.values())
+            self._pending.clear()
+        for q in pending:
+            q.put(_EOF)
+        if proc is not None:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except Exception:  # noqa: BLE001
+                        proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        if (
+            reader is not None
+            and reader.is_alive()
+            and reader is not threading.current_thread()
+        ):
+            reader.join(timeout=2)
 
     def _stderr_tail(self, limit: int = 500) -> str:
         """进程已死时尽力读取残留 stderr（脱敏后返回）。
@@ -298,48 +374,55 @@ class _StdioSession:
     def _request(self, method: str, params: dict, *, timeout_s: float = 8.0) -> Any:
         if not self._proc or not self._proc.stdin or not self._proc.stdout:
             raise _MCPError("protocol", "MCP process not started")
+        reader = self._reader
+        if reader is None or not reader.is_alive():
+            raise _MCPProcessCrash(f"MCP reader dead on {method}")
+        # 锁只保护：id 分配 + pending 注册 + stdin 写（防交错），不覆盖等待
         with self._lock:
             self._id += 1
             req_id = self._id
+            waiter: queue.SimpleQueue = queue.SimpleQueue()
+            self._pending[req_id] = waiter
             payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
             try:
                 self._proc.stdin.write(json.dumps(payload) + "\n")
                 self._proc.stdin.flush()
             except (OSError, ValueError) as exc:
+                self._pending.pop(req_id, None)
                 raise _MCPProcessCrash(
                     f"MCP write failed on {method}: {exc}"
                 ) from exc
-            deadline = time.time() + timeout_s
-            eof = False
-            while time.time() < deadline:
-                line = self._proc.stdout.readline()
-                if not line:
-                    eof = True
-                    break
+        deadline = time.time() + timeout_s
+        try:
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise TimeoutError(f"MCP timeout on {method}")
                 try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if msg.get("id") != req_id:
-                    continue
+                    msg = waiter.get(timeout=remaining)
+                except queue.Empty:
+                    raise TimeoutError(f"MCP timeout on {method}")
+                if msg is _EOF:
+                    # stdout 已 EOF：server 正在退出/已退出。注意 poll() 在此
+                    # 时可能因内核调度延迟仍返回 None（实测可达数十 ms），不能
+                    # 以它为准 —— EOF 本身就是连接死亡的权威证据。
+                    proc = self._proc
+                    code = proc.poll() if proc is not None else None
+                    raise _MCPProcessCrash(
+                        f"MCP connection lost (stdout EOF) on {method}"
+                        + (f" (exit code={code})" if code is not None else "")
+                        + self._stderr_tail()
+                    )
                 if "error" in msg:
                     raise _MCPError(
                         "protocol",
                         f"json-rpc error on {method}: {msg['error']}"[:300],
                     )
                 return msg.get("result")
-            if eof:
-                # stdout 已 EOF：server 正在退出/已退出。注意 poll() 在此
-                # 时可能因内核调度延迟仍返回 None（实测可达数十 ms），不能
-                # 以它为准 —— EOF 本身就是连接死亡的权威证据。
-                proc = self._proc
-                code = proc.poll() if proc is not None else None
-                raise _MCPProcessCrash(
-                    f"MCP connection lost (stdout EOF) on {method}"
-                    + (f" (exit code={code})" if code is not None else "")
-                    + self._stderr_tail()
-                )
-            raise TimeoutError(f"MCP timeout on {method}")
+        finally:
+            # 超时/异常/正常返回后摘除：迟到响应会被 reader 丢弃，不再阻塞调用方
+            with self._lock:
+                self._pending.pop(req_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +433,31 @@ _CLIENT_CACHE: dict[str, dict[str, Any]] = {}
 _CLIENT_LOCK = threading.Lock()
 _CONFIG_GENERATIONS: dict[str, int] = {}
 _CREATING: Any = object()  # 占位：已有线程正在创建该 server 的连接
+# B-12：shutdown 标记。shutdown_all_sessions() 置位后 _acquire_session 拒绝
+# 重建连接（防止关闭后迟到的创建者复活 session）；_reset_client_cache 清零
+# （测试隔离用）。
+_MCP_SHUTDOWN = False
+
+
+def shutdown_all_sessions() -> None:
+    """B-12：关闭全部缓存的 MCP session（lifespan shutdown 调用）。
+
+    关闭 client 缓存、terminate 子进程、join reader 线程。
+    幂等；单个 session 关闭失败不阻断其余（异常安全）。
+    """
+    global _MCP_SHUTDOWN
+    with _CLIENT_LOCK:
+        entries = [e for e in _CLIENT_CACHE.values() if e is not _CREATING]
+        _CLIENT_CACHE.clear()
+        _CONFIG_GENERATIONS.clear()
+        _MCP_SHUTDOWN = True
+    for entry in entries:
+        try:
+            sess = entry.get("session")
+            if sess is not None:
+                sess.close()
+        except Exception:  # noqa: BLE001
+            logger.exception("MCP shutdown: 关闭 session 失败（已忽略，继续其余）")
 
 
 def _server_config_digest(server: dict[str, Any]) -> str:
@@ -377,13 +485,18 @@ def _close_quietly(sess: _StdioSession | None) -> None:
 
 
 def _reset_client_cache() -> None:
-    """清空连接缓存并重置 generation（测试隔离用；生产不调用）。"""
+    """清空连接缓存并重置 generation（测试隔离用；生产不调用）。
+
+    同时清除 shutdown 标记，保证测试间隔离。
+    """
+    global _MCP_SHUTDOWN
     with _CLIENT_LOCK:
         for entry in _CLIENT_CACHE.values():
             if entry is not _CREATING:
                 _close_quietly(entry.get("session"))
         _CLIENT_CACHE.clear()
         _CONFIG_GENERATIONS.clear()
+        _MCP_SHUTDOWN = False
 
 
 def _cache_info() -> dict[str, dict[str, Any]]:
@@ -420,6 +533,9 @@ def _acquire_session(server: dict[str, Any], *, timeout_s: float = 8.0) -> _Stdi
     server_id = str(server.get("id") or "")
     if not server_id:
         raise _MCPError("protocol", "server id missing")
+    if _MCP_SHUTDOWN:
+        # B-12：shutdown 后拒绝重建，防止迟到创建者复活 session
+        raise _MCPError("protocol", "MCP client shut down")
     digest = _server_config_digest(server)
     to_close: _StdioSession | None = None
     wait = False

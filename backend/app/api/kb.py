@@ -376,12 +376,21 @@ def products(
     response_model=ChunkListResponse,
     tags=["kb"],
 )
-def chunks_by_source(source_id: str) -> ChunkListResponse:
-    """Retrieve all chunks for a source document with page/paragraph/offset info."""
+def chunks_by_source(
+    source_id: str,
+    limit: int = Query(default=200, ge=1, le=2000, description="每页返回的 chunk 数"),
+    offset: int = Query(default=0, ge=0, description="跳过前 N 个 chunk"),
+) -> ChunkListResponse:
+    """Retrieve chunks for a source document with page/paragraph/offset info.
+
+    P-6: paginated — previously the endpoint returned every chunk of the
+    source in a single response. The default limit keeps existing callers
+    working (first page); pass explicit limit/offset for the rest.
+    """
     from ..db.chunk_store import get_chunk_store
 
     store = get_chunk_store()
-    rows = store.get_by_source(source_id)
+    rows = store.get_by_source(source_id, limit=limit, offset=offset)
     return ChunkListResponse(
         chunks=[
             DocumentChunkResponse(

@@ -5,7 +5,7 @@
  * runId 来自 SSE done 事件的 reviewer_fix.run_id（searchSlice 挂到消息上）。
  * question/answer 由调用方（ResearchPanel 消息流）传入，供重审使用。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { reviewsApi, formatApiError, type ReviewRunDetail } from "../api";
 import ReviewerAuditModal from "./ReviewerAuditModal";
 
@@ -56,27 +56,50 @@ export default function ReviewerCard({
   const [rerunning, setRerunning] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [activeRunId, setActiveRunId] = useState(runId);
+  /** F-9: rounds=0（直接通过、无新 run）时的短暂提示。 */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** F-4: 序号守卫 —— runId 快速切换时旧请求的 load 不覆盖新数据。 */
+  const loadSeq = useRef(0);
+  const noticeTimer = useRef<number | null>(null);
+
+  const flashNotice = useCallback((msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    };
+  }, []);
 
   const load = useCallback(async (id: string) => {
+    const seq = ++loadSeq.current;
     setBusy(true);
     setError(null);
     try {
-      setRun(await reviewsApi.getReviewRun(id));
+      const r = await reviewsApi.getReviewRun(id);
+      if (loadSeq.current !== seq) return; // 已被更新的 load 取代
+      setRun(r);
     } catch (e) {
+      if (loadSeq.current !== seq) return;
       setError(formatApiError(e));
     } finally {
-      setBusy(false);
+      if (loadSeq.current === seq) setBusy(false);
     }
   }, []);
 
   useEffect(() => {
     setActiveRunId(runId);
+    setNotice(null);
     void load(runId);
   }, [runId, load]);
 
   async function rerun() {
     setRerunning(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await reviewsApi.rerunReviewRun(activeRunId, {
         question,
@@ -89,7 +112,9 @@ export default function ReviewerCard({
         setActiveRunId(newRunId);
         await load(newRunId);
       } else {
+        // F-9: 后端 rounds=0 不含 run_id（review 直接通过）——显式提示，避免用户点完无变化困惑。
         await load(activeRunId);
+        flashNotice("已是最新，无需重审");
       }
     } catch (e) {
       setError(formatApiError(e));
@@ -140,9 +165,14 @@ export default function ReviewerCard({
           <button
             data-testid="reviewer-card-rerun"
             onClick={() => void rerun()}
-            disabled={rerunning}
+            // F-11: question 为空时后端 rerun 返回 400 —— 直接禁用（ResearchPanel 传空串时）。
+            disabled={rerunning || !question.trim()}
             className="text-[11px] px-2 py-0.5 rounded border border-edge text-slate-300 hover:border-accent/50 hover:text-accent disabled:opacity-50"
-            title="对当前问答重新跑一遍证据审计"
+            title={
+              question.trim()
+                ? "对当前问答重新跑一遍证据审计"
+                : "缺少提问内容，无法重审"
+            }
           >
             {rerunning ? "重审中…" : "重审"}
           </button>
@@ -156,6 +186,14 @@ export default function ReviewerCard({
           </button>
         </span>
       </div>
+      {notice && (
+        <div
+          data-testid="reviewer-card-notice"
+          className="mt-1.5 text-[11px] px-2 py-1 rounded bg-sky-500/10 border border-sky-500/40 text-sky-300"
+        >
+          {notice}
+        </div>
+      )}
       <StaleBanner stale={run?.stale} reason={run?.stale_reason} />
       {error && (
         <div className="mt-1 text-[11px] text-rose-300/80">重审失败：{error}</div>
@@ -165,6 +203,8 @@ export default function ReviewerCard({
           open={auditOpen}
           onClose={() => setAuditOpen(false)}
           initialRunId={activeRunId}
+          // F-2: 透传 projectId，后端按 project 过滤审计记录（缺省返回全项目数据越界）
+          projectId={run?.project_id ?? null}
           question={question}
           answer={answer}
           citations={citations}

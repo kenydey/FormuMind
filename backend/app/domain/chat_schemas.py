@@ -86,14 +86,6 @@ class ChatRequest(BaseModel):
     chat_session_id: str | None = Field(default=None, max_length=80)
 
 
-class StructureContext(BaseModel):
-    """Normalized structure-image context attached to a chat request."""
-
-    smiles: str | None = None
-    moljson: dict | None = None
-    hits: list[dict] = Field(default_factory=list)  # [{name, role, similarity}]
-
-
 def structure_retrieval_context(structure: dict | None) -> str:
     """Collapse a /api/chemical/structure payload into query-context terms.
 

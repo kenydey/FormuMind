@@ -11,6 +11,7 @@ import logging
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -199,8 +200,11 @@ def new_review_run(
     """创建 review run。P1-29: scope 绑定——``scope`` 可含
     ``artifact_version_id`` / ``question`` / ``answer`` / ``project_id``，
     创建时计算 scope_kind + scope_digest 并记录，供 load 时 stale 检测。
+
+    B-8：run_id 并发唯一 —— 毫秒时间戳 + uuid4 随机后缀；
+    同一 session 同一毫秒并发建 run 不再互相覆盖审计记录。
     """
-    run_id = f"{session_key or 'na'}-{int(time.time() * 1000)}"
+    run_id = f"{session_key or 'na'}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:12]}"
     run = {
         "run_id": run_id,
         "session_key": session_key,
@@ -320,6 +324,31 @@ def _outcome_for_status(status: str | None) -> str:
 _AUTO_DEBOUNCE_S = 0.1
 _AUTO_LOCK = threading.Lock()
 _AUTO_STATE: dict[str, dict[str, Any]] = {}
+# B-11：_AUTO_STATE 有界增长 —— TTL（1h）+ 容量上限（1000，超限淘汰最早活跃）
+# + 懒清理（每次进入 maybe_auto_review 时顺带清理）。
+_AUTO_STATE_TTL_S = 3600.0
+_AUTO_STATE_CAP = 1000
+
+
+def _auto_state_prune_locked(now: float) -> None:
+    """懒清理 _AUTO_STATE。调用方须持有 _AUTO_LOCK。
+
+    - TTL：最后活跃超过 _AUTO_STATE_TTL_S 的 scope 剔除；
+    - 容量：仍超上限则按最后活跃时间淘汰最旧，直至不超限。
+    """
+    expired = [
+        k
+        for k, st in _AUTO_STATE.items()
+        if now - float(st.get("ts", now)) > _AUTO_STATE_TTL_S
+    ]
+    for k in expired:
+        del _AUTO_STATE[k]
+    if len(_AUTO_STATE) > _AUTO_STATE_CAP:
+        ordered = sorted(
+            _AUTO_STATE.items(), key=lambda kv: float(kv[1].get("ts", 0.0))
+        )
+        for k, _ in ordered[: len(_AUTO_STATE) - _AUTO_STATE_CAP]:
+            del _AUTO_STATE[k]
 _FIX_LOOP_DEPTH = 0
 _FIX_LOOP_GUARD = threading.Lock()
 
@@ -364,13 +393,18 @@ def maybe_auto_review(
     if not auto_audit_enabled(settings) or not (turn_id or "").strip():
         return None
     scope = session_id or project_id or "default"
+    now = time.time()
     with _AUTO_LOCK:
         if _FIX_LOOP_DEPTH > 0:
             return None  # 修正轮抑制
-        st = _AUTO_STATE.setdefault(scope, {"pending": None, "fired": set()})
+        _auto_state_prune_locked(now)  # B-11：懒清理（TTL + 容量上限）
+        st = _AUTO_STATE.setdefault(
+            scope, {"pending": None, "fired": set(), "ts": now}
+        )
         if turn_id in st["fired"]:
             return None  # per-turn 幂等
         st["pending"] = turn_id
+        st["ts"] = now  # 最后活跃
     time.sleep(_AUTO_DEBOUNCE_S)
     with _AUTO_LOCK:
         st = _AUTO_STATE.get(scope)
@@ -378,6 +412,7 @@ def maybe_auto_review(
             return None  # 防抖：被更新的 turn 取代
         st["fired"].add(turn_id)
         st["pending"] = None
+        st["ts"] = time.time()  # 最后活跃
     try:
         from .evidence_reviewer import review_answer
 
@@ -449,7 +484,8 @@ def run_fix_loop(
         with _fix_loop_active():
             key = session_key(question, answer, project_id)
             run["session_key"] = key
-            run["run_id"] = f"{key}-{int(time.time() * 1000)}"
+            # B-8：run_id 并发唯一（毫秒时间戳 + uuid4 随机后缀），防并发覆盖
+            run["run_id"] = f"{key}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:12]}"
             save_review_run(run)  # running 状态先落盘
             dispositions = load_dispositions(key)
             current = answer

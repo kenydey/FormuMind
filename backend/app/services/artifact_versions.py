@@ -21,14 +21,30 @@ recomputes the content sha256 to detect tampering.
 ``freeze_evidence()`` fail-open: it freezes the manifest / evidence /
 execution snapshots under the version directory, and a freeze failure is
 logged but never blocks finalization.
+
+Concurrency (B-1): every read → validate → write sequence is one atomic
+transaction under a per-version (or per-lineage) ``threading.RLock`` —
+``set_version_content``, ``submit_version`` and ``finalize_version`` hold the
+version lock across load, status-guard and save, so a stale in-memory object
+can no longer roll back ``pending``/``finalized`` or rewrite immutable
+content. ``create_version`` holds the lineage lock across the version write
++ ``version_ids`` append (no orphan versions). All file writes are atomic
+(same-dir temp file + flush/fsync + ``os.replace``).
+
+Performance (P-2): ``verify_version()`` caches the content digest per
+``version_id`` (process-local), stat-validated by mtime_ns + size so on-disk
+tampering is still detected; content-write transactions invalidate the entry.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
+import os
 import platform
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -40,6 +56,116 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
+
+# ── B-1: per-version / per-lineage locks ─────────────────────────────────────
+# Every read → validate → write sequence runs as one atomic transaction under
+# the lock for its version (or lineage). Lock ordering is fixed and never
+# inverted: lineage lock → version lock → _LOCK → digest-cache lock.
+# RLock (not Lock) so helpers can be nested safely inside transactions.
+_LOCKS_GUARD = threading.Lock()
+_VERSION_LOCKS: dict[str, threading.RLock] = {}
+_LINEAGE_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _version_lock(version_id: str) -> threading.RLock:
+    with _LOCKS_GUARD:
+        lock = _VERSION_LOCKS.get(version_id)
+        if lock is None:
+            lock = threading.RLock()
+            _VERSION_LOCKS[version_id] = lock
+        return lock
+
+
+def _lineage_lock(lineage_id: str) -> threading.RLock:
+    with _LOCKS_GUARD:
+        lock = _LINEAGE_LOCKS.get(lineage_id)
+        if lock is None:
+            lock = threading.RLock()
+            _LINEAGE_LOCKS[lineage_id] = lock
+        return lock
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` atomically.
+
+    Uses a same-directory temp file + flush/fsync + ``os.replace`` so readers
+    never observe a half-written file (B-1: non-atomic ``write_text`` let
+    concurrent readers parse truncated JSON).
+
+    An fcntl exclusive lock on a sibling ``.lock`` file serializes writers
+    across processes (multi-worker deployments); the in-process threading
+    locks remain the fast path.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".lock")
+    with open(lock_path, "w") as lock_fh:
+        try:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            # 非 POSIX / 无 fcntl 环境：退化为仅线程锁 + 原子写
+            pass
+        try:
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(data)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp_name, path)
+            except BaseException:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        finally:
+            try:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+
+
+# ── P-2: per-process content-digest cache ────────────────────────────────────
+# verify_version() used to re-read the whole content.bin on every call (the
+# review-runs list hit this for every run). Invariant from W4-1: a finalized
+# version's content is immutable, so its digest never drifts. Cache entries
+# are stat-validated (mtime_ns + size): an entry is only reused when the file
+# is provably untouched since it was cached, so on-disk tampering is still
+# detected (test_sha256_tamper_detected keeps passing). Any content-write
+# transaction explicitly invalidates the entry (staging/pending versions).
+_DIGEST_CACHE: dict[str, tuple[str, int, int]] = {}  # version_id -> (digest, mtime_ns, size)
+_DIGEST_CACHE_LOCK = threading.Lock()
+
+
+def _digest_cache_invalidate(version_id: str) -> None:
+    with _DIGEST_CACHE_LOCK:
+        _DIGEST_CACHE.pop(version_id, None)
+
+
+def _digest_cache_lookup(version_id: str, content_path: Path) -> str | None:
+    with _DIGEST_CACHE_LOCK:
+        entry = _DIGEST_CACHE.get(version_id)
+    if entry is None:
+        return None
+    digest, mtime_ns, size = entry
+    try:
+        st = content_path.stat()
+    except OSError:
+        return None
+    if st.st_mtime_ns == mtime_ns and st.st_size == size:
+        return digest
+    return None
+
+
+def _digest_cache_store(version_id: str, content_path: Path, digest: str) -> None:
+    try:
+        st = content_path.stat()
+    except OSError:
+        return
+    with _DIGEST_CACHE_LOCK:
+        _DIGEST_CACHE[version_id] = (digest, st.st_mtime_ns, st.st_size)
 
 STATUS_STAGING = "staging"
 STATUS_PENDING = "pending"
@@ -166,12 +292,15 @@ def _content_sha256(data: bytes) -> str:
 
 
 def _save_lineage(lineage: Lineage) -> None:
+    """Persist a lineage record (atomic write). Caller must hold the lineage lock
+    when this is part of a larger read-modify-write transaction."""
     path = _lineage_path(lineage.lineage_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = lineage.to_dict()
     payload["sha256_record"] = _record_checksum(payload)
     with _LOCK:
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_bytes(
+            path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        )
 
 
 def _load_lineage(lineage_id: str) -> Lineage | None:
@@ -190,6 +319,10 @@ def _save_version(version: Version, content: bytes | None = None) -> None:
 
     Content may only be (re)written while the version is in ``staging`` —
     finalized versions are immutable.
+
+    B-1: the caller MUST hold the version lock and pass a freshly loaded
+    ``Version`` — the status guard below is only sound on a non-stale object.
+    Writes are atomic (temp file + fsync + os.replace).
     """
     if content is not None and version.status != STATUS_STAGING:
         raise ValueError(
@@ -201,13 +334,15 @@ def _save_version(version: Version, content: bytes | None = None) -> None:
     if content is not None:
         version.sha256 = _content_sha256(content)
         version.content_bytes = len(content)
+        _digest_cache_invalidate(version.version_id)  # P-2: staging/pending write
         with _LOCK:
-            (vdir / "content.bin").write_bytes(content)
+            _atomic_write_bytes(vdir / "content.bin", content)
     payload = version.to_dict()
     payload["sha256_record"] = _record_checksum(payload)
     with _LOCK:
-        (vdir / "version.json").write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        _atomic_write_bytes(
+            vdir / "version.json",
+            json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
         )
 
 
@@ -266,35 +401,41 @@ def create_version(
     lineage (forms the derivation graph). When ``content`` is None, the
     content snapshot is copied from the based-on version (copy-on-write,
     used by W4-4 restore).
+
+    B-1: the version write + lineage ``version_ids`` append run as ONE atomic
+    transaction under the lineage lock — concurrent creates can no longer
+    lose ``version_ids`` (orphan versions).
     """
-    lineage = _load_lineage(lineage_id)
-    if lineage is None:
-        raise KeyError(f"lineage not found: {lineage_id}")
-    if based_on_version_id is not None:
-        base = _load_version(based_on_version_id)
-        if base is None:
-            raise KeyError(f"based-on version not found: {based_on_version_id}")
-        if base.lineage_id != lineage_id:
-            raise ValueError("based_on_version_id must belong to the same lineage")
+    with _lineage_lock(lineage_id):
+        lineage = _load_lineage(lineage_id)
+        if lineage is None:
+            raise KeyError(f"lineage not found: {lineage_id}")
+        if based_on_version_id is not None:
+            base = _load_version(based_on_version_id)
+            if base is None:
+                raise KeyError(f"based-on version not found: {based_on_version_id}")
+            if base.lineage_id != lineage_id:
+                raise ValueError("based_on_version_id must belong to the same lineage")
+            if content is None:
+                content = _read_content(based_on_version_id)
         if content is None:
-            content = _read_content(based_on_version_id)
-    if content is None:
-        content = b""
-    version = Version(
-        version_id=uuid.uuid4().hex[:16],
-        lineage_id=lineage_id,
-        based_on_version_id=based_on_version_id,
-        status=STATUS_STAGING,
-        actor=actor,
-    )
-    _save_version(version, content=content)
-    lineage.version_ids.append(version.version_id)
-    _save_lineage(lineage)
-    logger.info(
-        "artifact version created: %s (lineage %s, based_on=%s)",
-        version.version_id, lineage_id, based_on_version_id,
-    )
-    return version
+            content = b""
+        version = Version(
+            version_id=uuid.uuid4().hex[:16],
+            lineage_id=lineage_id,
+            based_on_version_id=based_on_version_id,
+            status=STATUS_STAGING,
+            actor=actor,
+        )
+        with _version_lock(version.version_id):
+            _save_version(version, content=content)
+            lineage.version_ids.append(version.version_id)
+            _save_lineage(lineage)
+        logger.info(
+            "artifact version created: %s (lineage %s, based_on=%s)",
+            version.version_id, lineage_id, based_on_version_id,
+        )
+        return version
 
 
 def get_version(version_id: str) -> Version | None:
@@ -310,30 +451,43 @@ def get_version_content(version_id: str) -> bytes:
 
 
 def set_version_content(version_id: str, content: bytes) -> Version:
-    """Rewrite a version's content snapshot — staging only (immutability guard)."""
-    version = _load_version(version_id)
-    if version is None:
-        raise KeyError(f"version not found: {version_id}")
-    _save_version(version, content=content)  # raises on non-staging
-    return version
+    """Rewrite a version's content snapshot — staging only (immutability guard).
+
+    B-1: load → guard → save is one atomic transaction under the version lock,
+    so a concurrent ``submit``/``finalize`` can no longer be rolled back by a
+    stale in-memory object.
+    """
+    with _version_lock(version_id):
+        version = _load_version(version_id)
+        if version is None:
+            raise KeyError(f"version not found: {version_id}")
+        _save_version(version, content=content)  # raises on non-staging (fresh object)
+        return version
 
 
 def _transition(version_id: str, to_status: str) -> Version:
-    version = _load_version(version_id)
-    if version is None:
-        raise KeyError(f"version not found: {version_id}")
-    if to_status not in _ALLOWED_TRANSITIONS.get(version.status, ()):
-        raise ValueError(
-            f"illegal transition {version.status} → {to_status} for version {version_id}"
-        )
-    version.status = to_status
-    return version
+    """Load → validate → mutate → save as one atomic transaction (B-1).
+
+    The transition legality check runs on a freshly loaded record while
+    holding the version lock, so a concurrent writer cannot slip a status
+    regression between the check and the write.
+    """
+    with _version_lock(version_id):
+        version = _load_version(version_id)
+        if version is None:
+            raise KeyError(f"version not found: {version_id}")
+        if to_status not in _ALLOWED_TRANSITIONS.get(version.status, ()):
+            raise ValueError(
+                f"illegal transition {version.status} → {to_status} for version {version_id}"
+            )
+        version.status = to_status
+        _save_version(version)
+        return version
 
 
 def submit_version(version_id: str) -> Version:
     """staging → pending (submit a version for review)."""
     version = _transition(version_id, STATUS_PENDING)
-    _save_version(version)
     logger.info("artifact version submitted: %s", version_id)
     return version
 
@@ -343,18 +497,31 @@ def finalize_version(version_id: str) -> Version:
 
     Invokes the W4-2 evidence-freeze hook fail-open: freeze failures are
     logged and never block finalization.
+
+    B-1: the whole transition + freeze + re-save runs under the version lock,
+    so a concurrent ``submit``/``set_version_content`` can neither roll the
+    status back nor rewrite content after finalization.
     """
-    version = _transition(version_id, STATUS_FINALIZED)
-    version.finalized_at = _utcnow()
-    _save_version(version)
-    try:
-        freeze_evidence(version.version_id, version.to_dict())
-        version.evidence_frozen = True
+    with _version_lock(version_id):
+        version = _load_version(version_id)
+        if version is None:
+            raise KeyError(f"version not found: {version_id}")
+        if STATUS_FINALIZED not in _ALLOWED_TRANSITIONS.get(version.status, ()):
+            raise ValueError(
+                f"illegal transition {version.status} → {STATUS_FINALIZED} "
+                f"for version {version_id}"
+            )
+        version.status = STATUS_FINALIZED
+        version.finalized_at = _utcnow()
         _save_version(version)
-    except Exception:  # fail-open: a freeze failure must never block finalize
-        logger.exception("freeze_evidence failed for %s (fail-open)", version_id)
-    logger.info("artifact version finalized: %s", version_id)
-    return version
+        try:
+            freeze_evidence(version.version_id, version.to_dict())
+            version.evidence_frozen = True
+            _save_version(version)
+        except Exception:  # fail-open: a freeze failure must never block finalize
+            logger.exception("freeze_evidence failed for %s (fail-open)", version_id)
+        logger.info("artifact version finalized: %s", version_id)
+        return version
 
 
 def freeze_evidence(version_id: str, version_dict: dict[str, Any]) -> dict[str, Any]:
@@ -436,8 +603,9 @@ def freeze_evidence(version_id: str, version_dict: dict[str, Any]) -> dict[str, 
     vdir = _version_dir(version_id)
     vdir.mkdir(parents=True, exist_ok=True)
     with _LOCK:
-        (vdir / "evidence.json").write_text(
-            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+        _atomic_write_bytes(
+            vdir / "evidence.json",
+            json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"),
         )
     logger.info(
         "evidence frozen for version %s: %d sources, %d claims, manifest %s",
@@ -606,11 +774,20 @@ def verify_version(version_id: str) -> dict[str, Any]:
     """Recompute the content sha256 and compare with the stored snapshot hash.
 
     Detects tampering of ``content.bin`` after the fact.
+
+    P-2: the content digest is cached per ``version_id`` (process-local). A
+    cache entry is only reused when the file's mtime_ns + size are unchanged
+    since it was cached, so on-disk tampering still invalidates it and is
+    detected. Content-write transactions invalidate the entry explicitly.
     """
     version = _load_version(version_id)
     if version is None:
         raise KeyError(f"version not found: {version_id}")
-    actual = _content_sha256(_read_content(version_id))
+    content_path = _version_dir(version_id) / "content.bin"
+    actual = _digest_cache_lookup(version_id, content_path)
+    if actual is None:
+        actual = _content_sha256(_read_content(version_id))
+        _digest_cache_store(version_id, content_path, actual)
     ok = actual == version.sha256
     return {
         "version_id": version_id,

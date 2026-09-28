@@ -19,6 +19,8 @@ from urllib.parse import quote, urlencode
 
 from loguru import logger
 
+from .chem_common import cache_get, cache_put
+
 _DEFAULT_BASE = "https://www.surechembl.org/api"
 _TIMEOUT_S = 2.0
 _CONTENT_TIMEOUT_S = 12.0
@@ -52,19 +54,11 @@ def surechembl_base_url() -> str:
 
 
 def _cache_get(key: str) -> Any | None:
-    entry = _CACHE.get(key)
-    if not entry:
-        return None
-    ts, payload = entry
-    if time.time() - ts > _TTL_SEC:
-        _CACHE.pop(key, None)
-        return None
-    return payload
+    return cache_get(_CACHE, key, _TTL_SEC)
 
 
 def _cache_put(key: str, payload: Any) -> Any:
-    _CACHE[key] = (time.time(), payload)
-    return payload
+    return cache_put(_CACHE, key, payload)
 
 
 def clear_surechembl_cache() -> None:

@@ -42,12 +42,3 @@ def build_multimodal_table_prompt(context_text: str = "") -> str:
         return MULTIMODAL_TABLE_EXTRACTION_PROMPT
     trimmed = ctx[:4000]
     return f"{MULTIMODAL_TABLE_EXTRACTION_PROMPT}\n\n上下文文本（辅助理解表格）：\n{trimmed}"
-
-
-def evidence_has_unresolved_trade(evidence_list) -> bool:
-    for ev in evidence_list:
-        for ref in getattr(ev, "entity_refs", None) or []:
-            status = ref.composition_status if hasattr(ref, "composition_status") else ref.get("composition_status")
-            if status in ("unknown", "proprietary", "mixture"):
-                return True
-    return False

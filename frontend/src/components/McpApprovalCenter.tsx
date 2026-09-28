@@ -16,9 +16,9 @@ function toRequest(item: McpApprovalPendingItem): McpApprovalRequest {
     tool_name: item.tool_name,
     session_id: item.session_id ?? null,
     project_id: item.project_id ?? null,
-    // pending 接口不返回 arguments（后端未持久化）；requested_at 由 age 反推
+    // F-8: pending 接口不返回 arguments（后端未持久化）；requested_at 删去
+    // （之前由 age 反推计算但从未被展示）。
     arguments: null,
-    requested_at: Date.now() / 1000 - item.age_s,
   };
 }
 

@@ -21,11 +21,6 @@ DRAFT_PATH_PREFIX = "queries/"
 _MAX_BODY = 80_000
 
 
-def is_query_draft_path(path: str | None) -> bool:
-    p = (path or "").replace("\\", "/").lstrip("/")
-    return p.startswith(DRAFT_PATH_PREFIX) or p.startswith("themes/draft-")
-
-
 def _title_from(*, title: str | None, question: str) -> str:
     t = (title or "").strip()
     if t:

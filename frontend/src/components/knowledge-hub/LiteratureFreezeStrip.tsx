@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, awaitTaskStream, formatApiError } from "../../api";
 
 type Props = {
@@ -33,6 +33,10 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
   const [history, setHistory] = useState<RuleHistory[]>([]);
   const [currentRuleName, setCurrentRuleName] = useState<string | null>(null);
   const [evalRes, setEvalRes] = useState<EvalResult | null>(null);
+  /** F-5: 回滚 select 受控化（替代 document.getElementById 命令式读取）。 */
+  const [rollbackVersion, setRollbackVersion] = useState("");
+  /** F-4: 序号守卫 —— project 快速切换时旧请求不覆盖新数据。 */
+  const loadSeq = useRef(0);
 
   const kwCriteria = () => ({
     include_keywords: includeKw
@@ -46,29 +50,35 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
   });
 
   const reload = useCallback(async () => {
+    const seq = ++loadSeq.current;
     if (!projectId) {
       setMan(null);
       return;
     }
     try {
       const m = await api.getLiteratureManifest(projectId);
+      if (loadSeq.current !== seq) return;
       setMan(m);
       setError(null);
     } catch (e) {
+      if (loadSeq.current !== seq) return;
       setError(formatApiError(e));
     }
     // W6-2: 预设与规则版本（fail-open，不阻塞主面板）
     try {
       const p = await api.getScreeningPresets();
+      if (loadSeq.current !== seq) return;
       setPresets(p.presets.map((x) => ({ name: x.name, title: x.title })));
     } catch {
       /* ignore */
     }
     try {
       const rv = await api.getScreeningRuleVersions(projectId);
+      if (loadSeq.current !== seq) return;
       setVersions(rv.versions);
       setHistory(rv.history.slice(-8).reverse());
       setCurrentRuleName(rv.current_rule_name ?? null);
+      setRollbackVersion(""); // 刷新后复位回滚选择
     } catch {
       /* ignore */
     }
@@ -310,7 +320,8 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
                 className="flex-1 bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
                 id="literature-rule-version-select"
                 data-testid="literature-rule-version-select"
-                defaultValue=""
+                value={rollbackVersion}
+                onChange={(e) => setRollbackVersion(e.target.value)}
               >
                 <option value="" disabled>
                   选择历史版本回滚…
@@ -324,19 +335,15 @@ export default function LiteratureFreezeStrip({ projectId }: Props) {
               </select>
               <button
                 type="button"
-                disabled={!!busy}
+                disabled={!!busy || !rollbackVersion}
                 className="px-1.5 py-0.5 rounded border border-edge text-slate-300 disabled:opacity-40"
                 data-testid="literature-rule-rollback-btn"
                 onClick={() => {
-                  const sel = document.getElementById(
-                    "literature-rule-version-select",
-                  ) as HTMLSelectElement | null;
-                  const version = sel?.value;
-                  if (!version) return;
+                  if (!rollbackVersion) return;
                   void run("rollback", () =>
                     api.rollbackScreeningRuleVersion({
                       project_id: projectId,
-                      version,
+                      version: rollbackVersion,
                       actor: "hub",
                     }),
                   );

@@ -92,61 +92,6 @@ def build_searchspace(req: Requirement, factors: list[DOEFactor]):
 GENOME_SPACE_VERSION = "genome-v1"
 
 
-def build_genome_searchspace(req: Requirement, genome, candidate_pools: dict[str, list[str]]):
-    """Mixed search space where ingredient *choice* is a variable.
-
-    Each swappable slot contributes two parameters: which material occupies it,
-    and how much. ``candidate_pools`` maps slot key → allowed material names.
-
-    Material choice is categorical by default. It is upgraded to a
-    ``SubstanceParameter`` only when every candidate in that pool has a SMILES,
-    because that parameter type encodes molecules as chemical descriptors —
-    which is what lets the surrogate generalize *across* materials instead of
-    treating them as unrelated labels, and is therefore what makes a predicted
-    swap meaningful. Only a third of the seed catalog carries SMILES today, so
-    categorical has to remain the fallback.
-
-    P2: high-frequency chemical exclusions (reactive metal × acid, carbonate ×
-    acid, strong alkali × acid) are injected as ``DiscreteExcludeConstraint``
-    across categorical ``mat_*`` slots so sampling budget is not spent on
-    combinations the post-hoc gate would mark infeasible. Continuous-only
-    numeric spaces still cannot express these and keep the post-hoc gate.
-    """
-    from baybe.constraints import ContinuousLinearConstraint
-    from baybe.parameters import NumericalContinuousParameter
-    from baybe.searchspace import SearchSpace
-
-    from ....domain import knowledge
-
-    parameters: list = []
-    wt_names: list[str] = []
-    mat_params: list[tuple[str, list[str]]] = []
-    for slot_key, pool in candidate_pools.items():
-        if len(pool) > 1:
-            parameters.append(_material_parameter(slot_key, pool, knowledge))
-            mat_params.append((f"mat_{slot_key}", list(pool)))
-        low, high = _slot_bounds(genome, slot_key)
-        wt_name = f"wt_{slot_key}"
-        parameters.append(NumericalContinuousParameter(name=wt_name, bounds=(low, high)))
-        wt_names.append(wt_name)
-
-    if not parameters:
-        raise ValueError("genome search space has no parameters")
-
-    constraints: list = []
-    if len(wt_names) >= 2:
-        constraints.append(
-            ContinuousLinearConstraint(
-                parameters=wt_names,
-                operator="<=",
-                coefficients=tuple(1.0 for _ in wt_names),
-                rhs=100.0,
-            )
-        )
-    constraints.extend(discrete_exclude_constraints_for_pools(mat_params))
-    return SearchSpace.from_product(parameters=parameters, constraints=constraints or None)
-
-
 # High-frequency incompatible material-class pairs for DiscreteExclude.
 # Drawn from acid_stability.toml hard rules (reactive metal / carbonate /
 # strong alkali must not co-exist with acidic species in the same bath).

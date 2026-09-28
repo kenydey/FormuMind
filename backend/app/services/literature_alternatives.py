@@ -12,21 +12,9 @@ from loguru import logger
 from ..db.material_store import norm_key
 from ..domain.knowledge import RAW_MATERIALS
 
+from .chem_common import _match_catalog
+
 _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
-
-
-def _match_catalog(cas: str, smiles: str, name: str) -> tuple[bool, str | None]:
-    cas_n = (cas or "").strip()
-    smiles_n = (smiles or "").strip()
-    name_n = norm_key(name or "")
-    for cat_name, spec in RAW_MATERIALS.items():
-        if cas_n and str(spec.get("cas_no") or "").strip() == cas_n:
-            return True, cat_name
-        if smiles_n and str(spec.get("smiles") or "").strip() == smiles_n:
-            return True, cat_name
-        if name_n and norm_key(cat_name) == name_n:
-            return True, cat_name
-    return False, None
 
 
 def _catalog_entity_id(name: str) -> str:

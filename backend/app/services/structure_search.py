@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 
 from ..config import get_settings
-from ..services.chemtools import mol_similarity
 
 logger = logging.getLogger(__name__)
 

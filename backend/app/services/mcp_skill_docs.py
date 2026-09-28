@@ -5,6 +5,8 @@ import json
 import logging
 import re
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +186,66 @@ def _render_skill_doc(
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+# P-9: probe-result cache. W5-5 caches the MCP *session* (subprocess) per
+# server, but every chat request still sent a fresh `tools/list` roundtrip
+# via probe_server. Cache the probe *result* keyed by (server_id, generation):
+# a generation bump (reconnect / config change) invalidates automatically.
+# Failures are never cached — the next request retries. TTL is a safety net
+# for servers whose tool list changes without a config change.
+_PROBE_CACHE: dict[str, tuple[int, float, dict[str, Any]]] = {}
+_PROBE_CACHE_TTL_S = 300.0
+_PROBE_CACHE_LOCK = threading.Lock()
+
+
+def _probe_generation(server_id: str) -> int:
+    try:
+        from .mcp_client import _CONFIG_GENERATIONS
+
+        return int(_CONFIG_GENERATIONS.get(server_id, 0) or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def invalidate_mcp_probe_cache(server_id: str | None = None) -> None:
+    """Drop cached probe results (all, or one server)."""
+    with _PROBE_CACHE_LOCK:
+        if server_id is None:
+            _PROBE_CACHE.clear()
+        else:
+            _PROBE_CACHE.pop(str(server_id), None)
+
+
+def _cached_probe(server: dict[str, Any]) -> dict[str, Any]:
+    """probe_server with (server_id, generation, probe callable) result caching."""
+    from .mcp_client import probe_server
+
+    sid = str(server.get("id") or "")
+    gen = _probe_generation(sid)
+    # P-9: 把 probe callable identity 纳入缓存命中判断。生产环境
+    # probe_server 是稳定的模块函数，identity 不变 → 正常命中；测试中每次
+    # monkeypatch 装入不同函数 → 自动失效，避免跨测试复用旧描述符。
+    probe_id = id(probe_server)
+    now = time.monotonic()
+    with _PROBE_CACHE_LOCK:
+        entry = _PROBE_CACHE.get(sid)
+        if (
+            entry is not None
+            and entry[0] == gen
+            and entry[1] == probe_id
+            and now - entry[2] < _PROBE_CACHE_TTL_S
+        ):
+            return entry[3]
+    probed = probe_server(server)
+    with _PROBE_CACHE_LOCK:
+        if probed.get("ok"):
+            # Re-read generation: the probe itself may have bumped it
+            # (reconnect path in _acquire_session).
+            _PROBE_CACHE[sid] = (_probe_generation(sid), probe_id, time.monotonic(), probed)
+        else:
+            _PROBE_CACHE.pop(sid, None)
+    return probed
+
+
 def ensure_mcp_skill_docs(
     *,
     server_ids: list[str] | None = None,
@@ -195,7 +257,7 @@ def ensure_mcp_skill_docs(
     Returns list of {server_id, skill_id, tools, path, ok}.
     probe 失败时删除旧 skill 目录（防过期工具广告），不写新文档。
     """
-    from .mcp_client import list_mcp_servers, probe_server
+    from .mcp_client import list_mcp_servers
 
     if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
         return []
@@ -265,7 +327,9 @@ def ensure_mcp_skill_docs(
         err = None
         if probe:
             try:
-                probed = probe_server(server)
+                # P-9: cached probe — one tools/list roundtrip per
+                # (server, generation), not one per chat request.
+                probed = _cached_probe(server)
                 descriptors, tools = _normalize_descriptors(probed)
                 if not probed.get("ok"):
                     err = probed.get("error")

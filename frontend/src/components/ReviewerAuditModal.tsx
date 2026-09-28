@@ -5,7 +5,7 @@
  * 从 ReviewerCard 的"审计详情"打开（带 initialRunId + 问答上下文可重审）；
  * 无 initialRunId 时为纯列表浏览，此时重审按钮禁用（缺问答输入）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Modal from "./Modal";
 import {
   reviewsApi,
@@ -61,8 +61,12 @@ export default function ReviewerAuditModal({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
+  /** F-4: 列表/详情各自的序号守卫 —— 快速切换时旧请求不覆盖新数据。 */
+  const listSeq = useRef(0);
+  const detailSeq = useRef(0);
 
   const loadList = useCallback(async () => {
+    const seq = ++listSeq.current;
     setBusy(true);
     setError(null);
     try {
@@ -70,24 +74,30 @@ export default function ReviewerAuditModal({
         projectId: projectId ?? undefined,
         limit: 30,
       });
+      if (listSeq.current !== seq) return;
       setRuns(res.items ?? []);
     } catch (e) {
+      if (listSeq.current !== seq) return;
       setError(formatApiError(e));
     } finally {
-      setBusy(false);
+      if (listSeq.current === seq) setBusy(false);
     }
   }, [projectId]);
 
   const loadDetail = useCallback(async (id: string) => {
+    const seq = ++detailSeq.current;
     setBusy(true);
     setError(null);
     try {
-      setDetail(await reviewsApi.getReviewRun(id));
+      const d = await reviewsApi.getReviewRun(id);
+      if (detailSeq.current !== seq) return;
+      setDetail(d);
       setSelectedId(id);
     } catch (e) {
+      if (detailSeq.current !== seq) return;
       setError(formatApiError(e));
     } finally {
-      setBusy(false);
+      if (detailSeq.current === seq) setBusy(false);
     }
   }, []);
 

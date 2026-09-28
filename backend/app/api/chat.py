@@ -32,6 +32,41 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ── B-7 reviewer 显错契约 ──────────────────────────────────────────────
+# evidence_reviewer.review_answer 在配置了 evidence_reviewer_model 后失败会
+# 抛 ReviewerModelError（"不静默回退，避免'以为审了'"）。调用方必须单独
+# 捕获并返回显式的 reviewer error 状态，绝不 debug-only 吞掉。
+
+
+def _run_evidence_review(question, answer, evidence, settings):
+    """调用 evidence_reviewer.review_answer，B-7 显错封装。
+
+    - ReviewerModelError → ``{"status": "error", "reviewer_error": ...}``
+      （配置专用 reviewer 模型后失败必须显错，客户端绝不能误以为"已审"）；
+    - 其他异常 → None（fail-open，沿用旧行为）。
+    """
+    from ..services.evidence_reviewer import ReviewerModelError, review_answer
+
+    try:
+        return review_answer(question, answer, evidence, settings=settings)
+    except ReviewerModelError as exc:
+        logger.error("reviewer 模型失败: %s", exc)
+        return {
+            "status": "error",
+            "reviewer_error": str(exc)[:500],
+            "notes": [],
+            "findings": [],
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("reviewer skipped: %s", exc)
+        return None
+
+
+def _reviewer_failed(review) -> bool:
+    """reviewer 是否处于显错状态（B-7）；是则跳过 fix-loop 与 auto-review。"""
+    return isinstance(review, dict) and bool(review.get("reviewer_error"))
+
+
 def _clamp_relevance(value: float) -> float:
     try:
         n = float(value)
@@ -117,7 +152,6 @@ def _augment_with_kb(
     include_entity_resolution: bool = False,
 ) -> tuple[list[Evidence], int, EntityResolutionSummary | None, KGRetrieveStats | None]:
     from ..config import get_settings
-    from ..services import kb_index
 
     settings = get_settings()
     resolution: EntityResolutionSummary | None = None
@@ -360,15 +394,14 @@ def chat(req: ChatRequestValidated):
             answer, emeta = postprocess_evidence_answer(answer, settings=settings)
             doi_results = emeta.get("doi_results")
             citation_expand = emeta.get("citation_expand") or None
-            try:
-                from ..services.evidence_reviewer import review_answer
-
-                evidence_reviewer = review_answer(
-                    question, answer, _claims_evidence(citations), settings=settings
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("reviewer skipped: %s", exc)
-            if evidence_reviewer and (evidence_reviewer.get("status") or "pass") != "pass":
+            evidence_reviewer = _run_evidence_review(
+                question, answer, _claims_evidence(citations), settings
+            )
+            if (
+                evidence_reviewer
+                and not _reviewer_failed(evidence_reviewer)
+                and (evidence_reviewer.get("status") or "pass") != "pass"
+            ):
                 try:
                     from ..services.reviewer_fix_loop import run_fix_loop
 
@@ -645,15 +678,14 @@ def _finalize_evidence_fields(
         answer, emeta = postprocess_evidence_answer(answer, settings=settings)
         doi_results = emeta.get("doi_results")
         citation_expand = emeta.get("citation_expand") or None
-        try:
-            from ..services.evidence_reviewer import review_answer
-
-            reviewer = review_answer(
-                question, answer, _claims_evidence(citations), settings=settings
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("stream reviewer skipped: %s", exc)
-        if reviewer and (reviewer.get("status") or "pass") != "pass":
+        reviewer = _run_evidence_review(
+            question, answer, _claims_evidence(citations), settings
+        )
+        if (
+            reviewer
+            and not _reviewer_failed(reviewer)
+            and (reviewer.get("status") or "pass") != "pass"
+        ):
             try:
                 from ..services.reviewer_fix_loop import run_fix_loop
 
@@ -695,12 +727,10 @@ async def chat_stream(req: "ChatRequestValidated"):
     import threading
     from ..config import get_settings
     from ..services.llm import (
-        _chat_prompt,
         _openai_compatible_stream,
         effective_setting as _es,
         _resolve_openai_base_url,
     )
-    from ..domain.chat_schemas import ChatResponse
 
     settings = get_settings()
     provider = _es(settings, "llm_provider")

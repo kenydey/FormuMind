@@ -90,11 +90,6 @@ export default function SourceTypePicker({
   );
 }
 
-export function isLocalEvidence(source: string): boolean {
-  const s = source.toLowerCase();
-  return s === "local" || s.includes("upload") || s.includes("ingest");
-}
-
 /** Source types sent to /api/search/stream (local is ingest-only). */
 export function searchSourceTypes(selected: SearchSourceType[]): SearchSourceType[] {
   return selected.filter((t) => t !== "local");

@@ -255,20 +255,3 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
             )
         snapshot.append({"name": name, "low": lo, "high": hi, "unit": unit})
     return snapshot
-
-
-def formulation_from_materials(req: Requirement) -> Formulation | None:
-    if not req.materials:
-        return None
-    ings = [
-        Ingredient(
-            name=m.name,
-            role=m.role,
-            weight_pct=m.weight_pct,
-            smiles=m.smiles,
-            formula=m.formula,
-        )
-        for m in req.materials
-    ]
-    name = req.product_type or req.domain.value
-    return Formulation(name=name, domain=req.domain, ingredients=ings, rationale="project materials")

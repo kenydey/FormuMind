@@ -13,7 +13,6 @@ from ...domain.kg_schemas import (
     RetrievalPlan,
 )
 from ...domain.schemas import Evidence, EvidenceEntityRef
-from .. import kb_index
 from ..errors import degrade_return
 from .entity_resolver import resolve_query
 from .prompts import TRADE_PRODUCT_DISCLAIMER

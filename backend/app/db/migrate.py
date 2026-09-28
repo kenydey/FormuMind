@@ -48,6 +48,52 @@ def migrate_inline_sql_to_datalab(legacy_store, datalab_store) -> int:
     return len(records)
 
 
+def clean_doe_metadata_from_factors() -> int:
+    """清洗历史脏数据：从 ExperimentRow.factors 移除 `_doe_metadata` 等非数值 blob。
+
+    旧代码曾把嵌套 dict（`_doe_metadata`）塞进 factors 并持久化；新写入已只
+    存数值（doe_cycle_service），但历史行仍带脏数据，下游按 dict[str, float]
+    消费时会 TypeError。本函数幂等，只改确实含非数值值的行。
+    返回清洗的行数。
+    """
+    from .database import default_session_factory
+    from .models import ExperimentRow
+
+    def _as_float(v: object) -> float | None:
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return None
+        return None
+
+    cleaned = 0
+    factory = default_session_factory()
+    with factory() as session:
+        rows = session.query(ExperimentRow).all()
+        for row in rows:
+            factors = row.factors or {}
+            if not isinstance(factors, dict):
+                continue
+            scrubbed: dict[str, float] = {}
+            for k, v in factors.items():
+                f = _as_float(v)
+                if f is not None:
+                    scrubbed[str(k)] = f
+            # 只有确实去掉东西时才写回（幂等，避免无谓的 UPDATE）
+            if set(scrubbed) != set(factors):
+                row.factors = scrubbed
+                cleaned += 1
+        session.commit()
+    if cleaned:
+        log.info("cleaned _doe_metadata/non-numeric factors from %d rows", cleaned)
+    return cleaned
+
+
 def migrate_experiments_if_needed() -> int:
     """Migrate legacy JSON and inline SQL experiment data into the active store.
 
@@ -70,11 +116,12 @@ def migrate_experiments_if_needed() -> int:
         if settings.experiment_backend == "datalab":
             legacy = SqlExperimentStore(default_session_factory())
             total += migrate_inline_sql_to_datalab(legacy, target)
+
+        # 历史脏数据：清洗 factors 里残留的 _doe_metadata 等非数值 blob（幂等）
+        try:
+            clean_doe_metadata_from_factors()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("doe_metadata cleanup skipped: %s", exc)
     except DatalabUnavailableError as exc:
         log.warning("Experiment migration skipped (Datalab unavailable): %s", exc)
     return total
-
-
-def migrate_json_if_needed() -> int:
-    """Backward-compatible alias for tests."""
-    return migrate_experiments_if_needed()

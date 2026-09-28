@@ -10,21 +10,6 @@ from typing import Protocol, runtime_checkable
 from ..domain.schemas import AgentFinding, Formulation, Requirement
 
 
-@runtime_checkable
-class ExpertAgent(Protocol):
-    """An expert agent inspects a formulation and returns a single finding."""
-
-    name: str
-
-    def inspect(
-        self,
-        form: Formulation,
-        requirement: Requirement | None = None,
-        explain: bool = True,
-    ) -> AgentFinding:
-        ...
-
-
 # Status severity ordering, shared by agents and the supervisor.
 STATUS_RANK = {"pass": 0, "warn": 1, "intercept": 2}
 

@@ -18,6 +18,7 @@ from ..domain.kg_schemas import (
     KGRelationView,
     SimilarFormulationRequest,
     SimilarFormulationResponse,
+    SimilarFormulationMatch,
     KGStats,
     KGSubstituteDiscoverResponse,
 )
@@ -134,7 +135,6 @@ def feedback_stats() -> dict:
 def feedback_report() -> dict:
     """审计报表：measured 统计 + 零增长告警 + 最近 campaign bias 趋势（loop_history 抽取）。"""
     from ..db.campaign_store import get_campaign_store
-    from ..db.models import KGEntityLink
 
     if not kg_enabled():
         raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")

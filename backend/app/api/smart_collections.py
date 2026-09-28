@@ -21,21 +21,22 @@ router = APIRouter(prefix="/api/collections", tags=["collections"])
 # ── W6-3 自动刷新 ─────────────────────────────────────────────────────────
 # GET list 顺带触发到期集合的后台刷新（daemon 线程，fail-open），兑现方案
 # "定时刷新（默认每天一次）"——不依赖 celery beat 是否配置。
-# _AUTO_REFRESH_IN_FLIGHT 做同进程去重；_AUTO_REFRESH_LOCK 串行化刷新，
-# 避免同一 project 的 store 文件并发 load-modify-save 互相覆盖。
+# B-4：_AUTO_REFRESH_IN_FLIGHT 只做同进程去重标记，由 _AUTO_REFRESH_MARK_LOCK
+# 做短临界区保护；耗时搜索在 services.refresh_collection 内部已移出 store 锁，
+# 快照持久化按 project 串行（services._project_txn）。GET list 只取短锁做
+# 标记，刷新在途时不被长时间阻塞。
 _AUTO_REFRESH_IN_FLIGHT: set[tuple[str, str]] = set()
-_AUTO_REFRESH_LOCK = threading.Lock()
+_AUTO_REFRESH_MARK_LOCK = threading.Lock()
 
 
 def _auto_refresh_worker(project_id: str, collection_id: str) -> None:
     key = (project_id, collection_id)
     try:
-        with _AUTO_REFRESH_LOCK:
-            sc.refresh_collection(project_id, collection_id, actor="auto")
+        sc.refresh_collection(project_id, collection_id, actor="auto")
     except Exception as exc:  # noqa: BLE001 — 后台刷新永不炸主请求
         logger.warning("smart collection auto-refresh failed %s: %s", key, exc)
     finally:
-        with _AUTO_REFRESH_LOCK:
+        with _AUTO_REFRESH_MARK_LOCK:
             _AUTO_REFRESH_IN_FLIGHT.discard(key)
 
 
@@ -58,7 +59,7 @@ def _kick_auto_refresh(project_id: str, collections: list[dict] | None) -> None:
         if not due:
             continue
         key = (project_id, cid)
-        with _AUTO_REFRESH_LOCK:
+        with _AUTO_REFRESH_MARK_LOCK:
             if key in _AUTO_REFRESH_IN_FLIGHT:
                 continue
             _AUTO_REFRESH_IN_FLIGHT.add(key)
@@ -144,14 +145,16 @@ def update_collection(
     project_id: str = Query(..., min_length=1),
 ):
     try:
+        # B-13：PATCH 部分更新语义 —— exclude_unset 避免模型默认值覆盖未提供字段；
+        # filters 在 service 层与现有值合并（显式 null 清键），而非全量替换。
         col = sc.update_collection(
             project_id,
             collection_id,
             name=body.name,
             query=body.query,
-            filters=body.filters.model_dump() if body.filters else None,
+            filters=body.filters.model_dump(exclude_unset=True) if body.filters else None,
             screening_preset=body.screening_preset,
-            schedule=body.schedule.model_dump() if body.schedule else None,
+            schedule=body.schedule.model_dump(exclude_unset=True) if body.schedule else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

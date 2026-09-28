@@ -70,45 +70,6 @@ def persist_structural_extraction(
     return written
 
 
-def run_multimodal_kg_fusion(
-    image_path: str,
-    context: str = "",
-    *,
-    source_id: str | None = None,
-    chunk_id: str | None = None,
-    persist: bool = False,
-    settings: Settings | None = None,
-) -> MultimodalFusionResult:
-    """Read image → vision JSON → structural triples → optional KG persist."""
-    settings = settings or get_settings()
-    result = MultimodalFusionResult()
-
-    if not settings.kg_multimodal_fusion_enabled and persist:
-        result.warnings.append("多模态图谱融合已禁用（FORMUMIND_KG_MULTIMODAL_FUSION_ENABLED）")
-        return result
-
-    path = Path(image_path)
-    if not path.is_file():
-        result.warnings.append(f"图片不存在: {image_path}")
-        return result
-
-    try:
-        image_bytes = path.read_bytes()
-    except OSError as exc:
-        result.warnings.append(f"读取图片失败: {exc}")
-        return result
-
-    return run_multimodal_kg_fusion_bytes(
-        image_bytes,
-        path.name,
-        context,
-        source_id=source_id,
-        chunk_id=chunk_id,
-        persist=persist,
-        settings=settings,
-    )
-
-
 def run_multimodal_kg_fusion_bytes(
     image_bytes: bytes,
     filename: str,

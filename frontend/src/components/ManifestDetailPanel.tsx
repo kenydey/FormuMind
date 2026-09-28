@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, formatApiError } from "../api";
 import { saveTextToProjectShelf, shelfFilename } from "../utils/export";
 import SourceDetailModal from "./SourceDetailModal";
@@ -138,17 +138,22 @@ export default function ManifestDetailPanel({ projectId }: Props) {
   const [style, setStyle] = useState<ManifestStyleKey>("list");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  /** F-4: 序号守卫 —— project 快速切换时旧请求的 manifest 不覆盖新数据。 */
+  const loadSeq = useRef(0);
 
   const reload = useCallback(async () => {
+    const seq = ++loadSeq.current;
     if (!projectId) {
       setMan(null);
       return;
     }
     try {
       const m = (await api.getLiteratureManifest(projectId)) as unknown as Manifest;
+      if (loadSeq.current !== seq) return;
       setMan(m);
       setError(null);
     } catch (e) {
+      if (loadSeq.current !== seq) return;
       setError(formatApiError(e));
     }
   }, [projectId]);
@@ -161,7 +166,8 @@ export default function ManifestDetailPanel({ projectId }: Props) {
   const scopedItems = useMemo(() => {
     if (!man) return [];
     if (!frozen) return man.items;
-    const ids = new Set(frozen.item_ids);
+    // F-3: item_ids 缺失（旧数据/损坏）时兜底空数组，防白屏。
+    const ids = new Set(frozen.item_ids ?? []);
     return man.items.filter((it) => ids.has(it.id));
   }, [man, frozen]);
 

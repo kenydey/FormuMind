@@ -55,12 +55,6 @@ FetchFn = Callable[[str], bytes]
 
 
 @dataclass
-class ReviewFinding:
-    level: str  # error | warning
-    message: str
-
-
-@dataclass
 class SkillPreview:
     name: str
     description: str = ""

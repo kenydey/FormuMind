@@ -80,13 +80,3 @@ def trace_generation(
                     )
             except Exception as exc:
                 logger.debug("langfuse generation end failed: %s", exc)
-
-
-def shutdown_tracer() -> None:
-    global _client
-    if _client is not None:
-        try:
-            _client.flush()
-        except Exception:
-            pass
-        _client = None

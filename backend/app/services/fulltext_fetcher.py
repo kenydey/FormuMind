@@ -471,7 +471,6 @@ def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
     tiers* is the point — refusing to store the result afterwards would pay the
     cost and cap nothing.
     """
-    from .pdf_downloader import _extract_text, fetch_pdf  # noqa: F401
 
     # Tier 0: OpenAlex-hosted copy. Cheapest when available — TEI XML skips the
     # parse/OCR stage outright, and it is the only tier immune to publisher 403s.

@@ -23,11 +23,12 @@ Design notes (mirroring ``wiki/fts.py``):
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
+
+from .cjk_fts import _cjk_expand, _match_query
 
 logger = logging.getLogger(__name__)
 
@@ -35,62 +36,8 @@ _FTS_TABLE = "source_chunks_fts"
 _FTS_META = "source_fts_meta"
 _FTS_SCHEMA = "2"  # v2: char_start/char_end + raw display vs expanded search columns
 
-# Copied from services/wiki/fts.py (kept private there): CJK-aware helpers.
-_TOKEN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
-_SPECIAL = re.compile(r"[^\w\u4e00-\u9fff]+", re.UNICODE)
-
-
-def _is_cjk(ch: str) -> bool:
-    return "\u4e00" <= ch <= "\u9fff"
-
-
-def _cjk_expand(s: str) -> str:
-    """Insert spaces around CJK so unicode61 tokenizes each character."""
-    parts: list[str] = []
-    for ch in s or "":
-        if _is_cjk(ch):
-            parts.append(f" {ch} ")
-        else:
-            parts.append(ch)
-    return re.sub(r"\s+", " ", "".join(parts)).strip()
-
-
-def _token_to_match(token: str) -> str | None:
-    pieces: list[str] = []
-    buf: list[str] = []
-
-    def flush_latin() -> None:
-        if not buf:
-            return
-        safe = _SPECIAL.sub(" ", "".join(buf)).strip()
-        buf.clear()
-        if safe:
-            pieces.append(f'"{safe}"')
-
-    for ch in token:
-        if _is_cjk(ch):
-            flush_latin()
-            pieces.append(f'"{ch}"')
-        else:
-            buf.append(ch)
-    flush_latin()
-    if not pieces:
-        return None
-    return " AND ".join(pieces)
-
-
-def _match_query(q: str) -> str | None:
-    tokens = [t for t in _TOKEN.findall(q or "") if t.strip()]
-    if not tokens:
-        return None
-    parts: list[str] = []
-    for t in tokens[:12]:
-        expr = _token_to_match(t)
-        if expr:
-            parts.append(f"({expr})" if " AND " in expr else expr)
-    if not parts:
-        return None
-    return " AND ".join(parts)
+# CJK FTS helpers now live in services/cjk_fts.py (shared with agent_memory,
+# wiki/fts) and are re-exported here for backward compatibility.
 
 
 def _session_factory() -> sessionmaker[Session]:

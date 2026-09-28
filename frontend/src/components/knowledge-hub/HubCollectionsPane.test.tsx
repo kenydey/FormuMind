@@ -127,3 +127,59 @@ describe("HubCollectionsPane", () => {
     );
   });
 });
+
+describe("HubCollectionsPane 回归（F-1 / F-12）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState({ activeProjectId: "proj-1" } as never);
+    list.mockResolvedValue({ collections: [] });
+  });
+
+  it("F-1: create 响应缺 snapshot_count/last_snapshot 时补默认值，不留空白行", async () => {
+    const user = userEvent.setup();
+    // 模拟后端 create_collection 直接 return dict(col) 的形状（无摘要字段）
+    create.mockResolvedValue({
+      collection_id: "col_new",
+      name: "新集合",
+      query: "zinc phosphate",
+      filters: {},
+      screening_preset: null,
+      schedule: { enabled: true, interval_hours: 24 },
+      created_at: 1,
+      updated_at: 1,
+      snapshots: [],
+    } as never);
+    render(<HubCollectionsPane active />);
+    await waitFor(() => expect(list).toHaveBeenCalled());
+
+    await user.type(screen.getByTestId("hub-collections-name"), "新集合");
+    await user.type(screen.getByTestId("hub-collections-query"), "zinc phosphate");
+    await user.click(screen.getByTestId("hub-collections-create"));
+
+    const row = await screen.findByTestId("hub-collection-col_new");
+    expect(row.textContent).toMatch(/snapshots：0/);
+    expect(row.textContent).not.toMatch(/上次：/);
+  });
+
+  it("F-12: 双击删除只发一次 remove（进行中守卫）", async () => {
+    const user = userEvent.setup();
+    list.mockResolvedValue({ collections: [SUMMARY] });
+    const remove = vi.mocked(collectionsApi.remove);
+    let release!: () => void;
+    remove.mockImplementation(
+      () =>
+        new Promise((res) => {
+          release = () => res({ deleted: true });
+        }),
+    );
+    render(<HubCollectionsPane active />);
+    await waitFor(() => expect(list).toHaveBeenCalled());
+
+    const btn = screen.getByTestId("hub-collection-delete-col_1");
+    await user.click(btn);
+    // 第二次点击：删除进行中，按钮已禁用/守卫拦截
+    await user.click(btn);
+    release();
+    await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+  });
+});

@@ -373,7 +373,7 @@ def _split_slides(markdown: str) -> list[tuple[str, list[str]]]:
 def markdown_to_pptx(markdown: str, *, title: str = "FormuMind Deck") -> bytes:
     try:
         from pptx import Presentation
-        from pptx.util import Inches, Pt
+        from pptx.util import Pt
     except ImportError as exc:
         raise RuntimeError("python-pptx not installed") from exc
 

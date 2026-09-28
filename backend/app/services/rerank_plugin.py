@@ -10,6 +10,8 @@ ever raises for a missing package or model.
 from __future__ import annotations
 
 import logging
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -21,6 +23,40 @@ logger = logging.getLogger(__name__)
 MAX_PLUGIN_K = 50
 
 _DEFAULT_MODEL = "BAAI/bge-reranker-base"
+
+# B-16: cross-encoder weights are GB-scale; cache loaded models by name so
+# repeated rerank calls reuse instead of reloading. Bounded to the 2 most
+# recently used — more would pin multiple GBs of weights in RAM.
+_MODEL_CACHE: OrderedDict[str, Any] = OrderedDict()
+_MODEL_CACHE_MAX = 2
+_MODEL_CACHE_LOCK = threading.Lock()
+
+
+def _cached_cross_encoder(model_name: str) -> Any:
+    """Return the cached CrossEncoder for ``model_name``, loading once."""
+    with _MODEL_CACHE_LOCK:
+        hit = _MODEL_CACHE.get(model_name)
+        if hit is not None:
+            _MODEL_CACHE.move_to_end(model_name)
+            return hit
+    # Load outside the lock (slow), then insert with eviction under the lock.
+    # A rare double-load race only wastes one load; the winner is shared after.
+    from sentence_transformers import CrossEncoder
+
+    model = CrossEncoder(model_name)
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE[model_name] = model
+        _MODEL_CACHE.move_to_end(model_name)
+        while len(_MODEL_CACHE) > _MODEL_CACHE_MAX:
+            evicted, _ = _MODEL_CACHE.popitem(last=False)
+            logger.info("rerank model cache evicted %s", evicted)
+    return model
+
+
+def invalidate_rerank_model_cache() -> None:
+    """Drop cached cross-encoder models (tests / memory pressure)."""
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE.clear()
 
 
 class Reranker(Protocol):
@@ -83,9 +119,10 @@ class CrossEncoderReranker:
             return False
         if self._model is None:
             try:
-                from sentence_transformers import CrossEncoder
-
-                self._model = CrossEncoder(self.model_name)
+                # B-16: shared process-wide cache — repeated rerank calls
+                # (and separate CrossEncoderReranker instances) reuse the
+                # loaded weights instead of reloading GBs per call.
+                self._model = _cached_cross_encoder(self.model_name)
             except Exception as exc:
                 logger.warning(
                     "cross-encoder model load failed (%s); rerank plugin degraded",
@@ -118,6 +155,10 @@ class CrossEncoderReranker:
                 "cross-encoder predict failed (%s); keeping upstream order", exc
             )
             self._degraded = True
+            # B-16: 坏模型逐出进程缓存 —— 新实例 retry 时重新加载权重
+            # （瞬时 GPU/OOM 错误可恢复），而不是永远复用这个坏对象。
+            with _MODEL_CACHE_LOCK:
+                _MODEL_CACHE.pop(self.model_name, None)
             return list(candidates[:k]), False
         if len(scores) != len(candidates):
             logger.warning(

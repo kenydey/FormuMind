@@ -257,10 +257,11 @@ export default function ArtifactVersionsPanel({ projectId }: Props) {
                     className="accent-sky-400"
                   />
                   <code className="text-[11px] text-slate-300">{shortId(v.version_id)}</code>
+                  {/* F-6: 未知 status 兜底 staging 样式，防 className=undefined 渲染异常 */}
                   <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[v.status]}`}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] ${STATUS_TONE[v.status] ?? STATUS_TONE.staging}`}
                   >
-                    {STATUS_LABEL[v.status]}
+                    {STATUS_LABEL[v.status] ?? "未知"}
                   </span>
                   {parent && (
                     <span className="text-[10px] text-slate-500">

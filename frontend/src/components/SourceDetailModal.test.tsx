@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import SourceDetailModal from "./SourceDetailModal";
@@ -57,5 +57,54 @@ describe("SourceDetailModal focusPage (W3-14)", () => {
     });
     await sleep(200);
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
+describe("SourceDetailModal 切块分页 (P-6)", () => {
+  beforeEach(() => {
+    vi.mocked(api.kbChunksBySource).mockReset();
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      chunk_id: `c${i}`,
+      text: `内容${i}`,
+      page: Math.floor(i / 10) + 1,
+    }));
+
+  it("120 个 chunk 只渲染首屏 50 个，可翻页", async () => {
+    vi.mocked(api.kbChunksBySource).mockResolvedValue(many(120) as never);
+    render(<SourceDetailModal title="Doc" sourceId="src-x" onClose={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("source-chunk-0")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("source-chunk-49")).toBeInTheDocument();
+    expect(screen.queryByTestId("source-chunk-50")).not.toBeInTheDocument();
+    expect(screen.getByTestId("source-chunk-pager")).toHaveTextContent("第 1 / 3 页");
+    fireEvent.click(screen.getByTestId("source-chunk-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("source-chunk-50")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("source-chunk-0")).not.toBeInTheDocument();
+    expect(screen.getByTestId("source-chunk-pager")).toHaveTextContent("第 2 / 3 页");
+  });
+
+  it("focusPage 跳到目标 chunk 所在分页", async () => {
+    vi.mocked(api.kbChunksBySource).mockResolvedValue(many(120) as never);
+    render(
+      <SourceDetailModal
+        title="Doc"
+        sourceId="src-x"
+        focusPage={9}
+        onClose={() => {}}
+      />,
+    );
+    // focusPage=9 的首个 chunk 全局序号为 80 → 第 2 页
+    await waitFor(() =>
+      expect(screen.getByTestId("source-chunk-80")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("source-chunk-pager")).toHaveTextContent("第 2 / 3 页");
+    expect(document.getElementById("source-chunk-9-80")).toBeTruthy();
   });
 });

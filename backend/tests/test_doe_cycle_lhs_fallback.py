@@ -71,7 +71,10 @@ def test_lhs_fallback_reads_infeasible_reason_from_run(monkeypatch):
     assert result["status"] == "success", result
     assert result["count"] == 1
     assert captured, "expected ExperimentRow construction"
-    meta = captured[0]["factors"]["_doe_metadata"]
-    assert meta["ai_suggested"] is True
-    assert meta["infeasible"] is False
-    assert meta["infeasible_reason"] == ""
+    # B-9 连带修复：_doe_metadata 嵌套 dict 不再注入 ExperimentRow.factors
+    #（相似度评分 `cv > 0` 会 TypeError，且无任何消费者读回它）。factors 只
+    # 含数值型 levers；metadata 走日志追踪。
+    factors = captured[0]["factors"]
+    assert "_doe_metadata" not in factors
+    assert factors == {"resin_wt_pct": 62.0}
+    assert all(isinstance(v, (int, float)) for v in factors.values())

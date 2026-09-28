@@ -4,12 +4,14 @@
 
 1. ``citation_veracity`` —— 答案中每个 ``[^n]`` 引用必须命中本次证据集合
    （按位置 1..len(evidence)），且被引证据至少有一个可解析来源
-   （identifier / title / doi / url 四取一非空）。孤儿引用记 fail。
+   （identifier / title / doi / url 四取一非空）。孤儿引用记 fail；
+   答案没有任何引用时亦记 fail（不给空引用满分）。
 2. ``coverage`` —— golden 标注的关键 claim 覆盖占比。claim 被"覆盖"当且仅当
    其关键词在答案中出现（>=50%）且答案带有至少一个有效引用。
    未覆盖但证据中有支撑的 claim 记 fail（"有证据没引用"）。
 3. ``numeric_consistency`` —— 答案中带单位的数字，经单位归一化（含明确换算，
    如 mm<->μm、h<->min）后，必须在所引 passage/snippet 原文出现；无来源数字记 fail。
+   数字只在其引用 passage 中核验，不回退全证据池；答案含数字但无有效引用时直接 fail。
 
 每项输出 ``{"score": float | None, "failures": [{"claim", "reason"}]}``；
 ``score`` 为 None 表示该指标内部异常（fail-open：记 error，不炸主流程）。
@@ -73,6 +75,15 @@ def metric_citation_veracity(
 ) -> dict[str, Any]:
     indices = extract_citation_indices(answer)
     failures: list[dict[str, str]] = []
+    if not indices:
+        # 零引用：不再给满分 —— 无任何引用时无法确认依据，记 fail。
+        failures.append(
+            {
+                "claim": "(no citations)",
+                "reason": "答案中没有任何 [^n] 引用，无法确认其依据",
+            }
+        )
+        return {"score": 0.0, "failures": failures}
     valid = 0
     for n in indices:
         if n < 1 or n > len(evidence):
@@ -229,7 +240,19 @@ def metric_numeric_consistency(
         return {"score": 1.0, "failures": []}
     indices = extract_citation_indices(answer)
     cited = [evidence[n - 1] for n in indices if 1 <= n <= len(evidence)]
-    pool = cited or evidence
+    failures: list[dict[str, str]] = []
+    if not cited:
+        # 答案含数字但无有效引用：不回退全 evidence 池，直接 fail。
+        # 数字必须绑定到其引用 passage，不允许"未引用证据命中数字"蒙混。
+        for v, u in answer_nums:
+            failures.append(
+                {
+                    "claim": f"{v:g}{u}",
+                    "reason": "答案含数字但无有效引用（数字无可绑定的引用来源）",
+                }
+            )
+        return {"score": 0.0, "failures": failures}
+    pool = cited
     pool_nums: list[tuple[float, str]] = []
     for item in pool:
         pool_nums.extend(extract_numbers(str(item.get("text") or "")))

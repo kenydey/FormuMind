@@ -43,11 +43,6 @@ def build_objective_from_specs(objectives: list[ObjectiveSpec]):
     return SingleTargetObjective(target=_numerical_target(obj))
 
 
-def build_objective(req: Requirement):
-    objectives = req.objectives or default_objectives(req.domain)
-    return build_objective_from_specs(objectives)
-
-
 def primary_metric(req: Requirement) -> str:
     objectives = req.objectives or default_objectives(req.domain)
     if objectives:

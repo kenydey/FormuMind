@@ -94,18 +94,3 @@ def is_granted(session_id: str, server_id: str, tool_name: str) -> bool:
             if exp is None or exp > time.time():
                 return True
     return False
-
-
-def revoke_session(session_id: str) -> None:
-    _ensure_loaded()
-    with _LOCK:
-        _GRANTS.pop((session_id or "").strip(), None)
-    _save_disk()
-
-
-def list_grants(session_id: str | None = None) -> dict[str, Any]:
-    _ensure_loaded()
-    with _LOCK:
-        if session_id:
-            return dict(_GRANTS.get(session_id) or {})
-        return {k: dict(v) for k, v in _GRANTS.items()}

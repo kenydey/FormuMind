@@ -331,7 +331,3 @@ def _dedupe_relations(relations: list[ExtractedRelation]) -> list[ExtractedRelat
         elif rel.confidence > grouped[key].confidence:
             grouped[key] = rel
     return list(grouped.values())
-
-
-def relation_type_values() -> frozenset[str]:
-    return SEMANTIC_RELATION_TYPES

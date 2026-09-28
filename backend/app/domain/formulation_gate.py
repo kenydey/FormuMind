@@ -551,15 +551,6 @@ def parse_llm_formulations(payload: dict | list) -> tuple[list[Formulation], lis
         return [], [f"LLM formulation JSON invalid: {exc}"]
 
 
-def parse_llm_recommended(payload: dict) -> tuple[RecommendedFormulaListResponse | None, str | None]:
-    try:
-        parsed = RecommendedFormulaListResponse.model_validate(payload)
-        formulas, warnings = validate_recommended_formulas(parsed.formulas)
-        return parsed.model_copy(update={"formulas": formulas, "warnings": warnings + parsed.warnings}), None
-    except ValidationError as exc:
-        return None, str(exc)
-
-
 def offline_recommend_response(
     forms: list[Formulation],
     *,

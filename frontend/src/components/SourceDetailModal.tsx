@@ -26,10 +26,14 @@ export default function SourceDetailModal({
   const [linking, setLinking] = useState(false);
   const [linkReport, setLinkReport] = useState<string | null>(null);
   const [flashIdx, setFlashIdx] = useState<number | null>(null);
+  /** P-6: 切块客户端分页（后端 by-source 接口无分页参数）——600+ chunk 时防全量 DOM。 */
+  const CHUNK_PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
 
   const load = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setPage(0);
     try {
       const res = await api.kbChunksBySource(sourceId);
       setChunks(Array.isArray(res) ? res : (res as { chunks?: KbChunk[] }).chunks ?? []);
@@ -44,12 +48,20 @@ export default function SourceDetailModal({
     if (sourceId) void load();
   }, [sourceId, load]);
 
+  const totalPages = chunks
+    ? Math.max(1, Math.ceil(chunks.length / CHUNK_PAGE_SIZE))
+    : 1;
+  const pageStart = page * CHUNK_PAGE_SIZE;
+  const pageChunks = chunks ? chunks.slice(pageStart, pageStart + CHUNK_PAGE_SIZE) : [];
+
   // W3-14: 切块加载完成后, 跳转到 focusPage 的首个切块并高亮。
   useEffect(() => {
     if (busy || !chunks || focusPage == null) return;
     const idx = chunks.findIndex((c) => c.page === focusPage);
     if (idx < 0) return;
     setFlashIdx(idx);
+    // P-6: 目标 chunk 可能在别的分页上 —— 先翻到对应页再滚动定位。
+    setPage(Math.floor(idx / CHUNK_PAGE_SIZE));
     const t = window.setTimeout(() => {
       const el = document.getElementById(`source-chunk-${focusPage}-${idx}`);
       if (el) {
@@ -57,7 +69,7 @@ export default function SourceDetailModal({
         el.classList.add("citation-flash");
         window.setTimeout(() => el.classList.remove("citation-flash"), 2000);
       }
-    }, 60);
+    }, 100);
     return () => window.clearTimeout(t);
   }, [busy, chunks, focusPage]);
 
@@ -103,38 +115,72 @@ export default function SourceDetailModal({
         {busy ? (
           <div className="text-xs text-slate-500 py-8 text-center">切块加载中…</div>
         ) : chunks && chunks.length > 0 ? (
-          <div className="space-y-2 max-h-[55vh] overflow-auto pr-1">
-            {chunks.map((c, i) => {
-              const text = (c.text ?? c.content ?? "").trim();
-              if (!text) return null;
-              const loc =
-                c.page != null
-                  ? `p.${c.page}${c.paragraph != null ? ` · ¶${c.paragraph}` : ""}`
-                  : c.paragraph != null
-                    ? `¶${c.paragraph}`
-                    : c.offset != null
-                      ? `+${c.offset}`
-                      : "";
-              return (
-                <div
-                  key={c.chunk_id ?? i}
-                  id={`source-chunk-${c.page ?? "na"}-${i}`}
-                  data-testid={`source-chunk-${i}`}
-                  className={`border rounded p-2 bg-ink/30 transition-colors ${
-                    flashIdx === i ? "border-accent/60" : "border-edge"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[9px] font-mono text-slate-600">#{i + 1}</span>
-                    {loc && <span className="text-[9px] font-mono text-slate-500">{loc}</span>}
-                  </div>
-                  <p className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed">
-                    {text.slice(0, 600)}
-                    {text.length > 600 && <span className="text-slate-600"> …</span>}
-                  </p>
+          <div>
+            {totalPages > 1 && (
+              <div
+                className="flex items-center justify-between text-[11px] text-slate-500 mb-2"
+                data-testid="source-chunk-pager"
+              >
+                <span>
+                  共 {chunks.length} 块 · 第 {page + 1} / {totalPages} 页
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page <= 0}
+                    className="border border-edge rounded px-2 py-0.5 disabled:opacity-40 hover:text-slate-200"
+                    data-testid="source-chunk-prev"
+                  >
+                    上一页
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    className="border border-edge rounded px-2 py-0.5 disabled:opacity-40 hover:text-slate-200"
+                    data-testid="source-chunk-next"
+                  >
+                    下一页
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+            )}
+            <div className="space-y-2 max-h-[55vh] overflow-auto pr-1">
+              {pageChunks.map((c, i) => {
+                // 全局序号：分页不改变 testid/锚点编号，旧测试与页码跳转不受影响
+                const gi = pageStart + i;
+                const text = (c.text ?? c.content ?? "").trim();
+                if (!text) return null;
+                const loc =
+                  c.page != null
+                    ? `p.${c.page}${c.paragraph != null ? ` · ¶${c.paragraph}` : ""}`
+                    : c.paragraph != null
+                      ? `¶${c.paragraph}`
+                      : c.offset != null
+                        ? `+${c.offset}`
+                        : "";
+                return (
+                  <div
+                    key={c.chunk_id ?? gi}
+                    id={`source-chunk-${c.page ?? "na"}-${gi}`}
+                    data-testid={`source-chunk-${gi}`}
+                    className={`border rounded p-2 bg-ink/30 transition-colors ${
+                      flashIdx === gi ? "border-accent/60" : "border-edge"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[9px] font-mono text-slate-600">#{gi + 1}</span>
+                      {loc && <span className="text-[9px] font-mono text-slate-500">{loc}</span>}
+                    </div>
+                    <p className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed">
+                      {text.slice(0, 600)}
+                      {text.length > 600 && <span className="text-slate-600"> …</span>}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : (
           <div className="text-xs text-slate-500 py-8 text-center">

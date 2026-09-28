@@ -185,13 +185,6 @@ def _filter_seed_by_query(
     return [e for n, e in scored if n >= threshold]
 
 
-def _resolve_search_query(query: str) -> str:
-    """Expand a user topic via QueryExpander for cross-lingual retrieval."""
-    from .deep_research.query_expander import prepare_search_queries
-
-    return prepare_search_queries(query).rank_q
-
-
 def _prepare_search_queries(query: str, domain=None):
     """Return SearchQueries bundle for multi-source search."""
     from .deep_research.query_expander import prepare_search_queries
@@ -840,6 +833,44 @@ def _evidence_identity_keys(e: Evidence) -> set[str]:
     return keys
 
 
+class _TokenBucket:
+    """Thread-safe token bucket: ``rate`` tokens accrue per second.
+
+    Used to keep parallel OpenAlex arms under the 5 req/s broad-boolean
+    limit (see ``arm_queries``): each arm acquires one token per page it is
+    about to fetch, so the aggregate request rate across arm threads stays
+    bounded even though pages inside one arm are sequential.
+    """
+
+    def __init__(self, rate: float, capacity: float | None = None) -> None:
+        self._rate = float(rate)
+        self._capacity = float(capacity if capacity is not None else rate)
+        self._tokens = self._capacity
+        self._updated = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self, n: float = 1.0) -> None:
+        n = float(n)
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                self._tokens = min(
+                    self._capacity,
+                    self._tokens + (now - self._updated) * self._rate,
+                )
+                self._updated = now
+                if self._tokens >= n:
+                    self._tokens -= n
+                    return
+                wait_s = (n - self._tokens) / self._rate
+            time.sleep(wait_s)
+
+
+# P-4: shared OpenAlex request budget across parallel arm threads.
+_OPENALEX_MAX_REQ_PER_S = 5.0
+_openalex_bucket = _TokenBucket(_OPENALEX_MAX_REQ_PER_S)
+
+
 def openalex_arms(
     terms: "list[str] | tuple[str, ...]",
     limit: int,
@@ -891,20 +922,45 @@ def openalex_arms(
     deferred = [a for a in arms if a.conditional]
     primary = [a for a in arms if not a.conditional]
 
+    def _run_arm(arm):
+        # Rate-limit at arm granularity: one token per page this arm will
+        # fetch (search_openalex pages 25 per request). The broad_boolean
+        # 5 req/s budget is shared across the arm threads.
+        _openalex_bucket.acquire(max(1, (limit + 24) // 25))
+        try:
+            rows = search_openalex(
+                arm.query, limit, offset,
+                domain=domain, preferred_source_ids=preferred_source_ids,
+                arm=arm.name, arm_delta=arm.relevance_delta,
+            )
+        except Exception as exc:  # noqa: BLE001 — one dead arm must not kill the search
+            logger.debug("openalex arm %s failed: %s", arm.name, exc)
+            rows = []
+        return arm, rows or []
+
     merged: list[Evidence] = []
     counts: list[str] = []
-    for arm in primary:
-        rows = search_openalex(
-            arm.query, limit, offset,
-            domain=domain, preferred_source_ids=preferred_source_ids,
-            arm=arm.name, arm_delta=arm.relevance_delta,
-        )
-        counts.append(f"{arm.name}={len(rows)}")
-        merged.extend(rows)
+    # P-4: primary arms run in parallel (one thread per arm). Results are
+    # collected in arm order so _dedupe_evidence keeps the same winner as the
+    # old serial loop — precise rows still win ties.
+    if primary:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(len(primary), 4)
+        ) as ex:
+            futures = [ex.submit(_run_arm, arm) for arm in primary]
+            for fut, arm in zip(futures, primary):
+                try:
+                    _, rows = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("openalex arm %s crashed: %s", arm.name, exc)
+                    rows = []
+                counts.append(f"{arm.name}={len(rows)}")
+                merged.extend(rows)
     merged = _dedupe_evidence(merged)
 
     if deferred and offset == 0 and len(merged) < int(settings.openalex_arm_broad_threshold):
         for arm in deferred:
+            _openalex_bucket.acquire(max(1, (limit + 24) // 25))
             rows = search_openalex(
                 arm.query, limit, offset,
                 domain=domain, preferred_source_ids=preferred_source_ids,
@@ -1102,6 +1158,9 @@ def iter_search(
     Each round pulls the next page from every still-active source concurrently.
     ``progress_cb`` (if given) is invoked after **each source** completes (not only
     at round end), so the UI can render results while the search keeps going.
+    Interim invocations carry the cumulative *unranked* raw list
+    (``meta["incremental"]=True``); the full filter+rank runs once and its
+    result is delivered by the terminal (``meta["final"]=True``) callback.
 
     Wave 1 · 会话缓存（P0-13）：入口先查 ``_SEARCH_CACHE``，TTL 内命中直接
     返回缓存结果并仍触发一次终态 ``progress_cb``，保持前端行为一致。
@@ -1148,7 +1207,9 @@ def iter_search(
     from ..config import get_settings
 
     settings = get_settings()
-    search_deadline_s = float(getattr(settings, 'search_round_deadline_s', 240) or 240)
+    # B-15: declared on Settings (app/config.py); was an undeclared getattr
+    # fallback stuck at 240s and not configurable.
+    search_deadline_s = float(settings.search_round_deadline_s or 240)
     search_deadline = time.monotonic() + search_deadline_s
 
     raw: list[Evidence] = []
@@ -1156,21 +1217,24 @@ def iter_search(
     rounds = 0
 
     def _notify(*, source: str | None = None, new_count: int = 0) -> None:
+        # P-7: interim notifications are incremental — the cumulative raw list
+        # with no re-rank. The full _merge_filter_rank runs exactly once at the
+        # end of iter_search (the final _emit_final_progress call). Consumers
+        # only use len(partial) / new_count for progress display; the ranked
+        # final list arrives via the terminal callback.
         if progress_cb is None:
             return
-        ranked, _ = _merge_filter_rank(
-            raw, rank_q, total_limit, domain=getattr(req, "domain", None) if req else None, req=req
-        )
         meta = {
             "source": source,
             "new_count": new_count,
             "sources_done": [s["name"] for s in streams if s["done"]],
             "sources_pending": [s["name"] for s in streams if not s["done"]],
+            "incremental": True,
         }
         try:
-            progress_cb(ranked, meta)
+            progress_cb(list(raw), meta)
         except TypeError:
-            progress_cb(ranked)
+            progress_cb(list(raw))
 
     while (
         any(not st["done"] for st in streams)

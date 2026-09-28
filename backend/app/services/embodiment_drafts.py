@@ -460,36 +460,6 @@ def _origin_for_kind(
     return "document_fulltext"
 
 
-def _placeholder_from_names(names: list[str], *, limit: int = 8) -> list[dict[str, Any]]:
-    picked = []
-    seen: set[str] = set()
-    for n in names:
-        key = n.casefold()
-        if not n or key in seen:
-            continue
-        seen.add(key)
-        picked.append(n)
-        if len(picked) >= limit:
-            break
-    if not picked:
-        return []
-    share = round(100.0 / len(picked), 4)
-    return [
-        {
-            "name": n,
-            "role": _infer_role(n),
-            "weight_pct": share,
-            "unit_raw": None,
-            "amount_raw": None,
-            "confidence": 0.3,
-            "evidence_span": None,
-            "smiles": None,
-            "cas_no": None,
-        }
-        for n in picked
-    ]
-
-
 _FLAT_ROW_RE = re.compile(
     r"^\s*(?P<name>[A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\s\-/\.]{1,60}?)"
     r"\s+(?P<num>\d+(?:\.\d+)?)\s*"

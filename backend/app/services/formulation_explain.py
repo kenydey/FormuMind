@@ -12,15 +12,6 @@ from ..config import get_settings
 from ..domain.schemas import Formulation, FormulationExplain, ObjectiveSpec, Requirement
 
 
-def _objective_metrics(objectives: Iterable[ObjectiveSpec] | None) -> list[str]:
-    out: list[str] = []
-    for o in objectives or []:
-        m = getattr(o, "metric", None) or getattr(o, "name", None)
-        if m:
-            out.append(str(m))
-    return out
-
-
 def _evidence_refs_from_ingredients(form: Formulation) -> list[dict[str, str]]:
     seen: set[tuple[str, str]] = set()
     refs: list[dict[str, str]] = []

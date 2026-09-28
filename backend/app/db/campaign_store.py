@@ -267,14 +267,6 @@ class _CampaignMetaMixin:
     def append_loop_history_sync(self, campaign_id: int, entry: dict) -> None:
         self._append_loop_history(campaign_id, entry)
 
-    def _delete_campaign_meta(self, campaign_id: int) -> None:
-        with self._write_lock:
-            with commit_session(self._session_factory) as session:
-                campaign = session.get(Campaign, campaign_id)
-                if campaign is None:
-                    return
-                session.delete(campaign)
-
     def _update_campaign_status(self, campaign_id: int, rows: list[WorkbenchRow]) -> None:
         with self._write_lock:
             with commit_session(self._session_factory) as session:

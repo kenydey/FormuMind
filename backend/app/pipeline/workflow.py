@@ -244,26 +244,6 @@ def run_research(
     return result
 
 
-def run_research_graph_stream(
-    topic: str,
-    req: Requirement | None = None,
-    *,
-    query: str = "",
-    pre_index: list | None = None,
-    event_cb=None,
-):
-    """SSE-friendly wrapper around CRAG graph."""
-    from .research_graph import run_research_graph
-
-    return run_research_graph(
-        topic=topic,
-        req=req,
-        query=query or topic,
-        pre_index=pre_index,
-        progress_cb=event_cb,
-    )
-
-
 def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:
     """Build a fresh formulation with lever ingredient percentages overridden."""
     return reconstruct.formulation_from_factors(req, values)

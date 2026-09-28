@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 
-from ..config import Settings, get_settings
+from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 

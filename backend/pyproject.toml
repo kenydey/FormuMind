@@ -26,7 +26,7 @@ dependencies = [
     "loguru>=0.7",
     "rank-bm25>=0.2",
     "jieba>=0.42",
-    "neomodel>=4.2",
+    "neo4j>=6.1.0",
     "openpyxl>=3.1",
 ]
 

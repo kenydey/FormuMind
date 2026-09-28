@@ -109,3 +109,131 @@ def test_fix_loop_unaddressed_after_max(tmp_data, monkeypatch):
     assert meta.get("unaddressed")
     soft = tmp_data / "preflight" / "proj-x" / "evidence_soft.json"
     assert soft.is_file()
+
+
+# ── B-8 回归：run_id 并发唯一 ────────────────────────────────────────────
+
+def test_new_review_run_ids_unique_same_ms(monkeypatch):
+    """同一毫秒、同一 session 并发建 run → run_id 必须全部唯一。"""
+    import app.services.reviewer_fix_loop as rfl
+
+    fixed = 1_700_000_000.123
+    monkeypatch.setattr(rfl.time, "time", lambda: fixed)
+    ids = [rfl.new_review_run(session_key="same-key")["run_id"] for _ in range(200)]
+    assert len(set(ids)) == 200
+    assert all(i.startswith("same-key-") for i in ids)
+
+
+def test_concurrent_save_review_run_no_overwrite(tmp_data):
+    """并发建 run + 落盘：审计文件数 == 建 run 数，无覆盖。"""
+    import threading
+
+    import app.services.reviewer_fix_loop as rfl
+
+    n = 24
+    created = []
+    lock = threading.Lock()
+
+    def _one():
+        run = rfl.new_review_run(session_key="collide")
+        rfl.save_review_run(run)
+        with lock:
+            created.append(run["run_id"])
+
+    threads = [threading.Thread(target=_one) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(set(created)) == n
+    files = list((tmp_data / "reviews" / "runs").glob("*.json"))
+    assert len(files) == n
+
+
+def test_run_fix_loop_rewrites_unique_run_id(tmp_data, monkeypatch):
+    """run_fix_loop 内重写 run_id 必须带随机后缀（B-8 :452）。"""
+    monkeypatch.setattr(
+        "app.services.evidence_reviewer.review_answer",
+        lambda *a, **k: {"status": "pass", "notes": []},
+    )
+    _, meta = rfl.run_fix_loop(
+        question="q",
+        answer="a",
+        citations=[],
+        review={"status": "warning", "notes": ["n"], "suggestion": "s"},
+        settings=_Settings(),
+        repair_fn=lambda q, a: "fixed",
+        max_rounds=1,
+        project_id="p",
+    )
+    assert meta["run_id"]
+    assert len(meta["run_id"].rsplit("-", 1)[-1]) == 12  # uuid4 hex 前 12 位
+
+
+# ── B-11 回归：_AUTO_STATE 有界（TTL + 容量上限 + 懒清理）─────────────────
+
+
+@pytest.fixture()
+def auto_state_isolated():
+    saved = dict(rfl._AUTO_STATE)
+    rfl._AUTO_STATE.clear()
+    yield rfl._AUTO_STATE
+    rfl._AUTO_STATE.clear()
+    rfl._AUTO_STATE.update(saved)
+
+
+def test_auto_state_ttl_prune(auto_state_isolated):
+    import time as _time
+
+    now = _time.time()
+    rfl._AUTO_STATE["stale-scope"] = {
+        "pending": None, "fired": set(), "ts": now - rfl._AUTO_STATE_TTL_S - 1
+    }
+    rfl._AUTO_STATE["fresh-scope"] = {
+        "pending": None, "fired": set(), "ts": now
+    }
+    with rfl._AUTO_LOCK:
+        rfl._auto_state_prune_locked(now)
+    assert "stale-scope" not in rfl._AUTO_STATE
+    assert "fresh-scope" in rfl._AUTO_STATE
+
+
+def test_auto_state_cap_evicts_oldest(auto_state_isolated):
+    import time as _time
+
+    now = _time.time()
+    for i in range(rfl._AUTO_STATE_CAP + 50):
+        rfl._AUTO_STATE[f"scope-{i:05d}"] = {
+            "pending": None, "fired": set(), "ts": now - i
+        }
+    with rfl._AUTO_LOCK:
+        rfl._auto_state_prune_locked(now)
+    assert len(rfl._AUTO_STATE) == rfl._AUTO_STATE_CAP
+    # 淘汰的是最早活跃（ts 最小）的 scope
+    assert "scope-00000" in rfl._AUTO_STATE
+    assert f"scope-{rfl._AUTO_STATE_CAP + 49:05d}" not in rfl._AUTO_STATE
+
+
+def test_maybe_auto_review_prunes_stale_scopes(auto_state_isolated):
+    """懒清理真实触发路径：maybe_auto_review 进入时顺带清理过期 scope。"""
+    import time as _time
+
+    now = _time.time()
+    rfl._AUTO_STATE["dead"] = {
+        "pending": None, "fired": set(), "ts": now - rfl._AUTO_STATE_TTL_S - 10
+    }
+
+    class S:
+        auto_audit_enabled = True
+
+    rfl.maybe_auto_review(
+        "turn-1",
+        question="q",
+        answer="a",
+        citations=[],
+        settings=S(),
+        session_id="live",
+    )
+    assert "dead" not in rfl._AUTO_STATE
+    assert "live" in rfl._AUTO_STATE
+    assert rfl._AUTO_STATE["live"]["ts"] >= now

@@ -94,10 +94,3 @@ def suggest_factors(req: Requirement) -> list[FactorCandidate]:
             )
         )
     return out
-
-
-def suggest_factors_as_doe(req: Requirement) -> list[DOEFactor]:
-    return [
-        DOEFactor(name=c.name, low=c.low, high=c.high, unit=c.unit)
-        for c in suggest_factors(req)
-    ]

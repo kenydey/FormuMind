@@ -178,7 +178,6 @@ class BaybeCampaignEngine:
 
     def _new_campaign(self, req: Requirement, objectives: list[ObjectiveSpec], factors=None):
         from baybe import Campaign
-        from baybe.recommenders import BotorchRecommender, FPSRecommender, TwoPhaseMetaRecommender
 
         factor_list = factors_for_requirement(req, factors)
         searchspace = build_searchspace(req, factor_list)

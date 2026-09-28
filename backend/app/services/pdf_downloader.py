@@ -91,11 +91,6 @@ def _landing_url(patent_id: str) -> str:
     return f"https://patents.google.com/patent/{patent_id.strip().upper()}/en"
 
 
-def _google_patents_url(patent_id: str) -> str:
-    """Deprecated alias — the ``/pdf`` suffix serves HTML, not a PDF."""
-    return _landing_url(patent_id)
-
-
 # ── Landing page → text / PDF url ────────────────────────────────────────────
 
 

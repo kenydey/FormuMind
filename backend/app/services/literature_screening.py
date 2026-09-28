@@ -11,6 +11,8 @@ from typing import Any, Callable
 from . import literature_manifest as lm
 from . import screening_presets as _presets
 
+from fastapi import HTTPException
+
 logger = logging.getLogger(__name__)
 
 # P0-4：输入证据不足（缺 title 或缺 snippet/abstract）时的 decision 模型标记
@@ -491,6 +493,18 @@ def _prf(tp: int, fp: int, fn: int) -> dict[str, float]:
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
+def _to_int_year(raw: Any, name: str) -> int | None:
+    """把 criteria 里的年份归一化为 int；None 保持 None，非法值抛 ValueError。"""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise ValueError(f"{name}={raw!r} 不是有效年份")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}={raw!r} 不是有效年份") from None
+
+
 def evaluate_screening(
     project_id: str,
     criteria: dict[str, Any] | None = None,
@@ -527,8 +541,16 @@ def evaluate_screening(
     include = list(criteria.get("include_keywords") or [])
     exclude = list(criteria.get("exclude_keywords") or [])
     require_doi = bool(criteria.get("require_doi") or False)
-    year_min = criteria.get("year_min")
-    year_max = criteria.get("year_max")
+    # B-10：year_min/year_max 的 int() 转换在此集中做并映射 400（此前 _predict
+    # 内部的 int(year_min) 无 try，非法年份直奔 500；同链路另三个端点都映射
+    # ValueError→400，evaluate 唯独漏了）。
+    try:
+        year_min = _to_int_year(criteria.get("year_min"), "year_min")
+        year_max = _to_int_year(criteria.get("year_max"), "year_max")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"screening 年份非法：{exc}"
+        ) from exc
 
     def _predict(
         item: dict[str, Any],
@@ -540,8 +562,8 @@ def evaluate_screening(
             include_keywords=inc,
             exclude_keywords=exc,
             require_doi=require_doi,
-            year_min=int(year_min) if year_min is not None else None,
-            year_max=int(year_max) if year_max is not None else None,
+            year_min=year_min,
+            year_max=year_max,
         )
         return disp == "match"
 

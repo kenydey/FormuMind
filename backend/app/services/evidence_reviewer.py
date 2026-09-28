@@ -351,16 +351,3 @@ def review_answer(
 _NUMERIC_BARE = re.compile(
     r"\b(\d+(?:\.\d+)?\s*(?:wt%|%|℃|°C|MPa|μm|µm|hrs?|h|min))\b"
 )
-
-
-def flag_bare_numerics(answer: str) -> list[str]:
-    """Soft signal: numerics with units that lack nearby citation markers."""
-    hits: list[str] = []
-    text = answer or ""
-    for m in _NUMERIC_BARE.finditer(text):
-        start = max(0, m.start() - 40)
-        window = text[start : m.end() + 10]
-        if "[^" in window or "(doi" in window.lower() or "doi.org" in window.lower():
-            continue
-        hits.append(m.group(1))
-    return hits[:12]

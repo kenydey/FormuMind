@@ -123,23 +123,6 @@ def get_policies(
     return {scope: decision for scope, decision in rows}
 
 
-def clear_policies(
-    server_id: str,
-    tool_name: str,
-    *,
-    path: str | Path | None = None,
-) -> int:
-    """删除该工具的全部策略（测试/重置用），返回删除行数。"""
-    sid, tool = _norm(server_id, tool_name)
-    db = ensure_store(path)
-    with _LOCK, sqlite3.connect(db) as conn:
-        cur = conn.execute(
-            "DELETE FROM mcp_tool_policies WHERE server_id = ? AND tool_name = ?",
-            (sid, tool),
-        )
-        return cur.rowcount
-
-
 def effective_decision(policies: dict[str, str]) -> str:
     """多作用域决策合并：block > ask > allow；无策略默认 ask。"""
     vals = set(policies.values())

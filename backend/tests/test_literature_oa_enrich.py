@@ -1,11 +1,15 @@
-"""Wave D — literature OA enrich into manifest."""
+"""Wave D — literature OA enrich into manifest.
+
+P-5: the per-item fetch now runs in a ThreadPool (_dispatch_fetch) with
+persist serialized in the main thread (_persist_fulltext) — tests patch that
+seam instead of the old per-item enrich_search_results call.
+"""
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from app.services import literature_oa_enrich as oe
-from app.services.fulltext_fetcher import FulltextReport
 
 
 class _Settings(SimpleNamespace):
@@ -47,14 +51,14 @@ def test_oa_enrich_success_unfreezes(tmp_path, monkeypatch):
     }
     oe.lm.save_manifest(man)
 
-    report = FulltextReport()
-    report.record("literature", True)
-
-    with patch.object(oe, "classify", return_value="literature"), patch.object(
-        oe, "enrich_search_results", return_value=([], report)
-    ) as mock_enrich:
+    with patch.object(oe, "classify", return_value="literature"), patch(
+        "app.services.fulltext_fetcher._dispatch_fetch", return_value="FULL TEXT"
+    ) as mock_fetch, patch(
+        "app.services.fulltext_fetcher._persist_fulltext", return_value="src-1"
+    ) as mock_persist:
         out = oe.enrich_manifest_oa("p1", limit=5, settings=_Settings())
-        assert mock_enrich.called
+        assert mock_fetch.called
+        assert mock_persist.called
         assert out["fetched"] == 1
         assert out["persisted"] == 1
         assert out["manifest"]["frozen"] is None
@@ -70,10 +74,8 @@ def test_oa_enrich_fetch_fail(tmp_path, monkeypatch):
         {"id": "10.9/z", "doi": "10.9/z", "title": "paywall", "screening": "unset"}
     ]
     oe.lm.save_manifest(man)
-    report = FulltextReport()
-    report.record("literature", False)
-    with patch.object(oe, "classify", return_value="literature"), patch.object(
-        oe, "enrich_search_results", return_value=([], report)
+    with patch.object(oe, "classify", return_value="literature"), patch(
+        "app.services.fulltext_fetcher._dispatch_fetch", return_value=None
     ):
         out = oe.enrich_manifest_oa("p1", settings=_Settings())
         assert out["fetched"] == 0
