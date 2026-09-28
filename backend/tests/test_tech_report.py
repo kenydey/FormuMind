@@ -16,6 +16,21 @@ from app.services import tech_report as tr
 from app.services.wiki import report_export as rexp
 
 
+@pytest.fixture
+def no_native_export_backends(monkeypatch):
+    """Simulate an environment with neither python-docx nor fpdf2 installed.
+
+    The "no backend" tests below assert the path where pandoc is missing AND
+    the native libs are missing. With the optional deps installed, the native
+    fallback genuinely works, so block those imports to restore the
+    "not installed" precondition the tests were written against.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "docx", None)
+    monkeypatch.setitem(sys.modules, "fpdf", None)
+
+
 # ── report_export: HTML ─────────────────────────────────────────────────────
 
 def test_markdown_to_html_structure():
@@ -55,13 +70,13 @@ def test_export_bytes_html():
 
 # ── report_export: pandoc pipeline ──────────────────────────────────────────
 
-def test_docx_falls_back_when_no_pandoc_no_docx(monkeypatch):
+def test_docx_falls_back_when_no_pandoc_no_docx(monkeypatch, no_native_export_backends):
     monkeypatch.setattr(rexp.shutil, "which", lambda name: None)
     with pytest.raises(RuntimeError, match="pandoc unavailable"):
         rexp.markdown_to_docx("# hi")
 
 
-def test_pdf_falls_back_when_no_pandoc_no_fpdf(monkeypatch):
+def test_pdf_falls_back_when_no_pandoc_no_fpdf(monkeypatch, no_native_export_backends):
     monkeypatch.setattr(rexp.shutil, "which", lambda name: None)
     with pytest.raises(RuntimeError, match="pandoc unavailable"):
         rexp.markdown_to_pdf("# hi")
@@ -78,7 +93,7 @@ def test_docx_uses_pandoc_when_available(monkeypatch):
     assert rexp.markdown_to_docx("# hi", title="T") == b"FAKE-DOCX"
 
 
-def test_pandoc_failure_falls_back_to_native(monkeypatch):
+def test_pandoc_failure_falls_back_to_native(monkeypatch, no_native_export_backends):
     monkeypatch.setattr(rexp.shutil, "which", lambda name: "/usr/bin/pandoc")
 
     def fake_run(cmd, **kwargs):
@@ -248,7 +263,7 @@ def test_export_html_success(monkeypatch):
     assert "doe_report_p1.html" in resp.headers["Content-Disposition"]
 
 
-def test_export_docx_no_backend_returns_503(monkeypatch):
+def test_export_docx_no_backend_returns_503(monkeypatch, no_native_export_backends):
     api = _import_api()
     monkeypatch.setattr(
         "app.services.tech_report.assemble_report",

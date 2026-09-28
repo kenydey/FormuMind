@@ -406,11 +406,18 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
 # Non-PDF tiers, in the same shape as _PDF_TIERS. This used to be a hardcoded
 # if-chain, which meant every new fallback had to be wedged into the control
 # flow rather than registered alongside its peers.
+#
+# The plain-text tier goes first on purpose: for formats that are already text
+# (txt/md/csv/html/htm/json/xml) there is nothing for markitdown to convert,
+# and markitdown mis-decodes non-ASCII bytes (e.g. UTF-8 Chinese) into mojibake
+# that slips past the binary-output guard. _parse_plain tries utf-8 → gbk →
+# latin-1 and returns the text untouched. Binary formats (docx/xlsx) fall
+# through the text tier (ext not in _ALWAYS_PARSEABLE) to markitdown unchanged.
 _DOC_TIERS: tuple[tuple[str, object], ...] = (
+    ("text", lambda c, e: _parse_plain(c) if e in _ALWAYS_PARSEABLE else None),
     ("markitdown", lambda c, e: _parse_markitdown(c, e)),
     ("docx", lambda c, e: _parse_docx(c) if e in ("docx", "doc") else None),
     ("xlsx", lambda c, e: _parse_xlsx(c) if e in ("xlsx", "xlsm") else None),
-    ("text", lambda c, e: _parse_plain(c) if e in _ALWAYS_PARSEABLE else None),
 )
 
 

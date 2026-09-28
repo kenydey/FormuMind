@@ -288,6 +288,10 @@ def test_lookup_chemical_tier4_pubchem(monkeypatch):
     _pubchem_aspirin(monkeypatch)
     monkeypatch.setattr(chemical_lookup, "_lookup_catalog", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_pubchem", lambda *a, **k: None)
+    # pubchempy tier sits between the httpx pubchem tier and the chemtools
+    # tier4 this test targets; block it so the test isolates tier4. Without
+    # this the test only passed when pubchempy was not installed.
+    monkeypatch.setattr(chemical_lookup, "_lookup_compound_synonyms", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_lookup_offline_compounds", lambda q: None)
     monkeypatch.setattr(chemical_lookup, "_CACHE", {})
     hit = chemical_lookup.lookup_chemical("aspirin")
