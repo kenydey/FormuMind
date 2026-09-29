@@ -1,5 +1,7 @@
 """Phase 3 — page thumbnails + VLM chart fallback (opt-in)."""
-import fitz  # PyMuPDF
+import pytest
+
+fitz = pytest.importorskip("fitz", reason="PyMuPDF is in the parse_pro extra")
 
 from app.config import get_settings
 from app.services import page_thumbnails as pt
