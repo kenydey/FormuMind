@@ -1113,7 +1113,11 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
 
             with commit_session(default_session_factory()) as session:
                 doe_plan_store.save(
-                    session, next_doe, campaign_id=campaign_id, round_no=round_no
+                    session,
+                    next_doe,
+                    campaign_id=campaign_id,
+                    round_no=round_no,
+                    project_id=getattr(campaign, "project_id", None) or None,
                 )
         except Exception as exc:
             log_handled_exception(logger, exc, "persist loop next_doe")

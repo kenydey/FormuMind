@@ -1,9 +1,13 @@
 """Project-scoped views for Knowledge Hub / Wiki browse.
 
-Wiki pages have no ``project_id`` column; we attribute them via:
+Wiki pages carry a ``project_id`` column (migration 0033, stamped at compile
+time), but browse attribution still goes through:
   - path conventions for dossier / reports (``themes/project-{id}.md``,
     ``reports/project-{id}-*.md``)
   - intersection of page ``source_ids`` with sources stamped for the project
+
+so that legacy/NULL rows and path-convention pages stay visible. Chat
+retrieval (``search_wiki``) uses the column directly for speed.
 
 Strict mode excludes global sources (``project_id IS NULL``).
 """

@@ -16,6 +16,15 @@ from ..services.wiki.schema import content_hash, wiki_root_from_db_url
 logger = logging.getLogger(__name__)
 
 
+class WikiProjectCollisionError(ValueError):
+    """Raised when upsert targets a path owned by a different project.
+
+    The write is refused (fail-closed); callers that bulk-compile wiki pages
+    should catch it and skip the page (fail-open) instead of overwriting
+    another project's content.
+    """
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -49,12 +58,14 @@ class WikiStore:
         source_ids: list[str] | None = None,
         flags: list[str] | None = None,
         replace_source_ids: bool = False,
+        project_id: str | None = None,
     ) -> WikiPage:
         rel = path.replace("\\", "/").lstrip("/")
         body = markdown
         digest = content_hash(body)
         abs_path = self._abs(rel)
         abs_path.parent.mkdir(parents=True, exist_ok=True)
+        scoped_project = (project_id or "").strip() or None
 
         with commit_session(self._session_factory) as session:
             row = (
@@ -76,6 +87,7 @@ class WikiStore:
                     revision=1,
                     created_at=_utcnow(),
                     updated_at=_utcnow(),
+                    project_id=scoped_project,
                 )
                 session.add(row)
                 abs_path.write_text(body, encoding="utf-8")
@@ -88,6 +100,20 @@ class WikiStore:
                     merged_sources = incoming
                 else:
                     merged_sources = list(dict.fromkeys([*(row.source_ids or []), *incoming]))
+
+                # P0-2: adopt project scope when the row has none; refuse
+                # cross-project path collision (fail-closed — see 0033).
+                if scoped_project is not None and not row.project_id:
+                    row.project_id = scoped_project
+                elif (
+                    scoped_project is not None
+                    and row.project_id
+                    and row.project_id != scoped_project
+                ):
+                    raise WikiProjectCollisionError(
+                        f"wiki path {rel!r} belongs to project {row.project_id!r}, "
+                        f"not {scoped_project!r}; refusing to overwrite"
+                    )
 
                 if row.content_hash == digest:
                     changed = False
@@ -155,12 +181,19 @@ class WikiStore:
             )
 
     def list_pages(
-        self, *, kind: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        *,
+        kind: str | None = None,
+        project_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[WikiPage]:
         with self._session_factory() as session:
             q = session.query(WikiPage).order_by(WikiPage.updated_at.desc())
             if kind:
                 q = q.filter(WikiPage.kind == kind)
+            if project_id:
+                q = q.filter(WikiPage.project_id == project_id)
             return q.offset(max(0, offset)).limit(min(500, max(1, limit))).all()
 
     def read_markdown(self, path: str) -> str | None:

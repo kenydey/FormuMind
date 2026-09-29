@@ -1451,7 +1451,11 @@ def _campaign_rounds_data(campaign_id: int) -> tuple[list[dict], int]:
     factory = default_session_factory()
     with factory() as session:
         doe_items, _ = doe_plan_store.list_history(
-            session, campaign_id=campaign_id, page=1, page_size=1000
+            session,
+            campaign_id=campaign_id,
+            project_id=getattr(campaign, "project_id", None) or None,
+            page=1,
+            page_size=1000,
         )
     doe_by_round: dict[int, dict] = {
         d["round"]: d for d in doe_items if d.get("round") is not None

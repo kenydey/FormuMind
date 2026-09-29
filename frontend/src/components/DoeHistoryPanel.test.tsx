@@ -5,8 +5,8 @@ import { api } from "../api";
 import DoeHistoryPanel from "./DoeHistoryPanel";
 
 vi.mock("../store", () => ({
-  useStore: (sel: (s: { workbenchCampaignId: number | null }) => unknown) =>
-    sel({ workbenchCampaignId: 11 }),
+  useStore: (sel: (s: { workbenchCampaignId: number | null; activeProjectId: string | null }) => unknown) =>
+    sel({ workbenchCampaignId: 11, activeProjectId: "proj-1" }),
 }));
 
 describe("DoeHistoryPanel", () => {
@@ -34,7 +34,7 @@ describe("DoeHistoryPanel", () => {
     expect(screen.getByTestId("doe-history-panel")).toBeTruthy();
     await userEvent.click(screen.getByTestId("doe-history-toggle"));
     await waitFor(() => expect(spy).toHaveBeenCalled());
-    expect(spy.mock.calls[0][0]).toMatchObject({ campaignId: 11 });
+    expect(spy.mock.calls[0][0]).toMatchObject({ campaignId: 11, projectId: "proj-1" });
     expect(await screen.findByTestId("doe-history-list")).toBeTruthy();
     expect(screen.getByText("lhs")).toBeTruthy();
     expect(screen.getByText(/batch A/)).toBeTruthy();

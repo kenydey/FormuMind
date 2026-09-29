@@ -224,9 +224,9 @@ export const apiMethods = {
     }),
   doe: (req: Requirement, design: string, engine = "auto") =>
     post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
-  listDoeHistory: (opts: { campaignId?: number | null; page?: number; pageSize?: number } = {}) =>
+  listDoeHistory: (opts: { campaignId?: number | null; projectId?: string | null; page?: number; pageSize?: number } = {}) =>
     get<{ items: Record<string, unknown>[]; total: number; page: number; page_size: number }>(
-      `/api/doe/history?page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 20}` +
+      `/api/doe/history?project_id=${encodeURIComponent(opts.projectId ?? "")}&page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 20}` +
         (opts.campaignId != null ? `&campaign_id=${opts.campaignId}` : "")
     ),
   startDoeCycle: (req: Requirement, opts: { workbench_campaign_id?: number | null } = {}) =>

@@ -125,6 +125,9 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
     from ...db.session_utils import commit_session
 
     session_factory = default_session_factory()
+    # P0-2: carry the wiki page's project scope onto its shadow SourceDocument
+    # so semantic retrieval can filter by project.
+    row_project_id = getattr(row, "project_id", None) or None
     with commit_session(session_factory) as session:
         doc = session.get(SourceDocument, sid)
         if doc is None:
@@ -139,6 +142,7 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
                     full_text=blob,
                     raw_text_chars=len(blob),
                     extraction_status="skipped",
+                    project_id=row_project_id,
                 )
             )
         else:
@@ -149,6 +153,8 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
             doc.origin_url = origin[:1024]
             doc.full_text = blob
             doc.raw_text_chars = len(blob)
+            if row_project_id and not doc.project_id:
+                doc.project_id = row_project_id
 
         get_chunk_store().replace_for_source_in(
             session,
@@ -220,8 +226,14 @@ def list_wiki_source_ids() -> set[str]:
     return ids
 
 
-def search_wiki_embedded(query: str, *, k: int = 5) -> list[Evidence]:
-    """Semantic (or keyword) search over wiki summary chunks only."""
+def search_wiki_embedded(
+    query: str, *, k: int = 5, project_id: str | None = None
+) -> list[Evidence]:
+    """Semantic (or keyword) search over wiki summary chunks only.
+
+    ``project_id`` scopes to the project's shadow wiki documents (P0-2);
+    ``None`` keeps the old global behavior.
+    """
     settings = get_settings()
     if not settings.wiki_enabled or not getattr(settings, "wiki_embed_enabled", False):
         return []
@@ -234,11 +246,12 @@ def search_wiki_embedded(query: str, *, k: int = 5) -> list[Evidence]:
 
     wiki_meta: dict[str, dict[str, str]] = {}
     with default_session_factory()() as session:
-        rows = (
-            session.query(SourceDocument)
-            .filter(SourceDocument.source_kind == "wiki")
-            .all()
+        qdocs = session.query(SourceDocument).filter(
+            SourceDocument.source_kind == "wiki"
         )
+        if project_id:
+            qdocs = qdocs.filter(SourceDocument.project_id == project_id)
+        rows = qdocs.all()
         for r in rows:
             path = path_from_origin(r.origin_url) or r.filename or ""
             wiki_meta[r.id] = {

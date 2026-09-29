@@ -162,7 +162,9 @@ def _augment_with_kb(
     try:
         from ..services.wiki.retrieve import blend_wiki_evidence
 
-        sources, wiki_added = blend_wiki_evidence(question, sources)
+        sources, wiki_added = blend_wiki_evidence(
+            question, sources, project_id=project_id
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("wiki chat blend skipped: %s", exc)
 

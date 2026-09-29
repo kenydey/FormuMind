@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ...config import get_settings
-from ...db.wiki_store import get_wiki_store
+from ...db.wiki_store import WikiProjectCollisionError, get_wiki_store
 from .dossier_pack import build_project_dossier_pack
 from .dossier_narrative import (
     attach_narrative,
@@ -506,17 +506,22 @@ def _persist_dossier(
     if pack.get("flags", {}).get("missing_requirement"):
         flags.append("incomplete")
 
-    row = store.upsert_page(
-        path=path,
-        kind="theme",
-        title=str(title)[:512],
-        norm_key=safe_key(project_id),
-        entity_id=f"theme:project:{safe_key(project_id)}"[:64],
-        markdown=markdown,
-        source_ids=list(pack.get("literature", {}).get("source_ids") or []),
-        flags=flags,
-        replace_source_ids=True,
-    )
+    try:
+        row = store.upsert_page(
+            path=path,
+            kind="theme",
+            title=str(title)[:512],
+            norm_key=safe_key(project_id),
+            entity_id=f"theme:project:{safe_key(project_id)}"[:64],
+            markdown=markdown,
+            source_ids=list(pack.get("literature", {}).get("source_ids") or []),
+            flags=flags,
+            replace_source_ids=True,
+            project_id=project_id,
+        )
+    except WikiProjectCollisionError as exc:
+        logger.warning("dossier write refused on project collision: %s", exc)
+        return {"ok": False, "error": "project_collision", "detail": str(exc)}
 
     data_payload = {
         **pack,

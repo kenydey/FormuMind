@@ -13,7 +13,7 @@ from ...config import get_settings
 from ...db.chunk_store import get_chunk_store
 from ...db.material_store import norm_key as material_norm_key
 from ...db.source_store import get_source_store
-from ...db.wiki_store import get_wiki_store
+from ...db.wiki_store import WikiProjectCollisionError, get_wiki_store
 from .schema import (
     chemical_entity_id,
     chemical_path,
@@ -57,6 +57,8 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
     doc = sources.get(sid)
     if doc is None:
         return {"ok": False, "reason": "source_not_found", "pages": []}
+    # P0-2: stamp compiled pages with the source's project for isolation.
+    doc_project_id = getattr(doc, "project_id", None) or None
 
     guide = sources.get_source_guide(sid)
     chunks = get_chunk_store().get_by_source(sid)
@@ -200,16 +202,21 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
             summary=summary,
             evidence_blocks=evidence,
         )
-        row = store.upsert_page(
-            path=path,
-            kind="material",
-            title=info["title"],
-            norm_key=key,
-            entity_id=entity_id,
-            markdown=md,
-            source_ids=source_ids,
-            flags=flags,
-        )
+        try:
+            row = store.upsert_page(
+                path=path,
+                project_id=doc_project_id,
+                kind="material",
+                title=info["title"],
+                norm_key=key,
+                entity_id=entity_id,
+                markdown=md,
+                source_ids=source_ids,
+                flags=flags,
+            )
+        except WikiProjectCollisionError as exc:
+            logger.warning("wiki compile skipped page on project collision: %s", exc)
+            continue
         updated.append(row.path)
 
     for cas, info in chemicals.items():
@@ -254,16 +261,21 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
             summary=summary,
             evidence_blocks=evidence,
         )
-        row = store.upsert_page(
-            path=path,
-            kind="chemical",
-            title=info["title"],
-            norm_key=cas,
-            entity_id=entity_id,
-            markdown=md,
-            source_ids=source_ids,
-            flags=flags,
-        )
+        try:
+            row = store.upsert_page(
+                path=path,
+                project_id=doc_project_id,
+                kind="chemical",
+                title=info["title"],
+                norm_key=cas,
+                entity_id=entity_id,
+                markdown=md,
+                source_ids=source_ids,
+                flags=flags,
+            )
+        except WikiProjectCollisionError as exc:
+            logger.warning("wiki compile skipped page on project collision: %s", exc)
+            continue
         updated.append(row.path)
 
     # Systems / mechanisms / pitfalls from SourceGuide (W4)
@@ -317,27 +329,32 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
             # Tight max as soft forbidden note
             if bound.max_value is not None:
                 forbidden.append(f"{pname} > {bound.max_value} {bound.unit}".strip())
-            row = store.upsert_page(
-                path=path,
-                kind="system",
-                title=pname,
-                norm_key=key,
-                entity_id=f"system:{key}"[:64],
-                markdown=dump_page(
+            try:
+                row = store.upsert_page(
+                    path=path,
+                    project_id=doc_project_id,
                     kind="system",
                     title=pname,
-                    entity_id=f"system:{key}"[:64],
                     norm_key=key,
+                    entity_id=f"system:{key}"[:64],
+                    markdown=dump_page(
+                        kind="system",
+                        title=pname,
+                        entity_id=f"system:{key}"[:64],
+                        norm_key=key,
+                        source_ids=source_ids,
+                        flags=flags,
+                        summary=summary,
+                        evidence_blocks=evidence,
+                        bounds=bounds,
+                        forbidden=forbidden,
+                    ),
                     source_ids=source_ids,
                     flags=flags,
-                    summary=summary,
-                    evidence_blocks=evidence,
-                    bounds=bounds,
-                    forbidden=forbidden,
-                ),
-                source_ids=source_ids,
-                flags=flags,
-            )
+                )
+            except WikiProjectCollisionError as exc:
+                logger.warning("wiki compile skipped page on project collision: %s", exc)
+                continue
             updated.append(row.path)
 
         # Mechanism page from summary
@@ -371,26 +388,32 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
                         ]
                     )
                 )
-            row = store.upsert_page(
-                path=path,
-                kind="mechanism",
-                title=f"机理 · {mkey}",
-                norm_key=mkey,
-                entity_id=f"mechanism:{mkey}"[:64],
-                markdown=dump_page(
+            try:
+                row = store.upsert_page(
+                    path=path,
+                    project_id=doc_project_id,
                     kind="mechanism",
                     title=f"机理 · {mkey}",
-                    entity_id=f"mechanism:{mkey}"[:64],
                     norm_key=mkey,
+                    entity_id=f"mechanism:{mkey}"[:64],
+                    markdown=dump_page(
+                        kind="mechanism",
+                        title=f"机理 · {mkey}",
+                        entity_id=f"mechanism:{mkey}"[:64],
+                        norm_key=mkey,
+                        source_ids=source_ids,
+                        flags=flags,
+                        summary=summary,
+                        evidence_blocks=evidence,
+                    ),
                     source_ids=source_ids,
                     flags=flags,
-                    summary=summary,
-                    evidence_blocks=evidence,
-                ),
-                source_ids=source_ids,
-                flags=flags,
-            )
-            updated.append(row.path)
+                )
+            except WikiProjectCollisionError as exc:
+                logger.warning("wiki compile skipped page on project collision: %s", exc)
+                row = None
+            if row is not None:
+                updated.append(row.path)
 
         # Pitfalls from FAQs mentioning 避免/禁忌/不要/禁止/avoid
         _pit_re = re.compile(r"避免|禁忌|不要|禁止|avoid|forbid|never", re.I)
@@ -419,26 +442,31 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
                         ]
                     )
                 )
-            row = store.upsert_page(
-                path=path,
-                kind="pitfall",
-                title=text[:120],
-                norm_key=pkey,
-                entity_id=f"pitfall:{pkey}"[:64],
-                markdown=dump_page(
+            try:
+                row = store.upsert_page(
+                    path=path,
+                    project_id=doc_project_id,
                     kind="pitfall",
                     title=text[:120],
-                    entity_id=f"pitfall:{pkey}"[:64],
                     norm_key=pkey,
+                    entity_id=f"pitfall:{pkey}"[:64],
+                    markdown=dump_page(
+                        kind="pitfall",
+                        title=text[:120],
+                        entity_id=f"pitfall:{pkey}"[:64],
+                        norm_key=pkey,
+                        source_ids=source_ids,
+                        flags=flags,
+                        summary=text,
+                        evidence_blocks=evidence,
+                        forbidden=[text],
+                    ),
                     source_ids=source_ids,
                     flags=flags,
-                    summary=text,
-                    evidence_blocks=evidence,
-                    forbidden=[text],
-                ),
-                source_ids=source_ids,
-                flags=flags,
-            )
+                )
+            except WikiProjectCollisionError as exc:
+                logger.warning("wiki compile skipped page on project collision: %s", exc)
+                continue
             updated.append(row.path)
 
     # Post: lint + optional neo4j

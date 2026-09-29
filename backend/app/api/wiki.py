@@ -21,6 +21,7 @@ class WikiPageItem(BaseModel):
     flags: list[str] = Field(default_factory=list)
     revision: int = 1
     updated_at: str | None = None
+    project_id: str | None = None
 
 
 class WikiPageDetail(WikiPageItem):
@@ -49,6 +50,7 @@ def _item(row) -> WikiPageItem:
         flags=list(row.flags or []),
         revision=int(row.revision or 1),
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        project_id=getattr(row, "project_id", None),
     )
 
 
@@ -60,7 +62,9 @@ def list_pages(
     project_id: str | None = Query(
         default=None,
         description="When set, only dossier/reports for this project and wiki pages "
-        "whose source_ids belong to the project (strict; no global leak)",
+        "whose source_ids belong to the project (strict; no global leak). "
+        "Attribution uses path conventions + source_ids (project_scope); the "
+        "wiki_pages.project_id column (0033) speeds up chat retrieval.",
     ),
 ) -> WikiPagesResponse:
     _require_wiki()
@@ -68,7 +72,8 @@ def list_pages(
     if project_id:
         from ..services.wiki.project_scope import filter_wiki_rows
 
-        # Over-fetch then filter — wiki has no project_id column.
+        # Over-fetch then filter — attribution needs path conventions +
+        # source_ids, which a plain column filter cannot express.
         scan = store.list_pages(kind=kind, limit=min(500, max(limit + offset, limit * 5)), offset=0)
         scoped = filter_wiki_rows(scan, project_id)
         rows = scoped[offset : offset + limit]

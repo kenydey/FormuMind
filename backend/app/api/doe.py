@@ -33,7 +33,11 @@ DOE_ENGINES = ["auto", "native", "pydoe"]
 AL_ENGINES = ["auto", "legacy", "baybe"]
 
 
-def _persist_doe_plan(plan: DOEPlan, campaign_id: int | None = None) -> None:
+def _persist_doe_plan(
+    plan: DOEPlan,
+    campaign_id: int | None = None,
+    project_id: str | None = None,
+) -> None:
     """Best-effort: persist a single DOEPlan to the doe_plans table."""
     try:
         from ..db import doe_plan_store
@@ -42,7 +46,9 @@ def _persist_doe_plan(plan: DOEPlan, campaign_id: int | None = None) -> None:
 
         factory = default_session_factory()
         with commit_session(factory) as session:
-            doe_plan_store.save(session, plan, campaign_id=campaign_id)
+            doe_plan_store.save(
+                session, plan, campaign_id=campaign_id, project_id=project_id
+            )
     except Exception as exc:
         logger.warning("persist doe plan failed: %s", exc, exc_info=True)
     # P4.2: optional dossier S4 patch (default OFF).
@@ -64,7 +70,7 @@ def generate_doe(
     if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
     plan = workflow.build_doe(requirement, design=design, engine=engine, n=n)
-    _persist_doe_plan(plan)
+    _persist_doe_plan(plan, project_id=requirement.project_id or None)
     return plan
 
 
@@ -123,7 +129,11 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
         workbench_campaign_id=req.workbench_campaign_id,
         budget_remaining=req.budget_remaining,
     )
-    _persist_doe_plan(result.plan, campaign_id=req.workbench_campaign_id)
+    _persist_doe_plan(
+        result.plan,
+        campaign_id=req.workbench_campaign_id,
+        project_id=req.project_id or None,
+    )
     return result
 
 
@@ -239,21 +249,30 @@ def doe_cycle_runs(
 
 @router.get("/doe/history", response_model=DoeHistoryResponse)
 def doe_history(
+    project_id: str = Query(...),
     campaign_id: int | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> DoeHistoryResponse:
     """分页查询历史 DOE 记录（最新优先）。
 
-    ``campaign_id`` 缺省时返回全部（含未关联的孤立记录）。
+    ``project_id`` is required (fail-closed): plan stats are meaningless
+    without a project scope, and unscoped reads would leak plans across
+    projects. ``campaign_id`` further narrows to one workbench campaign.
     """
+    if not project_id.strip():
+        raise HTTPException(status_code=422, detail="project_id must be non-empty")
     from ..db import doe_plan_store
     from ..db.database import default_session_factory
 
     factory = default_session_factory()
     with factory() as session:
         items, total = doe_plan_store.list_history(
-            session, campaign_id=campaign_id, page=page, page_size=page_size
+            session,
+            campaign_id=campaign_id,
+            project_id=project_id,
+            page=page,
+            page_size=page_size,
         )
     return DoeHistoryResponse(items=items, total=total, page=page, page_size=page_size)
 

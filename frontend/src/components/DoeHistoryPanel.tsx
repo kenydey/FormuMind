@@ -20,6 +20,7 @@ export type DoeHistoryItem = {
  */
 export default function DoeHistoryPanel() {
   const workbenchCampaignId = useStore((s) => s.workbenchCampaignId);
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<DoeHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -31,8 +32,15 @@ export default function DoeHistoryPanel() {
     setLoading(true);
     setError(null);
     try {
+      if (!activeProjectId) {
+        setItems([]);
+        setTotal(0);
+        setError("请先选择项目（DOE 历史按项目隔离）。");
+        return;
+      }
       const res = await api.listDoeHistory({
         campaignId: scope === "campaign" ? workbenchCampaignId : null,
+        projectId: activeProjectId,
         page: 1,
         pageSize: 20,
       });
@@ -45,7 +53,7 @@ export default function DoeHistoryPanel() {
     } finally {
       setLoading(false);
     }
-  }, [scope, workbenchCampaignId]);
+  }, [scope, workbenchCampaignId, activeProjectId]);
 
   useEffect(() => {
     if (!open) return;

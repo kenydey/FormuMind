@@ -28,6 +28,7 @@ def _plan_to_row(
     campaign_id: int | None = None,
     experiment_id: int | None = None,
     round_no: int | None = None,
+    project_id: str | None = None,
 ) -> DOEPlanRow:
     """Serialize a domain ``DOEPlan`` to an ORM row."""
     plan_id = plan.plan_id or uuid.uuid4().hex
@@ -36,6 +37,7 @@ def _plan_to_row(
         experiment_id=experiment_id,
         campaign_id=campaign_id,
         round=round_no,
+        project_id=project_id or None,
         design_type=plan.design,
         parameters={
             "factors": [f.model_dump() for f in plan.factors],
@@ -67,6 +69,7 @@ def save(
     campaign_id: int | None = None,
     experiment_id: int | None = None,
     round_no: int | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Persist *plan* to the ``doe_plans`` table.
 
@@ -76,7 +79,11 @@ def save(
     (idempotent — existing row is left untouched).
     """
     row = _plan_to_row(
-        plan, campaign_id=campaign_id, experiment_id=experiment_id, round_no=round_no
+        plan,
+        campaign_id=campaign_id,
+        experiment_id=experiment_id,
+        round_no=round_no,
+        project_id=project_id,
     )
     sp = session.begin_nested()
     try:
@@ -113,17 +120,22 @@ def list_history(
     session: Session,
     *,
     campaign_id: int | None = None,
+    project_id: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[dict], int]:
     """Paginated history of DOE plans, newest first. Returns (items, total).
 
     ``campaign_id=None`` returns every plan (including legacy orphan rows);
-    pass a campaign id to scope to one workbench campaign.
+    pass a campaign id to scope to one workbench campaign. ``project_id``
+    scopes to one project when provided (legacy NULL rows are excluded —
+    they are unscoped, not visible under any project).
     """
     q = select(DOEPlanRow)
     if campaign_id is not None:
         q = q.where(DOEPlanRow.campaign_id == campaign_id)
+    if project_id is not None:
+        q = q.where(DOEPlanRow.project_id == project_id)
 
     total = int(
         session.execute(select(func.count()).select_from(q.subquery())).scalar() or 0

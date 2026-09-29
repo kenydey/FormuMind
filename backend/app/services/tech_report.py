@@ -137,7 +137,9 @@ def _gather_doe(project_id: str) -> tuple[str, list[str]]:
     try:
         factory = default_session_factory()
         with factory() as session:
-            items, total = doe_plan_store.list_history(session, page=1, page_size=3)
+            items, total = doe_plan_store.list_history(
+                session, project_id=project_id or None, page=1, page_size=3
+            )
     except Exception as exc:
         logger.warning("doe history lookup failed: %s", exc)
         return "", [f"DOE 历史查询失败：{exc}"]

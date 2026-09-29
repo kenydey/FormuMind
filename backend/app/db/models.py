@@ -752,10 +752,16 @@ class DOEPlanRow(Base):
     # Closed-loop round this plan was generated for (1-based); NULL = manual/unassociated.
     round: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    # P0-1 (Phase 0): project scope for isolation. NULL = legacy / unscoped.
+    # Index is declared explicitly in __table_args__ (single index).
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, default=None
+    )
 
     __table_args__ = (
         Index("ix_doe_plans_experiment", "experiment_id"),
         Index("ix_doe_plans_campaign", "campaign_id"),
+        Index("ix_doe_plans_project", "project_id"),
     )
 
 
@@ -836,6 +842,15 @@ class WikiPage(Base):
     revision: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    # P0-2 (Phase 0): project scope for isolation. NULL = legacy / global page.
+    # Index is declared explicitly in __table_args__ (single index).
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, default=None
+    )
+
+    __table_args__ = (
+        Index("ix_wiki_pages_project", "project_id"),
+    )
 
 
 class KbIngestAudit(Base):

@@ -36,8 +36,14 @@ def _normalize_chat_mode(raw: str | None) -> str:
     return "balanced"
 
 
-def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
-    """Keyword search over wiki titles / norm_key / markdown body."""
+def search_wiki(
+    query: str, *, k: int = 5, project_id: str | None = None
+) -> list[Evidence]:
+    """Keyword search over wiki titles / norm_key / markdown body.
+
+    ``project_id`` scopes retrieval to one project (P0-2); legacy/None
+    keeps the old global behavior.
+    """
     settings = get_settings()
     if not settings.wiki_enabled or not settings.wiki_chat_blend:
         return []
@@ -51,7 +57,9 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
         tokens = [q.lower()]
 
     store = get_wiki_store()
-    pages = store.list_pages(limit=min(500, max(50, k * 40)))
+    pages = store.list_pages(
+        limit=min(500, max(50, k * 40)), project_id=project_id
+    )
     scored: list[tuple[float, Evidence]] = []
     for row in pages:
         md = store.read_markdown(row.path) or ""
@@ -98,7 +106,7 @@ def search_wiki(query: str, *, k: int = 5) -> list[Evidence]:
         try:
             from .embed import search_wiki_embedded
 
-            embedded = search_wiki_embedded(q, k=k)
+            embedded = search_wiki_embedded(q, k=k, project_id=project_id)
         except Exception:
             embedded = []
         if embedded:
@@ -121,6 +129,7 @@ def blend_wiki_evidence(
     sources: list[Evidence],
     *,
     k: int | None = None,
+    project_id: str | None = None,
 ) -> tuple[list[Evidence], int]:
     """Merge wiki hits (deduped). Ordering depends on ``wiki_chat_mode``.
 
@@ -137,7 +146,7 @@ def blend_wiki_evidence(
     else:
         default_k = min(5, max(2, settings.kb_chat_top_k // 4 or 2))
     top_k = k if k is not None else default_k
-    hits = search_wiki(question, k=top_k)
+    hits = search_wiki(question, k=top_k, project_id=project_id)
     if not hits:
         return sources, 0
     seen = {ev.identifier for ev in sources}

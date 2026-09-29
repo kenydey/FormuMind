@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from ...config import get_settings
-from ...db.wiki_store import get_wiki_store
+from ...db.wiki_store import WikiProjectCollisionError, get_wiki_store
 from .dossier import ensure_project_dossier, get_dossier_pack
 from .dossier_narrative import validate_narrative
 from .schema import dump_page, project_report_path, safe_key, utcnow_iso
@@ -464,17 +464,25 @@ def generate_report(
         if end > 0:
             md = md[: end + 4] + "\n\n" + body.strip() + "\n"
 
-    row = store.upsert_page(
-        path=path,
-        kind="report",
-        title=title[:512],
-        norm_key=f"{safe_key(pid)}-{tpl}"[:80],
-        entity_id=f"report:{tpl}:{safe_key(pid)}"[:64],
-        markdown=md,
-        source_ids=list((pack.get("literature") or {}).get("source_ids") or []),
-        flags=flags,
-        replace_source_ids=True,
-    )
+    try:
+        row = store.upsert_page(
+            path=path,
+            kind="report",
+            title=title[:512],
+            norm_key=f"{safe_key(pid)}-{tpl}"[:80],
+            entity_id=f"report:{tpl}:{safe_key(pid)}"[:64],
+            markdown=md,
+            source_ids=list((pack.get("literature") or {}).get("source_ids") or []),
+            flags=flags,
+            replace_source_ids=True,
+            project_id=pid,
+        )
+    except WikiProjectCollisionError as exc:
+        logger.warning("report write refused on project collision: %s", exc)
+        out["persisted"] = False
+        out["error"] = "project_collision"
+        out["detail"] = str(exc)
+        return out
     out["page_id"] = row.id
     out["revision"] = int(row.revision or 1)
     out["markdown"] = md
