@@ -37,7 +37,7 @@ def _doc(*blocks: mineru_cloud.MinerUBlock) -> mineru_cloud.MinerUDocument:
 
 
 def _clean_pdf(pages: int = 2, chars: int = 200) -> bytes:
-    import fitz  # type: ignore
+    fitz = pytest.importorskip("fitz", reason="PyMuPDF is in the parse_pro extra")
 
     doc = fitz.open()
     for _ in range(pages):
@@ -49,7 +49,7 @@ def _clean_pdf(pages: int = 2, chars: int = 200) -> bytes:
 
 
 def _dirty_pdf() -> bytes:
-    import fitz  # type: ignore
+    fitz = pytest.importorskip("fitz", reason="PyMuPDF is in the parse_pro extra")
 
     doc = fitz.open()
     doc.new_page()  # no text layer at all
