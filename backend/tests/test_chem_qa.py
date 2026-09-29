@@ -184,6 +184,22 @@ def test_chat_prompt_contains_chemistry_notation_rules():
     assert "trade names" in prompt
 
 
+def test_chat_prompt_sql_attribution_rule():
+    """P3-3: SQL 确定性数字不得挂文献脚注 — prompt 必须有显式归因规则。"""
+    from app.domain.schemas import Evidence
+    from app.services.llm import _chat_prompt
+
+    prompt = _chat_prompt(
+        "查耐盐雾大于1000小时的实验",
+        [Evidence(source="kb", identifier="x", title="t", snippet="s", relevance=0.9)],
+        "anticorrosion_coating",
+    )
+    assert "来自实验数据库" in prompt
+    assert "[^n]" in prompt
+    # 规则：SQL 数字不挂文献脚注，[^n] 只用于文献
+    assert "must NOT carry [^n] literature footnotes" in prompt
+
+
 # ── stats products counter ───────────────────────────────────────────────────
 
 

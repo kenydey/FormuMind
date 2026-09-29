@@ -936,6 +936,51 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "mode": plan.get("mode") or req.mode,
                 }
             )
+
+            # P3-2: opt-in VLM chart fallback. Chart questions are answered from
+            # stored page thumbnails instead of the pure-text path. Default off
+            # (vlm_fallback_enabled=False) = zero overhead: the check below
+            # short-circuits before any vision call. Fail-open — no thumbnails,
+            # no vision backend, or any error falls through to the normal
+            # token stream below.
+            chart_hit = False
+            try:
+                from ..services.page_thumbnails import (
+                    answer_chart_question,
+                    is_chart_question,
+                )
+
+                if settings.vlm_fallback_enabled and is_chart_question(question):
+                    _chart_source_id = (
+                        sources[0].identifier if sources else None
+                    )
+                    if _chart_source_id:
+                        _chart = await asyncio.to_thread(
+                            answer_chart_question, question, _chart_source_id, None
+                        )
+                        if _chart is not None and _chart.answer:
+                            chart_hit = True
+                            yield _sse({"type": "phase", "phase": "chart_vlm"})
+                            yield _sse({"type": "token", "delta": _chart.answer})
+                            yield _sse(
+                                {
+                                    "type": "done",
+                                    "answer": _chart.answer,
+                                    "citations": [],
+                                    "chart_vlm": {
+                                        "pages_used": _chart.pages_used,
+                                        "image_tokens": _chart.image_tokens,
+                                        "model": _chart.model,
+                                    },
+                                    "kb_chunks_used": kb_used,
+                                    "data_sources": plan.get("data_sources"),
+                                    "clarification": plan["clarification"],
+                                }
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("chat/stream chart vlm hook skipped: %s", exc)
+            if chart_hit:
+                return
         except Exception as exc:
             logger.warning("chat/stream 准备失败: %s", exc)
             yield _sse({"type": "error", "message": f"检索失败: {str(exc)[:200]}"})

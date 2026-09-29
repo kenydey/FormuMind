@@ -102,6 +102,7 @@ def _ingest_parsed_text(
     source_kind: str,
     persist: bool = True,
     origin_url: str | None = None,
+    parser: str | None = None,  # P3-5: ParseResult.parser provenance
 ) -> IngestOutcome:
     settings = get_settings()
     guide: SourceGuideSchema | None = None
@@ -134,6 +135,7 @@ def _ingest_parsed_text(
             extraction_status=status,
             extraction_error=err,
             origin_url=origin_url,
+            parser=parser,
         )
         # Persistent KB v2: chunk (+embed when available) into document_chunks
         # so chat retrieval spans the whole corpus across restarts.
@@ -223,6 +225,7 @@ def ingest_file(
         source_kind="local",
         persist=persist,
         origin_url=origin_url,
+        parser=getattr(parsed, "parser", None),
     )
     # Phase 1: MinerU structured products → extraction_tables/formulas.
     # Fail-open: a structured-persist failure must never break the ingest

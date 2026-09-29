@@ -10,7 +10,7 @@
 
 对抗用例（``"adversarial": True`` 的 pair）在独立章节单独计分：
 报告每个 trap 被新对抗指标检出（FLAGGED）还是漏网（MISSED），
-只报告、不影响 exit code，不污染 32 组标准集的通过线。
+任一 trap 漏网即 exit 1（硬门禁），不污染 32 组标准集的通过线。
 
 单 pair 评估异常记 error 并跳过（fail-open），不直接炸门禁；
 可用 ``FORMUMIND_RIGOR_GATE=0`` 跳过（默认开启）。
@@ -180,10 +180,11 @@ def main() -> int:
     )
     main_rc = 0 if (overall_ok and not failed_pairs) else 1
 
-    # ---- 对抗集：单独计分，只报告不影响 exit code ----
+    # ---- 对抗集：单独计分，trap 漏网影响 exit code（硬门禁） ----
+    missed_traps: list[str] = []
     if adversarial_pairs:
         print("=" * 60)
-        print(f"adversarial set: {len(adversarial_pairs)} trap pairs (report only)")
+        print(f"adversarial set: {len(adversarial_pairs)} trap pairs (HARD GATE)")
         detected = {m: 0 for m in adv_metric_names}
         applicable = {m: 0 for m in adv_metric_names}
         for i, pair in enumerate(adversarial_pairs):
@@ -210,6 +211,7 @@ def main() -> int:
                     detected[m] += 1
                     parts.append(f"{m}=FLAGGED")
                 else:
+                    missed_traps.append(f"[adv{i}] {m}")
                     parts.append(f"{m}=MISSED(score={mr.get('score')})")
                 for f in mr["failures"]:
                     parts.append(f"    - {f['reason']}")
@@ -227,6 +229,11 @@ def main() -> int:
                 print(
                     f"{m}: detected {detected[m]}/{applicable[m]} traps"
                 )
+        if missed_traps:
+            print(f"ADVERSARIAL GATE FAILED: {len(missed_traps)} trap(s) missed:")
+            for t in missed_traps:
+                print(f"  - {t}")
+            main_rc = 1
     return main_rc
 
 

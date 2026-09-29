@@ -162,3 +162,134 @@ def test_stream_structured_returns_done_without_tokens(monkeypatch, client):
     assert types[-1] == "done"
     assert events[-1]["structured"] is not None
     assert events[-1]["answer"] == "结构化答案摘要"
+
+
+# ── P3-2: opt-in VLM chart fallback ─────────────────────────────────────────
+
+
+def _chart_plan(req, settings):
+    from app.domain.schemas import Evidence
+
+    return {
+        "question": req.question,
+        "prompt": "p",
+        "sources": [
+            Evidence(
+                source="local",
+                identifier="doc-1",
+                title="t",
+                snippet="s",
+                relevance=0.9,
+            )
+        ],
+        "kb_used": 1,
+        "entity_resolution": None,
+        "kg_stats": None,
+        "clarification": None,
+        "rewritten_query": None,
+        "mode": "chat",
+        "selected_skills": [],
+        "selected_mcp_servers": [],
+        "data_sources": ["kb_evidence"],
+    }
+
+
+def test_chart_vlm_hook_zero_overhead_when_disabled(monkeypatch, client):
+    """默认关闭时零开销：answer_chart_question 不被调用，走正常文本流。"""
+    import app.api.chat as chat_mod
+    import app.services.llm as llm_mod
+    import app.services.page_thumbnails as thumbs_mod
+
+    monkeypatch.setattr(chat_mod, "_stream_answer_plan", _chart_plan)
+    monkeypatch.setattr(
+        llm_mod, "_openai_compatible_stream", lambda *a, **k: "文本答案"
+    )
+    called = []
+
+    def boom(*a, **k):
+        called.append(1)
+        raise AssertionError("must not be called when disabled")
+
+    monkeypatch.setattr(thumbs_mod, "answer_chart_question", boom)
+
+    resp = client.post(
+        "/api/chat/stream",
+        json={"question": "图1中的曲线说明了什么?", "sources": []},
+    )
+    assert resp.status_code == 200
+    assert called == []
+    events = _parse_events(resp.text)
+    assert events[-1]["type"] == "done"
+    assert "chart_vlm" not in events[-1]
+
+
+def test_chart_vlm_hook_answers_chart_question(monkeypatch, client):
+    """开启时图表问题走 VLM 路径：phase=chart_vlm，单 token，done 带 chart_vlm。"""
+    import app.api.chat as chat_mod
+    import app.services.llm as llm_mod
+    import app.services.page_thumbnails as thumbs_mod
+    from app.services.page_thumbnails import ChartVLMResult
+
+    monkeypatch.setenv("FORMUMIND_VLM_FALLBACK_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    monkeypatch.setattr(chat_mod, "_stream_answer_plan", _chart_plan)
+    llm_calls = []
+    monkeypatch.setattr(
+        llm_mod,
+        "_openai_compatible_stream",
+        lambda *a, **k: llm_calls.append(1) or "不应调用",
+    )
+
+    def fake_chart(query, source_id, page_nums=None):
+        assert source_id == "doc-1"
+        return ChartVLMResult(
+            answer="VLM图表答案", pages_used=[1], image_tokens=1105, model="m"
+        )
+
+    monkeypatch.setattr(thumbs_mod, "answer_chart_question", fake_chart)
+
+    resp = client.post(
+        "/api/chat/stream",
+        json={"question": "图1中的曲线说明了什么?", "sources": []},
+    )
+    assert resp.status_code == 200
+    events = _parse_events(resp.text)
+    phases = [e.get("phase") for e in events if e["type"] == "phase"]
+    assert "chart_vlm" in phases
+    tokens = [e["delta"] for e in events if e["type"] == "token"]
+    assert tokens == ["VLM图表答案"]
+    done = events[-1]
+    assert done["type"] == "done"
+    assert done["chart_vlm"]["pages_used"] == [1]
+    assert done["chart_vlm"]["image_tokens"] == 1105
+    assert llm_calls == []  # 文本 LLM 流未被调用
+
+
+def test_chart_vlm_hook_falls_through_on_none(monkeypatch, client):
+    """VLM 返回 None（无缩略图/失败）时回退正常文本流。"""
+    import app.api.chat as chat_mod
+    import app.services.llm as llm_mod
+    import app.services.page_thumbnails as thumbs_mod
+
+    monkeypatch.setenv("FORMUMIND_VLM_FALLBACK_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    monkeypatch.setattr(chat_mod, "_stream_answer_plan", _chart_plan)
+    monkeypatch.setattr(
+        llm_mod, "_openai_compatible_stream", lambda *a, **k: "文本答案"
+    )
+    monkeypatch.setattr(thumbs_mod, "answer_chart_question", lambda *a, **k: None)
+
+    resp = client.post(
+        "/api/chat/stream",
+        json={"question": "图1中的曲线说明了什么?", "sources": []},
+    )
+    assert resp.status_code == 200
+    events = _parse_events(resp.text)
+    assert events[-1]["type"] == "done"
+    assert "chart_vlm" not in events[-1]

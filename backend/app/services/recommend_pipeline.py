@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
+from typing import NamedTuple
 
 from ..config import Settings, get_settings
 from ..domain.schemas import Formulation, RecommendedFormula
@@ -12,6 +13,105 @@ from .recommend_diversity import select_diverse_mmr
 from .tradeoff_analysis import analyze_tradeoffs
 
 logger = logging.getLogger(__name__)
+
+
+class RecommendBundle(NamedTuple):
+    """Result of :func:`run_recommend_orchestration`.
+
+    ``warnings`` merges every stage's warnings (LLM synthesis + grounding +
+    gates) so callers can no longer drop one on the floor.
+    """
+
+    aligned_formulas: list[RecommendedFormula]
+    scored: list[Formulation]
+    warnings: list[str]
+    tradeoff: TradeOffAnalysis | None
+    requested_n: int
+    diversity_applied: bool
+    engine: str
+
+
+def run_recommend_orchestration(
+    req,
+    evidence: list,
+    *,
+    requested_n: int | None = None,
+    objectives=None,
+    include_tradeoff: bool = True,
+    scenario_kinds=None,
+    prefer_materials_catalog: bool = False,
+    modify_prompt: str = "",
+    base_formulas=None,
+    synth_override=None,
+    settings: Settings | None = None,
+) -> RecommendBundle:
+    """Single orchestration entry for formulation recommendation.
+
+    Encapsulates the previously triplicated sequence shared by
+    ``api/formulations.py::recommend_formulations``,
+    ``research_graph.recommend_generate_node`` and
+    ``research_graph.generate_node``:
+
+    1. ``llm.recommend_formulations`` (LLM synthesis, offline fallback inside)
+    2. ``ground_recommended_formulas`` (grounding against evidence)
+    3. ``finalize_recommendation_bundle`` (score / dedupe / diversify / trade-off)
+
+    Retrieval (Step 0) stays with the caller — the API path has its own
+    hybrid/kb_only/llm_only mode handling and passes its synthesized response
+    via ``synth_override`` (already carrying its mode-specific fallbacks).
+    Response shaping stays with the caller — each entry keeps its own schema.
+    """
+    from ..services.grounded_recommend import ground_recommended_formulas
+
+    settings = settings or get_settings()
+    n = resolve_recommend_n(requested_n, settings=settings)
+
+    if synth_override is not None:
+        rec_resp = synth_override
+    else:
+        from ..services import llm
+
+        llm_n = llm_candidate_count(n, settings=settings)
+        rec_resp = llm.recommend_formulations(
+            req,
+            objectives,
+            evidence,
+            n=llm_n,
+            modify_prompt=modify_prompt,
+            base_formulas=base_formulas,
+        )
+    warnings: list[str] = list(rec_resp.warnings)
+
+    grounded_formulas, ground_warnings = ground_recommended_formulas(
+        rec_resp.formulas,
+        evidence,
+        prefer_materials_catalog=prefer_materials_catalog,
+    )
+    warnings.extend(ground_warnings)
+
+    aligned, scored, gate_warnings, _, diversity_applied, tradeoff = (
+        finalize_recommendation_bundle(
+            grounded_formulas,
+            req,
+            evidence,
+            requested_n=n,
+            objectives=objectives,
+            include_tradeoff=include_tradeoff,
+            scenario_kinds=scenario_kinds,
+            settings=settings,
+        )
+    )
+    warnings.extend(gate_warnings)
+
+    return RecommendBundle(
+        aligned_formulas=aligned,
+        scored=scored,
+        warnings=warnings,
+        tradeoff=tradeoff,
+        requested_n=n,
+        diversity_applied=diversity_applied,
+        engine=rec_resp.engine,
+    )
 
 
 def resolve_recommend_n(requested: int | None, *, settings: Settings | None = None) -> int:

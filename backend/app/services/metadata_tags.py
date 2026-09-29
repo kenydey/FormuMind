@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 
 _CLAIM_RES = (
+    re.compile(r"权利要求书?\s*第?\s*(\d+)\s*项"),  # 权利要求书第 3 项 / 权利要求 1
     re.compile(r"权利要求\s*(\d+)"),
     re.compile(r"\bclaims?\s*(?:no\.?\s*)?(\d+)", re.IGNORECASE),
 )

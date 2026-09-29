@@ -349,8 +349,7 @@ def fallback_node(
 def recommend_generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
     """Lightweight recommend path — skip answer/report/synthesize LLM calls."""
     from ..domain.objective_contract import normalize_objectives
-    from ..services.grounded_recommend import ground_recommended_formulas
-    from ..services.recommend_pipeline import finalize_recommendation_bundle, llm_candidate_count, resolve_recommend_n
+    from ..services.recommend_pipeline import run_recommend_orchestration
 
     settings = settings or get_settings()
     req = state.get("req")
@@ -365,46 +364,29 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
 
     if req:
         objectives = normalize_objectives(req)
-        requested_n = resolve_recommend_n(None, settings=settings)
-        llm_n = llm_candidate_count(requested_n, settings=settings)
-        rec_resp = llm.recommend_formulations(
+        bundle = run_recommend_orchestration(
             req,
-            objectives,
             grounded,
-            n=llm_n,
+            objectives=objectives,
             modify_prompt=state.get("modify_prompt") or "",
             base_formulas=state.get("base_formulas") or None,
-        )
-        recommend_engine = rec_resp.engine
-        grounded_formulas, ground_warnings = ground_recommended_formulas(
-            rec_resp.formulas, grounded
-        )
-        rec_resp.warnings.extend(ground_warnings)
-        _, recommended, gate_warnings, _, diversity_applied, tradeoff = finalize_recommendation_bundle(
-            grounded_formulas,
-            req,
-            grounded,
-            requested_n=requested_n,
-            objectives=objectives,
             settings=settings,
         )
+        recommend_engine = bundle.engine
+        recommended = bundle.scored
+        tradeoff = bundle.tradeoff
         recommend_meta = {
-            "requested_n": requested_n,
+            "requested_n": bundle.requested_n,
             "returned_n": len(recommended),
-            "diversity_applied": diversity_applied,
+            "diversity_applied": bundle.diversity_applied,
         }
         if recommended:
             mechanism = recommended[0].rationale or ""
             chat = f"已推荐 {len(recommended)} 条配方。"
         else:
             chat = "未能生成有效配方。"
-        # rec_resp.warnings carries LLM-synthesis + grounding warnings; without
-        # merging it in here it's computed and then dropped on the floor —
-        # api/formulations.py's near-duplicate path returns it directly, this
-        # graph path had nowhere for it to go.
-        all_warnings = list(rec_resp.warnings) + list(gate_warnings)
-        if all_warnings:
-            chat += "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in all_warnings)
+        if bundle.warnings:
+            chat += "\n\n**Formulation validation:**\n" + "\n".join(f"- {w}" for w in bundle.warnings)
     else:
         chat = "缺少需求参数，无法推荐配方。"
 
@@ -421,8 +403,7 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
 def generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
     from ..domain.objective_contract import normalize_objectives
     from ..services.deep_research.engine import DeepResearchEngine
-    from ..services.grounded_recommend import ground_recommended_formulas
-    from ..services.recommend_pipeline import finalize_recommendation_bundle, llm_candidate_count, resolve_recommend_n
+    from ..services.recommend_pipeline import run_recommend_orchestration
 
     settings = settings or get_settings()
     topic = state.get("topic") or state.get("query") or ""
@@ -449,34 +430,24 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
 
     if req:
         objectives = normalize_objectives(req)
-        requested_n = resolve_recommend_n(None, settings=settings)
-        llm_n = llm_candidate_count(requested_n, settings=settings)
-
-        rec_resp = llm.recommend_formulations(req, objectives, grounded, n=llm_n)
-        recommend_engine = rec_resp.engine
-        grounded_formulas, ground_warnings = ground_recommended_formulas(
-            rec_resp.formulas, grounded
-        )
-        rec_resp.warnings.extend(ground_warnings)
-        _, recommended, gate_warnings, _, diversity_applied, tradeoff_obj = finalize_recommendation_bundle(
-            grounded_formulas,
+        bundle = run_recommend_orchestration(
             req,
             grounded,
-            requested_n=requested_n,
             objectives=objectives,
             settings=settings,
         )
-        state["tradeoff"] = tradeoff_obj.model_dump() if tradeoff_obj else None
+        recommend_engine = bundle.engine
+        recommended = bundle.scored
+        state["tradeoff"] = bundle.tradeoff.model_dump() if bundle.tradeoff else None
         state["recommend_meta"] = {
-            "requested_n": requested_n,
+            "requested_n": bundle.requested_n,
             "returned_n": len(recommended),
-            "diversity_applied": diversity_applied,
+            "diversity_applied": bundle.diversity_applied,
         }
         mechanism, chat = llm.synthesize_research(req, grounded, recommended)
-        all_warnings = list(rec_resp.warnings) + list(gate_warnings)
-        if all_warnings:
+        if bundle.warnings:
             chat += "\n\n**Formulation validation:**\n" + "\n".join(
-                f"- {w}" for w in all_warnings
+                f"- {w}" for w in bundle.warnings
             )
 
     state["mechanism"] = mechanism

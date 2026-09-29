@@ -21,6 +21,26 @@ from .metadata_tags import extract_patent_tags
 
 logger = logging.getLogger(__name__)
 
+# ── P3-5: ingest-time embedding coverage counters (process-local) ──────────
+# Bump on every index_source() embed pass; read by /api/ops/evidence-stats.
+# Reset on process restart, same contract as the tier-2 counters.
+import threading as _threading
+
+_KB_COVERAGE_LOCK = _threading.Lock()
+_KB_COVERAGE = {"kb_chunks_embedded": 0, "kb_chunks_total": 0}
+
+
+def get_kb_coverage_stats() -> dict[str, int]:
+    """Snapshot copy of the ingest embedding-coverage counters."""
+    with _KB_COVERAGE_LOCK:
+        return dict(_KB_COVERAGE)
+
+
+def _bump_kb_coverage(*, embedded: int, total: int) -> None:
+    with _KB_COVERAGE_LOCK:
+        _KB_COVERAGE["kb_chunks_embedded"] += embedded
+        _KB_COVERAGE["kb_chunks_total"] += total
+
 
 def _sync_source_fts(source_id: str, rows: list[dict], settings) -> None:
     """W2-1 (P1-6): mirror KB chunk rows into the chunk-level FTS5 index.
@@ -326,6 +346,19 @@ def index_source(
                 for row, vec in zip(rows, vectors):
                     row["embedding"] = vec
                     row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
+            # P3-5: embedding 缺失结构化告警 + 覆盖率计数。无向量时检索静默
+            # 退化为纯 BM25，过去只有一条易淹没的 warning；现在记结构化事件
+            # 并累计覆盖率，供 /api/ops/evidence-stats 透出。
+            n_embedded = sum(1 for r in rows if r.get("embedding"))
+            _bump_kb_coverage(embedded=n_embedded, total=len(rows))
+            if embed and rows and n_embedded == 0:
+                logger.warning(
+                    "kb_embedding_missing event=kb_embedding_missing source=%s "
+                    "chunks=%d — sentence-transformers unavailable, retrieval "
+                    "degraded to BM25-only",
+                    source_id,
+                    len(rows),
+                )
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)

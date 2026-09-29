@@ -37,6 +37,7 @@ class SourceStore:
         origin_url: str | None = None,
         project_id: str | None = None,
         acquisition: str | None = None,
+        parser: str | None = None,  # P3-5: parser tier provenance
     ) -> str:
         source_id = str(uuid.uuid4())
         guide_payload = source_guide.model_dump(mode="json") if source_guide else None
@@ -54,6 +55,7 @@ class SourceStore:
             extraction_status=extraction_status,
             extraction_error=extraction_error,
             acquisition=(acquisition or None),
+            parser=(parser or None),
             archived=False,
             created_at=_utcnow(),
         )

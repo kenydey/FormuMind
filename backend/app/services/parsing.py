@@ -5,11 +5,12 @@ the full-text fetcher, replacing the per-caller parser cascades.  Parsers are
 pluggable and probed at call time:
 
 * **PDF**: hybrid (pymupdf4llm + 云端 MinerU 按页升级 + 本地 OCR，CPU-cheap 主路径)
-  → docling → marker → mineru(magic-pdf 本地) → rapidocr → markitdown → pypdf,
+  → docling → marker → mineru(云端) → rapidocr → markitdown → pypdf,
   order controlled by ``FORMUMIND_PDF_PARSER`` (``auto`` tries best-first; naming
   a parser pins it with fallback to the tiers below it).  hybrid 已内置本地布局
-  解析 + 本地 OCR + 云端 MinerU，后面的 docling / marker / 本地 magic-pdf 是
-  离线高保真降级（docling/marker 需 weights、CPU 极慢，本地 magic-pdf 需 GPU）；
+  解析 + 本地 OCR + 云端 MinerU，后面的 docling / marker 是离线高保真降级
+  （dormant stub：未安装时跳过，docling/marker 需 weights、CPU 极慢）；
+  本地 magic-pdf 路径已退役（见 ``_parse_mineru``）；
   markitdown / pypdf 是纯文本兜底。
 * **Other formats** (DOCX/XLSX/PPTX/HTML/…): MarkItDown → format-specific
   fallbacks (python-docx, plain text decode).
@@ -53,7 +54,7 @@ class ParserUnavailable(RuntimeError):
 @dataclass
 class ParseResult:
     markdown: str
-    parser: str  # docling | marker | mineru | markitdown | pypdf | docx | text | none
+    parser: str  # tier name: hybrid | docling | marker | mineru | rapidocr | markitdown | pypdf | docx | text | none
     # W2-3: structured table assets extracted after a successful parse
     # (table_contract.TableAsset). Empty when extraction is disabled/failed.
     tables: list = field(default_factory=list)

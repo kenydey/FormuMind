@@ -226,6 +226,10 @@ class SourceDocument(Base):
     )
     extraction_status: Mapped[str] = mapped_column(String(32), default="pending")
     extraction_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P3-5: which parser tier produced the text
+    # (hybrid | docling | marker | mineru | rapidocr | markitdown | pypdf |
+    #  docx | text | none). NULL = unknown / non-parse path (API text, QC).
+    parser: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # How the full text was obtained: "tei" (structured XML, no parse/OCR),
     # "html" (landing/web text), "pdf" (download + parse, possibly OCR), or
     # "text" (unknown/absent). Only "pdf" counts against the per-project PDF

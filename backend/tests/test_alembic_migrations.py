@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0034(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head (``0034_doe_cycle_objective_tracking``)."""
+def test_revision_chain_head_is_0035(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head (``0035_source_document_parser``)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0034(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0034"
+    assert heads[0] == "0035"
 
 
 def test_migrations_partial_columns_branch(
@@ -509,3 +509,19 @@ def test_0014_converts_legacy_string_references_to_integers(
     # SQLite rebuilds a table without re-checking foreign keys, so the only
     # proof the result is consistent is to ask it explicitly.
     assert _fetch_all(tmp_db_url, "PRAGMA foreign_key_check(doe_plans)") == []
+
+
+def test_migration_0035_parser_column(tmp_db_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P3-5: 0035 adds ``source_documents.parser``; downgrade drops it; re-upgrade idempotent."""
+    from tests.alembic_helpers import run_downgrade
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "parser" in _column_names(tmp_db_url, "source_documents")
+
+    run_downgrade(tmp_db_url, monkeypatch, "0034")
+    assert "parser" not in _column_names(tmp_db_url, "source_documents")
+
+    # Re-upgrade is idempotent (twice).
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "parser" in _column_names(tmp_db_url, "source_documents")

@@ -122,8 +122,11 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     """
     from ..config import get_settings
     from ..pipeline.research_graph import resolve_grounded_evidence
-    from ..services.grounded_recommend import ground_recommended_formulas
-    from ..services.recommend_pipeline import finalize_recommendation_bundle, llm_candidate_count, resolve_recommend_n
+    from ..services.recommend_pipeline import (
+        llm_candidate_count,
+        resolve_recommend_n,
+        run_recommend_orchestration,
+    )
 
     settings = get_settings()
     objectives = body.objectives or normalize_objectives(body.requirement)
@@ -178,28 +181,24 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     if not rec_resp.formulas:
         raise HTTPException(status_code=503, detail="No formulations produced")
 
-    grounded_formulas, ground_warnings = ground_recommended_formulas(
-        rec_resp.formulas,
-        evidence,
-        prefer_materials_catalog=bool(body.prefer_materials_catalog),
-    )
-    rec_resp.warnings.extend(ground_warnings)
-
-    if retrieve_ok:
-        rec_resp.warnings.append(
-            f"已从知识库检索 {len(evidence)} 条证据辅助推荐")
-
-    aligned, scored, extra_warnings, _, diversity_applied, tradeoff = finalize_recommendation_bundle(
-        grounded_formulas,
+    bundle = run_recommend_orchestration(
         body.requirement,
         evidence,
         requested_n=requested_n,
         objectives=objectives,
         include_tradeoff=body.include_tradeoff,
         scenario_kinds=body.scenario_kinds or None,
+        prefer_materials_catalog=bool(body.prefer_materials_catalog),
+        synth_override=rec_resp,
         settings=settings,
     )
-    rec_resp.warnings.extend(extra_warnings)
+    aligned, scored, tradeoff = bundle.aligned_formulas, bundle.scored, bundle.tradeoff
+    diversity_applied = bundle.diversity_applied
+    rec_resp.warnings = bundle.warnings
+
+    if retrieve_ok:
+        rec_resp.warnings.append(
+            f"已从知识库检索 {len(evidence)} 条证据辅助推荐")
 
     insights: list[dict] = []
     if body.relation_insight:

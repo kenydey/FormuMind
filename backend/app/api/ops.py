@@ -24,8 +24,21 @@ def evidence_stats() -> dict:
     triggers = stats.get("tier2_triggers", 0)
     tokens_before = stats.get("tokens_before", 0)
     tokens_after = stats.get("tokens_after", 0)
+    # P3-5: ingest-time embedding coverage (process-local, reset on restart).
+    kb_cov = {}
+    kb_coverage_rate = None
+    try:
+        from ..services.kb_index import get_kb_coverage_stats
+
+        kb_cov = get_kb_coverage_stats()
+        total = kb_cov.get("kb_chunks_total", 0)
+        kb_coverage_rate = (kb_cov.get("kb_chunks_embedded", 0) / total) if total else None
+    except Exception:
+        pass
     return {
         **stats,
+        **kb_cov,
+        "kb_embedding_coverage": kb_coverage_rate,
         "tokens_saved": tokens_before - tokens_after,
         "trigger_rate": (triggers / attempts) if attempts else 0.0,
         "process_local": True,

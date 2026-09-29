@@ -77,15 +77,18 @@ report_export = [
     "fpdf2>=2.7",
 ]
 # Layout-aware PDF → Markdown parsers. FORMUMIND_PDF_PARSER picks the tier:
-# hybrid → rapidocr → markitdown → pypdf（docling/marker/本地 magic-pdf 已移除）.
+# hybrid → docling(dormant) → marker(dormant) → mineru(cloud) → rapidocr →
+# markitdown → pypdf. docling/marker are dormant stubs (skipped when not
+# installed); the old local magic-pdf path is retired (see _parse_mineru).
 #
 # ⚠️ LICENSING: pymupdf4llm and its PyMuPDF backend are AGPL-3.0, or a paid
 # Artifex commercial licence. Every call to them is confined to
 # app/services/pdf_local.py so this can be swapped without an audit.
 #
-# docling / marker-pdf / 本地 magic-pdf 需要 torch 权重或 GPU，在 CPU-only
-# 主机上不实用（marker 实测 ~54 s/page），已移除——高保真解析走 hybrid 的
-# 云端 MinerU（mineru-open-sdk）。有 GPU 的主机可自行加回。
+# docling / marker-pdf 需要 torch 权重或 GPU，在 CPU-only 主机上不实用
+# （marker 实测 ~54 s/page），在 _PDF_TIERS 中为 dormant stub（未安装时跳过）；
+# 高保真解析走 hybrid 的云端 MinerU（mineru-open-sdk）。本地 magic-pdf 路径
+# 已退役（见 app/services/parsing.py::_parse_mineru）。有 GPU 的主机可自行加回。
 parse_pro = [
     # Local OCR for scanned pages. rapidocr>=3.9 ships the PP-OCRv6 small ONNX
     # weights inside the wheel, so no model download at deploy time.
