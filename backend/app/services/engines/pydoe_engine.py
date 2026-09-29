@@ -50,8 +50,10 @@ def _generate_matrix(design: str, k: int, n: int) -> np.ndarray:
         fn = getattr(pydoe, "simplex_lattice_design", None)
         if fn is None:
             raise ValueError("pydoe has no simplex_lattice_design")
-        # degree=2 → moderate number of mixture points for k components
-        raw = fn(k, degree=2)
+        # degree m=2 → moderate number of mixture points for k components.
+        # pydoe>=1.0 signature is positional (q, m); older pydoe2 accepted
+        # the same positionally, so avoid the `degree=` keyword.
+        raw = fn(k, 2)
     elif design == "sobol":
         fn = getattr(pydoe, "sobol_sequence", None)
         if fn is None:

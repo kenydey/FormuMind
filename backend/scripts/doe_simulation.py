@@ -27,22 +27,83 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _seed_all(seed: int) -> None:
+    """Seed every RNG the simulation arms can touch.
+
+    stdlib ``random`` (legacy evaluator), numpy (pydoe LHS designs),
+    torch (Botorch recommender). Called before EACH arm: the BayBE
+    attempt inside the bayesian arm can consume a network-dependent
+    number of draws before falling back to legacy, so a single
+    seeding at startup is not enough for reproducibility.
+    """
+    random.seed(seed)
+    try:
+        import numpy as np
+
+        np.random.seed(seed)
+    except ImportError:  # pragma: no cover
+        pass
+    try:
+        import torch
+
+        torch.manual_seed(seed)
+    except ImportError:  # pragma: no cover
+        pass
+
+
+def synthetic_evaluate(
+    natural: Dict[str, float],
+    factor_names: List[str],
+    centers: Dict[str, float],
+    spans: Dict[str, float],
+    target_value: float,
+) -> float:
+    """Deterministic synthetic objective for honest strategy comparison.
+
+    Hidden optimum at ``centers`` (fixed 62% of each factor range); value
+    falls off quadratically with normalized distance. The peak
+    (1.05 * target) is reachable, so "rounds to target" is meaningful.
+
+    NOTE: the previous ``random.uniform`` "evaluator" drew progress
+    independently of the suggested points, so the old bayesian-vs-traditional
+    comparison measured the RNG, not the optimizers. Kept behind
+    ``--evaluator random`` for backward compatibility only.
+    """
+    dist2 = sum(
+        ((natural[name] - centers[name]) / spans[name]) ** 2 for name in factor_names
+    ) / max(len(factor_names), 1)
+    return target_value * (1.05 - dist2)
+
+
+def _synthetic_calibration(factors, target_value: float):
+    names = [f.name for f in factors]
+    centers = {f.name: f.low + 0.62 * (f.high - f.low) for f in factors}
+    spans = {f.name: (f.high - f.low) or 1.0 for f in factors}
+    return names, centers, spans
+
+
 def simulate_traditional_doe(
     requirement: Requirement,
     target_metric: str,
     target_value: float,
     batch_size: int = 5,
     max_batches: int = 20,
+    evaluator: str = "synthetic",
+    seed: int = 42,
 ) -> Tuple[int, List[float]]:
-    """
-    Simulate traditional DOE approach: generate batches of experiments using
-    LHS or full factorial, evaluate them (simulated), and track progress
-    toward target.
+    """Simulate traditional DOE: fresh LHS batch per round, honestly evaluated.
 
-    Returns:
-        (total_experiments, history_of_best_values)
+    Each batch is evaluated through the (deterministic synthetic) evaluator —
+    never through ``random.uniform`` progress draws. Returns
+    (total_experiments, history_of_best_values).
     """
+    from app.domain import doe as doe_engine
+    from app.pipeline.workflow import build_doe_factors
+
     logger.info(f"Starting traditional DOE simulation (batch_size={batch_size})")
+
+    factors = build_doe_factors(requirement)
+    names, centers, spans = _synthetic_calibration(factors, target_value)
 
     experiments_conducted = 0
     best_value = float('-inf')  # assuming we're maximizing
@@ -50,21 +111,26 @@ def simulate_traditional_doe(
 
     for batch_num in range(max_batches):
         try:
-            # Generate a batch of experiment candidates using LHS
-            active_result = active_learning_doe(
-                req=requirement,
-                existing=[],
-                n_suggest=batch_size,
-                design="lhs",
-                engine="auto",
-                workbench_campaign_id=None,
-                budget_remaining=None,
+            # Fresh LHS batch each round (the old code re-suggested the
+            # identical seed-0 batch every round and counted phantom runs).
+            matrix = doe_engine.latin_hypercube(
+                len(factors), batch_size, seed=seed * 1000 + batch_num
             )
+            batch_best = best_value
+            for row in matrix:
+                natural = {
+                    f.name: doe_engine.decode(float(c), f)
+                    for f, c in zip(factors, row)
+                }
+                if evaluator == "synthetic":
+                    value = synthetic_evaluate(
+                        natural, names, centers, spans, target_value
+                    )
+                else:  # legacy random progress draw (not optimizer-meaningful)
+                    headroom = max(0.0, target_value - best_value)
+                    value = best_value + random.uniform(0, headroom * 0.3)
+                batch_best = max(batch_best, value)
 
-            # Simulated experimental results: random improvement toward target
-            # (in reality these would come from the lab)
-            headroom = max(0.0, target_value - best_value)
-            batch_best = best_value + random.uniform(0, headroom * 0.3)
             if batch_best > best_value:
                 best_value = batch_best
 
@@ -94,16 +160,25 @@ def simulate_bayesian_closed_loop(
     target_metric: str,
     target_value: float,
     max_iterations: int = 24,
+    evaluator: str = "synthetic",
+    seed: int = 42,
 ) -> Tuple[int, List[float]]:
-    """
-    Simulate Bayesian optimization closed-loop approach.
+    """Simulate Bayesian closed-loop optimization.
 
-    Uses Baybe engine when available, falls back to LHS-based active learning.
+    Suggested points are evaluated through the (deterministic synthetic)
+    evaluator and fed back per-run — never through ``random.uniform``
+    progress draws. Uses BayBE when available, legacy LHS+EI otherwise
+    (honest comparison: same evaluator for both arms).
 
     Returns:
         (total_experiments, history_of_best_values)
     """
+    from app.pipeline.workflow import build_doe_factors
+
     logger.info(f"Starting Bayesian closed-loop simulation (max_iter={max_iterations})")
+
+    factors = build_doe_factors(requirement)
+    names, centers, spans = _synthetic_calibration(factors, target_value)
 
     experiments_conducted = 0
     best_value = float('-inf')
@@ -132,40 +207,50 @@ def simulate_bayesian_closed_loop(
                     )
                 )
 
-            # Use Baybe when available, otherwise legacy LHS+EI
+            # Use Baybe when available, otherwise legacy LHS+EI.
+            # doe_engine="native": the native LHS generator is seedable and
+            # deterministic; the pydoe engine calls pydoe.lhs() without a
+            # seed (pydoe>=1.0 then draws from OS entropy), which would
+            # break --seed reproducibility of this script. The BayBE
+            # attempt above does not use doe_engine at all.
             active_result = active_learning_doe(
                 req=requirement,
                 existing=existing,
                 n_suggest=5,
                 design="lhs",
                 engine="auto",
+                doe_engine="native",
                 workbench_campaign_id=None,
                 budget_remaining=None,
             )
 
-            # Simulated improvement
-            headroom = max(0.0, target_value - best_value)
-            improvement = random.uniform(0, headroom * 0.4)
-            if improvement > 0:
-                best_value += improvement
-                # Simulate the experiment we would have conducted
-                for run in active_result.plan.runs[:5]:
-                    completed_runs.append(
-                        {"natural": run.natural, "measured": {target_metric: best_value}}
+            # Evaluate the suggested points (honestly: per-run values).
+            suggested = active_result.plan.runs[:5]
+            if not suggested:
+                logger.warning("No suggested runs; stopping loop")
+                break
+            for run in suggested:
+                if evaluator == "synthetic":
+                    value = synthetic_evaluate(
+                        run.natural, names, centers, spans, target_value
                     )
-                experiments_conducted += 5
-                history.append(best_value)
-
-                logger.info(
-                    f"Iter {iteration+1}: best = {best_value:.3f} (target {target_value})"
+                else:  # legacy random progress draw (not optimizer-meaningful)
+                    headroom = max(0.0, target_value - best_value)
+                    value = best_value + random.uniform(0, headroom * 0.4)
+                completed_runs.append(
+                    {"natural": run.natural, "measured": {target_metric: value}}
                 )
+                best_value = max(best_value, value)
+            experiments_conducted += len(suggested)
+            history.append(best_value)
 
-                if best_value >= target_value:
-                    logger.info(f"Target reached after {experiments_conducted} experiments")
-                    return experiments_conducted, history
-            else:
-                history.append(best_value)
-                experiments_conducted += 5
+            logger.info(
+                f"Iter {iteration+1}: best = {best_value:.3f} (target {target_value})"
+            )
+
+            if best_value >= target_value:
+                logger.info(f"Target reached after {experiments_conducted} experiments")
+                return experiments_conducted, history
 
         except Exception as e:
             logger.error(f"Error in Bayesian iter {iteration}: {e}")
@@ -187,10 +272,18 @@ def main() -> int:
     parser.add_argument("--max-bayesian", type=int, default=24)
     parser.add_argument("--output", type=str, help="Output file for results (JSON)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument(
+        "--evaluator",
+        type=str,
+        default="synthetic",
+        choices=["synthetic", "random"],
+        help="synthetic: deterministic truth function (default, optimizer-meaningful); "
+        "random: legacy random-uniform progress draws (not optimizer-meaningful)",
+    )
 
     args = parser.parse_args()
 
-    random.seed(args.seed)
+    _seed_all(args.seed)
 
     requirement = Requirement(
         domain=ProductDomain(args.domain),
@@ -215,10 +308,12 @@ def main() -> int:
         target_value=args.target,
         batch_size=args.traditional_batch,
         max_batches=args.max_traditional,
+        evaluator=args.evaluator,
+        seed=args.seed,
     )
 
     # Reset seed for fair comparison
-    random.seed(args.seed)
+    _seed_all(args.seed)
 
     # Run Bayesian closed-loop simulation
     logger.info("-" * 60)
@@ -229,6 +324,8 @@ def main() -> int:
         target_metric=args.metric,
         target_value=args.target,
         max_iterations=args.max_bayesian,
+        evaluator=args.evaluator,
+        seed=args.seed,
     )
 
     # Calculate improvement
@@ -270,6 +367,7 @@ def main() -> int:
             "improvement": improvement_str,
             "traditional_experiments": traditional_count,
             "bayesian_experiments": bayesian_count,
+            "evaluator": args.evaluator,
         },
         "neo4j_kg_enabled": neo4j_is_enabled(),
     }
