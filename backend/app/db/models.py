@@ -770,8 +770,9 @@ class DOECycleRunRow(Base):
 
     Observability for the DOE -> measure -> next-cycle loop: which engine
     produced the batch (``baybe`` | ``lhs``), how many prior measurements
-    seeded it, and how many experiments it suggested. Auto-created by
-    ``Base.metadata.create_all(checkfirst=True)`` — no manual migration.
+    seeded it, and how many experiments it suggested. P2-4 adds objective
+    tracking (best vs target, convergence reason); schema changes go through
+    Alembic (see ``app/db/alembic/versions``).
     """
 
     __tablename__ = "doe_cycle_runs"
@@ -784,6 +785,14 @@ class DOECycleRunRow(Base):
     experiment_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="")  # success | error
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    # P2-4: objective tracking — best measured value vs target per cycle.
+    best_objective_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    objective_metric: Mapped[str] = mapped_column(String(64), default="")
+    objective_direction: Mapped[str] = mapped_column(String(16), default="")
+    # P2-4: why the cycle stopped generating: "" | rmse_plateau |
+    # target_achieved | budget_exhausted
+    convergence_reason: Mapped[str] = mapped_column(String(32), default="")
 
     __table_args__ = (Index("ix_doe_cycle_runs_project", "project_id"),)
 

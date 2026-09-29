@@ -1328,7 +1328,10 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
         )
         
         # Execute DOE cycle
-        result = doe_cycle_service.run_doe_cycle(requirement)
+        result = doe_cycle_service.run_doe_cycle(
+            requirement,
+            budget_remaining=payload.get("budget_remaining"),
+        )
 
         tracker.emit(
             "write",

@@ -172,3 +172,69 @@ def test_cycle_runs_empty_project_returns_zeros(mem_session_factory, monkeypatch
     assert resp.items == []
     assert resp.summary["cycle_count"] == 0
     assert resp.summary["last_engine"] == ""
+
+
+def test_cycle_runs_objective_tracking_fields(mem_session_factory, monkeypatch):
+    """P2-4: items carry best/target/distance; summary has the trend."""
+    from app.api import doe as doe_api
+
+    with mem_session_factory() as s:
+        s.add(
+            DOECycleRunRow(
+                project_id="proj-obj",
+                domain="anticorrosion_coating",
+                engine="baybe",
+                prior_measurement_count=2,
+                experiment_count=5,
+                status="success",
+                best_objective_value=800.0,
+                target_value=1000.0,
+                objective_metric="salt_spray_hours",
+                objective_direction="maximize",
+                convergence_reason="",
+            )
+        )
+        s.add(
+            DOECycleRunRow(
+                project_id="proj-obj",
+                domain="anticorrosion_coating",
+                engine="converged-hold",
+                prior_measurement_count=4,
+                experiment_count=0,
+                status="success",
+                best_objective_value=1050.0,
+                target_value=1000.0,
+                objective_metric="salt_spray_hours",
+                objective_direction="maximize",
+                convergence_reason="target_achieved",
+            )
+        )
+        s.commit()
+    monkeypatch.setattr(
+        "app.db.database.default_session_factory", lambda: mem_session_factory
+    )
+    stub_registry = SimpleNamespace(records_for=lambda d, project_id="": [])
+    monkeypatch.setattr("app.services.training.registry", stub_registry)
+
+    resp = doe_api.doe_cycle_runs(project_id="proj-obj", limit=20)
+    assert len(resp.items) == 2
+    newest, oldest = resp.items[0], resp.items[1]
+    assert newest.convergence_reason == "target_achieved"
+    assert newest.distance_to_target == pytest.approx(-50.0)
+    assert oldest.distance_to_target == pytest.approx(200.0)
+    assert newest.objective_metric == "salt_spray_hours"
+    trend = resp.summary["target_trend"]
+    assert [t["id"] for t in trend] == [oldest.id, newest.id]  # oldest → newest
+    assert trend[0]["distance_to_target"] == pytest.approx(200.0)
+    assert trend[1]["distance_to_target"] == pytest.approx(-50.0)
+    assert resp.summary["last_distance_to_target"] == pytest.approx(-50.0)
+    assert resp.summary["last_convergence_reason"] == "target_achieved"
+
+
+def test_distance_to_target_minimize_and_missing():
+    from app.api.doe import _distance_to_target
+
+    assert _distance_to_target(70.0, 80.0, "minimize") == pytest.approx(-10.0)
+    assert _distance_to_target(90.0, 80.0, "minimize") == pytest.approx(10.0)
+    assert _distance_to_target(None, 80.0, "maximize") is None
+    assert _distance_to_target(70.0, None, "maximize") is None

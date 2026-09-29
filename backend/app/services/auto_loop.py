@@ -18,7 +18,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..config import get_settings
-from ..domain.schemas import DOEPlan, LoopReport, OptimizationResult, ProductDomain, Requirement
+from ..domain.schemas import (
+    DOEPlan,
+    LoopReport,
+    ObjectiveSpec,
+    OptimizationResult,
+    ProductDomain,
+    Requirement,
+)
 
 
 def _rmse_by_metric(domain: ProductDomain) -> tuple[list, dict[str, float]]:
@@ -79,6 +86,47 @@ def rmse_plateau_detected(
     return True
 
 
+def target_achieved(best_so_far: float | None, objective: ObjectiveSpec) -> bool:
+    """P2-4: True when the measured best already meets the objective target.
+
+    Pure function. ``None`` best or ``None`` target → False (fail-open:
+    never claim convergence without data).
+    """
+    target = objective.target_value
+    if best_so_far is None or target is None:
+        return False
+    if objective.direction == "minimize":
+        return best_so_far <= target
+    return best_so_far >= target
+
+
+def best_objective_value(
+    records: list | None, metric: str, direction: str = "maximize"
+) -> float | None:
+    """P2-4: best measured value of ``metric`` across prior records."""
+    vals: list[float] = []
+    for r in records or []:
+        v = (getattr(r, "measured", None) or {}).get(metric)
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            vals.append(float(v))
+    if not vals:
+        return None
+    return min(vals) if direction == "minimize" else max(vals)
+
+
+def primary_objective_spec(req: Requirement) -> ObjectiveSpec:
+    """Primary objective: req.objectives[0], else a target-less default."""
+    from ..domain.schemas import ObjectiveSpec
+    from ..domain.project_spec import primary_objective
+
+    objectives = getattr(req, "objectives", None) or []
+    if objectives:
+        return objectives[0]
+    return ObjectiveSpec(metric=primary_objective(req))
+
+
 def _stub_optimization(req: Requirement) -> OptimizationResult:
     from ..domain.project_spec import primary_objective
 
@@ -92,7 +140,7 @@ def _stub_optimization(req: Requirement) -> OptimizationResult:
     )
 
 
-def _stub_doe(req: Requirement) -> DOEPlan:
+def _stub_doe(req: Requirement, reason: str = "rmse_plateau") -> DOEPlan:
     from ..domain.schemas import DOEFactor, DOERun
 
     levers = req.levers or []
@@ -101,11 +149,16 @@ def _stub_doe(req: Requirement) -> DOEPlan:
         for lev in levers[:6]
     ]
     natural = {lev.name: round((lev.low + lev.high) / 2, 3) for lev in levers[:6]}
+    notes = (
+        "目标已达成 — 保留上一轮 DOE，无需新实验建议"
+        if reason == "target_achieved"
+        else "模型 RMSE 已收敛 — 保留上一轮 DOE，无需新实验建议"
+    )
     return DOEPlan(
         design="converged-hold",
         factors=factors,
         runs=[DOERun(run_id=1, coded={}, natural=natural)] if natural else [],
-        notes="模型 RMSE 已收敛 — 保留上一轮 DOE，无需新实验建议",
+        notes=notes,
         plan_id="converged",
         domain=req.domain,
     )
@@ -151,6 +204,17 @@ def loop_iterate(
             patience=settings.loop_convergence_patience,
         )
     )
+    # P2-4: 达标即停 — measured best already meets the objective target.
+    obj_spec = primary_objective_spec(req)
+    best_measured = best_objective_value(records, obj_spec.metric, obj_spec.direction)
+    target_hit = bool(
+        settings.loop_convergence_enabled
+        and target_achieved(best_measured, obj_spec)
+    )
+    converged = bool(converged or target_hit)
+    convergence_reason = (
+        "target_achieved" if target_hit else ("rmse_plateau" if converged else "")
+    )
 
     chem = None
 
@@ -158,7 +222,16 @@ def loop_iterate(
         if progress_cb:
             progress_cb(1.0, "converged — skipping optimize")
         optimization = prior_optimization or _stub_optimization(req)
-        next_doe = prior_next_doe or _stub_doe(req)
+        next_doe = prior_next_doe or _stub_doe(req, reason=convergence_reason)
+        if convergence_reason == "target_achieved":
+            loop_message = (
+                f"目标已达成（{obj_spec.metric} 最优测量值 {best_measured:g}"
+                f"已达到目标 {obj_spec.target_value:g}），建议停止闭环迭代"
+            )
+            next_action = "目标已达成，建议汇总结果并停止新增实验。"
+        else:
+            loop_message = "模型 RMSE 已进入平台期，建议停止闭环迭代"
+            next_action = "模型 RMSE 已收敛，建议汇总结果并停止新增实验。"
         return LoopReport(
             domain=req.domain.value,
             total_records=len(records),
@@ -169,8 +242,8 @@ def loop_iterate(
             engine=optimization.engine,
             campaign_state=campaign_state,
             converged=True,
-            loop_message="模型 RMSE 已进入平台期，建议停止闭环迭代",
-            recommended_next_action="模型 RMSE 已收敛，建议汇总结果并停止新增实验。",
+            loop_message=loop_message,
+            recommended_next_action=next_action,
             chemical_feasibility=chem,
             cost_summary=_cost_summary(optimization),
         )

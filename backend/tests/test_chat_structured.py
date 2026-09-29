@@ -84,5 +84,7 @@ def test_structured_fallback(monkeypatch):
         json={"question": "q", "sources": [ev.model_dump()], "response_format": "structured"},
     )
     assert resp.status_code == 200
-    assert resp.json()["answer"] == "markdown 答案"
+    # P2-2: the stub evidence ("s") cannot support the fallback answer's claim,
+    # so the abstention hard gate replaces it — structured stays None.
+    assert resp.json()["answer"].startswith("证据不足")
     assert resp.json().get("structured") is None

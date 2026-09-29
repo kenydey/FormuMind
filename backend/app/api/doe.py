@@ -142,6 +142,8 @@ class DoeCycleBody(BaseModel):
 
     requirement: Requirement
     workbench_campaign_id: int | None = None
+    # P2-4: remaining experiment budget; <= 0 hard-stops with a hold stub.
+    budget_remaining: int | None = None
 
 
 @router.post("/doe/cycle", status_code=202)
@@ -150,6 +152,7 @@ def start_doe_cycle(body: DoeCycleBody) -> JSONResponse:
     payload = {
         "requirement": body.requirement.model_dump(),
         "workbench_campaign_id": body.workbench_campaign_id,
+        "budget_remaining": body.budget_remaining,
     }
     outbox_id = enqueue_outbox("doe_cycle", payload)
     return submit(run_doe_cycle_task, payload, "doe_cycle", outbox_id=outbox_id)
@@ -171,6 +174,25 @@ class DoeCycleRunItem(BaseModel):
     experiment_count: int = 0
     status: str = ""
     created_at: str = ""
+    # P2-4: objective tracking per cycle.
+    best_objective_value: float | None = None
+    target_value: float | None = None
+    objective_metric: str = ""
+    objective_direction: str = ""
+    convergence_reason: str = ""
+    # P2-4: signed distance to target (<= 0 means target met/exceeded).
+    distance_to_target: float | None = None
+
+
+def _distance_to_target(
+    best: float | None, target: float | None, direction: str
+) -> float | None:
+    """Signed gap remaining: maximize → target - best; minimize → best - target."""
+    if best is None or target is None:
+        return None
+    if (direction or "maximize") == "minimize":
+        return best - target
+    return target - best
 
 
 class DoeCycleRunsResponse(BaseModel):
@@ -212,6 +234,16 @@ def doe_cycle_runs(
                 experiment_count=r.experiment_count,
                 status=r.status,
                 created_at=r.created_at.isoformat() if r.created_at else "",
+                best_objective_value=r.best_objective_value,
+                target_value=r.target_value,
+                objective_metric=r.objective_metric or "",
+                objective_direction=r.objective_direction or "",
+                convergence_reason=r.convergence_reason or "",
+                distance_to_target=_distance_to_target(
+                    r.best_objective_value,
+                    r.target_value,
+                    r.objective_direction or "",
+                ),
             )
             for r in rows
         ]
@@ -243,6 +275,13 @@ def doe_cycle_runs(
             "measured_count": measured_count,
             "last_engine": last.engine if last else "",
             "last_status": last.status if last else "",
+            # P2-4: distance-to-target trend, oldest → newest.
+            "target_trend": [
+                {"id": i.id, "distance_to_target": i.distance_to_target}
+                for i in reversed(items)
+            ],
+            "last_distance_to_target": last.distance_to_target if last else None,
+            "last_convergence_reason": last.convergence_reason if last else "",
         },
     )
 

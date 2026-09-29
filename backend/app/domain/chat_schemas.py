@@ -58,6 +58,9 @@ class SourcedClaim(BaseModel):
     chunk_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0, le=1)
     status: ClaimStatus = "unsupported"
+    # P2-3: 原始核验判词（supported/unsupported/conflicting/insufficient），
+    # status 保持 back-compat 映射不变，前端用此字段渲染冲突态。
+    raw_verdict: str | None = None
 
 
 ChatMode = Literal["chat", "evidence"]

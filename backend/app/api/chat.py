@@ -216,7 +216,12 @@ def _claims_and_audit(
     structured: StructuredAnswer | None = None,
     settings=None,
 ):
-    """Run claim verification once → sourced_claims + sources_audit (Wave D)."""
+    """Run claim verification once → (sourced_claims, sources_audit, verified).
+
+    ``verified`` (raw :class:`VerifiedClaim` list) is returned for the P2
+    runtime gates (numeric check / conflict section / abstention); None when
+    claim-check is disabled.
+    """
     from ..config import get_settings
 
     settings = settings or get_settings()
@@ -247,7 +252,135 @@ def _claims_and_audit(
         except Exception as exc:  # noqa: BLE001
             logger.debug("sources_audit skipped: %s", exc)
             sources_audit = None
-    return sourced_claims, sources_audit
+    return sourced_claims, sources_audit, verified
+
+
+# ── P2 运行时门（数值一致性 / 证据冲突透出 / 证据不足拒答）─────────────────
+# 挂在 _claims_and_audit 之后、ChatResponse 组装之前。顺序：
+#   1. P2-1 数值检查：标注 + claim 降级（不替换答案）；
+#   2. P2-3 冲突段：答案尾追加（不替换答案）；
+#   3. P2-2 拒答门：触发时整体替换为拒答模板（硬门）。
+# Token 流式路径不经过此函数（P2-2 决策 A：已知缺口）。
+
+_ABSTAIN_TEMPLATE = (
+    "证据不足，无法基于现有证据回答该问题。\n\n"
+    "{reason}"
+    "为避免误导，本次不生成确定性结论。建议补充相关文献、专利或实验数据后重试，或缩小问题范围。"
+)
+
+_ABSTAIN_REASON_NO_EVIDENCE = "未检索到任何可用证据"
+_ABSTAIN_REASON_UNSUPPORTED = (
+    "已检索到的证据不足以支撑可靠回答（{n_claims} 条论断中 {n_unsupported} 条缺乏证据支撑），"
+)
+
+_NUMERIC_DOWNGRADE = {"supported": "weak", "weak": "unsupported"}
+
+
+def _apply_answer_gates(
+    question: str,
+    answer: str,
+    citations,
+    sourced_claims,
+    verified,
+    settings,
+):
+    """Apply P2-1/P2-3/P2-2 gates. Returns (answer, sourced_claims, abstained)."""
+    from ..services.numeric_check import (
+        check_answer_numbers,
+        extract_numbers,
+        format_numeric_note,
+    )
+    from ..pipeline.claim_checker import ClaimVerdict
+
+    gated_answer = answer
+    abstained = False
+
+    # —— P2-1：数值一致性运行时检查 ——
+    if getattr(settings, "chat_numeric_check_enabled", True) and citations:
+        try:
+            evidence_texts = [
+                f"{c.title or ''} {c.snippet or ''}" for c in citations
+            ]
+            failures = check_answer_numbers(gated_answer, evidence_texts)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("numeric check skipped: %s", exc)
+            failures = []
+        if failures:
+            gated_answer = gated_answer + format_numeric_note(failures)
+            if sourced_claims:
+                import math as _math
+                import re as _re
+
+                def _hit(claim_text: str) -> bool:
+                    cnums = extract_numbers(claim_text or "")
+                    if not cnums:
+                        return False
+                    for f in failures:
+                        m = _re.match(r"([0-9]+(?:\.[0-9]+)?)", f["claim"])
+                        if not m:
+                            continue
+                        fv = float(m.group(1))
+                        if any(
+                            _math.isclose(fv, cv, rel_tol=1e-6, abs_tol=1e-9)
+                            for cv, _ in cnums
+                        ):
+                            return True
+                    return False
+
+                for sc in sourced_claims:
+                    if _hit(sc.text) and sc.status in _NUMERIC_DOWNGRADE:
+                        sc.status = _NUMERIC_DOWNGRADE[sc.status]
+
+    # —— P2-3：conflicting 判词显式透出 ——
+    if (
+        getattr(settings, "chat_conflict_section_enabled", True)
+        and verified
+    ):
+        conflicts = [
+            v for v in verified if v.verdict == ClaimVerdict.conflicting
+        ]
+        if conflicts:
+            lines = ["\n\n【证据冲突】以下论断的证据相互矛盾，请谨慎采信："]
+            for v in conflicts:
+                refs = ", ".join(
+                    f"[^{i + 1}]" for i in (v.evidence_indices or [])
+                )
+                src = f"（相关证据 {refs} 结论不一致）" if refs else ""
+                lines.append(f"- 「{v.text}」{src}")
+            gated_answer = gated_answer + "\n".join(lines)
+
+    # —— P2-2：证据不足拒答硬门 ——
+    threshold = float(getattr(settings, "chat_abstention_threshold", 0.5) or 0.5)
+    should_abstain = False
+    n_claims, n_unsupported = 0, 0
+    if not citations:
+        should_abstain = True
+    elif verified:
+        n_claims = len(verified)
+        n_unsupported = sum(
+            1 for v in verified if v.verdict == ClaimVerdict.unsupported
+        )
+        if n_claims and n_unsupported / n_claims > threshold:
+            should_abstain = True
+    if should_abstain:
+        if n_claims:
+            reason = _ABSTAIN_REASON_UNSUPPORTED.format(
+                n_claims=n_claims, n_unsupported=n_unsupported
+            )
+        else:
+            reason = _ABSTAIN_REASON_NO_EVIDENCE + "，"
+        gated_answer = _ABSTAIN_TEMPLATE.format(reason=reason)
+        abstained = True
+        logger.info(
+            "chat abstention gate fired: citations=%d claims=%d unsupported=%d threshold=%.2f",
+            len(citations or []),
+            n_claims,
+            n_unsupported,
+            threshold,
+        )
+
+    return gated_answer, sourced_claims, abstained
+
 
 
 def _ensure_answer(text: str | None, *, fallback: str = "暂无可用回答。") -> str:
@@ -472,12 +605,21 @@ def chat(req: ChatRequestValidated):
             except Exception as exc:  # noqa: BLE001
                 logger.debug("mcp chat selection skipped: %s", exc)
 
-        sourced_claims, sources_audit = _claims_and_audit(
+        sourced_claims, sources_audit, _verified = _claims_and_audit(
             question,
             answer,
             citations,
             structured=structured,
             settings=settings,
+        )
+        # P2 运行时门：数值检查 → 冲突透出 → 拒答硬门（决策 A：同步路径）。
+        answer, sourced_claims, _abstained = _apply_answer_gates(
+            question,
+            answer,
+            citations,
+            sourced_claims,
+            _verified,
+            settings,
         )
         try:
             from ..services.scholar_helpers import build_evidence_provenance
@@ -831,12 +973,21 @@ async def chat_stream(req: "ChatRequestValidated"):
                     )
                     claims, sources_audit = None, None
                     try:
-                        claims, sources_audit = await asyncio.to_thread(
+                        claims, sources_audit, _verified = await asyncio.to_thread(
                             _claims_and_audit,
                             question,
                             answer,
                             citations,
                             settings=settings,
+                        )
+                        # P2 运行时门（paperqa 整包路径，决策 A）。
+                        answer, claims, _abstained = _apply_answer_gates(
+                            question,
+                            answer,
+                            citations,
+                            claims,
+                            _verified,
+                            settings,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("chat/stream paperqa claims: %s", exc)
@@ -1024,7 +1175,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                         ]
                         claims, sources_audit = None, None
                         try:
-                            claims, sources_audit = await asyncio.to_thread(
+                            claims, sources_audit, _ = await asyncio.to_thread(
                                 _claims_and_audit,
                                 question,
                                 answer,
@@ -1060,7 +1211,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                     ]
                     claims, sources_audit = None, None
                     try:
-                        claims, sources_audit = await asyncio.to_thread(
+                        claims, sources_audit, _ = await asyncio.to_thread(
                             _claims_and_audit,
                             question,
                             answer,
@@ -1179,7 +1330,7 @@ async def chat_stream(req: "ChatRequestValidated"):
             yield _sse({"type": "phase", "phase": "claims"})
             claims, sources_audit = None, None
             try:
-                claims, sources_audit = await asyncio.to_thread(
+                claims, sources_audit, _ = await asyncio.to_thread(
                     _claims_and_audit,
                     question,
                     answer,

@@ -43,9 +43,20 @@
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Any
+
+# P2-1: 数值抽取/单位归一化单实现移到 app/services/numeric_check.py，
+# 运行时与评测层共用；此处 re-export 保持对外 import 路径兼容。
+from ..services.numeric_check import (
+    CITATION_RE,
+    _canon_unit,
+    _numbers_match,
+    check_answer_numbers,
+    extract_citation_indices,
+    extract_numbers,
+    score_numeric_failures,
+)
 
 __all__ = [
     "CITATION_RE",
@@ -69,8 +80,6 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "numeric_consistency": 1.0,
 }
 
-CITATION_RE = re.compile(r"\[\^(\d+)\]")
-
 _SOURCE_KEYS = ("identifier", "title", "doi", "url")
 
 
@@ -78,15 +87,6 @@ def _norm(text: str) -> str:
     t = (text or "").lower()
     t = re.sub(r"[\s\u3000\-–—_.,;:!?，。；：！？、（）()\[\]【】\"'“”‘’·/\\]+", "", t)
     return t
-
-
-def extract_citation_indices(answer: str) -> list[int]:
-    seen: list[int] = []
-    for m in CITATION_RE.finditer(answer or ""):
-        n = int(m.group(1))
-        if n not in seen:
-            seen.append(n)
-    return seen
 
 
 def metric_citation_veracity(
@@ -172,133 +172,11 @@ def metric_coverage(
     return {"score": round(score, 4), "failures": failures}
 
 
-_UNIT_ALIASES: dict[str, str] = {
-    "°c": "c", "℃": "c",
-    "μm": "um", "微米": "um", "um": "um",
-    "mm": "mm", "毫米": "mm",
-    "cm": "cm", "厘米": "cm",
-    "m": "m", "米": "m",
-    "h": "h", "小时": "h", "hr": "h", "hrs": "h",
-    "min": "min", "分钟": "min",
-    "s": "s", "秒": "s",
-    "%": "pct", "％": "pct",
-    "ph": "ph",
-    "mpa": "mpa", "kpa": "kpa", "pa": "pa",
-    "g": "g", "克": "g",
-    "kg": "kg", "千克": "kg",
-    "mg": "mg", "毫克": "mg",
-    "kg·cm": "kgcm", "kgcm": "kgcm",  # 冲击强度常用复合单位
-    "ml": "ml", "毫升": "ml",
-    "l": "l", "升": "l",
-    "年": "yr",
-}
-_CONVERSIONS: dict[str, tuple[str, float]] = {
-    "um": ("um", 1.0), "mm": ("um", 1000.0), "cm": ("um", 10000.0), "m": ("um", 1e6),
-    "h": ("h", 1.0), "min": ("h", 1.0 / 60.0), "s": ("h", 1.0 / 3600.0),
-    "mpa": ("mpa", 1.0), "kpa": ("mpa", 1e-3), "pa": ("mpa", 1e-6),
-    "g": ("g", 1.0), "kg": ("g", 1000.0), "mg": ("g", 1e-3),
-    "kgcm": ("kgcm", 1.0),
-    "ml": ("ml", 1.0), "l": ("ml", 1000.0),
-}
-_UNIT_PATTERN = "|".join(
-    sorted((re.escape(u) for u in _UNIT_ALIASES), key=len, reverse=True)
-)
-_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")", re.IGNORECASE)
-_PH_RE = re.compile(r"[pP][Hh]\s*(\d+(?:\.\d+)?)")
-# pH 范围表达："pH 控制在 3.8-4.2" / "pH 8.5~9.5"（pH token 与数字不紧邻）。
-# 限制中间非数字字符 ≤12，避免跨句误抓。
-_PH_RANGE_RE = re.compile(
-    r"[pP][Hh][^\d.]{0,12}?(\d+(?:\.\d+)?)\s*[~～\-–—]\s*(\d+(?:\.\d+)?)"
-)
-_RANGE_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*[-\u2013\u2014~\u301c]\s*(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")",
-    re.IGNORECASE,
-)
-
-
-def _canon_unit(raw: str) -> str | None:
-    return _UNIT_ALIASES.get(raw.strip().lower())
-
-
-def _to_base(value: float, unit: str) -> tuple[str, float]:
-    base, factor = _CONVERSIONS.get(unit, (unit, 1.0))
-    return base, value * factor
-
-
-def extract_numbers(text: str) -> list[tuple[float, str]]:
-    out: list[tuple[float, str]] = []
-    seen: set[tuple[float, str]] = set()
-
-    def _add(v: float, u: str | None) -> None:
-        if u is None:
-            return
-        key = (v, u)
-        if key not in seen:
-            seen.add(key)
-            out.append(key)
-
-    src = text or ""
-    for m in _RANGE_RE.finditer(src):
-        u = _canon_unit(m.group(3))
-        _add(float(m.group(1)), u)
-        _add(float(m.group(2)), u)
-    for m in _NUM_RE.finditer(src):
-        _add(float(m.group(1)), _canon_unit(m.group(2)))
-    for m in _PH_RE.finditer(src):
-        _add(float(m.group(1)), "ph")
-    for m in _PH_RANGE_RE.finditer(src):
-        _add(float(m.group(1)), "ph")
-        _add(float(m.group(2)), "ph")
-    return out
-
-
-def _numbers_match(a: tuple[float, str], b: tuple[float, str]) -> bool:
-    (av, au), (bv, bu) = a, b
-    if au == bu:
-        return math.isclose(av, bv, rel_tol=1e-6, abs_tol=1e-9)
-    ab, avv = _to_base(av, au)
-    bb, bvv = _to_base(bv, bu)
-    return ab == bb and math.isclose(avv, bvv, rel_tol=1e-6, abs_tol=1e-9)
-
-
 def metric_numeric_consistency(
     answer: str, evidence: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    answer_nums = extract_numbers(answer)
-    if not answer_nums:
-        return {"score": 1.0, "failures": []}
-    indices = extract_citation_indices(answer)
-    cited = [evidence[n - 1] for n in indices if 1 <= n <= len(evidence)]
-    failures: list[dict[str, str]] = []
-    if not cited:
-        # 答案含数字但无有效引用：不回退全 evidence 池，直接 fail。
-        # 数字必须绑定到其引用 passage，不允许"未引用证据命中数字"蒙混。
-        for v, u in answer_nums:
-            failures.append(
-                {
-                    "claim": f"{v:g}{u}",
-                    "reason": "答案含数字但无有效引用（数字无可绑定的引用来源）",
-                }
-            )
-        return {"score": 0.0, "failures": failures}
-    pool = cited
-    pool_nums: list[tuple[float, str]] = []
-    for item in pool:
-        pool_nums.extend(extract_numbers(str(item.get("text") or "")))
-    failures: list[dict[str, str]] = []
-    ok = 0
-    for v, u in answer_nums:
-        if any(_numbers_match((v, u), p) for p in pool_nums):
-            ok += 1
-        else:
-            failures.append(
-                {
-                    "claim": f"{v:g}{u}",
-                    "reason": "答案中的数字在所引证据原文中无来源（亦无明确换算对应）",
-                }
-            )
-    score = ok / len(answer_nums)
-    return {"score": round(score, 4), "failures": failures}
+    """答案中带单位数字的证据一致性（P2-1 起与运行时共用单实现）。"""
+    return score_numeric_failures(answer, evidence)
 
 
 # ---------------------------------------------------------------------------

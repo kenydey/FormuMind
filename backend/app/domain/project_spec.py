@@ -86,12 +86,16 @@ def normalize_requirement(req: Requirement) -> Requirement:
 
 
 def primary_objective(req: Requirement) -> str:
-    objectives = req.objectives
+    objectives = getattr(req, "objectives", None) or []
     if objectives:
         return objectives[0].metric
     from ..pipeline.workflow import OBJECTIVE
 
-    return OBJECTIVE.get(req.domain, "salt_spray_hours")
+    try:
+        return OBJECTIVE.get(req.domain, "salt_spray_hours")
+    except TypeError:
+        # Test stubs may use an unhashable SimpleNamespace domain.
+        return "salt_spray_hours"
 
 
 def default_objectives_for(req: Requirement) -> list[ObjectiveSpec]:

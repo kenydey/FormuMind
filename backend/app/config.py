@@ -592,6 +592,13 @@ class Settings(BaseSettings):
     chat_structured_enabled: bool = True
     chat_clarification_enabled: bool = True
     chat_claim_check_enabled: bool = True
+    # P2-2 — 证据不足拒答硬门：unsupported claim 占比超阈值或零召回时，
+    # 用拒答模板替换答案（直接上硬门，无 report-only 过渡）。
+    chat_abstention_threshold: float = 0.5
+    # P2-1 — 数值一致性运行时检查（答案带单位数字 vs 所引证据）。
+    chat_numeric_check_enabled: bool = True
+    # P2-3 — 答案尾「证据冲突」段（conflicting 判词显式透出）。
+    chat_conflict_section_enabled: bool = True
     # Skills / Evidence / Connectors / MCP (OpenScience-inspired upgrade, default conservative).
     chat_composer_plus_enabled: bool = True
     chat_skills_runtime_enabled: bool = True

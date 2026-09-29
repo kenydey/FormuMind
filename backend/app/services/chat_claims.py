@@ -96,6 +96,9 @@ def build_sourced_claims(
                 chunk_ids=chunk_ids,
                 confidence=conf,
                 status=status,
+                raw_verdict=str(getattr(v.verdict, "value", v.verdict))
+                if v.verdict is not None
+                else None,
             )
         )
     return out

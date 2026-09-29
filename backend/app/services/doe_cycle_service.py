@@ -34,9 +34,15 @@ def record_cycle_run(
     prior_measurement_count: int,
     experiment_count: int,
     status: str,
+    best_objective_value: float | None = None,
+    target_value: float | None = None,
+    objective_metric: str | None = None,
+    objective_direction: str | None = None,
+    convergence_reason: str | None = None,
 ) -> None:
     """Wave 3-2: persist one closed-loop cycle execution for observability.
 
+    P2-4 adds objective tracking columns (all nullable; old callers unaffected).
     Fail-open: a recording failure must never break the cycle itself.
     """
     try:
@@ -50,6 +56,11 @@ def record_cycle_run(
                     prior_measurement_count=prior_measurement_count,
                     experiment_count=experiment_count,
                     status=status,
+                    best_objective_value=best_objective_value,
+                    target_value=target_value,
+                    objective_metric=objective_metric or "",
+                    objective_direction=objective_direction or "",
+                    convergence_reason=convergence_reason or "",
                 )
             )
     except Exception as e:  # noqa: BLE001 - observability must not break cycles
@@ -248,11 +259,42 @@ def persist_experiments(
         }
 
 
-def run_doe_cycle(requirement: Requirement) -> dict[str, Any]:
+def _hold_stub(
+    *,
+    reason: str,
+    message: str,
+    best_objective_value: float | None,
+    target_value: float | None,
+    objective_metric: str,
+    objective_direction: str,
+) -> dict[str, Any]:
+    """P2-4: converged-hold stub — no new experiments are generated."""
+    return {
+        "experiment_ids": [],
+        "status": "success",
+        "count": 0,
+        "message": message,
+        "engine": "converged-hold",
+        "held": True,
+        "convergence_reason": reason,
+        "best_objective_value": best_objective_value,
+        "target_value": target_value,
+        "objective_metric": objective_metric,
+        "objective_direction": objective_direction,
+    }
+
+
+def run_doe_cycle(
+    requirement: Requirement, budget_remaining: int | None = None
+) -> dict[str, Any]:
     """Execute one DOE cycle for closed-loop automation.
 
     Orchestrates: load prior measurements -> build candidates ->
-    generate points -> persist. Same signature as before.
+    generate points -> persist.
+
+    P2-4: hard stops before any generation —
+    ``budget_remaining <= 0`` or the primary objective target already met
+    returns a converged-hold stub (no experiments generated).
     """
     logger.info("Starting DOE cycle for requirement: %s", requirement.domain)
 
@@ -262,7 +304,25 @@ def run_doe_cycle(requirement: Requirement) -> dict[str, Any]:
     project_id = requirement.project_id or ""
     domain = requirement.domain.value if requirement.domain else ""
 
-    def _record(engine: str, n_experiments: int, status: str) -> None:
+    # P2-4: objective tracking for the observability row.
+    from .auto_loop import (
+        best_objective_value,
+        primary_objective_spec,
+        target_achieved,
+    )
+
+    obj_spec = primary_objective_spec(requirement)
+    best = best_objective_value(
+        prior_measurements, obj_spec.metric, obj_spec.direction
+    )
+    obj_kwargs = dict(
+        best_objective_value=best,
+        target_value=obj_spec.target_value,
+        objective_metric=obj_spec.metric,
+        objective_direction=obj_spec.direction,
+    )
+
+    def _record(engine: str, n_experiments: int, status: str, **extra: Any) -> None:
         # Wave 3-2: every terminal path leaves an observability row.
         record_cycle_run(
             project_id=project_id,
@@ -271,6 +331,35 @@ def run_doe_cycle(requirement: Requirement) -> dict[str, Any]:
             prior_measurement_count=n_prior,
             experiment_count=n_experiments,
             status=status,
+            **{**obj_kwargs, **extra},
+        )
+
+    # P2-4 hard stop 1: budget exhausted — before any candidate/generation work.
+    if budget_remaining is not None and budget_remaining <= 0:
+        logger.info("DOE cycle held: budget exhausted (remaining=%s)", budget_remaining)
+        _record("converged-hold", 0, "success", convergence_reason="budget_exhausted")
+        return _hold_stub(
+            reason="budget_exhausted",
+            message=f"预算已耗尽（remaining={budget_remaining}），保留上一轮 DOE，无需新实验建议",
+            **obj_kwargs,
+        )
+
+    # P2-4 hard stop 2: target already achieved by prior measurements.
+    if target_achieved(best, obj_spec):
+        logger.info(
+            "DOE cycle held: target achieved (%s best=%s target=%s)",
+            obj_spec.metric,
+            best,
+            obj_spec.target_value,
+        )
+        _record("converged-hold", 0, "success", convergence_reason="target_achieved")
+        return _hold_stub(
+            reason="target_achieved",
+            message=(
+                f"目标已达成（{obj_spec.metric} 最优测量值 {best:g}"
+                f"已达到目标 {obj_spec.target_value:g}），无需新实验建议"
+            ),
+            **obj_kwargs,
         )
 
     # 1. Candidate formulations (Top-12).

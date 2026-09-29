@@ -130,3 +130,110 @@ def test_loop_all_domains():
         )
         assert rep.optimization.top_formulations
         assert rep.next_doe.runs
+
+
+def test_loop_iterate_converges_when_target_achieved(monkeypatch):
+    """P2-4: measured best meets the objective target → converged hold."""
+    monkeypatch.setenv("FORMUMIND_LOOP_CONVERGENCE_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    from app.domain.schemas import ExperimentRecord, ObjectiveSpec
+
+    def fake_records(domain):
+        return [
+            ExperimentRecord(
+                domain=domain, factors={},
+                measured={"salt_spray_hours": 600.0},
+            )
+        ]
+
+    def fake_rmse(domain):
+        from app.domain.schemas import ModelInfo
+
+        infos = [
+            ModelInfo(domain=domain, metric="salt_spray_hours", rmse=0.50,
+                      r2=0.9, n_samples=8, backend="test"),
+        ]
+        return infos, {m.metric: m.rmse for m in infos}
+
+    monkeypatch.setattr(
+        "app.services.training.registry.records_for", fake_records)
+    monkeypatch.setattr("app.services.auto_loop._rmse_by_metric", fake_rmse)
+
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        objectives=[ObjectiveSpec(metric="salt_spray_hours",
+                                  direction="maximize", target_value=500.0)],
+    )
+    rep = loop_iterate(req)
+    assert rep.converged is True
+    assert "目标已达成" in rep.loop_message
+    assert rep.next_doe.design == "converged-hold"
+
+
+def test_loop_iterate_not_converged_when_target_missed(monkeypatch):
+    """P2-4: best below target → normal iteration continues."""
+    monkeypatch.setenv("FORMUMIND_LOOP_CONVERGENCE_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    from app.domain.schemas import ExperimentRecord, ObjectiveSpec
+
+    def fake_records(domain):
+        return [
+            ExperimentRecord(
+                domain=domain, factors={},
+                measured={"salt_spray_hours": 400.0},
+            )
+        ]
+
+    def fake_rmse(domain):
+        from app.domain.schemas import ModelInfo
+
+        infos = [
+            ModelInfo(domain=domain, metric="salt_spray_hours", rmse=0.50,
+                      r2=0.9, n_samples=8, backend="test"),
+        ]
+        return infos, {m.metric: m.rmse for m in infos}
+
+    monkeypatch.setattr(
+        "app.services.training.registry.records_for", fake_records)
+    monkeypatch.setattr("app.services.auto_loop._rmse_by_metric", fake_rmse)
+
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        objectives=[ObjectiveSpec(metric="salt_spray_hours",
+                                  direction="maximize", target_value=500.0)],
+    )
+    # target missed + no plateau → must NOT take the converged shortcut
+    # (workflow will run; stub it to avoid heavy compute)
+    import app.services.auto_loop as al
+
+    monkeypatch.setattr(
+        "app.pipeline.workflow.run_optimization",
+        lambda *a, **k: __import__("app.domain.schemas", fromlist=["OptimizationResult"]).OptimizationResult(
+            iterations=1, objective="salt_spray_hours", history=[],
+            top_formulations=[], engine="test"),
+    )
+
+    def fake_al_doe(*a, **k):
+        from types import SimpleNamespace
+
+        from app.domain.schemas import DOEPlan
+
+        plan = DOEPlan(design="lhs", factors=[], runs=[], plan_id="p")
+        return SimpleNamespace(
+            plan=plan, chemical_feasibility=None, physical_constraints=None,
+            campaign_state=None, strategy_label="balanced", strategy_rationale="",
+            run_explanations=[], anomalies=[], recommended_next_action="",
+            budget_remaining=None,
+        )
+
+    # active_learning is imported lazily inside loop_iterate: patch the source.
+    monkeypatch.setattr(
+        "app.services.active_learning.active_learning_doe", fake_al_doe)
+    rep = loop_iterate(req)
+    assert rep.converged is False
