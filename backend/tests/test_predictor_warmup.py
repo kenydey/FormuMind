@@ -44,3 +44,28 @@ def test_warm_predict_after_guard_reset_runs_again(monkeypatch):
     monkeypatch.setattr(predictor, "_warm_guard", {"done": False})
     predictor.warm_predict()
     assert calls["n"] == 2
+
+
+def test_molecular_features_rdkit_missing_warns_once(monkeypatch, caplog):
+    """A-3: RDKit 缺失时不再静默降级 — 记录一次 warning，仍返回 {}。"""
+    import logging
+    import sys
+
+    from app.domain.schemas import Formulation, Ingredient
+
+    monkeypatch.setattr(predictor, "_RDKIT_MISSING_WARNED", False)
+    # 让 `from rdkit import ...` 抛 ImportError（rdkit 本机已装，需屏蔽）。
+    monkeypatch.setitem(sys.modules, "rdkit", None)
+    monkeypatch.setitem(sys.modules, "rdkit.Chem", None)
+
+    form = Formulation(
+        name="t",
+        domain="surface_treatment",
+        ingredients=[Ingredient(name="水", weight_pct=100.0, smiles="O", role="solvent")],
+    )
+    with caplog.at_level(logging.WARNING, logger="app.services.predictor"):
+        assert predictor._molecular_features(form) == {}
+        assert predictor._molecular_features(form) == {}
+    warnings = [r for r in caplog.records if "RDKit not installed" in r.message]
+    assert len(warnings) == 1, [r.message for r in caplog.records]
+    assert predictor._RDKIT_MISSING_WARNED is True

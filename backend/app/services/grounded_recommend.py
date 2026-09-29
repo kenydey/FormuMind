@@ -172,12 +172,17 @@ def ground_recommended_formulas(
     evidence: list[Evidence],
     *,
     prefer_materials_catalog: bool = False,
+    strict: bool = True,
 ) -> tuple[list[RecommendedFormula], list[str]]:
-    """Verify components appear in evidence or material catalog; tag low-confidence rows.
+    """Verify components appear in evidence or material catalog.
 
     ``prefer_materials_catalog`` is a *soft* bias: catalog hits get stronger
     grounding / stable sort priority. It never drops formulas whose components
     are outside the catalog.
+
+    ``strict`` (default True): drop low-confidence components instead of only
+    tagging them. A formula whose every component is low-confidence is dropped
+    entirely. ``strict=False`` restores the legacy tag-only behaviour.
     """
     if not formulas:
         return [], []
@@ -202,7 +207,25 @@ def ground_recommended_formulas(
         ]
         low = [c.name for c in comps if c.grounding_confidence == "low"]
         form_warnings = list(rec.warnings)
-        if low:
+        if strict and low:
+            # A-5: drop instead of only tagging. Never renormalize weight_pct:
+            # the remaining recipe is honest about what was removed.
+            dropped_pct = sum(
+                c.weight_pct or 0.0 for c in comps if c.grounding_confidence == "low"
+            )
+            kept = [c for c in comps if c.grounding_confidence != "low"]
+            form_warnings.append(
+                f"已剔除低可信度成分（证据未覆盖）: {', '.join(low[:5])}"
+                f"（共剔除 {dropped_pct:.1f}%）"
+            )
+            warnings.append(
+                f"{rec.name}: 剔除 {len(low)} 个低可信度成分（{', '.join(low[:5])}）"
+            )
+            if not kept:
+                warnings.append(f"{rec.name}: 全部分成分均低可信度，整个配方已剔除")
+                continue
+            comps = kept
+        elif low:
             form_warnings.append(
                 f"低可信度成分（证据未覆盖）: {', '.join(low[:5])}"
             )

@@ -29,6 +29,8 @@ def _has_waterborne(form: Formulation) -> bool:
     return is_waterborne(form)
 
 
+_RDKIT_MISSING_WARNED = False
+
 _RDKIT_DESCRIPTORS = [
     ("MolWt",              "mean_molwt"),
     ("MolLogP",            "mean_logp"),
@@ -48,10 +50,19 @@ def _molecular_features(form: Formulation) -> dict[str, float]:
     and returns the wt%-weighted mean. More informative than the single
     mean_logp previously returned.
     """
+    global _RDKIT_MISSING_WARNED
     try:
         from rdkit import Chem  # type: ignore
         from rdkit.Chem import Descriptors  # type: ignore
     except ImportError:
+        # A-3: never degrade silently — warn once so the missing optional
+        # dependency is visible in logs instead of hiding behind empty features.
+        if not _RDKIT_MISSING_WARNED:
+            _RDKIT_MISSING_WARNED = True
+            logger.warning(
+                "RDKit not installed: molecular descriptors unavailable, "
+                "property prediction degrades to the empirical surrogate only"
+            )
         return {}
 
     accum: dict[str, float] = {col: 0.0 for _, col in _RDKIT_DESCRIPTORS}

@@ -90,12 +90,16 @@ def simulate_traditional_doe(
     max_batches: int = 20,
     evaluator: str = "synthetic",
     seed: int = 42,
+    probe: List[Dict] | None = None,
 ) -> Tuple[int, List[float]]:
     """Simulate traditional DOE: fresh LHS batch per round, honestly evaluated.
 
     Each batch is evaluated through the (deterministic synthetic) evaluator —
     never through ``random.uniform`` progress draws. Returns
     (total_experiments, history_of_best_values).
+
+    ``probe`` (A-8 observability): when given, one dict per batch is appended
+    with ``{"batch", "engine", "n_suggested", "best"}``.
     """
     from app.domain import doe as doe_engine
     from app.pipeline.workflow import build_doe_factors
@@ -136,6 +140,15 @@ def simulate_traditional_doe(
 
             experiments_conducted += batch_size
             history.append(best_value)
+            if probe is not None:
+                probe.append(
+                    {
+                        "batch": batch_num + 1,
+                        "engine": "lhs",
+                        "n_suggested": batch_size,
+                        "best": best_value,
+                    }
+                )
 
             logger.info(
                 f"Batch {batch_num+1}: best = {best_value:.3f} (target {target_value})"
@@ -162,6 +175,7 @@ def simulate_bayesian_closed_loop(
     max_iterations: int = 24,
     evaluator: str = "synthetic",
     seed: int = 42,
+    probe: List[Dict] | None = None,
 ) -> Tuple[int, List[float]]:
     """Simulate Bayesian closed-loop optimization.
 
@@ -169,6 +183,10 @@ def simulate_bayesian_closed_loop(
     evaluator and fed back per-run — never through ``random.uniform``
     progress draws. Uses BayBE when available, legacy LHS+EI otherwise
     (honest comparison: same evaluator for both arms).
+
+    ``probe`` (A-8 observability): when given, one dict per iteration is
+    appended with ``{"iteration", "engine", "n_suggested", "best"}`` — the
+    acquisition source actually used (``"baybe"`` or ``"legacy"``).
 
     Returns:
         (total_experiments, history_of_best_values)
@@ -243,6 +261,15 @@ def simulate_bayesian_closed_loop(
                 best_value = max(best_value, value)
             experiments_conducted += len(suggested)
             history.append(best_value)
+            if probe is not None:
+                probe.append(
+                    {
+                        "iteration": iteration + 1,
+                        "engine": getattr(active_result, "engine", "unknown"),
+                        "n_suggested": len(suggested),
+                        "best": best_value,
+                    }
+                )
 
             logger.info(
                 f"Iter {iteration+1}: best = {best_value:.3f} (target {target_value})"

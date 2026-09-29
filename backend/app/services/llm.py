@@ -1242,7 +1242,8 @@ def _recommend_system_prompt() -> str:
         "6. objectives_summary explains how the recipe meets each objective.\n"
         "7. Return JSON only — no markdown fences.\n"
         "8. RESPECT product_type strictly: if the product_type/headline says 「含聚合物/树脂的乳液型」 (polymer/resin EMULSION type), you MUST include a polymer resin (acrylic / epoxy / polyurethane emulsion) as the film-forming binder — a purely inorganic conversion coating does NOT satisfy an emulsion-type product.\n"
-        "9. Salt-spray realism: purely inorganic conversion coatings (zirconate/silane/rare-earth, 2-5% solids) realistically reach only 50-200h salt spray; only organic polymer/resin emulsion systems reach 500-1440h. Never claim 500h+ for an inorganic-only formula — keep predicted salt_spray_hours consistent with the formula type."
+        "9. Salt-spray realism: purely inorganic conversion coatings (zirconate/silane/rare-earth, 2-5% solids) realistically reach only 50-200h salt spray; only organic polymer/resin emulsion systems reach 500-1440h. Never claim 500h+ for an inorganic-only formula — keep predicted salt_spray_hours consistent with the formula type.\n"
+        "10. Do NOT add ingredients the user did not ask for: every component must serve an explicit objective or a stated constraint (pH adjustment, film formation, corrosion inhibition, etc). Do not pad the formula with extra additives 'just in case' — an unrequested ingredient is a defect, not a bonus."
     )
 
 

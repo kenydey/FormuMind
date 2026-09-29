@@ -22,7 +22,7 @@ def test_pydoe_kg_gate_marks_runs_infeasible(monkeypatch):
     """Requirement + infeasible KG check → every DOE run flagged."""
     monkeypatch.setattr(mod, "pydoe_available", lambda: True)
 
-    def fake_matrix(design, k, n):
+    def fake_matrix(design, k, n, seed=None):
         import numpy as np
 
         return np.array([[0.0, 0.0], [1.0, 1.0], [0.5, 0.5]])
@@ -75,7 +75,7 @@ def test_build_doe_plan_forwards_requirement(monkeypatch):
 
     seen: dict = {}
 
-    def fake_fallback(factors, design, n=None, requirement=None):
+    def fake_fallback(factors, design, n=None, requirement=None, seed=None):
         seen["requirement"] = requirement
         return SimpleNamespace(runs=[], notes="")
 

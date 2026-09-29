@@ -78,3 +78,63 @@ def test_lhs_fallback_reads_infeasible_reason_from_run(monkeypatch):
     assert "_doe_metadata" not in factors
     assert factors == {"resin_wt_pct": 62.0}
     assert all(isinstance(v, (int, float)) for v in factors.values())
+
+
+def test_lhs_fallback_held_when_budget_exhausted(monkeypatch):
+    """A-7: 预算耗尽时 LHS 回退也不生成实验点（纵深防御；run_doe_cycle 的
+    P2-4 硬停 normally 先拦截，此处覆盖直接调用 generate 路径）。"""
+    from types import SimpleNamespace
+
+    from app.services import doe_cycle_service as mod
+    import app.services.active_learning as al_mod
+
+    calls = []
+
+    def _should_not_run(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("active_learning_doe must not be called on exhausted budget")
+
+    monkeypatch.setattr(al_mod, "active_learning_doe", _should_not_run)
+    requirement = SimpleNamespace(
+        domain=SimpleNamespace(value="coating"),
+        project_id="proj-1",
+    )
+    for exhausted in (0, -2):
+        engine, dicts = mod._generate_via_lhs(
+            requirement, [], budget_remaining=exhausted
+        )
+        assert engine == "lhs"
+        assert dicts == []
+    assert calls == []
+
+
+def test_lhs_fallback_propagates_budget_remaining(monkeypatch):
+    """A-7: budget_remaining 下沉到 active_learning_doe（元数据/策略感知预算）。"""
+    from types import SimpleNamespace
+
+    from app.services import doe_cycle_service as mod
+    import app.services.active_learning as al_mod
+
+    captured: dict = {}
+
+    def _fake_active_doe(**kwargs):
+        captured.update(kwargs)
+        run = SimpleNamespace(
+            run_id="lhs-1",
+            coded={},
+            natural={},
+            ai_suggested=True,
+            infeasible=False,
+            infeasible_reason=None,
+        )
+        return SimpleNamespace(plan=SimpleNamespace(runs=[run]))
+
+    monkeypatch.setattr(al_mod, "active_learning_doe", _fake_active_doe)
+    requirement = SimpleNamespace(
+        domain=SimpleNamespace(value="coating"),
+        project_id="proj-1",
+    )
+    engine, dicts = mod._generate_via_lhs(requirement, [], budget_remaining=3)
+    assert engine == "lhs"
+    assert len(dicts) == 1
+    assert captured.get("budget_remaining") == 3

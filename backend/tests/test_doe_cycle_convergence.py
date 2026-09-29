@@ -72,7 +72,9 @@ def _patch_cycle(monkeypatch, records, calls):
     monkeypatch.setattr(
         doe_cycle_service,
         "generate_experiment_dicts",
-        lambda req, priors: calls.append("generate") or ("lhs", []),
+        # A-7: signature gained budget_remaining (default None).
+        lambda req, priors, budget_remaining=None: calls.append("generate")
+        or ("lhs", []),
     )
     recorded = {}
 

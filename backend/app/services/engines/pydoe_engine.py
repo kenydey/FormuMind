@@ -31,11 +31,16 @@ def _default_n(k: int, n: int | None) -> int:
     return n or max(2 * k + 1, 8)
 
 
-def _generate_matrix(design: str, k: int, n: int) -> np.ndarray:
+def _generate_matrix(
+    design: str, k: int, n: int, seed: int | None = None
+) -> np.ndarray:
     import pydoe
 
     if design == "lhs":
-        raw = pydoe.lhs(k, n)
+        # pydoe>=1.0 uses OS entropy when no seed is given -> non-reproducible
+        # plans. Thread an explicit seed; `seed=` is the non-deprecated
+        # parameter in pydoe>=1.0 (random_state= is deprecated in 1.5).
+        raw = pydoe.lhs(k, n, seed=seed)
     elif design == "ccd":
         fn = getattr(pydoe, "ccdesign", None) or getattr(pydoe, "ccd", None)
         if fn is None:
@@ -73,6 +78,7 @@ def build_pydoe_plan(
     design: str,
     n: int | None = None,
     requirement: "Requirement | None" = None,
+    seed: int | None = None,
 ) -> DOEPlan:
     if not pydoe_available():
         raise RuntimeError("pydoe is not installed")
@@ -83,9 +89,9 @@ def build_pydoe_plan(
 
     # Designs with fixed run counts ignore n
     if design in ("ccd", "bbdesign", "simplex_lattice"):
-        matrix = _generate_matrix(design, k, n or 0)
+        matrix = _generate_matrix(design, k, n or 0, seed=seed)
     else:
-        matrix = _generate_matrix(design, k, _default_n(k, n))
+        matrix = _generate_matrix(design, k, _default_n(k, n), seed=seed)
 
     plan = matrix_to_doe_plan(matrix, factors, design, engine="pydoe")
 
@@ -125,6 +131,7 @@ def build_plan_with_fallback(
     design: str,
     n: int | None = None,
     requirement: "Requirement | None" = None,
+    seed: int | None = None,
 ) -> DOEPlan:
     """Try pydoe; fall back to native for unknown designs or import failures.
 
@@ -142,7 +149,7 @@ def build_plan_with_fallback(
             )
         return build_native_plan(factors, design, n=n)
     try:
-        return build_pydoe_plan(factors, design, n=n, requirement=requirement)
+        return build_pydoe_plan(factors, design, n=n, requirement=requirement, seed=seed)
     except Exception as exc:
         if design in _MIXTURE_DESIGNS:
             raise ValueError(

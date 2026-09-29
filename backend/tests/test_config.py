@@ -34,3 +34,23 @@ def test_unknown_env_var_ignored_in_production(monkeypatch):
     assert settings.app_name == "FormuMind"
     monkeypatch.delenv("FORMUMIND_NOT_A_REAL_SETTING", raising=False)
     get_settings.cache_clear()
+
+
+def test_bo_quality_env_key_accepted_in_development(monkeypatch):
+    """A-2: FORMUMIND_BO_QUALITY is documented in baybe_engine (_recommender_for
+    tiers fast/auto/thorough) and must not be rejected by the dev/test env audit."""
+    import os
+
+    from app.config import _audit_formumind_env
+
+    monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "development")
+    for tier in ("fast", "auto", "thorough"):
+        monkeypatch.setenv("FORMUMIND_BO_QUALITY", tier)
+        _audit_formumind_env()  # must not raise
+    # Unknown keys are still rejected.
+    monkeypatch.setenv("FORMUMIND_BO_QUALITTY", "thorough")
+    try:
+        with pytest.raises(ValueError, match="Unknown FORMUMIND"):
+            _audit_formumind_env()
+    finally:
+        monkeypatch.delenv("FORMUMIND_BO_QUALITTY", raising=False)

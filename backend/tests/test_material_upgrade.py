@@ -157,6 +157,8 @@ def test_dismiss_noisy_candidates_api_cleans_kb_junk():
 
 
 def test_prefer_materials_catalog_soft_sort_keeps_out_of_catalog():
+    # prefer_materials_catalog 的软排序语义用 strict=False 验证（目录未命中本身
+    # 不剔除）；strict 默认开时，低可信度成分仍会被证据 grounding 剔除。
     formulas = [
         RecommendedFormula(
             name="Outside Heavy",
@@ -174,12 +176,18 @@ def test_prefer_materials_catalog_soft_sort_keeps_out_of_catalog():
         ),
     ]
     out, warnings = ground_recommended_formulas(
-        formulas, [], prefer_materials_catalog=True
+        formulas, [], prefer_materials_catalog=True, strict=False
     )
     assert len(out) == 2
     assert out[0].name == "Catalog Heavy"
     assert any(c.name == "TotallyUnknownium-42" for c in out[1].components)
     assert any("软排序" in w or "优先材料库" in w for w in warnings)
+    # A-5: strict 默认开 — 同一份输入，低可信度配方被剔除而非保留。
+    out_strict, warnings_strict = ground_recommended_formulas(
+        formulas, [], prefer_materials_catalog=True
+    )
+    assert [r.name for r in out_strict] == ["Catalog Heavy"]
+    assert any("整个配方已剔除" in w for w in warnings_strict)
     # No materials_only semantics: outsider still present.
     assert all(rec.name != "" for rec in out)
 

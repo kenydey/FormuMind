@@ -122,3 +122,41 @@ def test_golden_simplex_lattice_mixture_sums():
         s = sum(run.natural[f.name] for f in factors)
         assert abs(s - total) < 1e-6, (run.natural, s)
         assert all(run.natural[f.name] >= 0 for f in factors)
+
+
+def _run_matrix(plan, factors):
+    return np.array([[run.natural[f.name] for f in factors] for run in plan.runs])
+
+
+def test_golden_pydoe_lhs_seed_reproducible():
+    """A-1: pydoe lhs with an explicit seed must be byte-identical across calls.
+
+    Regression for the pydoe>=1.0 OS-entropy default (pydoe_engine passed no
+    seed, so every LHS plan differed run to run).
+    """
+    pytest.importorskip("pydoe", reason="pydoe engine is optional")
+    from app.services.engines.pydoe_engine import build_pydoe_plan
+
+    factors = _factors(3)
+    p1 = build_pydoe_plan(factors, design="lhs", n=8, seed=42)
+    p2 = build_pydoe_plan(factors, design="lhs", n=8, seed=42)
+    assert np.array_equal(_run_matrix(p1, factors), _run_matrix(p2, factors))
+
+    # Different seeds must (with overwhelming probability) differ.
+    p3 = build_pydoe_plan(factors, design="lhs", n=8, seed=43)
+    assert not np.array_equal(_run_matrix(p1, factors), _run_matrix(p3, factors))
+
+    # seed=None preserves the old non-seeded call path (no crash, valid plan).
+    p4 = build_pydoe_plan(factors, design="lhs", n=8)
+    assert len(p4.runs) == 8
+
+
+def test_golden_doe_registry_seed_passthrough():
+    """A-1: seed threads through the registry to the pydoe engine."""
+    pytest.importorskip("pydoe", reason="pydoe engine is optional")
+    from app.services.engines.doe_registry import build_doe_plan
+
+    factors = _factors(3)
+    p1 = build_doe_plan(factors, "lhs", engine="pydoe", n=8, seed=7)
+    p2 = build_doe_plan(factors, "lhs", engine="pydoe", n=8, seed=7)
+    assert np.array_equal(_run_matrix(p1, factors), _run_matrix(p2, factors))

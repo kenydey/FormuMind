@@ -58,3 +58,29 @@ def test_exception_falls_back_offline(monkeypatch):
     assert calls["offline"] == 2
     assert len(out) == 2
     assert all(c.status == "supported" for c in out)
+
+
+def test_conflicting_verdict_structured_passthrough():
+    """A-6: conflicting 判词结构化透出 — status 保持 weak（back-compat），
+    raw_verdict 携带 "conflicting" 供前端渲染独立冲突态。"""
+    from app.pipeline.claim_checker import ClaimVerdict, VerifiedClaim
+
+    verified = [
+        VerifiedClaim(
+            text="某成分耐盐雾 1000 小时",
+            verdict=ClaimVerdict.conflicting,
+            evidence_indices=[],
+        ),
+        VerifiedClaim(
+            text="水性体系",
+            verdict=ClaimVerdict.supported,
+            evidence_indices=[],
+        ),
+    ]
+    out = cc.build_sourced_claims("问题?", "答案。", [], verified=verified)
+    assert out is not None and len(out) == 2
+    conflict, ok = out
+    assert conflict.status == "weak"  # back-compat: 不破坏旧前端
+    assert conflict.raw_verdict == "conflicting"
+    assert ok.status == "supported"
+    assert ok.raw_verdict == "supported"

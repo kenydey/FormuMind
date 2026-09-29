@@ -1539,6 +1539,8 @@ export interface SourcedClaim {
   chunk_ids: string[];
   confidence: number;
   status: "supported" | "weak" | "unsupported";
+  /** A-6: 原始核验判词（supported/unsupported/conflicting/insufficient），用于渲染冲突态。 */
+  raw_verdict?: string | null;
 }
 
 export interface ChatRequest {

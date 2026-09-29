@@ -54,10 +54,11 @@ def build_doe_plan(
     engine: str = "auto",
     n: int | None = None,
     requirement=None,
+    seed: int | None = None,
 ) -> DOEPlan:
     resolved = resolve_doe_engine(engine, design)
     if resolved == "pydoe":
         return build_plan_with_fallback(
-            factors, design, n=n, requirement=requirement
+            factors, design, n=n, requirement=requirement, seed=seed
         )
     return build_native_plan(factors, design, n=n)

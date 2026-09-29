@@ -121,6 +121,7 @@ def build_candidate_formulations(requirement: Requirement) -> list:
 def generate_experiment_dicts(
     requirement: Requirement,
     prior_measurements: list[ExperimentRecord],
+    budget_remaining: int | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Step 2 (execution dispatch): generate the next experiment points.
 
@@ -137,8 +138,12 @@ def generate_experiment_dicts(
         baybe_engine = BaybeCampaignEngine()
         if not baybe_engine.available():
             logger.warning("Baybe engine not available, falling back to LHS")
-            return _generate_via_lhs(requirement, prior_measurements)
-        return _generate_via_baybe(requirement, prior_measurements, baybe_engine)
+            return _generate_via_lhs(
+                requirement, prior_measurements, budget_remaining=budget_remaining
+            )
+        return _generate_via_baybe(
+            requirement, prior_measurements, baybe_engine, budget_remaining=budget_remaining
+        )
     except Exception as e:
         logger.error("Failed to generate experiments: %s", e)
         raise
@@ -147,9 +152,17 @@ def generate_experiment_dicts(
 def _generate_via_lhs(
     requirement: Requirement,
     prior_measurements: list[ExperimentRecord],
+    budget_remaining: int | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     from ..services.active_learning import active_learning_doe
 
+    # A-7: budget-aware fallback — never generate points when the budget is
+    # exhausted, even if called outside run_doe_cycle's P2-4 hard stop.
+    if budget_remaining is not None and budget_remaining <= 0:
+        logger.info(
+            "LHS fallback held: budget exhausted (remaining=%s)", budget_remaining
+        )
+        return "lhs", []
     active_result = active_learning_doe(
         req=requirement,
         existing=prior_measurements or None,  # None -> registry fallback inside
@@ -157,7 +170,7 @@ def _generate_via_lhs(
         design="lhs",
         engine="auto",
         workbench_campaign_id=None,
-        budget_remaining=None,
+        budget_remaining=budget_remaining,
     )
     experiment_dicts = [_run_to_dict(run) for run in active_result.plan.runs]
     logger.info("Generated %d experiments via LHS fallback", len(experiment_dicts))
@@ -168,6 +181,7 @@ def _generate_via_baybe(
     requirement: Requirement,
     prior_measurements: list[ExperimentRecord],
     baybe_engine: Any,
+    budget_remaining: int | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     active_result = baybe_engine.recommend(
         req=requirement,
@@ -175,6 +189,7 @@ def _generate_via_baybe(
         batch_size=5,
         design="baybe_active",
         workbench_campaign_id=None,
+        budget_remaining=budget_remaining,
     )
     experiment_dicts = [_run_to_dict(run) for run in active_result.plan.runs]
     logger.info("Generated %d experiments via Baybe", len(experiment_dicts))
@@ -372,7 +387,7 @@ def run_doe_cycle(
     # 2. Next experiment points (BayBE seeded with priors, else LHS).
     try:
         engine, experiment_dicts = generate_experiment_dicts(
-            requirement, prior_measurements
+            requirement, prior_measurements, budget_remaining=budget_remaining
         )
     except Exception as e:
         _record("", 0, "error")

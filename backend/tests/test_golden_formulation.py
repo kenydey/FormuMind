@@ -105,23 +105,51 @@ def test_golden_grounding_high_confidence_ratio():
 
 
 def test_golden_grounding_preserves_weight_pct_sums():
-    """Grounding must not corrupt numeric payloads: weight_pct still sums ~100."""
+    """Strict grounding never corrupts numeric payloads.
+
+    Each formula either still sums ~100, or the gap is exactly the removed
+    low-confidence weight (honest removal, no silent renormalization), with a
+    removal warning on the formula. A fully-dropped formula must have a
+    whole-formula removal warning.
+    """
     formulas = [_clean_formula(d, i) for d in DOMAINS for i in range(8)]
-    grounded, _ = ground_recommended_formulas(formulas, _evidence())
-    for f in grounded:
-        total = sum(c.weight_pct or 0.0 for c in f.components)
-        assert abs(total - 100.0) < 1e-6, f.name
+    grounded, warnings = ground_recommended_formulas(formulas, _evidence())
+    by_name = {f.name: f for f in grounded}
+    for f in formulas:
+        g = by_name.get(f.name)
+        orig_total = sum(c.weight_pct or 0.0 for c in f.components)
+        if g is None:
+            assert any(
+                f.name in w and "整个配方已剔除" in w for w in warnings
+            ), f.name
+            continue
+        kept_names = {c.name for c in g.components}
+        removed_pct = sum(
+            c.weight_pct or 0.0 for c in f.components if c.name not in kept_names
+        )
+        total = sum(c.weight_pct or 0.0 for c in g.components)
+        assert abs((orig_total - removed_pct) - total) < 1e-6, f.name
+        if removed_pct > 0:
+            assert any("已剔除低可信度成分" in w for w in g.warnings), f.name
 
 
-def test_golden_grounding_flags_hallucinated_component():
-    """Mutation probe: an invented component must be flagged low, refs empty."""
+def test_golden_grounding_removes_hallucinated_component():
+    """Mutation probe (strict default): an invented component must be REMOVED,
+    not merely flagged, and the removal must be recorded in warnings."""
     formulas = [_clean_formula(d, i) for d in DOMAINS for i in range(8)]
     for f in formulas:
         f.components.append(HALLUCINATED.model_copy(deep=True))
-    grounded, _ = ground_recommended_formulas(formulas, _evidence())
+    grounded, warnings = ground_recommended_formulas(formulas, _evidence())
+    for g in grounded:
+        assert all(c.name != "Unobtainium X-999" for c in g.components), g.name
+    assert any(
+        "Unobtainium X-999" in w and "剔除" in w for w in warnings
+    ), warnings
+    # Legacy tag-only path (strict=False) still flags it low with empty refs.
+    tagged, _ = ground_recommended_formulas(formulas, _evidence(), strict=False)
     flagged = [
         c
-        for f in grounded
+        for f in tagged
         for c in f.components
         if c.name == "Unobtainium X-999"
     ]
@@ -129,8 +157,6 @@ def test_golden_grounding_flags_hallucinated_component():
     for c in flagged:
         assert c.grounding_confidence == "low"
         assert c.evidence_refs == []
-    # And the gate itself must catch the mutated set (discriminative power).
-    assert _high_ratio(grounded) < HIGH_CONFIDENCE_RATIO_GATE
 
 
 def test_golden_never_list_absent():

@@ -37,6 +37,35 @@ const CRAG_STAGES = [
 
 export const CRAG_STAGE_IDS: readonly string[] = CRAG_STAGES.map((s) => s.id);
 
+/**
+ * A-6: sourced claim 芯片的样式/文案。
+ *
+ * 后端 `_map_verdict` 为兼容旧 API 把 `conflicting` 降级为 `status="weak"`，
+ * 原始判词经 `raw_verdict` 透出。此处用 `raw_verdict === "conflicting"` 渲染
+ * 独立紫色冲突态；其他 status 行为不变。纯函数，便于 vitest 覆盖。
+ */
+export function sourcedClaimChip(claim: {
+  status: "supported" | "weak" | "unsupported";
+  raw_verdict?: string | null;
+}): { cls: string; label: string } {
+  const isConflict = claim.raw_verdict === "conflicting";
+  const cls = isConflict
+    ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
+    : claim.status === "supported"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+      : claim.status === "weak"
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+        : "border-rose-500/40 bg-rose-500/10 text-rose-300";
+  const label = isConflict
+    ? "冲突"
+    : claim.status === "supported"
+      ? "有据"
+      : claim.status === "weak"
+        ? "弱支撑"
+        : "无据";
+  return { cls, label };
+}
+
 function stageIndex(stage: string): number {
   const idx = CRAG_STAGE_IDS.indexOf(stage);
   // 0 covers the pre-start case, where `deepResearchStage` is "". It is also
@@ -577,14 +606,7 @@ export default function ResearchPanel() {
                     <div className="flex flex-wrap gap-1">
                       {m.sourcedClaims!.map((c, j) => {
                         if (!c) return null;
-                        const cls =
-                          c.status === "supported"
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                            : c.status === "weak"
-                              ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                              : "border-rose-500/40 bg-rose-500/10 text-rose-300";
-                        const label =
-                          c.status === "supported" ? "有据" : c.status === "weak" ? "弱支撑" : "无据";
+                        const { cls, label } = sourcedClaimChip(c);
                         const claimText = c.text ?? "";
                         return (
                           <span

@@ -28,6 +28,9 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_NEO4J_URI",
     "FORMUMIND_NEO4J_USER",
     "FORMUMIND_NEO4J_PASSWORD",
+    # BayBE acquisition quality tier, read directly by engines/baybe_engine.py
+    # (_recommender_for): "fast" | "auto" | "thorough". Not a Settings field.
+    "FORMUMIND_BO_QUALITY",
 })
 
 

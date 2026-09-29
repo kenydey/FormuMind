@@ -15,7 +15,8 @@ def _ev(ident: str, snippet: str) -> Evidence:
     )
 
 
-def test_ground_marks_unknown_ingredient_low_confidence():
+def test_ground_strict_drops_unknown_ingredient_by_default():
+    """A-5: strict 默认开 — 低可信度成分被剔除（而非仅标记），剔除记入 warnings。"""
     formulas = [
         RecommendedFormula(
             name="Test A",
@@ -28,6 +29,26 @@ def test_ground_marks_unknown_ingredient_low_confidence():
     ]
     evidence = [_ev("US123", "Zinc phosphate 10 wt% in epoxy primer")]
     out, warnings = ground_recommended_formulas(formulas, evidence)
+    assert [c.name for c in out[0].components] == ["Zinc phosphate"]
+    assert out[0].components[0].grounding_confidence == "high"
+    assert any("Imaginaryium-X999" in w and "剔除" in w for w in warnings)
+    assert any("已剔除低可信度成分" in w for w in out[0].warnings)
+
+
+def test_ground_non_strict_marks_unknown_ingredient_low_confidence():
+    """strict=False 保留旧行为：仅标记低可信度成分。"""
+    formulas = [
+        RecommendedFormula(
+            name="Test A",
+            domain=ProductDomain.anticorrosion_coating,
+            components=[
+                RecommendedFormulaComponent(name="Zinc phosphate", weight_pct=10.0),
+                RecommendedFormulaComponent(name="Imaginaryium-X999", weight_pct=5.0),
+            ],
+        )
+    ]
+    evidence = [_ev("US123", "Zinc phosphate 10 wt% in epoxy primer")]
+    out, warnings = ground_recommended_formulas(formulas, evidence, strict=False)
     assert out[0].components[0].grounding_confidence == "high"
     assert out[0].components[1].grounding_confidence == "low"
     assert warnings
@@ -79,6 +100,11 @@ def test_weak_name_overlap_without_cas_is_low():
         )
     ]
     evidence = [_ev("US999", "General polymer coatings market report overview")]
+    # strict 默认：唯一成分低可信度 → 整个配方被剔除。
     out, warnings = ground_recommended_formulas(formulas, evidence)
+    assert out == []
+    assert any("整个配方已剔除" in w for w in warnings)
+    # strict=False：旧行为，仅标记。
+    out, warnings = ground_recommended_formulas(formulas, evidence, strict=False)
     assert out[0].components[0].grounding_confidence == "low"
     assert warnings

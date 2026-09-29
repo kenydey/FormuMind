@@ -102,6 +102,25 @@ def _from_rules(
     return rows
 
 
+def _alternatives_prompt(material: str, role_hint: str | None, limit: int) -> str:
+    """Build the LLM prompt for functional substitute suggestions.
+
+    Extracted for testability (A-4 golden asserts the no-new-ingredients
+    constraint is present).
+    """
+    return (
+        "You suggest functional substitute materials for formulation R&D.\n"
+        f"Current material: {material}\n"
+        f"Role hint: {role_hint or 'unknown'}\n"
+        "Return JSON only: {\"suggestions\":[{\"name\":\"...\",\"rationale\":\"...\",\"kind\":\"substitute_functional\"}]}\n"
+        f"At most {limit} suggestions. Use real chemical / trade names.\n"
+        "Do NOT invent CAS numbers. Do NOT invent SMILES.\n"
+        "Prefer waterborne-compatible options when role is hardener/resin/accelerator.\n"
+        "Suggest substitutes for the CURRENT material only — do NOT propose adding "
+        "extra new materials to the formulation; unrequested additions are defects.\n"
+    )
+
+
 def _from_llm(
     *,
     material: str,
@@ -116,15 +135,7 @@ def _from_llm(
     except Exception as exc:
         return [], f"llm_import_failed:{exc}"
 
-    prompt = (
-        "You suggest functional substitute materials for formulation R&D.\n"
-        f"Current material: {material}\n"
-        f"Role hint: {role_hint or 'unknown'}\n"
-        "Return JSON only: {\"suggestions\":[{\"name\":\"...\",\"rationale\":\"...\",\"kind\":\"substitute_functional\"}]}\n"
-        f"At most {limit} suggestions. Use real chemical / trade names.\n"
-        "Do NOT invent CAS numbers. Do NOT invent SMILES.\n"
-        "Prefer waterborne-compatible options when role is hardener/resin/accelerator.\n"
-    )
+    prompt = _alternatives_prompt(material, role_hint, limit)
     try:
         data = complete_json(prompt)
     except Exception as exc:

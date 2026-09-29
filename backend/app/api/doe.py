@@ -66,10 +66,11 @@ def generate_doe(
     design: str = Query("full_factorial"),
     engine: str = Query("auto", enum=DOE_ENGINES),
     n: int | None = Query(None, ge=2, le=200),
+    seed: int | None = Query(None, description="随机种子；指定后 LHS 等随机设计可复现"),
 ) -> DOEPlan:
     if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
-    plan = workflow.build_doe(requirement, design=design, engine=engine, n=n)
+    plan = workflow.build_doe(requirement, design=design, engine=engine, n=n, seed=seed)
     _persist_doe_plan(plan, project_id=requirement.project_id or None)
     return plan
 
