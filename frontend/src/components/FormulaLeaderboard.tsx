@@ -148,6 +148,36 @@ function FormulaCard({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [substituteOpen, setSubstituteOpen] = useState<string | null>(null);
   const [similarOpen, setSimilarOpen] = useState(false);
+  // C-8: adopt signal for the latest recommend round (null when the card
+  // did not come from POST /api/formulations/recommend).
+  const recommendId = useStore((s) => s.lastRecommendId);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const [adoptBusy, setAdoptBusy] = useState(false);
+  const [adopted, setAdopted] = useState(false);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+
+  async function adoptFormula() {
+    if (!recommendId || adoptBusy || adopted) return;
+    setAdoptBusy(true);
+    setAdoptError(null);
+    try {
+      await api.adoptRecommendation(recommendId, {
+        adopt_signal: "button",
+        formula_index: formulaIdx,
+        formula_snapshot: {
+          name: form.name,
+          ingredients: form.ingredients,
+          score: form.score ?? null,
+        },
+        project_id: activeProjectId ?? undefined,
+      });
+      setAdopted(true);
+    } catch (e) {
+      setAdoptError(e instanceof Error ? e.message : "采纳失败");
+    } finally {
+      setAdoptBusy(false);
+    }
+  }
   const [provenanceOpen, setProvenanceOpen] = useState(false); // W3-10
   const expanded = open || forceOpen;
 
@@ -396,7 +426,30 @@ function FormulaCard({
             >
               {saveBusy ? "保存中…" : isDoeBase ? "✓ DOE 基准" : "💾 保存 DOE"}
             </button>
+            {/* C-8: 采纳 — only for cards from a /recommend round */}
+            {recommendId && (
+              <button
+                type="button"
+                disabled={adoptBusy || adopted}
+                data-testid="adopt-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void adoptFormula();
+                }}
+                className={`flex-1 text-[10px] border rounded px-2 py-1 disabled:opacity-50 ${
+                  adopted
+                    ? "border-accent/60 bg-accent/15 text-accent"
+                    : "border-accent/40 text-accent hover:bg-accent/10"
+                }`}
+                title="标记采纳该配方（推荐质量抽检埋点）"
+              >
+                {adopted ? "✓ 已采纳" : adoptBusy ? "采纳中…" : "👍 采纳"}
+              </button>
+            )}
           </div>
+          {adoptError && (
+            <div className="text-[10px] text-red-400">采纳失败：{adoptError}</div>
+          )}
           <div className="flex gap-1 mt-1">
             <button
               onClick={(e) => { e.stopPropagation(); setIpOpen(true); }}

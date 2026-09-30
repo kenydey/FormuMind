@@ -159,6 +159,25 @@ export const apiMethods = {
       prefer_materials_catalog: Boolean(opts.preferMaterialsCatalog),
       relation_insight: opts.relationInsight !== false,
     }),
+  // C-8: record a user adopt signal for one recommendation round.
+  adoptRecommendation: (
+    recommendId: string,
+    body: {
+      adopt_signal?: string;
+      formula_index?: number;
+      formula_snapshot?: Record<string, unknown>;
+      project_id?: string;
+    }
+  ) =>
+    post<{ recommend_id: string; adopted: boolean; adopt_signal: string }>(
+      `/api/formulations/recommend/${encodeURIComponent(recommendId)}/adopt`,
+      {
+        adopt_signal: body.adopt_signal ?? "button",
+        formula_index: body.formula_index ?? null,
+        formula_snapshot: body.formula_snapshot ?? {},
+        project_id: body.project_id ?? null,
+      }
+    ),
   chemicalLookup: (q: string) =>
     get<{
       query: string;

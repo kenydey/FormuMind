@@ -269,6 +269,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           await applyEnrichedLeaderboard(set, get, research.recommended ?? [], (draft) => {
             draft.research = { ...research, recommended: draft.leaderboard };
             draft.recommendMessage = "同步研究完成";
+            // /api/research path carries no recommend_id — clear any stale one.
+            draft.lastRecommendId = null;
           });
           return;
         } catch {
@@ -290,6 +292,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
               ? `同步推荐完成 · ${rec.engine || "offline"} · KG 关系洞察 ${insightN} 条`
               : `同步推荐完成 · ${rec.engine || "offline"}`;
           draft.relationInsights = rec.relation_insights ?? [];
+          // C-8: stash the round id so cards can report adopt signals.
+          draft.lastRecommendId = rec.recommend_id ?? null;
         });
       } catch (e) {
         set((draft) => {

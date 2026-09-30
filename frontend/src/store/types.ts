@@ -79,6 +79,10 @@ export interface AppState {
   deepReport: ComprehensiveReport | null;
   task: TaskStatus | null;
   leaderboard: Formulation[];
+  /** C-8: recommend_id of the latest POST /api/formulations/recommend round
+      that produced the leaderboard (null when the leaderboard came from
+      another path, e.g. /api/research). Drives the per-card 采纳 button. */
+  lastRecommendId: string | null;
   /** Latest warnings from POST /api/formulations/validate (CAS/zh enrich). */
   formulationValidateWarnings: string[];
   optimizationHistory: number[];

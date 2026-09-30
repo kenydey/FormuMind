@@ -109,6 +109,9 @@ class RecommendFormulationsResponse(BaseModel):
     diversity_applied: bool = False
     tradeoff: TradeOffAnalysis | None = None
     relation_insights: list[dict] = Field(default_factory=list)
+    # C-8: id of this recommendation round — the client sends it back on
+    # POST /formulations/recommend/{recommend_id}/adopt for outcome telemetry.
+    recommend_id: str = ""
 
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
@@ -204,6 +207,25 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     if body.relation_insight:
         insights = _relation_insights(aligned, settings)
 
+    # C-8: register this round as not-yet-adopted (adopt_rate denominator).
+    # Best-effort — telemetry must never break the recommendation path.
+    try:
+        from ..db import recommend_outcome_store
+        from ..db.database import default_session_factory
+        from ..db.session_utils import commit_session
+
+        _factory = default_session_factory()
+        with commit_session(_factory) as _s:
+            recommend_outcome_store.register_round(
+                _s,
+                recommend_id=bundle.recommend_id,
+                project_id=(body.requirement.project_id or None),
+            )
+    except Exception as exc:  # noqa: BLE001 — telemetry fail-open by contract
+        logging.getLogger(__name__).warning(
+            "recommend round registration failed (fail-open): %s", exc
+        )
+
     return RecommendFormulationsResponse(
         formulas=aligned,
         engine=rec_resp.engine,
@@ -214,7 +236,48 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         diversity_applied=diversity_applied,
         tradeoff=tradeoff,
         relation_insights=insights,
+        recommend_id=bundle.recommend_id,
     )
+
+
+class AdoptRecommendationBody(BaseModel):
+    adopt_signal: str = "button"  # button | copied | campaign（C-a 只接 button）
+    formula_index: int | None = None
+    formula_snapshot: dict = Field(default_factory=dict)
+    project_id: str | None = None
+
+
+@router.post("/formulations/recommend/{recommend_id}/adopt")
+def adopt_recommendation(recommend_id: str, body: AdoptRecommendationBody) -> dict:
+    """C-8: record a user adopt signal for one recommendation round.
+
+    Idempotent per ``recommend_id`` — repeated adopts update the row instead
+    of duplicating it. This is the weak-success layer (user adoption); the
+    strong-success layer (experiment validation) is pending C-5.
+    """
+    from ..db import recommend_outcome_store
+    from ..db.database import default_session_factory
+    from ..db.session_utils import commit_session
+
+    try:
+        recommend_outcome_store.validate_adopt_signal(body.adopt_signal)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    factory = default_session_factory()
+    with commit_session(factory) as session:
+        # formula_hash is derived from the snapshot inside the store.
+        row = recommend_outcome_store.record_adopt(
+            session,
+            recommend_id=recommend_id,
+            project_id=body.project_id or None,
+            adopt_signal=body.adopt_signal,
+            formula_snapshot=body.formula_snapshot,
+        )
+    return {
+        "recommend_id": row.recommend_id,
+        "adopted": row.adopted,
+        "adopt_signal": row.adopt_signal,
+    }
 
 
 def _relation_insights(formulas: list, settings) -> list[dict]:

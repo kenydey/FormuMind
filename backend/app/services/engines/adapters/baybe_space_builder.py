@@ -6,8 +6,20 @@ from ....domain.schemas import DOEFactor, Requirement
 
 
 def _max_lever_sum(factors: list[DOEFactor]) -> float:
-    """Upper bound on sum of lever wt% (solvent absorbs the remainder)."""
-    lever_factors = [f for f in factors if f.unit == "wt%"]
+    """Upper bound on sum of lever wt% (solvent absorbs the remainder).
+
+    C-4a: only factors that actually participate in the
+    ``ContinuousLinearConstraint`` (continuous wt% factors) contribute to the
+    RHS. This BayBE version's continuous linear constraint rejects discrete
+    parameters outright (verified: ``NumericalDiscreteParameter`` raises
+    ``ValueError``), so a discrete wt% factor can never be constrained —
+    counting its ``high`` in the RHS would only loosen the bound. Residual
+    limitation: discrete wt% mass is not captured by the linear constraint;
+    the RHS now covers exactly the constrained population, no more.
+    """
+    lever_factors = [
+        f for f in factors if f.unit == "wt%" and f.kind == "continuous"
+    ]
     if not lever_factors:
         return 100.0
     return min(100.0, sum(f.high for f in lever_factors))
@@ -30,11 +42,37 @@ def _is_ingredient_factor(name: str) -> bool:
     return name in RAW_MATERIALS
 
 
+def _discrete_parameter(factor: DOEFactor):
+    """Map a discrete DOEFactor to the matching BayBE parameter type.
+
+    All-numeric levels → NumericalDiscreteParameter; all str/bool levels →
+    CategoricalParameter. Mixed-type levels are a caller error and fail
+    closed rather than silently coercing.
+    """
+    from baybe.parameters import CategoricalParameter, NumericalDiscreteParameter
+
+    levels = list(factor.levels or [])
+    if all(isinstance(v, bool) or isinstance(v, str) for v in levels):
+        return CategoricalParameter(name=factor.name, values=tuple(levels))
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in levels):
+        return NumericalDiscreteParameter(
+            name=factor.name, values=tuple(float(v) for v in levels)
+        )
+    raise ValueError(
+        f"Discrete factor {factor.name!r} has mixed-type levels {levels!r}; "
+        "use all-numeric or all-string levels"
+    )
+
+
 def apply_requirement_bounds(req: Requirement, factors: list[DOEFactor]) -> list[DOEFactor]:
     """Tighten factor bounds from Requirement constraints before BayBE search."""
     constraints = normalize_constraints(req)
     adjusted: list[DOEFactor] = []
     for factor in factors:
+        if factor.kind == "discrete":
+            # Bound tightening is meaningless for a fixed level set.
+            adjusted.append(factor)
+            continue
         low, high = float(factor.low), float(factor.high)
         name_lower = factor.name.lower()
         process_knob = not _is_ingredient_factor(factor.name)
@@ -68,10 +106,15 @@ def build_searchspace(req: Requirement, factors: list[DOEFactor]):
 
     bounded = apply_requirement_bounds(req, factors)
     parameters = [
-        NumericalContinuousParameter(name=f.name, bounds=(float(f.low), float(f.high)))
+        _discrete_parameter(f) if f.kind == "discrete" else NumericalContinuousParameter(
+            name=f.name, bounds=(float(f.low), float(f.high))
+        )
         for f in bounded
     ]
-    lever_names = [f.name for f in bounded if f.unit == "wt%"]
+    # ContinuousLinearConstraint rejects discrete parameters outright in this
+    # BayBE version (verified against the installed build) — no discrete wt%
+    # factor, numerical or categorical, can participate.
+    lever_names = [f.name for f in bounded if f.unit == "wt%" and f.kind == "continuous"]
     constraints = []
     if len(lever_names) >= 2:
         constraints.append(

@@ -83,6 +83,16 @@ def build_pydoe_plan(
     if not pydoe_available():
         raise RuntimeError("pydoe is not installed")
 
+    # C-4a: pydoe designs sample a continuous space (LHS etc.) — a discrete
+    # factor level set cannot be sampled, so fail closed with an explicit
+    # error instead of silently degrading to a continuous approximation.
+    discrete = [f.name for f in factors if f.kind == "discrete"]
+    if discrete:
+        raise ValueError(
+            f"pydoe engine does not support discrete factors {discrete}; "
+            "use engine='native' or engine='baybe'"
+        )
+
     k = len(factors)
     if k == 0:
         raise ValueError("At least one factor is required")

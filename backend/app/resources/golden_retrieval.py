@@ -12,29 +12,33 @@ from __future__ import annotations
 # Format:
 #   question          — Chinese search query (simulates a real R&D question)
 #   expected_keywords — at least 1 of these must appear in top-3 retrieval results
+#   graded_keywords   — C-6: keyword → 0-3 graded relevance for nDCG@k
+#                       (core concept 3 / related 2 / weak 1). First 20 entries
+#                       graded; the rest fall back to binary expected-keyword
+#                       grades (see kb_query_test.graded_relevance_for).
 #   min_relevance_category — human-readable category label (for reporting)
 
 golden_questions: list[dict] = [
-    {"question": "环氧树脂防腐机理是什么", "expected_keywords": ["环氧", "防腐", "固化", "成膜"], "min_relevance_category": "epoxy"},
-    {"question": "磷酸锌在防腐蚀涂料中的作用", "expected_keywords": ["磷酸锌", "防锈", "颜料", "盐雾"], "min_relevance_category": "anticorrosion"},
-    {"question": "防腐蚀涂料固化温度范围", "expected_keywords": ["固化", "温度", "°C", "80"], "min_relevance_category": "coating_process"},
-    {"question": "盐雾试验标准及评价方法", "expected_keywords": ["盐雾", "试验", "小时", "中性"], "min_relevance_category": "testing"},
-    {"question": "表面处理前除油脱脂工艺", "expected_keywords": ["除油", "脱脂", "表面", "清洁"], "min_relevance_category": "pretreatment"},
-    {"question": "聚氨酯涂料与环氧涂料性能对比", "expected_keywords": ["聚氨酯", "环氧", "涂料", "耐候"], "min_relevance_category": "coating_comparison"},
-    {"question": "涂膜厚度对防腐性能的影响", "expected_keywords": ["涂膜", "厚度", "防腐", "微米"], "min_relevance_category": "film_properties"},
-    {"question": "环氧底漆附着力如何提高", "expected_keywords": ["环氧", "附着力", "底漆", "基材"], "min_relevance_category": "epoxy"},
-    {"question": "胺类固化剂用量对交联密度的影响", "expected_keywords": ["胺", "固化剂", "交联", "环氧"], "min_relevance_category": "epoxy"},
-    {"question": "无铬钝化膜的耐蚀机理", "expected_keywords": ["钝化", "无铬", "耐蚀", "膜"], "min_relevance_category": "passivation"},
-    {"question": "硅烷偶联剂在前处理中的作用", "expected_keywords": ["硅烷", "偶联", "前处理", "附着力"], "min_relevance_category": "pretreatment"},
-    {"question": "锌粉富锌底漆的阴极保护原理", "expected_keywords": ["锌粉", "富锌", "阴极", "底漆"], "min_relevance_category": "anticorrosion"},
-    {"question": "中性盐雾NSS与铜加速盐雾CASS区别", "expected_keywords": ["盐雾", "NSS", "CASS", "试验"], "min_relevance_category": "testing"},
-    {"question": "GB/T 1771盐雾试验操作要点", "expected_keywords": ["盐雾", "GB/T", "1771", "试验"], "min_relevance_category": "testing"},
-    {"question": "涂膜孔隙率如何降低", "expected_keywords": ["孔隙", "涂膜", "致密", "交联"], "min_relevance_category": "film_properties"},
-    {"question": "水性环氧涂料VOC控制方法", "expected_keywords": ["水性", "环氧", "VOC", "涂料"], "min_relevance_category": "waterborne"},
-    {"question": "丙烯酸面漆耐紫外老化性能", "expected_keywords": ["丙烯酸", "紫外", "老化", "耐候"], "min_relevance_category": "weathering"},
-    {"question": "喷砂Sa2.5表面清洁度要求", "expected_keywords": ["喷砂", "Sa2.5", "清洁", "表面"], "min_relevance_category": "pretreatment"},
-    {"question": "磷化膜厚度与耐蚀性关系", "expected_keywords": ["磷化", "厚度", "耐蚀", "膜"], "min_relevance_category": "pretreatment"},
-    {"question": "钼酸盐缓蚀剂替代铬酸盐可行性", "expected_keywords": ["钼酸", "缓蚀", "铬酸", "替代"], "min_relevance_category": "inhibitors"},
+    {"question": "环氧树脂防腐机理是什么", "expected_keywords": ["环氧", "防腐", "固化", "成膜"], "graded_keywords": {"环氧": 3, "防腐": 3, "固化": 2, "成膜": 2}, "min_relevance_category": "epoxy"},
+    {"question": "磷酸锌在防腐蚀涂料中的作用", "expected_keywords": ["磷酸锌", "防锈", "颜料", "盐雾"], "graded_keywords": {"磷酸锌": 3, "防锈": 3, "颜料": 2, "盐雾": 1}, "min_relevance_category": "anticorrosion"},
+    {"question": "防腐蚀涂料固化温度范围", "expected_keywords": ["固化", "温度", "°C", "80"], "graded_keywords": {"固化": 3, "温度": 3, "°C": 2, "80": 2}, "min_relevance_category": "coating_process"},
+    {"question": "盐雾试验标准及评价方法", "expected_keywords": ["盐雾", "试验", "小时", "中性"], "graded_keywords": {"盐雾": 3, "试验": 3, "小时": 2, "中性": 2}, "min_relevance_category": "testing"},
+    {"question": "表面处理前除油脱脂工艺", "expected_keywords": ["除油", "脱脂", "表面", "清洁"], "graded_keywords": {"除油": 3, "脱脂": 3, "表面": 2, "清洁": 1}, "min_relevance_category": "pretreatment"},
+    {"question": "聚氨酯涂料与环氧涂料性能对比", "expected_keywords": ["聚氨酯", "环氧", "涂料", "耐候"], "graded_keywords": {"聚氨酯": 3, "环氧": 3, "涂料": 2, "耐候": 2}, "min_relevance_category": "coating_comparison"},
+    {"question": "涂膜厚度对防腐性能的影响", "expected_keywords": ["涂膜", "厚度", "防腐", "微米"], "graded_keywords": {"涂膜": 3, "厚度": 3, "防腐": 2, "微米": 1}, "min_relevance_category": "film_properties"},
+    {"question": "环氧底漆附着力如何提高", "expected_keywords": ["环氧", "附着力", "底漆", "基材"], "graded_keywords": {"环氧": 3, "附着力": 3, "底漆": 3, "基材": 2}, "min_relevance_category": "epoxy"},
+    {"question": "胺类固化剂用量对交联密度的影响", "expected_keywords": ["胺", "固化剂", "交联", "环氧"], "graded_keywords": {"胺": 3, "固化剂": 3, "交联": 3, "环氧": 2}, "min_relevance_category": "epoxy"},
+    {"question": "无铬钝化膜的耐蚀机理", "expected_keywords": ["钝化", "无铬", "耐蚀", "膜"], "graded_keywords": {"钝化": 3, "无铬": 3, "耐蚀": 3, "膜": 2}, "min_relevance_category": "passivation"},
+    {"question": "硅烷偶联剂在前处理中的作用", "expected_keywords": ["硅烷", "偶联", "前处理", "附着力"], "graded_keywords": {"硅烷": 3, "偶联": 3, "前处理": 2, "附着力": 2}, "min_relevance_category": "pretreatment"},
+    {"question": "锌粉富锌底漆的阴极保护原理", "expected_keywords": ["锌粉", "富锌", "阴极", "底漆"], "graded_keywords": {"锌粉": 3, "富锌": 3, "阴极": 3, "底漆": 2}, "min_relevance_category": "anticorrosion"},
+    {"question": "中性盐雾NSS与铜加速盐雾CASS区别", "expected_keywords": ["盐雾", "NSS", "CASS", "试验"], "graded_keywords": {"盐雾": 3, "NSS": 3, "CASS": 3, "试验": 2}, "min_relevance_category": "testing"},
+    {"question": "GB/T 1771盐雾试验操作要点", "expected_keywords": ["盐雾", "GB/T", "1771", "试验"], "graded_keywords": {"盐雾": 3, "GB/T": 3, "1771": 3, "试验": 2}, "min_relevance_category": "testing"},
+    {"question": "涂膜孔隙率如何降低", "expected_keywords": ["孔隙", "涂膜", "致密", "交联"], "graded_keywords": {"孔隙": 3, "涂膜": 3, "致密": 2, "交联": 2}, "min_relevance_category": "film_properties"},
+    {"question": "水性环氧涂料VOC控制方法", "expected_keywords": ["水性", "环氧", "VOC", "涂料"], "graded_keywords": {"水性": 3, "VOC": 3, "环氧": 2, "涂料": 2}, "min_relevance_category": "waterborne"},
+    {"question": "丙烯酸面漆耐紫外老化性能", "expected_keywords": ["丙烯酸", "紫外", "老化", "耐候"], "graded_keywords": {"丙烯酸": 3, "紫外": 3, "老化": 2, "耐候": 2}, "min_relevance_category": "weathering"},
+    {"question": "喷砂Sa2.5表面清洁度要求", "expected_keywords": ["喷砂", "Sa2.5", "清洁", "表面"], "graded_keywords": {"喷砂": 3, "Sa2.5": 3, "清洁": 2, "表面": 2}, "min_relevance_category": "pretreatment"},
+    {"question": "磷化膜厚度与耐蚀性关系", "expected_keywords": ["磷化", "厚度", "耐蚀", "膜"], "graded_keywords": {"磷化": 3, "耐蚀": 3, "厚度": 2, "膜": 2}, "min_relevance_category": "pretreatment"},
+    {"question": "钼酸盐缓蚀剂替代铬酸盐可行性", "expected_keywords": ["钼酸", "缓蚀", "铬酸", "替代"], "graded_keywords": {"钼酸": 3, "缓蚀": 3, "铬酸": 2, "替代": 2}, "min_relevance_category": "inhibitors"},
     {"question": "稀土铈盐钝化工艺参数", "expected_keywords": ["铈", "稀土", "钝化", "工艺"], "min_relevance_category": "passivation"},
     {"question": "环氧玻璃鳞片涂料抗渗透性能", "expected_keywords": ["玻璃鳞片", "环氧", "渗透", "涂料"], "min_relevance_category": "epoxy"},
     {"question": "固化时间过短导致涂膜发软的原因", "expected_keywords": ["固化", "时间", "涂膜", "交联"], "min_relevance_category": "coating_process"},

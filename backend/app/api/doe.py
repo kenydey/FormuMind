@@ -317,6 +317,47 @@ def doe_history(
     return DoeHistoryResponse(items=items, total=total, page=page, page_size=page_size)
 
 
+class DoeAbortBody(BaseModel):
+    reason: str = ""
+
+
+def _transition_plan(plan_id: str, new_status: str) -> dict:
+    """Thin API wrapper over doe_plan_store.set_status (transition rules live in the store)."""
+    from ..db import doe_plan_store
+    from ..db.database import default_session_factory
+    from ..db.session_utils import commit_session
+
+    factory = default_session_factory()
+    try:
+        with commit_session(factory) as session:
+            status = doe_plan_store.set_status(session, plan_id, new_status)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"plan_id": plan_id, "status": status}
+
+
+@router.post("/doe/{plan_id}/activate")
+def activate_doe_plan(plan_id: str) -> dict:
+    """C-4b: draft → active (start executing the plan's experiments)."""
+    return _transition_plan(plan_id, "active")
+
+
+@router.post("/doe/{plan_id}/complete")
+def complete_doe_plan(plan_id: str) -> dict:
+    """C-4b: active → completed (all runs measured or manually confirmed)."""
+    return _transition_plan(plan_id, "completed")
+
+
+@router.post("/doe/{plan_id}/abort")
+def abort_doe_plan(plan_id: str, body: DoeAbortBody) -> dict:
+    """C-4b: draft/active → aborted (body carries the reason)."""
+    result = _transition_plan(plan_id, "aborted")
+    result["reason"] = body.reason
+    return result
+
+
 @router.get("/doe/{plan_id}/export")
 def export_doe(plan_id: str, format: str = Query("csv", enum=["csv", "xlsx"])) -> Response:
     """Export a previously generated DOE plan as a fill-in worksheet."""

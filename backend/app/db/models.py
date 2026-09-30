@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -761,11 +762,16 @@ class DOEPlanRow(Base):
     project_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, default=None
     )
+    # C-4b (Phase C): plan lifecycle status — draft → active → completed,
+    # draft/active → aborted. Distinct from ``doe_cycle_runs.status``, which
+    # records a cycle execution result (success|error), not a plan lifecycle.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
 
     __table_args__ = (
         Index("ix_doe_plans_experiment", "experiment_id"),
         Index("ix_doe_plans_campaign", "campaign_id"),
         Index("ix_doe_plans_project", "project_id"),
+        Index("ix_doe_plans_status", "status"),
     )
 
 
@@ -900,3 +906,38 @@ class KbCoverageCounter(Base):
         DateTime, default=_utcnow, onupdate=_utcnow
     )
 
+
+
+class RecommendOutcomeRow(Base):
+    """C-8 (Phase C): adopt-signal telemetry for formulation recommendations.
+
+    Weak-success layer (user adoption). The strong-success layer (experiment
+    validation via ``measurement_store``) is pending C-5 — the ``validated``
+    concept lives only in the ops stats response (always null for now), never
+    in this table.
+    """
+
+    __tablename__ = "recommend_outcomes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Stable id minted by run_recommend_orchestration per recommendation round.
+    recommend_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    # P0 isolation: NULL = legacy / unscoped, excluded from project-scoped reads.
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    # C-8: rounds are registered at generation time as NOT adopted (the
+    # denominator); adopt flips this to True. Never default to True — an
+    # always-adopted table makes adopt_rate meaningless.
+    adopted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # button | copied | campaign (only "button" is wired in C-a)
+    adopt_signal: Mapped[str] = mapped_column(String(16), nullable=False, default="button")
+    # Snapshot of the adopted formula's components so the signal stays
+    # interpretable even if the recommendation is later regenerated.
+    formula_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Reserved: component fingerprint for later measurement correlation (C-5).
+    formula_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+
+    __table_args__ = (
+        Index("ix_recommend_outcomes_recommend_id", "recommend_id"),
+        Index("ix_recommend_outcomes_project", "project_id"),
+    )

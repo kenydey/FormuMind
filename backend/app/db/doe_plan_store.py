@@ -59,7 +59,42 @@ def _row_to_plan(row: DOEPlanRow) -> DOEPlan:
         notes=params.get("notes", ""),
         plan_id=row.id,
         domain=ProductDomain(params["domain"]) if params.get("domain") else None,
+        status=getattr(row, "status", None) or "draft",
     )
+
+
+# C-4b: plan lifecycle state machine. draft → active → completed;
+# draft/active → aborted. This is the *plan* lifecycle; ``doe_cycle_runs.status``
+# (success|error) records a cycle execution result and is not mixed in.
+_PLAN_TRANSITIONS: dict[str, set[str]] = {
+    "draft": {"active", "aborted"},
+    "active": {"completed", "aborted"},
+    "completed": set(),
+    "aborted": set(),
+}
+
+
+def set_status(session: Session, plan_id: str, new_status: str) -> str:
+    """Transition a plan's lifecycle status.
+
+    Raises ``LookupError`` when the plan does not exist and ``ValueError``
+    on an illegal transition (the API layer maps both to 404/422).
+    """
+    if new_status not in _PLAN_TRANSITIONS:
+        raise ValueError(f"Unknown plan status {new_status!r}")
+    row = session.get(DOEPlanRow, plan_id)
+    if row is None:
+        raise LookupError(f"DOE plan {plan_id} not found")
+    current = row.status or "draft"
+    if new_status == current:
+        return current
+    if new_status not in _PLAN_TRANSITIONS[current]:
+        raise ValueError(
+            f"Illegal plan status transition: {current} → {new_status}"
+        )
+    row.status = new_status
+    session.flush()
+    return new_status
 
 
 def save(
@@ -159,6 +194,7 @@ def list_history(
                 "notes": params.get("notes", ""),
                 "campaign_id": r.campaign_id,
                 "round": r.round,
+                "status": getattr(r, "status", None) or "draft",
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
         )

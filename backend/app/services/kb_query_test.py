@@ -237,11 +237,14 @@ def run_golden_eval(
     include_global: bool = True,
     rerank: bool | None = None,
 ) -> dict[str, Any]:
-    """Run golden questions; keyword-hit@k plus Recall@k / MRR.
+    """Run golden questions; keyword-hit@k plus Recall@k / MRR / nDCG@k.
 
     Recall@k = fraction of questions with ≥1 expected keyword in top-k texts.
     MRR = mean reciprocal rank of the first hit that contains any expected keyword
     (0 when none match in top-k).
+    nDCG@k = mean nDCG@k over per-hit graded keyword relevance
+    (``graded_keywords`` per question; binary fallback documented in
+    ``graded_relevance_for``).
     """
     from ..resources.golden_retrieval import golden_questions
 
@@ -250,9 +253,11 @@ def run_golden_eval(
     results: list[dict[str, Any]] = []
     passed = 0
     reciprocal_ranks: list[float] = []
+    ndcgs: list[float] = []
     for entry in golden_questions:
         q = entry["question"]
         expected = list(entry.get("expected_keywords") or [])
+        graded = graded_relevance_for(entry)
         payload = run_query_test(
             query=q,
             mode=mode,
@@ -268,6 +273,8 @@ def run_golden_eval(
         if ok:
             passed += 1
         reciprocal_ranks.append(float(metrics["reciprocal_rank"]))
+        ndcg = ndcg_at_k(hits, graded, top_k=top_k)
+        ndcgs.append(ndcg)
         results.append(
             {
                 "question": q,
@@ -276,6 +283,8 @@ def run_golden_eval(
                 "matched_keyword": metrics["matched_keyword"],
                 "first_hit_rank": metrics["first_hit_rank"],
                 "reciprocal_rank": metrics["reciprocal_rank"],
+                "ndcg_at_k": ndcg,
+                "graded": bool(entry.get("graded_keywords")),
                 "expected_keywords": expected,
                 "hit_titles": [h.get("title") for h in hits[:top_k]],
                 "elapsed_ms": payload.get("elapsed_ms"),
@@ -286,6 +295,7 @@ def run_golden_eval(
     total = len(results)
     recall_at_k = (passed / total) if total else 0.0
     mrr = (sum(reciprocal_ranks) / total) if total else 0.0
+    mean_ndcg = (sum(ndcgs) / total) if total else 0.0
     return {
         "mode": mode,
         "top_k": top_k,
@@ -297,8 +307,61 @@ def run_golden_eval(
         "failed": total - passed,
         "recall_at_k": round(recall_at_k, 4),
         "mrr": round(mrr, 4),
+        # C-6: mean nDCG@k across golden questions. Questions without a
+        # graded_keywords annotation fall back to binary expected-keyword
+        # grades (see graded_relevance_for); count them via graded_questions.
+        "ndcg_at_k": round(mean_ndcg, 4),
+        "graded_questions": sum(1 for r in results if r["graded"]),
         "results": results,
     }
+
+
+def graded_relevance_for(entry: dict[str, Any]) -> dict[str, int]:
+    """Graded keyword relevance for one golden entry.
+
+    Uses ``graded_keywords`` (keyword → 0-3 grade) when present; otherwise
+    falls back to the binary ``expected_keywords`` list with every keyword
+    graded 1 (nDCG then degenerates to a binary ranking-quality measure).
+    The fallback is explicit, not silent: callers can check
+    ``entry.get("graded_keywords")`` to see which questions are graded.
+    """
+    graded = entry.get("graded_keywords")
+    if graded:
+        return {str(k): max(0, int(v)) for k, v in graded.items() if k}
+    return {kw: 1 for kw in (entry.get("expected_keywords") or []) if kw}
+
+
+def ndcg_at_k(
+    hits: list[dict[str, Any]],
+    graded: dict[str, int],
+    *,
+    top_k: int = 3,
+) -> float:
+    """Pure helper: nDCG@k over keyword-graded relevance.
+
+    Each hit's relevance is the max grade among keywords appearing in its
+    title/snippet/text (0 when none match). IDCG is the ideal ordering of
+    the graded keyword grades, truncated to the number of returned hits.
+    Returns 0.0 when there are no hits or no positive grades.
+    """
+    import math
+
+    rels: list[float] = []
+    for h in hits[:top_k]:
+        blob = f"{h.get('title') or ''} {h.get('snippet') or ''} {h.get('text') or ''}"
+        rel = 0
+        for kw, grade in graded.items():
+            if kw and kw in blob:
+                rel = max(rel, int(grade))
+        rels.append(float(rel))
+    if not rels:
+        return 0.0
+    dcg = sum(r / math.log2(i + 2) for i, r in enumerate(rels))
+    ideal = sorted((float(g) for g in graded.values()), reverse=True)[: len(rels)]
+    idcg = sum(r / math.log2(i + 2) for i, r in enumerate(ideal))
+    if idcg <= 0:
+        return 0.0
+    return round(dcg / idcg, 4)
 
 
 def keyword_rank_metrics(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections import defaultdict, deque
 from typing import NamedTuple
 
@@ -29,6 +30,9 @@ class RecommendBundle(NamedTuple):
     requested_n: int
     diversity_applied: bool
     engine: str
+    # C-8: stable id for one recommendation round — returned to the client
+    # in the API response and used to correlate adopt-outcome telemetry.
+    recommend_id: str = ""
 
 
 def run_recommend_orchestration(
@@ -65,6 +69,8 @@ def run_recommend_orchestration(
 
     settings = settings or get_settings()
     n = resolve_recommend_n(requested_n, settings=settings)
+    # C-8: one id per recommendation round, shared by API response + telemetry.
+    recommend_id = uuid.uuid4().hex
 
     if synth_override is not None:
         rec_resp = synth_override
@@ -111,6 +117,7 @@ def run_recommend_orchestration(
         requested_n=n,
         diversity_applied=diversity_applied,
         engine=rec_resp.engine,
+        recommend_id=recommend_id,
     )
 
 

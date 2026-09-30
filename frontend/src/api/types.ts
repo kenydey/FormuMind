@@ -348,6 +348,7 @@ export interface RecommendFormulationsResponse {
     substitutes?: string[];
     relations?: Array<{ type?: string; target?: string; confidence?: number }>;
   }>;
+  recommend_id?: string;
 }
 
 export interface TradeOffAnalysis {

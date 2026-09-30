@@ -56,3 +56,27 @@ def evidence_stats() -> dict:
         "process_local": True,
         "note": "counters reset on process restart; see logs for per-query lines",
     }
+
+
+@router.get("/recommend-stats")
+def recommend_stats(
+    project_id: str | None = None,
+    days: int = 30,
+) -> dict:
+    """C-8: recommendation adoption telemetry (weak-success layer).
+
+    Totals, adoption rate, and per-signal distribution over the trailing
+    ``days`` window. Fail-open: returns empty stats (``available: False``)
+    when the ``recommend_outcomes`` table does not exist yet.
+    ``validated`` is always null by contract — the strong-success layer
+    (experiment validation) is pending C-5.
+    """
+    from ..db import recommend_outcome_store
+    from ..db.database import default_session_factory
+
+    days = max(1, min(int(days), 365))
+    factory = default_session_factory()
+    with factory() as session:
+        return recommend_outcome_store.outcome_stats(
+            session, project_id=project_id or None, days=days
+        )

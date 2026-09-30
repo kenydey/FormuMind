@@ -37,6 +37,7 @@ function applyLoopReportToDraft(draft: AppState, report: LoopReport): void {
   const skipReplace = report.converged && report.optimization.top_formulations.length === 0;
   if (!skipReplace) {
     draft.leaderboard = report.optimization.top_formulations;
+    draft.lastRecommendId = null;
     draft.optimizationHistory = report.optimization.history;
     draft.doePlan = report.next_doe;
     draft.measured = {};

@@ -483,9 +483,21 @@ class FactorCandidate(BaseModel):
     low: float
     high: float
     unit: str = "wt%"
+    # C-4a: factor kind — "continuous" (range [low, high]) or "discrete"
+    # (fixed level set). Discrete levels are consumed per-engine:
+    # BayBE maps to NumericalDiscreteParameter/CategoricalParameter,
+    # native decode() maps coded [-1, 1] onto the level index, pydoe
+    # fails closed (LHS cannot sample a discrete set).
+    kind: str = "continuous"
+    levels: list[float | str] | None = None
     rationale: str = ""
     evidence_ids: list[str] = Field(default_factory=list)
     source: str = "kb+levers"
+
+    @model_validator(mode="after")
+    def _validate_kind_levels(self) -> "FactorCandidate":
+        _validate_factor_kind_levels(self.kind, self.levels, self.name)
+        return self
 
 
 class DOEFactor(BaseModel):
@@ -493,12 +505,33 @@ class DOEFactor(BaseModel):
     low: float
     high: float
     unit: str = ""
+    kind: str = "continuous"
+    levels: list[float | str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_kind_levels(self) -> "DOEFactor":
+        _validate_factor_kind_levels(self.kind, self.levels, self.name)
+        return self
+
+
+def _validate_factor_kind_levels(kind: str, levels: list[float | str] | None, name: str) -> None:
+    """Shared kind/levels invariant for DOEFactor and FactorCandidate."""
+    if kind not in ("continuous", "discrete"):
+        raise ValueError(f"Factor {name!r}: kind must be 'continuous' or 'discrete', got {kind!r}")
+    if kind == "discrete":
+        if not levels or len(levels) < 2:
+            raise ValueError(
+                f"Factor {name!r}: discrete kind requires at least 2 levels, got {levels!r}"
+            )
+    # continuous: levels are ignored by every engine, no error.
 
 
 class DOERun(BaseModel):
     run_id: int
     coded: dict[str, float]
-    natural: dict[str, float]
+    # C-4a: discrete factors decode to a level value, which may be a string
+    # (e.g. solvent names) rather than a number.
+    natural: dict[str, float | str]
     ai_suggested: bool = False
     # Closed-loop chemical feasibility flag (KG material-compatibility gate).
     # Set when the candidate's material skeleton shares an INHIBITS relation in
@@ -515,6 +548,9 @@ class DOEPlan(BaseModel):
     notes: str = ""
     plan_id: str = ""  # assigned + cached by the workflow for export/round-trip
     domain: ProductDomain | None = None  # carried so exported runs round-trip on import
+    # C-4b: plan lifecycle status (draft|active|completed|aborted); defaults to
+    # draft when a plan is built. Serialized separately into doe_plans.status.
+    status: str = "draft"
 
 
 class RunExplanation(BaseModel):

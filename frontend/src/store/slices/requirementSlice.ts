@@ -68,6 +68,7 @@ export function createRequirementSlice(set: SliceSet, get: SliceGet) {
           draft.activeConstraints = defaultConstraintsForDomain(req.domain);
           draft.research = null;
           draft.leaderboard = [];
+          draft.lastRecommendId = null;
           draft.formulationValidateWarnings = [];
           draft.doePlan = null;
           draft.adaptiveDoe = null;

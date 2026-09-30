@@ -154,6 +154,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.research = null;
           draft.deepReport = null;
           draft.leaderboard = [];
+          draft.lastRecommendId = null;
           draft.formulationValidateWarnings = [];
           draft.chatHistory = [];
           draft.activeSessionId = null;

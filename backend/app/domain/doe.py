@@ -14,14 +14,28 @@ import numpy as np
 from .schemas import DOEFactor, DOEPlan, DOERun
 
 
-def full_factorial(k: int, levels: int = 2) -> np.ndarray:
-    """Coded full factorial for ``k`` factors at ``levels`` levels."""
-    if levels == 2:
-        grid = np.array(list(itertools.product([-1.0, 1.0], repeat=k)))
+def full_factorial(k: int, levels: int | list[int] = 2) -> np.ndarray:
+    """Coded full factorial for ``k`` factors.
+
+    ``levels`` is either one level count applied to every factor, or a
+    per-factor list for a mixed-level factorial (C-4a: e.g. ``[3, 2]`` for a
+    3-level discrete factor crossed with a 2-level continuous factor, so
+    every declared discrete level actually appears in the design).
+    """
+    if isinstance(levels, int):
+        counts = [levels] * k
     else:
-        pts = np.linspace(-1.0, 1.0, levels)
-        grid = np.array(list(itertools.product(pts, repeat=k)))
-    return grid
+        counts = list(levels)
+        if len(counts) != k:
+            raise ValueError(
+                f"full_factorial: got {len(counts)} level counts for {k} factors"
+            )
+    if any(c < 2 for c in counts):
+        raise ValueError(f"full_factorial: level counts must be >= 2, got {counts}")
+    if all(c == 2 for c in counts):
+        return np.array(list(itertools.product([-1.0, 1.0], repeat=k)))
+    cols = [np.linspace(-1.0, 1.0, c) for c in counts]
+    return np.array(list(itertools.product(*cols)))
 
 
 def fractional_factorial(k: int) -> np.ndarray:
@@ -96,11 +110,34 @@ _DESIGNS = {
 }
 
 
-def decode(coded: float, factor: DOEFactor) -> float:
-    """Map a coded level in [-1, 1] to the factor's natural range."""
+def decode(coded: float, factor: DOEFactor) -> float | str:
+    """Map a coded level in [-1, 1] to the factor's natural range.
+
+    Discrete factors (C-4a) map the coded value onto the level index:
+    -1 → levels[0], +1 → levels[-1], linear in between.
+    """
+    if factor.kind == "discrete":
+        levels = factor.levels or []
+        if not levels:
+            raise ValueError(f"Discrete factor {factor.name!r} has no levels")
+        idx = int(round((coded + 1.0) / 2.0 * (len(levels) - 1)))
+        idx = max(0, min(len(levels) - 1, idx))
+        return levels[idx]
     mid = (factor.high + factor.low) / 2.0
     half = (factor.high - factor.low) / 2.0
     return round(mid + coded * half, 4)
+
+
+def _level_counts(factors: list[DOEFactor]) -> list[int]:
+    """Per-factor level counts for a mixed-level full factorial (C-4a).
+
+    Discrete factors contribute their declared level count so every level
+    appears in the design matrix; continuous factors stay at 2 levels.
+    """
+    return [
+        len(f.levels) if (f.kind == "discrete" and f.levels) else 2
+        for f in factors
+    ]
 
 
 def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int | None = None) -> DOEPlan:
@@ -109,7 +146,11 @@ def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int 
     if design not in _DESIGNS:
         raise ValueError(f"Unknown design {design!r}; choose from {sorted(_DESIGNS)}")
     k = len(factors)
-    matrix = _DESIGNS[design](k, n)
+    if design == "full_factorial":
+        # C-4a: align the design with each discrete factor's level count.
+        matrix = full_factorial(k, levels=_level_counts(factors))
+    else:
+        matrix = _DESIGNS[design](k, n)
     runs: list[DOERun] = []
     for idx, row in enumerate(matrix, start=1):
         coded = {f.name: round(float(c), 4) for f, c in zip(factors, row)}
