@@ -132,3 +132,6 @@ class ChatResponse(BaseModel):
     # Phase 4 — which data sources contributed to the answer, for the
     # frontend/eval to distinguish: "structured_sql" vs "kb_evidence".
     data_sources: list[str] | None = None
+    # B-1 — fail-open 降级显式提示位：numeric check 跳过、BM25-only 退化时
+    # 携带可见提示。每个元素 {"code": str, "message": str}，message 为中文。
+    notices: list[dict] | None = None

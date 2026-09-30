@@ -6,6 +6,13 @@ swallows network errors (logs + returns []).
 from __future__ import annotations
 
 from .errors import degrade_return
+from .provider_health import (
+    backoff_delay,
+    provider_breaker_open,
+    record_breaker_skip,
+    record_provider_failure,
+    record_provider_success,
+)
 import logging
 import re
 import time
@@ -60,6 +67,27 @@ def _safe_int(value: object) -> int | None:
         return None
 
 
+def _breaker_settings(settings) -> tuple[int, float]:
+    return (
+        int(getattr(settings, "provider_breaker_threshold", 5) or 5),
+        float(getattr(settings, "provider_breaker_cooldown_sec", 300.0) or 300.0),
+    )
+
+
+def _guard_provider(provider: str, settings) -> bool:
+    """B-8: 熔断中则跳过本次调用（fail-open，返回 True 表示应跳过）。"""
+    threshold, cooldown = _breaker_settings(settings)
+    if provider_breaker_open(provider, threshold=threshold, cooldown_sec=cooldown):
+        logger.warning(
+            "provider %s 熔断中（冷却 %.0fs），跳过本次检索",
+            provider,
+            cooldown,
+        )
+        record_breaker_skip(provider)
+        return True
+    return False
+
+
 def _get_with_retry(client, url: str, params: dict):
     """GET, retrying the documented broad-boolean rate limit.
 
@@ -70,20 +98,24 @@ def _get_with_retry(client, url: str, params: dict):
     returned 25 rows while recall and broad both returned 0, leaving a merged
     stream that looked perfectly healthy. Honouring ``retryAfter`` is cheap; the
     API explicitly asks for it.
+
+    B-8: retryAfter 缺失时改用指数退避 + 抖动（原固定 ~1s），避免与服务端
+    退避窗口持续对齐。
     """
-    delay = 1.0
     resp = client.get(url, params=params)
-    for _ in range(_RATE_LIMIT_RETRIES):
+    for attempt in range(_RATE_LIMIT_RETRIES):
         # `getattr`: several test doubles implement only `raise_for_status` /
         # `json`, and reading `status_code` off them would raise straight into
         # the caller's blanket except — turning a healthy search into zero hits.
         if getattr(resp, "status_code", None) != 429:
             return resp
         try:
-            delay = float((resp.json() or {}).get("retryAfter") or 1.0)
+            delay = float((resp.json() or {}).get("retryAfter") or 0.0)
         except Exception:
-            delay = 1.0
-        time.sleep(max(0.2, min(delay, 5.0)))
+            delay = 0.0
+        if delay <= 0:
+            delay = backoff_delay(attempt)
+        time.sleep(max(0.2, min(delay, 30.0)))
         resp = client.get(url, params=params)
     return resp
 
@@ -336,6 +368,10 @@ def search_openalex(
         return []
     if limit <= 0:
         return []
+    # B-8: 熔断中则跳过，避免 hammer 已挂的 provider。
+    if _guard_provider("openalex", settings):
+        return []
+    _t0 = time.monotonic()
     base_params: dict[str, Any] = {"search": q, "per-page": 25}
     filter_parts: list[str] = []
     preferred: frozenset[str] = frozenset()
@@ -429,8 +465,11 @@ def search_openalex(
             } else "openalex"
             for _ev in out:
                 tag_evidence_domain(_ev, domain, taxonomy_source=tax, match="strong")  # type: ignore[arg-type]
+        record_provider_success("openalex", _t0)
         return out
     except Exception as exc:
+        threshold, cooldown = _breaker_settings(settings)
+        record_provider_failure("openalex", exc, threshold=threshold, cooldown_sec=cooldown)
         return degrade_return(logger, exc, "OpenAlex search failed", [])
 
 
@@ -469,6 +508,9 @@ def search_serpapi_scholar(
     q = (query or "").strip()
     if not key or not q:
         return []
+    if _guard_provider("serpapi_scholar", settings):
+        return []
+    _t0 = time.monotonic()
     try:
         data = _serpapi_search("google_scholar", q, key, limit, offset)
         items = data.get("organic_results") or []
@@ -483,8 +525,11 @@ def search_serpapi_scholar(
                     relevance=_ranked(i, offset),
                 )
             )
+        record_provider_success("serpapi_scholar", _t0)
         return out
     except Exception as exc:
+        threshold, cooldown = _breaker_settings(settings)
+        record_provider_failure("serpapi_scholar", exc, threshold=threshold, cooldown_sec=cooldown)
         return degrade_return(logger, exc, "SerpAPI Scholar search failed", [])
 
 
@@ -522,6 +567,9 @@ def search_serpapi_patents(
                     q = f"{q} {_clause}"
     except Exception:
         pass
+    if _guard_provider("serpapi_patents", settings):
+        return []
+    _t0 = time.monotonic()
     try:
         data = _serpapi_search(
             "google_patents",
@@ -550,8 +598,11 @@ def search_serpapi_patents(
                 tag_evidence_domain(
                     _ev, domain, taxonomy_source="cpc", match="weak", extra_tags=["cpc_filter"]
                 )
+        record_provider_success("serpapi_patents", _t0)
         return out
     except Exception as exc:
+        threshold, cooldown = _breaker_settings(settings)
+        record_provider_failure("serpapi_patents", exc, threshold=threshold, cooldown_sec=cooldown)
         logger.warning("SerpAPI Google Patents failed (%s): %s", hl, exc)
         return []
 
@@ -591,6 +642,9 @@ def search_tavily(
     q = (query or "").strip()
     if not key or not q:
         return []
+    if _guard_provider("tavily", settings):
+        return []
+    _t0 = time.monotonic()
     try:
         with httpx.Client(timeout=_TIMEOUT_SEC) as client:
             resp = client.post(
@@ -617,8 +671,11 @@ def search_tavily(
                     relevance=_ranked(i, offset),
                 )
             )
+        record_provider_success("tavily", _t0)
         return out
     except Exception as exc:
+        threshold, cooldown = _breaker_settings(settings)
+        record_provider_failure("tavily", exc, threshold=threshold, cooldown_sec=cooldown)
         return degrade_return(logger, exc, "Tavily search failed", [])
 
 
@@ -640,10 +697,13 @@ def search_serpapi_web(
     q = (query or "").strip()
     if not key or not q:
         return []
+    if _guard_provider("serpapi_web", settings):
+        return []
+    _t0 = time.monotonic()
     try:
         payload = _serpapi_search("google", q, key, limit, offset)
         results = (payload.get("organic_results") or [])[offset : offset + limit]
-        return [
+        out = [
             Evidence(
                 # "(web)" is load-bearing, following the existing `CNIPA (web)`
                 # convention: a bare "SerpAPI" is already classified as
@@ -661,7 +721,11 @@ def search_serpapi_web(
             for i, r in enumerate(results)
             if r.get("link")
         ]
+        record_provider_success("serpapi_web", _t0)
+        return out
     except Exception as exc:
+        threshold, cooldown = _breaker_settings(settings)
+        record_provider_failure("serpapi_web", exc, threshold=threshold, cooldown_sec=cooldown)
         return degrade_return(logger, exc, "SerpAPI web search failed", [])
 
 
@@ -713,6 +777,9 @@ def search_cnipa_parallel(
                 for e in hits
             ]
     if effective_setting(settings, "serpapi_api_key"):
+        if _guard_provider("cnipa", settings):
+            return []
+        _t0 = time.monotonic()
         try:
             data = _serpapi_search(
                 "google",
@@ -734,7 +801,10 @@ def search_cnipa_parallel(
                         relevance=_ranked(i, offset),
                     )
                 )
+            record_provider_success("cnipa", _t0)
             return out
         except Exception as exc:
+            threshold, cooldown = _breaker_settings(settings)
+            record_provider_failure("cnipa", exc, threshold=threshold, cooldown_sec=cooldown)
             logger.warning("CNIPA parallel SerpAPI web failed: %s", exc)
     return []

@@ -201,3 +201,52 @@ def test_severity_normalized_to_minor(monkeypatch: pytest.MonkeyPatch):
     assert res["findings"][0]["severity"] == "minor"
     assert res["findings"][0]["evidence"] == []
     assert res["weak_count"] == 0  # minor 不计入 weak
+
+
+class _B5Settings:
+    evidence_reviewer_enabled = True
+    evidence_reviewer_llm_enabled = False
+    evidence_reviewer_model = ""
+
+
+class _Claim:
+    def __init__(self, status: str):
+        self.status = status
+
+
+def _b5_patch_claims(monkeypatch: pytest.MonkeyPatch, statuses: list):
+    import app.services.chat_claims as cc
+
+    monkeypatch.setattr(
+        cc,
+        "build_sourced_claims",
+        lambda *a, **k: [_Claim(s) for s in statuses],
+    )
+
+
+def test_b5_reviewer_easy_answer_weak_is_warning(monkeypatch: pytest.MonkeyPatch):
+    """B-5：简单答案（少数字、少论断）的弱支撑 → warning（旧行为保持）。"""
+    import app.services.evidence_reviewer as er
+
+    _b5_patch_claims(monkeypatch, ["weak"])
+    res = er.review_answer("pH 多少？", "pH 4.0[^1]。", [], settings=_B5Settings())
+    assert res is not None
+    assert res["status"] == "warning"
+    assert res["difficulty"] < 0.5
+
+
+def test_b5_reviewer_hard_answer_weak_is_failure(monkeypatch: pytest.MonkeyPatch):
+    """B-5：高难度答案（数值密集+多论断+长问题）的弱支撑 → failure。"""
+    import app.services.evidence_reviewer as er
+
+    _b5_patch_claims(monkeypatch, ["weak", "weak", "supported"])
+    question = "请详细说明该环氧富锌底漆的全部关键工艺参数与验收标准。" * 6
+    answer = (
+        "盐雾 1000 小时[^1]，附着力 5MPa[^1]，pH 4.0[^1]，"
+        "温度 35°C[^1]，固体分 62%[^1]，膜厚 120μm[^1]。"
+    )
+    res = er.review_answer(question, answer, [], settings=_B5Settings())
+    assert res is not None
+    assert res["difficulty"] >= 0.5
+    assert res["status"] == "failure"
+    assert any("严格口径" in n for n in res["notes"])

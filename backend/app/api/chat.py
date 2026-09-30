@@ -273,6 +273,34 @@ _ABSTAIN_REASON_UNSUPPORTED = (
     "已检索到的证据不足以支撑可靠回答（{n_claims} 条论断中 {n_unsupported} 条缺乏证据支撑），"
 )
 
+_RETRIEVAL_DEGRADED_MODES = ("degraded", "keyword", "stale")
+
+
+def _retrieval_degradation_notices(kb_used: int) -> list[dict]:
+    """B-1: BM25-only 退化显式提示。
+
+    KB 实际参与检索（kb_used>0）但向量层退化/缺失时返回提示位，否则 []。
+    探测失败时返回 []（不阻断问答）。
+    """
+    if not kb_used or kb_used <= 0:
+        return []
+    try:
+        from ..services.kb_index import kb_vector_notice
+
+        vec = kb_vector_notice() or {}
+        if vec.get("vector_mode") in _RETRIEVAL_DEGRADED_MODES:
+            return [
+                {
+                    "code": "retrieval_degraded",
+                    "message": vec.get("vector_hint")
+                    or "知识库检索已退化为关键词匹配，语义排序不可用。",
+                }
+            ]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("retrieval degradation probe failed: %s", exc)
+    return []
+
+
 _NUMERIC_DOWNGRADE = {"supported": "weak", "weak": "unsupported"}
 
 
@@ -284,7 +312,12 @@ def _apply_answer_gates(
     verified,
     settings,
 ):
-    """Apply P2-1/P2-3/P2-2 gates. Returns (answer, sourced_claims, abstained)."""
+    """Apply P2-1/P2-3/P2-2 gates.
+
+    Returns (answer, sourced_claims, abstained, notices). ``notices`` is a
+    list of {"code", "message"} dicts for B-1 fail-open visibility: e.g. the
+    numeric check being skipped (never silently ignored again).
+    """
     from ..services.numeric_check import (
         check_answer_numbers,
         extract_numbers,
@@ -294,6 +327,7 @@ def _apply_answer_gates(
 
     gated_answer = answer
     abstained = False
+    notices: list[dict] = []
 
     # —— P2-1：数值一致性运行时检查 ——
     if getattr(settings, "chat_numeric_check_enabled", True) and citations:
@@ -304,6 +338,13 @@ def _apply_answer_gates(
             failures = check_answer_numbers(gated_answer, evidence_texts)
         except Exception as exc:  # noqa: BLE001
             logger.debug("numeric check skipped: %s", exc)
+            # B-1: fail-open 降级必须显式提示用户，不再静默跳过。
+            notices.append(
+                {
+                    "code": "numeric_check_skipped",
+                    "message": "数值一致性检查未能执行，答案中的数字未经核验，请自行确认关键数值。",
+                }
+            )
             failures = []
         if failures:
             gated_answer = gated_answer + format_numeric_note(failures)
@@ -350,7 +391,14 @@ def _apply_answer_gates(
             gated_answer = gated_answer + "\n".join(lines)
 
     # —— P2-2：证据不足拒答硬门 ——
-    threshold = float(getattr(settings, "chat_abstention_threshold", 0.5) or 0.5)
+    # B-5：门限按问答难度自适应 — 难题门限收紧（最多 20%），更容易拒答；
+    # 简单问答恒等于 base，保持 pin 住的 0.5 边界行为。
+    from ..services.gate_difficulty import (
+        adaptive_abstention_threshold,
+        estimate_difficulty,
+    )
+
+    base_threshold = float(getattr(settings, "chat_abstention_threshold", 0.5) or 0.5)
     should_abstain = False
     n_claims, n_unsupported = 0, 0
     if not citations:
@@ -360,6 +408,11 @@ def _apply_answer_gates(
         n_unsupported = sum(
             1 for v in verified if v.verdict == ClaimVerdict.unsupported
         )
+    threshold = adaptive_abstention_threshold(
+        base_threshold,
+        estimate_difficulty(question=question, answer=gated_answer, n_claims=n_claims),
+    )
+    if not should_abstain and verified:
         if n_claims and n_unsupported / n_claims > threshold:
             should_abstain = True
     if should_abstain:
@@ -379,7 +432,7 @@ def _apply_answer_gates(
             threshold,
         )
 
-    return gated_answer, sourced_claims, abstained
+    return gated_answer, sourced_claims, abstained, notices
 
 
 
@@ -425,6 +478,9 @@ def chat(req: ChatRequestValidated):
             project_id=req.project_id,
             include_entity_resolution=req.include_entity_resolution,
         )
+        # B-1: BM25-only 退化显式提示。KB 实际参与检索（kb_used>0）但向量层
+        # 退化/缺失时，语义排序已失效，用户必须看得见。
+        retrieval_notices = _retrieval_degradation_notices(kb_used)
         try:
             from ..services.connectors_builtin import gather_connector_evidence
 
@@ -613,7 +669,7 @@ def chat(req: ChatRequestValidated):
             settings=settings,
         )
         # P2 运行时门：数值检查 → 冲突透出 → 拒答硬门（决策 A：同步路径）。
-        answer, sourced_claims, _abstained = _apply_answer_gates(
+        answer, sourced_claims, _abstained, gate_notices = _apply_answer_gates(
             question,
             answer,
             citations,
@@ -621,6 +677,7 @@ def chat(req: ChatRequestValidated):
             _verified,
             settings,
         )
+        notices = list(retrieval_notices) + list(gate_notices or [])
         try:
             from ..services.scholar_helpers import build_evidence_provenance
 
@@ -666,6 +723,7 @@ def chat(req: ChatRequestValidated):
             mcp_permission_required=mcp_permission_required,
             mcp_tool_results=mcp_tool_results,
             data_sources=data_sources,
+            notices=notices or None,
         )
     except HTTPException:
         raise
@@ -1017,6 +1075,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                         )
                     )
                     claims, sources_audit = None, None
+                    gate_notices = []
                     try:
                         claims, sources_audit, _verified = await asyncio.to_thread(
                             _claims_and_audit,
@@ -1026,7 +1085,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             settings=settings,
                         )
                         # P2 运行时门（paperqa 整包路径，决策 A）。
-                        answer, claims, _abstained = _apply_answer_gates(
+                        answer, claims, _abstained, gate_notices = _apply_answer_gates(
                             question,
                             answer,
                             citations,
@@ -1069,6 +1128,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "evidence_provenance": evidence_provenance,
                             "evidence_reviewer": reviewer,
                             "reviewer_fix": reviewer_fix,
+                            "notices": gate_notices or None,
                         }
                     )
                     return
@@ -1111,6 +1171,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                         "structured": structured,
                         "clarification": plan["clarification"],
                         "rewritten_query": plan["rewritten_query"],
+                        # B-1: BM25-only 退化提示位。
+                        "notices": _retrieval_degradation_notices(kb_used) or None,
                     }
                 )
                 return
@@ -1243,6 +1305,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "sourced_claims": claims,
                             "sources_audit": sources_audit,
                             "tools_used": tools_used or result_holder.get("tools_used") or [],
+                            # B-1: BM25-only 退化提示位。
+                            "notices": _retrieval_degradation_notices(kb_used) or None,
                         }
                         yield _sse(done_payload)
                         return
@@ -1417,6 +1481,9 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "evidence_provenance": evidence_provenance,
                     "evidence_reviewer": reviewer,
                     "reviewer_fix": reviewer_fix,
+                    # B-1: BM25-only 退化提示位（主 token 流路径不走门逻辑，
+                    # numeric_check_skipped 提示仅同步/paperqa 路径有）。
+                    "notices": _retrieval_degradation_notices(kb_used) or None,
                 }
             )
             # W2-8 (P1-12): turn-stop 自动审计；evidence 路径已内联 review 的 turn 跳过。

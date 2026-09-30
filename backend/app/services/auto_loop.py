@@ -21,7 +21,6 @@ from ..config import get_settings
 from ..domain.schemas import (
     DOEPlan,
     LoopReport,
-    ObjectiveSpec,
     OptimizationResult,
     ProductDomain,
     Requirement,
@@ -61,70 +60,18 @@ def _cost_summary(optimization: OptimizationResult) -> dict | None:
     }
 
 
-def rmse_plateau_detected(
-    history: list[dict[str, float]],
-    *,
-    eps: float,
-    patience: int,
-) -> bool:
-    """True when the last ``patience`` consecutive RMSE steps are flat for all metrics."""
-    if patience < 1 or len(history) < patience + 1:
-        return False
-    metrics: set[str] = set()
-    for snap in history:
-        metrics.update(snap.keys())
-    if not metrics:
-        return False
-    recent = history[-(patience + 1) :]
-    for i in range(1, len(recent)):
-        prev, curr = recent[i - 1], recent[i]
-        for metric in metrics:
-            if metric not in prev or metric not in curr:
-                return False
-            if abs(curr[metric] - prev[metric]) >= eps:
-                return False
-    return True
-
-
-def target_achieved(best_so_far: float | None, objective: ObjectiveSpec) -> bool:
-    """P2-4: True when the measured best already meets the objective target.
-
-    Pure function. ``None`` best or ``None`` target → False (fail-open:
-    never claim convergence without data).
-    """
-    target = objective.target_value
-    if best_so_far is None or target is None:
-        return False
-    if objective.direction == "minimize":
-        return best_so_far <= target
-    return best_so_far >= target
-
-
-def best_objective_value(
-    records: list | None, metric: str, direction: str = "maximize"
-) -> float | None:
-    """P2-4: best measured value of ``metric`` across prior records."""
-    vals: list[float] = []
-    for r in records or []:
-        v = (getattr(r, "measured", None) or {}).get(metric)
-        if isinstance(v, bool):
-            continue
-        if isinstance(v, (int, float)):
-            vals.append(float(v))
-    if not vals:
-        return None
-    return min(vals) if direction == "minimize" else max(vals)
-
-
-def primary_objective_spec(req: Requirement) -> ObjectiveSpec:
-    """Primary objective: req.objectives[0], else a target-less default."""
-    from ..domain.schemas import ObjectiveSpec
-    from ..domain.project_spec import primary_objective
-
-    objectives = getattr(req, "objectives", None) or []
-    if objectives:
-        return objectives[0]
-    return ObjectiveSpec(metric=primary_objective(req))
+# B-7: 收敛判定统一入口（services/convergence.py）。
+# 以下名字保留为 re-export，兼容既有 import 方（tests / doe_cycle_service）。
+from .convergence import (
+    REASON_NONE,
+    REASON_RMSE_PLATEAU,
+    REASON_TARGET_ACHIEVED,
+    best_objective_value,
+    evaluate_convergence,
+    primary_objective_spec,
+    rmse_plateau_detected,
+    target_achieved,
+)
 
 
 def _stub_optimization(req: Requirement) -> OptimizationResult:
@@ -192,28 +139,20 @@ def loop_iterate(
     model_info, rmse = _rmse_by_metric(req.domain)
 
     history = list(prior_rmse_history or [])
-    # 仅用于 plateau 检测：近 N 轮足够，避免跨长循环无限增长内存（S7）。
-    history = history[-50:]
-    full_history = history + [rmse] if rmse is not None else history
-    converged = (
-        settings.loop_convergence_enabled
-        and rmse
-        and rmse_plateau_detected(
-            full_history,
-            eps=settings.loop_convergence_eps,
-            patience=settings.loop_convergence_patience,
-        )
-    )
-    # P2-4: 达标即停 — measured best already meets the objective target.
+    # B-7: 收敛判定统一走 services/convergence.evaluate_convergence
+    #（目标达成优先于 RMSE 平台期；None 数据永不判收敛）。
     obj_spec = primary_objective_spec(req)
-    best_measured = best_objective_value(records, obj_spec.metric, obj_spec.direction)
-    target_hit = bool(
-        settings.loop_convergence_enabled
-        and target_achieved(best_measured, obj_spec)
+    converged, convergence_reason = evaluate_convergence(
+        prior_rmse_history=history,
+        current_rmse=rmse,
+        records=records,
+        objective=obj_spec,
+        enabled=settings.loop_convergence_enabled,
+        eps=settings.loop_convergence_eps,
+        patience=settings.loop_convergence_patience,
     )
-    converged = bool(converged or target_hit)
-    convergence_reason = (
-        "target_achieved" if target_hit else ("rmse_plateau" if converged else "")
+    best_measured = best_objective_value(
+        records, obj_spec.metric, obj_spec.direction
     )
 
     chem = None

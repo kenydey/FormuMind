@@ -1260,6 +1260,11 @@ export interface OrgDashboardStats {
 // --- types formerly below export const api ---
 export type SearchSourceType = "patents" | "literature" | "internet" | "local" | "notebooklm" | "surechembl";
 
+export interface ChatNotice {
+  code: string;
+  message: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -1276,6 +1281,8 @@ export interface ChatMessage {
   toolStatus?: string | null;
   /** Claim-check chips from SSE done (when chat_claim_check_enabled). */
   sourcedClaims?: SourcedClaim[] | null;
+  /** B-1: fail-open 降级显式提示位（numeric check 跳过 / BM25-only 退化）。 */
+  notices?: ChatNotice[] | null;
   /** Soft clarification prompt from SSE done (when chat_clarification_enabled). */
   clarification?: ClarificationOption | null;
   /** Wave C structured provenance from SSE done. */
@@ -1590,6 +1597,8 @@ export interface ChatResponse {
   citations: Evidence[];
   rag_backend?: string;
   kb_chunks_used?: number;
+  /** B-1: fail-open 降级显式提示位（numeric check 跳过 / BM25-only 退化）。 */
+  notices?: ChatNotice[] | null;
   entity_resolution?: KGEntityResolutionSummary | null;
   kg_retrieval_stats?: object | null;
   structured?: StructuredAnswer | null;

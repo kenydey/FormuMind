@@ -133,3 +133,112 @@ def test_golden_baybe_unavailable_falls_back(monkeypatch):
     res = active_learning_doe(req, existing=[], n_suggest=2, engine="auto")
     assert res.engine == "legacy"
     assert len(res.plan.runs) >= 1
+
+
+class _MockHillClimbCampaign:
+    """B-6: deterministic hill-climbing stand-in for ``baybe.Campaign``.
+
+    Runs in CI where the ``baybe`` extra (torch) is absent. It verifies the
+    *integration* rather than BayBE itself: ``records_to_dataframe`` column
+    alignment, ``recommend`` → ``dataframe_to_doe_plan`` conversion, and the
+    round/batch loop plumbing. A broken measurement framing (misaligned
+    columns) or plan conversion collapses even this simple optimizer to
+    random — the same failure mode the real BayBE golden guards against.
+
+    The strategy (perturb around the best-seen point) is verified to beat
+    seeded random on the synthetic quadratic across multiple seeds; it is
+    deliberately weaker than BayBE, so this test is a wiring gate, not a
+    BayBE quality claim.
+    """
+
+    def __init__(self, factor_list, rng, step: float = 0.08):
+        self._factors = factor_list
+        self._rng = rng
+        self._step = step
+        self._best: dict | None = None
+        self._best_score = float("-inf")
+
+    def add_measurements(self, df) -> None:
+        for _, row in df.iterrows():
+            score = float(row["synth_score"])
+            if score > self._best_score:
+                self._best_score = score
+                self._best = {
+                    f.name: float(row[f.name]) for f in self._factors
+                }
+
+    def recommend(self, batch_size: int):
+        import pandas as pd
+
+        assert self._best is not None, "recommend() before add_measurements()"
+        rows = []
+        for _ in range(batch_size):
+            point = {}
+            for f in self._factors:
+                span = (f.high - f.low) or 1.0
+                v = self._best[f.name] + self._rng.normal(0.0, self._step * span)
+                point[f.name] = float(min(max(v, f.low), f.high))
+            rows.append(point)
+        return pd.DataFrame(rows)
+
+
+def test_golden_mock_optimizer_beats_random_on_synthetic():
+    """B-6: without baybe installed, the mock arm must still beat random.
+
+    Exercises the real adapters (records_to_dataframe /
+    dataframe_to_doe_plan) and loop plumbing end to end.
+    """
+    # NOTE: import from the adapter modules directly — importing
+    # app.services.engines.baybe_engine would pull the baybe/torch chain.
+    from app.services.engines.adapters.baybe_space_builder import (
+        factors_for_requirement,
+    )
+    from app.services.engines.adapters.doe_adapter import dataframe_to_doe_plan
+    from app.services.engines.adapters.measurements_adapter import (
+        records_to_dataframe,
+    )
+
+    rng = np.random.default_rng(7)
+    req = _req()
+    factor_list = factors_for_requirement(req, None)
+    assert factor_list, "no factors for requirement"
+    truth = _truth_factory(factor_list)
+    seed_rows = _seed_rows(factor_list, rng)
+
+    # ── Mock optimizer arm (same budget/shape as the BayBE golden) ──
+    records = _to_records(req, seed_rows, truth)
+    campaign = _MockHillClimbCampaign(factor_list, np.random.default_rng(8))
+    campaign.add_measurements(records_to_dataframe(records, req, req.objectives))
+    mock_best = max(r.measured["synth_score"] for r in records)
+    for _ in range(N_ROUNDS):
+        rec_df = campaign.recommend(batch_size=BATCH)
+        plan = dataframe_to_doe_plan(
+            rec_df, factor_list, "mock_active", engine="mock"
+        )
+        new_rows = [dict(r.natural) for r in plan.runs]
+        assert new_rows, "mock campaign suggested no points"
+        # 集成断言：plan 必须携带全部因子的自然值（转换链不断裂）
+        assert all(
+            set(r.keys()) == {f.name for f in factor_list} for r in new_rows
+        )
+        new_records = _to_records(req, new_rows, truth)
+        records.extend(new_records)
+        campaign.add_measurements(
+            records_to_dataframe(new_records, req, req.objectives)
+        )
+        mock_best = max(
+            [mock_best] + [truth(r)["synth_score"] for r in new_rows]
+        )
+
+    # ── Random baseline arm (same budget) ──
+    rng2 = np.random.default_rng(7)
+    random_best = max(truth(r)["synth_score"] for r in seed_rows)
+    for _ in range(N_ROUNDS):
+        for _ in range(BATCH):
+            r = {f.name: float(rng2.uniform(f.low, f.high)) for f in factor_list}
+            random_best = max(random_best, truth(r)["synth_score"])
+
+    assert mock_best > random_best, (
+        f"mock optimizer ({mock_best:.1f}) did not beat random ({random_best:.1f}); "
+        "measurement framing or plan conversion may have regressed"
+    )

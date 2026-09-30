@@ -576,6 +576,10 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
                   ev.sources_audit && typeof ev.sources_audit === "object"
                     ? (ev.sources_audit as import("../../api").SourcesAudit)
                     : null;
+                // B-1: fail-open 降级显式提示位。
+                m.notices = Array.isArray((ev as { notices?: unknown }).notices)
+                  ? ((ev as { notices?: import("../../api").ChatNotice[] | null }).notices ?? null)
+                  : null;
                 if (perm?.server_id && perm?.tool_name) {
                   m.content +=
                     `\n\n> ⚠️ MCP 工具 \`${perm.server_id}/${perm.tool_name}\` 需要会话审批后才能执行。`;

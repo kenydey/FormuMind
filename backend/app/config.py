@@ -301,6 +301,10 @@ class Settings(BaseSettings):
     patent_cpc_filter: bool = True  # P0: append CPC=(…) to patent queries
     openalex_enabled: bool = True
 
+    # B-8: provider 熔断器（连续失败阈值 / 熔断冷却秒数）。
+    provider_breaker_threshold: int = 5
+    provider_breaker_cooldown_sec: float = 300.0
+
     # 检索结果内容过滤（KB P0）：规则层默认开启（保守规则：垃圾域名/
     # 空洞摘要/近重复 SimHash）；LLM 批量质量判定默认关闭（每次检索一次调用）。
     content_filter_enabled: bool = True
@@ -726,6 +730,9 @@ class Settings(BaseSettings):
     chat_chem_tools_max_rounds: int = 4
     chat_history_max_turns: int = 12
     chat_rewrite_context_turns: int = 6
+    # B-2 — 对话历史 token 预算：trim_history 在 max_turns 硬截断之外再按
+    # token 预算压缩；超限的旧轮次折叠为一条确定性摘要，不再静默丢弃。
+    chat_history_token_budget: int = 6000
     # LLM 精排问答检索候选（无 GPU 时替代 ColBERT 的语义排序）。召回阶段用
     # bm25_faiss/ColBERT 粗排 top-N，再由 LLM 打分精排到 top-k；失败回退原排序。
     chat_rerank_enabled: bool = True

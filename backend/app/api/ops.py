@@ -11,6 +11,18 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
 
+@router.get("/kb-health")
+def kb_health() -> dict:
+    """B-9: KB 健康仪表盘 v1。
+
+    parser 分布、embedding 覆盖率（chunk 表实测）、空文档率（零切块文档占比）。
+    读失败时返回 ``{"available": False}``（fail-open）。
+    """
+    from ..services.kb_index import kb_health_snapshot
+
+    return kb_health_snapshot()
+
+
 @router.get("/evidence-stats")
 def evidence_stats() -> dict:
     """Tier-2 (LLM) evidence compression counters for this process.

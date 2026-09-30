@@ -1249,6 +1249,91 @@ golden_rigor_pairs: list[dict] = [
             {"text": "VOC 限值 150g/L", "keywords": ["VOC", "150g"]},
         ],
     },
+    # ------------------------------------------------------------------
+    # 对抗用例（B-5 数值 trap）：naive 答案给出"看似有据实则错误"的数值，
+    # value_correctness 经单位归一化后必须检出（score=0.0=FLAGGED）。
+    # 覆盖 numeric_consistency 的盲区：数字在引用中有、但单位/量级张冠李戴。
+    # ------------------------------------------------------------------
+    {
+        "adversarial": True,
+        "expected_value": {"value": 2000, "unit": "kPa"},
+        "question": "ZP-200 富锌底漆的拉开法附着力是多少？",
+        "answer": (
+            "ZP-200 拉开法附着力达 2000 MPa[^1]，远超设计要求。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-zp200-adhesion",
+                "title": "ZP-200 富锌底漆技术数据表",
+                "doi": "",
+                "text": "拉开法附着力 ≥2000 kPa（ISO 4624），破坏形式为内聚破坏。",
+                "page": 2,
+            },
+        ],
+        "key_claims": [
+            {"text": "附着力 2000 MPa", "keywords": ["附着力", "2000MPa"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 1000, "unit": "小时"},
+        "question": "HW-310 环氧富锌底漆中性盐雾时长？",
+        "answer": (
+            "HW-310 中性盐雾可达 10000 小时[^1]，满足 C5 海洋环境要求。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-hw310-nss",
+                "title": "HW-310 环氧富锌底漆技术数据表",
+                "doi": "",
+                "text": "中性盐雾试验（GB/T 1771）：1000 小时划线处单边锈蚀 ≤1.5mm。",
+                "page": 3,
+            },
+        ],
+        "key_claims": [
+            {"text": "盐雾 10000 小时", "keywords": ["盐雾", "10000小时"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 4.0, "unit": "pH"},
+        "question": "硅烷陶化槽液 pH 控制范围？",
+        "answer": (
+            "硅烷陶化槽液 pH 8.3 左右即可[^1]，无需频繁调整。"
+        ),
+        "evidence": [
+            {
+                "identifier": "silane-process-sop",
+                "title": "硅烷陶化工艺作业指导书",
+                "doi": "",
+                "text": "槽液 pH 控制在 3.8-4.2，超出范围需用专用调整剂回调。",
+                "page": 5,
+            },
+        ],
+        "key_claims": [
+            {"text": "pH 8.3", "keywords": ["pH", "8.3"]},
+        ],
+    },
+    {
+        "adversarial": True,
+        "expected_value": {"value": 62, "unit": "%"},
+        "question": "EP-620 高固体分环氧底漆的固体分含量？",
+        "answer": (
+            "EP-620 固体分 26%[^1]，一次成膜可达 125μm。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-ep620-solids",
+                "title": "EP-620 高固体分环氧底漆技术数据表",
+                "doi": "",
+                "text": "固体分 62%（体积），推荐干膜厚度 100-150μm。",
+                "page": 1,
+            },
+        ],
+        "key_claims": [
+            {"text": "固体分 26%", "keywords": ["固体分", "26%"]},
+        ],
+    },
 ]
 
 __all__ = ["DATASET_VERSION", "golden_rigor_pairs"]

@@ -41,9 +41,8 @@ def stores(tmp_path, monkeypatch):
 def _reset_coverage():
     from app.services import kb_index
 
-    with kb_index._KB_COVERAGE_LOCK:
-        kb_index._KB_COVERAGE["kb_chunks_embedded"] = 0
-        kb_index._KB_COVERAGE["kb_chunks_total"] = 0
+    # B-3: counters persist in SQLite — reset both DB and process-local.
+    kb_index.reset_kb_coverage_stats()
 
 
 def test_parser_provenance_persisted(stores):
@@ -87,14 +86,13 @@ def test_embedding_missing_structured_alert(stores, monkeypatch, caplog):
     assert cov["kb_chunks_embedded"] == 0
 
 
-def test_evidence_stats_exposes_kb_coverage():
+def test_evidence_stats_exposes_kb_coverage(stores):
     from app.api.ops import evidence_stats
     from app.services import kb_index
 
+    # B-3: counters are DB-backed now — go through the public bump API.
     _reset_coverage()
-    with kb_index._KB_COVERAGE_LOCK:
-        kb_index._KB_COVERAGE["kb_chunks_embedded"] = 3
-        kb_index._KB_COVERAGE["kb_chunks_total"] = 4
+    kb_index._bump_kb_coverage(embedded=3, total=4)
     stats = evidence_stats()
     assert stats["kb_chunks_embedded"] == 3
     assert stats["kb_chunks_total"] == 4

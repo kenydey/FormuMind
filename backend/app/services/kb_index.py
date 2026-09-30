@@ -23,15 +23,46 @@ logger = logging.getLogger(__name__)
 
 # ── P3-5: ingest-time embedding coverage counters (process-local) ──────────
 # Bump on every index_source() embed pass; read by /api/ops/evidence-stats.
-# Reset on process restart, same contract as the tier-2 counters.
+# B-3: the counters persist in the ``kb_coverage_counters`` SQLite table
+# (source of truth across restarts/processes); the process-local dict is
+# only a fail-open fallback when the DB is unavailable.
 import threading as _threading
 
 _KB_COVERAGE_LOCK = _threading.Lock()
 _KB_COVERAGE = {"kb_chunks_embedded": 0, "kb_chunks_total": 0}
+_KB_COVERAGE_KEYS = ("kb_chunks_embedded", "kb_chunks_total")
+
+
+def _coverage_session_factory():
+    from ..db.database import default_session_factory
+
+    return default_session_factory()
+
+
+def _read_kb_coverage_db() -> dict[str, int] | None:
+    """Read counters from SQLite. None when the table/DB is unavailable."""
+    from sqlalchemy import text as _text
+
+    try:
+        with _coverage_session_factory()() as session:
+            rows = session.execute(
+                _text("SELECT key, value FROM kb_coverage_counters")
+            ).all()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("kb coverage read failed, using process-local: %s", exc)
+        return None
+    out = {k: 0 for k in _KB_COVERAGE_KEYS}
+    for k, v in rows:
+        if k in out:
+            out[k] = int(v or 0)
+    return out
 
 
 def get_kb_coverage_stats() -> dict[str, int]:
-    """Snapshot copy of the ingest embedding-coverage counters."""
+    """Snapshot of the ingest embedding-coverage counters (B-3: DB-backed)."""
+    db_vals = _read_kb_coverage_db()
+    if db_vals is not None:
+        return db_vals
     with _KB_COVERAGE_LOCK:
         return dict(_KB_COVERAGE)
 
@@ -40,6 +71,45 @@ def _bump_kb_coverage(*, embedded: int, total: int) -> None:
     with _KB_COVERAGE_LOCK:
         _KB_COVERAGE["kb_chunks_embedded"] += embedded
         _KB_COVERAGE["kb_chunks_total"] += total
+    # B-3: write-through to SQLite (atomic increment, cross-process safe via
+    # the shared sqlite write lock). Failure never breaks ingest.
+    try:
+        from sqlalchemy import text as _text
+
+        from ..db.session_utils import commit_session
+
+        deltas = {"kb_chunks_embedded": embedded, "kb_chunks_total": total}
+        with commit_session(_coverage_session_factory()) as session:
+            for key, delta in deltas.items():
+                session.execute(
+                    _text(
+                        "INSERT INTO kb_coverage_counters (key, value, updated_at) "
+                        "VALUES (:k, :v, CURRENT_TIMESTAMP) "
+                        "ON CONFLICT(key) DO UPDATE SET "
+                        "value = kb_coverage_counters.value + excluded.value, "
+                        "updated_at = excluded.updated_at"
+                    ),
+                    {"k": key, "v": int(delta)},
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("kb coverage persist failed: %s", exc)
+
+
+def reset_kb_coverage_stats() -> None:
+    """Test seam: zero both the DB counters and the process-local fallback."""
+    with _KB_COVERAGE_LOCK:
+        _KB_COVERAGE["kb_chunks_embedded"] = 0
+        _KB_COVERAGE["kb_chunks_total"] = 0
+    try:
+        from sqlalchemy import text as _text
+
+        from ..db.session_utils import commit_session
+
+        with commit_session(_coverage_session_factory()) as session:
+            session.execute(_text("DELETE FROM kb_coverage_counters"))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("kb coverage reset failed: %s", exc)
+
 
 
 def _sync_source_fts(source_id: str, rows: list[dict], settings) -> None:
@@ -197,6 +267,72 @@ def _vector_health(total: int, embedded: int, stale: int = 0) -> dict:
         mode = "keyword"
         hint = "未安装 sentence-transformers，检索为关键词匹配。可在下方一键安装 Embedding 后点「重建索引」。"
     return {"vector_mode": mode, "vector_hint": hint, "rag_backend": active_rag_backend()}
+
+
+def kb_vector_notice() -> dict | None:
+    """B-1: fail-open 降级提示位的数据源。
+
+    返回 ``_vector_health`` 的 ``{"vector_mode", "vector_hint", ...}`` 字典，
+    供 chat 响应在 KB 检索实际退化为关键词匹配（degraded/keyword/stale）时
+    透出可见提示。失败时返回 None（不阻断问答）。
+    """
+    try:
+        from ..db.chunk_store import get_chunk_store
+
+        total, embedded = get_chunk_store().counts()
+        stale = get_chunk_store().count_foreign_model(_embed_model_name())
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("kb_vector_notice unavailable: %s", exc)
+        return None
+    return _vector_health(total, embedded, stale)
+
+
+def kb_health_snapshot() -> dict:
+    """B-9: KB 健康仪表盘 v1 数据源。
+
+    返回 parser 分布、embedding 覆盖率（chunk 表实测，非 ingest 计数器）、
+    空文档率（零切块文档占比）。失败时返回 ``{"available": False}``
+    （fail-open，不阻断调用方）。
+    """
+    try:
+        from sqlalchemy import text as _text
+
+        from ..db.chunk_store import get_chunk_store
+
+        with _coverage_session_factory()() as session:
+            parser_rows = session.execute(
+                _text(
+                    "SELECT COALESCE(parser, 'unknown'), COUNT(*) "
+                    "FROM source_documents GROUP BY COALESCE(parser, 'unknown')"
+                )
+            ).all()
+            total_docs = session.execute(
+                _text("SELECT COUNT(*) FROM source_documents")
+            ).scalar() or 0
+            docs_with_chunks = session.execute(
+                _text("SELECT COUNT(DISTINCT source_id) FROM document_chunks")
+            ).scalar() or 0
+        chunk_total, chunk_embedded = get_chunk_store().counts()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("kb_health_snapshot unavailable: %s", exc)
+        return {"available": False}
+    empty_docs = max(0, total_docs - docs_with_chunks)
+    return {
+        "available": True,
+        "total_documents": total_docs,
+        "total_chunks": chunk_total,
+        "parser_distribution": {str(k): int(v) for k, v in parser_rows},
+        "embedding_coverage": {
+            "embedded_chunks": chunk_embedded,
+            "total_chunks": chunk_total,
+            "rate": (chunk_embedded / chunk_total) if chunk_total else None,
+        },
+        "empty_doc_rate": {
+            "empty_documents": empty_docs,
+            "total_documents": total_docs,
+            "rate": (empty_docs / total_docs) if total_docs else None,
+        },
+    }
 
 
 # ── indexing ─────────────────────────────────────────────────────────────────

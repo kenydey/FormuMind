@@ -882,3 +882,21 @@ class KbIngestAudit(Base):
     reason: Mapped[str] = mapped_column(String(64), default="")
     domain_match: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+
+class KbCoverageCounter(Base):
+    """B-3: KB embedding coverage counters persisted in SQLite.
+
+    Replaces the old process-local ``_KB_COVERAGE`` dict (in
+    ``app.services.kb_index``) as the source of truth, so counts survive
+    process restarts and stay consistent across processes. Keys:
+    ``kb_chunks_embedded`` / ``kb_chunks_total``.
+    """
+
+    __tablename__ = "kb_coverage_counters"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )
+

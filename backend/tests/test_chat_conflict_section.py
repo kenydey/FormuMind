@@ -37,7 +37,7 @@ def test_conflict_section_appended():
                       evidence_indices=[0], reason="x"),
     ]
     answer = "pH 应控制在 4[^1]，槽液温度 50 度[^1]。"
-    gated, _, abstained = _apply_answer_gates(
+    gated, _, abstained, _notices = _apply_answer_gates(
         "q", answer, [_ev()], [], verified, s)
     assert abstained is False
     assert "【证据冲突】" in gated
@@ -53,7 +53,7 @@ def test_no_conflict_no_section():
                       evidence_indices=[0], reason="x"),
     ]
     answer = "槽液温度 50 度[^1]。"
-    gated, _, _ = _apply_answer_gates("q", answer, [_ev()], [], verified, s)
+    gated, _, _, _notices = _apply_answer_gates("q", answer, [_ev()], [], verified, s)
     assert gated == answer
 
 
@@ -65,5 +65,5 @@ def test_conflict_section_disabled_by_flag():
                       evidence_indices=[0], reason="x"),
     ]
     answer = "pH 应控制在 4[^1]。"
-    gated, _, _ = _apply_answer_gates("q", answer, [_ev()], [], verified, s)
+    gated, _, _, _notices = _apply_answer_gates("q", answer, [_ev()], [], verified, s)
     assert "证据冲突" not in gated

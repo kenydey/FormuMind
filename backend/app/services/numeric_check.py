@@ -30,7 +30,7 @@ _UNIT_ALIASES: dict[str, str] = {
     "mm": "mm", "毫米": "mm",
     "cm": "cm", "厘米": "cm",
     "m": "m", "米": "m",
-    "h": "h", "小时": "h", "hr": "h", "hrs": "h",
+    "h": "h", "小时": "h", "hr": "h", "hrs": "h", "hours": "h",
     "min": "min", "分钟": "min",
     "s": "s", "秒": "s",
     "%": "pct", "％": "pct",

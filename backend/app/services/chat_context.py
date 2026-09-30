@@ -20,12 +20,91 @@ _CHEM_TOKEN_RE = re.compile(
 )
 
 
-def trim_history(history: list[ChatTurn], *, max_turns: int | None = None) -> list[ChatTurn]:
+def _summarize_turns(turns: list[ChatTurn]) -> ChatTurn:
+    """Deterministic extractive summary of dropped older turns (B-2).
+
+    Reuses the query-rewrite term machinery (CAS / chem terms / citation
+    titles) so the entities that matter for retrieval survive compression,
+    plus the first user question for intent. No LLM call — deterministic and
+    cheap, so long conversations don't pay a summary call per turn.
+    """
+    terms = _collect_context_terms(turns, [])
+    first_q = next(
+        (
+            (t.content or "").strip()
+            for t in turns
+            if t.role == "user" and (t.content or "").strip()
+        ),
+        "",
+    )
+    parts = [f"此前 {len(turns)} 轮对话"]
+    if terms:
+        parts.append("关键实体：" + "、".join(terms[:8]))
+    if first_q:
+        parts.append("首个问题：" + first_q[:120])
+    return ChatTurn(role="assistant", content="[历史摘要] " + "；".join(parts))
+
+
+def trim_history(
+    history: list[ChatTurn],
+    *,
+    max_turns: int | None = None,
+    token_budget: int | None = None,
+) -> list[ChatTurn]:
+    """Token-budget-aware history trim (B-2).
+
+    Replaces the old blind N-turn hard cut: after the ``max_turns`` hard
+    backstop, the newest turns that fit into the token budget are kept and
+    the dropped older turns are folded into a single deterministic summary
+    turn, so early key entities are never silently lost. Total prompt length
+    stays bounded by the budget.
+    """
     settings = get_settings()
     cap = max_turns if max_turns is not None else settings.chat_history_max_turns
-    if len(history) <= cap:
-        return history
-    return history[-cap:]
+    budget = (
+        token_budget
+        if token_budget is not None
+        else settings.chat_history_token_budget
+    )
+    turns = list(history or [])
+    if len(turns) > cap:
+        turns = turns[-cap:]
+    if not turns:
+        return turns
+
+    from .query_aware_compression import estimate_tokens
+
+    def _tokens(t: ChatTurn) -> int:
+        return estimate_tokens(t.content or "")
+
+    if not budget or budget <= 0 or sum(_tokens(t) for t in turns) <= budget:
+        return turns
+
+    # 从最新往最旧累积：保留能装进预算的轮次，被挤掉的旧轮次压缩为摘要。
+    # reserve 给摘要预留 token；最新一轮永远保留（prompt 层另有单轮截断）。
+    reserve = min(400, max(100, budget // 4))
+    kept: list[ChatTurn] = []
+    used = 0
+    idx = len(turns)
+    for t in reversed(turns):
+        cost = _tokens(t)
+        if kept and used + cost > budget - reserve:
+            break
+        kept.append(t)
+        used += cost
+        idx -= 1
+    kept.reverse()
+    dropped = turns[:idx]
+    if not dropped:
+        return kept
+    summary = _summarize_turns(dropped)
+    # 摘要本身约束在预留内（estimate_tokens 按 chars/4 估算）。
+    max_chars = reserve * 4
+    if len(summary.content) > max_chars:
+        summary = ChatTurn(
+            role="assistant", content=summary.content[: max_chars - 1] + "…"
+        )
+    return [summary] + kept
 
 
 def rewrite_query(

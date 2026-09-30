@@ -39,7 +39,8 @@ def test_dataset_has_30_or_more_pairs():
 
 def test_adversarial_pairs_present():
     adv = [p for p in golden_rigor_pairs if p.get("adversarial")]
-    assert 10 <= len(adv) <= 15, f"expected 10-15 adversarial pairs, got {len(adv)}"
+    # B-5: 12 → 16（新增 4 个数值 trap）
+    assert 10 <= len(adv) <= 20, f"expected 10-20 adversarial pairs, got {len(adv)}"
 
 
 def test_adversarial_pairs_have_decidable_expectations():

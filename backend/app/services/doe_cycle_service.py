@@ -320,7 +320,8 @@ def run_doe_cycle(
     domain = requirement.domain.value if requirement.domain else ""
 
     # P2-4: objective tracking for the observability row.
-    from .auto_loop import (
+    # B-7: 收敛判定统一入口（原从 auto_loop 导入，现下沉到 convergence）。
+    from .convergence import (
         best_objective_value,
         primary_objective_spec,
         target_achieved,

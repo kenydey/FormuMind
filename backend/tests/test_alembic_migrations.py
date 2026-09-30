@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0035(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head (``0035_source_document_parser``)."""
+def test_revision_chain_head_is_0036(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head (``0036_kb_coverage_counters``)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0035(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0035"
+    assert heads[0] == "0036"
 
 
 def test_migrations_partial_columns_branch(
@@ -525,3 +525,19 @@ def test_migration_0035_parser_column(tmp_db_url: str, monkeypatch: pytest.Monke
     run_upgrade(tmp_db_url, monkeypatch, "head")
     run_upgrade(tmp_db_url, monkeypatch, "head")
     assert "parser" in _column_names(tmp_db_url, "source_documents")
+
+
+def test_migration_0036_kb_coverage_counters(tmp_db_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B-3: 0036 adds ``kb_coverage_counters``; downgrade drops it; re-upgrade idempotent."""
+    from tests.alembic_helpers import run_downgrade
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "kb_coverage_counters" in _table_names(tmp_db_url)
+
+    run_downgrade(tmp_db_url, monkeypatch, "0035")
+    assert "kb_coverage_counters" not in _table_names(tmp_db_url)
+
+    # Re-upgrade is idempotent (twice).
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "kb_coverage_counters" in _table_names(tmp_db_url)

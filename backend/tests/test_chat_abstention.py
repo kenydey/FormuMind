@@ -21,7 +21,7 @@ def _ev(title, snippet, source="patent"):
 def _gate(answer, citations, claims, settings=None):
     s = settings or get_settings()
     verified = [verify_claim_offline(c, citations) for c in claims]
-    gated, _, abstained = _apply_answer_gates(
+    gated, _, abstained, _notices = _apply_answer_gates(
         "q", answer, citations, [], verified, s
     )
     return gated, abstained, verified
@@ -62,23 +62,23 @@ def test_threshold_boundary():
     claims_ok = ["磷化槽液总酸度控制在 18-22 点", "槽液温度应控制在 999 度"]
     v = [verify_claim_offline(c, ev) for c in claims_ok]
     s = get_settings()
-    _, _, ab = _apply_answer_gates("q", "a", ev, [], v, s)
+    _, _, ab, _notices = _apply_answer_gates("q", "a", ev, [], v, s)
     assert ab is False  # 0.5 不触发（严格大于）
     claims_bad = claims_ok + ["槽液 pH 应为 99"]
     v2 = [verify_claim_offline(c, ev) for c in claims_bad]
-    _, _, ab2 = _apply_answer_gates("q", "a", ev, [], v2, s)
+    _, _, ab2, _notices = _apply_answer_gates("q", "a", ev, [], v2, s)
     assert ab2 is True
 
 
 def test_claim_check_disabled_fail_open():
     s = get_settings()
-    gated, _, abstained = _apply_answer_gates(
+    gated, _, abstained, _notices = _apply_answer_gates(
         "q", "某答案", [], [], None, s
     )
     # verified=None（检查关闭）但零召回仍拒答：零召回不依赖 claim 检查。
     assert abstained is True
     ev = [_ev("t", "s")]
-    gated2, _, ab2 = _apply_answer_gates("q", "某答案", ev, [], None, s)
+    gated2, _, ab2, _notices = _apply_answer_gates("q", "某答案", ev, [], None, s)
     assert ab2 is False and gated2 == "某答案"
 
 
@@ -126,3 +126,42 @@ def test_abstain_template_uses_eval_marker():
     from app.evals.rigor_rubric import _ABSTAIN_MARKERS
 
     assert any(m in _ABSTAIN_TEMPLATE for m in _ABSTAIN_MARKERS)
+
+
+def test_b5_abstention_threshold_adaptive_hard_question():
+    """B-5：难题（数值密集+多论断+长问题）门限收紧 —
+    unsupported 3/7≈0.429 在 base 0.5 下不拒答，自适应门限下拒答。"""
+    from types import SimpleNamespace
+
+    from app.pipeline.claim_checker import ClaimVerdict
+
+    ev = [
+        _ev(
+            "环氧富锌底漆工艺报告",
+            "盐雾 1000 小时，附着力 5MPa，pH 4.0，温度 35°C，固体分 62%。",
+            source="literature",
+        )
+    ]
+    # 7 个论断：4 supported + 3 unsupported（3/7≈0.429 < base 0.5）
+    verified = [SimpleNamespace(verdict=ClaimVerdict.supported)] * 4 + [
+        SimpleNamespace(verdict=ClaimVerdict.unsupported)
+    ] * 3
+    answer = (
+        "盐雾 1000 小时[^1]，附着力 5MPa[^1]，pH 4.0[^1]，"
+        "温度 35°C[^1]，盐雾 9999 小时[^1]，附着力 99MPa[^1]，pH 99[^1]。"
+    )
+    question = "请详细说明该环氧富锌底漆的全部关键工艺参数、验收标准与控制范围。" * 6
+    s = get_settings()
+    gated, _, abstained, _ = _apply_answer_gates(
+        question, answer, ev, [], verified, s
+    )
+    assert abstained is True
+    assert "证据不足" in gated
+
+
+def test_b5_abstention_threshold_easy_question_unchanged():
+    """B-5：简单问答难度为 0，门限恒等于 base（0.5 边界行为不变）。"""
+    from app.services.gate_difficulty import adaptive_abstention_threshold
+
+    assert adaptive_abstention_threshold(0.5, 0.0) == 0.5
+    assert adaptive_abstention_threshold(0.5, 1.0) == 0.4

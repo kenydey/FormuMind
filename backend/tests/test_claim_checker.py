@@ -121,3 +121,52 @@ def test_claim_check_llm_failure_marks_degraded(monkeypatch):
     assert result.engine == "degraded"
     # offline fallback still produced verified claims, not an empty result
     assert len(result.claims) >= 1
+
+
+def _b4_form(predicted: dict) -> "Formulation":
+    from app.domain.schemas import Formulation, Ingredient, ProductDomain
+
+    return Formulation(
+        name="rec B4",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[Ingredient(name="Epoxy", role="resin", weight_pct=100)],
+        predicted=predicted,
+    )
+
+
+def test_b4_unit_aware_evidence_match_no_false_flag():
+    """B-4: 证据 '2 kPa' 与预测 adhesion_mpa=0.002 经单位换算应命中，
+    旧裸数字比较会误报（2 vs 0.002）。"""
+    from app.pipeline.claim_checker import check_formulation_predictions
+
+    form = _b4_form({"adhesion_mpa": 0.002})
+    evidence = [_evidence("Adhesion strength 2 kPa measured on steel panels.")]
+    warnings = check_formulation_predictions(form, evidence)
+    assert not any("lacks supporting evidence" in w for w in warnings)
+    assert not any("【数值降级】" in w for w in form.warnings)
+
+
+def test_b4_same_unit_mismatch_still_flags():
+    """B-4: 同单位但数值差一个数量级仍应标记（含新 'hours' 别名）。"""
+    from app.pipeline.claim_checker import check_formulation_predictions
+
+    form = _b4_form({"salt_spray_hours": 9999.0})
+    evidence = [_evidence("Salt spray resistance 1000 hours in neutral salt spray test.")]
+    warnings = check_formulation_predictions(form, evidence)
+    assert any("salt_spray_hours" in w for w in warnings)
+
+
+def test_b4_unsupported_prediction_downgrades_form():
+    """B-4: 无证据支撑的预测值 → bundle warning + form.warnings 降级标记（去重）。"""
+    from app.pipeline.claim_checker import check_formulation_predictions
+
+    form = _b4_form({"salt_spray_hours": 9999.0})
+    evidence = [_evidence("Degreaser pH adjustment for aluminum cleaning only.")]
+    warnings = check_formulation_predictions(form, evidence)
+    assert any("salt_spray_hours" in w for w in warnings)
+    markers = [w for w in form.warnings if "【数值降级】" in w and "salt_spray_hours" in w]
+    assert len(markers) == 1
+    # 重复调用不重复追加
+    check_formulation_predictions(form, evidence)
+    markers = [w for w in form.warnings if "【数值降级】" in w and "salt_spray_hours" in w]
+    assert len(markers) == 1

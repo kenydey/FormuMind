@@ -1,6 +1,7 @@
 """Post-generation Claim Checker — verify report claims against grounded evidence."""
 from __future__ import annotations
 
+import math
 import re
 from enum import Enum
 
@@ -301,22 +302,70 @@ def regenerate_prompt(topic: str, answer: str, failed_claims: list[VerifiedClaim
 _NUMERIC_IN_TEXT = re.compile(r"(\d+(?:\.\d+)?)")
 
 
+# B-4: metric 名称后缀 → numeric_check 单位提示。predicted 字典里是裸 float，
+# 靠后缀把预测值配成 (值, 单位) 对，再用共享的 extract_numbers/_to_base 做
+# unit-aware 的证据匹配（与 P2-1 chat 数值门同一套实现）。
+_METRIC_UNIT_HINTS: tuple[tuple[str, str], ...] = (
+    ("_hours", "h"),
+    ("_hour", "h"),
+    ("_mpa", "mpa"),
+    ("_kpa", "kpa"),
+    ("_pa", "pa"),
+    ("_pct", "pct"),
+    ("_percent", "pct"),
+    ("_gsm", "gsm"),
+    ("_mm", "mm"),
+    ("_um", "um"),
+    ("_mg", "mg"),
+    ("_kg", "kg"),
+    ("_g", "g"),
+    ("_ml", "ml"),
+    ("_min", "min"),
+    ("_ph", "ph"),
+    ("_c", "c"),
+)
+
+
+def _metric_unit(metric: str) -> str | None:
+    m = (metric or "").lower()
+    for suffix, unit in sorted(_METRIC_UNIT_HINTS, key=lambda x: -len(x[0])):
+        if m.endswith(suffix):
+            return unit
+    return None
+
+
 def _evidence_supports_value(evidence: list[Evidence], metric: str, value: float) -> bool:
-    """Heuristic: evidence snippets mention a numeric value within ±25% of prediction."""
+    """B-4: unit-aware evidence support via the shared numeric_check module.
+
+    Evidence numbers come from ``extract_numbers`` (unit-aware, with unit
+    conversions); the predicted bare float is paired with a unit hint derived
+    from the metric-name suffix. A match means the same base unit and within
+    ±25% — prediction tolerance, since predictions are estimates (unlike the
+    strict answer-number gate in chat, which demands exact match).
+    Metrics without a unit hint fall back to bare-number ±25% (old behavior).
+    """
+    from ..services.numeric_check import _to_base, extract_numbers
+
     if not evidence or value <= 0:
         return bool(evidence)
-    lo, hi = value * 0.75, value * 1.25
     metric_tokens = _token_set(metric.replace("_", " "))
+    unit = _metric_unit(metric)
+    pred_base, pred_v = _to_base(value, unit) if unit else (None, value)
     for ev in evidence[:12]:
         blob = f"{ev.title} {ev.snippet}".lower()
         if metric_tokens and not (metric_tokens & _token_set(blob)):
             continue
-        for match in _NUMERIC_IN_TEXT.findall(blob):
-            try:
-                num = float(match)
-            except ValueError:
-                continue
-            if lo <= num <= hi:
+        for ev_v, ev_u in extract_numbers(f"{ev.title} {ev.snippet}"):
+            if unit:
+                try:
+                    ev_base, ev_bv = _to_base(ev_v, ev_u)
+                except Exception:  # noqa: BLE001 - fail-open on odd units
+                    continue
+                if ev_base == pred_base and math.isclose(
+                    ev_bv, pred_v, rel_tol=0.25
+                ):
+                    return True
+            elif ev_v > 0 and abs(ev_v - value) / max(ev_v, value) <= 0.25:
                 return True
     return False
 
@@ -325,7 +374,15 @@ def check_formulation_predictions(
     form: Formulation,
     evidence: list[Evidence],
 ) -> list[str]:
-    """Lightweight numeric claim check for recommend-path formulations."""
+    """Lightweight numeric claim check for recommend-path formulations.
+
+    B-4: evidence matching is unit-aware via the shared ``numeric_check``
+    module (same implementation as the P2-1 chat gate). When a predicted
+    metric lacks evidence support the prediction is *downgraded*: a structured
+    ``【数值降级】`` marker is recorded on ``form.warnings`` (per-formulation
+    channel, travels with the scored bundle) in addition to the returned
+    bundle-level warning string.
+    """
     warnings: list[str] = []
     if not form.predicted:
         return warnings
@@ -347,5 +404,11 @@ def check_formulation_predictions(
             warnings.append(
                 f"{form.name}: predicted {metric}={val:.2g} lacks supporting evidence"
             )
+            marker = (
+                f"【数值降级】predicted {metric}={val:.2g} "
+                "在所引证据中无来源，该预测值可信度已降级，请谨慎采信"
+            )
+            if marker not in form.warnings:
+                form.warnings.append(marker)
     return warnings
 

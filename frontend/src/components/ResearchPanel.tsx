@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
-import type { Evidence, SessionInfoResponse, StructureRecognitionResult } from "../api";
+import type { ChatNotice, Evidence, SessionInfoResponse, StructureRecognitionResult } from "../api";
 import { api } from "../api";
 import type { NotificationKind } from "../store/notifications";
 import MarkdownMessage from "./MarkdownMessage";
@@ -36,6 +36,27 @@ const CRAG_STAGES = [
 ] as const;
 
 export const CRAG_STAGE_IDS: readonly string[] = CRAG_STAGES.map((s) => s.id);
+
+/**
+ * B-1: fail-open 降级显式提示条 —— numeric check 跳过 / BM25-only 退化时
+ * 的可见提示。纯组件，可独立测试。
+ */
+export function ChatNotices({ notices }: { notices?: ChatNotice[] | null }) {
+  if (!notices || notices.length === 0) return null;
+  return (
+    <div className="mt-1.5 space-y-1" data-testid="chat-notices">
+      {notices.map((n, j) => (
+        <div
+          key={`${n.code}-${j}`}
+          className="flex items-start gap-1.5 text-[11px] px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-200"
+        >
+          <span aria-hidden>⚠️</span>
+          <span>{n.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * A-6: sourced claim 芯片的样式/文案。
@@ -483,6 +504,8 @@ export default function ResearchPanel() {
                 ) : (
                   <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
                 )}
+                {/* B-1: fail-open 降级显式提示位 —— numeric check 跳过 / BM25-only 退化 */}
+                {m.role === "assistant" && !m.streaming && <ChatNotices notices={m.notices} />}
                 {m.role === "assistant" && (m.kbChunksUsed ?? 0) > 0 && (
                   <div className="mt-1.5">
                     <span

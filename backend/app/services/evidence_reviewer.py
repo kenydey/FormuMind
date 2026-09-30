@@ -318,11 +318,17 @@ def review_answer(
         weak = [c for c in claims if getattr(c, "status", None) == "weak"]
         # Also flag invented-looking DOIs already marked in answer footer
         doi_warn = "DOI 校验" in (answer or "")
+        # B-5: 难度自适应 — 高难度答案（数值密集/论断多）中弱支撑也判 failure。
+        from .gate_difficulty import estimate_difficulty
+
+        difficulty = estimate_difficulty(
+            question=question, answer=answer, n_claims=len(claims)
+        )
         status = "pass"
         if unsupported or doi_warn:
             status = "failure" if unsupported else "warning"
         elif weak:
-            status = "warning"
+            status = "failure" if difficulty >= 0.5 else "warning"
         notes: list[str] = []
         if unsupported:
             notes.append(f"{len(unsupported)} 条断言无据")
@@ -330,6 +336,8 @@ def review_answer(
             notes.append(f"{len(weak)} 条弱支撑")
         if doi_warn:
             notes.append("DOI 校验提出警告")
+        if status != "pass" and difficulty >= 0.5:
+            notes.append(f"高难度问答（难度 {difficulty:.2f}），已按严格口径判定")
         suggestion = None
         if status != "pass":
             suggestion = (
@@ -342,6 +350,7 @@ def review_answer(
             "suggestion": suggestion,
             "unsupported_count": len(unsupported),
             "weak_count": len(weak),
+            "difficulty": difficulty,
         }
     except Exception as exc:  # noqa: BLE001
         logger.debug("evidence reviewer skipped: %s", exc)

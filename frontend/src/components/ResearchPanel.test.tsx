@@ -81,3 +81,32 @@ describe("sourcedClaimChip (A-6 conflicting)", () => {
     expect(sourcedClaimChip({ status: "weak", raw_verdict: null }).label).toBe("弱支撑");
   });
 });
+
+/**
+ * B-1: fail-open 降级显式提示条。
+ */
+import { render, screen } from "@testing-library/react";
+import { ChatNotices } from "./ResearchPanel";
+
+describe("ChatNotices (B-1)", () => {
+  it("renders each notice message", () => {
+    render(
+      <ChatNotices
+        notices={[
+          { code: "numeric_check_skipped", message: "数值一致性检查未能执行" },
+          { code: "retrieval_degraded", message: "检索已退化为关键词匹配" },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("chat-notices")).toBeInTheDocument();
+    expect(screen.getByText("数值一致性检查未能执行")).toBeInTheDocument();
+    expect(screen.getByText("检索已退化为关键词匹配")).toBeInTheDocument();
+  });
+
+  it("renders nothing when notices are empty or null", () => {
+    const { container: c1 } = render(<ChatNotices notices={[]} />);
+    expect(c1.querySelector('[data-testid="chat-notices"]')).toBeNull();
+    const { container: c2 } = render(<ChatNotices notices={null} />);
+    expect(c2.querySelector('[data-testid="chat-notices"]')).toBeNull();
+  });
+});
