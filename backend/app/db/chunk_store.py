@@ -36,6 +36,12 @@ class ChunkStore:
         # Bumped on every write; lets services cache derived indexes safely.
         self.generation = 0
 
+    @property
+    def session_factory(self) -> sessionmaker[Session]:
+        """The factory this store was built with (lets services open
+        read sessions against the same database the store writes)."""
+        return self._session_factory
+
     def replace_for_source_in(
         self, session: Session, source_id: str, chunks: list[dict]
     ) -> int:

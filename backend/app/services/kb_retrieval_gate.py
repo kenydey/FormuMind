@@ -32,9 +32,17 @@ from .content_filter import DEFAULT_BLOCKED_DOMAINS, _WORD_RE
 logger = logging.getLogger(__name__)
 
 GateStage = Literal["retrieval", "ingest"]
-GateReason = Literal["blocked_domain", "garbage_snippet", "wiki_track"]
+GateReason = Literal[
+    "blocked_domain", "garbage_snippet", "wiki_track", "dedup_exact", "dedup_near"
+]
 
-_REASONS: tuple[GateReason, ...] = ("blocked_domain", "garbage_snippet", "wiki_track")
+_REASONS: tuple[GateReason, ...] = (
+    "blocked_domain",
+    "garbage_snippet",
+    "wiki_track",
+    "dedup_exact",
+    "dedup_near",
+)
 _STAGES: tuple[GateStage, ...] = ("retrieval", "ingest")
 
 _lock = threading.Lock()

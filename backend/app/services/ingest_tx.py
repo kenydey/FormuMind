@@ -133,6 +133,11 @@ def ingest_document_tx(
                         row["embedding"] = vec
                         row["embedding_model"] = model_name
 
+            # KB dedup (2026-10-01): drop exact / near-duplicate chunks before
+            # the write; the caller-owned session is reused read-only.
+            from .kb_dedup import dedupe_chunk_rows
+
+            rows = dedupe_chunk_rows(rows, source_id, session)
             # Write chunks via the caller-session method (no internal commit)
             try:
                 chunk_count = chunk_store.replace_for_source_in(session, source_id, rows)

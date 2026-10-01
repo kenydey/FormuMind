@@ -495,6 +495,12 @@ def index_source(
                     source_id,
                     len(rows),
                 )
+        # KB dedup (2026-10-01): drop exact / near-duplicate chunks after
+        # embedding, before the chunk write — and before the FTS mirror so
+        # both stay consistent.
+        from .kb_dedup import dedupe_chunk_rows
+
+        rows = dedupe_chunk_rows(rows, source_id)
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)

@@ -681,6 +681,15 @@ class Settings(BaseSettings):
     # context (Claims<->Examples stitching, zero LLM cost).
     kb_patent_stitch_enabled: bool = True
     kb_patent_stitch_max_siblings: int = 2
+    # KB near-duplicate dedup at ingest (2026-10-01): two layers applied to
+    # chunk rows after embedding, before ChunkStore.replace_for_source[_in].
+    # L1 exact (normalized-text sha256) is zero-false-positive → default ON.
+    # L2 near (same-lang embedding cosine >= threshold vs live DB vectors)
+    # is opt-in; audit mode only logs what *would* be skipped.
+    kb_dedup_exact_enabled: bool = True
+    kb_near_dedup_enabled: bool = False
+    kb_near_dedup_audit: bool = True
+    kb_near_dedup_threshold: float = 0.98
     # Phase 4 — Text2SQL hybrid routing in the chat chain. When True and the
     # question carries structured signals, deterministic SQL rows are
     # prepended to the answer prompt (fail-open: SQL failure falls back to

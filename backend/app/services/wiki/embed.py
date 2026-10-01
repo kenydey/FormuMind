@@ -156,9 +156,11 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
             if row_project_id and not doc.project_id:
                 doc.project_id = row_project_id
 
-        get_chunk_store().replace_for_source_in(
-            session,
-            sid,
+        # KB dedup (2026-10-01): wiki chunks go through the same L1/L2 filter
+        # as the other ingest paths (single-chunk source; embedding present).
+        from ..kb_dedup import dedupe_chunk_rows
+
+        _wiki_rows = dedupe_chunk_rows(
             [
                 {
                     "text": blob,
@@ -173,6 +175,13 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
                     "embedding_model": emb_model,
                 }
             ],
+            sid,
+            session,
+        )
+        get_chunk_store().replace_for_source_in(
+            session,
+            sid,
+            _wiki_rows,
         )
 
     try:
