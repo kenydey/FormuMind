@@ -4,6 +4,11 @@
   @apply text-slate-200;
 }
 
+/* Answer body: long unbroken strings (URLs, patent numbers) wrap instead of overflowing */
+.citation-answer {
+  @apply break-words;
+}
+
 /* Superscript citation links */
 .citation-sup {
   @apply text-[10px] leading-none;

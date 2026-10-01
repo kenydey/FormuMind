@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import MarkdownMessage from "./MarkdownMessage";
 import "./CitationRenderer.css";
 
 export interface CitationAnchor {
@@ -20,46 +21,102 @@ interface CitationRendererProps {
   onJumpToSource?: (sourceId: string, page: number | null) => void;
 }
 
-interface TextPart {
-  type: "text";
-  value: string;
-}
-
-interface CitationPart {
-  type: "citation";
-  refId: string;
-}
-
-type Part = TextPart | CitationPart;
-
 interface FootnoteEntry {
   id: string;
   content: string;
   anchor?: CitationAnchor;
 }
 
-/** Split answer text on [^n] markers, returning interleaved text and citation parts. */
-function parseAnswer(answer: string): Part[] {
-  const parts: Part[] = [];
-  const re = /\[\^(\d+)\]/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+/**
+ * 引用占位符：渲染前把 [^n] 换成 PUA 字符 token。Markdown 解析器不会触碰
+ * 这些字符，整段答案可直接复用 MarkdownMessage 的完整渲染管线（GFM 表格 /
+ * KaTeX / SMILES），排版与无引用答案完全一致。
+ */
+const PH_OPEN = "\uE000";
+const PH_CLOSE = "\uE001";
 
-  while ((match = re.exec(answer)) !== null) {
-    const before = answer.slice(lastIndex, match.index);
-    if (before.length > 0) {
-      parts.push({ type: "text", value: before });
+function maskCitationMarkers(answer: string): { text: string; ids: string[] } {
+  const ids: string[] = [];
+  const maskOne = (s: string) =>
+    s.replace(/\[\^(\d+)\]/g, (_m, id: string) => {
+      ids.push(id);
+      return `${PH_OPEN}${ids.length - 1}${PH_CLOSE}`;
+    });
+  // 围栏代码块与行内代码保持原文 —— 仅对代码之外的文本做占位符替换。
+  const text = answer
+    .split(/(```[\s\S]*?```)/g)
+    .map((chunk, i) =>
+      i % 2 === 1
+        ? chunk
+        : chunk
+            .split(/(`[^`\n]*`)/g)
+            .map((c, j) => (j % 2 === 1 ? c : maskOne(c)))
+            .join(""),
+    )
+    .join("");
+  return { text, ids };
+}
+
+/**
+ * rehype 插件：把文本节点中的占位符切成 <sup><a>[^n]</a></sup> 上标引用链接。
+ * pre/code 子树跳过 —— 代码块内的 [^n] 保持原文。
+ *
+ * 返回 unified attacher（unified 调用它拿到真正的 transformer）。
+ */
+function rehypeCitationRefs(ids: string[]): () => (tree: any) => void {
+  const tokenRe = new RegExp(`(${PH_OPEN}\\d+${PH_CLOSE})`, "g");
+  const singleRe = new RegExp(`^${PH_OPEN}(\\d+)${PH_CLOSE}$`);
+
+  const walk = (node: any): void => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "element" && (node.tagName === "pre" || node.tagName === "code")) {
+      return;
     }
-    parts.push({ type: "citation", refId: match[1] });
-    lastIndex = re.lastIndex;
-  }
+    const children: any[] | undefined = node.children;
+    if (!Array.isArray(children)) return;
+    const next: any[] = [];
+    for (const child of children) {
+      if (child && child.type === "text" && typeof child.value === "string") {
+        const parts = child.value.split(tokenRe);
+        if (parts.length === 1) {
+          next.push(child);
+          continue;
+        }
+        for (const part of parts) {
+          const m = singleRe.exec(part);
+          if (m) {
+            const refId = ids[Number(m[1])];
+            next.push({
+              type: "element",
+              tagName: "sup",
+              properties: { className: ["citation-sup"] },
+              children: [
+                {
+                  type: "element",
+                  tagName: "a",
+                  properties: {
+                    href: `#fn-${refId}`,
+                    className: ["citation-link"],
+                    ariaLabel: `Jump to footnote ${refId}`,
+                  },
+                  children: [{ type: "text", value: `[^${refId}]` }],
+                },
+              ],
+            });
+          } else if (part) {
+            next.push({ type: "text", value: part });
+          }
+        }
+      } else {
+        walk(child);
+        next.push(child);
+      }
+    }
+    node.children = next;
+  };
 
-  const remainder = answer.slice(lastIndex);
-  if (remainder.length > 0) {
-    parts.push({ type: "text", value: remainder });
-  }
-
-  return parts;
+  // unified attacher：被调用后返回真正作用于 tree 的 transformer。
+  return () => (tree: any) => walk(tree);
 }
 
 /** Parse footnotes markdown text into individual footnote entries.
@@ -113,7 +170,11 @@ export default function CitationRenderer({
 }: CitationRendererProps) {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-  const answerParts = parseAnswer(answer);
+  const { text: maskedAnswer, ids } = useMemo(
+    () => maskCitationMarkers(answer),
+    [answer],
+  );
+  const extraRehype = useMemo(() => [rehypeCitationRefs(ids)], [ids]);
   const footnoteEntries = parseFootnotes(footnotes, anchors);
 
   function scrollToFootnote(n: string) {
@@ -127,28 +188,18 @@ export default function CitationRenderer({
 
   return (
     <div className="citation-renderer">
-      {/* Answer text with superscript citation links */}
-      <div className="citation-answer leading-relaxed">
-        {answerParts.map((part, i) => {
-          if (part.type === "text") {
-            return <span key={i}>{part.value}</span>;
-          }
-          return (
-            <sup key={i} className="citation-sup">
-              <a
-                href={`#fn-${part.refId}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  scrollToFootnote(part.refId);
-                }}
-                className="citation-link"
-                aria-label={`Jump to footnote ${part.refId}`}
-              >
-                [^{part.refId}]
-              </a>
-            </sup>
-          );
-        })}
+      {/* Answer text: full markdown via MarkdownMessage, [^n] restored as sup links by the rehype plugin */}
+      <div
+        className="citation-answer leading-relaxed"
+        onClick={(e) => {
+          const anchor = (e.target as HTMLElement).closest?.("a.citation-link");
+          if (!anchor) return;
+          e.preventDefault();
+          const refId = (anchor.getAttribute("href") || "").replace(/^#fn-/, "");
+          if (refId) scrollToFootnote(refId);
+        }}
+      >
+        <MarkdownMessage content={maskedAnswer} rehypePlugins={extraRehype} />
       </div>
 
       {/* Footnotes section */}
@@ -211,7 +262,9 @@ export default function CitationRenderer({
                     )}
                   </div>
                 )}
-                <span className="citation-footnote-text">{entry.content}</span>
+                <div className="citation-footnote-text">
+                  <MarkdownMessage content={entry.content} />
+                </div>
               </li>
             ))}
           </ol>

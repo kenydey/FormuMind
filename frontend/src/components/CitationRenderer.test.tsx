@@ -150,6 +150,55 @@ describe("CitationRenderer", () => {
   });
 });
 
+describe("CitationRenderer markdown answer (排版修复)", () => {
+  it("renders markdown formatting in the answer while keeping sup citation links", () => {
+    const answer =
+      "## 标题\n\n这是**加粗**文本。[^1]\n\n- 列表项一\n- 列表项二[^2]";
+    const footnotes = "[^1]: 脚注一\n[^2]: 脚注二";
+    render(<CitationRenderer answer={answer} footnotes={footnotes} anchors={[]} />);
+
+    // Markdown 结构正常渲染
+    expect(document.querySelector(".citation-answer h2")).toBeTruthy();
+    expect(document.querySelector(".citation-answer strong")).toHaveTextContent("加粗");
+    expect(document.querySelectorAll(".citation-answer ul li")).toHaveLength(2);
+    // 上标引用链接仍在
+    const sups = document.querySelectorAll(".citation-answer sup.citation-sup");
+    expect(sups).toHaveLength(2);
+    // 无裸 markdown 符号残留
+    expect(document.querySelector(".citation-answer")?.textContent).not.toContain("**");
+  });
+
+  it("renders GFM tables in the answer", () => {
+    const answer =
+      "结果如下[^1]：\n\n| 专利号 | 标题 |\n| --- | --- |\n| CN123 | 测试 |\n";
+    render(<CitationRenderer answer={answer} footnotes="" anchors={[]} />);
+    expect(document.querySelector(".citation-answer table")).toBeTruthy();
+    expect(
+      document.querySelectorAll(".citation-answer sup.citation-sup"),
+    ).toHaveLength(1);
+  });
+
+  it("keeps [^n] literal inside fenced code blocks", () => {
+    const answer = "示例：\n\n```\ncode [^1] here\n```\n\n正文引用[^2]。";
+    render(<CitationRenderer answer={answer} footnotes="" anchors={[]} />);
+    const sups = document.querySelectorAll(".citation-answer sup.citation-sup");
+    expect(sups).toHaveLength(1);
+    expect(sups[0].textContent).toBe("[^2]");
+    // 代码块内原文保留
+    expect(document.querySelector(".citation-answer pre")?.textContent).toContain(
+      "[^1]",
+    );
+  });
+
+  it("clicking a rehype-generated sup link scrolls to the footnote", () => {
+    const answer = "陈述[^1]。";
+    const footnotes = "[^1]: 脚注内容";
+    render(<CitationRenderer answer={answer} footnotes={footnotes} anchors={[]} />);
+    fireEvent.click(screen.getByText("[^1]"));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+});
+
 describe("CitationRenderer page badges (W3-14)", () => {
   it("shows static page badge when no jump handler", () => {
     const answer = "A claim.[^1]";

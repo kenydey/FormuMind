@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, type ComponentProps } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -67,12 +67,18 @@ export type MarkdownMessageProps = {
   components?: Components;
   /** S3: render ```mermaid fences (Wiki/Report). Default off for chat. */
   enableMermaid?: boolean;
+  /** Extra rehype plugins, appended after rehypeKatex. */
+  rehypePlugins?: Exclude<
+    ComponentProps<typeof ReactMarkdown>["rehypePlugins"],
+    null | undefined
+  >;
 };
 
 function MarkdownMessage({
   content,
   components: extra,
   enableMermaid = false,
+  rehypePlugins = [],
 }: MarkdownMessageProps) {
   const base: Components = {
     code({ className, children, ...props }) {
@@ -94,7 +100,7 @@ function MarkdownMessage({
     <div className="md-message leading-relaxed [&_table]:my-2 [&_table]:w-full [&_table]:text-[12px] [&_th]:border [&_th]:border-edge/60 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:bg-ink/50 [&_td]:border [&_td]:border-edge/60 [&_td]:px-1.5 [&_td]:py-0.5 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ul]:pl-4 [&_ul]:list-disc [&_ol]:my-1.5 [&_ol]:pl-4 [&_ol]:list-decimal [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-2 [&_h3]:text-sm [&_h3]:font-medium [&_h3]:mt-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-edge [&_blockquote]:pl-2 [&_blockquote]:text-slate-400 [&_a]:text-accent [&_hr]:border-edge/60 [&_pre]:my-1.5 [&_pre]:rounded [&_pre]:bg-ink/60 [&_pre]:p-2 [&_pre]:overflow-x-auto [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeKatex, ...rehypePlugins]}
         components={{ ...base, ...extra }}
       >
         {content}

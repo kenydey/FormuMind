@@ -65,28 +65,6 @@ export function ChatNotices({ notices }: { notices?: ChatNotice[] | null }) {
  * 原始判词经 `raw_verdict` 透出。此处用 `raw_verdict === "conflicting"` 渲染
  * 独立紫色冲突态；其他 status 行为不变。纯函数，便于 vitest 覆盖。
  */
-export function sourcedClaimChip(claim: {
-  status: "supported" | "weak" | "unsupported";
-  raw_verdict?: string | null;
-}): { cls: string; label: string } {
-  const isConflict = claim.raw_verdict === "conflicting";
-  const cls = isConflict
-    ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
-    : claim.status === "supported"
-      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-      : claim.status === "weak"
-        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-        : "border-rose-500/40 bg-rose-500/10 text-rose-300";
-  const label = isConflict
-    ? "冲突"
-    : claim.status === "supported"
-      ? "有据"
-      : claim.status === "weak"
-        ? "弱支撑"
-        : "无据";
-  return { cls, label };
-}
-
 function stageIndex(stage: string): number {
   const idx = CRAG_STAGE_IDS.indexOf(stage);
   // 0 covers the pre-start case, where `deepResearchStage` is "". It is also
@@ -164,7 +142,7 @@ function CitationChip({ ev }: { ev: Evidence }) {
           示例
         </span>
       )}
-      <span className="truncate max-w-[140px]">{ev.title}</span>
+      <span className="truncate max-w-[140px]">{ev.title || ev.identifier || ev.source || "引用"}</span>
       <span className={`shrink-0 ${pageTone}`} title={pageLabel}>
         {pageLabel}
       </span>
@@ -516,57 +494,6 @@ export default function ResearchPanel() {
                     </span>
                   </div>
                 )}
-                {m.role === "assistant" && !m.streaming && m.sourcesAudit && (
-                  <div
-                    className="mt-2 pt-2 border-t border-edge/60 space-y-1"
-                    data-testid="chat-sources-audit"
-                  >
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wide">
-                      Sources 审计 · claim→passage
-                    </div>
-                    <div className="flex flex-wrap gap-1 text-[10px] text-slate-400">
-                      {(["supported", "partial", "unsupported", "contradicted"] as const).map(
-                        (k) => (
-                          <span key={k} className="px-1.5 py-0.5 rounded border border-edge">
-                            {k} {m.sourcesAudit?.summary?.[k] ?? 0}
-                          </span>
-                        ),
-                      )}
-                    </div>
-                    <div className="space-y-1 max-h-36 overflow-y-auto">
-                      {(m.sourcesAudit.rows || []).slice(0, 8).map((row, j) => {
-                        const g = row.grade || "unsupported";
-                        const tone =
-                          g === "supported"
-                            ? "border-emerald-500/40 text-emerald-300"
-                            : g === "partial"
-                              ? "border-amber-500/40 text-amber-300"
-                              : g === "contradicted"
-                                ? "border-rose-500/40 text-rose-300"
-                                : "border-edge text-slate-400";
-                        const loc = (row.locators || [])[0];
-                        const locLabel =
-                          loc?.page != null
-                            ? `pp. ${loc.page}`
-                            : loc?.paragraph != null
-                              ? `¶${loc.paragraph}`
-                              : "locator?";
-                        return (
-                          <div
-                            key={`${j}-${(row.claim || "").slice(0, 24)}`}
-                            className={`text-[10px] px-1.5 py-1 rounded border ${tone}`}
-                          >
-                            <span className="font-medium mr-1">{g}</span>
-                            <span className="text-slate-500 mr-1">{locLabel}</span>
-                            <span className="text-slate-300">
-                              {(row.claim || "").slice(0, 120)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
                 {/* W5-4 (P1-28): reviewer 审计卡片 —— fix-loop 跑过的回答挂 run 审计 */}
                 {m.role === "assistant" && !m.streaming && m.reviewRunId && (
                   <ReviewerCard
@@ -620,28 +547,6 @@ export default function ResearchPanel() {
                           {n}
                         </span>
                       ))}
-                    </div>
-                  </div>
-                )}
-                {m.role === "assistant" && !m.streaming && (m.sourcedClaims?.length ?? 0) > 0 && (
-                  <div className="mt-2 pt-2 border-t border-edge/60 space-y-1" data-testid="chat-sourced-claims">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wide">核验 · 断言</div>
-                    <div className="flex flex-wrap gap-1">
-                      {m.sourcedClaims!.map((c, j) => {
-                        if (!c) return null;
-                        const { cls, label } = sourcedClaimChip(c);
-                        const claimText = c.text ?? "";
-                        return (
-                          <span
-                            key={j}
-                            className={`text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
-                            title={claimText}
-                          >
-                            {label} · {(Number(c.confidence) * 100).toFixed(0)}% · {claimText.slice(0, 48)}
-                            {claimText.length > 48 ? "…" : ""}
-                          </span>
-                        );
-                      })}
                     </div>
                   </div>
                 )}

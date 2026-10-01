@@ -57,32 +57,6 @@ describe("CRAG stage contract", () => {
 });
 
 /**
- * A-6: conflicting 结构化透出 — 后端把 status 降级为 weak（back-compat），
- * 前端用 raw_verdict === "conflicting" 渲染独立紫色冲突态。
- */
-import { sourcedClaimChip } from "./ResearchPanel";
-
-describe("sourcedClaimChip (A-6 conflicting)", () => {
-  it("renders conflicting as its own purple conflict state", () => {
-    const chip = sourcedClaimChip({ status: "weak", raw_verdict: "conflicting" });
-    expect(chip.label).toBe("冲突");
-    expect(chip.cls).toContain("purple");
-  });
-
-  it("keeps plain weak without raw_verdict as 弱支撑", () => {
-    const chip = sourcedClaimChip({ status: "weak" });
-    expect(chip.label).toBe("弱支撑");
-    expect(chip.cls).toContain("amber");
-  });
-
-  it("does not mistake other raw_verdicts for conflict", () => {
-    expect(sourcedClaimChip({ status: "supported", raw_verdict: "supported" }).label).toBe("有据");
-    expect(sourcedClaimChip({ status: "unsupported", raw_verdict: "unsupported" }).label).toBe("无据");
-    expect(sourcedClaimChip({ status: "weak", raw_verdict: null }).label).toBe("弱支撑");
-  });
-});
-
-/**
  * B-1: fail-open 降级显式提示条。
  */
 import { render, screen } from "@testing-library/react";
