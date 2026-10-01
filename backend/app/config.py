@@ -838,6 +838,10 @@ class Settings(BaseSettings):
     # Hysteresis: after the gate fires, keep the ANN path for this many further
     # hybrid queries even if p95 briefly cools (avoids flap; still in-process).
     kb_hybrid_ann_sticky_queries: int = 3
+    # C-1: process-local faiss ANN over the full vector corpus (bypasses the
+    # 5000 scan cap for the vector half). Fail-open: when False or the index
+    # is unusable, retrieval falls back to the pre-C-1 brute-force path.
+    kb_ann_enabled: bool = True
     # W4: recommended age (days) for archived-source retention purge UI/stats.
     # 0 = retention disabled (no auto purge; POST /retention/purge still needs
     # explicit days+confirm for any physical delete).

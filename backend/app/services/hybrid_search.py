@@ -39,6 +39,7 @@ _LATENCY_MS: deque[float] = deque(maxlen=128)
 _LATENCY_LOCK = threading.Lock()
 _LAST_ANN_ACTIVE = False
 _LAST_ANN_MATRIX = False
+_LAST_ANN_FAISS = False
 _ANN_STREAK = 0
 _ANN_STICKY_REMAINING = 0
 
@@ -55,11 +56,12 @@ class ScoredChunk:
 
 def reset_latency_stats() -> None:
     """Test helper — clear the in-process latency ring."""
-    global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _ANN_STREAK, _ANN_STICKY_REMAINING
+    global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _LAST_ANN_FAISS, _ANN_STREAK, _ANN_STICKY_REMAINING
     with _LATENCY_LOCK:
         _LATENCY_MS.clear()
         _LAST_ANN_ACTIVE = False
         _LAST_ANN_MATRIX = False
+        _LAST_ANN_FAISS = False
         _ANN_STREAK = 0
         _ANN_STICKY_REMAINING = 0
 
@@ -81,6 +83,7 @@ def hybrid_latency_stats() -> dict[str, Any]:
         samples = list(_LATENCY_MS)
         ann = bool(_LAST_ANN_ACTIVE)
         matrix = bool(_LAST_ANN_MATRIX)
+        faiss = bool(_LAST_ANN_FAISS)
         streak = int(_ANN_STREAK)
     if not samples:
         return {
@@ -89,6 +92,7 @@ def hybrid_latency_stats() -> dict[str, Any]:
             "p95_ms": None,
             "ann_last": ann,
             "ann_matrix_last": matrix,
+            "ann_faiss_last": faiss,
             "ann_streak": streak,
             "note": "persistent hybrid_search ≠ rag.BM25FAISSStore (session RAG)",
         }
@@ -99,6 +103,7 @@ def hybrid_latency_stats() -> dict[str, Any]:
         "p95_ms": round(float(np.percentile(arr, 95)), 2),
         "ann_last": ann,
         "ann_matrix_last": matrix,
+        "ann_faiss_last": faiss,
         "ann_streak": streak,
         "note": "persistent hybrid_search ≠ rag.BM25FAISSStore (session RAG)",
     }
@@ -235,6 +240,58 @@ def _cosine_matrix_for_model(
     return True
 
 
+def _faiss_vector_scores(
+    query: str,
+    settings,
+    *,
+    top_k: int,
+    project_id: str | None,
+    include_global: bool,
+) -> dict[str, float] | None:
+    """C-1: full-corpus ANN vector scores, ``{chunk_id: cosine}``.
+
+    Searches each faiss model bucket with a query vector embedded by that
+    bucket's model (same per-model rule as the brute-force path). Returns
+    ``None`` on *any* failure — missing package, disabled setting, empty
+    index, embedding failure — so the caller transparently falls back to
+    the pre-C-1 path. Never raises.
+    """
+    try:
+        if not getattr(settings, "kb_ann_enabled", True):
+            return None
+        from .kb_ann import ensure_index
+        from .kb_ann import search as ann_search
+        from .rag import bge_query_prefix
+
+        idx = ensure_index()
+        if not idx.get("ready"):
+            return None
+        buckets = (idx.get("buckets") or {}).get("buckets", {})
+        if not buckets:
+            return None
+        pool = max(
+            top_k * 4,
+            int(getattr(settings, "kb_hybrid_ann_candidate_pool", 800) or 800),
+        )
+        out: dict[str, float] = {}
+        for model in buckets:
+            vecs = kb_index._embed_texts(
+                [bge_query_prefix(model) + query], model or None
+            )
+            if not vecs or not vecs[0]:
+                continue
+            hits = ann_search(model, vecs[0], pool)
+            if not hits:
+                continue
+            for cid, score in hits:
+                if cid not in out or score > out[cid]:
+                    out[cid] = float(score)
+        return out or None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("kb_ann vector path failed, falling back: %s", exc)
+        return None
+
+
 def hybrid_search_scored(
     query: str,
     top_k: int = 10,
@@ -255,7 +312,7 @@ def hybrid_search_scored(
     embedding dim ≥ ``kb_hybrid_ann_matrix_min_dim``, that subset is scored
     with a process-local float32 matmul (Option A; still not Qdrant).
     """
-    global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _ANN_STREAK, _ANN_STICKY_REMAINING
+    global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _LAST_ANN_FAISS, _ANN_STREAK, _ANN_STICKY_REMAINING
     settings = get_settings()
     if alpha is None:
         alpha = float(settings.kb_hybrid_alpha)
@@ -269,6 +326,7 @@ def hybrid_search_scored(
     ann_active = False
     ann_matrix = False
     ann_base = False
+    ann_faiss = False
     try:
         from ..db.chunk_store import get_chunk_store
 
@@ -290,6 +348,28 @@ def hybrid_search_scored(
                 include_global,
             )
 
+        # C-1: faiss ANN over the full vector corpus (bypasses the 5000 cap
+        # for the vector half). Fail-open: None -> pre-C-1 brute-force path.
+        faiss_scores = _faiss_vector_scores(
+            query,
+            settings,
+            top_k=top_k,
+            project_id=project_id,
+            include_global=include_global,
+        )
+        ann_faiss = faiss_scores is not None
+        if ann_faiss:
+            have_ids = {c.id for c in chunks}
+            extra_ids = [cid for cid in faiss_scores if cid not in have_ids]
+            if extra_ids:
+                extras = get_chunk_store().chunks_by_ids(
+                    extra_ids,
+                    project_id,
+                    include_global=include_global,
+                )
+                if extras:
+                    chunks = chunks + extras
+
         tokenized = [(c, t) for c, t in zip(chunks, (_tokenize(c.text) for c in chunks)) if t]
         if not tokenized:
             return []
@@ -304,7 +384,12 @@ def hybrid_search_scored(
         ann_active = _should_use_ann_gate(corpus_n=n, settings=settings)
         cosine_scores = np.zeros(n, dtype=float)
 
-        if ann_active:
+        if ann_faiss:
+            # C-1: exact ANN scores (IndexFlatIP over normalised vectors ==
+            # brute-force cosine). Chunks absent from the faiss result keep 0.
+            for i, c in enumerate(chunks):
+                cosine_scores[i] = float(faiss_scores.get(c.id, 0.0) or 0.0)
+        elif ann_active:
             pool = max(
                 top_k * 4,
                 int(getattr(settings, "kb_hybrid_ann_candidate_pool", 800) or 800),
@@ -399,6 +484,7 @@ def hybrid_search_scored(
         with _LATENCY_LOCK:
             _LAST_ANN_ACTIVE = ann_active
             _LAST_ANN_MATRIX = ann_matrix
+            _LAST_ANN_FAISS = ann_faiss
             if ann_active:
                 _ANN_STREAK += 1
             else:

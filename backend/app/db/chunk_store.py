@@ -75,6 +75,17 @@ class ChunkStore:
             # a malformed box never lands in the table silently.
             raw_bbox = chunk.get("bbox")
             bbox = validate_bbox(raw_bbox) if raw_bbox is not None else None
+            # C-1b: dual-write the vector as float32 BLOB alongside the legacy
+            # JSON column (old readers still read JSON; faiss prefers BLOB).
+            emb_list = chunk.get("embedding")
+            emb_blob = None
+            if emb_list:
+                try:
+                    from ..services.kb_ann import vector_to_blob
+
+                    emb_blob = vector_to_blob(list(emb_list))
+                except Exception:  # noqa: BLE001
+                    emb_blob = None
             session.add(
                 DocumentChunk(
                     id=str(uuid.uuid4()),
@@ -89,7 +100,8 @@ class ChunkStore:
                     offset_end=chunk.get("offset_end"),
                     paragraph_idx=chunk.get("paragraph_idx"),
                     meta=meta,
-                    embedding=chunk.get("embedding"),
+                    embedding=emb_list,
+                    embedding_blob=emb_blob,
                     embedding_model=chunk.get("embedding_model"),
                     # 2026-09-04 (双语分流): 写入时自动标语言子库(显式
                     # chunk["lang"] 优先), 增量 ingest 无需跑回填脚本。
@@ -185,6 +197,146 @@ class ChunkStore:
                 )
             if limit:
                 q = q.limit(limit)
+            return q.all()
+
+    def embedded_fingerprint(self) -> dict[str, dict[str, object]]:
+        """Per-model ``{count, max_created_at}`` over the indexed vector population.
+
+        C-1 staleness guard: ``kb_ann`` records this in its manifest and
+        rebuilds the faiss index whenever it changes. Insert, delete,
+        replace and archive/unarchive all move ``count`` or
+        ``max_created_at``. Same population filters as :meth:`embedded_vectors`.
+        Fail-open: never raises; returns ``{}`` on DB error (the caller then
+        treats the index as unverifiable and rebuilds).
+        """
+        from sqlalchemy import func, or_
+
+        from .models import SourceDocument
+
+        try:
+            with self._session_factory() as session:
+                rows = (
+                    session.query(
+                        DocumentChunk.embedding_model,
+                        func.count(DocumentChunk.id),
+                        func.max(DocumentChunk.created_at),
+                    )
+                    .outerjoin(
+                        SourceDocument,
+                        DocumentChunk.source_id == SourceDocument.id,
+                    )
+                    .filter(
+                        or_(
+                            SourceDocument.id.is_(None),
+                            SourceDocument.archived.is_(False),
+                            SourceDocument.archived.is_(None),
+                        )
+                    )
+                    .filter(
+                        or_(
+                            DocumentChunk.embedding_blob.isnot(None),
+                            DocumentChunk.embedding.isnot(None),
+                        )
+                    )
+                    .group_by(DocumentChunk.embedding_model)
+                    .all()
+                )
+        except Exception:  # noqa: BLE001
+            return {}
+        out: dict[str, dict[str, object]] = {}
+        for model, count, max_created in rows:
+            out[model or ""] = {
+                "count": int(count),
+                "max_created_at": str(max_created) if max_created else "",
+            }
+        return out
+
+    def embedded_vectors(self) -> list[dict]:
+        """Lightweight full-corpus vector scan for the C-1 faiss index build.
+
+        Returns ``{"id", "embedding_blob", "embedding", "embedding_model"}``
+        dicts for non-archived chunks that have a vector. Deliberately loads
+        no text columns. Same archive visibility as :meth:`all_chunks`.
+        """
+        from sqlalchemy import or_
+
+        from .models import SourceDocument
+
+        with self._session_factory() as session:
+            q = (
+                session.query(
+                    DocumentChunk.id,
+                    DocumentChunk.embedding_blob,
+                    DocumentChunk.embedding,
+                    DocumentChunk.embedding_model,
+                )
+                .outerjoin(SourceDocument, DocumentChunk.source_id == SourceDocument.id)
+                .filter(
+                    or_(
+                        SourceDocument.id.is_(None),
+                        SourceDocument.archived.is_(False),
+                        SourceDocument.archived.is_(None),
+                    )
+                )
+                .filter(
+                    or_(
+                        DocumentChunk.embedding_blob.isnot(None),
+                        DocumentChunk.embedding.isnot(None),
+                    )
+                )
+            )
+            return [
+                {
+                    "id": r[0],
+                    "embedding_blob": r[1],
+                    "embedding": r[2],
+                    "embedding_model": r[3],
+                }
+                for r in q.all()
+            ]
+
+    def chunks_by_ids(
+        self,
+        ids: list[str],
+        project_id: str | None = None,
+        *,
+        include_global: bool = False,
+    ) -> list[DocumentChunk]:
+        """Bulk-fetch chunks by id with the same project/archive visibility as
+        :meth:`all_chunks` (P0 project isolation applies to faiss extras)."""
+        if not ids:
+            return []
+        from sqlalchemy import or_
+
+        from .models import SourceDocument
+
+        with self._session_factory() as session:
+            q = session.query(DocumentChunk).filter(DocumentChunk.id.in_(ids))
+            if project_id:
+                q = q.join(SourceDocument, DocumentChunk.source_id == SourceDocument.id)
+                if include_global:
+                    q = q.filter(
+                        (SourceDocument.project_id == project_id)
+                        | (SourceDocument.project_id.is_(None))
+                    )
+                else:
+                    q = q.filter(SourceDocument.project_id == project_id)
+                q = q.filter(
+                    or_(
+                        SourceDocument.archived.is_(False),
+                        SourceDocument.archived.is_(None),
+                    )
+                )
+            else:
+                q = q.outerjoin(
+                    SourceDocument, DocumentChunk.source_id == SourceDocument.id
+                ).filter(
+                    or_(
+                        SourceDocument.id.is_(None),
+                        SourceDocument.archived.is_(False),
+                        SourceDocument.archived.is_(None),
+                    )
+                )
             return q.all()
 
     def counts(self) -> tuple[int, int]:

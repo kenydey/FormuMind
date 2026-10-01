@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -295,6 +296,11 @@ class DocumentChunk(Base):
         comment="归一化句向量（JSON 数组）",
     )
     embedding_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # C-1b: float32 little-endian BLOB twin of ``embedding`` (JSON). New
+    # writes populate both; reads prefer BLOB and fall back to JSON.
+    embedding_blob: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, comment="句向量 float32 BLOB（C-1b）"
+    )
     # Bilingual routing (2026-09-04): "zh" | "en" | None — filled by the lang
     # backfill; retrieval filters by language and embeds per language model.
     # zh chunks use BAAI/bge-small-zh-v1.5, en chunks keep all-MiniLM-L6-v2 —

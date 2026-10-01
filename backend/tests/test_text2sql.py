@@ -254,7 +254,8 @@ def test_hybrid_answer_fail_open_on_llm_error(scenario_engine):
         retrieve_fn=lambda *a, **k: [],
     )
     # Structured path failed -> evidence-only fallback, no exception.
-    assert out["route"] == "structured"
+    # C-3: the route is honestly "fallback" (SQL attempted, failed).
+    assert out["route"] == "fallback"
     assert out["sql"] is None
     assert out["rows"] == []
 
@@ -275,3 +276,54 @@ def test_hybrid_answer_unstructured_skips_sql(scenario_engine):
     assert out["route"] == "unstructured"
     assert calls == []
     assert out["sql"] is None
+
+
+# --- C-3 attribution & three-way golden -------------------------------------
+
+
+class _Ev:
+    def __init__(self, title, text):
+        self.title = title
+        self.text = text
+
+
+def test_fuse_context_attribution_separates_sql_from_literature():
+    ev = [_Ev("盐雾试验综述", "盐雾试验通常持续 72h 以上")]
+    ctx = mod.fuse_context(
+        "查询耐蚀性大于72h的实验，并介绍盐雾试验方法",
+        "SELECT value FROM measurements",
+        [{"value": 96.0, "unit": "h"}],
+        ev,
+        route="hybrid",
+    )
+    # P3-3 rule: SQL numbers are labeled as precise experiment-DB values;
+    # literature evidence keeps its own labeled section with sources.
+    assert "来自实验数据库，精确值" in ctx
+    assert "96.0" in ctx
+    assert "文献证据" in ctx
+    assert "盐雾试验综述" in ctx
+    # The SQL number must not be inside the literature section.
+    lit_start = ctx.index("相关文献证据（描述性）")
+    assert "96.0" not in ctx[lit_start:]
+
+
+def test_hybrid_golden_runs_both_halves(scenario_engine):
+    fake_sql = (
+        "SELECT e.label, m.value FROM experiments e "
+        "JOIN measurements m ON m.experiment_id = e.id "
+        "WHERE m.metric='耐蚀性' AND m.value > 72"
+    )
+    ev = [_Ev("耐蚀性提升方法综述", "添加缓蚀剂可提升耐蚀性")]
+
+    out = mod.hybrid_answer(
+        "查询耐蚀性大于72h的实验，并介绍提升耐蚀性的方法原理",
+        scenario_engine,
+        complete_fn=lambda system, user: fake_sql,
+        retrieve_fn=lambda *a, **k: ev,
+    )
+    assert out["route"] == "hybrid"
+    assert out["sql"] is not None
+    assert out["row_count"] >= 1
+    assert out["evidence_count"] == 1
+    assert out["data_sources"] == ["structured_sql", "kb_evidence"]
+    assert "明确区分" in out["fused_context"]

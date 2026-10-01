@@ -529,23 +529,30 @@ def chat(req: ChatRequestValidated):
         except Exception as exc:  # noqa: BLE001
             logger.debug("sync skill/mcp prefix skipped: %s", exc)
 
-        # Phase 4 — Text2SQL hybrid routing: prepend deterministic SQL rows
-        # to the answer prompt. Fail-open: hook never raises, SQL failure
-        # falls back to the pure-literature path (prompt_prefix unchanged).
-        sql_block, sql_prov = "", {"data_sources": ["kb_evidence"]}
+        # C-3 — unified hybrid routing: one decision drives the SQL half and
+        # the literature half (replaces the SQL-only structured_data_block).
+        # chat already retrieved literature into `sources`, so pass it in —
+        # hybrid_answer never re-retrieves. Fail-open: the hook never raises;
+        # SQL failure falls back to the pure-literature path.
+        hybrid_out: dict = {}
         try:
-            from ..services.text2sql import structured_data_block
+            from ..services.text2sql import hybrid_answer
 
-            sql_block, sql_prov = structured_data_block(
-                retrieval_query, settings=settings, project_id=req.project_id
+            hybrid_out = hybrid_answer(
+                retrieval_query,
+                settings=settings,
+                project_id=req.project_id,
+                evidence=sources,
+                include_evidence_text=False,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("text2sql chain hook skipped: %s", exc)
-        if sql_block:
+            logger.debug("hybrid_answer hook skipped: %s", exc)
+        fused_block = hybrid_out.get("fused_context") or ""
+        if fused_block:
             prompt_prefix = (
-                f"{sql_block}\n\n{prompt_prefix}" if prompt_prefix else sql_block
+                f"{fused_block}\n\n{prompt_prefix}" if prompt_prefix else fused_block
             )
-        data_sources = list(sql_prov.get("data_sources") or ["kb_evidence"])
+        data_sources = list(hybrid_out.get("data_sources") or ["kb_evidence"])
 
         if req.response_format == "structured" and settings.chat_structured_enabled:
             structured, struct_err = generate_structured_answer(
@@ -801,20 +808,26 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     prompt = _chat_prompt(
         question, relevant, req.domain, history=history, structure=req.structure
     )
-    # Phase 4 — Text2SQL hybrid routing (same hook as /api/chat): prepend
-    # deterministic SQL rows. Fail-open, never blocks the stream.
-    sql_block, sql_prov = "", {"data_sources": ["kb_evidence"]}
+    # C-3 — unified hybrid routing (same hook as /api/chat): one decision
+    # drives the SQL half and the literature half. Fail-open, never blocks
+    # the stream.
+    hybrid_out: dict = {}
     try:
-        from ..services.text2sql import structured_data_block
+        from ..services.text2sql import hybrid_answer
 
-        sql_block, sql_prov = structured_data_block(
-            retrieval_query, settings=settings, project_id=req.project_id
+        hybrid_out = hybrid_answer(
+            retrieval_query,
+            settings=settings,
+            project_id=req.project_id,
+            evidence=sources,
+            include_evidence_text=False,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.debug("stream text2sql hook skipped: %s", exc)
-    if sql_block:
-        prompt = f"{sql_block}\n\n{prompt}"
-    data_sources = list(sql_prov.get("data_sources") or ["kb_evidence"])
+        logger.debug("stream hybrid_answer hook skipped: %s", exc)
+    fused_block = hybrid_out.get("fused_context") or ""
+    if fused_block:
+        prompt = f"{fused_block}\n\n{prompt}"
+    data_sources = list(hybrid_out.get("data_sources") or ["kb_evidence"])
     try:
         from ..services.evidence_synthesis import enrich_chat_prompt
 

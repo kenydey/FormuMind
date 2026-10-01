@@ -299,16 +299,29 @@ _DOMAIN_SIGNALS = (
 )
 
 
+_LITERATURE_SIGNALS = (
+    "方法", "原理", "为什么", "如何", "机制", "文献", "研究", "综述",
+    "介绍", "讲解", "概念", "机理",
+)
+
+
 def classify_intent(question: str) -> dict:
     """Rule-based intent classification. Returns {route, reason}.
 
-    route is "structured" (Text2SQL over experiment/formulation tables) or
-    "unstructured" (ColBERT retrieval over the knowledge base).
+    route is "structured" (Text2SQL over experiment/formulation tables),
+    "hybrid" (both structured data and literature matter), or
+    "unstructured" (literature retrieval over the knowledge base).
     """
     q = question or ""
     has_struct = any(s in q for s in _STRUCTURED_SIGNALS)
     has_domain = any(s in q for s in _DOMAIN_SIGNALS)
+    has_lit = any(s in q for s in _LITERATURE_SIGNALS)
     if has_struct and has_domain:
+        if has_lit:
+            return {
+                "route": "hybrid",
+                "reason": "兼具结构化查询信号与文献性问法，走融合",
+            }
         return {
             "route": "structured",
             "reason": "含结构化查询信号（数值比较/统计/时间范围）且涉及实验数据域",
@@ -324,9 +337,24 @@ def fuse_context(
     sql_text: str | None,
     rows: list[dict],
     evidence: list[Any],
+    route: str = "structured",
 ) -> str:
-    """Merge deterministic SQL rows + descriptive literature evidence."""
+    """Merge deterministic SQL rows + descriptive literature evidence.
+
+    P3-3 attribution rule: SQL numbers are marked as precise experiment-DB
+    values and never take literature footnotes; the two halves are visually
+    separated so the answer model can attribute correctly.
+
+    Returns "" when there is nothing to fuse (e.g. the unstructured route
+    with no evidence text — the caller renders literature from its own
+    sources path instead).
+    """
     parts = [f"问题：{question}"]
+    if route == "hybrid":
+        parts.append(
+            "回答要求：下文同时包含实验数据库的确定性数据与文献证据，"
+            "引用时必须明确区分两者。"
+        )
     if sql_text:
         parts.append(f"结构化查询 SQL：{sql_text}")
     if rows:
@@ -335,7 +363,7 @@ def fuse_context(
             kv = "；".join(f"{k}={v}" for k, v in row.items())
             lines.append(f"  {i}. {kv}")
         parts.append("\n".join(lines))
-    else:
+    elif route in ("structured", "hybrid"):
         parts.append("结构化查询：无匹配数据。")
     if evidence:
         lines = ["相关文献证据（描述性）："]
@@ -344,124 +372,112 @@ def fuse_context(
             title = getattr(ev, "title", None) or getattr(ev, "doc_title", None) or ""
             lines.append(f"  [{i}] {title}: {str(snippet)[:300]}")
         parts.append("\n".join(lines))
+    if len(parts) == 1:
+        return ""
     return "\n\n".join(parts)
 
 
 def hybrid_answer(
     question: str,
-    engine: Engine,
+    engine: Engine | None = None,
     *,
     project_id: str | None = None,
     complete_fn: Callable[[str, str], str | None] | None = None,
     retrieve_fn: Callable[..., list[Any]] | None = None,
+    evidence: list[Any] | None = None,
+    include_evidence_text: bool = True,
+    settings=None,
     max_rows: int = DEFAULT_TOP_K,
     timeout_s: float = SQL_TIMEOUT_S,
 ) -> dict:
     """Route the question, gather both sides, return a fused context.
 
+    C-3 production entry for the chat chain (replaces the SQL-only
+    ``structured_data_block``): one routing decision drives the SQL half
+    and the literature half instead of two independent links.
+
+    ``evidence`` accepts pre-retrieved literature — the chat chain already
+    ran its KB retrieval, so it passes ``sources`` here and literature is
+    never retrieved twice. ``include_evidence_text=False`` renders only the
+    SQL section (the caller's own sources path carries the literature text).
+
     Structured path is fail-open: if SQL generation or execution fails, the
-    answer still carries the literature evidence instead of an error.
+    route becomes ``"fallback"`` and the answer still carries the literature
+    evidence instead of an error. Never raises.
     """
+    from ..config import get_settings
+
+    settings = settings or get_settings()
+    if not getattr(settings, "text2sql_routing_enabled", True):
+        ev = evidence if evidence is not None else []
+        return {
+            "route": "disabled",
+            "route_reason": "text2sql routing disabled",
+            "sql": None,
+            "rows": [],
+            "row_count": 0,
+            "evidence_count": len(ev),
+            "fused_context": "",
+            "data_sources": ["kb_evidence"],
+        }
     decision = classify_intent(question)
+    route = decision["route"]
     sql_text: str | None = None
     rows: list[dict] = []
-    if decision["route"] == "structured":
+    if route in ("structured", "hybrid"):
         try:
+            if engine is None:
+                from ..db.database import default_session_factory
+
+                engine = default_session_factory().bind
             schema_text = render_schema(engine)
             gen = generate_sql(
                 question, schema_text, project_id=project_id, complete_fn=complete_fn
             )
-            if gen:
-                sql_text = enforce_limit(
-                    require_project_scope(validate_select_only(gen), project_id),
-                    max_rows,
-                )
-                rows = execute_sql(
-                    engine, sql_text, max_rows=max_rows, timeout_s=timeout_s
-                )
+            if not gen:
+                # Generation failed: honest fallback, not "no matching data".
+                raise Text2SQLError("empty SQL generated")
+            sql_text = enforce_limit(
+                require_project_scope(validate_select_only(gen), project_id),
+                max_rows,
+            )
+            rows = execute_sql(
+                engine, sql_text, max_rows=max_rows, timeout_s=timeout_s
+            )
         except Exception as exc:  # fail-open: fall back to evidence only
             log.warning("text2sql structured path failed, falling back: %s", exc)
+            route = "fallback"
             sql_text = None
             rows = []
-    evidence: list[Any] = []
-    try:
-        retrieve = retrieve_fn
-        if retrieve is None:
-            from .kb_index import retrieve_evidence as _retrieve
+    ev: list[Any] = []
+    if evidence is not None:
+        ev = evidence
+    else:
+        try:
+            retrieve = retrieve_fn
+            if retrieve is None:
+                from .kb_index import retrieve_evidence as _retrieve
 
-            retrieve = _retrieve
-        evidence = retrieve(question, k=6, project_id=project_id) or []
-    except Exception as exc:
-        log.warning("text2sql evidence retrieval failed: %s", exc)
+                retrieve = _retrieve
+            ev = retrieve(question, k=6, project_id=project_id) or []
+        except Exception as exc:
+            log.warning("text2sql evidence retrieval failed: %s", exc)
+    data_sources = ["kb_evidence"]
+    if sql_text:
+        data_sources = ["structured_sql", "kb_evidence"]
     return {
-        "route": decision["route"],
+        "route": route,
         "route_reason": decision["reason"],
         "sql": sql_text,
         "rows": rows,
-        "evidence_count": len(evidence),
-        "fused_context": fuse_context(question, sql_text, rows, evidence),
+        "row_count": len(rows),
+        "evidence_count": len(ev),
+        "fused_context": fuse_context(
+            question,
+            sql_text,
+            rows,
+            ev if include_evidence_text else [],
+            route=route,
+        ),
+        "data_sources": data_sources,
     }
-
-
-def structured_data_block(
-    question: str,
-    *,
-    settings=None,
-    engine: Engine | None = None,
-    project_id: str | None = None,
-    complete_fn: Callable[[str, str], str | None] | None = None,
-    max_rows: int = DEFAULT_TOP_K,
-    timeout_s: float = SQL_TIMEOUT_S,
-) -> tuple[str, dict]:
-    """SQL-only half of :func:`hybrid_answer`, for the live chat chain.
-
-    Classifies intent; on a structured route it runs the Text2SQL path and
-    returns ``(prompt_block, provenance)`` where ``prompt_block`` is the
-    "deterministic data" section to prepend to the answer prompt and
-    ``provenance`` carries ``route`` / ``sql`` / ``row_count`` /
-    ``data_sources`` (``"structured_sql"`` vs ``"kb_evidence"``).
-
-    Never raises: any failure (routing disabled, SQL generation/execution
-    error, guardrail rejection) yields ``("", provenance)`` so the caller
-    falls back to the pure-literature path and the answer is never blocked.
-    Unlike :func:`hybrid_answer`, this does NOT re-run literature retrieval —
-    the chat chain already did that.
-    """
-    provenance: dict = {
-        "route": "unstructured",
-        "sql": None,
-        "row_count": 0,
-        "data_sources": ["kb_evidence"],
-    }
-    try:
-        from ..config import get_settings
-
-        settings = settings or get_settings()
-        if not getattr(settings, "text2sql_routing_enabled", True):
-            provenance["route"] = "disabled"
-            return "", provenance
-        decision = classify_intent(question)
-        if decision["route"] != "structured":
-            return "", provenance
-        if engine is None:
-            from ..db.database import default_session_factory
-
-            engine = default_session_factory().bind
-        schema_text = render_schema(engine)
-        gen = generate_sql(
-            question, schema_text, project_id=project_id, complete_fn=complete_fn
-        )
-        if not gen:
-            # Generation failed: honest fallback, not "no matching data".
-            raise Text2SQLError("empty SQL generated")
-        sql_text = enforce_limit(
-            require_project_scope(validate_select_only(gen), project_id), max_rows
-        )
-        rows = execute_sql(engine, sql_text, max_rows=max_rows, timeout_s=timeout_s)
-        provenance.update(route="structured", sql=sql_text, row_count=len(rows))
-        provenance["data_sources"] = ["structured_sql", "kb_evidence"]
-        return fuse_context(question, sql_text, rows, []), provenance
-    except Exception as exc:  # fail-open: never block the answer
-        log.warning("text2sql chain hook failed, falling back: %s", exc)
-        provenance["route"] = "fallback"
-        return "", provenance

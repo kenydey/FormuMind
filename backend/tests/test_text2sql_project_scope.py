@@ -113,15 +113,17 @@ def test_structured_block_filters_by_project(engine):
             "WHERE project_id = 'p1' AND domain = '除油剂'"
         )
 
-    block, prov = mod.structured_data_block(
+    prov = mod.hybrid_answer(
         "查询除油剂配方的实验",
         engine=eng,
         project_id="p1",
         complete_fn=fake_complete,
+        evidence=[],
+        include_evidence_text=False,
     )
     assert prov["route"] == "structured"
-    assert "除油剂配方A" in block
-    assert "除油剂配方X" not in block  # other project never surfaces
+    assert "除油剂配方A" in prov["fused_context"]
+    assert "除油剂配方X" not in prov["fused_context"]  # other project never surfaces
 
 
 def test_unscoped_sql_fail_open(engine):
@@ -130,11 +132,13 @@ def test_unscoped_sql_fail_open(engine):
     def fake_complete(system, user):
         return "SELECT label FROM experiments"  # model forgot the filter
 
-    block, prov = mod.structured_data_block(
+    out = mod.hybrid_answer(
         "查询除油剂配方的实验",
         engine=eng,
         project_id="p1",
         complete_fn=fake_complete,
+        evidence=[],
+        include_evidence_text=False,
     )
-    assert block == ""
-    assert prov["route"] == "fallback"  # literature path, answer not blocked
+    assert out["fused_context"] == ""
+    assert out["route"] == "fallback"  # literature path, answer not blocked
