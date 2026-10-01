@@ -340,8 +340,9 @@ def ndcg_at_k(
     """Pure helper: nDCG@k over keyword-graded relevance.
 
     Each hit's relevance is the max grade among keywords appearing in its
-    title/snippet/text (0 when none match). IDCG is the ideal ordering of
-    the graded keyword grades, truncated to the number of returned hits.
+    title/snippet/text (0 when none match). IDCG is the DCG of the retrieved
+    hits' relevances sorted descending — the best achievable ordering of this
+    candidate set, so nDCG is always within [0, 1].
     Returns 0.0 when there are no hits or no positive grades.
     """
     import math
@@ -357,7 +358,7 @@ def ndcg_at_k(
     if not rels:
         return 0.0
     dcg = sum(r / math.log2(i + 2) for i, r in enumerate(rels))
-    ideal = sorted((float(g) for g in graded.values()), reverse=True)[: len(rels)]
+    ideal = sorted(rels, reverse=True)
     idcg = sum(r / math.log2(i + 2) for i, r in enumerate(ideal))
     if idcg <= 0:
         return 0.0
