@@ -304,10 +304,17 @@ def ensure_index() -> dict[str, Any]:
         if not buckets:
             _last_error = "no embeddable vectors in corpus"
             return {"ready": False, "buckets": {}, "error": _last_error}
-        # Fingerprint the population we actually indexed (self-healing: a
-        # write racing the scan is caught by the next ensure_index).
+        # Race guard: compare the pre-scan fingerprint with the post-scan
+        # one. Any write landing inside the scan window changes count or
+        # max_created_at, so fp != fp_new proves the scanned vectors no
+        # longer match the DB. Discard the build (no manifest, no files)
+        # and let the next ensure_index rebuild — never trust a raced index.
         fp_new = _current_fingerprint()
-        manifest = _manifest_for(buckets, fp_new if fp_new is not None else (fp or {}))
+        if fp is None or fp_new is None or fp_new != fp:
+            _last_error = "build raced with concurrent DB write, discarded"
+            logger.info("kb_ann %s", _last_error)
+            return {"ready": False, "buckets": {}, "error": _last_error}
+        manifest = _manifest_for(buckets, fp_new)
         # Persist chunk-id sidecars alongside each bucket (faiss files don't
         # carry ids; the sidecar is what makes load possible).
         for model, b in buckets.items():

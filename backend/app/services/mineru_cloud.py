@@ -63,6 +63,11 @@ class MinerUBlock:
     caption: str = ""
     image_path: str = ""
     image: bytes | None = None
+    # Bounding box [x0, y0, x1, y1] when the cloud content_list carries one.
+    # Whether content_list includes bbox is UNVERIFIED (no real API sample
+    # as of 2026-10-01): _normalise passes it through when present and
+    # leaves None otherwise — never assert absence.
+    bbox: list | None = None
 
 
 @dataclass
@@ -174,6 +179,13 @@ def _normalise(result, images_by_path: dict[str, bytes]) -> MinerUDocument:
         caption = raw.get("image_caption") or raw.get("table_caption") or ""
         if isinstance(caption, list):
             caption = " ".join(str(c) for c in caption)
+        bbox = raw.get("bbox")
+        if bbox is not None:
+            try:
+                bbox = [float(v) for v in bbox]
+                bbox = bbox if len(bbox) == 4 else None
+            except (TypeError, ValueError):
+                bbox = None
         blocks.append(
             MinerUBlock(
                 type=kind,
@@ -183,6 +195,7 @@ def _normalise(result, images_by_path: dict[str, bytes]) -> MinerUDocument:
                 html=str(raw.get("table_body") or ""),
                 caption=str(caption),
                 image_path=image_path,
+                bbox=bbox,
                 image=images_by_path.get(image_path)
                 or images_by_path.get(Path(image_path).name if image_path else ""),
             )

@@ -50,7 +50,10 @@ class StructuredBlock:
     caption: str = ""
     latex: str = ""  # kind == "formula"
     formula_no: str | None = None
-    bbox: list | None = None  # cloud API content_list carries no bbox → None
+    # Passed through from MinerUBlock when the cloud content_list carries a
+    # bbox; None otherwise (bbox presence in content_list is unverified —
+    # see MinerUBlock). Never assert absence.
+    bbox: list | None = None
 
 
 @dataclass
@@ -262,7 +265,7 @@ def _normalise_blocks(document) -> list[StructuredBlock]:
                 caption=raw.caption or "",
                 latex=latex,
                 formula_no=formula_no,
-                bbox=None,  # cloud content_list carries no per-block bbox
+                bbox=raw.bbox,  # pass-through when present, else None
             )
         )
     return blocks
@@ -312,6 +315,50 @@ def _html_table_to_markdown(html: str) -> str:
     for r in rows[1:]:
         lines.append("| " + " | ".join(r) + " |")
     return "\n".join(lines)
+
+
+def _html_table_shape(html: str) -> tuple[int | None, int | None]:
+    """(n_rows, n_cols) from table HTML, computed locally.
+
+    No MinerU dependency: the shape is derived from the HTML we already
+    have. Returns (None, None) when the HTML carries no parseable rows.
+    colspan/rowspan are not expanded — the count is structural (tr/td),
+    which is what the extraction tables store.
+    """
+    from html.parser import HTMLParser
+
+    rows: list[int] = []
+    in_row = False
+    in_cell = False
+    cell_count = 0
+
+    class _P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            nonlocal in_row, in_cell, cell_count
+            if tag == "tr":
+                in_row = True
+                cell_count = 0
+            elif tag in ("td", "th") and in_row:
+                if not in_cell:
+                    in_cell = True
+                    cell_count += 1
+
+        def handle_endtag(self, tag):
+            nonlocal in_row, in_cell
+            if tag in ("td", "th"):
+                in_cell = False
+            elif tag == "tr":
+                if in_row:
+                    rows.append(cell_count)
+                in_row = False
+
+    try:
+        _P().feed(html or "")
+    except Exception:
+        return None, None
+    if not rows:
+        return None, None
+    return len(rows), max(rows)
 
 
 def render_markdown(blocks: list[StructuredBlock]) -> str:
@@ -383,17 +430,19 @@ def persist_structured(source_id: str, structured: MinerUStructured) -> None:
         from ..db.extraction_store import ExtractionStore
 
         store = ExtractionStore(default_session_factory())
-        tables = [
-            {
-                "page_no": b.page_no,
-                "bbox": b.bbox,
-                "caption": b.caption or None,
-                "markdown_text": _html_table_to_markdown(b.html) or b.text,
-                "n_rows": None,
-                "n_cols": None,
-            }
-            for b in structured.tables
-        ]
+        tables = []
+        for b in structured.tables:
+            n_rows, n_cols = _html_table_shape(b.html)
+            tables.append(
+                {
+                    "page_no": b.page_no,
+                    "bbox": b.bbox,
+                    "caption": b.caption or None,
+                    "markdown_text": _html_table_to_markdown(b.html) or b.text,
+                    "n_rows": n_rows,
+                    "n_cols": n_cols,
+                }
+            )
         formulas = [
             {
                 "page_no": b.page_no,
