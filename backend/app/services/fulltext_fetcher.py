@@ -717,6 +717,24 @@ def _persist_fulltext(
             existing = store.find_by_hash(content_hash)
             if existing is not None:
                 return existing.id
+            # P1-1: a previous failed attempt for this origin left a failed
+            # row — revive it in place instead of inserting a duplicate row
+            # for the same origin URL. Duck-typed: minimal test fakes may
+            # not implement the observability methods.
+            _find_failed = getattr(store, "find_failed_by_origin", None)
+            failed_row = _find_failed(origin) if (_find_failed and origin) else None
+            if failed_row is not None:
+                store.revive_failed_row(
+                    failed_row.id,
+                    full_text=text,
+                    content_hash=content_hash,
+                    filename=ev.identifier[:500],
+                    title=ev.title[:500],
+                )
+                from .kb_index import index_source
+
+                index_source(failed_row.id, text)
+                return failed_row.id
             source_id = store.create(
                 filename=ev.identifier[:500],
                 title=ev.title[:500],
@@ -727,6 +745,7 @@ def _persist_fulltext(
                 origin_url=origin,
                 project_id=(project_id or None),
                 acquisition=acquisition,
+                ingest_status="indexed",  # P1-1
             )
             from .kb_index import index_source
 

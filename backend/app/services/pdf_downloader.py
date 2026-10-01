@@ -30,7 +30,10 @@ Gated by the config flag so tests run offline without network requests.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
+from pathlib import Path
 from .errors import degrade_return, log_handled_exception
 import re
 
@@ -39,6 +42,98 @@ import httpx
 from ..domain.schemas import Evidence
 
 logger = logging.getLogger(__name__)
+
+# ── P1-2: PDF 下载链路三件套 ──────────────────────────────────────────────
+# 1. 磁盘缓存：URL-hash 命名，TTL 可配。同一 URL 在不同批次/任务中重复出现
+#    时直接命中，不再走网络（此前 PDF 只在内存、不落盘）。
+# 2. 403 host 短期拉黑：同一批次内对同一 host 的反复 403 只打一次，后续
+#    候选直接跳过（调用方仍按 403 语义换下一个镜像候选）。
+# 3. timeout / 5xx 指数退避重试（默认总共 2 次尝试）。
+
+_PDF_CACHE_MAX_BYTES = 200 * 1024 * 1024  # 单文件过大不进缓存（内存保护）
+_host_403_until: dict[str, float] = {}  # host -> 拉黑到期时间戳（进程内）
+
+
+def _pdf_cache_dir() -> Path | None:
+    """解析 PDF 缓存目录；禁用或解析失败返回 None（fail-open）。"""
+    try:
+        from ..config import get_settings
+
+        settings = get_settings()
+        if not settings.kb_pdf_cache_enabled:
+            return None
+        raw = (settings.kb_pdf_cache_dir or "").strip() or "pdf_cache"
+    except Exception:
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parents[2] / "data" / p
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return None
+    return p
+
+
+def _pdf_cache_key(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8", errors="replace")).hexdigest()[:32]
+
+
+def _pdf_cache_get(url: str) -> bytes | None:
+    d = _pdf_cache_dir()
+    if d is None:
+        return None
+    try:
+        from ..config import get_settings
+
+        ttl = int(get_settings().kb_pdf_cache_ttl_s or 0)
+    except Exception:
+        ttl = 0
+    f = d / (_pdf_cache_key(url) + ".pdf")
+    try:
+        if ttl > 0 and time.time() - f.stat().st_mtime > ttl:
+            return None
+        data = f.read_bytes()
+    except OSError:
+        return None
+    return data or None
+
+
+def _pdf_cache_put(url: str, data: bytes) -> None:
+    if not data or len(data) > _PDF_CACHE_MAX_BYTES:
+        return
+    d = _pdf_cache_dir()
+    if d is None:
+        return
+    try:
+        (d / (_pdf_cache_key(url) + ".pdf")).write_bytes(data)
+    except Exception:
+        pass  # 缓存写失败不影响主流程
+
+
+def _host_403_blocklisted(host: str) -> bool:
+    until = _host_403_until.get(host)
+    if until is None:
+        return False
+    if time.time() >= until:
+        _host_403_until.pop(host, None)
+        return False
+    return True
+
+
+def _record_host_403(host: str) -> None:
+    try:
+        from ..config import get_settings
+
+        ttl = int(get_settings().kb_403_blocklist_ttl_s or 0)
+    except Exception:
+        ttl = 0
+    if ttl > 0 and host:
+        _host_403_until[host] = time.time() + ttl
+
+
+def _retry_delay_s(attempt: int) -> float:
+    return float(min(2**attempt, 8))  # 1s, 2s, 4s, 8s 上限
 
 # ── URL construction ─────────────────────────────────────────────────────────
 
@@ -259,52 +354,97 @@ def fetch_pdf(url: str, timeout: float = 20.0) -> bytes | None:
 def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
     """GET *url*, return (PDF bytes, reason).
 
-    reason ∈ {"ok", "status:403", "timeout", "not_pdf", "ssrf", "error:..."} — so
-    callers can distinguish a source refusing the request (403) from a real
-    timeout instead of lumping both into one misleading "download timed out".
+    reason ∈ {"ok", "cache", "status:403", "blocked:403_host", "timeout",
+    "not_pdf", "ssrf", "error:..."} — so callers can distinguish a source
+    refusing the request (403) from a real timeout instead of lumping both
+    into one misleading "download timed out".
 
     SSRF: initial URL and every redirect hop are checked with ``_is_safe_url``
     (same manual-redirect loop as web fulltext). Auto ``follow_redirects`` is
     off so a malicious OA 302 cannot pivot to an internal host.
+
+    P1-2: disk cache (URL-hash, TTL via ``kb_pdf_cache_*``), per-host 403
+    short blocklist (``kb_403_blocklist_ttl_s``), and exponential-backoff
+    retry on timeout / 5xx (``kb_pdf_retry_attempts`` total attempts).
     """
     from .ingestion import _is_safe_url
 
     if not _is_safe_url(url):
         logger.warning("pdf fetch blocked by SSRF guard: %s", (url or "")[:200])
         return None, "ssrf"
-    current_url = url
     try:
-        with httpx.Client(
-            timeout=timeout, follow_redirects=False, headers=_HEADERS
-        ) as client:
-            r = None
-            for _hop in range(4):  # initial + up to 3 redirects
-                r = client.get(current_url)
-                status = int(getattr(r, "status_code", 0))
-                if 300 <= status < 400:
-                    location = r.headers.get("location")
-                    if not location:
-                        break
-                    current_url = str(httpx.URL(current_url).join(location))
-                    if not _is_safe_url(current_url):
-                        logger.warning(
-                            "pdf redirect blocked by SSRF guard: %s", current_url[:200]
-                        )
-                        return None, "ssrf"
-                    continue
-                break
-    except httpx.TimeoutException:
-        return None, "timeout"
-    except Exception as exc:
-        return None, f"error:{type(exc).__name__}"
-    if r is None:
-        return None, "error:no_response"
-    ct = r.headers.get("content-type", "")
-    if r.status_code != 200:
-        return None, f"status:{r.status_code}"
-    if "pdf" not in ct.lower():
-        return None, "not_pdf"
-    return r.content, "ok"
+        host = str(httpx.URL(url).host or "").lower()
+    except Exception:
+        host = ""
+    # Disk cache first: a repeat URL across batches/tasks never hits net.
+    cached = _pdf_cache_get(url)
+    if cached is not None:
+        return cached, "cache"
+    # 403-blocklisted host: skip the request, same caller semantics as 403
+    # (the caller moves on to the next mirror candidate).
+    if host and _host_403_blocklisted(host):
+        return None, "blocked:403_host"
+    try:
+        from ..config import get_settings
+
+        attempts = max(1, int(get_settings().kb_pdf_retry_attempts or 1))
+    except Exception:
+        attempts = 1
+
+    last_reason = "error:no_response"
+    for attempt in range(attempts):
+        current_url = url
+        try:
+            with httpx.Client(
+                timeout=timeout, follow_redirects=False, headers=_HEADERS
+            ) as client:
+                r = None
+                for _hop in range(4):  # initial + up to 3 redirects
+                    r = client.get(current_url)
+                    status = int(getattr(r, "status_code", 0))
+                    if 300 <= status < 400:
+                        location = r.headers.get("location")
+                        if not location:
+                            break
+                        current_url = str(httpx.URL(current_url).join(location))
+                        if not _is_safe_url(current_url):
+                            logger.warning(
+                                "pdf redirect blocked by SSRF guard: %s", current_url[:200]
+                            )
+                            return None, "ssrf"
+                        continue
+                    break
+        except httpx.TimeoutException:
+            last_reason = "timeout"
+            if attempt + 1 < attempts:
+                time.sleep(_retry_delay_s(attempt))
+                continue
+            return None, "timeout"
+        except Exception as exc:
+            return None, f"error:{type(exc).__name__}"
+        if r is None:
+            return None, "error:no_response"
+        status = int(getattr(r, "status_code", 0))
+        if status == 403:
+            # Fail fast to the next mirror candidate; short-blocklist the host
+            # so the rest of this batch doesn't hammer it per candidate URL.
+            _record_host_403(host)
+            return None, "status:403"
+        if 500 <= status < 600:
+            last_reason = f"status:{status}"
+            if attempt + 1 < attempts:
+                time.sleep(_retry_delay_s(attempt))
+                continue
+            return None, f"status:{status}"
+        if status != 200:
+            return None, f"status:{status}"
+        ct = r.headers.get("content-type", "")
+        if "pdf" not in ct.lower():
+            return None, "not_pdf"
+        data = r.content
+        _pdf_cache_put(url, data)
+        return data, "ok"
+    return None, last_reason
 
 
 def fetch_patent_pdf(patent_id: str, timeout: float = 20.0) -> bytes | None:

@@ -476,9 +476,20 @@ def _fetch_one(
     except Exception as exc:
         existing = degrade_return(logger, exc, "kb_ingest dedup lookup failed", None)
     if existing is not None:
-        doc.update(status="skipped", source_id=existing.id)
-        emit(doc)
-        return None
+        # P1-1: a row whose last ingest failed is retried, not skipped —
+        # tier-1 dedup only covers successfully acquired documents.
+        if existing.ingest_status == "failed":
+            logger.info(
+                "kb_ingest 重试上次失败的文档: %s (上次: %s)",
+                ev.identifier, (existing.ingest_error or "")[:120],
+            )
+        else:
+            doc.update(
+                status="skipped", skip_reason="already_ingested",
+                source_id=existing.id,
+            )
+            emit(doc)
+            return None
 
     # Content-filter blocklist: skip marketplace / junk landing URLs before fetch.
     try:
@@ -486,7 +497,10 @@ def _fetch_one(
 
         landing = (getattr(ev, "url", None) or "").strip()
         if get_settings().content_filter_enabled and is_blocked_origin_url(landing):
-            doc.update(status="skipped", error="blocked_domain")
+            doc.update(
+                status="skipped", skip_reason="blocked_domain",
+                error="blocked_domain",
+            )
             emit(doc)
             return None
     except Exception as exc:
@@ -543,6 +557,58 @@ def _index_one(
     else:
         doc.update(status="failed", error="入库失败（存储或索引异常）")
     emit(doc)
+
+
+def _skipped_by_reason(docs: list[dict[str, Any]]) -> dict[str, int]:
+    """P1-1: subdivide ``skipped`` by reason (already_ingested | blocked_domain | …)."""
+    counts: dict[str, int] = {}
+    for d in docs:
+        if d.get("status") == "skipped":
+            reason = d.get("skip_reason") or "unknown"
+            counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
+def _persist_ingest_failures(
+    docs: list[dict[str, Any]],
+    targets: list[tuple[Any, str]],
+    *,
+    project_id: str | None,
+) -> None:
+    """P1-1: write each failed document's reason to ``source_documents``.
+
+    Keyed by canonical origin URL so the failure is queryable per document.
+    Failed rows are retried on later runs (tier-1 dedup ignores them) and
+    revived in place on success — one row per origin. Never raises.
+    """
+    failed = [(d, t) for d, t in zip(docs, targets) if d.get("status") == "failed"]
+    if not failed:
+        return
+    try:
+        from ..db.source_store import get_source_store
+        from .patent_ids import canonical_origin_url
+
+        store = get_source_store()
+        for doc, (ev, kind) in failed:
+            try:
+                origin = canonical_origin_url(
+                    ev.identifier, url=getattr(ev, "url", None)
+                )
+                store.record_ingest_failure(
+                    origin_url=origin,
+                    filename=(ev.identifier or "")[:500],
+                    title=(ev.title or "")[:500],
+                    source_kind=(kind or "web")[:32],
+                    project_id=project_id,
+                    error=str(doc.get("error") or "未知失败"),
+                )
+            except Exception as exc:
+                degrade_return(
+                    logger, exc,
+                    f"kb_ingest 失败落盘异常 ({doc.get('identifier')})", None,
+                )
+    except Exception as exc:
+        degrade_return(logger, exc, "kb_ingest 失败落盘初始化异常", None)
 
 
 def _backfill_product_structures() -> dict:
@@ -680,6 +746,11 @@ def ingest_evidence_docs(
                         text = None
                     _index(idx, text)
 
+    # P1-1: persist per-document failures so they are queryable (previously
+    # they only lived in the in-memory summary / task result). Fail-open:
+    # observability must never break the batch itself.
+    _persist_ingest_failures(docs, targets, project_id=project_id)
+
     # Structure linking was deferred out of every document (see
     # `kb_index._attach_entities`); resolve it once per product now that the
     # batch is done. Outside `timing.batch` on purpose — it is not part of any
@@ -698,12 +769,25 @@ def ingest_evidence_docs(
         "indexed": sum(1 for d in docs if d["status"] == "indexed"),
         "skipped": sum(1 for d in docs if d["status"] == "skipped"),
         "failed": sum(1 for d in docs if d["status"] == "failed"),
+        # P1-1: skipped sub-reasons (already_ingested | blocked_domain | …).
+        "skipped_by_reason": _skipped_by_reason(docs),
         "product_structures": structures,
     }
     logger.info(
-        "kb_ingest: %d indexed / %d skipped / %d failed of %d",
+        "kb_ingest: %d indexed / %d skipped / %d failed of %d (skipped: %s)",
         summary["indexed"], summary["skipped"], summary["failed"], summary["total"],
+        summary["skipped_by_reason"] or "-",
     )
+    if summary["failed"]:
+        # P1-1: batch-end failure report — the per-document reasons that used
+        # to be visible only in the raw docs list.
+        for d in docs:
+            if d["status"] == "failed":
+                logger.warning(
+                    "kb_ingest 失败: %s [%s] %s",
+                    d.get("identifier"), d.get("kind"),
+                    (d.get("error") or "")[:200],
+                )
     return summary
 
 

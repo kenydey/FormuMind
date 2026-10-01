@@ -180,6 +180,9 @@ _SOURCE_SOFT_COLUMNS: dict[str, tuple[str, str | None]] = {
         "archived_at DATETIME",
         "CREATE INDEX ix_source_documents_archived_at ON source_documents (archived_at)",
     ),
+    # alembic 0040 — ingest observability (P1-1): per-document failure record
+    "ingest_status": ("ingest_status VARCHAR(16)", None),
+    "ingest_error": ("ingest_error TEXT", None),
 }
 
 # table → {column → alembic revision that owns it (or "model/create_all")}
@@ -188,6 +191,8 @@ SOFT_COLUMN_ALEMBIC_OWNERS: dict[str, dict[str, str]] = {
         "acquisition": "model/create_all",
         "archived": "0029_source_documents_archived",
         "archived_at": "0030_source_documents_archived_at",
+        "ingest_status": "0040_ingest_observability",
+        "ingest_error": "0040_ingest_observability",
     },
     "materials": {
         "archived": "0024_material_candidates",

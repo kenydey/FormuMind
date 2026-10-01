@@ -96,14 +96,76 @@ def workbench_dataframes_to_baybe(actual_X, measurements_Y, metrics: list[str] |
     return merged
 
 
-def _prepare_measurement_dataframe(df, metrics: list[str]):
+def _clean_measurement_dataframe(df, metrics: list[str], expected_params: list[str] | None = None):
+    """P1-4: pre-BayBE data cleaning with an explicit, logged strategy.
+
+    Missing data previously flowed into ``campaign.add_measurements`` as NaN
+    (or a factor column simply absent, e.g. ``cure_temperature_c``), where
+    BayBE/BoTorch failed with an obscure error that surfaced only as the
+    "falling back to numpy/optuna" warning. Strategy — no silent imputation,
+    inventing optimizer targets is worse than dropping the row:
+
+    - rows whose metrics are ALL NaN → dropped (no signal);
+    - rows with SOME NaN metrics → dropped (BayBE cannot fit NaN targets;
+      median-fill would fabricate evidence);
+    - a factor column required by the searchspace missing from the frame →
+      fail-closed ``ValueError`` naming the factors: those measurements
+      cannot be placed in this searchspace at all (re-run them, or drop
+      them — but not silently).
+
+    Returns ``(cleaned_df, report)``; ``report`` holds dropped/kept counts.
+    """
+    import pandas as pd
+
+    report = {"dropped_all_nan": 0, "dropped_partial_nan": 0, "kept": 0}
+    if df is None or getattr(df, "empty", True):
+        return df, report
+    if expected_params:
+        missing_params = [p for p in expected_params if p not in df.columns]
+        if missing_params:
+            raise ValueError(
+                "测量数据缺失 BayBE 搜索空间要求的因子列 "
+                f"{missing_params}（共 {len(df)} 行无法使用）："
+                "请补测这些因子后重试，或删除这些历史测量。"
+            )
+    metric_cols = [m for m in (metrics or []) if m in df.columns]
+    if not metric_cols:
+        return df, report
+    is_nan = df[metric_cols].isna()
+    all_nan = is_nan.all(axis=1)
+    partial_nan = is_nan.any(axis=1) & ~all_nan
+    report["dropped_all_nan"] = int(all_nan.sum())
+    report["dropped_partial_nan"] = int(partial_nan.sum())
+    cleaned = df.loc[~(all_nan | partial_nan)].reset_index(drop=True)
+    report["kept"] = len(cleaned)
+    if report["dropped_all_nan"]:
+        log.warning(
+            "BayBE 测量清洗: 丢弃 %d 行全缺失目标值的测量（无信号）",
+            report["dropped_all_nan"],
+        )
+    if report["dropped_partial_nan"]:
+        log.warning(
+            "BayBE 测量清洗: 丢弃 %d 行部分缺失目标值的测量（不做填充，避免伪造证据）",
+            report["dropped_partial_nan"],
+        )
+    return cleaned, report
+
+
+def _prepare_measurement_dataframe(df, metrics: list[str], expected_params: list[str] | None = None):
     if df is None or getattr(df, "empty", True):
         return df
     from ...domain.objective_contract import assert_dataframe_measurement_columns
 
     aligned = align_dataframe_measurement_columns(df, metrics, log=log)
     assert_dataframe_measurement_columns(aligned, metrics)
-    return aligned
+    # P1-4: NaN / missing-factor cleaning before BayBE ever sees the frame.
+    cleaned, report = _clean_measurement_dataframe(aligned, metrics, expected_params)
+    if report["dropped_all_nan"] or report["dropped_partial_nan"]:
+        log.info(
+            "BayBE 测量清洗报告: kept=%d dropped_all_nan=%d dropped_partial_nan=%d",
+            report["kept"], report["dropped_all_nan"], report["dropped_partial_nan"],
+        )
+    return cleaned
 
 
 def _rank_by_pareto_then_score(
@@ -238,7 +300,14 @@ class BaybeCampaignEngine:
                     metrics,
                     len(df_wb),
                 )
-                df_wb = _prepare_measurement_dataframe(df_wb, metrics)
+                # P1-4: pass the searchspace factor names so a measurement
+                # frame missing a required factor (e.g. cure_temperature_c)
+                # fails closed with a clear message instead of an obscure
+                # BayBE error downstream.
+                df_wb = _prepare_measurement_dataframe(
+                    df_wb, metrics,
+                    expected_params=[f.name for f in factor_list],
+                )
                 df_meas = (
                     pd.concat([df_meas, df_wb], ignore_index=True)
                     if not df_meas.empty
@@ -246,7 +315,12 @@ class BaybeCampaignEngine:
                 )
 
         if not df_meas.empty:
-            campaign.add_measurements(_prepare_measurement_dataframe(df_meas, metrics))
+            campaign.add_measurements(
+                _prepare_measurement_dataframe(
+                    df_meas, metrics,
+                    expected_params=[f.name for f in factor_list],
+                )
+            )
 
         if campaign_state is None and df_meas.empty:
             seed_plan = build_doe_plan(factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8))

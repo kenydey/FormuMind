@@ -228,6 +228,11 @@ class SourceDocument(Base):
     )
     extraction_status: Mapped[str] = mapped_column(String(32), default="pending")
     extraction_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P1-1 (0040): ingest observability — 'indexed' | 'failed', NULL = legacy /
+    # unknown / non-ingest path. Failed rows keep the last failure reason in
+    # ingest_error and are retried (tier-1 origin dedup ignores them).
+    ingest_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ingest_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # P3-5: which parser tier produced the text
     # (hybrid | docling | marker | mineru | rapidocr | markitdown | pypdf |
     #  docx | text | none). NULL = unknown / non-parse path (API text, QC).

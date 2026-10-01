@@ -77,13 +77,18 @@ def _formula_plausible(token: str) -> bool:
 
 
 def extract_formulas(text: str) -> list[str]:
-    from ..domain.chemistry import molar_mass, canonical_formula
+    from ..domain.chemistry import molar_mass, canonical_formula, sanitize_formula
 
     out: list[str] = []
     seen_canon: set[str] = set()
     for m in _FORMULA_CAND_RE.finditer(text or ""):
         token = m.group(0)
         if not _formula_plausible(token):
+            continue
+        # P1-5: recover OCR/LLM case-mangled formulas upstream (ZNO→ZnO);
+        # unsalvageable tokens are dropped as before.
+        token = sanitize_formula(token)
+        if not token:
             continue
         try:
             if molar_mass(token) <= 0:

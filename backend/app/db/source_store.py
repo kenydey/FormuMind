@@ -38,6 +38,8 @@ class SourceStore:
         project_id: str | None = None,
         acquisition: str | None = None,
         parser: str | None = None,  # P3-5: parser tier provenance
+        ingest_status: str | None = None,  # P1-1: 'indexed' | 'failed' | None
+        ingest_error: str | None = None,  # P1-1: last ingest failure reason
     ) -> str:
         source_id = str(uuid.uuid4())
         guide_payload = source_guide.model_dump(mode="json") if source_guide else None
@@ -56,6 +58,8 @@ class SourceStore:
             extraction_error=extraction_error,
             acquisition=(acquisition or None),
             parser=(parser or None),
+            ingest_status=(ingest_status or None),
+            ingest_error=(ingest_error or None),
             archived=False,
             created_at=_utcnow(),
         )
@@ -184,6 +188,117 @@ class SourceStore:
                 .order_by(SourceDocument.created_at.desc())
                 .first()
             )
+
+    # ── P1-1: ingest failure observability ────────────────────────────────
+
+    def record_ingest_failure(
+        self,
+        *,
+        origin_url: str | None,
+        filename: str,
+        title: str,
+        source_kind: str,
+        project_id: str | None,
+        error: str,
+    ) -> str | None:
+        """Persist a per-document ingest failure, keyed by origin URL.
+
+        Upserts: an existing row for this origin gets ingest_status='failed' +
+        the (truncated) error; otherwise a minimal failed row is inserted so
+        the failure is queryable. Never raises — observability must not break
+        ingest. Returns the row id, or None when there is no usable origin.
+        """
+        import hashlib
+
+        origin = (origin_url or "").strip()[:1024] or None
+        if not origin:
+            return None
+        err = (error or "未知失败")[:500]
+        try:
+            with commit_session(self._session_factory) as session:
+                row = (
+                    session.query(SourceDocument)
+                    .filter(SourceDocument.origin_url == origin)
+                    .order_by(SourceDocument.created_at.desc())
+                    .first()
+                )
+                if row is not None:
+                    # Only ever (re-)mark rows that are already failed: a real
+                    # row (indexed now or legacy, possibly with full_text
+                    # already cleared by clear_full_text) must never be
+                    # downgraded by a later failed attempt for the same origin
+                    # (tier-1 dedup skips indexed rows before we get here, but
+                    # belt-and-suspenders for other callers).
+                    if row.ingest_status == "failed" or row.extraction_status == "failed":
+                        row.ingest_status = "failed"
+                        row.ingest_error = err
+                    return row.id
+                row = SourceDocument(
+                    id=str(uuid.uuid4()),
+                    filename=filename[:500],
+                    title=title[:500],
+                    source_kind=source_kind[:32],
+                    content_hash=hashlib.sha256(
+                        f"ingest-failure:{origin}".encode("utf-8")
+                    ).hexdigest(),
+                    origin_url=origin,
+                    project_id=(project_id or None),
+                    full_text=None,
+                    raw_text_chars=0,
+                    extraction_status="failed",
+                    ingest_status="failed",
+                    ingest_error=err,
+                    archived=False,
+                    created_at=_utcnow(),
+                )
+                session.add(row)
+                return row.id
+        except Exception as exc:
+            logger.warning("record_ingest_failure 落盘失败: %s", exc)
+            return None
+
+    def find_failed_by_origin(self, origin_url: str | None) -> SourceDocument | None:
+        """Newest row for this origin whose last ingest attempt failed."""
+        origin = (origin_url or "").strip()[:1024]
+        if not origin:
+            return None
+        with self._session_factory() as session:
+            return (
+                session.query(SourceDocument)
+                .filter(SourceDocument.origin_url == origin)
+                .filter(SourceDocument.ingest_status == "failed")
+                .order_by(SourceDocument.created_at.desc())
+                .first()
+            )
+
+    def revive_failed_row(
+        self,
+        source_id: str,
+        *,
+        full_text: str,
+        content_hash: str,
+        filename: str | None = None,
+        title: str | None = None,
+    ) -> None:
+        """Promote a previously-failed row to indexed in place.
+
+        Keeps one row per origin URL: a retry that succeeds updates the failed
+        row instead of inserting a duplicate.
+        """
+        with commit_session(self._session_factory) as session:
+            row = session.get(SourceDocument, source_id)
+            if row is None:
+                return
+            row.full_text = full_text
+            row.raw_text_chars = len(full_text)
+            row.content_hash = content_hash
+            if filename:
+                row.filename = filename[:500]
+            if title:
+                row.title = title[:500]
+            row.extraction_status = "fulltext"
+            row.ingest_status = "indexed"
+            row.ingest_error = None
 
     def clear_full_text(self, source_id: str) -> None:
         """入库收尾：清空冗余的 full_text（切块已覆盖全文，检索不再读它）。

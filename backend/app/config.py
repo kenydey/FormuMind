@@ -514,6 +514,12 @@ class Settings(BaseSettings):
     # 2.2 GB 的机器上 3 路并发已经接近上限。入库（切块+向量+写库）保持串行，
     # 避免 SQLite 写冲突。
     kb_ingest_workers: int = 3
+    # ── P1-2: PDF 下载链路三件套（2026-10-01）──────────────────────────────
+    kb_pdf_cache_enabled: bool = True   # PDF 磁盘缓存（URL-hash 命名）
+    kb_pdf_cache_dir: str = "pdf_cache"  # 相对 backend/data；绝对路径则直接用
+    kb_pdf_cache_ttl_s: int = 604800   # 缓存有效期；0 = 永不过期
+    kb_pdf_retry_attempts: int = 2      # timeout/5xx 总尝试次数（含首次）
+    kb_403_blocklist_ttl_s: int = 600   # 403 host 短期拉黑；0 = 关闭
     # SSE 进度流的最大保持时长。构建一个几百篇文档的知识库需要几十分钟，原本
     # Redis 路径 1 小时、无 Redis 回退 120 秒都可能在任务健康运行时切断。
     # 客户端在流关闭后会自动改用轮询，所以这个值只决定「连接保持多久」，

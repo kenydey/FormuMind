@@ -127,6 +127,70 @@ def canonical_formula(formula: str) -> str | None:
         return None
 
 
+_FORMULA_BAD_CHARS = re.compile(r"[^A-Za-z0-9()+\-.·•]")
+
+
+def _fix_caps_element(m: re.Match[str]) -> str:
+    """All-caps element run → title case, only when unambiguous.
+
+    ZN→Zn (Z is not an element, so "ZN" cannot mean Z+N), but NO stays NO
+    (N and O are both elements — "NO" as nitric oxide must not become
+    nobelium). Ambiguous tokens are left for molar_mass to reject.
+    """
+    tok = m.group(0)
+    titled = tok[0] + tok[1].lower()
+    if titled in ATOMIC_MASS and not all(c in ATOMIC_MASS for c in tok):
+        return titled
+    return tok
+
+
+def _fix_lower_element(m: re.Match[str]) -> str:
+    """Lowercase element run → ALL CAPS, then the caps pass decides.
+
+    OCR sometimes lowercases a whole formula ("zn3(po4)2"). Uppercasing the
+    run ("ZN3(PO4)2") and letting :func:`_fix_caps_element` apply its
+    unambiguous rule recovers the intended reading: "ZN"→"Zn" (Z is not an
+    element) while "PO" stays "PO" (P+O, not polonium). The lookbehind keeps
+    correct "Xx" sequences (the "i" in "Ti") untouched.
+    """
+    return m.group(0).upper()
+
+
+def sanitize_formula(formula: str | None) -> str | None:
+    """Upstream cleaning for raw formula strings (P1-5).
+
+    OCR / LLM output mangles case ("ZNO", "h2o") and leaves junk characters;
+    previously those reached :func:`molar_mass` and surfaced as "Unknown
+    element" warnings in ``validate_formulation``. This cleans what can be
+    cleaned deterministically — no network (no PubChem on the hot path):
+
+    - strip whitespace; reject characters outside the formula charset;
+    - drop charge markers (``Fe3+`` → ``Fe3``);
+    - fix case-mangled symbols: lowercase runs are uppercased, then
+      unambiguous all-caps pairs are titlecased (ZN→Zn, h2o→H2O,
+      zn3(po4)2→Zn3(PO4)2). Ambiguous pairs are left as the common
+      multi-element reading (NO stays N+O, never nobelium).
+
+    Returns the cleaned formula, or None when it cannot be salvaged. Callers
+    keep the ``ValueError``→warning path as the last line of defense.
+    """
+    if not formula or not isinstance(formula, str):
+        return None
+    s = formula.strip().replace(" ", "").replace("•", "·")
+    if not s or _FORMULA_BAD_CHARS.search(s):
+        return None
+    s = re.sub(r"[+-]\d*$", "", s)  # charge suffix: Fe3+ → Fe3
+    # Lowercase runs first (zn3(po4)2 → ZN3(PO4)2), then the unambiguous
+    # caps rule (ZN→Zn, while PO stays P+O and NO stays N+O).
+    s = re.sub(r"(?<![A-Za-z])[a-z]{1,2}", _fix_lower_element, s)
+    s = re.sub(r"[A-Z]{2}", _fix_caps_element, s)
+    try:
+        molar_mass(s)
+    except ValueError:
+        return None
+    return s
+
+
 def molar_mass(formula: str) -> float:
     """Parse a chemical formula and return its molar mass (g/mol).
 
@@ -259,8 +323,17 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
         warnings.append(f"Weight percentages sum to {total:.2f}, expected ~100.")
     for ing in form.ingredients:
         if ing.formula:
+            # P1-5: clean OCR/LLM-mangled formulas upstream so the warning
+            # below only fires for genuinely unknown elements, not junk.
+            # sanitize_formula returns None for the unsalvageable — the
+            # ValueError→warning path stays as the last line of defense.
+            cleaned = sanitize_formula(ing.formula)
+            if cleaned is None:
+                warnings.append(f"{ing.name}: unparseable formula {ing.formula!r}")
+                continue
+            ing.formula = cleaned
             try:
-                computed = molar_mass(ing.formula)
+                computed = molar_mass(cleaned)
             except ValueError as exc:
                 warnings.append(f"{ing.name}: {exc}")
                 continue
