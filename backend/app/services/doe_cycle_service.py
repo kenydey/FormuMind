@@ -87,6 +87,22 @@ def load_prior_measurements(requirement: Requirement) -> list[ExperimentRecord]:
         return []
 
 
+def lab_measurement_source(prior_measurements: list[ExperimentRecord]) -> str:
+    """P0-2: 本轮 DOE/优化所依据数据的来源标记。
+
+    任一 prior 记录为真实 lab 测量 (``source == "lab"`` 且有实测值) 即返回
+    ``"lab"``; 否则 ``"predictor_virtual"``。此前该标记在三处被写死, 永远
+    到不了 ``"lab"`` —— 即使 BayBE 实际已被 lab 数据 seed。
+    """
+    for rec in prior_measurements or []:
+        try:
+            if getattr(rec, "source", "") == "lab" and rec.measured:
+                return "lab"
+        except Exception:  # noqa: BLE001
+            continue
+    return "predictor_virtual"
+
+
 def build_candidate_formulations(requirement: Requirement) -> list:
     """Step 1 (plan building): Top-12 candidate formulations.
 
@@ -316,6 +332,8 @@ def run_doe_cycle(
     # 0. Closed-loop feedback: round N's measured results seed round N+1.
     prior_measurements = load_prior_measurements(requirement)
     n_prior = len(prior_measurements)
+    # P0-2: 数据来源标记 —— lab 实测 seed 时优化器结果应标记 "lab"。
+    measurement_source = lab_measurement_source(prior_measurements)
     project_id = requirement.project_id or ""
     domain = requirement.domain.value if requirement.domain else ""
 
@@ -407,4 +425,6 @@ def run_doe_cycle(
     # Wave 3-2: enrich the task result with observability fields.
     result["engine"] = engine
     result["prior_measurement_count"] = n_prior
+    # P0-2: 本轮所依据数据的来源 (lab 实测 / predictor_virtual)。
+    result["measurement_source"] = measurement_source
     return result

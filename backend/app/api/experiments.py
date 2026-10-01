@@ -1582,3 +1582,82 @@ def get_doecyle_status(
         # Redis unavailable — still answer so the UI can poll without hard failure.
         return {"isPaused": False, "lastUpdated": None, "campaignId": campaign_id, "degraded": True}
     return status_val
+
+
+# ── P0-2: Datalab -> 优化器手动同步 ──────────────────────────────────────────
+
+
+@router.post("/experiments/{experiment_id}/sync-datalab", response_model=Dict[str, Any])
+def sync_experiment_from_datalab(experiment_id: int) -> Dict[str, Any]:
+    """手动触发单个实验的 Datalab -> MeasurementStore 同步 (P0-2)。
+
+    流程: 由 experiment_id 查 ExperimentRow 取 item_id -> 拉取 Datalab
+    ``formumind_measurements`` 块 -> 校验块内 experiment_id 与调用方一致 ->
+    写入 MeasurementStore 明细并回写 ``experiments.measured`` -> 成功后刷新
+    训练 registry, 使下一轮 DOE 的 ``load_prior_measurements()`` 可见,
+    优化器真正吃到 lab 实测。
+
+    Fail-open: Datalab 不可达返回 ``{"synced": 0, "errors": [...]}`` 而不是
+    500; ``validated`` 恒为 None, 真实端到端验证见 scripts/verify_datalab.py。
+    """
+    from ..db.database import default_session_factory
+    from ..db.models import ExperimentRow
+    from ..services.datalab_sync import (
+        block_experiment_id,
+        fetch_item_data,
+        sync_item_data_to_store,
+    )
+
+    factory = default_session_factory()
+    with factory() as session:
+        row = session.get(ExperimentRow, experiment_id)
+        item_id = row.item_id if row else None
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"experiment {experiment_id} not found",
+        )
+    if not item_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"experiment {experiment_id} has no Datalab item_id; nothing to sync",
+        )
+
+    settings = get_settings()
+    item_data = fetch_item_data(
+        settings.datalab_api_url, item_id, timeout=settings.datalab_timeout_seconds
+    )
+    claimed = block_experiment_id(item_data)
+    if claimed is not None and claimed != experiment_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"datalab item {item_id} block claims experiment_id={claimed}, "
+                f"but caller asked for {experiment_id}"
+            ),
+        )
+    report = sync_item_data_to_store(
+        item_data, experiment_id, item_id=item_id
+    )
+    if report.get("synced"):
+        try:
+            # 同步成功即确认该 Datalab item 属于本实验: 补上 item_id 绑定,
+            # 使 SqlExperimentStore 过滤语义 (item_id IS NULL) 保持一致。
+            with factory() as session:
+                row = session.get(ExperimentRow, experiment_id)
+                if row is not None and row.item_id != item_id:
+                    row.item_id = item_id
+                    session.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("item_id backfill after datalab sync failed: %s", exc)
+        try:
+            registry.load()
+            refreshed = True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("registry refresh after datalab sync failed: %s", exc)
+            refreshed = False
+    else:
+        refreshed = False
+    report["registry_refreshed"] = refreshed
+    report["experiment_id"] = experiment_id
+    return report
