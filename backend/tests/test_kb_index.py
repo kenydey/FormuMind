@@ -71,6 +71,29 @@ def test_chunk_store_counts_embedded(stores):
     assert chk.delete_for_source("s1") == 2
 
 
+def test_chunk_store_counts_blob_only_as_embedded(stores):
+    """P0-1 回填只写 embedding_blob, JSON 列全空 —— counts() 必须数 blob,
+    否则 kb_vector_notice 误报覆盖率 0%, B-1 在 chat 误报"退化为关键词匹配"。"""
+    from app.db.models import DocumentChunk
+
+    _, chk = stores
+    chk.replace_for_source("s1", [
+        {"text": "plain"},
+        {"text": "vec", "embedding": [0.1, 0.2], "embedding_model": "m"},
+    ])
+    # 模拟回填后状态: JSON 列清空, 仅 blob 留存
+    with chk._session_factory() as session:
+        session.query(DocumentChunk).update(
+            {DocumentChunk.embedding: None}, synchronize_session=False
+        )
+        session.commit()
+    total, embedded = chk.counts()
+    assert (total, embedded) == (2, 1)
+    # count_foreign_model 同样要认 blob, 否则换模型重回填后 stale 恒为 0
+    assert chk.count_foreign_model("other-model") == 1
+    assert chk.count_foreign_model("m") == 0
+
+
 # ── indexing ─────────────────────────────────────────────────────────────────
 
 

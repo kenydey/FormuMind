@@ -6,7 +6,8 @@
 3. lab_measurement_source: 有 lab 实测 -> "lab", 否则 "predictor_virtual"。
 4. block_experiment_id 冲突检测。
 5. POST /api/experiments/{id}/sync-datalab: 404 / 409(无item_id) /
-   409(块归属冲突) / fail-open / happy path。
+   409(块归属冲突) / fail-open / happy path / 请求体 datalab_item_id +
+   API 路径 registry 可见性 (P0-2 可见性修复回归)。
 """
 from __future__ import annotations
 
@@ -239,7 +240,11 @@ def test_sync_endpoint_409_on_block_conflict(tmp_path, monkeypatch, _fresh_regis
 
 
 def test_sync_endpoint_happy_path(tmp_path, monkeypatch, _fresh_registry):
-    """mock Datalab: 同步成功 -> measured 回写 + registry 可见。"""
+    """mock Datalab: 行已绑定 item_id 时仍可用行上绑定同步 -> measured 回写。
+
+    注意: 绑定行同步后保持绑定身份, SqlExperimentStore 仍过滤该行
+    (Datalab store 的管辖范围); 本测试不断言 registry 可见性。
+    """
     import app.services.datalab_sync as dl_mod
 
     client = _app_client(tmp_path, monkeypatch)
@@ -263,6 +268,70 @@ def test_sync_endpoint_happy_path(tmp_path, monkeypatch, _fresh_registry):
     with fac() as s:
         row = s.get(ExperimentRow, exp_id)
         assert row.measured == {"salt_spray_hours": 720.0}
+        assert row.item_id == "test:ABC123"  # 绑定身份不变
+
+
+def test_sync_endpoint_body_item_id_visible_to_optimizer(tmp_path, monkeypatch, _fresh_registry):
+    """P0-2 可见性修复的核心回归测试: 本地行(item_id=None) + 请求体传
+    datalab_item_id -> 同步后行保持本地身份 -> SqlExperimentStore 可见 ->
+    load_prior_measurements() 能吃到 lab 实测 (优化器消费点)。
+
+    这正是旧实现缺失的断言: 旧测试只断言了 row.measured 回写, 没走 API
+    路径验证 registry 可见性。
+    """
+    import app.services.datalab_sync as dl_mod
+    from app.db.store import SqlExperimentStore
+
+    client = _app_client(tmp_path, monkeypatch)
+    with client:
+        exp_id = _create_experiment(client)  # item_id=None, 本地训练记录
+        envelope = _item_envelope(_MEAS, experiment_id=exp_id)
+        monkeypatch.setattr(
+            dl_mod, "fetch_item_data", lambda *a, **k: envelope["item_data"]
+        )
+        r = client.post(
+            f"/api/experiments/{exp_id}/sync-datalab",
+            json={"datalab_item_id": "test:ABC123"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["synced"] == 1
+    assert body["mirrored"] is True
+    assert body["errors"] == []
+    assert body["datalab_item_id"] == "test:ABC123"
+
+    fac = db_mod.default_session_factory()
+    with fac() as s:
+        row = s.get(ExperimentRow, exp_id)
+        assert row.measured == {"salt_spray_hours": 720.0}
+        assert row.item_id is None  # 不回写绑定, 保持本地训练记录身份
+
+    # API 路径的真实可见性: 优化器经 SqlExperimentStore 看到 lab 数据
+    recs = SqlExperimentStore(fac).all()
+    assert len(recs) == 1
+    assert recs[0].source == "lab"
+    assert recs[0].measured == {"salt_spray_hours": 720.0}
+    assert lab_measurement_source(recs) == "lab"
+
+
+def test_sync_endpoint_body_item_id_empty_string_falls_back(tmp_path, monkeypatch, _fresh_registry):
+    """请求体 datalab_item_id 为空串时回退行上绑定; 两处都没有 -> 409。"""
+    import app.services.datalab_sync as dl_mod
+
+    client = _app_client(tmp_path, monkeypatch)
+    with client:
+        exp_id = _create_experiment(client)
+        _set_item_id(exp_id, "test:ABC123")
+        envelope = _item_envelope(_MEAS, experiment_id=exp_id)
+        monkeypatch.setattr(
+            dl_mod, "fetch_item_data", lambda *a, **k: envelope["item_data"]
+        )
+        r = client.post(
+            f"/api/experiments/{exp_id}/sync-datalab",
+            json={"datalab_item_id": "   "},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["synced"] == 1
 
 
 def test_sync_endpoint_fail_open_when_datalab_down(tmp_path, monkeypatch, _fresh_registry):

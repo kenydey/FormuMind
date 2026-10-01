@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import DocumentChunk
@@ -340,12 +340,21 @@ class ChunkStore:
             return q.all()
 
     def counts(self) -> tuple[int, int]:
-        """(total chunks, chunks with embeddings)."""
+        """(total chunks, chunks with embeddings).
+
+        P0-1 起向量以 ``embedding_blob`` (BLOB) 为主, JSON ``embedding`` 列
+        可能全空 —— 只数 JSON 会误报覆盖率 0%。有任一即算有向量。
+        """
         with self._session_factory() as session:
             total = session.query(func.count(DocumentChunk.id)).scalar() or 0
             embedded = (
                 session.query(func.count(DocumentChunk.id))
-                .filter(DocumentChunk.embedding.isnot(None))
+                .filter(
+                    or_(
+                        DocumentChunk.embedding_blob.isnot(None),
+                        DocumentChunk.embedding.isnot(None),
+                    )
+                )
                 .scalar()
                 or 0
             )
@@ -380,11 +389,19 @@ class ChunkStore:
 
         NULL is not counted — those rows predate the column being populated and
         are judged on dimension alone (see ``kb_index.comparable_embedding``).
+
+        向量载体可能是 ``embedding_blob`` (P0-1 起) 或旧 JSON ``embedding``,
+        有任一即纳入统计, 否则换模型重回填后该计数恒为 0 而误报全量 fresh。
         """
         with self._session_factory() as session:
             return int(
                 session.query(func.count(DocumentChunk.id))
-                .filter(DocumentChunk.embedding.isnot(None))
+                .filter(
+                    or_(
+                        DocumentChunk.embedding_blob.isnot(None),
+                        DocumentChunk.embedding.isnot(None),
+                    )
+                )
                 .filter(DocumentChunk.embedding_model.isnot(None))
                 .filter(DocumentChunk.embedding_model != model_name)
                 .scalar()

@@ -1587,15 +1587,37 @@ def get_doecyle_status(
 # ── P0-2: Datalab -> 优化器手动同步 ──────────────────────────────────────────
 
 
+class SyncDatalabRequest(BaseModel):
+    """POST /experiments/{id}/sync-datalab 请求体。
+
+    ``datalab_item_id``: 本次同步要拉取的 Datalab item。行保持本地训练记录
+    身份 (``item_id`` 不被改写), 因此同步到的 lab 测量对
+    ``SqlExperimentStore`` (只读 ``item_id IS NULL``) 可见, 下一轮 DOE 的
+    ``load_prior_measurements()`` 能吃到 lab 实测。若省略, 则回退使用行上
+    已绑定的 ``item_id`` (若行上也没有 -> 409)。
+    """
+
+    datalab_item_id: str | None = Field(
+        default=None, description="本次同步的 Datalab item id; 省略则用行上绑定的 item_id"
+    )
+
+
 @router.post("/experiments/{experiment_id}/sync-datalab", response_model=Dict[str, Any])
-def sync_experiment_from_datalab(experiment_id: int) -> Dict[str, Any]:
+def sync_experiment_from_datalab(
+    experiment_id: int, body: SyncDatalabRequest | None = None
+) -> Dict[str, Any]:
     """手动触发单个实验的 Datalab -> MeasurementStore 同步 (P0-2)。
 
-    流程: 由 experiment_id 查 ExperimentRow 取 item_id -> 拉取 Datalab
-    ``formumind_measurements`` 块 -> 校验块内 experiment_id 与调用方一致 ->
-    写入 MeasurementStore 明细并回写 ``experiments.measured`` -> 成功后刷新
-    训练 registry, 使下一轮 DOE 的 ``load_prior_measurements()`` 可见,
-    优化器真正吃到 lab 实测。
+    流程: 由 experiment_id 查 ExperimentRow, 取本次同步的 Datalab item_id
+    (请求体 ``datalab_item_id`` 优先, 否则行上绑定的 ``item_id``) -> 拉取
+    Datalab ``formumind_measurements`` 块 -> 校验块内 experiment_id 与调用方
+    一致 -> 写入 MeasurementStore 明细并回写 ``experiments.measured`` ->
+    成功后刷新训练 registry。
+
+    可见性语义: 行的 ``item_id`` 不被改写。本地训练记录
+    (``item_id IS NULL``) 同步后仍对 ``SqlExperimentStore`` 可见, 下一轮
+    DOE 的 ``load_prior_measurements()`` 可见 lab 实测; 已绑定 Datalab 的行
+    仍归 Datalab store 管 (Datalab 可达时 live 读)。
 
     Fail-open: Datalab 不可达返回 ``{"synced": 0, "errors": [...]}`` 而不是
     500; ``validated`` 恒为 None, 真实端到端验证见 scripts/verify_datalab.py。
@@ -1611,12 +1633,15 @@ def sync_experiment_from_datalab(experiment_id: int) -> Dict[str, Any]:
     factory = default_session_factory()
     with factory() as session:
         row = session.get(ExperimentRow, experiment_id)
-        item_id = row.item_id if row else None
+        bound_item_id = row.item_id if row else None
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"experiment {experiment_id} not found",
         )
+    requested = (body.datalab_item_id if body else None) or ""
+    requested = requested.strip()
+    item_id = requested or bound_item_id
     if not item_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1640,16 +1665,9 @@ def sync_experiment_from_datalab(experiment_id: int) -> Dict[str, Any]:
         item_data, experiment_id, item_id=item_id
     )
     if report.get("synced"):
-        try:
-            # 同步成功即确认该 Datalab item 属于本实验: 补上 item_id 绑定,
-            # 使 SqlExperimentStore 过滤语义 (item_id IS NULL) 保持一致。
-            with factory() as session:
-                row = session.get(ExperimentRow, experiment_id)
-                if row is not None and row.item_id != item_id:
-                    row.item_id = item_id
-                    session.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("item_id backfill after datalab sync failed: %s", exc)
+        # 注意: 不回写 row.item_id。行的本地训练记录身份保持不变,
+        # SqlExperimentStore 的 item_id IS NULL 过滤语义不受影响,
+        # 这正是同步到的 lab 数据对优化器可见的前提。
         try:
             registry.load()
             refreshed = True
@@ -1660,4 +1678,5 @@ def sync_experiment_from_datalab(experiment_id: int) -> Dict[str, Any]:
         refreshed = False
     report["registry_refreshed"] = refreshed
     report["experiment_id"] = experiment_id
+    report["datalab_item_id"] = item_id
     return report
