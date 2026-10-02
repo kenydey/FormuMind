@@ -113,12 +113,12 @@ describe("SettingsModal — Wave 0 tab reorganization", () => {
     } as Partial<AppState> as AppState);
   });
 
-  it("renders exactly the four new tabs", () => {
+  it("renders exactly the five new tabs", () => {
     render(<SettingsModal />);
-    for (const id of ["model", "capabilities", "prefs", "advanced"]) {
+    for (const id of ["model", "capabilities", "prefs", "env", "deps"]) {
       expect(screen.getByTestId(`settings-tab-${id}`)).toBeInTheDocument();
     }
-    for (const id of ["llm", "api", "skills", "connectors", "memory", "project", "env", "recommend", "notebooklm", "org", "deps"]) {
+    for (const id of ["llm", "api", "skills", "connectors", "memory", "project", "recommend", "notebooklm", "org", "advanced"]) {
       expect(screen.queryByTestId(`settings-tab-${id}`)).not.toBeInTheDocument();
     }
   });

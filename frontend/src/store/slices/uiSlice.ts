@@ -119,7 +119,7 @@ export function createUiSlice(set: SliceSet, get: SliceGet) {
     setSettingsTab: (tab: string) =>
       set((draft) => {
         draft.settingsTab = normalizeSettingsTab(tab);
-        if (draft.settingsTab !== "advanced") draft.settingsEnvFocusAttr = null;
+        if (draft.settingsTab !== "env") draft.settingsEnvFocusAttr = null;
       }),
 
     orgOpen: false as boolean,

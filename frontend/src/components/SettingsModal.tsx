@@ -179,7 +179,8 @@ export default function SettingsModal() {
           ["model", "模型与 API"],
           ["capabilities", "Skills 与连接"],
           ["prefs", "偏好"],
-          ["advanced", "高级"],
+          ["env", "环境变量"],
+          ["deps", "依赖管理"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -205,9 +206,12 @@ export default function SettingsModal() {
         </div>
       )}
 
-      {settingsTab === "advanced" ? (
+      {settingsTab === "env" ? (
         <div className="space-y-4">
           <EnvFlagsPanel reloadKey={reloadKey} />
+        </div>
+      ) : settingsTab === "deps" ? (
+        <div className="space-y-4">
           <DependencyManager reloadKey={reloadKey} />
         </div>
       ) : settingsTab === "capabilities" ? (

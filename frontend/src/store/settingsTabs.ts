@@ -1,10 +1,11 @@
 /**
  * Wave 0 (round-3): 设置页从 11 tab 收敛到 4 tab。
+ * 2026-10-02: 「高级」拆分为「环境变量」(env) 与「依赖管理」(deps) 两个 tab。
  *
  * 旧 tab id（可能已持久化在用户 localStorage）在这里做一次性映射，
  * 升级后不白屏、不出现空 tab。
  */
-export const SETTINGS_TABS = ["model", "capabilities", "prefs", "advanced"] as const;
+export const SETTINGS_TABS = ["model", "capabilities", "prefs", "env", "deps"] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -16,8 +17,7 @@ const LEGACY_TAB_MAP: Record<string, SettingsTab> = {
   connectors: "capabilities",
   notebooklm: "capabilities",
   recommend: "prefs",
-  env: "advanced",
-  deps: "advanced",
+  advanced: "env",
 };
 
 export function normalizeSettingsTab(id: string | null | undefined): SettingsTab {

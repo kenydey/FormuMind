@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { normalizeSettingsTab, isRelocatedSettingsTab } from "./settingsTabs";
 
 describe("normalizeSettingsTab (Wave 0 legacy mapping)", () => {
-  it("keeps the four new tab ids", () => {
-    for (const id of ["model", "capabilities", "prefs", "advanced"]) {
+  it("keeps the five new tab ids", () => {
+    for (const id of ["model", "capabilities", "prefs", "env", "deps"]) {
       expect(normalizeSettingsTab(id)).toBe(id);
     }
   });
@@ -15,8 +15,7 @@ describe("normalizeSettingsTab (Wave 0 legacy mapping)", () => {
     expect(normalizeSettingsTab("connectors")).toBe("capabilities");
     expect(normalizeSettingsTab("notebooklm")).toBe("capabilities");
     expect(normalizeSettingsTab("recommend")).toBe("prefs");
-    expect(normalizeSettingsTab("env")).toBe("advanced");
-    expect(normalizeSettingsTab("deps")).toBe("advanced");
+    expect(normalizeSettingsTab("advanced")).toBe("env");
   });
 
   it("falls back to model for unknown / empty ids (never a blank tab)", () => {

@@ -132,7 +132,7 @@ describe("HubReportsPlaceholderPane", () => {
     await user.click(screen.getByTestId("hub-reports-open-env-settings"));
     const s = useStore.getState();
     expect(s.settingsOpen).toBe(true);
-    expect(s.settingsTab).toBe("advanced");
+    expect(s.settingsTab).toBe("env");
     // First missing among Wiki/卷宗/Report — dossier is first false in this mock.
     expect(s.settingsEnvFocusAttr).toBe("wiki_project_dossier_enabled");
   });
@@ -228,7 +228,7 @@ describe("HubReportsPlaceholderPane", () => {
     );
     await user.click(screen.getByTestId("hub-reports-error-open-env"));
     expect(useStore.getState().settingsOpen).toBe(true);
-    expect(useStore.getState().settingsTab).toBe("advanced");
+    expect(useStore.getState().settingsTab).toBe("env");
     expect(useStore.getState().settingsEnvFocusAttr).toBe("wiki_dossier_report_enabled");
   });
 
