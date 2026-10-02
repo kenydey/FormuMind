@@ -213,7 +213,18 @@ def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[Le
 
 
 def levers_to_doe_factors(levers: list[LeverSpec]) -> list[DOEFactor]:
-    return [DOEFactor(name=l.name, low=l.low, high=l.high, unit=l.unit) for l in levers]
+    # Up-4A: 透传 kind/levels，离散因子进入生产链。
+    return [
+        DOEFactor(
+            name=l.name,
+            low=l.low,
+            high=l.high,
+            unit=l.unit,
+            kind=l.kind,
+            levels=list(l.levels) if l.levels else None,
+        )
+        for l in levers
+    ]
 
 
 def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]:
@@ -223,7 +234,18 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
     if req and req.levers:
         return [lev.model_dump() for lev in req.levers]
     if plan.factors:
-        return [{"name": f.name, "low": f.low, "high": f.high, "unit": f.unit} for f in plan.factors]
+        # Up-4A: 快照带 kind/levels，离散因子 round-trip 不丢失。
+        return [
+            {
+                "name": f.name,
+                "low": f.low,
+                "high": f.high,
+                "unit": f.unit,
+                "kind": getattr(f, "kind", "continuous"),
+                "levels": list(f.levels) if getattr(f, "levels", None) else None,
+            }
+            for f in plan.factors
+        ]
 
     domain = plan.domain or (req.domain if req else ProductDomain.anticorrosion_coating)
     if req:

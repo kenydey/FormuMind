@@ -805,6 +805,17 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     recalled = store.query(retrieval_query, k=candidates_n) or sources[:candidates_n]
     relevant = recalled[: settings.chat_rerank_top_k]
 
+    # Up-3: 主路径接入 query 压缩（fail-open；压缩后 prompt 与 plan["relevant"]
+    # 同序，Fix-1 的 [^n] 对齐不受影响）。
+    if getattr(settings, "query_compress_enabled", True) and relevant:
+        try:
+            from ..services.query_aware_compression import compress_evidence
+
+            budget = max(1000, int(getattr(settings, "chat_context_max_chars", 12000) or 12000))
+            relevant = compress_evidence(question, relevant, token_budget=budget)
+        except Exception as exc:  # noqa: BLE001 - fail-open
+            logger.debug("stream query compression skipped: %s", exc)
+
     prompt = _chat_prompt(
         question, relevant, req.domain, history=history, structure=req.structure
     )

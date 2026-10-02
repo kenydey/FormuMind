@@ -263,6 +263,64 @@ def list_sources(
     )
 
 
+class KBExtractionTableItem(BaseModel):
+    id: str
+    page_no: int | None = None
+    bbox: list | None = None
+    caption: str | None = None
+    markdown_text: str = ""
+    n_rows: int | None = None
+    n_cols: int | None = None
+
+
+class KBExtractionFormulaItem(BaseModel):
+    id: str
+    page_no: int | None = None
+    bbox: list | None = None
+    latex: str = ""
+    formula_no: str | None = None
+
+
+@router.get("/sources/{source_id}/tables", response_model=list[KBExtractionTableItem])
+def source_tables(source_id: str):
+    """Up-5A: 该来源抽取的表格（MinerU 结构化解析写入；bbox 待真实样本验证）。"""
+    from ..db.database import default_session_factory
+    from ..db.extraction_store import ExtractionStore
+
+    rows = ExtractionStore(default_session_factory()).tables_for_source(source_id)
+    return [
+        KBExtractionTableItem(
+            id=r.id,
+            page_no=r.page_no,
+            bbox=r.bbox,
+            caption=r.caption,
+            markdown_text=r.markdown_text or "",
+            n_rows=r.n_rows,
+            n_cols=r.n_cols,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/sources/{source_id}/formulas", response_model=list[KBExtractionFormulaItem])
+def source_formulas(source_id: str):
+    """Up-5A: 该来源抽取的公式（MinerU MFR 写入；bbox 待真实样本验证）。"""
+    from ..db.database import default_session_factory
+    from ..db.extraction_store import ExtractionStore
+
+    rows = ExtractionStore(default_session_factory()).formulas_for_source(source_id)
+    return [
+        KBExtractionFormulaItem(
+            id=r.id,
+            page_no=r.page_no,
+            bbox=r.bbox,
+            latex=r.latex or "",
+            formula_no=r.formula_no,
+        )
+        for r in rows
+    ]
+
+
 class KBSourceArchiveRequest(BaseModel):
     archived: bool = True
 

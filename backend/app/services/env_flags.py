@@ -203,6 +203,23 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "PDF 表格抽取为 TableAsset（recipe/performance/tds_sds 分类，caption 归属）；"
             "sidecar JSON 持久化，不改 DB 结构。",
             "kb"),
+    # ── Up-1：KB/检索关键开关进 UI（原只能改 .env）─────────────────────
+    EnvFlag("kb_children_retrieval_enabled", "子块检索（children）",
+            "句级子块打分、父块呈现；C-7 真实语料 A/B 阴性（0.900 vs 0.900），默认关闭。",
+            "retrieval", maturity="beta"),
+    EnvFlag("kb_patent_stitch_enabled", "同专利串联（patent stitch）",
+            "命中 chunk 携带 patent_tags（claim_no/example_no）时，把同专利的兄弟 chunk "
+            "并入上下文；零 LLM 成本。",
+            "retrieval"),
+    EnvFlag("kb_dedup_exact_enabled", "精确去重（L1）",
+            "入库时按（文本+provenance）键去重，默认开启。",
+            "kb"),
+    EnvFlag("kb_near_dedup_enabled", "近重复去重（L2）",
+            "入库时按向量 cosine>阈值去重；默认关闭（审计模式开），阈值见 kb_near_dedup_threshold。",
+            "kb", maturity="beta"),
+    EnvFlag("kb_ann_enabled", "向量 ANN 索引（faiss）",
+            "关闭则向量半区退化为暴力检索（现已读 embedding_blob，可用但慢）。",
+            "kb"),
     EnvFlag("agent_memory_enabled", "Agent 记忆系统",
             "跨会话长期记忆（全局/项目/about-you），FTS5+bm25 自动召回（6000 字符预算）；"
             "写入门控拒绝密钥与 prompt 注入。",
@@ -501,6 +518,47 @@ def list_env_flags() -> list[dict]:
                 "hint": flag.hint,
                 "maturity": getattr(flag, "maturity", None) or "stable",
                 "value": bool(getattr(settings, flag.attr)),
+                "default": default,
+            }
+        )
+    return out
+
+
+# ── Up-1：数值型参数只读展示（bool 注册表不支持数值，编辑仍走 .env）───
+ENV_VARS: tuple[dict, ...] = (
+    {
+        "attr": "kb_search_scan_limit",
+        "label": "检索扫描上限",
+        "description": "BM25 半区每次检索扫描的最大 chunk 数（faiss 向量半区不受此限）；"
+        "语料增大后此为实际天花板。",
+        "category": "kb",
+    },
+    {
+        "attr": "kb_hybrid_alpha",
+        "label": "Hybrid 权重 α",
+        "description": "BM25+向量 hybrid 融合权重（0=纯 BM25，1=纯向量）；推荐/研究融合探针共享此值。",
+        "category": "retrieval",
+    },
+)
+
+
+def list_env_vars() -> list[dict]:
+    """Current effective value + default for read-only numeric settings."""
+    settings = get_settings()
+    out: list[dict] = []
+    for var in ENV_VARS:
+        attr = var["attr"]
+        field = Settings.model_fields.get(attr)
+        default = field.default if field is not None else None
+        out.append(
+            {
+                "attr": attr,
+                "env_key": f"FORMUMIND_{attr.upper()}",
+                "label": var["label"],
+                "description": var["description"],
+                "category": var["category"],
+                "category_label": CATEGORY_LABELS.get(var["category"], var["category"]),
+                "value": getattr(settings, attr, None),
                 "default": default,
             }
         )

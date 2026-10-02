@@ -88,6 +88,9 @@ def suggest_factors(req: Requirement) -> list[FactorCandidate]:
                 low=lo,
                 high=hi,
                 unit=f.unit or "wt%",
+                # Up-4A: 透传 kind/levels，suggest 结果可直接用于离散 DOE。
+                kind=f.kind,
+                levels=list(f.levels) if f.levels else None,
                 rationale="; ".join(rationale_parts[:4]),
                 evidence_ids=evidence_ids[:6],
                 source=source_tag,

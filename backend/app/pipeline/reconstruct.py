@@ -40,7 +40,13 @@ def formulation_from_factors(
     for ing in base.ingredients:
         new = ing.model_copy(deep=True)
         if new.name in overrides and not is_process_lever(new.name):
-            raw = float(overrides[new.name])
+            # B-DOE-3: 离散因子的 natural 值可能是字符串水平（如材料种类），
+            # 不是重量——跳过 weight 覆盖，不做 float() 猜测。
+            try:
+                raw = float(overrides[new.name])
+            except (TypeError, ValueError):
+                ings.append(new)
+                continue
             unit = unit_map.get(new.name, "wt%")
             if unit == "g/L":
                 raw *= _G_PER_L_TO_WT_PCT

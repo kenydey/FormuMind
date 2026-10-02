@@ -25,6 +25,9 @@ export interface LeverSpec {
   low: number;
   high: number;
   unit?: string;
+  /** Up-4A: 离散因子 */
+  kind?: string;
+  levels?: Array<number | string> | null;
 }
 
 export interface MaterialSpec {
@@ -872,6 +875,9 @@ export interface FactorCandidate {
   low: number;
   high: number;
   unit: string;
+  /** Up-4A: 离散因子 */
+  kind?: string;
+  levels?: Array<number | string> | null;
   rationale: string;
   evidence_ids: string[];
   source: string;
@@ -1814,6 +1820,38 @@ export interface EnvFlag {
   default: boolean;
   /** Batch E: stable | beta | experimental | disabled */
   maturity?: string;
+}
+
+/** 数值型参数（Up-1）：只读展示，编辑仍走 .env */
+export interface EnvVar {
+  attr: string;
+  env_key: string;
+  label: string;
+  description: string;
+  category: string;
+  category_label: string;
+  value: number | null;
+  default: number | null;
+}
+
+/** Up-5A: extraction_tables 行 */
+export interface KBExtractionTable {
+  id: string;
+  page_no: number | null;
+  bbox: number[] | null;
+  caption: string | null;
+  markdown_text: string;
+  n_rows: number | null;
+  n_cols: number | null;
+}
+
+/** Up-5A: extraction_formulas 行 */
+export interface KBExtractionFormula {
+  id: string;
+  page_no: number | null;
+  bbox: number[] | null;
+  latex: string;
+  formula_no: string | null;
 }
 
 /** Batch D: GET /api/kb/quality-ops */

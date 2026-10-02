@@ -127,7 +127,7 @@ export default function DoeResultsPanel() {
     doeEngine, alEngine, setDoeEngine, setAlEngine, lastAlEngine, campaignState,
     workbenchCampaignId, workbenchStats, workbenchAdoptedPlanId, optimizationHistory, setOpenModal,
     runNextRoundDoe, runDoeCycle, adoptDoePlanToWorkbench, adaptiveDoe,
-    taskThinking, openArtifact, pendingDoeDesign,
+    taskThinking, openArtifact, pendingDoeDesign, setLevers,
   } = useStore(
     useShallow((s) => ({
       requirement: s.requirement,
@@ -159,6 +159,7 @@ export default function DoeResultsPanel() {
       taskThinking: s.taskThinking,
       openArtifact: s.openArtifact,
       pendingDoeDesign: s.pendingDoeDesign,
+      setLevers: s.setLevers,
     }))
   );
 
@@ -204,6 +205,21 @@ export default function DoeResultsPanel() {
     } finally {
       setFactorBusy(false);
     }
+  }
+
+  // Up-4A: 把 AI 建议因子写入需求 levers（含 kind/levels，离散因子可落地）
+  function applyFactorHints() {
+    if (!factorHints || factorHints.length === 0) return;
+    const levers = factorHints.map((f) => ({
+      name: f.name,
+      low: f.low,
+      high: f.high,
+      unit: f.unit || "wt%",
+      ...(f.kind === "discrete" && f.levels && f.levels.length >= 2
+        ? { kind: "discrete", levels: f.levels }
+        : {}),
+    }));
+    setLevers(levers);
   }
 
   const optChartData = optimizationHistory.map((v, i) => ({ iter: i + 1, score: v }));
@@ -331,12 +347,31 @@ export default function DoeResultsPanel() {
               )}
               {factorHints && factorHints.length > 0 && (
                 <div className="rounded border border-teal-500/30 bg-teal-500/5 p-2 text-[11px] text-slate-300">
-                  <div className="text-teal-300/90 mb-1 font-medium">KB + 需求 levers 因子建议</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-teal-300/90 font-medium">KB + 需求 levers 因子建议</div>
+                    <button
+                      type="button"
+                      onClick={applyFactorHints}
+                      className="text-[10px] border border-teal-500/50 text-teal-300 rounded px-2 py-0.5 hover:bg-teal-500/10"
+                      title="把建议因子写入需求 levers（离散因子含水平）"
+                    >
+                      应用到 levers
+                    </button>
+                  </div>
                   <ul className="space-y-1 max-h-32 overflow-y-auto">
                     {factorHints.map((f) => (
                       <li key={f.name}>
                         <span className="font-mono text-accent2">{f.name}</span>{" "}
-                        [{f.low}–{f.high} {f.unit}] — {f.rationale.slice(0, 120)}
+                        {f.kind === "discrete" && f.levels ? (
+                          <span className="text-amber-300/90">
+                            [离散: {f.levels.join(", ")}]
+                          </span>
+                        ) : (
+                          <span>
+                            [{f.low}–{f.high} {f.unit}]
+                          </span>
+                        )}{" "}
+                        — {f.rationale.slice(0, 120)}
                       </li>
                     ))}
                   </ul>
@@ -526,12 +561,31 @@ export default function DoeResultsPanel() {
           )}
           {factorHints && factorHints.length > 0 && (
             <div className="mb-3 rounded border border-teal-500/30 bg-teal-500/5 p-2 text-[11px] text-slate-300">
-              <div className="text-teal-300/90 mb-1 font-medium">KB + 需求 levers 因子建议</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-teal-300/90 font-medium">KB + 需求 levers 因子建议</div>
+                <button
+                  type="button"
+                  onClick={applyFactorHints}
+                  className="text-[10px] border border-teal-500/50 text-teal-300 rounded px-2 py-0.5 hover:bg-teal-500/10"
+                  title="把建议因子写入需求 levers（离散因子含水平）"
+                >
+                  应用到 levers
+                </button>
+              </div>
               <ul className="space-y-1 max-h-32 overflow-y-auto">
                 {factorHints.map((f) => (
                   <li key={f.name}>
                     <span className="font-mono text-accent2">{f.name}</span>{" "}
-                    [{f.low}–{f.high} {f.unit}] — {f.rationale.slice(0, 120)}
+                    {f.kind === "discrete" && f.levels ? (
+                      <span className="text-amber-300/90">
+                        [离散: {f.levels.join(", ")}]
+                      </span>
+                    ) : (
+                      <span>
+                        [{f.low}–{f.high} {f.unit}]
+                      </span>
+                    )}{" "}
+                    — {f.rationale.slice(0, 120)}
                   </li>
                 ))}
               </ul>

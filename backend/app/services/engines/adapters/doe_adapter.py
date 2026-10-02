@@ -111,14 +111,30 @@ def dataframe_to_doe_plan(
 ) -> DOEPlan:
     """Map a baybe recommend() DataFrame to DOEPlan."""
     rows = []
-    factor_names = [f.name for f in factors]
     for idx, (_, row) in enumerate(df.iterrows(), start=1):
-        natural = {name: round(float(row[name]), 4) for name in factor_names if name in row}
-        coded = {}
+        # B-DOE-3: 离散因子（C-4a）的 natural 值可能是字符串水平，
+        # 不能无条件 float()。coded 按水平索引归一化。
+        natural: dict = {}
+        coded: dict = {}
         for f in factors:
-            if f.name in natural:
-                unit = (natural[f.name] - f.low) / (f.high - f.low) if f.high > f.low else 0.5
-                coded[f.name] = unit_to_coded(float(np.clip(unit, 0.0, 1.0)))
+            if f.name not in row:
+                continue
+            raw = row[f.name]
+            if f.kind == "discrete":
+                natural[f.name] = raw
+                levels = list(f.levels or [])
+                if raw in levels and len(levels) > 1:
+                    unit = levels.index(raw) / (len(levels) - 1)
+                else:
+                    unit = 0.5
+            else:
+                natural[f.name] = round(float(raw), 4)
+                unit = (
+                    (natural[f.name] - f.low) / (f.high - f.low)
+                    if f.high > f.low
+                    else 0.5
+                )
+            coded[f.name] = unit_to_coded(float(np.clip(unit, 0.0, 1.0)))
         rows.append(
             DOERun(
                 run_id=idx,

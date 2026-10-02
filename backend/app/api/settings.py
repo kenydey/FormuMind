@@ -288,9 +288,9 @@ def post_secret_test(body: SecretTestRequest):
 
 @router.get("/settings/env-flags")
 def get_env_flags():
-    from ..services.env_flags import list_env_flags
+    from ..services.env_flags import list_env_flags, list_env_vars
 
-    return {"flags": list_env_flags()}
+    return {"flags": list_env_flags(), "vars": list_env_vars()}
 
 
 class ParseProfileRequest(BaseModel):

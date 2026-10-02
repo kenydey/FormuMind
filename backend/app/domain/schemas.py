@@ -82,6 +82,14 @@ class LeverSpec(BaseModel):
     low: float
     high: float
     unit: str = "wt%"
+    # Up-4A: discrete factor support (C-4a machinery now has a production entry).
+    kind: str = "continuous"
+    levels: list[float | str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_kind_levels(self) -> "LeverSpec":
+        _validate_factor_kind_levels(self.kind, self.levels, self.name)
+        return self
 
 
 class MaterialSpec(BaseModel):

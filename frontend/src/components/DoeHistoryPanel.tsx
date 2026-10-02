@@ -9,9 +9,17 @@ export type DoeHistoryItem = {
   notes?: string;
   campaign_id?: number | null;
   round?: number | null;
+  status?: string;
   created_at?: string | null;
   runs?: unknown[];
   factors?: unknown[];
+};
+
+const DOE_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  active: "执行中",
+  completed: "已完成",
+  aborted: "已终止",
 };
 
 /**
@@ -27,6 +35,29 @@ export default function DoeHistoryPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<"campaign" | "all">("campaign");
+  const [acting, setActing] = useState<string | null>(null);
+
+  async function onTransition(planId: string, action: "activate" | "complete" | "abort") {
+    if (!planId || acting) return;
+    let reason = "";
+    if (action === "abort") {
+      const input = window.prompt("终止原因（可空）：");
+      if (input === null) return; // 用户取消
+      reason = input;
+    }
+    setActing(planId);
+    setError(null);
+    try {
+      if (action === "activate") await api.activateDoePlan(planId);
+      else if (action === "complete") await api.completeDoePlan(planId);
+      else await api.abortDoePlan(planId, reason);
+      await load();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setActing(null);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,6 +155,19 @@ export default function DoeHistoryPanel() {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-slate-300">
                     <span className="font-mono text-accent2">{it.design || "—"}</span>
                     {it.round != null && <span className="text-slate-500">R{it.round}</span>}
+                    <span
+                      className={`text-[10px] px-1.5 py-px rounded border ${
+                        it.status === "active"
+                          ? "border-emerald-500/40 text-emerald-300"
+                          : it.status === "completed"
+                            ? "border-slate-500/40 text-slate-400"
+                            : it.status === "aborted"
+                              ? "border-rose-500/40 text-rose-300"
+                              : "border-edge text-slate-500"
+                      }`}
+                    >
+                      {DOE_STATUS_LABEL[it.status ?? "draft"] ?? it.status ?? "草稿"}
+                    </span>
                     <span className="text-slate-500">
                       {(Array.isArray(it.runs) ? it.runs.length : 0)} runs
                     </span>
@@ -136,6 +180,38 @@ export default function DoeHistoryPanel() {
                   {it.notes && (
                     <div className="text-slate-500 truncate mt-0.5" title={it.notes}>
                       {it.notes}
+                    </div>
+                  )}
+                  {it.plan_id && (it.status ?? "draft") !== "completed" && (it.status ?? "draft") !== "aborted" && (
+                    <div className="flex gap-1.5 mt-1">
+                      {(it.status ?? "draft") === "draft" && (
+                        <button
+                          type="button"
+                          disabled={acting === it.plan_id}
+                          onClick={() => void onTransition(it.plan_id!, "activate")}
+                          className="text-[10px] px-2 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10 disabled:opacity-40"
+                        >
+                          {acting === it.plan_id ? "处理中…" : "启动执行"}
+                        </button>
+                      )}
+                      {(it.status ?? "draft") === "active" && (
+                        <button
+                          type="button"
+                          disabled={acting === it.plan_id}
+                          onClick={() => void onTransition(it.plan_id!, "complete")}
+                          className="text-[10px] px-2 py-0.5 rounded border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40"
+                        >
+                          {acting === it.plan_id ? "处理中…" : "标记完成"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={acting === it.plan_id}
+                        onClick={() => void onTransition(it.plan_id!, "abort")}
+                        className="text-[10px] px-2 py-0.5 rounded border border-edge text-slate-500 hover:text-rose-300 hover:border-rose-500/40 disabled:opacity-40"
+                      >
+                        终止
+                      </button>
                     </div>
                   )}
                 </li>

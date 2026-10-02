@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import Modal from "./Modal";
 import TableBadges from "./TableBadges";
+import ExtractionTablesPanel from "./ExtractionTablesPanel";
 import "./CitationRenderer.css"; // W3-14: 复用 citation-flash 高亮动画
 import { api, type KbChunk } from "../api";
 
@@ -26,6 +27,8 @@ export default function SourceDetailModal({
   const [linking, setLinking] = useState(false);
   const [linkReport, setLinkReport] = useState<string | null>(null);
   const [flashIdx, setFlashIdx] = useState<number | null>(null);
+  /** Up-5A: 切块 / 结构化表格公式 页签 */
+  const [detailTab, setDetailTab] = useState<"chunks" | "structured">("chunks");
   /** P-6: 切块客户端分页（后端 by-source 接口无分页参数）——600+ chunk 时防全量 DOM。 */
   const CHUNK_PAGE_SIZE = 50;
   const [page, setPage] = useState(0);
@@ -132,7 +135,32 @@ export default function SourceDetailModal({
         {error && <div className="text-xs text-rose-400 bg-rose-500/10 rounded p-2">{error}</div>}
         {/* W3-7: 表格抽取 badge（kind 标签 + 行列预览） */}
         <TableBadges sourceId={sourceId} />
-        {busy ? (
+        {/* Up-5A: 切块 / 结构化表格公式 页签 */}
+        <div className="flex gap-1 border-b border-edge">
+          {(
+            [
+              ["chunks", "切块"],
+              ["structured", "表格与公式"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              data-testid={`source-detail-tab-${id}`}
+              onClick={() => setDetailTab(id)}
+              className={`text-xs px-3 py-1.5 -mb-px border-b-2 transition-colors ${
+                detailTab === id
+                  ? "border-accent text-accent"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {detailTab === "structured" ? (
+          <ExtractionTablesPanel sourceId={sourceId} />
+        ) : busy ? (
           <div className="text-xs text-slate-500 py-8 text-center">切块加载中…</div>
         ) : chunks && chunks.length > 0 ? (
           <div>

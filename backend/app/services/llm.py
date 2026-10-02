@@ -1909,6 +1909,15 @@ def answer_question(
             return pq
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
+    # Up-3: 主路径接入 query 压缩（fail-open；返回的 relevant 与 prompt 同序）。
+    if getattr(settings, "query_compress_enabled", True) and relevant:
+        try:
+            from .query_aware_compression import compress_evidence
+
+            budget = max(1000, int(getattr(settings, "chat_context_max_chars", 12000) or 12000))
+            relevant = compress_evidence(question, relevant, token_budget=budget)
+        except Exception as exc:  # noqa: BLE001 - fail-open
+            log.debug("answer_question query compression skipped: %s", exc)
     prompt = _chat_prompt(question, relevant, domain, history=history, structure=structure)
     if prompt_prefix and str(prompt_prefix).strip():
         prompt = f"{str(prompt_prefix).strip()}\n\n---\n\n{prompt}"

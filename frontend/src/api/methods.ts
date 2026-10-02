@@ -29,6 +29,9 @@ import type {
   EmbodimentDraft,
   EmbodimentEligibilityItem,
   EnvFlag,
+  EnvVar,
+  KBExtractionFormula,
+  KBExtractionTable,
   Evidence,
   ExperimentRecord,
   ExperimentSearchHit,
@@ -247,6 +250,22 @@ export const apiMethods = {
     get<{ items: Record<string, unknown>[]; total: number; page: number; page_size: number }>(
       `/api/doe/history?project_id=${encodeURIComponent(opts.projectId ?? "")}&page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 20}` +
         (opts.campaignId != null ? `&campaign_id=${opts.campaignId}` : "")
+    ),
+  // Up-2: doe_plans 生命周期（C-4b 后端已就绪，前端接线）
+  activateDoePlan: (planId: string) =>
+    post<{ plan_id: string; status: string }>(`/api/doe/${encodeURIComponent(planId)}/activate`, {}),
+  completeDoePlan: (planId: string) =>
+    post<{ plan_id: string; status: string }>(`/api/doe/${encodeURIComponent(planId)}/complete`, {}),
+  abortDoePlan: (planId: string, reason = "") =>
+    post<{ plan_id: string; status: string; reason?: string }>(
+      `/api/doe/${encodeURIComponent(planId)}/abort`,
+      { reason }
+    ),
+  // Up-2: Datalab 手动同步（P0-2 后端已就绪；Datalab 不可达时后端 fail-open）
+  syncExperimentFromDatalab: (experimentId: number | string, datalabItemId?: string | null) =>
+    post<Record<string, unknown>>(
+      `/api/experiments/${encodeURIComponent(String(experimentId))}/sync-datalab`,
+      datalabItemId ? { datalab_item_id: datalabItemId } : {}
     ),
   startDoeCycle: (req: Requirement, opts: { workbench_campaign_id?: number | null } = {}) =>
     postAccepted("/api/doe/cycle", {
@@ -2131,7 +2150,8 @@ export const apiMethods = {
     return get<WikiPageGraphResponse>(`/api/wiki/graph${qs ? `?${qs}` : ""}`);
   },
 
-  getEnvFlags: () => get<{ flags: EnvFlag[] }>("/api/settings/env-flags"),
+  getEnvFlags: () =>
+    get<{ flags: EnvFlag[]; vars?: EnvVar[] }>("/api/settings/env-flags"),
 
   postEnvFlags: (updates: Record<string, boolean>) =>
     post<{ updated: string[]; rejected: string[]; flags: EnvFlag[] }>(
@@ -2340,6 +2360,14 @@ export const apiMethods = {
   /** W3-7: table assets extracted from a source (kind badge + row preview). */
   getSourceTables: (sourceId: string) =>
     get<SourceTablesResponse>(`/api/sources/${encodeURIComponent(sourceId)}/tables`),
+
+  /** Up-5A: MinerU 结构化抽取的表格（extraction_tables，只读）。 */
+  getSourceExtractionTables: (sourceId: string) =>
+    get<KBExtractionTable[]>(`/api/kb/sources/${encodeURIComponent(sourceId)}/tables`),
+
+  /** Up-5A: MinerU 结构化抽取的公式（extraction_formulas，只读）。 */
+  getSourceExtractionFormulas: (sourceId: string) =>
+    get<KBExtractionFormula[]>(`/api/kb/sources/${encodeURIComponent(sourceId)}/formulas`),
 
   /** W3-9: fetch a session plan by id. */
   getSessionPlan: (planId: string) =>

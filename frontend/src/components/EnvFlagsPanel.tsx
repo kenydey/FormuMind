@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, formatApiError, type EnvFlag } from "../api";
+import { api, formatApiError, type EnvFlag, type EnvVar } from "../api";
 import { useStore } from "../store";
 
 /** True/False toggle for one FORMUMIND_* environment variable. */
@@ -89,6 +89,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
   const clearSettingsEnvFocus = useStore((s) => s.clearSettingsEnvFocus);
   const bumpEnvFlagsRevision = useStore((s) => s.bumpEnvFlagsRevision);
   const [flags, setFlags] = useState<EnvFlag[]>([]);
+  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -101,6 +102,7 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
     try {
       const r = await api.getEnvFlags();
       setFlags(r.flags ?? []);
+      setEnvVars(r.vars ?? []);
       setDrafts(Object.fromEntries((r.flags ?? []).map((f) => [f.attr, f.value])));
     } catch (e) {
       setFlags([]);
@@ -209,6 +211,37 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
           </div>
         ))}
       </div>
+
+      {envVars.length > 0 && (
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1.5">
+            数值参数 · 只读
+          </div>
+          <div className="space-y-1.5">
+            {envVars.map((v) => (
+              <div
+                key={v.attr}
+                className="flex items-start justify-between gap-3 rounded border border-edge px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="text-xs text-slate-200">{v.label}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">{v.description}</div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">
+                    <code className="text-slate-500">{v.env_key}</code>
+                    <span className="text-slate-600">（改 .env 后重启生效）</span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm text-slate-100 tabular-nums">
+                    {v.value ?? "—"}
+                  </div>
+                  <div className="text-[11px] text-slate-500">默认 {v.default ?? "—"}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between pt-1">
         <button

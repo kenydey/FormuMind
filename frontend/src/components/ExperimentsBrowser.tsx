@@ -48,6 +48,34 @@ export default function ExperimentsBrowser({
   const [searchHits, setSearchHits] = useState<ExperimentSearchHit[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
+  // Up-2: Datalab 手动同步
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  async function onSyncDatalab() {
+    if (!selected || syncBusy) return;
+    setSyncBusy(true);
+    setSyncMsg(null);
+    setDetailError(null);
+    try {
+      const r = (await api.syncExperimentFromDatalab(selected.id)) as {
+        synced?: number;
+        errors?: unknown[];
+      };
+      const n = r.synced ?? 0;
+      const errs = Array.isArray(r.errors) ? r.errors.length : 0;
+      if (n === 0 && errs > 0) {
+        setSyncMsg("Datalab 不可达，已跳过（fail-open），本地数据未动。");
+      } else {
+        setSyncMsg(`同步完成：${n} 条测量已回写${errs ? `，${errs} 项失败` : ""}。`);
+      }
+    } catch (e) {
+      setDetailError(formatApiError(e));
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -299,10 +327,27 @@ export default function ExperimentsBrowser({
 
       {selected && (
         <div className="border border-edge rounded-lg p-3 bg-ink/40 space-y-3">
-          <h4 className="text-xs uppercase tracking-widest text-accent2">
-            实验 #{selected.id} · 实测摘要
-            {detailBusy && <span className="ml-2 normal-case text-slate-500">加载中…</span>}
-          </h4>
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-xs uppercase tracking-widest text-accent2">
+              实验 #{selected.id} · 实测摘要
+              {detailBusy && <span className="ml-2 normal-case text-slate-500">加载中…</span>}
+            </h4>
+            <button
+              type="button"
+              onClick={() => void onSyncDatalab()}
+              disabled={syncBusy}
+              data-testid="experiments-sync-datalab"
+              title="从 Datalab 拉取该实验的测量数据并回写（Datalab 不可达时跳过）"
+              className="text-[11px] px-2.5 py-1 rounded border border-accent/50 text-accent hover:bg-accent/10 disabled:opacity-40"
+            >
+              {syncBusy ? "同步中…" : "从 Datalab 同步"}
+            </button>
+          </div>
+          {syncMsg && (
+            <p className="text-[11px] text-emerald-300/90 border border-emerald-500/30 bg-emerald-500/10 rounded px-2 py-1">
+              {syncMsg}
+            </p>
+          )}
 
           {detailError && (
             <p className="text-[11px] text-rose-400 border border-rose-500/30 bg-rose-500/10 rounded px-2 py-1">
