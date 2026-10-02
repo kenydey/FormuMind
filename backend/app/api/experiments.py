@@ -1634,6 +1634,9 @@ def sync_experiment_from_datalab(
     with factory() as session:
         row = session.get(ExperimentRow, experiment_id)
         bound_item_id = row.item_id if row else None
+        # U-4: 强成功层关联需要的快照（session 关闭后 row 即 detached）。
+        exp_project_id = (row.project_id or None) if row else None
+        exp_factors = dict(row.factors or {}) if row else {}
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1679,4 +1682,25 @@ def sync_experiment_from_datalab(
     report["registry_refreshed"] = refreshed
     report["experiment_id"] = experiment_id
     report["datalab_item_id"] = item_id
+    # U-4: 强成功层回写 —— 同步出 lab 测量后，启发式关联被采纳的推荐配方。
+    # fail-open：关联不上是正常情况，绝不影响同步结果本身。
+    if report.get("synced"):
+        try:
+            from ..db import recommend_outcome_store
+            from ..db.session_utils import commit_session
+
+            with factory() as vsession:
+                vrow = vsession.get(ExperimentRow, experiment_id)
+                measured_keys = list((vrow.measured or {}).keys()) if vrow else []
+            with commit_session(factory) as vsession:
+                validated_rid = recommend_outcome_store.try_mark_experiment_validated(
+                    vsession,
+                    project_id=exp_project_id,
+                    factors=exp_factors,
+                    experiment_id=experiment_id,
+                    measured_keys=measured_keys,
+                )
+            report["recommend_validated"] = validated_rid
+        except Exception as exc:  # noqa: BLE001 - fail-open
+            logger.warning("U-4 experiment validation write skipped: %s", exc)
     return report

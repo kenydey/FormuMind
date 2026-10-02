@@ -85,6 +85,9 @@ class LeverSpec(BaseModel):
     # Up-4A: discrete factor support (C-4a machinery now has a production entry).
     kind: str = "continuous"
     levels: list[float | str] | None = None
+    # U-5: 离散材料替换语义 —— 字符串水平 → 目标成分名的映射
+    # (如 {"树脂B": "聚氨酯树脂X"})。None 表示无替换语义（保持 B-DOE-3 跳过）。
+    material_map: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def _validate_kind_levels(self) -> "LeverSpec":

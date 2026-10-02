@@ -28,6 +28,8 @@ export interface LeverSpec {
   /** Up-4A: 离散因子 */
   kind?: string;
   levels?: Array<number | string> | null;
+  /** U-5: 离散材料替换语义 —— 水平值 → 目标成分名（可选） */
+  material_map?: Record<string, string> | null;
 }
 
 export interface MaterialSpec {

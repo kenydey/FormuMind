@@ -35,12 +35,27 @@ function ExportMenu({ form }: { form: Formulation }) {
   const [copied, setCopied] = useState(false);
   const [shelfMsg, setShelfMsg] = useState<string | null>(null);
   const activeProjectId = useStore((s) => s.activeProjectId);
+  // U-4: 复制即弱信号（copied），fail-open。
+  const recommendId = useStore((s) => s.lastRecommendId);
 
   const onCopy = async () => {
     await copyFormulaJson(form);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
     setOpen(false);
+    if (recommendId) {
+      api
+        .adoptRecommendation(recommendId, {
+          adopt_signal: "copied",
+          formula_snapshot: {
+            name: form.name,
+            ingredients: form.ingredients,
+            score: form.score ?? null,
+          },
+          project_id: activeProjectId ?? undefined,
+        })
+        .catch(() => {});
+    }
   };
 
   const onShelf = async (kind: "json" | "csv") => {
@@ -155,13 +170,15 @@ function FormulaCard({
   const [adoptBusy, setAdoptBusy] = useState(false);
   const [adopted, setAdopted] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  // U-4: 强成功层 —— 该配方是否已有 lab 测量回灌验证。
+  const [experimentValidated, setExperimentValidated] = useState(false);
 
   async function adoptFormula() {
     if (!recommendId || adoptBusy || adopted) return;
     setAdoptBusy(true);
     setAdoptError(null);
     try {
-      await api.adoptRecommendation(recommendId, {
+      const res = await api.adoptRecommendation(recommendId, {
         adopt_signal: "button",
         formula_index: formulaIdx,
         formula_snapshot: {
@@ -172,6 +189,7 @@ function FormulaCard({
         project_id: activeProjectId ?? undefined,
       });
       setAdopted(true);
+      setExperimentValidated(res.experiment_validated === true);
     } catch (e) {
       setAdoptError(e instanceof Error ? e.message : "采纳失败");
     } finally {
@@ -443,7 +461,13 @@ function FormulaCard({
                 }`}
                 title="标记采纳该配方（推荐质量抽检埋点）"
               >
-                {adopted ? "✓ 已采纳" : adoptBusy ? "采纳中…" : "👍 采纳"}
+                {adopted
+                  ? experimentValidated
+                    ? "✓✓ 已采纳·已验证"
+                    : "✓ 已采纳"
+                  : adoptBusy
+                    ? "采纳中…"
+                    : "👍 采纳"}
               </button>
             )}
           </div>

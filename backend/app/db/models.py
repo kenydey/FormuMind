@@ -922,10 +922,10 @@ class KbCoverageCounter(Base):
 class RecommendOutcomeRow(Base):
     """C-8 (Phase C): adopt-signal telemetry for formulation recommendations.
 
-    Weak-success layer (user adoption). The strong-success layer (experiment
-    validation via ``measurement_store``) is pending C-5 — the ``validated``
-    concept lives only in the ops stats response (always null for now), never
-    in this table.
+    Weak-success layer (user adoption). Strong-success layer (experiment
+    validation): U-4 marks ``experiment_validated`` when a synced lab
+    measurement heuristically matches the adopted formula's ingredients
+    (see ``recommend_outcome_store.try_mark_experiment_validated``).
     """
 
     __tablename__ = "recommend_outcomes"
@@ -947,6 +947,12 @@ class RecommendOutcomeRow(Base):
     formula_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     # Reserved: component fingerprint for later measurement correlation (C-5).
     formula_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    # U-4: 强成功层（实验验证）。adopt 记录用户采纳后，若该配方的实验数据
+    # 经 sync-datalab 同步入库（启发式成分名匹配），则标记为已实验验证。
+    experiment_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    # 命中实验的摘要：{experiment_id, measured_keys, matched_ingredients...}
+    validation_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
 
     __table_args__ = (
         Index("ix_recommend_outcomes_recommend_id", "recommend_id"),

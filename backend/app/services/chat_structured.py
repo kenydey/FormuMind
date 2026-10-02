@@ -27,6 +27,25 @@ def generate_structured_answer(
     if not settings.chat_structured_enabled:
         return None, "structured chat disabled"
 
+    # U-3: 结构化路径同样做 query-aware 证据压缩（只改 snippet 文本，
+    # identifier/title 不动，evidence_ref 校验不受影响）。fail-open。
+    if sources:
+        try:
+            from .query_aware_compression import (
+                compress_evidence,
+                query_compress_enabled,
+                query_compress_token_budget,
+            )
+
+            if query_compress_enabled(settings):
+                sources = compress_evidence(
+                    question,
+                    sources,
+                    token_budget=query_compress_token_budget(settings),
+                )
+        except Exception as exc:  # noqa: BLE001 - fail-open
+            logger.debug("structured query compression skipped: %s", exc)
+
     if not sources:
         fallback = StructuredAnswer(
             summary="暂无可用资料支撑结构化回答，请先检索或上传文献。",

@@ -286,6 +286,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         return;
       }
 
+      const prevPlanId = doePlan?.plan_id ?? null;
       set((draft) => {
         draft.busy = "doe";
         draft.error = null;
@@ -310,6 +311,10 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.adaptiveDoe = adaptiveMetaFrom(result);
         });
         await get().adoptDoePlanToWorkbench(result.plan);
+        // U-1: 新一轮已采纳，旧 plan → completed，fail-open。
+        if (prevPlanId && prevPlanId !== result.plan?.plan_id) {
+          void api.doePlanTransition(prevPlanId, "complete");
+        }
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
@@ -346,6 +351,10 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.workbenchAdoptedPlanId = p.plan_id || draft.workbenchAdoptedPlanId;
           draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
         });
+        // U-1: 采纳即 draft→active，fail-open（doePlanTransition 内部已吞错）。
+        if (p.plan_id) {
+          void api.doePlanTransition(p.plan_id, "activate");
+        }
         await get().refreshWorkbenchStats();
         await get().recomputePredicted();
         get().scheduleAutosave();

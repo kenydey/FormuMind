@@ -172,7 +172,13 @@ export const apiMethods = {
       project_id?: string;
     }
   ) =>
-    post<{ recommend_id: string; adopted: boolean; adopt_signal: string }>(
+    post<{
+      recommend_id: string;
+      adopted: boolean;
+      adopt_signal: string;
+      /** U-4: 双层口径 —— 用户采纳 + 实验验证 */
+      experiment_validated?: boolean;
+    }>(
       `/api/formulations/recommend/${encodeURIComponent(recommendId)}/adopt`,
       {
         adopt_signal: body.adopt_signal ?? "button",
@@ -326,6 +332,16 @@ export const apiMethods = {
       workbench_campaign_id: opts.workbench_campaign_id ?? null,
       budget_remaining: opts.budget_remaining ?? null,
     }),
+  // U-1: DOE 计划生命周期状态机消费方（draft→active→completed/aborted），fail-open。
+  doePlanTransition: (
+    planId: string,
+    action: "activate" | "complete" | "abort",
+    reason?: string
+  ) =>
+    post<{ plan_id: string; status: string }>(
+      `/api/doe/${encodeURIComponent(planId)}/${action}`,
+      action === "abort" ? { reason: reason ?? "" } : {}
+    ).catch(() => null),
   // ── Inverse design ──
   startInverseDesign: (
     req: Requirement,

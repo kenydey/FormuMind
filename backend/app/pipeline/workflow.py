@@ -418,6 +418,9 @@ def run_optimization(
         )
         form.name = f"Optimized {req.domain.value} (score {score:.3f})"
         top.append(form)
+    # U-2: 血缘打通 —— 有真实 lab 测量时不再谎报 predictor_virtual。
+    from ..services.doe_cycle_service import lab_measurement_source
+
     return OptimizationResult(
         iterations=iterations,
         objective=objective,
@@ -425,5 +428,5 @@ def run_optimization(
         history=history,
         top_formulations=top,
         engine=getattr(opt, "engine", "numpy-ucb"),
-        measurement_source="predictor_virtual",
+        measurement_source=lab_measurement_source(existing_records or []),
     )

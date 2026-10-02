@@ -121,6 +121,40 @@ export default function LeversEditor({
                   />
                 </label>
               ) : null}
+              {(l.kind ?? "continuous") === "discrete" ? (
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className="text-[10px] text-slate-500">
+                    材料替换映射（可选，格式：水平=成分名，逗号分隔）
+                  </span>
+                  <input
+                    value={Object.entries(l.material_map ?? {})
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(", ")}
+                    disabled={disabled}
+                    onChange={(e) => {
+                      const map: Record<string, string> = {};
+                      e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter((s) => s.length > 0)
+                        .forEach((pair) => {
+                          const eq = pair.indexOf("=");
+                          if (eq > 0) {
+                            const k = pair.slice(0, eq).trim();
+                            const v = pair.slice(eq + 1).trim();
+                            if (k && v) map[k] = v;
+                          }
+                        });
+                      update(idx, {
+                        material_map: Object.keys(map).length > 0 ? map : null,
+                      });
+                    }}
+                    className="bg-ink border border-edge rounded px-2 py-1 font-mono text-[11px] disabled:opacity-50"
+                    placeholder="例如：树脂B=聚氨酯树脂X"
+                    title="U-5：字符串水平命中时，用映射的成分名替换该成分（重量不变）；不填则保持跳过"
+                  />
+                </label>
+              ) : null}
               <button
                 type="button"
                 disabled={disabled}

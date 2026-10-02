@@ -2,8 +2,8 @@
 
 - ``record_adopt`` upserts per recommend_id (no duplicate rows)
 - invalid adopt_signal rejected
-- ``outcome_stats`` aggregates counts / rate / by_signal; ``validated`` stays
-  null by contract (strong-success layer pending C-5)
+- ``outcome_stats`` aggregates counts / rate / by_signal; ``validated`` counts
+  experiment-validated adopted rows (U-4 strong-success layer, 0 when none)
 - project_id scoping excludes other projects' rows
 - stats fail open when the table is missing (migration not applied)
 """
@@ -85,9 +85,9 @@ def test_stats_aggregation(session: Session) -> None:
     assert stats["adopt_rate"] == 1.0
     assert stats["by_signal"] == {"button": 2, "copied": 1}
     assert stats["adopted_7d"] == 3
-    # Strong-success layer pending C-5: null by contract, never fabricated.
-    assert stats["validated"] is None
-    assert "C-5" in stats["validated_note"]
+    # U-4: strong-success layer now implemented — 0 validated so far.
+    assert stats["validated"] == 0
+    assert "U-4" in stats["validated_note"]
 
 
 def test_stats_empty_table(session: Session) -> None:
@@ -95,7 +95,7 @@ def test_stats_empty_table(session: Session) -> None:
     assert stats["total"] == 0
     assert stats["adopt_rate"] == 0.0
     assert stats["by_signal"] == {}
-    assert stats["validated"] is None
+    assert stats["validated"] == 0
 
 
 def test_stats_project_isolation(session: Session) -> None:
@@ -127,7 +127,7 @@ def test_stats_fail_open_when_table_missing(tmp_path: Path) -> None:
         stats = recommend_outcome_store.outcome_stats(s)
         assert stats["available"] is False
         assert stats["total"] == 0
-        assert stats["validated"] is None
+        assert stats["validated"] == 0
     finally:
         s.close()
         engine.dispose()
@@ -236,7 +236,7 @@ def test_api_adopt_and_stats() -> None:
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] >= 1
-    assert body["validated"] is None
+    assert body["validated"] == 0
 
 
 def test_recommend_generate_node_registers_round_and_surfaces_id(monkeypatch):

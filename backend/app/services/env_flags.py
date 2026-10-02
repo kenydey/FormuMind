@@ -483,6 +483,15 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("agent_bus_enabled", "多智能体事件总线",
             "启用 Redis Pub/Sub 事件总线（预留能力；Redis 不可达时静默 no-op）。",
             "infra", "需可达的 Redis"),
+    # ── 检索 ──────────────────────────────────────────────────────────────
+    EnvFlag("query_compress_enabled", "Query 感知证据压缩",
+            "问答/结构化回答前按问题重排、去重并按 token 预算裁剪证据；"
+            "关闭则回退到固定截断。",
+            "retrieval"),
+    EnvFlag("query_compress_llm_enabled", "压缩 LLM 重写",
+            "证据压缩的 tier-2 允许调用 LLM 重写 snippet（更省 token 但多一次调用）；"
+            "关闭则只做抽取式压缩。",
+            "retrieval", "LLM 需有效 key"),
 )
 
 _FLAG_BY_ATTR = {f.attr: f for f in FLAG_REGISTRY}
@@ -537,6 +546,13 @@ ENV_VARS: tuple[dict, ...] = (
         "attr": "kb_hybrid_alpha",
         "label": "Hybrid 权重 α",
         "description": "BM25+向量 hybrid 融合权重（0=纯 BM25，1=纯向量）；推荐/研究融合探针共享此值。",
+        "category": "retrieval",
+    },
+    {
+        "attr": "query_compress_token_budget",
+        "label": "Query 压缩 token 预算",
+        "description": "问答/结构化回答的 query-aware 证据压缩 token 预算；"
+        "默认 3000，与主路径 12000 字符截断线对齐。",
         "category": "retrieval",
     },
 )

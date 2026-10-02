@@ -5,10 +5,14 @@ both the optimization workflow and the training service without import cycles.
 """
 from __future__ import annotations
 
+import logging
+
 from ..domain import knowledge
 from ..domain.levers import is_process_lever
 from ..domain.project_spec import normalize_requirement, resolve_levers
 from ..domain.schemas import Formulation, ProductDomain, Requirement
+
+logger = logging.getLogger(__name__)
 
 # Dilute aqueous baths: g/L ≈ wt% × 10 (density ~1 g/mL).
 _G_PER_L_TO_WT_PCT = 0.1
@@ -35,15 +39,39 @@ def formulation_from_factors(
     base = requirement.active_formulation or knowledge.baseline_formulation(requirement)
     levers = resolve_levers(requirement, base)
     unit_map = {lev.name: lev.unit for lev in levers}
+    # U-5: 离散材料替换语义 —— lever 上的水平→成分名映射。
+    material_maps = {lev.name: lev.material_map for lev in levers if lev.material_map}
     overrides = dict(factors)
+    existing_names = {ing.name for ing in base.ingredients}
     ings = []
     for ing in base.ingredients:
         new = ing.model_copy(deep=True)
         if new.name in overrides and not is_process_lever(new.name):
+            raw_value = overrides[new.name]
+            # U-5: 字符串水平 + material_map → 成分身份替换（wt% 不变，
+            # 配比骨架由数值因子负责）。无映射则保持 B-DOE-3 跳过。
+            mat_map = material_maps.get(new.name)
+            if isinstance(raw_value, str) and mat_map and raw_value in mat_map:
+                target = mat_map[raw_value]
+                if target != new.name and target in existing_names:
+                    logger.warning(
+                        "U-5 material replacement skipped: %r already exists in formulation",
+                        target,
+                    )
+                else:
+                    logger.info(
+                        "U-5 material replacement: %r → %r (level %r)",
+                        new.name, target, raw_value,
+                    )
+                    existing_names.discard(new.name)
+                    new.name = target
+                    existing_names.add(target)
+                ings.append(new)
+                continue
             # B-DOE-3: 离散因子的 natural 值可能是字符串水平（如材料种类），
             # 不是重量——跳过 weight 覆盖，不做 float() 猜测。
             try:
-                raw = float(overrides[new.name])
+                raw = float(raw_value)
             except (TypeError, ValueError):
                 ings.append(new)
                 continue

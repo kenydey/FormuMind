@@ -277,6 +277,8 @@ def adopt_recommendation(recommend_id: str, body: AdoptRecommendationBody) -> di
         "recommend_id": row.recommend_id,
         "adopted": row.adopted,
         "adopt_signal": row.adopt_signal,
+        # U-4: 双层口径 —— 用户采纳 + 实验验证（旧库无该列时回退 False）。
+        "experiment_validated": bool(getattr(row, "experiment_validated", False)),
     }
 
 

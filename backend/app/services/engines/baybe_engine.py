@@ -539,6 +539,9 @@ class BaybeCampaignEngine:
             form.name = f"BayBE {req.domain.value} (score {score:.3f})"
         top = [form for _, form in top]
 
+        # U-2: 血缘打通 —— 有真实 lab 测量 seed 时不再谎报 predictor_virtual。
+        from ..doe_cycle_service import lab_measurement_source
+
         return OptimizationResult(
             iterations=iterations,
             objective=OBJECTIVE[req.domain],
@@ -546,5 +549,5 @@ class BaybeCampaignEngine:
             history=history or [0.0],
             top_formulations=top,
             engine="baybe",
-            measurement_source="predictor_virtual",
+            measurement_source=lab_measurement_source(measurements or []),
         )
