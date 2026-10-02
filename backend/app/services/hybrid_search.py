@@ -476,9 +476,12 @@ def hybrid_search_scored(
         order.sort(key=lambda i: float(combined[i]), reverse=True)
 
         if not order:
+            # v7: fallback 按 token 交集大小排序（此前按全≤0 的 combined 排，无意义）。
             qtoks = set(_tokenize(query))
-            order = [i for i in range(n) if qtoks & set(corpus_tokens[i])]
-            order.sort(key=lambda i: float(combined[i]), reverse=True)
+            _overlap = [(len(qtoks & set(corpus_tokens[i])), i) for i in range(n)]
+            _overlap = [(ov, i) for ov, i in _overlap if ov > 0]
+            _overlap.sort(reverse=True)
+            order = [i for _, i in _overlap]
 
         # Corpus quality gate (blocked origin_url / garbage / wiki) — shared by
         # Hub retrieval probe and recommend hybrid fuse. Fills top_k after drops.

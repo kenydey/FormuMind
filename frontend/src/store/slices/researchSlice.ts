@@ -158,6 +158,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
             recommended: draft.leaderboard,
             chat_markdown: `AI 修改：${prompt}`,
           };
+          // v7 H2: AI 修改产生新轮次，必须更新 lastRecommendId，否则采纳记到旧轮
+          draft.lastRecommendId = research.recommend_id ?? draft.lastRecommendId;
         });
       } catch (e) {
         set((draft) => {

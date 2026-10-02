@@ -88,3 +88,24 @@ def test_anaphora_qianhouzhe(monkeypatch):
     q, rewritten = rewrite_query("前者的添加量呢？", history)
     assert rewritten is not None
     assert "磷酸锌的添加量" in rewritten
+
+
+def test_v7_anaphora_no_false_positives():
+    """v7 问答-1: 其实/极其/此时/此前/这个时候 不应被消解为实体。"""
+    from app.services.chat_context import _ANAPHORA_RE
+
+    # 这些不应匹配（返回 None 表示无代词可消解）
+    for text in ["其实它的耐盐雾如何？", "极其重要的参数有哪些？", "此前的实验数据呢？", "这个时候该加多少？", "其次要考虑什么？"]:
+        # "其实它的耐盐雾如何" 中的"它"是真代词，但"其实"的"其"不应先被匹配
+        m = _ANAPHORA_RE.search(text)
+        if m:
+            # 如果匹配，确保不是误匹配的"其/此/这个"
+            assert m.group(0) not in ("其",), f"{text!r} 误匹配 {m.group(0)!r}"
+    # "其实" 的"其"不应匹配
+    assert _ANAPHORA_RE.search("其实") is None
+    assert _ANAPHORA_RE.search("极其") is None
+    assert _ANAPHORA_RE.search("此时") is None
+    assert _ANAPHORA_RE.search("此前") is None
+    # 真代词仍应匹配
+    assert _ANAPHORA_RE.search("它的耐盐雾如何") is not None
+    assert _ANAPHORA_RE.search("该配方的") is not None

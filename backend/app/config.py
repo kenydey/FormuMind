@@ -320,7 +320,7 @@ class Settings(BaseSettings):
     # Search-stream LLM rerank (Phase B R-2a): reorder the head of the ranked list;
     # remaining slots up to search_total_limit are kept in rule-rank order.
     search_rerank_enabled: bool = True
-    search_rerank_top_k: int = 100       # 精排后至少保留条数（有足够结果时）
+    # v7: search_rerank_top_k 已删除（死开关，全仓库零读取）。
     search_rerank_llm_batch: int = 50    # 送入 LLM 评分的候选数（控制成本）
     # P1 #15: cross-encoder rerank (sentence-transformers CrossEncoder).
     # Default OFF — model download is heavy; enable when embedding extra is installed.

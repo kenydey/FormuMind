@@ -320,7 +320,11 @@ def _try_validate_adopt_against_lab(
     if not snap_names:
         return False
     # 有 lab 测量明细的实验行（sync-datalab / 手工录入都会写 measurements 表）。
+    # v7 M3: 时序约束 —— 测量必须晚于推荐创建时间，否则数月前的无关实验
+    # 会误标 experiment_validated。
     measured_ids = select(MeasurementRow.experiment_id).distinct()
+    if getattr(row, "created_at", None):
+        measured_ids = measured_ids.where(MeasurementRow.created_at >= row.created_at)
     q = select(ExperimentRow).where(ExperimentRow.id.in_(measured_ids))
     if project_id:
         q = q.where(ExperimentRow.project_id == project_id)
@@ -383,7 +387,10 @@ def outcome_stats(
     total = len(rows)
     adopted = sum(1 for r in rows if r.adopted)
     by_signal: dict[str, int] = {}
+    # v7 M4: 只统计已采纳行 —— 未采纳轮的 None 不应计入 button 桶。
     for r in rows:
+        if not r.adopted:
+            continue
         by_signal[r.adopt_signal or "button"] = by_signal.get(r.adopt_signal or "button", 0) + 1
     # 7-day window slice for the short-term rate.
     week_ago = _utcnow() - timedelta(days=7)

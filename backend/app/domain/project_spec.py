@@ -253,7 +253,6 @@ def levers_to_doe_factors(levers: list[LeverSpec]) -> list[DOEFactor]:
             unit=l.unit,
             kind=l.kind,
             levels=list(l.levels) if l.levels else None,
-            material_map=dict(l.material_map) if l.material_map else None,
         )
         for l in levers
     ]
@@ -276,9 +275,6 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
                 "unit": f.unit,
                 "kind": getattr(f, "kind", "continuous"),
                 "levels": list(f.levels) if getattr(f, "levels", None) else None,
-                "material_map": (
-                    dict(f.material_map) if getattr(f, "material_map", None) else None
-                ),
             }
             for f in plan.factors
         ]

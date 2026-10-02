@@ -91,10 +91,10 @@ def _stub_doe(req: Requirement, reason: str = "rmse_plateau") -> DOEPlan:
     from ..domain.schemas import DOEFactor, DOERun
 
     levers = req.levers or []
-    factors = [
-        DOEFactor(name=lev.name, low=lev.low, high=lev.high, unit=lev.unit)
-        for lev in levers[:6]
-    ]
+    # v7 DOE-2: 用 levers_to_doe_factors，与主链路一致（保留 kind/levels）。
+    from ..domain.project_spec import levers_to_doe_factors
+
+    factors = levers_to_doe_factors(levers[:6])
     natural = {lev.name: round((lev.low + lev.high) / 2, 3) for lev in levers[:6]}
     notes = (
         "目标已达成 — 保留上一轮 DOE，无需新实验建议"

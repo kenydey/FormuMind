@@ -1196,6 +1196,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                     citations = eff_sources[: min(8, len(eff_sources))]
                     # P1-4: 整包 structured 同样走 claims/gates —— 与同步路径同口径，
                     # 否则数值门/冲突节弃权等全部静默缺席。
+                    _claims: list = []
+                    _audit: dict = {}
                     try:
                         _claims, _audit, _verified = await asyncio.to_thread(
                             _claims_and_audit,
@@ -1252,6 +1254,10 @@ async def chat_stream(req: "ChatRequestValidated"):
                         "rewritten_query": plan["rewritten_query"],
                         # 风险5：reviewer 结果透出（与 paperqa 整包路径同字段）。
                         "evidence_reviewer": evidence_reviewer,
+                        # v7 问答-4: claims/audit 进 SSE（与 paperqa 整包路径同字段），
+                        # 否则前端无法展示。
+                        "sourced_claims": _claims,
+                        "sources_audit": _audit,
                         # B-1: BM25-only 退化提示位 + P1-4 门 notices 合并。
                         "notices": list(_degr_notices) + list(gate_notices or []) or None,
                     }

@@ -119,6 +119,8 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.kbIngest = null;
           draft.searchProgress = null;
           draft.notificationsDismissed = noNotificationsDismissed();
+          // v7 H1: 切项目必须重置 lastRecommendId，否则采纳信号写到别的项目轮次
+          draft.lastRecommendId = null;
         });
         if (!get().requirement.levers?.length) {
           await get().syncDefaultLevers();

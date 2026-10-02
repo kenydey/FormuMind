@@ -520,9 +520,8 @@ class DOEFactor(BaseModel):
     unit: str = ""
     kind: str = "continuous"
     levels: list[float | str] | None = None
-    # P2: U-5 离散材料替换语义 —— lever 的 material_map 透传到 DOE 因子，
-    # 下游 reconstruct 不必再回头从 req.levers 翻找。
-    material_map: dict[str, str] | None = None
+    # v7: material_map 已删除 —— 该字段写而不读（reconstruct 实际从 LeverSpec 取），
+    # 留着会误导。LeverSpec.material_map 是唯一 SSOT。
 
     @model_validator(mode="after")
     def _validate_kind_levels(self) -> "DOEFactor":
@@ -739,7 +738,8 @@ class ExperimentRecord(BaseModel):
 
     domain: ProductDomain
     project_id: str = ""
-    factors: dict[str, float] = Field(default_factory=dict)
+    # v7: 离散因子（如材料名）允许 str；数值消费方自行过滤。
+    factors: dict[str, float | str] = Field(default_factory=dict)
     cure_temperature_c: float | None = None
     measurements: list[Measurement] = Field(default_factory=list)
     source: str = "lab"

@@ -21,7 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-TABLES_DIR = Path(os.environ.get("FORMUMIND_TABLES_DIR") or "./data/source_tables")
+# v7: 默认改为脚本相对路径的 backend/data/source_tables（后端实际写入位置），
+# 此前 ./data/source_tables 从仓库根运行时是错的目录。
+TABLES_DIR = Path(
+    os.environ.get("FORMUMIND_TABLES_DIR")
+    or str(Path(__file__).resolve().parents[1] / "data" / "source_tables")
+)
 
 
 def _is_uuidish(stem: str) -> bool:

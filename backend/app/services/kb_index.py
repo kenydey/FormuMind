@@ -649,7 +649,13 @@ def reindex_all(*, embed: bool = True) -> dict:
     sources = 0
     chunks = 0
     with store._session_factory() as session:
-        rows = session.query(SourceDocument.id, SourceDocument.full_text).all()
+        # v7 KB-4: 排除 wiki —— wiki 页是单 summary chunk + meta.wiki 结构，
+        # 通用重切会摧毁它。
+        rows = (
+            session.query(SourceDocument.id, SourceDocument.full_text)
+            .filter(SourceDocument.source_kind != "wiki")
+            .all()
+        )
     for source_id, full_text in rows:
         text = (full_text or "").strip()
         if not text:
@@ -667,6 +673,11 @@ def reindex_all(*, embed: bool = True) -> dict:
         if n:
             sources += 1
             chunks += n
+            # v7 KB-8: reindex 成功回写 ingest_status，否则 failed 行状态撒谎。
+            try:
+                store.update_fields(source_id, ingest_status="indexed", ingest_error=None)
+            except Exception:  # noqa: BLE001
+                pass
     total, embedded = get_chunk_store().counts()
     return {
         "reindexed_sources": sources,
@@ -928,6 +939,23 @@ def search_chunks(
 
         scored = [(s, c) for s, c in scored if s > 0.05]
         scored.sort(key=lambda pair: pair[0], reverse=True)
+        # v7 检索-1: legacy 路径同样走质量门（blocked 域名/垃圾文本），
+        # 否则 deep research 证据池被污染。
+        try:
+            from .kb_retrieval_gate import drop_reason_for_chunk, record_gate_drop
+
+            filtered: list[tuple[float, object]] = []
+            for s, c in scored:
+                reason = drop_reason_for_chunk(c)
+                if reason:
+                    record_gate_drop("retrieval", reason)
+                    continue
+                filtered.append((s, c))
+                if len(filtered) >= k:
+                    break
+            scored = filtered
+        except Exception:  # noqa: BLE001
+            pass
         meta = _source_meta()
         return [_chunk_to_evidence(c, meta, s) for s, c in scored[:k]]
     except Exception as exc:

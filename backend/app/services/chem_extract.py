@@ -63,10 +63,17 @@ _FORMULA_STOPWORDS = {
     "CoO", "NiP", "VOC", "COO", "HNO", "NaN",
 }
 _TWO_LETTER_ELEMENT_RE = re.compile(r"[A-Z][a-z]")
+# v7 KB-6: 单元素符号+纯数字（如 S1、Fe2）多为样品/章节编号，非化学式。
+# 白名单放行真实存在的同素异形体/双原子分子。
+_SINGLE_ELEMENT_DIGIT_RE = re.compile(r"^[A-Z][a-z]?\d+$")
+_SINGLE_ELEMENT_ALLOW = frozenset({"H2", "O2", "N2", "F2", "Cl2", "Br2", "I2", "S8", "P4", "O3"})
 
 
 def _formula_plausible(token: str) -> bool:
     if token in _FORMULA_STOPWORDS or len(token) < 2:
+        return False
+    # v7 KB-6: S1/S2 这类单元素+数字先拦，白名单除外。
+    if _SINGLE_ELEMENT_DIGIT_RE.match(token) and token not in _SINGLE_ELEMENT_ALLOW:
         return False
     has_digit = any(ch.isdigit() for ch in token)
     caps = len(re.findall(r"[A-Z]", token))

@@ -111,27 +111,50 @@ def ingest_document_tx(
                 for c in chunks
             ]
 
+            # v7 KB-2: 补化学实体提取（与 index_source 同口径，否则 meta.chem 缺失）。
+            from .kb_index import _attach_entities, _detect_chunk_lang
+
+            for _r in rows:
+                _r["lang"] = _detect_chunk_lang(_r.get("text") or "")
+            _attach_entities(source_id, rows)
+
             # Embed if available
+            # v7 KB-3: 双语分流（与 index_source 同口径）——zh 用 bge 512d，
+            # 其余用 MiniLM 384d；此前统一用默认模型导致中文向量错配。
             if rows and _embedding_probe():
-                vectors = _embed_texts([r["text"] for r in rows])
+                from .rag import embed_model_name as _model_for_lang
+
+                def _lang_of(r: dict) -> str:
+                    return r.get("lang") or "en"
+
+                group_idxs: dict[str, list[int]] = {}
+                for _i, _r in enumerate(rows):
+                    group_idxs.setdefault(_lang_of(_r), []).append(_i)
+                vec_map: dict[int, list[float]] = {}
+                model_per_row: dict[int, str] = {}
+                mismatch = False
+                for lang, idxs in group_idxs.items():
+                    mname = _model_for_lang(lang)
+                    texts = [rows[i]["text"] for i in idxs]
+                    vecs = _embed_texts(texts, mname)
+                    if not vecs or len(vecs) != len(idxs):
+                        mismatch = True
+                        break
+                    for j, i in enumerate(idxs):
+                        vec_map[i] = vecs[j]
+                        model_per_row[id(rows[i])] = mname
+                vectors = None
+                if not mismatch and len(vec_map) == len(rows):
+                    vectors = [vec_map[i] for i in range(len(rows))]
+                else:
+                    logger.error(
+                        "kb embedding count mismatch for source %s — skipping embeddings",
+                        source_id,
+                    )
                 if vectors:
-                    if len(vectors) != len(rows):
-                        # A short or long response would bind vectors to the wrong
-                        # text from the mismatch onward — every later chunk carries
-                        # its neighbour's meaning, and nothing about the result
-                        # looks wrong. Drop the batch instead; the rows stay
-                        # keyword-searchable and a rebuild can retry.
-                        logger.error(
-                            "kb embedding count mismatch: %d vectors for %d chunks — "
-                            "skipping embeddings for this source",
-                            len(vectors), len(rows),
-                        )
-                        vectors = None
-                if vectors:
-                    model_name = _embed_model_name()
-                    for row, vec in zip(rows, vectors):
-                        row["embedding"] = vec
-                        row["embedding_model"] = model_name
+                    for i, row in enumerate(rows):
+                        row["embedding"] = vectors[i]
+                        row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
 
             # KB dedup (2026-10-01): drop exact / near-duplicate chunks before
             # the write; the caller-owned session is reused read-only.

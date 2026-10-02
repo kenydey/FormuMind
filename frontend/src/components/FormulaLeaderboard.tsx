@@ -191,14 +191,18 @@ function FormulaCard({
   const [experimentValidated, setExperimentValidated] = useState(false);
   // P1-10: 徽标水合 —— 刷新后从后端重读双层信号，不再只靠局部 state。
   // 采纳是配方粒度：只有点亮快照名对得上的卡片。
+  // v7 H3: 先重置再水合，否则新轮同名配方复用组件时旧徽标残留。
+  // v7 M2: 去掉空 formula_name 的 fallback，无名则不点亮，避免整轮误点亮。
   useEffect(() => {
+    setAdopted(false);
+    setExperimentValidated(false);
     if (!recommendId) return;
     let cancelled = false;
     api
       .getRecommendationOutcome(recommendId)
       .then((res) => {
         if (cancelled || !res) return;
-        const mine = !res.formula_name || res.formula_name === form.name;
+        const mine = !!res.formula_name && res.formula_name === form.name;
         if (res.adopted && mine) setAdopted(true);
         if (res.experiment_validated && mine) setExperimentValidated(true);
       })

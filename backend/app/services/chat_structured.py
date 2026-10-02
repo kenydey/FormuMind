@@ -65,8 +65,10 @@ def generate_structured_answer(
         "或引用序号 [1]、[2]。不得编造证据。"
     )
     ev_lines = "\n".join(
+        # v7 问答-5: 统一为 8 —— citations 只取 eff_sources[:8]，
+        # prompt 给 12 会导致 LLM 引用 [9]-[12] 时前端无卡片。
         f"[{i+1}] id={e.identifier} ({e.source}) {e.title}: {e.snippet[:350]}"
-        for i, e in enumerate(sources[:12])
+        for i, e in enumerate(sources[:8])
     )
     hist_lines = ""
     if history:
@@ -99,8 +101,8 @@ def _sanitize_structured(answer: StructuredAnswer, sources: list[Evidence]) -> S
     hints = []
     for hint in answer.formulation_hints:
         ref = (hint.evidence_ref or "").strip()
-        if ref in valid_refs or ref in valid_ids:
-            hints.append(hint)
-        elif _REF_RE.match(ref):
+        # v7 问答-3: 删除 elif 分支 —— valid_refs 已覆盖全部合法 [1..n]，
+        # 越界引用（如 [99]）必须丢弃，不能放行。
+        if ref in valid_refs:
             hints.append(hint)
     return answer.model_copy(update={"formulation_hints": hints})

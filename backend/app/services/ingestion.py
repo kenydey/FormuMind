@@ -146,7 +146,22 @@ def _ingest_parsed_text(
         try:
             # fail_soft=False: hard index errors must not leave an orphan
             # SourceDocument with zero chunks (create already committed).
-            index_source(source_id, text, fail_soft=False)
+            # v7 KB-1: 返回 0 也不抛错 —— 必须显式检查，否则零-chunk 孤儿行
+            # 状态仍为 ok（与 _persist_fulltext 的 P1-8 口径一致）。
+            from .kb_index import kb_enabled
+
+            n_chunks = index_source(source_id, text, fail_soft=False)
+            if not n_chunks and kb_enabled():
+                try:
+                    store.update_fields(
+                        source_id,
+                        ingest_status="failed",
+                        ingest_error="index_source produced 0 chunks",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("mark zero-chunk source failed (fail-open)")
+                status = "failed"
+                err = err or "kb index produced 0 chunks"
         except Exception as exc:
             log_handled_exception(logger, exc, "index_source hard fail — deleting orphan source")
             try:
@@ -439,6 +454,9 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
                 if not _is_safe_url(current_url):
                     raise ValueError(f"Redirect target not allowed: {current_url}")
             assert resp is not None
+            # v7 解析-5: 4 跳耗尽仍是重定向 → 明确报错，不解析 3xx 空体。
+            if resp.is_redirect:
+                raise ValueError(f"Too many redirects for {url}")
             resp.raise_for_status()
             content_type = (resp.headers.get("content-type") or "").lower()
             # P2: URL 下载上限 —— 真正的流式读取，超限即停。
@@ -482,14 +500,60 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     if "html" in content_type or body.lstrip()[:15].lower().startswith(b"<!doctype") or b"<html" in body[:500].lower():
         text = _html_to_text(body.decode("utf-8", errors="replace"))
     elif is_pdf:
-        from .parsing import parse_document
+        # v7 解析-4: 无 PDF 解析器时给出可操作的 hint（与 ingest_file 同口径）。
+        from .parsing import can_parse, parse_document
         from .parse_notices import collect as _collect_notices
 
+        if not can_parse("pdf"):
+            from .parsing import ParserUnavailable
+
+            raise ParserUnavailable("pdf")
         with _collect_notices() as _url_parse_warnings:
             parsed = parse_document(body, "pdf")
         text = parsed.markdown or ""
     else:
-        text = _parse_text(body)
+        # v7: 非 PDF 二进制（docx/xlsx/pptx 等）不能 latin-1 裸解码。
+        # 按 URL 扩展名或 content-type 映射到 parse_document；无法识别的
+        # 二进制拒绝入库而非写乱码。
+        from urllib.parse import urlparse
+
+        from .parsing import can_parse, parse_document
+        from .parse_notices import collect as _collect_notices
+
+        _ct_to_ext = {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+            "application/msword": "doc",
+            "application/vnd.ms-excel": "xls",
+            "application/vnd.ms-powerpoint": "ppt",
+            "application/octet-stream": None,  # 按 URL 扩展名判断
+        }
+        url_ext = urlparse(url).path.rsplit(".", 1)[-1].lower() if "." in urlparse(url).path else ""
+        ct_ext = _ct_to_ext.get(content_type.split(";")[0].strip().lower(), "")
+        ext = url_ext if url_ext and can_parse(url_ext) else (ct_ext or "")
+        # 二进制魔数启发：zip 包头（docx/xlsx/pptx 都是 zip）
+        is_zip = body[:4] == b"PK\x03\x04"
+        if ext and can_parse(ext):
+            with _collect_notices() as _url_parse_warnings:
+                parsed = parse_document(body, ext)
+            text = parsed.markdown or ""
+        elif is_zip or (ct_ext is None and not url_ext):
+            # 明确的二进制但无法识别格式 → 拒绝，不写乱码
+            return IngestOutcome(
+                evidence=[
+                    Evidence(
+                        source="web",
+                        identifier=url,
+                        title=url,
+                        snippet=f"不支持的二进制格式（{content_type}），无法提取文本",
+                        relevance=0.5,
+                    )
+                ],
+                extraction_status="skipped",
+            )
+        else:
+            text = _parse_text(body)
 
     if not text.strip():
         return IngestOutcome(

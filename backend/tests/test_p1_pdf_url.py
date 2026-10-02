@@ -143,3 +143,13 @@ def test_ingest_url_enforces_max_bytes_streaming(monkeypatch):
     out = ingest_url("https://example.com/big.html", persist=False)
     assert out.extraction_status == "skipped"
     assert "超限" in out.evidence[0].snippet
+
+
+def test_v7_ingest_url_rejects_unrecognized_binary(monkeypatch):
+    """v7 解析-1: 无法识别的二进制 URL 拒绝入库，不 latin-1 裸解码写乱码。"""
+    # 伪造 zip 包头但扩展名/content-type 都无法识别
+    fake_zip = b"PK\x03\x04" + b"\x00" * 100
+    _mock_pdf_download(monkeypatch, fake_zip, content_type="application/octet-stream")
+    out = ingest_url("https://example.com/file.unknownbin", persist=False)
+    assert out.extraction_status == "skipped"
+    assert "不支持" in out.evidence[0].snippet

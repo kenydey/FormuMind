@@ -107,7 +107,15 @@ def factor_spans(records: list[ExperimentRecord], candidate: dict[str, float]) -
     spans: dict[str, float] = {}
     keys = set(candidate) | {k for rec in records for k in rec.factors}
     for key in keys:
-        values = [float(rec.factors[key]) for rec in records if key in rec.factors]
+        # v7: 离散因子值为 str，跳过非数值（与 workbench_training 口径一致）。
+        values = []
+        for rec in records:
+            if key not in rec.factors:
+                continue
+            try:
+                values.append(float(rec.factors[key]))
+            except (TypeError, ValueError):
+                continue
         if key in candidate:
             values.append(float(candidate[key]))
         if len(values) >= 2:
