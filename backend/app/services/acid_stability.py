@@ -105,20 +105,23 @@ def _composition_violations(form: Formulation) -> list[tuple[bool, str]]:
     carbonate_cfg = rules["carbonate_fillers"]
     metal_cfg = rules["reactive_metals"]
     amine_cfg = rules["amine_neutralised"]
-    alkali_exact = set(alkali_cfg["exact"])
-    alkali_prefixes = tuple(alkali_cfg["prefixes"])
+    # Ingredient names arrive in whatever casing the catalog/LLM used
+    # ("sodium hydroxide", "NaOH"-style prefixes, ...), so every name match
+    # below is case-insensitive — an exact-case match let a lowercase strong
+    # alkali sail past the hard gate.
+    alkali_exact = {x.lower() for x in alkali_cfg["exact"]}
+    alkali_prefixes = tuple(x.lower() for x in alkali_cfg["prefixes"])
     carbonate_substrings = tuple(carbonate_cfg["substrings"])
-    reactive_metals = set(metal_cfg["names"])
+    reactive_metals = {x.lower() for x in metal_cfg["names"]}
     amine_substrings = tuple(amine_cfg["substrings"])
 
     names = [i.name for i in form.ingredients if i.weight_pct > 0.05]
-    lowered = {n.lower() for n in names}
     out: list[tuple[bool, str]] = []
 
     # Strong alkali + (any acid) → hard.
     alkali = [
         n for n in names
-        if n in alkali_exact or any(n.startswith(p) for p in alkali_prefixes)
+        if n.lower() in alkali_exact or any(n.lower().startswith(p) for p in alkali_prefixes)
     ]
     if alkali:
         out.append((True, alkali_cfg["reason"].format(names=", ".join(alkali))))
@@ -129,7 +132,7 @@ def _composition_violations(form: Formulation) -> list[tuple[bool, str]]:
         out.append((True, carbonate_cfg["reason"].format(names=", ".join(carbonates))))
 
     # Reactive metal + acid → hard (hydrogen).
-    metals = [n for n in names if n in reactive_metals]
+    metals = [n for n in names if n.lower() in reactive_metals]
     if metals:
         out.append((True, metal_cfg["reason"].format(names=", ".join(metals))))
 

@@ -70,6 +70,7 @@ def build_material_graph(
     out_degree: dict[str, int] = {}
     in_degree: dict[str, int] = {}
     edge_rows: list[tuple[str, str, str, float, str]] = []  # src,dst,type,conf,method
+    seen_edges: set[tuple[str, str, str]] = set()
 
     for link in links:
         src = link.src_entity_id
@@ -80,9 +81,12 @@ def build_material_graph(
         conf = float(link.confidence or 0.5)
         method = (link.extraction_method or "rule").strip() or "rule"
         key_seen = (src, dst, lt)
-        # dedupe identical typed edges (keep first = highest confidence due to order)
-        if any(e[0] == src and e[1] == dst and e[2] == lt for e in edge_rows):
+        # dedupe identical typed edges (keep first = highest confidence due to
+        # order). A set lookup: the previous per-link scan of edge_rows made
+        # graph building quadratic in the number of links.
+        if key_seen in seen_edges:
             continue
+        seen_edges.add(key_seen)
         edge_rows.append((src, dst, lt, conf, method))
         out_degree[src] = out_degree.get(src, 0) + 1
         in_degree[dst] = in_degree.get(dst, 0) + 1

@@ -1,7 +1,9 @@
 """Up-4A: 离散字符串因子生产链回归（B-DOE-3 float() 崩溃修复）。"""
 from __future__ import annotations
 
-import pandas as pd
+import pytest
+
+pd = pytest.importorskip("pandas", reason="pandas is an optional (baybe) extra")
 
 from app.domain.schemas import DOEFactor, LeverSpec
 from app.domain.project_spec import levers_to_doe_factors

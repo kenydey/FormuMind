@@ -362,7 +362,7 @@ class BaybeCampaignEngine:
                         run.infeasible = True
                         run.infeasible_reason = "; ".join(chk.reasons) or "知识图谱检测到材料不相容"
         except Exception as exc:  # gate must never break recommendation
-            log.debug("KG chemical gate skipped ({}); allowing", exc)
+            log.debug("KG chemical gate skipped (%s); allowing", exc)
 
         # ── Physical-constraint gate (v11) ───────────────────────────────────
         # Deterministic acid-stability + compliance screen on the same
@@ -402,7 +402,7 @@ class BaybeCampaignEngine:
                         run.infeasible = True
                         run.infeasible_reason = "; ".join(hard_reasons) or "物理约束检测到不可行组合"
         except Exception as exc:  # gate must never break recommendation
-            log.debug("Physical-constraint gate skipped ({}); allowing", exc)
+            log.debug("Physical-constraint gate skipped (%s); allowing", exc)
 
         # R2/P2: 数值空间全连续 → DiscreteExclude 仍不适用, gate 占比可度量。
         # genome 路径的 categorical mat_* 已注入 DiscreteExcludeConstraint

@@ -1,7 +1,7 @@
 """Diversity selection for multi-formulation recommend (MMR)."""
 from __future__ import annotations
 
-from ..domain.schemas import Formulation
+from ..domain.schemas import Evidence, Formulation
 
 
 def _ingredient_jaccard(a: Formulation, b: Formulation) -> float:

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pandas as pd
+import pytest
+
+pd = pytest.importorskip("pandas", reason="pandas is an optional (baybe) extra")
 
 from app.domain.schemas import ObjectiveSpec, ProductDomain, Requirement
 from app.services.engines.adapters.measurements_adapter import (

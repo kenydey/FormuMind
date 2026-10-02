@@ -1330,7 +1330,7 @@ def _resolve_system_constraints(req: Requirement) -> str:
         store = get_inferred_system_store()
         cached = store.match(key)
         if cached is not None:
-            log.info("命中沉淀约束: {}", product_type)
+            log.info("命中沉淀约束: %s", product_type)
             return _format_inferred_block(cached)
 
         inferred = _infer_system_constraints(product_type)
@@ -1398,7 +1398,7 @@ def _infer_system_constraints(product_type: str):
     parsed, err = complete_structured(system, user, InferredSystem)
     if parsed is not None:
         return parsed
-    log.warning("体系约束推理失败: {}", err)
+    log.warning("体系约束推理失败: %s", err)
     return None
 
 

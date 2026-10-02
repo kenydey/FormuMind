@@ -5,7 +5,7 @@ import logging
 from ..errors import log_handled_exception
 import numpy as np
 
-from ...domain.schemas import DOEFactor, DOEPlan
+from ...domain.schemas import DOEFactor, DOEPlan, Requirement
 from .adapters.doe_adapter import matrix_to_doe_plan
 from .native_doe_engine import build_native_plan
 
