@@ -164,16 +164,31 @@ class SourceStore:
                 .first()
             )
 
-    def find_by_origin_url(self, origin_url: str) -> SourceDocument | None:
+    def find_by_origin_url(
+        self, origin_url: str, *, include_failed: bool = True
+    ) -> SourceDocument | None:
         """Async-ingest dedup: has this URL / patent id / DOI been acquired?
 
         Tries patent-id aliases (compact / SCPN hyphen / Google Patents URL)
         so ``CN-104789083-B`` and ``CN104789083B`` hit the same row.
-        """
-        return self.find_by_origin_urls([origin_url] if origin_url else [])
 
-    def find_by_origin_urls(self, origin_urls: list[str]) -> SourceDocument | None:
-        """Dedup lookup across any of the given origin_url keys (and aliases)."""
+        ``include_failed=False`` answers the question "do we *have* this
+        document": a row whose last ingest failed (``ingest_status='failed'``,
+        usually zero chunks) is a retry candidate, not a duplicate.
+        """
+        return self.find_by_origin_urls(
+            [origin_url] if origin_url else [], include_failed=include_failed
+        )
+
+    def find_by_origin_urls(
+        self, origin_urls: list[str], *, include_failed: bool = True
+    ) -> SourceDocument | None:
+        """Dedup lookup across any of the given origin_url keys (and aliases).
+
+        By default failed rows are returned too (callers such as
+        ``kb_ingest._fetch_one`` inspect ``ingest_status`` themselves). Pass
+        ``include_failed=False`` for a plain "already have it?" check.
+        """
         from ..services.patent_ids import patent_id_aliases
 
         keys: list[str] = []
@@ -190,12 +205,13 @@ class SourceStore:
         if not keys:
             return None
         with self._session_factory() as session:
-            return (
-                session.query(SourceDocument)
-                .filter(SourceDocument.origin_url.in_(keys))
-                .order_by(SourceDocument.created_at.desc())
-                .first()
-            )
+            q = session.query(SourceDocument).filter(SourceDocument.origin_url.in_(keys))
+            if not include_failed:
+                q = q.filter(
+                    (SourceDocument.ingest_status.is_(None))
+                    | (SourceDocument.ingest_status != "failed")
+                )
+            return q.order_by(SourceDocument.created_at.desc()).first()
 
     # ── P1-1: ingest failure observability ────────────────────────────────
 
@@ -287,11 +303,19 @@ class SourceStore:
         content_hash: str,
         filename: str | None = None,
         title: str | None = None,
+        extraction_status: str | None = None,
+        extraction_error: str | None = None,
+        source_guide: SourceGuideSchema | None = None,
+        parser: str | None = None,
     ) -> None:
         """Promote a previously-failed row to indexed in place.
 
         Keeps one row per origin URL: a retry that succeeds updates the failed
         row instead of inserting a duplicate.
+
+        The fetch path leaves ``extraction_status`` at its default
+        (``"fulltext"``); the upload path passes its source-guide status,
+        guide and parser so the revived row looks exactly like a fresh one.
         """
         with commit_session(self._session_factory) as session:
             row = session.get(SourceDocument, source_id)
@@ -304,7 +328,12 @@ class SourceStore:
                 row.filename = filename[:500]
             if title:
                 row.title = title[:500]
-            row.extraction_status = "fulltext"
+            row.extraction_status = extraction_status or "fulltext"
+            row.extraction_error = extraction_error
+            if source_guide is not None:
+                row.source_guide = source_guide.model_dump(mode="json")
+            if parser:
+                row.parser = parser
             row.ingest_status = "indexed"
             row.ingest_error = None
 

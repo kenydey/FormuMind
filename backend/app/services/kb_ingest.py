@@ -826,8 +826,12 @@ def ingest_single_evidence(
         }
 
     # Fast-path dedup before fetch/index/backfill — one-click UX must stay snappy.
+    # A row whose last ingest failed is not "already ingested": fall through to
+    # the real ingest, which retries it (``_fetch_one``) and revives the row.
     try:
-        existing = get_source_store().find_by_origin_urls(_origin_lookup_keys(ev))
+        existing = get_source_store().find_by_origin_urls(
+            _origin_lookup_keys(ev), include_failed=False
+        )
     except Exception as exc:
         existing = degrade_return(logger, exc, "ingest_single dedup failed", None)
     if existing is not None:

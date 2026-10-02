@@ -690,7 +690,12 @@ def _filter_unindexed_external(evidence: list[Evidence]) -> list[Evidence]:
     filtered: list[str] = []
     for ev in evidence:
         ident = (ev.identifier or "").strip()
-        if ident.startswith(("http://", "https://")) and store.find_by_origin_url(ident) is None:
+        # include_failed=False: a failed-ingest row (P1-1 observability) is
+        # recorded under the same origin_url but holds no full text — it must
+        # not make an un-downloadable source look "ingested".
+        if ident.startswith(("http://", "https://")) and store.find_by_origin_url(
+            ident, include_failed=False
+        ) is None:
             filtered.append(ident)
             continue
         kept.append(ev)

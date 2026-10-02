@@ -30,6 +30,7 @@ pre-embedding, while L2 needs the row vectors.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import re
@@ -38,6 +39,24 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _WS_RE = re.compile(r"\s+")
+
+# Side channel for callers that must tell "every chunk already exists under
+# another source" apart from a genuine zero-chunk failure (both make
+# ``index_source`` return 0). A context variable keeps ``index_source``'s
+# signature intact; the consumer resets it right before the call and reads it
+# right after, in the same thread, so a stale value cannot leak across calls.
+_ALL_CHUNKS_DUPLICATE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "kb_dedup_all_chunks_duplicate", default=False
+)
+
+
+def reset_all_duplicate_flag() -> None:
+    _ALL_CHUNKS_DUPLICATE.set(False)
+
+
+def all_chunks_were_duplicates() -> bool:
+    """True when the last L1 pass in this context dropped every chunk."""
+    return _ALL_CHUNKS_DUPLICATE.get()
 
 
 def normalize_text(text: str | None) -> str:
@@ -122,6 +141,8 @@ def _l1_exact(
                 dropped += 1
                 continue
             out.append(row)
+        if dropped and not out:
+            _ALL_CHUNKS_DUPLICATE.set(True)
         if dropped:
             from .kb_retrieval_gate import record_gate_drop
 

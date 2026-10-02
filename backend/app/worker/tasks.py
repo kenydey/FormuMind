@@ -786,6 +786,7 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
     # re-downloading a fetched document. A retry then costs one hash, not a
     # second OCR pass and a duplicate source_documents row.
     duplicates: list[str] = []
+    duplicate_source_ids: dict[str, str] = {}
     origin_url_by_name: dict[str, str] = {}
     try:
         import hashlib
@@ -798,9 +799,16 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
             digest = hashlib.sha256(content).hexdigest()
             key = f"upload:sha256:{digest}"
             origin_url_by_name[name] = key
-            if store.find_by_origin_url(key):
+            # Only a row we actually *have* makes this a duplicate. A row whose
+            # last ingest failed (0 chunks, parse error, ...) is a retry
+            # candidate — ``ingest_file`` revives it in place — otherwise the
+            # file could never be re-ingested and the UI would claim it is
+            # "already in the library" when it is not.
+            existing = store.find_by_origin_url(key, include_failed=False)
+            if existing:
                 logger.info("file ingest: duplicate upload skipped: %s (%s)", name, key)
                 duplicates.append(name)
+                duplicate_source_ids[name] = existing.id
                 continue
             fresh.append((name, content))
         files = fresh
@@ -818,6 +826,7 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
             "source_id": None,
             "extraction_status": "skipped",
             "duplicates": duplicates,
+            "duplicate_source_ids": duplicate_source_ids,
         }
         message = f"跳过 {len(duplicates)} 个重复文件（内容与库中已有资料一致）"
         # Terminal snapshot first, result store second: the reverse order left a
@@ -848,6 +857,7 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
             "source_id": outcome.source_id,
             "extraction_status": outcome.extraction_status,
             "duplicates": duplicates,
+            "duplicate_source_ids": duplicate_source_ids,
             # P2: 解析截断等提示 —— 前端上传完成态展示。
             "warnings": list(outcome.warnings or []),
         }

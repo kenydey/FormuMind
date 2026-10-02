@@ -125,20 +125,49 @@ def _ingest_parsed_text(
     evidence = _to_evidence(text, filename, source=source_kind)
 
     source_id: str | None = None
+    warnings: list[str] = []
     if persist and text.strip():
         store = get_source_store()
-        source_id = store.create(
-            filename=filename,
-            title=Path(filename).stem if "." in filename else filename[:80],
-            source_kind=source_kind,
-            full_text=text,
-            content_hash=_content_hash(text),
-            source_guide=guide,
-            extraction_status=status,
-            extraction_error=err,
-            origin_url=origin_url,
-            parser=parser,
-        )
+        title = Path(filename).stem if "." in filename else filename[:80]
+        content_hash = _content_hash(text)
+        # A previous attempt for this origin (same upload bytes / same URL)
+        # that failed left a failed row behind: revive it in place so a retry
+        # yields one row per origin instead of a second, parallel row.
+        # Duck-typed: minimal test fakes may not implement the observability
+        # methods; any lookup error falls back to a fresh row.
+        failed_row = None
+        if origin_url:
+            _find_failed = getattr(store, "find_failed_by_origin", None)
+            try:
+                failed_row = _find_failed(origin_url) if _find_failed else None
+            except Exception as exc:  # noqa: BLE001
+                log_handled_exception(logger, exc, "failed-row lookup failed")
+        if failed_row is not None:
+            source_id = failed_row.id
+            store.revive_failed_row(
+                source_id,
+                full_text=text,
+                content_hash=content_hash,
+                filename=filename,
+                title=title,
+                extraction_status=status,
+                extraction_error=err,
+                source_guide=guide,
+                parser=parser,
+            )
+        else:
+            source_id = store.create(
+                filename=filename,
+                title=title,
+                source_kind=source_kind,
+                full_text=text,
+                content_hash=content_hash,
+                source_guide=guide,
+                extraction_status=status,
+                extraction_error=err,
+                origin_url=origin_url,
+                parser=parser,
+            )
         # Persistent KB v2: chunk (+embed when available) into document_chunks
         # so chat retrieval spans the whole corpus across restarts.
         from .kb_index import index_source
@@ -148,20 +177,36 @@ def _ingest_parsed_text(
             # SourceDocument with zero chunks (create already committed).
             # v7 KB-1: 返回 0 也不抛错 —— 必须显式检查，否则零-chunk 孤儿行
             # 状态仍为 ok（与 _persist_fulltext 的 P1-8 口径一致）。
+            from .kb_dedup import all_chunks_were_duplicates, reset_all_duplicate_flag
             from .kb_index import kb_enabled
 
+            reset_all_duplicate_flag()
             n_chunks = index_source(source_id, text, fail_soft=False)
             if not n_chunks and kb_enabled():
+                # Zero chunks is either a real failure or "everything in this
+                # document already exists under another source" (L1 exact
+                # dedup). Both leave a failed row (retryable once the other
+                # copy is gone / the cause is fixed) but the user is told
+                # which one it was instead of seeing a silent failure.
+                duplicate = all_chunks_were_duplicates()
+                reason = (
+                    "内容与库中已有资料重复（所有分块均已存在于其他资料）"
+                    if duplicate
+                    else "index_source produced 0 chunks"
+                )
                 try:
                     store.update_fields(
-                        source_id,
-                        ingest_status="failed",
-                        ingest_error="index_source produced 0 chunks",
+                        source_id, ingest_status="failed", ingest_error=reason
                     )
                 except Exception:  # noqa: BLE001
                     logger.warning("mark zero-chunk source failed (fail-open)")
                 status = "failed"
-                err = err or "kb index produced 0 chunks"
+                err = err or reason
+                warnings.append(
+                    "内容与库中已有资料重复，未新增任何分块"
+                    if duplicate
+                    else "未生成任何分块，入库失败（修复原因后可重新上传）"
+                )
         except Exception as exc:
             log_handled_exception(logger, exc, "index_source hard fail — deleting orphan source")
             try:
@@ -171,10 +216,10 @@ def _ingest_parsed_text(
             source_id = None
             status = "failed"
             err = err or f"kb index failed: {type(exc).__name__}"
-            return IngestOutcome(evidence, source_id, guide, status)
+            return IngestOutcome(evidence, source_id, guide, status, warnings=warnings)
         _register_guide_products(source_id, guide)
 
-    return IngestOutcome(evidence, source_id, guide, status)
+    return IngestOutcome(evidence, source_id, guide, status, warnings=warnings)
 
 
 def _register_guide_products(source_id: str | None, guide: SourceGuideSchema | None) -> None:
