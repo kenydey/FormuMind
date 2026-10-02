@@ -219,7 +219,10 @@ def test_wiring_persists_property_sets(tmp_path, monkeypatch):
     out = parsing._maybe_extract_tables(result, b"tds-bytes")
     assert len(out.tables) == 1
     assert out.tables[0].kind == "tds_sds"
-    key = hashlib.sha256(b"tds-bytes").hexdigest()
+    # The sidecar is persisted by persist_table_sidecar, keyed by the real
+    # source UUID (the key every reader uses), not by the file-bytes sha256.
+    key = "11111111-2222-3333-4444-555555555555"
+    parsing.persist_table_sidecar(key, out.tables)
     sets = tc.load_property_sets(key)
     assert len(sets) == 1
     names = {p["name_normalized"] for p in sets[0]["properties"]}

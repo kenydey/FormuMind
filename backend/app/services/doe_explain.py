@@ -42,7 +42,37 @@ def infer_strategy(
     return label, rationale
 
 
-def _factor_distance(a: dict[str, float | str], b: dict[str, float | str]) -> float:
+# Nearest-neighbour RMS distance (range-normalised, so in [0, 1]) above which a
+# candidate counts as sitting in unexplored space.
+_SPARSE_DISTANCE = 0.35
+
+
+def factor_spans(points: list[dict[str, float | str]]) -> dict[str, float]:
+    """Observed range of every numeric factor across *points* (for normalising)."""
+    lo: dict[str, float] = {}
+    hi: dict[str, float] = {}
+    for p in points:
+        for k, v in (p or {}).items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                continue
+            lo[k] = min(lo.get(k, v), v)
+            hi[k] = max(hi.get(k, v), v)
+    return {k: hi[k] - lo[k] for k in lo}
+
+
+def _factor_distance(
+    a: dict[str, float | str],
+    b: dict[str, float | str],
+    spans: dict[str, float] | None = None,
+) -> float:
+    """RMS per-factor distance, each factor scaled by its observed range.
+
+    The old span was ``max(a, b) - min(a, b)`` — the gap between the two points
+    themselves — so every unequal pair contributed exactly 1 whatever the real
+    separation, and the distance only ever counted *how many* factors differed.
+    With ``spans`` (see :func:`factor_spans`) a factor contributes
+    ``((a-b)/range)**2`` in [0, 1].
+    """
     keys = set(a) & set(b)
     if not keys:
         return float("inf")
@@ -53,9 +83,9 @@ def _factor_distance(a: dict[str, float | str], b: dict[str, float | str]) -> fl
         if isinstance(av, str) or isinstance(bv, str):
             dist += 0.0 if av == bv else 1.0
             continue
-        lo = min(av, bv)
-        hi = max(av, bv)
-        span = hi - lo if hi > lo else max(abs(av), abs(bv), 1.0)
+        span = (spans or {}).get(key) or 0.0
+        if span <= 0:
+            span = max(abs(av), abs(bv), 1.0)
         dist += ((av - bv) / span) ** 2
     return math.sqrt(dist / len(keys))
 
@@ -69,8 +99,9 @@ def k_nearest_experiments(
     if not existing:
         return []
     scored: list[tuple[float, ExperimentRecord, str]] = []
+    spans = factor_spans([factors] + [e.factors or {} for e in existing])
     for idx, exp in enumerate(existing):
-        dist = _factor_distance(factors, exp.factors or {})
+        dist = _factor_distance(factors, exp.factors or {}, spans)
         scored.append((dist, exp, experiment_id(exp, idx)))
     scored.sort(key=lambda t: t[0])
     return [(exp, eid) for _, exp, eid in scored[:k]]
@@ -81,6 +112,9 @@ def _describe_region(natural: dict[str, float], plan: DOEPlan) -> str:
     for factor in plan.factors[:3]:
         val = natural.get(factor.name)
         if val is None:
+            continue
+        if isinstance(val, str):  # discrete level: no low/mid/high band
+            parts.append(f"{factor.name}（{val}）")
             continue
         if val <= factor.low + (factor.high - factor.low) * 0.33:
             band = "低"
@@ -140,7 +174,11 @@ def build_run_explanations(
     for run in suggested:
         nearest = k_nearest_experiments(run.natural, existing, k=2)
         nearest_ids = [eid for _, eid in nearest]
-        is_sparse = not nearest or _factor_distance(run.natural, nearest[0][0].factors or {}) > 0.75
+        is_sparse = not nearest or _factor_distance(
+            run.natural,
+            nearest[0][0].factors or {},
+            factor_spans([run.natural] + [e.factors or {} for e in existing]),
+        ) > _SPARSE_DISTANCE
         run_strategy = _run_strategy(strategy_label, is_sparse=is_sparse)
         acq = (acquisition_scores or {}).get(run.run_id)
         cw = (constraint_warnings_by_run or {}).get(run.run_id, [])

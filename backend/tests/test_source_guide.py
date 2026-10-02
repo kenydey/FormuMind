@@ -17,6 +17,22 @@ from app.services.source_guide import _select_extraction_text, extract_source_gu
 
 client = TestClient(app)
 
+
+@pytest.fixture(autouse=True)
+def _no_cross_test_chunk_dedup(monkeypatch):
+    """These tests deliberately ingest the same fixture text over and over.
+
+    L1 exact dedup (kb_dedup) drops chunks already stored under *another*
+    source, so from the second test on every chunk is a "duplicate", index_source
+    returns 0 and the outcome flips to ``failed`` — unrelated to what is under test.
+    """
+    from app.config import get_settings
+
+    monkeypatch.setenv("FORMUMIND_KB_DEDUP_EXACT_ENABLED", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
 PATENT_FIXTURE = """
 本发明涉及一种用于铝合金的无铬转化膜处理液。
 

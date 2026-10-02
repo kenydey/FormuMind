@@ -11,6 +11,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from app.domain.schemas import Evidence
 from app.main import app
 
 
@@ -77,6 +78,10 @@ def test_stream_emits_tokens_then_done(monkeypatch, client):
             "kg_stats": None,
             "clarification": None,
             "rewritten_query": None,
+            "relevant": [
+                Evidence(source="seed", identifier="kb:1#c0", title="镁合金钝化",
+                         snippet="镁合金钝化是表面处理", relevance=0.9)
+            ],
         }
 
     monkeypatch.setattr(chat_mod, "_stream_answer_plan", fake_plan)
@@ -105,7 +110,7 @@ def test_stream_emits_tokens_then_done(monkeypatch, client):
     assert tokens == "镁合金钝化是表面处理"
     done = events[-1]
     assert done["answer"] == tokens
-    assert done["citations"] == []
+    assert [c["identifier"] for c in done["citations"]] == ["kb:1#c0"]
 
 
 def test_stream_error_when_llm_fails(monkeypatch, client):
@@ -122,7 +127,7 @@ def test_stream_error_when_llm_fails(monkeypatch, client):
         lambda req, settings: {
             "question": req.question, "prompt": "p", "sources": [],
             "kb_used": 0, "entity_resolution": None, "kg_stats": None,
-            "clarification": None, "rewritten_query": None,
+            "clarification": None, "rewritten_query": None, "relevant": [],
         },
     )
     monkeypatch.setattr(cc_mod, "build_sourced_claims", lambda *a, **k: [])
@@ -142,8 +147,11 @@ def test_stream_structured_returns_done_without_tokens(monkeypatch, client):
     import app.services.chat_structured as cs_mod
     from app.domain.chat_schemas import StructuredAnswer
 
-    def fake_structured(question, sources, history=None, domain=None, settings=None):
-        return StructuredAnswer(summary="结构化答案摘要", key_findings=["发现1"]), None
+    def fake_structured(question, sources, *args, **kwargs):
+        # generate_structured_answer returns (answer, error, effective_sources)
+        ev = Evidence(source="seed", identifier="kb:1#c0", title="镁合金钝化",
+                      snippet="结构化答案摘要 发现1 结构化答案摘要", relevance=0.9)
+        return StructuredAnswer(summary="结构化答案摘要", key_findings=["发现1"]), None, [ev]
 
     monkeypatch.setattr(cs_mod, "generate_structured_answer", fake_structured)
 
@@ -187,6 +195,7 @@ def _chart_plan(req, settings):
         "kg_stats": None,
         "clarification": None,
         "rewritten_query": None,
+        "relevant": [],
         "mode": "chat",
         "selected_skills": [],
         "selected_mcp_servers": [],

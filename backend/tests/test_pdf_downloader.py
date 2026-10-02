@@ -59,6 +59,7 @@ def test_dead_endpoints_are_never_requested(monkeypatch):
         status_code = 200
         headers = {"content-type": "text/html"}
         text = _LANDING_HTML
+        content = _LANDING_HTML.encode("utf-8")  # fetch_pdf_ex reads .content
 
     class _Client:
         def __init__(self, *a, **kw):

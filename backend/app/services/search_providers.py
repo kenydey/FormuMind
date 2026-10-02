@@ -5,7 +5,7 @@ swallows network errors (logs + returns []).
 """
 from __future__ import annotations
 
-from .errors import degrade_return
+from .errors import degrade_return, redact_secrets
 from .provider_health import (
     backoff_delay,
     provider_breaker_open,
@@ -603,7 +603,7 @@ def search_serpapi_patents(
     except Exception as exc:
         threshold, cooldown = _breaker_settings(settings)
         record_provider_failure("serpapi_patents", exc, threshold=threshold, cooldown_sec=cooldown)
-        logger.warning("SerpAPI Google Patents failed (%s): %s", hl, exc)
+        logger.warning("SerpAPI Google Patents failed (%s): %s", hl, redact_secrets(str(exc)))
         return []
 
 
@@ -806,5 +806,5 @@ def search_cnipa_parallel(
         except Exception as exc:
             threshold, cooldown = _breaker_settings(settings)
             record_provider_failure("cnipa", exc, threshold=threshold, cooldown_sec=cooldown)
-            logger.warning("CNIPA parallel SerpAPI web failed: %s", exc)
+            logger.warning("CNIPA parallel SerpAPI web failed: %s", redact_secrets(str(exc)))
     return []

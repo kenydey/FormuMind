@@ -526,6 +526,10 @@ class DOEFactor(BaseModel):
     @model_validator(mode="after")
     def _validate_kind_levels(self) -> "DOEFactor":
         _validate_factor_kind_levels(self.kind, self.levels, self.name)
+        if self.kind == "continuous" and self.low > self.high:
+            raise ValueError(
+                f"Factor {self.name!r}: low ({self.low}) must not exceed high ({self.high})"
+            )
         return self
 
 

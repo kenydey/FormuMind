@@ -160,14 +160,13 @@ def derive_process_levers(req: Requirement) -> list[LeverSpec]:
     levers: list[LeverSpec] = []
     cure = req.cure_temperature_c
     if cure is not None and req.domain == ProductDomain.anticorrosion_coating:
-        levers.append(
-            LeverSpec(
-                name="cure_temperature_c",
-                low=max(20.0, cure - 30),
-                high=float(cure),
-                unit="C",
-            )
-        )
+        high = float(cure)
+        low = max(20.0, cure - 30)
+        # A cure target at/below the 20 C floor leaves no range to explore;
+        # emitting low>=high produced a zero-width or inverted factor that
+        # decode() silently mapped backwards.
+        if low < high:
+            levers.append(LeverSpec(name="cure_temperature_c", low=low, high=high, unit="C"))
     return levers
 
 

@@ -210,6 +210,8 @@ def test_factor_suggest_wiki_bounds(wiki_env, monkeypatch):
         name = "catalyst_wt"
         low = 0.0
         high = 5.0
+        kind = "continuous"
+        levels = None
         unit = "wt%"
 
     monkeypatch.setattr(fs, "resolve_levers", lambda *a, **k: [])

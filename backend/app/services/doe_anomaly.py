@@ -7,7 +7,8 @@ from .doe_explain import experiment_id, k_nearest_experiments
 
 
 _RESIDUAL_Z_THRESHOLD = 2.5
-_FACTOR_OUTLIER_DISTANCE = 1.5
+# Range-normalised RMS distance (max 1.0): far from every other experiment.
+_FACTOR_OUTLIER_DISTANCE = 0.6
 
 
 def _physical_limit_checks(
@@ -110,9 +111,13 @@ def detect_anomalies(
             others = [e for i, e in enumerate(existing) if i != idx]
             nearest = k_nearest_experiments(exp.factors or {}, others, k=1)
             if nearest and nearest[0][0] is not None:
-                from .doe_explain import _factor_distance
+                from .doe_explain import _factor_distance, factor_spans
 
-                dist = _factor_distance(exp.factors or {}, nearest[0][0].factors or {})
+                dist = _factor_distance(
+                    exp.factors or {},
+                    nearest[0][0].factors or {},
+                    factor_spans([e.factors or {} for e in existing]),
+                )
                 if dist > _FACTOR_OUTLIER_DISTANCE:
                     flags.append(
                         AnomalyFlag(

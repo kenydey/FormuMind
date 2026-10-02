@@ -7,6 +7,7 @@ instead of silent ``pass`` or undifferentiated logging.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Literal, TypeVar
 
 T = TypeVar("T")
@@ -98,6 +99,21 @@ def classify_exception(exc: BaseException) -> ErrorKind:
     return "unknown"
 
 
+_SECRET_QS_RE = re.compile(
+    r"(?i)((?:api[_-]?key|apikey|key|token|access[_-]?token|secret|password|mailto)=)[^&\s'\"]+"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask credentials embedded in URLs / query strings before logging.
+
+    httpx's ``HTTPStatusError`` stringifies with the full request URL, and
+    several providers (OpenAlex, SerpAPI, ...) take their key as a query
+    parameter, so a 401/429 would otherwise write the key into the log.
+    """
+    return _SECRET_QS_RE.sub(r"\1***", text)
+
+
 def log_handled_exception(
     logger: logging.Logger,
     exc: BaseException,
@@ -115,14 +131,14 @@ def log_handled_exception(
     # text "%s" on those loggers instead of raising, so the exception detail
     # this function exists to capture would just vanish from the log.
     if level is not None:
-        logger.log(level, f"{context}: {exc}")
+        logger.log(level, f"{context}: {redact_secrets(str(exc))}")
         return kind
     if kind == "transient":
-        logger.warning(f"{context} (transient): {exc}")
+        logger.warning(f"{context} (transient): {redact_secrets(str(exc))}")
     elif kind == "permanent":
-        logger.info(f"{context} (permanent): {exc}")
+        logger.info(f"{context} (permanent): {redact_secrets(str(exc))}")
     else:
-        logger.warning(f"{context}: {exc}")
+        logger.warning(f"{context}: {redact_secrets(str(exc))}")
     return kind
 
 

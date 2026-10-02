@@ -85,13 +85,19 @@ def test_validate_bbox_rejects_malformed() -> None:
         validate_bbox(["a", "b", "c", "d"])
 
 
-def test_chunk_store_rejects_bad_bbox(factory, store) -> None:
+def test_chunk_store_degrades_bad_bbox_to_none(factory, store) -> None:
+    """F-5: a malformed bbox must not sink the whole chunk write — the
+    store keeps the chunk and drops only the geometry (validate_bbox itself
+    still raises; the stores go through safe_bbox)."""
     sid = str(uuid.uuid4())
-    with pytest.raises(ValueError):
-        with factory() as session:
-            store.replace_for_source_in(
-                session, sid, [{"text": "x" * 40, "bbox": [0, 0, 72, 100]}]
-            )
+    with factory() as session:
+        store.replace_for_source_in(
+            session, sid, [{"text": "x" * 40, "bbox": [0, 0, 72, 100]}]
+        )
+        session.commit()
+    chunks = store.get_by_source(sid)
+    assert len(chunks) == 1
+    assert chunks[0].bbox is None
 
 
 # ── block type heuristic ────────────────────────────────────────────────
@@ -179,10 +185,13 @@ def test_extraction_store_formulas_roundtrip(factory, xstore) -> None:
     assert rows[0].formula_no == "(3)"
 
 
-def test_extraction_store_rejects_bad_bbox(factory, xstore) -> None:
+def test_extraction_store_degrades_bad_bbox_to_none(factory, xstore) -> None:
+    """F-5: bad geometry is dropped (None), the table row is still stored."""
     sid = str(uuid.uuid4())
-    with pytest.raises(ValueError):
-        xstore.replace_tables(sid, [{"markdown_text": "| a |", "bbox": [0, 0, 2, 1]}])
+    xstore.replace_tables(sid, [{"markdown_text": "| a |", "bbox": [0, 0, 2, 1]}])
+    rows = xstore.tables_for_source(sid)
+    assert len(rows) == 1
+    assert rows[0].bbox is None
 
 
 # ── end-to-end: 10 synthetic documents ────────────────────────────────────

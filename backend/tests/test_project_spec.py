@@ -90,12 +90,14 @@ def test_material_map_round_trip_lever_to_factor_to_snapshot():
         material_map={"A": "聚氨酯树脂X", "B": "环氧树脂Y"},
     )
     factors = levers_to_doe_factors([lever])
-    assert factors[0].material_map == {"A": "聚氨酯树脂X", "B": "环氧树脂Y"}
+    # v7/v8: DOEFactor no longer carries material_map; LeverSpec is the SSOT
+    # and lever_snapshot_from_plan reads it from req.levers.
+    assert not hasattr(factors[0], "material_map")
     assert factors[0].kind == "discrete"
     assert factors[0].levels == ["A", "B"]
 
     plan = SimpleNamespace(factors=factors, runs=[], domain=None)
-    snap = lever_snapshot_from_plan(plan, None)
+    snap = lever_snapshot_from_plan(plan, SimpleNamespace(levers=[lever]))
     assert snap[0]["material_map"] == {"A": "聚氨酯树脂X", "B": "环氧树脂Y"}
     assert snap[0]["kind"] == "discrete"
 
@@ -104,4 +106,4 @@ def test_material_map_absent_stays_none():
     """无 material_map 的 lever 透传后为 None，不污染快照。"""
     lever = LeverSpec(name="温度", low=20.0, high=80.0, unit="°C")
     factors = levers_to_doe_factors([lever])
-    assert factors[0].material_map is None
+    assert not hasattr(factors[0], "material_map")

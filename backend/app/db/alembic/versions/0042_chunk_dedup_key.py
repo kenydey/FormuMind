@@ -30,7 +30,16 @@ def _has_column(table: str, column: str) -> bool:
     return any(c["name"] == column for c in insp.get_columns(table))
 
 
+def _has_table(table: str) -> bool:
+    return table in sa.inspect(op.get_bind()).get_table_names()
+
+
 def upgrade() -> None:
+    # Same guard as 0039: partial / synthetic legacy schemas (e.g. the 0032
+    # fixture DB) have no document_chunks table, and inspecting columns of a
+    # missing table raises NoSuchTableError, aborting `upgrade head`.
+    if not _has_table("document_chunks"):
+        return
     if not _has_column("document_chunks", "dedup_key"):
         op.add_column(
             "document_chunks",
@@ -72,6 +81,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not _has_table("document_chunks"):
+        return
     bind = op.get_bind()
     insp = sa.inspect(bind)
     existing = {ix["name"] for ix in insp.get_indexes("document_chunks")}

@@ -877,10 +877,23 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     }
 
 
+def _sse_default(o):
+    """json fallback: pydantic models become JSON objects, not their repr().
+
+    ``default=str`` turned every ``Evidence`` / ``SourcedClaim`` / structured
+    answer in a ``done`` event into a ``"source='x' identifier=..."`` string,
+    so the client received unusable citation cards.
+    """
+    dump = getattr(o, "model_dump", None)
+    if callable(dump):
+        return dump(mode="json")
+    return str(o)
+
+
 def _sse(obj: dict) -> str:
     import json
 
-    return f"data: {json.dumps(obj, ensure_ascii=False, default=str)}\n\n"
+    return f"data: {json.dumps(obj, ensure_ascii=False, default=_sse_default)}\n\n"
 
 
 def _fire_auto_review(
@@ -1365,7 +1378,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                         yield _sse({"type": "phase", "phase": "claims"})
                         cites = [
                             _sanitize_evidence(c)
-                            for c in plan["relevant"][: min(8, len(plan["relevant"]))]
+                            for c in plan["relevant"]
                         ]
                         claims, sources_audit = None, None
                         try:
@@ -1417,7 +1430,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                     yield _sse({"type": "phase", "phase": "claims"})
                     cites = [
                         _sanitize_evidence(c)
-                        for c in plan["relevant"][: min(8, len(plan["relevant"]))]
+                        for c in plan["relevant"]
                     ]
                     claims, sources_audit = None, None
                     try:
@@ -1474,18 +1487,31 @@ async def chat_stream(req: "ChatRequestValidated"):
                         pass  # loop 已关(客户端断开)
 
                 try:
-                    base_url = _resolve_openai_base_url(
-                        provider, _es(settings, "llm_base_url")
-                    )
-                    text = _openai_compatible_stream(
-                        prompt,
-                        api_key,
-                        _es(settings, "llm_model"),
-                        2048,
-                        base_url,
-                        on_delta=on_delta,
-                        disable_thinking=True,
-                    )
+                    from ..services.llm import _OPENAI_COMPAT_PROVIDERS, _call_llm
+
+                    if (provider or "").strip().lower() not in _OPENAI_COMPAT_PROVIDERS:
+                        # anthropic / gemini have no OpenAI-compatible endpoint
+                        # (and the default provider is anthropic): streaming
+                        # through the OpenAI SDK sent the Anthropic key to
+                        # api.openai.com. Use the provider-aware blocking call
+                        # and emit the answer as a single delta.
+                        text = _call_llm(prompt, 2048, disable_thinking=True)
+                        if not text:
+                            raise RuntimeError("LLM 未返回内容")
+                        on_delta(text)
+                    else:
+                        base_url = _resolve_openai_base_url(
+                            provider, _es(settings, "llm_base_url")
+                        )
+                        text = _openai_compatible_stream(
+                            prompt,
+                            api_key,
+                            _es(settings, "llm_model"),
+                            2048,
+                            base_url,
+                            on_delta=on_delta,
+                            disable_thinking=True,
+                        )
                     result_holder["text"] = text
                 except Exception as exc:  # noqa: BLE001
                     result_holder["error"] = str(exc)[:300]
@@ -1529,7 +1555,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                 answer = result_holder.get("text") or ""
 
             citations = [
-                _sanitize_evidence(c) for c in plan["relevant"][: min(8, len(plan["relevant"]))]
+                _sanitize_evidence(c) for c in plan["relevant"]
             ]
             answer, doi_results, reviewer, reviewer_fix, citation_expand = (
                 _finalize_evidence_fields(

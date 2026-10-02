@@ -13,6 +13,7 @@ adapter+fallback philosophy as the rest of the platform.
 from __future__ import annotations
 
 import csv
+import math
 import io
 
 from ..domain.schemas import DOEPlan, ExperimentRecord, ProductDomain
@@ -81,9 +82,12 @@ def _coerce_float(value: str) -> float | None:
     if value == "":
         return None
     try:
-        return float(value)
+        num = float(value)
     except ValueError:
         return None
+    # float() happily parses "nan"/"inf"; one of those in a training row
+    # poisons every downstream fit.
+    return num if math.isfinite(num) else None
 
 
 def csv_to_records(text: str, default_domain: ProductDomain | None = None) -> list[ExperimentRecord]:

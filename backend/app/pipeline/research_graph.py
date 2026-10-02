@@ -367,7 +367,7 @@ def _register_recommend_round(recommend_id: str, project_id: str | None) -> None
                 _s, recommend_id=recommend_id, project_id=project_id or None
             )
     except Exception as exc:  # noqa: BLE001 — telemetry fail-open by contract
-        logger.warning("recommend round registration failed (fail-open): %s", exc)
+        logger.warning("recommend round registration failed (fail-open): {}", exc)
 
 
 def recommend_generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
@@ -569,7 +569,13 @@ def _run_claim_check_loop(
     )
     while not state.get("claim_check_passed") and int(state.get("claim_check_attempts") or 0) < 2:
         _emit(progress_cb, "regenerate", "修正未支撑论断")
+        before = state.get("report_markdown")
         state = regenerate_report_node(state, settings)
+        if state.get("report_markdown") == before:
+            # Nothing was rewritten (only `insufficient` claims, which have no
+            # narrowed-rewrite prompt). Re-checking would re-verify the report
+            # *including its own footer* and append a second footer.
+            break
         _emit(progress_cb, "claim_check", "复核论断")
         state = claim_check_node(state, settings)
     return state
@@ -690,7 +696,7 @@ def _filter_unindexed_external(evidence: list[Evidence]) -> list[Evidence]:
         kept.append(ev)
     if filtered:
         logger.info(
-            "过滤 %d 条未入库外部源（full-text 获取失败），示例: %s",
+            "过滤 {} 条未入库外部源（full-text 获取失败），示例: {}",
             len(filtered), filtered[0],
         )
     return kept
@@ -780,7 +786,7 @@ def _fuse_recommend_kb_hybrid(
 
             merged = llm_rerank(query, merged, k=len(merged))
         except Exception as exc:
-            logger.debug("kb recommend rerank skipped: %s", exc)
+            logger.debug("kb recommend rerank skipped: {}", exc)
     return merged
 
 

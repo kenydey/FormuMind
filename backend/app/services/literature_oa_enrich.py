@@ -188,7 +188,11 @@ def enrich_manifest_oa(
             it["has_fulltext"] = True
             it["enrich_status"] = "fetched"
             it["enriched_at"] = time.time()
-            it["source_id"] = it.get("source_id") or it.get("id")
+            # _persist_fulltext returns the stored SourceDocument id; the manifest
+            # item's own `id` is a DOI/URL, which downstream lookups can't resolve.
+            it["source_id"] = source_id if isinstance(source_id, str) else (
+                it.get("source_id") or it.get("id")
+            )
         else:
             skipped += 1
             it["enrich_status"] = "failed"

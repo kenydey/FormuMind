@@ -8,10 +8,25 @@ natural units against the supplied factor ranges.
 from __future__ import annotations
 
 import itertools
+import math
 
 import numpy as np
 
 from .schemas import DOEFactor, DOEPlan, DOERun
+
+
+# Hard ceiling on generated runs. Full factorials grow as levels**k, so an
+# unbounded request (e.g. 25 two-level levers = 33M runs) would exhaust memory
+# and the DB before any validation ran. Callers get a ValueError (-> HTTP 422).
+MAX_DESIGN_RUNS = 4096
+
+
+def _check_run_budget(n_runs: int, what: str) -> None:
+    if n_runs > MAX_DESIGN_RUNS:
+        raise ValueError(
+            f"{what} would generate {n_runs} runs (limit {MAX_DESIGN_RUNS}); "
+            "reduce the number of factors/levels or use design='lhs'/'fractional_factorial'"
+        )
 
 
 def full_factorial(k: int, levels: int | list[int] = 2) -> np.ndarray:
@@ -32,6 +47,7 @@ def full_factorial(k: int, levels: int | list[int] = 2) -> np.ndarray:
             )
     if any(c < 2 for c in counts):
         raise ValueError(f"full_factorial: level counts must be >= 2, got {counts}")
+    _check_run_budget(math.prod(counts), f"full factorial over {k} factors")
     if all(c == 2 for c in counts):
         return np.array(list(itertools.product([-1.0, 1.0], repeat=k)))
     cols = [np.linspace(-1.0, 1.0, c) for c in counts]
@@ -64,7 +80,11 @@ def plackett_burman(k: int) -> np.ndarray:
         16: [1, 1, 1, 1, -1, 1, -1, 1, 1, -1, -1, 1, -1, -1, -1],
         20: [1, 1, -1, -1, 1, 1, 1, 1, -1, 1, -1, 1, -1, -1, -1, -1, 1, 1, -1],
     }
-    n = next(m for m in sorted(generators) if m - 1 >= k)
+    n = next((m for m in sorted(generators) if m - 1 >= k), None)
+    if n is None:
+        raise ValueError(
+            f"plackett_burman supports at most {max(generators) - 1} factors, got {k}"
+        )
     row = generators[n]
     design = [row]
     for _ in range(n - 2):
@@ -76,6 +96,8 @@ def plackett_burman(k: int) -> np.ndarray:
 
 def central_composite(k: int, alpha: str = "rotatable") -> np.ndarray:
     """Central composite design: factorial + axial (star) + centre points."""
+    if k > 4:
+        _check_run_budget(2 ** (k - 1), f"central composite over {k} factors")
     factorial = full_factorial(k) if k <= 4 else fractional_factorial(k)
     a = float(len(factorial)) ** 0.25 if alpha == "rotatable" else 1.0
     axial = []
@@ -169,10 +191,24 @@ def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int 
     else:
         matrix = _DESIGNS[design](k, n)
     runs: list[DOERun] = []
+    clipped = False
     for idx, row in enumerate(matrix, start=1):
-        coded = {f.name: round(float(c), 4) for f, c in zip(factors, row)}
-        natural = {f.name: decode(float(c), f) for f, c in zip(factors, row)}
+        coded: dict[str, float] = {}
+        natural: dict[str, float | str] = {}
+        for f, c in zip(factors, row):
+            c = float(c)
+            if f.kind != "discrete" and abs(c) > 1.0:
+                # CCD star points sit at +-alpha (>1) and would decode to
+                # concentrations outside [low, high] — negative wt% for a low
+                # bound near zero. low/high are physical limits, so clip (the
+                # pydoe engine path clips the same way).
+                c = max(-1.0, min(1.0, c))
+                clipped = True
+            coded[f.name] = round(c, 4)
+            natural[f.name] = decode(c, f)
         runs.append(DOERun(run_id=idx, coded=coded, natural=natural))
+    if clipped:
+        note_extra += " NOTE: axial points beyond the factor range were clipped to [low, high]."
     note = (
         f"{design} design over {k} factors -> {len(runs)} runs. "
         f"Estimated resolution: {'screening' if design in ('fractional_factorial', 'plackett_burman') else 'response-surface' if design == 'ccd' else 'space-filling' if design == 'lhs' else 'full'}."

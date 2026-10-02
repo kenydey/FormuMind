@@ -246,7 +246,7 @@ def active_learning_doe(
                     )
                 # P1 #18: package importable but engine reports unavailable.
                 logger.warning(
-                    "BayBE reported unavailable; falling back to legacy DOE (engine=%s)",
+                    "BayBE reported unavailable; falling back to legacy DOE (engine={})",
                     eng,
                 )
             except Exception as exc:
@@ -254,7 +254,7 @@ def active_learning_doe(
                     raise
                 # P1 #18: engine=auto must not swallow BayBE failures silently.
                 logger.warning(
-                    "BayBE active-learning failed, falling back to legacy DOE: %s",
+                    "BayBE active-learning failed, falling back to legacy DOE: {}",
                     exc,
                 )
 

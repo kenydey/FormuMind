@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -13,6 +14,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
+_DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"<>]+", re.IGNORECASE)
 SCHEMA_VERSION = 1
 
 
@@ -84,6 +86,12 @@ def load_manifest(project_id: str) -> dict[str, Any]:
         return raw
     except Exception as exc:  # noqa: BLE001
         logger.warning("literature manifest load failed: %s", exc)
+        # Keep the unreadable file: the next save_manifest would otherwise
+        # overwrite whatever (possibly recoverable) corpus it held.
+        try:
+            os.replace(path, path.with_name(path.name + ".corrupt"))
+        except OSError:
+            pass
         return empty_manifest(project_id)
 
 
@@ -101,9 +109,14 @@ def save_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     manifest["content_hash"] = content_hash_manifest(manifest)
     manifest["schema_version"] = SCHEMA_VERSION
     with _LOCK:
-        path.write_text(
+        # Atomic replace: a plain write_text truncates first, so a concurrent
+        # reader could see half a file, fail to parse it, fall back to an empty
+        # manifest and then save that over the frozen corpus.
+        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+        tmp.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        os.replace(tmp, path)
     return manifest
 
 
@@ -147,16 +160,33 @@ def _item_from_evidence(ev: Any) -> dict[str, Any]:
     ident = str(getattr(ev, "identifier", "") or getattr(ev, "title", "") or "")
     title = str(getattr(ev, "title", None) or ident)[:240]
     snippet = str(getattr(ev, "snippet", None) or "")[:400]
+    # Evidence has no `doi` field — the DOI (when there is one) is the
+    # identifier. Without it, OA enrichment (needs doi/oa_pdf_url), the DOI
+    # requirement and the year filters never saw a single search hit.
     doi = getattr(ev, "doi", None)
-    return {
+    if not doi and _DOI_RE.search(ident):
+        doi = _DOI_RE.search(ident).group(0)
+    year = getattr(ev, "pub_year", None)
+    if year is None:
+        pub_date = str(getattr(ev, "pub_date", "") or "")
+        if pub_date[:4].isdigit():
+            year = int(pub_date[:4])
+    item: dict[str, Any] = {
         "id": ident or title,
         "title": title,
         "doi": doi,
+        "year": year,
         "source": str(getattr(ev, "source", "") or "search_hit"),
         "snippet": snippet,
         "evidence_class": "search_hit",
         "screening": "unset",
     }
+    oa_pdf_url = getattr(ev, "oa_pdf_url", None)
+    if oa_pdf_url:
+        item["oa_pdf_url"] = oa_pdf_url
+    if getattr(ev, "has_fulltext", None):
+        item["has_fulltext"] = True
+    return item
 
 
 def capture_from_project(
