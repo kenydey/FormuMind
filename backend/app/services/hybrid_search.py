@@ -206,7 +206,9 @@ def _cosine_on_indices(
         for i in indices:
             c = chunks[i]
             if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
-                cosine_scores[i] = kb_index._dot(qv, c.embedding)
+                cemb = kb_index.chunk_embedding_list(c)
+                if cemb:
+                    cosine_scores[i] = kb_index._dot(qv, cemb)
     return used_matrix
 
 
@@ -225,7 +227,7 @@ def _cosine_matrix_for_model(
         c = chunks[i]
         if c.embedding_model != mname or not kb_index.comparable_embedding(c, dim, mname):
             continue
-        emb = getattr(c, "embedding", None)
+        emb = kb_index.chunk_embedding_list(c)
         if not emb or len(emb) != dim:
             continue
         rows.append(emb)
@@ -422,7 +424,9 @@ def hybrid_search_scored(
                 dim = len(qv)
                 for i, c in enumerate(chunks):
                     if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
-                        cosine_scores[i] = kb_index._dot(qv, c.embedding)
+                        cemb = kb_index.chunk_embedding_list(c)
+                        if cemb:
+                            cosine_scores[i] = kb_index._dot(qv, cemb)
 
         bm25_scores = bm25_raw.copy()
         bm25_max = float(bm25_scores.max()) if bm25_scores.size else 0.0

@@ -151,3 +151,36 @@ def test_pareto_ranking_falls_back_to_scalar_for_one_objective():
     objectives = [ObjectiveSpec(metric="salt_spray_hours", direction="maximize")]
     ranked = [(0.4, _form("low", 700)), (0.9, _form("high", 1200))]
     assert [f.name for _, f in _rank_by_pareto_then_score(ranked, objectives, 2)] == ["high", "low"]
+
+
+@pytest.mark.skipif(not baybe_available(), reason="baybe not installed")
+def test_baybe_recommend_all_measurements_dropped_takes_seed_plan():
+    """B-DOE-1 回归：清洗删光所有行时走 seed-plan 分支。
+
+    曾用清洗前的 df_meas.empty 判分支，空帧被喂给 campaign.add_measurements
+    → BayBE 抛 ValueError（线上 500）。修复后判清洗后的帧。
+    """
+    from app.services.engines.adapters.baybe_space_builder import factors_for_requirement
+
+    engine = BaybeCampaignEngine()
+    flist = factors_for_requirement(REQ)
+    assert flist, "测试需要真实搜索空间因子"
+    factors = {f.name: (f.low + f.high) / 2 for f in flist}
+    records = [
+        ExperimentRecord(
+            domain=REQ.domain,
+            factors=dict(factors),
+            measured={"salt_spray_hours": float("nan")},
+            source="test",
+        ),
+        ExperimentRecord(
+            domain=REQ.domain,
+            factors=dict(factors),
+            measured={"salt_spray_hours": float("nan")},
+            source="test",
+        ),
+    ]
+    r = engine.recommend(REQ, measurements=records, batch_size=2)
+    assert r.engine == "baybe"
+    assert len(r.plan.runs) == 2
+    assert r.campaign_state

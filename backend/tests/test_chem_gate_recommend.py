@@ -229,3 +229,20 @@ def test_ip_report_carries_molecule_checks(monkeypatch):
 )
 def test_is_queryable_name_filters_citation_artifacts(name, expected):
     assert chemtools._is_queryable_name(name) is expected
+
+
+def test_score_and_validate_preserves_grounding_warnings():
+    """B-F1 回归：grounding 阶段的警告（如"已剔除低可信度成分"）必须保留在卡片上。
+
+    曾用 `form.warnings = validate_formulation(...)` 赋值覆盖，导致
+    recommended_to_formulation 拷入的 grounding 警告丢失。
+    """
+    from app.pipeline.workflow import _score_and_validate
+
+    form = _form()
+    form.warnings = ["已剔除低可信度成分（证据未覆盖）：某助剂X"]
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating, substrate=Substrate.carbon_steel
+    )
+    out = _score_and_validate(form, None, req)
+    assert any("已剔除低可信度成分" in w for w in out.warnings)

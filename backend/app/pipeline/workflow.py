@@ -113,7 +113,10 @@ def _score_and_validate(
 
         logging.getLogger(__name__).debug("prediction bias soft-correct skipped: %s", exc)
     voc_limit = req.voc_limit_gpl if req else None
-    form.warnings = validate_formulation(form, voc_limit_gpl=voc_limit)
+    # B-F1: 追加而非覆盖 —— form.warnings 此时已载有 grounding 阶段的
+    # "已剔除低可信度成分"警告（formulation_gate.recommended_to_formulation 拷入），
+    # 覆盖会让用户在卡片上永远看不到配方被动过删减。
+    form.warnings = [*form.warnings, *validate_formulation(form, voc_limit_gpl=voc_limit)]
     voc_gpl = form.predicted.get("voc_gpl")
     form.warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
     if chem_screen:

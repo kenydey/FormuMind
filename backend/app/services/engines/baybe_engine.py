@@ -314,15 +314,20 @@ class BaybeCampaignEngine:
                     else df_wb
                 )
 
-        if not df_meas.empty:
-            campaign.add_measurements(
-                _prepare_measurement_dataframe(
-                    df_meas, metrics,
-                    expected_params=[f.name for f in factor_list],
-                )
+        # B-DOE-1: 先清洗再判空。清洗可能删光所有行（目标值全缺），
+        # 此时必须走 seed-plan 分支，不能把空帧喂给 add_measurements（BayBE 抛 ValueError）。
+        df_meas_clean = (
+            _prepare_measurement_dataframe(
+                df_meas, metrics,
+                expected_params=[f.name for f in factor_list],
             )
+            if not df_meas.empty
+            else df_meas
+        )
+        if not df_meas_clean.empty:
+            campaign.add_measurements(df_meas_clean)
 
-        if campaign_state is None and df_meas.empty:
+        if campaign_state is None and df_meas_clean.empty:
             seed_plan = build_doe_plan(factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8))
             virtual = surrogate_measurements_from_plan(seed_plan, req, None)
             if not virtual.empty and metrics:

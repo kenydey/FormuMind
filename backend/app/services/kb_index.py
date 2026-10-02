@@ -178,6 +178,31 @@ def _dot(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
+def chunk_embedding_list(chunk) -> list[float] | None:
+    """Read a chunk's embedding, BLOB-first (``embedding_blob``), JSON-fallback.
+
+    P0-1 backfill wrote vectors to ``embedding_blob`` only; the legacy JSON
+    ``embedding`` column is empty for those rows (2087 chunks: 88 JSON vs
+    2085 BLOB). All brute-force scoring must go through this helper, never
+    ``chunk.embedding`` directly. Never raises.
+    """
+    try:
+        raw = getattr(chunk, "embedding_blob", None)
+        if raw:
+            import struct
+
+            buf = bytes(raw)
+            n = len(buf) // 4
+            if n:
+                return list(struct.unpack(f"<{n}f", buf[: n * 4]))
+        js = getattr(chunk, "embedding", None)
+        if js:
+            return [float(x) for x in js]
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def comparable_embedding(chunk, query_dim: int, model_name: str) -> bool:
     """Whether *chunk*'s vector can be dot-producted against the query vector.
 
@@ -198,7 +223,7 @@ def comparable_embedding(chunk, query_dim: int, model_name: str) -> bool:
     would silently gut retrieval on every existing corpus, which is the same
     class of harm this guard is meant to prevent.
     """
-    vec = getattr(chunk, "embedding", None)
+    vec = chunk_embedding_list(chunk)
     if not vec or len(vec) != query_dim:
         return False
     stored = getattr(chunk, "embedding_model", None)
@@ -836,7 +861,11 @@ def search_chunks(
             expanded_query = f"{query} {' '.join(qctx['terms'][:8])}"
 
         scored: list[tuple[float, object]] = []
-        embedded = [c for c in chunks if c.embedding]
+        embedded = [
+            c
+            for c in chunks
+            if getattr(c, "embedding_blob", None) or getattr(c, "embedding", None)
+        ]
         # 每组模型编码一次查询(双语: zh→bge+指令, en→MiniLM)。
         vec_by_model: dict[str, list[float]] = {}
         if embedded:
@@ -865,8 +894,9 @@ def search_chunks(
             for c in chunks:
                 m = getattr(c, "embedding_model", None)
                 vec = vec_by_model.get(m) if m else None
-                if c.embedding and vec and comparable_embedding(c, len(vec), m or ""):
-                    scored.append((_dot(vec, c.embedding), c))
+                cemb = chunk_embedding_list(c) if vec else None
+                if cemb and vec and comparable_embedding(c, len(vec), m or ""):
+                    scored.append((_dot(vec, cemb), c))
                 else:
                     # 该 chunk 模型未参与本组编码(双语另一侧/脏数据/纯文本)
                     # → keyword 竞争, rescaled below cosine range。

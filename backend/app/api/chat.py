@@ -846,6 +846,10 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         "question": question,
         "prompt": prompt,
         "sources": sources,
+        # Fix B-Q1: prompt 用 BM25 重排后的 relevant 建 [^n] 序号，
+        # stream done 的 citations 必须取同序的 relevant[:8]，
+        # 否则 [^n] 与前端引用卡片错位。
+        "relevant": relevant,
         "kb_used": kb_used,
         "entity_resolution": entity_resolution,
         "kg_stats": kg_stats,
@@ -1291,11 +1295,11 @@ async def chat_stream(req: "ChatRequestValidated"):
                         yield _sse({"type": "phase", "phase": "claims"})
                         cites = [
                             _sanitize_evidence(c)
-                            for c in plan["sources"][: min(8, len(plan["sources"]))]
+                            for c in plan["relevant"][: min(8, len(plan["relevant"]))]
                         ]
                         claims, sources_audit = None, None
                         try:
-                            claims, sources_audit, _ = await asyncio.to_thread(
+                            claims, sources_audit, _verified = await asyncio.to_thread(
                                 _claims_and_audit,
                                 question,
                                 answer,
@@ -1304,6 +1308,17 @@ async def chat_stream(req: "ChatRequestValidated"):
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.warning("chat/stream claims 失败: %s", exc)
+                            _verified = None
+                        # P2 运行时门（与同步 /chat 对齐）：数值检查 → 冲突透出 → 拒答硬门。
+                        # 前端 done 用 ev.answer 替换流式内容，门触发时最终展示门控后答案。
+                        answer, claims, _abstained, _gate_notices = _apply_answer_gates(
+                            question,
+                            answer,
+                            cites,
+                            claims,
+                            _verified,
+                            settings,
+                        )
                         done_payload = {
                             "type": "done",
                             "answer": answer,
@@ -1318,8 +1333,11 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "sourced_claims": claims,
                             "sources_audit": sources_audit,
                             "tools_used": tools_used or result_holder.get("tools_used") or [],
-                            # B-1: BM25-only 退化提示位。
-                            "notices": _retrieval_degradation_notices(kb_used) or None,
+                            # B-1: BM25-only 退化提示位 + P2 门 notices。
+                            "notices": (
+                                list(_retrieval_degradation_notices(kb_used) or [])
+                                + list(_gate_notices or [])
+                            ) or None,
                         }
                         yield _sse(done_payload)
                         return
@@ -1329,11 +1347,11 @@ async def chat_stream(req: "ChatRequestValidated"):
                     yield _sse({"type": "phase", "phase": "claims"})
                     cites = [
                         _sanitize_evidence(c)
-                        for c in plan["sources"][: min(8, len(plan["sources"]))]
+                        for c in plan["relevant"][: min(8, len(plan["relevant"]))]
                     ]
                     claims, sources_audit = None, None
                     try:
-                        claims, sources_audit, _ = await asyncio.to_thread(
+                        claims, sources_audit, _verified = await asyncio.to_thread(
                             _claims_and_audit,
                             question,
                             answer,
@@ -1342,6 +1360,16 @@ async def chat_stream(req: "ChatRequestValidated"):
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("chat/stream claims 失败: %s", exc)
+                        _verified = None
+                    # P2 运行时门（与同步 /chat 对齐）：数值检查 → 冲突透出 → 拒答硬门。
+                    answer, claims, _abstained, _gate_notices = _apply_answer_gates(
+                        question,
+                        answer,
+                        cites,
+                        claims,
+                        _verified,
+                        settings,
+                    )
                     yield _sse(
                         {
                             "type": "done",
@@ -1357,6 +1385,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                             "sourced_claims": claims,
                             "sources_audit": sources_audit,
                             "tools_used": tools_used,
+                            "notices": list(_gate_notices or []) or None,
                         }
                     )
                     return
@@ -1430,7 +1459,7 @@ async def chat_stream(req: "ChatRequestValidated"):
                 answer = result_holder.get("text") or ""
 
             citations = [
-                _sanitize_evidence(c) for c in plan["sources"][: min(8, len(plan["sources"]))]
+                _sanitize_evidence(c) for c in plan["relevant"][: min(8, len(plan["relevant"]))]
             ]
             answer, doi_results, reviewer, reviewer_fix, citation_expand = (
                 _finalize_evidence_fields(
@@ -1452,7 +1481,7 @@ async def chat_stream(req: "ChatRequestValidated"):
             yield _sse({"type": "phase", "phase": "claims"})
             claims, sources_audit = None, None
             try:
-                claims, sources_audit, _ = await asyncio.to_thread(
+                claims, sources_audit, _verified = await asyncio.to_thread(
                     _claims_and_audit,
                     question,
                     answer,
@@ -1461,6 +1490,17 @@ async def chat_stream(req: "ChatRequestValidated"):
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("chat/stream claims 失败: %s", exc)
+                _verified = None
+            # P2 运行时门（与同步 /chat 对齐）：数值检查 → 冲突透出 → 拒答硬门。
+            # 前端 done 用 ev.answer 替换流式内容，门触发时最终展示门控后答案。
+            answer, claims, _abstained, _gate_notices = _apply_answer_gates(
+                question,
+                answer,
+                citations,
+                claims,
+                _verified,
+                settings,
+            )
 
             evidence_provenance = None
             try:
@@ -1494,9 +1534,11 @@ async def chat_stream(req: "ChatRequestValidated"):
                     "evidence_provenance": evidence_provenance,
                     "evidence_reviewer": reviewer,
                     "reviewer_fix": reviewer_fix,
-                    # B-1: BM25-only 退化提示位（主 token 流路径不走门逻辑，
-                    # numeric_check_skipped 提示仅同步/paperqa 路径有）。
-                    "notices": _retrieval_degradation_notices(kb_used) or None,
+                    # B-1: BM25-only 退化提示位 + P2 门 notices。
+                    "notices": (
+                        list(_retrieval_degradation_notices(kb_used) or [])
+                        + list(_gate_notices or [])
+                    ) or None,
                 }
             )
             # W2-8 (P1-12): turn-stop 自动审计；evidence 路径已内联 review 的 turn 跳过。
