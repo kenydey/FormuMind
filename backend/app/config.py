@@ -656,7 +656,9 @@ class Settings(BaseSettings):
     paperqa_embedding: str = ""  # empty → OpenAI emb if key else skip/default
     # Wave 5 — query-aware evidence compression tier 1 (default on; fail-open).
     query_compress_enabled: bool = True
-    query_compress_token_budget: int = 12000
+    # F-1: token 单位。默认 3000 ≈ chat_context_max_chars(12000 字符)/4，
+    # 与 _build_context 的真实截断线对齐；之前误配 12000 使压缩预算保证失效。
+    query_compress_token_budget: int = 3000
     # Wave 5 — tier 2 LLM rewrite layer.
     # Default ON since 2026-09-28 (Wave 1 ablation): under tight token budgets
     # tier-1's mechanical 400-char truncation drops buried key numbers

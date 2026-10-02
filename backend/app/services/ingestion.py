@@ -237,6 +237,13 @@ def ingest_file(
             persist_structured(outcome.source_id, parsed.structured)
         except Exception:
             logger.exception("structured persist failed (fail-open)")
+    # W2-3: table sidecar persisted here (not inside parse_document) so the key
+    # is the real SourceDocument UUID — the same key load_tables(doc.id) reads.
+    # Fail-open: a sidecar failure must never break the ingest that succeeded.
+    if persist and outcome.source_id and getattr(parsed, "tables", None):
+        from .parsing import persist_table_sidecar
+
+        persist_table_sidecar(outcome.source_id, parsed.tables)
     # Phase 3: opt-in page thumbnails (PDF only). Fail-open inside the hook;
     # zero overhead when page_thumbnail_enabled is False (default).
     if persist and outcome.source_id:

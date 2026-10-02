@@ -22,7 +22,6 @@ parser produced the output so provenance can be persisted.
 """
 from __future__ import annotations
 
-import hashlib
 import io
 import logging
 import re
@@ -72,9 +71,14 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
     """W2-3 wiring: table-contract extraction on the successful parse path.
 
     Fail-open by contract: any error leaves ``result`` untouched (tables=[]).
-    The sidecar key is the content sha256, which equals
-    ``SourceDocument.content_hash``, so assets rejoin documents without any
-    DB schema change. Gate: ``table_extract_enabled`` (default True).
+    Extracted assets are kept in-memory on ``result.tables``; the sidecar JSON
+    is persisted separately by :func:`persist_table_sidecar` once the
+    ``SourceDocument`` row exists, keyed by the source UUID — the same key the
+    read side (``table_contract.load_tables``) uses. (Historically this
+    function wrote the sidecar keyed by the file-bytes sha256, which no reader
+    ever used, so those writes were silently unreadable. Pre-fix sidecars are
+    orphaned on disk and can be deleted.)
+    Gate: ``table_extract_enabled`` (default True).
 
     W3-1: extracted assets are additionally normalised into PropertySets
     (``table_normalize``) and persisted under the ``"property_sets"`` key of
@@ -86,25 +90,40 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
         if not getattr(get_settings(), "table_extract_enabled", True):
             return result
         from . import table_contract as _tc
-        from . import table_normalize as _tn
         blocks = _tc.blocks_from_markdown(result.markdown or "")
         if not blocks:
             return result
-        source_id = hashlib.sha256(content).hexdigest()
-        assets = _tc.extract_tables(source_id, blocks, parser=result.parser)
+        assets = _tc.extract_tables("", blocks, parser=result.parser)
         result.tables = assets
-        if assets:
-            # W3-1: normalise tables → PropertySets, persisted in the same
-            # sidecar JSON. Fail-open: normalisation never blocks extraction.
-            try:
-                prop_dicts = [p.to_dict() for p in _tn.normalize_tables(assets)]
-            except Exception:
-                logger.exception("table_normalize: failed (fail-open)")
-                prop_dicts = None
-            _tc.save_tables(source_id, assets, property_sets=prop_dicts)
     except Exception:
         logger.exception("table_contract: extraction failed (fail-open)")
     return result
+
+
+def persist_table_sidecar(source_id: str, tables: list) -> None:
+    """Persist W2-3/W3-1 table assets as JSON sidecar keyed by source UUID.
+
+    Must be called after the ``SourceDocument`` row exists. Fail-open: never
+    raises. The key MUST be the source UUID — readers call
+    ``load_tables(doc.id)``; any other key makes the payload unreadable.
+    """
+    if not source_id or not tables:
+        return
+    try:
+        from . import table_contract as _tc
+        from . import table_normalize as _tn
+        # Re-key assets to the real source UUID now that it exists.
+        for i, asset in enumerate(tables):
+            asset.source_id = source_id
+            asset.table_id = f"{source_id}#p{(asset.page_no or 0):02d}-{i:02d}"
+        try:
+            prop_dicts = [p.to_dict() for p in _tn.normalize_tables(tables)]
+        except Exception:
+            logger.exception("table_normalize: failed (fail-open)")
+            prop_dicts = None
+        _tc.save_tables(source_id, tables, property_sets=prop_dicts)
+    except Exception:
+        logger.exception("table sidecar persist failed (fail-open)")
 
 
 # ── individual parsers (return markdown/text or None) ────────────────────────

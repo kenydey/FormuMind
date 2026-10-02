@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from .db_common import validate_bbox
+from .db_common import safe_bbox
 from .models import ExtractionFormula, ExtractionTable
 
 
@@ -46,7 +46,7 @@ class ExtractionStore:
                     id=str(uuid.uuid4()),
                     source_id=source_id,
                     page_no=item.get("page_no"),
-                    bbox=validate_bbox(raw_bbox) if raw_bbox is not None else None,
+                    bbox=safe_bbox(raw_bbox),
                     caption=(item.get("caption") or "")[:500] or None,
                     markdown_text=item.get("markdown_text") or "",
                     n_rows=item.get("n_rows"),
@@ -80,7 +80,7 @@ class ExtractionStore:
                     id=str(uuid.uuid4()),
                     source_id=source_id,
                     page_no=item.get("page_no"),
-                    bbox=validate_bbox(raw_bbox) if raw_bbox is not None else None,
+                    bbox=safe_bbox(raw_bbox),
                     latex=item.get("latex") or "",
                     formula_no=item.get("formula_no"),
                     created_at=_utcnow(),
@@ -89,7 +89,7 @@ class ExtractionStore:
         session.flush()
         return len(items)
 
-    def tables_for_source(self, source_id: str) -> list[ExtractionFormula]:
+    def tables_for_source(self, source_id: str) -> list[ExtractionTable]:
         with self._factory() as session:
             return (
                 session.query(ExtractionTable)

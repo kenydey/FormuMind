@@ -25,6 +25,11 @@ from ..services.chat_clarify import apply_assumption_to_structured, detect_clari
 from ..services.chat_context import rewrite_query, trim_history
 from ..services.chat_structured import generate_structured_answer
 from ..services.llm import answer_question
+from ..services.query_aware_compression import (
+    compress_evidence,
+    query_compress_enabled,
+    query_compress_token_budget,
+)
 from ..services.rag import active_rag_backend
 
 logger = logging.getLogger(__name__)
@@ -807,11 +812,9 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
 
     # Up-3: 主路径接入 query 压缩（fail-open；压缩后 prompt 与 plan["relevant"]
     # 同序，Fix-1 的 [^n] 对齐不受影响）。
-    if getattr(settings, "query_compress_enabled", True) and relevant:
+    if query_compress_enabled(settings) and relevant:
         try:
-            from ..services.query_aware_compression import compress_evidence
-
-            budget = max(1000, int(getattr(settings, "chat_context_max_chars", 12000) or 12000))
+            budget = query_compress_token_budget(settings)
             relevant = compress_evidence(question, relevant, token_budget=budget)
         except Exception as exc:  # noqa: BLE001 - fail-open
             logger.debug("stream query compression skipped: %s", exc)

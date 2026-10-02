@@ -269,8 +269,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
           await applyEnrichedLeaderboard(set, get, research.recommended ?? [], (draft) => {
             draft.research = { ...research, recommended: draft.leaderboard };
             draft.recommendMessage = "同步研究完成";
-            // /api/research path carries no recommend_id — clear any stale one.
-            draft.lastRecommendId = null;
+            // F-4: /api/research now carries recommend_id — adopt button works.
+            draft.lastRecommendId = research.recommend_id ?? null;
           });
           return;
         } catch {

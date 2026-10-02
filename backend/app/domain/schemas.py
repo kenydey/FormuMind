@@ -449,6 +449,8 @@ class ResearchResult(BaseModel):
     recommend_engine: Literal["llm", "offline"] = "offline"
     tradeoff: TradeOffAnalysis | None = None
     recommend_meta: dict | None = None
+    # F-4: C-8 round id — lets the /api/research entry path report adopt signals.
+    recommend_id: str | None = None
 
 
 class ComprehensiveReport(BaseModel):

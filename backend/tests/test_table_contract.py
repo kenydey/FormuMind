@@ -199,17 +199,39 @@ def test_save_fail_open_on_unwritable_dir(monkeypatch):
 
 # ── parsing.py wiring ───────────────────────────────────────────────────────
 
-def test_wiring_attaches_tables_and_persists(tmp_path, monkeypatch):
+def test_wiring_attaches_tables_in_memory_only(tmp_path, monkeypatch):
+    # F-3: _maybe_extract_tables 只做内存抽取，不再写字节-hash sidecar
+    #（那种写入永远读不到）。落盘由 persist_table_sidecar 以 source UUID 为键。
     monkeypatch.setenv("FORMUMIND_TABLES_DIR", str(tmp_path))
     result = parsing.ParseResult(RECIPE_MD, "docling")
     assert result.tables == []
     out = parsing._maybe_extract_tables(result, b"fake-bytes")
     assert len(out.tables) == 1
     assert out.tables[0].kind == "recipe"
+    # 旧键（字节 sha256）下无文件
     key = hashlib.sha256(b"fake-bytes").hexdigest()
-    loaded = tc.load_tables(key)
+    assert tc.load_tables(key) == []
+
+
+def test_persist_table_sidecar_keyed_by_source_uuid(tmp_path, monkeypatch):
+    # F-3 回归：sidecar 以 source UUID 为键写入，load_tables(doc.id) 可读。
+    monkeypatch.setenv("FORMUMIND_TABLES_DIR", str(tmp_path))
+    result = parsing.ParseResult(RECIPE_MD, "docling")
+    out = parsing._maybe_extract_tables(result, b"fake-bytes")
+    parsing.persist_table_sidecar("source-uuid-1", out.tables)
+    loaded = tc.load_tables("source-uuid-1")
     assert len(loaded) == 1
-    assert loaded[0].table_id == out.tables[0].table_id
+    assert loaded[0].source_id == "source-uuid-1"
+    assert loaded[0].table_id.startswith("source-uuid-1#")
+    assert loaded[0].headers == ["组分", "配比"]
+
+
+def test_persist_table_sidecar_fail_open(tmp_path, monkeypatch):
+    # 空 source_id / 空表不写、不抛错。
+    monkeypatch.setenv("FORMUMIND_TABLES_DIR", str(tmp_path))
+    parsing.persist_table_sidecar("", [])
+    parsing.persist_table_sidecar("source-uuid-1", [])
+    assert tc.load_tables("source-uuid-1") == []
 
 
 def test_wiring_disabled_by_setting(tmp_path, monkeypatch):

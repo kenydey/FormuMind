@@ -72,6 +72,7 @@ class ResearchGraphState(TypedDict, total=False):
     retrieval_queries: list[str]
     tradeoff: dict[str, Any] | None
     recommend_meta: dict[str, Any] | None
+    recommend_id: str | None  # F-4: C-8 round id for adopt signals
 
 
 ProgressCallback = Callable[[str, str, dict[str, Any] | None], None]
@@ -346,6 +347,29 @@ def fallback_node(
     return state
 
 
+def _register_recommend_round(recommend_id: str, project_id: str | None) -> None:
+    """F-4: C-8 round registration for graph (non-API) recommend paths.
+
+    Mirrors ``api/formulations.py`` — the research graph nodes bypass that
+    endpoint, so without this the user's main recommend entry never enters the
+    adopt_rate denominator. Best-effort: telemetry must never break recommend.
+    """
+    if not recommend_id:
+        return
+    try:
+        from ..db import recommend_outcome_store
+        from ..db.database import default_session_factory
+        from ..db.session_utils import commit_session
+
+        _factory = default_session_factory()
+        with commit_session(_factory) as _s:
+            recommend_outcome_store.register_round(
+                _s, recommend_id=recommend_id, project_id=project_id or None
+            )
+    except Exception as exc:  # noqa: BLE001 — telemetry fail-open by contract
+        logger.warning("recommend round registration failed (fail-open): %s", exc)
+
+
 def recommend_generate_node(state: ResearchGraphState, settings: Settings | None = None) -> ResearchGraphState:
     """Lightweight recommend path — skip answer/report/synthesize LLM calls."""
     from ..domain.objective_contract import normalize_objectives
@@ -380,6 +404,12 @@ def recommend_generate_node(state: ResearchGraphState, settings: Settings | None
             "returned_n": len(recommended),
             "diversity_applied": bundle.diversity_applied,
         }
+        # F-4: register the round + surface recommend_id (adopt_rate denominator
+        # and adopt-button enablement for the /api/research entry path).
+        state["recommend_id"] = bundle.recommend_id or None
+        _register_recommend_round(
+            bundle.recommend_id, getattr(req, "project_id", None)
+        )
         if recommended:
             mechanism = recommended[0].rationale or ""
             chat = f"已推荐 {len(recommended)} 条配方。"
@@ -438,6 +468,11 @@ def generate_node(state: ResearchGraphState, settings: Settings | None = None) -
         )
         recommend_engine = bundle.engine
         recommended = bundle.scored
+        # F-4: register the round + surface recommend_id (same as recommend_generate_node).
+        state["recommend_id"] = bundle.recommend_id or None
+        _register_recommend_round(
+            bundle.recommend_id, getattr(req, "project_id", None)
+        )
         state["tradeoff"] = bundle.tradeoff.model_dump() if bundle.tradeoff else None
         state["recommend_meta"] = {
             "requested_n": bundle.requested_n,
@@ -762,6 +797,7 @@ def graph_state_to_research_result(state: ResearchGraphState, req: Requirement) 
         recommend_engine=state.get("recommend_engine") or "offline",
         tradeoff=tradeoff,
         recommend_meta=state.get("recommend_meta"),
+        recommend_id=state.get("recommend_id"),
     )
 
 

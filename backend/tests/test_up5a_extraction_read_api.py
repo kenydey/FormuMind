@@ -76,3 +76,19 @@ def test_source_tables_empty_for_unknown_source(client):
     r = client.get("/api/kb/sources/nope/formulas")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_bad_bbox_degrades_to_none_not_batch_loss():
+    # F-5 回归：单条非法 bbox（如 MinerU 像素坐标）降级为 None，
+    # 不能抛错导致整批表格/公式丢失。
+    from app.db.db_common import safe_bbox, validate_bbox
+
+    assert safe_bbox([0.1, 0.2, 0.9, 0.8]) == [0.1, 0.2, 0.9, 0.8]
+    assert safe_bbox(None) is None
+    assert safe_bbox([10, 20, 900, 800]) is None  # 像素坐标 → 非法 → None
+    assert safe_bbox("bad") is None
+    # validate_bbox 本体仍抛错（显式校验语义不变）
+    import pytest
+
+    with pytest.raises(ValueError):
+        validate_bbox([10, 20, 900, 800])

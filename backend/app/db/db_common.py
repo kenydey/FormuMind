@@ -39,3 +39,17 @@ def validate_bbox(bbox: object) -> list[float] | None:
     if xmin > xmax or ymin > ymax:
         raise ValueError(f"bbox min must not exceed max, got {bbox!r}")
     return coords
+
+
+def safe_bbox(bbox: object) -> list[float] | None:
+    """F-5: ``validate_bbox`` that degrades a malformed box to ``None`` instead
+    of raising, so one bad bbox never discards a whole batch of tables,
+    formulas, or chunks. Use at write boundaries where geometry is provenance,
+    not content.
+    """
+    if bbox is None:
+        return None
+    try:
+        return validate_bbox(bbox)
+    except ValueError:
+        return None

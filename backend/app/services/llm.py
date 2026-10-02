@@ -17,6 +17,11 @@ the SDK is missing or the API call fails.
 from __future__ import annotations
 
 from .errors import degrade_return, reraise_if_fatal
+from .query_aware_compression import (
+    compress_evidence,
+    query_compress_enabled,
+    query_compress_token_budget,
+)
 import json
 import logging
 from pathlib import Path
@@ -1910,11 +1915,11 @@ def answer_question(
 
     # Tier 3: configured multi-LLM provider over re-ranked sources.
     # Up-3: 主路径接入 query 压缩（fail-open；返回的 relevant 与 prompt 同序）。
-    if getattr(settings, "query_compress_enabled", True) and relevant:
+    # F-1: budget 用 token 单位的 query_compress_token_budget（字符预算当
+    # token 传会使压缩名存实亡）。
+    if query_compress_enabled(settings) and relevant:
         try:
-            from .query_aware_compression import compress_evidence
-
-            budget = max(1000, int(getattr(settings, "chat_context_max_chars", 12000) or 12000))
+            budget = query_compress_token_budget(settings)
             relevant = compress_evidence(question, relevant, token_budget=budget)
         except Exception as exc:  # noqa: BLE001 - fail-open
             log.debug("answer_question query compression skipped: %s", exc)

@@ -44,7 +44,7 @@ class TableAsset:
     """One structured table extracted from a parsed document."""
 
     table_id: str  # "<source_id>#p<page:02d>-<idx:02d>"
-    source_id: str  # SourceDocument.id when known, else content sha256
+    source_id: str  # SourceDocument.id (re-keyed at persist time)
     page_no: int  # 1-based
     caption: str
     provenance: dict = field(default_factory=dict)  # parser/parser_version/extracted_at

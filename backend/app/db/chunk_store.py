@@ -8,7 +8,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import DocumentChunk
-from .db_common import validate_bbox
+from .db_common import safe_bbox
 from .session_utils import commit_session
 
 
@@ -78,9 +78,11 @@ class ChunkStore:
                 meta = None
             text = chunk.get("text", "") or ""
             # Phase 0 layout provenance: validate bbox at the write boundary so
-            # a malformed box never lands in the table silently.
+            # a malformed box never lands in the table silently. F-5: degrade
+            # per-item to None instead of raising (one bad box must not zero
+            # out the whole source's chunks).
             raw_bbox = chunk.get("bbox")
-            bbox = validate_bbox(raw_bbox) if raw_bbox is not None else None
+            bbox = safe_bbox(raw_bbox)
             # C-1b: dual-write the vector as float32 BLOB alongside the legacy
             # JSON column (old readers still read JSON; faiss prefers BLOB).
             emb_list = chunk.get("embedding")

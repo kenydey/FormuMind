@@ -237,3 +237,46 @@ def test_api_adopt_and_stats() -> None:
     body = r.json()
     assert body["total"] >= 1
     assert body["validated"] is None
+
+
+def test_recommend_generate_node_registers_round_and_surfaces_id(monkeypatch):
+    # F-4 回归：research graph 的推荐节点必须注册 C-8 round（分母）
+    # 并把 recommend_id 放进 state，前端采纳按钮才能启用。
+    from types import SimpleNamespace
+
+    from app.domain.schemas import ProductDomain, Requirement
+    from app.pipeline import research_graph
+
+    bundle = SimpleNamespace(
+        engine="offline",
+        scored=[],
+        tradeoff=None,
+        requested_n=3,
+        diversity_applied=False,
+        warnings=[],
+        recommend_id="rec-graph-1",
+    )
+    monkeypatch.setattr(
+        "app.services.recommend_pipeline.run_recommend_orchestration",
+        lambda *a, **kw: bundle,
+    )
+    seen = {}
+    monkeypatch.setattr(
+        research_graph,
+        "_register_recommend_round",
+        lambda rid, pid: seen.update(rid=rid, pid=pid),
+    )
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, project_id="proj-x")
+    state = research_graph.recommend_generate_node({"req": req, "grounded_evidence": []})
+    assert state["recommend_id"] == "rec-graph-1"
+    assert seen == {"rid": "rec-graph-1", "pid": "proj-x"}
+
+
+def test_graph_state_to_research_result_carries_recommend_id():
+    # F-4 回归：ResearchResult 透出 recommend_id 给前端。
+    from app.domain.schemas import ProductDomain, Requirement
+    from app.pipeline.research_graph import graph_state_to_research_result
+
+    req = Requirement(domain=ProductDomain.anticorrosion_coating)
+    result = graph_state_to_research_result({"recommend_id": "rec-graph-2"}, req)
+    assert result.recommend_id == "rec-graph-2"

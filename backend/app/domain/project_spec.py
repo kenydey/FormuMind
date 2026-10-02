@@ -187,8 +187,34 @@ def default_levers_for(
     return resolve_levers(req)
 
 
+def _merge_explicit_levers(
+    derived: list[LeverSpec], explicit: list[LeverSpec] | None
+) -> list[LeverSpec]:
+    """Merge user-explicit levers over formulation-derived ones (F-2).
+
+    Explicit levers win on name match (replace) and are appended when new.
+    Without this, ``resolve_levers`` priority 1 (formulation-derived) silently
+    discards everything the user configured in LeversEditor — including
+    Up-4A discrete factors — on the real ``generateDoe`` path.
+    """
+    if not explicit:
+        return derived
+    explicit_by_name = {e.name: e for e in explicit}
+    merged: list[LeverSpec] = []
+    seen: set[str] = set()
+    for lever in derived:
+        merged.append(explicit_by_name.get(lever.name, lever))
+        seen.add(lever.name)
+    for lever in explicit:
+        if lever.name not in seen:
+            merged.append(lever)
+    return merged
+
+
 def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[LeverSpec]:
-    """Resolve DOE levers: formulation > explicit > substrate defaults > legacy."""
+    """Resolve DOE levers: formulation-derived, then explicit user levers merged
+    over them (explicit wins on name match), then substrate defaults, legacy.
+    """
     # Substrate defaults are the SSOT for units and natural ranges. They are
     # resolved first so the formulation-derived path below can honour them:
     # deriving levers from ingredient weights alone loses the g/L unit and
@@ -199,7 +225,11 @@ def resolve_levers(req: Requirement, form: Formulation | None = None) -> list[Le
     if source and source.ingredients:
         derived = derive_levers_from_formulation(source, defaults=substrate_levers)
         if derived:
-            return derived + derive_process_levers(req)
+            # F-2: explicit user levers (e.g. discrete factors from LeversEditor)
+            # are merged over the derived set instead of being silently dropped.
+            merged = _merge_explicit_levers(derived, req.levers)
+            names = {l.name for l in merged}
+            return merged + [l for l in derive_process_levers(req) if l.name not in names]
     # Priority 2: explicit user-specified levers
     if req.levers:
         return list(req.levers)

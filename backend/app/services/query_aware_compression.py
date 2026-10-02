@@ -62,8 +62,9 @@ def _bump_stats(**deltas: int) -> None:
             _EVIDENCE_STATS[key] = _EVIDENCE_STATS.get(key, 0) + delta
 
 # Default budget when the caller does not pass one (also the settings
-# fallback for ``query_compress_token_budget``).
-DEFAULT_TOKEN_BUDGET = 12000
+# fallback for ``query_compress_token_budget``). F-1: 3000 tokens ≈ 12000
+# chars, aligned with _build_context's chat_context_max_chars truncation line.
+DEFAULT_TOKEN_BUDGET = 3000
 # Max evidence items kept per source identifier (anti single-paper flooding).
 MAX_PER_SOURCE = 3
 # Char length of the degraded "short snippet" form.

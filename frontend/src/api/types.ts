@@ -308,6 +308,7 @@ export interface ResearchResult {
   recommended: Formulation[];
   chat_markdown: string;
   recommend_engine?: "llm" | "offline";
+  recommend_id?: string | null;
 }
 
 export interface RecommendedFormulaComponent {

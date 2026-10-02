@@ -71,3 +71,63 @@ def test_formulation_from_factors_skips_string_level():
     form = formulation_from_factors(req, {"固化剂种类": "聚酰胺", "不存在组分": "x"})
     assert form is not None
     assert len(form.ingredients) > 0
+
+
+def test_build_doe_factors_keeps_explicit_discrete_lever():
+    # F-2 回归：走生产路径 build_doe_factors（经 resolve_levers），显式离散
+    # lever 不能被配方派生 levers 静默丢弃。旧行为：P1 恒命中，P2 不可达。
+    from app.domain.schemas import Formulation, Ingredient, ProductDomain, Requirement
+    from app.pipeline.workflow import build_doe_factors
+
+    form = Formulation(
+        name="基线",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[
+            Ingredient(name="环氧树脂", role="resin", weight_pct=60.0),
+            Ingredient(name="固化剂", role="hardener", weight_pct=30.0),
+        ],
+    )
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        active_formulation=form,
+        levers=[
+            LeverSpec(
+                name="固化剂种类",
+                low=0.0,
+                high=1.0,
+                unit="",
+                kind="discrete",
+                levels=["聚酰胺", "酚醛"],
+            )
+        ],
+    )
+    factors = build_doe_factors(req)
+    by_name = {f.name: f for f in factors}
+    assert "固化剂种类" in by_name
+    assert by_name["固化剂种类"].kind == "discrete"
+    assert by_name["固化剂种类"].levels == ["聚酰胺", "酚醛"]
+    # 配方派生的连续 lever 仍然保留
+    assert "环氧树脂" in by_name
+
+
+def test_resolve_levers_explicit_wins_on_name_match():
+    # 显式 lever 与派生 lever 同名时，显式配置获胜（范围/单位以用户为准）。
+    from app.domain.project_spec import resolve_levers
+    from app.domain.schemas import Formulation, Ingredient, ProductDomain, Requirement
+
+    form = Formulation(
+        name="基线",
+        domain=ProductDomain.anticorrosion_coating,
+        ingredients=[Ingredient(name="环氧树脂", role="resin", weight_pct=60.0)],
+    )
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        active_formulation=form,
+        levers=[LeverSpec(name="环氧树脂", low=40.0, high=80.0, unit="wt%")],
+    )
+    levers = resolve_levers(req)
+    resin = next(l for l in levers if l.name == "环氧树脂")
+    assert (resin.low, resin.high) == (40.0, 80.0)
+    # 无重复名
+    names = [l.name for l in levers]
+    assert len(names) == len(set(names))
