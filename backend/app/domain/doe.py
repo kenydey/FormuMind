@@ -191,24 +191,26 @@ def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int 
     else:
         matrix = _DESIGNS[design](k, n)
     runs: list[DOERun] = []
-    clipped = False
+    beyond = False
     for idx, row in enumerate(matrix, start=1):
         coded: dict[str, float] = {}
         natural: dict[str, float | str] = {}
         for f, c in zip(factors, row):
             c = float(c)
-            if f.kind != "discrete" and abs(c) > 1.0:
-                # CCD star points sit at +-alpha (>1) and would decode to
-                # concentrations outside [low, high] — negative wt% for a low
-                # bound near zero. low/high are physical limits, so clip (the
-                # pydoe engine path clips the same way).
-                c = max(-1.0, min(1.0, c))
-                clipped = True
+            if f.kind != "discrete" and abs(c) > 1.0 + 1e-9:
+                beyond = True
             coded[f.name] = round(c, 4)
             natural[f.name] = decode(c, f)
         runs.append(DOERun(run_id=idx, coded=coded, natural=natural))
-    if clipped:
-        note_extra += " NOTE: axial points beyond the factor range were clipped to [low, high]."
+    if beyond:
+        # CCD star points sit at +-alpha (>1) by contract (pinned by the
+        # golden gate). Clipping would collapse them onto the factorial
+        # corners (duplicate runs), so surface it instead: the caller must
+        # widen the physical limits or pick a face-centred design.
+        note_extra += (
+            " WARNING: axial points extend beyond the factor [low, high] range; "
+            "check physical limits (e.g. negative concentrations) before running."
+        )
     note = (
         f"{design} design over {k} factors -> {len(runs)} runs. "
         f"Estimated resolution: {'screening' if design in ('fractional_factorial', 'plackett_burman') else 'response-surface' if design == 'ccd' else 'space-filling' if design == 'lhs' else 'full'}."
