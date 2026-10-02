@@ -381,8 +381,11 @@ def test_vectors_from_another_model_are_not_compared(stores, monkeypatch):
     monkeypatch.setattr(kb_index, "_embed_model_name", lambda: "new-model")
 
     chunk = chk.get_by_source(sid)[0]
-    assert kb_index.comparable_embedding(chunk, 2, "new-model") is False
-    assert kb_index.comparable_embedding(chunk, 2, "old-model") is True
+    # U-2: comparable_embedding 返回 (ok, vec) 元组
+    ok, vec = kb_index.comparable_embedding(chunk, 2, "new-model")
+    assert ok is False and vec is None
+    ok, vec = kb_index.comparable_embedding(chunk, 2, "old-model")
+    assert ok is True and vec == [1.0, 0.0]
 
 
 def test_legacy_rows_without_a_model_name_stay_searchable(stores):
@@ -393,9 +396,11 @@ def test_legacy_rows_without_a_model_name_stay_searchable(stores):
     chk.replace_for_source(sid, [{"text": "legacy", "embedding": [1.0, 0.0]}])
 
     chunk = chk.get_by_source(sid)[0]
-    assert kb_index.comparable_embedding(chunk, 2, "any-model") is True
+    ok, vec = kb_index.comparable_embedding(chunk, 2, "any-model")
+    assert ok is True and vec == [1.0, 0.0]
     # ...but a dimension mismatch still disqualifies them.
-    assert kb_index.comparable_embedding(chunk, 3, "any-model") is False
+    ok, vec = kb_index.comparable_embedding(chunk, 3, "any-model")
+    assert ok is False and vec is None
 
 
 def test_embedding_count_mismatch_drops_the_batch(stores, monkeypatch):

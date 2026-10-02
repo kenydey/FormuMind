@@ -42,16 +42,21 @@ def infer_strategy(
     return label, rationale
 
 
-def _factor_distance(a: dict[str, float], b: dict[str, float]) -> float:
+def _factor_distance(a: dict[str, float | str], b: dict[str, float | str]) -> float:
     keys = set(a) & set(b)
     if not keys:
         return float("inf")
     dist = 0.0
     for key in keys:
-        lo = min(a[key], b[key])
-        hi = max(a[key], b[key])
-        span = hi - lo if hi > lo else max(abs(a[key]), abs(b[key]), 1.0)
-        dist += ((a[key] - b[key]) / span) ** 2
+        av, bv = a[key], b[key]
+        # v8: 离散 str 因子用 0/1 示性距离，不参与欧氏计算
+        if isinstance(av, str) or isinstance(bv, str):
+            dist += 0.0 if av == bv else 1.0
+            continue
+        lo = min(av, bv)
+        hi = max(av, bv)
+        span = hi - lo if hi > lo else max(abs(av), abs(bv), 1.0)
+        dist += ((av - bv) / span) ** 2
     return math.sqrt(dist / len(keys))
 
 

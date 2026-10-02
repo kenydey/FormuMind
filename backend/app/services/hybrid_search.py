@@ -205,9 +205,10 @@ def _cosine_on_indices(
                 continue
         for i in indices:
             c = chunks[i]
-            if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
-                cemb = kb_index.chunk_embedding_list(c)
-                if cemb:
+            if c.embedding_model == mname:
+                # U-2: comparable_embedding 返回 (ok, vec)，不再二次反序列化
+                ok, cemb = kb_index.comparable_embedding(c, dim, mname)
+                if ok and cemb:
                     cosine_scores[i] = kb_index._dot(qv, cemb)
     return used_matrix
 
@@ -225,10 +226,11 @@ def _cosine_matrix_for_model(
     valid: list[int] = []
     for i in indices:
         c = chunks[i]
-        if c.embedding_model != mname or not kb_index.comparable_embedding(c, dim, mname):
+        if c.embedding_model != mname:
             continue
-        emb = kb_index.chunk_embedding_list(c)
-        if not emb or len(emb) != dim:
+        # U-2: comparable_embedding 返回 (ok, vec)，不再二次反序列化
+        ok, emb = kb_index.comparable_embedding(c, dim, mname)
+        if not ok or not emb or len(emb) != dim:
             continue
         rows.append(emb)
         valid.append(i)
@@ -423,9 +425,10 @@ def hybrid_search_scored(
                 qv = vecs[0]
                 dim = len(qv)
                 for i, c in enumerate(chunks):
-                    if c.embedding_model == mname and kb_index.comparable_embedding(c, dim, mname):
-                        cemb = kb_index.chunk_embedding_list(c)
-                        if cemb:
+                    if c.embedding_model == mname:
+                        # U-2: comparable_embedding 返回 (ok, vec)，不再二次反序列化
+                        ok, cemb = kb_index.comparable_embedding(c, dim, mname)
+                        if ok and cemb:
                             cosine_scores[i] = kb_index._dot(qv, cemb)
 
         bm25_scores = bm25_raw.copy()

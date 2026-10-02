@@ -72,6 +72,8 @@ def ingest_document_tx(
                             text.encode("utf-8", errors="replace")
                         ).hexdigest(),
                         raw_text_chars=len(text),
+                        # v8: 与 fulltext_fetcher 同口径，避免 NULL 漏算
+                        ingest_status="indexed",
                     )
                 )
                 # No savepoint (see outbox_store.enqueue): begin_nested() on
@@ -90,77 +92,17 @@ def ingest_document_tx(
                 )
 
             # Chunk the text
-            chunks = chunk_markdown(
-                text,
-                max_chars=settings.ingest_chunk_max_chars,
-                overlap=settings.ingest_chunk_overlap,
-            )
-            chunks = [
-                c for c in chunks if len(c.text.strip()) > 30
-            ][: settings.kb_max_chunks_per_source]
+            # U-1: 公共 chunk 准备（chunking → lang → entity → embedding → dedupe）
+            # 与 index_source 共用，保证双写入路径永远一致。
+            # session 透传给 helper（dedupe 用 caller session 做 DB 比对）。
+            from .kb_index import prepare_chunk_rows
 
-            rows: list[dict] = [
-                {
-                    "text": c.text,
-                    "heading_path": c.heading_path,
-                    "page_no": c.page_no,
-                    "paragraph_idx": c.paragraph_idx,
-                    "offset_start": c.offset_start,
-                    "offset_end": c.offset_end,
-                }
-                for c in chunks
-            ]
-
-            # v7 KB-2: 补化学实体提取（与 index_source 同口径，否则 meta.chem 缺失）。
-            from .kb_index import _attach_entities, _detect_chunk_lang
-
-            for _r in rows:
-                _r["lang"] = _detect_chunk_lang(_r.get("text") or "")
-            _attach_entities(source_id, rows)
-
-            # Embed if available
-            # v7 KB-3: 双语分流（与 index_source 同口径）——zh 用 bge 512d，
-            # 其余用 MiniLM 384d；此前统一用默认模型导致中文向量错配。
-            if rows and _embedding_probe():
-                from .rag import embed_model_name as _model_for_lang
-
-                def _lang_of(r: dict) -> str:
-                    return r.get("lang") or "en"
-
-                group_idxs: dict[str, list[int]] = {}
-                for _i, _r in enumerate(rows):
-                    group_idxs.setdefault(_lang_of(_r), []).append(_i)
-                vec_map: dict[int, list[float]] = {}
-                model_per_row: dict[int, str] = {}
-                mismatch = False
-                for lang, idxs in group_idxs.items():
-                    mname = _model_for_lang(lang)
-                    texts = [rows[i]["text"] for i in idxs]
-                    vecs = _embed_texts(texts, mname)
-                    if not vecs or len(vecs) != len(idxs):
-                        mismatch = True
-                        break
-                    for j, i in enumerate(idxs):
-                        vec_map[i] = vecs[j]
-                        model_per_row[id(rows[i])] = mname
-                vectors = None
-                if not mismatch and len(vec_map) == len(rows):
-                    vectors = [vec_map[i] for i in range(len(rows))]
-                else:
-                    logger.error(
-                        "kb embedding count mismatch for source %s — skipping embeddings",
-                        source_id,
-                    )
-                if vectors:
-                    for i, row in enumerate(rows):
-                        row["embedding"] = vectors[i]
-                        row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
-
-            # KB dedup (2026-10-01): drop exact / near-duplicate chunks before
-            # the write; the caller-owned session is reused read-only.
-            from .kb_dedup import dedupe_chunk_rows
-
-            rows = dedupe_chunk_rows(rows, source_id, session)
+            rows = prepare_chunk_rows(text, source_id, embed=_embedding_probe(), session=session)
+            # v8: 0-chunk 不提交空 SourceDocument —— 标记 failed，避免僵尸行
+            #（与 v7 KB-1 的上传路径同口径）。
+            if not rows:
+                session.rollback()
+                return {"source_id": source_id, "chunk_count": 0, "already_existed": False, "failed": True}
             # Write chunks via the caller-session method (no internal commit)
             try:
                 chunk_count = chunk_store.replace_for_source_in(session, source_id, rows)

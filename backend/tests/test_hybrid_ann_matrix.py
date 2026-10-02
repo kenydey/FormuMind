@@ -79,7 +79,8 @@ def test_cosine_on_indices_uses_matrix_above_min_dim(monkeypatch):
     )
     monkeypatch.setattr(
         "app.services.kb_index.comparable_embedding",
-        lambda chunk, d, m: True,
+        # U-2: 返回 (ok, vec) 元组 —— 用 q 本身保证 dot>0
+        lambda chunk, d, m: (True, q),
     )
 
     scores = np.zeros(len(chunks), dtype=float)
@@ -118,7 +119,8 @@ def test_cosine_on_indices_keeps_dot_below_min_dim(monkeypatch):
     )
     monkeypatch.setattr(
         "app.services.kb_index.comparable_embedding",
-        lambda chunk, d, m: True,
+        # U-2: 返回 (ok, vec) 元组 —— 用 q 本身保证 dot>0
+        lambda chunk, d, m: (True, q),
     )
 
     scores = np.zeros(len(chunks), dtype=float)

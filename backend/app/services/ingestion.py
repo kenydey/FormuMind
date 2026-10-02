@@ -497,6 +497,7 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     is_pdf = "pdf" in content_type or body.lstrip()[:4] == b"%PDF"
     parsed = None
     _url_parse_warnings: list = []
+    text = ""
     if "html" in content_type or body.lstrip()[:15].lower().startswith(b"<!doctype") or b"<html" in body[:500].lower():
         text = _html_to_text(body.decode("utf-8", errors="replace"))
     elif is_pdf:
@@ -529,7 +530,20 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
             "application/vnd.ms-powerpoint": "ppt",
             "application/octet-stream": None,  # 按 URL 扩展名判断
         }
-        url_ext = urlparse(url).path.rsplit(".", 1)[-1].lower() if "." in urlparse(url).path else ""
+        # v8: 先算 url_ext（图片检查也要用）。
+        url_ext = urlparse(url).path.rsplit("/", 1)[-1].rsplit(".", 1)[-1].lower() if "." in urlparse(url).path.rsplit("/", 1)[-1] else ""
+        # v8: 先处理图片 URL —— v7 分流漏了所有非 zip 二进制，
+        # PNG/JPG 会落入 else 被 latin-1 解码成乱码。
+        _IMAGE_EXTS = ("png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff")
+        if "image/" in content_type.lower() or url_ext in _IMAGE_EXTS:
+            try:
+                return _ingest_image(url, body, origin_url=url)
+            except Exception as exc:
+                return IngestOutcome(
+                    evidence=[],
+                    extraction_status="skipped",
+                    notices=[f"图片 URL 解析失败：{exc}"],
+                )
         ct_ext = _ct_to_ext.get(content_type.split(";")[0].strip().lower(), "")
         ext = url_ext if url_ext and can_parse(url_ext) else (ct_ext or "")
         # 二进制魔数启发：zip 包头（docx/xlsx/pptx 都是 zip）
@@ -538,20 +552,35 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
             with _collect_notices() as _url_parse_warnings:
                 parsed = parse_document(body, ext)
             text = parsed.markdown or ""
+        elif ext in ("docx", "xlsx", "pptx", "doc", "xls", "ppt") or (url_ext in ("docx", "xlsx", "pptx", "doc", "xls", "ppt")):
+            # v8: 格式可识别但无解析器 → 与 ingest_file 同口径抛 ParserUnavailable，
+            # 而不是误导性的"不支持的二进制格式"。
+            from .parsing import ParserUnavailable
+
+            raise ParserUnavailable(url_ext or ext or "office")
         elif is_zip or (ct_ext is None and not url_ext):
             # 明确的二进制但无法识别格式 → 拒绝，不写乱码
-            return IngestOutcome(
-                evidence=[
-                    Evidence(
-                        source="web",
-                        identifier=url,
-                        title=url,
-                        snippet=f"不支持的二进制格式（{content_type}），无法提取文本",
-                        relevance=0.5,
-                    )
-                ],
-                extraction_status="skipped",
-            )
+            # v8: 先用文本启发式抢救（content-type 标错的纯文本）
+            if b"\x00" not in body:
+                try:
+                    body.decode("utf-8")
+                except UnicodeDecodeError:
+                    pass
+                else:
+                    text = _parse_text(body)
+            if text == "":
+                return IngestOutcome(
+                    evidence=[
+                        Evidence(
+                            source="web",
+                            identifier=url,
+                            title=url,
+                            snippet=f"不支持的二进制格式（{content_type}），无法提取文本",
+                            relevance=0.5,
+                        )
+                    ],
+                    extraction_status="skipped",
+                )
         else:
             text = _parse_text(body)
 

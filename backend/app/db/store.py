@@ -74,9 +74,10 @@ def _blocks_for_training(rec: ExperimentRecord) -> dict[str, Any]:
     }
 
 
-def _coerce_factor_floats(raw: dict | None) -> dict[str, float]:
-    """Keep only numeric factor levers; drop metadata blobs (e.g. ``_doe_metadata``)."""
-    out: dict[str, float] = {}
+def _coerce_factor_floats(raw: dict | None) -> dict[str, float | str]:
+    """Keep numeric factor levers and discrete str values; drop metadata blobs."""
+    # v8: 保留离散 str 因子值（如材料名），只丢 bool/dict/list 这类真正的 blob。
+    out: dict[str, float | str] = {}
     for key, val in (raw or {}).items():
         if isinstance(val, bool):
             continue
@@ -87,7 +88,7 @@ def _coerce_factor_floats(raw: dict | None) -> dict[str, float]:
             try:
                 out[str(key)] = float(val)
             except ValueError:
-                continue
+                out[str(key)] = val  # 离散因子值，保留
     return out
 
 

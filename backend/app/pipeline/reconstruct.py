@@ -40,7 +40,12 @@ def formulation_from_factors(
     levers = resolve_levers(requirement, base)
     unit_map = {lev.name: lev.unit for lev in levers}
     # U-5: 离散材料替换语义 —— lever 上的水平→成分名映射。
-    material_maps = {lev.name: lev.material_map for lev in levers if lev.material_map}
+    # v8: getattr 防御（某些调用路径可能传 dict）。
+    material_maps = {
+        lev.name: getattr(lev, "material_map", None)
+        for lev in levers
+        if getattr(lev, "material_map", None)
+    }
     overrides = dict(factors)
     existing_names = {ing.name for ing in base.ingredients}
     ings = []

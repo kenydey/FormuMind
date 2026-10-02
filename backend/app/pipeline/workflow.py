@@ -364,6 +364,16 @@ def run_optimization(
 
     base = knowledge.baseline_formulation(req)
     levers = resolve_levers(req, req.active_formulation or base)
+    # U-3: fallback 降级时离散因子不能当连续优化 —— 先记 warning，
+    # 优化后对离散因子做最近邻取整。
+    _discrete_levers = {l.name: l for l in levers if l.kind == "discrete" and l.levels}
+    if _discrete_levers:
+        from loguru import logger
+
+        logger.warning(
+            "Fallback optimizer degrading discrete levers to continuous: {}",
+            sorted(_discrete_levers),
+        )
     factors = [
         Factor(name=l.name, low=l.low, high=l.high)
         for l in levers
@@ -401,6 +411,25 @@ def run_optimization(
     top: list[Formulation] = []
     for x, score in opt.ranked(settings.top_n_formulas):
         values = {f.name: v for f, v in zip(factors, x)}
+        # U-3: 离散因子最近邻取整 —— 数值 levels 取最近值，
+        # 字符串 levels 保持 baseline（不瞎猜）。
+        for _name, _lever in _discrete_levers.items():
+            if _name not in values:
+                continue
+            _v = values[_name]
+            _num_levels = [lv for lv in _lever.levels if isinstance(lv, (int, float))]
+            if _num_levels and isinstance(_v, (int, float)):
+                values[_name] = min(_num_levels, key=lambda lv: abs(lv - _v))
+            else:
+                # 字符串水平：fallback 无法优化，回退到 baseline 值
+                _base_val = getattr(base, "process_params", {}).get(_name)
+                if _base_val is None:
+                    # 从 baseline 配方成分中找同名
+                    for _ing in getattr(base, "ingredients", []):
+                        if _ing.name == _name:
+                            _base_val = _ing.name
+                            break
+                values[_name] = _base_val if _base_val is not None else _lever.levels[0]
         top_process = dict(process)
         for k, v in values.items():
             if k in ("cure_temperature_c", "cure_time_min"):

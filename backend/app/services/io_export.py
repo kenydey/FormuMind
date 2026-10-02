@@ -112,7 +112,7 @@ def csv_to_records(text: str, default_domain: ProductDomain | None = None) -> li
             raise ValueError(f"Row missing a valid 'domain' and no default supplied: {row!r}")
 
         measured: dict[str, float] = {}
-        factors: dict[str, float] = {}
+        factors: dict[str, float | str] = {}
         cure_temp: float | None = None
         for col, val in row.items():
             if col in _META_COLS:
@@ -125,6 +125,9 @@ def csv_to_records(text: str, default_domain: ProductDomain | None = None) -> li
                 cure_temp = num
             elif num is not None:
                 factors[col] = num
+            # U-4: _coerce_float 失败但原值非空 → 保留离散因子字符串
+            elif isinstance(val, str) and val.strip():
+                factors[col] = val.strip()
 
         if not measured:
             continue  # nothing to learn from an unfilled row

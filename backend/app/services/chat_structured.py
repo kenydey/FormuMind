@@ -12,7 +12,7 @@ from .llm import complete_structured
 
 logger = logging.getLogger(__name__)
 
-_REF_RE = re.compile(r"^\[\d+\]$")
+# v8: _REF_RE 已删除（v7 删掉了唯一使用它的 elif 分支）。
 
 
 def generate_structured_answer(
@@ -89,7 +89,9 @@ def generate_structured_answer(
         parsed, err = complete_structured(system, user, StructuredAnswerResponse)
         if parsed is None or not parsed.answer.summary.strip():
             return None, err or "structured parse failed", sources
-        cleaned = _sanitize_structured(parsed.answer, sources)
+        # v8: sanitize 用 sources[:8] —— prompt 只展示前 8 条，[9]+ 无卡片，
+        # 必须同步拦掉，否则引用悬空。
+        cleaned = _sanitize_structured(parsed.answer, sources[:8])
         return cleaned, None, sources
     except Exception as exc:
         return degrade_return(logger, exc, "structured chat failed", None), str(exc), sources

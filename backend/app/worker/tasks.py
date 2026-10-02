@@ -1252,6 +1252,16 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
             progress_cb=progress,
         )
         data = result.model_dump()
+        # v8: 逆向设计同样注册推荐轮次，否则采纳遥测漏掉整条路径。
+        try:
+            from ..db.recommend_outcome_store import register_round
+
+            data["recommend_id"] = register_round(
+                project_id=payload.get("project_id"),
+                n_formulas=len(result.formulations or []),
+            )
+        except Exception:  # noqa: BLE001 - fail-open，不阻断主流程
+            pass
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "inverse_design", data)
         return data

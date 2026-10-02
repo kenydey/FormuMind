@@ -439,9 +439,10 @@ def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
         if status != 200:
             return None, f"status:{status}"
         ct = r.headers.get("content-type", "")
-        if "pdf" not in ct.lower():
-            return None, "not_pdf"
         data = r.content
+        # v8: content-type 不可靠时用 %PDF 魔数兜底（服务器可能标 octet-stream）
+        if "pdf" not in ct.lower() and data.lstrip()[:4] != b"%PDF":
+            return None, "not_pdf"
         _pdf_cache_put(url, data)
         return data, "ok"
     return None, last_reason

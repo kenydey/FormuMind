@@ -130,6 +130,16 @@ def record_adopt(
         )
         session.add(row)
     else:
+        # v8: 防御纵深 —— project_id 不一致时记 warning（fail-open 不阻断）。
+        if (
+            project_id
+            and row.project_id
+            and project_id != row.project_id
+        ):
+            logger.warning(
+                "record_adopt project_id mismatch: row=%s vs arg=%s (recommend_id=%s)",
+                row.project_id, project_id, recommend_id,
+            )
         row.adopted = True
         # P2: 弱信号不覆盖强信号 —— copied 后到不得把 button 降级。
         # 风险2 修正：快照/hash 同样受强度门控，否则弱信号会用另一张卡片
@@ -322,9 +332,13 @@ def _try_validate_adopt_against_lab(
     # 有 lab 测量明细的实验行（sync-datalab / 手工录入都会写 measurements 表）。
     # v7 M3: 时序约束 —— 测量必须晚于推荐创建时间，否则数月前的无关实验
     # 会误标 experiment_validated。
+    # v8: 用 measured_at（真实实验时间）优先，空时回退到 created_at（sync 时间）。
+    from sqlalchemy import func
+
     measured_ids = select(MeasurementRow.experiment_id).distinct()
     if getattr(row, "created_at", None):
-        measured_ids = measured_ids.where(MeasurementRow.created_at >= row.created_at)
+        _m_time = func.coalesce(MeasurementRow.measured_at, MeasurementRow.created_at)
+        measured_ids = measured_ids.where(_m_time >= row.created_at)
     q = select(ExperimentRow).where(ExperimentRow.id.in_(measured_ids))
     if project_id:
         q = q.where(ExperimentRow.project_id == project_id)

@@ -203,7 +203,9 @@ def chunk_embedding_list(chunk) -> list[float] | None:
     return None
 
 
-def comparable_embedding(chunk, query_dim: int, model_name: str) -> bool:
+def comparable_embedding(
+    chunk, query_dim: int, model_name: str
+) -> tuple[bool, list[float] | None]:
     """Whether *chunk*'s vector can be dot-producted against the query vector.
 
     Two vectors are only comparable when they came out of the same model. The
@@ -222,12 +224,17 @@ def comparable_embedding(chunk, query_dim: int, model_name: str) -> bool:
     They are judged on dimension alone rather than excluded — excluding them
     would silently gut retrieval on every existing corpus, which is the same
     class of harm this guard is meant to prevent.
+
+    Returns ``(ok, vec)`` — the deserialized vector is returned alongside the
+    verdict so callers don't deserialize the BLOB twice (U-2).
     """
     vec = chunk_embedding_list(chunk)
     if not vec or len(vec) != query_dim:
-        return False
+        return False, None
     stored = getattr(chunk, "embedding_model", None)
-    return not stored or stored == model_name
+    if stored and stored != model_name:
+        return False, None
+    return True, vec
 
 
 def _embedding_probe() -> bool:
@@ -391,6 +398,110 @@ def ingest_full_document(source_id: str, text: str, metadata: dict | None = None
         return degrade_return(logger, exc, "ingest_full_document failed", 0)
 
 
+def prepare_chunk_rows(
+    full_text: str, source_id: str, *, embed: bool = True, session=None
+) -> list[dict] | None:
+    """U-1: 双写入路径的公共 chunk 准备逻辑.
+
+    `index_source`（上传/URL/wiki）和 `ingest_document_tx`（/api/kb/ingest）
+    都调它，保证 chunking → lang → entity → embedding → dedupe 五步永远一致。
+
+    返回 rows；文本为空或全被过滤时返回 None（调用方标记 failed）。
+    不做 DB 写入、不 commit。`session` 透传给 dedupe（tx 路径用 caller session）。
+    """
+    from .chunking import chunk_markdown
+
+    settings = get_settings()
+    chunks = chunk_markdown(
+        full_text,
+        max_chars=settings.ingest_chunk_max_chars,
+        overlap=settings.ingest_chunk_overlap,
+    )
+    chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
+    if not chunks:
+        return None
+
+    rows: list[dict] = []
+    for c in chunks:
+        # Phase 0: rule-based patent tags（claim_no / example_no / section_title）
+        tags = extract_patent_tags(c.text, c.heading_path)
+        rows.append(
+            {
+                "text": c.text,
+                "heading_path": c.heading_path,
+                "page_no": c.page_no,
+                "paragraph_idx": c.paragraph_idx,
+                "offset_start": c.offset_start,
+                "offset_end": c.offset_end,
+                "bbox": c.bbox,
+                "block_type": c.block_type,
+                "meta": {"patent_tags": tags} if tags else None,
+            }
+        )
+
+    # 双语分流：嵌入前预标 lang（与 chunk_store 写入判定同源）
+    from ..db.chunk_store import _detect_chunk_lang
+
+    for _r in rows:
+        _r["lang"] = _detect_chunk_lang(_r.get("text") or "")
+
+    _attach_entities(source_id, rows)
+
+    if embed:
+        # 双语 embedding：zh chunks 用 bge(512维)，其余用全局模型(MiniLM 384维)
+        from .rag import embed_model_name as _model_for_lang
+
+        def _lang_of(r: dict) -> str:
+            return r.get("lang") or "en"
+
+        group_idxs: dict[str, list[int]] = {}
+        for _i, _r in enumerate(rows):
+            group_idxs.setdefault(_lang_of(_r), []).append(_i)
+        model_per_row: dict[int, str] = {}
+        vec_map: dict[int, list[float]] = {}
+        mismatch = False
+        for lang, idxs in group_idxs.items():
+            mname = _model_for_lang(lang)
+            texts = [rows[i]["text"] for i in idxs]
+            vecs = _embed_texts(texts, mname)
+            if not vecs or len(vecs) != len(idxs):
+                mismatch = True
+                break
+            for j, i in enumerate(idxs):
+                vec_map[i] = vecs[j]
+                model_per_row[id(rows[i])] = mname
+        if len(vec_map) != len(rows):
+            mismatch = True
+        if mismatch:
+            logger.error(
+                "kb embedding count mismatch for source %s — skipping embeddings",
+                source_id,
+            )
+            vectors = None
+        else:
+            vectors = [vec_map[i] for i in range(len(rows))]
+        if vectors:
+            for row, vec in zip(rows, vectors):
+                row["embedding"] = vec
+                row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
+        # embedding 缺失结构化告警 + 覆盖率计数
+        n_embedded = sum(1 for r in rows if r.get("embedding"))
+        _bump_kb_coverage(embedded=n_embedded, total=len(rows))
+        if n_embedded == 0:
+            logger.warning(
+                "kb_embedding_missing event=kb_embedding_missing source=%s "
+                "chunks=%d — sentence-transformers unavailable, retrieval "
+                "degraded to BM25-only",
+                source_id,
+                len(rows),
+            )
+
+    from .kb_dedup import dedupe_chunk_rows
+
+    rows = dedupe_chunk_rows(rows, source_id, session)
+    return rows if rows else None
+
+
 def index_source(
     source_id: str, full_text: str, *, embed: bool = True, fail_soft: bool = True
 ) -> int:
@@ -422,110 +533,16 @@ def index_source(
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
             return 0
-        with timing.span("chunk"):
-            chunks = chunk_markdown(
-                full_text,
-                max_chars=settings.ingest_chunk_max_chars,
-                overlap=settings.ingest_chunk_overlap,
-            )
-            chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
-        rows: list[dict] = []
-        for c in chunks:
-            # Phase 0: rule-based patent tags (claim_no / example_no /
-            # section_title) for claims↔examples stitching at query time.
-            # Zero LLM cost; only attached when something matched.
-            tags = extract_patent_tags(c.text, c.heading_path)
-            rows.append(
-                {
-                    "text": c.text,
-                    "heading_path": c.heading_path,
-                    "page_no": c.page_no,
-                    "paragraph_idx": c.paragraph_idx,
-                    "offset_start": c.offset_start,
-                    "offset_end": c.offset_end,
-                    "bbox": c.bbox,
-                    "block_type": c.block_type,
-                    "meta": {"patent_tags": tags} if tags else None,
-                }
-            )
-        rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
+        # U-1: 公共 chunk 准备（chunking → lang → entity → embedding → dedupe）
+        # 与 ingest_document_tx 共用，保证双写入路径永远一致。
+        with timing.span("prepare"):
+            rows = prepare_chunk_rows(full_text, source_id, embed=embed)
+        if rows:
+            rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
         if not rows:
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
             return 0
-        # 2026-09-04 (双语分流): 嵌入前预标 lang(与 chunk_store 写入判定
-        # 同源), 让嵌入模型选择(zh→bge / en→MiniLM)在写入前就正确。
-        if rows:
-            from ..db.chunk_store import _detect_chunk_lang
-
-            for _r in rows:
-                _r["lang"] = _detect_chunk_lang(_r.get("text") or "")
-        with timing.span("entities"):
-            _attach_entities(source_id, rows)
-        if embed and rows:
-            with timing.span("embed"):
-                # 2026-09-04 (双语分流): 文档嵌入按语言分模型——zh chunks
-                # 用 bge(512 维), 其余用全局模型(MiniLM 384 维)。文档侧
-                # 不加 bge 指令(仅查询侧加)。分组编码, 每组各自校验长度。
-                from .rag import embed_model_name as _model_for_lang
-
-                def _lang_of(r: dict) -> str:
-                    return (r.get("lang") or "en")
-
-                group_idxs: dict[str, list[int]] = {}
-                for _i, _r in enumerate(rows):
-                    group_idxs.setdefault(_lang_of(_r), []).append(_i)
-                model_per_row: dict[int, str] = {}
-                vec_map: dict[int, list[float]] = {}
-                mismatch = False
-                for lang, idxs in group_idxs.items():
-                    mname = _model_for_lang(lang)
-                    texts = [rows[i]["text"] for i in idxs]
-                    vecs = _embed_texts(texts, mname)
-                    if not vecs or len(vecs) != len(idxs):
-                        mismatch = True
-                        break
-                    for j, i in enumerate(idxs):
-                        vec_map[i] = vecs[j]
-                        model_per_row[id(rows[i])] = mname
-                if len(vec_map) != len(rows):
-                    mismatch = True
-                if mismatch:
-                    # A short or long response would bind vectors to the wrong
-                    # text from the mismatch onward — every later chunk carries
-                    # its neighbour's meaning, and nothing about the result
-                    # looks wrong. Drop the batch instead; the rows stay
-                    # keyword-searchable and a rebuild can retry.
-                    logger.error(
-                        "kb embedding count mismatch for source %s — skipping embeddings",
-                        source_id,
-                    )
-                    vectors = None
-                else:
-                    vectors = [vec_map[i] for i in range(len(rows))]
-            if vectors:
-                for row, vec in zip(rows, vectors):
-                    row["embedding"] = vec
-                    row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
-            # P3-5: embedding 缺失结构化告警 + 覆盖率计数。无向量时检索静默
-            # 退化为纯 BM25，过去只有一条易淹没的 warning；现在记结构化事件
-            # 并累计覆盖率，供 /api/ops/evidence-stats 透出。
-            n_embedded = sum(1 for r in rows if r.get("embedding"))
-            _bump_kb_coverage(embedded=n_embedded, total=len(rows))
-            if embed and rows and n_embedded == 0:
-                logger.warning(
-                    "kb_embedding_missing event=kb_embedding_missing source=%s "
-                    "chunks=%d — sentence-transformers unavailable, retrieval "
-                    "degraded to BM25-only",
-                    source_id,
-                    len(rows),
-                )
-        # KB dedup (2026-10-01): drop exact / near-duplicate chunks after
-        # embedding, before the chunk write — and before the FTS mirror so
-        # both stay consistent.
-        from .kb_dedup import dedupe_chunk_rows
-
-        rows = dedupe_chunk_rows(rows, source_id)
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)
@@ -919,8 +936,9 @@ def search_chunks(
             for c in chunks:
                 m = getattr(c, "embedding_model", None)
                 vec = vec_by_model.get(m) if m else None
-                cemb = chunk_embedding_list(c) if vec else None
-                if cemb and vec and comparable_embedding(c, len(vec), m or ""):
+                # U-2: comparable_embedding 返回 (ok, vec)，直接用返回的向量
+                ok, cemb = comparable_embedding(c, len(vec), m or "") if vec else (False, None)
+                if cemb and vec and ok:
                     scored.append((_dot(vec, cemb), c))
                 else:
                     # 该 chunk 模型未参与本组编码(双语另一侧/脏数据/纯文本)
@@ -941,12 +959,18 @@ def search_chunks(
         scored.sort(key=lambda pair: pair[0], reverse=True)
         # v7 检索-1: legacy 路径同样走质量门（blocked 域名/垃圾文本），
         # 否则 deep research 证据池被污染。
+        # v8: 补 source_meta —— 否则 blocked_domain 检查永不触发。
         try:
-            from .kb_retrieval_gate import drop_reason_for_chunk, record_gate_drop
+            from .kb_retrieval_gate import (
+                _load_source_meta,
+                drop_reason_for_chunk,
+                record_gate_drop,
+            )
 
+            _meta = _load_source_meta([getattr(c, "source_id", "") for _, c in scored])
             filtered: list[tuple[float, object]] = []
             for s, c in scored:
-                reason = drop_reason_for_chunk(c)
+                reason = drop_reason_for_chunk(c, source_meta=_meta)
                 if reason:
                     record_gate_drop("retrieval", reason)
                     continue
