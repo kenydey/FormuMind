@@ -54,3 +54,37 @@ def test_trim_history():
     trimmed = trim_history(turns, max_turns=12)
     assert len(trimmed) == 12
     assert trimmed[0].content == "8"
+
+
+def _hist(*texts: str) -> list:
+    return [ChatTurn(role="user", content=t) for t in texts]
+
+
+def test_anaphora_substitutes_pronoun(monkeypatch):
+    """P2: '它的X' → '磷酸锌的X'，而不仅是前置词条。"""
+    monkeypatch.setenv("FORMUMIND_CHAT_MULTI_TURN_ENABLED", "true")
+    get_settings.cache_clear()
+    history = _hist("磷酸锌在环氧底漆中的添加量是多少？")
+    q, rewritten = rewrite_query("它的耐盐雾表现呢？", history)
+    assert rewritten is not None
+    assert "磷酸锌的耐盐雾" in rewritten
+
+
+def test_anaphora_ignores_yinggai(monkeypatch):
+    """P2: '应该'中的'该'不是代词，不替换。"""
+    monkeypatch.setenv("FORMUMIND_CHAT_MULTI_TURN_ENABLED", "true")
+    get_settings.cache_clear()
+    history = _hist("磷酸锌的添加量？")
+    q, rewritten = rewrite_query("应该加多少？", history)
+    assert rewritten is not None
+    assert "磷酸锌加多少" not in rewritten  # "应该"保持完整
+
+
+def test_anaphora_qianhouzhe(monkeypatch):
+    """P2: 前者/后者按提及顺序消解。"""
+    monkeypatch.setenv("FORMUMIND_CHAT_MULTI_TURN_ENABLED", "true")
+    get_settings.cache_clear()
+    history = _hist("比较磷酸锌和环氧树脂的防锈性能")
+    q, rewritten = rewrite_query("前者的添加量呢？", history)
+    assert rewritten is not None
+    assert "磷酸锌的添加量" in rewritten

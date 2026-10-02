@@ -162,6 +162,8 @@ export interface AppState {
   searchBusy: boolean;
   searchProgress: SearchStreamProgress | null;
   kbIngest: KbIngestState | null;
+  /** P2: 最近一次文件上传的解析提示（页数截断等），面板展示。 */
+  uploadWarnings: string[];
   /**
    * Which run-status notifications the user has manually closed. A flag rather
    * than a deleted source field — see store/notifications.ts for why.

@@ -66,6 +66,9 @@ def _seed(factory, source_id, text, lang="en", vec=None):
     blob = None
     if vec is not None:
         blob = np.asarray(vec, dtype="<f4").tobytes()
+    # P2 (0042): 种子行走生产写入语义 —— dedup_key 与 replace_for_source_in 一致。
+    from app.services.kb_dedup import chunk_dedup_key
+
     with factory() as s:
         s.add(
             DocumentChunk(
@@ -74,6 +77,7 @@ def _seed(factory, source_id, text, lang="en", vec=None):
                 text=text,
                 lang=lang,
                 embedding_blob=blob,
+                dedup_key=chunk_dedup_key(text, "", None),
             )
         )
         s.commit()

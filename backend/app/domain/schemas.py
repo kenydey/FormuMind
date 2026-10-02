@@ -520,6 +520,9 @@ class DOEFactor(BaseModel):
     unit: str = ""
     kind: str = "continuous"
     levels: list[float | str] | None = None
+    # P2: U-5 离散材料替换语义 —— lever 的 material_map 透传到 DOE 因子，
+    # 下游 reconstruct 不必再回头从 req.levers 翻找。
+    material_map: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def _validate_kind_levels(self) -> "DOEFactor":

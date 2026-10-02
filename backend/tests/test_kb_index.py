@@ -142,6 +142,35 @@ def test_reindex_all_backfills(stores):
     assert chk.get_by_source(sid)
 
 
+def test_reindex_all_recovers_from_chunks_when_full_text_pruned(stores):
+    """P1-5: prune_source_fulltext 清空 full_text 后，reindex 从现存 chunk
+    拼回文本，而非静默返回 0。"""
+    src, chk = stores
+    sid = src.create(filename="b.md", title="b", source_kind="local",
+                     full_text=MD, content_hash="h2")
+    n0 = kb_index.index_source(sid, MD, embed=False)
+    assert n0 >= 2
+    # 模拟 prune：清空 full_text 但保留 chunk 行
+    src.update_fields(sid, full_text="")
+    assert chk.get_by_source(sid), "prune 不应删 chunk 行"
+    result = kb_index.reindex_all(embed=False)
+    assert result["reindexed_sources"] == 1
+    # 注意：从 chunk 拼回的是可用降级（标题结构已在切分时消耗），
+    # chunk 数可能少于原文直接切分；关键是恢复了而非 0。
+    assert result["total_chunks"] >= 1
+    texts = " ".join(c.text for c in chk.get_by_source(sid))
+    assert "盐雾" in texts
+
+
+def test_reindex_all_skips_source_with_no_text_and_no_chunks(stores):
+    """full_text 为空且无 chunk → 跳过，不计入。"""
+    src, chk = stores
+    src.create(filename="c.md", title="c", source_kind="local",
+               full_text="", content_hash="h3")
+    result = kb_index.reindex_all(embed=False)
+    assert result["reindexed_sources"] == 0
+
+
 # ── retrieval ────────────────────────────────────────────────────────────────
 
 
@@ -270,9 +299,9 @@ def test_kb_api_endpoints(monkeypatch, stores):
 
     re_resp = client.post("/api/kb/reindex", params={"embed": "false"})
     assert re_resp.status_code == 200
-    # prune_source_fulltext=True（默认）：index_source 切块后已清空 full_text，
-    # reindex 找不到全文 → 跳过（"入库后删源文档"的预期代价，见 test_ingest_prune）。
-    assert re_resp.json()["reindexed_sources"] == 0
+    # P1-5: prune_source_fulltext=True（默认）清空 full_text 后，reindex
+    # 从现存 chunk 拼回文本重建 —— 不再是旧行为的 0。
+    assert re_resp.json()["reindexed_sources"] == 1
 
 
 def test_kb_reindex_works_when_prune_disabled(monkeypatch, stores):

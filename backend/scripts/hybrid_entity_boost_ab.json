@@ -1,0 +1,18 @@
+{
+  "control": {
+    "ndcg_at_k": 0.2453,
+    "mrr": 0.2453,
+    "recall_at_k": 0.2453
+  },
+  "treatment": {
+    "ndcg_at_k": 0.2453,
+    "mrr": 0.2453,
+    "recall_at_k": 0.2453
+  },
+  "delta_ndcg": 0.0,
+  "delta_mrr": 0.0,
+  "delta_recall": 0.0,
+  "improved": 0,
+  "regressed": 0,
+  "verdict": "KEEP OFF"
+}

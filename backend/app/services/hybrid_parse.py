@@ -317,6 +317,10 @@ def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | No
             "hybrid: %d-page scan exceeds the %d-page cap — not sending to MinerU",
             len(pages), cap,
         )
+        # P2: 截断用户可见 —— 不再只写日志。
+        from .parse_notices import note
+
+        note(f"文档共 {len(pages)} 页，MinerU 解析上限 {cap} 页，超限部分未解析")
         return None
 
     logger.info("hybrid: no text layer, sending %d pages to MinerU with OCR", len(pages))
@@ -486,6 +490,10 @@ def parse(content: bytes) -> str | None:
             "the rest keep their local text",
             len(candidates), cap,
         )
+        # P2: 截断用户可见。
+        from .parse_notices import note
+
+        note(f"{len(candidates)} 页需高精度解析，上限 {cap} 页，其余保留本地文本")
 
     if selected:
         # Wake a scale-to-zero vision endpoint once, up front. The loop below is

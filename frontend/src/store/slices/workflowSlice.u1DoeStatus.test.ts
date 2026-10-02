@@ -101,4 +101,13 @@ describe("workflowSlice U-1 doe status consumers", () => {
     expect(calls).toContain("plan-B/activate");
     expect(calls).toContain("plan-A/complete");
   });
+
+  it("P2: transition 抛 422 时错误可见、采纳不受影响", async () => {
+    doePlanTransition.mockRejectedValueOnce(new Error("request failed with 422"));
+    const id = await useStore.getState().adoptDoePlanToWorkbench(planA);
+    expect(id).toBe(42);
+    // 微任务 flush：catch 回调是异步的
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useStore.getState().error).toMatch(/状态同步失败/);
+  });
 });

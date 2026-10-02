@@ -14,9 +14,11 @@ by-products; this module turns them into *structured assets* with provenance:
   :func:`blocks_from_markdown` for markdown-only parser output.
 * Sidecar persistence — :func:`save_tables` / :func:`load_tables` keep assets
   as JSON next to SourceDocument metadata (``data/source_tables/<key>.json``);
-  the DB schema is untouched. The parse-time key is the content sha256, which
-  equals ``SourceDocument.content_hash``, so assets rejoin documents without
-  any schema change. W3-1: ``save_tables`` accepts optional ``property_sets``
+  the DB schema is untouched. P2: the key is now the SourceDocument UUID
+  (re-keyed at persist time by ``parsing.persist_table_sidecar`` / F-3) —
+  the old content-sha256 key is legacy: sidecars written under the sha256 key
+  are orphans no reader will open. See ``scripts/`` for cleanup tooling.
+  W3-1: ``save_tables`` accepts optional ``property_sets``
   (normalised :class:`table_normalize.PropertySet` dicts) persisted under the
   ``"property_sets"`` key of the same sidecar; :func:`load_property_sets`
   reads them back.

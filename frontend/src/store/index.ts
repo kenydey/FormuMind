@@ -85,6 +85,7 @@ export const useStore = create<AppState>()(
       searchBusy: false,
       searchProgress: null,
       kbIngest: null,
+      uploadWarnings: [],
       notificationsDismissed: noNotificationsDismissed(),
       deepResearchBusy: false,
       deepResearchStage: "",
@@ -144,6 +145,8 @@ export const useStore = create<AppState>()(
         adaptiveDoe: state.adaptiveDoe,
         research: state.research,
         deepReport: state.deepReport,
+        // P1-10: 刷新后徽标水合依赖此 id，必须持久化，否则 outcome 接口不触发。
+        lastRecommendId: state.lastRecommendId,
         measured: state.measured,
         modelHistory: state.modelHistory,
         trainMessage: state.trainMessage,

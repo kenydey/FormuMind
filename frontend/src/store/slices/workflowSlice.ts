@@ -311,9 +311,14 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.adaptiveDoe = adaptiveMetaFrom(result);
         });
         await get().adoptDoePlanToWorkbench(result.plan);
-        // U-1: 新一轮已采纳，旧 plan → completed，fail-open。
+        // U-1: 新一轮已采纳，旧 plan → completed。
+        // P2: 422（非法迁移）要让用户看见，其余 fail-open。
         if (prevPlanId && prevPlanId !== result.plan?.plan_id) {
-          void api.doePlanTransition(prevPlanId, "complete");
+          api.doePlanTransition(prevPlanId, "complete").catch((e) => {
+            set((draft) => {
+              draft.error = `旧 DOE 计划状态同步失败（不影响新计划）：${formatApiError(e)}`;
+            });
+          });
         }
       } catch (e) {
         set((draft) => {
@@ -351,9 +356,14 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           draft.workbenchAdoptedPlanId = p.plan_id || draft.workbenchAdoptedPlanId;
           draft.workbenchObjectivesSnapshot = wb.objectives_snapshot ?? null;
         });
-        // U-1: 采纳即 draft→active，fail-open（doePlanTransition 内部已吞错）。
+        // U-1: 采纳即 draft→active。
+        // P2: 422（非法迁移）要让用户看见，其余 fail-open。
         if (p.plan_id) {
-          void api.doePlanTransition(p.plan_id, "activate");
+          api.doePlanTransition(p.plan_id, "activate").catch((e) => {
+            set((draft) => {
+              draft.error = `DOE 计划状态同步失败（计划已采纳）：${formatApiError(e)}`;
+            });
+          });
         }
         await get().refreshWorkbenchStats();
         await get().recomputePredicted();

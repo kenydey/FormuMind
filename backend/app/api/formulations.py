@@ -247,6 +247,36 @@ class AdoptRecommendationBody(BaseModel):
     project_id: str | None = None
 
 
+@router.get("/formulations/recommend/{recommend_id}/outcome")
+def recommendation_outcome(recommend_id: str) -> dict:
+    """P1-10: 双层信号水合 —— 页面刷新后徽标从后端重读，Datalab 验证
+    回写也能被前端看到（不再只靠组件局部 useState）。"""
+    from ..db import recommend_outcome_store
+    from ..db.database import default_session_factory
+
+    factory = default_session_factory()
+    with factory() as session:
+        row = recommend_outcome_store.get_outcome(session, recommend_id=recommend_id)
+    if row is None:
+        return {
+            "recommend_id": recommend_id,
+            "adopted": False,
+            "adopt_signal": None,
+            "experiment_validated": False,
+            "formula_name": None,
+        }
+    snap = row.formula_snapshot or {}
+    return {
+        "recommend_id": row.recommend_id,
+        "adopted": bool(row.adopted),
+        "adopt_signal": row.adopt_signal,
+        "experiment_validated": bool(getattr(row, "experiment_validated", False)),
+        # P1-10: 采纳是配方粒度 —— 快照名供前端卡片对号，避免同轮
+        # 未采纳的卡片刷新后也被点亮。
+        "formula_name": snap.get("name") if isinstance(snap, dict) else None,
+    }
+
+
 @router.post("/formulations/recommend/{recommend_id}/adopt")
 def adopt_recommendation(recommend_id: str, body: AdoptRecommendationBody) -> dict:
     """C-8: record a user adopt signal for one recommendation round.
@@ -272,6 +302,14 @@ def adopt_recommendation(recommend_id: str, body: AdoptRecommendationBody) -> di
             project_id=body.project_id or None,
             adopt_signal=body.adopt_signal,
             formula_snapshot=body.formula_snapshot,
+        )
+        # P2: 先 sync、后 adopt —— 采纳时已有 lab 测量的实验行若匹配，
+        # 在此补记强成功层（fail-open，不影响 adopt 主路径）。
+        recommend_outcome_store.try_validate_adopt_against_lab(
+            session,
+            recommend_id=recommend_id,
+            project_id=body.project_id or None,
+            snapshot=body.formula_snapshot,
         )
     return {
         "recommend_id": row.recommend_id,

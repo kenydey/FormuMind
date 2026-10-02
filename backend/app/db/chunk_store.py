@@ -11,6 +11,9 @@ from .models import DocumentChunk
 from .db_common import safe_bbox
 from .session_utils import commit_session
 
+# P2 (0042): L1 去重索引键 —— kb_dedup 顶层只依赖标准库，无循环导入。
+from ..services.kb_dedup import chunk_dedup_key as _chunk_dedup_key
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -102,6 +105,10 @@ class ChunkStore:
                     text=text,
                     heading_path=(chunk.get("heading_path") or "")[:120],
                     page_no=chunk.get("page_no"),
+                    # P2 (0042): L1 去重索引键 —— 写入时计算，_l1_exact 走索引查。
+                    dedup_key=_chunk_dedup_key(
+                        text, chunk.get("heading_path"), chunk.get("page_no")
+                    ),
                     bbox=bbox,
                     block_type=chunk.get("block_type") or "text",
                     offset_start=chunk.get("offset_start"),

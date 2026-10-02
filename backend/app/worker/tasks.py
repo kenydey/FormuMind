@@ -333,6 +333,9 @@ def run_deep_research_task(self, payload: dict) -> dict:
         result = {
             "report": report.model_dump(),
             "grounded_evidence": [e.model_dump() for e in grounded],
+            # P1-1: deep 模式 generate_node 已 register_round 并写
+            # state["recommend_id"]，透传出来否则前端采不到。
+            "recommend_id": state.get("recommend_id"),
         }
         kb_task_id = dispatch_kb_ingest(
             result["grounded_evidence"],
@@ -475,6 +478,9 @@ def run_recommend_task(self, payload: dict) -> dict:
             "recommend_engine": result_raw.get("engine", "llm"),
             "tradeoff": result_raw.get("tradeoff"),
             "recommend_meta": {"warnings": result_raw.get("warnings") or []},
+            # P1-1: 异步路径透传 recommend_id —— 否则前端 lastRecommendId
+            # 恒为 null，采纳按钮静默禁用，C-8 分子永远采不到。
+            "recommend_id": result_raw.get("recommend_id"),
         }
         result = {"research": research}
 
@@ -799,6 +805,8 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
             "source_id": outcome.source_id,
             "extraction_status": outcome.extraction_status,
             "duplicates": duplicates,
+            # P2: 解析截断等提示 —— 前端上传完成态展示。
+            "warnings": list(outcome.warnings or []),
         }
         message = (
             f"文件入库完成：{len(outcome.evidence)} 条"

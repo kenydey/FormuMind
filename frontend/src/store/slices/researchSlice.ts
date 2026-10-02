@@ -220,6 +220,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         if (!research) throw new Error("推荐未返回结果");
         await applyEnrichedLeaderboard(set, get, research.recommended, (draft) => {
           draft.research = { ...research, recommended: draft.leaderboard };
+          // P1-1: 异步路径同样写入 round id，否则采纳按钮静默禁用。
+          draft.lastRecommendId = research.recommend_id ?? draft.lastRecommendId;
         });
       } catch (e) {
         const msg = formatApiError(e);
@@ -338,11 +340,13 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
             if (steps.length) draft.taskThinking = steps;
           });
         }, 600_000, ctrl.signal);
-        const wrapped = final.data as { report?: ComprehensiveReport } | undefined;
+        const wrapped = final.data as { report?: ComprehensiveReport; recommend_id?: string | null } | undefined;
         const report = wrapped?.report;
         if (!report) throw new Error("深度研究未返回结果");
         set((draft) => {
           draft.deepReport = report;
+          // P1-1: deep 异步路径同样写入 round id，否则采纳按钮静默禁用。
+          draft.lastRecommendId = wrapped?.recommend_id ?? draft.lastRecommendId;
         });
         if (report.citations?.length) get().addSources(report.citations);
         if (report.candidates?.length) {

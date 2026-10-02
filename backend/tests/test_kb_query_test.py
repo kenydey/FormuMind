@@ -188,3 +188,114 @@ def test_golden_eval_run(stores):
     assert 0.0 <= data["mrr"] <= 1.0
     assert 0.0 <= data["recall_at_k"] <= 1.0
     assert data["recall_at_k"] == pytest.approx(data["passed"] / data["total"])
+
+
+def test_query_test_keyword_mode_is_pure_keyword(stores, monkeypatch):
+    """P2: keyword 探针强制纯关键词 —— 有 embedding 时也不走 cosine，
+    hybrid_score/cosine_score 必须为 None。"""
+    client = _client()
+    r = client.post(
+        "/api/kb/ingest",
+        json={
+            "text": "硅烷偶联剂可用于金属表面处理，改善涂层附着力。磷化液常用于前处理。",
+            "title": "表面处理",
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    # 即使 embedding 可用，keyword 模式也不计算 cosine
+    resp = client.post(
+        "/api/kb/query-test",
+        json={"query": "硅烷偶联剂", "mode": "keyword", "top_k": 5},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["mode"] == "keyword"
+    assert data["hits"], data
+    for hit in data["hits"]:
+        assert hit["cosine_score"] is None, "keyword 模式不应有 cosine 分"
+        assert hit["hybrid_score"] is None, "keyword 模式不应有 hybrid 分"
+
+
+def test_hybrid_entity_boost_lifts_entity_chunk(stores, monkeypatch):
+    """P2: kb_hybrid_entity_boost=1 时，含查询 CAS 的 chunk 在融合前获得
+    +0.3 加性 boost（legacy _entity_boost 的 CAS 档）；关闭时无加成。"""
+    from app.config import get_settings
+    from app.services.hybrid_search import hybrid_search_scored
+
+    src, chk = stores
+    sid_a = src.create(filename="a.md", title="a", source_kind="local",
+                       full_text="x", content_hash="ha")
+    chk.replace_for_source(sid_a, [{
+        "text": "该助剂可改善涂层流平性，添加量为总配方的 0.5%。",
+        "meta": {"chem": [{"type": "cas", "value": "2530-83-8"}]},
+    }])
+    sid_b = src.create(filename="b.md", title="b", source_kind="local",
+                       full_text="y", content_hash="hb")
+    chk.replace_for_source(sid_b, [{
+        "text": "硅烷偶联剂在金属表面处理中作为附着力促进剂，CAS 2530-83-8 "
+                "的水解缩合形成硅氧烷网络。",
+    }])
+
+    def score_of(sid: str, scored) -> float | None:
+        for sc in scored:
+            if sc.chunk.source_id == sid:
+                return sc.hybrid_score
+        return None
+
+    q = "CAS 2530-83-8 硅烷偶联剂附着力"
+    monkeypatch.setenv("FORMUMIND_KB_HYBRID_ENTITY_BOOST", "0")
+    get_settings.cache_clear()
+    control = hybrid_search_scored(q, top_k=5)
+    monkeypatch.setenv("FORMUMIND_KB_HYBRID_ENTITY_BOOST", "1")
+    get_settings.cache_clear()
+    treatment = hybrid_search_scored(q, top_k=5)
+    get_settings.cache_clear()
+
+    ca, ta = score_of(sid_a, control), score_of(sid_a, treatment)
+    assert ca is not None and ta is not None
+    # 加性 boost：treatment = control + 0.3（CAS 档），融合是线性的
+    assert ta == pytest.approx(ca + 0.3, abs=1e-6)
+    # 无 chem 元数据的 chunk 不受加成影响（分量不变）
+    cb = score_of(sid_b, control)
+    tb = score_of(sid_b, treatment)
+    if cb is not None and tb is not None:
+        assert tb == pytest.approx(cb, abs=1e-6)
+
+
+
+def test_probe_rerank_reads_kb_recommend_switch(stores, monkeypatch):
+    """P1-12: hybrid_rerank 探针默认读 kb_recommend_rerank_enabled，
+    不再读 search_rerank_enabled（两者默认行为不一致）。"""
+    from app.config import get_settings
+
+    client = _client()
+    r = client.post(
+        "/api/kb/ingest",
+        json={"text": "硅烷偶联剂改善涂层附着力。", "title": "t"},
+    )
+    assert r.status_code == 200, r.text
+
+    # search_rerank 开但 kb_recommend_rerank 关 → 不重排
+    monkeypatch.setenv("FORMUMIND_SEARCH_RERANK_ENABLED", "true")
+    monkeypatch.setenv("FORMUMIND_KB_RECOMMEND_RERANK_ENABLED", "false")
+    get_settings.cache_clear()
+    resp = client.post(
+        "/api/kb/query-test",
+        json={"query": "硅烷偶联剂", "mode": "hybrid_rerank", "top_k": 3},
+    )
+    get_settings.cache_clear()
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["params"]["rerank_applied"] is False
+    assert "kb_recommend_rerank_enabled" in (data["warning"] or "")
+
+    # kb_recommend_rerank 开 → 尝试重排（无 LLM key 时 fail-open 降级）
+    monkeypatch.setenv("FORMUMIND_KB_RECOMMEND_RERANK_ENABLED", "true")
+    get_settings.cache_clear()
+    resp = client.post(
+        "/api/kb/query-test",
+        json={"query": "硅烷偶联剂", "mode": "hybrid_rerank", "top_k": 3},
+    )
+    get_settings.cache_clear()
+    assert resp.status_code == 200, resp.text

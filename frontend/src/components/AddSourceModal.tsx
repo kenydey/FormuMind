@@ -25,6 +25,7 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
     searchSources,
     uploadFiles,
     addSources,
+    uploadWarnings,
   } = useStore(
     useShallow((s) => ({
       searchQuery: s.searchQuery,
@@ -36,6 +37,7 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
       searchSources: s.searchSources,
       uploadFiles: s.uploadFiles,
       addSources: s.addSources,
+      uploadWarnings: s.uploadWarnings,
     }))
   );
 
@@ -77,6 +79,10 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
     try {
       const res = await api.ingestUrl(urlValue.trim());
       addSources(res.evidence);
+      // P2: URL 抓取的解析提示同样可见。
+      if (res.warnings?.length) {
+        useStore.setState({ uploadWarnings: res.warnings });
+      }
       setUrlOpen(false);
       setUrlValue("");
     } catch (e) {
@@ -226,6 +232,19 @@ export default function AddSourceModal({ open, onClose }: { open: boolean; onClo
           {error && (
             <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded p-2">
               {error}
+            </div>
+          )}
+
+          {/* P2: 解析截断等提示 —— 不再只躺在日志里。 */}
+          {uploadWarnings.length > 0 && (
+            <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded p-2 space-y-1">
+              <div className="font-medium">解析提示</div>
+              {uploadWarnings.slice(0, 5).map((w, i) => (
+                <div key={i}>• {w}</div>
+              ))}
+              {uploadWarnings.length > 5 && (
+                <div className="text-amber-400/70">等 {uploadWarnings.length} 条</div>
+              )}
             </div>
           )}
 

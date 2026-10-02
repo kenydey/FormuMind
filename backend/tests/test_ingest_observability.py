@@ -216,3 +216,30 @@ def test_failure_persistence_is_fail_open(stores, monkeypatch):
     result = kb_ingest.ingest_evidence_docs([_ev("US7777777")])
     assert result["failed"] == 1  # batch completes; error still in summary
     assert result["docs"][0]["error"]
+
+
+def test_find_by_hash_ignores_failed_rows(stores):
+    """P1-8 风险1：失败行保留真实 content_hash，但 find_by_hash 必须跳过它，
+    否则下一次 _persist_fulltext 直接命中零-chunk 失败行，形成僵尸。"""
+    src, _ = stores
+    content_hash = "ab" * 32
+    sid = src.create(
+        filename="f.pdf", title="f", source_kind="web",
+        full_text="x" * 100, content_hash=content_hash,
+    )
+    src.update_fields(sid, ingest_status="failed", ingest_error="0 chunks")
+    assert src.find_by_hash(content_hash) is None
+
+    # 非失败行仍可命中
+    sid2 = src.create(
+        filename="g.pdf", title="g", source_kind="web",
+        full_text="y" * 100, content_hash="cd" * 32,
+        ingest_status="indexed",
+    )
+    assert src.find_by_hash("cd" * 32).id == sid2
+    # NULL 状态的历史行也可命中
+    sid3 = src.create(
+        filename="h.pdf", title="h", source_kind="web",
+        full_text="z" * 100, content_hash="ef" * 32,
+    )
+    assert src.find_by_hash("ef" * 32).id == sid3

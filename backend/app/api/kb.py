@@ -23,13 +23,17 @@ router = APIRouter(prefix="/kb", tags=["kb"])
 
 class HybridSearchRequest(BaseModel):
     query: str
-    top_k: int = 10
-    alpha: float = 0.3
+    # P2: top_k 加上限；alpha 默认 None → 走 kb_hybrid_alpha 设置项
+    # （此前硬编码 0.3 覆盖设置）；补 project_id/include_global。
+    top_k: int = Field(default=10, ge=1, le=50)
+    alpha: float | None = Field(default=None, ge=0.0, le=1.0)
+    project_id: str | None = None
+    include_global: bool = True
 
     @field_validator("alpha")
     @classmethod
-    def _validate_alpha(cls, v: float) -> float:
-        if v < 0.0 or v > 1.0:
+    def _validate_alpha(cls, v: float | None) -> float | None:
+        if v is not None and not 0.0 <= v <= 1.0:
             raise ValueError(f"alpha must be in [0, 1], got {v}")
         return v
 
@@ -202,8 +206,24 @@ def search(
     q: str = Query(min_length=1),
     k: int = Query(default=6, ge=1, le=50),
     project_id: str | None = Query(default=None),
+    langs: str | None = Query(
+        default=None,
+        description="逗号分隔的语言过滤（如 zh,en）；不传则走统一 hybrid 门面",
+    ),
 ) -> KBSearchResponse:
-    return KBSearchResponse(results=kb_index.search_chunks(q, k=k, project_id=project_id))
+    # P1-9: 切统一检索门面 —— 真 BM25+向量融合 / Faiss / children /
+    # 统一 alpha 与 rerank 开关；此前直连 legacy search_chunks 受
+    # kb_search_scan_limit=5000 与 Python 全扫描限制。
+    lang_list = [s.strip() for s in langs.split(",") if s.strip()] if langs else None
+    return KBSearchResponse(
+        results=kb_index.retrieve_evidence(
+            q,
+            k=k,
+            project_id=project_id,
+            include_global=False,
+            langs=lang_list,
+        )
+    )
 
 
 class KBSourceItem(BaseModel):
@@ -484,7 +504,13 @@ def hybrid_search(body: HybridSearchRequest) -> list[DocumentChunkResponse]:
         raise HTTPException(status_code=409, detail="知识库 v2 未启用")
     from ..services.hybrid_search import hybrid_search as _hs
 
-    return _hs(body.query, top_k=body.top_k, alpha=body.alpha)
+    return _hs(
+        body.query,
+        top_k=body.top_k,
+        alpha=body.alpha,
+        project_id=body.project_id,
+        include_global=body.include_global,
+    )
 
 
 # ── retrieval probe (query-test) ─────────────────────────────────────────────
@@ -693,14 +719,16 @@ def ingest(body: IngestRequest) -> IngestResponse:
 
     Idempotent: repeating the same ``source_id`` returns the same result
     without re-indexing.
+
+    P1-7: 经原子事务 ingest_document_tx（SourceDocument + chunks + outbox
+    一次提交）—— 索引失败不再留下零 chunk 孤儿行。
     """
     import hashlib
     import uuid as _uuid
 
     from ..db.database import default_session_factory
     from ..db.models import SourceDocument
-    from ..db.outbox_store import enqueue
-    from ..db.session_utils import commit_session
+    from ..services.ingest_tx import ingest_document_tx
     # NOTE: metadata parameter accepted for future expansion (Task 2.4).
 
     source_id = body.source_id or str(_uuid.uuid4())
@@ -708,15 +736,11 @@ def ingest(body: IngestRequest) -> IngestResponse:
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    # Ensure a SourceDocument row exists for this source_id
     factory = default_session_factory()
-    with commit_session(factory) as session:
+    # 用户显式 source_id 撞库检查：内容相同 → 幂等返回；内容不同 → 409。
+    with factory() as session:
         doc = session.get(SourceDocument, source_id)
         if doc is not None and body.source_id is not None:
-            # User-supplied source_id collides with an existing document.
-            # Idempotent when content matches (return same result without
-            # re-indexing); reject only when the content actually differs,
-            # to prevent silent overwrite of another source's content.
             new_hash = hashlib.sha256(
                 text.encode("utf-8", errors="replace")
             ).hexdigest()
@@ -725,45 +749,27 @@ def ingest(body: IngestRequest) -> IngestResponse:
                     status_code=409,
                     detail=f"source_id {source_id} already exists with different content",
                 )
-            # Same content → idempotent: skip indexing, return chunk_count=0
             return IngestResponse(
                 source_id=source_id,
                 chunk_count=0,
                 status="ok",
             )
-        if doc is None:
-            session.add(
-                SourceDocument(
-                    id=source_id,
-                    filename=body.title or "api_ingest",
-                    title=body.title or "API Ingest",
-                    source_kind="api",
-                    full_text=text,
-                    content_hash=hashlib.sha256(
-                        text.encode("utf-8", errors="replace")
-                    ).hexdigest(),
-                    raw_text_chars=len(text),
-                )
-            )
 
-    chunk_count = kb_index.ingest_full_document(source_id, text, body.metadata)
-
-    # Outbox record: idempotent (keyed on source_id)
-    with commit_session(factory) as session:
-        enqueue(
-            session,
-            operation="ingest_complete",
-            idempotency_key=source_id,
-            payload={
-                "source_id": source_id,
-                "chunk_count": chunk_count,
-                "status": "ok",
-            },
+    try:
+        result = ingest_document_tx(
+            factory,
+            source_id=source_id,
+            text=text,
+            title=body.title or "",
+            metadata=body.metadata,
         )
+    except Exception as exc:
+        logger.exception("kb ingest tx failed")
+        raise HTTPException(status_code=500, detail="入库失败") from exc
 
     return IngestResponse(
-        source_id=source_id,
-        chunk_count=chunk_count,
+        source_id=result.source_id,
+        chunk_count=result.chunk_count,
         status="ok",
     )
 

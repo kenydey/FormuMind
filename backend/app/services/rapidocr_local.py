@@ -244,6 +244,10 @@ def ocr_pdf(content: bytes) -> str | None:
     cap = int(settings.rapidocr_max_pages)
     if total > cap:
         logger.warning("rapidocr: %d-page document capped at %d pages", total, cap)
+        # P2: 截断用户可见。
+        from .parse_notices import note
+
+        note(f"文档共 {total} 页，OCR 上限 {cap} 页，仅解析前 {cap} 页")
 
     dpi = int(settings.rapidocr_dpi)
     rendered: list[tuple[int, str]] = []

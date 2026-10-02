@@ -114,11 +114,14 @@ def run_query_test(
     source_meta = kb_index._source_meta()
 
     if mode == "keyword":
+        # P2: 纯 keyword 探针 —— 有 embedding 时也不走 cosine，否则
+        # "keyword" 模式名不副实。
         evidence = kb_index.search_chunks(
             q,
             k=top_k,
             project_id=project_id,
             include_global=include_global,
+            keyword_only=True,
         )
         hits: list[dict[str, Any]] = []
         for rank, ev in enumerate(evidence, start=1):
@@ -148,7 +151,9 @@ def run_query_test(
 
     want_rerank = False
     if mode == "hybrid_rerank":
-        want_rerank = bool(settings.search_rerank_enabled) if rerank is None else bool(rerank)
+        # P1-12: 读生产实际开关 kb_recommend_rerank_enabled —— 此前读
+        # search_rerank_enabled，探针默认行为与生产不一致。
+        want_rerank = bool(settings.kb_recommend_rerank_enabled) if rerank is None else bool(rerank)
 
     pool_k = top_k
     if want_rerank:
@@ -200,7 +205,7 @@ def run_query_test(
     if mode == "hybrid" or not want_rerank:
         warning = None
         if mode == "hybrid_rerank" and not want_rerank:
-            warning = "重排未启用（search_rerank_enabled=false 或请求覆盖为 false）"
+            warning = "重排未启用（kb_recommend_rerank_enabled=false 或请求覆盖为 false）"
         return _done(prelim[:top_k], warning=warning, gate_before=gate_before)
 
     items, meta = rerank_scored(q, evidence_pool, k=top_k)

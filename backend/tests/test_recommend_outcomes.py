@@ -58,8 +58,44 @@ def test_adopt_upsert_is_idempotent(session: Session) -> None:
     )
     assert _row_count(session) == 1
     assert r2.id == r1.id
-    assert r2.adopt_signal == "copied"
-    assert r2.formula_snapshot == {"name": "f1-updated"}
+    # P2: 弱信号（copied）不覆盖强信号（button），快照/hash 同样不受弱信号污染。
+    assert r2.adopt_signal == "button"
+    assert r2.formula_snapshot == {"name": "f1"}
+
+
+def test_adopt_signal_rank_stronger_wins(session: Session) -> None:
+    """P2: 强信号可覆盖弱信号（copied → button 升级）。"""
+    recommend_outcome_store.record_adopt(
+        session,
+        recommend_id="rec-2",
+        adopt_signal="copied",
+        formula_snapshot={"name": "f1"},
+    )
+    r2 = recommend_outcome_store.record_adopt(
+        session,
+        recommend_id="rec-2",
+        adopt_signal="button",
+        formula_snapshot={"name": "f1"},
+    )
+    assert r2.adopt_signal == "button"
+
+
+def test_adopt_same_rank_snapshot_updates(session: Session) -> None:
+    """P2 风险2: 同级信号（button→button）允许快照更新，最新为准。"""
+    recommend_outcome_store.record_adopt(
+        session,
+        recommend_id="rec-3",
+        adopt_signal="button",
+        formula_snapshot={"name": "f-old"},
+    )
+    r2 = recommend_outcome_store.record_adopt(
+        session,
+        recommend_id="rec-3",
+        adopt_signal="button",
+        formula_snapshot={"name": "f-new"},
+    )
+    assert r2.adopt_signal == "button"
+    assert r2.formula_snapshot == {"name": "f-new"}
 
 
 def test_invalid_signal_rejected(session: Session) -> None:
@@ -237,6 +273,42 @@ def test_api_adopt_and_stats() -> None:
     body = r.json()
     assert body["total"] >= 1
     assert body["validated"] == 0
+
+
+def test_api_outcome_hydration() -> None:
+    """P1-10: GET outcome 返回双层信号 + 配方名，供刷新后徽标水合。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client = TestClient(app)
+    rid = "rec-outcome-hydration-1"
+    r = client.post(
+        f"/api/formulations/recommend/{rid}/adopt",
+        json={
+            "adopt_signal": "button",
+            "formula_index": 1,
+            "formula_snapshot": {"name": "hydration-f"},
+            "project_id": "proj-outcome-api",
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.get(f"/api/formulations/recommend/{rid}/outcome")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["recommend_id"] == rid
+    assert body["adopted"] is True
+    assert body["adopt_signal"] == "button"
+    assert body["experiment_validated"] is False
+    assert body["formula_name"] == "hydration-f"  # 配方粒度：卡片对号
+
+    # 未采纳的 round：全 False，前端不点亮
+    r = client.get("/api/formulations/recommend/no-such-round-xyz/outcome")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["adopted"] is False
+    assert body["formula_name"] is None
 
 
 def test_recommend_generate_node_registers_round_and_surfaces_id(monkeypatch):

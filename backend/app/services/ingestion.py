@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import hashlib
 import ipaddress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -31,6 +31,8 @@ class IngestOutcome:
     source_id: str | None = None
     source_guide: SourceGuideSchema | None = None
     extraction_status: str = "skipped"
+    # P2: 解析截断等用户可见提示（页数上限、OCR 降级…）。
+    warnings: list[str] = field(default_factory=list)
 
 
 def _parse_text(content: bytes) -> str:
@@ -176,6 +178,24 @@ def _register_guide_products(source_id: str | None, guide: SourceGuideSchema | N
         log_handled_exception(logger, exc, "guide product registration failed")
 
 
+def _maybe_persist_mineru_structured(
+    persist: bool, source_id: str | None, parsed
+) -> None:
+    """P2: MinerU 结构化产物统一落盘（extraction_tables/formulas）。
+
+    上传与 URL 两条入库路径共用 —— 此前只接了上传路径。
+    Fail-open: 失败只记日志，不破坏已成功的入库。
+    """
+    if not persist or not source_id or getattr(parsed, "structured", None) is None:
+        return
+    try:
+        from .mineru_structured import persist_structured
+
+        persist_structured(source_id, parsed.structured)
+    except Exception:  # noqa: BLE001
+        logger.exception("structured persist failed (fail-open)")
+
+
 def ingest_file(
     filename: str,
     content: bytes,
@@ -191,13 +211,15 @@ def ingest_file(
     computed over the extracted text, which is only known after parsing.
     """
     from .parsing import parse_document
+    from .parse_notices import collect as _collect_notices
 
     ext = Path(filename).suffix.lower().lstrip(".")
 
     if ext in _IMAGE_EXTS:
         return _ingest_image(filename, content, persist=persist, origin_url=origin_url)
 
-    parsed = parse_document(content, ext)
+    with _collect_notices() as _parse_warnings:
+        parsed = parse_document(content, ext)
     text = parsed.markdown
 
     if not text or not text.strip():
@@ -217,7 +239,11 @@ def ingest_file(
             snippet=f"未能提取到文本（格式：{ext}）——可能是扫描件或纯图片文档。",
             relevance=0.5,
         )
-        return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
+        return IngestOutcome(
+            evidence=[placeholder],
+            extraction_status="skipped",
+            warnings=list(_parse_warnings),
+        )
 
     outcome = _ingest_parsed_text(
         text,
@@ -230,26 +256,23 @@ def ingest_file(
     # Phase 1: MinerU structured products → extraction_tables/formulas.
     # Fail-open: a structured-persist failure must never break the ingest
     # that already succeeded.
-    if persist and outcome.source_id and getattr(parsed, "structured", None) is not None:
-        try:
-            from .mineru_structured import persist_structured
+    _maybe_persist_mineru_structured(persist, outcome.source_id, parsed)
+    # W2-3/P2: table sidecar persisted here (not inside parse_document) so the
+    # key is the real SourceDocument UUID — the same key load_tables(doc.id)
+    # reads. Fail-open: a sidecar failure must never break the ingest that
+    # succeeded.
+    if persist and outcome.source_id:
+        from .parsing import maybe_persist_table_sidecar
 
-            persist_structured(outcome.source_id, parsed.structured)
-        except Exception:
-            logger.exception("structured persist failed (fail-open)")
-    # W2-3: table sidecar persisted here (not inside parse_document) so the key
-    # is the real SourceDocument UUID — the same key load_tables(doc.id) reads.
-    # Fail-open: a sidecar failure must never break the ingest that succeeded.
-    if persist and outcome.source_id and getattr(parsed, "tables", None):
-        from .parsing import persist_table_sidecar
-
-        persist_table_sidecar(outcome.source_id, parsed.tables)
+        maybe_persist_table_sidecar(outcome.source_id, parsed)
     # Phase 3: opt-in page thumbnails (PDF only). Fail-open inside the hook;
     # zero overhead when page_thumbnail_enabled is False (default).
     if persist and outcome.source_id:
         from .page_thumbnails import maybe_store_page_thumbnails
 
         maybe_store_page_thumbnails(content, ext, outcome.source_id)
+    # P2: 解析截断提示带回给用户。
+    outcome.warnings.extend(_parse_warnings)
     return outcome
 
 
@@ -397,23 +420,74 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     current_url = url
     headers = {"User-Agent": "FormuMind/0.1 (research platform)"}
     with httpx.Client(timeout=20.0, follow_redirects=False) as client:
-        for _hop in range(4):  # initial + up to 3 redirects
-            resp = client.get(current_url, headers=headers)
-            if resp.is_redirect:
+        # 风险3 修正：全程 stream=True。client.get() 会先把整个响应
+        # eager-buffer 进内存，iter_bytes 的上限截断形同虚设 —— 超大文件
+        # 在截断前就已占满内存。重定向 hop 只读 headers 就关连接。
+        resp = None
+        try:
+            for _hop in range(4):  # initial + up to 3 redirects
+                if resp is not None:
+                    resp.close()
+                req = client.build_request("GET", current_url, headers=headers)
+                resp = client.send(req, stream=True)
+                if not resp.is_redirect:
+                    break
                 location = resp.headers.get("location")
                 if not location:
                     break
                 current_url = str(httpx.URL(current_url).join(location))
                 if not _is_safe_url(current_url):
                     raise ValueError(f"Redirect target not allowed: {current_url}")
-                continue
-            break
-        resp.raise_for_status()
-        content_type = (resp.headers.get("content-type") or "").lower()
-        body = resp.content
+            assert resp is not None
+            resp.raise_for_status()
+            content_type = (resp.headers.get("content-type") or "").lower()
+            # P2: URL 下载上限 —— 真正的流式读取，超限即停。
+            max_bytes = int(get_settings().ingest_max_url_bytes or 0)
+            chunks: list[bytes] = []
+            total = 0
+            truncated = False
+            for chunk in resp.iter_bytes(65536):
+                if max_bytes and total + len(chunk) > max_bytes:
+                    truncated = True
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            body = b"".join(chunks)
+        finally:
+            if resp is not None:
+                resp.close()
+        if truncated:
+            logger.warning(
+                "ingest_url: %s exceeds ingest_max_url_bytes (%d), skipped",
+                current_url, max_bytes,
+            )
+            return IngestOutcome(
+                evidence=[
+                    Evidence(
+                        source="web",
+                        identifier=url,
+                        title=url,
+                        snippet=f"下载超限（>{max_bytes // 1024 // 1024} MiB），已跳过入库",
+                        relevance=0.0,
+                    )
+                ],
+                extraction_status="skipped",
+            )
 
+    # P1-3: PDF 必须走 parse_document —— 裸字节 latin-1 解码会把二进制
+    # 乱码写入 KB 污染检索。content-type 或魔数任一命中即判 PDF。
+    is_pdf = "pdf" in content_type or body.lstrip()[:4] == b"%PDF"
+    parsed = None
+    _url_parse_warnings: list = []
     if "html" in content_type or body.lstrip()[:15].lower().startswith(b"<!doctype") or b"<html" in body[:500].lower():
         text = _html_to_text(body.decode("utf-8", errors="replace"))
+    elif is_pdf:
+        from .parsing import parse_document
+        from .parse_notices import collect as _collect_notices
+
+        with _collect_notices() as _url_parse_warnings:
+            parsed = parse_document(body, "pdf")
+        text = parsed.markdown or ""
     else:
         text = _parse_text(body)
 
@@ -449,6 +523,15 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
         from .page_thumbnails import maybe_store_page_thumbnails
 
         maybe_store_page_thumbnails(body, "pdf", outcome.source_id)
+    # P1-3/P2: URL 抓到的 PDF 表格同样落 sidecar（与 ingest_file 同键：UUID）。
+    if persist and outcome.source_id:
+        from .parsing import maybe_persist_table_sidecar
+
+        maybe_persist_table_sidecar(outcome.source_id, parsed)
+    # P2: MinerU 结构化产物 —— URL 路径此前漏接。
+    _maybe_persist_mineru_structured(persist, outcome.source_id, parsed)
+    # P2: 解析截断提示带回给用户。
+    outcome.warnings.extend(_url_parse_warnings)
     return outcome
 
 
@@ -480,6 +563,27 @@ def ingest_text(text: str, title: str = "Pasted text", *, persist: bool = True) 
     return outcome
 
 
+def _record_batch_failure(name: str, origin_url: str | None, error: str) -> None:
+    """P2: 批量入库单文件失败可观测 —— 记入 record_ingest_failure。
+
+    上传文件无 origin URL 时用 ``upload://文件名`` 合成 key，保证失败
+    可查询、可复活。Fail-open：记录本身永不破坏批量流程。
+    """
+    try:
+        from ..db.source_store import get_source_store
+
+        get_source_store().record_ingest_failure(
+            origin_url=origin_url or f"upload://{name}",
+            filename=name,
+            title=name,
+            source_kind="local",
+            project_id=None,
+            error=error,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("record batch ingest failure failed (fail-open)", exc_info=True)
+
+
 def ingest_files_batch(
     files: list[tuple[str, bytes]],
     *,
@@ -489,19 +593,22 @@ def ingest_files_batch(
     from .parsing import ParserUnavailable
 
     all_evidence: list[Evidence] = []
+    all_warnings: list[str] = []
     last_outcome: IngestOutcome | None = None
     for name, content in files:
+        origin = (origin_url_by_name or {}).get(name)
         try:
             outcome = ingest_file(
                 name,
                 content,
                 persist=persist,
-                origin_url=(origin_url_by_name or {}).get(name),
+                origin_url=origin,
             )
         except ParserUnavailable as exc:
             # One unsupported file must not discard the other nineteen. Name
             # the file and the reason so it is obvious which one to fix.
             logger.warning("batch ingest: %s unparseable (%s)", name, exc.hint)
+            _record_batch_failure(name, origin, f"ParserUnavailable: {exc.hint}")
             all_evidence.append(
                 Evidence(
                     source="local",
@@ -512,11 +619,28 @@ def ingest_files_batch(
                 )
             )
             continue
+        except Exception as exc:  # noqa: BLE001
+            # P2: 单文件一般异常不杀死整批 —— 记录失败行后继续下一个。
+            logger.exception("batch ingest: %s failed", name)
+            _record_batch_failure(name, origin, f"{type(exc).__name__}: {exc}")
+            all_evidence.append(
+                Evidence(
+                    source="local",
+                    identifier=name,
+                    title=name,
+                    snippet=f"入库失败：{type(exc).__name__}",
+                    relevance=0.5,
+                )
+            )
+            continue
         all_evidence.extend(outcome.evidence)
+        for w in outcome.warnings:
+            all_warnings.append(f"{name}：{w}")
         last_outcome = outcome
     return IngestOutcome(
         evidence=all_evidence,
         source_id=last_outcome.source_id if last_outcome else None,
         source_guide=last_outcome.source_guide if last_outcome else None,
         extraction_status=last_outcome.extraction_status if last_outcome else "skipped",
+        warnings=all_warnings,
     )

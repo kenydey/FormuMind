@@ -71,12 +71,14 @@ def test_structured_compresses_evidence_when_enabled(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.query_aware_compression.compress_evidence", fake_compress
     )
-    out, err = _run(monkeypatch, sources, _Settings())
+    out, err, eff = _run(monkeypatch, sources, _Settings())
     assert err is None and out is not None
     assert seen["n_in"] == 12
     assert seen["budget"] == 3000
     # identifier 保留 → evidence_ref 校验通过
     assert out.formulation_hints[0].evidence_ref == "kb:s0#c0"
+    # P1-11: 返回的是压缩后列表（与 LLM 所见同序），调用方取 citations 用它。
+    assert len(eff) == 3 and eff[0].identifier == "kb:s0#c0"
 
 
 def test_structured_passthrough_when_disabled(monkeypatch) -> None:
@@ -94,7 +96,7 @@ def test_structured_passthrough_when_disabled(monkeypatch) -> None:
     class Off(_Settings):
         query_compress_enabled = False
 
-    out, err = _run(monkeypatch, sources, Off())
+    out, err, eff = _run(monkeypatch, sources, Off())
     assert err is None and out is not None
     assert called["n"] == 0
 
@@ -109,7 +111,7 @@ def test_structured_compression_fail_open(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.query_aware_compression.compress_evidence", boom
     )
-    out, err = _run(monkeypatch, sources, _Settings())
+    out, err, eff = _run(monkeypatch, sources, _Settings())
     assert err is None and out is not None
     assert out.summary == "摘要"
 

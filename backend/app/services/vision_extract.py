@@ -459,7 +459,10 @@ def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
         else:
             shared_dir = "/app/data/_ocsr_tmp"
         os.makedirs(shared_dir, exist_ok=True)
-        path = os.path.join(shared_dir, f"ocsr_{os.getpid()}.png")
+        # P1-13: 唯一文件名 —— 同进程并发 OCSR 此前按 PID 命名互相覆盖。
+        import uuid
+
+        path = os.path.join(shared_dir, f"ocsr_{os.getpid()}_{uuid.uuid4().hex}.png")
         with open(path, "wb") as f:
             f.write(content)
         try:

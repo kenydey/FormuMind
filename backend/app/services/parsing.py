@@ -126,6 +126,22 @@ def persist_table_sidecar(source_id: str, tables: list) -> None:
         logger.exception("table sidecar persist failed (fail-open)")
 
 
+def maybe_persist_table_sidecar(source_id: str | None, parsed) -> None:
+    """P2: 各入库路径统一的表格 sidecar 落盘入口（fail-open）。
+
+    调用方在 SourceDocument 行落盘后、持有 ``parse_document`` 的
+    ``parsed.tables`` 时调用。fulltext/专利路径在 persist 时手头没有
+    PDF 字节（fetch 阶段已丢弃），暂不做重解析 —— 如需覆盖，需把
+    fetch 的返回签名改成 (text, tables) 再一路透传。
+    """
+    if not source_id or parsed is None or not getattr(parsed, "tables", None):
+        return
+    try:
+        persist_table_sidecar(source_id, parsed.tables)
+    except Exception:  # noqa: BLE001 - fail-open
+        logger.exception("table sidecar persist failed (fail-open)")
+
+
 # ── individual parsers (return markdown/text or None) ────────────────────────
 
 _DOCLING_CONVERTERS: dict[str, object] = {}

@@ -65,23 +65,55 @@ def _l1_exact(
     session,
     settings,
 ) -> list[dict]:
-    """Drop rows whose (text, provenance) already exists under another source."""
+    """Drop rows whose (text, provenance) already exists under another source.
+
+    P2: 走 ``dedup_key`` 索引 —— 先算出来入库行的 key，再
+    ``WHERE dedup_key IN (...)`` 查（0042 迁移加列+索引+回填），
+    不再全表扫描。
+    """
     if not rows:
         return rows
     try:
         from ..db.models import DocumentChunk
 
-        # Cross-source dups: hash the live table (excluding this source, whose
-        # old rows are still present — replace_for_source deletes them after).
-        existing_keys: set[str] = set()
-        for text, heading_path, page_no in (
-            session.query(
-                DocumentChunk.text, DocumentChunk.heading_path, DocumentChunk.page_no
+        wanted = {
+            chunk_dedup_key(
+                row.get("text"), row.get("heading_path"), row.get("page_no")
             )
-            .filter(DocumentChunk.source_id != source_id)
-            .yield_per(1000)
-        ):
-            existing_keys.add(chunk_dedup_key(text, heading_path, page_no))
+            for row in rows
+        }
+        wanted.discard(None)
+        existing_keys: set[str] = set()
+        if wanted:
+            # IN 切片：SQLite 变量上限 999，入库行数通常远小于此，仍做保护。
+            keys = sorted(wanted)
+            for i in range(0, len(keys), 500):
+                batch = keys[i : i + 500]
+                for (k,) in (
+                    session.query(DocumentChunk.dedup_key)
+                    .filter(
+                        DocumentChunk.dedup_key.in_(batch),
+                        DocumentChunk.source_id != source_id,
+                    )
+                    .all()
+                ):
+                    if k:
+                        existing_keys.add(k)
+            # 兜底：dedup_key 为 NULL 的历史行（0042 回填失败/直接插库），
+            # 按旧方式在 Python 侧比对 —— 正常库中这类行接近于零。
+            for text, heading_path, page_no in (
+                session.query(
+                    DocumentChunk.text,
+                    DocumentChunk.heading_path,
+                    DocumentChunk.page_no,
+                )
+                .filter(
+                    DocumentChunk.source_id != source_id,
+                    DocumentChunk.dedup_key.is_(None),
+                )
+                .yield_per(1000)
+            ):
+                existing_keys.add(chunk_dedup_key(text, heading_path, page_no))
 
         out: list[dict] = []
         dropped = 0

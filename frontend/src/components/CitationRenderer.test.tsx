@@ -243,4 +243,49 @@ describe("CitationRenderer page badges (W3-14)", () => {
     expect(screen.queryByTestId("citation-page-badge-1")).toBeNull();
     expect(screen.queryByTestId("citation-page-jump-1")).toBeNull();
   });
+
+  // P2: 围栏/代码内的 [^n] 不做占位 —— ~~~、双反引号、未闭合围栏、缩进代码块。
+  it("does not mask [^n] inside ~~~ fences", () => {
+    const answer = "Claim.[^1]\n~~~\ncode [^2]\n~~~\nMore.[^1]";
+    render(
+      <CitationRenderer
+        answer={answer}
+        footnotes=""
+        anchors={sampleAnchors}
+      />
+    );
+    // 只有两个 [^1] 被渲染成上标链接，[^2] 保持代码原文。
+    const supLinks = screen.getAllByText(/\[\^1\]/);
+    expect(supLinks).toHaveLength(2);
+    expect(screen.queryByText(/\[\^2\]/)?.closest("sup")).toBeNull();
+  });
+
+  it("does not mask [^n] inside double-backtick inline code", () => {
+    const answer = "Use ``[^1]`` here.[^2]";
+    render(
+      <CitationRenderer
+        answer={answer}
+        footnotes=""
+        anchors={sampleAnchors}
+      />
+    );
+    const supLinks = screen.getAllByText(/\[\^2\]/);
+    expect(supLinks).toHaveLength(1);
+    expect(supLinks[0].closest("sup")).toBeTruthy();
+  });
+
+  it("treats unclosed fence as code (streaming truncation)", () => {
+    const answer = "Claim.[^1]\n```python\ncode [^2] still open";
+    render(
+      <CitationRenderer
+        answer={answer}
+        footnotes=""
+        anchors={sampleAnchors}
+      />
+    );
+    const supLinks = screen.getAllByText(/\[\^1\]/);
+    expect(supLinks).toHaveLength(1);
+    // PUA 占位符不应泄漏到渲染输出。
+    expect(document.body.textContent).not.toMatch(/\uE000/);
+  });
 });

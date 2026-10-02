@@ -42,19 +42,64 @@ function maskCitationMarkers(answer: string): { text: string; ids: string[] } {
       ids.push(id);
       return `${PH_OPEN}${ids.length - 1}${PH_CLOSE}`;
     });
-  // 围栏代码块与行内代码保持原文 —— 仅对代码之外的文本做占位符替换。
-  const text = answer
-    .split(/(```[\s\S]*?```)/g)
-    .map((chunk, i) =>
-      i % 2 === 1
-        ? chunk
-        : chunk
-            .split(/(`[^`\n]*`)/g)
-            .map((c, j) => (j % 2 === 1 ? c : maskOne(c)))
-            .join(""),
-    )
-    .join("");
-  return { text, ids };
+  // P2: 围栏感知的逐行切分 —— 处理 ``` 与 ~~~（任意长度、带 info string、
+  // 允许未闭合：流式截断时剩余部分视为代码）、缩进代码块、1+ 反引号行内代码。
+  // 旧的单正则 split 只认闭合的 ```，其余情况都会把代码内的 [^n] 误占位。
+  const FENCE_OPEN_RE = /^(\s*)(`{3,}|~{3,})(.*)$/;
+  const FENCE_CLOSE_RE = /^(\s*)(`{3,}|~{3,})\s*$/;
+  const lines = answer.split("\n");
+  const out: string[] = [];
+  let fenceChar: string | null = null;
+  let fenceLen = 0;
+  let prevBlank = true;
+  let prevIndentCode = false;
+  for (const line of lines) {
+    if (fenceChar) {
+      out.push(line);
+      const m = FENCE_CLOSE_RE.exec(line);
+      if (m && m[2][0] === fenceChar && m[2].length >= fenceLen) fenceChar = null;
+      prevBlank = false;
+      prevIndentCode = false;
+      continue;
+    }
+    const open = FENCE_OPEN_RE.exec(line);
+    if (open) {
+      fenceChar = open[2][0];
+      fenceLen = open[2].length;
+      out.push(line);
+      prevBlank = false;
+      prevIndentCode = false;
+      continue;
+    }
+    // 缩进代码块：行首 4 空格/Tab，且前一行为空行或同为缩进代码。
+    const indented = /^(?:    |\t)/.test(line);
+    if (indented && (prevBlank || prevIndentCode) && line.trim()) {
+      out.push(line);
+      prevBlank = false;
+      prevIndentCode = true;
+      continue;
+    }
+    prevIndentCode = false;
+    prevBlank = line.trim() === "";
+    out.push(maskInlineCode(line, maskOne));
+  }
+  return { text: out.join("\n"), ids };
+}
+
+/** 行内代码（1+ 反引号配对，如 ``code``）保持原文，其余部分做占位替换。 */
+function maskInlineCode(line: string, maskOne: (s: string) => string): string {
+  const parts: string[] = [];
+  const re = /(`+)[^`\n]*?\1/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((m = re.exec(line))) {
+    parts.push(maskOne(line.slice(last, m.index)));
+    parts.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  parts.push(maskOne(line.slice(last)));
+  return parts.join("");
 }
 
 /**

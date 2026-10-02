@@ -1,5 +1,6 @@
 // API methods object (P2: kept cohesive; domain facades in ./domains).
 import {
+  ApiError,
   apiAuthHeaders,
   del,
   get,
@@ -187,6 +188,17 @@ export const apiMethods = {
         project_id: body.project_id ?? null,
       }
     ),
+  // P1-10: 双层信号水合 —— 刷新后从后端重读 adopted/experiment_validated。
+  getRecommendationOutcome: (recommendId: string) =>
+    get<{
+      recommend_id: string;
+      adopted: boolean;
+      adopt_signal: string | null;
+      experiment_validated: boolean;
+      formula_name: string | null;
+    }>(
+      `/api/formulations/recommend/${encodeURIComponent(recommendId)}/outcome`
+    ),
   chemicalLookup: (q: string) =>
     get<{
       query: string;
@@ -341,7 +353,19 @@ export const apiMethods = {
     post<{ plan_id: string; status: string }>(
       `/api/doe/${encodeURIComponent(planId)}/${action}`,
       action === "abort" ? { reason: reason ?? "" } : {}
-    ).catch(() => null),
+    ).catch((e) => {
+      // P2: fail-open，但 422（非法状态迁移）必须可见 —— 记日志并抛出，
+      // 调用方负责展示；其余错误（网络/500）仍吞掉保流程。
+      // 风险7 修正：用 ApiError.status 结构化判断，不再正则扫 message
+      //（message 里出现 "422" 字样会误判，如 "plan 422xxx"）。
+      if (e instanceof ApiError && e.status === 422) {
+        const msg = e.message;
+        // eslint-disable-next-line no-console
+        console.error(`[doePlanTransition] ${action} ${planId} → 422:`, msg);
+        throw e;
+      }
+      return null;
+    }),
   // ── Inverse design ──
   startInverseDesign: (
     req: Requirement,

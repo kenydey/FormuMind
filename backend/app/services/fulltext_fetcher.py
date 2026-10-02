@@ -731,9 +731,19 @@ def _persist_fulltext(
                     filename=ev.identifier[:500],
                     title=ev.title[:500],
                 )
-                from .kb_index import index_source
+                from .kb_index import index_source, kb_enabled
 
-                index_source(failed_row.id, text)
+                # P1-8: index_source fail_soft 返回 0 不是成功 —— 必须重新
+                # 标记 failed，否则永久僵尸行（已标 indexed、零 chunk）。
+                if not index_source(failed_row.id, text) and kb_enabled():
+                    try:
+                        store.update_fields(
+                            failed_row.id,
+                            ingest_status="failed",
+                            ingest_error="index_source produced 0 chunks (revive)",
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("mark revive failed row failed (fail-open)")
                 return failed_row.id
             source_id = store.create(
                 filename=ev.identifier[:500],
@@ -747,15 +757,36 @@ def _persist_fulltext(
                 acquisition=acquisition,
                 ingest_status="indexed",  # P1-1
             )
-            from .kb_index import index_source
+            from .kb_index import index_source, kb_enabled
 
-            index_source(source_id, text)
+            # P1-8: 同上 —— 0 chunk 必须降级为 failed 供下次复活。
+            if not index_source(source_id, text) and kb_enabled():
+                try:
+                    store.update_fields(
+                        source_id,
+                        ingest_status="failed",
+                        ingest_error="index_source produced 0 chunks",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("mark indexed-failed row failed (fail-open)")
             return source_id
         except Exception as exc:
             if _is_db_locked(exc) and attempt < 5:
                 time.sleep(delay)
                 delay *= 2
                 continue
+            # P2: fulltext 落盘失败同样记失败行（供复活/可观测），不只记日志。
+            try:
+                get_source_store().record_ingest_failure(
+                    origin_url=origin or f"fulltext://{ev.identifier[:200]}",
+                    filename=ev.identifier[:500],
+                    title=ev.title[:500],
+                    source_kind=persist_kind,
+                    project_id=(project_id or None),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("record fulltext ingest failure failed (fail-open)")
             return degrade_return(logger, exc, "fulltext persistence failed", None)
 
 

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import { api, type Formulation } from "../api";
@@ -30,6 +30,18 @@ import { cardMeasuredChip } from "./kgMeasuredObservability";
 import ParetoFrontPlot from "./charts/ParetoFrontPlot";
 import ParallelCoordinates from "./charts/ParallelCoordinates";
 
+// P1-2: adopt 快照附带 material_map（lever 名 -> {水平: 目标成分名}），
+// 后端 U-4 强成功层用它做 U-5 重命名后的别名归一。
+function snapshotMaterialMapOf(
+  levers: { name: string; material_map?: Record<string, string> | null }[] | undefined
+): Record<string, Record<string, string>> | undefined {
+  const m: Record<string, Record<string, string>> = {};
+  for (const l of levers ?? []) {
+    if (l.material_map && Object.keys(l.material_map).length) m[l.name] = l.material_map;
+  }
+  return Object.keys(m).length ? m : undefined;
+}
+
 function ExportMenu({ form }: { form: Formulation }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -37,6 +49,9 @@ function ExportMenu({ form }: { form: Formulation }) {
   const activeProjectId = useStore((s) => s.activeProjectId);
   // U-4: 复制即弱信号（copied），fail-open。
   const recommendId = useStore((s) => s.lastRecommendId);
+  const requirement = useStore((s) => s.requirement);
+
+  const snapshotMaterialMap = snapshotMaterialMapOf(requirement?.levers);
 
   const onCopy = async () => {
     await copyFormulaJson(form);
@@ -51,6 +66,7 @@ function ExportMenu({ form }: { form: Formulation }) {
             name: form.name,
             ingredients: form.ingredients,
             score: form.score ?? null,
+            material_map: snapshotMaterialMap,
           },
           project_id: activeProjectId ?? undefined,
         })
@@ -167,11 +183,31 @@ function FormulaCard({
   // did not come from POST /api/formulations/recommend).
   const recommendId = useStore((s) => s.lastRecommendId);
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const requirement = useStore((s) => s.requirement);
   const [adoptBusy, setAdoptBusy] = useState(false);
   const [adopted, setAdopted] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
   // U-4: 强成功层 —— 该配方是否已有 lab 测量回灌验证。
   const [experimentValidated, setExperimentValidated] = useState(false);
+  // P1-10: 徽标水合 —— 刷新后从后端重读双层信号，不再只靠局部 state。
+  // 采纳是配方粒度：只有点亮快照名对得上的卡片。
+  useEffect(() => {
+    if (!recommendId) return;
+    let cancelled = false;
+    api
+      .getRecommendationOutcome(recommendId)
+      .then((res) => {
+        if (cancelled || !res) return;
+        const mine = !res.formula_name || res.formula_name === form.name;
+        if (res.adopted && mine) setAdopted(true);
+        if (res.experiment_validated && mine) setExperimentValidated(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recommendId]);
 
   async function adoptFormula() {
     if (!recommendId || adoptBusy || adopted) return;
@@ -185,6 +221,7 @@ function FormulaCard({
           name: form.name,
           ingredients: form.ingredients,
           score: form.score ?? null,
+          material_map: snapshotMaterialMapOf(requirement?.levers),
         },
         project_id: activeProjectId ?? undefined,
       });

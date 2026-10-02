@@ -346,8 +346,19 @@ def _llm_seed_genomes(
     from . import llm as llm_service
 
     out: list[FormulationGenome] = []
+    # P1-6: 播种前先做一次 grounding 检索 —— 空 evidence 会让 LLM 凭参数
+    # 知识自由发挥，破坏 grounding 链。fail-open：检索失败仍允许播种
+    # （退化为旧行为），绝不让逆向设计整轮失败。
+    evidence: list = []
     try:
-        response = llm_service.recommend_formulations(req, objectives, [], n=n)
+        from ..pipeline.research_graph import resolve_grounded_evidence
+
+        grounded = resolve_grounded_evidence(req, req.headline())
+        evidence = list(grounded.evidence or grounded.grounded_evidence or [])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("inverse design: seed grounding retrieval failed (%s)", exc)
+    try:
+        response = llm_service.recommend_formulations(req, objectives, evidence, n=n)
     except Exception as exc:
         logger.debug("inverse design: LLM seeding failed ({}); continuing", exc)
         return out

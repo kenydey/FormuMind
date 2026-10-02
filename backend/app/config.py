@@ -885,6 +885,11 @@ class Settings(BaseSettings):
     kb_recommend_top_k: int = 4
     # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.3）。
     kb_hybrid_alpha: float = 0.3
+    # P2 A/B: hybrid 融合前化学实体加成（CAS/分子式/牌号/SMILES）。
+    # legacy search_chunks 的加性 0.2/0.3 是按 cosine 0-1 尺度调的，直接加到
+    # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做加性，
+    # 再进融合。默认关，A/B 验证后再决定。
+    kb_hybrid_entity_boost: bool = False
     # 推荐/研究 KB 融合走 hybrid_search_scored（探针同栈）；关则退回 search_chunks。
     kb_recommend_use_hybrid: bool = True
     # 有 project_id 时是否并入全局资料（对齐探针 project_global）。
@@ -961,6 +966,8 @@ class Settings(BaseSettings):
     api_auth_enabled: bool | None = None
     api_token: str | None = None
     ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
+    # P2: URL 下载上限 —— 无上限时一个超大 PDF/页面可吃掉 worker 内存。
+    ingest_max_url_bytes: int = 20 * 1024 * 1024  # 20 MiB per URL fetch
     # Server-side pip install via POST /api/dependencies/install. Unset → on in
     # development/test, **off** in production (opposite of api_auth_enabled).
     deps_install_enabled: bool | None = None

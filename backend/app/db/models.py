@@ -311,6 +311,10 @@ class DocumentChunk(Base):
     # zh chunks use BAAI/bge-small-zh-v1.5, en chunks keep all-MiniLM-L6-v2 —
     # embedding_model column already distinguishes them (comparable_embedding).
     lang: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    # P2 (0042): L1 精确去重的索引键 —— sha256(text+heading_path+page_no)。
+    # 写入时由 ChunkStore.replace_for_source_in 统一计算；可空以兼容
+    # 回填失败的极端行（_l1_exact 对其回退为不去重）。
+    dedup_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # Extracted entities: {"chem": [{type, value, ...}], "products": [...]}.
     meta: Mapped[dict | None] = mapped_column(
         JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"),

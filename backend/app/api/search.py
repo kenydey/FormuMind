@@ -1,6 +1,7 @@
 """POST /api/search — Multi-source evidence retrieval (single-shot).
-POST /api/search/stream — Incremental search; returns a task handle the client
-     polls so it can render results while the search keeps going.
+POST /api/search/stream — Incremental search via SSE (preferred); the client
+     falls back to polling the task handle when the SSE stream cannot be
+     established. P2: 文档此前只写轮询，已按实际（SSE 优先、轮询 fallback）修正。
 GET  /api/search/status — Per-source availability check (no network requests).
 """
 from fastapi import APIRouter, HTTPException

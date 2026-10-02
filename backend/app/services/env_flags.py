@@ -192,6 +192,10 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("kb_recommend_rerank_enabled", "推荐融合 LLM 精排",
             "仅对推荐/研究融合后的证据池做 LLM 精排；默认关，不改动全局 search_rerank_enabled。",
             "retrieval", "需有效 LLM key"),
+    EnvFlag("kb_hybrid_entity_boost", "Hybrid 化学实体加成（A/B）",
+            "融合前对 BM25/cosine 归一化分量做加性实体加成（CAS/分子式/牌号/SMILES，"
+            "与 legacy 同量级）；不直接加到 RRF 融合分上。默认关，A/B 验证后定。",
+            "retrieval"),
     EnvFlag("fulltext_enrich", "检索全文获取",
             "把排名靠前的专利/OA 文献/网页命中升级为全文分块并持久化入知识库。",
             "kb", "需网络；每次深度研究会下载最多 8 篇全文"),
@@ -554,6 +558,12 @@ ENV_VARS: tuple[dict, ...] = (
         "description": "问答/结构化回答的 query-aware 证据压缩 token 预算；"
         "默认 3000，与主路径 12000 字符截断线对齐。",
         "category": "retrieval",
+    },
+    {
+        "attr": "ingest_max_url_bytes",
+        "label": "URL 下载上限",
+        "description": "ingest_url 单次下载字节上限；超限直接跳过入库（防超大文件吃内存）。",
+        "category": "kb",
     },
 )
 

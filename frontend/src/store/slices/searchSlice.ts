@@ -443,6 +443,7 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
       set((draft) => {
         draft.searchBusy = true;
         draft.error = null;
+        draft.uploadWarnings = [];
       });
       try {
         const res =
@@ -450,6 +451,11 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
             ? await api.ingest(files[0])
             : await api.ingestBatch(files);
         get().addSources(res.evidence);
+        // P2: 解析截断等提示 —— 上传完成后面板可见，不再只躺在日志里。
+        const warnings = (res as { warnings?: string[] }).warnings ?? [];
+        set((draft) => {
+          draft.uploadWarnings = warnings;
+        });
       } catch (e) {
         set((draft) => {
           draft.error = `文件上传失败：${e instanceof Error ? e.message : String(e)}`;

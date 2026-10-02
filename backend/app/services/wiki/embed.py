@@ -141,7 +141,9 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
                     origin_url=origin[:1024],
                     full_text=blob,
                     raw_text_chars=len(blob),
-                    extraction_status="skipped",
+                    # P2: wiki 页是正常入库的影子文档，不是"跳过" ——
+                    # 此前写 skipped 导致来源列表里永远显示未解析。
+                    extraction_status="fulltext",
                     project_id=row_project_id,
                 )
             )
@@ -153,6 +155,9 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
             doc.origin_url = origin[:1024]
             doc.full_text = blob
             doc.raw_text_chars = len(blob)
+            # P2: 存量 wiki 行的 skipped 一并纠正。
+            if (doc.extraction_status or "") == "skipped":
+                doc.extraction_status = "fulltext"
             if row_project_id and not doc.project_id:
                 doc.project_id = row_project_id
 

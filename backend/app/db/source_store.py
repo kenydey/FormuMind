@@ -148,10 +148,18 @@ class SourceStore:
             return session.get(SourceDocument, source_id)
 
     def find_by_hash(self, content_hash: str) -> SourceDocument | None:
+        # P1-8 修正：忽略 ingest_status='failed' 的行。失败行保留真实
+        # content_hash（供复活路径按 hash 校验），但 hash 命中必须只返回
+        # 可用行，否则下一次 _persist_fulltext 直接命中零-chunk 失败行，
+        # 形成"已索引"僵尸。失败行走 find_failed_by_origin 复活路径。
         with self._session_factory() as session:
             return (
                 session.query(SourceDocument)
                 .filter(SourceDocument.content_hash == content_hash)
+                .filter(
+                    (SourceDocument.ingest_status.is_(None))
+                    | (SourceDocument.ingest_status != "failed")
+                )
                 .order_by(SourceDocument.created_at.desc())
                 .first()
             )

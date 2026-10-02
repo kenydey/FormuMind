@@ -645,14 +645,25 @@ def reindex_all(*, embed: bool = True) -> dict:
     from ..db.source_store import get_source_store
 
     store = get_source_store()
+    chunk_store = get_chunk_store()
     sources = 0
     chunks = 0
     with store._session_factory() as session:
         rows = session.query(SourceDocument.id, SourceDocument.full_text).all()
     for source_id, full_text in rows:
-        if not (full_text or "").strip():
+        text = (full_text or "").strip()
+        if not text:
+            # P1-5: 默认 prune_source_fulltext=True 会清空 full_text ——
+            # 从现存 chunk 行按 ord 拼回原文，而非静默跳过（否则默认
+            # 配置下 reindex 恒返回 0）。
+            text = "\n\n".join(
+                (c.text or "").strip()
+                for c in chunk_store.get_by_source(source_id)
+                if (c.text or "").strip()
+            )
+        if not text:
             continue
-        n = index_source(source_id, full_text, embed=embed)
+        n = index_source(source_id, text, embed=embed)
         if n:
             sources += 1
             chunks += n
@@ -808,11 +819,14 @@ def search_chunks(
     project_id: str | None = None,
     include_global: bool = False,
     langs: list[str] | None = None,
+    keyword_only: bool = False,
 ) -> list[Evidence]:
     """Retrieve the top-k KB chunks for a query (chemistry-aware hybrid).
 
     Base score: cosine over stored embeddings when both sides can embed,
-    token-overlap otherwise.  On top of that, chunks sharing chemical
+    token-overlap otherwise. P2: ``keyword_only=True`` forces pure
+    token-overlap (probe "keyword" mode) even when embeddings exist.
+    On top of that, chunks sharing chemical
     entities with the question (CAS / formula / 牌号 / structure similarity
     via Tanimoto) get an additive boost, and trade names in the question are
     expanded with their registry-linked generic names.  Empty list when
@@ -868,7 +882,7 @@ def search_chunks(
         ]
         # 每组模型编码一次查询(双语: zh→bge+指令, en→MiniLM)。
         vec_by_model: dict[str, list[float]] = {}
-        if embedded:
+        if embedded and not keyword_only:
             from .rag import bge_query_prefix, embed_model_name
 
             if langs:
@@ -933,6 +947,19 @@ def search_chunks_hybrid(
 
     Uses ``hybrid_search_scored`` with shared ``kb_hybrid_alpha`` when ``alpha``
     is omitted. Safe empty list when KB is off or hybrid fails.
+
+    P2 语义分叉说明：本路径**不**套用 legacy ``search_chunks`` 的
+    ``_entity_boost``（CAS/分子式/牌号加成）。原因：hybrid 融合分是 RRF
+    尺度（~0.02 量级），legacy 加成是按 cosine 0-1 尺度调的 0.2/0.3，
+    直接相加会让加成项主导排序。如需化学实体加成，应在 RRF 融合前对
+    BM25/cosine 分量做，而非融合后相加 —— ``kb_hybrid_entity_boost``
+    开关已实现该语义（融合前加性，默认关）。
+
+    A/B（2026-10-02，见 scripts/hybrid_entity_boost_ab_report.md）：
+    inconclusive → 保持关闭。53 道 golden 题 0 题含实体；回填 1163 chunk
+    chem 元数据后，实体题 A/B 仍 Δ=0 —— 含实体的 chunk 全是 wiki chunk，
+    被检索质量门按设计排除；非 wiki 语料是合成文本无实体。实现经代码验证
+    正确（108 chunk 确实 +0.3），待真实实体语料入库后重测。
 
     ``children=True``: Phase 2 retrieval_by_children — score sentence-level
     children at query time, present the parent block (see
@@ -1074,7 +1101,7 @@ def retrieve_evidence(
     k: int = 6,
     *,
     project_id: str | None = None,
-    include_global: bool = False,
+    include_global: bool = True,
     mode: str = "hybrid",
     langs: list[str] | None = None,
     alpha: float | None = None,

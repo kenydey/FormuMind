@@ -35,6 +35,8 @@ class IngestResponse(BaseModel):
     source_id: str | None = None
     source_guide: SourceGuideSchema | None = None
     extraction_status: str = "skipped"
+    # P2: 解析截断等用户可见提示。
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SourceDocumentResponse(BaseModel):
@@ -96,6 +98,7 @@ def _to_ingest_response(filename: str, outcome) -> IngestResponse:
         source_id=outcome.source_id,
         source_guide=outcome.source_guide,
         extraction_status=outcome.extraction_status,
+        warnings=list(getattr(outcome, "warnings", None) or []),
     )
 
 

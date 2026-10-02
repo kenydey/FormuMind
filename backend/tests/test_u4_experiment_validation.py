@@ -119,3 +119,52 @@ def test_outcome_stats_validated_count(session) -> None:
     assert stats["adopted"] == 2
     assert stats["validated"] == 1
     assert stats["by_signal"]["copied"] == 1
+
+
+def test_validation_recall_metric_subset_factors(session) -> None:
+    """P1-2: factors 是快照成分的子集时召回式指标能命中。
+
+    真实数据：F⊆S，Jaccard=|F|/|S|≈0.67 系统性够不上 0.8；
+    召回式 |F∩S|/|F|=1.0 命中。
+    """
+    recommend_outcome_store.record_adopt(
+        session,
+        recommend_id="r-sub",
+        project_id="p1",
+        adopt_signal="button",
+        formula_snapshot={
+            "name": "配方B",
+            "ingredients": [{"name": n} for n in
+                            ["树脂A", "固化剂B", "溶剂C", "助剂D", "颜料E", "流平剂F"]],
+        },
+    )
+    rid = recommend_outcome_store.try_mark_experiment_validated(
+        session,
+        project_id="p1",
+        factors={"树脂A": 12.0, "固化剂B": 5.0, "溶剂C": 60.0, "助剂D": 1.0},
+        experiment_id=11,
+    )
+    assert rid == "r-sub"
+
+
+def test_validation_material_map_alias(session) -> None:
+    """P1-2: U-5 重命名后的成分名经 material_map 反向归一后命中。"""
+    recommend_outcome_store.record_adopt(
+        session,
+        recommend_id="r-alias",
+        project_id="p1",
+        adopt_signal="button",
+        formula_snapshot={
+            "name": "配方C",
+            # 快照里是替换后的目标名，factors 里是 lever 原名。
+            "ingredients": [{"name": "聚氨酯树脂X"}, {"name": "固化剂B"}],
+            "material_map": {"树脂A": {"L1": "聚氨酯树脂X"}},
+        },
+    )
+    rid = recommend_outcome_store.try_mark_experiment_validated(
+        session,
+        project_id="p1",
+        factors={"树脂A": 12.0, "固化剂B": 5.0},
+        experiment_id=12,
+    )
+    assert rid == "r-alias"

@@ -2,6 +2,8 @@
 import type { AsyncTaskAccepted, Evidence } from "./types";
 
 export class ApiError extends Error {
+  /** HTTP status code (e.g. 422) — P2: 调用方做结构化状态判断，不再正则扫 message。 */
+  status?: number;
   /** Raw FastAPI `detail` when it was an object (e.g. message + candidates). */
   detail?: unknown;
   /** Slot / suggestion names when a 404 carries structured candidates. */
@@ -9,10 +11,11 @@ export class ApiError extends Error {
 
   constructor(
     message: string,
-    opts?: { detail?: unknown; candidates?: string[] }
+    opts?: { detail?: unknown; candidates?: string[]; status?: number }
   ) {
     super(message);
     this.name = "ApiError";
+    this.status = opts?.status;
     this.detail = opts?.detail;
     this.candidates = opts?.candidates;
   }
@@ -59,7 +62,7 @@ export async function readApiError(res: Response, path: string): Promise<ApiErro
   } catch {
     // keep status fallback
   }
-  return new ApiError(message, { detail, candidates });
+  return new ApiError(message, { detail, candidates, status: res.status });
 }
 
 /** Stable Chinese copy when the API process / Vite proxy is unreachable. */

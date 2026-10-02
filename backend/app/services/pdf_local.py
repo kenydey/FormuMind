@@ -253,6 +253,10 @@ def ocr_markdown(content: bytes, *, max_pages: int = 0) -> str | None:
                 "pdf_local: %d-page scan exceeds the %d-page local-OCR cap — skipping",
                 pages_in_doc, max_pages,
             )
+            # P2: 截断用户可见。
+            from .parse_notices import note
+
+            note(f"文档共 {pages_in_doc} 页，本地 OCR 上限 {max_pages} 页，超限未解析")
             return None
     pages = extract_pages(content, ocr=True)
     if not pages:

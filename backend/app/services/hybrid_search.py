@@ -300,7 +300,7 @@ def hybrid_search_scored(
     alpha: float | None = None,
     *,
     project_id: str | None = None,
-    include_global: bool = False,
+    include_global: bool = True,
 ) -> list[ScoredChunk]:
     """BM25 + vector hybrid retrieval with bm25/cosine/hybrid scores retained.
 
@@ -437,6 +437,24 @@ def hybrid_search_scored(
         if cosine_max > 0.0:
             cosine_scores = cosine_scores / cosine_max
 
+        # P2 A/B: kb_hybrid_entity_boost —— 化学实体加成移到融合前。
+        # legacy search_chunks 是 cosine 0-1 尺度上的加性 0.2/0.3；直接加到
+        # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做
+        # 加性 boost（与 legacy 同量级），再进融合，而非加到融合后的 RRF 分上。
+        # 默认关，A/B 验证后再决定。
+        if getattr(settings, "kb_hybrid_entity_boost", False):
+            try:
+                qctx = kb_index._query_chem_context(query)
+                if qctx["cas"] or qctx["formulas"] or qctx["smiles"] or qctx["products"]:
+                    boosts = np.array(
+                        [kb_index._entity_boost(c, qctx) for c in chunks],
+                        dtype=float,
+                    )
+                    bm25_scores = bm25_scores + boosts
+                    cosine_scores = cosine_scores + boosts
+            except Exception:  # noqa: BLE001
+                logger.debug("hybrid entity boost skipped (fail-open)", exc_info=True)
+
         fusion = (getattr(settings, "kb_hybrid_fusion", None) or "weighted").strip().lower()
         if fusion == "rrf":
             # Wave D: Reciprocal Rank Fusion (k=60). Scores stored as RRF mass
@@ -503,11 +521,14 @@ def hybrid_search(
     query: str,
     top_k: int = 10,
     alpha: float | None = None,
+    *,
+    project_id: str | None = None,
+    include_global: bool = True,
 ) -> list[DocumentChunkResponse]:
     """BM25 + vector hybrid retrieval over the persistent KB chunk store.
 
-    Existing callers keep the unscored DocumentChunkResponse list over the
-    global corpus (no project filter). ``alpha`` defaults to ``kb_hybrid_alpha``.
+    Returns the unscored DocumentChunkResponse list. ``alpha`` defaults to
+    ``kb_hybrid_alpha``; ``project_id``/``include_global`` filter the corpus.
 
     Note: this is **not** the session-level ``rag.BM25FAISSStore`` used by chat.
     """
@@ -520,7 +541,13 @@ def hybrid_search(
         return []
 
     try:
-        scored = hybrid_search_scored(query, top_k=top_k, alpha=alpha)
+        scored = hybrid_search_scored(
+            query,
+            top_k=top_k,
+            alpha=alpha,
+            project_id=project_id,
+            include_global=include_global,
+        )
         return [_to_response(s.chunk) for s in scored]
     except Exception as exc:
         return degrade_return(logger, exc, "hybrid search failed", [])

@@ -560,7 +560,7 @@ def chat(req: ChatRequestValidated):
         data_sources = list(hybrid_out.get("data_sources") or ["kb_evidence"])
 
         if req.response_format == "structured" and settings.chat_structured_enabled:
-            structured, struct_err = generate_structured_answer(
+            structured, struct_err, eff_sources = generate_structured_answer(
                 question,
                 sources,
                 history=history,
@@ -570,7 +570,8 @@ def chat(req: ChatRequestValidated):
             if structured is not None:
                 structured = apply_assumption_to_structured(structured, clarification)
                 answer = _ensure_answer(structured.summary)
-                citations = sources[: min(8, len(sources))]
+                # P1-11: citations 取压缩后列表，与 LLM 所见 [n] 同序。
+                citations = eff_sources[: min(8, len(eff_sources))]
             else:
                 logger.warning("structured chat fallback: %s", struct_err)
                 answer, citations = answer_question(
@@ -1171,7 +1172,7 @@ async def chat_stream(req: "ChatRequestValidated"):
             if req.response_format == "structured" and settings.chat_structured_enabled:
                 from ..services.chat_structured import generate_structured_answer
 
-                structured, struct_err = await asyncio.to_thread(
+                structured, struct_err, eff_sources = await asyncio.to_thread(
                     generate_structured_answer,
                     question,
                     plan["sources"],
@@ -1184,13 +1185,60 @@ async def chat_stream(req: "ChatRequestValidated"):
                     structured = None
                 answer = ""
                 citations: list = []
+                gate_notices: list = []
                 if structured is not None:
                     structured = apply_assumption_to_structured(
                         structured, plan["clarification"]
                     )
                     assert structured is not None
                     answer = _ensure_answer(structured.summary)
-                    citations = plan["sources"][: min(8, len(plan["sources"]))]
+                    # P1-11: citations 取压缩后列表，与 LLM 所见 [n] 同序。
+                    citations = eff_sources[: min(8, len(eff_sources))]
+                    # P1-4: 整包 structured 同样走 claims/gates —— 与同步路径同口径，
+                    # 否则数值门/冲突节弃权等全部静默缺席。
+                    try:
+                        _claims, _audit, _verified = await asyncio.to_thread(
+                            _claims_and_audit,
+                            question,
+                            answer,
+                            citations,
+                            structured=structured,
+                            settings=settings,
+                        )
+                        answer, _claims, _abstained, gate_notices = _apply_answer_gates(
+                            question,
+                            answer,
+                            citations,
+                            _claims,
+                            _verified,
+                            settings,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("chat/stream structured claims: %s", exc)
+                    # 风险5 复核补齐：同步 structured 路径会跑 evidence_reviewer
+                    #（use_evidence/skills/MCP 门控），stream 整包路径此前完全缺席。
+                    # 只跑 review 不跑 fix-loop —— fix-loop 的 repair 重生成 markdown
+                    # 会破坏 structured 对象契约；fail-open。
+                    evidence_reviewer = None
+                    try:
+                        from ..services.evidence_synthesis import evidence_mode_active
+
+                        if (
+                            evidence_mode_active(req.mode, settings)
+                            or req.selected_skills
+                            or req.selected_mcp_servers
+                        ):
+                            evidence_reviewer = await asyncio.to_thread(
+                                _run_evidence_review,
+                                question,
+                                answer,
+                                _claims_evidence(citations),
+                                settings,
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("chat/stream structured reviewer: %s", exc)
+                        evidence_reviewer = None
+                _degr_notices = _retrieval_degradation_notices(kb_used) or []
                 yield _sse(
                     {
                         "type": "done",
@@ -1202,8 +1250,10 @@ async def chat_stream(req: "ChatRequestValidated"):
                         "structured": structured,
                         "clarification": plan["clarification"],
                         "rewritten_query": plan["rewritten_query"],
-                        # B-1: BM25-only 退化提示位。
-                        "notices": _retrieval_degradation_notices(kb_used) or None,
+                        # 风险5：reviewer 结果透出（与 paperqa 整包路径同字段）。
+                        "evidence_reviewer": evidence_reviewer,
+                        # B-1: BM25-only 退化提示位 + P1-4 门 notices 合并。
+                        "notices": list(_degr_notices) + list(gate_notices or []) or None,
                     }
                 )
                 return

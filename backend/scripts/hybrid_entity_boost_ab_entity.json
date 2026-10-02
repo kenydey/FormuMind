@@ -1,0 +1,46 @@
+{
+  "control": {
+    "mrr": 0.0,
+    "mean_hits_in_topk": 0.0,
+    "per_q": [
+      {
+        "q": "CAS 2530-83-8 硅烷偶联剂在金属表面处理中的作用",
+        "mrr": 0.0,
+        "hits_in_topk": 0
+      },
+      {
+        "q": "2530-83-8 KH-560 改善涂层附着力的机理",
+        "mrr": 0.0,
+        "hits_in_topk": 0
+      },
+      {
+        "q": "硅烷偶联剂 2530-83-8 的水解工艺",
+        "mrr": 0.0,
+        "hits_in_topk": 0
+      }
+    ]
+  },
+  "treatment": {
+    "mrr": 0.0,
+    "mean_hits_in_topk": 0.0,
+    "per_q": [
+      {
+        "q": "CAS 2530-83-8 硅烷偶联剂在金属表面处理中的作用",
+        "mrr": 0.0,
+        "hits_in_topk": 0
+      },
+      {
+        "q": "2530-83-8 KH-560 改善涂层附着力的机理",
+        "mrr": 0.0,
+        "hits_in_topk": 0
+      },
+      {
+        "q": "硅烷偶联剂 2530-83-8 的水解工艺",
+        "mrr": 0.0,
+        "hits_in_topk": 0
+      }
+    ]
+  },
+  "delta_mrr": 0.0,
+  "verdict": "KEEP OFF"
+}

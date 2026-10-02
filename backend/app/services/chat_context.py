@@ -19,6 +19,14 @@ _CHEM_TOKEN_RE = re.compile(
     r"(磷酸锌|环氧树脂|固化剂|防锈颜料|乳液|牌号|盐雾|添加量|wt%|实施例|[A-Za-z]{2,}[- ]?\d{2,4})"
 )
 
+# P2: 可消解的代词 —— 排除"应该"（应+该）、"尤其"（尤+其）、
+# "其他/其它/其余/其中"（其+他/它/余/中，非指代）。
+_ANAPHORA_RE = re.compile(
+    r"(?<!应)该|(?<!尤)其(?!他|它|余|中)|它|此|这个|那个|上述|上面|前者|后者"
+)
+# 做先行词时过滤的泛词（是检索词条，但不是可指代的实体）。
+_ANAPHORA_STOPWORDS = frozenset({"实施例", "wt%", "添加量", "盐雾", "牌号"})
+
 
 def _summarize_turns(turns: list[ChatTurn]) -> ChatTurn:
     """Deterministic extractive summary of dropped older turns (B-2).
@@ -134,7 +142,9 @@ def rewrite_query(
         if not needs_context:
             return q, None
 
-        rewritten = f"{' '.join(terms)} {q}".strip()
+        # P2: 真正的指代消解 —— 代词替换成先行词，而不仅是前置词条。
+        resolved_q = _resolve_anaphora(q, context_turns, clarified_entities or [])
+        rewritten = f"{' '.join(terms)} {resolved_q}".strip()
         if rewritten == q:
             return q, None
         return rewritten, rewritten
@@ -171,3 +181,66 @@ def _collect_context_terms(
             break
 
     return list(dict.fromkeys(t for t in terms if t))[:8]
+
+
+def _antecedents(
+    turns: list[ChatTurn],
+    clarified: list[ClarifiedEntity],
+) -> list[str]:
+    """P2: 按新鲜度排序的先行词候选（澄清实体 > CAS > 化学实体 > 文献标题）。
+
+    与 _collect_context_terms 不同：过滤掉"实施例/wt%/添加量"这类
+    泛词——它们是检索词条，但不能做代词的先行词。
+    """
+    cands: list[str] = []
+    for ce in clarified:
+        resolved = (ce.resolved or ce.term or "").strip()
+        if resolved:
+            cands.append(resolved)
+    for turn in reversed(turns):
+        text = (turn.content or "").strip()
+        if not text:
+            continue
+        # 轮内按提及位置倒序 —— 代词指最近提及的实体。
+        for cas in reversed(_CAS_RE.findall(text)):
+            cands.append(cas)
+        for tok in reversed(_CHEM_TOKEN_RE.findall(text)):
+            if tok and tok not in _ANAPHORA_STOPWORDS:
+                cands.append(tok)
+        cits = []
+        for ev in turn.citations or []:
+            title = (ev.title or "").split("·")[0].strip()
+            if title and len(title) >= 2:
+                cits.append(title[:48])
+        cands.extend(reversed(cits))
+    # 去重保序（最新优先）。
+    return list(dict.fromkeys(c for c in cands if c))
+
+
+def _resolve_anaphora(
+    question: str,
+    turns: list[ChatTurn],
+    clarified: list[ClarifiedEntity],
+) -> str:
+    """P2: 代词消解 —— 把"它/该/这个/那个…"替换成历史最近的关键实体。
+
+    只替换首个可消解代词；无候选先行词时原文返回。Fail-open：异常时
+    返回原问句。
+    """
+    try:
+        antecedents = _antecedents(turns, clarified)
+        if not antecedents:
+            return question
+
+        def _sub(m: "re.Match[str]") -> str:
+            pron = m.group(0)
+            # 前者=较早提及的实体，后者=最近的（新鲜度倒序）。
+            if pron == "前者":
+                return antecedents[1] if len(antecedents) > 1 else pron
+            if pron == "后者":
+                return antecedents[0]
+            return antecedents[0]
+
+        return _ANAPHORA_RE.sub(_sub, question, count=1)
+    except Exception:  # noqa: BLE001 - fail-open
+        return question

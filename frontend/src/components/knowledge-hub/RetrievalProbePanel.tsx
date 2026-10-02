@@ -136,7 +136,9 @@ export default function RetrievalProbePanel({ active }: { active: boolean }) {
     setError(null);
     try {
       const payload = await api.kbGoldenEvalRun({
-        mode: mode === "keyword" ? "hybrid" : mode,
+        // P2: 模式诚实透传 —— 此前 keyword 被静默改成 hybrid，
+        // 面板上"关键词"跑的却是混合检索。
+        mode,
         top_k: Math.min(topK, 5),
         alpha,
         project_id: scopeParams.project_id,

@@ -1512,6 +1512,8 @@ export interface IngestResponse {
   filename: string;
   evidence: Evidence[];
   total: number;
+  /** P2: 解析截断等用户可见提示 */
+  warnings?: string[];
 }
 
 export interface ChatTurn {
