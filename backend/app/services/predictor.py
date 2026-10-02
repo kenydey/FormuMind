@@ -364,14 +364,56 @@ def default_bounds(
     return bounds
 
 
+def shared_bounds(
+    objectives: list,
+    props_list: list[dict[str, float]],
+) -> dict[str, tuple[float, float]]:
+    """One normalisation range for ranking a *batch* of candidates together.
+
+    ``default_bounds(objectives, form)`` derives an unspecified metric's range
+    from that one formulation (``(0, 2·value)``), so every candidate scores
+    exactly 0.5 on it regardless of quality and a batch cannot be ranked. Here
+    the candidate-independent defaults (objective ``ref_min/ref_max`` where the
+    user gave them, otherwise the zero-anchored defaults) are widened to cover
+    every candidate's predicted value — and the target of a ``match_target``
+    objective, so overshoot is penalised instead of clamped — giving all
+    candidates the same ruler.
+    """
+    import math
+
+    bounds = default_bounds(objectives)
+    for obj in objectives:
+        if obj.ref_min is not None and obj.ref_max is not None:
+            continue  # an explicit range is authoritative
+        lo, hi = bounds[obj.metric]
+        values = [
+            float(p[obj.metric])
+            for p in props_list
+            if isinstance(p.get(obj.metric), (int, float))
+            and math.isfinite(float(p[obj.metric]))
+        ]
+        if obj.direction == "match_target" and obj.target_value is not None:
+            values.append(float(obj.target_value))
+        if values:
+            lo, hi = min(lo, min(values)), max(hi, max(values))
+        bounds[obj.metric] = (lo, hi)
+    return bounds
+
+
 def multi_objective_score(
     form: Formulation,
     objectives: list,
     process: dict | None = None,
     bounds: dict[str, tuple[float, float]] | None = None,
+    *,
+    props: dict[str, float] | None = None,
 ) -> float:
-    """Weighted aggregated score across multiple objectives."""
-    props = predict(form, process)
+    """Weighted aggregated score across multiple objectives.
+
+    ``props`` lets a caller that already predicted this formulation (e.g. to
+    build :func:`shared_bounds`) reuse those values instead of predicting again.
+    """
+    props = props if props is not None else predict(form, process)
     bounds = bounds or {}
     total, total_weight = 0.0, 0.0
     for obj in objectives:

@@ -167,6 +167,52 @@ def finalize_scored_formulations(
     return scored, formulas, dedup_notes, diversity_applied
 
 
+def _rescore_with_shared_bounds(scored: list[Formulation], objectives, process) -> None:
+    """Re-score a multi-objective batch against one shared normalisation range.
+
+    ``_score_and_validate`` scores each candidate on its own, normalising every
+    metric without a user-given range against ``(0, 2 × that candidate's own
+    value)`` — so a weak and a strong candidate both land on exactly 0.5 and the
+    ranking below (``finalize_scored_formulations`` sorts by ``score``) is just
+    the LLM's output order. Candidates are only comparable on a common ruler,
+    so recompute the aggregate with :func:`predictor.shared_bounds`.
+
+    The KG compatibility adjustment was applied to ``score`` as a multiplier
+    after the first scoring; it is carried over as ``score / first_base_score``
+    rather than recomputed. Fail-open: on any error the per-candidate scores
+    stay as they were.
+    """
+    import math
+
+    if len(objectives or []) < 2 or not scored:
+        return
+    try:
+        from . import predictor
+
+        objectives = list(objectives)
+        props = [predictor.predict(f, process) for f in scored]
+        shared = predictor.shared_bounds(objectives, props)
+        rescored: list[float] = []
+        for form, p in zip(scored, props):
+            old_base = predictor.multi_objective_score(
+                form, objectives, process, predictor.default_bounds(objectives, form), props=p
+            )
+            new_base = predictor.multi_objective_score(
+                form, objectives, process, shared, props=p
+            )
+            factor = 1.0
+            if form.score is not None and old_base > 1e-9:
+                factor = float(form.score) / old_base
+            value = float(new_base) * factor
+            if not math.isfinite(value):
+                raise ValueError(f"non-finite rescored value for {form.name!r}")
+            rescored.append(value)
+        for form, value in zip(scored, rescored):
+            form.score = value
+    except Exception:
+        logger.warning("shared-bounds rescoring failed; keeping per-candidate scores", exc_info=True)
+
+
 def finalize_recommendation_bundle(
     rec_formulas: list[RecommendedFormula],
     req,
@@ -201,12 +247,19 @@ def finalize_recommendation_bundle(
     for rec in rec_formulas:
         try:
             form = recommended_to_formulation(rec)
-            scored.append(_score_and_validate(form, process, req, chem_screen=True))
+            # ``objectives`` is the list trade-off analysis and the LLM prompt
+            # use; scoring must rank by the same one (see _score_and_validate).
+            scored.append(
+                _score_and_validate(
+                    form, process, req, chem_screen=True, objectives=objectives
+                )
+            )
         except ValueError as exc:
             warnings.append(str(exc))
 
     scored, gate_warnings = validate_formulations(scored, req=req)
     warnings.extend(gate_warnings)
+    _rescore_with_shared_bounds(scored, objectives, process)
     for form in scored:
         warnings.extend(check_formulation_predictions(form, evidence))
 
