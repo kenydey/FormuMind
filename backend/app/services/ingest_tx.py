@@ -141,6 +141,10 @@ def ingest_document_tx(
                 raise
 
             # ── 3. Outbox enqueue (idempotent, savepoint-guarded internally)─
+            # Audit record of a unit of work that committed in this very
+            # transaction: born DONE, never PENDING — nothing is left to
+            # dispatch, and a PENDING row would only be "recovered" (and
+            # eventually marked DEAD) by every restart.
             enqueue(
                 session,
                 operation="ingest_complete",
@@ -150,6 +154,7 @@ def ingest_document_tx(
                     "chunk_count": chunk_count,
                     "status": "ok",
                 },
+                status="DONE",
             )
 
             # ── 4. Single commit — everything or nothing ──────────────────

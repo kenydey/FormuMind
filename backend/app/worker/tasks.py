@@ -62,6 +62,37 @@ def load_persisted_task(task_id: str) -> TaskStatus | None:
         return degrade_return(logger, exc, "operation failed", None)
 
 
+class _OutboxTask(celery_app.Task):
+    """Base for tasks submitted through a durable outbox row.
+
+    ``api/*`` writes the row (``outbox_operation`` × content-hash of the
+    payload) before dispatching. When the task reaches a *final* state — Celery
+    calls ``on_success`` / ``on_failure`` only after retries are exhausted —
+    the row is flipped to ``DONE`` so ``dispatcher.recover_stalled`` replays
+    only jobs interrupted by a crash, never ones that finished. The failure
+    itself is recorded in the task snapshot, not in the outbox. Never raises:
+    a lost completion mark must not turn a finished task into a failed one.
+    """
+
+    outbox_operation: str = ""
+
+    def _mark_outbox_done(self, args, kwargs) -> None:
+        if not self.outbox_operation:
+            return
+        payload = args[0] if args else (kwargs or {}).get("payload")
+        if not isinstance(payload, dict):
+            return
+        from ..db.outbox_store import record_done
+
+        record_done(self.outbox_operation, payload)
+
+    def on_success(self, retval, task_id, args, kwargs):
+        self._mark_outbox_done(args, kwargs)
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        self._mark_outbox_done(args, kwargs)
+
+
 def _persist_terminal(
     task_id: str,
     kind: str,
@@ -277,7 +308,12 @@ def _thinking_title(stage: str, message: str) -> str:
     return labels.get(stage) or message or stage or "处理中…"
 
 
-@celery_app.task(bind=True, name="formumind.deep_research")
+@celery_app.task(
+    bind=True,
+    base=_OutboxTask,
+    outbox_operation="research_deep",
+    name="formumind.deep_research",
+)
 def run_deep_research_task(self, payload: dict) -> dict:
     from ..domain.schemas import ComprehensiveReport, Evidence, Requirement
     from ..pipeline.research_graph import run_research_graph
@@ -413,7 +449,12 @@ def _convert_formulas(formulas: list, scored: list) -> list[dict]:
     return result
 
 
-@celery_app.task(bind=True, name="formumind.recommend")
+@celery_app.task(
+    bind=True,
+    base=_OutboxTask,
+    outbox_operation="research_recommend",
+    name="formumind.recommend",
+)
 def run_recommend_task(self, payload: dict) -> dict:
     from ..api.formulations import recommend_formulations as _sync_recommend
     from ..api.formulations import RecommendFormulationsRequest as SyncRequest
@@ -1220,7 +1261,12 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
         raise
 
 
-@celery_app.task(bind=True, name="formumind.inverse_design")
+@celery_app.task(
+    bind=True,
+    base=_OutboxTask,
+    outbox_operation="inverse_design",
+    name="formumind.inverse_design",
+)
 def run_inverse_design_task(self, payload: dict) -> dict:
     return run_inverse_design_impl(self.request.id, payload)
 
@@ -1298,6 +1344,8 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
 
 @celery_app.task(
     bind=True,
+    base=_OutboxTask,
+    outbox_operation="doe_cycle",
     name="formumind.doe_cycle",
     soft_time_limit=1500,
     time_limit=1800,

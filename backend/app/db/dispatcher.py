@@ -5,6 +5,13 @@ configurable cutoff (default 30 min) and re-dispatches them via the
 Celery ``.delay()`` path so no durable outbox row is left behind after a
 crash / redeploy while jobs are in-flight.
 
+A row is only ever replayed while it is *unfinished*: the worker flips it to
+``DONE`` when the task reaches a final state (``outbox_store.record_done``),
+so recovery covers crash / redeploy / lost-broker-message cases only. Rows
+whose operation has no Celery handler (audit records such as
+``ingest_complete`` / ``datalab_orphan_cleanup``) are never touched, and rows
+older than ``MAX_RECOVER_AGE_HOURS`` are expired instead of replayed.
+
 Lifespan MUST schedule recovery in a daemon thread (see
 ``schedule_recover_stalled``): with ``FORMUMIND_CELERY_EAGER=true``, a
 synchronous ``.delay()`` would run whole research/inverse tasks on the
@@ -19,8 +26,9 @@ import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .models import TaskOutbox
@@ -28,6 +36,11 @@ from .models import TaskOutbox
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
+# Recovery is for jobs interrupted by a crash / redeploy, not archaeology: a
+# row still unfinished after this long is expired (DEAD) instead of replayed,
+# so legacy rows written before the completion mark existed cannot trigger a
+# replay storm of long-finished jobs.
+MAX_RECOVER_AGE_HOURS = 24
 # Cap how many stalled rows one recovery pass will touch (startup budget).
 DEFAULT_MAX_ROWS = 20
 # Broker publish timeout for non-eager ``.delay()`` (seconds).
@@ -53,26 +66,53 @@ def _celery_is_eager() -> bool:
 
 # ── operation → Celery task mapping ─────────────────────────────────────────
 
+def _send_recommend(payload: dict) -> None:
+    from ..worker.tasks import run_recommend_task
+
+    run_recommend_task.delay(payload)
+
+
+def _send_deep_research(payload: dict) -> None:
+    from ..worker.tasks import run_deep_research_task
+
+    run_deep_research_task.delay(payload)
+
+
+def _send_inverse_design(payload: dict) -> None:
+    from ..worker.tasks import run_inverse_design_task
+
+    run_inverse_design_task.delay(payload)
+
+
+def _send_doe_cycle(payload: dict) -> None:
+    from ..worker.tasks import run_doe_cycle_task
+
+    run_doe_cycle_task.delay(payload)
+
+
+# Single source of truth for what recovery may replay. Every operation that
+# ``api/*`` enqueues through ``enqueue_outbox`` MUST have an entry here (a
+# test pins that); audit-only operations deliberately do not.
+_HANDLERS: dict[str, Callable[[dict], None]] = {
+    "research_recommend": _send_recommend,
+    "research_deep": _send_deep_research,
+    "inverse_design": _send_inverse_design,
+    "doe_cycle": _send_doe_cycle,
+}
+
+DISPATCHABLE_OPERATIONS: tuple[str, ...] = tuple(_HANDLERS)
+
+
 def _dispatch(operation: str, payload: dict) -> None:
-    """Map an outbox *operation* to the matching Celery task ``.delay()``."""
-    if operation == "research_recommend":
-        from ..worker.tasks import run_recommend_task
+    """Map an outbox *operation* to the matching Celery task ``.delay()``.
 
-        run_recommend_task.delay(payload)
-    elif operation == "research_deep":
-        from ..worker.tasks import run_deep_research_task
-
-        run_deep_research_task.delay(payload)
-    elif operation == "inverse_design":
-        from ..worker.tasks import run_inverse_design_task
-
-        run_inverse_design_task.delay(payload)
-    elif operation == "ingest_complete":
-        logger.info("ingest_complete task acknowledged (payload=%s)", payload)
-    else:
-        logger.warning(
-            "recover_stalled: unknown operation %s — skipped", operation
-        )
+    Raises ``ValueError`` for an operation without a handler so the caller
+    never counts a no-op as a successful re-enqueue.
+    """
+    handler = _HANDLERS.get(operation)
+    if handler is None:
+        raise ValueError(f"no outbox handler for operation {operation!r}")
+    handler(payload)
 
 
 def _dispatch_with_timeout(
@@ -89,6 +129,33 @@ def _dispatch_with_timeout(
             ) from exc
 
 
+def _expire_ancient(session: Session, expiry: datetime) -> int:
+    """Mark unfinished dispatchable rows older than *expiry* ``DEAD`` (no replay).
+
+    One bulk UPDATE, outside the per-pass ``max_rows`` budget: otherwise the
+    oldest (least useful) rows would eat the budget one pass at a time.
+    """
+    result = session.execute(
+        update(TaskOutbox)
+        .where(
+            TaskOutbox.status.in_(["PENDING", "CLAIMED"]),
+            TaskOutbox.operation.in_(DISPATCHABLE_OPERATIONS),
+            TaskOutbox.created_at < expiry,
+        )
+        .values(status="DEAD")
+    )
+    n = int(result.rowcount or 0)
+    if n:
+        session.commit()
+        logger.warning(
+            "recover_stalled: expired %d unfinished outbox row(s) older than %s "
+            "(not replayed)",
+            n,
+            expiry.isoformat(timespec="seconds"),
+        )
+    return n
+
+
 # ── public API ──────────────────────────────────────────────────────────────
 
 def recover_stalled(
@@ -97,6 +164,7 @@ def recover_stalled(
     *,
     max_rows: int = DEFAULT_MAX_ROWS,
     dispatch_timeout_s: float = DEFAULT_DISPATCH_TIMEOUT_S,
+    max_age_hours: float = MAX_RECOVER_AGE_HOURS,
 ) -> int:
     """Re-enqueue outbox rows that have been stalled for too long.
 
@@ -114,6 +182,8 @@ def recover_stalled(
         cutoff_minutes: Age threshold in minutes (default 30).
         max_rows: Maximum rows to process in this pass (startup budget).
         dispatch_timeout_s: Broker publish timeout when not eager.
+        max_age_hours: Rows older than this are expired (``DEAD``) instead of
+            replayed.
 
     Returns:
         Number of rows that were re-enqueued.
@@ -125,14 +195,17 @@ def recover_stalled(
         raise ValueError("cutoff_minutes must be >= 1")
     if max_rows < 1:
         raise ValueError("max_rows must be >= 1")
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff -= timedelta(minutes=cutoff_minutes)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(minutes=cutoff_minutes)
+
+    _expire_ancient(session, now - timedelta(hours=max_age_hours))
 
     stalled = (
         session.execute(
             select(TaskOutbox)
             .where(
                 TaskOutbox.status.in_(["PENDING", "CLAIMED"]),
+                TaskOutbox.operation.in_(DISPATCHABLE_OPERATIONS),
                 TaskOutbox.created_at < cutoff,
             )
             .order_by(TaskOutbox.created_at.asc())
@@ -222,6 +295,7 @@ def recover_stalled_for_startup(
                 select(TaskOutbox.id)
                 .where(
                     TaskOutbox.status.in_(["PENDING", "CLAIMED"]),
+                    TaskOutbox.operation.in_(DISPATCHABLE_OPERATIONS),
                     TaskOutbox.created_at < cutoff,
                 )
                 .limit(max_rows)

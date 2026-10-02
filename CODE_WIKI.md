@@ -596,7 +596,8 @@ class ExpertAgent(Protocol):
 
 - 持久化任务队列（幂等性保障）
 - `(operation, idempotency_key)` 唯一约束
-- 自动恢复停滞任务
+- 状态流转：`PENDING → CLAIMED → PENDING（重投，attempt_count+1）`；worker 任务到达最终态（成功/终态失败）时由 `record_done` 标记 `DONE`；恢复放弃时为 `DEAD`
+- 自动恢复停滞任务：仅重放**未完成**且有 Celery 处理器的行（`dispatcher.DISPATCHABLE_OPERATIONS`：`research_recommend` / `research_deep` / `inverse_design` / `doe_cycle`）；审计类行（`ingest_complete` 生来即 `DONE`，`datalab_orphan_cleanup` 保持 `PENDING`）不会被重放；超过 24h 仍未完成的行直接标 `DEAD`，不再重放
 
 ---
 
