@@ -166,6 +166,11 @@ def build_plan_with_fallback(
                 f"混料设计 {design!r} 生成失败: {exc} — "
                 "混料约束(成分和=100%)无法由无约束 LHS 兜底, 请检查因子数/设计参数"
             ) from exc
+        # v9: 离散因子的 fail-closed 不得被 fallback 击穿 ——
+        # build_pydoe_plan 对离散 raise ValueError 是有意的设计，
+        # 吞掉它会降级到 native lhs 的静默 clamp 路径（doe.py P1-7）。
+        if isinstance(exc, ValueError) and "discrete factors" in str(exc):
+            raise
         native_design = design if design in {"lhs", "ccd"} else "lhs"
         plan = build_native_plan(factors, native_design, n=n)
         plan.notes = f"engine=native (pydoe fallback: {exc}); {plan.notes}"

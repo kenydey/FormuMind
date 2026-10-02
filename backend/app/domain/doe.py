@@ -146,6 +146,23 @@ def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int 
     if design not in _DESIGNS:
         raise ValueError(f"Unknown design {design!r}; choose from {sorted(_DESIGNS)}")
     k = len(factors)
+    _discrete = [f.name for f in factors if f.kind == "discrete"]
+    if _discrete and design != "full_factorial":
+        # v9: ccd/fractional/pb 的 coded 点经 decode clamp 到水平索引后会
+        # 静默退化（星点坍缩成重复 run、中间水平永不出现），fail-closed
+        # 而非给出"看起来正常、实际退化"的方案。lhs 保留但记 warning。
+        if design == "lhs":
+            note_extra = (
+                f" WARNING: discrete factors {_discrete} mapped to nearest levels; "
+                "level coverage is not guaranteed for lhs."
+            )
+        else:
+            raise ValueError(
+                f"design {design!r} does not support discrete factors {_discrete}; "
+                "use design='full_factorial' (engine='native') or engine='baybe'"
+            )
+    else:
+        note_extra = ""
     if design == "full_factorial":
         # C-4a: align the design with each discrete factor's level count.
         matrix = full_factorial(k, levels=_level_counts(factors))
@@ -159,5 +176,6 @@ def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int 
     note = (
         f"{design} design over {k} factors -> {len(runs)} runs. "
         f"Estimated resolution: {'screening' if design in ('fractional_factorial', 'plackett_burman') else 'response-surface' if design == 'ccd' else 'space-filling' if design == 'lhs' else 'full'}."
+        f"{note_extra}"
     )
     return DOEPlan(design=design, factors=factors, runs=runs, notes=note)

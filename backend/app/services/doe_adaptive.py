@@ -83,6 +83,9 @@ def resample_plan_for_constraints(req: Requirement, plan: DOEPlan, *, max_rounds
                         coded=replacement.coded,
                         natural=replacement.natural,
                         ai_suggested=True,
+                        # v10: 保留替换源的 infeasible 信号，避免 KG 不相容标记丢失。
+                        infeasible=replacement.infeasible,
+                        infeasible_reason=replacement.infeasible_reason,
                     )
                 )
             else:

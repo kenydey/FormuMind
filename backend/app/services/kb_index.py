@@ -13,11 +13,17 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from ..config import get_settings
 from ..domain.schemas import Evidence
 from .errors import degrade_return, log_handled_exception
 from .metadata_tags import extract_patent_tags
+
+if TYPE_CHECKING:  # v10: 仅类型注解用，避免运行时导入开销
+    from collections.abc import Callable
+
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -399,45 +405,65 @@ def ingest_full_document(source_id: str, text: str, metadata: dict | None = None
 
 
 def prepare_chunk_rows(
-    full_text: str, source_id: str, *, embed: bool = True, session=None
+    full_text: str,
+    source_id: str,
+    *,
+    embed: bool = True,
+    session: Session | None = None,
+    gate_fn: Callable[[list[dict]], tuple[list[dict], str | None]] | None = None,
 ) -> list[dict] | None:
     """U-1: 双写入路径的公共 chunk 准备逻辑.
 
     `index_source`（上传/URL/wiki）和 `ingest_document_tx`（/api/kb/ingest）
-    都调它，保证 chunking → lang → entity → embedding → dedupe 五步永远一致。
+    都调它，使 chunking → gate → lang → entity → embedding → dedupe 六步在
+    双路径下保持一致（v10: 原"永远一致"夸大 —— gate_fn 由调用方传入，
+    传 None 时该步为空操作）。
+
+    `gate_fn`: 可选质量门 `rows -> (kept_rows, reason)`，在 embedding/dedupe
+    **之前**执行（v9：原 U-1 把 gate 放到 dedupe 之后，会造成
+    dedupe 以垃圾 chunk 为保留对象丢掉好 chunk 的数据丢失边角，
+    且垃圾 chunk 先 embedding 浪费计算）。
 
     返回 rows；文本为空或全被过滤时返回 None（调用方标记 failed）。
     不做 DB 写入、不 commit。`session` 透传给 dedupe（tx 路径用 caller session）。
     """
     from .chunking import chunk_markdown
+    from . import ingest_timing as timing
 
     settings = get_settings()
-    chunks = chunk_markdown(
-        full_text,
-        max_chars=settings.ingest_chunk_max_chars,
-        overlap=settings.ingest_chunk_overlap,
-    )
-    chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
-    if not chunks:
-        return None
-
-    rows: list[dict] = []
-    for c in chunks:
-        # Phase 0: rule-based patent tags（claim_no / example_no / section_title）
-        tags = extract_patent_tags(c.text, c.heading_path)
-        rows.append(
-            {
-                "text": c.text,
-                "heading_path": c.heading_path,
-                "page_no": c.page_no,
-                "paragraph_idx": c.paragraph_idx,
-                "offset_start": c.offset_start,
-                "offset_end": c.offset_end,
-                "bbox": c.bbox,
-                "block_type": c.block_type,
-                "meta": {"patent_tags": tags} if tags else None,
-            }
+    with timing.span("chunk"):
+        chunks = chunk_markdown(
+            full_text,
+            max_chars=settings.ingest_chunk_max_chars,
+            overlap=settings.ingest_chunk_overlap,
         )
+        chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
+        if not chunks:
+            return None
+
+        rows: list[dict] = []
+        for c in chunks:
+            # Phase 0: rule-based patent tags（claim_no / example_no / section_title）
+            tags = extract_patent_tags(c.text, c.heading_path)
+            rows.append(
+                {
+                    "text": c.text,
+                    "heading_path": c.heading_path,
+                    "page_no": c.page_no,
+                    "paragraph_idx": c.paragraph_idx,
+                    "offset_start": c.offset_start,
+                    "offset_end": c.offset_end,
+                    "bbox": c.bbox,
+                    "block_type": c.block_type,
+                    "meta": {"patent_tags": tags} if tags else None,
+                }
+            )
+
+        # v9: 质量门前置 —— 与原 index_source 顺序一致（gate 在 embed/dedupe 之前）。
+        if gate_fn is not None:
+            rows, _gate_reason = gate_fn(rows)
+            if not rows:
+                return None
 
     # 双语分流：嵌入前预标 lang（与 chunk_store 写入判定同源）
     from ..db.chunk_store import _detect_chunk_lang
@@ -445,7 +471,8 @@ def prepare_chunk_rows(
     for _r in rows:
         _r["lang"] = _detect_chunk_lang(_r.get("text") or "")
 
-    _attach_entities(source_id, rows)
+    with timing.span("entities"):
+        _attach_entities(source_id, rows)
 
     if embed:
         # 双语 embedding：zh chunks 用 bge(512维)，其余用全局模型(MiniLM 384维)
@@ -460,16 +487,17 @@ def prepare_chunk_rows(
         model_per_row: dict[int, str] = {}
         vec_map: dict[int, list[float]] = {}
         mismatch = False
-        for lang, idxs in group_idxs.items():
-            mname = _model_for_lang(lang)
-            texts = [rows[i]["text"] for i in idxs]
-            vecs = _embed_texts(texts, mname)
-            if not vecs or len(vecs) != len(idxs):
-                mismatch = True
-                break
-            for j, i in enumerate(idxs):
-                vec_map[i] = vecs[j]
-                model_per_row[id(rows[i])] = mname
+        with timing.span("embed"):
+            for lang, idxs in group_idxs.items():
+                mname = _model_for_lang(lang)
+                texts = [rows[i]["text"] for i in idxs]
+                vecs = _embed_texts(texts, mname)
+                if not vecs or len(vecs) != len(idxs):
+                    mismatch = True
+                    break
+                for j, i in enumerate(idxs):
+                    vec_map[i] = vecs[j]
+                    model_per_row[id(rows[i])] = mname
         if len(vec_map) != len(rows):
             mismatch = True
         if mismatch:
@@ -521,8 +549,6 @@ def index_source(
         from .chunking import chunk_markdown
         from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
-        from . import ingest_timing as timing
-
         settings = get_settings()
         # Ingest-time quality gate (same rules as hybrid #111): blocked origin
         # never becomes document_chunks — clear any prior rows and stop early.
@@ -533,12 +559,17 @@ def index_source(
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
             return 0
-        # U-1: 公共 chunk 准备（chunking → lang → entity → embedding → dedupe）
+        # U-1: 公共 chunk 准备（chunking → gate → lang → entity → embedding → dedupe）
         # 与 ingest_document_tx 共用，保证双写入路径永远一致。
-        with timing.span("prepare"):
-            rows = prepare_chunk_rows(full_text, source_id, embed=embed)
-        if rows:
-            rows, _gate_reason = gate_ingest_rows(rows, source_id=source_id)
+        # v9: gate_fn 前置到 embedding/dedupe 之前（原顺序），避免 dedupe 丢好 chunk。
+        # v10: 去掉外层 "prepare" span —— ingest_timing.finish 只读
+        # parse/chunk/entities/embed 四个 span，"prepare" 只写不读。
+        rows = prepare_chunk_rows(
+            full_text,
+            source_id,
+            embed=embed,
+            gate_fn=lambda r: gate_ingest_rows(r, source_id=source_id),
+        )
         if not rows:
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
@@ -607,7 +638,9 @@ def _attach_entities(source_id: str, rows: list[dict]) -> None:
         for row in rows:
             meta = extract_entities(row["text"])
             if meta:
-                row["meta"] = meta
+                # v9: 合并而非覆盖 —— prepare_chunk_rows 已写 patent_tags，
+                # 直接赋值会静默丢掉专利结构标签。
+                row["meta"] = {**(row.get("meta") or {}), **meta}
                 all_products.extend(meta.get("products") or [])
         if all_products and settings.product_extract_enabled:
             from ..db.product_store import get_product_store
@@ -994,6 +1027,8 @@ def search_chunks_hybrid(
     project_id: str | None = None,
     include_global: bool = True,
     children: bool = False,
+    # v10: 允许调用方传入已查好的 source meta，避免一次检索多次全表扫描。
+    source_meta: dict | None = None,
 ) -> list[Evidence]:
     """Probe-aligned hybrid retrieval as Evidence (for recommend / research fuse).
 
@@ -1001,10 +1036,11 @@ def search_chunks_hybrid(
     is omitted. Safe empty list when KB is off or hybrid fails.
 
     P2 语义分叉说明：本路径**不**套用 legacy ``search_chunks`` 的
-    ``_entity_boost``（CAS/分子式/牌号加成）。原因：hybrid 融合分是 RRF
-    尺度（~0.02 量级），legacy 加成是按 cosine 0-1 尺度调的 0.2/0.3，
-    直接相加会让加成项主导排序。如需化学实体加成，应在 RRF 融合前对
-    BM25/cosine 分量做，而非融合后相加 —— ``kb_hybrid_entity_boost``
+    ``_entity_boost``（CAS/分子式/牌号加成）。原因（v9 更新）：默认
+    ``kb_hybrid_fusion="weighted"`` 下融合分是 0-1 尺度，0.2/0.3 的加成
+    量级上是兼容的 —— 原文档"RRF 尺度 ~0.02、加成会主导排序"的推理
+    只在 RRF 模式下成立。如需化学实体加成，应在融合前对 BM25/cosine
+    分量做，而非融合后相加 —— ``kb_hybrid_entity_boost``
     开关已实现该语义（融合前加性，默认关）。
 
     A/B（2026-10-02，见 scripts/hybrid_entity_boost_ab_report.md）：
@@ -1046,10 +1082,19 @@ def search_chunks_hybrid(
             )
         if not scored:
             return []
-        meta = _source_meta()
+        # v10: 调用方已传 meta 则复用，否则自己查（_source_meta 是全表扫描）。
+        meta = source_meta if source_meta is not None else _source_meta()
+        # v10: RRF 模式 hybrid_score ~0.01-0.03，会被 _chunk_to_evidence 的
+        # max(0.05, …) 全部钳成 0.05，排名信息在 Evidence 层被抹平。
+        # RRF 分数按本次 batch max 归一化后再转 Evidence，保留相对排序。
+        scores = [float(s.hybrid_score) for s in scored]
+        if (getattr(settings, "kb_hybrid_fusion", "weighted") or "weighted").strip().lower() == "rrf":
+            _mx = max(scores) if scores else 0.0
+            if _mx > 0:
+                scores = [x / _mx for x in scores]
         return [
-            _chunk_to_evidence(s.chunk, meta, float(s.hybrid_score))
-            for s in scored
+            _chunk_to_evidence(s.chunk, meta, sc)
+            for s, sc in zip(scored, scores)
         ]
     except Exception as exc:
         return degrade_return(logger, exc, "kb hybrid search failed", [])
@@ -1145,6 +1190,9 @@ def _stitch_patent_siblings(
             sib.title = f"{sib.title} · 同专利串联"
             out.append(sib)
             added += 1
+    # v10: sibling 追加到末尾后按 relevance 重排 —— 否则低相关度的原文会
+    # 排在高相关度的 sibling 之前。stable sort，同分保持原有相对顺序。
+    out.sort(key=lambda e: (e.relevance or 0.0), reverse=True)
     return out
 
 
@@ -1188,6 +1236,9 @@ def retrieve_evidence(
     # retrieval entry, so the split belongs here. Downstream rerank /
     # compression / synthesis are untouched. Fail-open: any loop error falls
     # back to the single-shot path below.
+    # v10: _source_meta() 是 SourceDocument 全表扫描 —— 一次检索只查一次，
+    # 复用于 hybrid 转换与 patent stitch（旧代码一次检索最多查两次）。
+    meta = _source_meta()
     try:
         from .agent_search_loop import agent_search, agent_search_enabled
 
@@ -1198,6 +1249,7 @@ def retrieve_evidence(
                     project_id=kw.get("project_id"),
                     include_global=bool(kw.get("include_global")),
                     children=bool(children),
+                    source_meta=meta,
                 )
 
             result = agent_search(
@@ -1213,6 +1265,7 @@ def retrieve_evidence(
                 project_id=project_id,
                 include_global=include_global,
                 children=bool(children),
+                source_meta=meta,
             )
     except Exception as exc:  # noqa: BLE001
         logger.debug("agent search split failed, single-shot fallback: %s", exc)
@@ -1223,6 +1276,7 @@ def retrieve_evidence(
             project_id=project_id,
             include_global=include_global,
             children=bool(children),
+            source_meta=meta,
         )
     if getattr(settings, "kb_patent_stitch_enabled", True):
         evidence = _stitch_patent_siblings(
@@ -1230,7 +1284,7 @@ def retrieve_evidence(
             max_siblings=int(
                 getattr(settings, "kb_patent_stitch_max_siblings", 2) or 2
             ),
-            meta=_source_meta(),
+            meta=meta,
         )
     return evidence
 

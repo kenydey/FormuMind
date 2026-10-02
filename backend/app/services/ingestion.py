@@ -291,7 +291,45 @@ def ingest_file(
     return outcome
 
 
-_IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "webp", "gif", "bmp"})
+_IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"})
+
+# v10: 未知二进制魔数表（提到模块级；P2-7 补 RIFF/WebP、gzip、7z、RAR）。
+_BIN_MAGIC = (
+    b"\x89PNG",          # PNG
+    b"\xff\xd8",          # JPEG
+    b"GIF8",              # GIF
+    b"PK\x03\x04",        # ZIP / OOXML
+    b"%PDF",              # PDF
+    b"BM",                # BMP（2 字节 —— 必须用 startswith，见下）
+    b"RIFF",              # WebP / AVI / WAV（RIFF 容器，WebP 在 [8:12] 为 b"WEBP"）
+    b"\x1f\x8b",          # gzip
+    b"7z\xbc\xaf\x27\x1c",  # 7z
+    b"Rar!\x1a\x07",      # RAR
+)
+
+
+def _looks_like_binary(body: bytes) -> bool:
+    """v10: 二进制启发式 —— 魔数前缀匹配 + NUL 检查。
+
+    P2-5: 旧代码 ``body[:4] in _BIN_MAGIC`` 中 2 字节的 b"BM" 永不可能
+    命中（4 字节切片不可能等于 2 字节），是死代码；此处改用 startswith。
+    P2-6: NUL 检查前先排除 UTF-16/UTF-32 合法文本（NUL 是其正常字节，
+    旧代码会误杀）；能解码且可打印字符占主导则视为文本。
+    """
+    for magic in _BIN_MAGIC:
+        if body.startswith(magic):
+            return True
+    if b"\x00" not in body[:1024]:
+        return False
+    sample = body[:4096]
+    for enc in ("utf-16", "utf-32"):
+        try:
+            text = sample.decode(enc)
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if text and sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t") / len(text) > 0.7:
+            return False
+    return True
 
 
 def _ingest_image(
@@ -506,9 +544,9 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
         from .parse_notices import collect as _collect_notices
 
         if not can_parse("pdf"):
-            from .parsing import ParserUnavailable
+            from .parsing import ParserUnavailable, install_hint
 
-            raise ParserUnavailable("pdf")
+            raise ParserUnavailable("pdf", install_hint("pdf"))
         with _collect_notices() as _url_parse_warnings:
             parsed = parse_document(body, "pdf")
         text = parsed.markdown or ""
@@ -534,15 +572,17 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
         url_ext = urlparse(url).path.rsplit("/", 1)[-1].rsplit(".", 1)[-1].lower() if "." in urlparse(url).path.rsplit("/", 1)[-1] else ""
         # v8: 先处理图片 URL —— v7 分流漏了所有非 zip 二进制，
         # PNG/JPG 会落入 else 被 latin-1 解码成乱码。
-        _IMAGE_EXTS = ("png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff")
+        # v9: 用模块级 _IMAGE_EXTS（含 tiff），不再局部遮蔽。
         if "image/" in content_type.lower() or url_ext in _IMAGE_EXTS:
             try:
-                return _ingest_image(url, body, origin_url=url)
+                # v9: 透传 persist，否则预览/dry-run(persist=False) 也会写 DB。
+                return _ingest_image(url, body, persist=persist, origin_url=url)
             except Exception as exc:
+                # v9: IngestOutcome 字段是 warnings，不是 notices（v8 写错会 TypeError）。
                 return IngestOutcome(
                     evidence=[],
                     extraction_status="skipped",
-                    notices=[f"图片 URL 解析失败：{exc}"],
+                    warnings=[f"图片 URL 解析失败：{exc}"],
                 )
         ct_ext = _ct_to_ext.get(content_type.split(";")[0].strip().lower(), "")
         ext = url_ext if url_ext and can_parse(url_ext) else (ct_ext or "")
@@ -555,9 +595,11 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
         elif ext in ("docx", "xlsx", "pptx", "doc", "xls", "ppt") or (url_ext in ("docx", "xlsx", "pptx", "doc", "xls", "ppt")):
             # v8: 格式可识别但无解析器 → 与 ingest_file 同口径抛 ParserUnavailable，
             # 而不是误导性的"不支持的二进制格式"。
-            from .parsing import ParserUnavailable
+            # v9: 补 hint 参数（ParserUnavailable(ext, hint)），否则 TypeError。
+            from .parsing import ParserUnavailable, install_hint
 
-            raise ParserUnavailable(url_ext or ext or "office")
+            _fmt = url_ext or ext or "office"
+            raise ParserUnavailable(_fmt, install_hint(_fmt))
         elif is_zip or (ct_ext is None and not url_ext):
             # 明确的二进制但无法识别格式 → 拒绝，不写乱码
             # v8: 先用文本启发式抢救（content-type 标错的纯文本）
@@ -582,6 +624,21 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
                     extraction_status="skipped",
                 )
         else:
+            # v9: 未知扩展名 + 二进制仍会 latin-1 乱码（P1-10）。
+            # v10: 走模块级 _looks_like_binary（魔数 startswith + NUL 检查排除 UTF-16/32）。
+            if _looks_like_binary(body):
+                return IngestOutcome(
+                    evidence=[
+                        Evidence(
+                            source="web",
+                            identifier=url,
+                            title=url,
+                            snippet=f"不支持的二进制格式（{content_type}），无法提取文本",
+                            relevance=0.5,
+                        )
+                    ],
+                    extraction_status="skipped",
+                )
             text = _parse_text(body)
 
     if not text.strip():

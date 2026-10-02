@@ -95,7 +95,14 @@ def _stub_doe(req: Requirement, reason: str = "rmse_plateau") -> DOEPlan:
     from ..domain.project_spec import levers_to_doe_factors
 
     factors = levers_to_doe_factors(levers[:6])
-    natural = {lev.name: round((lev.low + lev.high) / 2, 3) for lev in levers[:6]}
+
+    def _stub_natural(lev):
+        # v9: 离散因子取中间水平 —— (low+high)/2 会产生无效值（如 0.5 不是合法水平）。
+        if getattr(lev, "kind", "") == "discrete" and getattr(lev, "levels", None):
+            return lev.levels[len(lev.levels) // 2]
+        return round((lev.low + lev.high) / 2, 3)
+
+    natural = {lev.name: _stub_natural(lev) for lev in levers[:6]}
     notes = (
         "目标已达成 — 保留上一轮 DOE，无需新实验建议"
         if reason == "target_achieved"
@@ -206,11 +213,18 @@ def loop_iterate(
 
     if progress_cb:
         progress_cb(0.9, "selecting next experiments")
+    # v9: 离散因子项目不用 lhs —— native lhs 对离散是静默 clamp（P1-7），
+    # 唯一真正支持离散的设计是 full_factorial。
+    from ..domain.project_spec import resolve_levers
+
+    _has_discrete = any(
+        getattr(lv, "kind", "") == "discrete" for lv in resolve_levers(req)
+    )
     next_result = active_learning.active_learning_doe(
         req,
         existing=records,
         n_suggest=n_suggest,
-        design="lhs",
+        design="full_factorial" if _has_discrete else "lhs",
         engine=doe_engine,
         doe_engine=doe_engine,
         campaign_state=campaign_state,

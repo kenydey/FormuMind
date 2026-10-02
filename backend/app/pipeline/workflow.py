@@ -247,7 +247,7 @@ def run_research(
     return result
 
 
-def _apply_levers(req: Requirement, values: dict[str, float]) -> Formulation:
+def _apply_levers(req: Requirement, values: dict[str, float | str]) -> Formulation:
     """Build a fresh formulation with lever ingredient percentages overridden."""
     return reconstruct.formulation_from_factors(req, values)
 
@@ -313,6 +313,35 @@ def build_doe(
         plan.notes = (plan.notes + "\n" if plan.notes else "") + "\n".join(kb_hints)
     _cache_plan(plan)
     return plan
+
+
+def _round_discrete_values(
+    values: dict,
+    discrete_levers: dict,
+    base: "Formulation",
+    process: dict,
+) -> None:
+    """U-3: fallback 优化器输出的离散因子最近邻取整（原地修改 values）。
+
+    数值 levels 取最近值；字符串 levels 保持 baseline（不瞎猜）：
+    先查 baseline 工艺字典 `process`，再查 baseline 配方同名成分，
+    都没有才取 `levels[0]`。v9 从 run_optimization 内联抽出以便单测。
+    """
+    for _name, _lever in discrete_levers.items():
+        if _name not in values:
+            continue
+        _v = values[_name]
+        _num_levels = [lv for lv in _lever.levels if isinstance(lv, (int, float))]
+        if _num_levels and isinstance(_v, (int, float)):
+            values[_name] = min(_num_levels, key=lambda lv: abs(lv - _v))
+        else:
+            _base_val = process.get(_name)
+            if _base_val is None:
+                for _ing in getattr(base, "ingredients", []):
+                    if _ing.name == _name:
+                        _base_val = _ing.name
+                        break
+            values[_name] = _base_val if _base_val is not None else _lever.levels[0]
 
 
 def run_optimization(
@@ -411,25 +440,8 @@ def run_optimization(
     top: list[Formulation] = []
     for x, score in opt.ranked(settings.top_n_formulas):
         values = {f.name: v for f, v in zip(factors, x)}
-        # U-3: 离散因子最近邻取整 —— 数值 levels 取最近值，
-        # 字符串 levels 保持 baseline（不瞎猜）。
-        for _name, _lever in _discrete_levers.items():
-            if _name not in values:
-                continue
-            _v = values[_name]
-            _num_levels = [lv for lv in _lever.levels if isinstance(lv, (int, float))]
-            if _num_levels and isinstance(_v, (int, float)):
-                values[_name] = min(_num_levels, key=lambda lv: abs(lv - _v))
-            else:
-                # 字符串水平：fallback 无法优化，回退到 baseline 值
-                _base_val = getattr(base, "process_params", {}).get(_name)
-                if _base_val is None:
-                    # 从 baseline 配方成分中找同名
-                    for _ing in getattr(base, "ingredients", []):
-                        if _ing.name == _name:
-                            _base_val = _ing.name
-                            break
-                values[_name] = _base_val if _base_val is not None else _lever.levels[0]
+        # U-3: 离散因子最近邻取整（抽成 helper 以便单测 —— v9）。
+        _round_discrete_values(values, _discrete_levers, base, process)
         top_process = dict(process)
         for k, v in values.items():
             if k in ("cure_temperature_c", "cure_time_min"):
@@ -445,8 +457,12 @@ def run_optimization(
             bounds=bounds,
             enrich_network=False,
         )
-        form.name = f"Optimized {req.domain.value} (score {score:.3f})"
+        # v10: 取整已改变配方 —— 展示用取整后的真实分数（form.score），
+        # 而非取整前连续伪值的 score。
+        form.name = f"Optimized {req.domain.value} (score {form.score:.3f})"
         top.append(form)
+    # v10: 取整后按真实分数重排 —— opt.ranked() 的顺序是取整前伪值排的。
+    top.sort(key=lambda f: f.score, reverse=True)
     # U-2: 血缘打通 —— 有真实 lab 测量时不再谎报 predictor_virtual。
     from ..services.doe_cycle_service import lab_measurement_source
 

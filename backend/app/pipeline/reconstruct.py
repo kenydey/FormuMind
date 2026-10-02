@@ -20,7 +20,7 @@ _G_PER_L_TO_WT_PCT = 0.1
 
 def formulation_from_factors(
     req: Requirement | ProductDomain,
-    factors: dict[str, float],
+    factors: dict[str, float | str],  # v9: 离散 str 因子（B-DOE-3 跳过 / U-5 材料替换）
 ) -> Formulation:
     """Apply natural-unit lever values onto the substrate-aware baseline formulation.
 

@@ -82,8 +82,9 @@ def _labels_for(experiment_ids: set[int]) -> set[str]:
 
 
 def _normalised_distance(
-    a: dict[str, float],
-    b: dict[str, float],
+    # v10: 离散 str 因子合法（v9 起跳过该 key），类型如实标注。
+    a: dict[str, float | str],
+    b: dict[str, float | str],
     spans: dict[str, float],
 ) -> float:
     """Euclidean distance over shared factors, each scaled by its own span.
@@ -96,13 +97,26 @@ def _normalised_distance(
     if not shared:
         return float("inf")
     total = 0.0
+    used = 0
     for key in shared:
         span = spans[key] or 1.0
-        total += ((float(a[key]) - float(b[key])) / span) ** 2
-    return math.sqrt(total / len(shared))
+        try:
+            # v9: 离散 str 因子跳过该 key（与 _factor_distance 的 0/1 口径同源，
+            # 这里做距离归一化，str 无法归一化则跳过而非崩溃）。
+            _da, _db = float(a[key]), float(b[key])
+        except (TypeError, ValueError):
+            continue
+        total += ((_da - _db) / span) ** 2
+        used += 1
+    # v10: 被跳过的 key 不计入分母；若全部被跳过则无可比因子，返回 inf
+    #（旧代码除以 len(shared)，全 str 时会错误返回 0.0，导致 penalty_for
+    # 得 0 并在 active_learning 中把候选 acq 彻底清零）。
+    if used == 0:
+        return float("inf")
+    return math.sqrt(total / used)
 
 
-def factor_spans(records: list[ExperimentRecord], candidate: dict[str, float]) -> dict[str, float]:
+def factor_spans(records: list[ExperimentRecord], candidate: dict[str, float | str]) -> dict[str, float]:
     """Observed range per factor, used to normalise distances."""
     spans: dict[str, float] = {}
     keys = set(candidate) | {k for rec in records for k in rec.factors}
@@ -117,7 +131,11 @@ def factor_spans(records: list[ExperimentRecord], candidate: dict[str, float]) -
             except (TypeError, ValueError):
                 continue
         if key in candidate:
-            values.append(float(candidate[key]))
+            # v9: candidate 同样保护（v7 只修了 rec.factors）——离散 str 跳过。
+            try:
+                values.append(float(candidate[key]))
+            except (TypeError, ValueError):
+                continue
         if len(values) >= 2:
             spread = max(values) - min(values)
             spans[key] = spread if spread > 1e-9 else 1.0
@@ -127,7 +145,7 @@ def factor_spans(records: list[ExperimentRecord], candidate: dict[str, float]) -
 
 
 def penalty_for(
-    candidate: dict[str, float],
+    candidate: dict[str, float | str],
     failures: list[ExperimentRecord],
     spans: dict[str, float] | None = None,
 ) -> float:

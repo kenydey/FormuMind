@@ -22,6 +22,7 @@ class IngestTxResult:
     source_id: str
     chunk_count: int       # 0 = idempotent hit
     already_existed: bool
+    failed: bool = False   # v9: 0-chunk / 全过滤时为 True（P0-3 修复裸 dict 崩溃）
 
 
 def ingest_document_tx(
@@ -49,6 +50,7 @@ def ingest_document_tx(
     from ..db.session_utils import commit_session
     from .chunking import chunk_markdown
     from .kb_index import _embed_model_name, _embed_texts, _embedding_probe, kb_enabled
+    from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
     if not kb_enabled() or not (text or "").strip():
         return IngestTxResult(source_id=source_id, chunk_count=0, already_existed=False)
@@ -57,6 +59,13 @@ def ingest_document_tx(
     settings = get_settings()
 
     with commit_session(session_factory) as session:
+        # v10: blocked origin 永不写 chunks —— 与 index_source 同口径，
+        # 入口即拦截并回滚（不留 SourceDocument 僵尸行）。
+        if ingest_block_reason_for_source(source_id):
+            session.rollback()
+            return IngestTxResult(
+                source_id=source_id, chunk_count=0, already_existed=False, failed=True
+            )
         try:
             # ── 1. SourceDocument upsert ──────────────────────────────────
             doc = session.get(SourceDocument, source_id)
@@ -97,12 +106,22 @@ def ingest_document_tx(
             # session 透传给 helper（dedupe 用 caller session 做 DB 比对）。
             from .kb_index import prepare_chunk_rows
 
-            rows = prepare_chunk_rows(text, source_id, embed=_embedding_probe(), session=session)
+            # v10: 接入质量门 —— 与 index_source 同口径（gate 在 embedding/dedupe
+            # 之前）；全过滤时 prepare 返回 None，走 failed+rollback 分支。
+            rows = prepare_chunk_rows(
+                text,
+                source_id,
+                embed=_embedding_probe(),
+                session=session,
+                gate_fn=lambda r: gate_ingest_rows(r, source_id=source_id),
+            )
             # v8: 0-chunk 不提交空 SourceDocument —— 标记 failed，避免僵尸行
             #（与 v7 KB-1 的上传路径同口径）。
             if not rows:
                 session.rollback()
-                return {"source_id": source_id, "chunk_count": 0, "already_existed": False, "failed": True}
+                return IngestTxResult(
+                    source_id=source_id, chunk_count=0, already_existed=False, failed=True
+                )
             # Write chunks via the caller-session method (no internal commit)
             try:
                 chunk_count = chunk_store.replace_for_source_in(session, source_id, rows)

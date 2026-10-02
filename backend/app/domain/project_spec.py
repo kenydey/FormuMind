@@ -287,11 +287,17 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
     keys: list[str] = []
     seen: set[str] = set()
     values: dict[str, list[float]] = {}
+    str_values: dict[str, list[str]] = {}  # v9: 离散 str 水平单独收集
     for run in plan.runs:
         for key, raw in (run.natural or {}).items():
             if key not in seen:
                 seen.add(key)
                 keys.append(key)
+            if isinstance(raw, str) and raw.strip():
+                # v9: 字符串水平保留原值（float() 会跳过导致信息丢失）。
+                if raw not in str_values.setdefault(key, []):
+                    str_values[key].append(raw)
+                continue
             try:
                 values.setdefault(key, []).append(float(raw))
             except (TypeError, ValueError):
@@ -304,6 +310,20 @@ def lever_snapshot_from_plan(plan, req: Requirement | None = None) -> list[dict]
         elif name in legacy_map:
             lo, hi = legacy_map[name]
             unit = "C" if name in ("cure_temperature_c", "bath_temperature_c") else "wt%"
+        elif str_values.get(name):
+            # v9: runs 里是字符串水平 → 重建离散因子，而非伪造连续范围。
+            # v10: 补 low/high/unit（DOEFactor/LeverSpec 的 low/high 必填，
+            # 缺失会导致 ValidationError；离散水平用序号索引作占位范围）。
+            _levels = str_values[name]
+            snapshot.append({
+                "name": name,
+                "low": 0.0,
+                "high": float(len(_levels) - 1),
+                "unit": "",
+                "kind": "discrete",
+                "levels": _levels,
+            })
+            continue
         else:
             samples = values.get(name) or [50.0]
             lo, hi = _bounds_from_pct(sum(samples) / len(samples))

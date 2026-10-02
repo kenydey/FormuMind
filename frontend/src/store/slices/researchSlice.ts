@@ -159,7 +159,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
             chat_markdown: `AI 修改：${prompt}`,
           };
           // v7 H2: AI 修改产生新轮次，必须更新 lastRecommendId，否则采纳记到旧轮
-          draft.lastRecommendId = research.recommend_id ?? draft.lastRecommendId;
+          // v10: 无 ID 时写 null 而非保留旧值，避免采纳归因到上一轮。
+          draft.lastRecommendId = research.recommend_id ?? null;
         });
       } catch (e) {
         set((draft) => {
@@ -223,7 +224,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         await applyEnrichedLeaderboard(set, get, research.recommended, (draft) => {
           draft.research = { ...research, recommended: draft.leaderboard };
           // P1-1: 异步路径同样写入 round id，否则采纳按钮静默禁用。
-          draft.lastRecommendId = research.recommend_id ?? draft.lastRecommendId;
+          // v10: 无 ID 时写 null 而非保留旧值，避免采纳归因到上一轮。
+          draft.lastRecommendId = research.recommend_id ?? null;
         });
       } catch (e) {
         const msg = formatApiError(e);
@@ -348,7 +350,8 @@ export function createResearchSlice(set: SliceSet, get: SliceGet) {
         set((draft) => {
           draft.deepReport = report;
           // P1-1: deep 异步路径同样写入 round id，否则采纳按钮静默禁用。
-          draft.lastRecommendId = wrapped?.recommend_id ?? draft.lastRecommendId;
+          // v10: 无 ID 时写 null 而非保留旧值，避免采纳归因到上一轮。
+          draft.lastRecommendId = wrapped?.recommend_id ?? null;
         });
         if (report.citations?.length) get().addSources(report.citations);
         if (report.candidates?.length) {

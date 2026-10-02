@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -19,6 +20,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from .models import RecommendOutcomeRow
+
+logger = logging.getLogger(__name__)
 
 _ADOPT_SIGNALS = ("button", "copied", "campaign")
 

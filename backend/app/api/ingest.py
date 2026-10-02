@@ -191,7 +191,9 @@ def ingest_from_url(req: IngestUrlRequest):
     except Exception as exc:
         logger.exception("ingest_url failed")
         raise HTTPException(status_code=502, detail="文件处理失败") from exc
-    colbert_store.index_evidence(outcome.evidence)
+    # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
+    if outcome.extraction_status != "skipped":
+        colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(req.url, outcome)
 
 
@@ -199,7 +201,9 @@ def ingest_from_url(req: IngestUrlRequest):
 def ingest_from_text(req: IngestTextRequest):
     title = req.title or "Pasted text"
     outcome = ingest_text(req.text, title)
-    colbert_store.index_evidence(outcome.evidence)
+    # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
+    if outcome.extraction_status != "skipped":
+        colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(title, outcome)
 
 
@@ -214,7 +218,9 @@ def ingest_from_task(req: IngestTaskRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if outcome.error:
         raise HTTPException(status_code=502, detail=outcome.error)
-    colbert_store.index_evidence(outcome.evidence)
+    # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
+    if outcome.extraction_status != "skipped":
+        colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(outcome.identifier, outcome)
 
 

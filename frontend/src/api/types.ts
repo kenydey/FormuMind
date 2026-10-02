@@ -940,6 +940,8 @@ export interface InverseDesignResult {
   seeded_from: Record<string, number>;
   engine: string;
   warnings: string[];
+  // v9: 逆向设计同样注册推荐轮次 —— 后端 data["recommend_id"]，前端写入 lastRecommendId 供采纳按钮。
+  recommend_id?: string | null;
 }
 
 // ── Material substitution ──────────────────────────────────────────────────

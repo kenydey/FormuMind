@@ -180,6 +180,9 @@ def _legacy_active_learning_doe(
             coded=r.coded,
             natural=r.natural,
             ai_suggested=(r.run_id in suggested_ids),
+            # v10: 重建时保留 infeasible 信号，否则 KG 不相容标记在此丢失。
+            infeasible=r.infeasible,
+            infeasible_reason=r.infeasible_reason,
         )
         for r in plan.runs
     ]

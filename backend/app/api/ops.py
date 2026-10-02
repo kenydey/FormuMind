@@ -68,8 +68,9 @@ def recommend_stats(
     Totals, adoption rate, and per-signal distribution over the trailing
     ``days`` window. Fail-open: returns empty stats (``available: False``)
     when the ``recommend_outcomes`` table does not exist yet.
-    ``validated`` is always null by contract — the strong-success layer
-    (experiment validation) is pending C-5.
+    ``validated`` counts rounds with ``experiment_validated=True`` (U-4:
+    sync-datalab 成功后按 snapshot 指纹 fail-open 回写；C-5 pending 时恒为
+    null 的旧契约已过时）。
     """
     from ..db import recommend_outcome_store
     from ..db.database import default_session_factory

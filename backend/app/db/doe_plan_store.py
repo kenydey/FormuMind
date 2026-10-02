@@ -88,7 +88,8 @@ def set_status(session: Session, plan_id: str, new_status: str) -> str:
     current = row.status or "draft"
     if new_status == current:
         return current
-    if new_status not in _PLAN_TRANSITIONS[current]:
+    # v9: 脏数据（表外 status）走 ValueError → API 422，而非 KeyError → 500。
+    if new_status not in _PLAN_TRANSITIONS.get(current, set()):
         raise ValueError(
             f"Illegal plan status transition: {current} → {new_status}"
         )

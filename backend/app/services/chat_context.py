@@ -23,10 +23,10 @@ _CHEM_TOKEN_RE = re.compile(
 # "其他/其它/其余/其中"（其+他/它/余/中，非指代）。
 # v7: 补"其实/其次/其后"（其+实/次/后）、"极其"（极+其）、
 # "此时/此前/此后/此次"（此+时/前/后/次）、"这个时候"。
-# v8: 补"其它"（其+它已排除，但独立的"它"分支会误匹配第二个字）、
-# "因此"/"在此"（高频连词/介词，非指代）。
+# v9: 补"对此/以此/为此/由此/除此"（介词+此，非指代）、"与其"（连词，非代词）。
+# v10: 补"自此/至此/从此/就此/鉴此/有鉴于此"（时间习语，非指代）—— 6/6 实测误杀。
 _ANAPHORA_RE = re.compile(
-    r"(?<!应)该|(?<!尤)(?<!极)其(?!他|它|余|中|实|次|后)|(?<!其)它|(?<!因)(?<!在)此(?!时|前|后|次|致)|这个(?!时候)|那个|上述|上面|前者|后者"
+    r"(?<!应)该|(?<!尤)(?<!极)(?<!与)其(?!他|它|余|中|实|次|后)|(?<!其)它|(?<!因)(?<!在)(?<!对)(?<!以)(?<!为)(?<!由)(?<!除)(?<!自)(?<!至)(?<!从)(?<!就)(?<!鉴)(?<!于)此(?!时|前|后|次|致)|这个(?!时候)|那个|上述|上面|前者|后者"
 )
 # 做先行词时过滤的泛词（是检索词条，但不是可指代的实体）。
 _ANAPHORA_STOPWORDS = frozenset({"实施例", "wt%", "添加量", "盐雾", "牌号"})
@@ -137,7 +137,10 @@ def rewrite_query(
         return q, None
 
     try:
-        context_turns = history[-settings.chat_rewrite_context_turns :]
+        # v10: chat_rewrite_context_turns=0 时 history[-0:] == 全量历史；
+        # 0 应表示"不取上下文"，而非"取全部"。
+        _n = settings.chat_rewrite_context_turns
+        context_turns = history[-_n:] if _n else []
         terms = _collect_context_terms(context_turns, clarified_entities or [])
         if not terms:
             return q, None

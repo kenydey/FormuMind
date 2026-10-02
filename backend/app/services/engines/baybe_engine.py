@@ -525,7 +525,15 @@ class BaybeCampaignEngine:
                     ExperimentRecord(
                         domain=req.domain,
                         factors=run.natural,
-                        cure_temperature_c=run.natural.get("cure_temperature_c"),
+                        # v9: run.natural 是 dict[str, float|str]，str 离散因子
+                        # 传给 float|None 字段会 ValidationError —— 非数值时记 None。
+                        cure_temperature_c=(
+                            _ct
+                            if isinstance(
+                                (_ct := run.natural.get("cure_temperature_c")), (int, float)
+                            )
+                            else None
+                        ),
                         measured=measured_vals,
                         source="baybe_opt",
                     )

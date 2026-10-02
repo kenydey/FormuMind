@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 
 from ..config import Settings, get_settings
 from ..domain.chat_schemas import ChatTurn, StructuredAnswer, StructuredAnswerResponse

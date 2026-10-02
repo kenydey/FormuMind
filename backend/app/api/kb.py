@@ -770,7 +770,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
     return IngestResponse(
         source_id=result.source_id,
         chunk_count=result.chunk_count,
-        status="ok",
+        status="failed" if result.failed else "ok",
     )
 
 

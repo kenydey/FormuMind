@@ -189,9 +189,20 @@ function parseFootnotes(
       }
       currentId = match[1];
       currentContent = match[2] ? [match[2]] : [];
-    } else if (currentId !== null && line.trim()) {
-      // Continuation line of current footnote
-      currentContent.push(line);
+    } else if (currentId !== null) {
+      // v9: 空行终止当前脚注 —— 否则空行后的正文会被吞入上一条脚注的 content。
+      if (!line.trim()) {
+        entries.push({
+          id: currentId,
+          content: currentContent.join("\n").trim(),
+          anchor: anchors.find((a) => a.id === currentId),
+        });
+        currentId = null;
+        currentContent = [];
+      } else {
+        // Continuation line of current footnote
+        currentContent.push(line);
+      }
     }
   }
 

@@ -797,7 +797,9 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
     )
     try:
         outcome = ingest_files_batch(files, origin_url_by_name=origin_url_by_name)
-        colbert_store.index_evidence(outcome.evidence)
+        # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
+        if outcome.extraction_status != "skipped":
+            colbert_store.index_evidence(outcome.evidence)
         result = {
             "evidence": [e.model_dump() for e in outcome.evidence],
             "total": len(outcome.evidence),
@@ -1223,6 +1225,34 @@ def run_inverse_design_task(self, payload: dict) -> dict:
     return run_inverse_design_impl(self.request.id, payload)
 
 
+def _register_inverse_design_round(payload: dict) -> str | None:
+    """v9: 逆向设计注册推荐轮次（C-8 分母），fail-open。
+
+    返回 recommend_id 字符串（可 JSON 序列化），失败返回 None。
+    抽成独立函数以便单测直接断言调用签名 —— v8 曾因签名错误导致
+    整个修复是 no-op（TypeError 被静默吞掉）。
+    """
+    # v8 曾用错签名：register_round(session, *, recommend_id, project_id=None)
+    try:
+        from ..db import recommend_outcome_store
+        from ..db.database import default_session_factory
+        from ..db.session_utils import commit_session
+
+        rec_id = f"inv-{uuid.uuid4().hex[:12]}"
+        req = payload.get("requirement") or {}
+        pid = (req.get("project_id") or "").strip() or None
+        with commit_session(default_session_factory()) as session:
+            recommend_outcome_store.register_round(
+                session,
+                recommend_id=rec_id,
+                project_id=pid,
+            )
+        return rec_id
+    except Exception as exc:  # noqa: BLE001 - fail-open，不阻断主流程
+        logger.warning("inverse design round registration failed (fail-open): %s", exc)
+        return None
+
+
 def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
     from ..domain.schemas import TargetSpec
     from ..services import inverse_design
@@ -1252,16 +1282,10 @@ def run_inverse_design_impl(task_id: str, payload: dict) -> dict:
             progress_cb=progress,
         )
         data = result.model_dump()
-        # v8: 逆向设计同样注册推荐轮次，否则采纳遥测漏掉整条路径。
-        try:
-            from ..db.recommend_outcome_store import register_round
-
-            data["recommend_id"] = register_round(
-                project_id=payload.get("project_id"),
-                n_formulas=len(result.formulations or []),
-            )
-        except Exception:  # noqa: BLE001 - fail-open，不阻断主流程
-            pass
+        # v9: 逆向设计同样注册推荐轮次，否则采纳遥测漏掉整条路径。
+        _rec_id = _register_inverse_design_round(payload)
+        if _rec_id:
+            data["recommend_id"] = _rec_id  # 字符串，json 可序列化
         persist_result(task_id, data, failed=False)
         _persist_terminal(task_id, "inverse_design", data)
         return data

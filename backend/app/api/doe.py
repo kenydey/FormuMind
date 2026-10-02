@@ -70,7 +70,11 @@ def generate_doe(
 ) -> DOEPlan:
     if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
-    plan = workflow.build_doe(requirement, design=design, engine=engine, n=n, seed=seed)
+    try:
+        plan = workflow.build_doe(requirement, design=design, engine=engine, n=n, seed=seed)
+    except ValueError as exc:
+        # v9: 离散因子 + 非 full_factorial 设计 fail-closed → 422 而非 500。
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     _persist_doe_plan(plan, project_id=requirement.project_id or None)
     return plan
 
@@ -119,17 +123,21 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
             }
         )
     )
-    result = active_learning_doe(
-        req=base_req,
-        existing=req.existing_records,
-        n_suggest=req.n_suggest,
-        design=req.doe_design,
-        engine=req.engine,
-        campaign_state=req.campaign_state,
-        doe_engine=req.doe_engine,
-        workbench_campaign_id=req.workbench_campaign_id,
-        budget_remaining=req.budget_remaining,
-    )
+    try:
+        result = active_learning_doe(
+            req=base_req,
+            existing=req.existing_records,
+            n_suggest=req.n_suggest,
+            design=req.doe_design,
+            engine=req.engine,
+            campaign_state=req.campaign_state,
+            doe_engine=req.doe_engine,
+            workbench_campaign_id=req.workbench_campaign_id,
+            budget_remaining=req.budget_remaining,
+        )
+    except ValueError as exc:
+        # v9: 离散因子 + 非 full_factorial 设计 fail-closed → 422 而非 500。
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     _persist_doe_plan(
         result.plan,
         campaign_id=req.workbench_campaign_id,

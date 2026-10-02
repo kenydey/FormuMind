@@ -100,6 +100,9 @@ export default function InverseDesignModal() {
       const data = final.data as (InverseDesignResult & { error?: string }) | undefined;
       if (!data || data.error) throw new Error(data?.error || "搜索失败");
       setResult(data);
+      // v9: 逆向设计轮次同样要写入 lastRecommendId，否则采纳信号记到错误轮次。
+      // v10: 无 ID 时写 null 而非保留旧值 —— fail-open 未注册时旧 ID 会导致采纳归因到上一轮。
+      useStore.setState({ lastRecommendId: data.recommend_id ?? null });
     } catch (err) {
       setError(formatApiError(err));
     } finally {
