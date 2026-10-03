@@ -4,11 +4,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
+from ..clock import utcnow
 from ..db.models import Campaign, ExperimentRow, ProjectRow
 from ..db.session import get_db_session
 
@@ -123,7 +124,7 @@ def _compute_org_dashboard() -> dict:
             total_with_history = sum(1 for c in campaigns if c.loop_history)
             avg_rounds = round(total_rounds / total_with_history, 1) if total_with_history else 0.0
 
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_ago = utcnow() - timedelta(days=7)
         recent_experiments = session.execute(
             select(func.count()).select_from(ExperimentRow).where(ExperimentRow.created_at >= week_ago)
         ).scalar() or 0

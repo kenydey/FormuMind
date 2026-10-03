@@ -1,7 +1,9 @@
 """Post-A′ #1: stale_price / missing_price into explain supply_flags."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
+
+from app.clock import utcnow
 
 from app.domain.schemas import Formulation, Ingredient, ProductDomain
 from app.services.formulation_explain import build_formulation_explain
@@ -9,7 +11,7 @@ from app.services.supply_flags import annotate_supply, collect_formulation_suppl
 
 
 def test_annotate_supply_stale_and_missing():
-    old = (datetime.utcnow() - timedelta(days=400)).isoformat(timespec="seconds")
+    old = (utcnow() - timedelta(days=400)).isoformat(timespec="seconds")
     stale = annotate_supply(
         [{"name": "V", "price_cny_per_kg": 12.0, "price_observed_at": old, "stale_price": True}]
     )

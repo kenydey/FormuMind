@@ -1,10 +1,11 @@
 """A′: manual supplier commercial fields + stale_price annotation."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
+from app.clock import utcnow
 from app.db.database import Base, make_engine, make_session_factory
 from app.db.material_store import MaterialStore
 from app.db.models import MaterialSupplierRow, SupplierRow
@@ -51,7 +52,7 @@ def test_sanitize_manual_quote_fields_and_stamps_observed():
 
 
 def test_stale_price_when_observed_old():
-    old = datetime.utcnow() - timedelta(days=200)
+    old = utcnow() - timedelta(days=200)
     assert is_stale_price(price_cny_per_kg=10.0, price_observed_at=old) is True
     assert is_stale_price(price_cny_per_kg=10.0, price_observed_at=None) is True
     assert is_stale_price(price_cny_per_kg=None, price_observed_at=None) is False
