@@ -88,6 +88,39 @@ def formulation_from_factors(
     return knowledge._balanced(base.name, base.domain, ings, base.rationale)
 
 
+def baseline_lever_values(levers, base: Formulation, process: dict | None = None) -> dict[str, float]:
+    """Natural-unit value of every numeric lever at the *baseline* recipe.
+
+    The inverse of :func:`formulation_from_factors`: an ingredient lever reads
+    the ingredient's ``weight_pct`` in ``base`` (÷ the g/L conversion for g/L
+    levers); a process lever reads ``process`` (e.g. the requirement's cure
+    temperature). A lever whose baseline is unknown — a process parameter the
+    requirement does not state, or a name that is not in ``base`` — falls back
+    to the midpoint of its range rather than guessing. Every value is clipped
+    into the lever's ``[low, high]``.
+
+    Lets an optimizer evaluate the incumbent recipe first, so what it returns as
+    "optimized" is never worse than what the user already has.
+    """
+    process = process or {}
+    weights = {ing.name: float(ing.weight_pct) for ing in base.ingredients}
+    out: dict[str, float] = {}
+    for lev in levers:
+        value: float | None = None
+        if is_process_lever(lev.name):
+            raw = process.get(lev.name)
+            if isinstance(raw, (int, float)):
+                value = float(raw)
+        elif lev.name in weights:
+            value = weights[lev.name]
+            if lev.unit == "g/L":
+                value /= _G_PER_L_TO_WT_PCT
+        if value is None or value != value:  # unknown / NaN → neutral midpoint
+            value = (lev.low + lev.high) / 2.0
+        out[lev.name] = min(max(value, lev.low), lev.high)
+    return out
+
+
 def genome_from_requirement(req: Requirement | ProductDomain):
     """Baseline formulation as a genome — the starting point for genome search.
 

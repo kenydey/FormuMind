@@ -417,8 +417,7 @@ def run_optimization(
     # single formulation's predicted values (which would collapse scores to ~0.5).
     bounds = predictor.default_bounds(objectives, base)
 
-    for it in range(iterations):
-        x = opt.suggest()
+    def _score_candidate(x: list[float]) -> float:
         values = {f.name: v for f, v in zip(factors, x)}
         form = _apply_levers(req, values)
         process_it = dict(process)
@@ -430,7 +429,28 @@ def run_optimization(
         for metric, val in props.items():
             lo, hi = bounds.get(metric, (val, val))
             bounds[metric] = (min(lo, val), max(hi, val))
-        score = predictor.multi_objective_score(form, objectives, process_it, bounds)
+        return predictor.multi_objective_score(form, objectives, process_it, bounds)
+
+    # Warm start: evaluate the incumbent (baseline) recipe first. Without it the
+    # search only ever scores *suggested* points, so a short run — Optuna's TPE
+    # draws its first ten trials at random — can return an "optimized" recipe
+    # that is worse than the one the user already has. It is not one of the
+    # ``iterations`` suggested experiments and adds no history entry, but it is
+    # the starting best so the curve and the returned top are consistent.
+    try:
+        baseline_values = reconstruct.baseline_lever_values(levers, base, process)
+        x0 = [baseline_values[f.name] for f in factors]
+        score0 = _score_candidate(x0)
+        opt.observe(x0, score0)
+        best_so_far = score0
+    except Exception as exc:  # warm start is an improvement, never a requirement
+        from loguru import logger
+
+        logger.warning("optimizer warm start with the baseline skipped: {}", exc)
+
+    for it in range(iterations):
+        x = opt.suggest()
+        score = _score_candidate(x)
         opt.observe(x, score)
         best_so_far = max(best_so_far, score)
         history.append(round(best_so_far, 3))

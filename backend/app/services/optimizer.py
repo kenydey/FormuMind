@@ -193,13 +193,26 @@ class OptunaOptimizer(_ObservedHistoryMixin):
 
     def observe(self, x: list[float], y: float) -> None:
         trial = self._pending.pop(self._key(x), None)
-        if trial is None:
-            # Miss (e.g. x not from suggest()): register a fresh trial so the
-            # study still learns from this observation instead of dropping it.
-            trial = self._study.ask()
-            for f, v in zip(self.factors, x):
-                trial.suggest_float(f.name, f.low, f.high)
-        self._study.tell(trial, float(y))
+        if trial is not None:
+            self._study.tell(trial, float(y))
+        else:
+            # x did not come from suggest() — a warm start (the baseline recipe)
+            # or a prior measurement. Record the REAL (x, y) pair as a finished
+            # trial. The previous fallback did ``ask()`` and ``suggest_float`` on
+            # a fresh trial, which draws *new* parameter values, so the study
+            # learned y against points that were never x.
+            import optuna
+
+            params = {f.name: f.clip(v) for f, v in zip(self.factors, x)}
+            distributions = {
+                f.name: optuna.distributions.FloatDistribution(f.low, f.high)
+                for f in self.factors
+            }
+            self._study.add_trial(
+                optuna.trial.create_trial(
+                    params=params, distributions=distributions, value=float(y)
+                )
+            )
         self._X.append(list(x))
         self._y.append(float(y))
 
@@ -239,6 +252,7 @@ class SummitOptimizer(_ObservedHistoryMixin):
         self._domain = domain
         self._strategy = SOBO(domain)
         self._prev = None  # previous experiments DataSet fed back to the strategy
+        self._last = None  # last suggestion; None until the first suggest()
 
     def suggest(self, n_candidates: int = 64, kappa: float = 1.5) -> list[float]:
         suggestion = self._strategy.suggest_experiments(1, prev_res=self._prev)
@@ -246,9 +260,13 @@ class SummitOptimizer(_ObservedHistoryMixin):
         return [float(suggestion[f.name].iloc[0]) for f in self.factors]
 
     def observe(self, x: list[float], y: float) -> None:
-        ds = self._last.copy()
-        ds["objective", "DATA"] = float(y)
-        self._prev = ds
+        if self._last is not None:
+            ds = self._last.copy()
+            ds["objective", "DATA"] = float(y)
+            self._prev = ds
+        # else: an observation before any suggest() (warm start). Summit's
+        # strategy is only fed suggested experiments; the pair is still kept in
+        # the history so ranked()/best include it.
         self._X.append(list(x))
         self._y.append(float(y))
 
