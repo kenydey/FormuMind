@@ -79,3 +79,56 @@ def test_index_source_triggers_link_on_ingest(stores):
     n = kb_index.index_source(sid, MD, embed=False)
     assert n >= 1
     assert ent.stats()["mentions"] >= 1
+
+
+def test_catalog_materials_without_a_chinese_name_are_not_linked_into_every_chunk(stores):
+    """``name not in text and zh_name not in text``: for the 30 catalog entries that have no
+    ``zh_name`` the second clause was ``"" not in text`` — always False — so *every* chunk
+    got a mention of every one of them (Xylene, Titanium dioxide, Talc, Deionized water…)
+    and the KG filled with materials no document had mentioned."""
+    from app.services.kg.entity_linker import _catalog_entity_id
+
+    src, _, ent = stores
+    text = "# 环氧体系\n\n环氧树脂 E51 一百质量份，盐雾试验七百二十小时，附着力 1 级。\n"
+    sid = src.create(
+        filename="plain.md",
+        title="环氧体系",
+        source_kind="local",
+        full_text=text,
+        content_hash="h-plain",
+    )
+    kb_index.index_source(sid, text, embed=False)
+    link_source(sid)
+
+    for absent in ("Xylene", "Titanium dioxide", "Talc", "Deionized water", "Fumed silica"):
+        assert ent.get_entity(_catalog_entity_id(absent)) is None, f"{absent} was never mentioned"
+
+
+def test_catalog_material_without_a_chinese_name_is_linked_when_its_english_name_appears(stores):
+    from app.services.kg.entity_linker import _catalog_entity_id
+
+    src, _, ent = stores
+    text = "# Solvent notes\n\nThe formulation is thinned with Xylene to 60 s flow time.\n"
+    sid = src.create(
+        filename="xyl.md",
+        title="Solvent notes",
+        source_kind="local",
+        full_text=text,
+        content_hash="h-xyl",
+    )
+    kb_index.index_source(sid, text, embed=False)
+    link_source(sid)
+    assert ent.get_entity(_catalog_entity_id("Xylene")) is not None
+    assert ent.get_entity(_catalog_entity_id("Talc")) is None
+
+
+def test_element_map_loads_from_any_working_directory(tmp_path, monkeypatch):
+    """The packaged map is the fallback for the relative default path; the fallback itself
+    pointed one directory too high, so outside ``backend/`` the element expansion was
+    silently empty."""
+    from app.services.kg import element_map
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(element_map, "_cache", None)
+    loaded = element_map.load_element_map("app/resources/kg_elements.json")
+    assert loaded, "packaged kg_elements.json was not found"

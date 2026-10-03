@@ -365,7 +365,10 @@ def _link_catalog_in_text(session: Session, chunk, source_id: str, touched: set[
     for name, spec in RAW_MATERIALS.items():
         if len(name) < 4:
             continue
-        if name.lower() not in lower and (spec.get("zh_name") or "") not in text:
+        zh_name = spec.get("zh_name") or ""
+        # ``"" in text`` is always true: without the truthiness guard a catalog entry that
+        # has no Chinese name (30 of 46) matched *every* chunk.
+        if name.lower() not in lower and not (zh_name and zh_name in text):
             continue
         eid = _catalog_entity_id(name)
         store.upsert_entity(
