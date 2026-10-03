@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, type BuiltinConnector, type McpServerConfig, type UnifiedSkill } from "../api";
+import { useEnvFlag } from "../hooks/useEnvFlag";
 import { useStore } from "../store";
 
 export default function ChatComposerPlus() {
@@ -9,9 +10,10 @@ export default function ChatComposerPlus() {
   const [connectors, setConnectors] = useState<BuiltinConnector[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Settings → "中栏 Composer + 菜单" (backend flag chat_composer_plus_enabled).
+  const chatComposerPlusEnabled = useEnvFlag("chat_composer_plus_enabled", true);
 
   const {
-    chatComposerPlusEnabled,
     chatMode,
     selectedChatSkills,
     selectedConnectors,
@@ -26,7 +28,6 @@ export default function ChatComposerPlus() {
     appendChatDraftRef,
   } = useStore(
     useShallow((s) => ({
-      chatComposerPlusEnabled: s.chatComposerPlusEnabled,
       chatMode: s.chatMode,
       selectedChatSkills: s.selectedChatSkills,
       selectedConnectors: s.selectedConnectors,

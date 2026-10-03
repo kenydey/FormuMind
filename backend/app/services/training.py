@@ -174,12 +174,20 @@ class ModelRegistry:
                 self._store.clear()
 
     # --- ingestion -----------------------------------------------------
-    def add(self, records: list[ExperimentRecord], retrain: bool = True) -> None:
+    def add(self, records: list[ExperimentRecord], retrain: bool = True) -> bool:
+        """Persist *records*; return True when the surrogate models were retrained.
+
+        ``retrain`` is what the caller asked for; the global ``auto_retrain``
+        setting (Settings UI "实验自动重训") can veto it, in which case models
+        only refresh through ``train()`` / ``POST /api/train`` or a restart.
+        """
         with self._lock:
             self._store.add(records)
             self._records.extend(records)
-            if retrain:
+            if retrain and get_settings().auto_retrain:
                 self._retrain_all()
+                return True
+            return False
 
     def known_labels(self) -> set[str]:
         with self._lock:

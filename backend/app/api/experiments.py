@@ -206,15 +206,23 @@ def _row_response(row: WorkbenchRow, ingested_items: set[str] | None = None) -> 
 
 
 @router.post("/experiments", response_model=TrainingReport)
+def _retrain_note(requested: bool, retrained: bool | None) -> str:
+    """Say so when ``auto_retrain=false`` vetoed a requested retrain."""
+    if requested and retrained is False:
+        return " Auto-retrain is off (FORMUMIND_AUTO_RETRAIN=false): call POST /api/train to refresh models."
+    return ""
+
+
 def submit_experiments(submission: ExperimentSubmission) -> TrainingReport:
     """Ingest measured DOE results and (optionally) retrain models."""
-    registry.add(submission.records, retrain=submission.retrain)
+    retrained = registry.add(submission.records, retrain=submission.retrain)
     trained = registry.info()
     msg = (
         f"Ingested {len(submission.records)} record(s); "
         f"{len(trained)} model(s) active."
     )
     if not trained:
+    msg += _retrain_note(submission.retrain, retrained)
         msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
     return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
 
@@ -242,11 +250,12 @@ async def import_experiments_csv(
         if not records:
             raise HTTPException(status_code=422, detail="No rows with measured values found in the CSV.")
 
-        await run_in_threadpool(registry.add, records, retrain=retrain)
+        retrained = await run_in_threadpool(registry.add, records, retrain=retrain)
         trained = registry.info()
         msg = (
             f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
             f"{len(trained)} model(s) active."
+        msg += _retrain_note(retrain, retrained)
         )
         if not trained:
             msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."

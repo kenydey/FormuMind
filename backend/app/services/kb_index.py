@@ -577,7 +577,9 @@ def index_source(
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)
-        if n and settings.kg_enabled and (
+        # ``kg_link_on_ingest`` is the legacy master switch kept as a compat
+        # alias: False still disables linking even if the split flags are on.
+        if n and settings.kg_enabled and settings.kg_link_on_ingest and (
             settings.kg_entities_on_ingest or settings.kg_relations_on_ingest
         ):
             try:

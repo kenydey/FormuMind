@@ -2582,6 +2582,8 @@ export interface Neo4jCompound {
   uid: string;
   name?: string | null;
   smiles?: string | null;
+  relations_upserted?: number;
+  failed_sources?: number;
   cas_number?: string | null;
   molecular_weight?: number | null;
   supplier?: string | null;

@@ -1290,8 +1290,6 @@ defaults.
 | `FORMUMIND_CHAT_CROSS_ENCODER_ENABLED` | `false` | Optional local CE on chat after session BM25 recall. Default off (CPU latency); failures keep BM25 order |
 | `FORMUMIND_WIKI_STORM_CLAIM_REGENERATE` | `false` | When claim_check sets `needs_regenerate`, rewrite one failed section once (still `draft_not_claims`) |
 | `FORMUMIND_ARXIV_PREFER_SOURCE` | `true` | Fetch arXiv LaTeX source instead of the PDF: measured 53 s → 1.2 s on the same 100-page paper |
-| `FORMUMIND_PDF_DOWNLOAD` | `false` | **Legacy** patent PDF download, superseded by full-text enrichment; kept for compatibility |
-| `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |
 
 ### Settings saved in the UI vs. settings set by the deployment
 

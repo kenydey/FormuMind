@@ -431,16 +431,8 @@ def test_enrich_skips_non_patent_identifiers(monkeypatch):
     assert result == ev  # unchanged — not a patent identifier
 
 
-# ── KnowledgeCohort PDF gate ──────────────────────────────────────────────────
-
-
-def test_cohort_pdf_download_gate_is_off_by_default():
-    """By default pdf_download=False, so enrich_with_fulltext is never called."""
-    from app.config import get_settings
-    settings = get_settings()
-    assert settings.pdf_download is False, (
-        "pdf_download must default to False to keep tests offline"
-    )
+# (The ``pdf_download`` gate test was removed with the retired setting: nothing in
+# production calls ``enrich_with_fulltext``; ``fulltext_fetcher`` replaced it.)
 
 
 # ── Real PDF fixture tests (no mocks — exercises actual parsing cascade) ───────

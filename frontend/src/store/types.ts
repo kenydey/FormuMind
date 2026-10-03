@@ -207,7 +207,6 @@ export interface AppState {
   /** 组织看板独立入口（Wave 0 从设置页搬出）。 */
   orgOpen: boolean;
   toggleOrg: () => void;
-  chatComposerPlusEnabled: boolean;
   chatMode: "chat" | "evidence";
   selectedChatSkills: string[];
   selectedConnectors: string[];

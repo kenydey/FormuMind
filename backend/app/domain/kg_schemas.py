@@ -171,6 +171,9 @@ class KGRebuildReport(BaseModel):
     entities_upserted: int = 0
     mentions_upserted: int = 0
     links_created: int = 0
+    relations_upserted: int = 0
+    # Sources whose linking raised; the rebuild carries on with the rest.
+    failed_sources: int = 0
 
 
 class KGLinkReport(BaseModel):

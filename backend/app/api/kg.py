@@ -297,7 +297,7 @@ def link_one_source(source_id: str) -> KGLinkReport:
     if not kg_enabled():
         raise HTTPException(status_code=409, detail="知识图谱未启用（FORMUMIND_KG_ENABLED）")
     try:
-        return link_source(source_id)
+        return link_source(source_id, force_entities=True)
     except Exception as exc:
         logger.exception("kg link-source failed")
         raise HTTPException(status_code=500, detail="操作失败") from exc

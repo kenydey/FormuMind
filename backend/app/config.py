@@ -13,6 +13,15 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_ENVS = frozenset({"development", "dev", "test"})
+# Settings that were removed because nothing read them any more. Old .env files
+# (the Settings UI persists toggles there) may still carry them: accepted and
+# ignored, so dev-mode fail-fast on typos does not break an existing deployment.
+_RETIRED_ENV_KEYS = frozenset({
+    "FORMUMIND_PDF_DOWNLOAD",       # superseded by fulltext_enrich / fulltext_fetcher
+    "FORMUMIND_PDF_DOWNLOAD_MAX",
+    "FORMUMIND_CHAT_RERANK_ENABLED",  # LLM rerank dropped from the chat path
+    "FORMUMIND_AGENT_SEARCH_LLM_ASSESS",  # reserved placeholder, never implemented
+})
 # Env keys read by subsystems but not declared on Settings.
 _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_ENV_FILE",
@@ -237,12 +246,6 @@ class Settings(BaseSettings):
     # agents.bus.publish() 在关闭 / Redis 不可达 / redis 库缺失时静默 no-op。
     # 为下一阶段重物理计算（physics_jobs 频道）的异步投递做准备。
     agent_bus_enabled: bool = False
-
-    # PDF 全文下载（v0.9）。启用后 DeepResearchEngine 在检索到专利后尝试下载 PDF，
-    # 将摘要替换为全文段落，提升 kb_agent 的合成质量。默认关闭以保证测试速度。
-    # 需要网络访问 USPTO / EPO / Google Patents 服务器。
-    pdf_download: bool = False
-    pdf_download_max: int = 3     # 每次研究最多下载几篇专利 PDF
 
     # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
     # Polite-pool contact for OpenAlex. Default is a non-personal placeholder —
@@ -675,8 +678,6 @@ class Settings(BaseSettings):
     agent_search_enabled: bool = False
     agent_search_max_iters: int = 3
     agent_search_time_budget_s: float = 20.0
-    # LLM-based gap assessment (cost); heuristic is used when False.
-    agent_search_llm_assess: bool = False
     # Phase 2 — retrieval_by_children: score sentence-level children at query
     # time, present the parent block. Default OFF until golden A/B decides
     # (see tests/test_phase2_children_ab.py). Override via
@@ -752,11 +753,10 @@ class Settings(BaseSettings):
     # B-2 — 对话历史 token 预算：trim_history 在 max_turns 硬截断之外再按
     # token 预算压缩；超限的旧轮次折叠为一条确定性摘要，不再静默丢弃。
     chat_history_token_budget: int = 6000
-    # LLM 精排问答检索候选（无 GPU 时替代 ColBERT 的语义排序）。召回阶段用
-    # bm25_faiss/ColBERT 粗排 top-N，再由 LLM 打分精排到 top-k；失败回退原排序。
-    chat_rerank_enabled: bool = True
-    chat_rerank_candidates: int = 50    # 召回候选数（送入 LLM 打分）
-    chat_rerank_top_k: int = 20         # 精排后保留条数
+    # 问答检索：BM25/ColBERT 召回 top-N 候选，直取 top-k（不再做 LLM 二次精排——
+    # 实测 30-76 s/问、收益边际，旧开关 chat_rerank_enabled 已移除）。
+    chat_rerank_candidates: int = 50    # 召回候选数
+    chat_rerank_top_k: int = 20         # 保留条数
     chat_context_max_chars: int = 12000  # 交给 LLM 的全文 chunk 总字符预算
 
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
@@ -1028,7 +1028,7 @@ def _audit_formumind_env() -> None:
     if _settings_extra_policy() != "forbid":
         return
     known = {f"FORMUMIND_{name.upper()}" for name in Settings.model_fields}
-    known |= _INFRA_ENV_KEYS
+    known |= _INFRA_ENV_KEYS | _RETIRED_ENV_KEYS
     unknown = sorted(k for k in os.environ if k.startswith("FORMUMIND_") and k not in known)
     if unknown:
         raise ValueError(
