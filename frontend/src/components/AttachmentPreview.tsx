@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatApiError, type Attachment } from "../api";
+import AuthDownloadLink from "./AuthDownloadLink";
 
 interface AttachmentPreviewProps {
   campaignId: number;
@@ -127,14 +128,14 @@ export default function AttachmentPreview({
                   {a.filename || a.source_document_id}
                 </span>
                 <span className="text-slate-500">{a.kind}</span>
-                <a
-                  href={api.workbenchAttachmentDownloadUrl(campaignId, rowId, a.id)}
-                  download={a.filename || undefined}
+                <AuthDownloadLink
+                  url={api.workbenchAttachmentDownloadUrl(campaignId, rowId, a.id)}
+                  filename={a.filename || undefined}
                   className="text-accent hover:text-accent/80"
                   title="下载原件（DataLab 归档副本优先）"
                 >
                   ⬇ 下载
-                </a>
+                </AuthDownloadLink>
                 <button
                   className="text-red-400/80 hover:text-red-300 disabled:opacity-40"
                   disabled={busy}

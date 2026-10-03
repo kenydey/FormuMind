@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import AuthDownloadLink from "./AuthDownloadLink";
 
 interface RoundItem {
   round: number;
@@ -89,14 +90,13 @@ export default function CampaignRoundsModal({
                 <div className="mt-2 text-[11px] text-slate-400">
                   DOE：{r.doe_plan.design ?? "?"}（{r.doe_plan.runs?.length ?? 0} 个实验点）
                   {r.doe_plan.plan_id && (
-                    <a
+                    <AuthDownloadLink
                       className="ml-2 text-accent2 hover:underline"
-                      href={api.doeExportUrl(r.doe_plan.plan_id)}
-                      target="_blank"
-                      rel="noreferrer"
+                      url={api.doeExportUrl(r.doe_plan.plan_id)}
+                      filename={`doe_${r.doe_plan.plan_id}.csv`}
                     >
                       导出
-                    </a>
+                    </AuthDownloadLink>
                   )}
                 </div>
               ) : (

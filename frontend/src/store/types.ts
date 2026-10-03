@@ -271,7 +271,7 @@ export interface AppState {
   /** B: 训练数据就绪度刷新（导入/训练后调用） */
   refreshTrainingStatus: () => Promise<void>;
   recomputePredicted: () => Promise<void>;
-  exportDoe: (format: "csv" | "xlsx") => void;
+  exportDoe: (format: "csv" | "xlsx") => Promise<void>;
   importCsv: (file: File) => Promise<void>;
   toggleHistory: () => void;
   initProjects: () => Promise<void>;

@@ -8,6 +8,7 @@ import {
 import { api, type ProjectExportFile } from "../api";
 import { useStore } from "../store";
 import { saveTextToProjectShelf, shelfFilename } from "../utils/export";
+import AuthDownloadLink from "./AuthDownloadLink";
 
 const KIND_ICON: Record<ArtifactKind, string> = {
   leaderboard: "⭐",
@@ -220,16 +221,17 @@ function ExportShelfPanel({ projectId }: { projectId: string }) {
                 {formatBytes(f.size)} · {new Date(f.updated_at).toLocaleString("zh-CN")}
               </div>
             </div>
-            <a
-              href={api.downloadProjectExportUrl(projectId, f.name)}
-              download={f.name}
+            <AuthDownloadLink
+              url={api.downloadProjectExportUrl(projectId, f.name)}
+              filename={f.name}
               className="text-[10px] text-accent border border-accent/30 rounded px-1.5 py-0.5 hover:bg-accent/10 shrink-0"
             >
               下载
-            </a>
+            </AuthDownloadLink>
             <button
               type="button"
               onClick={() => void removeFile(f.name)}
+              testId={`shelf-download-${f.name}`}
               className="text-[10px] text-rose-400 border border-rose-500/30 rounded px-1.5 py-0.5 hover:bg-rose-500/10 shrink-0"
             >
               删除

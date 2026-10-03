@@ -7,6 +7,7 @@ import type {
   OptimizationResult,
 } from "../../api";
 import { extractMeasuredValues, objectiveMetrics } from "../../utils/objectiveContract";
+import { downloadWithAuth } from "../../utils/download";
 import { applyEnrichedLeaderboard, enrichFormulationsViaValidate } from "../formulationEnrich";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState } from "../types";
@@ -719,7 +720,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    exportDoe: (format) => {
+    exportDoe: async (format) => {
       const { doePlan } = get();
       if (!doePlan?.plan_id) {
         set((draft) => {
@@ -727,7 +728,14 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
         return;
       }
-      window.open(api.doeExportUrl(doePlan.plan_id, format), "_blank");
+      // window.open() navigates without the bearer token → 401 whenever API auth is on.
+      try {
+        await downloadWithAuth(api.doeExportUrl(doePlan.plan_id, format), `doe_${doePlan.plan_id}.${format}`);
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      }
     },
 
     importCsv: async (file) => {
