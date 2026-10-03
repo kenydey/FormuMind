@@ -40,6 +40,11 @@ services:
     ports:
       - "127.0.0.1:5173:80"
 
+  beat:
+    restart: always
+    environment:
+      FORMUMIND_ENVIRONMENT: production
+
   redis:
     restart: always
 
