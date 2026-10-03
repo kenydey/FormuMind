@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..services import connectors_builtin, mcp_client, mcp_import
+from ._uploads import read_upload_capped
 
 router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
@@ -138,7 +139,7 @@ async def mcp_import_upload(
     file: UploadFile = File(...),
     dry_run: bool = True,
 ) -> dict:
-    data = await file.read()
+    data = await read_upload_capped(file, file.filename or "mcp.json")
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:

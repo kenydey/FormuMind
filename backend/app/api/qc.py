@@ -14,6 +14,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
+from ._uploads import read_upload_capped
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -70,14 +72,8 @@ async def ingest_qc_report(
     from ..services.parsing import parse_document
     from ..services.qc_ingest import ingest_qc_report_tx, sync_measurements_to_experiment
 
-    content = await file.read()
     filename = file.filename or "qc_report"
-    limit = get_settings().ingest_max_upload_bytes
-    if len(content) > limit:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File {filename!r} exceeds upload limit ({limit // (1024 * 1024)} MiB)",
-        )
+    content = await read_upload_capped(file, filename)
     if not content:
         raise HTTPException(status_code=400, detail="空文件")
 

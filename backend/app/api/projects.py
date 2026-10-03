@@ -14,6 +14,7 @@ from ..domain.project_workspace import (
     ProjectUpdateRequest,
 )
 from ..services import project_exports as exports_svc
+from ._uploads import read_upload_capped
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -163,8 +164,8 @@ async def upload_project_export(
     filename: str | None = Form(default=None),
 ) -> ExportFileOut:
     """Multipart binary upload (PDF / XLSX) into the project export shelf."""
-    raw = await file.read()
     name = filename or file.filename or "export.bin"
+    raw = await read_upload_capped(file, name, limit=exports_svc.MAX_EXPORT_BYTES)
     info = exports_svc.save_export_bytes(project_id, name, raw)
     return ExportFileOut(
         name=info.name,

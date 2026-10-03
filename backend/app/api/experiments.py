@@ -27,6 +27,7 @@ from ..db.models import Campaign
 from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, Requirement, TrainingReport
 from ..services import io_export
 from ..services.training import registry
+from ._uploads import read_upload_capped
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,6 @@ def _row_response(row: WorkbenchRow, ingested_items: set[str] | None = None) -> 
     )
 
 
-@router.post("/experiments", response_model=TrainingReport)
 def _retrain_note(requested: bool, retrained: bool | None) -> str:
     """Say so when ``auto_retrain=false`` vetoed a requested retrain."""
     if requested and retrained is False:
@@ -213,6 +213,7 @@ def _retrain_note(requested: bool, retrained: bool | None) -> str:
     return ""
 
 
+@router.post("/experiments", response_model=TrainingReport)
 def submit_experiments(submission: ExperimentSubmission) -> TrainingReport:
     """Ingest measured DOE results and (optionally) retrain models."""
     retrained = registry.add(submission.records, retrain=submission.retrain)
@@ -221,8 +222,8 @@ def submit_experiments(submission: ExperimentSubmission) -> TrainingReport:
         f"Ingested {len(submission.records)} record(s); "
         f"{len(trained)} model(s) active."
     )
-    if not trained:
     msg += _retrain_note(submission.retrain, retrained)
+    if not trained:
         msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
     return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
 
@@ -236,9 +237,7 @@ async def import_experiments_csv(
     """Import a filled-in DOE/experiment CSV (the worksheet produced by
     ``GET /api/doe/{plan_id}/export``) and (optionally) retrain models."""
     try:
-        raw = await file.read()
-        if len(raw) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+        raw = await read_upload_capped(file, file.filename or "upload")
         try:
             text = raw.decode("utf-8-sig")  # tolerate Excel's UTF-8 BOM
         except UnicodeDecodeError:
@@ -255,8 +254,8 @@ async def import_experiments_csv(
         msg = (
             f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
             f"{len(trained)} model(s) active."
-        msg += _retrain_note(retrain, retrained)
         )
+        msg += _retrain_note(retrain, retrained)
         if not trained:
             msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
         return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
@@ -813,14 +812,9 @@ async def upload_experiment_attachment(
 
     filename = file.filename or "upload"
 
-    # 上限 20MB：优先用 Content-Length 预估，缺失则读后检查（A11：原端点无上限）
-    MAX_BYTES = 20 * 1024 * 1024
-    if file.size is not None and file.size > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+    # Size cap = Settings.ingest_max_upload_bytes (A11), enforced while reading.
     # Upload to Datalab ELN (best-effort; falls back to local file storage)
-    content = await file.read()
-    if len(content) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+    content = await read_upload_capped(file, filename)
     item_id = await _datalab_item_id_for(experiment_id=experiment_id)
     source_document_id = await _upload_or_store_locally(content, filename, item_id=item_id)
     # Create local attachment link
@@ -1082,14 +1076,8 @@ async def upload_workbench_row_attachment(
         )
     from ..db.measurement_store import get_measurement_store
 
-    settings = get_settings()
     filename = file.filename or "upload"
-    MAX_BYTES = 20 * 1024 * 1024
-    if file.size is not None and file.size > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
-    content = await file.read()
-    if len(content) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+    content = await read_upload_capped(file, filename)
     item_id = await _datalab_item_id_for(campaign_id=campaign_id, row_id=row_id)
     source_document_id = await _upload_or_store_locally(content, filename, item_id=item_id)
     store = get_measurement_store()

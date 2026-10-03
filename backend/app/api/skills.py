@@ -8,6 +8,7 @@ from ..resources.formulation_skills import get_formulation_skill, list_formulati
 from ..services import chat_skills as chat_skills_svc
 from ..services import skill_install as install_svc
 from ..services.skills_store import is_enabled, load_prefs, save_prefs
+from ._uploads import read_upload_capped
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
@@ -174,7 +175,7 @@ async def install_upload(
     file: UploadFile = File(...),
     dry_run: bool = True,
 ) -> dict:
-    data = await file.read()
+    data = await read_upload_capped(file, file.filename or "skill")
     name = (file.filename or "").lower()
     if name.endswith(".md") or name.endswith(".markdown"):
         try:
