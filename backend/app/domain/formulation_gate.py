@@ -5,6 +5,8 @@ import re
 
 from pydantic import BaseModel, Field, ValidationError
 
+from .closure import is_closure_warning, total_of as closure_total_of
+from .closure import warning_text as closure_warning_text
 from .knowledge import RAW_MATERIALS, resolve_material_name
 from .schemas import (
     Formulation,
@@ -395,8 +397,18 @@ def _requirement_constraint_warnings(form: Formulation, req: Requirement) -> lis
     warnings: list[str] = []
     voc_limit = req.voc_limit_gpl
     voc_gpl = form.predicted.get("voc_gpl") if form.predicted else None
-    warnings.extend(validate_formulation(form, voc_limit_gpl=voc_limit))
-    warnings.extend(full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit))
+    # The caller already reported the closure (with the formulation's name); these two
+    # re-run it, unnamed, on the same recipe.
+    warnings.extend(
+        w
+        for w in validate_formulation(form, voc_limit_gpl=voc_limit)
+        if not is_closure_warning(w)
+    )
+    warnings.extend(
+        w
+        for w in full_safety_check(form, voc_gpl=voc_gpl, voc_limit_gpl=voc_limit)
+        if not is_closure_warning(w)
+    )
 
     if req.cure_temperature_c is not None:
         cure = form.predicted.get("cure_temperature_c")
@@ -432,9 +444,9 @@ def validate_formulations(
         if not form.ingredients:
             warnings.append(f"Formulation {form.name!r} has no ingredients; skipped")
             continue
-        total_wt = sum(i.weight_pct for i in form.ingredients)
-        if abs(total_wt - 100.0) > 5.0:
-            warnings.append(f"{form.name}: ingredient weights sum to {total_wt:.1f}% (expected ~100%)")
+        closure_msg = closure_warning_text(sum(i.weight_pct for i in form.ingredients), form.name)
+        if closure_msg:
+            warnings.append(closure_msg)
         enriched_ings: list[Ingredient] = []
         for ing in form.ingredients:
             updates, ing_warnings = _resolve_fields(
@@ -533,8 +545,10 @@ def validate_recommended_formulas(
         if missing_mf:
             warnings.append(f"{rec.name}: missing MF for {', '.join(missing_mf[:3])}")
         weights = [c.weight_pct for c in enriched_comps if c.weight_pct is not None]
-        if weights and abs(sum(weights) - 100.0) > 8.0:
-            warnings.append(f"{rec.name}: weight_pct sum {sum(weights):.1f}% (expected ~100%)")
+        if weights:
+            closure_msg = closure_warning_text(closure_total_of(weights), rec.name)
+            if closure_msg:
+                warnings.append(closure_msg)
         out.append(rec.model_copy(update={"components": enriched_comps}))
     return out, warnings
 

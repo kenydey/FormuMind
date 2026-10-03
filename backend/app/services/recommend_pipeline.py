@@ -168,7 +168,10 @@ def finalize_scored_formulations(
 
 
 def _rescore_with_shared_bounds(scored: list[Formulation], objectives, process) -> None:
-    """Re-score a multi-objective batch against one shared normalisation range.
+    """Re-score a batch whose scores are normalised against one shared range.
+
+    That is every batch except a single *maximize* objective (whose score is the raw
+    predicted value): two or more objectives, or one that minimizes / matches a target.
 
     ``_score_and_validate`` scores each candidate on its own, normalising every
     metric without a user-given range against ``(0, 2 × that candidate's own
@@ -184,11 +187,11 @@ def _rescore_with_shared_bounds(scored: list[Formulation], objectives, process) 
     """
     import math
 
-    if len(objectives or []) < 2 or not scored:
+    from . import predictor
+
+    if not scored or not objectives or predictor.score_is_raw(objectives):
         return
     try:
-        from . import predictor
-
         objectives = list(objectives)
         props = [predictor.predict(f, process) for f in scored]
         shared = predictor.shared_bounds(objectives, props)

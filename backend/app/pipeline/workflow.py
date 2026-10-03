@@ -142,7 +142,7 @@ def _score_and_validate(
     if objectives is None:
         objectives = req.objectives if req else None
     if objectives:
-        if len(objectives) == 1:
+        if predictor.score_is_raw(objectives):
             metric = objectives[0].metric
             form.score = float(form.predicted.get(metric, 0.0))
         else:
@@ -157,6 +157,13 @@ def _score_and_validate(
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
         form.score = float(form.predicted.get(metric, 0.0))
+    # A recipe whose weights do not add up to ~100 % (strict grounding drops unsupported
+    # components instead of rescaling the rest) is not comparable with a complete one:
+    # discount its score by the shared closure policy so it cannot out-rank a full recipe
+    # on predicted properties alone. Complete recipes (|Σ−100| ≤ 0.5) are untouched.
+    from ..domain.closure import discount_score
+
+    form.score = discount_score(form.score, form.total_pct())
     if chem_screen:
         # KG soft ranking *after* score assignment so measured/INHIBITS factors
         # are not wiped by predicted / multi_objective assignment above.
@@ -175,6 +182,8 @@ def _score_and_validate(
         )
     except Exception:
         pass
+    # The same closure / safety message can arrive through more than one check.
+    form.warnings = list(dict.fromkeys(form.warnings))
     return form
 
 
