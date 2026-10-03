@@ -6,24 +6,40 @@ import { noNotificationsDismissed } from "../notifications";
 import type { SliceGet, SliceSet } from "../sliceTypes";
 import type { AppState, StoreWorkspaceSlice } from "../types";
 
+/**
+ * Per-project working state that is not part of the saved workspace payload: the last
+ * search's per-source status and filter report, upload / validation warnings, relation
+ * insights, the agent's reasoning steps and the stage text of a finished run. Switching or
+ * creating a project used to leave all of it in place, so project B showed project A's
+ * "source failed" badges, filter statistics and recipe-validation warnings.
+ */
+function resetTransientProjectState(draft: AppState): void {
+  draft.sourceStatus = {};
+  draft.usedSeedFallback = false;
+  draft.filterReport = null;
+  draft.uploadWarnings = [];
+  draft.relationInsights = [];
+  draft.taskThinking = [];
+  draft.formulationValidateWarnings = [];
+  draft.deepResearchStage = "";
+  draft.deepResearchMessage = "";
+  draft.recommendStage = "";
+  draft.recommendMessage = "";
+}
+
 export function createProjectSlice(set: SliceSet, get: SliceGet) {
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   // dirty 去重(2026-09-05): 内容无变化不重复 PUT(降噪 + 防空覆盖)
   let lastSavedJson = "";
 
+  // Fingerprint of everything that is saved. It used to cover 9 of the ~35 payload
+  // fields (sources, chat, requirement, leaderboard, research, doe_plan,
+  // constraints, measured, agent_context), so a change confined to any other one
+  // — the search query, which sources are ticked, source types, engines, loop
+  // results — compared "unchanged", was never PUT, and was lost on reload (the
+  // local persist backup does not hold search/sources/chat).
   function workspaceJson(s: StoreWorkspaceSlice) {
-    const payload = buildWorkspacePayload(s);
-    return JSON.stringify({
-      sources: payload.sources,
-      chat_history: payload.chat_history,
-      requirement: payload.requirement,
-      leaderboard: payload.leaderboard,
-      research: payload.research,
-      doe_plan: payload.doe_plan,
-      active_constraints: payload.active_constraints,
-      measured: payload.measured,
-      agent_context: payload.agent_context,
-    });
+    return JSON.stringify(buildWorkspacePayload(s));
   }
 
   return {
@@ -82,27 +98,36 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
     },
 
     loadProject: async (id) => {
+      get().cancelAutosave();
+      // Save the project we are leaving FIRST. saveProject() refuses to run while
+      // projectLoading is set (guard against writing back a still-empty workspace),
+      // so raising the flag before this call made the save a silent no-op and lost
+      // every edit from the last AUTOSAVE_MS before the switch.
+      const { activeProjectId } = get();
+      if (activeProjectId && activeProjectId !== id) {
+        await get().saveProject();
+      }
       set((draft) => {
         draft.projectLoading = true;
       });
-      get().cancelAutosave();
       try {
-        const { activeProjectId } = get();
-        if (activeProjectId && activeProjectId !== id) {
-          await get().saveProject();
-        }
         const detail = await api.getProject(id);
         const patch = applyWorkspacePayload(detail.workspace, defaultRequirement);
         // 空 payload 保护(2026-09-05): 后端 sources/chat 为空而本地镜像有值
         // → 保留本地显示(防事故空 payload 循环覆盖), 内容以服务端后续为准。
-        const prevWs = workspaceSlice(get());
-        if (!patch.sources?.length && prevWs.sources?.length) {
-          patch.sources = prevWs.sources;
-          console.warn("[project] 后端 sources 为空, 已用本地镜像恢复显示 (project %s)", id);
-        }
-        if (!patch.chatHistory?.length && prevWs.chatHistory?.length) {
-          patch.chatHistory = prevWs.chatHistory;
-          console.warn("[project] 后端 chat_history 为空, 已用本地镜像恢复显示 (project %s)", id);
+        // Only for re-opening the SAME project. The in-memory workspace belongs to the project
+        // being left, so for a switch it is somebody else's data: a new/empty project B used to
+        // come up with A's sources and chat, and the next autosave wrote them into B.
+        if (get().activeProjectId === id) {
+          const prevWs = workspaceSlice(get());
+          if (!patch.sources?.length && prevWs.sources?.length) {
+            patch.sources = prevWs.sources;
+            console.warn("[project] 后端 sources 为空, 已用本地镜像恢复显示 (project %s)", id);
+          }
+          if (!patch.chatHistory?.length && prevWs.chatHistory?.length) {
+            patch.chatHistory = prevWs.chatHistory;
+            console.warn("[project] 后端 chat_history 为空, 已用本地镜像恢复显示 (project %s)", id);
+          }
         }
         if (!patch.activeConstraints?.length && patch.requirement) {
           patch.activeConstraints = defaultConstraintsForDomain(patch.requirement.domain);
@@ -116,11 +141,17 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.busy = "idle";
           // project 切换: 会话归零(旧会话存档在后端, 可经会话列表恢复)
           draft.activeSessionId = null;
+          // The session list is per project (listSessions filters by project_id). Leaving the
+          // old project's list in place showed A's threads under B — and picking one loaded A's
+          // conversation into B. createProject already clears these; a switch must too.
+          draft.chatSessions = [];
+          draft.chatSessionTitles = {};
           draft.kbIngest = null;
           draft.searchProgress = null;
           draft.notificationsDismissed = noNotificationsDismissed();
           // v7 H1: 切项目必须重置 lastRecommendId，否则采纳信号写到别的项目轮次
           draft.lastRecommendId = null;
+          resetTransientProjectState(draft);
         });
         if (!get().requirement.levers?.length) {
           await get().syncDefaultLevers();
@@ -133,6 +164,8 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           });
         }
         get().captureRequirementSnapshot();
+        // The session drawer may already be open: it only refetches when toggled.
+        if (get().chatSessionsOpen) void get().refreshChatSessions();
       } catch (e) {
         set((draft) => {
           draft.error = formatApiError(e);
@@ -157,7 +190,7 @@ export function createProjectSlice(set: SliceSet, get: SliceGet) {
           draft.deepReport = null;
           draft.leaderboard = [];
           draft.lastRecommendId = null;
-          draft.formulationValidateWarnings = [];
+          resetTransientProjectState(draft);
           draft.chatHistory = [];
           draft.activeSessionId = null;
           draft.chatSessions = [];
