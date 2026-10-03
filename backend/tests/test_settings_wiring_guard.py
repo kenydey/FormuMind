@@ -153,3 +153,38 @@ def test_documented_override_dirs_do_not_trip_dev_fail_fast(monkeypatch, tmp_pat
     finally:
         config.get_settings.cache_clear()
 
+
+def test_every_env_key_in_compose_and_scripts_is_known_to_the_dev_audit():
+    """``docker-compose*.yml`` / ``scripts/*.sh`` / ``deploy/`` set or read ``FORMUMIND_*``
+    keys too. One the app does not know is a startup failure waiting in development mode
+    (the default environment) the moment it lands in the backend's environment."""
+    from app import config
+
+    repo = BACKEND.parent
+    known = (
+        {f"FORMUMIND_{n.upper()}" for n in Settings.model_fields}
+        | set(config._INFRA_ENV_KEYS)
+        | set(config._RETIRED_ENV_KEYS)
+    )
+    candidates = [
+        *repo.glob("docker-compose*.yml"),
+        *repo.glob("scripts/**/*.sh"),
+        *repo.glob("deploy/**/*.yml"),
+        *repo.glob("deploy/**/*.yaml"),
+        *repo.glob("deploy/**/*.env*"),
+        *repo.glob(".env*"),
+    ]
+    if not any(p.is_file() for p in candidates):
+        pytest.skip("deployment files not available (backend-only checkout)")
+    unknown: dict[str, str] = {}
+    for path in candidates:
+        if not path.is_file():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+            for key in re.findall(r"\bFORMUMIND_[A-Z0-9_]+\b", line):
+                if key not in known:
+                    unknown.setdefault(key, f"{path.relative_to(repo)}:{lineno}")
+    assert not unknown, (
+        "FORMUMIND_* keys used by deployment files but unknown to config._audit_formumind_env "
+        f"(add to _INFRA_ENV_KEYS or make them Settings fields): {unknown}"
+    )

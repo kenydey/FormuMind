@@ -46,6 +46,14 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_RULES_DIR",   # services/rule_loader.py editable rules directory
     "FORMUMIND_DEEPEVAL",    # scripts/deepeval_gate.py on/off switch (CI)
     "FORMUMIND_RIGOR_GATE",  # scripts/rigor_gate.py skip switch (CI)
+    # Deployment knobs read by compose / shell scripts, never by the app. They live in the
+    # same ``.env`` that ``env_file:`` hands to the backend container, where dev-mode
+    # fail-fast used to reject them as typos:
+    "FORMUMIND_PG_USER",                # docker-compose.eln.yml  (postgres container)
+    "FORMUMIND_PG_PASSWORD",            # docker-compose.eln.yml
+    "FORMUMIND_PG_DB",                  # docker-compose.eln.yml
+    "FORMUMIND_USE_HOST_NETWORK",       # scripts/deploy-docker.sh
+    "FORMUMIND_DATALAB_PROBE_TIMEOUT_S",  # scripts/start_all.sh
 })
 
 
