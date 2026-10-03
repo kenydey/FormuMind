@@ -15,7 +15,7 @@ from ..db.chunk_store import get_chunk_store
 from ..db.entity_store import get_entity_store
 from ..db.session_utils import commit_session
 from ..db.source_store import get_source_store
-from .kg.formulation_linker import _infer_role
+from .kg.ingredient_roles import infer_role
 from .material_promote import propose_material
 from .patent_ids import normalize_patent_pub
 
@@ -346,7 +346,7 @@ def table_to_ingredients(table: dict[str, Any]) -> dict[str, Any] | None:
     ingredients = []
     extra_warnings: list[str] = []
     for name, pct, raw in zip(names, pcts, amounts):
-        role = _infer_role(name)
+        role = infer_role(name)
         conf = 0.85 if amount_source == "table" else 0.4
         if _DIRTY_NAME_RE.search(name):
             conf = min(conf, 0.45)
@@ -524,7 +524,7 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
         current.append(
             {
                 "name": name,
-                "role": _infer_role(name),
+                "role": infer_role(name),
                 "amount_raw": num,
                 "unit_raw": unit,
                 "evidence_span": raw[:200],
@@ -556,7 +556,7 @@ def parse_flattened_amount_rows(text: str) -> dict[str, Any] | None:
         ingredients.append(
             {
                 "name": name,
-                "role": row.get("role") or _infer_role(name),
+                "role": row.get("role") or infer_role(name),
                 "weight_pct": pct,
                 "unit_raw": row.get("unit_raw"),
                 "amount_raw": row.get("amount_raw"),

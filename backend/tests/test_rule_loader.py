@@ -82,7 +82,7 @@ def test_override_dir_adds_new_alkali(tmp_path, monkeypatch):
 
 
 def test_override_dir_new_role_hint(tmp_path, monkeypatch):
-    """覆盖目录加 rheology_modifier → additive → _infer_role 返回 additive。"""
+    """覆盖目录加 rheology_modifier → additive → infer_role 返回 additive。"""
     over = tmp_path / "rules"
     over.mkdir()
     (over / "linker_roles.toml").write_text(
@@ -92,9 +92,9 @@ def test_override_dir_new_role_hint(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("FORMUMIND_RULES_DIR", str(over))
     reload_rules()
-    from app.services.kg.formulation_linker import _infer_role
+    from app.services.kg.ingredient_roles import infer_role
 
-    assert _infer_role("Rheology Modifier 9000") == "additive"
+    assert infer_role("Rheology Modifier 9000") == "additive"
 
 
 def test_override_dir_extends_ambiguity_lexicon(tmp_path, monkeypatch):
@@ -162,7 +162,7 @@ def test_consumers_work_with_default_rules():
     assert any("析氢" in r for r in res.reasons)
     assert any("强碱" in r for r in res.reasons)
 
-    from app.services.kg.formulation_linker import _infer_role
-    assert _infer_role("Epoxy resin E51") == "resin"
-    assert _infer_role("FoamStar defoamer") == "additive"
-    assert _infer_role("Something exotic new") == "unknown"
+    from app.services.kg.ingredient_roles import infer_role
+    assert infer_role("Epoxy resin E51") == "resin"
+    assert infer_role("FoamStar defoamer") == "additive"
+    assert infer_role("Something exotic new") == "unknown"

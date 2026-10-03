@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0043(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head (``0043_outbox_task_id``)."""
+def test_revision_chain_head_is_0044(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head (``0044_drop_kg_formulation_links``)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0043(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0043"
+    assert heads[0] == "0044"
 
 
 def test_migrations_partial_columns_branch(
@@ -598,3 +598,46 @@ def test_make_engine_adds_task_id_to_a_database_that_was_not_upgraded(
             assert session.query(TaskOutbox).one().task_id == "abc"
     finally:
         engine.dispose()
+
+
+def test_migration_0044_drops_the_unused_kg_formulation_links_table(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing ever wrote or read ``kg_formulation_links``; a fresh database no longer has it,
+    and the downgrade restores the shape revision 0020 created."""
+    from tests.alembic_helpers import run_downgrade
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "kg_formulation_links" not in _table_names(tmp_db_url)
+
+    run_downgrade(tmp_db_url, monkeypatch, "0043")
+    assert {
+        "experiment_id",
+        "entity_id",
+        "role",
+        "weight_pct",
+        "link_type",
+        "project_id",
+        "created_at",
+    } <= _column_names(tmp_db_url, "kg_formulation_links")
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    run_upgrade(tmp_db_url, monkeypatch, "head")  # repeatable
+    assert "kg_formulation_links" not in _table_names(tmp_db_url)
+
+
+def test_an_upgrade_from_before_the_table_existed_ends_in_the_same_place(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0020 creates the table when the baseline did not (it no longer does); 0044 removes it."""
+    from tests.alembic_helpers import run_downgrade
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    run_downgrade(tmp_db_url, monkeypatch, "0019_add_task_id_to_experiments")
+    assert "kg_formulation_links" not in _table_names(tmp_db_url)
+
+    run_upgrade(tmp_db_url, monkeypatch, "0020")
+    assert "kg_formulation_links" in _table_names(tmp_db_url)
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "kg_formulation_links" not in _table_names(tmp_db_url)
