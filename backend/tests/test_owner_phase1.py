@@ -55,7 +55,7 @@ def test_campaign_owner_persisted(tmp_path, monkeypatch):
     """create_from_plan 写入 owner_id（非 default 时）。"""
     from app.db.database import make_engine, make_session_factory
     from app.db.campaign_store import SqliteCampaignStore
-    from app.domain.schemas import DOEPlan, ProductDomain, Requirement
+    from app.domain.schemas import ProductDomain, Requirement
     import asyncio
 
     db_path = tmp_path / "owner.db"

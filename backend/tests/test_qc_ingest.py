@@ -14,7 +14,7 @@ def test_sync_measurements_failure_returns_error_marker(monkeypatch):
     @contextmanager
     def _boom(*a, **k):
         raise RuntimeError("db down")
-        yield  # noqa: unreachable
+        yield  # unreachable: keeps this a generator so @contextmanager accepts it
 
     monkeypatch.setattr(su, "commit_session", _boom)
     # also patch the already-imported reference if any, and qc_ingest re-imports inside fn so su patch suffices

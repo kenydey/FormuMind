@@ -336,8 +336,6 @@ def _try_validate_adopt_against_lab(
     # v7 M3: 时序约束 —— 测量必须晚于推荐创建时间，否则数月前的无关实验
     # 会误标 experiment_validated。
     # v8: 用 measured_at（真实实验时间）优先，空时回退到 created_at（sync 时间）。
-    from sqlalchemy import func
-
     measured_ids = select(MeasurementRow.experiment_id).distinct()
     if getattr(row, "created_at", None):
         _m_time = func.coalesce(MeasurementRow.measured_at, MeasurementRow.created_at)

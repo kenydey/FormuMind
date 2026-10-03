@@ -1,6 +1,8 @@
 """Tests for post-generation Claim Checker."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.config import Settings
 from app.domain.schemas import Evidence
 from app.pipeline.claim_checker import (
@@ -10,6 +12,10 @@ from app.pipeline.claim_checker import (
     extract_claims,
     verify_claim_offline,
 )
+
+
+if TYPE_CHECKING:  # only for the "Formulation" return annotation below
+    from app.domain.schemas import Formulation
 
 
 def _evidence(snippet: str, source: str = "USPTO") -> Evidence:

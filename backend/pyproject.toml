@@ -141,8 +141,21 @@ dev = [
     "pytest-timeout>=2.0",
     "httpx>=0.27",
     "pypdf>=4.0",             # real PDF parsing in test_pdf_downloader real-path tests
+    "ruff==0.15.8",           # lint gate (see [tool.ruff] below); pinned so new rules cannot break CI
 ]
 postgres = ["psycopg2-binary>=2.9"]
+
+# Lint gate: bug classes only — syntax errors (E9), invalid comparisons/literals
+# (F63), statement-level mistakes (F7), undefined names (F82) and shadowed
+# definitions (F811). Style rules (F401 unused imports, F841 unused variables,
+# E-series layout, import order) are deliberately NOT enabled yet: they have
+# ~250 pre-existing hits and none of them is a defect on its own.
+[tool.ruff]
+target-version = "py310"
+extend-exclude = ["data", "locks"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "F811"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

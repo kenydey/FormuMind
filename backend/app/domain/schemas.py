@@ -1077,6 +1077,6 @@ Requirement.model_rebuild()
 InverseDesignRequest.model_rebuild()
 # Resolve VerificationDoe.doe_plan forward reference to DOEPlan (defined
 # above) — circular-import guard in tradeoff_schemas keeps it lazy.
-from .tradeoff_schemas import TradeOffAnalysis, VerificationDoe
+from .tradeoff_schemas import VerificationDoe  # TradeOffAnalysis: imported above
 TradeOffAnalysis.model_rebuild()
 VerificationDoe.model_rebuild()

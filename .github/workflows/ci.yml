@@ -35,13 +35,22 @@ jobs:
         # requirements.txt is hand-maintained (it carries comments explaining
         # why individual pins exist) and is what the Dockerfile installs from,
         # so it is the source of truth here too. Never regenerate it with
-        # `pip freeze`. The dev extra adds only the test tooling.
+        # `pip freeze`. The dev extra adds only the test tooling (and ruff).
         # llm + science extras pull openai / rdkit so vision + chemistry suites
         # exercise real code paths instead of ModuleNotFoundError skips/fails.
+        # optimize + pydoe + pandas are the light optional engines: without them
+        # the optuna / pydoe / pandas-backed suites are silently skipped
+        # (importorskip), which is how a broken pydoe import survived CI. The
+        # heavy ones (baybe, torch) have their own non-blocking job below.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -e '.[dev,llm,science]'
+          pip install -e '.[dev,llm,science,optimize,pydoe]' pandas
+
+      - name: Lint (ruff)
+        # Bug-class rules only (see [tool.ruff] in pyproject.toml): undefined
+        # names, syntax errors, invalid comparisons, shadowed definitions.
+        run: ruff check .
 
       - name: Run tests
         # golden_eval is the slow QA-dataset suite; everything else must pass.
@@ -54,6 +63,36 @@ jobs:
         # (citation veracity / claim coverage / numeric consistency).
         # No LLM cost; fails the build if rigor metrics regress.
         run: python scripts/rigor_gate.py
+
+  # Heavy optional engine (BayBE pulls torch/botorch). Non-blocking: it exists to
+  # make the BayBE-backed suites visible instead of silently skipped, without
+  # letting a multi-GB resolve or an upstream release gate every merge.
+  backend-baybe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e '.[dev,llm,science,optimize,pydoe,baybe]'
+
+      - name: BayBE-backed tests
+        # Only the files that exercise BayBE; the full suite already runs in the
+        # blocking `backend` job.
+        run: pytest -m "not golden_eval" -q -rs $(grep -l -i "baybe" tests/test_*.py)
 
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
   # still required — failures block merge once calibrated.
