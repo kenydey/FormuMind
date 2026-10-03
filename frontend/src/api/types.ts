@@ -562,16 +562,26 @@ export interface ModelInfo {
   /** P1 #19: conformal absolute residual quantile (~90% half-width). */
   conformal_q90?: number | null;
   uncertainty_calibrated?: boolean;
+  /** A rollback pins the served version: retrains archive new ones beside it. */
+  pinned?: boolean;
+  /** Newest archived version when it is not the one being served. */
+  newer_version_id?: string | null;
 }
 
 export interface ModelVersionMeta {
   version_id: string;
   path?: string;
   is_current?: boolean;
-  data_hash?: string;
-  feature_version?: string;
-  trained_at?: string;
-  backend?: string;
+  /** Only the current row can be pinned. */
+  pinned?: boolean;
+  data_hash?: string | null;
+  feature_version?: string | null;
+  trained_at?: string | null;
+  backend?: string | null;
+  n_samples?: number | null;
+  r2?: number | null;
+  cv_r2?: number | null;
+  rmse?: number | null;
 }
 
 export interface TrainingReport {

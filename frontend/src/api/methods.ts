@@ -729,6 +729,9 @@ export const apiMethods = {
       metric,
       version_id: versionId,
     }),
+  /** Release a rollback pin and serve the newest archived version. */
+  unpinModel: (projectId: string, metric: string) =>
+    post<ModelInfo>("/api/models/unpin", { project_id: projectId, metric }),
   trainingStatus: () => get<TrainingStatus>("/api/training-status"),
   doeExportUrl: (planId: string, format: "csv" | "xlsx" = "csv") =>
     `/api/doe/${planId}/export?format=${format}`,

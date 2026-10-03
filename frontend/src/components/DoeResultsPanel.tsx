@@ -9,6 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import type { ModelInfo, FactorCandidate } from "../api";
+import ModelVersionsPanel from "./ModelVersionsPanel";
 import { api, primaryObjectiveMetric } from "../api";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
@@ -81,20 +82,44 @@ function R2Trend({ trend }: { trend: number[] }) {
 }
 
 function ModelCard({ m, trend }: { m: ModelInfo; trend: number[] }) {
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const refreshModels = useStore((s) => s.refreshModels);
   return (
-    <div className="border border-edge/40 rounded p-1.5 bg-ink/40">
+    <div
+      className={`border border-edge/40 rounded p-1.5 bg-ink/40 ${versionsOpen ? "col-span-2" : ""}`}
+      data-testid={`model-card-${m.metric}`}
+    >
       <div className="flex items-center gap-2">
         <R2Gauge value={m.r2} />
-        <div className="text-[10px] leading-snug min-w-0">
-          <div className="text-accent2 font-mono truncate">{m.metric}</div>
+        <div className="text-[10px] leading-snug min-w-0 flex-1">
+          <div className="text-accent2 font-mono truncate">
+            {m.metric}
+            {m.pinned && (
+              <span className="ml-1 text-amber-300" title="已回滚并锁定，重训不会覆盖" data-testid="model-pin-badge">
+                🔒
+              </span>
+            )}
+          </div>
           <div className="text-slate-500">{m.backend} · n={m.n_samples}</div>
           <div className="text-slate-500">
             RMSE={m.rmse.toFixed(m.rmse < 1 ? 3 : 1)}
             {m.cv_r2 != null ? ` · cvR²=${m.cv_r2.toFixed(2)}` : ""}
           </div>
         </div>
+        {m.project_id && (
+          <button
+            type="button"
+            onClick={() => setVersionsOpen((o) => !o)}
+            className="self-start shrink-0 rounded border border-edge px-1 py-0.5 text-[10px] text-slate-400 hover:border-accent/40 hover:text-accent"
+            title="查看历史版本 / 回滚"
+            data-testid={`model-versions-toggle-${m.metric}`}
+          >
+            版本{m.newer_version_id ? " •" : ""}
+          </button>
+        )}
       </div>
       <R2Trend trend={trend} />
+      {versionsOpen && <ModelVersionsPanel model={m} onChanged={refreshModels} />}
     </div>
   );
 }

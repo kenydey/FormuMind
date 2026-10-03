@@ -213,6 +213,18 @@ def _retrain_note(requested: bool, retrained: bool | None) -> str:
     return ""
 
 
+def _pinned_note(models: list[ModelInfo]) -> str:
+    """Say so when a rolled-back (pinned) model kept serving instead of the retrained one."""
+    pinned = [m for m in models if m.pinned and m.newer_version_id]
+    if not pinned:
+        return ""
+    names = ", ".join(sorted({m.metric for m in pinned}))
+    return (
+        f" {len(pinned)} model(s) stay pinned to a rolled-back version ({names}); "
+        "the retrained versions are archived — release the pin (POST /api/models/unpin) to use them."
+    )
+
+
 @router.post("/experiments", response_model=TrainingReport)
 def submit_experiments(submission: ExperimentSubmission) -> TrainingReport:
     """Ingest measured DOE results and (optionally) retrain models."""
@@ -222,7 +234,7 @@ def submit_experiments(submission: ExperimentSubmission) -> TrainingReport:
         f"Ingested {len(submission.records)} record(s); "
         f"{len(trained)} model(s) active."
     )
-    msg += _retrain_note(submission.retrain, retrained)
+    msg += _retrain_note(submission.retrain, retrained) + _pinned_note(trained)
     if not trained:
         msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
     return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
@@ -255,7 +267,7 @@ async def import_experiments_csv(
             f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
             f"{len(trained)} model(s) active."
         )
-        msg += _retrain_note(retrain, retrained)
+        msg += _retrain_note(retrain, retrained) + _pinned_note(trained)
         if not trained:
             msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
         return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
@@ -270,7 +282,10 @@ def train_models() -> TrainingReport:
     return TrainingReport(
         trained=trained,
         total_records=registry.total_records,
-        message=f"Retrained {len(trained)} model(s) from {registry.total_records} records.",
+        message=(
+            f"Retrained {len(trained)} model(s) from {registry.total_records} records."
+            + _pinned_note(trained)
+        ),
     )
 
 
@@ -296,10 +311,24 @@ class ModelRollbackBody(BaseModel):
 
 @router.post("/models/rollback", response_model=ModelInfo)
 def rollback_model(body: ModelRollbackBody) -> ModelInfo:
-    """P1 #20: point current surrogate at a prior artifact and load it."""
+    """P1 #20: serve a prior artifact and pin it (retrains archive new versions beside it)."""
     info = registry.rollback_model(body.project_id, body.metric, body.version_id)
     if info is None:
         raise HTTPException(status_code=404, detail="model version not found")
+    return info
+
+
+class ModelUnpinBody(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    metric: str = Field(..., min_length=1)
+
+
+@router.post("/models/unpin", response_model=ModelInfo)
+def unpin_model(body: ModelUnpinBody) -> ModelInfo:
+    """Release a rollback pin and serve the newest archived version."""
+    info = registry.unpin_model(body.project_id, body.metric)
+    if info is None:
+        raise HTTPException(status_code=404, detail="no archived model version for this metric")
     return info
 
 

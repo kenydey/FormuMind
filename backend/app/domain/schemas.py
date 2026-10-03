@@ -813,6 +813,11 @@ class ModelInfo(BaseModel):
     # P1 #19: absolute residual quantile from k-fold OOF (≈90% coverage half-width).
     conformal_q90: float | None = None
     uncertainty_calibrated: bool = False
+    # A rollback pins the chosen version: retrains archive new versions beside it without
+    # taking over. ``newer_version_id`` is the newest archived version when it is not the
+    # one being served (so the UI can say "locked at X, Y is waiting").
+    pinned: bool = False
+    newer_version_id: str | None = None
 
 
 class TrainingReport(BaseModel):
