@@ -117,11 +117,13 @@ export function useContourGrid(
   gridSize: number = 40,
   levels: number = 10
 ) {
+  // The tuples are new objects on every render; the numbers inside them are what matter.
+  const [xMin, xMax] = xDomain;
+  const [yMin, yMax] = yDomain;
+
   return useMemo(() => {
     if (points.length < 3) return { grid: [], gridX: [], gridY: [], paths: [], levelValues: [] };
 
-    const [xMin, xMax] = xDomain;
-    const [yMin, yMax] = yDomain;
     const dx = (xMax - xMin) / (gridSize - 1);
     const dy = (yMax - yMin) / (gridSize - 1);
 
@@ -140,5 +142,5 @@ export function useContourGrid(
     const paths = generateContourPaths(grid, gridX, gridY, levelValues);
 
     return { grid, gridX, gridY, paths, levelValues };
-  }, [points, xDomain[0], xDomain[1], yDomain[0], yDomain[1], gridSize, levels]);
+  }, [points, xMin, xMax, yMin, yMax, gridSize, levels]);
 }
