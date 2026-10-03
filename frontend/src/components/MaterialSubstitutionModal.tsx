@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import {
@@ -66,7 +66,8 @@ export default function MaterialSubstitutionModal({
   );
 
   const formulation = leaderboard[0];
-  const ingredients = formulation?.ingredients ?? [];
+  // Memoised: `?? []` made a new array every render, so the effect below re-ran on every render.
+  const ingredients = useMemo(() => formulation?.ingredients ?? [], [formulation]);
   const [material, setMaterial] = useState(initialMaterial ?? "");
   const [report, setReport] = useState<SubstitutionReport | null>(null);
   const [risk, setRisk] = useState<SupplyRiskReport | null>(null);

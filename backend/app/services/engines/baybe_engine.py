@@ -115,7 +115,6 @@ def _clean_measurement_dataframe(df, metrics: list[str], expected_params: list[s
 
     Returns ``(cleaned_df, report)``; ``report`` holds dropped/kept counts.
     """
-    import pandas as pd
 
     report = {"dropped_all_nan": 0, "dropped_partial_nan": 0, "kept": 0}
     if df is None or getattr(df, "empty", True):

@@ -41,6 +41,7 @@ from .datalab_client import (
 )
 from .session_utils import commit_session
 from .models import Campaign
+from ..services.http_safe import make_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +322,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
                     await self._client.aclose()
                 except Exception:
                     pass
-            self._client = httpx.AsyncClient(
+            self._client = make_async_client(
                 base_url=self._api_url,
                 timeout=self._timeout,
                 limits=self._limits,

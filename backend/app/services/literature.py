@@ -19,6 +19,7 @@ from ..domain.schemas import Evidence, Passage, ProductDomain, Requirement
 from ..services.runtime_secrets import effective_setting
 from .errors import degrade_return, optional_import
 from .literature_identity import identity_keys
+from .http_safe import make_client
 
 if TYPE_CHECKING:
     from .content_filter import FilterReport
@@ -415,10 +416,8 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0, *, doma
             if _prof is not None
             else _ALLOWED_S2_FIELDS
         )
-        import httpx
-
         want = min(100, (limit + offset) * 3)
-        with httpx.Client(timeout=_SOURCE_TIMEOUT_SEC) as client:
+        with make_client(timeout=_SOURCE_TIMEOUT_SEC) as client:
             resp = client.get(
                 "https://api.semanticscholar.org/graph/v1/paper/search",
                 params={

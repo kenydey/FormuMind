@@ -35,13 +35,25 @@ def _catalog_entity_id(catalog_key: str) -> str:
     return f"chem:catalog:{safe}"
 
 
-def link_source(source_id: str, *, settings: Settings | None = None) -> KGLinkReport:
+def link_source(
+    source_id: str,
+    *,
+    settings: Settings | None = None,
+    force_entities: bool = False,
+) -> KGLinkReport:
+    """Link one source's chunks to KG entities (and, if enabled, relations).
+
+    The ``*_on_ingest`` flags only say what the *automatic* ingest hook does.
+    On-demand callers (``POST /api/kg/link-source``, ``rebuild_all``) pass
+    ``force_entities=True``: an explicit "rebuild" must not silently do nothing
+    just because the user turned the ingest-time pass off to keep uploads fast.
+    """
     settings = settings or get_settings()
     if not settings.kg_enabled:
         return KGLinkReport(source_id=source_id)
     # 关系提取依赖实体提及（mentions 是关系的锚点），所以关系开则实体也开。
     do_relations = settings.kg_relations_on_ingest and settings.kg_relation_extract_enabled
-    do_entities = settings.kg_entities_on_ingest or do_relations
+    do_entities = force_entities or settings.kg_entities_on_ingest or do_relations
     try:
         store = get_entity_store()
         if do_entities:
@@ -101,7 +113,12 @@ def rebuild_all(*, project_id: str | None = None, settings: Settings | None = No
                 )
             source_ids = [r[0] for r in q.all()]
         for sid in source_ids:
-            lr = link_source(sid, settings=settings)
+            try:
+                lr = link_source(sid, settings=settings, force_entities=True)
+            except Exception as exc:  # one bad source must not truncate the rebuild
+                report.failed_sources += 1
+                degrade_return(logger, exc, f"kg rebuild: link_source failed for {sid}", None)
+                continue
             report.linked_sources += 1
             report.entities_upserted += lr.entities_upserted
             report.mentions_upserted += lr.mentions_upserted
@@ -348,7 +365,10 @@ def _link_catalog_in_text(session: Session, chunk, source_id: str, touched: set[
     for name, spec in RAW_MATERIALS.items():
         if len(name) < 4:
             continue
-        if name.lower() not in lower and (spec.get("zh_name") or "") not in text:
+        zh_name = spec.get("zh_name") or ""
+        # ``"" in text`` is always true: without the truthiness guard a catalog entry that
+        # has no Chinese name (30 of 46) matched *every* chunk.
+        if name.lower() not in lower and not (zh_name and zh_name in text):
             continue
         eid = _catalog_entity_id(name)
         store.upsert_entity(

@@ -82,6 +82,16 @@ def _env_or_file(name: str, default: str = "") -> str:
     return default
 
 
+# The password the compose file and this adapter fall back to when nothing is configured. It is
+# in the repository, so it protects nothing; ``uses_default_password`` lets startup say so.
+DEFAULT_PASSWORD = "formumind123"
+
+
+def uses_default_password() -> bool:
+    """True when no ``FORMUMIND_NEO4J_PASSWORD`` is set (or it is the shipped default)."""
+    return _env_or_file("FORMUMIND_NEO4J_PASSWORD", DEFAULT_PASSWORD) == DEFAULT_PASSWORD
+
+
 def is_enabled() -> bool:
     """Return True if the Neo4j adapter should be used.
 
@@ -116,7 +126,7 @@ def _get_driver() -> Optional["Driver"]:
         return _driver
     uri = _env_or_file("FORMUMIND_NEO4J_URI", "bolt://kg:7687")
     user = _env_or_file("FORMUMIND_NEO4J_USER", "neo4j")
-    password = _env_or_file("FORMUMIND_NEO4J_PASSWORD", "formumind123")
+    password = _env_or_file("FORMUMIND_NEO4J_PASSWORD", DEFAULT_PASSWORD)
     try:
         _driver = GraphDatabase.driver(uri, auth=(user, password))
         # Verify reachability once, but don't hard-fail.

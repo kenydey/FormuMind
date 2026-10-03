@@ -38,7 +38,6 @@ def test_meta_includes_engines_probe(monkeypatch):
         "pydoe",
         "optuna",
         "botorch",
-        "summit",
         "sentence_transformers",
         "docling",
     }

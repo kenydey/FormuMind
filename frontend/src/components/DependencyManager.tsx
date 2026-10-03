@@ -569,8 +569,10 @@ function KbDiagnosticsCard() {
     setReport(null);
     try {
       const r = await api.kgRebuild();
+      const failed = r.failed_sources ?? 0;
       setReport(
-        `✓ 图谱重建完成: ${r.linked_sources} 源 / ${r.entities_upserted} 实体 / ${r.mentions_upserted} 提及 / ${r.links_created} 链接`
+        `${failed > 0 ? "⚠" : "✓"} 图谱重建完成: ${r.linked_sources} 源 / ${r.entities_upserted} 实体 / ${r.mentions_upserted} 提及 / ${r.links_created} 链接` +
+          (failed > 0 ? `（${failed} 个源失败，详见后端日志）` : "")
       );
       await refreshKgStats();
     } catch (e) {

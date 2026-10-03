@@ -5,10 +5,12 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..services import connectors_builtin, mcp_client, mcp_import
+from ._uploads import read_upload_capped
 
 router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
@@ -133,12 +135,8 @@ def mcp_import_github(body: McpImportGithubBody) -> dict:
     return payload
 
 
-@router.post("/mcp/import/upload")
-async def mcp_import_upload(
-    file: UploadFile = File(...),
-    dry_run: bool = True,
-) -> dict:
-    data = await file.read()
+def _import_uploaded_json(data: bytes, dry_run: bool) -> dict:
+    """Parse, validate and (unless dry-run) stage an uploaded MCP config — file I/O, off the loop."""
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -148,6 +146,15 @@ async def mcp_import_upload(
     if not result.ok:
         raise _import_error(payload)
     return payload
+
+
+@router.post("/mcp/import/upload")
+async def mcp_import_upload(
+    file: UploadFile = File(...),
+    dry_run: bool = True,
+) -> dict:
+    data = await read_upload_capped(file, file.filename or "mcp.json")
+    return await run_in_threadpool(_import_uploaded_json, data, dry_run)
 
 
 @router.post("/mcp/import/confirm")

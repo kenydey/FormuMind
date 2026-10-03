@@ -624,27 +624,6 @@ class KGEntityLink(Base):
     )
 
 
-
-class KGFormulationLink(Base):
-    """Link between an experiment (formulation) and a knowledge-graph entity."""
-    __tablename__ = "kg_formulation_links"
-    __table_args__ = (
-        UniqueConstraint("experiment_id", "entity_id", "role", name="uq_kg_formulation_link"),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    experiment_id: Mapped[int] = mapped_column(
-        ForeignKey("experiments.id", ondelete="CASCADE"), index=True
-    )
-    entity_id: Mapped[str] = mapped_column(
-        ForeignKey("kb_entities.id", ondelete="CASCADE"), index=True
-    )
-    role: Mapped[str] = mapped_column(String(60), default="")
-    weight_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    link_type: Mapped[str] = mapped_column(String(32), default="contains")
-    project_id: Mapped[str] = mapped_column(String(64), index=True, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-
-
 class ProjectRow(Base):
     """NotebookLM-style project workspace (JSON payload)."""
 
@@ -732,7 +711,14 @@ class TaskOutbox(Base):
     claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Celery task id the client was handed for this submission. Recovery re-dispatches
+    # under the same id, so a client polling it sees the replayed run finish instead of
+    # waiting on a task that died.
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    # Doubles as the liveness heartbeat: every status flip and every worker heartbeat
+    # touches it (``onupdate``), and recovery treats "not touched for N minutes" — not
+    # "created N minutes ago" — as stalled.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )

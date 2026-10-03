@@ -27,6 +27,8 @@ from ..db.models import Campaign
 from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, Requirement, TrainingReport
 from ..services import io_export
 from ..services.training import registry
+from ._uploads import read_upload_capped
+from ..services.http_safe import make_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -205,15 +207,35 @@ def _row_response(row: WorkbenchRow, ingested_items: set[str] | None = None) -> 
     )
 
 
+def _retrain_note(requested: bool, retrained: bool | None) -> str:
+    """Say so when ``auto_retrain=false`` vetoed a requested retrain."""
+    if requested and retrained is False:
+        return " Auto-retrain is off (FORMUMIND_AUTO_RETRAIN=false): call POST /api/train to refresh models."
+    return ""
+
+
+def _pinned_note(models: list[ModelInfo]) -> str:
+    """Say so when a rolled-back (pinned) model kept serving instead of the retrained one."""
+    pinned = [m for m in models if m.pinned and m.newer_version_id]
+    if not pinned:
+        return ""
+    names = ", ".join(sorted({m.metric for m in pinned}))
+    return (
+        f" {len(pinned)} model(s) stay pinned to a rolled-back version ({names}); "
+        "the retrained versions are archived — release the pin (POST /api/models/unpin) to use them."
+    )
+
+
 @router.post("/experiments", response_model=TrainingReport)
 def submit_experiments(submission: ExperimentSubmission) -> TrainingReport:
     """Ingest measured DOE results and (optionally) retrain models."""
-    registry.add(submission.records, retrain=submission.retrain)
+    retrained = registry.add(submission.records, retrain=submission.retrain)
     trained = registry.info()
     msg = (
         f"Ingested {len(submission.records)} record(s); "
         f"{len(trained)} model(s) active."
     )
+    msg += _retrain_note(submission.retrain, retrained) + _pinned_note(trained)
     if not trained:
         msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
     return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
@@ -228,26 +250,25 @@ async def import_experiments_csv(
     """Import a filled-in DOE/experiment CSV (the worksheet produced by
     ``GET /api/doe/{plan_id}/export``) and (optionally) retrain models."""
     try:
-        raw = await file.read()
-        if len(raw) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+        raw = await read_upload_capped(file, file.filename or "upload")
         try:
             text = raw.decode("utf-8-sig")  # tolerate Excel's UTF-8 BOM
         except UnicodeDecodeError:
             text = raw.decode("latin-1")
         try:
-            records = io_export.csv_to_records(text, default_domain=domain)
+            records = await run_in_threadpool(io_export.csv_to_records, text, default_domain=domain)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not records:
             raise HTTPException(status_code=422, detail="No rows with measured values found in the CSV.")
 
-        await run_in_threadpool(registry.add, records, retrain=retrain)
+        retrained = await run_in_threadpool(registry.add, records, retrain=retrain)
         trained = registry.info()
         msg = (
             f"Imported {len(records)} record(s) from {file.filename or 'upload'}; "
             f"{len(trained)} model(s) active."
         )
+        msg += _retrain_note(retrain, retrained) + _pinned_note(trained)
         if not trained:
             msg += f" Need >= {get_settings().min_train_samples} samples per metric to train."
         return TrainingReport(trained=trained, total_records=registry.total_records, message=msg)
@@ -262,7 +283,10 @@ def train_models() -> TrainingReport:
     return TrainingReport(
         trained=trained,
         total_records=registry.total_records,
-        message=f"Retrained {len(trained)} model(s) from {registry.total_records} records.",
+        message=(
+            f"Retrained {len(trained)} model(s) from {registry.total_records} records."
+            + _pinned_note(trained)
+        ),
     )
 
 
@@ -288,10 +312,24 @@ class ModelRollbackBody(BaseModel):
 
 @router.post("/models/rollback", response_model=ModelInfo)
 def rollback_model(body: ModelRollbackBody) -> ModelInfo:
-    """P1 #20: point current surrogate at a prior artifact and load it."""
+    """P1 #20: serve a prior artifact and pin it (retrains archive new versions beside it)."""
     info = registry.rollback_model(body.project_id, body.metric, body.version_id)
     if info is None:
         raise HTTPException(status_code=404, detail="model version not found")
+    return info
+
+
+class ModelUnpinBody(BaseModel):
+    project_id: str = Field(..., min_length=1)
+    metric: str = Field(..., min_length=1)
+
+
+@router.post("/models/unpin", response_model=ModelInfo)
+def unpin_model(body: ModelUnpinBody) -> ModelInfo:
+    """Release a rollback pin and serve the newest archived version."""
+    info = registry.unpin_model(body.project_id, body.metric)
+    if info is None:
+        raise HTTPException(status_code=404, detail="no archived model version for this metric")
     return info
 
 
@@ -804,14 +842,9 @@ async def upload_experiment_attachment(
 
     filename = file.filename or "upload"
 
-    # 上限 20MB：优先用 Content-Length 预估，缺失则读后检查（A11：原端点无上限）
-    MAX_BYTES = 20 * 1024 * 1024
-    if file.size is not None and file.size > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+    # Size cap = Settings.ingest_max_upload_bytes (A11), enforced while reading.
     # Upload to Datalab ELN (best-effort; falls back to local file storage)
-    content = await file.read()
-    if len(content) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+    content = await read_upload_capped(file, filename)
     item_id = await _datalab_item_id_for(experiment_id=experiment_id)
     source_document_id = await _upload_or_store_locally(content, filename, item_id=item_id)
     # Create local attachment link
@@ -1073,14 +1106,8 @@ async def upload_workbench_row_attachment(
         )
     from ..db.measurement_store import get_measurement_store
 
-    settings = get_settings()
     filename = file.filename or "upload"
-    MAX_BYTES = 20 * 1024 * 1024
-    if file.size is not None and file.size > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
-    content = await file.read()
-    if len(content) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="文件过大，最大20MB")
+    content = await read_upload_capped(file, filename)
     item_id = await _datalab_item_id_for(campaign_id=campaign_id, row_id=row_id)
     source_document_id = await _upload_or_store_locally(content, filename, item_id=item_id)
     store = get_measurement_store()
@@ -1225,9 +1252,8 @@ async def search_experiments(
         from ..db.datalab_client import check_datalab_reachable, datalab_headers
         ok, _ = await run_in_threadpool(check_datalab_reachable, settings.datalab_api_url, timeout=2.0)
         if ok:
-            import httpx
             try:
-                async with httpx.AsyncClient(
+                async with make_async_client(
                     base_url=settings.datalab_api_url.rstrip("/"),
                     timeout=10.0,
                     headers=datalab_headers(),

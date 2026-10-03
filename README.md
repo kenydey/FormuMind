@@ -73,7 +73,7 @@ toolchain required — and "lights up" the real engine when it is installed:
 | Property prediction | RDKit + DeepChem/ChemBERTa · MoLFormer (reserved) | transparent empirical surrogate |
 | VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
 | Compound data | PubChemPy (SMILES / molar mass) | hand-curated raw-material library |
-| Optimization | Summit (Bayesian/TSEMO) → Optuna (NSGA-II/TPE, CPU) | numpy UCB Bayesian optimizer |
+| Optimization | BayBE → BoTorch (GP-EI) → Optuna (NSGA-II/TPE, CPU) | numpy UCB Bayesian optimizer |
 | Stoichiometry | ChemFormula / RDKit | self-contained formula parser |
 | Cure/MD simulation | HTPolyNet · LUNAR · LAMMPS (Docker) | analytic cure/interface approximation |
 
@@ -217,7 +217,7 @@ pip install -e ".[embedding]"    # sentence-transformers semantic RAG
 pip install -e ".[colbert,crag]" # ColBERT index + LangGraph CRAG research pipeline
 pip install -e ".[color]"        # colour-science CIELAB / CIEDE2000
 pip install -e ".[notebooklm]"   # notebooklm-py + Playwright (NotebookLM source)
-pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
+pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), ase
 pip install -e ".[export]"       # openpyxl (XLSX DOE worksheet export; CSV needs nothing)
 ```
 
@@ -228,8 +228,8 @@ Or use **Settings → 依赖管理** in the UI to install catalogued packages as
 (`POST /api/dependencies/install`). The `heavy` extra (multi-GB torch stack) is intentionally
 omitted from the one-click catalog — install it manually when needed.
 
-The optimizer auto-selects the best engine installed (**Summit** → **Optuna** →
-the built-in numpy optimizer); grounded Q&A routes chemistry questions to
+The optimizer auto-selects the best engine installed (**BoTorch** → **Optuna** →
+the built-in numpy optimizer; **BayBE** when its extra is installed); grounded Q&A routes chemistry questions to
 **ChemCrow** and otherwise uses **paper-qa** semantic synthesis, both falling
 back to the TF-IDF + LLM path. Set `FORMUMIND_ENRICH_COMPOUNDS=true` to let
 **PubChemPy** backfill missing SMILES/molar-mass on startup. None of these are

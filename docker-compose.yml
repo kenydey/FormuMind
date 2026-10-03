@@ -15,8 +15,10 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --stop-writes-on-bgsave-error no --save ""
+    # Loopback only: host-side tools (scripts/start_all.sh) still reach it, the network does not.
+    # The broker has no password.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -28,11 +30,18 @@ services:
   kg:
     image: neo4j:5.15
     restart: unless-stopped
+    # Loopback only (browser on :7474, bolt on :7687). To reach it from another machine, publish it
+    # deliberately — behind a firewall or a tunnel — rather than on every interface.
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     environment:
-      - NEO4J_AUTH=neo4j/formumind123
+      # Set FORMUMIND_NEO4J_PASSWORD in .env BEFORE the first start: Neo4j stores the password in
+      # data/neo4j on first initialisation and ignores NEO4J_AUTH afterwards. The fallback only
+      # keeps an existing install (initialised with it) working — change it there with
+      # `cypher-shell … ALTER CURRENT USER SET PASSWORD`, then set the variable.
+      - NEO4J_AUTH=neo4j/${FORMUMIND_NEO4J_PASSWORD:-formumind123}
+      - FORMUMIND_NEO4J_PASSWORD=${FORMUMIND_NEO4J_PASSWORD:-formumind123}
       - NEO4J_apoc_export_file_enabled=true
       - NEO4J_apoc_import_file_enabled=true
       - NEO4J_dbms_memory_pagecache_size=512M
@@ -40,7 +49,7 @@ services:
     volumes:
       - ./data/neo4j:/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p formumind123 'RETURN 1' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$$FORMUMIND_NEO4J_PASSWORD\" 'RETURN 1' || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -75,7 +84,7 @@ services:
       FORMUMIND_NEO4J_ENABLED: "true"
       FORMUMIND_NEO4J_URI: bolt://kg:7687
       FORMUMIND_NEO4J_USER: neo4j
-      FORMUMIND_NEO4J_PASSWORD: formumind123
+      FORMUMIND_NEO4J_PASSWORD: ${FORMUMIND_NEO4J_PASSWORD:-formumind123}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -119,7 +128,7 @@ services:
       FORMUMIND_NEO4J_ENABLED: "true"
       FORMUMIND_NEO4J_URI: bolt://kg:7687
       FORMUMIND_NEO4J_USER: neo4j
-      FORMUMIND_NEO4J_PASSWORD: formumind123
+      FORMUMIND_NEO4J_PASSWORD: ${FORMUMIND_NEO4J_PASSWORD:-formumind123}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -145,6 +154,30 @@ services:
         condition: service_healthy
       kg:
         condition: service_healthy
+
+  # Topic radar (optional, `docker compose --profile radar up -d`): Celery Beat fires
+  # formumind.topic_sweep on the schedule defined by FORMUMIND_TOPIC_RADAR_ENABLED /
+  # FORMUMIND_TOPIC_RADAR_TOPICS in .env (see .env.example). One beat process per deployment —
+  # two would fire every sweep twice. A single sweep can also be started on demand with
+  # POST /api/search/topic-sweep.
+  beat:
+    build: ./backend
+    profiles: ["radar"]
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info -s /tmp/celerybeat-schedule
+    env_file:
+      - .env
+    environment:
+      FORMUMIND_REDIS_URL: redis://redis:6379/0
+      FORMUMIND_CELERY_EAGER: "false"
+    # Shares the backend image and so its uvicorn HEALTHCHECK, which this container cannot satisfy.
+    healthcheck:
+      disable: true
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
 
   # MolScribe OCSR worker — dedicated image (torch 2.3.0+cpu pin), consumes
   # only the `molscribe` queue. mem_limit isolates its ~1.9 GB peak so an OOM
@@ -174,7 +207,7 @@ services:
       FORMUMIND_NEO4J_ENABLED: "true"
       FORMUMIND_NEO4J_URI: bolt://kg:7687
       FORMUMIND_NEO4J_USER: neo4j
-      FORMUMIND_NEO4J_PASSWORD: formumind123
+      FORMUMIND_NEO4J_PASSWORD: ${FORMUMIND_NEO4J_PASSWORD:-formumind123}
       HF_HUB_OFFLINE: "1"
     extra_hosts:
       - "host.docker.internal:host-gateway"

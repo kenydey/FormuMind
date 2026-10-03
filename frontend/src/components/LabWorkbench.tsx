@@ -355,31 +355,38 @@ export default function LabWorkbench({
   }, []);
 
   // ── P2: 批量操作（选中行）──────────────────────────────────────
-  const selectedIds = () =>
-    (gridRef.current?.api.getSelectedRows() ?? []).map((r) => r.id);
+  // Both read the grid through its ref and write through state setters — all stable — so they can
+  // be memoised with no dependencies and listed in the batch handlers' dependency arrays.
+  const selectedIds = useCallback(
+    () => (gridRef.current?.api.getSelectedRows() ?? []).map((r) => r.id),
+    []
+  );
 
-  const applyToRows = (mutate: (r: WorkbenchRow) => void) => {
-    const ids = new Set(selectedIds());
-    if (ids.size === 0) {
-      setError("请先选中至少一行（Ctrl/⌘ 多选）");
-      return;
-    }
-    setRows((prev) => {
-      const next = prev.map((r) => {
-        if (!ids.has(r.id)) return r;
-        mutate(r);
-        return r;
+  const applyToRows = useCallback(
+    (mutate: (r: WorkbenchRow) => void) => {
+      const ids = new Set(selectedIds());
+      if (ids.size === 0) {
+        setError("请先选中至少一行（Ctrl/⌘ 多选）");
+        return;
+      }
+      setRows((prev) => {
+        const next = prev.map((r) => {
+          if (!ids.has(r.id)) return r;
+          mutate(r);
+          return r;
+        });
+        return next;
       });
-      return next;
-    });
-    setDirtyIds((prev) => {
-      const s = new Set(prev);
-      ids.forEach((i) => s.add(i));
-      return s;
-    });
-    gridRef.current?.api.redrawRows({ rowNodes: gridRef.current.api.getSelectedNodes() });
-    setError(null);
-  };
+      setDirtyIds((prev) => {
+        const s = new Set(prev);
+        ids.forEach((i) => s.add(i));
+        return s;
+      });
+      gridRef.current?.api.redrawRows({ rowNodes: gridRef.current.api.getSelectedNodes() });
+      setError(null);
+    },
+    [selectedIds]
+  );
 
   const [batchStatus, setBatchStatus] = useState<string>("Completed");
 
@@ -389,14 +396,14 @@ export default function LabWorkbench({
     applyToRows((r) => {
       r.status = status;
     });
-  }, [batchStatus]);
+  }, [batchStatus, applyToRows, selectedIds]);
 
   const handleBatchClearMeasurements = useCallback(() => {
     if (!window.confirm(`清空选中的 ${selectedIds().length} 行的测量值？（未保存，需点保存台账生效）`)) return;
     applyToRows((r) => {
       r.measurements = {};
     });
-  }, []);
+  }, [applyToRows, selectedIds]);
 
   const handleBatchCopyPlanToActual = useCallback(() => {
     const n = selectedIds().length;
@@ -404,7 +411,7 @@ export default function LabWorkbench({
     applyToRows((r) => {
       r.actual_params = { ...(r.planned_params ?? {}) };
     });
-  }, []);
+  }, [applyToRows, selectedIds]);
 
   // ── P2: 详情条 action → 弹现有 modal ───────────────────────────
   const handleRowAction = useCallback((action: RowDetailAction) => {

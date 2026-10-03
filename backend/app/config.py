@@ -13,6 +13,15 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_ENVS = frozenset({"development", "dev", "test"})
+# Settings that were removed because nothing read them any more. Old .env files
+# (the Settings UI persists toggles there) may still carry them: accepted and
+# ignored, so dev-mode fail-fast on typos does not break an existing deployment.
+_RETIRED_ENV_KEYS = frozenset({
+    "FORMUMIND_PDF_DOWNLOAD",       # superseded by fulltext_enrich / fulltext_fetcher
+    "FORMUMIND_PDF_DOWNLOAD_MAX",
+    "FORMUMIND_CHAT_RERANK_ENABLED",  # LLM rerank dropped from the chat path
+    "FORMUMIND_AGENT_SEARCH_LLM_ASSESS",  # reserved placeholder, never implemented
+})
 # Env keys read by subsystems but not declared on Settings.
 _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_ENV_FILE",
@@ -31,6 +40,20 @@ _INFRA_ENV_KEYS = frozenset({
     # BayBE acquisition quality tier, read directly by engines/baybe_engine.py
     # (_recommender_for): "fast" | "auto" | "thorough". Not a Settings field.
     "FORMUMIND_BO_QUALITY",
+    # Read straight from the environment by their owners, so dev-mode fail-fast
+    # used to reject a documented override with "Unknown FORMUMIND_* ...":
+    "FORMUMIND_DATA_DIR",    # services/tech_report.py data root (default ./data)
+    "FORMUMIND_RULES_DIR",   # services/rule_loader.py editable rules directory
+    "FORMUMIND_DEEPEVAL",    # scripts/deepeval_gate.py on/off switch (CI)
+    "FORMUMIND_RIGOR_GATE",  # scripts/rigor_gate.py skip switch (CI)
+    # Deployment knobs read by compose / shell scripts, never by the app. They live in the
+    # same ``.env`` that ``env_file:`` hands to the backend container, where dev-mode
+    # fail-fast used to reject them as typos:
+    "FORMUMIND_PG_USER",                # docker-compose.eln.yml  (postgres container)
+    "FORMUMIND_PG_PASSWORD",            # docker-compose.eln.yml
+    "FORMUMIND_PG_DB",                  # docker-compose.eln.yml
+    "FORMUMIND_USE_HOST_NETWORK",       # scripts/deploy-docker.sh
+    "FORMUMIND_DATALAB_PROBE_TIMEOUT_S",  # scripts/start_all.sh
 })
 
 
@@ -237,12 +260,6 @@ class Settings(BaseSettings):
     # agents.bus.publish() 在关闭 / Redis 不可达 / redis 库缺失时静默 no-op。
     # 为下一阶段重物理计算（physics_jobs 频道）的异步投递做准备。
     agent_bus_enabled: bool = False
-
-    # PDF 全文下载（v0.9）。启用后 DeepResearchEngine 在检索到专利后尝试下载 PDF，
-    # 将摘要替换为全文段落，提升 kb_agent 的合成质量。默认关闭以保证测试速度。
-    # 需要网络访问 USPTO / EPO / Google Patents 服务器。
-    pdf_download: bool = False
-    pdf_download_max: int = 3     # 每次研究最多下载几篇专利 PDF
 
     # 深度研究外部知识库（Phase 2+ 使用；Phase 1 仅读取配置）
     # Polite-pool contact for OpenAlex. Default is a non-personal placeholder —
@@ -538,6 +555,13 @@ class Settings(BaseSettings):
     # 并发只决定一个卡死的任务会占住几个 worker 槽位，不决定单个任务能跑多久。
     celery_soft_time_limit_s: int = 14400  # 4 小时：抛 SoftTimeLimitExceeded，任务可自报
     celery_hard_time_limit_s: int = 18000  # 5 小时：强杀，防止卡死的任务永久占槽（须 < task_stream_timeout_s 21600）
+    # 主题雷达（Celery Beat）：按计划周期性检索并把相关文献回填知识库。默认关闭；
+    # 需要单独的 beat 进程（compose: `--profile radar`，或 `celery … worker -B`）。
+    # topics 为 JSON 数组，每项：{"query": "...", "project_id": "...", "cron": "0 1 * * 1",
+    # "total_limit": 100, "source_types": ["literature"]}；cron 为 5 段（分 时 日 月 周），缺省
+    # 每周一 01:00。非法项会被跳过并记入日志，不影响 worker 启动。
+    topic_radar_enabled: bool = False
+    topic_radar_topics: str = ""
     kb_ingest_min_relevance: float = 0.45  # 0 = off; e.g. 0.5 filters low-relevance rows
     # Top-5 #2（2026-09-25）：检索期负向收缩。True=合并 DomainSearchProfile.search_deny
     # 与扩展 negative_terms，命中且 allow 不足时打 domain_match=none / 排序惩罚。
@@ -675,8 +699,6 @@ class Settings(BaseSettings):
     agent_search_enabled: bool = False
     agent_search_max_iters: int = 3
     agent_search_time_budget_s: float = 20.0
-    # LLM-based gap assessment (cost); heuristic is used when False.
-    agent_search_llm_assess: bool = False
     # Phase 2 — retrieval_by_children: score sentence-level children at query
     # time, present the parent block. Default OFF until golden A/B decides
     # (see tests/test_phase2_children_ab.py). Override via
@@ -752,11 +774,10 @@ class Settings(BaseSettings):
     # B-2 — 对话历史 token 预算：trim_history 在 max_turns 硬截断之外再按
     # token 预算压缩；超限的旧轮次折叠为一条确定性摘要，不再静默丢弃。
     chat_history_token_budget: int = 6000
-    # LLM 精排问答检索候选（无 GPU 时替代 ColBERT 的语义排序）。召回阶段用
-    # bm25_faiss/ColBERT 粗排 top-N，再由 LLM 打分精排到 top-k；失败回退原排序。
-    chat_rerank_enabled: bool = True
-    chat_rerank_candidates: int = 50    # 召回候选数（送入 LLM 打分）
-    chat_rerank_top_k: int = 20         # 精排后保留条数
+    # 问答检索：BM25/ColBERT 召回 top-N 候选，直取 top-k（不再做 LLM 二次精排——
+    # 实测 30-76 s/问、收益边际，旧开关 chat_rerank_enabled 已移除）。
+    chat_rerank_candidates: int = 50    # 召回候选数
+    chat_rerank_top_k: int = 20         # 保留条数
     chat_context_max_chars: int = 12000  # 交给 LLM 的全文 chunk 总字符预算
 
     # 持久知识库 v2（KB P2）：每个 SourceDocument 结构感知切块入
@@ -1028,7 +1049,7 @@ def _audit_formumind_env() -> None:
     if _settings_extra_policy() != "forbid":
         return
     known = {f"FORMUMIND_{name.upper()}" for name in Settings.model_fields}
-    known |= _INFRA_ENV_KEYS
+    known |= _INFRA_ENV_KEYS | _RETIRED_ENV_KEYS
     unknown = sorted(k for k in os.environ if k.startswith("FORMUMIND_") and k not in known)
     if unknown:
         raise ValueError(

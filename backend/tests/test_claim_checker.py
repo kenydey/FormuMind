@@ -176,3 +176,41 @@ def test_b4_unsupported_prediction_downgrades_form():
     check_formulation_predictions(form, evidence)
     markers = [w for w in form.warnings if "【数值降级】" in w and "salt_spray_hours" in w]
     assert len(markers) == 1
+
+
+def test_unsupported_metrics_collapse_into_one_warning_and_one_marker_per_formulation():
+    """The predictor emits ~15 metrics and evidence rarely quotes each: a recipe used to
+    carry one "lacks supporting evidence" warning *per metric* (and one marker per metric
+    on the card) — ~15 near-identical lines per candidate."""
+    from app.pipeline.claim_checker import check_formulation_predictions
+
+    metrics = {f"metric_{i}": 10.0 + i for i in range(15)}
+    form = _b4_form(dict(metrics))
+    warnings = check_formulation_predictions(form, [_evidence("Unrelated text about degreasing.")])
+
+    evidence_warnings = [w for w in warnings if "lack supporting evidence" in w]
+    assert len(evidence_warnings) == 1
+    assert all(name in evidence_warnings[0] for name in metrics)
+    markers = [w for w in form.warnings if "【数值降级】" in w]
+    assert len(markers) == 1
+    assert "15 项" in markers[0]
+
+
+def test_recheck_replaces_the_downgrade_marker_instead_of_stacking_a_second_one():
+    from app.pipeline.claim_checker import check_formulation_predictions
+
+    form = _b4_form({"salt_spray_hours": 9999.0, "adhesion_mpa": 7.0})
+    evidence = [_evidence("Degreaser pH adjustment for aluminum cleaning only.")]
+    check_formulation_predictions(form, evidence)
+    assert len([w for w in form.warnings if "【数值降级】" in w]) == 1
+
+    form.predicted = {"salt_spray_hours": 9999.0}  # e.g. after a re-score
+    check_formulation_predictions(form, evidence)
+    markers = [w for w in form.warnings if "【数值降级】" in w]
+    assert len(markers) == 1
+    assert "adhesion_mpa" not in markers[0]
+
+    # Evidence now supports the value → the marker goes away entirely.
+    supportive = [_evidence("Salt spray resistance 9999 hours in neutral salt spray test.")]
+    check_formulation_predictions(form, supportive)
+    assert not any("【数值降级】" in w for w in form.warnings)

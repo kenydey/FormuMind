@@ -395,7 +395,8 @@ reverse proxy and whether the backend is reachable.
 - Custom objectives, `constraint_values`, manual / AI formula edits, multi-LLM and
   search API setup? See the **[full User Guide](./USER_GUIDE.md)**.
 - `pytest -q` runs **1040+** offline backend tests; `cd frontend && npm test`
-  runs **106** frontend tests. `pip install -e ".[dev]"` for dev tooling.
+  runs the frontend tests; `npm run lint` checks the React hooks rules (the only lint rules —
+  everything else is `tsc` and the tests). `pip install -e ".[dev]"` for dev tooling.
 - Stronger engines auto-detect on install — `".[optimize]"`, `".[bo]"`, `".[intel]"`,
   `".[science]"`, `".[embedding]"`, `".[colbert,crag]"`, `".[color]"`, `".[notebooklm]"`.
   Installing `".[science]"` (RDKit) is what raises substitution's

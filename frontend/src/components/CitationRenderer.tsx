@@ -92,7 +92,6 @@ function maskInlineCode(line: string, maskOne: (s: string) => string): string {
   const re = /(`+)[^`\n]*?\1/g;
   let last = 0;
   let m: RegExpExecArray | null;
-  // eslint-disable-next-line no-cond-assign
   while ((m = re.exec(line))) {
     parts.push(maskOne(line.slice(last, m.index)));
     parts.push(m[0]);

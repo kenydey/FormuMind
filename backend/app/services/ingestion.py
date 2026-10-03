@@ -11,15 +11,14 @@ from __future__ import annotations
 
 import logging
 import hashlib
-import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
 
 from ..config import get_settings
 from ..db.source_store import get_source_store
 from ..domain.schemas import Evidence, SourceGuideSchema
 from .errors import log_handled_exception
+from .http_safe import UnsafeAddressError, is_blocked_ip, is_safe_url, ssrf_safe_client
 from .source_guide import extract_source_guide
 
 logger = logging.getLogger(__name__)
@@ -430,56 +429,10 @@ def _ingest_image(
     return IngestOutcome(evidence=[placeholder], extraction_status="skipped")
 
 
-def _normalize_host(host: str) -> str:
-    return host.strip().lower().rstrip(".")
-
-
-def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_link_local
-        or addr.is_multicast
-        or addr.is_reserved
-        or addr.is_unspecified
-    )
-
-
-def _host_resolves_to_blocked(host: str) -> bool:
-    import socket
-
-    for family in (socket.AF_INET, socket.AF_INET6):
-        try:
-            infos = socket.getaddrinfo(host, None, family, socket.SOCK_STREAM)
-        except socket.gaierror:
-            continue
-        for info in infos:
-            addr = ipaddress.ip_address(info[4][0])
-            if _is_blocked_ip(addr):
-                return True
-    return False
-
-
-def _is_safe_url(url: str) -> bool:
-    parsed = urlparse(url.strip())
-    if parsed.scheme not in ("http", "https"):
-        return False
-    host = parsed.hostname
-    if not host:
-        return False
-    host = _normalize_host(host)
-    if host in ("localhost", "localhost.localdomain", "0.0.0.0"):
-        return False
-    if host.endswith(".localhost") or host.endswith(".local"):
-        return False
-    try:
-        if _is_blocked_ip(ipaddress.ip_address(host)):
-            return False
-    except ValueError:
-        pass
-    if _host_resolves_to_blocked(host):
-        return False
-    return True
+# The address policy lives in ``http_safe`` (so the pinned transport and this pre-flight cannot
+# drift apart); the underscore names stay because callers and tests patch them here.
+_is_blocked_ip = is_blocked_ip
+_is_safe_url = is_safe_url
 
 
 def _html_to_text(html: str) -> str:
@@ -514,10 +467,12 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     import httpx
 
     # follow_redirects=False + manual loop: every redirect target is re-checked
-    # with _is_safe_url so an SSRF cannot pivot to an internal host via a 3xx.
+    # with _is_safe_url so an SSRF cannot pivot to an internal host via a 3xx. The client
+    # itself connects only to the addresses it resolved and judged (ssrf_safe_client), so a
+    # name that resolves differently for the check and for the connection gets nowhere.
     current_url = url
     headers = {"User-Agent": "FormuMind/0.1 (research platform)"}
-    with httpx.Client(timeout=20.0, follow_redirects=False) as client:
+    with ssrf_safe_client(timeout=20.0, follow_redirects=False) as client:
         # 风险3 修正：全程 stream=True。client.get() 会先把整个响应
         # eager-buffer 进内存，iter_bytes 的上限截断形同虚设 —— 超大文件
         # 在截断前就已占满内存。重定向 hop 只读 headers 就关连接。
@@ -554,6 +509,10 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
                 chunks.append(chunk)
                 total += len(chunk)
             body = b"".join(chunks)
+        except UnsafeAddressError as exc:
+            # The name resolved to an internal address at connection time (a redirect hop, or a
+            # DNS answer that changed after the pre-flight): same outcome as the pre-flight.
+            raise ValueError(f"URL must be a public http(s) address: {exc}") from exc
         finally:
             if resp is not None:
                 resp.close()

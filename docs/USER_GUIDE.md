@@ -90,7 +90,7 @@ it is installed.
 | VOC / density | `thermo` mass-weighted density | nominal 1.3 kg/L assumption |
 | Compound data | PubChemPy (SMILES / molar mass) | hand-curated raw-material library |
 | Stoichiometry & safety | ChemFormula + acid/base, SVHC, VOC-category checks | self-contained formula parser + rule checks |
-| Optimization | BoTorch GP (qNEHVI) · Summit (Bayesian/TSEMO) · Optuna (NSGA-II/TPE, CPU) — all optional | **native** numpy UCB Bayesian optimizer (default) |
+| Optimization | BayBE · BoTorch GP (qNEHVI) · Optuna (NSGA-II/TPE, CPU) — all optional | **native** numpy UCB Bayesian optimizer (default) |
 | Active-learning DOE | BayBE / trained surrogate + EI on DOE grid (optional extras) | **native** DOE (LHS / factorial / CCD / …) — default |
 | IP analysis | LLM JSON (`complete_json`) over retrieved patents | offline keyword overlap → risk tag |
 | Process optimizer | shared engine over manufacturing parameters | Arrhenius / empirical outcome models |
@@ -332,7 +332,7 @@ platform runs an asynchronous Bayesian multi-objective optimization (24
 iterations by default):
 
 - the optimizer auto-selects the strongest installed engine (**BoTorch** →
-  **Summit** → **Optuna** → built-in numpy UCB);
+  **Optuna** → built-in numpy UCB);
 - it samples the design space of key formulation levers (e.g. zinc inhibitor
   loading, resin/hardener ratio);
 - each candidate is validated for stoichiometry and scored with the
@@ -381,7 +381,7 @@ task the platform:
 
 1. pulls every measured record for the active domain from the registry;
 2. retrains the data-driven model (RMSE / R² are reported per metric);
-3. runs the optimizer (engine is auto-selected — BoTorch / Summit / Optuna / numpy);
+3. runs the optimizer (engine is auto-selected — BoTorch / Optuna / numpy);
 4. uses the freshly-retrained surrogate to compute EI on the DOE grid and
    suggests the next active-learning batch.
 
@@ -542,9 +542,8 @@ adapter switches over with no code change; absent, the platform keeps using the
 deterministic offline path, so behaviour never breaks.
 
 - **Optimizer tiering** — the closed-loop optimizer auto-selects the best engine
-  installed: **BoTorch** (GP + qNEHVI, the `bo` extra) → **Summit**
-  (Bayesian/TSEMO, the `heavy` extra) → **Optuna** (NSGA-II/TPE, CPU-only, the
-  lightweight `optimize` extra) → the built-in numpy UCB optimizer. The `engine`
+  installed: **BoTorch** (GP + qNEHVI, the `bo` extra) → **Optuna** (NSGA-II/TPE,
+  CPU-only, the lightweight `optimize` extra) → the built-in numpy UCB optimizer. The `engine`
   used is reported on the optimization result.
 - **Active-learning DOE** — when ≥ `min_train_samples` records exist, the DOE
   modal's *🧠 AI active selection* uses the trained surrogate's expected
@@ -1257,7 +1256,6 @@ defaults.
 | `FORMUMIND_LLM_BASE_URL` | provider default | override the OpenAI-compatible base URL |
 | `FORMUMIND_SEARCH_LIMIT_PER_SOURCE` | `5` | max results fetched per source type |
 | `FORMUMIND_RAG_BACKEND` | `auto` | RAG store: `auto` (embedding if installed, else TF-IDF) / `embedding` / `tfidf` |
-| `FORMUMIND_USE_CHEMCROW` | `true` | route chemistry questions to ChemCrow when installed |
 | `FORMUMIND_ENRICH_COMPOUNDS` | `false` | backfill SMILES/molar-mass via PubChem on startup (needs `intel` + network) |
 | `FORMUMIND_NOTEBOOKLM_ENABLED` | `false` | enable the NotebookLM retrieval source |
 | `FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID` | empty | the fixed notebook id to query |
@@ -1289,9 +1287,6 @@ defaults.
 | `FORMUMIND_KB_HYBRID_FUSION` | `weighted` | `weighted` (α·BM25+(1-α)·cosine) or `rrf` (reciprocal rank fusion A/B). Default stays weighted |
 | `FORMUMIND_CHAT_CROSS_ENCODER_ENABLED` | `false` | Optional local CE on chat after session BM25 recall. Default off (CPU latency); failures keep BM25 order |
 | `FORMUMIND_WIKI_STORM_CLAIM_REGENERATE` | `false` | When claim_check sets `needs_regenerate`, rewrite one failed section once (still `draft_not_claims`) |
-| `FORMUMIND_ARXIV_PREFER_SOURCE` | `true` | Fetch arXiv LaTeX source instead of the PDF: measured 53 s → 1.2 s on the same 100-page paper |
-| `FORMUMIND_PDF_DOWNLOAD` | `false` | **Legacy** patent PDF download, superseded by full-text enrichment; kept for compatibility |
-| `FORMUMIND_PDF_DOWNLOAD_MAX` | `3` | Max PDFs to download per DeepResearchEngine run |
 
 ### Settings saved in the UI vs. settings set by the deployment
 
@@ -1354,7 +1349,7 @@ pip install -e ".[embedding]"    # sentence-transformers → embeddings (session
 pip install -e ".[color]"        # colour-science (CIELAB / CIEDE2000)
 pip install -e ".[colbert,crag]"   # ColBERT index + LangGraph CRAG pipeline
 pip install -e ".[notebooklm]"   # notebooklm-py[browser] (NotebookLM source; run `notebooklm login` once)
-pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), summit, ase
+pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), ase
 pip install -e ".[export]"       # openpyxl (XLSX export; CSV needs nothing)
 ```
 
@@ -1373,7 +1368,7 @@ After installing the `science` extra:
 - `thermo` grounds the VOC g/L calculation in a real mixture density.
 
 The optimizer auto-selects the strongest engine installed (**BoTorch** →
-**Summit** → **Optuna** → numpy), grounded Q&A routes chemistry questions to
+**Optuna** → numpy), grounded Q&A routes chemistry questions to
 **ChemCrow** and others to **paper-qa**, both falling back to TF-IDF + the
 configured LLM, and the RAG store upgrades from TF-IDF to semantic embeddings
 when `sentence-transformers` is installed (see §5.9). The IP analyser and NL
@@ -1522,7 +1517,7 @@ which also proves the broker connection. If you still see it, rebuild.
 > support across nine providers, multi-source research (patents / literature /
 > internet / **NotebookLM** / local files), RAG-grounded Q&A with
 > semantic-embedding upgrade, auto-detected intelligence engines
-> (BoTorch/Summit/Optuna optimization, active-learning DOE, ChemCrow/paper-qa
+> (BoTorch/Optuna optimization, active-learning DOE, ChemCrow/paper-qa
 > Q&A, PubChem enrichment, thermo-grounded VOC, Fox/Mooney rheology,
 > CIELAB/ΔE₀₀ color, PVC/CPVC, IP novelty analysis, ✨ NL intent parser),
 > multi-objective optimization, cost/sustainability scoring, confidence

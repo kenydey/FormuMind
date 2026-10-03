@@ -12,6 +12,7 @@ from ..config import get_settings
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
+MAX_EXPORT_BYTES = _MAX_BYTES
 
 
 @dataclass(frozen=True)

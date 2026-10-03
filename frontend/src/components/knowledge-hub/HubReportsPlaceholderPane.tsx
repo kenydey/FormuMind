@@ -15,6 +15,8 @@ import WikiMarkdownReader from "../WikiMarkdownReader";
 import LiteratureFreezeStrip from "./LiteratureFreezeStrip";
 import ManifestDetailPanel from "../ManifestDetailPanel";
 import ArtifactVersionsPanel from "../ArtifactVersionsPanel";
+import PublicationPreflightPanel from "../PublicationPreflightPanel";
+import { saveBlob } from "../../utils/download";
 
 /** Grayscale keys required for Hub dossier → Report generate/export. */
 const REPORT_FLAG_ATTRS = [
@@ -27,9 +29,15 @@ const REPORT_FLAG_ATTRS = [
 const STORM_FLAG_ATTR = "wiki_storm_report_enabled" as const;
 /** Productization (default off) — Hub CTA only. */
 const AUTO_PATCH_FLAG_ATTR = "wiki_dossier_auto_patch" as const;
+/** Publication preflight gate; only decides whether its panel is shown. */
+const PREFLIGHT_FLAG_ATTR = "publication_preflight_enabled" as const;
 
 type ReportFlagAttr = (typeof REPORT_FLAG_ATTRS)[number];
-type TrackedFlagAttr = ReportFlagAttr | typeof STORM_FLAG_ATTR | typeof AUTO_PATCH_FLAG_ATTR;
+type TrackedFlagAttr =
+  | ReportFlagAttr
+  | typeof STORM_FLAG_ATTR
+  | typeof AUTO_PATCH_FLAG_ATTR
+  | typeof PREFLIGHT_FLAG_ATTR;
 
 const REPORT_FLAG_LABEL: Record<TrackedFlagAttr, string> = {
   wiki_enabled: "Wiki",
@@ -37,6 +45,7 @@ const REPORT_FLAG_LABEL: Record<TrackedFlagAttr, string> = {
   wiki_dossier_report_enabled: "Report",
   wiki_storm_report_enabled: "STORM",
   wiki_dossier_auto_patch: "自动patch",
+  publication_preflight_enabled: "发布预检",
 };
 
 function isFlagGateError(message: string): boolean {
@@ -96,17 +105,6 @@ type ExportCaps = {
   cjk_font?: string | null;
 };
 
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 /** Report generation + export from DossierPack (P5 / P5.1). */
 export default function HubReportsPlaceholderPane() {
   const activeProjectId = useStore(useShallow((s) => s.activeProjectId));
@@ -156,7 +154,12 @@ export default function HubReportsPlaceholderPane() {
       .then((body) => {
         if (cancelled) return;
         const next: Partial<Record<TrackedFlagAttr, boolean>> = {};
-        const tracked = [...REPORT_FLAG_ATTRS, STORM_FLAG_ATTR, AUTO_PATCH_FLAG_ATTR] as const;
+        const tracked = [
+          ...REPORT_FLAG_ATTRS,
+          STORM_FLAG_ATTR,
+          AUTO_PATCH_FLAG_ATTR,
+          PREFLIGHT_FLAG_ATTR,
+        ] as const;
         for (const f of body.flags ?? []) {
           if ((tracked as readonly string[]).includes(f.attr)) {
             next[f.attr as TrackedFlagAttr] = Boolean(f.value);
@@ -267,7 +270,7 @@ export default function HubReportsPlaceholderPane() {
         use_llm: useLlm,
         ensure_dossier: true,
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -288,7 +291,7 @@ export default function HubReportsPlaceholderPane() {
         kind: "storm",
         actor: "hub",
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -343,7 +346,7 @@ export default function HubReportsPlaceholderPane() {
         parallel: stormParallel,
         ensure_dossier: true,
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -443,6 +446,10 @@ export default function HubReportsPlaceholderPane() {
       <LiteratureFreezeStrip projectId={activeProjectId} />
       <ManifestDetailPanel projectId={activeProjectId} />
       <ArtifactVersionsPanel projectId={activeProjectId} />
+      <PublicationPreflightPanel
+        projectId={activeProjectId}
+        enabled={flagMap?.[PREFLIGHT_FLAG_ATTR] !== false}
+      />
       <div
         className="rounded-lg border border-edge/70 bg-ink/40 px-3 py-2 space-y-1.5"
         data-testid="hub-reports-flags"

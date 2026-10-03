@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, formatApiError } from "../../api";
 import { useStore } from "../../store";
 import { useShallow } from "zustand/react/shallow";
+import { saveBlob } from "../../utils/download";
 
 type LibItem = Awaited<ReturnType<typeof api.getLiteratureLibrary>>["items"][number];
 type Collection = Awaited<ReturnType<typeof api.getLiteratureLibrary>>["collections"][number];
@@ -10,17 +11,23 @@ type DupGroup = Awaited<ReturnType<typeof api.getLiteratureDuplicates>>["groups"
 const FLAG_ATTR = "literature_library_enabled";
 
 function downloadText(filename: string, text: string, mime: string) {
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  saveBlob(new Blob([text], { type: mime }), filename);
 }
 
-/** Knowledge Hub — Literature Library catalog (Wave E-Lit). */
+/**
+ * Knowledge Hub — Literature Library catalog (Wave E-Lit).
+ *
+ * Everything in the pane (filters, selection, draft, duplicate groups, the loaded items)
+ * belongs to one project, so the pane is re-mounted when the active project changes. A
+ * collection id of project A sent for project B just returned an empty library, and a slow
+ * answer for A could land after B's.
+ */
 export default function HubLiteratureLibraryPane({ active }: { active: boolean }) {
+  const projectId = useStore((s) => s.activeProjectId);
+  return <LiteratureLibraryPaneBody key={projectId ?? "no-project"} active={active} />;
+}
+
+function LiteratureLibraryPaneBody({ active }: { active: boolean }) {
   const { projectId, envFlagsRevision, openSettings } = useStore(
     useShallow((s) => ({
       projectId: s.activeProjectId,
@@ -80,8 +87,12 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
     };
   }, [active, envFlagsRevision]);
 
+  // Only the newest request may write: typing in the filters fires one per keystroke and
+  // they do not come back in order.
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
     if (!projectId || flagOn !== true) return;
+    const seq = ++refreshSeq.current;
     setBusy(true);
     setErr(null);
     try {
@@ -91,6 +102,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         collection_id: collectionId || undefined,
         screening: screening || undefined,
       });
+      if (seq !== refreshSeq.current) return;
       setItems(lib.items ?? []);
       setCollections(lib.collections ?? []);
       setFrozenIds(new Set(lib.frozen?.item_ids ?? []));
@@ -99,9 +111,10 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         return lib.items?.[0]?.id ?? null;
       });
     } catch (e) {
+      if (seq !== refreshSeq.current) return;
       setErr(formatApiError(e));
     } finally {
-      setBusy(false);
+      if (seq === refreshSeq.current) setBusy(false);
     }
   }, [projectId, flagOn, q, tag, collectionId, screening]);
 
@@ -398,6 +411,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
           className="text-xs bg-panel border border-edge rounded px-2 py-1"
           value={collectionId}
           onChange={(e) => setCollectionId(e.target.value)}
+          data-testid="hub-library-collection-filter"
         >
           <option value="">全部集合</option>
           {collections.map((c) => (
@@ -433,6 +447,47 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         >
           + 集合
         </button>
+        {collectionId && (
+          <>
+            <button
+              type="button"
+              className="text-xs px-2 py-1 rounded border border-edge"
+              disabled={busy}
+              title="重命名当前集合"
+              data-testid="hub-library-collection-rename"
+              onClick={() =>
+                run("集合已重命名", async () => {
+                  const current = collections.find((c) => c.id === collectionId)?.name ?? "";
+                  const name = window.prompt("新的集合名称", current);
+                  if (!name?.trim() || name.trim() === current) return;
+                  await api.patchLiteratureCollection(collectionId, {
+                    project_id: projectId,
+                    name: name.trim(),
+                  });
+                })
+              }
+            >
+              重命名
+            </button>
+            <button
+              type="button"
+              className="text-xs px-2 py-1 rounded border border-rose-500/40 text-rose-300"
+              disabled={busy}
+              title="删除当前集合（不会删除其中的文献）"
+              data-testid="hub-library-collection-delete"
+              onClick={() =>
+                run("集合已删除", async () => {
+                  const current = collections.find((c) => c.id === collectionId)?.name ?? collectionId;
+                  if (!window.confirm(`删除集合「${current}」？其中的文献不会被删除。`)) return;
+                  await api.deleteLiteratureCollection(collectionId, { project_id: projectId });
+                  setCollectionId("");
+                })
+              }
+            >
+              删除集合
+            </button>
+          </>
+        )}
       </div>
 
       {(msg || err) && (

@@ -21,6 +21,7 @@ from ..services import colbert_store
 from ..services.ingestion import ingest_text, ingest_url
 from ..db.source_store import get_source_store
 from ..worker.tasks import dispatch_file_ingest
+from ._uploads import read_upload_capped
 from .tasks import accepted_response
 
 logger = logging.getLogger(__name__)
@@ -73,21 +74,9 @@ async def _read_upload_capped(file: UploadFile, filename: str) -> bytes:
     内存耗尽（DoS）。此处按 1MiB 分块读，一旦累计字节超过
     ``ingest_max_upload_bytes`` 立刻 413，不再继续读后续字节。
     """
-    limit = get_settings().ingest_max_upload_bytes
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > limit:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File {filename!r} exceeds upload limit ({limit // (1024 * 1024)} MiB)",
-            )
-        chunks.append(chunk)
-    return b"".join(chunks)
+    return await read_upload_capped(
+        file, filename, limit=get_settings().ingest_max_upload_bytes
+    )
 
 
 def _to_ingest_response(filename: str, outcome) -> IngestResponse:

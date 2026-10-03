@@ -75,7 +75,7 @@ def _mock_recommendations(monkeypatch, mod, n=2):
 
     monkeypatch.setattr(form_mod, "RecommendFormulationsRequest", _Req)
     monkeypatch.setattr(
-        form_mod, "recommend_formulations", lambda req: SimpleNamespace(formulations=cands)
+        form_mod, "recommend_formulations", lambda req: SimpleNamespace(scored=cands)
     )
 
 

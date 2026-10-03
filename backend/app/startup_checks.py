@@ -96,6 +96,19 @@ def run_startup_checks(settings) -> list[str]:
             "unless this host is truly isolated."
         )
 
+    # 5. The Neo4j password compose falls back to is published in the repository.
+    if env in ("production", "prod") and getattr(settings, "neo4j_enabled", False):
+        from .services import neo4j_kg
+
+        if neo4j_kg.uses_default_password():
+            warnings.append(
+                "FORMUMIND_NEO4J_ENABLED=true with FORMUMIND_ENVIRONMENT=production but "
+                "FORMUMIND_NEO4J_PASSWORD is unset or the shipped default: anyone who can reach "
+                "the graph database can read it. Set a strong password in .env before the "
+                "first start of the kg service (Neo4j stores it at initialisation; an existing "
+                "install must change it in the database first)."
+            )
+
     if errors:
         raise RuntimeError("Startup configuration check failed:\n- " + "\n- ".join(errors))
     return warnings

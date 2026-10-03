@@ -46,11 +46,10 @@ science = [
     "thermo>=0.2",          # physical-property estimation (density → VOC g/L)
 ]
 # CPU-only, pip-installable multi-objective / Bayesian optimizer. Sits between
-# the built-in numpy UCB fallback and the heavy Summit engine.
+# the built-in numpy UCB fallback and BoTorch (the `bo` extra).
 optimize = ["optuna>=3.4"]
 heavy = [
     "torch>=2.2",
-    # summit>=0.8  pins torch<2.0 — conflicts; skipped
     "ase>=3.22",
 ]
 intel = [
@@ -141,21 +140,29 @@ dev = [
     "pytest-timeout>=2.0",
     "httpx>=0.27",
     "pypdf>=4.0",             # real PDF parsing in test_pdf_downloader real-path tests
+    "PyYAML>=6.0",            # tests/test_compose_hardening.py parses the compose files
+    "cryptography>=42",       # tests/test_http_safe.py mints a self-signed cert for the TLS-name test
     "ruff==0.15.8",           # lint gate (see [tool.ruff] below); pinned so new rules cannot break CI
 ]
 postgres = ["psycopg2-binary>=2.9"]
 
 # Lint gate: bug classes only — syntax errors (E9), invalid comparisons/literals
 # (F63), statement-level mistakes (F7), undefined names (F82) and shadowed
-# definitions (F811). Style rules (F401 unused imports, F841 unused variables,
-# E-series layout, import order) are deliberately NOT enabled yet: they have
-# ~250 pre-existing hits and none of them is a defect on its own.
+# definitions (F811) — plus unused imports (F401) in application code: an import
+# nobody uses is how a half-finished wiring hides (the KG "formulation linker"
+# kept its imports for a feature that no longer existed). Re-exports that other
+# modules rely on carry ``# noqa: F401``. Tests are exempt from F401 (fixtures and
+# optional-dependency probes import for effect). Layout, import order and unused
+# *variables* (F841) are deliberately NOT enabled: none is a defect on its own.
 [tool.ruff]
 target-version = "py310"
 extend-exclude = ["data", "locks"]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82", "F811"]
+select = ["E9", "F401", "F63", "F7", "F82", "F811"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
@@ -166,4 +173,5 @@ asyncio_mode = "auto"
 markers = [
     "golden_eval: golden QA dataset evaluation — slower, use -m 'not golden_eval' to skip in fast local runs",
     "flaky: historically intermittent (timeouts / external deps); still run in CI but easy to filter",
+    "network: test may reach the public internet (everything else runs with outbound connects blocked)",
 ]

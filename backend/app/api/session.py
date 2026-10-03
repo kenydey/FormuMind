@@ -85,6 +85,10 @@ async def save_session(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Failed to save session (service unavailable)"
             )
+    except HTTPException:
+        # Without this the 503 above was caught by the generic handler below and
+        # came back as a 500 ("Internal server error: 503: ...").
+        raise
     except Exception as e:
         logger.error(f"Error saving session {payload.session_id}: {e}")
         raise HTTPException(

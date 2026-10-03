@@ -119,7 +119,14 @@ def build_candidate_formulations(requirement: Requirement) -> list:
 
         req_obj = RecommendFormulationsRequest(requirement=requirement, n=12)
         rec_result = recommendation_recommend_formulations(req_obj)
-        candidates = rec_result.formulations
+        # ``scored`` are the validated, ranked ``Formulation`` objects (they carry
+        # ``ingredients``, which provenance needs); ``formulas`` are the raw
+        # ``RecommendedFormula`` rows. The response has no ``formulations`` field —
+        # reading one made this raise AttributeError on every cycle, so the Top-12
+        # was always discarded in favour of the baseline (after a full LLM call).
+        candidates = list(rec_result.scored or [])
+        if not candidates:
+            raise ValueError("recommendation returned no scored candidates")
         logger.info("Got %d candidate formulations", len(candidates))
         return candidates
     except Exception as e:

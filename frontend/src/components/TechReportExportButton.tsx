@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { api, formatApiError } from "../api";
 import { useStore } from "../store";
+import { saveBlob } from "../utils/download";
 
 export type TechReportKind = "formulation" | "doe" | "optimization";
 export type TechReportFormat = "docx" | "pdf" | "html" | "md";
@@ -21,17 +22,6 @@ const FORMATS: { value: TechReportFormat; label: string }[] = [
   { value: "html", label: "HTML" },
   { value: "md", label: "MD" },
 ];
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 export default function TechReportExportButton({ kind }: { kind: TechReportKind }) {
   const activeProjectId = useStore((s) => s.activeProjectId);
@@ -54,7 +44,7 @@ export default function TechReportExportButton({ kind }: { kind: TechReportKind 
         format,
         project_id: activeProjectId,
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
       setDone(`已导出 ${filename}`);
     } catch (e) {
       setError(formatApiError(e));

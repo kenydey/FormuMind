@@ -12,6 +12,8 @@ import Modal from "./Modal";
 import { api, type ChemicalHit, type MaterialCandidate, type MaterialImportPreview, type MaterialView, type Supplier } from "../api";
 import { formatChemicalLookupSourceMsg } from "../utils/chemicalLookup";
 import { useStore } from "../store";
+import { downloadWithAuth } from "../utils/download";
+import AuthDownloadLink from "./AuthDownloadLink";
 
 const ROLES = ["", "resin", "additive", "inhibitor", "solvent", "crosslinker", "surfactant", "catalyst"];
 const AVAIL_LABEL: Record<string, { text: string; cls: string }> = {
@@ -145,8 +147,11 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
   }
 
   function downloadExport(format: "json" | "csv" | "xlsx") {
-    const url = api.exportMaterialsUrl(format, { q, role });
-    window.open(url, "_blank");
+    // window.open() navigates without the bearer token → 401 whenever API auth is on.
+    setError(null);
+    downloadWithAuth(api.exportMaterialsUrl(format, { q, role }), `materials.${format}`).catch((e) =>
+      setError(e instanceof Error ? e.message : String(e)),
+    );
   }
 
   function startCreate() {
@@ -387,15 +392,15 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
             onChange={(e) => void onPickImportFile(e.target.files?.[0] ?? null, true)}
           />
         </label>
-        <a
-          href={api.materialsImportTemplateUrl("csv")}
-          download
+        <AuthDownloadLink
+          url={api.materialsImportTemplateUrl("csv")}
+          filename="materials_template.csv"
           className="text-[10px] border border-edge rounded-full px-3 py-1 text-slate-400 hover:border-accent/40 hover:text-accent"
-          data-testid="materials-import-template"
+          testId="materials-import-template"
           title="下载 CSV 导入模板"
         >
           下载模板
-        </a>
+        </AuthDownloadLink>
         <button
           type="button"
           className="text-[10px] border border-edge rounded-full px-3 py-1 text-slate-400 hover:border-accent/40 hover:text-accent"

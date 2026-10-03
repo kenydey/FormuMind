@@ -8,9 +8,8 @@ stops. This module adds the PaperQA2-style loop on top:
 Only the *retrieval* stage is iterative; downstream rerank / compression /
 synthesis are untouched. Everything is fail-open: a failed round keeps the
 evidence gathered so far, and hard guards (max iterations, time budget) bound
-cost. Gap assessment is a deterministic heuristic by default; an LLM assessor
-can be injected via ``assess_fn`` (config flag ``agent_search_llm_assess``
-exists for future wiring, default off for cost).
+cost. Gap assessment is a deterministic heuristic; an LLM assessor can be
+injected via ``assess_fn`` (there is deliberately no config flag for it yet).
 """
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..domain.schemas import Evidence
 from .errors import degrade_return

@@ -11,3 +11,5 @@
 pytest==9.1.0
 pytest-asyncio==1.4.0
 pypdf==6.14.0
+PyYAML==6.0.3          # tests/test_compose_hardening.py
+cryptography==50.0.2   # tests/test_http_safe.py (self-signed cert for the TLS-name test)

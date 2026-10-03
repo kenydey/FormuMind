@@ -3,11 +3,38 @@ from __future__ import annotations
 
 import re
 
+from ..domain.chemistry import normalize_role
 from ..domain.knowledge import RAW_MATERIALS
 from ..domain.schemas import Evidence, RecommendedFormula, RecommendedFormulaComponent
 
 _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 _CAS_RE = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
+
+
+# Commodity ingredient classes. They are well known (a missing citation says little
+# about whether they exist) and structurally essential — they set solids / VOC and
+# make the weights add up — so strict grounding keeps them, tagged "medium", instead
+# of dropping them. Dropping them used to turn a plausible epoxy primer into a 72 %
+# recipe with no solvent, filler or additive whose predicted VOC was 0 g/L (which the
+# "minimize VOC" objective then rewarded). Specialty roles (inhibitor, resin, hardener,
+# active, accelerator, …) are where hallucinated chemicals matter and stay strict.
+_COMMODITY_ROLES = frozenset({"solvent", "filler", "pigment"})
+# "additive" is only commodity when the *name* says it is a generic additive class.
+_GENERIC_ADDITIVE_HINTS = (
+    "defoam", "antifoam", "anti-foam", "wetting", "dispers", "levelling", "leveling",
+    "rheolog", "thicken", "biocide", "preservative", "uv absorber", "flow agent",
+    "消泡", "润湿", "分散", "流平", "增稠", "防腐", "紫外",
+)
+
+
+def _is_commodity(comp: RecommendedFormulaComponent) -> bool:
+    role = normalize_role(comp.component_type or "")
+    if role in _COMMODITY_ROLES:
+        return True
+    if role == "additive":
+        name = f"{comp.name} {comp.zh_name or ''}".lower()
+        return any(hint in name for hint in _GENERIC_ADDITIVE_HINTS)
+    return False
 
 
 def _tokens(text: str) -> set[str]:
@@ -21,6 +48,74 @@ def _extract_cas(text: str) -> set[str]:
         return {c.lower() for c in extract_cas(text or "")}
     except Exception:
         return {m.group(1).lower() for m in _CAS_RE.finditer(text or "")}
+
+
+_PAREN_RE = re.compile(r"[(（]([^()（）]{3,})[)）]")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _name_variants(comp: RecommendedFormulaComponent) -> list[str]:
+    """Spellings of a component worth searching for verbatim in evidence text.
+
+    The full name, the name without a parenthetical, the parenthetical itself
+    (``"… epoxy resin (DGEBA)"`` → ``dgeba``) and the Chinese name. Anything that
+    is too short to be specific (``Zn``, ``PU``) is skipped.
+    """
+    out: list[str] = []
+    for raw in (comp.name, comp.zh_name):
+        text = (raw or "").strip().lower()
+        if not text:
+            continue
+        candidates = [text, _PAREN_RE.sub("", text).strip()]
+        candidates += [m.group(1).strip() for m in _PAREN_RE.finditer(text)]
+        for c in candidates:
+            cjk = bool(_CJK_RE.search(c))
+            min_len = 2 if cjk else 4
+            if len(c) >= min_len and c not in out:
+                out.append(c)
+            # "Silanes" in the recipe, "silane" in the evidence.
+            if not cjk and len(c) >= 6 and c.endswith("s") and c[:-1] not in out:
+                out.append(c[:-1])
+    return out
+
+
+def _verbatim_refs(
+    comp: RecommendedFormulaComponent, texts: list[tuple[str, str]]
+) -> list[str]:
+    """Identifiers of evidence whose text states this component's name verbatim.
+
+    Token overlap cannot do this: a one-word name ("Benzotriazole", "Silane") can
+    never reach the two-token bar, and Chinese text is not tokenised at all (a
+    whole run of 汉字 is one token), so an evidence snippet that literally named the
+    ingredient still left it "low" and — under strict grounding — dropped.
+    Latin variants match on word boundaries (plural ``s``/``es`` allowed) so
+    ``acid`` does not hit ``acidic``; CJK variants match as substrings.
+    """
+    variants = _name_variants(comp)
+    if not variants:
+        return []
+    patterns = []
+    for v in variants:
+        if _CJK_RE.search(v):
+            patterns.append(re.compile(re.escape(v)))
+        else:
+            patterns.append(re.compile(rf"(?<![a-z0-9]){re.escape(v)}(?:e?s)?(?![a-z0-9])"))
+    hits: list[str] = []
+    for ident, blob in texts:
+        if any(p.search(blob) for p in patterns) and ident not in hits:
+            hits.append(ident)
+    return hits[:3]
+
+
+def _evidence_texts(evidence: list[Evidence]) -> list[tuple[str, str]]:
+    """``(identifier, lower-cased title + snippet)`` per evidence item."""
+    out: list[tuple[str, str]] = []
+    for ev in evidence:
+        ident = (ev.identifier or ev.title or "").strip()
+        blob = f"{ev.title or ''} {ev.snippet or ''}".lower()
+        if ident and blob.strip():
+            out.append((ident, blob))
+    return out
 
 
 def _evidence_corpus(evidence: list[Evidence]) -> tuple[set[str], set[str], dict[str, str]]:
@@ -118,6 +213,7 @@ def _ground_component(
     catalog_cas: set[str],
     *,
     prefer_catalog: bool = False,
+    texts: list[tuple[str, str]] | None = None,
 ) -> RecommendedFormulaComponent:
     refs = list(comp.evidence_refs or [])
     raw_toks = _tokens(comp.name) | _tokens(comp.zh_name or "")
@@ -129,6 +225,14 @@ def _ground_component(
             refs = _match_evidence_ids(comp.name, corpus, id_map)
         return comp.model_copy(
             update={"evidence_refs": refs, "grounding_confidence": "high"}
+        )
+
+    # The evidence states the component by name: that is support, however short
+    # the name is or whichever script it is written in.
+    verbatim = _verbatim_refs(comp, texts or [])
+    if verbatim:
+        return comp.model_copy(
+            update={"evidence_refs": refs or verbatim, "grounding_confidence": "high"}
         )
 
     if not refs:
@@ -152,6 +256,10 @@ def _ground_component(
     # Soft prefer: catalog hits escalate low→high when prefer is on and evidence is weak.
     if prefer_catalog and catalog_hit and conf != "high":
         conf = "high"
+
+    # Unverified but commodity: keep it (flagged), do not drop it.
+    if conf == "low" and _is_commodity(comp):
+        conf = "medium"
 
     return comp.model_copy(update={"evidence_refs": refs, "grounding_confidence": conf})
 
@@ -187,6 +295,7 @@ def ground_recommended_formulas(
     if not formulas:
         return [], []
     corpus, corpus_cas, id_map = _evidence_corpus(evidence)
+    texts = _evidence_texts(evidence)
     catalog = _catalog_tokens()
     catalog_cas = _catalog_cas()
     warnings: list[str] = []
@@ -202,11 +311,17 @@ def ground_recommended_formulas(
                 catalog,
                 catalog_cas,
                 prefer_catalog=prefer_materials_catalog,
+                texts=texts,
             )
             for c in rec.components
         ]
         low = [c.name for c in comps if c.grounding_confidence == "low"]
+        medium = [c.name for c in comps if c.grounding_confidence == "medium"]
         form_warnings = list(rec.warnings)
+        if medium:
+            form_warnings.append(
+                f"常规成分未在证据/材料库中核实（已保留，请人工确认）: {', '.join(medium[:5])}"
+            )
         if strict and low:
             # A-5: drop instead of only tagging. Never renormalize weight_pct:
             # the remaining recipe is honest about what was removed.

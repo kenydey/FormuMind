@@ -60,9 +60,23 @@ def check_formulation(
         for finding in verdict.findings
         for issue in finding.issues
     ]
+    status = verdict.overall_status
+    # Weight closure is a feasibility question too: a recipe that does not add up to
+    # ~100 % (beyond the shared tolerance) is not a recipe anyone can make. The review
+    # agents never looked at the total, so a 68 % formulation passed the gate.
+    from ..domain import closure
+
+    state = closure.assess(form.total_pct())
+    if not state.ok:
+        message = closure.warning_text(state.total)
+        reasons.append(f"[CLOSURE] {message}")
+        if state.level == "error":
+            status = "intercept"
+        elif status == "pass":
+            status = "warn"
     return FeasibilityVerdict(
-        feasible=verdict.overall_status != "intercept",
-        status=verdict.overall_status,
+        feasible=status != "intercept",
+        status=status,
         reasons=reasons,
         formulation=form,
     )

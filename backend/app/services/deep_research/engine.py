@@ -11,6 +11,7 @@ from ...domain.schemas import ComprehensiveReport, Evidence, Requirement
 from .. import literature, llm, rag
 from .models import ExpandedQuery, RetrievalHit, RetrievalReport
 from .query_expander import QueryExpander, prepare_search_queries
+from ..http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class DeepResearchEngine:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._expander = QueryExpander(self._settings)
-        self._http = httpx.Client(
+        self._http = make_client(
             timeout=30.0,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             # 离线引擎不走代理：避免沙箱 NO_PROXY 含 IPv6 括号格式时 httpx 解析崩溃

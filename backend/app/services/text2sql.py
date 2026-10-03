@@ -26,7 +26,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.schema import CreateTable
 
 from ..db.database import make_engine  # noqa: F401  (re-export for tests/consumers)
-from ..db.models import Base, DOEPlanRow, ExperimentRow, FormulationVersion, MeasurementRow
+from ..db.models import DOEPlanRow, ExperimentRow, FormulationVersion, MeasurementRow
 
 log = logging.getLogger(__name__)
 

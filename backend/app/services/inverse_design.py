@@ -90,6 +90,7 @@ def _evaluate(
     req: Requirement,
     hard: list[HardConstraint],
     process: dict,
+    objectives: list[ObjectiveSpec] | None = None,
 ) -> bool:
     """Build, gate, and predict. False when the candidate is unusable."""
     from ..pipeline import reconstruct
@@ -107,7 +108,9 @@ def _evaluate(
 
     # P3: chem_screen 解封 — 网络版 (ChemCrow) 不适合优化循环，改用
     # 零网络本地版（RDKit 价键 + molbloom patent），每代数百次调用安全。
-    form = _score_and_validate(form, process, req, chem_screen_local=True)
+    # ``objectives`` are the ones the search ranks by (``targets.soft`` can differ from the
+    # requirement's): the displayed score must be computed from the same set.
+    form = _score_and_validate(form, process, req, chem_screen_local=True, objectives=objectives)
     individual.formulation = form
     individual.metrics = dict(form.predicted)
     individual.violation = _total_violation(individual.metrics, hard)
@@ -447,7 +450,7 @@ def design(
     for genome in seeded:
         ind = _Individual(genome=genome)
         evaluations += 1
-        if _evaluate(ind, req, hard, process):
+        if _evaluate(ind, req, hard, process, objectives):
             current.append(ind)
         else:
             rejected += 1
@@ -477,7 +480,7 @@ def design(
             )
             child = _Individual(genome=child_genome)
             evaluations += 1
-            if _evaluate(child, req, hard, process):
+            if _evaluate(child, req, hard, process, objectives):
                 offspring.append(child)
             else:
                 rejected += 1
@@ -495,6 +498,12 @@ def design(
     _assign_ranks(current, objectives)
     _assign_crowding(current, objectives)
     forms = [ind.formulation for ind in current if ind.formulation is not None]
+    # Ranking is NSGA-II on the raw predicted metrics, but each candidate's ``score`` was
+    # normalised against its own value (a weak and a strong design both read 0.5). Show the final
+    # population on one shared ruler so the numbers can be compared across candidates.
+    from .recommend_pipeline import rescore_with_shared_bounds
+
+    rescore_with_shared_bounds(forms, objectives, process)
     tradeoff = analyze_tradeoffs(forms, objectives, req=req, settings=settings)
 
     candidates = [

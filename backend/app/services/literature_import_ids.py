@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from . import literature_manifest as lm
 from .scholar_helpers import extract_dois
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +42,11 @@ def _openalex_work_by_doi(doi: str) -> dict[str, Any] | None:
 
 def _chemrxiv_public_item(item_id: str) -> dict[str, Any] | None:
     try:
-        import httpx
-
         url = (
             "https://chemrxiv.org/engage/chemrxiv/public-api/v1/items/"
             + quote(item_id, safe="")
         )
-        with httpx.Client(timeout=8.0) as client:
+        with make_client(timeout=8.0) as client:
             resp = client.get(url)
             if resp.status_code != 200:
                 return None

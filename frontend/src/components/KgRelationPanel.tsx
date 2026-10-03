@@ -132,8 +132,13 @@ export default function KgRelationPanel({ query }: { query: string }) {
     if (q.length < 2) {
       setResolved(null);
       setSubstitutes(null);
+      setContradictions(null);
       setFullRelations(null);
       setError(null);
+      // A request for the previous query may still be in flight; its cleanup has just
+      // cancelled it, so its ``finally`` will not clear the flag — do it here, or the
+      // panel is stuck on 加载中… for an empty search box.
+      setLoading(false);
       return;
     }
 
@@ -172,6 +177,7 @@ export default function KgRelationPanel({ query }: { query: string }) {
             }
             setResolved(null);
             setSubstitutes(null);
+            setContradictions(null);
             setFullRelations(null);
           }
         } finally {

@@ -20,6 +20,7 @@ from ..config import get_settings
 from ..db.material_store import get_material_store
 from ..domain.knowledge import RAW_MATERIALS
 from ..domain.schemas import Formulation, Requirement
+from ._uploads import read_upload_capped
 
 logger = logging.getLogger(__name__)
 
@@ -384,7 +385,7 @@ async def import_materials(
     _require_store()
     from ..services import material_io
 
-    payload = await file.read()
+    payload = await read_upload_capped(file, file.filename or "materials")
     if not payload:
         raise HTTPException(status_code=400, detail="空文件")
     try:

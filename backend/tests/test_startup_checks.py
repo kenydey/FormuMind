@@ -97,3 +97,32 @@ def test_multiple_errors_all_reported(tmp_path, monkeypatch):
     msg = str(exc_info.value)
     assert "unsupported scheme" in msg
     assert "FORMUMIND_DATALAB_API_URL" in msg
+
+
+# ── Neo4j password ───────────────────────────────────────────────────────────
+
+
+def test_production_with_the_shipped_neo4j_password_warns(monkeypatch):
+    monkeypatch.delenv("FORMUMIND_NEO4J_PASSWORD", raising=False)
+    with patch("app.services.neo4j_kg._env_or_file", side_effect=lambda name, default="": default):
+        warnings = run_startup_checks(
+            _settings(environment="production", api_auth_enabled=True, neo4j_enabled=True)
+        )
+    assert any("FORMUMIND_NEO4J_PASSWORD" in w for w in warnings)
+
+
+def test_a_configured_neo4j_password_is_quiet():
+    with patch("app.services.neo4j_kg._env_or_file", return_value="a-long-random-secret"):
+        warnings = run_startup_checks(
+            _settings(environment="production", api_auth_enabled=True, neo4j_enabled=True)
+        )
+    assert not any("NEO4J" in w for w in warnings)
+
+
+def test_neo4j_password_is_only_a_production_concern_when_the_graph_is_on():
+    with patch("app.services.neo4j_kg._env_or_file", side_effect=lambda name, default="": default):
+        dev = run_startup_checks(_settings(environment="development", neo4j_enabled=True))
+        off = run_startup_checks(
+            _settings(environment="production", api_auth_enabled=True, neo4j_enabled=False)
+        )
+    assert not any("NEO4J" in w for w in dev + off)

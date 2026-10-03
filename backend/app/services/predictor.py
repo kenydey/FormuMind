@@ -340,6 +340,18 @@ def objective_value(form: Formulation, objective: str, process: dict | None = No
     return float(props.get(objective, 0.0))
 
 
+def score_is_raw(objectives: list | None) -> bool:
+    """True when a formulation's ``score`` is simply its predicted value of the one metric.
+
+    Only a *single maximize* objective can be ranked on the raw value ("higher is better"
+    is already what the number means, and the leaderboard shows e.g. 1000 h). A single
+    ``minimize`` / ``match_target`` objective — or any set of two or more — needs the
+    direction-aware normalised score from :func:`multi_objective_score`; ranking a lone
+    "minimize VOC" objective on the raw value put the *highest*-VOC recipe first.
+    """
+    return bool(objectives) and len(objectives) == 1 and objectives[0].direction == "maximize"
+
+
 def default_bounds(
     objectives: list,
     form: Formulation | None = None,

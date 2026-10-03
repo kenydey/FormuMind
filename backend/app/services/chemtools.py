@@ -34,6 +34,7 @@ from urllib.parse import quote
 
 from ..config import get_settings
 from .errors import degrade_return, optional_import
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -216,14 +217,10 @@ def _pubchem_get(path: str) -> Any | None:
     function to keep the network out of unit runs, and any transport / status
     failure degrades uniformly to ``None`` so callers stay neutral offline.
     """
-    try:
-        import httpx  # type: ignore
-    except Exception:
-        return None
     url = path if path.startswith("http") else f"{_PUBCHEM_BASE}{path}"
     timeout = float(get_settings().chemtools_timeout_s)
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with make_client(timeout=timeout) as client:
             resp = client.get(url)
         if resp.status_code != 200:
             return None

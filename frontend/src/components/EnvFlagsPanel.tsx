@@ -114,7 +114,6 @@ export default function EnvFlagsPanel({ reloadKey = 0 }: { reloadKey?: number })
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
 
   useEffect(() => {

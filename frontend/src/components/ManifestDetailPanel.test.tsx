@@ -9,10 +9,12 @@ import ManifestDetailPanel, {
 
 const getMan = vi.fn();
 const saveExport = vi.fn();
+const setLoc = vi.fn();
 
 vi.mock("../api", () => ({
   api: {
     getLiteratureManifest: (projectId: string) => getMan(projectId),
+    setLiteratureItemLocator: (itemId: string, body: unknown) => setLoc(itemId, body),
     kbChunksBySource: vi.fn(async () => []),
     getSourceTables: vi.fn(async () => ({ tables: [] })),
     kgLinkSource: vi.fn(async () => ({})),
@@ -204,10 +206,79 @@ describe("ManifestDetailPanel locator 展示", () => {
     });
   });
 
-  it("引用行只读展示 locator", async () => {
+  it("引用行展示 locator", async () => {
     render(<ManifestDetailPanel projectId="p1" />);
     await waitFor(() => screen.getByTestId("manifest-item-locator-s9"));
     expect(screen.getByTestId("manifest-item-locator-s9").textContent).toBe("p.3 / Fig.2");
+  });
+
+  it("标注定位器：表单预填现值，保存走 setLiteratureItemLocator 并重载", async () => {
+    setLoc.mockReset();
+    setLoc.mockResolvedValue({});
+    render(<ManifestDetailPanel projectId="p1" />);
+    await waitFor(() => screen.getByTestId("manifest-item-locator-edit-s9"));
+    expect(screen.queryByTestId("manifest-locator-form-s9")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("manifest-item-locator-edit-s9"));
+    expect((screen.getByTestId("manifest-locator-page") as HTMLInputElement).value).toBe("3");
+    expect((screen.getByTestId("manifest-locator-figure") as HTMLInputElement).value).toBe("2");
+
+    fireEvent.change(screen.getByTestId("manifest-locator-page"), { target: { value: "7" } });
+    fireEvent.change(screen.getByTestId("manifest-locator-table"), { target: { value: " 1 " } });
+    fireEvent.click(screen.getByTestId("manifest-locator-save"));
+
+    await waitFor(() => expect(setLoc).toHaveBeenCalledTimes(1));
+    expect(setLoc).toHaveBeenCalledWith("s9", {
+      project_id: "p1",
+      page: 7,
+      figure: "2",
+      table: "1",
+    });
+    // 保存后表单收起并重载 manifest（初次加载 + 保存后一次）。
+    await waitFor(() => expect(screen.queryByTestId("manifest-locator-form-s9")).toBeNull());
+    expect(getMan).toHaveBeenCalledTimes(2);
+  });
+
+  it("三项全空 = 清除定位（后端收到全 null）", async () => {
+    setLoc.mockReset();
+    setLoc.mockResolvedValue({});
+    render(<ManifestDetailPanel projectId="p1" />);
+    await waitFor(() => screen.getByTestId("manifest-item-locator-edit-s9"));
+    fireEvent.click(screen.getByTestId("manifest-item-locator-edit-s9"));
+    fireEvent.change(screen.getByTestId("manifest-locator-page"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("manifest-locator-figure"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("manifest-locator-save"));
+
+    await waitFor(() => expect(setLoc).toHaveBeenCalledTimes(1));
+    expect(setLoc).toHaveBeenCalledWith("s9", {
+      project_id: "p1",
+      page: null,
+      figure: null,
+      table: null,
+    });
+  });
+
+  it("非法页码在前端拦截，不发请求", async () => {
+    setLoc.mockReset();
+    render(<ManifestDetailPanel projectId="p1" />);
+    await waitFor(() => screen.getByTestId("manifest-item-locator-edit-s9"));
+    fireEvent.click(screen.getByTestId("manifest-item-locator-edit-s9"));
+    fireEvent.change(screen.getByTestId("manifest-locator-page"), { target: { value: "0" } });
+    fireEvent.click(screen.getByTestId("manifest-locator-save"));
+
+    await waitFor(() => screen.getByTestId("manifest-error"));
+    expect(screen.getByTestId("manifest-error").textContent).toMatch(/页码/);
+    expect(setLoc).not.toHaveBeenCalled();
+  });
+
+  it("取消编辑不写入", async () => {
+    setLoc.mockReset();
+    render(<ManifestDetailPanel projectId="p1" />);
+    await waitFor(() => screen.getByTestId("manifest-item-locator-edit-s9"));
+    fireEvent.click(screen.getByTestId("manifest-item-locator-edit-s9"));
+    fireEvent.click(screen.getByTestId("manifest-locator-cancel"));
+    expect(screen.queryByTestId("manifest-locator-form-s9")).toBeNull();
+    expect(setLoc).not.toHaveBeenCalled();
   });
 });
 

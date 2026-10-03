@@ -6,6 +6,7 @@ formulation levers are tuned per product family.
 """
 from __future__ import annotations
 
+import math
 import threading
 import uuid
 from collections.abc import Callable
@@ -141,7 +142,7 @@ def _score_and_validate(
     if objectives is None:
         objectives = req.objectives if req else None
     if objectives:
-        if len(objectives) == 1:
+        if predictor.score_is_raw(objectives):
             metric = objectives[0].metric
             form.score = float(form.predicted.get(metric, 0.0))
         else:
@@ -156,6 +157,13 @@ def _score_and_validate(
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
         form.score = float(form.predicted.get(metric, 0.0))
+    # A recipe whose weights do not add up to ~100 % (strict grounding drops unsupported
+    # components instead of rescaling the rest) is not comparable with a complete one:
+    # discount its score by the shared closure policy so it cannot out-rank a full recipe
+    # on predicted properties alone. Complete recipes (|Σ−100| ≤ 0.5) are untouched.
+    from ..domain.closure import discount_score
+
+    form.score = discount_score(form.score, form.total_pct())
     if chem_screen:
         # KG soft ranking *after* score assignment so measured/INHIBITS factors
         # are not wiped by predicted / multi_objective assignment above.
@@ -174,6 +182,8 @@ def _score_and_validate(
         )
     except Exception:
         pass
+    # The same closure / safety message can arrive through more than one check.
+    form.warnings = list(dict.fromkeys(form.warnings))
     return form
 
 
@@ -344,6 +354,65 @@ def _round_discrete_values(
             values[_name] = _base_val if _base_val is not None else _lever.levels[0]
 
 
+# Newest measured experiments shown to the fallback optimizer (it is O(n) per
+# surrogate query, and old points matter less than recent ones).
+_MAX_LAB_OBSERVATIONS = 200
+
+
+def _lab_points(
+    records: list | None,
+    req: Requirement,
+    factors: list[Factor],
+    base: Formulation,
+    levers: list,
+    process: dict,
+) -> list[tuple[list[float], dict[str, float]]]:
+    """Measured lab experiments as ``(x, measured)`` in the optimizer's coordinates.
+
+    ``x`` follows ``factors``: a lever the experiment varied takes its recorded
+    value (clipped into range); one it did not record stays at the baseline
+    recipe's value, which is what a DOE run that varies a subset of the levers
+    actually did. Only ``source == "lab"`` rows with measured values count, an
+    experiment that recorded none of the optimizer's levers says nothing about
+    this search space, and a project-scoped request ignores other projects'.
+    """
+    baseline = reconstruct.baseline_lever_values(levers, base, process)
+    pid = (req.project_id or "").strip()
+    out: list[tuple[list[float], dict[str, float]]] = []
+    for rec in records or []:
+        try:
+            if getattr(rec, "source", "") != "lab" or not rec.measured:
+                continue
+            if rec.domain != req.domain:
+                continue
+            rec_pid = (getattr(rec, "project_id", "") or "").strip()
+            if pid and rec_pid and rec_pid not in (pid, req.domain.value):
+                continue
+            x: list[float] = []
+            covered = 0
+            for f in factors:
+                v = rec.factors.get(f.name)
+                if v is None and f.name == "cure_temperature_c":
+                    v = rec.cure_temperature_c
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)):
+                    x.append(f.clip(float(v)))
+                    covered += 1
+                else:
+                    x.append(baseline[f.name])
+            if covered == 0:
+                continue
+            measured = {
+                m: float(val)
+                for m, val in rec.measured.items()
+                if isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(float(val))
+            }
+            if measured:
+                out.append((x, measured))
+        except Exception:  # one malformed record must not sink the optimization
+            continue
+    return out[-_MAX_LAB_OBSERVATIONS:]
+
+
 def run_optimization(
     req: Requirement,
     iterations: int | None = None,
@@ -417,7 +486,7 @@ def run_optimization(
     # single formulation's predicted values (which would collapse scores to ~0.5).
     bounds = predictor.default_bounds(objectives, base)
 
-    def _score_candidate(x: list[float]) -> float:
+    def _score_candidate(x: list[float], measured: dict[str, float] | None = None) -> float:
         values = {f.name: v for f, v in zip(factors, x)}
         form = _apply_levers(req, values)
         process_it = dict(process)
@@ -425,11 +494,17 @@ def run_optimization(
             if k in ("cure_temperature_c", "cure_time_min"):
                 process_it[k] = v
         props = predictor.predict(form, process_it)
+        if measured:
+            # A measured value beats the model's guess; metrics the experiment did
+            # not measure keep their prediction (a missing one would score as 0).
+            props = {**props, **measured}
         # Expand running bounds.
         for metric, val in props.items():
             lo, hi = bounds.get(metric, (val, val))
             bounds[metric] = (min(lo, val), max(hi, val))
-        return predictor.multi_objective_score(form, objectives, process_it, bounds)
+        # props is passed through: re-predicting the same formulation doubled the
+        # (rdkit/thermo-heavy) predict cost of every iteration for the same result.
+        return predictor.multi_objective_score(form, objectives, process_it, bounds, props=props)
 
     # Warm start: evaluate the incumbent (baseline) recipe first. Without it the
     # search only ever scores *suggested* points, so a short run — Optuna's TPE
@@ -447,6 +522,30 @@ def run_optimization(
         from loguru import logger
 
         logger.warning("optimizer warm start with the baseline skipped: {}", exc)
+
+    # Lab measurements: show the optimizer what was really measured. Before this
+    # the numpy/optuna/BoTorch fallback ignored ``existing_records`` entirely (it
+    # only learned through the retrained surrogate, which needs min_train_samples
+    # per metric), while the BayBE path was seeded with them.
+    lab_records = existing_records
+    if lab_records is None:
+        try:
+            from ..services.training import registry
+
+            lab_records = registry.records_for(req.domain, project_id=req.project_id or "")
+        except Exception:  # registry trouble degrades to a virtual-only run
+            lab_records = []
+    lab_used = 0
+    for x_lab, measured in _lab_points(lab_records, req, factors, base, levers, process):
+        try:
+            score_lab = _score_candidate(x_lab, measured)
+            opt.observe(x_lab, score_lab)
+            best_so_far = max(best_so_far, score_lab)
+            lab_used += 1
+        except Exception as exc:  # noqa: BLE001 — one bad point never aborts the run
+            from loguru import logger
+
+            logger.warning("lab observation skipped: {}", exc)
 
     for it in range(iterations):
         x = opt.suggest()
@@ -493,5 +592,8 @@ def run_optimization(
         history=history,
         top_formulations=top,
         engine=getattr(opt, "engine", "numpy-ucb"),
-        measurement_source=lab_measurement_source(existing_records or []),
+        # "lab" once measured data shaped this run (injected above) — also when the
+        # caller passed none and the registry supplied it.
+        measurement_source="lab" if lab_used else lab_measurement_source(lab_records or []),
+        lab_points_used=lab_used,
     )

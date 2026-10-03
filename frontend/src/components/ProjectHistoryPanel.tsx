@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   api,
   formatApiError,
@@ -18,21 +18,30 @@ export default function ProjectHistoryPanel({ projectId }: { projectId: string }
   const [busyVersion, setBusyVersion] = useState<number | null>(null);
   const [confirm, setConfirm] = useState<ProjectPayloadVersion | null>(null);
 
+  // Newest request wins. The rollback buttons act on the *displayed* version numbers, so a
+  // slow answer for the previous project must never replace this project's list.
+  const refreshSeq = useRef(0);
+
   async function refresh() {
+    const seq = ++refreshSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await api.getProjectHistory(projectId, 30);
+      if (seq !== refreshSeq.current) return;
       setVersions(res.versions ?? []);
     } catch (e) {
+      if (seq !== refreshSeq.current) return;
       setVersions([]);
       setError(formatApiError(e));
     } finally {
-      setLoading(false);
+      if (seq === refreshSeq.current) setLoading(false);
     }
   }
 
   useEffect(() => {
+    setVersions([]);
+    setConfirm(null);
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);

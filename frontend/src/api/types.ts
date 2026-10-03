@@ -355,6 +355,8 @@ export interface RecommendFormulationsResponse {
     relations?: Array<{ type?: string; target?: string; confidence?: number }>;
   }>;
   recommend_id?: string;
+  /** Evidence the round was grounded on (KB retrieval, else the caller's sources). */
+  grounded_evidence?: Evidence[];
 }
 
 export interface TradeOffAnalysis {
@@ -394,6 +396,8 @@ export interface OptimizationResult {
   engine?: string;
   /** predictor_virtual = in-loop surrogate scores (not lab); lab | skipped */
   measurement_source?: string;
+  /** Measured lab experiments shown to the optimizer (0 = purely virtual run). */
+  lab_points_used?: number;
 }
 
 export interface RunExplanation {
@@ -558,16 +562,26 @@ export interface ModelInfo {
   /** P1 #19: conformal absolute residual quantile (~90% half-width). */
   conformal_q90?: number | null;
   uncertainty_calibrated?: boolean;
+  /** A rollback pins the served version: retrains archive new ones beside it. */
+  pinned?: boolean;
+  /** Newest archived version when it is not the one being served. */
+  newer_version_id?: string | null;
 }
 
 export interface ModelVersionMeta {
   version_id: string;
   path?: string;
   is_current?: boolean;
-  data_hash?: string;
-  feature_version?: string;
-  trained_at?: string;
-  backend?: string;
+  /** Only the current row can be pinned. */
+  pinned?: boolean;
+  data_hash?: string | null;
+  feature_version?: string | null;
+  trained_at?: string | null;
+  backend?: string | null;
+  n_samples?: number | null;
+  r2?: number | null;
+  cv_r2?: number | null;
+  rmse?: number | null;
 }
 
 export interface TrainingReport {
@@ -2544,11 +2558,44 @@ export interface KgMaterialGraphResponse {
   meta: KgMaterialGraphMeta;
 }
 
+/** Publication preflight (citation / placeholder / numeric gates before export). */
+export type PreflightSeverity = "blocking" | "major" | "minor" | "info";
+export type PreflightFindingStatus = "open" | "resolved" | "overridden";
+
+export interface PreflightFinding {
+  id: string;
+  check: string;
+  severity: PreflightSeverity;
+  status: PreflightFindingStatus;
+  title: string;
+  detail: string;
+  evidence?: string[];
+  location?: Record<string, unknown>;
+  resolution?: { kind?: string; actor?: string; reason?: string; note?: string; at?: number } | null;
+  /** Content changed since the finding was confirmed → needs a fresh look. */
+  stale?: boolean;
+}
+
+export interface PreflightState {
+  project_id: string;
+  kind: string;
+  content_hash: string;
+  findings: PreflightFinding[];
+  events?: Array<Record<string, unknown>>;
+  finalization: { actor?: string; at?: number; artifactHash?: string } | null;
+  updated_at?: number;
+  open_blocking: number;
+  open_major: number;
+  ready: boolean;
+}
+
 export interface KgRebuildReport {
   linked_sources: number;
   entities_upserted: number;
   mentions_upserted: number;
   links_created: number;
+  relations_upserted?: number;
+  failed_sources?: number;
 }
 
 export interface KgLinkReport {
@@ -2759,6 +2806,26 @@ export interface RerunReviewResult {
   review?: Record<string, unknown> | null;
   fix?: Record<string, unknown> | null;
   final_answer?: string | null;
+}
+
+/** P1-32: one row of GET /api/reports/checklist/{run_id}. */
+export interface ReviewChecklistItem {
+  id: string;
+  category: "citation" | "numeric" | "method" | "general";
+  statement: string;
+  verdict: "pass" | "flagged" | "n_a";
+  evidence_refs: Array<{ source_id: string; page_no: number | null }>;
+  reviewer_note: string;
+}
+
+/** P1-32: structured review checklist built from a persisted review run. */
+export interface ReviewChecklist {
+  run_id: string;
+  session_key: string;
+  outcome: string | null;
+  generated_at: number;
+  items: ReviewChecklistItem[];
+  summary: { total: number; pass: number; flagged: number; n_a: number };
 }
 
 /** W4-1/W4-4: artifact lineage (logical file) for version management. */

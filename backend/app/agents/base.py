@@ -5,9 +5,7 @@ can treat every expert uniformly while each agent stays a plain Python class.
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
 
-from ..domain.schemas import AgentFinding, Formulation, Requirement
 
 
 # Status severity ordering, shared by agents and the supervisor.

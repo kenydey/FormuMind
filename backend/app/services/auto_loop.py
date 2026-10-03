@@ -62,7 +62,7 @@ def _cost_summary(optimization: OptimizationResult) -> dict | None:
 
 # B-7: 收敛判定统一入口（services/convergence.py）。
 # 以下名字保留为 re-export，兼容既有 import 方（tests / doe_cycle_service）。
-from .convergence import (
+from .convergence import (  # noqa: F401  (re-exports: tests import them from here)
     REASON_NONE,
     REASON_RMSE_PLATEAU,
     REASON_TARGET_ACHIEVED,
@@ -88,7 +88,7 @@ def _stub_optimization(req: Requirement) -> OptimizationResult:
 
 
 def _stub_doe(req: Requirement, reason: str = "rmse_plateau") -> DOEPlan:
-    from ..domain.schemas import DOEFactor, DOERun
+    from ..domain.schemas import DOERun
 
     levers = req.levers or []
     # v7 DOE-2: 用 levers_to_doe_factors，与主链路一致（保留 kind/levels）。

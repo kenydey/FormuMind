@@ -107,7 +107,6 @@ export const useStore = create<AppState>()(
       settingsTab: "model" as const,
       settingsEnvFocusAttr: null as string | null,
       envFlagsRevision: 0,
-      chatComposerPlusEnabled: true,
       chatMode: "chat" as const,
       selectedChatSkills: [] as string[],
       selectedConnectors: [] as string[],

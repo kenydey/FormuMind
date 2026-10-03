@@ -35,6 +35,7 @@ SUBMISSIONS = [
     ("/api/optimize", {"requirement": REQUIREMENT, "iterations": 2}),
     ("/api/design/inverse", {"requirement": REQUIREMENT}),
     ("/api/search/stream", {"query": "环氧防腐涂料"}),
+    ("/api/search/topic-sweep", {"query": "环氧防腐涂料"}),
     ("/api/loop/iterate", {"domain": "anticorrosion_coating", "substrate": "carbon_steel"}),
 ]
 

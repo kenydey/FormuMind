@@ -317,10 +317,12 @@ def validate_formulation(form: Formulation, voc_limit_gpl: float | None = None) 
     When ``voc_limit_gpl`` is supplied and the formulation's ``predicted``
     dict already contains ``voc_gpl``, a VOC-exceedance warning is appended.
     """
+    from .closure import warning_text as closure_warning
+
     warnings: list[str] = []
-    total = form.total_pct()
-    if abs(total - 100.0) > 0.5:
-        warnings.append(f"Weight percentages sum to {total:.2f}, expected ~100.")
+    closure_msg = closure_warning(form.total_pct())
+    if closure_msg:
+        warnings.append(closure_msg)
     for ing in form.ingredients:
         if ing.formula:
             # P1-5: clean OCR/LLM-mangled formulas upstream so the warning
@@ -414,18 +416,19 @@ def dimension_closure(form: Formulation) -> list[str]:
 
     Returns a list of human-readable warnings. Checks:
 
-    1. weight-% sums to ~100 (cheap re-assert of :func:`validate_formulation`)
-    2. an aqueous system must actually contain water / aqueous-carried matter
-    3. a solvent-borne system must not be mislabelled as waterborne (no water
+    1. an aqueous system must actually contain water / aqueous-carried matter
+    2. a solvent-borne system must not be mislabelled as waterborne (no water
        carrier but high "aqueous" share from role-name coincidence)
-    4. solids fraction (100 − water − volatile solvent) stays in 0-100
+    3. solids fraction (100 − water − volatile solvent) stays in 0-100
+
+    The weight-% closure itself (Σ ≈ 100) is judged once, by :mod:`.closure`, and
+    reported by :func:`validate_formulation`; repeating it here produced a second,
+    differently-worded warning for the same recipe.
     """
     from .knowledge import RAW_MATERIALS
 
     warnings: list[str] = []
     total = form.total_pct()
-    if abs(total - 100.0) > 5.0:
-        warnings.append(f"Weight percentages sum to {total:.2f}, expected ~100.")
 
     water = sum(
         ing.weight_pct

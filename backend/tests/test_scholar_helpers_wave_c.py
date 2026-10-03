@@ -1,6 +1,8 @@
 """Wave C scholar_helpers: notice_kind + expand_citations + provenance."""
 from __future__ import annotations
 
+import httpx
+
 from app.services import scholar_helpers as sh
 
 
@@ -39,11 +41,7 @@ def test_verify_dois_notice_kind(monkeypatch):
         def get(self, *a, **k):
             return Resp()
 
-    class FakeHttpx:
-        Client = FakeClient
-
-    monkeypatch.setitem(__import__("sys").modules, "httpx", FakeHttpx)
-    # Force re-import path: verify_dois imports httpx inside
+    monkeypatch.setattr(httpx, "Client", FakeClient)
     rows = sh.verify_dois(["10.1000/xyz"], enabled=True)
     assert rows[0]["status"] == "ok"
     assert rows[0]["notice_kind"] == "retracted_work"

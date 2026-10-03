@@ -35,6 +35,7 @@ import logging
 import time
 from pathlib import Path
 from .errors import degrade_return, log_handled_exception
+from .http_safe import UnsafeAddressError, ssrf_safe_client
 import re
 
 import httpx
@@ -333,7 +334,7 @@ def fetch_patent_landing(patent_id: str, timeout: float = 20.0) -> str | None:
     """GET the Google Patents landing page HTML, or None on failure."""
     url = _landing_url(patent_id)
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True, headers=_HTML_HEADERS) as client:
+        with ssrf_safe_client(timeout=timeout, follow_redirects=True, headers=_HTML_HEADERS) as client:
             r = client.get(url)
         if int(getattr(r, "status_code", 0)) != 200:
             return None
@@ -395,7 +396,7 @@ def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
     for attempt in range(attempts):
         current_url = url
         try:
-            with httpx.Client(
+            with ssrf_safe_client(
                 timeout=timeout, follow_redirects=False, headers=_HEADERS
             ) as client:
                 r = None
@@ -414,6 +415,10 @@ def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
                             return None, "ssrf"
                         continue
                     break
+        except UnsafeAddressError as exc:
+            # Resolved to an internal address at connection time (rebinding / a redirect hop).
+            logger.warning("pdf fetch blocked at connect time: %s", exc)
+            return None, "ssrf"
         except httpx.TimeoutException:
             last_reason = "timeout"
             if attempt + 1 < attempts:

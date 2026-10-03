@@ -50,24 +50,28 @@ def record_ingest_audit(
 
 def _try_sqlite(row: dict[str, Any]) -> bool:
     try:
-        from ..db.session import session_scope
+        # ``session_scope`` never existed in db/session.py, so this raised
+        # ImportError on every call (swallowed below) and the SQL half of
+        # "SQLite table with JSONL fallback" was dead: rows only ever reached
+        # the JSONL file. ``get_db_session`` commits on exit.
         from ..db.models import KbIngestAudit
-        with session_scope() as s:
+        from ..db.session import get_db_session
+
+        with get_db_session() as s:
             s.add(
                 KbIngestAudit(
                     id=row["id"],
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     project_id=row.get("project_id"),
                     domain=row.get("domain"),
                     query_fingerprint=row.get("query_fingerprint") or "",
                     evidence_id=row.get("evidence_id"),
                     source=row.get("source"),
                     action=row["action"],
-                    reason=row["reason"],
+                    reason=str(row.get("reason") or "")[:64],
                     domain_match=row.get("domain_match"),
                 )
             )
-            s.commit()
         return True
     except Exception:
         logger.debug("kb_ingest_audit sqlite path failed", exc_info=True)

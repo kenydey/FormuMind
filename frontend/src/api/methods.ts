@@ -39,7 +39,6 @@ import type {
   ExperimentSummary,
   FactorCandidate,
   Formulation,
-  FormulationSkill,
   FormulationVersionView,
   IPAnalysisRequest,
   IPReport,
@@ -57,7 +56,6 @@ import type {
   KbChunk,
   KbGoldenEvalRequest,
   KbGoldenEvalResponse,
-  KbGoldenQuestion,
   KbIntegrityResponse,
   KbProductsResponse,
   KbQueryTestRequest,
@@ -91,6 +89,7 @@ import type {
   NotebookLMStatus,
   ObjectiveSpec,
   OcsrStatus,
+  PreflightState,
   OptimizationResult,
   OrgDashboardStats,
   PlatformHealth,
@@ -119,6 +118,7 @@ import type {
   ProvenanceLineageResponse,
   RerunReviewRequest,
   RerunReviewResult,
+  ReviewChecklist,
   ReviewRunDetail,
   ReviewRunSummary,
   StructureRecognitionResult,
@@ -144,6 +144,46 @@ import type {
   WorkbenchRow,
   WorkbenchSyncResponse
 } from "./types";
+
+/**
+ * Turn a failed export response into an Error a person can act on.
+ *
+ * Reports are gated by publication preflight: a blocked export used to surface
+ * as a bare ``publication_preflight_blocked`` code (or, for the STORM endpoint,
+ * the entire raw JSON state). Say how many blocking findings are open and where
+ * to clear them instead.
+ */
+export async function exportFailure(res: Response, fallback: string): Promise<Error> {
+  const text = await res.text();
+  let message = text || fallback;
+  let detail: unknown;
+  try {
+    const body = JSON.parse(text) as { detail?: unknown };
+    detail = body.detail;
+    const d = body.detail;
+    if (typeof d === "string") {
+      message = d;
+    } else if (d && typeof d === "object") {
+      const obj = d as {
+        error?: string;
+        message?: string;
+        preflight?: { errors?: string[]; state?: { open_blocking?: number } };
+      };
+      if (obj.error === "publication_preflight_blocked") {
+        const n = obj.preflight?.state?.open_blocking ?? 0;
+        const extra = (obj.preflight?.errors ?? []).filter(Boolean).join("；");
+        message =
+          `发布预检未通过：${n > 0 ? `${n} 条阻断项未处理` : "存在未处理的阻断项"}` +
+          `${extra ? `（${extra}）` : ""}。请在「发布预检」面板处理或放行后重试。`;
+      } else if (typeof obj.message === "string" && obj.message.trim()) {
+        message = obj.message;
+      }
+    }
+  } catch {
+    /* not JSON: keep the raw text */
+  }
+  return new ApiError(message, { detail, status: res.status });
+}
 
 export const apiMethods = {
   research: (req: Requirement, sources: Evidence[] = [], query = "") =>
@@ -360,7 +400,6 @@ export const apiMethods = {
       //（message 里出现 "422" 字样会误判，如 "plan 422xxx"）。
       if (e instanceof ApiError && e.status === 422) {
         const msg = e.message;
-        // eslint-disable-next-line no-console
         console.error(`[doePlanTransition] ${action} ${planId} → 422:`, msg);
         throw e;
       }
@@ -688,6 +727,9 @@ export const apiMethods = {
       metric,
       version_id: versionId,
     }),
+  /** Release a rollback pin and serve the newest archived version. */
+  unpinModel: (projectId: string, metric: string) =>
+    post<ModelInfo>("/api/models/unpin", { project_id: projectId, metric }),
   trainingStatus: () => get<TrainingStatus>("/api/training-status"),
   doeExportUrl: (planId: string, format: "csv" | "xlsx" = "csv") =>
     `/api/doe/${planId}/export?format=${format}`,
@@ -931,9 +973,6 @@ export const apiMethods = {
   /** Shared probe ↔ recommend retrieval knobs (GET /api/kb/retrieval-settings). */
   kbRetrievalSettings: () => get<KbRetrievalSettings>("/api/kb/retrieval-settings"),
 
-  /** Curated golden retrieval questions (GET /api/kb/golden-questions). */
-  kbGoldenQuestions: () => get<KbGoldenQuestion[]>("/api/kb/golden-questions"),
-
   /** Run golden eval batch (POST /api/kb/golden-eval/run). */
   kbGoldenEvalRun: (body: KbGoldenEvalRequest) =>
     post<KbGoldenEvalResponse>("/api/kb/golden-eval/run", body),
@@ -1159,11 +1198,6 @@ export const apiMethods = {
 
   listProjects: () => get<import("../projectWorkspace").ProjectSummary[]>("/api/projects"),
 
-  listFormulationSkills: () => get<FormulationSkill[]>("/api/formulation-skills"),
-
-  getFormulationSkill: (id: string) =>
-    get<FormulationSkill>(`/api/formulation-skills/${encodeURIComponent(id)}`),
-
   listSkills: (kind?: string) =>
     get<import("./types").SkillsCatalogResponse>(
       kind ? `/api/skills?kind=${encodeURIComponent(kind)}` : "/api/skills",
@@ -1219,9 +1253,6 @@ export const apiMethods = {
       `/api/skills/installed/${encodeURIComponent(skill_id)}`,
     ),
 
-  listInstalledSkills: () =>
-    get<{ skills: Array<Record<string, unknown>> }>("/api/skills/installed"),
-
   checkSkillUpdate: (skill_id: string) =>
     get<{
       skill_id: string;
@@ -1275,9 +1306,6 @@ export const apiMethods = {
       `/api/connectors/builtin/${encodeURIComponent(id)}/toggle`,
       { enabled },
     ),
-
-  replaceMcpServers: (servers: import("./types").McpServerConfig[]) =>
-    put<{ mcp: import("./types").McpServerConfig[] }>("/api/connectors/mcp", { servers }),
 
   importMcpJson: (body: {
     json_text?: string;
@@ -1647,21 +1675,6 @@ export const apiMethods = {
       section_revisions?: Record<string, number>;
       error?: string;
     }>("/api/wiki/dossier/ensure", body),
-  patchWikiDossier: (body: {
-    project_id: string;
-    sections?: string[];
-    campaign_id?: string;
-    vertical?: string;
-    use_llm?: boolean;
-  }) =>
-    post<{
-      ok: boolean;
-      path?: string;
-      patched_sections?: string[];
-      skipped_unchanged?: string[];
-      section_revisions?: Record<string, number>;
-      error?: string;
-    }>("/api/wiki/dossier/patch", body),
   refreshWikiDossier: (body: {
     project_id: string;
     sections?: string[];
@@ -1693,12 +1706,6 @@ export const apiMethods = {
         [key: string]: unknown;
       } | null;
     }>(`/api/wiki/dossier/${encodeURIComponent(projectId)}`),
-  getWikiDossierPack: (projectId: string, campaignId?: string) => {
-    const q = campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : "";
-    return get<Record<string, unknown>>(
-      `/api/wiki/dossier/${encodeURIComponent(projectId)}/pack${q}`,
-    );
-  },
   listWikiReportTemplates: () =>
     get<{
       templates: { id: string; title: string; blurb: string; slices: string }[];
@@ -1979,6 +1986,22 @@ export const apiMethods = {
       return res.json();
     }),
 
+  /** W4-6: write (or, with all fields empty, clear) an item's citation locator. */
+  setLiteratureItemLocator: (
+    itemId: string,
+    body: {
+      project_id: string;
+      page?: number | null;
+      figure?: string | null;
+      table?: string | null;
+      actor?: string;
+    },
+  ) =>
+    put<Record<string, unknown>>(
+      `/api/wiki/literature/items/${encodeURIComponent(itemId)}/locator`,
+      body,
+    ),
+
   createLiteratureCollection: (body: { project_id: string; name: string }) =>
     post<Record<string, unknown>>("/api/wiki/literature/collections", body),
 
@@ -2047,11 +2070,9 @@ export const apiMethods = {
     if (params?.scope) qs.set("scope", params.scope);
     if (params?.collection_id) qs.set("collection_id", params.collection_id);
     const suffix = qs.toString() ? `?${qs}` : "";
-    const res = await fetch(
-      `/api/wiki/literature/${encodeURIComponent(projectId)}/export.bib${suffix}`,
-      { headers: { ...apiAuthHeaders() } },
-    );
-    if (!res.ok) throw new Error(await res.text());
+    const path = `/api/wiki/literature/${encodeURIComponent(projectId)}/export.bib`;
+    const res = await fetch(`${path}${suffix}`, { headers: { ...apiAuthHeaders() } });
+    if (!res.ok) throw await readApiError(res, path);
     return res.text();
   },
 
@@ -2063,11 +2084,9 @@ export const apiMethods = {
     if (params?.scope) qs.set("scope", params.scope);
     if (params?.collection_id) qs.set("collection_id", params.collection_id);
     const suffix = qs.toString() ? `?${qs}` : "";
-    const res = await fetch(
-      `/api/wiki/literature/${encodeURIComponent(projectId)}/export.ris${suffix}`,
-      { headers: { ...apiAuthHeaders() } },
-    );
-    if (!res.ok) throw new Error(await res.text());
+    const path = `/api/wiki/literature/${encodeURIComponent(projectId)}/export.ris`;
+    const res = await fetch(`${path}${suffix}`, { headers: { ...apiAuthHeaders() } });
+    if (!res.ok) throw await readApiError(res, path);
     return res.text();
   },
 
@@ -2117,10 +2136,7 @@ export const apiMethods = {
       headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `storm export failed (${res.status})`);
-    }
+    if (!res.ok) throw await exportFailure(res, `storm export failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") || "";
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
@@ -2140,10 +2156,7 @@ export const apiMethods = {
       headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `export failed (${res.status})`);
-    }
+    if (!res.ok) throw await exportFailure(res, `export failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") || "";
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
@@ -2161,58 +2174,54 @@ export const apiMethods = {
       headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      let detail = text || `tech report export failed (${res.status})`;
-      try {
-        const j = JSON.parse(text);
-        if (j?.detail?.error === "publication_preflight_blocked") {
-          detail = "发布预检未通过，导出被拒绝（publication preflight blocked）";
-        }
-      } catch {
-        /* keep raw text */
-      }
-      const err = new Error(detail) as Error & { status?: number };
-      err.status = res.status;
-      throw err;
-    }
+    if (!res.ok) throw await exportFailure(res, `tech report export failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") || "";
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
     return { blob, filename: m?.[1] || `${body.kind}_report.${body.format}` };
   },
-  getReportCapabilities: () =>
-    get<Record<string, boolean | string | null>>("/api/reports/capabilities"),
-  /** S2: deterministic wiki catalog from wiki_pages (App-maintained; not SSOT). */
-  getWikiCatalog: (params?: {
-    limit?: number;
-    kinds?: string;
-    project_id?: string | null;
-    format?: "json";
+  /** P1-37: up to 10 KB sources as one file — POST /api/sources/export {source_ids, format}. */
+  exportSources: async (body: {
+    source_ids: string[];
+    format: "docx" | "pdf" | "html" | "md";
   }) => {
-    const q = new URLSearchParams();
-    if (params?.limit != null) q.set("limit", String(params.limit));
-    if (params?.kinds) q.set("kinds", params.kinds);
-    if (params?.project_id) q.set("project_id", params.project_id);
-    q.set("format", "json");
-    const qs = q.toString();
-    return get<{
-      ok: boolean;
-      path?: string;
-      generated_at?: string;
-      entry_count?: number;
-      entries?: Array<{
-        path: string;
-        kind: string;
-        title: string;
-        norm_key?: string;
-        flags?: string[];
-        source_ids?: string[];
-      }>;
-      markdown?: string;
-      persisted?: boolean;
-    }>(`/api/wiki/catalog${qs ? `?${qs}` : ""}`);
+    const res = await fetch("/api/sources/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await exportFailure(res, `sources export failed (${res.status})`);
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `sources_export.${body.format}` };
   },
+  /** Publication preflight: persisted findings for one report kind (storm | tech_report_*). */
+  getPreflightState: (projectId: string, kind = "storm") =>
+    get<PreflightState>(
+      `/api/wiki/preflight/${encodeURIComponent(projectId)}?kind=${encodeURIComponent(kind)}`,
+    ),
+  reviewPreflight: (body: { project_id: string; kind?: string; markdown?: string }) =>
+    post<PreflightState>("/api/wiki/preflight/review", body),
+  overridePreflightFinding: (body: {
+    project_id: string;
+    kind?: string;
+    finding_id: string;
+    actor: string;
+    reason: string;
+  }) => post<PreflightState>("/api/wiki/preflight/override", body),
+  resolvePreflightFinding: (body: {
+    project_id: string;
+    kind?: string;
+    finding_id: string;
+    actor: string;
+    note: string;
+  }) => post<PreflightState>("/api/wiki/preflight/resolve", body),
+  finalizePreflight: (body: { project_id: string; kind?: string; markdown?: string; actor?: string }) =>
+    post<{ ok: boolean; ready: boolean; errors: string[]; state: PreflightState }>(
+      "/api/wiki/preflight/finalize",
+      body,
+    ),
   rebuildWikiCatalog: (body?: {
     persist?: boolean;
     limit?: number;
@@ -2287,7 +2296,6 @@ export const apiMethods = {
       human_override?: string | null;
       flags?: string[];
     }>("/api/wiki/pages/review", body),
-  getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
   listWikiFlags: (params?: { limit?: number; project_id?: string | null }) => {
@@ -2651,5 +2659,9 @@ export const apiMethods = {
       `/api/reviews/runs/${encodeURIComponent(runId)}/rerun`,
       body,
     ),
+
+  /** P1-32: structured pass / flagged checklist for one review run (404 when the run is gone). */
+  getReviewChecklist: (runId: string) =>
+    get<ReviewChecklist>(`/api/reports/checklist/${encodeURIComponent(runId)}`),
 };
 

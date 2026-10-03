@@ -76,10 +76,26 @@ class _OutboxTask(celery_app.Task):
 
     outbox_operation: str = ""
 
+    @staticmethod
+    def _payload_of(args, kwargs):
+        return args[0] if args else (kwargs or {}).get("payload")
+
+    def __call__(self, *args, **kwargs):
+        # Celery (worker and eager apply alike) enters the task body through __call__.
+        # While it runs, keep the outbox row's ``updated_at`` fresh: startup recovery
+        # replays only rows nothing has touched for the cutoff, so a job that simply takes
+        # longer than the cutoff (loop, whole-library KB ingest) is not run a second time.
+        if not self.outbox_operation:
+            return super().__call__(*args, **kwargs)
+        from ..db.outbox_store import heartbeat
+
+        with heartbeat(self.outbox_operation, self._payload_of(args, kwargs)):
+            return super().__call__(*args, **kwargs)
+
     def _mark_outbox_done(self, args, kwargs) -> None:
         if not self.outbox_operation:
             return
-        payload = args[0] if args else (kwargs or {}).get("payload")
+        payload = self._payload_of(args, kwargs)
         if not isinstance(payload, dict):
             return
         from ..db.outbox_store import record_done
@@ -1083,11 +1099,13 @@ def run_search_task(self, payload: dict) -> dict:
 
 @celery_app.task(bind=True, name="formumind.topic_sweep")
 def run_topic_sweep(self, payload: dict) -> dict:
-    """主题雷达单次触发(2026-09-05 P2): 检索 → topic 筛选 → 后台 KB 回填.
+    """主题雷达单次触发: 检索 → topic 筛选 → 后台 KB 回填.
 
-    Celery Beat 周期调度入口(beat 默认不启, 手动起 celery 加 -B 时按
-    celery_app.py 中注释的 beat_schedule 生效); 亦可由 API 手动触发。
+    两个入口: ``POST /api/search/topic-sweep``（手动一次）和 Celery Beat（设置
+    ``FORMUMIND_TOPIC_RADAR_*`` 生成的计划，见 ``worker/topic_radar.py``）。结果写入
+    任务状态，``GET /api/tasks/{id}`` 可查（``found`` / ``ingest_task_id`` / ``error``）。
     """
+    from ..config import get_settings
     from ..domain.schemas import Requirement
     from ..services import literature
 
@@ -1098,7 +1116,7 @@ def run_topic_sweep(self, payload: dict) -> dict:
         req = Requirement(**payload["requirement"]) if payload.get("requirement") else None
         iter_result = literature.iter_search(
             query,
-            payload.get("source_types") or [],
+            payload.get("source_types") or list(get_settings().federated_sources),
             req=req,
             total_limit=int(payload.get("total_limit", 100)),
             per_source_cap=int(payload.get("per_source_cap", 30)),
@@ -1107,23 +1125,31 @@ def run_topic_sweep(self, payload: dict) -> dict:
         final, _filter_report = (
             iter_result if isinstance(iter_result, tuple) else (list(iter_result), {})
         )
-        if not final:
-            return {"task_id": task_id, "query": query, "found": 0, "ingest_task_id": None}
-        kb_task_id = dispatch_kb_ingest(
-            [e.model_dump() for e in final],
-            project_id=project_id,
-            query=query,
-            domain=getattr(req, "domain", None) if req else None,
-        )
-        return {
+        kb_task_id = None
+        if final:
+            kb_task_id = dispatch_kb_ingest(
+                [e.model_dump() for e in final],
+                project_id=project_id,
+                query=query,
+                domain=getattr(req, "domain", None) if req else None,
+            )
+        data = {
             "task_id": task_id,
             "query": query,
             "found": len(final),
             "ingest_task_id": kb_task_id,
         }
+        if task_id:  # a direct ``.run()`` call (tests, scripts) has no Celery id to record under
+            persist_result(task_id, data, failed=False)
+            _persist_terminal(task_id, "topic_sweep", data)
+        return data
     except Exception as exc:
         logger.exception("topic_sweep failed")
-        return {"task_id": task_id, "query": query, "error": str(exc)}
+        err = {"task_id": task_id, "query": query, "error": str(exc)}
+        if task_id:
+            persist_result(task_id, err, failed=True)
+            _persist_terminal(task_id, "topic_sweep", err, failed=True, message=str(exc))
+        return err
 
 
 @celery_app.task(bind=True, name="formumind.loop")

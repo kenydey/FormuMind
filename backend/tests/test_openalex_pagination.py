@@ -47,7 +47,7 @@ def test_openalex_offset_spans_page_boundary(monkeypatch):
             page = int((params or {}).get("page", 1))
             return FakeResp(page)
 
-    monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
+    monkeypatch.setattr("httpx.Client", lambda **kw: FakeClient())
     hits = search_openalex("coating", limit=10, offset=20)
     assert len(hits) == 10
     assert hits[0].identifier == "10.1234/p120"
@@ -72,5 +72,5 @@ def test_openalex_returns_empty_when_no_results(monkeypatch):
         def get(self, url, params=None):
             return FakeResp()
 
-    monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
+    monkeypatch.setattr("httpx.Client", lambda **kw: FakeClient())
     assert search_openalex("empty", limit=5, offset=30) == []

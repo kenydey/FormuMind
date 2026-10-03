@@ -97,6 +97,13 @@ def broker_reachable() -> bool:
         return False
 
 
+def _record_outbox_task_id(outbox_id: str | None, task_id: str) -> None:
+    """Remember which Celery id the client holds, so recovery can replay under it."""
+    from ..db.outbox_store import record_task_id
+
+    record_task_id(outbox_id, task_id)
+
+
 def submit(
     task,
     payload: dict,
@@ -125,6 +132,7 @@ def submit(
         # RUNNING progress write cannot be overwritten by a late register_pending.
         task_id = str(uuid.uuid4())
         response = accepted_response(task_id, kind, outbox_id=outbox_id, owner_id=owner_id)
+        _record_outbox_task_id(outbox_id, task_id)
         _submit_eager_background(task, payload, kind, task_id=task_id)
         return response
 
@@ -147,6 +155,7 @@ def submit(
         raise HTTPException(
             status_code=503, detail=f"{DISPATCH_FAILURE_DETAIL}（{exc}）"
         ) from exc
+    _record_outbox_task_id(outbox_id, async_result.id)
     return accepted_response(async_result.id, kind, outbox_id=outbox_id, owner_id=owner_id)
 
 

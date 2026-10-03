@@ -67,7 +67,9 @@ describe("SourcesPanel P3.1 embodiment KB gate", () => {
   it("shows extract only on eligible KB docs", async () => {
     render(<SourcesPanel />);
     await waitFor(() => expect(api.embodimentEligibility).toHaveBeenCalled());
-    expect(screen.getByTestId("embodiment-extract-src-eligible")).toBeInTheDocument();
+    // The eligibility response is applied asynchronously after the call: wait for
+    // the button instead of asserting right after the call count (flaky under load).
+    expect(await screen.findByTestId("embodiment-extract-src-eligible")).toBeInTheDocument();
     expect(screen.queryByTestId("embodiment-extract-src-short")).not.toBeInTheDocument();
   });
 

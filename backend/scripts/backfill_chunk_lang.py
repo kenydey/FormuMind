@@ -14,7 +14,6 @@ import argparse
 import json
 import re
 import sqlite3
-import sys
 from pathlib import Path
 
 _BACKEND = Path(__file__).resolve().parent.parent

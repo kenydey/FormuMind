@@ -370,6 +370,9 @@ def _evidence_supports_value(evidence: list[Evidence], metric: str, value: float
     return False
 
 
+_DOWNGRADE_MARKER = "【数值降级】"
+
+
 def check_formulation_predictions(
     form: Formulation,
     evidence: list[Evidence],
@@ -388,6 +391,7 @@ def check_formulation_predictions(
         return warnings
 
     rationale = form.rationale or ""
+    unsupported: list[str] = []
     for metric, predicted in form.predicted.items():
         if not isinstance(predicted, (int, float)):
             continue
@@ -401,14 +405,20 @@ def check_formulation_predictions(
                     f"{form.name}: rationale numbers disagree with predicted {metric}={val:.2g}"
                 )
         if not _evidence_supports_value(evidence, metric, val):
-            warnings.append(
-                f"{form.name}: predicted {metric}={val:.2g} lacks supporting evidence"
-            )
-            marker = (
-                f"【数值降级】predicted {metric}={val:.2g} "
-                "在所引证据中无来源，该预测值可信度已降级，请谨慎采信"
-            )
-            if marker not in form.warnings:
-                form.warnings.append(marker)
+            unsupported.append(f"{metric}={val:.2g}")
+    # A re-check replaces the previous verdict instead of stacking a second marker.
+    form.warnings = [w for w in form.warnings if not w.startswith(_DOWNGRADE_MARKER)]
+    if unsupported:
+        # One line per formulation, not one per metric: the predictor emits ~15 metrics and
+        # evidence rarely quotes each, so a recipe used to carry ~15 near-identical warnings
+        # (times every candidate in the bundle) that buried the ones that matter.
+        listed = ", ".join(unsupported)
+        warnings.append(
+            f"{form.name}: {len(unsupported)} predicted value(s) lack supporting evidence ({listed})"
+        )
+        form.warnings.append(
+            f"{_DOWNGRADE_MARKER}{len(unsupported)} 项预测值在所引证据中无来源（{listed}），"
+            "可信度已降级，请谨慎采信"
+        )
     return warnings
 

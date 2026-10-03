@@ -275,9 +275,8 @@ SQLite 默认**不**执行外键约束，且该开关是**每连接**生效的�
 | 优先级 | 引擎 | 依赖 | 特点 |
 |--------|------|------|------|
 | 1 | BoTorch GP-EI | `botorch` + `gpytorch` | 真实高斯过程，Log-EI采集 |
-| 2 | Summit SOBO | `summit` | 贝叶斯/TSEMO优化 |
-| 3 | Optuna TPE | `optuna` | CPU多目标优化 |
-| 4 | numpy UCB | 内置 | 轻量级贝叶斯风格 |
+| 2 | Optuna TPE | `optuna` | CPU多目标优化 |
+| 3 | numpy UCB | 内置 | 轻量级贝叶斯风格 |
 
 **统一接口**：`suggest()` → `observe()` → `ranked()`
 
@@ -815,8 +814,6 @@ dependencies = [
 def build_optimizer(factors):
     if _botorch_available():
         return BotorchOptimizer(factors)
-    if _summit_available():
-        return SummitOptimizer(factors)
     if _optuna_available():
         return OptunaOptimizer(factors)
     return BayesianOptimizer(factors)  # 内置回退

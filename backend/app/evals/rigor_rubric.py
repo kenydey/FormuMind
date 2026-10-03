@@ -52,7 +52,6 @@ from ..services.numeric_check import (
     CITATION_RE,
     _canon_unit,
     _numbers_match,
-    check_answer_numbers,
     extract_citation_indices,
     extract_numbers,
     score_numeric_failures,

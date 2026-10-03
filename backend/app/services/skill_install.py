@@ -20,6 +20,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .chat_skills import ALLOWED_CHAT_TOOLS, parse_frontmatter
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -157,13 +158,11 @@ def parse_github_skill_url(url: str) -> dict[str, str]:
 
 
 def _default_fetch(url: str) -> bytes:
-    import httpx
-
     headers = {
         "User-Agent": "FormuMind-skill-install",
         "Accept": "application/vnd.github+json",
     }
-    with httpx.Client(timeout=30.0, follow_redirects=True, headers=headers) as client:
+    with make_client(timeout=30.0, follow_redirects=True, headers=headers) as client:
         r = client.get(url)
         if r.status_code >= 400:
             raise ValueError(f"GitHub 请求失败 {r.status_code}: {url}")

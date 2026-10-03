@@ -644,7 +644,7 @@ class OptimizationResult(BaseModel):
     history: list[float]
     top_formulations: list[Formulation]
     # Which optimizer engine produced this result (e.g. "numpy-ucb",
-    # "optuna-tpe", "summit-sobo", "botorch-ei"). Default preserves
+    # "optuna-tpe", "botorch-ei", "baybe"). Default preserves
     # backward compatibility.
     engine: str = "numpy-ucb"
     # P1 #22: history/observe values source. Virtual loops feed the optimizer
@@ -652,6 +652,9 @@ class OptimizationResult(BaseModel):
     # consistency of the surrogate, not real improvement.
     # "predictor_virtual" | "lab" | "skipped"
     measurement_source: str = "predictor_virtual"
+    # How many measured lab experiments were shown to the optimizer (0 for a
+    # purely virtual run). Lets the UI say "吸收了 N 条实验数据".
+    lab_points_used: int = 0
 
 
 class TaskState(str, Enum):
@@ -810,6 +813,11 @@ class ModelInfo(BaseModel):
     # P1 #19: absolute residual quantile from k-fold OOF (≈90% coverage half-width).
     conformal_q90: float | None = None
     uncertainty_calibrated: bool = False
+    # A rollback pins the chosen version: retrains archive new versions beside it without
+    # taking over. ``newer_version_id`` is the newest archived version when it is not the
+    # one being served (so the UI can say "locked at X, Y is waiting").
+    pinned: bool = False
+    newer_version_id: str | None = None
 
 
 class TrainingReport(BaseModel):

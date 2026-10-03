@@ -5,6 +5,7 @@ import logging
 from typing import Any, Callable
 
 from ..domain.schemas import DatalabDeleteResponse, DatalabItemEnvelope, DatalabSampleResponse
+from ..services.http_safe import make_client, make_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, s
     if not url:
         return False, "FORMUMIND_DATALAB_API_URL 未配置"
     try:
-        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
+        with make_client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
             resp = client.get("/")
             resp.raise_for_status()
         return True, None
@@ -132,6 +133,25 @@ def parse_delete_response(body: dict[str, Any], item_id: str) -> None:
         raise DatalabStoreError(f"Datalab delete-sample failed for {item_id}: status={parsed.status}")
 
 
+def delete_sample_sync(api_url: str, item_id: str, *, timeout: float = 10.0) -> None:
+    """Delete one Datalab sample; return normally when it is gone.
+
+    "Gone" includes *already absent* (HTTP 404): the point is that the sample must not
+    exist afterwards, and a retry after a half-finished cleanup would otherwise fail
+    forever. Transport errors and non-success answers raise, so the caller keeps the work
+    pending and retries later.
+    """
+    url = (api_url or "").rstrip("/")
+    if not url:
+        raise DatalabUnavailableError(api_url or "", "FORMUMIND_DATALAB_API_URL 未配置")
+    with make_client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
+        resp = client.post("/delete-sample/", json={"item_id": item_id})
+        if resp.status_code == 404:
+            return
+        resp.raise_for_status()
+        parse_delete_response(resp.json(), item_id)
+
+
 async def upload_file(
     api_url: str,
     content: bytes,
@@ -151,13 +171,11 @@ async def upload_file(
     of the experiment / workbench row they are archiving for. Without it the
     upload cannot be attached to anything and we return ``None``.
     """
-    import httpx
-
     url = (api_url or "").rstrip("/")
     if not url or not item_id:
         return None
     try:
-        async with httpx.AsyncClient(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
+        async with make_async_client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
             resp = await client.post(
                 "/upload-file/",
                 files={"file": (filename, content)},
@@ -183,13 +201,11 @@ def list_item_versions(
     Returns [] on any failure (unreachable / 401 / 404) so the UI can degrade
     to "no version history" instead of erroring.
     """
-    import httpx
-
     url = (api_url or "").rstrip("/")
     if not url or not refcode:
         return []
     try:
-        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
+        with make_client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
             resp = client.get(f"/items/{refcode}/versions/")
             if resp.status_code != 200:
                 return []
@@ -216,13 +232,11 @@ def diff_item_versions(
     api_url: str, refcode: str, v1_id: str, v2_id: str, *, timeout: float = 15.0, _transport=None
 ) -> dict:
     """P3: DeepDiff between two saved versions; {} on failure."""
-    import httpx
-
     url = (api_url or "").rstrip("/")
     if not url or not refcode:
         return {}
     try:
-        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
+        with make_client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
             resp = client.get(
                 f"/items/{refcode}/compare-versions/",
                 params={"v1": v1_id, "v2": v2_id},
@@ -243,13 +257,11 @@ def get_file_bytes(
     Returns None on any failure (unreachable / 401 / 404) so callers can fall
     back to a local copy / friendly 404.
     """
-    import httpx
-
     url = (api_url or "").rstrip("/")
     if not url or not file_id:
         return None
     try:
-        with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
+        with make_client(base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport) as client:
             resp = client.get(f"/files/{file_id}/{filename}")
             if resp.status_code != 200:
                 logger.warning(
@@ -269,13 +281,11 @@ def restore_item_version(
 
     Returns True on success; False on any failure (the caller shows a message).
     """
-    import httpx
-
     url = (api_url or "").rstrip("/")
     if not url or not refcode or not version_id:
         return False
     try:
-        with httpx.Client(
+        with make_client(
             base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport
         ) as client:
             resp = client.post(

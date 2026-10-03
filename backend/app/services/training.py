@@ -174,12 +174,20 @@ class ModelRegistry:
                 self._store.clear()
 
     # --- ingestion -----------------------------------------------------
-    def add(self, records: list[ExperimentRecord], retrain: bool = True) -> None:
+    def add(self, records: list[ExperimentRecord], retrain: bool = True) -> bool:
+        """Persist *records*; return True when the surrogate models were retrained.
+
+        ``retrain`` is what the caller asked for; the global ``auto_retrain``
+        setting (Settings UI "实验自动重训") can veto it, in which case models
+        only refresh through ``train()`` / ``POST /api/train`` or a restart.
+        """
         with self._lock:
             self._store.add(records)
             self._records.extend(records)
-            if retrain:
+            if retrain and get_settings().auto_retrain:
                 self._retrain_all()
+                return True
+            return False
 
     def known_labels(self) -> set[str]:
         with self._lock:
@@ -272,27 +280,126 @@ class ModelRegistry:
             return None
         model, info_dict = loaded
         try:
-            cq = info_dict.get("conformal_q90")
-            info = ModelInfo(
-                domain=domain,
-                project_id=pid,
-                metric=metric,
-                backend=str(info_dict.get("backend") or "cached"),
-                n_samples=int(info_dict.get("n_samples") or 0),
-                r2=float(info_dict.get("r2") or 0.0),
-                cv_r2=info_dict.get("cv_r2"),
-                rmse=float(info_dict.get("rmse") or 0.0),
-                trained_at=info_dict.get("trained_at"),
+            info = self._info_from_artifact(
+                domain,
+                pid,
+                metric,
+                info_dict,
+                version_id=info_dict.get("version_id"),
                 data_hash=info_dict.get("data_hash") or data_hash,
                 feature_version=info_dict.get("feature_version") or feature_version,
-                version_id=info_dict.get("version_id"),
-                conformal_q90=float(cq) if cq is not None else None,
-                uncertainty_calibrated=bool(info_dict.get("uncertainty_calibrated")),
             )
         except Exception as exc:
             logger.warning("cached ModelInfo invalid for %s/%s: %s", pid, metric, exc)
             return None
         return _Trained(model, info)
+
+    @staticmethod
+    def _info_from_artifact(
+        domain: ProductDomain,
+        pid: str,
+        metric: str,
+        info_dict: dict,
+        *,
+        version_id: str | None,
+        data_hash: str | None = None,
+        feature_version: str | None = None,
+        pinned: bool = False,
+        newer_version_id: str | None = None,
+    ) -> ModelInfo:
+        cq = info_dict.get("conformal_q90")
+        return ModelInfo(
+            domain=domain,
+            project_id=pid,
+            metric=metric,
+            backend=str(info_dict.get("backend") or "cached"),
+            n_samples=int(info_dict.get("n_samples") or 0),
+            r2=float(info_dict.get("r2") or 0.0),
+            cv_r2=info_dict.get("cv_r2"),
+            rmse=float(info_dict.get("rmse") or 0.0),
+            trained_at=info_dict.get("trained_at"),
+            data_hash=data_hash if data_hash is not None else info_dict.get("data_hash"),
+            feature_version=(
+                feature_version if feature_version is not None else info_dict.get("feature_version")
+            ),
+            version_id=version_id,
+            conformal_q90=float(cq) if cq is not None else None,
+            uncertainty_calibrated=bool(info_dict.get("uncertainty_calibrated")),
+            pinned=pinned,
+            newer_version_id=newer_version_id,
+        )
+
+    def _load_pinned(self, domain: ProductDomain, pid: str, metric: str) -> _Trained | None:
+        """The version a rollback pinned for (pid, metric), loaded; None when nothing is pinned.
+
+        A pin whose artifact is gone or unreadable is dropped (with a warning) so the
+        metric falls back to normal training instead of silently serving nothing.
+        """
+        if not self._persist_enabled():
+            return None
+        vid = model_store.pinned_version_id(pid, metric)
+        if vid is None:
+            return None
+        loaded = model_store.load_model(pid, metric, version_id=vid)
+        if loaded is None:
+            logger.warning("pinned model %s/%s@%s is unreadable; releasing the pin", pid, metric, vid)
+            model_store.release_pin(pid, metric)
+            return None
+        model, info_dict = loaded
+        newest = model_store.newest_version_id(pid, metric)
+        try:
+            info = self._info_from_artifact(
+                domain,
+                pid,
+                metric,
+                info_dict,
+                version_id=vid,
+                pinned=True,
+                newer_version_id=newest if newest and newest != vid else None,
+            )
+        except Exception as exc:
+            logger.warning("pinned ModelInfo invalid for %s/%s: %s", pid, metric, exc)
+            return None
+        return _Trained(model, info)
+
+    def _fit_and_describe(
+        self,
+        domain: ProductDomain,
+        pid: str,
+        metric: str,
+        data: tuple[np.ndarray, np.ndarray],
+        data_hash: str,
+        feat_ver: str,
+    ):
+        """Train one surrogate on *data*; return ``(model, ModelInfo)`` (not yet persisted)."""
+        X, y = data
+        model, backend = _make_regressor()
+        model.fit(X, y)
+        trained_at = _utcnow_iso()
+        oof = _kfold_oof(X, y)
+        cv_r2 = round(_r2(y, oof), 4) if oof is not None else None
+        q90: float | None = None
+        if oof is not None:
+            resid = np.abs(y - oof)
+            n = len(resid)
+            q_level = min(1.0, 0.9 * (1.0 + 1.0 / n))
+            q90 = float(np.quantile(resid, q_level))
+        info = ModelInfo(
+            domain=domain,
+            project_id=pid,
+            metric=metric,
+            backend=backend,
+            n_samples=len(y),
+            r2=round(_r2(y, np.asarray(model.predict(X))), 4),
+            cv_r2=cv_r2,
+            rmse=round(math.sqrt(np.mean((y - np.asarray(model.predict(X))) ** 2)), 4),
+            trained_at=trained_at,
+            data_hash=data_hash,
+            feature_version=feat_ver,
+            conformal_q90=round(q90, 6) if q90 is not None else None,
+            uncertainty_calibrated=bool(q90 is not None and q90 > 0),
+        )
+        return model, info
 
     def _retrain_all(self) -> None:
         self._models = {}
@@ -307,6 +414,17 @@ class ModelRegistry:
             if domain is None:
                 continue
             data = self._dataset(domain, metric, project_id=pid)
+            pinned = self._load_pinned(domain, pid, metric)
+            if pinned is not None:
+                # A rollback is in force: keep serving it, but still learn from the new data
+                # and archive that as a version the user can switch to (or release the pin to).
+                self._models[(pid, metric)] = pinned
+                if data is not None:
+                    self._archive_candidate(domain, pid, metric, data, feat_ver)
+                    newest = model_store.newest_version_id(pid, metric)
+                    if newest and newest != pinned.info.version_id:
+                        pinned.info = pinned.info.model_copy(update={"newer_version_id": newest})
+                continue
             if data is None:
                 continue
             rows = self._training_rows(domain, metric, project_id=pid)
@@ -315,45 +433,38 @@ class ModelRegistry:
             if cached is not None:
                 self._models[(pid, metric)] = cached
                 continue
-            X, y = data
-            model, backend = _make_regressor()
-            model.fit(X, y)
-            trained_at = _utcnow_iso()
-            oof = _kfold_oof(X, y)
-            cv_r2 = round(_r2(y, oof), 4) if oof is not None else None
-            q90: float | None = None
-            if oof is not None:
-                resid = np.abs(y - oof)
-                n = len(resid)
-                q_level = min(1.0, 0.9 * (1.0 + 1.0 / n))
-                q90 = float(np.quantile(resid, q_level))
-            info = ModelInfo(
-                domain=domain,
-                project_id=pid,
-                metric=metric,
-                backend=backend,
-                n_samples=len(y),
-                r2=round(_r2(y, np.asarray(model.predict(X))), 4),
-                cv_r2=cv_r2,
-                rmse=round(math.sqrt(np.mean((y - np.asarray(model.predict(X))) ** 2)), 4),
-                trained_at=trained_at,
-                data_hash=data_hash,
-                feature_version=feat_ver,
-                conformal_q90=round(q90, 6) if q90 is not None else None,
-                uncertainty_calibrated=bool(q90 is not None and q90 > 0),
-            )
+            model, info = self._fit_and_describe(domain, pid, metric, data, data_hash, feat_ver)
             if self._persist_enabled():
                 try:
-                    vid = model_store.save_model(
-                        pid,
-                        metric,
-                        model,
-                        info.model_dump(mode="json"),
-                    )
+                    vid = model_store.save_model(pid, metric, model, info.model_dump(mode="json"))
                     info = info.model_copy(update={"version_id": vid})
                 except Exception as exc:
                     logger.warning("model persist failed for %s/%s: %s", pid, metric, exc)
             self._models[(pid, metric)] = _Trained(model, info)
+
+    def _archive_candidate(
+        self,
+        domain: ProductDomain,
+        pid: str,
+        metric: str,
+        data: tuple[np.ndarray, np.ndarray],
+        feat_ver: str,
+    ) -> None:
+        """Train on the current data and store it beside a pinned model without taking over.
+
+        Skipped when persistence is off or a version trained on exactly this data already exists.
+        """
+        if not self._persist_enabled():
+            return
+        rows = self._training_rows(domain, metric, project_id=pid)
+        data_hash = model_store.compute_data_hash(rows, metric)
+        if model_store.has_version_for_data(pid, metric, data_hash):
+            return
+        try:
+            model, info = self._fit_and_describe(domain, pid, metric, data, data_hash, feat_ver)
+            model_store.save_model(pid, metric, model, info.model_dump(mode="json"), make_current=False)
+        except Exception as exc:
+            logger.warning("archiving a candidate model failed for %s/%s: %s", pid, metric, exc)
 
     def train(self) -> list[ModelInfo]:
         with self._lock:
@@ -364,44 +475,70 @@ class ModelRegistry:
         """P1 #20: disk versions for one surrogate (newest first)."""
         return model_store.list_versions(project_id, metric)
 
+    def _domain_for(self, project_id: str, info_dict: dict) -> ProductDomain | None:
+        domain_raw = info_dict.get("domain")
+        try:
+            domain = ProductDomain(domain_raw) if domain_raw else None
+        except Exception:
+            domain = None
+        if domain is None:
+            domain = next(
+                (r.domain for r in self._records if (r.project_id or r.domain.value) == project_id),
+                None,
+            )
+        return domain
+
     def rollback_model(self, project_id: str, metric: str, version_id: str) -> ModelInfo | None:
-        """Load a prior artifact into memory and mark it current."""
+        """Serve a prior artifact and pin it.
+
+        Pinning is what makes the rollback stick: without it the very next retrain (an
+        experiment submit with ``auto_retrain`` on, ``POST /api/train``, or a restart whose
+        data no longer matches the old artifact's hash) overwrote it. Rolling back to the
+        newest version is just "use the latest" and pins nothing.
+        """
         with self._lock:
             loaded = model_store.load_model(project_id, metric, version_id=version_id)
             if loaded is None:
                 return None
             model, info_dict = loaded
-            domain_raw = info_dict.get("domain")
-            try:
-                domain = ProductDomain(domain_raw) if domain_raw else None
-            except Exception:
-                domain = None
-            if domain is None:
-                domain = next(
-                    (r.domain for r in self._records if (r.project_id or r.domain.value) == project_id),
-                    None,
-                )
+            domain = self._domain_for(project_id, info_dict)
             if domain is None:
                 return None
-            if not model_store.set_current_version(project_id, metric, version_id):
+            newest = model_store.newest_version_id(project_id, metric)
+            pinned = bool(newest) and newest != version_id
+            if not model_store.set_current_version(project_id, metric, version_id, pinned=pinned):
                 return None
-            cq = info_dict.get("conformal_q90")
-            info = ModelInfo(
-                domain=domain,
-                project_id=project_id,
-                metric=metric,
-                backend=str(info_dict.get("backend") or "cached"),
-                n_samples=int(info_dict.get("n_samples") or 0),
-                r2=float(info_dict.get("r2") or 0.0),
-                cv_r2=info_dict.get("cv_r2"),
-                rmse=float(info_dict.get("rmse") or 0.0),
-                trained_at=info_dict.get("trained_at"),
-                data_hash=info_dict.get("data_hash"),
-                feature_version=info_dict.get("feature_version"),
+            info = self._info_from_artifact(
+                domain,
+                project_id,
+                metric,
+                info_dict,
                 version_id=version_id,
-                conformal_q90=float(cq) if cq is not None else None,
-                uncertainty_calibrated=bool(info_dict.get("uncertainty_calibrated")),
+                pinned=pinned,
+                newer_version_id=newest if pinned else None,
             )
+            self._models[(project_id, metric)] = _Trained(model, info)
+            return info
+
+    def unpin_model(self, project_id: str, metric: str) -> ModelInfo | None:
+        """Release a rollback pin and switch to the newest archived version.
+
+        None when the metric has no archived version at all.
+        """
+        with self._lock:
+            newest = model_store.newest_version_id(project_id, metric)
+            if newest is None:
+                return None
+            loaded = model_store.load_model(project_id, metric, version_id=newest)
+            if loaded is None:
+                return None
+            model, info_dict = loaded
+            domain = self._domain_for(project_id, info_dict)
+            if domain is None:
+                return None
+            if not model_store.set_current_version(project_id, metric, newest, pinned=False):
+                return None
+            info = self._info_from_artifact(domain, project_id, metric, info_dict, version_id=newest)
             self._models[(project_id, metric)] = _Trained(model, info)
             return info
 

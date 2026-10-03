@@ -315,6 +315,7 @@ def find_substitutes(
             pool.append(name)
 
     candidates: list[dict] = []
+    scored_forms: list[tuple[dict, object]] = []  # (candidate row, its scored Formulation)
     for name in pool:
         spec = dict(knowledge.RAW_MATERIALS.get(name) or {})
         score, breakdown = structural_score(original_spec, spec)
@@ -365,6 +366,20 @@ def find_substitutes(
             cand["stale_price"] = False
         cand["requirement_fit"] = _requirement_fit(cand, req)
         candidates.append(cand)
+        scored_forms.append((cand, form))
+
+    # _score_and_validate normalises each metric without a user-given range against *that
+    # candidate's own* predicted value, so a weak and a strong swap both score 0.5 and
+    # ``score_after`` could not tell them apart. Put every swap — and the recipe they replace —
+    # on one shared ruler. (A no-op for a single maximize objective, whose score is the raw value.)
+    if scored_forms:
+        from ..domain.project_spec import normalize_requirement
+        from .recommend_pipeline import rescore_with_shared_bounds
+
+        objectives = normalize_requirement(req).objectives if req is not None else None
+        rescore_with_shared_bounds([base_form, *(f for _c, f in scored_forms)], objectives, process)
+        for cand, form in scored_forms:
+            cand["score_after"] = form.score
 
     # Feasible first; then requirement-fit; then prefer non-stale; then structural / score.
     candidates.sort(

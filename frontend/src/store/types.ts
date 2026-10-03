@@ -207,7 +207,6 @@ export interface AppState {
   /** 组织看板独立入口（Wave 0 从设置页搬出）。 */
   orgOpen: boolean;
   toggleOrg: () => void;
-  chatComposerPlusEnabled: boolean;
   chatMode: "chat" | "evidence";
   selectedChatSkills: string[];
   selectedConnectors: string[];
@@ -272,7 +271,7 @@ export interface AppState {
   /** B: 训练数据就绪度刷新（导入/训练后调用） */
   refreshTrainingStatus: () => Promise<void>;
   recomputePredicted: () => Promise<void>;
-  exportDoe: (format: "csv" | "xlsx") => void;
+  exportDoe: (format: "csv" | "xlsx") => Promise<void>;
   importCsv: (file: File) => Promise<void>;
   toggleHistory: () => void;
   initProjects: () => Promise<void>;

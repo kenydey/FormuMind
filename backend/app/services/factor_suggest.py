@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from . import kb_index
 from ..domain.project_spec import levers_to_doe_factors, resolve_levers
-from ..domain.schemas import DOEFactor, FactorCandidate, Requirement
+from ..domain.schemas import FactorCandidate, Requirement
 
 
 def suggest_factors(req: Requirement) -> list[FactorCandidate]:

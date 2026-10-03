@@ -5,6 +5,8 @@
  * ingredient now happens to sit at the same index in the *new* formulation.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import type { ChemicalProfile, Ingredient } from "../api";
@@ -60,5 +62,59 @@ describe("RecommendedFormulaTable stale CAS lookup", () => {
 
     expect(onChangeA).not.toHaveBeenCalled();
     expect(onChangeB).not.toHaveBeenCalled();
+  });
+});
+
+function Editable({ initial }: { initial: Ingredient[] }) {
+  const [rows, setRows] = useState(initial);
+  return (
+    <RecommendedFormulaTable
+      ingredients={rows}
+      editable
+      onIngredientChange={(idx, patch) =>
+        setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+      }
+    />
+  );
+}
+
+describe("RecommendedFormulaTable inline editing", () => {
+  it("keeps focus while an ingredient name is typed (row key must not follow the name)", async () => {
+    const user = userEvent.setup();
+    render(<Editable initial={[ingredient("A", "")]} />);
+    const input = screen.getByDisplayValue("A") as HTMLInputElement;
+    await user.click(input);
+    await user.type(input, "bcd");
+    // With ``key={`${ing.name}-${idx}`}`` the <tr> was re-mounted after every keystroke:
+    // focus dropped to <body> and only the first character ever landed.
+    expect(screen.getByDisplayValue("Abcd")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByDisplayValue("Abcd"));
+  });
+
+  it("does not show a resolved-profile badge under a different ingredient", async () => {
+    vi.spyOn(api, "chemicalProfile").mockResolvedValue({
+      ...profile("Bisphenol A"),
+      iupac_name: "Bisphenol A",
+      patented: true,
+    });
+    const { rerender } = render(
+      <RecommendedFormulaTable
+        ingredients={[ingredient("Bisphenol A", "")]}
+        editable
+        onIngredientChange={() => undefined}
+      />,
+    );
+    fireEvent.blur(screen.getByPlaceholderText("CAS"), { target: { value: "Bisphenol A" } });
+    await screen.findByText(/专利/);
+
+    // Same row index, different material (e.g. the leaderboard was replaced).
+    rerender(
+      <RecommendedFormulaTable
+        ingredients={[ingredient("Titanium dioxide", "13463-67-7")]}
+        editable
+        onIngredientChange={() => undefined}
+      />,
+    );
+    expect(screen.queryByText(/专利/)).toBeNull();
   });
 });

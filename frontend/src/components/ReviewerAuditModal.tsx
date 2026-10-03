@@ -10,6 +10,7 @@ import Modal from "./Modal";
 import {
   reviewsApi,
   formatApiError,
+  type ReviewChecklist,
   type ReviewRunDetail,
   type ReviewRunSummary,
 } from "../api";
@@ -18,6 +19,19 @@ const DISPOSITION_CLS: Record<string, string> = {
   resolved: "text-emerald-300",
   open: "text-amber-300",
   unaddressed: "text-rose-300",
+};
+
+const VERDICT_LABEL: Record<string, string> = { pass: "通过", flagged: "标记", n_a: "不适用" };
+const VERDICT_CLS: Record<string, string> = {
+  pass: "text-emerald-300",
+  flagged: "text-amber-300",
+  n_a: "text-slate-400",
+};
+const CATEGORY_LABEL: Record<string, string> = {
+  citation: "引用",
+  numeric: "数值",
+  method: "方法",
+  general: "通用",
 };
 
 function StaleNote({ run }: { run: ReviewRunSummary }) {
@@ -61,9 +75,13 @@ export default function ReviewerAuditModal({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [checklist, setChecklist] = useState<ReviewChecklist | null>(null);
+  const [checklistBusy, setChecklistBusy] = useState(false);
+  const [checklistError, setChecklistError] = useState<string | null>(null);
   /** F-4: 列表/详情各自的序号守卫 —— 快速切换时旧请求不覆盖新数据。 */
   const listSeq = useRef(0);
   const detailSeq = useRef(0);
+  const checklistSeq = useRef(0);
 
   const loadList = useCallback(async () => {
     const seq = ++listSeq.current;
@@ -112,6 +130,32 @@ export default function ReviewerAuditModal({
       void loadList();
     }
   }, [open, initialRunId, loadDetail, loadList]);
+
+  // 清单属于某一条审计记录：换记录就丢掉上一条的（含其在途请求）。
+  const detailRunId = detail?.run_id ?? null;
+  useEffect(() => {
+    checklistSeq.current += 1;
+    setChecklist(null);
+    setChecklistError(null);
+    setChecklistBusy(false);
+  }, [detailRunId]);
+
+  async function loadChecklist() {
+    if (!detailRunId) return;
+    const seq = ++checklistSeq.current;
+    setChecklistBusy(true);
+    setChecklistError(null);
+    try {
+      const c = await reviewsApi.getReviewChecklist(detailRunId);
+      if (checklistSeq.current !== seq) return;
+      setChecklist(c);
+    } catch (e) {
+      if (checklistSeq.current !== seq) return;
+      setChecklistError(formatApiError(e));
+    } finally {
+      if (checklistSeq.current === seq) setChecklistBusy(false);
+    }
+  }
 
   async function rerun() {
     if (!selectedId || !question || !answer) return;
@@ -238,6 +282,54 @@ export default function ReviewerAuditModal({
                   </tbody>
                 </table>
               )}
+              <div className="mt-3 border-t border-edge/60 pt-2" data-testid="reviewer-checklist">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[11px] text-slate-500">发布清单（逐条 通过 / 标记）</span>
+                  <button
+                    type="button"
+                    data-testid="reviewer-checklist-load"
+                    onClick={() => void loadChecklist()}
+                    disabled={checklistBusy}
+                    className="text-[11px] px-2 py-0.5 rounded border border-edge text-slate-300 hover:border-accent/50 hover:text-accent disabled:opacity-40"
+                    title="按本次审计的处置记录生成结构化清单"
+                  >
+                    {checklistBusy ? "生成中…" : checklist ? "刷新" : "生成清单"}
+                  </button>
+                </div>
+                {checklistError && (
+                  <div className="text-[11px] text-rose-300/80">{checklistError}</div>
+                )}
+                {checklist && (
+                  <div>
+                    <div className="flex gap-3 text-[11px] mb-1" data-testid="reviewer-checklist-summary">
+                      <span className={VERDICT_CLS.pass}>通过 {checklist.summary.pass}</span>
+                      <span className={VERDICT_CLS.flagged}>标记 {checklist.summary.flagged}</span>
+                      <span className={VERDICT_CLS.n_a}>不适用 {checklist.summary.n_a}</span>
+                    </div>
+                    {checklist.items.length === 0 ? (
+                      <div className="text-[11px] text-slate-500">本次审计没有可核对的条目。</div>
+                    ) : (
+                      <ul className="space-y-1">
+                        {checklist.items.map((it) => (
+                          <li
+                            key={it.id}
+                            data-testid="reviewer-checklist-item"
+                            className="flex items-start gap-2 text-[11px]"
+                          >
+                            <span className={`shrink-0 ${VERDICT_CLS[it.verdict] ?? "text-slate-400"}`}>
+                              {VERDICT_LABEL[it.verdict] ?? it.verdict}
+                            </span>
+                            <span className="shrink-0 text-slate-500">
+                              {CATEGORY_LABEL[it.category] ?? it.category}
+                            </span>
+                            <span className="text-slate-300 break-words min-w-0">{it.statement}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="text-[11px] text-slate-500">

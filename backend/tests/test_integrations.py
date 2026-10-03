@@ -1,6 +1,6 @@
 """Offline-fallback tests for the optional engine adapters.
 
-These verify that when Summit / Optuna / paper-qa / ChemCrow / PubChemPy /
+These verify that when BoTorch / Optuna / paper-qa / ChemCrow / PubChemPy /
 thermo are NOT installed (the CI baseline), every adapter degrades gracefully
 to the deterministic built-in behaviour and the public contracts are unchanged.
 """
@@ -30,8 +30,8 @@ _REQ = Requirement(
 def test_build_optimizer_falls_back_to_numpy_when_no_engine():
     factors = [Factor(name="a", low=0.0, high=10.0), Factor(name="b", low=1.0, high=5.0)]
     opt = build_optimizer(factors, seed=1)
-    # In the CI baseline neither Summit nor Optuna is installed.
-    if not optimizer._summit_available() and not optimizer._optuna_available():
+    # In the CI baseline neither BoTorch nor Optuna is installed.
+    if not optimizer._botorch_available() and not optimizer._optuna_available():
         assert isinstance(opt, BayesianOptimizer)
         assert opt.engine == "numpy-ucb"
     # Whatever engine is chosen must honour the shared interface.
@@ -46,7 +46,7 @@ def test_optimization_result_reports_engine():
     from app.pipeline import workflow
 
     res = workflow.run_optimization(_REQ, iterations=1)
-    assert res.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "baybe", "botorch-ei"}
+    assert res.engine in {"numpy-ucb", "optuna-tpe", "baybe", "botorch-ei"}
     assert len(res.history) == 1
     assert res.top_formulations
 
@@ -187,7 +187,7 @@ def test_optimization_result_engine_includes_botorch_when_installed():
     from app.services.optimizer import _botorch_available
 
     res = workflow.run_optimization(_REQ, iterations=1)
-    valid = {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei", "baybe"}
+    valid = {"numpy-ucb", "optuna-tpe", "botorch-ei", "baybe"}
     assert res.engine in valid, f"Unknown engine: {res.engine}"
 
 

@@ -25,6 +25,7 @@ from ..db.measurement_store import MeasurementStore
 from ..db.models import ExperimentRow
 from ..db.session_utils import commit_session
 from ..domain.schemas import Measurement
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +46,11 @@ def fetch_item_data(
     used by the sibling read APIs; the exact path is confirmed on the first
     real run (see verify_datalab.py).
     """
-    import httpx
-
     url = (api_url or "").rstrip("/")
     if not url or not item_id:
         return None
     try:
-        with httpx.Client(
+        with make_client(
             base_url=url, timeout=timeout, headers=datalab_headers(), transport=_transport
         ) as client:
             resp = client.get(f"/items/{item_id}/")

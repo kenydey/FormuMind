@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .levers import substrate_default_levers
-from .schemas import DOEFactor, Formulation, Ingredient, LeverSpec, ObjectiveSpec, ProductDomain, Requirement, Substrate
+from .schemas import DOEFactor, Formulation, LeverSpec, ObjectiveSpec, ProductDomain, Requirement, Substrate
 
 # Roles typically held fixed (solvent fills to 100%).
 _FIXED_ROLES = frozenset({"solvent", "pigment", "filler", "additive"})

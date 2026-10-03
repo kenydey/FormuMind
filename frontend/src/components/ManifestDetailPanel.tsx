@@ -14,7 +14,7 @@ export type ManifestItem = {
   has_fulltext?: boolean;
   enrich_status?: string;
   oa_pdf_url?: string;
-  /** W4-6 引用定位器（只读展示，无写入口）。 */
+  /** W4-6 引用定位器（页/图/表）；可在引用列表中标注，不改变冻结语料。 */
   locator?: { page?: number; figure?: string; table?: string };
 };
 
@@ -129,7 +129,8 @@ type Props = {
  * - 引用列表 + 点击打开 SourceDetailModal（Wave 3 复用）。
  * - "Frozen review corpus" coverage 七格统计（诚实声明：计数 = 冻结时返回给 Agent 的内容）。
  * - 换样式 → 预览 → 存新版（快照存到项目 shelf，不修改 manifest 本体）。
- * - 条目只读：不提供任何编辑入口（防篡改证据）。
+ * - 条目内容只读（防篡改证据）；仅引用定位器（页/图/表）可标注——它是标注元数据，
+ *   写入走 PUT /api/wiki/literature/items/{id}/locator，不改变冻结语料。
  */
 export default function ManifestDetailPanel({ projectId }: Props) {
   const [man, setMan] = useState<Manifest | null>(null);
@@ -138,6 +139,13 @@ export default function ManifestDetailPanel({ projectId }: Props) {
   const [style, setStyle] = useState<ManifestStyleKey>("list");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [locEdit, setLocEdit] = useState<{
+    id: string;
+    page: string;
+    figure: string;
+    table: string;
+  } | null>(null);
+  const [locBusy, setLocBusy] = useState(false);
   /** F-4: 序号守卫 —— project 快速切换时旧请求的 manifest 不覆盖新数据。 */
   const loadSeq = useRef(0);
 
@@ -161,6 +169,40 @@ export default function ManifestDetailPanel({ projectId }: Props) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const startLocatorEdit = (it: ManifestItem) =>
+    setLocEdit({
+      id: it.id,
+      page: it.locator?.page != null ? String(it.locator.page) : "",
+      figure: it.locator?.figure ?? "",
+      table: it.locator?.table ?? "",
+    });
+
+  /** 写入（或，三项全空时清除）引用定位器；成功后重载 manifest。 */
+  const saveLocator = async () => {
+    if (!projectId || !locEdit || locBusy) return;
+    const pageRaw = locEdit.page.trim();
+    const page = pageRaw === "" ? null : Number(pageRaw);
+    if (page !== null && (!Number.isInteger(page) || page < 1)) {
+      setError("页码必须是 ≥1 的整数");
+      return;
+    }
+    setLocBusy(true);
+    try {
+      await api.setLiteratureItemLocator(locEdit.id, {
+        project_id: projectId,
+        page,
+        figure: locEdit.figure.trim() || null,
+        table: locEdit.table.trim() || null,
+      });
+      setLocEdit(null);
+      await reload();
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setLocBusy(false);
+    }
+  };
 
   const frozen = man?.frozen ?? null;
   const scopedItems = useMemo(() => {
@@ -290,12 +332,21 @@ export default function ManifestDetailPanel({ projectId }: Props) {
               {formatLocator(it) && (
                 <span
                   className="text-violet-300/90 text-[10px]"
-                  title="引用定位器（只读）"
+                  title="引用定位器"
                   data-testid={`manifest-item-locator-${it.id}`}
                 >
                   {formatLocator(it)}
                 </span>
               )}
+              <button
+                type="button"
+                className="px-1 rounded border border-edge text-slate-400 hover:border-accent/40 text-[10px]"
+                title="标注引用定位器（页 / 图 / 表）；仅标注，不改变冻结语料"
+                data-testid={`manifest-item-locator-edit-${it.id}`}
+                onClick={() => startLocatorEdit(it)}
+              >
+                定位
+              </button>
               <span
                 className={`px-1 rounded border text-[10px] ${screeningTone(it.screening)}`}
               >
@@ -305,6 +356,66 @@ export default function ManifestDetailPanel({ projectId }: Props) {
                 <span className="px-1 rounded border border-sky-500/40 text-sky-300 text-[10px]">
                   全文
                 </span>
+              )}
+              {locEdit?.id === it.id && (
+                <form
+                  noValidate
+                  className="basis-full flex flex-wrap items-center gap-1 pt-1"
+                  data-testid={`manifest-locator-form-${it.id}`}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveLocator();
+                  }}
+                >
+                  <label className="text-slate-500">
+                    页
+                    <input
+                      type="number"
+                      min={1}
+                      value={locEdit.page}
+                      onChange={(e) => setLocEdit({ ...locEdit, page: e.target.value })}
+                      className="ml-1 w-14 bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                      data-testid="manifest-locator-page"
+                    />
+                  </label>
+                  <label className="text-slate-500">
+                    图
+                    <input
+                      value={locEdit.figure}
+                      maxLength={60}
+                      onChange={(e) => setLocEdit({ ...locEdit, figure: e.target.value })}
+                      className="ml-1 w-16 bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                      data-testid="manifest-locator-figure"
+                    />
+                  </label>
+                  <label className="text-slate-500">
+                    表
+                    <input
+                      value={locEdit.table}
+                      maxLength={60}
+                      onChange={(e) => setLocEdit({ ...locEdit, table: e.target.value })}
+                      className="ml-1 w-16 bg-ink border border-edge rounded px-1 py-0.5 text-slate-200"
+                      data-testid="manifest-locator-table"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={locBusy}
+                    className="px-1.5 py-0.5 rounded border border-accent/50 text-accent disabled:opacity-50"
+                    data-testid="manifest-locator-save"
+                  >
+                    {locBusy ? "保存中…" : "保存"}
+                  </button>
+                  <button
+                    type="button"
+                    className="px-1.5 py-0.5 rounded border border-edge text-slate-400"
+                    onClick={() => setLocEdit(null)}
+                    data-testid="manifest-locator-cancel"
+                  >
+                    取消
+                  </button>
+                  <span className="text-slate-600 text-[10px]">三项全空 = 清除定位</span>
+                </form>
               )}
             </li>
           ))}

@@ -219,17 +219,20 @@ def test_dimension_closure_clean_formulation():
     assert dimension_closure(form) == []
 
 
-def test_dimension_closure_detects_solids_anomaly():
-    from app.domain.chemistry import dimension_closure
+def test_an_overfull_recipe_is_flagged_once_by_the_closure_policy():
+    from app.domain.chemistry import dimension_closure, validate_formulation
 
-    # Solids > 100 impossible: water 10 + solvent 20 + solids 90 → sums 120.
+    # water 10 + solvent 20 + resin 90 → Σ = 120 %: impossible as a recipe.
     form = _form(
         ("Bisphenol-A epoxy (DGEBA)", 90.0, "resin"),
         ("Deionized water", 10.0, "solvent"),
         ("Xylene", 20.0, "solvent"),
     )
-    warnings = dimension_closure(form)
-    assert any("Weight percentages sum" in w for w in warnings)
+    closure = [w for w in validate_formulation(form) if "Weight percentages sum" in w]
+    assert len(closure) == 1 and "over-full" in closure[0]
+    # The dimension layer used to word the same problem a second way; the weight-% closure is
+    # judged in one place (domain/closure.py) and reported by validate_formulation only.
+    assert not any("percentages sum" in w.lower() for w in dimension_closure(form))
 
 
 def test_dimension_closure_waterborne_needs_water():

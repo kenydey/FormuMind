@@ -53,21 +53,13 @@ celery_app.conf.update(
     result_expires=86400,
 )
 
-# ── Celery Beat 主题雷达(P2, 2026-09-05)────────────────────────────────────
-# 默认不启: 需定时雷达时放开注释, 并手动起 celery 加 -B(beat 进程)。镁合金
-# 钝化主题示例(周一 01:00 检索 + KB 回填)。改查询/项目后在 celery_app 注释内
-# 调整, 勿改代码。from celery.schedules import crontab 需随注释一并放开。
-# celery_app.conf.beat_schedule = {
-#     "topic-sweep-mg-passivation": {
-#         "task": "formumind.topic_sweep",
-#         "schedule": crontab(day_of_week="mon", hour=1, minute=0),
-#         "kwargs": {
-#             "query": "镁合金 无铬钝化 耐盐雾 聚合物 树脂",
-#             "project_id": "1d10717c",
-#             "total_limit": 100,
-#         },
-#     },
-# }
+# ── Celery Beat 主题雷达(P2, 2026-09-05; 2026-10-03 改为设置驱动) ───────────────
+# FORMUMIND_TOPIC_RADAR_ENABLED + FORMUMIND_TOPIC_RADAR_TOPICS（JSON 数组）生成计划，
+# 见 worker/topic_radar.py。只有 beat 进程运行时才会触发（compose: --profile radar）；
+# 手动触发一次用 POST /api/search/topic-sweep。
+from .topic_radar import build_beat_schedule
+
+celery_app.conf.beat_schedule = build_beat_schedule(settings)
 
 # Register Celery tasks on import.
 import app.worker.tasks  # noqa: F401

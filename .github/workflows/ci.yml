@@ -145,6 +145,10 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: Lint (React hooks rules)
+        # react-hooks/rules-of-hooks + exhaustive-deps only; --max-warnings 0 (see eslint.config.js).
+        run: npm run lint
+
       - name: Unit tests
         run: npx vitest run
 
