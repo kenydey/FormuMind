@@ -2020,6 +2020,22 @@ export const apiMethods = {
     }>("/api/wiki/literature/import-ids", body),
 
   getLiteratureDuplicates: (projectId: string) =>
+  /** W4-6: write (or, with all fields empty, clear) an item's citation locator. */
+  setLiteratureItemLocator: (
+    itemId: string,
+    body: {
+      project_id: string;
+      page?: number | null;
+      figure?: string | null;
+      table?: string | null;
+      actor?: string;
+    },
+  ) =>
+    put<Record<string, unknown>>(
+      `/api/wiki/literature/items/${encodeURIComponent(itemId)}/locator`,
+      body,
+    ),
+
     get<{
       groups: Array<{
         id: string;

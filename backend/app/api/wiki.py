@@ -1090,6 +1090,16 @@ def literature_get_endpoint(project_id: str) -> dict:
     _require_wiki()
     from ..services.literature_manifest import load_manifest, manifest_enabled
 
+class LiteratureLocatorBody(BaseModel):
+    """Citation locator for one manifest item; all-empty clears it."""
+
+    project_id: str = Field(min_length=1)
+    page: int | None = Field(default=None, ge=1)
+    figure: str | None = Field(default=None, max_length=60)
+    table: str | None = Field(default=None, max_length=60)
+    actor: str = Field(default="user", max_length=120)
+
+
     if not manifest_enabled(get_settings()):
         raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
     return load_manifest(project_id)
@@ -1343,6 +1353,31 @@ def literature_collection_patch_endpoint(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+@router.put("/literature/items/{item_id}/locator")
+def literature_item_locator_endpoint(item_id: str, body: LiteratureLocatorBody) -> dict:
+    """W4-6: annotate a manifest item with ``{page, figure, table}``.
+
+    The locator is annotation metadata, not corpus membership: it never breaks a
+    freeze. An empty body (no page/figure/table) clears the locator.
+    """
+    _require_wiki()
+    from ..services.literature_manifest import manifest_enabled, set_item_locator
+
+    if not manifest_enabled(get_settings()):
+        raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
+    locator = {
+        k: v
+        for k, v in (("page", body.page), ("figure", body.figure), ("table", body.table))
+        if v is not None
+    }
+    try:
+        return set_item_locator(body.project_id, item_id, locator, actor=body.actor)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
