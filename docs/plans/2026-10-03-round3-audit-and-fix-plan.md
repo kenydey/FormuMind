@@ -58,7 +58,7 @@
 
 | 问题 | 症状 / 根因 |
 |---|---|
-| 下载不带鉴权 | `<a href="/api/...">`、`window.open()` 无法携带 `Authorization`，**开启 API 鉴权后** 材料导出、DOE 导出、轮次导出、附件下载、成果架下载全部 401 → 统一 `downloadWithAuth` + `AuthDownloadLink`，失败会提示；blob URL 延迟 40 s 再回收（立即回收会取消 Safari/Firefox 的下载） |
+| 下载不带鉴权 | `<a href="/api/...">`、`window.open()` 无法携带 `Authorization`，**开启 API 鉴权后** 材料导出、DOE 导出、轮次导出、附件下载、成果架下载全部 401 → 统一 `downloadWithAuth` + `AuthDownloadLink`，失败会提示；另有 6 份各自实现的"blob → 锚点 → 点击"保存例程（全部立即回收 URL，可能取消 Safari/Firefox 的下载）合并为 `saveBlob`，延迟 40 s 回收 |
 | 切换项目丢编辑 | `loadProject` 先置 `projectLoading` 再调 `saveProject`（后者遇到该标志直接返回）→ "先保存要离开的项目"是空操作，最近 1.5 s 的编辑丢失 |
 | **项目串数据** | "空 payload 保护"拿**内存里上一个项目**的 sources / chat 去填新项目的空 payload → 打开一个新建 / 未检索过的项目会带上上一个项目的资料和对话，下一次自动保存把它们写进新项目 |
 | 项目切换残留 | 会话列表、检索状态、过滤报告、上传 / 校验告警等切项目后仍显示上一个项目的内容（`createProject` 清了，`loadProject` 没清） |
@@ -170,7 +170,7 @@
 | 后端全量（`pytest -m "not golden_eval"`，默认禁止出网） | 3818 通过 / 27 跳过 / 0 失败（448 s；加入后台线程等待后 +17 s） |
 | `ruff check`（E9 / F401 / F63 / F7 / F82 / F811） | 通过 |
 | 前端 `tsc --noEmit` | 通过 |
-| 前端 `vitest run` | 123 个文件 / 610 个用例全部通过 |
+| 前端 `vitest run` | 123 个文件 / 612 个用例全部通过 |
 | `vite build` | 通过 |
 | 回归测试是否真能失败 | 抽查 3 组（材料导出、版本历史、`AttachmentPreview`）：在旧代码上失败，新代码上通过 |
 
