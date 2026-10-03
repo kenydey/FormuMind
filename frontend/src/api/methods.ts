@@ -400,7 +400,6 @@ export const apiMethods = {
       //（message 里出现 "422" 字样会误判，如 "plan 422xxx"）。
       if (e instanceof ApiError && e.status === 422) {
         const msg = e.message;
-        // eslint-disable-next-line no-console
         console.error(`[doePlanTransition] ${action} ${planId} → 422:`, msg);
         throw e;
       }
@@ -2071,11 +2070,9 @@ export const apiMethods = {
     if (params?.scope) qs.set("scope", params.scope);
     if (params?.collection_id) qs.set("collection_id", params.collection_id);
     const suffix = qs.toString() ? `?${qs}` : "";
-    const res = await fetch(
-      `/api/wiki/literature/${encodeURIComponent(projectId)}/export.bib${suffix}`,
-      { headers: { ...apiAuthHeaders() } },
-    );
-    if (!res.ok) throw new Error(await res.text());
+    const path = `/api/wiki/literature/${encodeURIComponent(projectId)}/export.bib`;
+    const res = await fetch(`${path}${suffix}`, { headers: { ...apiAuthHeaders() } });
+    if (!res.ok) throw await readApiError(res, path);
     return res.text();
   },
 
@@ -2087,11 +2084,9 @@ export const apiMethods = {
     if (params?.scope) qs.set("scope", params.scope);
     if (params?.collection_id) qs.set("collection_id", params.collection_id);
     const suffix = qs.toString() ? `?${qs}` : "";
-    const res = await fetch(
-      `/api/wiki/literature/${encodeURIComponent(projectId)}/export.ris${suffix}`,
-      { headers: { ...apiAuthHeaders() } },
-    );
-    if (!res.ok) throw new Error(await res.text());
+    const path = `/api/wiki/literature/${encodeURIComponent(projectId)}/export.ris`;
+    const res = await fetch(`${path}${suffix}`, { headers: { ...apiAuthHeaders() } });
+    if (!res.ok) throw await readApiError(res, path);
     return res.text();
   },
 
