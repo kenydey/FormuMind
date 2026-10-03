@@ -91,6 +91,7 @@ import type {
   NotebookLMStatus,
   ObjectiveSpec,
   OcsrStatus,
+  PreflightState,
   OptimizationResult,
   OrgDashboardStats,
   PlatformHealth,
@@ -144,6 +145,46 @@ import type {
   WorkbenchRow,
   WorkbenchSyncResponse
 } from "./types";
+
+/**
+ * Turn a failed export response into an Error a person can act on.
+ *
+ * Reports are gated by publication preflight: a blocked export used to surface
+ * as a bare ``publication_preflight_blocked`` code (or, for the STORM endpoint,
+ * the entire raw JSON state). Say how many blocking findings are open and where
+ * to clear them instead.
+ */
+export async function exportFailure(res: Response, fallback: string): Promise<Error> {
+  const text = await res.text();
+  let message = text || fallback;
+  let detail: unknown;
+  try {
+    const body = JSON.parse(text) as { detail?: unknown };
+    detail = body.detail;
+    const d = body.detail;
+    if (typeof d === "string") {
+      message = d;
+    } else if (d && typeof d === "object") {
+      const obj = d as {
+        error?: string;
+        message?: string;
+        preflight?: { errors?: string[]; state?: { open_blocking?: number } };
+      };
+      if (obj.error === "publication_preflight_blocked") {
+        const n = obj.preflight?.state?.open_blocking ?? 0;
+        const extra = (obj.preflight?.errors ?? []).filter(Boolean).join("；");
+        message =
+          `发布预检未通过：${n > 0 ? `${n} 条阻断项未处理` : "存在未处理的阻断项"}` +
+          `${extra ? `（${extra}）` : ""}。请在「发布预检」面板处理或放行后重试。`;
+      } else if (typeof obj.message === "string" && obj.message.trim()) {
+        message = obj.message;
+      }
+    }
+  } catch {
+    /* not JSON: keep the raw text */
+  }
+  return new ApiError(message, { detail, status: res.status });
+}
 
 export const apiMethods = {
   research: (req: Requirement, sources: Evidence[] = [], query = "") =>
@@ -1979,6 +2020,22 @@ export const apiMethods = {
       return res.json();
     }),
 
+  /** W4-6: write (or, with all fields empty, clear) an item's citation locator. */
+  setLiteratureItemLocator: (
+    itemId: string,
+    body: {
+      project_id: string;
+      page?: number | null;
+      figure?: string | null;
+      table?: string | null;
+      actor?: string;
+    },
+  ) =>
+    put<Record<string, unknown>>(
+      `/api/wiki/literature/items/${encodeURIComponent(itemId)}/locator`,
+      body,
+    ),
+
   createLiteratureCollection: (body: { project_id: string; name: string }) =>
     post<Record<string, unknown>>("/api/wiki/literature/collections", body),
 
@@ -2020,22 +2077,6 @@ export const apiMethods = {
     }>("/api/wiki/literature/import-ids", body),
 
   getLiteratureDuplicates: (projectId: string) =>
-  /** W4-6: write (or, with all fields empty, clear) an item's citation locator. */
-  setLiteratureItemLocator: (
-    itemId: string,
-    body: {
-      project_id: string;
-      page?: number | null;
-      figure?: string | null;
-      table?: string | null;
-      actor?: string;
-    },
-  ) =>
-    put<Record<string, unknown>>(
-      `/api/wiki/literature/items/${encodeURIComponent(itemId)}/locator`,
-      body,
-    ),
-
     get<{
       groups: Array<{
         id: string;
@@ -2133,10 +2174,7 @@ export const apiMethods = {
       headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `storm export failed (${res.status})`);
-    }
+    if (!res.ok) throw await exportFailure(res, `storm export failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") || "";
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
@@ -2156,10 +2194,7 @@ export const apiMethods = {
       headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `export failed (${res.status})`);
-    }
+    if (!res.ok) throw await exportFailure(res, `export failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") || "";
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
@@ -2177,26 +2212,38 @@ export const apiMethods = {
       headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      let detail = text || `tech report export failed (${res.status})`;
-      try {
-        const j = JSON.parse(text);
-        if (j?.detail?.error === "publication_preflight_blocked") {
-          detail = "发布预检未通过，导出被拒绝（publication preflight blocked）";
-        }
-      } catch {
-        /* keep raw text */
-      }
-      const err = new Error(detail) as Error & { status?: number };
-      err.status = res.status;
-      throw err;
-    }
+    if (!res.ok) throw await exportFailure(res, `tech report export failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") || "";
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
     return { blob, filename: m?.[1] || `${body.kind}_report.${body.format}` };
   },
+  /** Publication preflight: persisted findings for one report kind (storm | tech_report_*). */
+  getPreflightState: (projectId: string, kind = "storm") =>
+    get<PreflightState>(
+      `/api/wiki/preflight/${encodeURIComponent(projectId)}?kind=${encodeURIComponent(kind)}`,
+    ),
+  reviewPreflight: (body: { project_id: string; kind?: string; markdown?: string }) =>
+    post<PreflightState>("/api/wiki/preflight/review", body),
+  overridePreflightFinding: (body: {
+    project_id: string;
+    kind?: string;
+    finding_id: string;
+    actor: string;
+    reason: string;
+  }) => post<PreflightState>("/api/wiki/preflight/override", body),
+  resolvePreflightFinding: (body: {
+    project_id: string;
+    kind?: string;
+    finding_id: string;
+    actor: string;
+    note: string;
+  }) => post<PreflightState>("/api/wiki/preflight/resolve", body),
+  finalizePreflight: (body: { project_id: string; kind?: string; markdown?: string; actor?: string }) =>
+    post<{ ok: boolean; ready: boolean; errors: string[]; state: PreflightState }>(
+      "/api/wiki/preflight/finalize",
+      body,
+    ),
   getReportCapabilities: () =>
     get<Record<string, boolean | string | null>>("/api/reports/capabilities"),
   /** S2: deterministic wiki catalog from wiki_pages (App-maintained; not SSOT). */

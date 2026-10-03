@@ -2546,11 +2546,44 @@ export interface KgMaterialGraphResponse {
   meta: KgMaterialGraphMeta;
 }
 
+/** Publication preflight (citation / placeholder / numeric gates before export). */
+export type PreflightSeverity = "blocking" | "major" | "minor" | "info";
+export type PreflightFindingStatus = "open" | "resolved" | "overridden";
+
+export interface PreflightFinding {
+  id: string;
+  check: string;
+  severity: PreflightSeverity;
+  status: PreflightFindingStatus;
+  title: string;
+  detail: string;
+  evidence?: string[];
+  location?: Record<string, unknown>;
+  resolution?: { kind?: string; actor?: string; reason?: string; note?: string; at?: number } | null;
+  /** Content changed since the finding was confirmed → needs a fresh look. */
+  stale?: boolean;
+}
+
+export interface PreflightState {
+  project_id: string;
+  kind: string;
+  content_hash: string;
+  findings: PreflightFinding[];
+  events?: Array<Record<string, unknown>>;
+  finalization: { actor?: string; at?: number; artifactHash?: string } | null;
+  updated_at?: number;
+  open_blocking: number;
+  open_major: number;
+  ready: boolean;
+}
+
 export interface KgRebuildReport {
   linked_sources: number;
   entities_upserted: number;
   mentions_upserted: number;
   links_created: number;
+  relations_upserted?: number;
+  failed_sources?: number;
 }
 
 export interface KgLinkReport {
@@ -2584,8 +2617,6 @@ export interface Neo4jCompound {
   uid: string;
   name?: string | null;
   smiles?: string | null;
-  relations_upserted?: number;
-  failed_sources?: number;
   cas_number?: string | null;
   molecular_weight?: number | null;
   supplier?: string | null;

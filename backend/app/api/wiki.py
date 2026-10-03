@@ -901,6 +901,14 @@ class PreflightOverrideRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class PreflightResolveRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    kind: str = Field(default="storm")
+    finding_id: str = Field(min_length=1)
+    actor: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=2000)
+
+
 class PreflightFinalizeRequest(BaseModel):
     project_id: str = Field(min_length=1)
     kind: str = Field(default="storm")
@@ -949,6 +957,31 @@ def preflight_override_endpoint(body: PreflightOverrideRequest) -> dict:
             body.finding_id,
             actor=body.actor,
             reason=body.reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/preflight/resolve")
+def preflight_resolve_endpoint(body: PreflightResolveRequest) -> dict:
+    """Mark an open finding as handled (the person fixed it); blocking ones need a note.
+
+    Unlike ``override`` (accept the risk and ship anyway) this records that the
+    underlying problem was dealt with. The service function existed with seven
+    test callers and no route, so the UI could only ever offer ``override``.
+    """
+    _require_wiki()
+    from ..services.publication_preflight import resolve_finding
+
+    try:
+        return resolve_finding(
+            body.project_id,
+            body.kind,
+            body.finding_id,
+            actor=body.actor,
+            note=body.note,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1057,6 +1090,16 @@ class LiteratureCollectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class LiteratureLocatorBody(BaseModel):
+    """Citation locator for one manifest item; all-empty clears it."""
+
+    project_id: str = Field(min_length=1)
+    page: int | None = Field(default=None, ge=1)
+    figure: str | None = Field(default=None, max_length=60)
+    table: str | None = Field(default=None, max_length=60)
+    actor: str = Field(default="user", max_length=120)
+
+
 class LiteratureCollectionPatch(BaseModel):
     project_id: str = Field(min_length=1)
     name: str | None = Field(default=None, max_length=120)
@@ -1089,16 +1132,6 @@ class LiteratureCitationImportRequest(BaseModel):
 def literature_get_endpoint(project_id: str) -> dict:
     _require_wiki()
     from ..services.literature_manifest import load_manifest, manifest_enabled
-
-class LiteratureLocatorBody(BaseModel):
-    """Citation locator for one manifest item; all-empty clears it."""
-
-    project_id: str = Field(min_length=1)
-    page: int | None = Field(default=None, ge=1)
-    figure: str | None = Field(default=None, max_length=60)
-    table: str | None = Field(default=None, max_length=60)
-    actor: str = Field(default="user", max_length=120)
-
 
     if not manifest_enabled(get_settings()):
         raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
@@ -1320,6 +1353,31 @@ def literature_item_patch_endpoint(item_id: str, body: LiteratureItemPatch) -> d
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.put("/literature/items/{item_id}/locator")
+def literature_item_locator_endpoint(item_id: str, body: LiteratureLocatorBody) -> dict:
+    """W4-6: annotate a manifest item with ``{page, figure, table}``.
+
+    The locator is annotation metadata, not corpus membership: it never breaks a
+    freeze. An empty body (no page/figure/table) clears the locator.
+    """
+    _require_wiki()
+    from ..services.literature_manifest import manifest_enabled, set_item_locator
+
+    if not manifest_enabled(get_settings()):
+        raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
+    locator = {
+        k: v
+        for k, v in (("page", body.page), ("figure", body.figure), ("table", body.table))
+        if v is not None
+    }
+    try:
+        return set_item_locator(body.project_id, item_id, locator, actor=body.actor)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/literature/collections")
 def literature_collection_create_endpoint(body: LiteratureCollectionCreate) -> dict:
     _require_wiki()
@@ -1353,31 +1411,6 @@ def literature_collection_patch_endpoint(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-@router.put("/literature/items/{item_id}/locator")
-def literature_item_locator_endpoint(item_id: str, body: LiteratureLocatorBody) -> dict:
-    """W4-6: annotate a manifest item with ``{page, figure, table}``.
-
-    The locator is annotation metadata, not corpus membership: it never breaks a
-    freeze. An empty body (no page/figure/table) clears the locator.
-    """
-    _require_wiki()
-    from ..services.literature_manifest import manifest_enabled, set_item_locator
-
-    if not manifest_enabled(get_settings()):
-        raise HTTPException(status_code=409, detail="literature_manifest_enabled is false")
-    locator = {
-        k: v
-        for k, v in (("page", body.page), ("figure", body.figure), ("table", body.table))
-        if v is not None
-    }
-    try:
-        return set_item_locator(body.project_id, item_id, locator, actor=body.actor)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
