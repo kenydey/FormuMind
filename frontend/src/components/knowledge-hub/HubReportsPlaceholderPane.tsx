@@ -16,6 +16,7 @@ import LiteratureFreezeStrip from "./LiteratureFreezeStrip";
 import ManifestDetailPanel from "../ManifestDetailPanel";
 import ArtifactVersionsPanel from "../ArtifactVersionsPanel";
 import PublicationPreflightPanel from "../PublicationPreflightPanel";
+import { saveBlob } from "../../utils/download";
 
 /** Grayscale keys required for Hub dossier → Report generate/export. */
 const REPORT_FLAG_ATTRS = [
@@ -103,17 +104,6 @@ type ExportCaps = {
   pptx?: boolean;
   cjk_font?: string | null;
 };
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 /** Report generation + export from DossierPack (P5 / P5.1). */
 export default function HubReportsPlaceholderPane() {
@@ -280,7 +270,7 @@ export default function HubReportsPlaceholderPane() {
         use_llm: useLlm,
         ensure_dossier: true,
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -301,7 +291,7 @@ export default function HubReportsPlaceholderPane() {
         kind: "storm",
         actor: "hub",
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -356,7 +346,7 @@ export default function HubReportsPlaceholderPane() {
         parallel: stormParallel,
         ensure_dossier: true,
       });
-      triggerDownload(blob, filename);
+      saveBlob(blob, filename);
     } catch (e) {
       setError(formatApiError(e));
     } finally {

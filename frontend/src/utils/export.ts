@@ -4,17 +4,7 @@
 // main bundle.
 import type { Formulation } from "../api";
 import { OBJECTIVE_METRIC } from "../api";
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
+import { saveBlob } from "./download";
 
 function slug(name: string): string {
   return name.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase() || "formula";
@@ -46,7 +36,7 @@ export function formulaToCsv(form: Formulation): string {
 
 export function downloadFormulaCsv(form: Formulation): void {
   const blob = new Blob([formulaToCsv(form)], { type: "text/csv;charset=utf-8" });
-  triggerDownload(blob, `${slug(form.name)}.csv`);
+  saveBlob(blob, `${slug(form.name)}.csv`);
 }
 
 export async function exportFormulaToPdf(form: Formulation): Promise<void> {
@@ -161,7 +151,7 @@ export function leaderboardToCsv(forms: Formulation[]): string {
 
 export function downloadLeaderboardCsv(forms: Formulation[]): void {
   const blob = new Blob([leaderboardToCsv(forms)], { type: "text/csv;charset=utf-8" });
-  triggerDownload(blob, `formulations_leaderboard_${forms.length}.csv`);
+  saveBlob(blob, `formulations_leaderboard_${forms.length}.csv`);
 }
 
 export async function copyLeaderboardJson(forms: Formulation[]): Promise<void> {

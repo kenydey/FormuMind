@@ -9,6 +9,7 @@ import {
   type WikiSearchHit,
 } from "../../api";
 import { useStore } from "../../store";
+import { saveBlob } from "../../utils/download";
 import WikiMarkdownReader from "../WikiMarkdownReader";
 import HubWikiGraphPane from "./HubWikiGraphPane";
 
@@ -703,14 +704,7 @@ export default function HubWikiPane({ active }: { active: boolean }) {
                   limit: 500,
                   project_id: activeProjectId || undefined,
                 });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                saveBlob(blob, filename);
                 setLintSummary(`已下载 ${filename}`);
               } catch (e) {
                 setError(formatApiError(e));

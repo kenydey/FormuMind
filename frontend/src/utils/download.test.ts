@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { downloadWithAuth, filenameFromDisposition } from "./download";
+import { downloadWithAuth, filenameFromDisposition, saveBlob } from "./download";
 import { setApiToken } from "../api/http";
 
 describe("filenameFromDisposition", () => {
@@ -68,5 +68,44 @@ describe("downloadWithAuth", () => {
     );
     await expect(downloadWithAuth("/api/x", "f")).rejects.toThrow(/Unauthorized/);
     expect(clicked).toEqual([]);
+  });
+});
+
+describe("saveBlob", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:saved"), revokeObjectURL: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("downloads through an anchor, leaves no element behind and releases the URL only later", () => {
+    const clicked: Array<{ href: string; download: string }> = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push({ href: this.href, download: this.download });
+    });
+
+    saveBlob(new Blob(["x"]), "report.pdf");
+
+    expect(clicked).toEqual([{ href: "blob:saved", download: "report.pdf" }]);
+    expect(document.querySelector("a[download]")).toBeNull();
+    // Immediate revocation cancels the download in Safari / Firefox.
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(40_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:saved");
+  });
+
+  it("does not leak the anchor or skip the release when click() throws", () => {
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(() => saveBlob(new Blob(["x"]), "a.csv")).toThrow("blocked");
+    expect(document.querySelector("a[download]")).toBeNull();
+    vi.advanceTimersByTime(40_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:saved");
   });
 });

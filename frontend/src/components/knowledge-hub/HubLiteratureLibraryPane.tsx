@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, formatApiError } from "../../api";
 import { useStore } from "../../store";
 import { useShallow } from "zustand/react/shallow";
+import { saveBlob } from "../../utils/download";
 
 type LibItem = Awaited<ReturnType<typeof api.getLiteratureLibrary>>["items"][number];
 type Collection = Awaited<ReturnType<typeof api.getLiteratureLibrary>>["collections"][number];
@@ -10,13 +11,7 @@ type DupGroup = Awaited<ReturnType<typeof api.getLiteratureDuplicates>>["groups"
 const FLAG_ATTR = "literature_library_enabled";
 
 function downloadText(filename: string, text: string, mime: string) {
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  saveBlob(new Blob([text], { type: mime }), filename);
 }
 
 /**

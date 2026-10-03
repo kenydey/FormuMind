@@ -28,18 +28,34 @@ export async function downloadWithAuth(url: string, fallbackName = "download"): 
   if (!res.ok) throw await readApiError(res, url);
   const blob = await res.blob();
   const name = filenameFromDisposition(res.headers.get("Content-Disposition")) || fallbackName;
+  saveBlob(blob, name);
+  return name;
+}
+
+/**
+ * Hand a blob to the browser as a file download (anchor + click).
+ *
+ * The object URL is released after 40 s, not synchronously: Safari / Firefox may still be
+ * reading the blob when ``click()`` returns, and an immediate revoke cancels the download
+ * (FileSaver.js waits the same 40 s). Six copies of this routine used to exist, all revoking
+ * at once.
+ */
+export function saveBlob(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;
-  a.download = name;
+  a.download = filename;
   document.body.appendChild(a);
   try {
     a.click();
   } finally {
     document.body.removeChild(a);
-    // Not synchronously: Safari / Firefox may still be reading the blob when click()
-    // returns, and an immediate revoke cancels the download (FileSaver.js waits 40 s).
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 40_000);
+    window.setTimeout(() => {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {
+        /* already released */
+      }
+    }, 40_000);
   }
-  return name;
 }
