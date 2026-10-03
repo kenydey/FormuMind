@@ -396,6 +396,8 @@ export interface OptimizationResult {
   engine?: string;
   /** predictor_virtual = in-loop surrogate scores (not lab); lab | skipped */
   measurement_source?: string;
+  /** Measured lab experiments shown to the optimizer (0 = purely virtual run). */
+  lab_points_used?: number;
 }
 
 export interface RunExplanation {

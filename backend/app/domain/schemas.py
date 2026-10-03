@@ -652,6 +652,9 @@ class OptimizationResult(BaseModel):
     # consistency of the surrogate, not real improvement.
     # "predictor_virtual" | "lab" | "skipped"
     measurement_source: str = "predictor_virtual"
+    # How many measured lab experiments were shown to the optimizer (0 for a
+    # purely virtual run). Lets the UI say "吸收了 N 条实验数据".
+    lab_points_used: int = 0
 
 
 class TaskState(str, Enum):
