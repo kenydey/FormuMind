@@ -136,7 +136,11 @@ export default function RecommendedFormulaTable({
   validateWarnings?: string[];
 }) {
   const [lookupBusy, setLookupBusy] = useState<number | null>(null);
-  const [profiles, setProfiles] = useState<Record<number, ChemicalProfile>>({});
+  // A resolved profile describes one *material*, not a row position: it is kept with the
+  // name it was resolved for and only shown while that name is still in the row. Keyed
+  // by index alone, a regulatory badge ("⚠ 管制" / "🔒 专利") outlived edits of the name
+  // and the replacement of the whole formulation, and showed under a different material.
+  const [profiles, setProfiles] = useState<Record<number, { name: string; profile: ChemicalProfile }>>({});
   const [substituteMaterial, setSubstituteMaterial] = useState<string | null>(null);
 
   // Tracks the *current* ingredients array identity so an in-flight lookup
@@ -154,15 +158,16 @@ export default function RecommendedFormulaTable({
     try {
       const hit = await api.chemicalProfile(query.trim());
       if (ingredientsRef.current !== requestIngredients) return; // stale: formulation changed while awaiting
+      const resolvedName = hit.iupac_name || query;
       onIngredientChange(idx, {
         cas_no: hit.cas || undefined,
-        name: hit.iupac_name || query,
+        name: resolvedName,
         zh_name: hit.zh_name || ingredients[idx]?.zh_name,
         formula: hit.formula || ingredients[idx]?.formula,
         molar_mass: hit.molar_mass ?? ingredients[idx]?.molar_mass,
         smiles: hit.smiles ?? ingredients[idx]?.smiles,
       });
-      setProfiles((prev) => ({ ...prev, [idx]: hit }));
+      setProfiles((prev) => ({ ...prev, [idx]: { name: resolvedName, profile: hit } }));
     } catch {
       if (ingredientsRef.current !== requestIngredients) return;
       onIngredientChange(idx, { cas_no: query });
@@ -198,7 +203,10 @@ export default function RecommendedFormulaTable({
             const lowGrounding = ing.grounding_confidence === "low";
             return (
             <tr
-              key={`${ing.name}-${idx}`}
+              // Not the name: the name cell is an <input> in edit mode, and a key that
+              // follows it re-mounts the row on every keystroke (focus lost after one char).
+              // Rows are never reordered here, so the position is the stable identity.
+              key={idx}
               className={`border-b border-edge/40 align-top ${
                 lowGrounding ? "bg-amber-500/[0.06] ring-1 ring-inset ring-amber-500/15" : ""
               }`}
@@ -252,7 +260,7 @@ export default function RecommendedFormulaTable({
                 ) : (
                   <span className="font-mono text-slate-500">{ing.mf_structure || ing.formula || "—"}</span>
                 )}
-                <ChemBadges profile={profiles[idx]} />
+                <ChemBadges profile={profiles[idx]?.name === ing.name ? profiles[idx].profile : undefined} />
               </td>
               <td className="py-1 px-2 text-right font-mono text-slate-300">
                 {ing.molar_mass != null ? ing.molar_mass.toFixed(2) : "—"}

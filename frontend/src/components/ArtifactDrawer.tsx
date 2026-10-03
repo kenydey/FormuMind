@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   selectProjectArtifacts,
@@ -81,20 +81,26 @@ function ExportShelfPanel({ projectId }: { projectId: string }) {
   const leaderboard = useStore((s) => s.leaderboard);
   const deepReport = useStore((s) => s.deepReport);
 
+  // Newest request wins (switching project quickly must not show the old project's files).
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     setBusy(true);
     setError(null);
     try {
-      setFiles(await api.listProjectExports(projectId));
+      const list = await api.listProjectExports(projectId);
+      if (seq === refreshSeq.current) setFiles(list);
     } catch (e) {
+      if (seq !== refreshSeq.current) return;
       setError(e instanceof Error ? e.message : "加载失败");
       setFiles([]);
     } finally {
-      setBusy(false);
+      if (seq === refreshSeq.current) setBusy(false);
     }
   }, [projectId]);
 
   useEffect(() => {
+    setFiles([]);
     void refresh();
   }, [refresh]);
 
@@ -225,13 +231,13 @@ function ExportShelfPanel({ projectId }: { projectId: string }) {
               url={api.downloadProjectExportUrl(projectId, f.name)}
               filename={f.name}
               className="text-[10px] text-accent border border-accent/30 rounded px-1.5 py-0.5 hover:bg-accent/10 shrink-0"
+              testId={`shelf-download-${f.name}`}
             >
               下载
             </AuthDownloadLink>
             <button
               type="button"
               onClick={() => void removeFile(f.name)}
-              testId={`shelf-download-${f.name}`}
               className="text-[10px] text-rose-400 border border-rose-500/30 rounded px-1.5 py-0.5 hover:bg-rose-500/10 shrink-0"
             >
               删除

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, formatApiError } from "../../api";
 import { useStore } from "../../store";
 import { useShallow } from "zustand/react/shallow";
@@ -19,8 +19,20 @@ function downloadText(filename: string, text: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Knowledge Hub — Literature Library catalog (Wave E-Lit). */
+/**
+ * Knowledge Hub — Literature Library catalog (Wave E-Lit).
+ *
+ * Everything in the pane (filters, selection, draft, duplicate groups, the loaded items)
+ * belongs to one project, so the pane is re-mounted when the active project changes. A
+ * collection id of project A sent for project B just returned an empty library, and a slow
+ * answer for A could land after B's.
+ */
 export default function HubLiteratureLibraryPane({ active }: { active: boolean }) {
+  const projectId = useStore((s) => s.activeProjectId);
+  return <LiteratureLibraryPaneBody key={projectId ?? "no-project"} active={active} />;
+}
+
+function LiteratureLibraryPaneBody({ active }: { active: boolean }) {
   const { projectId, envFlagsRevision, openSettings } = useStore(
     useShallow((s) => ({
       projectId: s.activeProjectId,
@@ -80,8 +92,12 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
     };
   }, [active, envFlagsRevision]);
 
+  // Only the newest request may write: typing in the filters fires one per keystroke and
+  // they do not come back in order.
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
     if (!projectId || flagOn !== true) return;
+    const seq = ++refreshSeq.current;
     setBusy(true);
     setErr(null);
     try {
@@ -91,6 +107,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         collection_id: collectionId || undefined,
         screening: screening || undefined,
       });
+      if (seq !== refreshSeq.current) return;
       setItems(lib.items ?? []);
       setCollections(lib.collections ?? []);
       setFrozenIds(new Set(lib.frozen?.item_ids ?? []));
@@ -99,9 +116,10 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         return lib.items?.[0]?.id ?? null;
       });
     } catch (e) {
+      if (seq !== refreshSeq.current) return;
       setErr(formatApiError(e));
     } finally {
-      setBusy(false);
+      if (seq === refreshSeq.current) setBusy(false);
     }
   }, [projectId, flagOn, q, tag, collectionId, screening]);
 
