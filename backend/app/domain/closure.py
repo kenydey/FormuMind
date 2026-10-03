@@ -74,8 +74,11 @@ def warning_text(total: float, name: str | None = None) -> str | None:
     closure = assess(total)
     if closure.ok:
         return None
+    # Sentence case when it opens the message ("Weight percentages sum to …", the wording the
+    # physical-constraint layer has always used); mid-sentence after a formulation name.
     prefix = f"{name}: " if name else ""
-    text = f"{prefix}{CLOSURE_MARK} {closure.total:.1f}% (expected ~100%)"
+    phrase = CLOSURE_MARK if name else CLOSURE_MARK[:1].upper() + CLOSURE_MARK[1:]
+    text = f"{prefix}{phrase} {closure.total:.1f}% (expected ~100%)"
     if closure.level == "error":
         text += " — " + ("incomplete" if closure.total < 100.0 else "over-full") + " recipe"
     discount = round((1.0 - closure.score_factor) * 100.0, 1)
