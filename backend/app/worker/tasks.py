@@ -1086,7 +1086,8 @@ def run_topic_sweep(self, payload: dict) -> dict:
     """主题雷达单次触发(2026-09-05 P2): 检索 → topic 筛选 → 后台 KB 回填.
 
     Celery Beat 周期调度入口(beat 默认不启, 手动起 celery 加 -B 时按
-    celery_app.py 中注释的 beat_schedule 生效); 亦可由 API 手动触发。
+    celery_app.py 中注释的 beat_schedule 生效)。注意：目前没有 API / UI 入口可手动触发
+    本任务(此前文档写"亦可由 API 手动触发"，并不属实)——只有放开 beat_schedule 才会运行。
     """
     from ..domain.schemas import Requirement
     from ..services import literature
