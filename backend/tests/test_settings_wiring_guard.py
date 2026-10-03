@@ -109,3 +109,47 @@ def test_a_genuinely_unknown_env_key_still_fails_fast_in_dev(monkeypatch):
     finally:
         monkeypatch.delenv("FORMUMIND_TOTALLY_MADE_UP_KEY", raising=False)
         config.get_settings.cache_clear()
+
+
+def test_every_env_key_the_code_reads_is_known_to_the_dev_audit():
+    """``FORMUMIND_RULES_DIR`` / ``FORMUMIND_DATA_DIR`` are read straight from the
+    environment, but were neither Settings fields nor listed infra keys — so in
+    development (the default environment) *setting the documented override made
+    startup fail* with "Unknown FORMUMIND_* environment variables"."""
+    from app import config
+
+    known = (
+        {f"FORMUMIND_{n.upper()}" for n in Settings.model_fields}
+        | set(config._INFRA_ENV_KEYS)
+        | set(config._RETIRED_ENV_KEYS)
+    )
+    unknown: dict[str, str] = {}
+    paths = [*(BACKEND / "app").rglob("*.py"), *(BACKEND / "scripts").rglob("*.py")]
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and re.fullmatch(r"FORMUMIND_[A-Z0-9_]+", node.value)
+                and node.value not in known
+            ):
+                unknown.setdefault(node.value, f"{path.relative_to(BACKEND)}:{node.lineno}")
+    assert not unknown, (
+        "env keys read by code but unknown to config._audit_formumind_env "
+        f"(add to _INFRA_ENV_KEYS or make them Settings fields): {unknown}"
+    )
+
+
+def test_documented_override_dirs_do_not_trip_dev_fail_fast(monkeypatch, tmp_path):
+    from app import config
+
+    monkeypatch.setenv("FORMUMIND_ENVIRONMENT", "development")
+    monkeypatch.setenv("FORMUMIND_RULES_DIR", str(tmp_path))
+    monkeypatch.setenv("FORMUMIND_DATA_DIR", str(tmp_path))
+    config.get_settings.cache_clear()
+    try:
+        config.get_settings()
+    finally:
+        config.get_settings.cache_clear()
+

@@ -40,6 +40,12 @@ _INFRA_ENV_KEYS = frozenset({
     # BayBE acquisition quality tier, read directly by engines/baybe_engine.py
     # (_recommender_for): "fast" | "auto" | "thorough". Not a Settings field.
     "FORMUMIND_BO_QUALITY",
+    # Read straight from the environment by their owners, so dev-mode fail-fast
+    # used to reject a documented override with "Unknown FORMUMIND_* ...":
+    "FORMUMIND_DATA_DIR",    # services/tech_report.py data root (default ./data)
+    "FORMUMIND_RULES_DIR",   # services/rule_loader.py editable rules directory
+    "FORMUMIND_DEEPEVAL",    # scripts/deepeval_gate.py on/off switch (CI)
+    "FORMUMIND_RIGOR_GATE",  # scripts/rigor_gate.py skip switch (CI)
 })
 
 
