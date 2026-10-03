@@ -6,7 +6,7 @@ boots and tests run without any external credentials or services.
 from __future__ import annotations
 
 import os
-from functools import lru_cache
+import threading
 from pathlib import Path
 
 from pydantic import Field, model_validator
@@ -1034,10 +1034,54 @@ def _audit_formumind_env() -> None:
         )
 
 
-@lru_cache
-def get_settings() -> Settings:
+_settings_lock = threading.Lock()
+_settings_value: Settings | None = None
+# Bumped by every ``cache_clear()``; see ``get_settings``.
+_settings_generation = 0
+
+
+def _build_settings() -> Settings:
     # Read the CWD .env (legacy behaviour) plus the canonical resolved path;
     # the resolved file — where the Settings UI persists — takes precedence.
     settings = Settings(_env_file=(".env", str(resolve_env_path())))
     _audit_formumind_env()
     return settings
+
+
+def get_settings() -> Settings:
+    """Process-wide ``Settings`` singleton, built lazily and thread-safe.
+
+    Behaves like the ``functools.lru_cache`` it replaces (including
+    ``get_settings.cache_clear()``) with one difference that matters: a build
+    that was already running when ``cache_clear()`` happened is discarded and
+    redone. With ``lru_cache`` two concurrent misses both build and the *first
+    to finish* is cached — so a background thread that started building before
+    an environment change (a UI settings update, a test's ``monkeypatch``) could
+    finish first and pin the stale object, while the caller that cleared the
+    cache received a correct one it could not keep. The next reader then saw the
+    old values: e.g. API auth silently switched off after it had been enabled.
+    """
+    global _settings_value
+    while True:
+        cached = _settings_value
+        if cached is not None:
+            return cached
+        generation = _settings_generation
+        built = _build_settings()
+        with _settings_lock:
+            if generation == _settings_generation:
+                if _settings_value is None:
+                    _settings_value = built
+                return _settings_value
+        # cache_clear() ran while we were building: ``built`` may reflect the
+        # pre-change environment. Discard it and rebuild.
+
+
+def _clear_settings_cache() -> None:
+    global _settings_value, _settings_generation
+    with _settings_lock:
+        _settings_generation += 1
+        _settings_value = None
+
+
+get_settings.cache_clear = _clear_settings_cache  # type: ignore[attr-defined]

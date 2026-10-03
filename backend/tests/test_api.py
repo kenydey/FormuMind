@@ -249,6 +249,14 @@ def _stub_celery_dispatch(monkeypatch):
 
     monkeypatch.setattr(_dispatch, "broker_reachable", lambda: True)
     monkeypatch.setattr(tasks.run_recommend_task, "delay", lambda _payload: _Dispatched())
+    # ``submit()`` picks the eager path from *Settings* (FORMUMIND_CELERY_EAGER,
+    # set to true by conftest), not from celery_app.conf — flipping only the
+    # latter left these tests running the real recommend pipeline in a daemon
+    # thread that outlived the test and raced later tests' Settings cache.
+    monkeypatch.setenv("FORMUMIND_CELERY_EAGER", "false")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
 
 
 def test_research_recommend_writes_outbox_row(tmp_path, monkeypatch):
