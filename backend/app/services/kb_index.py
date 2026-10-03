@@ -546,7 +546,6 @@ def index_source(
         return 0
     try:
         from ..db.chunk_store import get_chunk_store
-        from .chunking import chunk_markdown
         from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
         settings = get_settings()

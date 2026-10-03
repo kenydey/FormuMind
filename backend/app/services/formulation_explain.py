@@ -6,7 +6,7 @@ bias_corrected_metrics, ingredient evidence_refs).
 """
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from ..config import get_settings
 from ..domain.schemas import Formulation, FormulationExplain, ObjectiveSpec, Requirement

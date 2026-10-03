@@ -1,7 +1,7 @@
 """P0 domain tagging + lexical match helpers for Evidence / ingest gates."""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from ..domain.schemas import Evidence, ProductDomain
 from ..domain.search_profiles import DomainSearchProfile, resolve_profile

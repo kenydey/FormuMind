@@ -1,13 +1,13 @@
-"""Link experiment formulations to knowledge graph entities."""
+"""Role inference for ingredient names (substring rules → ``resin`` / ``hardener`` / …).
+
+Despite the module name, nothing here links formulations to knowledge-graph entities:
+that linker was never finished. ``db.models.KGFormulationLink`` (table
+``kg_formulation_links``) is still declared but nothing writes or reads it — see the
+round-3 audit plan before building on it.
+"""
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Any
-
-from ...db.models import KGEntity, KGFormulationLink
-from ...db.session import get_db_session
-from .entity_resolver import resolve_query
 
 logger = logging.getLogger(__name__)
 

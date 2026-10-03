@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from ...config import Settings, get_settings
 from ...db.models import KGEntity, KGMention
-from ...domain.kg_schemas import RelationType, SEMANTIC_RELATION_TYPES
+from ...domain.kg_schemas import RelationType
 
 logger = logging.getLogger(__name__)
 

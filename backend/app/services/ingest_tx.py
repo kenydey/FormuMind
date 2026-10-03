@@ -48,8 +48,7 @@ def ingest_document_tx(
     from ..db.models import DocumentChunk, SourceDocument
     from ..db.outbox_store import enqueue
     from ..db.session_utils import commit_session
-    from .chunking import chunk_markdown
-    from .kb_index import _embed_model_name, _embed_texts, _embedding_probe, kb_enabled
+    from .kb_index import _embedding_probe, kb_enabled
     from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
     if not kb_enabled() or not (text or "").strip():

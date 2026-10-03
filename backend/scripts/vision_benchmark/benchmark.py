@@ -20,7 +20,6 @@ import json
 import os
 import re
 import sys
-import time
 
 from rdkit import Chem, RDLogger
 from rdkit.Chem import DataStructs, rdMolDescriptors

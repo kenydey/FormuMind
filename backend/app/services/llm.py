@@ -41,7 +41,6 @@ from ..services.runtime_secrets import effective_setting
 from ..domain.schemas import (
     Evidence,
     ObjectiveSpec,
-    ProductDomain,
     RecommendedFormulaListResponse,
     Requirement,
 )

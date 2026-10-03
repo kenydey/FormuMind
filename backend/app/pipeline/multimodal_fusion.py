@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from ..config import Settings, get_settings
 from ..db.chunk_store import get_chunk_store

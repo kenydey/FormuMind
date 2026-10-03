@@ -17,7 +17,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..domain.schemas import Evidence
 from .errors import degrade_return
