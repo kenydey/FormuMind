@@ -216,6 +216,10 @@ def _rescore_with_shared_bounds(scored: list[Formulation], objectives, process) 
         logger.warning("shared-bounds rescoring failed; keeping per-candidate scores", exc_info=True)
 
 
+# Public name: substitution and inverse design rank their own batches on the same shared ruler.
+rescore_with_shared_bounds = _rescore_with_shared_bounds
+
+
 def finalize_recommendation_bundle(
     rec_formulas: list[RecommendedFormula],
     req,
