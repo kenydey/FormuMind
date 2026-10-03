@@ -16,14 +16,22 @@ Row lifecycle::
 failure — the failure itself is recorded in the task snapshot), so crash
 recovery must never replay it. ``CONFIRMED`` is reserved for the Datalab
 reconciliation phase.
+
+Liveness: a running job keeps ``updated_at`` fresh through :func:`heartbeat`, and
+recovery only treats a row as stalled once *nothing has touched it* for the cutoff —
+so a legitimately long job (a multi-hour KB ingest) is never replayed underneath
+itself. ``task_id`` remembers the Celery id handed to the client so a replay can
+run under the same one.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -117,6 +125,7 @@ def enqueue(
             existing.attempt_count = 0
             existing.claimed_by = None
             existing.claimed_at = None
+            existing.task_id = None  # a new submission gets a new id
             existing.payload = payload
             existing.created_at = now
             existing.updated_at = now
@@ -180,6 +189,87 @@ def record_done(operation: str, payload: dict) -> bool:
             return mark_done(session, operation, payload)
     except Exception:
         logger.exception("outbox mark_done failed (non-fatal)")
+        return False
+
+
+# How often a running task refreshes its row. Recovery's cutoff is 30 minutes, so
+# one beat per minute leaves a wide margin for a slow database or a paused process.
+HEARTBEAT_INTERVAL_S = 60.0
+
+
+def touch(operation: str, payload: dict) -> bool:
+    """Refresh ``updated_at`` of the in-flight row for *operation* × *payload*.
+
+    Own transaction, never raises: a missed beat must not fail the job it is watching.
+    Returns True when a row was touched (a finished / unknown row is left alone).
+    """
+    try:
+        from .database import default_session_factory
+        from .session_utils import commit_session
+
+        with commit_session(default_session_factory()) as session:
+            result = session.execute(
+                update(TaskOutbox)
+                .where(
+                    TaskOutbox.operation == operation,
+                    TaskOutbox.idempotency_key == idempotency_key(operation, payload),
+                    TaskOutbox.status.in_([STATUS_PENDING, STATUS_CLAIMED]),
+                )
+                .values(updated_at=_utcnow())
+            )
+            return bool(result.rowcount)
+    except Exception as exc:
+        logger.warning("outbox heartbeat failed (non-fatal): %s", exc)
+        return False
+
+
+@contextmanager
+def heartbeat(
+    operation: str, payload: Any, interval_s: float | None = None
+) -> Iterator[None]:
+    """Keep the outbox row's ``updated_at`` fresh while the wrapped job runs.
+
+    A beat is written immediately (a row that waited in the queue starts "fresh") and
+    then every ``interval_s`` until the block exits. No-op for jobs without an outbox
+    operation or a dict payload.
+    """
+    if not operation or not isinstance(payload, dict):
+        yield
+        return
+    interval = HEARTBEAT_INTERVAL_S if interval_s is None else interval_s
+    stop = threading.Event()
+
+    def _beat() -> None:
+        touch(operation, payload)
+        while not stop.wait(interval):
+            touch(operation, payload)
+
+    thread = threading.Thread(target=_beat, name="outbox-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=2.0)
+
+
+def record_task_id(outbox_id: str | None, task_id: str) -> bool:
+    """Remember the Celery id handed to the client. Own transaction, never raises."""
+    if not outbox_id or not task_id:
+        return False
+    try:
+        from .database import default_session_factory
+        from .session_utils import commit_session
+
+        with commit_session(default_session_factory()) as session:
+            result = session.execute(
+                update(TaskOutbox)
+                .where(TaskOutbox.id == outbox_id)
+                .values(task_id=task_id, updated_at=_utcnow())
+            )
+            return bool(result.rowcount)
+    except Exception as exc:
+        logger.warning("outbox task_id not recorded (non-fatal): %s", exc)
         return False
 
 

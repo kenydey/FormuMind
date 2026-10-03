@@ -732,7 +732,14 @@ class TaskOutbox(Base):
     claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Celery task id the client was handed for this submission. Recovery re-dispatches
+    # under the same id, so a client polling it sees the replayed run finish instead of
+    # waiting on a task that died.
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    # Doubles as the liveness heartbeat: every status flip and every worker heartbeat
+    # touches it (``onupdate``), and recovery treats "not touched for N minutes" — not
+    # "created N minutes ago" — as stalled.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )

@@ -265,8 +265,8 @@ def test_migrations_idempotent_on_fresh_db(
     assert "experiment_records" not in _table_names(tmp_db_url)
 
 
-def test_revision_chain_head_is_0042(tmp_db_url: str) -> None:
-    """The revision chain is linear with a single head (``0042_chunk_dedup_key``)."""
+def test_revision_chain_head_is_0043(tmp_db_url: str) -> None:
+    """The revision chain is linear with a single head (``0043_outbox_task_id``)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -275,7 +275,7 @@ def test_revision_chain_head_is_0042(tmp_db_url: str) -> None:
 
     heads = script.get_heads()
     assert len(heads) == 1, f"expected a single head, got {heads}"
-    assert heads[0] == "0042"
+    assert heads[0] == "0043"
 
 
 def test_migrations_partial_columns_branch(
@@ -541,3 +541,60 @@ def test_migration_0036_kb_coverage_counters(tmp_db_url: str, monkeypatch: pytes
     run_upgrade(tmp_db_url, monkeypatch, "head")
     run_upgrade(tmp_db_url, monkeypatch, "head")
     assert "kb_coverage_counters" in _table_names(tmp_db_url)
+
+
+def test_migration_0043_adds_outbox_task_id(tmp_db_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0043 adds ``task_outbox.task_id`` (replay under the client's Celery id); downgrade
+    drops it; re-upgrade is idempotent.
+
+    (A fresh DB already has the column at every revision — ``0001_baseline`` runs
+    ``create_all`` from the current models — so the migration is exercised through a
+    downgrade first.)
+    """
+    from tests.alembic_helpers import run_downgrade
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "task_id" in _column_names(tmp_db_url, "task_outbox")
+
+    run_downgrade(tmp_db_url, monkeypatch, "0042")
+    assert "task_id" not in _column_names(tmp_db_url, "task_outbox")
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    assert "task_id" in _column_names(tmp_db_url, "task_outbox")
+
+
+def test_make_engine_adds_task_id_to_a_database_that_was_not_upgraded(
+    tmp_db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every submission writes an outbox row; a model column the table lacks would make
+    each async endpoint 500 until someone runs ``alembic upgrade head``."""
+    import uuid
+
+    from sqlalchemy.orm import Session
+
+    from app.db.database import make_engine
+    from app.db.models import TaskOutbox
+    from tests.alembic_helpers import run_downgrade
+
+    run_upgrade(tmp_db_url, monkeypatch, "head")
+    run_downgrade(tmp_db_url, monkeypatch, "0042")  # the pre-0043 table shape
+    assert "task_id" not in _column_names(tmp_db_url, "task_outbox")
+
+    engine = make_engine(tmp_db_url)
+    try:
+        assert "task_id" in _column_names(tmp_db_url, "task_outbox")
+        with Session(engine) as session:
+            session.add(
+                TaskOutbox(
+                    id=str(uuid.uuid4()),
+                    operation="doe_cycle",
+                    idempotency_key="k",
+                    payload={},
+                    task_id="abc",
+                )
+            )
+            session.commit()
+            assert session.query(TaskOutbox).one().task_id == "abc"
+    finally:
+        engine.dispose()

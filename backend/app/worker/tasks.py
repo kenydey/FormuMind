@@ -76,10 +76,26 @@ class _OutboxTask(celery_app.Task):
 
     outbox_operation: str = ""
 
+    @staticmethod
+    def _payload_of(args, kwargs):
+        return args[0] if args else (kwargs or {}).get("payload")
+
+    def __call__(self, *args, **kwargs):
+        # Celery (worker and eager apply alike) enters the task body through __call__.
+        # While it runs, keep the outbox row's ``updated_at`` fresh: startup recovery
+        # replays only rows nothing has touched for the cutoff, so a job that simply takes
+        # longer than the cutoff (loop, whole-library KB ingest) is not run a second time.
+        if not self.outbox_operation:
+            return super().__call__(*args, **kwargs)
+        from ..db.outbox_store import heartbeat
+
+        with heartbeat(self.outbox_operation, self._payload_of(args, kwargs)):
+            return super().__call__(*args, **kwargs)
+
     def _mark_outbox_done(self, args, kwargs) -> None:
         if not self.outbox_operation:
             return
-        payload = args[0] if args else (kwargs or {}).get("payload")
+        payload = self._payload_of(args, kwargs)
         if not isinstance(payload, dict):
             return
         from ..db.outbox_store import record_done

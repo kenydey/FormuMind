@@ -108,6 +108,7 @@ def make_engine(db_url: str) -> Engine:
     _ensure_experiment_columns(engine)
     _ensure_campaign_columns(engine)
     _ensure_owner_id_column(engine, "task_outbox")
+    _ensure_outbox_task_id_column(engine)
     _ensure_source_document_columns(engine)
     _ensure_kb_entity_link_columns(engine)
     _ensure_material_columns(engine)
@@ -381,6 +382,25 @@ def _ensure_owner_id_column(engine: Engine, table: str) -> None:
                 pass
     except Exception as exc:
         # 竞态或已存在：静默（alembic 已加过）
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
+def _ensure_outbox_task_id_column(engine: Engine) -> None:
+    """``task_outbox.task_id`` (alembic 0043): nullable, no backfill. Added in place for
+    databases that were not upgraded, because every submission writes an outbox row — a
+    missing column would turn each async endpoint into a 500 until someone migrates."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "task_outbox" not in inspector.get_table_names():
+        return
+    if "task_id" in {c["name"] for c in inspector.get_columns("task_outbox")}:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('ALTER TABLE "task_outbox" ADD COLUMN task_id VARCHAR(64)'))
+    except Exception as exc:  # a concurrent starter may have added it first
         if "duplicate column" not in str(exc).lower():
             raise
 

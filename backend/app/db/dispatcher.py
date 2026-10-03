@@ -7,10 +7,14 @@ crash / redeploy while jobs are in-flight.
 
 A row is only ever replayed while it is *unfinished*: the worker flips it to
 ``DONE`` when the task reaches a final state (``outbox_store.record_done``),
-so recovery covers crash / redeploy / lost-broker-message cases only. Rows
-whose operation has no Celery handler (audit records such as
-``ingest_complete`` / ``datalab_orphan_cleanup``) are never touched, and rows
-older than ``MAX_RECOVER_AGE_HOURS`` are expired instead of replayed.
+so recovery covers crash / redeploy / lost-broker-message cases only. "Stalled"
+means *nothing has touched the row* for the cutoff: a running task keeps
+``updated_at`` fresh through ``outbox_store.heartbeat``, so a job that simply runs
+longer than the cutoff is not replayed underneath itself. A replay runs under the
+Celery id the client was given (``task_id``) when it is known. Rows whose operation
+has no Celery handler (audit records such as ``ingest_complete``) are never
+replayed, and rows untouched for ``MAX_RECOVER_AGE_HOURS`` are expired instead.
+``datalab_orphan_cleanup`` rows are consumed by :func:`drain_orphans`.
 
 Lifespan MUST schedule recovery in a daemon thread (see
 ``schedule_recover_stalled``): with ``FORMUMIND_CELERY_EAGER=true``, a
@@ -66,34 +70,42 @@ def _celery_is_eager() -> bool:
 
 # ── operation → Celery task mapping ─────────────────────────────────────────
 
-def _send_recommend(payload: dict) -> None:
+def _publish(task, payload: dict, task_id: str | None) -> None:
+    """Publish *task*; under the client's original Celery id when we have it."""
+    if task_id:
+        task.apply_async(args=(payload,), task_id=task_id)
+    else:
+        task.delay(payload)
+
+
+def _send_recommend(payload: dict, task_id: str | None = None) -> None:
     from ..worker.tasks import run_recommend_task
 
-    run_recommend_task.delay(payload)
+    _publish(run_recommend_task, payload, task_id)
 
 
-def _send_deep_research(payload: dict) -> None:
+def _send_deep_research(payload: dict, task_id: str | None = None) -> None:
     from ..worker.tasks import run_deep_research_task
 
-    run_deep_research_task.delay(payload)
+    _publish(run_deep_research_task, payload, task_id)
 
 
-def _send_inverse_design(payload: dict) -> None:
+def _send_inverse_design(payload: dict, task_id: str | None = None) -> None:
     from ..worker.tasks import run_inverse_design_task
 
-    run_inverse_design_task.delay(payload)
+    _publish(run_inverse_design_task, payload, task_id)
 
 
-def _send_doe_cycle(payload: dict) -> None:
+def _send_doe_cycle(payload: dict, task_id: str | None = None) -> None:
     from ..worker.tasks import run_doe_cycle_task
 
-    run_doe_cycle_task.delay(payload)
+    _publish(run_doe_cycle_task, payload, task_id)
 
 
 # Single source of truth for what recovery may replay. Every operation that
 # ``api/*`` enqueues through ``enqueue_outbox`` MUST have an entry here (a
 # test pins that); audit-only operations deliberately do not.
-_HANDLERS: dict[str, Callable[[dict], None]] = {
+_HANDLERS: dict[str, Callable[..., None]] = {
     "research_recommend": _send_recommend,
     "research_deep": _send_deep_research,
     "inverse_design": _send_inverse_design,
@@ -103,24 +115,35 @@ _HANDLERS: dict[str, Callable[[dict], None]] = {
 DISPATCHABLE_OPERATIONS: tuple[str, ...] = tuple(_HANDLERS)
 
 
-def _dispatch(operation: str, payload: dict) -> None:
-    """Map an outbox *operation* to the matching Celery task ``.delay()``.
+def _dispatch(operation: str, payload: dict, task_id: str | None = None) -> None:
+    """Map an outbox *operation* to the matching Celery task and publish it.
 
-    Raises ``ValueError`` for an operation without a handler so the caller
-    never counts a no-op as a successful re-enqueue.
+    With *task_id* the replay runs under the id the client already holds. Raises
+    ``ValueError`` for an operation without a handler so the caller never counts a
+    no-op as a successful re-enqueue.
     """
     handler = _HANDLERS.get(operation)
     if handler is None:
         raise ValueError(f"no outbox handler for operation {operation!r}")
-    handler(payload)
+    if task_id:
+        handler(payload, task_id)
+    else:
+        handler(payload)
 
 
 def _dispatch_with_timeout(
-    operation: str, payload: dict, timeout_s: float = DEFAULT_DISPATCH_TIMEOUT_S
+    operation: str,
+    payload: dict,
+    timeout_s: float = DEFAULT_DISPATCH_TIMEOUT_S,
+    task_id: str | None = None,
 ) -> None:
     """Publish to the broker with a hard wall-clock limit (non-eager path)."""
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox-delay") as pool:
-        fut = pool.submit(_dispatch, operation, payload)
+        fut = (
+            pool.submit(_dispatch, operation, payload, task_id)
+            if task_id
+            else pool.submit(_dispatch, operation, payload)
+        )
         try:
             fut.result(timeout=timeout_s)
         except FuturesTimeout as exc:
@@ -130,7 +153,7 @@ def _dispatch_with_timeout(
 
 
 def _expire_ancient(session: Session, expiry: datetime) -> int:
-    """Mark unfinished dispatchable rows older than *expiry* ``DEAD`` (no replay).
+    """Mark unfinished dispatchable rows untouched since *expiry* ``DEAD`` (no replay).
 
     One bulk UPDATE, outside the per-pass ``max_rows`` budget: otherwise the
     oldest (least useful) rows would eat the budget one pass at a time.
@@ -140,7 +163,7 @@ def _expire_ancient(session: Session, expiry: datetime) -> int:
         .where(
             TaskOutbox.status.in_(["PENDING", "CLAIMED"]),
             TaskOutbox.operation.in_(DISPATCHABLE_OPERATIONS),
-            TaskOutbox.created_at < expiry,
+            TaskOutbox.updated_at < expiry,
         )
         .values(status="DEAD")
     )
@@ -148,7 +171,7 @@ def _expire_ancient(session: Session, expiry: datetime) -> int:
     if n:
         session.commit()
         logger.warning(
-            "recover_stalled: expired %d unfinished outbox row(s) older than %s "
+            "recover_stalled: expired %d unfinished outbox row(s) untouched since %s "
             "(not replayed)",
             n,
             expiry.isoformat(timespec="seconds"),
@@ -169,9 +192,11 @@ def recover_stalled(
     """Re-enqueue outbox rows that have been stalled for too long.
 
     Scans ``task_outbox`` for rows with ``status IN ('PENDING', 'CLAIMED')``
-    whose ``created_at`` is older than *now − cutoff_minutes*.  For each
-    match the payload is re-dispatched via the Celery ``.delay()`` path and
-    the row's status is reset to ``'PENDING'`` (attempt_count incremented).
+    that nothing has touched (``updated_at``: creation, claim, or a running
+    task's heartbeat) since *now − cutoff_minutes*.  For each match the payload
+    is re-dispatched — under the original Celery id when the row recorded it,
+    else via ``.delay()`` — and the row's status is reset to ``'PENDING'``
+    (attempt_count incremented).
 
     Prefer ``recover_stalled_for_startup`` / ``schedule_recover_stalled`` from
     lifespan: those skip re-dispatch when ``celery_eager`` is True so a local
@@ -206,7 +231,7 @@ def recover_stalled(
             .where(
                 TaskOutbox.status.in_(["PENDING", "CLAIMED"]),
                 TaskOutbox.operation.in_(DISPATCHABLE_OPERATIONS),
-                TaskOutbox.created_at < cutoff,
+                TaskOutbox.updated_at < cutoff,
             )
             .order_by(TaskOutbox.created_at.asc())
             .limit(max_rows)
@@ -236,7 +261,12 @@ def recover_stalled(
         session.commit()
 
         try:
-            _dispatch_with_timeout(row.operation, row.payload, dispatch_timeout_s)
+            if row.task_id:
+                _dispatch_with_timeout(
+                    row.operation, row.payload, dispatch_timeout_s, task_id=row.task_id
+                )
+            else:
+                _dispatch_with_timeout(row.operation, row.payload, dispatch_timeout_s)
         except Exception:
             logger.exception(
                 "recover_stalled: dispatch failed for outbox row %s "
@@ -272,6 +302,127 @@ def recover_stalled(
     return count
 
 
+# ── orphaned Datalab samples ────────────────────────────────────────────────
+
+ORPHAN_OPERATION = "datalab_orphan_cleanup"
+
+
+def _orphan_rows(session: Session, *, status: str | None, limit: int) -> list[TaskOutbox]:
+    stmt = select(TaskOutbox).where(TaskOutbox.operation == ORPHAN_OPERATION)
+    if status:
+        stmt = stmt.where(TaskOutbox.status == status)
+    return list(session.execute(stmt.order_by(TaskOutbox.created_at.asc()).limit(limit)).scalars().all())
+
+
+def list_orphans(session: Session, *, status: str | None = None, limit: int = 100) -> dict:
+    """Pending / finished orphan-cleanup rows plus per-status counts (for the ops view)."""
+    from sqlalchemy import func
+
+    counts = {
+        str(st): int(n)
+        for st, n in session.execute(
+            select(TaskOutbox.status, func.count())
+            .where(TaskOutbox.operation == ORPHAN_OPERATION)
+            .group_by(TaskOutbox.status)
+        ).all()
+    }
+    rows = _orphan_rows(session, status=status, limit=max(1, min(int(limit), 500)))
+    return {
+        "counts": counts,
+        "items": [
+            {
+                "id": r.id,
+                "item_id": (r.payload or {}).get("item_id"),
+                "kind": (r.payload or {}).get("kind"),
+                "status": r.status,
+                "attempts": r.attempt_count or 0,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+def drain_orphans(
+    session: Session,
+    *,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    max_attempts: int = MAX_ATTEMPTS,
+    deleter: Callable[[str], None] | None = None,
+) -> dict:
+    """Delete the Datalab samples that a failed saga rollback left behind.
+
+    Creating a campaign / training record is a saga: samples are created one by one and
+    compensated (deleted) if a later step fails. When the compensation itself fails —
+    Datalab flaky at exactly that moment — the sample id is recorded as a
+    ``datalab_orphan_cleanup`` outbox row. Nothing used to read those rows, so the ELN
+    kept samples no experiment pointed at, forever.
+
+    Each pending row is retried: success → ``DONE``; failure → attempt counted, ``DEAD``
+    after *max_attempts* (the log line then names the sample for manual deletion). When
+    Datalab is not configured or unreachable nothing is attempted and no attempt is
+    burned — an outage must not use up the retries.
+
+    *deleter* is the seam for tests; by default it calls Datalab's ``/delete-sample/``.
+    Returns a summary dict (``examined`` / ``cleaned`` / ``failed`` / ``dead`` / ``skipped``).
+    """
+    summary: dict = {"examined": 0, "cleaned": 0, "failed": 0, "dead": 0, "skipped": ""}
+    rows = _orphan_rows(session, status="PENDING", limit=max_rows)
+    if not rows:
+        return summary
+
+    if deleter is None:
+        from ..config import get_settings
+        from .datalab_client import check_datalab_reachable, delete_sample_sync
+
+        api_url = get_settings().datalab_api_url
+        if not api_url:
+            summary["skipped"] = "FORMUMIND_DATALAB_API_URL is not configured"
+            return summary
+        reachable, reason = check_datalab_reachable(api_url)
+        if not reachable:
+            summary["skipped"] = f"datalab unreachable: {reason}"
+            return summary
+
+        def deleter(item_id: str, _url: str = api_url) -> None:
+            delete_sample_sync(_url, item_id)
+
+    for row in rows:
+        summary["examined"] += 1
+        item_id = str((row.payload or {}).get("item_id") or "").strip()
+        if not item_id:
+            row.status = "DEAD"
+            summary["dead"] += 1
+            session.commit()
+            continue
+        try:
+            deleter(item_id)
+        except Exception as exc:
+            row.attempt_count = (row.attempt_count or 0) + 1
+            summary["failed"] += 1
+            if row.attempt_count >= max_attempts:
+                row.status = "DEAD"
+                summary["dead"] += 1
+                logger.error(
+                    "datalab orphan %s could not be deleted after %d attempts (%s) — "
+                    "delete it in Datalab by hand",
+                    item_id,
+                    row.attempt_count,
+                    exc,
+                )
+            else:
+                logger.warning("datalab orphan %s not deleted yet: %s", item_id, exc)
+            session.commit()
+            continue
+        row.status = "DONE"
+        summary["cleaned"] += 1
+        session.commit()
+    if summary["cleaned"]:
+        logger.info("drain_orphans: deleted %d orphaned Datalab sample(s)", summary["cleaned"])
+    return summary
+
+
 def recover_stalled_for_startup(
     session: Session,
     cutoff_minutes: int = 30,
@@ -296,7 +447,7 @@ def recover_stalled_for_startup(
                 .where(
                     TaskOutbox.status.in_(["PENDING", "CLAIMED"]),
                     TaskOutbox.operation.in_(DISPATCHABLE_OPERATIONS),
-                    TaskOutbox.created_at < cutoff,
+                    TaskOutbox.updated_at < cutoff,
                 )
                 .limit(max_rows)
             )
@@ -342,6 +493,11 @@ def schedule_recover_stalled() -> threading.Thread:
                             "lifespan: recovered %d stalled outbox row(s)", recovered
                         )
                     session.commit()
+            # Not a Celery replay, so it also runs under celery_eager. Outside the write
+            # lock on purpose: it talks to Datalab (up to 10 s per sample) and must not
+            # keep other writers waiting.
+            with factory() as session:
+                drain_orphans(session)
         except Exception:
             logger.exception("lifespan: outbox stall recovery failed (non-fatal)")
 

@@ -11,6 +11,34 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
 
+@router.get("/datalab-orphans")
+def datalab_orphans(status: str | None = None, limit: int = 100) -> dict:
+    """Datalab samples a failed saga rollback could not delete (cleanup queue).
+
+    ``counts`` is per outbox status (PENDING = still to delete, DONE = cleaned,
+    DEAD = gave up — delete by hand); ``items`` lists the rows, oldest first.
+    """
+    from ..db.database import default_session_factory
+    from ..db.dispatcher import list_orphans
+
+    with default_session_factory()() as session:
+        return list_orphans(session, status=status, limit=limit)
+
+
+@router.post("/datalab-orphans/cleanup")
+def datalab_orphans_cleanup(max_rows: int = 50) -> dict:
+    """Retry deleting the pending orphaned Datalab samples now.
+
+    The same pass runs at startup; this is the manual trigger. Nothing is attempted
+    (and no retry burned) while Datalab is unconfigured or unreachable — see ``skipped``.
+    """
+    from ..db.database import default_session_factory
+    from ..db.dispatcher import drain_orphans
+
+    with default_session_factory()() as session:
+        return drain_orphans(session, max_rows=max(1, min(int(max_rows), 200)))
+
+
 @router.get("/kb-health")
 def kb_health() -> dict:
     """B-9: KB 健康仪表盘 v1。

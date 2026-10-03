@@ -132,6 +132,27 @@ def parse_delete_response(body: dict[str, Any], item_id: str) -> None:
         raise DatalabStoreError(f"Datalab delete-sample failed for {item_id}: status={parsed.status}")
 
 
+def delete_sample_sync(api_url: str, item_id: str, *, timeout: float = 10.0) -> None:
+    """Delete one Datalab sample; return normally when it is gone.
+
+    "Gone" includes *already absent* (HTTP 404): the point is that the sample must not
+    exist afterwards, and a retry after a half-finished cleanup would otherwise fail
+    forever. Transport errors and non-success answers raise, so the caller keeps the work
+    pending and retries later.
+    """
+    import httpx
+
+    url = (api_url or "").rstrip("/")
+    if not url:
+        raise DatalabUnavailableError(api_url or "", "FORMUMIND_DATALAB_API_URL 未配置")
+    with httpx.Client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
+        resp = client.post("/delete-sample/", json={"item_id": item_id})
+        if resp.status_code == 404:
+            return
+        resp.raise_for_status()
+        parse_delete_response(resp.json(), item_id)
+
+
 async def upload_file(
     api_url: str,
     content: bytes,
