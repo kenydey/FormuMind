@@ -27,6 +27,31 @@ def _lab_record() -> ExperimentRecord:
     )
 
 
+def _complete_lab_record() -> ExperimentRecord:
+    """A lab row BayBE can actually use.
+
+    BayBE fails closed on a measurement that lacks any factor column of its search
+    space (``_clean_measurement_dataframe``), and drops rows with a missing
+    objective, so the row must carry *every* lever and *every* objective metric.
+    Derived from the requirement itself so it cannot drift from the real lever
+    names (the old ``{"zinc_phosphate": 15.0}`` fixture matched nothing).
+    """
+    from app.domain.objective_contract import normalize_objectives
+    from app.pipeline.workflow import build_doe_factors
+
+    req = _req()
+    return ExperimentRecord(
+        domain=ProductDomain.anticorrosion_coating,
+        factors={f.name: (f.low + f.high) / 2 for f in build_doe_factors(req)},
+        # req.objectives is empty here; the engine resolves the domain defaults.
+        measured={
+            o.metric: (620.0 if o.metric == "salt_spray_hours" else 50.0)
+            for o in normalize_objectives(req)
+        },
+        source="lab",
+    )
+
+
 def test_numpy_path_reports_lab_when_seeded_with_lab() -> None:
     res = run_optimization(
         _req(), iterations=2, engine="numpy", existing_records=[_lab_record()]
@@ -57,7 +82,7 @@ def test_baybe_path_uses_lab_measurement_source() -> None:
     eng = BaybeCampaignEngine()
     if not eng.available():
         pytest.skip("baybe engine unavailable")
-    res = eng.run_optimization(_req(), iterations=2, measurements=[_lab_record()])
+    res = eng.run_optimization(_req(), iterations=2, measurements=[_complete_lab_record()])
     assert res.measurement_source == "lab"
     res2 = eng.run_optimization(_req(), iterations=2, measurements=[])
     assert res2.measurement_source == "predictor_virtual"
