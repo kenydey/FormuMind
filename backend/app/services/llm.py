@@ -44,6 +44,7 @@ from ..domain.schemas import (
     RecommendedFormulaListResponse,
     Requirement,
 )
+from .http_safe import make_client
 
 # ── Provider metadata ────────────────────────────────────────────────────────
 # Used by the settings API to enumerate available options.
@@ -283,11 +284,9 @@ def fetch_openai_compatible_model_ids(
     *,
     timeout: float = 30.0,
 ) -> list[str]:
-    import httpx
-
     root = (base_url or "").strip().rstrip("/") or "https://api.openai.com/v1"
     url = f"{root}/models"
-    with httpx.Client(timeout=timeout) as client:
+    with make_client(timeout=timeout) as client:
         resp = client.get(url, headers={"Authorization": f"Bearer {api_key}"})
         resp.raise_for_status()
         payload = resp.json()

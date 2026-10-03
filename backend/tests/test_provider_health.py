@@ -148,7 +148,7 @@ def test_openalex_failure_records_structured_event(monkeypatch):
     from app.services.search_providers import search_openalex
 
     monkeypatch.setattr(
-        "app.services.search_providers.httpx.Client",
+        "httpx.Client",
         _boom_client(exc=httpx.ConnectError("dns down")),
     )
     hits = search_openalex("zinc coating", limit=5)
@@ -165,7 +165,7 @@ def test_breaker_open_skips_http_call(monkeypatch):
 
     monkeypatch.setattr(sp, "_breaker_settings", lambda settings: (2, 300.0))
     monkeypatch.setattr(
-        "app.services.search_providers.httpx.Client",
+        "httpx.Client",
         _boom_client(exc=httpx.ConnectError("dns down")),
     )
     assert search_openalex("zinc coating", limit=5) == []
@@ -188,7 +188,7 @@ def test_breaker_open_skips_http_call(monkeypatch):
             calls.append(url)
             raise AssertionError("breaker open but HTTP was attempted")
 
-    monkeypatch.setattr("app.services.search_providers.httpx.Client", CountingClient)
+    monkeypatch.setattr("httpx.Client", CountingClient)
     assert search_openalex("zinc coating", limit=5) == []
     assert calls == []
     ev = recent_provider_events(1)[0]

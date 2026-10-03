@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from .datalab_client import datalab_headers
 from .models import TaskOutbox
+from ..services.http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def reconcile(
     errors = 0
     skipped = 0
 
-    with httpx.Client(
+    with make_client(
         base_url=base_url, timeout=timeout, headers=datalab_headers()
     ) as client:
         for row in rows:

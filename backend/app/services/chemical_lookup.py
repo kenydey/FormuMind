@@ -10,6 +10,7 @@ from urllib.parse import quote
 from ..domain.knowledge import RAW_MATERIALS
 
 from .chem_common import cache_get, cache_put
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +57,6 @@ def _lookup_catalog(q: str) -> dict[str, Any] | None:
 
 
 def _lookup_pubchem(q: str) -> dict[str, Any] | None:
-    try:
-        import httpx
-    except ImportError:
-        return None
     encoded = quote(q.strip(), safe="")
     props_url = (
         f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}"
@@ -70,7 +67,7 @@ def _lookup_pubchem(q: str) -> dict[str, Any] | None:
         "/xrefs/RegistryNumber/JSON"
     )
     try:
-        with httpx.Client(timeout=12.0) as client:
+        with make_client(timeout=12.0) as client:
             props_resp = client.get(props_url)
             if props_resp.status_code != 200:
                 return None

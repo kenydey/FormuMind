@@ -53,7 +53,7 @@ def _mock_client(monkeypatch: pytest.MonkeyPatch, handler) -> httpx.Client:
     """Install a mock httpx.Client on rec_mod and return the mock client."""
     transport = httpx.MockTransport(handler)
     client = httpx.Client(base_url="http://datalab.test", transport=transport)
-    monkeypatch.setattr(rec_mod.httpx, "Client", lambda *a, **kw: client)
+    monkeypatch.setattr(httpx, "Client", lambda *a, **kw: client)
     return client
 
 

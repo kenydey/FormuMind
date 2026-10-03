@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +73,11 @@ def ledger_path() -> Path:
 
 
 def _default_fetch(url: str) -> bytes:
-    import httpx
-
     headers = {
         "User-Agent": "FormuMind-mcp-import",
         "Accept": "application/vnd.github+json, application/json, text/plain",
     }
-    with httpx.Client(timeout=30.0, follow_redirects=True, headers=headers) as client:
+    with make_client(timeout=30.0, follow_redirects=True, headers=headers) as client:
         r = client.get(url)
         if r.status_code >= 400:
             raise ValueError(f"请求失败 {r.status_code}: {url}")

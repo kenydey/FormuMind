@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from urllib.parse import quote
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +17,6 @@ def lookup_chebi(query: str, *, limit: int = 5, timeout_s: float = 6.0) -> list[
     if not q:
         return []
     try:
-        import httpx
-    except ImportError:
-        return []
-    try:
         params = {
             "q": q,
             "ontology": "chebi",
@@ -27,7 +24,7 @@ def lookup_chebi(query: str, *, limit: int = 5, timeout_s: float = 6.0) -> list[
             "exact": "false",
         }
         url = f"{_OLS_SEARCH}?q={quote(q)}&ontology=chebi&rows={params['rows']}"
-        with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
+        with make_client(timeout=timeout_s, follow_redirects=True) as client:
             resp = client.get(
                 url,
                 headers={"Accept": "application/json", "User-Agent": "FormuMind/1.0"},

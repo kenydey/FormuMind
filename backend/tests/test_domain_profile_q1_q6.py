@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from app.config import Settings, get_settings
@@ -60,7 +61,7 @@ def test_openalex_filter_param(monkeypatch):
             captured["params"] = params
             return FakeResp()
 
-    monkeypatch.setattr(sp.httpx, "Client", FakeClient)
+    monkeypatch.setattr(httpx, "Client", FakeClient)
     settings = Settings(openalex_enabled=True, openalex_concept_filter=True, domain_profile_search=True)
     sp.search_openalex("passivation", limit=1, settings=settings, domain=ProductDomain.surface_treatment)
     assert "filter" in (captured.get("params") or {})

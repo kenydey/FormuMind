@@ -56,7 +56,7 @@ def test_search_openalex_parses_inverted_index(monkeypatch):
         def get(self, url, params=None):
             return FakeResp()
 
-    monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
+    monkeypatch.setattr("httpx.Client", lambda **kw: FakeClient())
     hits = search_openalex("zinc coating", limit=5)
     assert len(hits) == 1
     assert hits[0].source == "OpenAlex"
@@ -100,7 +100,7 @@ def test_search_openalex_filters_non_oa(monkeypatch):
         def get(self, url, params=None):
             return FakeResp()
 
-    monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
+    monkeypatch.setattr("httpx.Client", lambda **kw: FakeClient())
     hits = search_openalex("zinc coating", limit=5)
     assert len(hits) == 1
     assert hits[0].identifier == "10.1234/oa"
@@ -146,7 +146,7 @@ def test_search_tavily_maps_results(monkeypatch):
         def post(self, url, json=None):
             return FakeResp()
 
-    monkeypatch.setattr("app.services.search_providers.httpx.Client", lambda **kw: FakeClient())
+    monkeypatch.setattr("httpx.Client", lambda **kw: FakeClient())
 
     from app.config import get_settings
     from app.services.runtime_secrets import get_runtime_secrets

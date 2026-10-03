@@ -1,6 +1,8 @@
 """ChEBI connector lookup tests."""
 from __future__ import annotations
 
+import httpx
+
 from app.services import chemistry_chebi as chebi
 from app.services import connectors_builtin as conn
 
@@ -40,10 +42,7 @@ def test_lookup_chebi_mock(monkeypatch):
         def get(self, *a, **k):
             return Resp()
 
-    class FakeHttpx:
-        Client = FakeClient
-
-    monkeypatch.setitem(__import__("sys").modules, "httpx", FakeHttpx)
+    monkeypatch.setattr(httpx, "Client", FakeClient)
     rows = chebi.lookup_chebi("water", limit=2)
     assert rows and rows[0]["chebi_id"] == "CHEBI:15377"
     assert rows[0]["name"] == "water"

@@ -19,11 +19,10 @@ import time
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-import httpx
-
 from ..config import Settings, get_settings
 from ..domain.schemas import Evidence
 from ..services.runtime_secrets import effective_setting
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +424,7 @@ def search_openalex(
         page = 1 + offset // 25
         skip_in_page = offset % 25
         global_idx = 0
-        with httpx.Client(timeout=_TIMEOUT_SEC) as client:
+        with make_client(timeout=_TIMEOUT_SEC) as client:
             while len(out) < limit:
                 params = {**base_params, "page": page}
                 resp = _get_with_retry(client, "https://api.openalex.org/works", params)
@@ -489,7 +488,7 @@ def _serpapi_search(
     }
     if extra_params:
         params.update(extra_params)
-    with httpx.Client(timeout=_TIMEOUT_SEC) as client:
+    with make_client(timeout=_TIMEOUT_SEC) as client:
         resp = client.get("https://serpapi.com/search.json", params=params)
         resp.raise_for_status()
         return resp.json()
@@ -646,7 +645,7 @@ def search_tavily(
         return []
     _t0 = time.monotonic()
     try:
-        with httpx.Client(timeout=_TIMEOUT_SEC) as client:
+        with make_client(timeout=_TIMEOUT_SEC) as client:
             resp = client.post(
                 "https://api.tavily.com/search",
                 json={

@@ -28,6 +28,7 @@ from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDo
 from ..services import io_export
 from ..services.training import registry
 from ._uploads import read_upload_capped
+from ..services.http_safe import make_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -1251,9 +1252,8 @@ async def search_experiments(
         from ..db.datalab_client import check_datalab_reachable, datalab_headers
         ok, _ = await run_in_threadpool(check_datalab_reachable, settings.datalab_api_url, timeout=2.0)
         if ok:
-            import httpx
             try:
-                async with httpx.AsyncClient(
+                async with make_async_client(
                     base_url=settings.datalab_api_url.rstrip("/"),
                     timeout=10.0,
                     headers=datalab_headers(),

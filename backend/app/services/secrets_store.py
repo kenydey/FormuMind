@@ -13,6 +13,7 @@ from .runtime_secrets import (
     get_runtime_secrets,
     secret_attrs_from_registry,
 )
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -258,8 +259,6 @@ def update_secrets(updates: dict[str, str | None]) -> list[str]:
 
 def probe_secret(secret_id: str) -> dict:
     """Lightweight connectivity probe per secret type."""
-    import httpx
-
     s = get_settings()
     if secret_id == "mineru_api_key":
         # MinerU publishes no token-validation or quota endpoint, so the probe
@@ -274,7 +273,7 @@ def probe_secret(secret_id: str) -> dict:
         if not key:
             return {"ok": False, "message": "SerpAPI key 未配置"}
         try:
-            with httpx.Client(timeout=15.0) as client:
+            with make_client(timeout=15.0) as client:
                 r = client.get(
                     "https://serpapi.com/account",
                     params={"api_key": key},
@@ -288,7 +287,7 @@ def probe_secret(secret_id: str) -> dict:
         if not key:
             return {"ok": False, "message": "Tavily key 未配置"}
         try:
-            with httpx.Client(timeout=15.0) as client:
+            with make_client(timeout=15.0) as client:
                 r = client.post(
                     "https://api.tavily.com/search",
                     json={"api_key": key, "query": "zinc phosphate coating", "max_results": 1},

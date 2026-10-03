@@ -9,6 +9,7 @@ import logging
 import re
 from typing import Any, Literal
 from urllib.parse import quote
+from .http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -74,19 +75,6 @@ def verify_dois(
             }
             for d in dois
         ]
-    try:
-        import httpx
-    except ImportError:
-        return [
-            {
-                "doi": d,
-                "status": "unknown",
-                "title": None,
-                "retracted": None,
-                "notice_kind": "unknown",
-            }
-            for d in dois
-        ]
 
     for doi in dois[:20]:
         row: dict[str, Any] = {
@@ -98,7 +86,7 @@ def verify_dois(
         }
         try:
             url = f"https://api.crossref.org/works/{quote(doi, safe='')}"
-            with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
+            with make_client(timeout=timeout_s, follow_redirects=True) as client:
                 resp = client.get(
                     url,
                     headers={"User-Agent": "FormuMind/1.0 (mailto:formumind@example.com)"},
@@ -170,11 +158,7 @@ def _openalex_headers() -> dict[str, str]:
 
 def _openalex_get(url: str, *, timeout_s: float = 6.0) -> dict[str, Any] | None:
     try:
-        import httpx
-    except ImportError:
-        return None
-    try:
-        with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
+        with make_client(timeout=timeout_s, follow_redirects=True) as client:
             resp = client.get(url, headers=_openalex_headers())
         if resp.status_code >= 400:
             return None

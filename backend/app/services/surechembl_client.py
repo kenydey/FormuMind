@@ -20,6 +20,7 @@ from urllib.parse import quote, urlencode
 from loguru import logger
 
 from .chem_common import cache_get, cache_put
+from .http_safe import make_client
 
 _DEFAULT_BASE = "https://www.surechembl.org/api"
 _TIMEOUT_S = 2.0
@@ -70,14 +71,9 @@ def _headers() -> dict[str, str]:
 
 
 def _http_get_json(path: str, *, timeout: float = _TIMEOUT_S) -> dict[str, Any] | None:
-    try:
-        import httpx
-    except Exception as exc:
-        logger.debug("surechembl: httpx unavailable ({})", exc)
-        return None
     url = f"{surechembl_base_url()}{path}"
     try:
-        with httpx.Client(timeout=timeout, headers=_headers()) as client:
+        with make_client(timeout=timeout, headers=_headers()) as client:
             resp = client.get(url)
             if resp.status_code != 200:
                 logger.debug("surechembl GET {} -> {}", path, resp.status_code)
@@ -100,14 +96,9 @@ def _http_post_json(
     *,
     timeout: float = _TIMEOUT_S,
 ) -> dict[str, Any] | None:
-    try:
-        import httpx
-    except Exception as exc:
-        logger.debug("surechembl: httpx unavailable ({})", exc)
-        return None
     url = f"{surechembl_base_url()}{path}"
     try:
-        with httpx.Client(timeout=timeout, headers=_headers()) as client:
+        with make_client(timeout=timeout, headers=_headers()) as client:
             resp = client.post(url, json=body or {})
             if resp.status_code != 200:
                 logger.debug("surechembl POST {} -> {}", path, resp.status_code)
@@ -421,14 +412,9 @@ def _http_post_bytes(
     *,
     timeout: float = _CONTENT_TIMEOUT_S,
 ) -> bytes | None:
-    try:
-        import httpx
-    except Exception as exc:
-        logger.debug("surechembl: httpx unavailable ({})", exc)
-        return None
     url = f"{surechembl_base_url()}{path}"
     try:
-        with httpx.Client(timeout=timeout, headers=_headers()) as client:
+        with make_client(timeout=timeout, headers=_headers()) as client:
             resp = client.post(url, json=body or {})
             if resp.status_code != 200:
                 logger.debug("surechembl POST bytes {} -> {}", path, resp.status_code)

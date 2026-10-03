@@ -38,6 +38,7 @@ from .datalab_client import (
 )
 from .models import ExperimentRow
 from .session_utils import commit_session
+from ..services.http_safe import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ class DatalabExperimentStore:
 
     def _ensure_client(self) -> httpx.Client:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(
+            self._client = make_client(
                 base_url=self._api_url,
                 timeout=self._timeout,
                 limits=self._limits,

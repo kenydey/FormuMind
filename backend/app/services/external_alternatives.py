@@ -14,6 +14,7 @@ from loguru import logger
 
 from .chem_common import _match_catalog, cache_get, cache_put
 from .errors import degrade_return
+from .http_safe import make_client
 
 _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
 _CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
@@ -85,11 +86,7 @@ def resolve_slot_identity(
 
 def _http_get_json(url: str, *, timeout: float = 12.0) -> dict[str, Any] | None:
     try:
-        import httpx
-    except ImportError:
-        return None
-    try:
-        with httpx.Client(timeout=timeout) as client:
+        with make_client(timeout=timeout) as client:
             resp = client.get(url)
             if resp.status_code != 200:
                 return None

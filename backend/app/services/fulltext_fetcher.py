@@ -30,6 +30,7 @@ from ..config import get_settings
 from ..domain.schemas import Evidence
 from . import ingest_timing as _timing
 from .errors import degrade_return
+from .http_safe import make_client, ssrf_safe_client
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ def _unpaywall_locations(doi: str, timeout: float) -> tuple[list[str], list[str]
     pdfs: list[str] = []
     landings: list[str] = []
     try:
-        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+        with make_client(timeout=timeout, headers=_HEADERS) as client:
             r = client.get(f"https://api.unpaywall.org/v2/{doi}?email={mailto}")
         if r.status_code != 200:
             return [], []
@@ -182,7 +183,7 @@ def _europepmc_pmcid(doi: str, timeout: float) -> str | None:
     """
     try:
         url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:%22{doi}%22&format=json&pageSize=1"
-        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+        with make_client(timeout=timeout, headers=_HEADERS) as client:
             r = client.get(url)
         if r.status_code != 200:
             return None
@@ -217,7 +218,7 @@ def _resolve_oa_candidates(ev: Evidence, timeout: float) -> tuple[list[str], lis
     pdfs: list[str] = []
     landings: list[str] = []
     try:
-        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+        with make_client(timeout=timeout, headers=_HEADERS) as client:
             r = client.get(f"https://api.openalex.org/works/doi:{doi}?mailto={mailto}")
         if r.status_code == 200:
             data = r.json()
@@ -342,7 +343,7 @@ def _openalex_work_id(ev: Evidence, doi: str | None, timeout: float) -> str | No
     elif settings.openalex_mailto:
         params["mailto"] = settings.openalex_mailto
     try:
-        with httpx.Client(timeout=timeout, headers=_HEADERS) as client:
+        with make_client(timeout=timeout, headers=_HEADERS) as client:
             r = client.get(f"https://api.openalex.org/works/doi:{doi}", params=params)
         if r.status_code != 200:
             return None
@@ -389,7 +390,7 @@ def _openalex_content_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
     for ext, label, acq in tiers:
         url = f"{base}.{ext}"
         try:
-            with httpx.Client(
+            with make_client(
                 timeout=timeout, headers=auth_headers, follow_redirects=False
             ) as client:
                 r = None
@@ -528,7 +529,7 @@ def _fetch_landing_text(landing_url: str, timeout: float) -> str | None:
         return None
     current_url = landing_url
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=False, headers=_HEADERS) as client:
+        with ssrf_safe_client(timeout=timeout, follow_redirects=False, headers=_HEADERS) as client:
             r = None
             for _hop in range(4):
                 r = client.get(current_url)
@@ -563,7 +564,7 @@ def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:
     # redirect target so an SSRF cannot pivot to an internal host via a 3xx.
     current_url = url
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=False, headers=_HEADERS) as client:
+        with ssrf_safe_client(timeout=timeout, follow_redirects=False, headers=_HEADERS) as client:
             r = None
             for _hop in range(4):  # initial + up to 3 redirects
                 r = client.get(current_url)
