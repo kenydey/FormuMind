@@ -49,6 +49,7 @@ API_ONLY_ROUTES: dict[str, str] = {
     "/api/ops/kb-health": _OPS,
     "/api/ops/recommend-stats": _OPS,
     "/api/reports/capabilities": "which export formats this deployment can produce; the UI offers all four and shows the 503",
+    "/api/search/topic-sweep": "on-demand topic-radar sweep for operators and agents; periodic runs come from the beat schedule (FORMUMIND_TOPIC_RADAR_*)",
     "/api/session-plans": f"plan submission: {_AGENT_DRIVEN}; the UI approves or rejects pending plans",
     "/api/session-plans/{}/advance": f"marking a plan step done: {_AGENT_DRIVEN}; the UI only approves or rejects",
     "/api/skills/installed": "the skills screen reads the merged /api/skills catalog and checks updates per skill",

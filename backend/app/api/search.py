@@ -2,6 +2,9 @@
 POST /api/search/stream — Incremental search via SSE (preferred); the client
      falls back to polling the task handle when the SSE stream cannot be
      established. P2: 文档此前只写轮询，已按实际（SSE 优先、轮询 fallback）修正。
+POST /api/search/topic-sweep — One topic-radar sweep (search → topic filter → background
+     KB fill) as a background task; the same task Celery Beat runs on the
+     ``FORMUMIND_TOPIC_RADAR_*`` schedule.
 GET  /api/search/status — Per-source availability check (no network requests).
 """
 from fastapi import APIRouter, HTTPException
@@ -9,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from ..domain.schemas import Evidence, Requirement
 from ..services import literature
-from ..worker.tasks import run_search_task
+from ..worker.tasks import run_search_task, run_topic_sweep
 from ._dispatch import submit
 
 router = APIRouter()
@@ -174,3 +177,31 @@ def search_stream(req: SearchRequest) -> JSONResponse:
         "notebooklm_notebook_id": req.notebooklm_notebook_id,
     }, "search")
 
+
+class TopicSweepRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    project_id: str | None = None
+    source_types: list[str] = Field(default_factory=list)
+    requirement: Requirement | None = None
+    total_limit: int = Field(default=100, ge=1, le=1000)
+    per_source_cap: int = Field(default=30, ge=1, le=200)
+    notebooklm_notebook_id: str | None = None
+
+
+@router.post("/search/topic-sweep", status_code=202)
+def topic_sweep(req: TopicSweepRequest) -> JSONResponse:
+    """Run one topic-radar sweep now: search, keep what matches the topic, fill the KB in the background.
+
+    Returns the usual 202 task handle; ``GET /api/tasks/{id}`` reports ``found`` and the id of the
+    KB ingest task it started (``ingest_task_id`` is null when nothing matched).
+    """
+    _assert_requirement_consistency(req.requirement)
+    return submit(run_topic_sweep, {
+        "query": req.query.strip(),
+        "project_id": req.project_id,
+        "source_types": _effective_source_types(req.source_types),
+        "requirement": req.requirement.model_dump() if req.requirement else None,
+        "total_limit": req.total_limit,
+        "per_source_cap": req.per_source_cap,
+        "notebooklm_notebook_id": req.notebooklm_notebook_id,
+    }, "topic_sweep")
