@@ -86,6 +86,10 @@ def validate_formulation_list(body: FormulationValidateRequest) -> FormulationVa
     return FormulationValidateResponse(formulations=forms, warnings=warnings)
 
 
+# Upper bound on evidence echoed back in a recommend response.
+_ECHO_EVIDENCE_CAP = 50
+
+
 class RecommendFormulationsRequest(BaseModel):
     requirement: Requirement
     objectives: list[ObjectiveSpec] = Field(default_factory=list)
@@ -112,6 +116,11 @@ class RecommendFormulationsResponse(BaseModel):
     # C-8: id of this recommendation round — the client sends it back on
     # POST /formulations/recommend/{recommend_id}/adopt for outcome telemetry.
     recommend_id: str = ""
+    # Evidence the round was grounded on (KB retrieval, else the caller's own
+    # sources). The async research task forwards it as ``research.evidence`` and
+    # hands it to the KB-ingest dispatcher; before this field existed both read
+    # a key the response never carried, so they always saw an empty list.
+    grounded_evidence: list[Evidence] = Field(default_factory=list)
 
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
@@ -242,6 +251,7 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         tradeoff=tradeoff,
         relation_insights=insights,
         recommend_id=bundle.recommend_id,
+        grounded_evidence=list(evidence)[:_ECHO_EVIDENCE_CAP],
     )
 
 

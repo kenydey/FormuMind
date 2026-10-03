@@ -29,8 +29,9 @@ def _run_cycle(monkeypatch, runs):
     monkeypatch.setattr(
         form_mod,
         "recommend_formulations",
+        # Real response shape: validated candidates live in ``scored``.
         lambda req: SimpleNamespace(
-            formulations=[SimpleNamespace(factors={"resin_wt_pct": 60.0})]
+            scored=[SimpleNamespace(factors={"resin_wt_pct": 60.0})]
         ),
     )
 

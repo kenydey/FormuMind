@@ -355,6 +355,8 @@ export interface RecommendFormulationsResponse {
     relations?: Array<{ type?: string; target?: string; confidence?: number }>;
   }>;
   recommend_id?: string;
+  /** Evidence the round was grounded on (KB retrieval, else the caller's sources). */
+  grounded_evidence?: Evidence[];
 }
 
 export interface TradeOffAnalysis {
