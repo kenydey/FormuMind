@@ -39,7 +39,6 @@ import type {
   ExperimentSummary,
   FactorCandidate,
   Formulation,
-  FormulationSkill,
   FormulationVersionView,
   IPAnalysisRequest,
   IPReport,
@@ -57,7 +56,6 @@ import type {
   KbChunk,
   KbGoldenEvalRequest,
   KbGoldenEvalResponse,
-  KbGoldenQuestion,
   KbIntegrityResponse,
   KbProductsResponse,
   KbQueryTestRequest,
@@ -120,6 +118,7 @@ import type {
   ProvenanceLineageResponse,
   RerunReviewRequest,
   RerunReviewResult,
+  ReviewChecklist,
   ReviewRunDetail,
   ReviewRunSummary,
   StructureRecognitionResult,
@@ -975,9 +974,6 @@ export const apiMethods = {
   /** Shared probe ↔ recommend retrieval knobs (GET /api/kb/retrieval-settings). */
   kbRetrievalSettings: () => get<KbRetrievalSettings>("/api/kb/retrieval-settings"),
 
-  /** Curated golden retrieval questions (GET /api/kb/golden-questions). */
-  kbGoldenQuestions: () => get<KbGoldenQuestion[]>("/api/kb/golden-questions"),
-
   /** Run golden eval batch (POST /api/kb/golden-eval/run). */
   kbGoldenEvalRun: (body: KbGoldenEvalRequest) =>
     post<KbGoldenEvalResponse>("/api/kb/golden-eval/run", body),
@@ -1203,11 +1199,6 @@ export const apiMethods = {
 
   listProjects: () => get<import("../projectWorkspace").ProjectSummary[]>("/api/projects"),
 
-  listFormulationSkills: () => get<FormulationSkill[]>("/api/formulation-skills"),
-
-  getFormulationSkill: (id: string) =>
-    get<FormulationSkill>(`/api/formulation-skills/${encodeURIComponent(id)}`),
-
   listSkills: (kind?: string) =>
     get<import("./types").SkillsCatalogResponse>(
       kind ? `/api/skills?kind=${encodeURIComponent(kind)}` : "/api/skills",
@@ -1263,9 +1254,6 @@ export const apiMethods = {
       `/api/skills/installed/${encodeURIComponent(skill_id)}`,
     ),
 
-  listInstalledSkills: () =>
-    get<{ skills: Array<Record<string, unknown>> }>("/api/skills/installed"),
-
   checkSkillUpdate: (skill_id: string) =>
     get<{
       skill_id: string;
@@ -1319,9 +1307,6 @@ export const apiMethods = {
       `/api/connectors/builtin/${encodeURIComponent(id)}/toggle`,
       { enabled },
     ),
-
-  replaceMcpServers: (servers: import("./types").McpServerConfig[]) =>
-    put<{ mcp: import("./types").McpServerConfig[] }>("/api/connectors/mcp", { servers }),
 
   importMcpJson: (body: {
     json_text?: string;
@@ -1691,21 +1676,6 @@ export const apiMethods = {
       section_revisions?: Record<string, number>;
       error?: string;
     }>("/api/wiki/dossier/ensure", body),
-  patchWikiDossier: (body: {
-    project_id: string;
-    sections?: string[];
-    campaign_id?: string;
-    vertical?: string;
-    use_llm?: boolean;
-  }) =>
-    post<{
-      ok: boolean;
-      path?: string;
-      patched_sections?: string[];
-      skipped_unchanged?: string[];
-      section_revisions?: Record<string, number>;
-      error?: string;
-    }>("/api/wiki/dossier/patch", body),
   refreshWikiDossier: (body: {
     project_id: string;
     sections?: string[];
@@ -1737,12 +1707,6 @@ export const apiMethods = {
         [key: string]: unknown;
       } | null;
     }>(`/api/wiki/dossier/${encodeURIComponent(projectId)}`),
-  getWikiDossierPack: (projectId: string, campaignId?: string) => {
-    const q = campaignId ? `?campaign_id=${encodeURIComponent(campaignId)}` : "";
-    return get<Record<string, unknown>>(
-      `/api/wiki/dossier/${encodeURIComponent(projectId)}/pack${q}`,
-    );
-  },
   listWikiReportTemplates: () =>
     get<{
       templates: { id: string; title: string; blurb: string; slices: string }[];
@@ -2221,6 +2185,22 @@ export const apiMethods = {
     const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
     return { blob, filename: m?.[1] || `${body.kind}_report.${body.format}` };
   },
+  /** P1-37: up to 10 KB sources as one file — POST /api/sources/export {source_ids, format}. */
+  exportSources: async (body: {
+    source_ids: string[];
+    format: "docx" | "pdf" | "html" | "md";
+  }) => {
+    const res = await fetch("/api/sources/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await exportFailure(res, `sources export failed (${res.status})`);
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    return { blob, filename: m?.[1] || `sources_export.${body.format}` };
+  },
   /** Publication preflight: persisted findings for one report kind (storm | tech_report_*). */
   getPreflightState: (projectId: string, kind = "storm") =>
     get<PreflightState>(
@@ -2247,38 +2227,6 @@ export const apiMethods = {
       "/api/wiki/preflight/finalize",
       body,
     ),
-  getReportCapabilities: () =>
-    get<Record<string, boolean | string | null>>("/api/reports/capabilities"),
-  /** S2: deterministic wiki catalog from wiki_pages (App-maintained; not SSOT). */
-  getWikiCatalog: (params?: {
-    limit?: number;
-    kinds?: string;
-    project_id?: string | null;
-    format?: "json";
-  }) => {
-    const q = new URLSearchParams();
-    if (params?.limit != null) q.set("limit", String(params.limit));
-    if (params?.kinds) q.set("kinds", params.kinds);
-    if (params?.project_id) q.set("project_id", params.project_id);
-    q.set("format", "json");
-    const qs = q.toString();
-    return get<{
-      ok: boolean;
-      path?: string;
-      generated_at?: string;
-      entry_count?: number;
-      entries?: Array<{
-        path: string;
-        kind: string;
-        title: string;
-        norm_key?: string;
-        flags?: string[];
-        source_ids?: string[];
-      }>;
-      markdown?: string;
-      persisted?: boolean;
-    }>(`/api/wiki/catalog${qs ? `?${qs}` : ""}`);
-  },
   rebuildWikiCatalog: (body?: {
     persist?: boolean;
     limit?: number;
@@ -2353,7 +2301,6 @@ export const apiMethods = {
       human_override?: string | null;
       flags?: string[];
     }>("/api/wiki/pages/review", body),
-  getWikiPage: (id: string) => get<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(id)}`),
   getWikiByPath: (path: string) =>
     get<WikiPageDetail>(`/api/wiki/by-path?path=${encodeURIComponent(path)}`),
   listWikiFlags: (params?: { limit?: number; project_id?: string | null }) => {
@@ -2717,5 +2664,9 @@ export const apiMethods = {
       `/api/reviews/runs/${encodeURIComponent(runId)}/rerun`,
       body,
     ),
+
+  /** P1-32: structured pass / flagged checklist for one review run (404 when the run is gone). */
+  getReviewChecklist: (runId: string) =>
+    get<ReviewChecklist>(`/api/reports/checklist/${encodeURIComponent(runId)}`),
 };
 

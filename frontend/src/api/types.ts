@@ -2808,6 +2808,26 @@ export interface RerunReviewResult {
   final_answer?: string | null;
 }
 
+/** P1-32: one row of GET /api/reports/checklist/{run_id}. */
+export interface ReviewChecklistItem {
+  id: string;
+  category: "citation" | "numeric" | "method" | "general";
+  statement: string;
+  verdict: "pass" | "flagged" | "n_a";
+  evidence_refs: Array<{ source_id: string; page_no: number | null }>;
+  reviewer_note: string;
+}
+
+/** P1-32: structured review checklist built from a persisted review run. */
+export interface ReviewChecklist {
+  run_id: string;
+  session_key: string;
+  outcome: string | null;
+  generated_at: number;
+  items: ReviewChecklistItem[];
+  summary: { total: number; pass: number; flagged: number; n_a: number };
+}
+
 /** W4-1/W4-4: artifact lineage (logical file) for version management. */
 export interface ArtifactLineage {
   lineage_id: string;

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { api, type Evidence, type EmbodimentDraft, type KBSourceItem } from "../api";
+import { api, formatApiError, type Evidence, type EmbodimentDraft, type KBSourceItem } from "../api";
 import { useStore } from "../store";
+import { saveBlob } from "../utils/download";
 import { idsMatch, patentIdAliases } from "../utils/patentIds";
 import AddSourceModal from "./AddSourceModal";
 import SourceDetailModal from "./SourceDetailModal";
@@ -12,6 +13,11 @@ import SourceTypePicker, { searchSourceTypes } from "./SourceTypePicker";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 
 const ACCEPT = ".pdf,.docx,.doc,.xlsx,.pptx,.html,.htm,.txt,.md,.csv,.png,.jpg,.jpeg";
+
+/** POST /api/sources/export takes at most this many documents per file. */
+const KB_EXPORT_MAX = 10;
+const KB_EXPORT_FORMATS = ["docx", "pdf", "html", "md"] as const;
+type KbExportFormat = (typeof KB_EXPORT_FORMATS)[number];
 
 function iconForSource(source: string): string {
   const s = source.toLowerCase();
@@ -207,6 +213,10 @@ export default function SourcesPanel() {
   // 知识库文档(2026-09-05): 已导入语料列表 —— 项目视图含全局文档(project_id OR NULL),
   // 不依赖易被覆盖的 payload.sources —— 资料可见性的权威来源。
   const [kbDocs, setKbDocs] = useState<KBSourceItem[]>([]);
+  const [exportIds, setExportIds] = useState<string[]>([]);
+  const [exportFormat, setExportFormat] = useState<KbExportFormat>("docx");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [eligibleIds, setEligibleIds] = useState<Record<string, boolean>>({});
   const activeProjectId = useStore((s) => s.activeProjectId);
 
@@ -348,6 +358,31 @@ export default function SourcesPanel() {
       setSchActionMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setSchActionBusy(null);
+    }
+  }
+
+  // Picks survive a refresh of the list but not a project switch: only ids still listed count.
+  const pickedExportIds = exportIds.filter((id) => kbDocs.some((d) => d.id === id));
+
+  function toggleExportPick(id: string) {
+    setExportIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function exportPicked() {
+    if (pickedExportIds.length === 0) return;
+    setExportBusy(true);
+    setExportMsg(null);
+    try {
+      const { blob, filename } = await api.exportSources({
+        source_ids: pickedExportIds,
+        format: exportFormat,
+      });
+      saveBlob(blob, filename);
+      setExportMsg(`已导出 ${filename}`);
+    } catch (e) {
+      setExportMsg(formatApiError(e));
+    } finally {
+      setExportBusy(false);
     }
   }
 
@@ -757,12 +792,59 @@ export default function SourcesPanel() {
                 （已导入语料，可供检索）
               </span>
             </div>
+            <div
+              className="flex items-center gap-1.5 mb-1 text-[10px] normal-case text-slate-600"
+              data-testid="kb-export-bar"
+            >
+              <span className="flex-1 truncate">勾选后导出为一个文件（最多 {KB_EXPORT_MAX} 篇）</span>
+              <select
+                value={exportFormat}
+                onChange={(e) => setExportFormat(e.target.value as KbExportFormat)}
+                disabled={exportBusy}
+                className="bg-ink border border-edge rounded px-1 py-0.5 text-[10px] text-slate-300"
+                data-testid="kb-export-format"
+                title="导出格式"
+              >
+                {KB_EXPORT_FORMATS.map((f) => (
+                  <option key={f} value={f}>
+                    {f.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => void exportPicked()}
+                disabled={exportBusy || pickedExportIds.length === 0}
+                className="shrink-0 px-1.5 py-0.5 rounded border border-edge text-slate-300 hover:border-accent/50 hover:text-accent disabled:opacity-40"
+                data-testid="kb-export-run"
+                title="把勾选的知识库文档导出为一个文件（摘要、表格清单与引用清单）"
+              >
+                {exportBusy ? "导出中…" : `⬇ 导出${pickedExportIds.length ? ` (${pickedExportIds.length})` : ""}`}
+              </button>
+            </div>
+            {exportMsg && (
+              <div className="mb-1 text-[10px] text-slate-400" data-testid="kb-export-msg">
+                {exportMsg}
+              </div>
+            )}
             <div className="flex flex-col gap-1">
               {kbDocs.map((d) => (
                 <div
                   key={d.id}
                   className="group flex items-center gap-2 rounded px-2 py-1 text-[11px] bg-ink/30 border border-edge/40"
                 >
+                  <input
+                    type="checkbox"
+                    className="shrink-0 accent-teal-500"
+                    checked={pickedExportIds.includes(d.id)}
+                    disabled={
+                      exportBusy ||
+                      (!pickedExportIds.includes(d.id) && pickedExportIds.length >= KB_EXPORT_MAX)
+                    }
+                    onChange={() => toggleExportPick(d.id)}
+                    aria-label={`选择导出：${d.title ?? d.filename}`}
+                    data-testid={`kb-export-pick-${d.id}`}
+                  />
                   <span className="shrink-0">{iconForSource(d.source_kind)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="text-slate-300 truncate" title={d.title ?? ""}>
