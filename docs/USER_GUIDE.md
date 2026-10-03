@@ -251,6 +251,17 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
   - **Peer-review skill**: bundled `peer-review` (BLOCKING / OBSERVATION). Hub
     **审稿一遍** injects the STORM draft into the chat composer and selects the skill
     — does not auto-rewrite.
+- **Wave E-Lit (OpenScience) — Literature Library MVP**:
+  - **Hub「文献库」tab**: catalog over the same `literature_manifest` (tags, notes,
+    manual collections, search/filter). Shares Capture / Freeze / OA enrich with the
+    Reports freeze strip. Flag `literature_library_enabled` (**default off** — soak
+    then enable); tab stays visible and shows a Settings CTA when off.
+  - **DOI / ChemRxiv import**: paste DOIs or ChemRxiv URLs/UUIDs
+    (`POST /api/wiki/literature/import-ids`). **No arXiv / PMID** (chemistry stack
+    uses ChemRxiv via OpenAlex). Duplicates UI + merge
+    (`GET .../duplicates`, `POST .../merge`) preserve screening and remap freeze ids.
+  - **BibTeX / RIS**: export/import under `/api/wiki/literature/export.{bib,ris}` and
+    `POST .../import` (ChemRxiv `eprint` supported; arXiv entries rejected).
 - **Two kinds of keys (do not confuse them)**:
   - **Platform API bearer token** (`FORMUMIND_API_TOKEN`): protects `/api/*` when
     `FORMUMIND_API_AUTH_ENABLED=true`. For intranet dev, set auth to `false`. When

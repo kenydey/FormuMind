@@ -1,6 +1,7 @@
 # Post–Wave D2 OpenScience Top-5（含完整 Literature Library）
 
-> 状态：**仅评估，未开工**（2026-09-27）  
+> 状态：**E-Lit 1→2→3 已开工**（ChemRxiv，不含 arXiv；2026-09-27）  
+
 > 源：`/tmp/openscience`（SynSci）· `/tmp/aipoch-open-science`（AIPOCH）  
 > 对照：FormuMind `main` 已合入 Wave A–D2（#164–#168）
 
@@ -63,10 +64,10 @@
 |--|--|
 | **源** | AIPOCH `reference-resolver.ts` · `duplicates.ts` · `duplicate-metadata.ts` · `metadata-enricher.ts` |
 | **必要性** | **5** — Library 无查重则 DOI/标题重复污染冻结集与钢印 |
-| **可行性** | **4** — DOI/arXiv/OpenAlex 解析可复用 `scholar_helpers`；查重启发式（DOI > 规范化标题）可纯 Python |
+| **可行性** | **4** — DOI/ChemRxiv/OpenAlex 解析可复用 `scholar_helpers` + 现有 ChemRxiv OpenAlex source；查重启发式（DOI > 规范化标题）可纯 Python |
 | **FM 落点** | `POST /api/wiki/literature/import-ids`；`GET .../duplicates`；`POST .../merge` |
-| **切片** | E2a DOI/arXiv 粘贴导入 → E2b 重复组预览 → E2c 一键合并（保留 screening/freeze 态） |
-| **明确不做** | 模糊作者聚类的重型 ML |
+| **切片** | E2a DOI/ChemRxiv 粘贴导入 → E2b 重复组预览 → E2c 一键合并（保留 screening/freeze 态） |
+| **明确不做** | arXiv 导入；模糊作者聚类的重型 ML |
 
 ### 3. BibTeX / RIS 导入 · 导出
 

@@ -57,3 +57,20 @@ describe("KnowledgeHubModal memory tab (Wave 0: moved from Settings)", () => {
     expect(screen.getByTestId("memory-panel")).toBeInTheDocument();
   });
 });
+
+describe("KnowledgeHubModal library tab", () => {
+  beforeEach(() => {
+    useStore.setState({
+      knowledgeHubTab: "library",
+      activeProjectId: "proj-demo",
+      envFlagsRevision: 0,
+    } as never);
+  });
+
+  it("shows the literature library tab and pane", () => {
+    render(<KnowledgeHubModal open onClose={() => undefined} />);
+    expect(screen.getByTestId("hub-tab-library")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-tab-library").textContent).toMatch(/文献库/);
+    expect(screen.getByTestId("hub-library-pane")).toBeInTheDocument();
+  });
+});
