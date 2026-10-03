@@ -398,6 +398,7 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
           className="text-xs bg-panel border border-edge rounded px-2 py-1"
           value={collectionId}
           onChange={(e) => setCollectionId(e.target.value)}
+          data-testid="hub-library-collection-filter"
         >
           <option value="">全部集合</option>
           {collections.map((c) => (
@@ -433,6 +434,47 @@ export default function HubLiteratureLibraryPane({ active }: { active: boolean }
         >
           + 集合
         </button>
+        {collectionId && (
+          <>
+            <button
+              type="button"
+              className="text-xs px-2 py-1 rounded border border-edge"
+              disabled={busy}
+              title="重命名当前集合"
+              data-testid="hub-library-collection-rename"
+              onClick={() =>
+                run("集合已重命名", async () => {
+                  const current = collections.find((c) => c.id === collectionId)?.name ?? "";
+                  const name = window.prompt("新的集合名称", current);
+                  if (!name?.trim() || name.trim() === current) return;
+                  await api.patchLiteratureCollection(collectionId, {
+                    project_id: projectId,
+                    name: name.trim(),
+                  });
+                })
+              }
+            >
+              重命名
+            </button>
+            <button
+              type="button"
+              className="text-xs px-2 py-1 rounded border border-rose-500/40 text-rose-300"
+              disabled={busy}
+              title="删除当前集合（不会删除其中的文献）"
+              data-testid="hub-library-collection-delete"
+              onClick={() =>
+                run("集合已删除", async () => {
+                  const current = collections.find((c) => c.id === collectionId)?.name ?? collectionId;
+                  if (!window.confirm(`删除集合「${current}」？其中的文献不会被删除。`)) return;
+                  await api.deleteLiteratureCollection(collectionId, { project_id: projectId });
+                  setCollectionId("");
+                })
+              }
+            >
+              删除集合
+            </button>
+          </>
+        )}
       </div>
 
       {(msg || err) && (
