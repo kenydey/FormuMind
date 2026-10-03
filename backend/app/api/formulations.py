@@ -170,19 +170,24 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
             if mode == "hybrid" and evidence:
                 # KB 已有证据：降级为 KB-only 推荐，不让 LLM 故障整体 503（A8）
                 log.warning("LLM 合成失败，hybrid 降级为 KB-only: %s", exc)
-                rec_resp = _evidence_as_recommendation_response(
-                    evidence, body.requirement, objectives)
-                rec_resp.warnings.append("LLM 合成失败，已降级为知识库检索结果")
+                rec_resp = _offline_recommendation_response(
+                    body.requirement, evidence, n=llm_n,
+                    note="LLM 合成失败，已降级为离线模板候选 + 知识库证据校验",
+                )
             else:
                 log.exception("recommend_formulations LLM failed")
                 raise HTTPException(status_code=503, detail="配方推荐失败") from exc
     else:
-        # kb_only: return evidence as lightweight recommendations
-        rec_resp = _evidence_as_recommendation_response(
-            evidence, body.requirement, objectives)
+        # kb_only: no LLM. Retrieved evidence is not a formulation, so candidates
+        # come from the deterministic offline engine and the orchestration's
+        # grounding step checks them against the retrieved KB evidence.
+        rec_resp = _offline_recommendation_response(
+            body.requirement, evidence, n=llm_n,
+            note="kb_only 模式：未调用 LLM，候选来自确定性离线模板",
+        )
 
     if not rec_resp.formulas:
-        raise HTTPException(status_code=503, detail="No formulations produced")
+        raise HTTPException(status_code=503, detail="未能生成配方：LLM 与离线模板均无可用候选")
 
     bundle = run_recommend_orchestration(
         body.requirement,
@@ -368,29 +373,41 @@ def _relation_insights(formulas: list, settings) -> list[dict]:
     return insights
 
 
-def _evidence_as_recommendation_response(
-    evidence: list,
+def _offline_recommendation_response(
     requirement: Requirement,
-    objectives: list[ObjectiveSpec],
+    evidence: list,
+    *,
+    n: int,
+    note: str,
 ) -> RecommendedFormulaListResponse:
-    """Convert KB evidence into a basic recommendation response (kb_only mode)."""
-    formulas: list[RecommendedFormula] = []
-    for i, ev in enumerate(evidence[:5]):
-        # predicted 按 objectives 的 metric 生成占位键（0 = 未预测），不再捏造 salt_spray_hours
-        predicted = {o.metric: 0 for o in objectives} if objectives else {}
-        formulas.append(RecommendedFormula(
-            name=ev.title or f"KB 候选 #{i+1}",
-            domain=requirement.domain,
-            rationale=f"知识库检索结果：{ev.snippet[:200]}" if ev.snippet else "无详细描述",
-            objectives_summary="; ".join(
-                f"{o.metric}: {o.direction}" for o in objectives),
-            predicted=predicted,
-            score=0.5 if ev.relevance is None else ev.relevance,
-        ))
-    return RecommendedFormulaListResponse(
-        formulas=formulas, engine="offline",
-        warnings=["kb_only 模式：仅返回知识库检索结果，未经 LLM 合成"],
+    """No-LLM candidates for ``kb_only`` and for a hybrid run whose LLM failed.
+
+    This used to turn each retrieved *evidence snippet* into a component-less
+    ``RecommendedFormula``. The orchestration (``recommended_to_formulation``)
+    rejects a formula without components, so ``kb_only`` always answered 200
+    with zero formulas plus a "has no components" warning per document — or a
+    503 when retrieval came back empty — and the degraded-hybrid path claimed to
+    avoid a 503 while delivering nothing. Candidates now come from the
+    deterministic offline engine (the same one the LLM path falls back to); the
+    orchestration's grounding step then checks their components against the
+    retrieved evidence and the material catalog.
+    """
+    from ..domain.formulation_gate import offline_recommend_response
+    from ..domain.knowledge import offline_recommend_fallback
+
+    resp = offline_recommend_response(
+        offline_recommend_fallback(requirement, n=n), reason=note
     )
+    if evidence:
+        resp.warnings.append(
+            f"已按检索到的 {len(evidence)} 条知识库证据校验候选成分"
+            "（证据与材料库均未覆盖的成分会被剔除）"
+        )
+    else:
+        resp.warnings.append(
+            "知识库未检索到匹配证据：候选仅来自离线模板，成分未经文献/专利证据校验"
+        )
+    return resp
 
 
 class ManualFormulationRequest(BaseModel):
