@@ -140,6 +140,8 @@ dev = [
     "pytest-timeout>=2.0",
     "httpx>=0.27",
     "pypdf>=4.0",             # real PDF parsing in test_pdf_downloader real-path tests
+    "PyYAML>=6.0",            # tests/test_compose_hardening.py parses the compose files
+    "cryptography>=42",       # tests/test_http_safe.py mints a self-signed cert for the TLS-name test
     "ruff==0.15.8",           # lint gate (see [tool.ruff] below); pinned so new rules cannot break CI
 ]
 postgres = ["psycopg2-binary>=2.9"]

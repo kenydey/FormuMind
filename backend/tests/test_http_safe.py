@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import datetime
+import errno
 import http.server
 import ipaddress
 import os
@@ -473,26 +474,58 @@ def test_tls_is_verified_against_the_original_name_not_the_pinned_ip(tmp_path, m
 # ── callers: the rebinding timeline through the real entry points ─────────────
 
 
-def test_ingest_url_refuses_a_name_that_flips_to_loopback(dns):
+@pytest.fixture
+def connects(monkeypatch) -> list:
+    """Every attempt to reach the network: ``("http", host)`` for a request that got as far as an
+    httpx transport, ``("socket", address)`` for a connect (refused, so nothing leaves the machine).
+
+    "The fetch returned nothing" is not proof that nothing was attempted — an unpinned client that
+    tries 127.0.0.1 and is refused also returns nothing, and the suite's own outbound guard
+    refuses non-local hosts at the transport, hiding the attempt from the socket layer. The point
+    of the pinned transport is that the request is never sent.
+    """
+    attempts: list = []
+
+    def refuse(self, address):
+        attempts.append(("socket", address))
+        raise ConnectionRefusedError(errno.ECONNREFUSED, "test: nothing may connect")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+
+    reaches_the_network = httpx.HTTPTransport.handle_request
+
+    def record(self, request):
+        attempts.append(("http", request.url.host))
+        return reaches_the_network(self, request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", record)
+    return attempts
+
+
+def test_ingest_url_refuses_a_name_that_flips_to_loopback(dns, connects):
     dns.set("flip.example", [PUBLIC], ["127.0.0.1"])
     with pytest.raises(ValueError, match="public http"):
         ingestion.ingest_url("https://flip.example/article", persist=False)
+    assert connects == []
 
 
-def test_fetch_pdf_ex_reports_ssrf_for_a_name_that_flips_to_loopback(dns):
+def test_fetch_pdf_ex_reports_ssrf_for_a_name_that_flips_to_loopback(dns, connects):
     dns.set("flip.example", [PUBLIC], ["127.0.0.1"])
     data, reason = fetch_pdf_ex("https://flip.example/paper.pdf")
     assert (data, reason) == (None, "ssrf")
+    assert connects == []
 
 
-def test_fulltext_fetchers_drop_a_name_that_flips_to_loopback(dns):
+def test_fulltext_fetchers_drop_a_name_that_flips_to_loopback(dns, connects):
     dns.set("flip.example", [PUBLIC], ["127.0.0.1"])
     assert ft._fetch_landing_text("https://flip.example/landing", timeout=5) is None
     dns.set("flip2.example", [PUBLIC], ["127.0.0.1"])
     ev = ft.Evidence(source="web", identifier="https://flip2.example/page", title="t", snippet="s", relevance=0.5)
     assert ft._fetch_web_text(ev, timeout=5) is None
+    assert connects == []
 
 
-def test_the_patent_landing_fetch_cannot_be_pointed_inside(dns):
+def test_the_patent_landing_fetch_cannot_be_pointed_inside(dns, connects):
     dns.set("patents.google.com", ["10.0.0.9"])  # poisoned resolver
     assert fetch_patent_landing("US1234567B2") is None
+    assert connects == []

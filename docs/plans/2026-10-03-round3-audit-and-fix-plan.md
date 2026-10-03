@@ -6,6 +6,8 @@
 > 评分是对"代码 + 测试 + 探针"的主观判断，没有真实数据集、线上流量或人工盲评作依据；
 > 数字的价值在于**前后对比**和**每一分差在哪**，不要当作绝对质量。
 
+> **更新（同日）**：原 §4 的 P1–P3 十六项已全部落地（§2.3），§3 评分按落地后重估，§4 现在只列**仍未解决**的问题与下一步。
+
 ---
 
 ## 1. 这一轮怎么查的
@@ -69,97 +71,90 @@
 | 文献库竞态 | 切换项目后上一个项目的慢响应可覆盖新项目列表；集合过滤器沿用上个项目的 id → 空库 → 组件按项目重新挂载 + 只接受最新请求 |
 | 版本历史 / 成果架竞态 | 回滚按钮作用于**显示的**版本号：切项目时旧项目的慢响应可能出现在新项目上，一键回滚会把别的项目的版本号套到当前项目 → 只接受最新请求 + 切换即清空 |
 
----
+### 2.3 第二批：原 §4 的 P1–P3（带回归测试）
 
-## 3. 七项核心功能评分（满分 10；上轮 → 本轮）
+| 项 | 问题（症状 → 根因） | 修复 | 提交 |
+|---|---|---|---|
+| P1-1 模型回滚 | 回滚只改 `current.json` 和内存模型：下一次实验提交（`auto_retrain`）、`POST /api/train` 或数据哈希变了的重启就重训并覆盖；`modelVersions` / `rollbackModel` 前端无人调用 | 回滚写 `pinned`；重训照常训练并**存档**新版本，但不切换当前模型，响应里说"已锁定在 vX，新版本 vY 已存档"；`POST /api/models/unpin`；模型卡片"版本"抽屉（列表 / 回滚需确认 / 解除锁定）；存档的候选版本按数据去重 | `26ed58c` |
+| P1-2 outbox 心跳 | 恢复按"创建 / 认领后 30 分钟"判停滞，仍在跑的长任务会被重投；重投用新 Celery id，客户端手里的 id 永远等不到结果 | `task_outbox.updated_at` 当心跳（任务包装器运行期间定时刷新），恢复只重投"超过 cutoff 没动过"的行；重投复用原 Celery id（`task_id` 列，alembic 0043，附软 ALTER） | `1f0fac0` |
+| P1-3 孤儿样本 | Saga 回滚删除 DataLab 样本失败时只落一行"待清理"，没有消费者 → ELN 残留孤儿样本 | `drain_orphans`（启动时 + `POST /api/ops/datalab-orphans/cleanup`）：404 视为已不存在、DataLab 不可达时不消耗重试、5 次后 `DEAD`；`GET /api/ops/datalab-orphans` | `1f0fac0` |
+| P1-4 配方闭合 | "总和是不是 100%"在五处问、四种答案，可行性闸门不问；68% 的配方只有三条措辞不同的告警、判"可行"、与完整配方同样排序。**顺带**：只有一个 minimize 目标时按原始值降序排，最高 VOC 排第一 | `domain/closure.py` 唯一策略（≤0.5 通过 / ≤5 警告 / >5 错误），每处调用同一个；分数每超 1 个百分点扣 1%（上限 20%，从幅度里扣，负分不会变好）；可行性闸门 `[CLOSURE]` 拒绝错误级配方；单个 maximize 之外的目标用方向感知的归一化分并在批内共享标尺 | `a4d517d`、`0ecf8f0` |
+| P1-5 SSRF | `_is_safe_url` 解析一次判断，httpx 连接时再解析一次——公网 / 内网交替应答的 DNS（重绑定）能通过检查后连到 127.0.0.1 | `PinnedTransport`：每个请求解析一次、全部地址必须公网、连接**已判定的 IP**（Host 与 TLS 的 SNI / 证书校验保持原主机名），重定向每一跳重新解析；`ingest_url`、PDF 下载（含 Google Patents 落地页）、全文抓取用它；NAT64 `64:ff9b::/96` 按其内嵌的 IPv4 判断；真实回环套接字 + 自签证书测试 Host / SNI / 证书名 | `b90153e` |
+| P2-12 外呼开销 | 每次 `httpx.Client()` 重新加载 CA（约 48 ms），38 处各建各的 | `make_client` / `make_async_client` 共用进程级 SSL context（按 `SSL_CERT_FILE/DIR` 缓存，约 1 ms）；38 处全部改用；守卫测试禁止应用代码直接 `httpx.Client(` | `b90153e` |
+| P2-6 接线 | 10 个无人调用的封装；13 个后端接口无前端入口 | 删除 10 个封装；"来源导出"（KB 文档勾选 → 一个 docx/pdf/html/md）和"审计清单"（审计弹窗按需生成）接上界面；守卫测试：每个封装必须有调用方，每个文档化路由要么被前端调用、要么在 `API_ONLY_ROUTES` 里写明原因（29 条：代理工具、运维诊断…），名单自己不许腐烂；`scripts/ops_check.py` 一次读完运维诊断接口，`docs/deployment.md` 列出 | `b25ac8c`、`ccf1728` |
+| P2-7 死表 | `kg_formulation_links` 无任何读写；`formulation_linker.py` 只有角色推断 | alembic 0044 删表（降级可还原），模型删除；模块改名 `kg/ingredient_roles.infer_role` | `7081144` |
+| P2-8 主题雷达 | `formumind.topic_sweep` 只能靠被注释掉的 beat 计划触发，文档说"可由 API 触发"不属实 | `POST /api/search/topic-sweep` + `FORMUMIND_TOPIC_RADAR_*` 驱动的 beat 计划（非法条目跳过并告警，不影响 worker 启动）+ `docker compose --profile radar` 的 beat 进程；任务现在会记录终态，缺省用联邦检索源 | `4b08282`、`ccf1728` |
+| P2-9 事件循环阻塞 | 4 个上传端点在 `async def` 里解压 / 解析 / 写盘 | 移到线程池；本轮用过的扫描脚本变成测试：新增未卸载的同步服务调用即失败（短白名单写明原因，名单自己也有防腐检查，合成模块证明扫描能看见内联 / 别名 / 局部导入调用） | `c6f1632` |
+| P2-10 Summit | 依赖 `torch<2.0`，项目的任何 extra 都装不上、CI 从未跑过，且 `observe` 每次覆盖上一次观测（策略永远只见一个点） | 删除适配器、探针、`build_optimizer` 一档、`/api/meta` 引擎项；文档不再把它列为引擎 | `1cbf5ff` |
+| P2-11 共享标尺 | 替代 / 反向设计逐候选归一化，弱候选与强候选都得 0.5；反向设计的显示分数用需求目标、排序用 `targets.soft`，口径不一 | 替代的 `score_after` 在"全部替代 + 被替代的原配方"上共享标尺；反向设计用排序目标打分、终选种群共享标尺。（影响比审查时估计的小：成本 / 盐雾有候选无关的默认下限，真正塌缩的是 VOC>50 g/L 和没有默认范围的指标。）测试把预测器接到可控杠杆，关掉重打分即失败 | `9052896` |
+| P3-13 compose | Neo4j 密码明文写在五处；Neo4j 与**无密码**的 Redis 发布在所有网卡 | 密码走 `${FORMUMIND_NEO4J_PASSWORD:-…}`（回退值保证用旧默认初始化过的安装不断）；两个数据存储只发布在 `127.0.0.1`；生产环境启用 Neo4j 且仍是默认密码时启动告警；守卫测试 | `ccf1728` |
+| P3-14 ESLint | 前端没有 lint，`tsc` 看不见过期闭包 / 每次渲染都变的依赖 | ESLint 10 + `react-hooks` 两条规则（`--max-warnings 0`，CI 里跑）；配置测试用缺陷形状的样例证明规则开着。**当场查出 3 处**：`MaterialSubstitutionModal`（`?? []` 作依赖，每次渲染重跑 effect）、`useContourGrid`（memo 依赖 `xDomain[0]` 之类表达式）、`LabWorkbench`（三个批量处理函数漏依赖） | `38adaa1` |
+| P3-15 Bib/Ris | 导出失败抛出原始响应文本（用户看到 `{"detail":"…"}`） | 走 `readApiError` | `73c6b40` |
+| P3-16 `utcnow` | 审查时数到 87 处 | 实测各模块早已改成 `datetime.now(timezone.utc)`，只剩 1 处运行时调用 + 2 处测试；新增 `app/clock.utcnow()`，AST 守卫禁止 `utcnow` / `utcfromtimestamp` 的任何写法 | `d38bd7c` |
 
-| 功能 | 上轮 | 本轮 | 变化来自 | 距 9 分还差什么 |
-|---|---|---|---|---|
-| 资料检索 | 7.0 | **7.2** | SSRF 补 CGNAT；文献库补齐定位器写入 / 集合改名删除；文献库切项目串数据、竞态已修；单测不再偷偷访问公网 | 检索质量没有基准集（召回 / 精度从未量化）；SSRF 仍有 DNS 重绑定窗口；限流下的降级只靠 mock 验证；主题雷达（`topic_sweep`）没有任何触发入口 |
-| 文档解析 | 7.5 | **7.7** | 所有上传统一限长（413）；结构识别未启用时不再空等 180 s、不再冻结事件循环 | CI 里没有真实文档基准（表格 / 公式 / 扫描件的抽取准确率）；docling 与其他依赖冲突需分镜像；OCSR 默认关闭、需独立 worker |
-| 知识库构建 | 7.5 | **8.0** | 修复"30 种目录材料出现在所有分块"这一 KG 污染；`rebuild_all` 不再半途静默失败；审计表真正落库；`kg_link_on_ingest` / 元素图路径接通 | 嵌入向量路径在 CI 没有覆盖；KG 实体链接没有精度 / 召回评测；死表 `kg_formulation_links`；增量重建语义 |
-| 问答能力 | 7.0 | **7.3** | 见下面三项 | |
-| └ 检索 | 7.5 | 7.7 | KG 实体引用不再被 30 个无关材料淹没；证据收尾（Crossref + 审稿）移出事件循环，流式不再卡顿 | 无检索评测集；非 OpenAI 兼容 provider 仍不能真流式 |
-| └ 理解 | 7.0 | 7.0 | — | 改写 / 澄清没有评测集；歧义消解依赖 KG 质量（刚修好，需观察） |
-| └ 上下文 | 6.5 | 7.2 | 会话存储不可用时返回 503 而非 500；切项目不再把上一个项目的资料 / 对话 / 会话列表带过来；切换前先保存 | 历史截断 / 摘要策略没有量化；会话持久依赖 Redis，缺失时只降级为进程内 |
-| 配方推荐 | 7.8 | **8.3** | 严格 grounding 不再删掉溶剂 / 填料 / 颜料（配方曾只剩 72%、VOC 预测为 0）；一词名称与中文证据可落地；DOE 循环的 Top-12 候选真正生效；告警每配方一条；可编辑表不再丢焦点、监管标签不再错位 | 配方总和闭合在三处用不同容差、可行性闸门不检查，且**不进入排序**；证据不足时预测器仍是先验；grounding 对中文只做子串匹配 |
-| DOE 设计 | 8.0 | **8.2** | DOE 导出恢复可用（鉴权）；DOE 循环候选修复；轮次导出同理 | CCD 星点超出物理范围只警告；混合物约束设计；DOE 历史 / 模型版本无界面 |
-| 寻优与迭代 | 7.3 | **7.8** | 标量寻优真正使用实测（`lab_points_used`，标注与事实一致）；`auto_retrain` 生效；切项目前先保存 | 模型回滚是临时的且无界面（下一次重训即覆盖）；outbox 无心跳（长任务可能被重复派发）；孤儿样本无人清理；Summit 适配器只喂最后一次观测 |
-
-**一句话**：知识库构建和配方推荐是这一轮收益最大的两项——前者是一个"测试永远发现不了"的污染（每个分块 +30 个假实体），后者是严格 grounding 把正确配方改坏。问答的"理解"没动，是下一轮最缺证据的一项。
-
----
-
-## 4. 尚未修复的问题与修复方案
-
-按"做错的代价 × 发生概率"排序。每项都给出**做法**和**验收**，可以直接拆成独立提交。
-
-### P1 — 下一步先做
-
-**1. 模型回滚是临时的，且没有界面**（寻优与迭代）
-- 现状：`POST /api/models/rollback` 把旧版本载入内存并写 `current.json`；下一次实验提交（`auto_retrain` 开启）或 `/api/train` 立刻重训并覆盖。`api.modelVersions` / `api.rollbackModel` 前端无人调用。
-- 做法：① `current.json` 增加 `pinned: true`，回滚时写入；② `_retrain_all` 对 pinned 的 (project, metric) 仍训练并存档新版本，但**不切换** current 与内存模型，响应里提示"已锁定在 vX，新版本 vY 已存档"；③ `POST /api/models/unpin`（或回滚到最新版本即解除）；④ 前端 `ModelCard` 增"版本"抽屉：列出版本、回滚、解除锁定，回滚需二次确认。
-- 验收：回滚后新增实验 → current 不变；解除后恢复；界面可见版本列表。
-
-**2. outbox 无心跳：长任务会被重复派发**
-- 现状：启动恢复按"创建 / 认领后 30 分钟"判停滞，仍在运行的长任务（loop、整库 KB 导入数小时）会被重新投递。
-- 做法：alembic 0043 给 `task_outbox` 加 `heartbeat_at`；`publish_progress` 顺带刷新；恢复只重投 `heartbeat_at < now - cutoff`；重投用 `apply_async(task_id=原 id)` 保持幂等。
-- 验收：任务运行超过 cutoff 时重启，不产生第二次执行。
-
-**3. `datalab_orphan_cleanup` 没有消费者**
-- 现状：Saga 回滚删除 DataLab 样本失败时只落一行"待清理"，之后没人处理 → ELN 里残留孤儿样本。
-- 做法：`dispatcher.drain_orphans()`（启动恢复线程里调用 + `POST /api/ops/datalab-orphans/cleanup`）；把 `_delete_sample` 公开为 `delete_sample`；成功置 DONE，失败累计次数 → DEAD；`GET /api/ops/datalab-orphans` 列表。
-- 验收：伪造一次删除成功、一次失败，状态分别为 DONE / 仍 PENDING 并计数。
-
-**4. 配方校验口径三处不一，且"总和不足"不影响排序**
-- 现状：总和检查散在三处且容差不同——`chemistry.validate_formulation`（±0.5）、`chemistry` 的 v11 物理层（±5）、`formulation_gate.validate_formulations`（±5）；可行性闸门 `feasibility.check_formulation` 完全不看总和。同一配方在不同入口得到不同结论，而且总和不足（如严格 grounding 之后的 68%）只出一条告警，不影响排序。
-- 做法：抽 `domain/closure.py` 作为唯一容差策略（|Σ−100| ≤ 0.5 通过，≤ 5 警告，> 5 错误），三处与可行性闸门统一调用；`multi_objective_score` 加 `closure_penalty`（上限 −20%）。
-- 验收：同一输入各入口结论一致；68% 配方排名低于等价的 100% 配方。
-
-**5. SSRF 仍有 DNS 重绑定窗口**
-- 现状：`_is_blocked_ip` 在检查时解析域名，真正请求时再解析一次（TOCTOU）。
-- 做法：自定义 httpx transport，把已校验的 IP 固定为连接目标（保留 Host / SNI）；统一用于 `ingest_url`、PDF 下载、检索抓取。
-- 验收：解析器第一次返回公网 IP、第二次返回内网 IP，请求应被拒绝。
-
-### P2 — 接线与一致性
-
-**6. 13 个后端接口没有前端入口，12 个前端 API 封装无人调用**
-
-| 类别 | 项 | 建议 |
-|---|---|---|
-| 诊断 / 运维（保持 API-only，补文档） | `GET /api/ops/evidence-stats`、`/ops/kb-health`、`/ops/recommend-stats`、`/kb/relevance-shadow/stats` | 在 `docs/` 的运维章节列出，加到 `scripts/` 巡检脚本 |
-| 面向用户但缺界面 | `POST /api/sources/export`；`GET /api/reports/checklist/{run_id}`；`POST /api/session-plans/{plan_id}/advance` | 分别挂到来源面板、报告面板、计划面板 |
-| 面向代理 / 服务 | `POST /api/connectors/mcp/call`；`/api/artifacts/versions/{id}/{content,evidence,verify,submit,evidence/verify}` | 保持 API-only，补 OpenAPI 说明；若要界面，参考发布预检面板 |
-| 无人调用的封装 | `getFormulationSkill`、`listFormulationSkills`、`listInstalledSkills`、`getReportCapabilities`、`getWikiCatalog`、`getWikiDossierPack`、`getWikiPage`、`patchWikiDossier`、`kbGoldenQuestions`、`replaceMcpServers`；`modelVersions` / `rollbackModel`（见 P1-1） | 要么接界面，要么删除；新增一个"封装必须有调用方"的守卫测试（同 Settings 守卫） |
-
-**7. 死表与误导性命名**：`kg_formulation_links` 表和模型无任何读写；`kg/formulation_linker.py` 其实只有 `_infer_role`。做法：alembic 0043 删表 + 重命名模块；或真正实现"实验 → KG 实体"的链接（让实测结果挂到实体节点，给 `kg_feedback` 用）。
-
-**8. 主题雷达没有触发入口**：`formumind.topic_sweep` 的 beat 计划被注释掉，原文档所称"可由 API 手动触发"并不存在。做法：`POST /api/search/topic-sweep` + 设置项驱动的 beat 计划（`topic_radar_*`）；或删除任务。
-
-**9. `async def` 里残留的同步 I/O**：`skills.install_upload`（解压 + 写盘）、`connectors.mcp_import_upload`、`projects.upload_project_export`、`experiments.import_experiments_csv`。做法：`run_in_threadpool`；把本轮用过的扫描脚本改成 CI 守卫（新增阻塞调用即失败）。
-
-**10. `SummitOptimizer` 只喂最后一次观测**（`_prev` 每次被覆盖），且依赖（`summit`）在 `pyproject` 里因 torch 冲突被注释掉——默认部署里它构建不出来，`build_optimizer` 回退到别的引擎，这条路径实际上是死代码。做法：删除适配器，或累积观测并加可选依赖 job。
-
-**11. `substitution` / `inverse_design` 仍用逐候选的 `default_bounds`**：同一指标的归一化范围随候选变化。影响很小（只作第 6 级并列排序键，`score_after` 前端并不展示），复用 `recommend_pipeline._rescore_with_shared_bounds` 即可。
-
-**12. 每次外呼都新建 `httpx.Client`（38 处）**：构造一次约 48 ms（每次重新加载 CA 证书，也没有连接复用）。PubChem 逐名查询、检索提供方等热点路径上累积可观，也是 §2.1 里那个后台任务在测试里拖 20 s+ 的原因。做法：模块级共享 Client（或至少共享 SSL context），应用关闭时统一释放。
-
-### P3 — 工程与部署
-
-13. `docker-compose.yml` 明文写死 Neo4j 密码 `formumind123`，并把 7474 / 7687 发布到所有网卡。建议密码走 `.env`，端口绑定 `127.0.0.1`（需要远程访问的另行显式开启）。
-14. 前端没有 ESLint（`react-hooks/exhaustive-deps` 能提前抓到本轮的 `AttachmentPreview` 死循环一类问题）。
-15. `exportLiteratureBib/Ris` 失败时抛出原始响应文本，其余封装统一走 `readApiError`。
-16. 87 处 `datetime.utcnow()`（3.12 起弃用、无时区）与 41 处带时区的调用混用，目前没有触发比较错误，但迁移到 Python 3.12 后会有大量 DeprecationWarning。
+**做这些时顺带发现的**：① 完整跑一遍才发现闭合口径提交让 `test_physical_constraints` 过时（该测试断言 `dimension_closure` 里的重复告警）——更新为单一口径契约，告警首字母大写恢复原样；② 重绑定测试用"首次公网、之后回环"的脚本化解析器把攻击时间线原样演一遍，旧代码下它们会得到 `error:ConnectError` 而不是 `ssrf`。
 
 ---
 
-## 5. 建议的执行顺序
+## 3. 七项核心功能评分（满分 10；上轮 → 第一批后 → P1–P3 后）
 
-1. **P1-1 + P1-4**（模型锁定 + 闭合口径）：直接影响"推荐结果可信度"和"迭代是否被悄悄覆盖"，各自独立提交。
-2. **P1-2 + P1-3**（outbox 心跳 + 孤儿清理）：同一次迁移（0043），一起做。
-3. **P1-5**（SSRF 固定 IP）。
-4. **P2-6 / 7 / 8**：先做"封装必须有调用方"守卫，让清单自己维护，再逐项接线或删除。
-5. **P2-9**：异步阻塞守卫（把本轮用过的扫描脚本放进 CI），让这一轮的发现方式变成 CI 能力；**P2-12** 顺手做。
+| 功能 | 上轮 | 第一批后 | P1–P3 后 | 第二批的变化来自 | 距 9 分还差什么 |
+|---|---|---|---|---|---|
+| 资料检索 | 7.0 | 7.2 | **7.5** | SSRF 重绑定窗口关闭（含重定向每一跳、PDF 下载、全文抓取）；每次外呼省约 47 ms 的 CA 加载；主题雷达可手动 / 定时触发；导出失败给出原因；无人调用的封装清掉 | **检索质量没有基准集**（召回 / 精度从未量化）；限流下的降级只靠 mock 验证；走出口代理的部署里"固定 IP"不生效（代理自己解析名字，见 §4-2） |
+| 文档解析 | 7.5 | 7.7 | **7.8** | 4 个上传端点的解压 / 解析 / 写盘移出事件循环，且有守卫测试防回归 | CI 里没有真实文档基准（表格 / 公式 / 扫描件的抽取准确率）；docling 与其他依赖冲突需分镜像；OCSR 默认关闭、需独立 worker |
+| 知识库构建 | 7.5 | 8.0 | **8.2** | 死表删除、模块名不再误导；主题雷达可定时回填；来源可批量导出 | 嵌入向量路径在 CI 没有覆盖；KG 实体链接没有精度 / 召回评测；增量重建语义 |
+| 问答能力 | 7.0 | 7.3 | **7.3** | 无直接改动（事件循环守卫让流式不再被新增的同步调用拖慢） | |
+| └ 检索 | 7.5 | 7.7 | 7.7 | — | 无检索评测集；非 OpenAI 兼容 provider 仍不能真流式 |
+| └ 理解 | 7.0 | 7.0 | 7.0 | — | 改写 / 澄清没有评测集；歧义消解依赖 KG 质量（需观察） |
+| └ 上下文 | 6.5 | 7.2 | 7.2 | — | 历史截断 / 摘要策略没有量化；会话持久依赖 Redis，缺失时只降级为进程内 |
+| 配方推荐 | 7.8 | 8.3 | **8.7** | 闭合口径统一并**进入排序**（不完整配方不再与完整配方同分、可行性闸门拒绝错误级）；只有一个 minimize 目标时不再把最差排第一；替代 / 反向设计的分数可在候选间比较 | 证据不足时预测器仍是先验；grounding 对中文只做子串匹配 |
+| DOE 设计 | 8.0 | 8.2 | **8.3** | 模型版本有了界面（卡片"版本"抽屉） | CCD 星点超出物理范围只警告；混合物约束设计；DOE 历史无界面 |
+| 寻优与迭代 | 7.3 | 7.8 | **8.4** | 模型回滚会"锁住"并有界面；outbox 心跳 + 按原 Celery id 重投（长任务不再被重复派发）；孤儿样本有消费者；不可用且有 bug 的 Summit 适配器移除 | 虚拟寻优的曲线只反映替代模型自洽；实测点少时优化器靠先验；多目标 Pareto 只在 BayBE 路径 |
+
+**一句话**：这一批里分数涨得最多的是寻优（"回滚被悄悄覆盖""长任务被重投"都是用户看不见却会毁掉一轮实验的问题）和配方推荐（一个 68% 的配方不该和完整配方同分）。评分仍然没有评测集作依据——下一步最该补的是它，而不是再修一轮缺陷。
+
+---
+
+## 4. 仍未解决的问题与下一步
+
+按"没有它就无法判断好坏"优先。每项给出**做法**和**验收**。
+
+**1. 检索 / 问答 / 解析没有评测集（最大缺口）**
+- 现状：所有分数是代码 + mock 级证据；检索召回 / 精度、改写与澄清、表格 / 公式 / 扫描件抽取从未被量化，"变好还是变坏"无从判断。
+- 做法：20–30 条带标准答案的问答 + 10 份真实文档（含表格 / 公式 / 扫描件），CI 里加一个**非阻塞** job 输出趋势（沿用 `golden_eval` 标记与 `evals-history.jsonl`）。
+- 验收：每次合并能看到召回@k / 引用命中率 / 表格单元格准确率的曲线。
+
+**2. 走出口代理的部署里，固定 IP 不生效**
+- 现状：配置了 `HTTPS_PROXY` 时请求交给代理，由代理解析名字——本进程的"解析一次、连接已判定地址"保护对这部分请求不起作用（只剩 `is_safe_url` 的预检）。这是有意的：httpx 在自定义 transport 下会忽略环境代理，不这样做会让所有走代理的部署断网。
+- 做法：策略放在代理上（拒绝内网段）；可选：首次走代理时记一条警告。
+- 验收：`docs/deployment.md` 写明；有代理的部署在代理侧验证过内网段被拒。
+
+**3. `get_campaign_store()` 首次调用可能在事件循环里阻塞**
+- 现状：`auto` 后端首次调用会探测 DataLab（≤ 2 s）；它被十几个 `async def` 处理函数直接调用（守卫白名单里写着原因）。
+- 做法：lifespan 里预热一次。验收：从白名单里删掉这一项，守卫测试仍通过。
+
+**4. 界面缺口里真正有用户价值的**
+- 成果发布流程（`/api/artifacts/versions/{id}/{content,evidence,verify,submit,finalize,…}`）和计划步骤推进（`/api/session-plans/{id}/advance`）目前都是代理驱动的 API-only。若要给人用，参照"发布预检面板"的做法；其余 21 条 API-only 路由留着，原因在 `tests/test_frontend_api_wiring.py` 里。
+
+**5. 旧脚本 `scripts/verify_frontend_api.py`**：与 pytest 守卫重复，且对嵌套模板字面量（`${qs ? `?${qs}` : ""}`）会误报。删除，或改成调用守卫里的读取器；CI 的 `api-contract` job 随之调整。
+
+**6. `_utcnow` 帮手有十余份，语义四种**（朴素 datetime / 带时区 / 浮点秒 / ISO 串）：可收敛到 `app.clock`，需要逐个确认调用方对时区的假设。
+
+**7. DOE**：CCD 星点超出物理范围只警告；混合物（成分和为 100%）约束设计。
+
+**8. 知识库**：嵌入向量路径的 CI 覆盖、KG 实体链接的精度 / 召回评测、增量重建语义。
+
+**9. 部署文件只做了 YAML 级校验**：沙箱没有 Docker，compose 的改动（环回绑定、`${…}` 密码、`radar` profile、healthcheck 里的 `$$` 转义）没有真正起过栈。需要在有 Docker 的机器上 `docker compose config -q`，并用 `docker compose --profile radar up -d` 走一遍（含 Neo4j 健康检查能否用环境变量里的密码登录）。
+
+**10. 前端 lint 只开了 hooks 规则**：`AttachmentPreview` 那种"父组件传入的内联回调不稳定"的循环 `exhaustive-deps` 看不出来，仍靠回归测试。
+
+---
+
+## 5. 执行顺序
+
+已按下面的顺序完成：P1-1 + P1-4（模型锁定 + 闭合口径）→ P1-2 + P1-3（outbox 心跳 + 孤儿清理，同一次迁移）→ P1-5 + P2-12（固定 IP + 共享 TLS）→ P2-6/7/8（封装守卫 → 接线 / 删除 → 死表 → 主题雷达）→ P2-9/10/11 → P3。
+
+下一步建议：**§4-1（评测集）** → §4-9（在有 Docker 的机器上验证部署改动）→ §4-2 / §4-3（各约半天）→ 其余。
 
 ---
 
@@ -167,12 +162,17 @@
 
 | 项 | 结果 |
 |---|---|
-| 后端全量（`pytest -m "not golden_eval"`，默认禁止出网） | 3818 通过 / 27 跳过 / 0 失败（448 s；加入后台线程等待后 +17 s） |
-| `ruff check`（E9 / F401 / F63 / F7 / F82 / F811） | 通过 |
+| 后端全量（`pytest -m "not golden_eval"`，默认禁止出网） | 3969 通过 / 27 跳过 / 0 失败（566 s） |
+| `ruff check .`（E9 / F401 / F63 / F7 / F82 / F811） | 通过 |
 | 前端 `tsc --noEmit` | 通过 |
-| 前端 `vitest run` | 123 个文件 / 612 个用例全部通过 |
+| 前端 `npm run lint`（`--max-warnings 0`） | 通过 |
+| 前端 `vitest run` | 129 个文件 / 639 个用例全部通过 |
 | `vite build` | 通过 |
-| 回归测试是否真能失败 | 抽查 3 组（材料导出、版本历史、`AttachmentPreview`）：在旧代码上失败，新代码上通过 |
+| 回归测试是否真能失败 | 抽查：**共享标尺**——关掉重打分，替代 / 反向设计两条失败；**SSRF 重绑定**——把四个入口换回普通 client，四条失败（含"请求是否真的发出"的断言：测试环境自己的出网守卫会在传输层拒绝非本地主机，只看"返回空"分辨不出）；**hooks 规则**——配置测试用缺陷形状的样例证明规则开着 |
+| 完整跑才发现的回归 | 闭合口径提交使 `test_physical_constraints` 过时（该测试断言 `dimension_closure` 里的重复告警），已改为单一口径契约 |
 
-没有验证的部分：没有真实 LLM / PubChem / DataLab / Redis 环境，所以涉及这些的路径只有 mock 级证据；
-BayBE 路径只在 CI 的非阻塞 job 里跑。
+没有验证的部分：
+
+* 没有 Docker：compose 的改动只有 YAML 解析和守卫测试，没有真正起过栈（见 §4-9）。
+* 没有真实 LLM / PubChem / DataLab / Redis / Neo4j 环境，涉及它们的路径只有 mock 级证据；BayBE 路径只在 CI 的非阻塞 job 里跑。
+* SSRF 固定 IP：TLS 的 SNI / 证书名校验只在回环套接字 + 自签证书上验证过；"走环境代理"的分支用注入的传输层测试，没有对着真实代理跑。
