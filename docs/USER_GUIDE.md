@@ -159,21 +159,21 @@ A dark, industrial NotebookLM-style three-column layout that separates **inputs
 - **Right (Actions)**: a **PathWizard** at the top (formula / substitute / knowledge).
   When a playbook is active, a compact **checklist strip** appears (no skills
   marketplace dock). Buttons open focused modals —
-  🧪 Requirements,
+  🧪 Requirements (**constraint effect tracing**: which brief fields feed scoring / DOE),
   ⭐ Recommend (default playbook is **Formula recommend**, with domain-adaptive
-  search hints — not locked to silane coupling),
+  search hints — not locked to silane coupling; expand **Why recommended** on each card),
   🎯 Inverse Design (§5.15),
   🔁 Material Substitution (§5.16),
   🔬 DOE Design,
-  📋 Workbench,
+  📋 Workbench (project-level **auto-loop on sync** and **prediction soft-correct**, both default off),
   📄 QC Report (§5.17),
   📈 Optimization,
   ⚙️ Process Optimization,
   🔄 Self-Driving Loop,
-  📚 **Knowledge Hub**.
+  📚 **Knowledge Hub** (archive · retrieval probe · quality-ops · Wiki · graph · dossier).
   Status badges show running / result counts.
 - **Header**: ⚙ **Settings** (includes **Skills**, **MCP/Connectors**, LLM, API keys,
-  Dependencies, …) and 🕐 **History**. Enable/disable playbooks and chat skills under
+  Dependencies, …) and 🕐 **History** (project snapshot drawer, with a live count badge). Enable/disable playbooks and chat skills under
   **Settings → Skills**; start them from the center **「+」**. Under **Settings → Skills →
   + Add**, install chat skills from GitHub, a local zip/SKILL.md upload, or paste —
   dry-run preview + security review, then one-click confirm. Origin badges:
