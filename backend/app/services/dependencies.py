@@ -37,7 +37,7 @@ class Dependency:
 
 
 # Curated set: the practical, CPU-friendly extras that unlock "online mode".
-# The truly heavy `heavy` extra (torch/deepchem/transformers/summit/ase) is
+# The truly heavy `heavy` extra (torch/deepchem/transformers/ase) is
 # intentionally omitted from the one-click UI to avoid multi-GB surprise pulls;
 # `bo` (botorch/gpytorch) already pulls a CPU torch for users who opt in.
 CATALOG: tuple[Dependency, ...] = (

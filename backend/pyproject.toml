@@ -46,11 +46,10 @@ science = [
     "thermo>=0.2",          # physical-property estimation (density → VOC g/L)
 ]
 # CPU-only, pip-installable multi-objective / Bayesian optimizer. Sits between
-# the built-in numpy UCB fallback and the heavy Summit engine.
+# the built-in numpy UCB fallback and BoTorch (the `bo` extra).
 optimize = ["optuna>=3.4"]
 heavy = [
     "torch>=2.2",
-    # summit>=0.8  pins torch<2.0 — conflicts; skipped
     "ase>=3.22",
 ]
 intel = [

@@ -83,7 +83,7 @@ def test_loop_iterate_returns_loop_report():
     rep = loop_iterate(_REQ, optimize_iterations=1, n_suggest=3, optimize_engine="numpy", doe_engine="legacy")
     assert isinstance(rep, LoopReport)
     assert rep.domain == "anticorrosion_coating"
-    assert rep.engine in {"numpy-ucb", "optuna-tpe", "summit-sobo", "botorch-ei", "baybe"}
+    assert rep.engine in {"numpy-ucb", "optuna-tpe", "botorch-ei", "baybe"}
 
 
 def test_loop_iterate_produces_optimization_and_next_doe():

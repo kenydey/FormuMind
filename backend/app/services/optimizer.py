@@ -1,10 +1,9 @@
 """Formulation optimization service.
 
 Drives a closed loop that adjusts continuous formulation levers to maximise a
-predicted objective. The interface mirrors Summit's
-``suggest_experiments`` / ``receive_results`` so that, when Summit is
-installed, its Bayesian/TSEMO strategies can be swapped in without changing
-callers.
+predicted objective. Every engine exposes the same sequential
+``suggest`` / ``observe`` / ``best`` / ``ranked`` interface, so a real
+Bayesian engine (BoTorch, Optuna) can be swapped in without changing callers.
 
 The default offline strategy is a lightweight Bayesian-style optimizer:
 Latin-hypercube exploration seeds a surrogate, then candidates are scored by an
@@ -26,8 +25,8 @@ class _ObservedHistoryMixin:
     """Shared ``best``/``ranked`` over the observed ``(_X, _y)`` history.
 
     Extracted (code review 2026-09-28): ``BayesianOptimizer``,
-    ``OptunaOptimizer``, ``SummitOptimizer`` and ``BotorchOptimizer`` all
-    carried a character-identical copy of these two members. Every adapter
+    ``OptunaOptimizer`` and ``BotorchOptimizer`` (and the since-removed Summit
+    adapter) all carried a character-identical copy of these two members. Every adapter
     appends to ``self._X``/``self._y`` in ``observe()``, so one base
     implementation keeps them in lockstep.
 
@@ -134,16 +133,6 @@ def _optuna_available() -> bool:
         return False
 
 
-def _summit_available() -> bool:
-    try:
-        import summit  # noqa: F401
-
-        return True
-    except Exception as exc:
-        log_handled_exception(logger, exc, "optional feature check")
-        return False
-
-
 def _botorch_available() -> bool:
     try:
         import botorch  # noqa: F401
@@ -224,60 +213,6 @@ class OptunaOptimizer(_ObservedHistoryMixin):
 
 
 @dataclass
-class SummitOptimizer(_ObservedHistoryMixin):
-    """Summit single-objective Bayesian optimizer (SOBO) adapter.
-
-    Wraps Summit's domain/strategy API behind the same sequential
-    suggest/observe interface. Best-effort: any API/version mismatch raises in
-    __post_init__ so build_optimizer() can fall back to a lighter engine.
-    """
-
-    factors: list[Factor]
-    seed: int = 0
-    _X: list[list[float]] = field(default_factory=list)
-    _y: list[float] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        from summit.domain import ContinuousVariable, Domain
-        from summit.strategies import SOBO
-        from summit.utils.dataset import DataSet
-
-        self._DataSet = DataSet
-        domain = Domain()
-        for f in self.factors:
-            domain += ContinuousVariable(name=f.name, description=f.name, bounds=[f.low, f.high])
-        domain += ContinuousVariable(
-            name="objective", description="aggregated score", bounds=[0.0, 1e6], is_objective=True, maximize=True
-        )
-        self._domain = domain
-        self._strategy = SOBO(domain)
-        self._prev = None  # previous experiments DataSet fed back to the strategy
-        self._last = None  # last suggestion; None until the first suggest()
-
-    def suggest(self, n_candidates: int = 64, kappa: float = 1.5) -> list[float]:
-        suggestion = self._strategy.suggest_experiments(1, prev_res=self._prev)
-        self._last = suggestion
-        return [float(suggestion[f.name].iloc[0]) for f in self.factors]
-
-    def observe(self, x: list[float], y: float) -> None:
-        if self._last is not None:
-            ds = self._last.copy()
-            ds["objective", "DATA"] = float(y)
-            self._prev = ds
-        # else: an observation before any suggest() (warm start). Summit's
-        # strategy is only fed suggested experiments; the pair is still kept in
-        # the history so ranked()/best include it.
-        self._X.append(list(x))
-        self._y.append(float(y))
-
-
-
-    @property
-    def engine(self) -> str:
-        return "summit-sobo"
-
-
-@dataclass
 class BotorchOptimizer(_ObservedHistoryMixin):
     """BoTorch Gaussian-process optimizer with Expected-Improvement acquisition.
 
@@ -351,17 +286,16 @@ class BotorchOptimizer(_ObservedHistoryMixin):
 def build_optimizer(factors: list[Factor], seed: int = 0):
     """Return the best available optimizer, falling back to the numpy engine.
 
-    Priority: BoTorch GP-EI (bo extra) > Summit (heavy) > Optuna (optimize) >
-    numpy UCB. Construction-time failures degrade gracefully to the next tier.
+    Priority: BoTorch GP-EI (bo extra) > Optuna (optimize) > numpy UCB.
+    Construction-time failures degrade gracefully to the next tier.
+
+    (A Summit SOBO adapter used to sit between BoTorch and Optuna. It was removed: Summit pins
+    ``torch<2.0`` so no extra of this project could install it, no CI job ever exercised it, and
+    it fed the strategy only the *last* observation — the surrogate never saw more than one point.)
     """
     if _botorch_available():
         try:
             return BotorchOptimizer(factors=factors, seed=seed)
-        except Exception as exc:
-            log_handled_exception(logger, exc, "handled exception")
-    if _summit_available():
-        try:
-            return SummitOptimizer(factors=factors, seed=seed)
         except Exception as exc:
             log_handled_exception(logger, exc, "handled exception")
     if _optuna_available():

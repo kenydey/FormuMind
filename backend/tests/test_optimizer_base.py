@@ -1,6 +1,6 @@
 """Regression tests for the optimizer ``best``/``ranked`` dedup (2026-09-28).
 
-The four optimizer adapters (Bayesian/Optuna/Summit/BoTorch) carried
+The optimizer adapters (Bayesian/Optuna/BoTorch) carried
 character-identical copies of ``best``/``ranked``; they now inherit both from
 ``_ObservedHistoryMixin``. These tests pin the pre-merge behaviour: same
 shared implementation on every adapter, and identical semantics.
@@ -13,11 +13,10 @@ from app.services.optimizer import (
     BotorchOptimizer,
     Factor,
     OptunaOptimizer,
-    SummitOptimizer,
     _ObservedHistoryMixin,
 )
 
-_ADAPTERS = (BayesianOptimizer, OptunaOptimizer, SummitOptimizer, BotorchOptimizer)
+_ADAPTERS = (BayesianOptimizer, OptunaOptimizer, BotorchOptimizer)
 
 
 def test_all_adapters_share_mixin_implementation():

@@ -43,10 +43,6 @@ def engines_status() -> dict[str, dict[str, object]]:
             "available": _probe("botorch") and _probe("gpytorch") and _probe("torch"),
             "label": "BoTorch GP 寻优",
         },
-        "summit": {
-            "available": _probe("summit"),
-            "label": "Summit SOBO 寻优",
-        },
         "sentence_transformers": {
             "available": bool(_embedding_available()),
             "label": "句向量嵌入 (FAISS hybrid)",

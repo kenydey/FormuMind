@@ -644,7 +644,7 @@ class OptimizationResult(BaseModel):
     history: list[float]
     top_formulations: list[Formulation]
     # Which optimizer engine produced this result (e.g. "numpy-ucb",
-    # "optuna-tpe", "summit-sobo", "botorch-ei"). Default preserves
+    # "optuna-tpe", "botorch-ei", "baybe"). Default preserves
     # backward compatibility.
     engine: str = "numpy-ucb"
     # P1 #22: history/observe values source. Virtual loops feed the optimizer
