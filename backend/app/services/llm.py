@@ -438,6 +438,10 @@ def _openai_message_text(message) -> str | None:
 
 
 log = logging.getLogger(__name__)
+
+# Newest experiment rows scanned for similar past formulations per recommend call.
+_HISTORY_SCAN_LIMIT = 2000
+
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
@@ -1474,7 +1478,16 @@ def recommend_formulations(
         from ..db.models import ExperimentRow
         factory = default_session_factory()
         with factory() as session:
-            rows = session.query(ExperimentRow).all()
+            # Only this domain matters (find_similar_formulations filters on it
+            # anyway) and only recent history: loading every experiment row of
+            # every domain on each recommend call grew without bound with the ledger.
+            rows = (
+                session.query(ExperimentRow)
+                .filter(ExperimentRow.domain == req.domain.value)
+                .order_by(ExperimentRow.id.desc())
+                .limit(_HISTORY_SCAN_LIMIT)
+                .all()
+            )
             all_exps = [
                 {"id": r.id, "project_id": r.project_id or "", "domain": r.domain or "", "factors": r.factors or {}, "measured": r.measured or {}}
                 for r in rows

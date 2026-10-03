@@ -52,7 +52,7 @@ _NAME_STOPWORDS = {
 
 # Short abbreviations that are real materials / resins (allowlist).
 _CHEM_ABBREV = {
-    "peg", "ppg", "pva", "pvc", "ptfe", "pet", "pu", "ep", "upa", "upa",
+    "peg", "ppg", "pva", "pvc", "ptfe", "pet", "pu", "ep", "upa",
     "dgeba", "tdi", "mdi", "ipdi", "hdi", "bpa", "bpf", "hmee", "hme",
     "teos", "tmos", "gptms", "aptes", "hmds", "tmspma", "ipa", "mek", "mibk",
     "nmp", "dmf", "dmso", "thf", "toc", "voc", "uv", "led",
