@@ -256,7 +256,7 @@ async def import_experiments_csv(
         except UnicodeDecodeError:
             text = raw.decode("latin-1")
         try:
-            records = io_export.csv_to_records(text, default_domain=domain)
+            records = await run_in_threadpool(io_export.csv_to_records, text, default_domain=domain)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not records:

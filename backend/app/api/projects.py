@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -166,7 +167,7 @@ async def upload_project_export(
     """Multipart binary upload (PDF / XLSX) into the project export shelf."""
     name = filename or file.filename or "export.bin"
     raw = await read_upload_capped(file, name, limit=exports_svc.MAX_EXPORT_BYTES)
-    info = exports_svc.save_export_bytes(project_id, name, raw)
+    info = await run_in_threadpool(exports_svc.save_export_bytes, project_id, name, raw)
     return ExportFileOut(
         name=info.name,
         size=info.size,

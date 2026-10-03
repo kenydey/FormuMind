@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..resources.formulation_skills import get_formulation_skill, list_formulation_skills
@@ -170,13 +171,9 @@ def install_github(body: GithubInstallBody) -> dict:
     return payload
 
 
-@router.post("/install/upload")
-async def install_upload(
-    file: UploadFile = File(...),
-    dry_run: bool = True,
-) -> dict:
-    data = await read_upload_capped(file, file.filename or "skill")
-    name = (file.filename or "").lower()
+def _install_uploaded(filename: str, data: bytes, dry_run: bool) -> dict:
+    """Unpack, scan and (unless dry-run) install an uploaded skill — zip + disk work, off the loop."""
+    name = filename.lower()
     if name.endswith(".md") or name.endswith(".markdown"):
         try:
             markdown = data.decode("utf-8")
@@ -191,6 +188,15 @@ async def install_upload(
     if result.installed:
         payload["catalog"] = _catalog_payload().model_dump()
     return payload
+
+
+@router.post("/install/upload")
+async def install_upload(
+    file: UploadFile = File(...),
+    dry_run: bool = True,
+) -> dict:
+    data = await read_upload_capped(file, file.filename or "skill")
+    return await run_in_threadpool(_install_uploaded, file.filename or "", data, dry_run)
 
 
 @router.post("/install/confirm")
