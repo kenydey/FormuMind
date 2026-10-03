@@ -435,8 +435,15 @@ def _normalize_host(host: str) -> str:
 
 
 def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:  # ::ffff:a.b.c.d is judged as a.b.c.d
+        return _is_blocked_ip(mapped)
     return (
-        addr.is_private
+        # Anything not globally routable: also covers the CGNAT block
+        # 100.64.0.0/10 (carrier-grade NAT; Alibaba's metadata service lives at
+        # 100.100.100.200), which ``is_private`` does not flag.
+        not addr.is_global
+        or addr.is_private
         or addr.is_loopback
         or addr.is_link_local
         or addr.is_multicast
