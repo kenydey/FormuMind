@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..domain.schemas import MaterialSpec
@@ -72,7 +73,11 @@ async def structure_image_endpoint(
     """
     content = await image.read()
     try:
-        return recognize_structure_image(
+        # The recognizer waits on a Celery result (up to molscribe_timeout_s, 180 s
+        # by default) — on the event loop that froze the whole worker for the
+        # duration. Offload it.
+        return await run_in_threadpool(
+            recognize_structure_image,
             content,
             filename=image.filename or "structure.png",
             threshold=threshold,

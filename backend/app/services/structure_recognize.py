@@ -136,6 +136,14 @@ def recognize_structure_image(
         logger.info("structure image cache hit: %s…", sha[:8])
         return {**cached, "cached": True}
 
+    # MolScribe runs in its own Celery worker, which only exists when OCSR is
+    # enabled. Without this check (the vision path already has it) every upload
+    # dispatched to a queue nobody consumes and waited the full molscribe_timeout_s.
+    if not getattr(settings, "ocsr_enabled", False):
+        msg = "离线结构识别未启用（设置 → OCSR 离线结构识别，需独立 molscribe worker）"
+        warnings.append(msg)
+        return _result(False, None, None, [], sha, False, warnings, msg)
+
     # ── write to shared volume ──────────────────────────────────────
     try:
         os.makedirs(_SHARED_DIR, exist_ok=True)

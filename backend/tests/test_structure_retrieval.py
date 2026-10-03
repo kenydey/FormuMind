@@ -48,6 +48,17 @@ def _no_redis(monkeypatch):
     )
 
 
+@pytest.fixture()
+def ocsr_on(monkeypatch):
+    """The recognizer only dispatches to the MolScribe worker when OCSR is enabled."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("FORMUMIND_OCSR_ENABLED", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 class TestRecognizePipeline:
     def test_invalid_image_type_rejected(self, material_store):
         res = recognize_structure_image(b"plain text, not an image")
@@ -66,7 +77,7 @@ class TestRecognizePipeline:
         assert res["recognized"] is False
         assert "限制" in (res["error"] or "")
 
-    def test_full_pipeline_success(self, material_store, monkeypatch):
+    def test_full_pipeline_success(self, material_store, monkeypatch, ocsr_on):
         """MolScribe returns DGEBA-ish SMILES; validation passes; hits found."""
         from rdkit import Chem
         from rdkit.Chem import AllChem, DataStructs
@@ -84,7 +95,7 @@ class TestRecognizePipeline:
         assert res["image_sha"]  # sha256 of the fake png
         assert isinstance(res["hits"], list)
 
-    def test_molscribe_failure_degrades(self, material_store, monkeypatch):
+    def test_molscribe_failure_degrades(self, material_store, monkeypatch, ocsr_on):
         monkeypatch.setattr(
             "app.worker.celery_app.celery_app.send_task",
             lambda *a, **k: _FakeAsyncResult(
@@ -96,7 +107,7 @@ class TestRecognizePipeline:
         assert res["error"] and "识别" in res["error"]
         assert any("聚合物" in w for w in res["warnings"])
 
-    def test_invalid_recognized_smiles_dropped(self, material_store, monkeypatch):
+    def test_invalid_recognized_smiles_dropped(self, material_store, monkeypatch, ocsr_on):
         monkeypatch.setattr(
             "app.worker.celery_app.celery_app.send_task",
             lambda *a, **k: _FakeAsyncResult(
@@ -479,7 +490,7 @@ class TestKgStructureHits:
         assert kg_structure_hits("not-a-molecule") == []
         assert kg_structure_hits("") == []
 
-    def test_recognize_includes_kg_hits(self, monkeypatch, material_store):
+    def test_recognize_includes_kg_hits(self, monkeypatch, material_store, ocsr_on):
         """Full pipeline: kg_hits field present and populated on success."""
         monkeypatch.setattr(
             "app.worker.celery_app.celery_app.send_task",
@@ -603,3 +614,58 @@ class _FakeAsyncResult:
 
     def get(self, timeout=None):
         return self._payload
+
+
+class TestOcsrGate:
+    """OCSR off (the default): fail fast instead of waiting on a queue nobody consumes."""
+
+    def test_disabled_ocsr_answers_immediately_without_dispatch(self, material_store, monkeypatch):
+        calls: list = []
+        monkeypatch.setattr(
+            "app.worker.celery_app.celery_app.send_task",
+            lambda *a, **k: calls.append(1) or _FakeAsyncResult({"ok": True, "smiles": "CCO"}),
+        )
+        res = recognize_structure_image(_FAKE_PNG)
+        assert calls == [], "must not dispatch to the molscribe queue"
+        assert res["recognized"] is False
+        assert "OCSR" in (res["error"] or "")
+        assert any("OCSR" in w for w in res["warnings"])
+
+    def test_endpoint_with_ocsr_off_degrades_quickly(self, material_store, monkeypatch):
+        monkeypatch.setattr(
+            "app.worker.celery_app.celery_app.send_task",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("dispatched with OCSR off")),
+        )
+        r = client.post(
+            "/api/chemical/structure",
+            files={"image": ("s.png", _FAKE_PNG, "image/png")},
+        )
+        assert r.status_code == 200
+        assert r.json()["recognized"] is False and "OCSR" in r.json()["error"]
+
+
+class TestStructureEndpointOffload:
+    def test_recognizer_runs_off_the_event_loop(self, material_store, monkeypatch):
+        """It blocks on a Celery result for up to molscribe_timeout_s — never on the loop."""
+        import asyncio
+        import app.api.chemistry as chem_api
+
+        seen: dict = {}
+
+        def spy(content, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                seen["on_loop"] = True
+            except RuntimeError:
+                seen["on_loop"] = False
+            return {"recognized": False, "smiles": None, "moljson": None, "hits": [],
+                    "image_sha": "", "cached": False, "warnings": [], "error": "stub"}
+
+        monkeypatch.setattr(chem_api, "recognize_structure_image", spy)
+        r = client.post(
+            "/api/chemical/structure",
+            files={"image": ("s.png", _FAKE_PNG, "image/png")},
+        )
+        assert r.status_code == 200
+        assert seen["on_loop"] is False
+

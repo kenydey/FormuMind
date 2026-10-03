@@ -1104,8 +1104,11 @@ async def chat_stream(req: "ChatRequestValidated"):
                     yield _sse({"type": "phase", "phase": "answering"})
                     yield _sse({"type": "token", "delta": answer})
                     yield _sse({"type": "phase", "phase": "claims"})
+                    # Crossref + LLM reviewer + repair loop: seconds of blocking
+                    # I/O — never on the event loop.
                     answer, doi_results, reviewer, reviewer_fix, citation_expand = (
-                        _finalize_evidence_fields(
+                        await asyncio.to_thread(
+                            _finalize_evidence_fields,
                             question,
                             answer,
                             citations,
@@ -1558,7 +1561,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                 _sanitize_evidence(c) for c in plan["relevant"]
             ]
             answer, doi_results, reviewer, reviewer_fix, citation_expand = (
-                _finalize_evidence_fields(
+                await asyncio.to_thread(
+                    _finalize_evidence_fields,
                     question,
                     answer,
                     citations,
