@@ -255,6 +255,22 @@ def _maybe_persist_mineru_structured(
         logger.exception("structured persist failed (fail-open)")
 
 
+def _no_ocr_hint(ext: str) -> str:
+    """What to do about a PDF with no text layer when nothing on this machine can read pixels.
+
+    "可能是扫描件" alone leaves the user with a document that will never ingest and no idea that an OCR parser is
+    one install away (or that a MinerU token would do it in the cloud).
+    """
+    if ext != "pdf":
+        return ""
+    from .parsing import parser_availability
+
+    available = parser_availability()
+    if available.get("rapidocr") or available.get("mineru"):
+        return ""
+    return "本机没有 OCR 解析器：安装 rapidocr（pip install -e '.[parse_pro]'），或在设置里配置 MinerU 云端解析后重新上传。"
+
+
 def ingest_file(
     filename: str,
     content: bytes,
@@ -295,7 +311,7 @@ def ingest_file(
             source="local",
             identifier=filename,
             title=filename,
-            snippet=f"未能提取到文本（格式：{ext}）——可能是扫描件或纯图片文档。",
+            snippet=f"未能提取到文本（格式：{ext}）——可能是扫描件或纯图片文档。{_no_ocr_hint(ext)}",
             relevance=0.5,
         )
         return IngestOutcome(
