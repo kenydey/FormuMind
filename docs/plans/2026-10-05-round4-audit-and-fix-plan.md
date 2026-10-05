@@ -28,7 +28,8 @@
 | **"空请求体 → 带参数端点"扫描**（封装发 `{}` / 不带体，而后端 schema 有可选参数） | 按钮点了没效果 | 1 处：材料页"属性补全"（§2 #17） |
 | **新增脚本逐行审查**（`install.sh` / `install.ps1` / `install.bat`）+ 在干净目录里真跑 alembic | 安装器在全新克隆上能否走完 | 3 处（§2 #9） |
 | **装上解析器，用真实文件走完整入库链路**（PyMuPDF / pymupdf4llm / MarkItDown / python-docx：合成的 PDF、DOCX、XLSX、PPTX，中英文数据表 → 解析 → 分块 → 质量门 → 入库 → 检索 → 表格归一化） | 前几轮"沙箱没装解析器，无法实测"留下的盲区 | **8 处**（§2 #20–#24、#29–#31）——全部在"解析 → 入库"这条路上（主要是表格），且都是喂手写 markdown 的测试看不到的 |
-| **在真实 Windows 上跑**（CI `windows-latest`：`install.bat` → Windows PowerShell 5.1 → `install.ps1`，再 import 应用、起服务、跑一组测试、故意让 pip 失败） | 只有真 Windows 才暴露的缺陷——整个仓库的 CI 原来全是 Linux | **2 处连续命中**（§2 #32、#33），都是"在 Windows 上根本用不了"级别 |
+| **在真实 Windows 上跑**（CI `windows-latest`：`install.bat` → Windows PowerShell 5.1 → `install.ps1`，再 import 应用、起服务、跑一组测试、故意让 pip 失败；随后把**整套后端测试**切成 8 个分片放到 Windows 上，每轮读失败清单、修、再跑） | 只有真 Windows 才暴露的缺陷——整个仓库的 CI 原来全是 Linux | **13 处**（§2 #32–#44，其中 3 处是"健康数据被丢弃 / 被当成损坏"级别：#38、#39，以及一个只在 Windows 上显形的 SSRF 绕过 #35）；整套测试首轮 37 个失败 / 错误、分片 10–22 min，三轮后**全部通过、分片 4.5–8 min** |
+| **每个测试文件单独跑一遍**（514 个文件、4 路并行、干净检出、不设任何 `FORMUMIND_*` 环境） | 只在"前面某些用例留下了全局状态"时才通过的测试（隐藏的顺序依赖） | 2 处（§2 #42 的 `test_api_auth`、#44 的反演设计标尺用例）；其余 512 个文件单独通过 |
 | **PowerShell 7 真解析 `install.ps1`**（下载官方 pwsh，用语言解析器解析；把字节按 Windows PowerShell 5.1 的 ANSI 方式解码再解析；真跑 `Invoke-Step` / `Invoke-Optional`） | 只靠静态扫描无法确认的 PowerShell 语义 | 确认 BOM 修复有效（无 BOM → 3 个解析错误）；辅助函数语义正确；`install.bat`（§2 #26） |
 
 ---
@@ -81,6 +82,7 @@
 | 42 | 低 | 测试可移植性 | 其余 Windows 失败都是**测试里的 POSIX 假设**：`mp.get_context("fork")`（Windows 没有 fork——改为 Windows 用 `spawn`，于是 `msvcrt` 锁第一次在**真实多进程竞争**下被验证）、`/proc/...` 当"不可写目录"（Windows 上 `D:\proc\...` 能建出来）、`bash -n` 检查（Windows 上 `bash` 可能是 WSL 启动器）、`no_proxy` / `NO_PROXY` 在 Windows 上是同一个变量、心跳用例用"此刻 − 1 分钟"当基准（任务收尾在 Windows 上耗了 76 s）。**另：`test_api_auth.py` 单独运行在干净克隆上必失败**——默认库路径 `./data/formumind.db` 指向不存在的目录，启动检查拒绝启动；以前只因为前面某个用例恰好建了 `backend/data` 才通过（顺带的问题：测试套件一直把行写进开发者的真实库）。`conftest` 现在给整个会话一个临时库 | 各用例本身；`test_api_auth.py`（干净克隆单独运行 9 条通过） | — |
 | 43 | 中 | 工程 / Windows | **`/health` 在没有 Datalab 的机器（默认安装）上要 5–6 秒**：每次请求都探测 Datalab，Windows 上被拒绝的回环连接约 2 s 才报告（`localhost` 还要先后试 `::1` 与 `127.0.0.1`）。探测的**连接**超时对回环主机收紧到 0.5 s（本机有进程监听时握手以毫秒计；读超时不变，繁忙的本机 Datalab 仍有完整的回复时间），远程主机沿用调用方超时；超时给出可读原因 | `test_datalab_probe_timeout.py`（7） | — |
 | 44 | 中 | 工程 | **测试顺序依赖（单独运行必失败）**：`test_inverse_design_scores_the_final_population_on_one_ruler` 靠"`seed=42, generations=4` 的种群不塌缩"通过，但两个受控目标随同一杠杆单调上升，NSGA-II 会把种群选成最优设计的克隆（探针：seed=42 只剩 1 个杠杆值）；它在全量里通过，只是因为前面某些用例留下的全局状态改变了候选池——单独或在 Windows 的另一个分片里就失败。改用确定且多样的初始种群（`generations=0`）。**顺带做了"每个测试文件单独跑一遍"的全量扫描（514 个文件、4 路并行、干净检出、无任何 `FORMUMIND_*` 环境）：其余文件全部单独通过** | `test_shared_ruler_substitution_design.py` | 单独运行失败 |
+| 45 | 低（安装） | 部署 | 安装器选 `py -3`——**最新**的 Python（CI 的 Windows 机器上是 3.14），而 Dockerfile 与 CI 跑的是 3.11；刚发布的 Python 常常还没有 rdkit / torch 的预编译包，失败表现为远离原因的 pip 编译错误。`Find-Python` 现在依次试 3.11、3.12、3.10，最后才是最新的；两个安装器遇到 3.13 及以上会提示"比测试过的版本新"。选择逻辑用真实 PowerShell + 假的 `py` 启动器测试 | `test_installers_pwsh.py`（+3）、`test_installers.py`（+1） | 3 条在旧脚本上失败 |
 **CI 上新增**：非阻塞 job `backend-extras`——装上 `file_ingest` / `report_export` / `color` 与 PyMuPDF 两个固定版本 + CJK 字体，跑所有需要这些可选依赖的测试，并把"被跳过"当成失败（阻塞 job 不装它们，这类测试在那里全是 `importorskip`，这正是三轮审查都没发现表格路径问题的原因；`colour-science` 那条分支此前在任何地方都没跑过）。
 
 **新增的长期守卫**（让这一类问题下次在测试里失败，而不是在线上）：
@@ -144,11 +146,12 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 - 现状：`provenance.link` 另开连接、裸 `commit()`，不走 `commit_session` 的 Redis 写锁（单进程下无影响；多进程争用时靠 30 s busy timeout，且 fail-open 只会丢边）。**成本不是问题**：实测 100 条边 106 ms（1.1 ms/条），之前担心的"N × 5 次 DDL"并不构成瓶颈。
 - 做法（可选）：新增 `link_many` 单事务批量写并走 `commit_session`；验收：多进程并发写入下无 `database is locked`。
 
-**6. Windows 现在是"测过的平台"，但只测了一部分**
-- 已做（CI `windows-latest`，全绿）：`install.bat` → Windows PowerShell 5.1 → `install.ps1` 在干净检出上跑完；应用可 import、迁移后的数据库存在；服务起得来并答 `/health`；文件 / 锁 / HTTP 层的 41 条测试通过；故意让 pip 失败时安装器非零退出。过程中修了两个"Windows 上根本用不了"的缺陷（§2 #32、#33）。
-- 已加（非阻塞）：`backend-windows` 任务在 Windows 上跑**整套**后端测试并把失败清单打在日志末尾——这份清单就是下一步的工作清单；结果见 §5。
-- 仍缺：`install.bat` 的**双击** `pause` 行为（CI 不是双击启动）；Celery worker 在 Windows 上的 `--pool=solo` 路径；Redis / Datalab 在 Windows 上的部署；安装器默认选 `py -3`（CI 上选到了最新的 Python 3.14，项目自己的 Docker / CI 用 3.11）——能装能起，但"支持哪些 Python 版本"没有明说也没有测。
-- 做法：按 `backend-windows` 的失败清单逐项修；安装器优先选 3.11 / 3.12（找不到再退回最新），并在 README 写明测过的版本；验收：`backend-windows` 失败清单为空，或每个失败都有"Windows 不适用"的显式 skip 原因。
+**6. Windows 现在是"测过的平台"——整套后端测试全绿，但仍有几块没测到**
+- 已做（CI `windows-latest`）：`install.bat` → Windows PowerShell 5.1 → `install.ps1` 在干净检出上跑完；应用可 import、迁移后的数据库存在；服务起得来并答 `/health`；故意让 pip 失败时安装器非零退出；**整套后端测试（约 4,300 条，8 个分片）全部通过**。这个过程修了 13 处只在 Windows 上显形的问题（§2 #32–#44），包括一个 SSRF 绕过（#35）和两处"健康数据被丢弃 / 被当成损坏"（#38、#39）。Windows 上第一次真跑整套的结果是 37 个失败 / 错误、分片 10–22 分钟；现在是 0 个、4.5–8 分钟。
+- 仍缺：`install.bat` 的**双击** `pause` 行为（CI 不是双击启动）；Celery worker 在 Windows 上的 `--pool=solo` 路径；Redis / Datalab 在 Windows 上的部署；前端测试没在 Windows 上跑；`msvcrt` 文件锁在**真实多进程竞争**下的行为由 `test_artifact_xproc_lock.py`（Windows 用 spawn）覆盖，已通过，但只跑了一次——是否稳定要看后续几轮 CI。
+- 已改：安装器优先选 3.11 / 3.12（§2 #45）。**仍需写明"测过的 Python 版本"**——目前只有 3.11（Docker / CI）和"安装器在 CI 上选到 3.14 也能装能起"这两个数据点，没有 3.12 / 3.13 的全量测试。
+- **决策（需要你定）**：`backend-windows` 现在是非阻塞的（每次推送占 8 个 Windows runner，约 5–8 分钟）。它已经全绿，设为阻塞能防止 Windows 回归，代价是 runner 用量，以及 Windows runner 偶发慢导致的时间类用例波动（本轮已把几个时间断言改成与任务起点比较 / 给 Windows 留余量）。建议：先保持非阻塞、观察一周，再决定。
+- 验收：`backend-windows` 连续多轮全绿；README 写明测过的 Python 版本。
 
 **7. 质量门对短公式仍会误伤（影响小，取舍）**
 - 现状：表格已修（#20）。其余块已实测：长公式（比例 0.55–0.58）、代码块（0.54）、图注（0.58）、图片链接（0.70）都能通过；**短公式**（`$$k = A e^{-E_a / (RT)}$$` 比例 0.27，`$$x = 1$$` 只有 9 个字符）会被判垃圾。公式 chunk 脱离上下文本来就很少是检索目标，所以只是记录，不是缺陷。
@@ -174,9 +177,11 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | PowerShell 7.4.6 真解析 `install.ps1` | 有 BOM：0 个解析错误；无 BOM 且按 cp1252 解码：3 个解析错误（证实 BOM 必要）；`Invoke-Step` / `Invoke-Optional` 行为符合设计。现为测试，CI 的 ubuntu runner 会真跑 |
 | OpenAPI 全量游走（修复前 → 后） | 290 个接口：修复前 3 个 500 + 15 个超时（连锁）；修复后 0 个 500、0 个超时（剩余 503 均为"功能关闭 / 依赖不可用"）。游走现在只验证 HTTP 层（任务派发回 202、不跑任务体），约 20 秒 |
 | DOE 探针 | 8 种设计 × 4 个领域 × 2 个引擎：越界行数 0（native CCD 星点除外，§4-3） |
+| Windows 全量（`windows-latest`，8 个分片并行） | 首轮：7 个分片红、37 个失败 / 错误（其中 Redis 连接慢导致的超时类约 12 个）；两轮修复后 **全部分片通过**，分片耗时 10–22 min → 4.5–8 min。CI `f6bd3f9`：**16 个 job 全绿**（阻塞的 `backend` / `frontend`，非阻塞的 `backend-extras` / `backend-baybe` / `golden` / `deepeval` / `api-contract` / `installer-windows` / 8 个 `backend-windows` 分片） |
+| 每个测试文件单独运行（干净检出、无 `FORMUMIND_*` 环境、4 路并行，514 个文件） | 2 个顺序依赖已修（§2 #42、#44）；其余全部通过。扫描脚本本身用一个故意失败的文件验证过会报告失败 |
 | 日志洪水扫描 | 寻优 / DOE 流程里不再有重复 ≥ 3 次的 WARNING（唯一的重复项是无 Redis 时每次写入一行"写锁不可用"，是预期的降级提示） |
 
-没有验证的部分：Windows PowerShell **5.1** 上真实执行 `install.ps1` 与 `install.bat` 的双击行为；Docker compose 真起栈；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为（本地无 Redis，`commit_session` 走"无锁继续"分支）。
+没有验证的部分：`install.bat` 的**双击**行为（Windows PowerShell 5.1 下真实执行 `install.ps1` 已由 CI 验证）；Docker compose / 镜像真构建真起栈（镜像装的是全部可选依赖，含 torch / docling，构建一次要十几分钟，没放进 CI）；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为，以及 Redis breaker 在真实 Redis 断开 / 恢复时的表现（本地与 CI 都没有 Redis：breaker 用假客户端测，写锁走"无锁继续"分支）；3.12 / 3.13 上的全量测试。
 
 ---
 
