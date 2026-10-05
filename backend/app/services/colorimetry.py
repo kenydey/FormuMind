@@ -9,7 +9,9 @@ values (a screening-level approximation, not a spectral simulation).
 from __future__ import annotations
 
 import logging
-from .errors import log_handled_exception
+from functools import lru_cache
+
+from .errors import log_handled_exception, optional_import
 from ..domain.chemistry import _PIGMENT_ROLES, _density_gcm3
 from ..domain.schemas import Formulation
 
@@ -19,14 +21,16 @@ logger = logging.getLogger(__name__)
 WHITE_LAB: tuple[float, float, float] = (100.0, 0.0, 0.0)
 
 
+@lru_cache(maxsize=1)
 def _colour_available() -> bool:
-    try:
-        import colour  # noqa: F401
+    """Whether ``colour-science`` is installed — probed once per process.
 
-        return True
-    except Exception as exc:
-        log_handled_exception(logger, exc, "optional feature check")
-        return False
+    Every ``predict()`` of a formulation with a pigment ends up here, and an optimisation run predicts thousands
+    of candidates. The probe used to import (and fail) on every call and log a WARNING each time, so a default
+    install — which does not have the optional ``color`` extra — wrote one "optional feature check: No module
+    named 'colour'" line per prediction.
+    """
+    return optional_import("colour")
 
 
 def delta_e_2000(

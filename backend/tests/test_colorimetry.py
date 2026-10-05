@@ -54,3 +54,45 @@ def test_color_metrics_empty_for_pigment_free():
 
 def test_colour_available_is_bool():
     assert isinstance(_colour_available(), bool)
+
+
+# ── the optional colour-science dependency ──────────────────────────────────
+
+def test_colour_availability_is_probed_once_and_logs_nothing(caplog, monkeypatch):
+    """A default install has no colour-science. ``predict()`` reaches this on every candidate of an optimisation
+    run, and the probe used to import-and-fail (logging a WARNING "optional feature check: No module named
+    'colour'") each time — one log line per prediction."""
+    import logging
+
+    import app.services.colorimetry as colorimetry
+
+    probes: list[str] = []
+    monkeypatch.setattr(colorimetry, "optional_import", lambda name: probes.append(name) or False)
+    colorimetry._colour_available.cache_clear()
+    try:
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(50):
+                colorimetry.delta_e_2000((50.0, 0.0, 0.0), (60.0, 5.0, 5.0))
+        assert probes == ["colour"], "probed more than once"
+        assert not [r for r in caplog.records if "optional feature check" in r.getMessage()]
+    finally:
+        colorimetry._colour_available.cache_clear()
+
+
+def test_without_colour_science_the_metric_is_cie76(monkeypatch):
+    import app.services.colorimetry as colorimetry
+
+    monkeypatch.setattr(colorimetry, "_colour_available", lambda: False)
+    # CIE76 is the Euclidean distance in L*a*b*
+    assert colorimetry.delta_e_2000((50.0, 2.6772, -79.7751), (50.0, 0.0, -82.7485)) == pytest.approx(4.0, abs=0.01)
+
+
+def test_ciede2000_matches_the_published_test_pair():
+    """The branch that uses colour-science is otherwise never run (CI installs no ``color`` extra).
+    Sharma, Wu & Dalal (2005), pair 1: ΔE00 = 2.0425."""
+    pytest.importorskip("colour")
+    import app.services.colorimetry as colorimetry
+
+    colorimetry._colour_available.cache_clear()
+    assert colorimetry._colour_available()
+    assert delta_e_2000((50.0, 2.6772, -79.7751), (50.0, 0.0, -82.7485)) == pytest.approx(2.0425, abs=1e-3)
