@@ -254,7 +254,7 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
     EnvFlag("rapidocr_enabled", "本地 OCR（扫描件）",
             "扫描件无文字层时用本地 OCR 读出文字，无需 MinerU 配额。"
             "只出文字，表格/图表仍交给 MinerU 或视觉模型。",
-            "kb", "需 rapidocr-onnxruntime；CPU 约 1-3 秒/页，模型随包分发"),
+            "kb", "需 rapidocr + onnxruntime（.[parse_pro]）；CPU 约 1-3 秒/页，模型随包分发"),
     EnvFlag("mineru_enabled", "MinerU 云端解析",
             "本地解析不好的单页（密集表格/公式/图表）升级到 MinerU 云端。", "kb",
             "需 MinerU Token；被升级的页面会上传至 mineru.net（第三方）"),

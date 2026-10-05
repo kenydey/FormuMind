@@ -1631,17 +1631,18 @@ def get_source_availability() -> dict[str, dict]:
     s = get_settings()
     serpapi_ok = bool(effective_setting(s, "serpapi_api_key"))
     tavily_ok = bool(effective_setting(s, "tavily_api_key"))
-    epo_ok = bool(
+    epo_keys = bool(
         effective_setting(s, "epo_consumer_key") and effective_setting(s, "epo_consumer_secret")
     )
     openalex_ok = bool(s.openalex_enabled and effective_setting(s, "openalex_mailto"))
 
+    # Both the USPTO and the EPO search go through the patent_client SDK; credentials alone enable nothing.
     patents_online = _ok("patent_client")
-    lit_ok = (
-        _ok("semanticscholar")
-        or openalex_ok
-        or serpapi_ok
-    )
+    epo_ok = epo_keys and patents_online
+    # Semantic Scholar is queried over plain HTTP (search_semantic_scholar), so literature search needs nothing
+    # installed. This used to probe for the `semanticscholar` SDK that no code imports and no extra installs, which
+    # reported "library_missing" - and a "去安装依赖" banner nothing could clear - whenever OpenAlex was switched off.
+    lit_ok = True
     web_ok = _ok("ddgs") or _ok("duckduckgo_search")
     chemcrow_import_ok = _ok("chemcrow")
     chemcrow_installed = chemcrow_import_ok or _pip_installed("chemcrow")
@@ -1650,22 +1651,20 @@ def get_source_availability() -> dict[str, dict]:
         "patents": {
             "available": True,
             "offline_fallback": True,
-            "reason": None if (patents_online or epo_ok) else "offline_seed",
+            "reason": None if patents_online else "offline_seed",
             "hint": (
                 None
-                if patents_online or epo_ok
-                else "配置 EPO OPS 凭证或 pip install -e '.[intel]' 启用 USPTO 专利检索"
+                if patents_online
+                else "USPTO/EPO 官方检索需单独安装 patent-client（pip install -e '.[patents]'）：它要求 "
+                "httpx<0.28 与 pypdf<5，会把后端固定的版本降级，所以默认不装；未装时使用 Google Patents / "
+                "SerpAPI / 内置种子语料"
             ),
         },
         "literature": {
             "available": lit_ok,
             "offline_fallback": False,
-            "reason": None if lit_ok else "library_missing",
-            "hint": (
-                (None if chemcrow_import_ok else "chemcrow 已安装但存在兼容性问题" if chemcrow_installed else "pip install -e '.[intel]' 启用 ChemCrow LitSearch")
-                if lit_ok
-                else "pip install -e '.[intel]' 或配置 OpenAlex mailto / SerpAPI 启用学术检索"
-            ),
+            "reason": None,
+            "hint": None,
         },
         "openalex": {
             "available": openalex_ok,
@@ -1702,8 +1701,14 @@ def get_source_availability() -> dict[str, dict]:
         "epo": {
             "available": epo_ok,
             "offline_fallback": False,
-            "reason": None if epo_ok else "key_missing",
-            "hint": None if epo_ok else "FORMUMIND_EPO_CONSUMER_KEY/SECRET 未配置",
+            "reason": None if epo_ok else ("key_missing" if not epo_keys else "library_missing"),
+            "hint": (
+                None
+                if epo_ok
+                else "FORMUMIND_EPO_CONSUMER_KEY/SECRET 未配置"
+                if not epo_keys
+                else "EPO 检索经 patent-client 发出，需单独安装：pip install -e '.[patents]'（会降级 httpx / pypdf，见文档）"
+            ),
         },
         "google_patents_cn": {
             "available": serpapi_ok,
@@ -1726,7 +1731,9 @@ def get_source_availability() -> dict[str, dict]:
                 if chemcrow_import_ok
                 else "chemcrow 0.3.7 已安装但与 Pydantic v2 不兼容，WebSearch/LitSearch 将通过其他引擎降级运行"
                 if chemcrow_installed
-                else "pip install -e '.[intel]' 启用 ChemCrow WebSearch (SerpAPI) + LitSearch (paper-qa) 化学增强检索"
+                # De-ChemCrow (2026-09): no extra installs it any more and no code imports it. The hint used to say
+                # `pip install -e '.[intel]'`, which could not have enabled it.
+                else "ChemCrow 集成已于 2026-09 退役，无需安装（化学增强检索由 paper-qa 与网络源提供）"
             ),
         },
         "notebooklm": get_setup_status(),

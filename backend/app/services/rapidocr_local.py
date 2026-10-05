@@ -7,9 +7,11 @@ without a MinerU token simply came back as "可能是扫描件" and nothing was 
 
 Why RapidOCR specifically: it is the only OCR option that fits this box. docling
 and marker need weights and measure ~54 s/page on CPU (see ``parsing.py``);
-local MinerU needs a GPU. ``rapidocr-onnxruntime`` ships the Chinese PP-OCRv4
-weights *inside the wheel* (16 MB: det + rec + cls), so ``pip install`` yields
-working offline OCR with no model download and nothing to manage at deploy time.
+local MinerU needs a GPU. ``rapidocr`` 3.x ships the Chinese PP-OCRv6 small
+weights *inside the wheel* (31 MB: det + rec + cls, counted in a real install),
+so ``pip install`` yields working offline OCR with no model download and nothing
+to manage at deploy time - provided an ONNX runtime is installed beside it (the
+wheel declares none; see ``REQUIRED_MODULES``).
 
 Measured on this hardware (A4, synthetic Chinese page, 2 ORT threads):
 
@@ -43,6 +45,11 @@ logger = logging.getLogger(__name__)
 
 _IMPORT_NAME = "rapidocr"
 _PIP_NAME = "rapidocr"
+# rapidocr 3.x ships no inference runtime of its own: ``import rapidocr`` succeeds and the constructor then raises
+# "onnxruntime is not installed". Everything that reports whether OCR is usable has to ask for both modules, and has
+# to ask for *these* - an older release of this code imported ``rapidocr_onnxruntime``, and the availability report
+# kept asking for that package long after the engine stopped using it.
+REQUIRED_MODULES = (_IMPORT_NAME, "onnxruntime")
 
 # The engine costs ~1.2 s to construct and ~125 MB resident. Build it once per
 # process: N concurrent uploads would otherwise mean N copies of three ONNX
@@ -83,9 +90,9 @@ def rapidocr_available() -> tuple[bool, str]:
     settings = get_settings()
     if not settings.rapidocr_enabled:
         return False, "本地 OCR 已禁用（FORMUMIND_RAPIDOCR_ENABLED）"
-    if not optional_import(_IMPORT_NAME):
+    if not all(optional_import(module) for module in REQUIRED_MODULES):
         return False, (
-            f"未安装本地 OCR 引擎（pip install {_PIP_NAME}，或在「设置 → 依赖管理」中安装）"
+            f"未安装本地 OCR 引擎（pip install {_PIP_NAME} onnxruntime，或在「设置 → 依赖管理」中安装）"
         )
     return True, ""
 

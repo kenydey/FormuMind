@@ -61,7 +61,7 @@ def _fake_engine(monkeypatch, result, *, record: dict | None = None):
 
     mod.RapidOCR = RapidOCR
     monkeypatch.setitem(sys.modules, "rapidocr", mod)
-    monkeypatch.setattr(ro, "optional_import", lambda name: name == "rapidocr")
+    monkeypatch.setattr(ro, "optional_import", lambda name: name in ro.REQUIRED_MODULES)
     return mod
 
 
@@ -88,6 +88,23 @@ def test_available_with_the_engine(monkeypatch):
     monkeypatch.setattr(get_settings(), "rapidocr_enabled", True, raising=False)
     monkeypatch.setattr(ro, "optional_import", lambda name: True)
     assert ro.rapidocr_available() == (True, "")
+
+
+def test_the_package_without_a_runtime_is_not_an_engine(monkeypatch):
+    """Measured against rapidocr 3.9.2: ``from rapidocr import RapidOCR`` succeeds and ``RapidOCR(...)`` then raises
+    "onnxruntime is not installed" - the wheel declares no inference runtime. "Installed" has to mean both, or the
+    report says OCR is ready and every scanned page comes back empty."""
+    monkeypatch.setattr(get_settings(), "rapidocr_enabled", True, raising=False)
+    monkeypatch.setattr(ro, "optional_import", lambda name: name == "rapidocr")
+    ok, hint = ro.rapidocr_available()
+    assert ok is False
+    assert "onnxruntime" in hint and "依赖管理" in hint
+
+
+def test_the_modules_asked_for_are_the_ones_the_engine_imports():
+    """The availability checks used to ask for ``rapidocr_onnxruntime`` - the package this engine stopped importing."""
+    assert ro.REQUIRED_MODULES[0] == ro._IMPORT_NAME == "rapidocr"
+    assert "rapidocr_onnxruntime" not in ro.REQUIRED_MODULES
 
 
 # ── reading order ────────────────────────────────────────────────────────────

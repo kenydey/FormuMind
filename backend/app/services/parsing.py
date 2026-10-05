@@ -653,6 +653,13 @@ def _html_tables_to_pipes(html: str) -> str:
     return "".join(out)
 
 
+def _local_ocr_installed() -> bool:
+    """Whether the local OCR engine can be built: the package ``rapidocr_local`` imports and the runtime under it."""
+    from .rapidocr_local import REQUIRED_MODULES
+
+    return all(optional_import(module) for module in REQUIRED_MODULES)
+
+
 def parser_availability() -> dict[str, bool]:
     """Which parser tiers are importable (for the dependencies UI)."""
     return {
@@ -663,7 +670,7 @@ def parser_availability() -> dict[str, bool]:
         # means SDK importable AND enabled with a token (the old magic_pdf
         # local path was never installed; availability key set is unchanged).
         "mineru": optional_import("mineru") and bool(get_settings().mineru_enabled),
-        "rapidocr": optional_import("rapidocr_onnxruntime"),
+        "rapidocr": _local_ocr_installed(),
         "markitdown": optional_import("markitdown"),
         "pypdf": optional_import("pypdf"),
         "trafilatura": optional_import("trafilatura"),
@@ -704,7 +711,7 @@ def format_availability() -> dict[str, bool]:
                 optional_import("marker"),
                 optional_import("magic_pdf"),
                 # Local OCR reads scans, which none of the text-layer parsers can.
-                optional_import("rapidocr_onnxruntime"),
+                _local_ocr_installed(),
                 _markitdown_can("pdf"),
                 optional_import("pypdf"),
             )

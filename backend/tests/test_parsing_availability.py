@@ -58,6 +58,31 @@ def test_a_pdf_parser_ships_in_the_locked_requirements() -> None:
 # ── capability reporting ─────────────────────────────────────────────────────
 
 
+def test_the_ocr_report_asks_for_what_the_engine_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``rapidocr_local`` imports ``rapidocr`` 3.x (plus an ONNX runtime). The report asked for the retired
+    ``rapidocr_onnxruntime`` instead, so it was wrong in both directions: after ``pip install -e '.[parse_pro]'``
+    (which installs ``rapidocr``) it said OCR was missing and the upload hint told the user to install what they had
+    just installed; after the one-click install (which installed the retired package) it said OCR was ready while
+    the engine could not even import."""
+    from app.services.ingestion import _no_ocr_hint
+
+    def only(*present: str) -> None:
+        monkeypatch.setattr(parsing, "optional_import", lambda mod: mod in present)
+
+    only("rapidocr", "onnxruntime")  # what `.[parse_pro]` gives you
+    assert parsing.parser_availability()["rapidocr"] is True
+    assert parsing.format_availability()["pdf"] is True  # nothing else is installed: OCR alone makes PDFs readable
+    assert _no_ocr_hint("pdf") == ""
+
+    only("rapidocr_onnxruntime")  # what the catalog used to install
+    assert parsing.parser_availability()["rapidocr"] is False
+    assert parsing.format_availability()["pdf"] is False
+    assert "rapidocr" in _no_ocr_hint("pdf")
+
+    only("rapidocr")  # the package alone cannot build an engine
+    assert parsing.parser_availability()["rapidocr"] is False
+
+
 def test_format_availability_covers_every_ingestible_format() -> None:
     formats = parsing.format_availability()
     assert set(formats) == {"pdf", "docx", "pptx", "xlsx", "html", "text"}
