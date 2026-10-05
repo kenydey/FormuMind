@@ -252,6 +252,27 @@ def pytest_collection_finish(session):
     _revert_environ_pollution()
 
 
+# pytest keeps the running test's node id in ``os.environ["PYTEST_CURRENT_TEST"]``, and Windows refuses an environment
+# variable longer than 32,767 characters: a parametrized test whose *parameter* is a 40 KB string failed with
+# "ValueError: the environment variable is longer than 32767 characters" at setup - on Windows only, so Linux CI was
+# green. Ordinary ids are under 300 characters; anything past this limit is a parameter that needs a ``pytest.param(id=)``.
+MAX_NODEID_CHARS = 2000
+
+
+def overlong_node_ids(items, limit: int = MAX_NODEID_CHARS) -> list[str]:
+    return [f"{item.nodeid[:100]}... ({len(item.nodeid):,} characters)" for item in items if len(item.nodeid) > limit]
+
+
+def pytest_collection_modifyitems(config, items):
+    too_long = overlong_node_ids(items)
+    if too_long:
+        raise pytest.UsageError(
+            f"{len(too_long)} test id(s) longer than {MAX_NODEID_CHARS} characters; give the huge parameter an explicit "
+            "id with pytest.param(..., id='short-name') (Windows cannot hold the id in PYTEST_CURRENT_TEST):\n  "
+            + "\n  ".join(too_long)
+        )
+
+
 def pytest_configure():
     """Keep Settings cache + Celery eager flag aligned with the test env.
 
@@ -296,6 +317,11 @@ def _reset_rate_limits_before_test():
         # An absent Redis opens a 30 s breaker (every Redis touch fails at once instead of paying for a refused
         # connection — ~2 s each on Windows). One test's "Redis is down" must not be the next one's.
         ("app.services.redis_breaker", "reset"),
+        # The runtime overlay on Settings (secrets and LLM config written by the UI / API, or copied from Settings by
+        # a lifespan that ran in an earlier test). ``effective_setting`` prefers it over the attribute, so a stale
+        # entry silently overrides a later test's ``monkeypatch.setattr(get_settings(), ...)``: test_mineru_cloud's
+        # "SDK missing" case reported a missing token when it ran after test_v03.
+        ("app.services.runtime_secrets", "reset_runtime_secrets"),
     ):
         try:
             getattr(__import__(_mod, fromlist=[_fn]), _fn)()

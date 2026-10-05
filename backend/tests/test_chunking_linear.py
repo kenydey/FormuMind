@@ -53,14 +53,16 @@ def test_the_known_corner_cases(line, expected):
     assert chunking._parse_heading(line) == expected == _old(line)
 
 
+# Explicit ids: a document this long would otherwise be spelled out in the node id (1 MB of it), and pytest keeps the
+# node id in the environment variable PYTEST_CURRENT_TEST - which Windows caps at 32,767 characters.
 @pytest.mark.parametrize(
     "doc",
     [
-        "# a" + " " * 200_000 + "b",
-        "# a" + " " * 200_000,
-        "## " + " " * 200_000 + "x ##" + " " * 100_000,
-        "# a" + " #" * 100_000,
-        ("# h\n\n" + " " * 50_000 + "\n") * 20,
+        pytest.param("# a" + " " * 200_000 + "b", id="heading-200k-spaces-text"),
+        pytest.param("# a" + " " * 200_000, id="heading-200k-spaces"),
+        pytest.param("## " + " " * 200_000 + "x ##" + " " * 100_000, id="spaces-heading-spaces"),
+        pytest.param("# a" + " #" * 100_000, id="heading-100k-hashes"),
+        pytest.param(("# h\n\n" + " " * 50_000 + "\n") * 20, id="repeated-padded-sections"),
     ],
 )
 def test_headings_with_long_whitespace_runs_are_chunked_in_bounded_time(doc):

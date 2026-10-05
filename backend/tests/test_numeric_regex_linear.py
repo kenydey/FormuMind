@@ -23,7 +23,17 @@ def _seconds(fn, *args) -> float:
     return time.perf_counter() - start
 
 
-@pytest.mark.parametrize("text", ["1" * 40_000, "1" * 20_000 + "-" + "1" * 20_000, "1." * 20_000, "9" * 30_000 + " m"])
+# Explicit ids: a parameter this long becomes part of the node id, and pytest keeps the node id in the environment
+# variable PYTEST_CURRENT_TEST - which Windows caps at 32,767 characters (these were setup errors there).
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("1" * 40_000, id="digits-40k"),
+        pytest.param("1" * 20_000 + "-" + "1" * 20_000, id="digits-dash-digits-40k"),
+        pytest.param("1." * 20_000, id="dotted-digits-40k"),
+        pytest.param("9" * 30_000 + " m", id="digits-then-unit-30k"),
+    ],
+)
 def test_long_digit_runs_are_extracted_in_bounded_time(text):
     assert _seconds(nc.extract_numbers, text) < 3.0
     assert _seconds(agent.extract_numeric_facets, text) < 3.0
