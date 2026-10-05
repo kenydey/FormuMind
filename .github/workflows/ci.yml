@@ -228,14 +228,19 @@ jobs:
           echo installer failed as it should, exit code %ERRORLEVEL%
           exit /b 0
 
-  # The whole backend suite on Windows. Everything else in CI is Linux, so a Windows-only break (a POSIX-only import,
-  # a flag that does not exist there, a path assumption, a file that cannot be replaced while open) is invisible
-  # until a user hits it - the first installer-windows run found two in a row. Non-blocking: the point is the
-  # list of failures, which is printed at the end.
+  # The whole backend suite on Windows, in shards. Everything else in CI is Linux, so a Windows-only break (a
+  # POSIX-only import, a flag that does not exist there, a path assumption, a file that cannot be replaced while open)
+  # is invisible until a user hits it - the first installer-windows runs found two in a row. The suite is much slower
+  # there (SQLite fsyncs, refused loopback connections), so one job did not finish in an hour; shards by test file keep
+  # each one short and report their own failures. Non-blocking: the point is the list of failures.
   backend-windows:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     defaults:
       run:
         working-directory: backend
@@ -255,10 +260,16 @@ jobs:
           pip install -r requirements.txt
           pip install -e ".[dev,llm,science,optimize,pydoe]" pandas
 
-      - name: Backend tests
+      - name: Backend tests (shard ${{ matrix.shard }} of 8)
         shell: pwsh
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
-          python -m pytest -m "not golden_eval" -q -p no:cacheprovider --maxfail=400 -rfE
+          $files = Get-ChildItem tests -Filter "test_*.py" | Sort-Object Name | ForEach-Object { "tests/$($_.Name)" }
+          $mine = @()
+          for ($i = 0; $i -lt $files.Count; $i++) { if (($i % 8) -eq [int]$env:SHARD) { $mine += $files[$i] } }
+          Write-Host "shard $env:SHARD: $($mine.Count) of $($files.Count) test files"
+          python -m pytest -m "not golden_eval" -q -p no:cacheprovider --maxfail=400 -rfE --durations=10 @mine
           exit $LASTEXITCODE
 
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
