@@ -85,3 +85,34 @@ def test_plain_text_uploads_are_untouched():
 def test_a_page_with_no_text_is_empty_not_raw_markup():
     result = parsing.parse_document(b"<html><head><script>x()</script></head><body></body></html>", "html")
     assert not result.markdown.strip()
+
+
+# ── with trafilatura installed (the preferred converter) ────────────────────
+
+def test_a_small_datasheet_page_keeps_its_table_whichever_converter_is_installed():
+    """trafilatura drops to a plain-text baseline on a small page and puts every cell on its own line; a data
+    table that came out without a pipe row must still reach the chunker as a table."""
+    pytest.importorskip("trafilatura")
+    text = parsing.html_to_markdown(PAGE.decode("utf-8"))
+    assert "固体含量 | 65 | %" in text, text
+
+
+def test_a_layout_table_is_left_to_trafilatura(monkeypatch):
+    layout = "<table><tr><td>导航</td><td>正文</td></tr></table>"
+    assert not parsing._has_data_table(layout)
+    assert not parsing._has_data_table("<table><tr><td>只有一行</td><td>两列</td></tr></table>")
+    assert parsing._has_data_table(PAGE.decode("utf-8"))
+
+
+def test_a_realistic_article_page_keeps_trafilatura_output():
+    pytest.importorskip("trafilatura")
+    para = "<p>环氧锌磷酸盐底漆是一种双组分防腐底漆，由环氧树脂、聚酰胺固化剂、锌磷酸盐防锈颜料和填料组成，适用于碳钢表面的防腐保护，施工方便，附着力优异。</p>"
+    page = (
+        f"<html><body><header><nav><a href='/'>首页</a></nav></header><article><h1>技术数据表</h1>{para * 3}"
+        f"<h2>典型性能</h2>{para}<table><tr><th>项目</th><th>指标</th></tr><tr><td>粘度</td><td>1200</td></tr></table>"
+        f"{para * 2}</article><footer>版权所有</footer></body></html>"
+    )
+    text = parsing.html_to_markdown(page)
+    assert "# 技术数据表" in text, "trafilatura's heading structure is kept"
+    assert "| 粘度 | 1200 |" in text
+    assert "版权所有" not in text, "boilerplate removal is kept"

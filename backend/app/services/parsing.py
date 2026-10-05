@@ -532,7 +532,11 @@ def html_to_markdown(html: str) -> str:
             output_format="markdown",
         )
         if text and len(text.strip()) > 100:
-            return text
+            # trafilatura keeps a table as a table on an article-sized page, but on a small one (a datasheet is
+            # mostly its table) it drops to a plain-text baseline that puts every cell on its own line. A data
+            # table that came out without a pipe row is the converter below's job.
+            if "|---" in text or "| ---" in text or not _has_data_table(html):
+                return text
     except ImportError:
         pass
     except Exception as exc:
@@ -545,6 +549,18 @@ def html_to_markdown(html: str) -> str:
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+\n", "\n", text)
     return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def _has_data_table(html: str) -> bool:
+    """A ``<table>`` that holds data (two rows, two columns, a number) rather than page layout."""
+    from .table_contract import _is_numeric_cell, _parse_html_table
+
+    for match in re.finditer(r"(?is)<table\b.*?</table\s*>", html):
+        headers, rows = _parse_html_table(match.group(0))
+        body = ([headers] if headers else []) + rows
+        if len(body) >= 2 and max(len(r) for r in body) >= 2 and any(_is_numeric_cell(c) for r in body for c in r):
+            return True
+    return False
 
 
 def _html_tables_to_pipes(html: str) -> str:

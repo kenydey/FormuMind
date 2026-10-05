@@ -132,14 +132,14 @@ jobs:
         run: |
           set -o pipefail  # the default shell has no pipefail: a failing pytest would otherwise be masked by tee
           pytest -m "not golden_eval" -q -rs \
-            tests/test_document_parsers_real.py tests/test_table_converter_output.py tests/test_colorimetry.py \
+            tests/test_document_parsers_real.py tests/test_table_converter_output.py tests/test_colorimetry.py tests/test_html_upload.py \
             tests/test_parsing_availability.py tests/test_parsing_chunking.py tests/test_hybrid_parse.py \
             tests/test_chem_parsing.py tests/test_structured_ingest.py tests/test_ingest.py \
             tests/test_ingest_extended.py tests/test_table_contract.py tests/test_table_normalize.py \
             tests/test_kb_gate_tables.py tests/test_chunking_table_caption.py | tee /tmp/extras.txt
 
       - name: Extras tests must not be skipped
-        run: "! grep -E 'SKIPPED.*(test_document_parsers_real|test_table_converter_output|test_colorimetry)' /tmp/extras.txt"
+        run: "! grep -E 'SKIPPED.*(test_document_parsers_real|test_table_converter_output|test_colorimetry|test_html_upload)' /tmp/extras.txt"
 
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
   # still required — failures block merge once calibrated.
