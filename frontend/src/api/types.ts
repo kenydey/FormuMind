@@ -120,7 +120,9 @@ export interface Ingredient {
   amount_display?: string;
   notes?: string;
   evidence_refs?: string[];
-  grounding_confidence?: "high" | "low";
+  // "medium" = a conventional ingredient the evidence / catalogue did not confirm; the backend lists those in the
+  // formulation's warnings, only "low" is highlighted per row.
+  grounding_confidence?: "high" | "medium" | "low";
 }
 
 export interface Formulation {
