@@ -69,6 +69,24 @@ def test_the_optional_helper_does_not_leak_command_output_into_its_result():
     assert "| Out-Host" in body
 
 
+def test_the_batch_launcher_is_ascii_and_returns_the_installers_exit_code():
+    """``install.bat`` is what a Windows user double-clicks.
+
+    * ``cmd.exe`` decodes a batch file with the OEM code page (GBK on a Chinese Windows), where the last byte
+      of a UTF-8 character can be read as a lead byte and swallow the line break after it — keep it ASCII.
+    * The PowerShell script's exit code has to reach the caller (CI, wrappers).
+    * A double-click console closes with the script, taking the next-steps text (or the error) with it, so it
+      must pause — but only then, or every terminal / CI run would block on a key press.
+    """
+    raw = (REPO / "install.bat").read_bytes()
+    assert all(b < 0x80 for b in raw), "install.bat must stay ASCII"
+    text = raw.decode("ascii")
+    assert "install.ps1" in text
+    assert re.search(r"exit\s+/b\s+%RC%", text), "the installer's exit code is not handed back"
+    assert re.search(r"set\s+\"?RC=%ERRORLEVEL%", text), "the exit code must be captured right after powershell returns"
+    assert "%cmdcmdline%" in text and re.search(r"&&\s*pause\b", text), "pause only for a double-click launch"
+
+
 def test_script_line_endings_are_pinned():
     rules = {}
     for line in (REPO / ".gitattributes").read_text(encoding="utf-8").splitlines():
