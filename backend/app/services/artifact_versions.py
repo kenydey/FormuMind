@@ -33,16 +33,16 @@ content. ``create_version`` holds the lineage lock across the version write
 
 Cross-process transactions (A-route): the threading locks above are
 process-local. Every read → validate → write transaction additionally holds
-an exclusive ``fcntl.flock`` on a per-version / per-lineage sibling
+an exclusive file lock (``flock`` / ``msvcrt.locking``) on a per-version / per-lineage sibling
 ``.txn.lock`` file for its whole critical section (``create_version`` incl.
 restore copy-on-write, ``set_version_content``, ``_transition``,
 ``finalize_version`` incl. the fail-open evidence freeze, which is local
 disk IO only — no LLM / network calls inside any transaction). Lock order is
 globally fixed — xproc file lock → threading RLock → ``_LOCK`` →
-single-write fcntl in ``_atomic_write_bytes`` — never inverted, so no
+single-write file lock in ``_atomic_write_bytes`` — never inverted, so no
 deadlock. Granularity matches the thread locks (version vs lineage), so
 unrelated artifacts never block each other; single-process deployments just
-pay one extra flock per transaction.
+pay one extra file lock per transaction.
 
 Performance (P-2): ``verify_version()`` caches the content digest per
 ``version_id`` (process-local), stat-validated by mtime_ns + size so on-disk
@@ -51,7 +51,6 @@ tampering is still detected; content-write transactions invalidate the entry.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
@@ -66,6 +65,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ._filelock import lock_exclusive, unlock
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _lineage_lock(lineage_id: str) -> threading.RLock:
 #   finalized immutability.
 # Granularity mirrors the thread locks (per-version vs per-lineage) so
 # unrelated artifacts never block each other. Ordering is fixed globally:
-# xproc file lock → threading RLock → _LOCK → _atomic_write_bytes' fcntl;
+# xproc file lock → threading RLock → _LOCK → _atomic_write_bytes' file lock;
 # the xproc lock is never nested on the same path, so no self-deadlock.
 
 
@@ -117,20 +118,20 @@ def _lineage_lock(lineage_id: str) -> threading.RLock:
 def _xproc_file_lock(lock_path: Path):
     """Hold an exclusive cross-process lock for one transaction.
 
-    ``fcntl.flock(LOCK_EX)`` on a sibling lock file; degraded to a no-op on
-    non-POSIX platforms (threading locks + atomic writes remain).
+    An exclusive lock on a sibling lock file (``flock`` on POSIX, ``msvcrt.locking`` on Windows — see
+    ``_filelock``); if it cannot be taken the transaction degrades to the threading locks + atomic writes.
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a") as fh:
         try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            lock_exclusive(fh)
         except OSError:
-            pass  # 非 POSIX：退化为仅线程锁 + 原子写
+            pass  # 退化为仅线程锁 + 原子写
         try:
             yield
         finally:
             try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                unlock(fh)
             except OSError:
                 pass
 
@@ -153,7 +154,7 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     never observe a half-written file (B-1: non-atomic ``write_text`` let
     concurrent readers parse truncated JSON).
 
-    An fcntl exclusive lock on a sibling ``.lock`` file serializes writers
+    An exclusive lock on a sibling ``.lock`` file serializes writers
     across processes (multi-worker deployments); the in-process threading
     locks remain the fast path.
     """
@@ -161,9 +162,9 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     lock_path = path.with_name(path.name + ".lock")
     with open(lock_path, "w") as lock_fh:
         try:
-            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            lock_exclusive(lock_fh)
         except OSError:
-            # 非 POSIX / 无 fcntl 环境：退化为仅线程锁 + 原子写
+            # 取不到跨进程锁：退化为仅线程锁 + 原子写
             pass
         try:
             fd, tmp_name = tempfile.mkstemp(
@@ -183,7 +184,7 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
                 raise
         finally:
             try:
-                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+                unlock(lock_fh)
             except OSError:
                 pass
 

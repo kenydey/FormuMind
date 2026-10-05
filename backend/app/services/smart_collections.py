@@ -21,7 +21,6 @@ item is preserved — refreshes only *add* new candidates.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import logging
 import os
@@ -32,6 +31,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from ._filelock import lock_exclusive, unlock
 
 logger = logging.getLogger(__name__)
 
@@ -200,17 +201,17 @@ def _save_store(project_id: str, store: dict[str, Any]) -> dict[str, Any]:
 def _file_lock(path: Path):
     """跨进程排他锁（B-3）：多 worker 部署时防止进程间并发写丢更新。
 
-    单进程部署时 threading.Lock 已足够，fcntl 是第二道防线。
+    单进程部署时 threading.Lock 已足够，文件锁是第二道防线（POSIX flock / Windows msvcrt，见 _filelock）。
     锁文件与数据文件同目录，保证同文件系统。
     """
     lock_path = path.with_name(path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "w") as f:
+        lock_exclusive(f)
         try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             yield
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            unlock(f)
 
 
 @contextlib.contextmanager
