@@ -94,6 +94,53 @@ jobs:
         # blocking `backend` job.
         run: pytest -m "not golden_eval" -q -rs $(grep -l -i "baybe" tests/test_*.py)
 
+  # Optional extras the blocking job does not install: the real document parsers (pymupdf4llm / MarkItDown /
+  # python-docx / python-pptx) and colour-science. Every test that needs one of them is an importorskip there, so the
+  # code behind them was never exercised in CI - which is how a Word table losing its header row, and the KB quality
+  # gate dropping every pipe table as "garbage", went unnoticed through three audits. Non-blocking for the same
+  # reason as the BayBE job: it tracks upstream releases (pymupdf4llm is pinned in pyproject.toml because 1.28.2 breaks
+  # the layout path).
+  backend-extras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        # file_ingest = markitdown[pdf,docx,pptx,xlsx] + python-docx; report_export adds python-pptx / fpdf2; color is
+        # colour-science. The two PyMuPDF pins are the `hybrid` PDF tier (the rest of parse_pro - OCR, MinerU - is not
+        # needed to parse a text PDF). A CJK font lets the Chinese PDF fixture be drawn.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e '.[dev,file_ingest,report_export,color]' "pymupdf4llm==1.28.0" "PyMuPDF==1.28.0"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-wqy-zenhei
+
+      - name: Tests that need the extras
+        # -rs lists skips; the next step turns a skipped extras test into a failure.
+        run: |
+          set -o pipefail  # the default shell has no pipefail: a failing pytest would otherwise be masked by tee
+          pytest -m "not golden_eval" -q -rs \
+            tests/test_document_parsers_real.py tests/test_table_converter_output.py tests/test_colorimetry.py \
+            tests/test_parsing_availability.py tests/test_parsing_chunking.py tests/test_hybrid_parse.py \
+            tests/test_chem_parsing.py tests/test_structured_ingest.py tests/test_ingest.py \
+            tests/test_ingest_extended.py tests/test_table_contract.py tests/test_table_normalize.py \
+            tests/test_kb_gate_tables.py tests/test_chunking_table_caption.py | tee /tmp/extras.txt
+
+      - name: Extras tests must not be skipped
+        run: "! grep -E 'SKIPPED.*(test_document_parsers_real|test_table_converter_output|test_colorimetry)' /tmp/extras.txt"
+
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
   # still required — failures block merge once calibrated.
   golden:
