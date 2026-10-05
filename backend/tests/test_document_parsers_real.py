@@ -83,21 +83,30 @@ def _xlsx_bytes() -> bytes:
 
 
 def _ingest(client: TestClient, name: str, content: bytes):
-    """Upload, then wait for the background job (Celery-eager runs it in a daemon thread) to store the source."""
+    """Upload, then wait for the background job (Celery-eager runs it in a daemon thread) to *finish*.
+
+    The source row appears before its chunks are written, so "the row exists" is not "the job is done" — waiting on
+    the row alone made this flaky under load (an empty chunk list read between the two writes).
+    """
     from app.db.database import default_session_factory
     from app.db.models import DocumentChunk, SourceDocument
 
     resp = client.post("/api/ingest", files={"file": (name, content)})
     assert resp.status_code == 202, resp.text
-    deadline = time.monotonic() + 60
+    status_url = resp.json()["status_url"]
+    deadline = time.monotonic() + 90
+    state = ""
     while time.monotonic() < deadline:
-        with default_session_factory()() as session:
-            source = session.query(SourceDocument).filter(SourceDocument.filename == name).one_or_none()
-            if source is not None and source.extraction_status:
-                chunks = session.query(DocumentChunk).filter(DocumentChunk.source_id == source.id).all()
-                return source, chunks
+        state = client.get(status_url).json().get("state", "")
+        if state in ("completed", "failed", "error"):
+            break
         time.sleep(0.2)
-    pytest.fail(f"{name} was not ingested within 60 s")
+    assert state == "completed", f"{name}: ingest job ended in state {state!r}"
+    with default_session_factory()() as session:
+        source = session.query(SourceDocument).filter(SourceDocument.filename == name).one()
+        chunks = session.query(DocumentChunk).filter(DocumentChunk.source_id == source.id).all()
+        session.expunge_all()
+        return source, chunks
 
 
 def test_a_docx_datasheet_table_is_stored_with_its_caption(client):
