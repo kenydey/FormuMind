@@ -213,7 +213,7 @@ def test_oa_enrich_parallel_fetch_serial_persist(tmp_path, monkeypatch):
 
     def fake_fetch(kind, ev, timeout, *, allow_pdf=True):
         fetch_threads.append(threading.get_ident())
-        time.sleep(0.15)
+        time.sleep(0.4)
         return f"TEXT for {ev.identifier}"
 
     def fake_persist(text, ev, kind, *, project_id=None, acquisition=None):
@@ -241,7 +241,10 @@ def test_oa_enrich_parallel_fetch_serial_persist(tmp_path, monkeypatch):
     assert out["persisted"] == 3
     assert len(set(fetch_threads)) > 1, "fetch 应在多个线程并发"
     assert set(persist_threads) == {main_ident}, "persist 必须串行在主线程"
-    assert elapsed < 0.45, f"3×0.15s 串行应 ≥0.45s，实测 {elapsed:.2f}s 说明未并行"
+    # Serial would be 3 × 0.4 s = 1.2 s; parallel is ~0.4 s plus the manifest load/save and thread start-up. The bound
+    # leaves that overhead 0.5 s of room — the original 3 × 0.15 s against 0.45 s left 0.3 s and failed at 0.498 s on a
+    # busy machine without anything being serial.
+    assert elapsed < 0.9, f"3×0.4s 串行应 ≥1.2s，实测 {elapsed:.2f}s 说明未并行"
 
 
 # ── P-6: chunks_by_source 分页 ────────────────────────────────────────────

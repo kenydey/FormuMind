@@ -31,7 +31,7 @@ _MAX_HEADING_PATH = 80
 
 
 def _parse_heading(line: str) -> tuple[int, str] | None:
-    """``## Title ##`` → ``(2, "Title")``; ``None`` when the line is not an ATX heading.
+    r"""``## Title ##`` → ``(2, "Title")``; ``None`` when the line is not an ATX heading.
 
     The same answer as the regex ``^(#{1,6})\s+(.+?)\s*#*\s*$`` this replaces, in linear time: that pattern has two
     adjacent ``\s*`` around an optional ``#*`` and a lazy title in front, so a heading followed by a long run of
