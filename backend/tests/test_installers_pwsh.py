@@ -111,3 +111,57 @@ Invoke-Step "failing-step" { & $native -NoProfile -Command "exit 3" }
     assert "SHOULD_NOT_PRINT" not in out
     assert done.returncode == 3, (done.returncode, out, done.stderr)
     assert "failing-step" in out
+
+
+# ── which Python the installer picks ─────────────────────────────────────────
+
+_FAKE_PY = r"""
+$script:installed = @(%s)
+function py {
+  # the installer calls `& $cmd @(...)`: a native py.exe receives the array flattened, a function one nested array
+  $a = @($args | ForEach-Object { $_ })
+  $version = $a -contains '--version'
+  if ($a[0] -match '^-(\d+\.\d+)$') {
+    $hit = $script:installed | Where-Object { $_ -like "$($Matches[1]).*" } | Select-Object -First 1
+    if (-not $hit) { throw 'No suitable Python runtime found' }
+    if ($version) { return "Python $hit" }
+    return "C:\fake\py$($Matches[1])\python.exe"
+  }
+  if ($a[0] -eq '-3') {
+    $hit = $script:installed | Select-Object -Last 1
+    if ($version) { return "Python $hit" }
+    return 'C:\fake\latest\python.exe'
+  }
+}
+"""
+
+
+def _find_python(tmp_path: Path, installed: list[str]) -> str:
+    text = INSTALLER.read_text(encoding="utf-8-sig")
+    function = text[text.index("function Find-Python"): text.index('Write-Step "[1/5]')]
+    probe = tmp_path / "find.ps1"
+    probe.write_text(
+        (_FAKE_PY % ", ".join(f"'{v}'" for v in installed))
+        + function
+        + '\n$p = Find-Python\nif ($p) { "FOUND=$($p.Version)|$($p.Exe)" } else { "FOUND=none" }\n',
+        encoding="utf-8",
+    )
+    done = _pwsh("-File", str(probe))
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    return next(line for line in done.stdout.splitlines() if line.startswith("FOUND="))
+
+
+def test_the_installer_prefers_the_version_the_project_is_tested_on(tmp_path):
+    """``py -3`` is the *newest* Python — 3.14 on the CI runner, where rdkit / torch have no wheels yet."""
+    found = _find_python(tmp_path, ["3.10.11", "3.11.9", "3.14.0"])
+    assert found == r"FOUND=3.11.9|C:\fake\py3.11\python.exe", found
+
+
+def test_without_3_11_it_takes_3_12_before_the_newest(tmp_path):
+    found = _find_python(tmp_path, ["3.12.4", "3.14.0"])
+    assert found == r"FOUND=3.12.4|C:\fake\py3.12\python.exe", found
+
+
+def test_only_a_newer_python_is_still_accepted(tmp_path):
+    found = _find_python(tmp_path, ["3.14.0"])
+    assert found == r"FOUND=3.14.0|C:\fake\latest\python.exe", found

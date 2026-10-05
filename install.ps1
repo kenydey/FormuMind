@@ -49,9 +49,14 @@ function Invoke-Optional([scriptblock]$Command) {
 
 function Find-Python {
   # 返回 @{ Exe = <python.exe>; Version = [version] }，找不到返回 $null
+  # 先挑项目自己测试 / 打包用的版本（Dockerfile 与 CI 是 3.11），最后才是"最新的 3.x"：新发布的 Python
+  # 往往还没有 rdkit / torch 等科学依赖的预编译包，`py -3` 会选到它（CI 的 Windows 机器上就是 3.14）。
   $cands = @()
   $pyLauncher = Get-Command "py" -ErrorAction SilentlyContinue
-  if ($pyLauncher) { $cands += @{ Cmd = "py"; Args = @("-3") } }
+  if ($pyLauncher) {
+    foreach ($v in @("3.11", "3.12", "3.10")) { $cands += @{ Cmd = "py"; Args = @("-$v") } }
+    $cands += @{ Cmd = "py"; Args = @("-3") }
+  }
   foreach ($name in @("python", "python3")) {
     $c = Get-Command $name -ErrorAction SilentlyContinue
     if ($c) { $cands += @{ Cmd = $c.Source; Args = @() } }
@@ -64,8 +69,8 @@ function Find-Python {
         if ($ver -ge [version]"3.10") {
           $exe = $cand.Cmd
           if ($cand.Cmd -eq "py") {
-            # 解析 py -3 背后的真实 python.exe，供 venv 使用
-            $exe = (& py -3 -c "import sys; print(sys.executable)" 2>$null).Trim()
+            # 解析 py -3.x 背后的真实 python.exe，供 venv 使用
+            $exe = (& py @($cand.Args + @("-c", "import sys; print(sys.executable)")) 2>$null | Out-String).Trim()
             if (-not $exe) { $exe = "py" }
           }
           return @{ Exe = $exe; Version = $ver }
@@ -87,6 +92,9 @@ if (-not $py) {
   exit 1
 }
 Write-Ok "Python $($py.Version) ($($py.Exe))"
+if ($py.Version -ge [version]"3.13") {
+  Write-Warn "Python $($py.Version) 比本项目测试过的版本（3.11，Dockerfile 与 CI 所用）新；科学依赖可能没有预编译包。安装失败时请改用 3.11 或 3.12（winget install Python.Python.3.11）。"
+}
 
 $nodeCmd = Get-Command "node" -ErrorAction SilentlyContinue
 $npmCmd  = Get-Command "npm" -ErrorAction SilentlyContinue

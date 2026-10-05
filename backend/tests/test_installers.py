@@ -127,3 +127,10 @@ def test_files_the_installers_point_at_exist(script):
     # `apply_patches.py` / `rapidocr-attribute-fix.md` live under backend/scripts (resolved above);
     # anything left over is a dangling reference.
     assert not missing, f"{script} mentions files that do not exist: {missing}"
+
+
+def test_both_installers_warn_about_a_python_newer_than_the_tested_one():
+    """The image and CI run 3.11; a brand-new Python often has no prebuilt rdkit / torch, and the failure shows up as a
+    pip build error far from its cause."""
+    assert 'Version -ge [version]"3.13"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    assert 'ver_ge "$PY_VER" "3.13"' in (REPO / "install.sh").read_text(encoding="utf-8")

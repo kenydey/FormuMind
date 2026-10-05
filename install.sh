@@ -75,6 +75,9 @@ if ! ver_ge "$PY_VER" "3.10"; then
   exit 1
 fi
 echo "    Python $PY_VER ✓"
+if ver_ge "$PY_VER" "3.13"; then
+  echo "    ⚠ Python $PY_VER 比本项目测试过的版本（3.11，Dockerfile 与 CI 所用）新；科学依赖可能没有预编译包。安装失败时请改用 3.11 或 3.12。"
+fi
 
 if command -v node >/dev/null 2>&1; then
   NODE_VER="$(node --version | sed 's/^v//')"
