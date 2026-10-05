@@ -10,6 +10,7 @@ from ..services.errors import degrade_return, log_handled_exception
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import uuid
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def _task_persist_dir() -> Path:
     # 延迟读取：测试用 monkeypatch.setenv 时模块已导入，import 期常量会绕过隔离。
-    return Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
+    return Path(os.environ.get("FORMUMIND_TASK_DIR") or Path(tempfile.gettempdir()) / "formumind_tasks")
 
 
 def _persist_task(task_id: str, status: TaskStatus) -> None:

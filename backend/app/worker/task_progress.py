@@ -5,6 +5,7 @@ import logging
 from ..services.errors import degrade_return, log_handled_exception
 import json
 import os
+import tempfile
 import time
 from enum import Enum
 from pathlib import Path
@@ -21,7 +22,7 @@ RESULT_TTL_SECONDS = 86400
 
 def _task_dir() -> Path:
     # 延迟读取：测试用 monkeypatch.setenv 时模块已导入，import 期常量会绕过隔离。
-    return Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
+    return Path(os.environ.get("FORMUMIND_TASK_DIR") or Path(tempfile.gettempdir()) / "formumind_tasks")
 
 
 def _default_progress_dir() -> Path:

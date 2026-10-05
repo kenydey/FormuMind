@@ -31,7 +31,9 @@ def _shared_dir() -> str:
         from ..config import get_settings
 
         if get_settings().environment.strip().lower() == "test":
-            return "/tmp/_structure_tmp"
+            import tempfile
+
+            return os.path.join(tempfile.gettempdir(), "_structure_tmp")
         # __file__ = <root>/backend/app/services/structure_recognize.py
         # 上三级 = backend/ → 再上一级 = 仓库根
         root = os.path.dirname(

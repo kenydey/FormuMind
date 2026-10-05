@@ -8,6 +8,7 @@ from __future__ import annotations
 import html as _html
 import io
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -24,6 +25,11 @@ _CJK_FONT_CANDIDATES = (
     # DroidSansFallback lacks many Latin glyphs → avoid as primary.
     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     "/System/Library/Fonts/PingFang.ttc",
+    # Windows: without these the PDF export has no CJK glyphs there
+    *(
+        os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", name)
+        for name in ("msyh.ttc", "msyhl.ttc", "simsun.ttc", "simhei.ttf")
+    ),
 )
 
 

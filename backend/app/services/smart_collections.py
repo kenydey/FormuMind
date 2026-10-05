@@ -157,8 +157,13 @@ def _load_store(project_id: str) -> dict[str, Any]:
 
 
 def _fsync_dir(d: Path) -> None:
+    # Windows has no os.O_DIRECTORY (and cannot fsync a directory): the attribute access raised AttributeError, which
+    # the ``except OSError`` below does not catch — every write of a smart collection failed there.
+    flag = getattr(os, "O_DIRECTORY", None)
+    if flag is None:
+        return
     try:
-        fd = os.open(d, os.O_DIRECTORY)
+        fd = os.open(d, flag)
     except OSError:
         return
     try:

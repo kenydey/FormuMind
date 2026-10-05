@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import platform
 import re
 from datetime import datetime, timezone
@@ -173,7 +174,7 @@ def _gather_doe(project_id: str) -> tuple[str, list[str]]:
 
 
 def _task_persist_dir() -> Path:
-    return Path(os.environ.get("FORMUMIND_TASK_DIR", "/tmp/formumind_tasks"))
+    return Path(os.environ.get("FORMUMIND_TASK_DIR") or Path(tempfile.gettempdir()) / "formumind_tasks")
 
 
 def _gather_optimization(project_id: str) -> tuple[str, list[str]]:
