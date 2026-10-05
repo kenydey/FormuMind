@@ -371,6 +371,18 @@ def save_rule_version(
     return record
 
 
+def _newest_first(versions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Newest first. Versions are appended as they are saved, so the list position is the true recency order;
+    ``created_at`` alone ties whenever two saves land inside one tick of a coarse clock (Windows: ~15.6 ms),
+    which listed — and rolled back to — the *older* of the two."""
+    ranked = sorted(
+        enumerate(versions),
+        key=lambda pair: (pair[1].get("created_at") or 0, pair[0]),
+        reverse=True,
+    )
+    return [row for _, row in ranked]
+
+
 def list_rule_versions(
     project_id: str, *, settings: Any = None
 ) -> dict[str, Any]:
@@ -378,9 +390,7 @@ def list_rule_versions(
     if settings is not None and not screening_enabled(settings):
         raise PermissionError("literature_screening_enabled is false")
     man = lm.load_manifest(project_id)
-    versions = sorted(
-        _rule_versions(man), key=lambda r: r.get("created_at") or 0, reverse=True
-    )
+    versions = _newest_first(_rule_versions(man))
     history = man.get("screening_rule_history")
     return {
         "project_id": project_id,
@@ -450,7 +460,7 @@ def rollback_rule_version(
         target = next((v for v in versions if v.get("version") == version), None)
     elif name:
         named = [v for v in versions if v.get("name") == name]
-        target = max(named, key=lambda v: v.get("created_at") or 0) if named else None
+        target = _newest_first(named)[0] if named else None
     if target is None:
         raise LookupError("rule version not found")
     result = screen_project(

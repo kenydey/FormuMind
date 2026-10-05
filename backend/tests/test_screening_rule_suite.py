@@ -141,6 +141,23 @@ def test_save_list_rule_versions(tmp_data):
     assert all(h["action"] == "saved" for h in out["history"])
 
 
+def test_versions_saved_within_one_clock_tick_still_list_newest_first(tmp_data, monkeypatch):
+    """Windows' clock ticks every ~15.6 ms: two saves inside one tick share ``created_at``.
+
+    The sort used to be stable on that key alone, so the *older* version came first (and a rollback "to the latest
+    version of <name>" picked the older one). A frozen clock reproduces the tie on every platform.
+    """
+    _seed()
+    monkeypatch.setattr(ls.time, "time", lambda: 1_700_000_000.0)
+    r1 = ls.save_rule_version("p1", name="v", criteria={"include_keywords": ["epoxy"]})
+    r2 = ls.save_rule_version("p1", name="v", criteria={"include_keywords": ["epoxy", "zinc"]})
+    assert r1["created_at"] == r2["created_at"]
+    out = ls.list_rule_versions("p1", settings=_S())
+    assert [v["version"] for v in out["versions"]] == [r2["version"], r1["version"]]
+    res = ls.rollback_rule_version("p1", name="v", settings=_S())
+    assert res["rolled_back_to"]["version"] == r2["version"]
+
+
 def test_save_rule_version_requires_name(tmp_data):
     _seed()
     with pytest.raises(ValueError):

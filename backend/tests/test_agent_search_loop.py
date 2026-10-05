@@ -140,6 +140,19 @@ def test_agent_search_time_budget_stops():
     assert res.stopped_reason == "budget"
 
 
+def test_a_zero_budget_runs_no_round_even_when_the_clock_has_not_moved(monkeypatch):
+    """Windows' monotonic clock ticks every ~15.6 ms, so ``elapsed`` is exactly 0 — and ``0 > 0`` let one round run."""
+    from app.services import agent_search_loop
+
+    monkeypatch.setattr(agent_search_loop.time, "monotonic", lambda: 1234.5)
+
+    def fake(q, k, **kw):  # pragma: no cover
+        raise AssertionError("must not be called")
+
+    res = agent_search("盐雾试验", fake, k=6, max_iters=3, time_budget_s=0)
+    assert (res.rounds, res.stopped_reason, res.evidence) == (0, "budget", [])
+
+
 def test_agent_search_fail_open_on_round_error():
     calls = []
 

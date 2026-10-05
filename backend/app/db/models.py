@@ -7,7 +7,7 @@ stable as new metrics appear without migrations.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import (
     JSON,
@@ -26,6 +26,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from ..clock import utcnow
+
 _source_guide_type = JSON().with_variant(JSONB(), "postgresql")
 
 
@@ -33,8 +35,9 @@ class Base(DeclarativeBase):
     pass
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+# Strictly increasing within a process (see app/clock.py): the default for every ``created_at`` / ``updated_at``
+# below, so "newest first" is well-defined even where the OS clock ticks every ~15 ms (Windows).
+_utcnow = utcnow
 
 
 class ExperimentRow(Base):

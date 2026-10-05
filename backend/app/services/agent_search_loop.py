@@ -213,7 +213,9 @@ def agent_search(
 
     current_query = query
     for round_no in range(1, max(1, max_iters) + 1):
-        if time.monotonic() - start > time_budget_s:
+        # ``>=``: a budget of 0 must mean "no rounds". With ``>`` it only did on a clock fine enough for the
+        # elapsed time to be non-zero — on Windows (~15.6 ms ticks) it is exactly 0, and one round still ran.
+        if time.monotonic() - start >= time_budget_s:
             reason = "budget"
             break
         queries_issued.append(current_query)
@@ -245,7 +247,7 @@ def agent_search(
         if round_no >= max(1, max_iters):
             reason = "max_iters"
             break
-        if time.monotonic() - start > time_budget_s:
+        if time.monotonic() - start >= time_budget_s:
             reason = "budget"
             break
         current_query = rewrite_query(query, uncovered)

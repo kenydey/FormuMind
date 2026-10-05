@@ -13,12 +13,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from ..clock import utcnow
 from .models import RecommendOutcomeRow
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ _ADOPT_SIGNALS = ("button", "copied", "campaign")
 def _utcnow() -> datetime:
     # Naive UTC, matching dispatcher.py: SQLite returns naive datetimes, so
     # Python-side comparisons (e.g. the 7-day window slice) must be naive too.
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return utcnow()
 
 
 def validate_adopt_signal(signal: str) -> str:
@@ -430,7 +431,8 @@ def recent_adopted(session: Session, *, limit: int = 20) -> list[dict]:
             session.execute(
                 select(RecommendOutcomeRow)
                 .where(RecommendOutcomeRow.adopted.is_(True))
-                .order_by(RecommendOutcomeRow.created_at.desc())
+                # ``id`` breaks a ``created_at`` tie (two workers, or a coarse OS clock): the higher one is newer.
+                .order_by(RecommendOutcomeRow.created_at.desc(), RecommendOutcomeRow.id.desc())
                 .limit(limit)
             )
             .scalars()
