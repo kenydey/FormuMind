@@ -380,6 +380,16 @@ def _parse_xlsx(content: bytes) -> str | None:
         return None
 
 
+def _parse_text_file(content: bytes, ext: str) -> str | None:
+    """Text-like uploads. An HTML page is markup, not text: URL ingestion has always converted it with
+    ``html_to_markdown``, but an uploaded ``.html`` / ``.htm`` (both in the upload dialog's accept list) was stored
+    as raw source — ``<script>`` and ``<style>`` bodies, navigation, every tag — and chunked as if it were prose."""
+    text = _parse_plain(content)
+    if text is not None and ext in ("html", "htm"):
+        return html_to_markdown(text)
+    return text
+
+
 def _parse_plain(content: bytes) -> str | None:
     for enc in ("utf-8", "gbk", "latin-1"):
         try:
@@ -445,7 +455,7 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
 # latin-1 and returns the text untouched. Binary formats (docx/xlsx) fall
 # through the text tier (ext not in _ALWAYS_PARSEABLE) to markitdown unchanged.
 _DOC_TIERS: tuple[tuple[str, object], ...] = (
-    ("text", lambda c, e: _parse_plain(c) if e in _ALWAYS_PARSEABLE else None),
+    ("text", lambda c, e: _parse_text_file(c, e) if e in _ALWAYS_PARSEABLE else None),
     ("markitdown", lambda c, e: _parse_markitdown(c, e)),
     ("docx", lambda c, e: _parse_docx(c) if e in ("docx", "doc") else None),
     ("xlsx", lambda c, e: _parse_xlsx(c) if e in ("xlsx", "xlsm") else None),
@@ -529,11 +539,33 @@ def html_to_markdown(html: str) -> str:
         log_handled_exception(logger, exc, "trafilatura extract failed")
 
     text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
+    text = _html_tables_to_pipes(text)
     text = re.sub(r"(?is)<br\s*/?>", "\n", text)
     text = re.sub(r"(?is)</p>", "\n\n", text)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+\n", "\n", text)
     return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def _html_tables_to_pipes(html: str) -> str:
+    """``<table>`` → a Markdown pipe table, before the tag stripper flattens its cells into one line of words.
+
+    Without trafilatura (an optional extra) a datasheet page lost every row and column boundary — the one part
+    the table contract, the chunker and the normalizer can use.
+    """
+    from .table_contract import _parse_html_table
+
+    def _pipe(match: re.Match) -> str:
+        headers, rows = _parse_html_table(match.group(0))
+        if not headers and not rows:
+            return " "
+        width = max([len(headers)] + [len(r) for r in rows])
+        pad = lambda cells: [c.replace("|", "\\|") for c in cells] + [""] * (width - len(cells))  # noqa: E731
+        lines = ["| " + " | ".join(pad(headers)) + " |", "| " + " | ".join(["---"] * width) + " |"]
+        lines += ["| " + " | ".join(pad(r)) + " |" for r in rows]
+        return "\n\n" + "\n".join(lines) + "\n\n"
+
+    return re.sub(r"(?is)<table\b.*?</table\s*>", _pipe, html)
 
 
 def parser_availability() -> dict[str, bool]:
