@@ -1166,8 +1166,27 @@ export const apiMethods = {
     }),
 
   // ── Neo4j 图谱适配层 ──
-  neo4jStats: () =>
-    get<Neo4jStats>("/api/kg/neo4j/stats"),
+  // The endpoint answers `{ enabled, reachable, stats: { compound, formulation, experimentreport, contains_rels, … } }`;
+  // the panels read flat `nodes` / `edges` / `compounds` / `formulations`. Without this mapping the Neo4j badge
+  // always read "就绪 · ? 节点 / ? 边" and never showed the compound / formulation counts.
+  neo4jStats: async (): Promise<Neo4jStats> => {
+    const raw = await get<{ enabled?: boolean; reachable?: boolean; stats?: Record<string, number> }>(
+      "/api/kg/neo4j/stats"
+    );
+    const stats = raw.stats ?? {};
+    const known = Object.keys(stats).length > 0;
+    const count = (key: string) => (typeof stats[key] === "number" ? stats[key] : 0);
+    return {
+      enabled: raw.enabled,
+      reachable: raw.reachable,
+      adapter_status: raw.enabled ? (raw.reachable ? "ready" : "unreachable") : "disabled",
+      compounds: known ? count("compound") : undefined,
+      formulations: known ? count("formulation") : undefined,
+      nodes: known ? count("compound") + count("formulation") + count("experimentreport") : undefined,
+      edges: known ? count("contains_rels") + count("similar_to_rels") + count("evaluates_rels") : undefined,
+      detail: stats,
+    };
+  },
 
   neo4jCompounds: (q = "", limit = 50) => {
     const qs = new URLSearchParams();

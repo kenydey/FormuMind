@@ -96,3 +96,22 @@ describe("catalogue enrichment", () => {
     expect(res.enriched).toBe(2);
   });
 });
+
+describe("neo4j stats", () => {
+  it("flattens the backend's stats dict into the fields the badge reads", async () => {
+    mockGet.mockResolvedValueOnce({
+      enabled: true,
+      reachable: true,
+      stats: { compound: 12, formulation: 5, experimentreport: 3, contains_rels: 20, similar_to_rels: 4, evaluates_rels: 1 },
+    });
+    const stats = await apiMethods.neo4jStats();
+    expect(stats).toMatchObject({ reachable: true, compounds: 12, formulations: 5, nodes: 20, edges: 25, adapter_status: "ready" });
+  });
+
+  it("leaves the counts undefined (not zero) when the graph store reports nothing", async () => {
+    mockGet.mockResolvedValueOnce({ enabled: true, reachable: false, stats: {} });
+    const stats = await apiMethods.neo4jStats();
+    expect(stats.nodes).toBeUndefined();
+    expect(stats.adapter_status).toBe("unreachable");
+  });
+});
