@@ -374,9 +374,12 @@ def test_ocr_and_non_ocr_are_cached_separately(sdk) -> None:
 
 
 def test_unwritable_cache_does_not_break_parsing(
-    sdk, monkeypatch: pytest.MonkeyPatch
+    sdk, monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    monkeypatch.setattr(get_settings(), "mineru_cache_dir", "/proc/nope", raising=False)
+    from app.services._fsutil import unwritable_path
+
+    # A path under a *file* is unwritable on every platform (``/proc`` only is on Linux).
+    monkeypatch.setattr(get_settings(), "mineru_cache_dir", str(unwritable_path(tmp_path)), raising=False)
     assert mineru_cloud.parse_bytes(b"%PDF-1.4", ext="pdf") is not None
 
 

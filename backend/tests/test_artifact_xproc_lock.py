@@ -16,14 +16,17 @@ is now serialized across processes via the per-version / per-lineage
   another process's ``finalize_version`` blocks until the lock is released —
   proving the lock covers the transaction, not just the single file write.
 
-Uses real ``multiprocessing`` (fork); no timing-sensitive assertions except
-the blocking check, which waits on events/barriers.
+Uses real ``multiprocessing`` — ``fork`` where the platform has it, ``spawn`` on Windows (which has no
+fork, and is where the lock is ``msvcrt.locking`` rather than ``flock``: this is the only test that puts the
+Windows branch of ``_filelock`` under real cross-process contention). No timing-sensitive assertions except the
+blocking check, which waits on events/barriers.
 """
 from __future__ import annotations
 
 import multiprocessing as mp
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -43,10 +46,20 @@ def _mk_submitted(data_note="xproc"):
     return lin, v
 
 
-# ── workers (module level: fork-safe) ────────────────────────────────────────
+# ── workers (module level: picklable, so they run under ``spawn`` too) ───────
 
-def _finalize_worker(vid, barrier, queue):
+def _context():
+    return mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+
+
+def _use_root(root):
+    # A spawned child re-imports this module, so it does not inherit the test's monkeypatch of the data root.
+    svc._data_root = lambda: Path(root)
+
+
+def _finalize_worker(vid, barrier, queue, root):
     """Thundering-herd finalize: exactly one process may win."""
+    _use_root(root)
     try:
         barrier.wait(timeout=60)
         svc.finalize_version(vid)
@@ -57,8 +70,9 @@ def _finalize_worker(vid, barrier, queue):
         queue.put(f"error:{exc!r}")
 
 
-def _restore_worker(lid, base_vid, idx, barrier, queue):
+def _restore_worker(lid, base_vid, idx, barrier, queue, root):
     """Concurrent copy-on-write restore off the same finalized version."""
+    _use_root(root)
     try:
         barrier.wait(timeout=60)
         new = svc.create_version(
@@ -69,10 +83,9 @@ def _restore_worker(lid, base_vid, idx, barrier, queue):
         queue.put(("error", repr(exc)))
 
 
-def _txn_lock_holder(vid, lock_path_str, acquired, release):
+def _txn_lock_holder(vid, lock_path_str, acquired, release, root):
     """Hold the raw version txn lock until ``release`` is set."""
-    from pathlib import Path
-
+    _use_root(root)
     with svc._xproc_file_lock(Path(lock_path_str)):
         acquired.set()
         assert release.wait(timeout=60), "release event never set"
@@ -85,12 +98,12 @@ def test_concurrent_finalize_multiprocess_single_winner(data_dir):
     _lin, v = _mk_submitted("finalize-race")
     vid = v.version_id
 
-    ctx = mp.get_context("fork")
+    ctx = _context()
     n = 8
     barrier = ctx.Barrier(n)
     queue = ctx.Queue()
     procs = [
-        ctx.Process(target=_finalize_worker, args=(vid, barrier, queue))
+        ctx.Process(target=_finalize_worker, args=(vid, barrier, queue, str(data_dir)))
         for _ in range(n)
     ]
     for p in procs:
@@ -120,12 +133,12 @@ def test_concurrent_restore_multiprocess_no_lost_version_ids(data_dir):
     svc.finalize_version(v.version_id)
     lid, base_vid = lin.lineage_id, v.version_id
 
-    ctx = mp.get_context("fork")
+    ctx = _context()
     n = 8
     barrier = ctx.Barrier(n)
     queue = ctx.Queue()
     procs = [
-        ctx.Process(target=_restore_worker, args=(lid, base_vid, i, barrier, queue))
+        ctx.Process(target=_restore_worker, args=(lid, base_vid, i, barrier, queue, str(data_dir)))
         for i in range(n)
     ]
     for p in procs:
@@ -164,11 +177,11 @@ def test_finalize_blocks_while_xproc_lock_held(data_dir):
     vid = v.version_id
     lock_path = str(svc._version_txn_lock_path(vid))
 
-    ctx = mp.get_context("fork")
+    ctx = _context()
     acquired = ctx.Event()
     release = ctx.Event()
     holder = ctx.Process(
-        target=_txn_lock_holder, args=(vid, lock_path, acquired, release)
+        target=_txn_lock_holder, args=(vid, lock_path, acquired, release, str(data_dir))
     )
     holder.start()
     try:

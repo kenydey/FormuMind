@@ -191,8 +191,11 @@ def test_load_missing_returns_empty(tmp_path, monkeypatch):
     assert tc.load_tables("nope") == []
 
 
-def test_save_fail_open_on_unwritable_dir(monkeypatch):
-    monkeypatch.setenv("FORMUMIND_TABLES_DIR", "/proc/formumind-nope")
+def test_save_fail_open_on_unwritable_dir(tmp_path, monkeypatch):
+    # ``/proc/...`` is only unwritable on Linux; a path under a *file* is unwritable everywhere.
+    from app.services._fsutil import unwritable_path
+
+    monkeypatch.setenv("FORMUMIND_TABLES_DIR", str(unwritable_path(tmp_path)))
     assets = tc.extract_tables("s", tc.blocks_from_markdown(RECIPE_MD))
     assert tc.save_tables("s", assets) is None  # 不抛错
 

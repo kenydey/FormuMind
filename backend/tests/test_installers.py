@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,10 @@ def test_script_line_endings_are_pinned():
     assert "eol=crlf" in rules.get("*.ps1", [])
 
 
+# Not on Windows: ``bash`` there is whichever the PATH finds first (Git Bash, or the WSL launcher that exits 1 when no
+# distribution is installed — the Windows CI job failed all three of these that way). The shell scripts are for
+# POSIX hosts and the Linux jobs check them; Windows has install.bat / install.ps1 (tested above and in CI).
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell scripts; checked on the Linux jobs")
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
 @pytest.mark.parametrize("script", ["install.sh", "scripts/install.sh", "scripts/start_all.sh"])
 def test_shell_installers_are_valid_bash(script):

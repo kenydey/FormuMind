@@ -426,9 +426,13 @@ def test_the_task_body_runs_under_the_heartbeat(db, monkeypatch) -> None:
         return {"ok": True}
 
     monkeypatch.setattr(doe_cycle_service, "run_doe_cycle", body)
+    started = _naive_now()
     res = run_doe_cycle_task.apply(args=(payload,))
     assert res.successful(), res.result
-    assert seen["updated_at"] > _naive_now() - timedelta(minutes=1), "no heartbeat while the body ran"
+    # Compared with when the task *started*, not with "now − 1 min": the task's own epilogue (progress publishing)
+    # can take tens of seconds on a machine where Redis is down and each attempt is slow (Windows), which made a
+    # heartbeat that did happen look stale by the time it was checked.
+    assert seen["updated_at"] >= started, "no heartbeat while the body ran"
 
 
 def test_ancient_rows_with_a_recent_heartbeat_are_not_expired(db, monkeypatch) -> None:

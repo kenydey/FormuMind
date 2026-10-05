@@ -8,6 +8,7 @@ import socket
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -36,6 +37,15 @@ os.environ.setdefault("FORMUMIND_CELERY_EAGER", "true")
 os.environ.setdefault(
     "FORMUMIND_ENV_FILE",
     os.path.join(tempfile.mkdtemp(prefix="formumind-test-env-"), ".env"),
+)
+# The default database is ``sqlite:///./data/formumind.db`` — a CWD-relative file inside the checkout. Left
+# alone, the suite (a) wrote its rows into a developer's real database, and (b) only passed
+# ``test_api_auth`` when some earlier test happened to have created ``backend/data``: run on its own in a
+# fresh clone, the startup check refused to boot ("SQLite data directory ... does not exist"). A session-scoped
+# temp database makes both go away; tests that need their own file still set ``FORMUMIND_DB_URL`` themselves.
+os.environ.setdefault(
+    "FORMUMIND_DB_URL",
+    "sqlite:///" + (Path(tempfile.mkdtemp(prefix="formumind-test-db-")) / "formumind.db").as_posix(),
 )
 
 
@@ -283,6 +293,9 @@ def _reset_rate_limits_before_test():
         ("app.services.chemtools", "clear_cache"),
         ("app.services.surechembl_client", "clear_surechembl_cache"),
         ("app.services.external_alternatives", "clear_external_cache"),
+        # An absent Redis opens a 30 s breaker (every Redis touch fails at once instead of paying for a refused
+        # connection — ~2 s each on Windows). One test's "Redis is down" must not be the next one's.
+        ("app.services.redis_breaker", "reset"),
     ):
         try:
             getattr(__import__(_mod, fromlist=[_fn]), _fn)()
@@ -293,6 +306,15 @@ def _reset_rate_limits_before_test():
 
         with literature._SEARCH_CACHE_LOCK:
             literature._SEARCH_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        # No Redis runs in the suite. Linux refuses a loopback connection at once, but Windows takes ~2 s to give up
+        # on it — so the first Redis touch of every test (the breaker is reset above) would cost the production
+        # 1 s connect timeout. A real local Redis answers in well under a millisecond.
+        from app.services import redis_breaker
+
+        redis_breaker.CONNECT_TIMEOUT_S = 0.05
     except Exception:
         pass
     yield

@@ -19,19 +19,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from backfill_chunk_embeddings import _sanitize_no_proxy, main  # noqa: E402
 
 
+_BRACKETED = "localhost,127.0.0.1,::1,[::1],fd8b:4f84:7d32:99::1,[fd8b:4f84:7d32:99::1]"
+_CLEAN = "localhost,127.0.0.1,::1,fd8b:4f84:7d32:99::1"
+
+
 def test_sanitize_no_proxy_drops_bracketed_ipv6(monkeypatch):
-    monkeypatch.setenv(
-        "no_proxy",
-        "localhost,127.0.0.1,::1,[::1],fd8b:4f84:7d32:99::1,[fd8b:4f84:7d32:99::1]",
-    )
-    monkeypatch.setenv("NO_PROXY", "localhost,[::1]")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.setenv("no_proxy", _BRACKETED)
     _sanitize_no_proxy()
-    assert os.environ["no_proxy"] == "localhost,127.0.0.1,::1,fd8b:4f84:7d32:99::1"
-    assert os.environ["NO_PROXY"] == "localhost"
+    assert os.environ["no_proxy"] == _CLEAN
     # 真实回归点: 清洗后 httpx.Client() 可构造 (之前崩 Invalid port: ':1]')
     import httpx
 
     httpx.Client()
+
+
+def test_sanitize_no_proxy_handles_the_uppercase_spelling(monkeypatch):
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.setenv("NO_PROXY", "localhost,[::1]")
+    _sanitize_no_proxy()
+    assert os.environ["NO_PROXY"] == "localhost"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows environment variable names are case-insensitive: no_proxy and NO_PROXY are one variable",
+)
+def test_sanitize_no_proxy_cleans_both_spellings_in_one_call(monkeypatch):
+    monkeypatch.setenv("no_proxy", _BRACKETED)
+    monkeypatch.setenv("NO_PROXY", "localhost,[::1]")
+    _sanitize_no_proxy()
+    assert os.environ["no_proxy"] == _CLEAN
+    assert os.environ["NO_PROXY"] == "localhost"
 
 
 def _fake_st_module(monkeypatch):

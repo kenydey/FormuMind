@@ -191,9 +191,11 @@ def test_write_output_receipt(tmp_path):
     assert {"best_value", "candidates"} <= keys
 
 
-def test_write_output_receipt_fail_open():
-    # 不可写目录 → 返回 None，不抛错
-    assert tr.write_output_receipt("x", "y", data_dir="/proc/definitely-not-here") is None
+def test_write_output_receipt_fail_open(tmp_path):
+    # 不可写目录 → 返回 None，不抛错（``/proc`` 只在 Linux 上不可写；文件之下的路径在任何平台都不可写）
+    from app.services._fsutil import unwritable_path
+
+    assert tr.write_output_receipt("x", "y", data_dir=str(unwritable_path(tmp_path))) is None
 
 
 # ── tech_report: P1-35 repro template ───────────────────────────────────────
