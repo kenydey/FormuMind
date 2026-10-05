@@ -159,15 +159,26 @@ def build_sqlite_prompt(
     return system, f"问题：{question}\nSQL:"
 
 
-def _default_complete(system: str, user: str) -> str | None:
-    """Default LLM call via the platform's structured completion."""
-    from .llm import complete_structured
+# One question must not wait on a slow provider for minutes: the route is consulted for every chat question that
+# looks structured, and the literature answer is the fallback. (Chat caps its main LLM call at 45 s the same way.)
+SQL_GENERATION_DEADLINE_S = 20.0
 
-    parsed, err = complete_structured(system, user, _GeneratedSQL, retry=False)
-    if err or parsed is None:
-        log.warning("text2sql LLM generation failed: %s", err)
-        return None
-    return parsed.sql
+
+def _default_complete(system: str, user: str) -> str | None:
+    """Default LLM call via the platform's structured completion, with a wall-clock deadline."""
+    from .llm import _call_with_deadline, complete_structured
+
+    def _generate() -> str | None:
+        parsed, err = complete_structured(system, user, _GeneratedSQL, retry=False)
+        if err or parsed is None:
+            log.warning("text2sql LLM generation failed: %s", err)
+            return None
+        return parsed.sql
+
+    sql = _call_with_deadline(_generate, SQL_GENERATION_DEADLINE_S)
+    if sql is None:
+        log.info("text2sql: no SQL within %.0fs (or generation failed) — using the literature path", SQL_GENERATION_DEADLINE_S)
+    return sql
 
 
 def generate_sql(

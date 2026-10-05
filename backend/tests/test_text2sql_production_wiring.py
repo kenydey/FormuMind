@@ -10,6 +10,7 @@ the table whitelist (it used to exist only in the prompt) and the project scope.
 from __future__ import annotations
 
 import sqlite3
+import time
 
 import pytest
 
@@ -118,3 +119,27 @@ def test_functions_that_leave_the_database_are_refused(db):
     for sql in ("SELECT load_extension('x')", "SELECT readfile('/etc/passwd')"):
         with pytest.raises((Text2SQLError, sqlite3.DatabaseError)):
             text2sql.execute_sql(default_engine(), sql)
+
+
+def test_a_slow_model_cannot_hold_the_question_hostage(monkeypatch):
+    """The structured route is now live for every chat question that looks structured; SQL generation gets a
+    wall-clock deadline instead of the provider's own (minutes-long) tail latency."""
+    import app.services.llm as llm_mod
+
+    monkeypatch.setattr(text2sql, "SQL_GENERATION_DEADLINE_S", 0.2)
+
+    def slow(*args, **kwargs):
+        time.sleep(3)
+        return None, "too late"
+
+    monkeypatch.setattr(llm_mod, "complete_structured", slow)
+    started = time.monotonic()
+    assert text2sql._default_complete("system", "user") is None
+    assert time.monotonic() - started < 1.5
+
+
+def test_a_prompt_answered_in_time_still_yields_the_sql(monkeypatch):
+    import app.services.llm as llm_mod
+
+    monkeypatch.setattr(llm_mod, "complete_structured", lambda *a, **k: (text2sql._GeneratedSQL(sql="SELECT 1"), None))
+    assert text2sql._default_complete("system", "user") == "SELECT 1"
