@@ -31,7 +31,7 @@ def test_markitdown_is_declared_with_its_format_backends() -> None:
     """MarkItDown keeps every converter behind an extra. Declared bare it
     imports fine and converts nothing: .pptx/.xlsx yield an empty document and
     .docx silently degrades to python-docx, which drops tables."""
-    pyproject = (BACKEND / "pyproject.toml").read_text()
+    pyproject = (BACKEND / "pyproject.toml").read_text(encoding="utf-8")
     spec = re.search(r'"(markitdown[^"]*)"', pyproject)
     assert spec, "markitdown must be declared in pyproject"
     for extra in ("pdf", "docx", "pptx", "xlsx"):
@@ -51,7 +51,7 @@ def test_dependency_catalog_installs_the_same_extras() -> None:
 def test_a_pdf_parser_ships_in_the_locked_requirements() -> None:
     """Optional extras are fine for the good parsers, but the image must not
     ship with zero. pypdf is pure Python and a few hundred KB."""
-    requirements = (BACKEND / "requirements.txt").read_text()
+    requirements = (BACKEND / "requirements.txt").read_text(encoding="utf-8")
     assert re.search(r"^pypdf==", requirements, re.M), requirements
 
 

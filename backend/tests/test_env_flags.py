@@ -81,12 +81,12 @@ def test_update_applies_immediately_and_persists(monkeypatch, tmp_path):
     assert os.environ["FORMUMIND_CONTENT_FILTER_LLM_JUDGE"] == "true"
     assert get_settings().content_filter_llm_judge is True
     # Persisted to .env for restart survival.
-    env_text = (tmp_path / ".env").read_text()
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "FORMUMIND_CONTENT_FILTER_LLM_JUDGE=true" in env_text
 
     env_flags.update_env_flags({"content_filter_llm_judge": False})
     assert get_settings().content_filter_llm_judge is False
-    assert "FORMUMIND_CONTENT_FILTER_LLM_JUDGE=false" in (tmp_path / ".env").read_text()
+    assert "FORMUMIND_CONTENT_FILTER_LLM_JUDGE=false" in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
 def test_update_rejects_unknown_and_nonregistry_attrs():

@@ -329,7 +329,7 @@ def test_ui_saved_eager_flag_cannot_override_the_deployment(
     from app.services import secrets_store
 
     env_file = tmp_path / "runtime.env"
-    env_file.write_text("FORMUMIND_CELERY_EAGER=true\n")
+    env_file.write_text("FORMUMIND_CELERY_EAGER=true\n", encoding="utf-8")
     monkeypatch.setattr(secrets_store, "read_env_file", lambda: {"FORMUMIND_CELERY_EAGER": "true"})
     monkeypatch.setenv("FORMUMIND_CELERY_EAGER", "false")
 

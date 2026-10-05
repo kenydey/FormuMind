@@ -95,3 +95,38 @@ def test_the_cjk_font_search_includes_windows(monkeypatch):
     # candidates are computed at import; the Windows ones must at least be present for the default WINDIR
     names = [Path(p).name for p in report_export._CJK_FONT_CANDIDATES]
     assert "msyh.ttc" in names and "simsun.ttc" in names
+
+
+def test_text_files_are_read_and_written_with_an_explicit_encoding():
+    """Without ``encoding=`` Python uses the locale's code page on Windows (cp1252 / cp936): a Chinese document
+    came back as mojibake or as ``UnicodeDecodeError: 'charmap' codec can't decode byte`` — which is how four of
+    this repository's own tests failed there. Applies to app/ and tests/ alike."""
+    offenders = []
+    for root in (APP, APP.parent / "tests"):
+        for path in sorted(root.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if isinstance(func, ast.Attribute) and func.attr in ("read_text", "write_text"):
+                    positional = 1 if func.attr == "read_text" else 2  # read_text(encoding) / write_text(data, encoding)
+                    if len(node.args) >= positional or any(kw.arg == "encoding" for kw in node.keywords):
+                        continue
+                    offenders.append(f"{path.relative_to(APP.parent)}:{node.lineno}: .{func.attr}()")
+                elif isinstance(func, ast.Name) and func.id == "open":
+                    mode = None
+                    if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                        mode = node.args[1].value
+                    for kw in node.keywords:
+                        if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                            mode = kw.value.value
+                    if isinstance(mode, str) and "b" in mode:
+                        continue
+                    if len(node.args) >= 4 or any(kw.arg == "encoding" for kw in node.keywords):
+                        continue
+                    if path.name == "_filelock.py" or "lock" in ast.unparse(node.args[0]).lower():
+                        continue  # lock files are never read: their text mode is irrelevant
+                    offenders.append(f"{path.relative_to(APP.parent)}:{node.lineno}: open()")
+    assert not offenders, "\n".join(["pass encoding='utf-8' (or open in binary mode):"] + offenders)

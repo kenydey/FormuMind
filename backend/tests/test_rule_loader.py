@@ -133,7 +133,7 @@ def test_missing_rules_dir_falls_back(tmp_path, monkeypatch):
 def test_bad_toml_falls_back(tmp_path, monkeypatch):
     over = tmp_path / "rules"
     over.mkdir()
-    (over / "acid_stability.toml").write_text("not [ valid toml ===")
+    (over / "acid_stability.toml").write_text("not [ valid toml ===", encoding="utf-8")
     monkeypatch.setenv("FORMUMIND_RULES_DIR", str(over))
     reload_rules()
     assert load_rules("acid_stability") == _rules_default("acid_stability")

@@ -67,12 +67,12 @@ def test_a_second_holder_waits_for_the_first(tmp_path):
     acquired_at: list[float] = []
 
     def contender():
-        with open(path, "w") as second:
+        with open(path, "w", encoding="utf-8") as second:
             lock_exclusive(second)
             acquired_at.append(time.monotonic())
             unlock(second)
 
-    with open(path, "w") as first:
+    with open(path, "w", encoding="utf-8") as first:
         lock_exclusive(first)
         thread = threading.Thread(target=contender)
         thread.start()

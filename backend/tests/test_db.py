@@ -141,7 +141,7 @@ def test_migrate_json_to_sql(tmp_path):
             "label": "",
         }
     ]
-    json_path.write_text(json.dumps(records_data))
+    json_path.write_text(json.dumps(records_data), encoding="utf-8")
 
     engine = make_engine("sqlite:///:memory:")
     sql_store = SqlExperimentStore(make_session_factory(engine))
@@ -159,7 +159,7 @@ def test_migrate_skips_when_db_not_empty(tmp_path):
         "domain": "anticorrosion_coating",
         "factors": {}, "cure_temperature_c": None,
         "measured": {"salt_spray_hours": 800.0}, "source": "lab", "label": "",
-    }]))
+    }]), encoding="utf-8")
 
     engine = make_engine("sqlite:///:memory:")
     sql_store = SqlExperimentStore(make_session_factory(engine))

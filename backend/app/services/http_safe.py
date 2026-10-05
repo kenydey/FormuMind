@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import socket
 import ssl
 import threading
@@ -122,6 +123,33 @@ def is_blocked_hostname(host: str) -> bool:
     return host.endswith(".localhost") or host.endswith(".local")
 
 
+_LEGACY_IPV4 = re.compile(r"^(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.(?:0[xX][0-9a-fA-F]+|[0-9]+)){0,3}$")
+
+
+def parse_legacy_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """The address ``inet_aton`` reads from *host*: ``127.1``, ``2130706433``, ``0177.0.0.1``, ``0x7f.1`` …
+
+    The stdlib's ``ipaddress`` only accepts the dotted quad, and whether ``getaddrinfo`` accepts the other
+    spellings is up to the operating system: glibc resolves ``127.1`` to 127.0.0.1, Windows' resolver does not —
+    it fails, the pre-flight then saw "no addresses to refuse" and let the URL through to a connection attempt.
+    A host that is an IPv4 address in disguise is judged here, the same way everywhere.
+    """
+    if not _LEGACY_IPV4.match(host):
+        return None
+    try:
+        numbers = [int(part, 16) if part[:2] in ("0x", "0X") else int(part, 8) if len(part) > 1 and part[0] == "0" else int(part)
+                   for part in host.split(".")]
+    except ValueError:  # "08", "09": not valid octal — inet_aton rejects them too
+        return None
+    *head, last = numbers
+    if any(n > 255 for n in head) or last >= 256 ** (4 - len(head)):
+        return None
+    value = 0
+    for n in head:
+        value = (value << 8) | n
+    return ipaddress.IPv4Address((value << (8 * (4 - len(head)))) | last)
+
+
 def resolve_addresses(host: str) -> list[IPAddress]:
     """Every address *host* resolves to, IPv4 first; a literal resolves to itself.
 
@@ -132,6 +160,9 @@ def resolve_addresses(host: str) -> list[IPAddress]:
         return [ipaddress.ip_address(host)]
     except ValueError:
         pass
+    legacy = parse_legacy_ipv4(host)
+    if legacy is not None:
+        return [legacy]
     found: list[IPAddress] = []
     for family in (socket.AF_INET, socket.AF_INET6):
         try:

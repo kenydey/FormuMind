@@ -16,7 +16,7 @@ DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile"
 
 @pytest.fixture(scope="module")
 def dockerfile() -> str:
-    return DOCKERFILE.read_text()
+    return DOCKERFILE.read_text(encoding="utf-8")
 
 
 def _run_steps(dockerfile: str) -> list[str]:
@@ -67,7 +67,7 @@ def test_alembic_config_ships_in_the_image(dockerfile: str) -> None:
 
 def test_alembic_config_points_at_a_path_that_ships(dockerfile: str) -> None:
     """script_location must resolve inside the image, not just in a checkout."""
-    ini = (DOCKERFILE.parent / "alembic.ini").read_text()
+    ini = (DOCKERFILE.parent / "alembic.ini").read_text(encoding="utf-8")
     location = re.search(r"^script_location\s*=\s*(.+)$", ini, re.M)
     assert location, "alembic.ini must declare script_location"
     # "%(here)s/app/db/alembic" — the app/ tree is COPYed, so this resolves.
@@ -87,7 +87,7 @@ COMPOSE = DOCKERFILE.resolve().parents[1] / "docker-compose.yml"
 @pytest.fixture(scope="module")
 def compose() -> dict:
     yaml = pytest.importorskip("yaml")
-    return yaml.safe_load(COMPOSE.read_text())
+    return yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
 
 
 def test_worker_does_not_inherit_the_api_healthcheck(compose: dict) -> None:

@@ -66,7 +66,7 @@ unfix           NVT
 """
     output_dir.mkdir(parents=True, exist_ok=True)
     inp_path = output_dir / "in.cure"
-    inp_path.write_text(input_content)
+    inp_path.write_text(input_content, encoding="utf-8")
     return inp_path
 
 
@@ -125,7 +125,7 @@ def fetch_simulation_result(job_id: str, job_dir: str | None = None) -> dict[str
         return {"job_id": job_id, "status": "pending", "engine": "lammps-htpolynet"}
 
     # Minimal log parse: look for the last "Step ... Temp ... PotEng ..." line
-    lines = log_path.read_text().splitlines()
+    lines = log_path.read_text(encoding="utf-8").splitlines()
     last_thermo = None
     for line in reversed(lines):
         parts = line.split()

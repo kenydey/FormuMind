@@ -104,5 +104,5 @@ body v1
     )
     assert upd.status_code == 200, upd.text
     assert upd.json()["installed"] is True
-    text = (tmp_path / "data" / "skills" / "remote-skill" / "SKILL.md").read_text()
+    text = (tmp_path / "data" / "skills" / "remote-skill" / "SKILL.md").read_text(encoding="utf-8")
     assert "v2" in text

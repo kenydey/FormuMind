@@ -90,7 +90,7 @@ def test_available_with_project_id_without_global(monkeypatch, tmp_path):
     monkeypatch.setenv("FORMUMIND_NOTEBOOKLM_ENABLED", "true")
     monkeypatch.setenv("FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID", "")
     session = tmp_path / "session.json"
-    session.write_text("{}")
+    session.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("FORMUMIND_NOTEBOOKLM_STORAGE_PATH", str(session))
     _reset_settings()
     try:
@@ -125,7 +125,7 @@ def test_setup_status_auth_ready_without_global_notebook_id(monkeypatch, tmp_pat
     monkeypatch.setenv("FORMUMIND_NOTEBOOKLM_ENABLED", "true")
     monkeypatch.setenv("FORMUMIND_NOTEBOOKLM_NOTEBOOK_ID", "")
     session = tmp_path / "session.json"
-    session.write_text("{}")
+    session.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("FORMUMIND_NOTEBOOKLM_STORAGE_PATH", str(session))
     _reset_settings()
     try:
