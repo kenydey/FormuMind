@@ -240,3 +240,30 @@ def test_a_real_pdf_datasheet_has_clean_headers_and_caption():
     result = parsing.parse_document(doc.tobytes(), "pdf")
     assert result.parser == "hybrid"
     _assert_datasheet(result)
+
+
+# ── a column-per-property table is not a property list ──────────────────────
+
+WIDE_DOCX = """表2 性能指标（合并表头）
+
+|  |  |  |  |
+| --- | --- | --- | --- |
+| 物理性能 | | 防腐性能 | |
+| 固含量(%) | 粘度(mPa·s) | 盐雾(h) | 附着力(级) |
+| 65 | 1200 | 720 | 1 |
+| 60 | 1100 | 500 | 2 |
+"""
+
+
+def test_a_wide_table_is_skipped_instead_of_producing_properties_named_after_numbers():
+    sets = tn.normalize_tables(_extract(WIDE_DOCX))
+    assert [(s.properties, s.warnings) for s in sets] == [
+        ([], ["skipped: column-per-property (wide) table — its row labels are numbers"])
+    ]
+
+
+def test_a_property_list_with_an_occasional_numeric_label_is_still_normalised():
+    md = "| 项目 | 指标 | 单位 |\n| --- | --- | --- |\n| 固体含量 | 65 | % |\n| 粘度 | 1200 | mPa·s |\n| 3 | 4 | h |\n"
+    (asset,) = _extract(md)
+    props, _ = _props([asset])
+    assert {"固体含量", "粘度"} <= set(props)

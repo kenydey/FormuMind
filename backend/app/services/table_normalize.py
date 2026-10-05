@@ -166,6 +166,7 @@ _PROPERTY_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 _PAREN_SUFFIX_RE = re.compile(r"[（(][^）)]*[）)]\s*$")
+_NUMERIC_LABEL = re.compile(r"^[<>≥≤~±+\-\s]*\d[\d,]*(?:\.\d+)?\s*%?$")
 
 
 def _norm_name_key(text: str) -> str:
@@ -339,6 +340,13 @@ def normalize_table(asset: TableAsset) -> PropertySet:
 
         name_col, value_col, unit_col = _detect_columns(headers)
         header_unit = _unit_from_header(headers[value_col]) if value_col < len(headers) else ""
+
+        # One property per row is the only layout this reads. A table with a column per property and a row per
+        # sample (``| 固含量 | 粘度 | 盐雾 |`` / ``| 65 | 1200 | 720 |``) has numbers where the names should be and
+        # would come out as properties called "65" holding the next column's value.
+        labels = [str(r[name_col]).strip() for r in rows if r and len(r) > name_col]
+        if labels and 2 * sum(1 for label in labels if _NUMERIC_LABEL.match(label)) >= len(labels):
+            return _empty_set(asset, "skipped: column-per-property (wide) table — its row labels are numbers")
 
         properties: list[Property] = []
         warnings: list[str] = []
