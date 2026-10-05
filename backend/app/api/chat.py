@@ -1197,8 +1197,8 @@ async def chat_stream(req: "ChatRequestValidated"):
                     settings=settings,
                 )
                 if structured is None:
+                    # Falls through to the markdown stream below (the sync endpoint does the same).
                     logger.warning("structured stream fallback: %s", struct_err)
-                    structured = None
                 answer = ""
                 citations: list = []
                 gate_notices: list = []
@@ -1256,29 +1256,29 @@ async def chat_stream(req: "ChatRequestValidated"):
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("chat/stream structured reviewer: %s", exc)
                         evidence_reviewer = None
-                _degr_notices = _retrieval_degradation_notices(kb_used) or []
-                yield _sse(
-                    {
-                        "type": "done",
-                        "answer": answer,
-                        "citations": [_sanitize_evidence(c) for c in citations],
-                        "rag_backend": active_rag_backend(),
-                        "kb_chunks_used": kb_used,
-                        "data_sources": plan.get("data_sources"),
-                        "structured": structured,
-                        "clarification": plan["clarification"],
-                        "rewritten_query": plan["rewritten_query"],
-                        # 风险5：reviewer 结果透出（与 paperqa 整包路径同字段）。
-                        "evidence_reviewer": evidence_reviewer,
-                        # v7 问答-4: claims/audit 进 SSE（与 paperqa 整包路径同字段），
-                        # 否则前端无法展示。
-                        "sourced_claims": _claims,
-                        "sources_audit": _audit,
-                        # B-1: BM25-only 退化提示位 + P1-4 门 notices 合并。
-                        "notices": list(_degr_notices) + list(gate_notices or []) or None,
-                    }
-                )
-                return
+                    _degr_notices = _retrieval_degradation_notices(kb_used) or []
+                    yield _sse(
+                        {
+                            "type": "done",
+                            "answer": answer,
+                            "citations": [_sanitize_evidence(c) for c in citations],
+                            "rag_backend": active_rag_backend(),
+                            "kb_chunks_used": kb_used,
+                            "data_sources": plan.get("data_sources"),
+                            "structured": structured,
+                            "clarification": plan["clarification"],
+                            "rewritten_query": plan["rewritten_query"],
+                            # 风险5：reviewer 结果透出（与 paperqa 整包路径同字段）。
+                            "evidence_reviewer": evidence_reviewer,
+                            # v7 问答-4: claims/audit 进 SSE（与 paperqa 整包路径同字段），
+                            # 否则前端无法展示。
+                            "sourced_claims": _claims,
+                            "sources_audit": _audit,
+                            # B-1: BM25-only 退化提示位 + P1-4 门 notices 合并。
+                            "notices": list(_degr_notices) + list(gate_notices or []) or None,
+                        }
+                    )
+                    return
 
             # markdown 主回答 — 可选 chem tool loop，否则 token 流。
             from ..services.chat_chem_tools import (

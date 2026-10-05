@@ -1954,7 +1954,11 @@ def answer_question(
     if not answer:
         # Tier 4 — offline fallback: return the most relevant snippet.
         if relevant:
-            answer = f"根据已加载资料：{relevant[0].snippet[:300]}…"
+            # The quote carries its footnote marker: without ``[^1]`` the numeric gate finds numbers
+            # with no citation to bind to and tells the reader a verbatim quote has "no source".
+            snippet = (relevant[0].snippet or "").strip()
+            quoted = snippet[:300] + ("…" if len(snippet) > 300 else "")
+            answer = f"根据已加载资料：{quoted}[^1]"
         else:
             answer = "暂无相关资料，请先检索或上传文献。"
     return answer, relevant
