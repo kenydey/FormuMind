@@ -141,6 +141,51 @@ jobs:
       - name: Extras tests must not be skipped
         run: "! grep -E 'SKIPPED.*(test_document_parsers_real|test_table_converter_output|test_colorimetry|test_html_upload)' /tmp/extras.txt"
 
+  # The one-click Windows installer has only ever been read, never run: the sandbox it was written in has no
+  # Windows. This runs the real entry point (install.bat -> Windows PowerShell 5.1 -> install.ps1) on a clean
+  # runner, then checks what a user would: the venv imports the app and the database exists. Non-blocking - a full
+  # dependency install is slow and tracks upstream wheels - but a red job here is a broken install for Windows users.
+  installer-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: install.bat on a clean checkout
+        shell: cmd
+        run: call install.bat
+
+      - name: The installed app imports, and the migrated database exists
+        shell: cmd
+        run: |
+          backend\.venv\Scripts\python.exe -c "import app.main; print('app imports')"
+          if errorlevel 1 exit /b 1
+          if not exist backend\data\formumind.db (echo database missing & exit /b 1)
+          dir backend\data\formumind.db
+
+      - name: A failing pip step must fail the installer
+        # Unreachable index: the venv is reused, so the first pip call fails. The installer used to print
+        # "installation complete" after a failed native command (PowerShell does not stop on one by itself).
+        shell: cmd
+        env:
+          PIP_INDEX_URL: http://127.0.0.1:9/simple
+          PIP_RETRIES: "0"
+          PIP_DEFAULT_TIMEOUT: "3"
+        run: |
+          call install.bat
+          if %ERRORLEVEL% EQU 0 (echo installer reported success although pip failed & exit /b 1)
+          echo installer failed as it should, exit code %ERRORLEVEL%
+          exit /b 0
+
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
   # still required — failures block merge once calibrated.
   golden:
