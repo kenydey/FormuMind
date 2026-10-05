@@ -17,16 +17,34 @@ interface SimilarFormulationModalProps {
   onClose: () => void;
 }
 
+/**
+ * The ``{ingredient: wt%}`` map the similarity search compares — the same shape the experiments store as
+ * ``factors``. ``Formulation.factors`` is never produced by the backend, so reading only that left every
+ * recommended formulation with an empty query: the modal always answered "未找到相似历史配方". The recipe's own
+ * ingredients are the query; an explicit ``factors`` (a measured run) still wins when present.
+ */
+export function similarityFactors(formulation: Formulation): Record<string, number> {
+  const out: Record<string, number> = {};
+  const explicit = Object.entries(formulation.factors ?? {}).filter(([, v]) => typeof v === "number");
+  if (explicit.length > 0) {
+    for (const [k, v] of explicit) out[k] = v;
+    return out;
+  }
+  for (const ing of formulation.ingredients ?? []) {
+    if (ing.name && Number.isFinite(ing.weight_pct) && ing.weight_pct > 0) {
+      out[ing.name] = (out[ing.name] ?? 0) + ing.weight_pct;
+    }
+  }
+  return out;
+}
+
 export default function SimilarFormulationModal({ formulation, onClose }: SimilarFormulationModalProps) {
   const [matches, setMatches] = useState<SimilarMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const factors: Record<string, number> = {};
-    for (const [k, v] of Object.entries(formulation.factors ?? {})) {
-      if (typeof v === "number") factors[k] = v;
-    }
+    const factors = similarityFactors(formulation);
     if (Object.keys(factors).length === 0) {
       setLoading(false);
       return;
@@ -46,8 +64,8 @@ export default function SimilarFormulationModal({ formulation, onClose }: Simila
         </div>
         <div className="mb-3 p-2 rounded bg-ink/60 border border-edge/30 text-[11px]">
           <span className="text-slate-500">当前配方: </span>
-          {Object.entries(formulation.factors ?? {}).map(([k, v]) => (
-            <span key={k} className="text-slate-300 mr-2">{k}: {v}%</span>
+          {Object.entries(similarityFactors(formulation)).map(([k, v]) => (
+            <span key={k} className="text-slate-300 mr-2">{k}: {Number(v.toFixed(2))}%</span>
           ))}
         </div>
         {loading && <div className="text-slate-500 text-sm py-4">搜索相似配方中...</div>}

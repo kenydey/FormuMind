@@ -138,9 +138,8 @@ export interface Formulation {
   // a measured run (charts prefer these over `predicted`); absent for pure
   // predictions. Optional so existing Formulation producers are unaffected.
   measured?: Record<string, number>;
-  // Ingredient/factor values in natural units (cross-project KG similarity
-  // queries are built from these); absent when the formulation carries no
-  // experiment factors.
+  // Ingredient/factor values in natural units for a measured run. The backend
+  // never sends it; the similarity modal falls back to the ingredients' wt%.
   factors?: Record<string, number>;
   score: number | null;
   warnings: string[];
