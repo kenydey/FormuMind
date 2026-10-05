@@ -6,9 +6,11 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
+import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -91,14 +93,38 @@ def _to_ingest_response(filename: str, outcome) -> IngestResponse:
     )
 
 
+_UNSAFE_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+)
+
+
+def _disk_name(filename: str) -> str:
+    """A name that is valid on every file system and cannot leave the directory it is joined to.
+
+    ``os.path.basename`` only knows the separators of the OS the server runs on, so a client's ``..\\x`` survived on
+    Linux; ``:``, ``?`` and ``*`` are fine in a macOS / Linux client's file name but make ``open()`` fail on Windows
+    (an upload of ``TDS: epoxy primer.pdf`` was a 500 there); ``CON`` / ``NUL`` are devices, not files.
+    """
+    base = re.split(r"[\\/]", filename or "")[-1]
+    base = _UNSAFE_NAME_CHARS.sub("_", base).strip(" .")
+    stem, ext = os.path.splitext(base)
+    if stem.lower() in _WINDOWS_DEVICE_NAMES:
+        stem = f"_{stem}"
+    return (stem[:100] + ext[:20]) or "upload"
+
+
 def _write_upload(content: bytes, filename: str, dest_dir: str) -> str:
     """Persist one uploaded part to the temp dir the task will read from.
 
-    The name is flattened to a basename so a crafted filename cannot escape
-    the temp directory; the original name is still what the parser sniffs.
+    The name is flattened and sanitised (see :func:`_disk_name`); the original name is still what the parser
+    sniffs — it travels beside the path, not in it. Every part gets a directory of its own: two parts called
+    ``datasheet.pdf`` (a folder upload with the same file name in several sub-folders) used to land on the same path,
+    so the first was silently replaced by the second, which was then ingested twice.
     """
-    safe_name = os.path.basename(filename) or "upload"
-    path = os.path.join(dest_dir, safe_name)
+    part_dir = os.path.join(dest_dir, uuid.uuid4().hex[:12])
+    os.makedirs(part_dir)
+    path = os.path.join(part_dir, _disk_name(filename))
     with open(path, "wb") as fh:
         fh.write(content)
     return path
