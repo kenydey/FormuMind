@@ -184,10 +184,10 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 
 **9. 其余 R3 §4 未动的项**：#2 走代理时固定 IP 不生效、#3 `get_campaign_store()` 首次探测、#4 无界面的接口、#5 旧脚本 `verify_frontend_api.py`（现在有了 `scripts/audit/contract/`，可以直接删）、#6 `_utcnow` 帮手收敛、#8 KB 嵌入路径 CI、#9 compose 未真起过栈、#10 ESLint 范围。
 
-**10. Windows 上有一个"慢得没道理"的测试，原因未明**
-- 现状：`test_session_factory_usage.py::test_both_accessors_follow_a_database_url_change` 在 `1d5ac38` 的 Windows 分片里分别用了 **122 s 与 172 s**（Linux 上 0.2 s），上一次全绿的运行里它不在每个分片最慢的十条里。测试里只有两次 `make_engine` 加 `create_all`；已排除"DDL 条数随导入的模块增长"（整个 app 导入之后仍是 29 张表 / 112 条 DDL，Linux 上 0.13 s）。同一次运行里别的建库夹具每次只要 3–13 s，所以它不是"Windows 上 SQLite 就是慢"，而像是某种与分片内前序测试状态有关的等待（SQLite `busy_timeout` 是 60 s，两个测试的耗时都接近它的整数倍，但这只是线索不是结论）。
-- 做法：Windows 分片现在对超过 60 s 的单个测试打印**所有线程的栈**（`-o faulthandler_timeout=60`，并把慢测试清单拉长到 25 条）——下一次 `backend-windows` 运行会直接给出它在等什么。若是 `make_engine` 里逐条自动提交的 DDL，则把 `create_all` 包进一次显式事务（对首次启动在慢盘 / Docker Desktop 绑定挂载上也有好处）；若是前序测试泄漏的连接 / 线程，则找到并关掉它。
-- 验收：Windows 分片里没有超过 30 s 的单个测试；分片总耗时回到 5 min 以内。
+**10. Windows 上一个"慢得没道理"的测试：已不再复现，原因仍是推测（低优先）**
+- 现状：`test_session_factory_usage.py::test_both_accessors_follow_a_database_url_change` 在 `1d5ac38` 的 Windows 分片里分别用了 **122 s 与 172 s**（Linux 上 0.2 s）。修复 #60 之后的运行（`b8fe985`）里它只要 3 s，8 个分片里**没有任何测试触发 60 s 的栈转储**，分片耗时 2:42–7:06；把 `1d5ac38` 的第 0 个分片按文件清单在 Linux 上原样重跑也只要 48 s、该测试不在最慢列表里。同一分片里正好有 #60 的 6 个 setup / teardown 错误（日志里看得到的那条：`pytest_runtest_teardown` 第一句 `_update_current_test_var` 就抛了 `ValueError`，之后的拆除没有走），所以**最可能**的解释是前序错误留下了没撤销的状态——但没有栈来证实，别当结论。已排除"DDL 条数随导入的模块增长"（整个 app 导入之后仍是 29 张表 / 112 条 DDL，Linux 上 0.13 s）。
+- 做法：Windows 分片保留 `-o faulthandler_timeout=60`（任何单测超过 60 s 就把所有线程的栈打进日志，不杀进程）并把慢测试清单拉到 25 条——它再出现时日志里就有答案；另外 Windows 上建一次库的夹具 3–21 s（每条 DDL 自动提交一次，`make_engine` 在 Windows 上约 1.5 s、夹具里偶尔 20 s），若想把分片压到 3 分钟内，可把 `create_all` 包进一次显式事务。
+- 验收：Windows 分片里没有超过 30 s 的单个测试（现在最慢的是 21 s 的一个真实语料对比用例和几个建库夹具）。
 
 **11. Docker 镜像"构建出来能不能跑"仍不在 CI 里**
 - 现状：本轮加的 `dockerfile-extras` 关卡只回答"整份 Dockerfile 的依赖解析得出来吗、pin 还在吗"（那一类缺陷此前在构建前根本看不见）；构建本身一次要十几分钟（torch / docling），没有放进 CI。
@@ -227,7 +227,8 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | 一键安装的约束（真 pip，`--dry-run`） | 由 `pin_constraints()` 生成的约束文件被 pip 接受；`ddgs` 装得上；**无下限的 `patent-client` 在约束下被回溯到 3.2.6**——所以目录条目现在带 extra 自己的下限，而不是裸名字 |
 | OCR 真实验证（干净 venv） | `rapidocr==3.9.2` 不带 onnxruntime → 构造引擎抛 `ImportError`；加上 `onnxruntime` 后离线读出渲染图上的 "Zinc phosphate 15.0 parts E-44"；包内带 3 个 `.onnx`（31 MB） |
 | 声明 / 探针 / 文档一致性扫描 | `optional_import` 探针与目录 ↔ extras ↔ Dockerfile 逐项对；`.env.example` / 文档 / compose / 脚本里的 `FORMUMIND_*` 全部对得上 Settings 字段或 `config.py` 登记的非 Settings 变量 |
-| `backend-windows` 在 `1d5ac38` 上（读日志逐个分片核对） | 8 个分片里 6 个绿、2 个红——红的两个都是 §2 #60；另见 §4 #10（两个原因未明的慢测试）。本轮的修复尚未在 Windows 上复跑，结果见下一次 CI |
+| `backend-windows`（读日志逐个分片核对） | `1d5ac38`：8 个分片里 6 个绿、2 个红——红的两个都是 §2 #60（16 个 setup / teardown 错误），另有两个原因未明的慢测试（§4 #10）。**`b8fe985`：8 / 8 分片全绿**，耗时 2:42–7:06，没有测试触发 60 s 的栈转储，原来慢的那个测试 3 s；两个分片的 `FAILED` / `ERROR` 清单为空 |
+| CI `b8fe985`（本轮最终推送） | **19 个 job 全绿**：阻塞的 `backend`（含 ruff 与 rigor gate）/ `frontend`，以及非阻塞的 `backend-newer-python`（3.12 / 3.13，首次）、`backend-extras`、`backend-baybe`、`golden`、`deepeval`、`api-contract`、`api-fuzz`、`installer-windows`、8 个 `backend-windows` 分片；另有 `Dependency pins`（9 个 job，含新的 `dockerfile-extras`，`intel` 零豁免）与新的 `Dependency audit`（pip-audit + npm audit）也是绿的 |
 
 没有验证的部分：`install.bat` 的**双击**行为（Windows PowerShell 5.1 下真实执行 `install.ps1` 已由 CI 验证）；Docker compose / 镜像真构建真起栈（镜像装的是全部可选依赖，含 torch / docling，构建一次要十几分钟，没放进 CI）；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为，以及 Redis breaker 在真实 Redis 断开 / 恢复时的表现（本地与 CI 都没有 Redis：breaker 用假客户端测，写锁走"无锁继续"分支）；一键安装在**真实 pip 上真装包**的行为（约束文件的格式与"拒绝"行为用真 pip 的 `--dry-run` 验证过，安装本身用假 `subprocess.run` 测）；Docker 镜像"构建出来能不能跑"（新增的解析关卡只回答"装得出来吗、pin 还在吗"）。
 
