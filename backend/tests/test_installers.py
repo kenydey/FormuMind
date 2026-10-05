@@ -130,7 +130,43 @@ def test_files_the_installers_point_at_exist(script):
 
 
 def test_both_installers_warn_about_a_python_newer_than_the_tested_one():
-    """The image and CI run 3.11; a brand-new Python often has no prebuilt rdkit / torch, and the failure shows up as a
-    pip build error far from its cause."""
-    assert 'Version -ge [version]"3.13"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
-    assert 'ver_ge "$PY_VER" "3.13"' in (REPO / "install.sh").read_text(encoding="utf-8")
+    """The image and the blocking CI job run 3.11 and the full suite passes on 3.12 and 3.13; a brand-new Python often
+    has no prebuilt rdkit / torch, and the failure shows up as a pip build error far from its cause."""
+    assert 'Version -ge [version]"3.14"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    assert 'ver_ge "$PY_VER" "3.14"' in (REPO / "install.sh").read_text(encoding="utf-8")
+
+
+def test_the_declared_minimum_python_is_one_the_pinned_requirements_support():
+    """``requires-python`` said ``>=3.10`` while ``requirements.txt`` pins numpy 2.4, which needs 3.11: on 3.10 pip failed
+    with an unsatisfiable-requirements error that nothing in the installers had warned about.
+
+    Every pinned distribution that is installed here must admit the minimum the project declares, and both installers
+    must enforce that same minimum.
+    """
+    import importlib.metadata as md
+    import tomllib
+
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    backend = REPO / "backend"
+    declared = tomllib.loads((backend / "pyproject.toml").read_text(encoding="utf-8"))["project"]["requires-python"]
+    floor = re.match(r">=\s*(\d+\.\d+)", declared)
+    assert floor, declared
+    minimum = Version(floor.group(1))
+
+    refusing = []
+    for line in (backend / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^([A-Za-z0-9_.\-]+)(?:\[[^\]]*\])?==([^\s;#]+)", line.strip())
+        if not match:
+            continue
+        try:
+            requires = md.metadata(match.group(1)).get("Requires-Python")
+        except md.PackageNotFoundError:
+            continue
+        if requires and not SpecifierSet(requires).contains(f"{minimum}.0"):
+            refusing.append(f"{match.group(1)}=={match.group(2)} requires Python {requires}")
+    assert not refusing, f"requires-python is {declared!r} but:\n  " + "\n  ".join(refusing)
+
+    assert f'-ge [version]"{minimum}"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    assert f'ver_ge "$PY_VER" "{minimum}"' in (REPO / "install.sh").read_text(encoding="utf-8")

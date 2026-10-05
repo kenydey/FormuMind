@@ -54,7 +54,7 @@ function Find-Python {
   $cands = @()
   $pyLauncher = Get-Command "py" -ErrorAction SilentlyContinue
   if ($pyLauncher) {
-    foreach ($v in @("3.11", "3.12", "3.10")) { $cands += @{ Cmd = "py"; Args = @("-$v") } }
+    foreach ($v in @("3.11", "3.12", "3.13")) { $cands += @{ Cmd = "py"; Args = @("-$v") } }
     $cands += @{ Cmd = "py"; Args = @("-3") }
   }
   foreach ($name in @("python", "python3")) {
@@ -66,7 +66,7 @@ function Find-Python {
       $out = & $cand.Cmd @($cand.Args + "--version") 2>&1 | Out-String
       if ($out -match "Python (\d+\.\d+\.\d+)") {
         $ver = [version]$Matches[1]
-        if ($ver -ge [version]"3.10") {
+        if ($ver -ge [version]"3.11") {
           $exe = $cand.Cmd
           if ($cand.Cmd -eq "py") {
             # 解析 py -3.x 背后的真实 python.exe，供 venv 使用
@@ -85,15 +85,15 @@ Write-Step "[1/5] 环境检查"
 
 $py = Find-Python
 if (-not $py) {
-  Write-Err "未找到 Python 3.10+"
-  Write-Host "  请先安装 Python 3.10+（勾选 Add to PATH）："
+  Write-Err "未找到 Python 3.11+"
+  Write-Host "  请先安装 Python 3.11+（勾选 Add to PATH）："
   Write-Host "    winget install Python.Python.3.12"
   Write-Host "    或 https://www.python.org/downloads/"
   exit 1
 }
 Write-Ok "Python $($py.Version) ($($py.Exe))"
-if ($py.Version -ge [version]"3.13") {
-  Write-Warn "Python $($py.Version) 比本项目测试过的版本（3.11，Dockerfile 与 CI 所用）新；科学依赖可能没有预编译包。安装失败时请改用 3.11 或 3.12（winget install Python.Python.3.11）。"
+if ($py.Version -ge [version]"3.14") {
+  Write-Warn "Python $($py.Version) 比本项目测试过的版本（3.11–3.13；3.11 是 Dockerfile 与 CI 阻塞 job 所用）新；科学依赖可能没有预编译包。安装失败时请改用 3.11 或 3.12（winget install Python.Python.3.11）。"
 }
 
 $nodeCmd = Get-Command "node" -ErrorAction SilentlyContinue

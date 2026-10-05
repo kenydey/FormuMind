@@ -1,0 +1,62 @@
+# Known-vulnerability scan of what the application actually ships (round-4).
+#
+# A pinned dependency stays pinned: nothing re-checks it once it is in requirements.txt / package-lock.json. The first
+# scan found, in production dependencies, pypdf 6.14.2 (14 advisories — crafted PDFs that run for ever or exhaust memory,
+# in the parser every uploaded PDF goes through), pydantic-settings 2.14.1, and on the frontend jspdf 2.5.2 (12 advisories,
+# two critical, eight high) and DOMPurify (2.5.9 behind jspdf, 3.4.15 behind Mermaid's "strict" mode; 17 advisories).
+#
+# Advisories appear without this repository changing, so it runs on a schedule as well as when dependency files change.
+# A separate workflow rather than a CI job: a new advisory should be read and acted on, not block an unrelated merge.
+name: Dependency audit
+
+on:
+  push:
+    paths:
+      - "backend/requirements.txt"
+      - "backend/pyproject.toml"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/dependency-audit.yml"
+  pull_request:
+    paths:
+      - "backend/requirements.txt"
+      - "backend/pyproject.toml"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/dependency-audit.yml"
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays 04:17 UTC
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+
+      - name: Audit the pinned runtime requirements and everything they pull in
+        # -r resolves the file in a throw-away environment, so pip / setuptools of the runner are not part of the answer.
+        working-directory: backend
+        run: pip-audit -r requirements.txt --progress-spinner off
+
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Audit the production dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=moderate

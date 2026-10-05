@@ -1,8 +1,10 @@
 # FormuMind backend — dev / test tooling (locked).
 #
-# Includes the core runtime via -r, plus the test stack. pypdf is here (not in
-# requirements.txt) because it is only needed to exercise the real PDF-parsing
-# path in tests; production uses the stdlib raw-stream fallback when absent.
+# Includes the core runtime via -r, plus the test stack. Do not pin anything here
+# that requirements.txt already pins (pypdf, httpx, ...): two pins of one package
+# make `pip install -r requirements-dev.txt` fail with ResolutionImpossible, which
+# is what it did once requirements.txt began pinning pypdf too (6.14.0 here, 6.14.2
+# there) - nothing noticed because CI installs `-e '.[dev]'` instead.
 #
 #   pip install -r requirements-dev.txt
 
@@ -10,6 +12,5 @@
 
 pytest==9.1.0
 pytest-asyncio==1.4.0
-pypdf==6.14.0
 PyYAML==6.0.3          # tests/test_compose_hardening.py
 cryptography==50.0.2   # tests/test_http_safe.py (self-signed cert for the TLS-name test)

@@ -763,17 +763,22 @@ dependencies = [
 | 优化 | `pip install -e ".[optimize]"` | Optuna |
 | 贝叶斯优化 | `pip install -e ".[bo]"` | BoTorch |
 | 企业优化 | `pip install -e ".[baybe]"` | BayBE约束贝叶斯学习 |
-| 文献检索 | `pip install -e ".[intel]"` | patent_client, arxiv, semanticscholar ⚠️ |
+| 文献检索 | `pip install -e ".[intel]"` | paper-qa, molbloom, pubchempy, ddgs（arXiv 为核心依赖，Semantic Scholar 走 HTTP） |
+| 专利 SDK | `pip install -e ".[patents]"` | patent_client ⚠️ 替换固定的 httpx / pypdf，见下 |
 
-> ⚠️ **`.[intel]` 会静默降级四个钉住的依赖**。`patent-client` 要求
-> `httpx<0.28` + `pypdf<5.0`，解析结果还会带下 `arxiv` 与 `ddgs`。实测：
+> ⚠️ **`.[patents]` 会静默替换两个钉住的依赖——所以它不在 `.[intel]` 里。**
+> `patent-client` 要求 `httpx<0.28` + `pypdf<5.0`。实测：
 >
-> | 包 | 钉住 | 装 `.[intel]` 后 | 影响面 |
+> | 包 | 钉住 | 装 `.[patents]` 后 | 影响面 |
 > |---|---|---|---|
 > | `httpx` | 0.28.1 | 0.27.2 | **全代码库** |
-> | `pypdf` | 6.14.2 | 4.3.1 | 解析级联最后一层 |
-> | `arxiv` | 4.0.0 | 3.0.0 | 文献检索客户端 |
-> | `ddgs` | 9.14.4 | 9.14.3 | 互联网检索 |
+> | `pypdf` | 6.19.0 | 4.3.1 | 解析级联最后一层——读每一个上传/下载的 PDF，4.3.1 已公开 49 条漏洞（构造 PDF 导致拒绝服务） |
+>
+> 它原先是 `.[intel]` 的一员，而 Dockerfile 装的正是 `intel`——**生产镜像里跑的就是降级后的这一对**，没有任何东西报错；
+> 后来把 pypdf 下限抬到 6.19.0，Dockerfile 的 extras 组合干脆**解析不出来**，也只有 `docker compose build`
+> 才会说。现在它独立成 `patents` extra：Docker 镜像不装；设置页一键安装拒绝（`dependencies.install()` 把
+> `requirements.txt` 作为 pip 约束传入，冲突即失败，而不是降级）；`ci-deps.yml` 的 `dockerfile-extras` job 把
+> Dockerfile 的整串 extras 按 pin 解析一遍（`scripts/check_docker_extras.py`）。
 >
 > **pip 不报错，`pip check` 也说「No broken requirements found」**——降级之后环境
 > 内部是自洽的，只是不再是 requirements.txt 描述的那一个。唯一可靠的信号是拿实际
@@ -793,10 +798,11 @@ dependencies = [
 > 这一点（截断的 baseline 和小工程无法区分），所以那个 flag 由
 > `backend/tests/test_ci_deps_workflow.py` 钉在工作流文件上。
 >
-> 这不是疏漏而是**已评审的取舍**：`literature.py` 用 `patent_client` 做**在线
-> USPTO/EPO 专利检索**，依赖是真实的。所以只在需要那个功能时才装；
-> 专利**全文**走 Google Patents 落地页（见 §7.6），完全不需要它。
-> `.github/workflows/ci-deps.yml` 把上表四个版本写成允许清单——**变了就会重新报错**，
+> 取舍已经重新评审：`literature.py` 的在线 USPTO/EPO 检索依赖 `patent_client` 是真实的，但代价（降级 httpx，
+> 以及一个有 49 条漏洞的 PDF 解析器）不该由默认安装路径承担。所以只在**不解析不可信 PDF 的独立环境**里、
+> 确实需要时才装 `.[patents]`；专利**全文**走 Google Patents 落地页（见 §7.6），完全不需要它，
+> Google Patents / SerpAPI / 种子语料在没有它时照常工作。
+> `.github/workflows/ci-deps.yml` 把 `patents` 的两个版本写成允许清单、`intel` 必须零豁免——**变了就会重新报错**，
 > 新增的冲突也一样。
 | 文件解析 | `pip install -e ".[file_ingest]"` | PDF/DOCX/XLSX解析 |
 | 语义检索 | `pip install -e ".[embedding]"` | sentence-transformers |

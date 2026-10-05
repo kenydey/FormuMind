@@ -81,19 +81,47 @@ def test_the_check_is_given_the_baseline(workflow: str) -> None:
         assert "--report=" in line, line
 
 
+def _matrix(workflow: str) -> dict[str, str]:
+    """extra -> its allow-list, from the job's matrix (parsed, not grepped: there are several ``allow:`` lines)."""
+    import yaml
+
+    include = yaml.safe_load(workflow)["jobs"]["extras"]["strategy"]["matrix"]["include"]
+    return {row["extra"]: row["allow"] for row in include}
+
+
 def test_the_known_downgrades_are_recorded_at_exact_versions(workflow: str) -> None:
-    """`intel` really does downgrade three packages; that stays reviewed, not waived.
+    """`patents` really does downgrade two packages; that stays reviewed, not waived.
 
     Pinned to exact versions so the exception covers only the drift that was
     actually looked at — if it changes, the job fails again rather than the
     waiver quietly widening.
     """
-    allow = re.search(r"allow:\s*\"([^\"]+)\"", workflow)
-    assert allow, "the intel allow-list disappeared"
-    entries = dict(item.split(":", 1) for item in allow.group(1).split(","))
-    assert entries == {
-        "ddgs": "9.14.3",
-        "httpx": "0.27.2",
-        "pypdf": "4.3.1",
-    }
-    assert "allow: \"\"" not in allow.group(0)
+    allow = _matrix(workflow)
+    assert "patents" in allow, "the patents extra disappeared from the matrix"
+    entries = dict(item.split(":", 1) for item in allow["patents"].split(","))
+    assert entries == {"httpx": "0.27.2", "pypdf": "4.3.1"}
+
+
+def test_no_other_extra_is_waived(workflow: str) -> None:
+    """`intel` used to carry the same waiver (plus ddgs) because it contained patent-client - and the Dockerfile
+    installs `intel`, so the production image shipped pypdf 4.3.1. It is clean now and must stay that way: a waiver
+    on an extra that real installs use is a downgrade shipped on purpose."""
+    allow = _matrix(workflow)
+    assert allow["intel"] == "", allow["intel"]
+    waived = {name: value for name, value in allow.items() if value and name != "patents"}
+    assert not waived, waived
+
+
+def test_the_dockerfile_combination_is_resolved_against_the_pins(workflow: str) -> None:
+    """One extra at a time cannot see two extras that disagree (file_ingest wanted pypdf>=6.19 while patent-client
+    wanted pypdf<5), and the image is not built in CI - so the Dockerfile's whole list is resolved with the pins as
+    constraints, and a change to the Dockerfile re-runs the gate."""
+    import yaml
+
+    doc = yaml.safe_load(workflow)
+    steps = doc["jobs"]["dockerfile-extras"]["steps"]
+    assert any("scripts/check_docker_extras.py" in step.get("run", "") for step in steps)
+    triggers = doc.get("on") or doc.get(True)  # YAML 1.1 reads the bare key `on` as True
+    for event in ("push", "pull_request"):
+        assert "backend/Dockerfile" in triggers[event]["paths"], event
+        assert "scripts/check_docker_extras.py" in triggers[event]["paths"], event

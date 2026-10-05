@@ -29,7 +29,7 @@ for arg in "$@"; do
   esac
 done
 
-# 版本比较：ver_ge "3.12.3" "3.10" → 0 表示 >=
+# 版本比较：ver_ge "3.12.3" "3.11" → 0 表示 >=
 ver_ge() {
   [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
 }
@@ -38,7 +38,7 @@ OS="linux"
 [ "$(uname -s)" = "Darwin" ] && OS="macos"
 
 hint_python() {
-  echo "  请先安装 Python 3.10+："
+  echo "  请先安装 Python 3.11+："
   if [ "$OS" = "macos" ]; then
     echo "    brew install python@3.12"
   elif command -v apt >/dev/null 2>&1; then
@@ -69,14 +69,14 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')"
-if ! ver_ge "$PY_VER" "3.10"; then
-  echo "❌ Python 版本过低: $PY_VER（需要 >= 3.10）"
+if ! ver_ge "$PY_VER" "3.11"; then
+  echo "❌ Python 版本过低: $PY_VER（需要 >= 3.11：requirements.txt 固定的 numpy 2.x 不支持更低版本）"
   hint_python
   exit 1
 fi
 echo "    Python $PY_VER ✓"
-if ver_ge "$PY_VER" "3.13"; then
-  echo "    ⚠ Python $PY_VER 比本项目测试过的版本（3.11，Dockerfile 与 CI 所用）新；科学依赖可能没有预编译包。安装失败时请改用 3.11 或 3.12。"
+if ver_ge "$PY_VER" "3.14"; then
+  echo "    ⚠ Python $PY_VER 比本项目测试过的版本（3.11–3.13；3.11 是 Dockerfile 与 CI 阻塞 job 所用）新；科学依赖可能没有预编译包。安装失败时请改用 3.11 或 3.12。"
 fi
 
 if command -v node >/dev/null 2>&1; then

@@ -76,8 +76,8 @@ it is installed.
 |------------|------------------------|-------------------|
 | Research / chat | 9 LLM providers — Claude, OpenAI, Gemini, Grok, Meta (Groq), DeepSeek, Qwen, Kimi, MiniMax | rule-based synthesis over the knowledge base |
 | NL intent parsing | configured LLM (`complete_json`) | regex/keyword heuristic |
-| Patent search | `patent_client` | curated seed corpus per domain |
-| Literature search | `arxiv`, `semanticscholar` | (offline returns no extra hits) |
+| Patent search | `patent_client` (optional, `.[patents]` — see the warning in the install section) | curated seed corpus per domain |
+| Literature search | `arxiv`, Semantic Scholar (HTTP API, no SDK), OpenAlex | (offline returns no extra hits) |
 | Internet search | `duckduckgo-search` | (offline returns no extra hits) |
 | **NotebookLM source** | `notebooklm-py` (browser-session auth) | (off → no extra hits) |
 | File ingestion | `markitdown` (PDF/DOCX/XLSX/PPTX/HTML/images…) → `pypdf`/`python-docx` | plain-text decoder |
@@ -508,7 +508,7 @@ matching `FORMUMIND_API_TOKEN` at the top of Settings.
 The research step is split into selectable sources, all behind adapters with
 offline fallbacks:
 
-- **Patents** — `patent_client` (offline: curated seed corpus per domain);
+- **Patents** — `patent_client` (optional, `.[patents]`; offline: curated seed corpus per domain);
 - **Literature** — arXiv + Semantic Scholar;
 - **Internet** — DuckDuckGo (no API key required);
 - **NotebookLM** — `notebooklm-py` direct library: a single fixed Google
@@ -1343,7 +1343,8 @@ pip install -e ".[llm]"          # Claude + OpenAI + Gemini SDKs (covers all 9 p
 pip install -e ".[science]"      # scipy, scikit-learn, RDKit, ChemFormula, thermo
 pip install -e ".[optimize]"     # optuna (optional CPU multi-objective; native is default)
 pip install -e ".[bo]"           # BoTorch + gpytorch + torch CPU (optional GP qNEHVI)
-pip install -e ".[intel]"        # patent_client, paper-qa, chemcrow, pubchempy, arxiv, semanticscholar, duckduckgo-search
+pip install -e ".[intel]"        # paper-qa, molbloom, pubchempy, ddgs (arXiv is a core dependency; Semantic Scholar is queried over HTTP)
+pip install -e ".[patents]"      # patent-client for online USPTO/EPO search — ⚠️ replaces the pinned httpx and pypdf; read the warning below first
 pip install -e ".[file_ingest]"  # markitdown, pypdf, python-docx (local file upload)
 pip install -e ".[embedding]"    # sentence-transformers → embeddings (session RAG / KB hybrid)
 pip install -e ".[color]"        # colour-science (CIELAB / CIEDE2000)
@@ -1353,7 +1354,7 @@ pip install -e ".[heavy]"        # torch, deepchem, transformers (MoLFormer), as
 pip install -e ".[export]"       # openpyxl (XLSX export; CSV needs nothing)
 ```
 
-> ⚠️ **`.[intel]` silently downgrades four pinned dependencies.** `patent-client` requires `httpx<0.28` and `pypdf<5.0`, and the resolution also pulls older `arxiv` and `ddgs`. Measured: `httpx 0.28.1→0.27.2`, `pypdf 6.14.2→4.3.1`, `arxiv 4.0.0→3.0.0`, `ddgs 9.14.4→9.14.3`. pip does not error and `pip check` reports nothing wrong. Install it only if you need **online USPTO/EPO patent search** — patent *full text* comes from Google Patents landing pages and needs none of this. CI enforces the exact accepted versions (`.github/workflows/ci-deps.yml`).
+> ⚠️ **`.[patents]` replaces two pinned dependencies — which is why it is not part of `.[intel]` and nothing installs it for you.** `patent-client` (online USPTO/EPO patent search through its SDK) requires `httpx<0.28` and `pypdf<5.0`. pip resolves that conflict by *replacing* the pins instead of failing: `httpx 0.28.1→0.27.2` and `pypdf 6.19.0→4.3.1` — and pypdf is the parser that reads every uploaded and downloaded PDF; 4.3.1 has 49 published advisories (crafted-PDF denial of service). pip does not error and `pip check` reports nothing wrong. Install it only into an environment that does not parse untrusted PDFs, and only if you need the SDK: patent *full text* comes from Google Patents landing pages, and Google Patents / SerpAPI / the built-in seed corpus keep answering without it. The Docker image does not include it, Settings → Dependencies refuses it, and CI checks both (`.github/workflows/ci-deps.yml`: per-extra drift, and the Dockerfile's whole extras list resolved against `requirements.txt`).
 
 
 After installing the `science` extra:

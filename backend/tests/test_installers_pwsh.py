@@ -165,3 +165,9 @@ def test_without_3_11_it_takes_3_12_before_the_newest(tmp_path):
 def test_only_a_newer_python_is_still_accepted(tmp_path):
     found = _find_python(tmp_path, ["3.14.0"])
     assert found == r"FOUND=3.14.0|C:\fake\latest\python.exe", found
+
+
+def test_a_python_older_than_the_supported_minimum_is_never_chosen(tmp_path):
+    """3.10 is below the floor (numpy 2.x needs 3.11): whatever is found instead, it is not that one."""
+    found = _find_python(tmp_path, ["3.10.11"])
+    assert not found.startswith("FOUND=3.10"), found

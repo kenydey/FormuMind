@@ -64,6 +64,38 @@ jobs:
         # No LLM cost; fails the build if rigor metrics regress.
         run: python scripts/rigor_gate.py
 
+  # The installers prefer 3.11, then 3.12, then 3.13 - so a user who does not have 3.11 lands on a version this
+  # repository only ever ran by hand (4440 tests pass on both as of round 4). Non-blocking, like the other jobs that
+  # track what upstream wheels do: new Pythons break compiled dependencies before they break our code.
+  backend-newer-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e '.[dev,llm,science,optimize,pydoe]' pandas
+
+      - name: Run tests
+        run: pytest -m "not golden_eval" -q
+
   # Heavy optional engine (BayBE pulls torch/botorch). Non-blocking: it exists to
   # make the BayBE-backed suites visible instead of silently skipped, without
   # letting a multi-GB resolve or an upstream release gate every merge.
@@ -269,7 +301,9 @@ jobs:
           $mine = @()
           for ($i = 0; $i -lt $files.Count; $i++) { if (($i % 8) -eq [int]$env:SHARD) { $mine += $files[$i] } }
           Write-Host "shard $env:SHARD: $($mine.Count) of $($files.Count) test files"
-          python -m pytest -m "not golden_eval" -q -p no:cacheprovider --maxfail=400 -rfE --durations=10 @mine
+          # faulthandler_timeout: a test that runs longer than 60 s dumps every thread's stack into the log (it does not
+          # kill it). Two tests that take 0.2 s on Linux took 122 s and 172 s here once, with nothing in the log to say why.
+          python -m pytest -m "not golden_eval" -q -p no:cacheprovider --maxfail=400 -rfE --durations=25 -o faulthandler_timeout=60 @mine
           exit $LASTEXITCODE
 
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;

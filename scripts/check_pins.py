@@ -1,11 +1,11 @@
 """Assert that installing an optional extra did not downgrade a pinned base dep.
 
-`pip install -e ".[intel]"` does not fail when an extra disagrees with
-`requirements.txt` — it silently resolves the conflict by downgrading. That is
-how `patent-client` (httpx<0.28, pypdf<5.0) quietly replaces the pinned
-httpx==0.28.1 and pypdf==6.14.2 that the whole codebase runs on. Nothing errors,
-nothing logs, and the break surfaces much later as odd behaviour in unrelated
-code.
+`pip install -e ".[patents]"` (and, before patent-client moved there, `.[intel]`)
+does not fail when an extra disagrees with `requirements.txt` — it silently
+resolves the conflict by downgrading. That is how `patent-client` (httpx<0.28,
+pypdf<5.0) quietly replaces the pinned httpx==0.28.1 and pypdf==6.x that the
+whole codebase runs on. Nothing errors, nothing logs, and the break surfaces
+much later as odd behaviour in unrelated code.
 
 pip's own `pip check` does not catch this: after the downgrade the environment
 is internally *consistent*, just not the one requirements.txt describes. The

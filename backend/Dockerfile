@@ -46,17 +46,23 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
     && pip uninstall -y surya-ocr 2>/dev/null; echo "surya-ocr removed (CPU VPS)"
 
 # 3) Local OCR for scanned pages. No build-time model download step is needed:
-# rapidocr-onnxruntime ships the Chinese PP-OCRv4 weights inside the wheel
-# (16 MB — det + rec + cls), so the container OCRs offline the moment it starts.
-# Verified by blocking the network and running a page through it.
+# rapidocr 3.x ships the PP-OCRv6 small det/rec weights and the angle classifier
+# inside the wheel (three .onnx files), so the container OCRs offline the moment
+# it starts. Verified by blocking the network and running a page through it.
+#
+# `rapidocr` is the package app/services/rapidocr_local.py imports. This step used
+# to install the retired `rapidocr-onnxruntime`, which nothing imports - OCR only
+# worked here because docling happened to pull rapidocr in. 3.x declares no
+# inference runtime (the engine fails to build with "onnxruntime is not
+# installed"), so that is named explicitly instead of left to a transitive pick-up.
 #
 # opencv-python-headless is installed explicitly and the GUI build removed:
 # rapidocr depends on plain opencv-python, which pulls libGL and friends that a
 # headless image does not have.
-RUN pip install "rapidocr-onnxruntime>=1.4.4" opencv-python-headless \
+RUN pip install "rapidocr==3.9.2" "onnxruntime>=1.17" opencv-python-headless \
     && pip uninstall -y opencv-python 2>/dev/null; \
-    python -c "import rapidocr_onnxruntime, pathlib, sys; \
-m = pathlib.Path(rapidocr_onnxruntime.__file__).parent / 'models'; \
+    python -c "import rapidocr, pathlib, sys; \
+m = pathlib.Path(rapidocr.__file__).parent / 'models'; \
 n = len(list(m.glob('*.onnx'))); print(f'rapidocr models bundled: {n}'); \
 sys.exit(0 if n >= 3 else 1)"
 

@@ -7,7 +7,7 @@ name = "formumind-backend"
 version = "0.1.0"
 description = "FormuMind — AI-assisted formulation R&D platform for metal surface treatment"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -53,19 +53,26 @@ heavy = [
     "ase>=3.22",
 ]
 intel = [
-    "patent-client>=5.0",
     "paper-qa>=4.0",        # semantic RAG synthesis (auto-detected in chat)
     "molbloom>=2.0",        # standalone SureChEMBL patent pre-screen
     "pubchempy>=1.0.4",     # enrich raw-material SMILES/molar-mass from PubChem
     "ddgs>=6.0",            # renamed from duckduckgo-search
 ]
+# Online USPTO / EPO patent search, on its own because of what it costs: every patent-client release requires
+# httpx<0.28 and pypdf<5.0, so installing it makes pip *replace* the pinned httpx (used by the whole backend) and
+# pypdf (the PDF parser that reads uploaded and downloaded files) with older releases - pypdf 4.3.1 has 49 published
+# advisories, all of them crafted-PDF denial of service (RAM exhaustion, infinite loops). It used to ride along in
+# `intel`, which the Dockerfile installs, so the production image shipped them; with the pypdf floor raised the
+# combination does not resolve at all. Patent full text does not need it (Google Patents landing pages), so install
+# this one only into an environment that is not parsing untrusted PDFs, or not at all.
+patents = ["patent-client>=5.0"]
 # MarkItDown keeps every format backend behind an extra — a bare install parses
 # nothing but plain text, so .pptx/.xlsx silently yield an empty document and
 # .docx falls back to python-docx, which drops tables. The extras are the whole
 # point of depending on it.
 file_ingest = [
     "markitdown[pdf,docx,pptx,xlsx]>=0.1",
-    "pypdf>=4.0",
+    "pypdf>=6.19.0",
     "python-docx>=1.1",
     "trafilatura>=1.8",
 ]
@@ -94,6 +101,9 @@ parse_pro = [
     # opencv-python-headless is pinned explicitly: the default opencv-python drags
     # in GUI libraries that a headless VPS does not have.
     "rapidocr==3.9.2",
+    # rapidocr 3.x declares no inference runtime ("onnxruntime is not installed" when the engine is built). It used
+    # to arrive through pymupdf4llm -> pymupdf-layout; naming it here keeps OCR from depending on that.
+    "onnxruntime>=1.17",
     "opencv-python-headless>=4.9",
     # pymupdf4llm is pinned to 1.28.0 (NOT >=): 1.28.2 rewrites OCR backend
     # selection and adds pymupdf.layout which links libmupdf.so.29.0 (absent from
@@ -131,7 +141,6 @@ intel-colbert = [
     "torch>=2.2",
     "langgraph>=0.2",
     "sentence-transformers>=2.6",
-    "patent-client>=5.0",
     "ddgs>=6.0",
 ]
 dev = [
@@ -139,7 +148,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-timeout>=2.0",
     "httpx>=0.27",
-    "pypdf>=4.0",             # real PDF parsing in test_pdf_downloader real-path tests
+    "pypdf>=6.19.0",          # real PDF parsing in test_pdf_downloader real-path tests
     "PyYAML>=6.0",            # tests/test_compose_hardening.py parses the compose files
     "cryptography>=42",       # tests/test_http_safe.py mints a self-signed cert for the TLS-name test
     "ruff==0.15.8",           # lint gate (see [tool.ruff] below); pinned so new rules cannot break CI
