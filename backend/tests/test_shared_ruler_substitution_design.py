@@ -116,7 +116,12 @@ def designed():
         hard=[HardConstraint(metric="voc_gpl", op="le", value=420)],
         soft=OBJECTIVES,
     )
-    return design(req, targets, population=16, generations=4, seed_with_llm=False)
+    # No generations: this test is about how the *final population* is scored, and it needs that population to
+    # contain different designs. Both controlled objectives rise with the same lever, so NSGA-II selection collapses
+    # an evolved population onto clones of the best design (``seed=42, generations=4`` ends with one distinct lever) —
+    # which the test used to dodge only because of leftover global state from whichever tests ran before it: alone, or in
+    # a different shard, it failed on every platform. The seeded population is deterministic and varied.
+    return design(req, targets, population=16, generations=0, seed_with_llm=False)
 
 
 def test_inverse_design_scores_the_final_population_on_one_ruler(designed):

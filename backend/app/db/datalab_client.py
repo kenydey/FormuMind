@@ -69,20 +69,36 @@ def datalab_headers() -> dict[str, str]:
     return {"DATALAB-API-KEY": token} if token else {}
 
 
+# A listener on this machine accepts a connection within milliseconds, so waiting longer than this for the *connect*
+# can only mean nothing is listening. It matters on Windows, where a refused loopback connection takes ~2 s to be
+# reported (and ``localhost`` is tried as ::1 and 127.0.0.1): /health, which probes Datalab on every call, took
+# 5-6 s on a machine without it.
+LOOPBACK_CONNECT_TIMEOUT_S = 0.5
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
 def check_datalab_reachable(api_url: str, timeout: float = 2.0) -> tuple[bool, str | None]:
     """Return (reachable, error_reason)."""
+    from urllib.parse import urlparse
+
     import httpx
 
     url = (api_url or "").rstrip("/")
     if not url:
         return False, "FORMUMIND_DATALAB_API_URL 未配置"
+    host = (urlparse(url).hostname or "").lower()
+    connect = min(timeout, LOOPBACK_CONNECT_TIMEOUT_S) if host in _LOOPBACK_HOSTS else timeout
     try:
-        with make_client(base_url=url, timeout=timeout, headers=datalab_headers()) as client:
+        with make_client(
+            base_url=url, timeout=httpx.Timeout(timeout, connect=connect), headers=datalab_headers()
+        ) as client:
             resp = client.get("/")
             resp.raise_for_status()
         return True, None
     except httpx.HTTPStatusError as exc:
         return False, f"HTTP {exc.response.status_code}"
+    except httpx.ConnectTimeout:
+        return False, f"连接超时（{host or url} 上没有进程在监听，或网络不通）"
     except Exception as exc:
         return False, str(exc)
 
