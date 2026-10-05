@@ -50,13 +50,26 @@ def test_powershell_installer_checks_native_exit_codes():
         for n, line in enumerate(text.splitlines(), 1)
         # quoted text (messages that merely mention `npm install`) is not an invocation
         if re.search(r"&\s+(\$VenvPython|npm|\$py\.Exe)\b", re.sub(r'"[^"]*"', '""', line))
-        and not re.search(r"Invoke-(Step|Optional)\b", line)
+        # Invoke-Probe qualifies: it reports the exit code as .Ok instead of exiting,
+        # which is what a *probe* has to do (see the test below).
+        and not re.search(r"Invoke-(Step|Optional|Probe)\b", line)
         and "function " not in line
     ]
     assert not unchecked, (
         "native commands whose failure would go unnoticed (wrap them in Invoke-Step / Invoke-Optional):\n  "
         + "\n  ".join(unchecked)
     )
+
+
+def test_the_probe_helper_derives_its_result_from_the_exit_code():
+    """``Invoke-Probe`` is on the allowlist above, so the property that earns it a place
+    there has to hold: it must report `$LASTEXITCODE`. A probe that always said Ok would
+    turn the allowlist into a hole the size of the interpreter selection."""
+    text = (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    body = text[text.index("function Invoke-Probe"):]
+    body = body[: body.index("\nfunction ", 1)]
+    assert "$LASTEXITCODE" in body, "Invoke-Probe must read the native exit code"
+    assert re.search(r"Ok\s*=", body), "and expose it as .Ok for the caller to branch on"
 
 
 def test_the_optional_helper_does_not_leak_command_output_into_its_result():

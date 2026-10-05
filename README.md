@@ -90,6 +90,25 @@ the **Bayesian optimizer** — are implemented for real in pure numpy.
 cp .env.example .env                 # optional keys; see API auth below
 ```
 
+### One-click install (Windows, native PowerShell)
+
+```powershell
+.\install.bat                        # venv + requirements + engine extras + npm + alembic
+scripts\windows\start-dev.ps1 start  # Redis/Neo4j via Docker, then API + worker + Vite
+scripts\windows\start-dev.ps1 status # what is up (ports + /health + containers)
+```
+
+> **Windows 说明**：推荐 **Python 3.12**——ColBERT 依赖链
+> (`ragatouille` → `voyager`) 只有到 CPython 3.12 的 Windows wheel，3.13/3.14 上
+> 安装脚本会自动跳过该档并给出提示（RAG 会退回 BM25/TF-IDF/向量检索）。可选引擎
+> 分档安装（`-Minimal` 只装核心，`-Full` 追加 torch 的 bo/heavy/colbert），因为
+> pip 把 extras 放在同一个解析事务里，一个装不上的依赖会让整条命令白跑。脚本直接
+> 调用 `backend\.venv\Scripts\python.exe`，不需要 `activate`，因此不受
+> `Set-ExecutionPolicy` 限制；Celery 用 `--pool=solo`（Windows 不支持默认 prefork
+> 池），uvicorn 用 `--reload-dir app` 而不是 `--reload-exclude .venv\*`
+> （PowerShell 会把后者展开成真实文件列表）。详见
+> [`scripts/windows/README.md`](scripts/windows/README.md)。
+
 ### Local (no Docker, fully offline)
 
 ```bash
