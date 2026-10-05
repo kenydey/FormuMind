@@ -60,7 +60,11 @@ def metadata() -> dict:
 
 @router.get("/examples/{example_id}", response_model=Requirement)
 def get_example_project(example_id: str) -> Requirement:
-    return load_example(example_id)
+    try:
+        return load_example(example_id)
+    except KeyError as exc:
+        # An unknown id (stale link, typo) is a missing resource, not a server error.
+        raise HTTPException(status_code=404, detail=f"未知的示例项目：{example_id}") from exc
 
 
 @router.get("/templates/{domain}", response_model=Formulation, include_in_schema=False)
@@ -434,6 +438,13 @@ class ManualFormulationResponse(BaseModel):
 def add_manual_formulation(body: ManualFormulationRequest) -> ManualFormulationResponse:
     """Validate, enrich, and optionally score a manually entered formulation."""
     forms, warnings = validate_formulations([body.formulation])
+    if not forms:
+        # validation drops a recipe it cannot keep (e.g. no ingredients at all): that is the caller's
+        # input, not a server fault — it used to surface as ``IndexError`` → HTTP 500.
+        raise HTTPException(
+            status_code=422,
+            detail="配方未通过校验：" + ("；".join(warnings) if warnings else "没有可用的成分"),
+        )
     form = forms[0].model_copy(update={"source": "manual"})
     if body.requirement:
         process = workflow.process_for(body.requirement)
