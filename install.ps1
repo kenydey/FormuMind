@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   FormuMind 一键安装脚本 (Windows)
 
@@ -23,6 +23,29 @@ function Write-Step($msg) { Write-Host "" ; Write-Host "==> $msg" -ForegroundCol
 function Write-Ok($msg)   { Write-Host "    $msg ✓" -ForegroundColor Green }
 function Write-Warn($msg)  { Write-Host "    ⚠ $msg" -ForegroundColor Yellow }
 function Write-Err($msg)   { Write-Host "    ❌ $msg" -ForegroundColor Red }
+
+# 原生命令（pip / npm / alembic）失败不会触发 $ErrorActionPreference = "Stop"：
+# 不检查 $LASTEXITCODE 的话，依赖没装上也会一路打印「安装完成」。
+function Invoke-Step($What, [scriptblock]$Command) {
+  & $Command
+  if ($LASTEXITCODE) {
+    Write-Err "$What 失败（退出码 $LASTEXITCODE），已中止安装"
+    exit $LASTEXITCODE
+  }
+}
+
+# 可选步骤：成功返回 $true，失败只警告。临时放宽 Stop，避免 Windows PowerShell 5.1 把原生命令的
+# stderr 当作终止错误；输出送去 Out-Host，否则它会混进函数的返回值（数组恒为真）。
+function Invoke-Optional([scriptblock]$Command) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command | Out-Host
+    return (-not $LASTEXITCODE)
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
 
 function Find-Python {
   # 返回 @{ Exe = <python.exe>; Version = [version] }，找不到返回 $null
@@ -86,34 +109,36 @@ Write-Step "[2/5] 安装后端依赖（virtualenv + pinned requirements + extras
 
 if (-not (Test-Path $VenvPython)) {
   Write-Host "    创建虚拟环境 $VenvDir ..."
-  & $py.Exe -m venv $VenvDir
+  Invoke-Step "创建虚拟环境" { & $py.Exe -m venv $VenvDir }
 } else {
   Write-Host "    复用已有虚拟环境"
 }
-& $VenvPython -m pip install -U pip setuptools wheel
+Invoke-Step "升级 pip" { & $VenvPython -m pip install -U pip setuptools wheel }
 
 Push-Location $BackendDir
 try {
   # 与 scripts/install.sh 一致：先装 Docker/CI 锁定版本，再叠加 extras
-  & $VenvPython -m pip install -r requirements.txt
-  & $VenvPython -m pip install -e ".[dev,llm]"
+  Invoke-Step "安装 requirements.txt" { & $VenvPython -m pip install -r requirements.txt }
+  Invoke-Step "安装后端（pip install -e .[dev,llm]）" { & $VenvPython -m pip install -e ".[dev,llm]" }
   # 轻量在线检索（失败不中断，与 install.sh 一致）
-  & $VenvPython -m pip install arxiv semanticscholar ddgs 2>$null
-  if (-not $?) { Write-Warn "arxiv/semanticscholar/ddgs 安装失败，已跳过（在线检索可选）" }
+  if (-not (Invoke-Optional { & $VenvPython -m pip install arxiv semanticscholar ddgs })) {
+    Write-Warn "arxiv/semanticscholar/ddgs 安装失败，已跳过（在线检索可选）"
+  }
 } finally { Pop-Location }
 
 # 第三方库补丁（幂等；与 scripts/install.sh 一致）
 $patchScript = Join-Path $BackendDir "scripts\apply_patches.py"
 if (Test-Path $patchScript) {
-  & $VenvPython $patchScript 2>$null
-  if (-not $?) { Write-Warn "补丁应用失败，详见 backend/scripts/reference/rapidocr-attribute-fix.md" }
+  if (-not (Invoke-Optional { & $VenvPython $patchScript })) {
+    Write-Warn "补丁应用失败，详见 backend/scripts/reference/rapidocr-attribute-fix.md"
+  }
 }
 
 # ---- [3/5] 前端依赖 ----
 Write-Step "[3/5] 安装前端依赖"
 if ($npmCmd) {
   Push-Location (Join-Path $ROOT "frontend")
-  try { & npm install } finally { Pop-Location }
+  try { Invoke-Step "npm install" { & npm install } } finally { Pop-Location }
 } else {
   Write-Warn "跳过：未找到 npm，稍后手动执行 cd frontend && npm install"
 }
@@ -132,7 +157,7 @@ if (Test-Path $envFile) {
 
 Write-Step "[5/5] 数据库迁移"
 Push-Location $BackendDir
-try { & $VenvPython -m alembic upgrade head } finally { Pop-Location }
+try { Invoke-Step "数据库迁移" { & $VenvPython -m alembic upgrade head } } finally { Pop-Location }
 Write-Host "    数据库已就绪"
 
 # ---- 完成 ----

@@ -72,6 +72,13 @@ def run_migrations_online() -> None:
     """Run migrations in online mode against a live database connection."""
     section = config.get_section(config.config_ini_section, {})
     section["sqlalchemy.url"] = _resolve_url()
+    # ``data/`` is git-ignored, so a fresh clone has no directory for the default
+    # ``sqlite:///./data/formumind.db``: SQLite then fails with "unable to open database
+    # file" and the one-click installers die at their migration step. The application's own
+    # ``make_engine`` creates the directory; the CLI path has to as well.
+    from app.db.database import _ensure_sqlite_dir
+
+    _ensure_sqlite_dir(section["sqlalchemy.url"])
     # Match ``make_engine``: eager Celery / test threads may touch the same
     # SQLite file while Alembic runs; default check_same_thread=True would
     # reject those connections even when DDL is serialized separately.
