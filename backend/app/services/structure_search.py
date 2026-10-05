@@ -69,13 +69,14 @@ def similarity_hits(
         return []
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem
         from rdkit.Chem import DataStructs
+
+        from .fingerprints import morgan_bitvect
 
         query = Chem.MolFromSmiles(smiles)
         if query is None:
             return []
-        qfp = AllChem.GetMorganFingerprintAsBitVect(query, 2, nBits=2048)
+        qfp = morgan_bitvect(query)
     except Exception as exc:
         logger.warning("structure_search: query fingerprint failed: %s", exc)
         return []
@@ -86,7 +87,7 @@ def similarity_hits(
             cand = Chem.MolFromSmiles(cand_smiles)
             if cand is None:
                 continue
-            cfp = AllChem.GetMorganFingerprintAsBitVect(cand, 2, nBits=2048)
+            cfp = morgan_bitvect(cand)
             sim = float(DataStructs.TanimotoSimilarity(qfp, cfp))
         except Exception:
             continue
@@ -229,12 +230,14 @@ def kg_structure_hits(
         return []
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem, DataStructs
+        from rdkit.Chem import DataStructs
+
+        from .fingerprints import morgan_bitvect
 
         query = Chem.MolFromSmiles(smiles)
         if query is None:
             return []
-        qfp = AllChem.GetMorganFingerprintAsBitVect(query, 2, nBits=2048)
+        qfp = morgan_bitvect(query)
         effective_threshold = _adaptive_kg_threshold(smiles, threshold)
     except Exception as exc:
         logger.warning("structure_search: kg query fingerprint failed: %s", exc)
@@ -246,7 +249,7 @@ def kg_structure_hits(
             cand = Chem.MolFromSmiles(cand_smiles)
             if cand is None:
                 continue
-            cfp = AllChem.GetMorganFingerprintAsBitVect(cand, 2, nBits=2048)
+            cfp = morgan_bitvect(cand)
             sim = float(DataStructs.TanimotoSimilarity(qfp, cfp))
         except Exception:
             continue

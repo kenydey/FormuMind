@@ -51,14 +51,16 @@ def _tanimoto_similarity(smi_a: str, smi_b: str) -> float | None:
     """Morgan 指纹 Tanimoto; RDKit 缺失/解析失败 → None(调用方降级)。"""
     try:
         from rdkit import Chem  # type: ignore
-        from rdkit.Chem import AllChem, DataStructs  # type: ignore
+        from rdkit.Chem import DataStructs  # type: ignore
+
+        from ..fingerprints import morgan_bitvect
 
         mol_a = Chem.MolFromSmiles(smi_a)
         mol_b = Chem.MolFromSmiles(smi_b)
         if mol_a is None or mol_b is None:
             return None
-        fp_a = AllChem.GetMorganFingerprintAsBitVect(mol_a, 2, nBits=2048)
-        fp_b = AllChem.GetMorganFingerprintAsBitVect(mol_b, 2, nBits=2048)
+        fp_a = morgan_bitvect(mol_a)
+        fp_b = morgan_bitvect(mol_b)
         return float(DataStructs.TanimotoSimilarity(fp_a, fp_b))
     except Exception:
         return None
