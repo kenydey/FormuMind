@@ -11,6 +11,10 @@
 * display-math blocks (``$$…$$``, ``\\[…\\]``, ``\\begin{…}…\\end{…}``) are
   atomic too — chemistry PDFs parsed by Docling/MinerU carry reaction
   equations as LaTeX, and half an equation is as useless as half a table;
+* a table keeps its caption: the short ``表 N …`` / ``Table N …`` paragraph right above it is part of
+  the table's chunk. A table is its own chunk, so the caption used to become a separate chunk of a few
+  words (dropped outright when under the length floor) and the table — numbers with no subject — was left
+  to be retrieved without the words that say what it is;
 * ``<!-- page:N -->`` markers (inserted by the PDF parsers between pages) are
   consumed into ``Chunk.page_no`` provenance and stripped from chunk text;
 * plain text without headings degrades to the legacy recursive splitter
@@ -301,6 +305,27 @@ def _is_atomic(block: str) -> bool:
     )
 
 
+_CAPTION_START_RE = re.compile(r"^\s*(?:表|Table|TABLE|Tab\.)\s*[\dIVXivx]+", re.UNICODE)
+_CAPTION_MAX_CHARS = 300
+
+
+def _is_table_block(block: str) -> bool:
+    first = block.lstrip()
+    return first.startswith("|") or "<table" in first[:200].lower()
+
+
+def _is_table_caption(paragraph: str) -> bool:
+    """A short paragraph that *starts* with ``表 N`` / ``Table N`` — what a table's caption looks like.
+
+    Anchored on purpose: "如表1所示，粘度符合要求" is a sentence about a table, not its caption.
+    """
+    text = paragraph.strip()
+    if not text or len(text) > _CAPTION_MAX_CHARS or "\n\n" in text:
+        return False
+    text = re.sub(r"^#{1,6}\s+", "", text).replace("**", "").replace("__", "")
+    return bool(_CAPTION_START_RE.match(text))
+
+
 def _strip_block_markers(md: str) -> str:
     """Remove ``<!-- block:K -->`` lines (plain-text fallback paths)."""
     return "\n".join(
@@ -390,6 +415,11 @@ def chunk_markdown(
                 pending_block = bm.group(1)
                 continue
             if _is_atomic(block):
+                caption = ""
+                if current.strip() and _is_table_block(block):
+                    head, _, tail = current.rpartition("\n\n")
+                    if _is_table_caption(tail):
+                        caption, current = tail.strip(), head
                 if current.strip():
                     clen = len(current.strip())
                     chunks.append(Chunk(
@@ -402,9 +432,10 @@ def chunk_markdown(
                     char_pos += clen
                     current = ""
                     pending_block = None
-                alen = len(block)
+                atom = f"{caption}\n\n{block}" if caption else block
+                alen = len(atom)
                 chunks.append(Chunk(
-                    block, path, page,
+                    atom, path, page,
                     paragraph_idx=para_counter,
                     offset_start=char_pos,
                     offset_end=char_pos + alen,

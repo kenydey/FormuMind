@@ -32,7 +32,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from .table_contract import TableAsset
+from .table_contract import NAME_COL_HINTS, UNIT_COL_HINTS, VALUE_COL_HINTS, TableAsset
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,9 @@ _PROPERTY_ALIASES: dict[str, tuple[str, ...]] = {
     "flash_point": ("闪点", "flash point"),
     "salt_spray": (
         "盐雾试验", "耐盐雾性", "盐雾", "中性盐雾", "salt spray", "salt fog",
+        # "耐盐雾性能" is the usual wording in Chinese datasheets and was the one row in a TDS that stayed unmapped.
+        "耐盐雾性能", "耐盐雾", "耐盐雾试验", "耐中性盐雾", "盐雾性能", "中性盐雾试验",
+        "neutral salt spray", "salt spray resistance", "salt spray test", "nss",
     ),
     "water_resistance": ("耐水性", "water resistance"),
     "alkali_resistance": ("耐碱性", "alkali resistance"),
@@ -266,16 +269,9 @@ def _split_number_unit(text: str) -> tuple[float | None, str, bool]:
 
 # ── column detection ────────────────────────────────────────────────────────
 
-_NAME_COL_HINTS = (
-    "项目", "性能项目", "检验项目", "测试项目", "指标名称",
-    "组分", "成分", "名称", "property", "item", "characteristic",
-)
-_VALUE_COL_HINTS = (
-    "典型值", "指标值", "指标", "测试结果", "结果", "实测值", "数值",
-    "要求", "技术要求", "value", "typical", "result", "requirement",
-    "specification",
-)
-_UNIT_COL_HINTS = ("单位", "unit",)
+_NAME_COL_HINTS = NAME_COL_HINTS
+_VALUE_COL_HINTS = VALUE_COL_HINTS
+_UNIT_COL_HINTS = UNIT_COL_HINTS
 
 
 def _header_hits(header: str, hints: tuple[str, ...]) -> bool:

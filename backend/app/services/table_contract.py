@@ -138,13 +138,42 @@ def _confidence(hits: int) -> float:
     return 0.9
 
 
+# Column-header vocabulary of a property table ("项目 | 指标 | 单位", "Property | Value | Unit"). Shared with
+# ``table_normalize``, which uses the same words to find the name / value / unit columns — a table it can read
+# column by column should not be refused at the door because its caption carries no topical keyword.
+NAME_COL_HINTS = (
+    "项目", "性能项目", "检验项目", "测试项目", "指标名称",
+    "组分", "成分", "名称", "property", "item", "characteristic",
+)
+VALUE_COL_HINTS = (
+    "典型值", "指标值", "指标", "测试结果", "结果", "实测值", "数值",
+    "要求", "技术要求", "value", "typical", "result", "requirement",
+    "specification",
+)
+UNIT_COL_HINTS = ("单位", "unit",)
+
+# Confidence of a kind inferred from the column layout alone (below two keyword hits, above the 0.5 floor).
+_SHAPE_CONFIDENCE = 0.6
+
+
+def _has_property_table_shape(headers: Iterable[str]) -> bool:
+    """A name column *and a different* value column — the layout of a datasheet / spec table."""
+    keys = [str(h).lower() for h in headers]
+    name_cols = {i for i, h in enumerate(keys) if any(hint in h for hint in NAME_COL_HINTS)}
+    value_cols = {i for i, h in enumerate(keys) if any(hint in h for hint in VALUE_COL_HINTS)}
+    return bool(name_cols) and bool(value_cols - name_cols)
+
+
 def classify_table(headers: Iterable[str], caption: str = "") -> tuple[str, float]:
     """Chemistry-first kind classification.
 
     Caption hits count double (authorial intent). Returns ``(kind, confidence)``;
-    confidence < 0.5 degrades to ``"other"`` rather than guessing.
+    confidence < 0.5 degrades to ``"other"`` rather than guessing — except that a table laid out as a
+    property table (a name column next to a value column) is a ``performance`` table even when neither
+    its caption nor its headers name a topic (a spreadsheet sheet, an English ``Property | Value | Unit``).
     """
-    header_text = " | ".join(str(h) for h in headers)
+    headers = [str(h) for h in headers]
+    header_text = " | ".join(headers)
     caption_hits = _keyword_hits(caption or "")
     header_hits = _keyword_hits(header_text)
     total = {
@@ -153,6 +182,8 @@ def classify_table(headers: Iterable[str], caption: str = "") -> tuple[str, floa
     best = max(_KIND_PRIORITY, key=lambda k: (total[k], -_KIND_PRIORITY.index(k)))
     conf = _confidence(total[best])
     if conf < 0.5:
+        if _has_property_table_shape(headers):
+            return "performance", _SHAPE_CONFIDENCE
         return "other", conf
     return best, conf
 
@@ -169,7 +200,12 @@ _HTML_TABLE_RE = re.compile(r"<table\b.*?</table\s*>", re.IGNORECASE | re.DOTALL
 _SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 
 
+_HEADING_MARK_RE = re.compile(r"^\s*#{1,6}\s+")
+
+
 def _clean_caption(line: str) -> str:
+    # A caption that the parser promoted to a heading arrives as "## 表1 典型性能".
+    line = _HEADING_MARK_RE.sub("", line)
     return line.replace("**", "").replace("__", "").strip(" :：\t")
 
 
@@ -189,10 +225,26 @@ def _looks_like_pipe_table(text: str) -> bool:
     return len(lines) >= 2 and any(_is_separator_line(ln) for ln in lines)
 
 
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_WHOLE_EMPHASIS_RE = re.compile(r"^(\*\*|__)(.+?)\1$")
+
+
+def _clean_cell(cell: str) -> str:
+    """Cell text as a reader would see it: no ``<br>`` line breaks, no emphasis wrapped around the whole cell.
+
+    Layout parsers bold header rows (``**Sample**``) and break wrapped cells with ``<br>``; left in, those
+    markers end up in header names, so ``_header_hits`` / unit detection / classification compare against
+    ``**单位**`` instead of ``单位``. The untouched text stays available as ``TableAsset.raw_markdown``.
+    """
+    cell = re.sub(r"\s+", " ", _BR_RE.sub(" ", cell)).strip()
+    m = _WHOLE_EMPHASIS_RE.match(cell)
+    return m.group(2).strip() if m else cell
+
+
 def _split_pipe_row(line: str) -> list[str]:
     # Split on unescaped pipes.
     cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
-    return [c.replace("\\|", "|").strip() for c in cells]
+    return [_clean_cell(c.replace("\\|", "|")) for c in cells]
 
 
 def _parse_pipe_table(text: str) -> tuple[list[str], list[list[str]]]:
@@ -256,6 +308,42 @@ def _parse_html_table(html_text: str) -> tuple[list[str], list[list[str]]]:
     if not rows:
         return [], []
     return rows[0], rows[1:]
+
+
+_NUMERIC_CELL_RE = re.compile(
+    r"^[<>≥≤~±+\-\s]*\d[\d,]*(?:\.\d+)?\s*(?:%|％|[A-Za-zμ°℃·./³²]+(?:\s*[A-Za-zμ°℃·./³²]+)?)?$"
+)
+
+
+def _is_numeric_cell(cell: str) -> bool:
+    return bool(_NUMERIC_CELL_RE.match((cell or "").strip()))
+
+
+def _promote_blank_header(
+    headers: list[str], rows: list[list[str]]
+) -> tuple[list[str], list[list[str]]]:
+    """A table whose header row is blank takes its first body row as the header.
+
+    Word (and PowerPoint) tables carry no header markup, so MarkItDown renders them with an *empty* header
+    row and pushes the real one into the body. Left alone that row becomes a bogus data point
+    (``项目 / 指标 / 单位`` as a property), the unit column cannot be found — every value loses its unit —
+    and classification sees no header text at all.
+
+    Only promoted when the first row looks like labels (no numeric cell) *and* there are numbers below it
+    for those labels to head. A genuinely header-less table (``固体含量 | 65 | %``, or ``外观 | 灰色液体``)
+    keeps its first row as data.
+    """
+    if not headers or any(h.strip() for h in headers):
+        return headers, rows
+    if len(rows) < 2:
+        return headers, rows
+    first, body = rows[0], rows[1:]
+    labels = [c for c in first if c.strip()]
+    if not labels or any(_is_numeric_cell(c) for c in labels):
+        return headers, rows
+    if not any(_is_numeric_cell(c) for row in body for c in row):
+        return headers, rows
+    return first, body
 
 
 def blocks_from_markdown(markdown: str) -> list[MdBlock]:
@@ -376,6 +464,7 @@ def extract_tables(
             else:
                 raw = (html_text or text).strip()
 
+            headers, rows = _promote_blank_header(headers, rows)
             kind, conf = classify_table(headers, caption)
             prefix = f"{source_id}#p{page_no:02d}-{idx:02d}" if source_id else f"p{page_no:02d}-{idx:02d}"
             assets.append(

@@ -21,6 +21,7 @@ LLM judge / SimHash / substrate checks are intentionally out of scope.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import Iterable, Literal
@@ -135,6 +136,38 @@ def is_blocked_origin_url(url: str | None) -> bool:
     return any(host == d or host.endswith("." + d) for d in _blocked_domains())
 
 
+_TABLE_SEPARATOR_ROW = re.compile(r"^[\s|:\-]+$")
+_HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>")
+_BR_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
+
+
+def _without_table_markup(text: str) -> str:
+    """The words of a table chunk, minus the syntax that carries them.
+
+    ``is_garbage_chunk_text`` measures how much of a chunk is word characters. A pipe table is mostly
+    punctuation by construction — ``| 固体含量 | 65 | % |``, a ``| --- | --- |`` separator row, the padding
+    around every cell — so a perfectly good datasheet table scored 0.3 and was thrown away at ingest (and
+    from retrieval): every ``.docx`` / ``.xlsx`` / ``.pptx`` table MarkItDown produced, and any PDF table
+    with short cells. Tables are atomic chunks (``chunking``), so there is no prose around them to lift the
+    ratio. Only the cell text is measured; chunks without table rows are returned unchanged.
+    """
+    lines = text.splitlines()
+    if not any(ln.lstrip().startswith("|") for ln in lines) and "<table" not in text.lower():
+        return text
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            if _TABLE_SEPARATOR_ROW.match(stripped):
+                continue
+            stripped = _BR_TAG.sub(" ", stripped).replace("**", "").replace("__", "")
+            stripped = " ".join(c for c in (cell.strip() for cell in stripped.strip("|").split("|")) if c)
+        elif "<" in stripped:
+            stripped = " ".join(_HTML_TAG.sub(" ", stripped).split())
+        out.append(stripped)
+    return "\n".join(out)
+
+
 def is_garbage_chunk_text(text: str, *, min_chars: int | None = None) -> bool:
     """Chunk-body analogue of literature garbage-snippet detection.
 
@@ -148,7 +181,7 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None) -> bool:
         limit = max(20, base // 2)
     else:
         limit = int(min_chars)
-    body = (text or "").strip()
+    body = _without_table_markup((text or "").strip()).strip()
     if len(body) < limit:
         return True
     word_chars = len(_WORD_RE.findall(body))
