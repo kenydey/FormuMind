@@ -1019,7 +1019,26 @@ async def chat_stream(req: "ChatRequestValidated"):
 
     async def gen():
         if not api_key:
-            yield _sse({"type": "error", "message": "未配置 LLM API Key"})
+            # Running without a key is a supported mode (QUICKSTART: "with no key, everything still runs via the
+            # offline rule engine") and POST /api/chat answers it with an excerpt of the loaded sources. The UI only
+            # ever streams, so refusing here made that path unreachable from it. Same pipeline, one `done` event.
+            yield _sse({"type": "phase", "phase": "retrieval"})
+            try:
+                resp = await asyncio.to_thread(chat, req)
+            except HTTPException as exc:
+                yield _sse({"type": "error", "message": str(exc.detail)})
+                return
+            payload = resp.model_dump(mode="json")
+            payload["notices"] = [
+                {
+                    "code": "llm_offline",
+                    "message": "未配置 LLM API Key：以下是已加载资料的摘录，不是模型生成的回答。",
+                },
+                *(payload.get("notices") or []),
+            ]
+            yield _sse({"type": "phase", "phase": "answering"})
+            yield _sse({"type": "token", "delta": payload["answer"]})
+            yield _sse({"type": "done", **payload})
             return
 
         try:
