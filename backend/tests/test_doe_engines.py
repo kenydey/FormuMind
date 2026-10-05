@@ -73,7 +73,8 @@ def test_mixture_design_failure_raises_not_fallback(monkeypatch):
 
 
 def test_simplex_lattice_mapping_preserves_mixture_sum():
-    """Mixture proportions must map to naturals that sum to Σ factor.high."""
+    """Mixture proportions map onto the recipe components so that they add up to the baseline total
+    (Σ midpoint of the ranges) with every value inside its own range."""
     import numpy as np
 
     from app.services.engines.adapters.doe_adapter import matrix_to_doe_plan
@@ -87,7 +88,8 @@ def test_simplex_lattice_mapping_preserves_mixture_sum():
     matrix = np.array([[0.5, 0.25, 0.25]], dtype=float)
     plan = matrix_to_doe_plan(matrix, factors, "simplex_lattice", engine="test")
     assert len(plan.runs) == 1
-    total = sum(f.high for f in factors)
-    nat_sum = sum(plan.runs[0].natural.values())
-    assert nat_sum == pytest.approx(total, abs=1e-3)
-    assert plan.runs[0].natural["A"] == pytest.approx(0.5 * total, abs=1e-3)
+    total = sum((f.low + f.high) / 2 for f in factors)  # 50: the baseline mass of the components
+    nat = plan.runs[0].natural
+    assert sum(nat.values()) == pytest.approx(total, abs=1e-3)
+    assert nat["A"] == pytest.approx(0.5 * total, abs=1e-3)
+    assert all(f.low <= nat[f.name] <= f.high for f in factors)
