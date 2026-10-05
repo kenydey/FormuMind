@@ -27,6 +27,8 @@
 | **各项核心功能的端到端探针**（KB 入库 → 检索 → 问答；DOE 8 种设计 × 4 个领域 × 2 个引擎；寻优 4 个领域；推荐 4 个领域；闭环 loop；离线问答） | 功能"能不能真的跑通"、结果是否越界 | 混料设计越界（§2 #4）；离线答案误报（§2 #10） |
 | **"空请求体 → 带参数端点"扫描**（封装发 `{}` / 不带体，而后端 schema 有可选参数） | 按钮点了没效果 | 1 处：材料页"属性补全"（§2 #17） |
 | **新增脚本逐行审查**（`install.sh` / `install.ps1` / `install.bat`）+ 在干净目录里真跑 alembic | 安装器在全新克隆上能否走完 | 3 处（§2 #9） |
+| **装上解析器，用真实文件走完整入库链路**（PyMuPDF / pymupdf4llm / MarkItDown / python-docx：合成的 PDF、DOCX、XLSX、PPTX，中英文数据表 → 解析 → 分块 → 质量门 → 入库 → 检索 → 表格归一化） | 前几轮"沙箱没装解析器，无法实测"留下的盲区 | **8 处**（§2 #20–#24、#29–#31）——全部在"解析 → 入库"这条路上（主要是表格），且都是喂手写 markdown 的测试看不到的 |
+| **PowerShell 7 真解析 `install.ps1`**（下载官方 pwsh，用语言解析器解析；把字节按 Windows PowerShell 5.1 的 ANSI 方式解码再解析；真跑 `Invoke-Step` / `Invoke-Optional`） | 只靠静态扫描无法确认的 PowerShell 语义 | 确认 BOM 修复有效（无 BOM → 3 个解析错误）；辅助函数语义正确；`install.bat`（§2 #26） |
 
 ---
 
@@ -52,6 +54,21 @@
 | 16 | 中 | 配方推荐 / 前端 | **配方卡片的"相似历史配方"永远是空的**：弹窗用 `formulation.factors` 当查询，但后端从不下发 `Formulation.factors`，前端也没有任何生产者（类型注释声称"跨项目 KG 相似度查询由它构建"）→ 每个推荐配方查询为空，直接显示"未找到相似历史配方"，功能等于没接。现在用配方自己的成分 wt% 作查询（与实验里 `factors` 同形），显式 `factors`（实测 run）仍优先 | `SimilarFormulationModal.test.tsx` | 失败 |
 | 17 | 中 | 知识库 / 前端 | **材料页"属性补全"按钮什么也不做**：封装向 `/api/chemical/enrich-materials` 发 `{}`，该接口只补全**传给它的**材料列表（空列表），立即返回；面板却显示"属性补全完成: ? 条更新"（读了一个响应里没有的 `enriched`）。启动时的后台 PubChem 回填（`compounds.enrich_materials`）才是按钮想要的。新增 `POST /api/materials/enrich?limit=`（每次一批，返回 `enriched / scanned / remaining / available`，只填空字段、持久化），按钮改指向它并如实显示；原接口记为 agent 专用 | `test_materials_enrich_catalog.py`、`methods.responseEnvelopes.test.ts`；`/chemical/enrich-materials` 进入 `API_ONLY_ROUTES`（带原因） | 失败 |
 | 18 | 低 | 前端 | Neo4j 状态徽标永远是"就绪 · ? 节点 / ? 边"：端点答 `{enabled, reachable, stats:{compound, formulation, …_rels}}`，界面读扁平的 `nodes / edges / compounds / formulations`。封装里做一次映射 | `methods.responseEnvelopes.test.ts` | 失败 |
+| 19 | 高 | 问答 | **"无 Key 也能离线运行"在界面里走不到**：同步 `/api/chat` 无 Key 时给出已加载资料的摘录（文档也这么承诺），但界面**只**走 `/api/chat/stream`，后者无 Key 直接发 `error: 未配置 LLM API Key`。离线路径存在，没有任何入口能到达它。现在流式走同一条管线，以 `phase → token → done` 交付，并带一条 `llm_offline` 提示（"以下是已加载资料的摘录，不是模型生成的回答"） | `test_chat_stream_offline.py`（6） | 6 / 6 失败 |
+| 20 | **高** | 知识库 / 文档解析 | **数据表在入库时被"垃圾门"丢弃**：`is_garbage_chunk_text` 要求字母 / 数字 / 汉字占字符的 40% 以上，而管道表格天生满是标点（`\| 固体含量 \| 65 \| % \|`、`\| --- \| --- \|` 分隔行、单元格补白），且每个表格都是独立的原子 chunk，旁边没有正文来抬高比例。实测 MarkItDown 产出的 docx / xlsx / pptx 表格比例 0.31–0.34，PDF 表格（加粗 + `<br>`）0.38，宽数值表 0.24 → 全部判垃圾。端到端：一页数据表 `kb ingest gate: all 1 chunk(s) garbage — writing 0`，随后"粘度是多少"在知识库里查不到；检索期同一规则又把已入库的表格过滤一遍。现在只按**单元格文本**度量（去掉管道、分隔行、HTML 标签、加粗、`<br>`），空 HTML 表格反而改判垃圾 | `test_kb_gate_tables.py`（14，含"垃圾仍是垃圾"的对照与入库端到端） | 4 / 14 失败（含入库端到端：写入 0 个 chunk） |
+| 21 | **高** | 文档解析 | **Word / PowerPoint 表格丢表头行，进而每个数值都丢单位**：Word 表格没有表头标记，MarkItDown 输出一行**空表头** + 把真表头压进正文（`\|  \|  \|  \|` / `\| 项目 \| 指标 \| 单位 \|`）。资产 `headers == ['', '', '']`，表头行变成一个伪属性"项目"，**单位列找不到**（`65` 而不是 `65 %`、`1200` 而不是 `1200 mPa·s`），类别只能靠 caption。现在空表头行让位给首个正文行——仅当首行没有数值单元格**且**下方有数值时（无表头的数据表、纯文字键值表保持原样） | `test_table_converter_output.py`（31，含真实 DOCX / PPTX / PDF 文件） | 20 / 31 失败 |
+| 22 | 中 | 文档解析 | pymupdf4llm 把表头加粗（`**项目**`）、用 `<br>` 折行，被当成 caption 的标题带着 `## `——全部原样存进表格资产，于是 `_header_hits` / 单位探测 / 分类拿 `**单位**` 去比 `单位`。单元格去掉整格加粗与 `<br>`、caption 去掉标题标记（原文仍在 `raw_markdown`） | 同上 | 同上 |
+| 23 | 中 | 文档解析 / 知识库 | **没有主题关键词的数据表永远不归一化**：分类词表几乎全是中文主题词，xlsx 表（无 caption）、英文 `Property \| Value \| Unit`、caption 不含主题词的表都是 `other`——而归一化器自己正是靠这些列名找名称 / 取值 / 单位列的。现在"名称列 + 另一列取值列"的表头形状即判 `performance`（置信度 0.6，低于两个关键词命中），词表与归一化器共用一份；同时补上 `耐盐雾性能`（中文 TDS 里最常见的写法，原本是整张表里唯一未映射的一行）等盐雾别名 | 同上 | 同上 |
+| 24 | 中 | 知识库 / 检索 | **表格与它的 caption 分家**：表格总是独立 chunk，上方的 `表1 典型性能` / `Table 2. …` 被切成另一个几个字的 chunk——短的被长度门直接丢，长的留下一个没数据的 chunk，而表格（只有数字、没有主语）只能靠单元格值被检索到。现在 caption 并入表格 chunk（仅当紧邻上方、以 `表 N` / `Table N` **开头**且短；"如表 1 所示…"这种句子不算） | `test_chunking_table_caption.py`（13） | 7 / 13 失败 |
+| 25 | 低 | 前端 | `Ingredient.grounding_confidence` 的 TS 类型缺 `"medium"`（后端是 `high / medium / low`，`medium` 成分在配方警告里列出） | `tsc` | — |
+| 26 | 中（安装） | 部署 | `install.bat` 双击后控制台随脚本一起关闭——成功后的"手动启动"说明、失败时的报错**一闪而过**；文件里是 UTF-8 中文 `REM`，在中文 Windows（GBK 代码页）下 UTF-8 字符的末字节可被当作双字节前导字节而**吞掉后面的换行**；PowerShell 的退出码也没有回传。现为纯 ASCII、仅在双击启动时 `pause`（终端 / CI 不阻塞）、`exit /b %RC%`。另：下载官方 PowerShell 7，用语言解析器**真解析** `install.ps1`——有 BOM 时 0 个错误；按 5.1 的 ANSI 方式解码无 BOM 的字节则出现 3 个解析错误（证实了 §2 #9 的诊断）；真跑 `Invoke-Step` / `Invoke-Optional`（失败步骤以原退出码结束、可选步骤返回单个布尔、stderr 不致命）。这些检查现在是测试（CI 的 ubuntu runner 自带 `pwsh`，会真跑） | `test_installers.py`（+1）、`test_installers_pwsh.py`（3） | `install.bat` 用例失败 |
+| 27 | 低 | 寻优与迭代 / 运维 | **默认安装下每次预测写一行 WARNING**：`predict()` 对每个含颜料的候选调用 `delta_e_2000`，其中的可选依赖探测（`import colour`）每次都失败一次并打一行 `optional feature check: No module named 'colour'`——一次寻优预测成千上万个候选，就是成千上万行（CI 日志里单个用例就有几十行）。探测改为缓存、静默。同时第一次让 `colour-science` 分支真跑起来：对照 CIEDE2000 公开测试数据（Sharma et al. 2005 第 1 对 = 2.0425）通过 | `test_colorimetry.py`（+3） | 实测：50 次预测，旧代码 50 行日志，新代码 0 行；另两条是对 CIE76 回退与 CIEDE2000 公开数据的钉子（后者装了库才跑） |
+| 28 | **CI 红** | 工程 | 上一个检查点 `b09c727` 的 backend job 唯一失败：`test_optimizer_lab_seeding` 的 spy 收到了别人的 `multi_objective_score` 调用。**根因是本轮新增的 `test_openapi_smoke_walk`**：Celery-eager 下每个派发任务的接口都会在守护线程里跑真实任务体，最小请求触发的 inverse-design 跑了 **160 s**，超出 conftest 的 60 s 排空预算，漏进后面的用例。本地用"游走 → 寻优用例"同进程复现。现在游走只验证 HTTP 层（派发器回 202，不跑任务体），并在结束时断言没有遗留后台线程；游走从 3 分钟降到约 20 秒。任务体本来就有各自的测试 | `test_openapi_smoke_walk.py`（泄漏断言） | 复现命令由失败变通过 |
+| 29 | 中 | 文档解析 | **上传的 `.html` / `.htm` 原样存成源码**：URL 入库一直用 `html_to_markdown` 转换，上传路径（两种扩展名都在上传框的 accept 列表里）走的文本档只解码字节——chunk 里存的是 `<!doctype html><html><head><style>…<script>…`，`<script>` / `<style>` 正文、导航、每个标签都当正文切块。现在上传与 URL 共用同一个转换器；没装 trafilatura（可选依赖）时，转换器的正则回退原来还会把表格压成一行字，现在先把 `<table>` 转成管道表（转义 `\|`、补齐参差行）；没有正文的页面得到空结果而不是原始标签 | `test_html_upload.py`（9） | 7 / 9 失败 |
+| 30 | 低 | 文档解析 | 没有文字层的 PDF（扫描件）：任务"完成：1 条"，提示"可能是扫描件"，但**不说怎么办**。本机既没有 rapidocr 也没有 MinerU 时，现在提示安装 rapidocr（`.[parse_pro]`）或配置 MinerU 云端解析 | `test_ingest_scanned_pdf_hint.py`（3） | 1 / 3 失败 |
+| 31 | 低 | 文档解析 | 列 = 指标、行 = 样品的**宽表**被当"一行一属性"读，得到名字叫 `65`、值是下一列的伪属性。行标签半数以上是数字时整张表跳过并说明原因（属性集目前只用于展示，没有被推荐 / KG 消费，所以影响面是界面上的垃圾行） | `test_table_converter_output.py`（+2） | 1 / 2 失败 |
+
+**CI 上新增**：非阻塞 job `backend-extras`——装上 `file_ingest` / `report_export` / `color` 与 PyMuPDF 两个固定版本 + CJK 字体，跑所有需要这些可选依赖的测试，并把"被跳过"当成失败（阻塞 job 不装它们，这类测试在那里全是 `importorskip`，这正是三轮审查都没发现表格路径问题的原因；`colour-science` 那条分支此前在任何地方都没跑过）。
 
 **新增的长期守卫**（让这一类问题下次在测试里失败，而不是在线上）：
 `test_session_factory_usage.py`（AST）、`test_project_workspace_contract.py`（前端保存键 ⊆ 后端模型）、`test_response_envelopes.py` + 前端同名封装测试、
@@ -72,56 +89,58 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | 功能 | R3 报分 | R4 校正（缺陷计入） | R4 修复后 | 这一轮的依据 | 距 9 分还差什么 |
 |---|---|---|---|---|---|
 | 资料检索 | 7.5 | 7.5 | **7.5** | 离线降级链路走通（种子语料回退 + `source_status` 标注）；本轮没发现该功能自身缺陷，也没有新增能力 | 没有评测集；走代理的部署里 SSRF 固定 IP 不生效（R3 §4-2）；测试里的 `ddgs`（primp）绕过 socket 守卫会真的访问 DuckDuckGo |
-| 文档解析 | 7.8 | 7.8 | **7.8** | 本沙箱没装 PDF / DOCX 解析器，**无法实测这两类**；markdown / txt / 分块 / 偏移 / 表格接口走通 | 没有真实文档基准（表格 / 公式 / 扫描件准确率）；解析器依赖冲突需分镜像 |
-| 知识库构建 | 8.2 | 8.0 | **8.3** | 入库 → 分块 → 检索 → 去重 → 完整性检查走通；**全新克隆的首次安装原来走不完**（§2 #9）；块查看器字段错位（#5）；Neo4j 写入口不可用（#6） | 嵌入向量路径 CI 无覆盖；KG 实体链接无精度 / 召回评测；增量重建语义 |
-| **问答能力** | 7.3 | 6.8 | **7.5** | Text2SQL 路由死了（#1）；流式结构化失败直接报错（#3）；离线答案带误导性告警（#10） | 见下三项 |
-| └ 检索 | 7.7 | 7.2 | 8.0 | 结构化数据路径现在真的可达，且有硬白名单 / 项目范围 | 无检索评测集；非 OpenAI 兼容 provider 不能真流式；Text2SQL 的行级隔离只到"项目"这一层（§4-2） |
+| 文档解析 | 7.8 | 6.9 | **8.0** | 这一轮**装上了解析器**（PyMuPDF / pymupdf4llm / MarkItDown / python-docx），第一次用真实 PDF / DOCX / XLSX / PPTX 实测：解析本身都通（PDF 走 `hybrid`，页标记 / 标题 / 表格正确）；但**表格这条路有 4 处缺陷**——Word 表丢表头行并丢光单位（#21）、加粗 / `<br>` / `##` 漏进存储文本（#22）、无关键词的数据表不归一化（#23）。修复后同一张数据表从 4 种格式、中英文两种写法出来，得到同样的属性集（含单位、`耐盐雾性能 → salt_spray`） | 只测了**合成**文件，没有真实文档基准：合并单元格 / 跨页表 / 双栏论文 / 公式 / 扫描件（OCR）都没验；docling / marker / MinerU 云端各档在本沙箱不可用；解析器依赖冲突需分镜像 |
+| 知识库构建 | 8.2 | 7.2 | **8.4** | 入库 → 分块 → 检索 → 去重 → 完整性检查走通；**数据表原来在入库时被质量门当垃圾丢掉**（#20）——TDS 里最有价值的部分，进不了知识库；表格与 caption 分家（#24）；**全新克隆的首次安装原来走不完**（§2 #9）；块查看器字段错位（#5）；Neo4j 写入口不可用（#6）。修复后真实 docx / xlsx / pptx / pdf 数据表 → 带 caption 的表格 chunk + 属性集，按内容可检索 | 嵌入向量路径 CI 无覆盖；KG 实体链接无精度 / 召回评测；增量重建语义；质量门对**其他**结构化块（公式、图注）是否同样误伤，未逐类实测 |
+| **问答能力** | 7.3 | 6.6 | **7.6** | Text2SQL 路由死了（#1）；流式结构化失败直接报错（#3）；离线答案带误导性告警（#10）；**界面里无 Key 直接报错，离线路径走不到**（#19）；数据表进不了知识库因而问答查不到（#20 / #24） | 见下三项 |
+| └ 检索 | 7.7 | 7.0 | 8.3 | 结构化数据路径现在真的可达，且有硬白名单 / 项目范围；表格 chunk 不再被门丢弃，且带 caption，"耐盐雾性能 720"这类按内容的查询能命中 | 无检索评测集；非 OpenAI 兼容 provider 不能真流式；Text2SQL 的行级隔离只到"项目"这一层（§4-2） |
 | └ 理解 | 7.0 | 7.0 | 7.0 | 无改动 | 改写 / 澄清无评测集；歧义消解依赖 KG 质量 |
 | └ 上下文 | 7.2 | 7.2 | 7.2 | 无改动 | 历史截断 / 摘要策略未量化；会话持久依赖 Redis |
 | 配方推荐 | 8.7 | 8.6 | **8.8** | 4 个领域离线推荐都满 100% 或带闭合告警；手工配方空成分 500 → 422（#11）；DOE 基准徽标重载保持（#7） | 无评测集；表面处理类强制 grounding 后只剩 97% |
 | DOE 设计 | 8.3 | 7.8 | **8.5** | 8 种设计 × 4 个领域 × 2 个引擎逐个核对范围：**混料原来全部越界**（#4）；其余均在范围内，唯一例外是 native CCD 星点 | native CCD 星点仍超出物理范围（只告警）；DOE 历史无界面 |
 | 寻优与迭代 | 8.4 | 7.4 | **8.5** | **闭环写入会自己等自己**（#2，生产里一个周期卡数分钟并拖死所有写）；自动闭环的轮次上限 / 计数重载丢失（#7）；修复后 loop 端到端（训练 → 寻优 → 下一轮 DOE）走通，结果键与前端 `LoopReport` 对得上 | 虚拟寻优曲线不是实测；无"寻优质量"评测（收敛速度 vs 随机基线） |
 
-**一句话**：这一轮分数涨得最多的不是"新能力"，而是**把已有能力从"测试里绿"变成"生产里真的通"**——结构化问答、DOE 闭环、混料设计、材料页结构检索都属于这一类。
-最大的单项发现是 #2：它不是功能错误，而是**让整个系统在 DOE 闭环期间变成只读**，而且被 fail-open 吞得干干净净。
+**一句话**：这一轮分数涨得最多的不是"新能力"，而是**把已有能力从"测试里绿"变成"生产里真的通"**——结构化问答、DOE 闭环、混料设计、材料页结构检索、数据表入库都属于这一类。
+最大的两项发现：**#2** 不是功能错误，而是**让整个系统在 DOE 闭环期间变成只读**，被 fail-open 吞得干干净净；**#20** 是**数据表被当垃圾丢弃**——它躲过了三轮审查，原因很具体：沙箱没装解析器，所有表格测试都喂手写的、表头完整的 markdown。装上解析器、用真实文件走一遍，几分钟就暴露了。
+**教训**：凡是 `importorskip` 把整类真实输入挡在 CI 外的地方，都在替缺陷放行；`backend-extras` job 就是为此加的。
 
 ---
 
 ## 4. 仍未解决的问题与下一步
 
-按"没有它就无法判断好坏"优先。每项给出**做法**和**验收**。
+按"没有它就无法判断好坏"优先。每项给出**做法**和**验收**。本轮已经动手的（流式无 Key、Windows 安装器的解析验证、TS 类型、表格路径）不再列在这里。
 
 **1. 检索 / 问答 / 解析 / 寻优没有评测集（仍是最大缺口，R3 §4-1 原样保留）**
-- 做法：20–30 条带标准答案的问答 + 10 份真实文档（含表格 / 公式 / 扫描件）+ 一组"寻优收敛 vs 随机基线"的合成任务；CI 里加一个**非阻塞** job 输出趋势（沿用 `golden_eval`）。
+- 做法：20–30 条带标准答案的问答 + 10 份**真实**文档（含合并单元格 / 跨页表 / 双栏论文 / 公式 / 扫描件）+ 一组"寻优收敛 vs 随机基线"的合成任务；CI 里加一个**非阻塞** job 输出趋势（沿用 `golden_eval`）。本轮的 `backend-parsers` job 只覆盖合成的小文件，是起点不是基准。
 - 验收：每次合并能看到召回@k / 引用命中率 / 单元格准确率 / 寻优收敛曲线。
 
 **2. Text2SQL 只做到"项目"粒度的隔离**
-- 现状：硬白名单 + 项目范围校验（正则，可被 `OR` 绕过）+ 样例行按项目过滤。多用户（`owner_id`）场景下没有行级隔离；聊天端点本身没有 owner 概念。
+- 现状：硬白名单 + 项目范围校验（正则，可被 `OR` 绕过）+ 样例行按项目过滤。多用户（`owner_id`）场景下没有行级隔离；聊天端点本身没有 owner 概念，所以这现在是纵深防御而不是访问边界。
 - 做法：执行前把白名单表按 `project_id`（及 `owner_id`）物化进一个**内存 SQLite 快照**，生成的 SQL 只在快照上跑——模型写什么都碰不到范围外的行；这样 `require_project_scope` 的正则可以退役。
 - 验收：对抗用例（`OR 1=1`、子查询、CTE 改名、`main.` 前缀）全部只返回范围内的行。
 
-**3. native CCD 星点超出物理范围（R3 §4-7 的前半）**
-- 现状：pydoe 引擎走面心 CCD（在范围内），native 走旋转 CCD（α≈2），星点会低于 0 / 高于 100%，只在备注里告警。
-- 做法：native 引擎在因子有物理边界时改用面心（α=1）或把星点裁到边界并逐 run 标注 `infeasible`；`ccd_alpha` 做成参数。
-- 验收：`test_doe_probe` 类扫描里 CCD 的 oob 行数为 0。
+**3. native CCD 星点超出物理范围（R3 §4-7 的前半）——产品决策**
+- 现状：pydoe 引擎走面心 CCD（在范围内），native 走旋转 CCD（α≈2），星点会低于 0 / 高于 100%，只在备注里告警。`test_golden_ccd_structure` 把"星点在 ±α"**钉成了契约**，所以这不是顺手能改的 bug。
+- 做法：先决定契约——native 在因子有物理边界时改用面心（α=1），或保留旋转并把星点逐 run 标 `infeasible`；`ccd_alpha` 做成参数并在界面暴露。
+- 验收：CCD 的越界行数为 0（或全部带 `infeasible` 标注），黄金测试同步更新。
 
-**4. 暂停 / 恢复 DOE 闭环只存在 Redis 里**
-- 现状：没有 Redis（开发 / eager 模式）时 `pause-doecycle` 恒 503，状态接口则降级回答。
-- 做法：标志落到 SQLite（`campaigns` 上一列或 kv 表），Redis 仅作为加速；验收：eager 模式下能暂停并生效。
+**4. 暂停 / 恢复 DOE 闭环只存在 Redis 里，且 24 小时后静默失效**
+- 现状：标志 `doe_cycle:paused:<id>` 带 24 h TTL——周五暂停的自动闭环，周日会自己恢复；没有 Redis（开发 / eager 模式）时 `pause-doecycle` 恒 503。平台文档把 Redis 列为必需基础设施，所以后者是设计，**前者是需要决定的语义**。
+- 做法：标志落到 SQLite（`campaigns` 上一列或 kv 表），Redis 仅作为加速，暂停不过期（或过期要有可见的提示 / 日志）；验收：eager 模式下能暂停并生效，暂停 25 小时后状态仍为 paused。
 
-**5. 溯源写入的成本与"侧门"**
-- 现状：`provenance.link` 每条边都跑一遍 `ensure_provenance`（3 条 DDL + 元数据读）并且裸 `commit()`，不走 `commit_session` 的 Redis 写锁；闭环里 N × 5 条边就是 N × 5 次。
-- 做法：启动时 `ensure_provenance` 一次；新增 `link_many` 单事务批量写，走 `commit_session`。验收：100 条边 < 100 ms。
+**5. 溯源写入的"侧门"**
+- 现状：`provenance.link` 另开连接、裸 `commit()`，不走 `commit_session` 的 Redis 写锁（单进程下无影响；多进程争用时靠 30 s busy timeout，且 fail-open 只会丢边）。**成本不是问题**：实测 100 条边 106 ms（1.1 ms/条），之前担心的"N × 5 次 DDL"并不构成瓶颈。
+- 做法（可选）：新增 `link_many` 单事务批量写并走 `commit_session`；验收：多进程并发写入下无 `database is locked`。
 
-**6. Windows 安装器从未在 Windows 上跑过**
-- 现状：沙箱没有 PowerShell。BOM / 退出码问题是按行为规格 + 静态守卫修的。
+**6. Windows 安装器仍未在 Windows 上跑过**
+- 已做：官方 PowerShell 7 真解析 `install.ps1`（BOM 必要性被证实），`Invoke-Step` / `Invoke-Optional` 语义在真实 PowerShell 里验证并变成测试（CI 的 ubuntu runner 自带 `pwsh`，会真跑）。
+- 仍缺：Windows PowerShell **5.1** 本身的行为（`$ErrorActionPreference = "Stop"` 与原生命令 stderr 的交互在 5.1 / 7 之间有差异）、`py` 启动器、`.venv\Scripts` 路径、`install.bat` 的双击 `pause`——都只能在 Windows 上确认。
 - 做法：CI 加 `windows-latest` job 跑 `install.ps1`（跳过前端与启动）；验收：job 绿，且故意让 pip 失败时安装器非零退出。
 
-**7. 无 LLM Key 时流式问答直接报错，而同步问答会给离线摘录**
-- 现状：流式入口在没 Key 时立刻 `error: 未配置 LLM API Key`；同步 `/api/chat` 会返回"根据已加载资料…"。文档却宣称"LLM Key 可选，离线运行"。
-- 做法：产品决策——流式也走离线摘录（单个 `done` 事件），或在界面明确提示"离线模式只支持非流式"。
+**7. 质量门对短公式仍会误伤（影响小，取舍）**
+- 现状：表格已修（#20）。其余块已实测：长公式（比例 0.55–0.58）、代码块（0.54）、图注（0.58）、图片链接（0.70）都能通过；**短公式**（`$$k = A e^{-E_a / (RT)}$$` 比例 0.27，`$$x = 1$$` 只有 9 个字符）会被判垃圾。公式 chunk 脱离上下文本来就很少是检索目标，所以只是记录，不是缺陷。
+- 做法（若要处理）：对 `block_type == "formula"` 豁免密度规则，只保留长度下限；验收：Arrhenius 式这类带说明文字的公式 chunk 不再被丢。
 
-**8. 前端类型里的死字段**：`Formulation.measured`（没有任何生产者）、`grounding_confidence` 缺 `"medium"`——删除或补齐。
+**8. 前端类型里的死字段**：`Formulation.measured`（没有任何生产者，只有两个图表组件把它当预测的后备）——删除或接上。（`grounding_confidence` 缺 `"medium"` 已补。）
 
 **9. 其余 R3 §4 未动的项**：#2 走代理时固定 IP 不生效、#3 `get_campaign_store()` 首次探测、#4 无界面的接口、#5 旧脚本 `verify_frontend_api.py`（现在有了 `scripts/audit/contract/`，可以直接删）、#6 `_utcnow` 帮手收敛、#8 KB 嵌入路径 CI、#9 compose 未真起过栈、#10 ESLint 范围。
 
@@ -131,20 +150,27 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 
 | 项 | 结果 |
 |---|---|
-| 后端全量（`pytest -m "not golden_eval"`，默认禁止出网） | **4049 通过 / 27 跳过 / 0 失败**（558 s）。用例收集数 3992 → 4074（本轮 +82）。中途一次全量带 `sys.settrace` 追踪跑，有 2 条 `test_vector_ceiling` 性能预算用例因追踪开销超时，不带追踪重跑通过——不是缺陷 |
+| 后端全量（`pytest -m "not golden_eval"`，默认禁止出网） | 本地，装了解析器 + colour-science 的环境：**4195 通过 / 18 跳过 / 1 失败**——那 1 个是我新写的真实文档测试里的竞态（读到"源行已写、chunk 未写"的瞬间），已改成等任务结束，并在 8 倍 CPU 过载下复验通过。用例收集数 3992 → 4212（本轮 +220）。**CI**：阻塞 job（不装可选依赖）与新增的 `backend-extras` job 在 `eda93c7` 上**均为绿**，`backend-extras` 里"真实文件测试不得被跳过"一步也通过 |
+| 中途记录 | ① 带 `sys.settrace` 追踪的全量里有 2 条 `test_vector_ceiling` 性能预算用例因追踪开销超时，不带追踪重跑通过——不是缺陷。② 检查点 `b09c727` 的 CI 红过一次：`test_optimizer_lab_seeding` 被 OpenAPI 游走泄漏出的 160 s 后台任务污染（§2 #28），已修，本地用"游走 → 寻优用例"同进程复现并验证 |
 | `ruff check app tests` | 通过 |
 | 前端 `tsc --noEmit` / `npm run lint`（`--max-warnings 0`）/ `vite build` | 均通过 |
-| 前端 `vitest run` | **131 个文件 / 653 个用例通过**（含新增封装 / 相似配方 / Neo4j 统计测试） |
-| 回归测试是否真能失败 | 逐条核对：text2sql（6/12 失败）、experiments item-id、安装器（3/11）、DOE 闭环（60 s 后失败）、混料映射、流式回退均在撤掉修复后失败 |
-| OpenAPI 全量游走（修复前 → 后） | 290 个接口：修复前 3 个 500 + 15 个超时（连锁）；修复后 0 个 500、0 个超时（剩余 503 均为"功能关闭 / 依赖不可用"） |
+| 前端 `vitest run` | **131 个文件 / 653 个用例通过** |
+| 回归测试是否真能失败 | 逐条核对（撤掉修复后）：text2sql（前 12 条中 6 条失败 + 超时用例要等满 3 s）、experiments item-id、安装器（3/11、`install.bat` 三项断言全失败）、DOE 闭环（60 s 后失败）、混料映射、流式回退、无 Key 流式（6/6）、表格转换产物（20/31）、质量门（4/14，含入库端到端写入 0 个 chunk）、caption 合并（7/13）、真实文档端到端（4/4）、HTML 上传（7/9）、日志洪水（50 次预测 50 行 → 0 行）均失败 |
+| 真实文件实测（合成文件，装了 PyMuPDF / pymupdf4llm / MarkItDown / python-docx） | PDF（`hybrid` 档）/ DOCX / XLSX / PPTX × 中英文数据表：修复前每种格式都有至少一处表格缺陷（§2 #20–#24）；修复后 4 种格式得到同样的属性集（单位齐全、`耐盐雾性能 → salt_spray`），按"耐盐雾性能 720"可检索到表格 chunk |
+| PowerShell 7.4.6 真解析 `install.ps1` | 有 BOM：0 个解析错误；无 BOM 且按 cp1252 解码：3 个解析错误（证实 BOM 必要）；`Invoke-Step` / `Invoke-Optional` 行为符合设计。现为测试，CI 的 ubuntu runner 会真跑 |
+| OpenAPI 全量游走（修复前 → 后） | 290 个接口：修复前 3 个 500 + 15 个超时（连锁）；修复后 0 个 500、0 个超时（剩余 503 均为"功能关闭 / 依赖不可用"）。游走现在只验证 HTTP 层（任务派发回 202、不跑任务体），约 20 秒 |
 | DOE 探针 | 8 种设计 × 4 个领域 × 2 个引擎：越界行数 0（native CCD 星点除外，§4-3） |
+| 日志洪水扫描 | 寻优 / DOE 流程里不再有重复 ≥ 3 次的 WARNING（唯一的重复项是无 Redis 时每次写入一行"写锁不可用"，是预期的降级提示） |
 
-没有验证的部分：Windows 上真实执行 `install.ps1`；Docker compose 真起栈；PDF / DOCX 解析（沙箱没装解析器）；带真实 LLM 的问答质量；Redis 在线时的写锁行为（本地无 Redis，`commit_session` 走"无锁继续"分支）。
+没有验证的部分：Windows PowerShell **5.1** 上真实执行 `install.ps1` 与 `install.bat` 的双击行为；Docker compose 真起栈；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为（本地无 Redis，`commit_session` 走"无锁继续"分支）。
 
 ---
 
 ## 6. 本轮留下的工具（下一轮直接复用）
 
 - `scripts/audit/contract/`：`extract_ts.cjs`（抽取前端封装）→ `dump_openapi.py`（导出后端 schema）→ `compare.py`（逐类对比，见文件头注释）。输出是**线索而不是结论**：别名、before-validator 兼容入口、FormData 成员都会被报成"未知字段"。本轮真正有价值的命中集中在 `resp_array_vs_other`、`form_field_unknown_to_backend`、`body_required_not_sent`。
-- `backend/tests/test_openapi_smoke_walk.py`：OpenAPI 全量游走，已进 CI。
+- `backend/tests/test_openapi_smoke_walk.py`：OpenAPI 全量游走，已进 CI（只验证 HTTP 层，任务派发回 202 不跑任务体；见 §2 #28 的教训）。
+- `backend/tests/test_document_parsers_real.py` + `test_table_converter_output.py` 里的真实文件段：用 python-docx / openpyxl / PyMuPDF 现场生成数据表文件，经 `POST /api/ingest` 走完整链路，再断言"表格在知识库里、带 caption / 表头 / 单位、按内容可检索"。下次要验合并单元格、跨页表、新格式时，直接在这里加一个生成函数即可。CI 的 `backend-extras` job 会跑它们，且把"被跳过"当失败。
+- `backend/tests/test_installers_pwsh.py`：用真实 PowerShell 解析并执行 `install.ps1` 的辅助函数；按 Windows PowerShell 5.1 的方式（无 BOM → ANSI）解码后再解析，可复现"没有 BOM 就解析失败"。
+- 日志洪水扫描思路：在 `logging` 根 logger 和 loguru 上挂计数器，跑一遍寻优 / 推荐 / DOE，列出重复 ≥ 3 次的 WARNING / ERROR——比读代码更容易发现"热路径里每次都失败一次的可选依赖探测"（`colour` 就是这么找到的）。
 - 吞异常追踪思路：`sys.settrace` 只跟随 `app/` 的帧，记录 AttributeError / NameError / TypeError（特定文案）等"像代码缺陷"的异常，不管它之后被怎样吞掉——比"只 hook 日志通道"强（text2sql 的 `.bind` 就漏过了前两版追踪器）。
