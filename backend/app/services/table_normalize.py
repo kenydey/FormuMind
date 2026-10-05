@@ -165,7 +165,9 @@ _PROPERTY_ALIASES: dict[str, tuple[str, ...]] = {
     "storage_temp": ("贮存温度", "storage temperature"),
 }
 
-_PAREN_SUFFIX_RE = re.compile(r"[（(][^）)]*[）)]\s*$")
+# Bounded: ``[^）)]*`` rescans the rest of the text from every "(" when there is no closing bracket, so a cell of 40,000
+# opening brackets took 17 s. A parenthetical suffix on a property name ("粘度 (25 °C)") is never this long.
+_PAREN_SUFFIX_RE = re.compile(r"[（(][^）)]{0,120}[）)]\s*$")
 _NUMERIC_LABEL = re.compile(r"^[<>≥≤~±+\-\s]*\d[\d,]*(?:\.\d+)?\s*%?$")
 
 

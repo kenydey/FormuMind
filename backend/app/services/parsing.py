@@ -542,21 +542,83 @@ def html_to_markdown(html: str) -> str:
     except Exception as exc:
         log_handled_exception(logger, exc, "trafilatura extract failed")
 
-    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
+    text = _strip_script_style(html)
     text = _html_tables_to_pipes(text)
     text = re.sub(r"(?is)<br\s*/?>", "\n", text)
     text = re.sub(r"(?is)</p>", "\n\n", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+\n", "\n", text)
+    text = re.sub(r"<[^<>]+>", " ", text)  # not [^>]+: an unclosed "<" then rescans the rest of the page, once per "<"
+    text = _collapse_whitespace_before_newline(text)
     return re.sub(r"[ \t]+", " ", text).strip()
+
+
+# The tag stripper below runs on whatever HTML a user uploads or a URL returns. Its regexes were written as
+# ``<(script|style).*?>.*?</\1>`` / ``<table\b.*?</table\s*>`` / ``\s+\n``: lazy or greedy runs that, when the closing part
+# is missing, are retried from every start — a truncated download with one unclosed <script> took minutes, 300 KB of
+# whitespace took 2.5 (measured). These helpers do the same work in a single pass over the text.
+
+_SCRIPT_STYLE_OPEN = re.compile(r"(?i)<(script|style)\b[^<>]*>")
+_SCRIPT_STYLE_CLOSE = {
+    "script": re.compile(r"(?i)</script\s*>"),
+    "style": re.compile(r"(?i)</style\s*>"),
+}
+_TABLE_OPEN = re.compile(r"(?i)<table\b")
+_TABLE_CLOSE = re.compile(r"(?i)</table\s*>")
+
+
+def _strip_script_style(html: str) -> str:
+    """Drop ``<script>`` / ``<style>`` elements (an unclosed one is left for the tag stripper)."""
+    out: list[str] = []
+    pos = 0
+    no_closer: set[str] = set()  # tags with no closing tag anywhere after the point we have reached
+    for opener in _SCRIPT_STYLE_OPEN.finditer(html):
+        if opener.start() < pos:
+            continue  # inside an element already dropped
+        name = opener.group(1).lower()
+        if name in no_closer:
+            continue
+        closer = _SCRIPT_STYLE_CLOSE[name].search(html, opener.end())
+        if closer is None:
+            no_closer.add(name)  # none after this opener means none after any later one
+            continue
+        out.append(html[pos:opener.start()])
+        out.append(" ")
+        pos = closer.end()
+    out.append(html[pos:])
+    return "".join(out)
+
+
+def _table_spans(html: str):
+    """``(start, end)`` of each ``<table>…</table>`` (outer-most first closer, as the old regex matched)."""
+    pos = 0
+    for opener in _TABLE_OPEN.finditer(html):
+        if opener.start() < pos:
+            continue
+        closer = _TABLE_CLOSE.search(html, opener.end())
+        if closer is None:
+            return  # no closing tag after this table means none after any later one
+        yield opener.start(), closer.end()
+        pos = closer.end()
+
+
+def _collapse_whitespace_before_newline(text: str) -> str:
+    """``re.sub(r"\\s+\\n", "\\n", text)`` without its quadratic backtracking on a long run with no newline.
+
+    A whitespace run that contains a newline becomes that newline plus whatever followed the run's last newline.
+    """
+    def repl(match: re.Match) -> str:
+        run = match.group(0)
+        last = run.rfind("\n")
+        return run if last < 0 else "\n" + run[last + 1:]
+
+    return re.sub(r"\s+", repl, text)
 
 
 def _has_data_table(html: str) -> bool:
     """A ``<table>`` that holds data (two rows, two columns, a number) rather than page layout."""
     from .table_contract import _is_numeric_cell, _parse_html_table
 
-    for match in re.finditer(r"(?is)<table\b.*?</table\s*>", html):
-        headers, rows = _parse_html_table(match.group(0))
+    for start, end in _table_spans(html):
+        headers, rows = _parse_html_table(html[start:end])
         body = ([headers] if headers else []) + rows
         if len(body) >= 2 and max(len(r) for r in body) >= 2 and any(_is_numeric_cell(c) for r in body for c in r):
             return True
@@ -571,8 +633,8 @@ def _html_tables_to_pipes(html: str) -> str:
     """
     from .table_contract import _parse_html_table
 
-    def _pipe(match: re.Match) -> str:
-        headers, rows = _parse_html_table(match.group(0))
+    def _pipe(fragment: str) -> str:
+        headers, rows = _parse_html_table(fragment)
         if not headers and not rows:
             return " "
         width = max([len(headers)] + [len(r) for r in rows])
@@ -581,7 +643,14 @@ def _html_tables_to_pipes(html: str) -> str:
         lines += ["| " + " | ".join(pad(r)) + " |" for r in rows]
         return "\n\n" + "\n".join(lines) + "\n\n"
 
-    return re.sub(r"(?is)<table\b.*?</table\s*>", _pipe, html)
+    out: list[str] = []
+    pos = 0
+    for start, end in _table_spans(html):
+        out.append(html[pos:start])
+        out.append(_pipe(html[start:end]))
+        pos = end
+    out.append(html[pos:])
+    return "".join(out)
 
 
 def parser_availability() -> dict[str, bool]:

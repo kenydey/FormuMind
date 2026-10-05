@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,8 +40,8 @@ __all__ = [
 # Numeric completeness checkpoint (Phase 2): a query like "耐蚀性 > 72h" is not
 # answered by evidence that merely mentions 耐蚀性 without the number. Numbers
 # with units are extracted deterministically and must appear in the evidence.
-_NUM_UNIT_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:g/L|mg/L|mol/L|°C|℃|%|wt%|wt\.%|ppm|ppb|MPa|kPa|Pa|"
+_NUM_UNIT_RE = re.compile(  # (?<!\d): see numeric_check._NUM_RE — a digit run with no unit was retried from every digit
+    r"(?<!\d)\d+(?:\.\d+)?\s*(?:g/L|mg/L|mol/L|°C|℃|%|wt%|wt\.%|ppm|ppb|MPa|kPa|Pa|"
     r"N·m|N|μm|um|mm|cm|mL|L|kg|g|h|小时|分钟|min|s|V|A|pH)",
     re.IGNORECASE,
 )
@@ -49,7 +50,7 @@ _NUM_UNIT_RE = re.compile(
 def extract_numeric_facets(query: str) -> list[str]:
     """Numbers-with-units in the query that evidence must reproduce."""
     seen: list[str] = []
-    for m in _NUM_UNIT_RE.finditer(query or ""):
+    for m in _NUM_UNIT_RE.finditer(unicodedata.normalize("NFKC", query or "")):
         t = _norm(m.group(0))
         if t and t not in seen:
             seen.append(t)
@@ -64,7 +65,8 @@ _FACET_STOPWORDS = {
 
 
 def _norm(text: str) -> str:
-    t = (text or "").lower()
+    # NFKC so "80 µm" (micro sign) in the evidence and "80 μm" (Greek mu) in the question are the same facet.
+    t = unicodedata.normalize("NFKC", text or "").lower()
     return re.sub(r"[\s\u3000\-–—_.,;:!?，。；：！？、（）()\[\]【】\"'“”‘’·/\\]+", "", t)
 
 

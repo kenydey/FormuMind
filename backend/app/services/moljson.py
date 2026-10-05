@@ -131,6 +131,9 @@ def _bond_type(order: float):
     return Chem.BondType.SINGLE
 
 
+MAX_SMILES_CHARS = 5000
+
+
 def validate_smiles(smiles: str) -> dict[str, Any]:
     """Validate a SMILES string and report structure fidelity.
 
@@ -144,7 +147,9 @@ def validate_smiles(smiles: str) -> dict[str, Any]:
     Used by the MolScribe-result validation loop and the LLM-output gate.
     """
     stripped = (smiles or "").strip()
-    if not rdkit_available() or not stripped:
+    # No molecule this application handles is anywhere near this long, and RDKit's parse + ring perception grow
+    # faster than linearly: a 12,000-character chain took 6 s, and the string can come from an LLM or a request.
+    if not rdkit_available() or not stripped or len(stripped) > MAX_SMILES_CHARS:
         return {"valid": False, "smiles": smiles, "moljson": None,
                 "roundtrip_ok": False, "atom_count": 0, "ring_count": 0}
     raw = Chem.MolFromSmiles(stripped)

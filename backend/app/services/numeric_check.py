@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from typing import Any
 
 CITATION_RE = re.compile(r"\[\^(\d+)\]")
@@ -55,7 +56,11 @@ _CONVERSIONS: dict[str, tuple[str, float]] = {
 _UNIT_PATTERN = "|".join(
     sorted((re.escape(u) for u in _UNIT_ALIASES), key=len, reverse=True)
 )
-_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")", re.IGNORECASE)
+# ``(?<!\d)``: start only at the beginning of a digit run. Without it a run of N digits with no unit after it was retried
+# from each of its N positions (each retry backing off one digit at a time through the whole unit alternation):
+# quadratic — 4,000 digits took 3.5 s, and this runs on every answer and every evidence text. Matches are unchanged:
+# a mid-run start can only end where the run-start attempt already ends.
+_NUM_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")", re.IGNORECASE)
 _PH_RE = re.compile(r"[pP][Hh]\s*(\d+(?:\.\d+)?)")
 # pH 范围表达："pH 控制在 3.8-4.2" / "pH 8.5~9.5"（pH token 与数字不紧邻）。
 # 限制中间非数字字符 ≤12，避免跨句误抓。
@@ -63,7 +68,7 @@ _PH_RANGE_RE = re.compile(
     r"[pP][Hh][^\d.]{0,12}?(\d+(?:\.\d+)?)\s*[~～\-–—]\s*(\d+(?:\.\d+)?)"
 )
 _RANGE_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*[-\u2013\u2014~\u301c]\s*(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")",
+    r"(?<!\d)(\d+(?:\.\d+)?)\s*[-\u2013\u2014~\u301c]\s*(\d+(?:\.\d+)?)\s*(" + _UNIT_PATTERN + ")",
     re.IGNORECASE,
 )
 
@@ -89,7 +94,10 @@ def extract_numbers(text: str) -> list[tuple[float, str]]:
             seen.add(key)
             out.append(key)
 
-    src = text or ""
+    # NFKC: "80 µm" with the MICRO SIGN (U+00B5 — what Word and most keyboards produce, and what pasted datasheets
+    # carry) is a different character from the GREEK MU (U+03BC) the alias table lists, so the number silently was not
+    # found; likewise full-width "８０" / "６５％" / "㎜" in Chinese documents. NFKC folds them all onto the forms below.
+    src = unicodedata.normalize("NFKC", text or "")
     for m in _RANGE_RE.finditer(src):
         u = _canon_unit(m.group(3))
         _add(float(m.group(1)), u)

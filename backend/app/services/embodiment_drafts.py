@@ -236,7 +236,7 @@ def parse_html_tables(text: str) -> list[dict[str, Any]]:
         for rr in rows_raw:
             cells = re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", rr, flags=re.I | re.S)
             cleaned = [
-                _normalize_header(re.sub(r"<[^>]+>", "", c))
+                _normalize_header(re.sub(r"<[^<>]+>", "", c))
                 for c in cells
             ]
             if cleaned:

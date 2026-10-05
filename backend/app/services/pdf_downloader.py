@@ -194,11 +194,13 @@ def _strip_tags(html: str) -> str:
     """Tags out, entities decoded, whitespace collapsed."""
     import html as html_mod
 
-    text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)
+    from .parsing import _strip_script_style  # single pass: the regex this replaced was cubic on a page with an unclosed <script>
+
+    text = _strip_script_style(html)
     # Block-level tags become newlines so paragraphs survive the strip.
     text = re.sub(r"(?i)</(p|div|li|tr|h[1-6]|section)>", "\n", text)
     text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"<[^<>]+>", " ", text)
     text = html_mod.unescape(text)
     text = re.sub(r"[ \t ]+", " ", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -208,7 +210,7 @@ def _cell_text(cell_html: str) -> str:
     import html as html_mod
 
     t = re.sub(r"(?is)<br\s*/?>", " ", cell_html or "")
-    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"<[^<>]+>", " ", t)
     t = html_mod.unescape(t)
     return re.sub(r"\s+", " ", t).strip()
 

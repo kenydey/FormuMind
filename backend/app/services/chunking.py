@@ -26,8 +26,34 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+_HEADING_OPEN_RE = re.compile(r"^(#{1,6})(\s+)")
 _MAX_HEADING_PATH = 80
+
+
+def _parse_heading(line: str) -> tuple[int, str] | None:
+    """``## Title ##`` → ``(2, "Title")``; ``None`` when the line is not an ATX heading.
+
+    The same answer as the regex ``^(#{1,6})\s+(.+?)\s*#*\s*$`` this replaces, in linear time: that pattern has two
+    adjacent ``\s*`` around an optional ``#*`` and a lazy title in front, so a heading followed by a long run of
+    spaces (padding from a layout-preserving PDF conversion) was retried from every position — cubic. 2000 trailing
+    spaces took longer than 20 s; a differential test against the old pattern is in ``test_chunking_linear.py``.
+    """
+    opened = _HEADING_OPEN_RE.match(line)
+    if not opened:
+        return None
+    level, gap = len(opened.group(1)), opened.group(2)
+    rest = line[opened.end():]
+    if not rest:
+        # the old pattern's title needed a character, so it took the last whitespace character of the gap; one
+        # whitespace character after the hashes therefore was not a heading, two or more were (with an empty title)
+        return (level, "") if len(gap) >= 2 else None
+    trimmed = rest.rstrip()
+    title = trimmed.rstrip("#").rstrip()
+    if title:
+        return level, title
+    if trimmed:  # nothing but closing hashes: the first one stays as the title
+        return level, trimmed[0]
+    return level, ""
 
 PAGE_MARKER_RE = re.compile(r"^\s*<!--\s*page:(\d+)\s*-->\s*$")
 BLOCK_MARKER_RE = re.compile(
@@ -153,9 +179,9 @@ def _split_sections(md: str) -> list[tuple[str, str]]:
     for line in lines:
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
-        m = None if in_fence else _HEADING_RE.match(line)
-        if m:
-            level, title = len(m.group(1)), m.group(2).strip()
+        heading = None if in_fence else _parse_heading(line)
+        if heading:
+            level, title = heading
             while stack and stack[-1][0] >= level:
                 stack.pop()
             stack.append((level, title))
