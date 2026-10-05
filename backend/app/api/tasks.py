@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..config import get_settings
 from ..domain.schemas import AsyncTaskAccepted, TaskState, TaskStatus
+from ..services import redis_breaker
 from ..worker.task_progress import (
     TaskProgressEvent,
     TaskProgressStatus,
@@ -181,9 +182,16 @@ async def stream_task_progress(task_id: str, request: Request) -> StreamingRespo
 
             settings = get_settings()
             try:
+                # Redis known to be down → straight to the disk poll below, without a connection attempt per
+                # stream (on Windows a refused connection takes ~2 s to fail).
+                redis_breaker.refuse_if_open()
                 import redis.asyncio as aioredis
 
-                client = aioredis.from_url(settings.redis_url, decode_responses=True)
+                client = aioredis.from_url(
+                    settings.redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=redis_breaker.CONNECT_TIMEOUT_S,
+                )
                 await client.ping()
                 pubsub = client.pubsub()
                 await pubsub.subscribe(channel_name(task_id))
@@ -228,7 +236,11 @@ async def stream_task_progress(task_id: str, request: Request) -> StreamingRespo
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("SSE Redis unavailable for %s: %s", task_id, exc)
+                redis_breaker.note_failure(exc)
+                # One WARNING per outage (the first failed attempt); the streams refused while it is open are noise.
+                (logger.debug if redis_breaker.was_refused(exc) else logger.warning)(
+                    "SSE Redis unavailable for %s: %s", task_id, exc
+                )
                 async for event in _poll_until_terminal(task_id):
                     yield _sse_frame(event)
 

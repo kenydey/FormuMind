@@ -6,6 +6,7 @@ read-only snapshot compatible with ``GET /api/tasks/{id}``.
 """
 from __future__ import annotations
 
+from ..services._fsutil import atomic_write_text, read_text_with_retry
 from ..services.errors import degrade_return, log_handled_exception
 import json
 import logging
@@ -43,11 +44,9 @@ def _persist_task(task_id: str, status: TaskStatus) -> None:
         persist_dir.mkdir(parents=True, exist_ok=True)
         data = status.model_dump()
         data["state"] = data["state"].value if hasattr(data["state"], "value") else data["state"]
-        # 原子写：先写 .tmp 再 rename，避免进程崩溃时留下半截 JSON（W5）。
-        target = persist_dir / f"{task_id}.json"
-        tmp = persist_dir / f".{task_id}.tmp"
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, target)
+        # 原子写：先写 .tmp 再 rename，避免进程崩溃时留下半截 JSON（W5）。临时文件名按进程+线程区分——
+        # 固定的 ``.<task_id>.tmp`` 让同一任务的两个并发写方互相覆盖对方写到一半的文件。
+        atomic_write_text(persist_dir / f"{task_id}.json", json.dumps(data, ensure_ascii=False))
     except Exception as exc:
         log_handled_exception(logger, exc, "handled exception")
 
@@ -57,7 +56,7 @@ def load_persisted_task(task_id: str) -> TaskStatus | None:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(read_text_with_retry(path))
         return TaskStatus(**data)
     except Exception as exc:
         return degrade_return(logger, exc, "operation failed", None)
@@ -139,12 +138,26 @@ def _persist_terminal(
     )
 
 
+def _result_from_event(meta: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        data = json.loads(meta.get("last_event") or "{}").get("data")
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _status_from_progress(task_id: str, kind: str) -> TaskStatus:
     from .task_progress import get_task_meta, get_task_result
 
     meta = get_task_meta(task_id) or {}
     result = get_task_result(task_id)
     raw_status = meta.get("status", "PENDING")
+    if result is None and raw_status in ("COMPLETED", "FAILED"):
+        # The terminal event carries the result, and the separate result store is written just *after* it. A snapshot
+        # taken in that gap — or one whose disk copy could not be read at that instant (Windows, mid-replace) — was
+        # "completed" with no result and, persisted back, replaced the good terminal snapshot: the task finished and
+        # its result was gone.
+        result = _result_from_event(meta)
     state_map = {
         "PENDING": TaskState.pending,
         "RUNNING": TaskState.running,

@@ -40,6 +40,8 @@ import threading
 import time
 from typing import Any
 
+from ._fsutil import replace_with_retry
+
 logger = logging.getLogger(__name__)
 
 _INDEX_DIR_NAME = "kb_ann"
@@ -142,7 +144,7 @@ def _write_manifest(m: dict[str, Any]) -> None:
     tmp = _manifest_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(m, fh)
-    os.replace(tmp, _manifest_path())
+    replace_with_retry(tmp, _manifest_path())
 
 
 def _bucket_path(model: str) -> str:
@@ -322,7 +324,7 @@ def ensure_index() -> dict[str, Any]:
             tmp = sidecar + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(b["ids"], fh)
-            os.replace(tmp, sidecar)
+            replace_with_retry(tmp, sidecar)
         _write_manifest(manifest)
         _buckets, _manifest, _last_error = buckets, manifest, None
         return {"ready": True, "buckets": manifest, "error": None}

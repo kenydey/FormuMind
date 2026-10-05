@@ -16,6 +16,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from .. import redis_breaker
+
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +71,16 @@ class SessionMemoryService:
             from ...config import get_settings
 
             self._redis = rredis.from_url(
-                get_settings().redis_url, encoding="utf-8", decode_responses=True
+                get_settings().redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=redis_breaker.CONNECT_TIMEOUT_S,
             )
         return self._redis
 
     async def _cache_write(self, session_id: str, history: list, context: dict) -> None:
         try:
+            redis_breaker.refuse_if_open()  # no Redis → no connection attempt per save (Windows: ~2 s each)
             client = await self._get_redis()
             data = {
                 "history": history,
@@ -92,14 +98,16 @@ class SessionMemoryService:
                 ),
             )
         except Exception as e:  # hot cache failure is non-fatal
+            redis_breaker.note_failure(e)
             logger.debug("redis hot cache write failed: %s", e)
 
     async def _cache_drop(self, session_id: str) -> None:
         try:
+            redis_breaker.refuse_if_open()
             client = await self._get_redis()
             await client.delete(f"chat_history:{session_id}", f"chat_session:{session_id}")
-        except Exception:
-            pass
+        except Exception as e:
+            redis_breaker.note_failure(e)
 
     # ── persistence API ────────────────────────────────────────
     async def save_chat_session(

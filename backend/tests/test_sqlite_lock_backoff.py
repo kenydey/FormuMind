@@ -14,6 +14,7 @@ import types
 import pytest
 
 from app.db import sqlite_lock
+from app.services import redis_breaker
 
 
 class _Clock:
@@ -27,8 +28,8 @@ class _Clock:
 @pytest.fixture()
 def clock(monkeypatch):
     c = _Clock()
-    monkeypatch.setattr(sqlite_lock, "_monotonic", c)
-    monkeypatch.setattr(sqlite_lock, "_redis_down_until", 0.0)
+    monkeypatch.setattr(redis_breaker, "_monotonic", c)
+    monkeypatch.setattr(redis_breaker, "_open_until", 0.0)
     return c
 
 
@@ -73,7 +74,7 @@ def test_it_is_tried_again_after_the_window(clock, monkeypatch):
     calls = _fake_redis(monkeypatch, down=True)
     with sqlite_lock.sqlite_write_lock("redis://x"):
         pass
-    clock.now += sqlite_lock._RETRY_AFTER_S - 1
+    clock.now += redis_breaker.RETRY_AFTER_S - 1
     with sqlite_lock.sqlite_write_lock("redis://x"):
         pass
     assert calls["from_url"] == 1
@@ -87,7 +88,7 @@ def test_a_redis_that_comes_up_is_used_again(clock, monkeypatch):
     _fake_redis(monkeypatch, down=True)
     with sqlite_lock.sqlite_write_lock("redis://x"):
         pass
-    clock.now += sqlite_lock._RETRY_AFTER_S + 1
+    clock.now += redis_breaker.RETRY_AFTER_S + 1
     calls = _fake_redis(monkeypatch, down=False)
     with sqlite_lock.sqlite_write_lock("redis://x"):
         pass
@@ -106,7 +107,7 @@ def test_the_connection_attempt_is_bounded(clock, monkeypatch):
     calls = _fake_redis(monkeypatch, down=False)
     with sqlite_lock.sqlite_write_lock("redis://x"):
         pass
-    assert calls["kwargs"]["socket_connect_timeout"] == sqlite_lock._CONNECT_TIMEOUT_S
+    assert calls["kwargs"]["socket_connect_timeout"] == redis_breaker.CONNECT_TIMEOUT_S
 
 
 def test_without_a_url_redis_is_never_touched(clock, monkeypatch):

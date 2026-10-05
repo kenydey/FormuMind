@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ._fsutil import read_text_with_retry, replace_with_retry
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
@@ -179,7 +181,7 @@ def load_manifest(project_id: str) -> dict[str, Any]:
     if not path.is_file():
         return empty_manifest(project_id)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(read_text_with_retry(path))
         if not isinstance(raw, dict):
             return empty_manifest(project_id)
         raw.setdefault("project_id", project_id)
@@ -188,6 +190,10 @@ def load_manifest(project_id: str) -> dict[str, Any]:
         raw.setdefault("events", [])
         raw.setdefault("coverage", {"candidate_count": 0, "frozen_count": 0})
         return migrate_manifest(raw)
+    except OSError:
+        # Unreadable *right now* is not corrupt: on Windows a concurrent save_manifest's os.replace makes a healthy
+        # file briefly unreadable, and renaming it to ``.corrupt`` below would hand every caller an empty corpus.
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("literature manifest load failed: %s", exc)
         # Keep the unreadable file: the next save_manifest would otherwise
@@ -220,7 +226,7 @@ def save_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         tmp.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     return manifest
 
 

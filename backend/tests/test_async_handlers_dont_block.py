@@ -34,6 +34,9 @@ ALLOWED: dict[str, str] = {
     "db.campaign_store.get_campaign_store": "cached singleton; only the first call per process can probe DataLab (≤ 2 s)",
     "services.http_safe.make_async_client": "constructs a client (shared TLS context), sends nothing",
     "services.errors.log_handled_exception": "writes one log line",
+    "services.redis_breaker.refuse_if_open": "a monotonic-clock comparison; raises or returns, no I/O",
+    "services.redis_breaker.note_failure": "an isinstance check and one float assignment, no I/O",
+    "services.redis_breaker.was_refused": "reads one attribute of an exception, no I/O",
 }
 
 

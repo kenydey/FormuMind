@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import Any
 
 from ._filelock import lock_exclusive, unlock
+from ._fsutil import read_bytes_with_retry, read_text_with_retry, replace_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
                     fh.write(data)
                     fh.flush()
                     os.fsync(fh.fileno())
-                os.replace(tmp_name, path)
+                replace_with_retry(tmp_name, path)
             except BaseException:
                 try:
                     os.unlink(tmp_name)
@@ -369,7 +370,7 @@ def _load_lineage(lineage_id: str) -> Lineage | None:
     path = _lineage_path(lineage_id)
     if not path.is_file():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(read_text_with_retry(path))
     stored = data.pop("sha256_record", None)
     if stored != _record_checksum(data):
         raise ValueError(f"lineage file checksum mismatch: {lineage_id}")
@@ -413,7 +414,7 @@ def _load_version(version_id: str) -> Version | None:
     path = vdir / "version.json"
     if not path.is_file():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(read_text_with_retry(path))
     stored = data.pop("sha256_record", None)
     if stored != _record_checksum(data):
         raise ValueError(f"version file checksum mismatch: {version_id}")
@@ -424,7 +425,7 @@ def _read_content(version_id: str) -> bytes:
     path = _version_dir(version_id) / "content.bin"
     if not path.is_file():
         raise KeyError(f"content snapshot missing for version {version_id}")
-    return path.read_bytes()
+    return read_bytes_with_retry(path)
 
 
 # ── public API ──────────────────────────────────────────────────────────────
@@ -787,7 +788,7 @@ def get_evidence(version_id: str) -> dict[str, Any]:
     path = _version_dir(version_id) / "evidence.json"
     if not path.is_file():
         raise ValueError(f"evidence not frozen for version {version_id}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(read_text_with_retry(path))
 
 
 def verify_evidence(version_id: str) -> dict[str, Any]:

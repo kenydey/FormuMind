@@ -36,6 +36,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 
+from ._fsutil import atomic_write_text, read_text_with_retry
+
 logger = logging.getLogger(__name__)
 
 # ── data model ──────────────────────────────────────────────────────────────
@@ -528,7 +530,8 @@ def save_tables(
         }
         if property_sets is not None:
             payload["property_sets"] = property_sets
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Atomic: the source-detail endpoint reads this file while the ingest that wrote it may still be finishing.
+        atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
         return path
     except Exception:
         logger.exception("table_contract: save_tables failed (fail-open)")
@@ -541,7 +544,7 @@ def load_tables(source_id: str) -> list[TableAsset]:
         path = _tables_path(source_id)
         if not path.exists():
             return []
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_text_with_retry(path))
         return [TableAsset.from_dict(d) for d in payload.get("tables", [])]
     except Exception:
         logger.exception("table_contract: load_tables failed (fail-open)")
@@ -559,7 +562,7 @@ def load_property_sets(source_id: str) -> list[dict]:
         path = _tables_path(source_id)
         if not path.exists():
             return []
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_text_with_retry(path))
         sets = payload.get("property_sets") or []
         return [dict(s) for s in sets if isinstance(s, dict)]
     except Exception:

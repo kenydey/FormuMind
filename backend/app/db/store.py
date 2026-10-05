@@ -24,6 +24,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings, get_settings
+from ..services._fsutil import replace_with_retry
 from ..domain.schemas import ExperimentRecord, ProductDomain
 from .datalab_client import (
     DatalabUnavailableError,
@@ -137,7 +138,6 @@ class JsonExperimentStore:
 
     def _write(self, records: list[ExperimentRecord]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        import os
         import tempfile
 
         with tempfile.NamedTemporaryFile(
@@ -150,7 +150,7 @@ class JsonExperimentStore:
         ) as fh:
             fh.write(json.dumps([r.model_dump() for r in records], indent=2, ensure_ascii=False))
             tmp_path = fh.name
-        os.replace(tmp_path, str(self.path))
+        replace_with_retry(tmp_path, str(self.path))
 
     def add(self, records: list[ExperimentRecord]) -> None:
         with self._lock:

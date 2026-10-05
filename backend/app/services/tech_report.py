@@ -350,7 +350,9 @@ def write_output_receipt(
         }
         tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, target)
+        from ._fsutil import replace_with_retry
+
+        replace_with_retry(tmp, target)
         return target
     except Exception as exc:  # noqa: BLE001 — receipts must never break a run
         logger.warning("write_output_receipt(%s/%s) failed: %s", run_kind, run_id, exc)

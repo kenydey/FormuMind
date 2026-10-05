@@ -14,6 +14,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from ..config import get_settings
+from ..services import redis_breaker
+from ..services._fsutil import atomic_write_text, read_text_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -209,10 +211,7 @@ def _file_write_meta(
     }
     if kind:
         meta["kind"] = kind
-    _meta_path(task_id).write_text(
-        json.dumps(meta, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    atomic_write_text(_meta_path(task_id), json.dumps(meta, ensure_ascii=False))
 
 
 def _file_read_meta(task_id: str) -> dict[str, str] | None:
@@ -220,17 +219,14 @@ def _file_read_meta(task_id: str) -> dict[str, str] | None:
     if not path.exists():
         return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(read_text_with_retry(path))
         return {k: str(v) for k, v in raw.items()}
     except Exception as exc:
         return degrade_return(logger, exc, "operation failed", None)
 
 
 def _file_write_result(task_id: str, result: dict[str, Any] | None) -> None:
-    _result_path(task_id).write_text(
-        json.dumps(result or {}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    atomic_write_text(_result_path(task_id), json.dumps(result or {}, ensure_ascii=False))
 
 
 def _file_read_result(task_id: str) -> dict[str, Any] | None:
@@ -238,20 +234,24 @@ def _file_read_result(task_id: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_text_with_retry(path))
     except Exception as exc:
         return degrade_return(logger, exc, "operation failed", None)
 
 
-def _redis_client():
-    import redis
+def _log_redis_failure(exc: Exception, message: str, *args: Any) -> None:
+    """One WARNING per outage; the calls the breaker refuses while it is open are not news."""
+    (logger.debug if redis_breaker.was_refused(exc) else logger.warning)(message, *args, exc)
 
+
+def _redis_client():
     settings = get_settings()
-    client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
     # Don't ping on every call — the first operation will fail gracefully
     # if Redis is down, and the result-store / progress-store already have
-    # disk fallbacks.
-    return client
+    # disk fallbacks. The breaker keeps "down" cheap: after one failed
+    # connection the following calls fail at once for a while instead of each
+    # paying for a connection attempt (~2 s per call on Windows).
+    return redis_breaker.client_from_url(settings.redis_url, decode_responses=True)
 
 
 def _store_progress(
@@ -277,7 +277,7 @@ def _store_progress(
         client.hset(_meta_key(task_id), mapping=meta)
         client.expire(_meta_key(task_id), META_TTL_SECONDS)
     except Exception as exc:
-        logger.warning("progress store failed for %s: %s", task_id, exc)
+        _log_redis_failure(exc, "progress store failed for %s: %s", task_id)
         _file_write_meta(task_id, event, kind=kind)
 
 
@@ -319,10 +319,10 @@ def publish_progress(
         try:
             p = _meta_path(task_id)
             if p.exists():
-                meta = json.loads(p.read_text(encoding="utf-8"))
+                meta = json.loads(read_text_with_retry(p))
                 if "started_at" not in meta:
                     meta["started_at"] = str(time.time())
-                    p.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+                    atomic_write_text(p, json.dumps(meta, ensure_ascii=False))
         except Exception:
             pass
     return event
@@ -342,7 +342,7 @@ def persist_result(
             ex=RESULT_TTL_SECONDS,
         )
     except Exception as exc:
-        logger.warning("persist_result redis set failed for %s: %s", task_id, exc)
+        _log_redis_failure(exc, "persist_result redis set failed for %s: %s", task_id)
         _file_write_result(task_id, result)
     publish_progress(
         task_id,
@@ -360,7 +360,8 @@ def get_task_meta(task_id: str) -> dict[str, str] | None:
         if meta:
             return meta
     except Exception as exc:
-        log_handled_exception(logger, exc, "handled exception")
+        if not redis_breaker.was_refused(exc):
+            log_handled_exception(logger, exc, "handled exception")
     return _file_read_meta(task_id)
 
 
@@ -371,7 +372,8 @@ def get_task_result(task_id: str) -> dict[str, Any] | None:
         if raw:
             return json.loads(raw)
     except Exception as exc:
-        log_handled_exception(logger, exc, "handled exception")
+        if not redis_breaker.was_refused(exc):
+            log_handled_exception(logger, exc, "handled exception")
     return _file_read_result(task_id)
 
 

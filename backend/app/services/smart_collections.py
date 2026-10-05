@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from ._filelock import lock_exclusive, unlock
+from ._fsutil import read_text_with_retry, replace_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,11 @@ def _load_store_strict(project_id: str) -> tuple[dict[str, Any], bool]:
     if not path.is_file():
         return _empty_store(project_id), False
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(read_text_with_retry(path))
+    except OSError:
+        # 读不出来 ≠ 损坏：Windows 上写方的 os.replace 瞬间会让健康文件短暂不可读。把它当损坏隔离，
+        # 就是把一份完好的 store 改名挪走并回一个空的——唯一错误的答案。上抛，让调用方失败而不是丢数据。
+        raise
     except Exception as exc:  # noqa: BLE001 — 解析失败即视为损坏
         _quarantine_corrupt(path, exc)
         _mark_corrupt_seen(project_id)
@@ -193,7 +198,7 @@ def _save_store(project_id: str, store: dict[str, Any]) -> dict[str, Any]:
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
+        replace_with_retry(tmp_name, path)
         _fsync_dir(path.parent)
     except BaseException:
         with contextlib.suppress(OSError):
