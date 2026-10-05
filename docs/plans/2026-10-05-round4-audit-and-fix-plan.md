@@ -28,6 +28,7 @@
 | **"空请求体 → 带参数端点"扫描**（封装发 `{}` / 不带体，而后端 schema 有可选参数） | 按钮点了没效果 | 1 处：材料页"属性补全"（§2 #17） |
 | **新增脚本逐行审查**（`install.sh` / `install.ps1` / `install.bat`）+ 在干净目录里真跑 alembic | 安装器在全新克隆上能否走完 | 3 处（§2 #9） |
 | **装上解析器，用真实文件走完整入库链路**（PyMuPDF / pymupdf4llm / MarkItDown / python-docx：合成的 PDF、DOCX、XLSX、PPTX，中英文数据表 → 解析 → 分块 → 质量门 → 入库 → 检索 → 表格归一化） | 前几轮"沙箱没装解析器，无法实测"留下的盲区 | **8 处**（§2 #20–#24、#29–#31）——全部在"解析 → 入库"这条路上（主要是表格），且都是喂手写 markdown 的测试看不到的 |
+| **在真实 Windows 上跑**（CI `windows-latest`：`install.bat` → Windows PowerShell 5.1 → `install.ps1`，再 import 应用、起服务、跑一组测试、故意让 pip 失败） | 只有真 Windows 才暴露的缺陷——整个仓库的 CI 原来全是 Linux | **2 处连续命中**（§2 #32、#33），都是"在 Windows 上根本用不了"级别 |
 | **PowerShell 7 真解析 `install.ps1`**（下载官方 pwsh，用语言解析器解析；把字节按 Windows PowerShell 5.1 的 ANSI 方式解码再解析；真跑 `Invoke-Step` / `Invoke-Optional`） | 只靠静态扫描无法确认的 PowerShell 语义 | 确认 BOM 修复有效（无 BOM → 3 个解析错误）；辅助函数语义正确；`install.bat`（§2 #26） |
 
 ---
@@ -67,6 +68,8 @@
 | 29 | 中 | 文档解析 | **上传的 `.html` / `.htm` 原样存成源码**：URL 入库一直用 `html_to_markdown` 转换，上传路径（两种扩展名都在上传框的 accept 列表里）走的文本档只解码字节——chunk 里存的是 `<!doctype html><html><head><style>…<script>…`，`<script>` / `<style>` 正文、导航、每个标签都当正文切块。现在上传与 URL 共用同一个转换器；没装 trafilatura（可选依赖）时，转换器的正则回退原来还会把表格压成一行字，现在先把 `<table>` 转成管道表（转义 `\|`、补齐参差行）；没有正文的页面得到空结果而不是原始标签。装了 trafilatura 时还有一处：小页面（数据表页面基本就是一张表）它会退化成逐格一行的纯文本基线，原来只要超过 100 字就被接受；现在页面含数据表而输出里没有管道行时改用转换器自己的保表路径（文章页仍用 trafilatura 的标题结构与去噪） | `test_html_upload.py`（12，其中 3 条需要 trafilatura，在 `backend-extras` 里跑） | 7 / 9 失败（不含 trafilatura 的条目） |
 | 30 | 低 | 文档解析 | 没有文字层的 PDF（扫描件）：任务"完成：1 条"，提示"可能是扫描件"，但**不说怎么办**。本机既没有 rapidocr 也没有 MinerU 时，现在提示安装 rapidocr（`.[parse_pro]`）或配置 MinerU 云端解析 | `test_ingest_scanned_pdf_hint.py`（3） | 1 / 3 失败 |
 | 31 | 低 | 文档解析 | 列 = 指标、行 = 样品的**宽表**被当"一行一属性"读，得到名字叫 `65`、值是下一列的伪属性。行标签半数以上是数字时整张表跳过并说明原因（属性集目前只用于展示，没有被推荐 / KG 消费，所以影响面是界面上的垃圾行） | `test_table_converter_output.py`（+2） | 1 / 2 失败 |
+| 32 | **高** | 部署 / Windows | **后端在 Windows 上 `import` 就崩**：`artifact_versions` 与 `smart_collections` 在模块顶层 `import fcntl`（`fcntl` 在 Windows 上不存在），`app.main` 经路由列表导入前者 → `ModuleNotFoundError`；而安装器（§2 #9 修过退出码之后）照样打印"安装完成"。两个模块的注释早就写着"非 POSIX 退化为线程锁 + 原子写"，但顶层导入让这个退化永远走不到。**由 `installer-windows` 任务第一次真跑发现**——仓库里没有任何 Windows 的 CI，这类缺陷此前不可能被发现。新增 `services/_filelock.py`（POSIX `flock` / Windows `msvcrt.locking`，非阻塞重试 + 超时），两处改用它；守卫测试：`app/` 下任何模块在顶层导入 POSIX 专有 / Windows 专有模块即失败；msvcrt 分支在 Linux 上用假对象覆盖 | `test_filelock.py`（7） | 2 / 7 失败（守卫类） |
+| 33 | 中 | 部署 / Windows | 同一次真跑的下一个：**智能集合在 Windows 上每次保存都失败**——`os.O_DIRECTORY` 在 Windows 不存在，属性访问抛 `AttributeError`，而旁边的 `except OSError` 接不住（Windows 子集 41 条测试里 8 条失败）。同批修：任务目录默认值写死 `/tmp/formumind_tasks`（3 处）和 `/tmp/_structure_tmp` 在 Windows 上落到 `<当前盘>:\tmp`，改用 `tempfile.gettempdir()`；PDF 导出的 CJK 字体搜索只认 Linux / macOS 路径，补 Windows 系统字体。守卫测试（Linux 上跑）：不得直接访问 POSIX 专有的 `os` 属性、不得出现硬编码 `/tmp` | `test_windows_compat.py`（6） | 3 / 6 失败 |
 
 **CI 上新增**：非阻塞 job `backend-extras`——装上 `file_ingest` / `report_export` / `color` 与 PyMuPDF 两个固定版本 + CJK 字体，跑所有需要这些可选依赖的测试，并把"被跳过"当成失败（阻塞 job 不装它们，这类测试在那里全是 `importorskip`，这正是三轮审查都没发现表格路径问题的原因；`colour-science` 那条分支此前在任何地方都没跑过）。
 
@@ -131,10 +134,11 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 - 现状：`provenance.link` 另开连接、裸 `commit()`，不走 `commit_session` 的 Redis 写锁（单进程下无影响；多进程争用时靠 30 s busy timeout，且 fail-open 只会丢边）。**成本不是问题**：实测 100 条边 106 ms（1.1 ms/条），之前担心的"N × 5 次 DDL"并不构成瓶颈。
 - 做法（可选）：新增 `link_many` 单事务批量写并走 `commit_session`；验收：多进程并发写入下无 `database is locked`。
 
-**6. Windows 安装器仍未在 Windows 上跑过**
-- 已做：官方 PowerShell 7 真解析 `install.ps1`（BOM 必要性被证实），`Invoke-Step` / `Invoke-Optional` 语义在真实 PowerShell 里验证并变成测试（CI 的 ubuntu runner 自带 `pwsh`，会真跑）。
-- 仍缺：Windows PowerShell **5.1** 本身的行为（`$ErrorActionPreference = "Stop"` 与原生命令 stderr 的交互在 5.1 / 7 之间有差异）、`py` 启动器、`.venv\Scripts` 路径、`install.bat` 的双击 `pause`——都只能在 Windows 上确认。
-- 做法：CI 加 `windows-latest` job 跑 `install.ps1`（跳过前端与启动）；验收：job 绿，且故意让 pip 失败时安装器非零退出。
+**6. Windows 现在是"测过的平台"，但只测了一部分**
+- 已做（CI `windows-latest`，全绿）：`install.bat` → Windows PowerShell 5.1 → `install.ps1` 在干净检出上跑完；应用可 import、迁移后的数据库存在；服务起得来并答 `/health`；文件 / 锁 / HTTP 层的 41 条测试通过；故意让 pip 失败时安装器非零退出。过程中修了两个"Windows 上根本用不了"的缺陷（§2 #32、#33）。
+- 已加（非阻塞）：`backend-windows` 任务在 Windows 上跑**整套**后端测试并把失败清单打在日志末尾——这份清单就是下一步的工作清单；结果见 §5。
+- 仍缺：`install.bat` 的**双击** `pause` 行为（CI 不是双击启动）；Celery worker 在 Windows 上的 `--pool=solo` 路径；Redis / Datalab 在 Windows 上的部署；安装器默认选 `py -3`（CI 上选到了最新的 Python 3.14，项目自己的 Docker / CI 用 3.11）——能装能起，但"支持哪些 Python 版本"没有明说也没有测。
+- 做法：按 `backend-windows` 的失败清单逐项修；安装器优先选 3.11 / 3.12（找不到再退回最新），并在 README 写明测过的版本；验收：`backend-windows` 失败清单为空，或每个失败都有"Windows 不适用"的显式 skip 原因。
 
 **7. 质量门对短公式仍会误伤（影响小，取舍）**
 - 现状：表格已修（#20）。其余块已实测：长公式（比例 0.55–0.58）、代码块（0.54）、图注（0.58）、图片链接（0.70）都能通过；**短公式**（`$$k = A e^{-E_a / (RT)}$$` 比例 0.27，`$$x = 1$$` 只有 9 个字符）会被判垃圾。公式 chunk 脱离上下文本来就很少是检索目标，所以只是记录，不是缺陷。

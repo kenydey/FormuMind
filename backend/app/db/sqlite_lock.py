@@ -12,11 +12,21 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
 _LOCK_KEY = "formumind:sqlite_write"
+
+# Redis down is the normal state of a development install (and of every test run). Every write goes through here,
+# so without a back-off each one paid a connection attempt and logged a WARNING: instant on Linux, ~2 s per write
+# on Windows (a refused loopback connection is retried by the TCP stack there) — a dev install without Redis crawled.
+# After a failure the lock is skipped for this long; a Redis that comes up is picked up at the next attempt.
+_RETRY_AFTER_S = 30.0
+_CONNECT_TIMEOUT_S = 1.0
+_monotonic = time.monotonic
+_redis_down_until = 0.0
 
 
 @contextlib.contextmanager
@@ -28,7 +38,8 @@ def sqlite_write_lock(
     Reduced default timeout/blocking to 30s to fail fast and surface contention
     rather than stalling callers for five minutes.
     """
-    if not redis_url:
+    global _redis_down_until
+    if not redis_url or _monotonic() < _redis_down_until:
         yield
         return
 
@@ -39,11 +50,16 @@ def sqlite_write_lock(
     try:
         import redis
 
-        client = redis.from_url(redis_url, decode_responses=True, socket_timeout=5)
+        client = redis.from_url(
+            redis_url, decode_responses=True, socket_timeout=5, socket_connect_timeout=_CONNECT_TIMEOUT_S
+        )
         lock = client.lock(_LOCK_KEY, timeout=timeout, blocking_timeout=blocking_timeout)
         acquired = lock.acquire(blocking=True, blocking_timeout=blocking_timeout)
     except Exception as exc:
-        logger.warning("Redis write lock unavailable (%s) — proceeding unlocked", exc)
+        _redis_down_until = _monotonic() + _RETRY_AFTER_S
+        logger.warning(
+            "Redis write lock unavailable (%s) — proceeding unlocked, not retrying for %.0f s", exc, _RETRY_AFTER_S
+        )
         yield
         return
 
