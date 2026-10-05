@@ -164,7 +164,10 @@ jobs:
         shell: cmd
         run: call install.bat
 
+      # The steps below are independent of each other (`if: always()`), so one run reports every Windows-only
+      # failure instead of the first one.
       - name: The installed app imports, and the migrated database exists
+        if: always()
         shell: cmd
         run: |
           backend\.venv\Scripts\python.exe -c "import app.main; print('app imports')"
@@ -172,7 +175,46 @@ jobs:
           if not exist backend\data\formumind.db (echo database missing & exit /b 1)
           dir backend\data\formumind.db
 
+      - name: The server starts and answers /health
+        if: always()
+        shell: pwsh
+        working-directory: backend
+        env:
+          FORMUMIND_API_AUTH_ENABLED: "false"
+          FORMUMIND_CELERY_EAGER: "true"
+          FORMUMIND_DATALAB_REQUIRED: "false"
+          FORMUMIND_CAMPAIGN_BACKEND: sqlite
+          FORMUMIND_EXPERIMENT_BACKEND: sqlite
+        run: |
+          $proc = Start-Process -FilePath .\.venv\Scripts\python.exe -PassThru `
+            -ArgumentList "-m", "uvicorn", "app.main:app", "--port", "8000" `
+            -RedirectStandardOutput server.out.log -RedirectStandardError server.err.log
+          $answered = $false
+          for ($i = 0; $i -lt 60 -and -not $proc.HasExited; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-WebRequest -Uri http://127.0.0.1:8000/health -SkipHttpErrorCheck -TimeoutSec 5
+              Write-Host "GET /health -> HTTP $($r.StatusCode): $($r.Content)"
+              $answered = $true
+              break
+            } catch { }
+          }
+          Write-Host "---- server.err.log (tail)"
+          Get-Content server.err.log -Tail 40 -ErrorAction SilentlyContinue
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          if (-not $answered) { Write-Error "the server never answered"; exit 1 }
+
+      - name: Backend tests that touch files, locks and the HTTP layer
+        if: always()
+        shell: cmd
+        working-directory: backend
+        run: >
+          .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+          tests/test_filelock.py tests/test_artifact_versions.py tests/test_smart_collections.py
+          tests/test_api.py tests/test_ingest.py
+
       - name: A failing pip step must fail the installer
+        if: always()
         # Unreachable index: the venv is reused, so the first pip call fails. The installer used to print
         # "installation complete" after a failed native command (PowerShell does not stop on one by itself).
         shell: cmd
