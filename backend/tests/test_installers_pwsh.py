@@ -118,19 +118,15 @@ Invoke-Step "failing-step" { & $native -NoProfile -Command "exit 3" }
 _FAKE_PY = r"""
 $script:installed = @(%s)
 function py {
-  # the installer calls `& $cmd @(...)`: a native py.exe receives the array flattened, a function one nested array
+  # the installer calls `& $cand.Exe @($cand.Args + @("-c", $code))`: a native py.exe receives the array flattened, a
+  # function one nested array. The probe prints two lines - "<major>.<minor>" and the interpreter's own path.
   $a = @($args | ForEach-Object { $_ })
-  $version = $a -contains '--version'
   if ($a[0] -match '^-(\d+\.\d+)$') {
     $hit = $script:installed | Where-Object { $_ -like "$($Matches[1]).*" } | Select-Object -First 1
+    # py.exe says this on stderr and exits non-zero; as a function it is a terminating error, the harder case
     if (-not $hit) { throw 'No suitable Python runtime found' }
-    if ($version) { return "Python $hit" }
-    return "C:\fake\py$($Matches[1])\python.exe"
-  }
-  if ($a[0] -eq '-3') {
-    $hit = $script:installed | Select-Object -Last 1
-    if ($version) { return "Python $hit" }
-    return 'C:\fake\latest\python.exe'
+    "$($Matches[1])"
+    "C:\fake\py$($Matches[1])\python.exe"
   }
 }
 """
@@ -138,7 +134,8 @@ function py {
 
 def _find_python(tmp_path: Path, installed: list[str]) -> str:
     text = INSTALLER.read_text(encoding="utf-8-sig")
-    function = text[text.index("function Find-Python"): text.index('Write-Step "[1/5]')]
+    # Invoke-Probe is what Find-Python probes through; take everything from it up to the first step
+    function = text[text.index("function Invoke-Probe"): text.index('Write-Step "[1/5]')]
     probe = tmp_path / "find.ps1"
     probe.write_text(
         (_FAKE_PY % ", ".join(f"'{v}'" for v in installed))
@@ -151,23 +148,39 @@ def _find_python(tmp_path: Path, installed: list[str]) -> str:
     return next(line for line in done.stdout.splitlines() if line.startswith("FOUND="))
 
 
-def test_the_installer_prefers_the_version_the_project_is_tested_on(tmp_path):
-    """``py -3`` is the *newest* Python — 3.14 on the CI runner, where rdkit / torch have no wheels yet."""
+def test_the_installer_prefers_the_versions_colbert_supports(tmp_path):
+    """3.12 first (ColBERT has Windows wheels to 3.12), then 3.11 - never the newest by default: on 3.14 rdkit / torch
+    have no wheels yet."""
     found = _find_python(tmp_path, ["3.10.11", "3.11.9", "3.14.0"])
-    assert found == r"FOUND=3.11.9|C:\fake\py3.11\python.exe", found
+    assert found == r"FOUND=3.11|C:\fake\py3.11\python.exe", found
+    found = _find_python(tmp_path, ["3.11.9", "3.12.4", "3.14.0"])
+    assert found == r"FOUND=3.12|C:\fake\py3.12\python.exe", found
 
 
-def test_without_3_11_it_takes_3_12_before_the_newest(tmp_path):
-    found = _find_python(tmp_path, ["3.12.4", "3.14.0"])
-    assert found == r"FOUND=3.12.4|C:\fake\py3.12\python.exe", found
+def test_without_3_12_or_3_11_it_takes_3_13_before_3_14(tmp_path):
+    found = _find_python(tmp_path, ["3.13.1", "3.14.0"])
+    assert found == r"FOUND=3.13|C:\fake\py3.13\python.exe", found
 
 
 def test_only_a_newer_python_is_still_accepted(tmp_path):
     found = _find_python(tmp_path, ["3.14.0"])
-    assert found == r"FOUND=3.14.0|C:\fake\latest\python.exe", found
+    assert found == r"FOUND=3.14|C:\fake\py3.14\python.exe", found
 
 
 def test_a_python_older_than_the_supported_minimum_is_never_chosen(tmp_path):
-    """3.10 is below the floor (numpy 2.x needs 3.11): whatever is found instead, it is not that one."""
+    """3.10 is below the floor (numpy 2.x needs 3.11): it is not even a candidate. Whatever is found instead - the
+    test machine's own python may be picked up by the plain `python` fallback - it is not that one."""
     found = _find_python(tmp_path, ["3.10.11"])
     assert not found.startswith("FOUND=3.10"), found
+
+
+def test_the_candidate_list_and_the_rejection_floor_agree_with_the_declared_minimum():
+    """The text-level half of the above: no 3.10 candidate, and an interpreter below the floor is rejected."""
+    import re
+    import tomllib
+
+    floor = re.match(r">=\s*(\d+\.\d+)", tomllib.loads((INSTALLER.parent / "backend" / "pyproject.toml").read_text(encoding="utf-8"))["project"]["requires-python"]).group(1)
+    text = INSTALLER.read_text(encoding="utf-8-sig")
+    candidates = re.search(r'foreach \(\$v in @\(([^)]*)\)\)', text).group(1)
+    assert "3.10" not in candidates, candidates
+    assert f'-lt [version]"{floor}"' in text

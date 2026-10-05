@@ -51,13 +51,26 @@ def test_powershell_installer_checks_native_exit_codes():
         for n, line in enumerate(text.splitlines(), 1)
         # quoted text (messages that merely mention `npm install`) is not an invocation
         if re.search(r"&\s+(\$VenvPython|npm|\$py\.Exe)\b", re.sub(r'"[^"]*"', '""', line))
-        and not re.search(r"Invoke-(Step|Optional)\b", line)
+        # Invoke-Probe qualifies: it reports the exit code as .Ok instead of exiting,
+        # which is what a *probe* has to do (see the test below).
+        and not re.search(r"Invoke-(Step|Optional|Probe)\b", line)
         and "function " not in line
     ]
     assert not unchecked, (
         "native commands whose failure would go unnoticed (wrap them in Invoke-Step / Invoke-Optional):\n  "
         + "\n  ".join(unchecked)
     )
+
+
+def test_the_probe_helper_derives_its_result_from_the_exit_code():
+    """``Invoke-Probe`` is on the allowlist above, so the property that earns it a place
+    there has to hold: it must report `$LASTEXITCODE`. A probe that always said Ok would
+    turn the allowlist into a hole the size of the interpreter selection."""
+    text = (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    body = text[text.index("function Invoke-Probe"):]
+    body = body[: body.index("\nfunction ", 1)]
+    assert "$LASTEXITCODE" in body, "Invoke-Probe must read the native exit code"
+    assert re.search(r"Ok\s*=", body), "and expose it as .Ok for the caller to branch on"
 
 
 def test_the_optional_helper_does_not_leak_command_output_into_its_result():
@@ -132,7 +145,7 @@ def test_files_the_installers_point_at_exist(script):
 def test_both_installers_warn_about_a_python_newer_than_the_tested_one():
     """The image and the blocking CI job run 3.11 and the full suite passes on 3.12 and 3.13; a brand-new Python often
     has no prebuilt rdkit / torch, and the failure shows up as a pip build error far from its cause."""
-    assert 'Version -ge [version]"3.14"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    assert '[version]$py.Version -ge [version]"3.14"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
     assert 'ver_ge "$PY_VER" "3.14"' in (REPO / "install.sh").read_text(encoding="utf-8")
 
 
@@ -168,5 +181,5 @@ def test_the_declared_minimum_python_is_one_the_pinned_requirements_support():
             refusing.append(f"{match.group(1)}=={match.group(2)} requires Python {requires}")
     assert not refusing, f"requires-python is {declared!r} but:\n  " + "\n  ".join(refusing)
 
-    assert f'-ge [version]"{minimum}"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
+    assert f'-lt [version]"{minimum}"' in (REPO / "install.ps1").read_text(encoding="utf-8-sig")
     assert f'ver_ge "$PY_VER" "{minimum}"' in (REPO / "install.sh").read_text(encoding="utf-8")
