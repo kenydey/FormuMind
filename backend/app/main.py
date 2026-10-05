@@ -332,6 +332,25 @@ async def datalab_unavailable_handler(_request: Request, exc: DatalabUnavailable
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
+from .strict_json import install as _install_strict_json  # noqa: E402
+
+_install_strict_json()
+
+
+@app.exception_handler(OverflowError)
+async def integer_out_of_range_handler(_request: Request, exc: OverflowError) -> JSONResponse:
+    """An id too large for the database cannot belong to any row: answer 404, not 500.
+
+    Path / query / body ids are declared ``int`` — unbounded in Python — and every one of them reaches SQLite as a
+    parameter, which raises ``OverflowError: Python int too large to convert to SQLite INTEGER`` above 2**63. The fuzz
+    found 20 endpoints answering ``GET /api/experiments/999999999999999999999999999999/attachments`` with a 500.
+    Any other ``OverflowError`` is still a defect and still surfaces as one.
+    """
+    if "SQLite INTEGER" in str(exc):
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    raise exc
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Log 422 validation errors so intermittent autosave failures are traceable.

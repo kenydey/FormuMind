@@ -32,6 +32,8 @@ import time
 from typing import Any, Callable, TypeVar
 from urllib.parse import quote
 
+import httpx
+
 from ..config import get_settings
 from .errors import degrade_return, optional_import
 from .http_safe import make_client
@@ -57,6 +59,14 @@ _CACHE_WRITE_COUNT = 0
 
 _EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = threading.Lock()
+
+# PubChem unreachable (offline lab, corporate firewall that drops packets): without this every cold name lookup waits
+# out its own timeout, one after the other, inside the request — the first recommendation of an air-gapped install took
+# 12-25 s here (one ingredient after another). After a transport-level failure the lookups are skipped for a while; they
+# all already degrade to "unknown" and are negatively cached.
+_PUBCHEM_BACKOFF_S = 60.0
+_PUBCHEM_CONNECT_TIMEOUT_S = 3.0
+_pubchem_down_until = 0.0
 
 _CAS_RE = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
 
@@ -203,8 +213,10 @@ def _cached(tool: str, arg: str, compute: Callable[[], T]) -> T:
 
 def clear_cache() -> None:
     """Test hook."""
+    global _pubchem_down_until
     with _CACHE_LOCK:
         _CACHE.clear()
+    _pubchem_down_until = 0.0
 
 
 # ── native PubChem backend ────────────────────────────────────────────────────
@@ -217,14 +229,22 @@ def _pubchem_get(path: str) -> Any | None:
     function to keep the network out of unit runs, and any transport / status
     failure degrades uniformly to ``None`` so callers stay neutral offline.
     """
+    global _pubchem_down_until
+    if time.monotonic() < _pubchem_down_until:
+        return None
     url = path if path.startswith("http") else f"{_PUBCHEM_BASE}{path}"
     timeout = float(get_settings().chemtools_timeout_s)
     try:
-        with make_client(timeout=timeout) as client:
+        # A reachable PubChem accepts the connection in milliseconds; waiting longer than a few seconds for the *connect*
+        # only means nobody is there. The read timeout stays as configured.
+        with make_client(timeout=httpx.Timeout(timeout, connect=min(timeout, _PUBCHEM_CONNECT_TIMEOUT_S))) as client:
             resp = client.get(url)
         if resp.status_code != 200:
             return None
         return resp.json()
+    except httpx.TransportError as exc:  # connect / DNS / timeout: the service or the network is not there
+        _pubchem_down_until = time.monotonic() + _PUBCHEM_BACKOFF_S
+        return degrade_return(logger, exc, "pubchem request failed", None)
     except Exception as exc:
         return degrade_return(logger, exc, "pubchem request failed", None)
 
