@@ -415,7 +415,8 @@ _default: dict[str, object] = {}
 _default_lock = threading.Lock()
 
 
-def default_session_factory() -> sessionmaker[Session]:
+def _default_pair() -> tuple[Engine, sessionmaker[Session]]:
+    """The process-wide (engine, session factory), rebuilt when ``FORMUMIND_DB_URL`` changes."""
     from ..config import get_settings
 
     db_url = os.environ.get("FORMUMIND_DB_URL") or get_settings().db_url
@@ -430,4 +431,14 @@ def default_session_factory() -> sessionmaker[Session]:
             _default["url"] = db_url
             _default["engine"] = engine
             _default["factory"] = make_session_factory(engine)
-    return _default["factory"]  # type: ignore[return-value]
+        return _default["engine"], _default["factory"]  # type: ignore[return-value]
+
+
+def default_session_factory() -> sessionmaker[Session]:
+    """A *factory*: call it (``default_session_factory()()``) to get a ``Session``."""
+    return _default_pair()[1]
+
+
+def default_engine() -> Engine:
+    """The engine behind :func:`default_session_factory` (a ``sessionmaker`` has no ``.bind``)."""
+    return _default_pair()[0]
