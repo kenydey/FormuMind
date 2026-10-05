@@ -34,6 +34,9 @@
 | **Schema 引导的 API 模糊测试**（`scripts/audit/api_fuzz.py`：对 270 个文档化接口，用冒烟游走的最小请求逐叶变异——空串 / 2 万字符 / NUL / 注入样式字符串、0 / -1 / 2**63 / 1e308 / NaN / Infinity、错误的 JSON 类型、空列表与 3000 元素列表、null，外加超出数据库范围的 id、NUL 与 3000 字符的路径段、乱写的 limit / page / offset） | 手写测试想不到的请求形状：未处理的类型 / 范围错误变成 500，或让记录从此读不出来 | **2 类、27 个接口**（§2 #50）；修复后 12 个种子 ≈ 3.7 万个变异请求 **0 个 5xx、0 个挂起** |
 | **对抗性文本扫描**（① 语法式模糊测试：随机 markdown / 表格 / HTML 喂文档→分块→表格→质量门全链路；② 对 `app/services` + `app/pipeline` 的**每个文本入口函数**逐个喂 6000 字符的单字符重复串 / 空白 / 括号 / 引号 / 数字串等，量化耗时与"翻倍后的增长比"） | 正则灾难性回溯（ReDoS）、二次 / 三次方的文本处理——用户上传的文档、抓取的网页、粘贴的问题都会走到 | **5 处**（§2 #47–#49），其中 HTML 回退剥离器 16 KB 的输入就能卡住一个 worker 数十秒到数分钟 |
 | **PowerShell 7 真解析 `install.ps1`**（下载官方 pwsh，用语言解析器解析；把字节按 Windows PowerShell 5.1 的 ANSI 方式解码再解析；真跑 `Invoke-Step` / `Invoke-Optional`） | 只靠静态扫描无法确认的 PowerShell 语义 | 确认 BOM 修复有效（无 BOM → 3 个解析错误）；辅助函数语义正确；`install.bat`（§2 #26） |
+| **依赖与声明的一致性审计**：`pip-audit` / `npm audit --omit=dev` 扫锁定的依赖；用 `uv pip compile` 把 Dockerfile 的**整份**依赖（16 个 extras + 后续步骤的 11 项）与 `requirements.txt` 的 pin 一起解析（pin 当约束）；再用 pip 的 `--dry-run --report` 逐个 extra 对基线比对；"一键安装目录 ↔ `pyproject` extras ↔ `optional_import` 探针 ↔ Dockerfile ↔ 代码实际 import 的包"逐项对；`.env.example` / 文档 / compose / 脚本里的 `FORMUMIND_*` 名字对 Settings | 镜像**没在 CI 里构建过**，于是"装进去的"和"锁定的"可以不是同一份；各处各自描述同一个依赖，彼此不一致 | **7 处**（§2 #53–#57、#59，另有 #55 的状态探针）：生产镜像里的 pypdf / httpx 被静默降级、抬高下限后 Docker 构建会解析失败、OCR 三处对着不同的包、依赖里的已知漏洞、声明的最低 Python 不可满足、开发依赖文件装不上 |
+| **在 3.12 / 3.13 上跑全量测试**（装上与阻塞 job 相同的依赖，再加 `file_ingest` / `report_export` / `color` 与 PyMuPDF 固定版本） | 安装器可能选到的 Python 与 Docker / CI 的 3.11 不是同一个 | 0 个不兼容（各 4488 通过）；但证明了声明的最低版本（3.10）本身就装不上（#57） |
+| **读 CI 日志，逐个分片核对**（尤其是非阻塞 job——整个运行显示"成功"，里面可能有红的分片） | "绿色勾"掩盖的失败：`backend-windows` 的两个分片在最近一次推送上是红的 | 1 处确认的缺陷（#60）+ 顺藤摸出的隐藏顺序依赖（#58）；另有一个**原因未明的慢测试**（§4 #10） |
 
 ---
 
@@ -93,6 +96,14 @@
 | 50 | 中 | API | **两类请求会让接口答 500**（API 模糊测试找到，共 27 个接口）：① **超出数据库整数范围的 id**（`GET /api/experiments/999999999999999999999999999999/attachments`）：`int` 在 Python 里不设上限，每个 id 都作为参数传给 SQLite，超过 2**63 抛 `OverflowError` → 20 个接口 500；现在一个全局处理器把这种溢出答成 404（任何别的 `OverflowError` 仍然是缺陷、仍然 500）。② **请求体里的 `NaN` / `Infinity`**：`json.loads` 默认接受这些字面量，pydantic `float` 字段也接受其值——`objectives[].weight`（DOE / 推荐 / 闭环四个接口）、`days`（检索保留期清理）、`step_idx`（会话计划）= 500；更糟的是**一个被存下来的非有限值会让之后每次响应序列化失败**（响应编码器拒绝 NaN），一次坏请求就能让一条记录从此读不出来。浏览器永远不会发它们（`JSON.stringify(NaN)` 是 `null`），所以进程级把 `Request.json()` 换成严格版本（`app/strict_json.py`），拒绝时与其他畸形 JSON 一样答 422，不需要任何路由单独接入 | `test_request_robustness.py`（19） | 27 个接口在旧代码上 500 |
 | 51 | 低 | 配方推荐 / 离线 | **PubChem 不可达时，首次推荐为每个陌生成分各等一次超时**：`chemical_lookup` → `chemtools._pubchem_get` 在请求路径里逐个成分同步查询，每个等满 10 s 超时（断网的实验室、丢包的防火墙就是这种）——对"支持离线运行"的产品，一个全新进程的第一次推荐要 12–25 s（对栈采样确认）。传输层失败后 60 s 内跳过 PubChem（这些调用本来就都降级成"未知"并有负缓存）；**连接**阶段（可达的服务毫秒级完成握手）只给 3 s，读超时仍按配置 | `test_chemtools_backoff.py`（9） | 窗口内仍发请求的用例在旧代码上失败（沙箱的代理会先建立连接再卡住，所以这里实测首次调用仍约 10 s——收益在"丢包 / 无路由"的网络上，用假客户端验证机制） |
 | 52 | 低 | 工程 | `chunking._parse_heading` 的文档字符串里写了 `\s`——3.11 上是 `DeprecationWarning`（只表现为警告汇总里的一行），3.12 / 3.13 是 `SyntaxWarning`，之后会变成错误；安装器选最新的 Python，所以代码必须在所有版本上干净编译。改成原始字符串，并新增守卫：把 `app/` / `tests/` / `scripts/` 的每个模块在"警告即错误"下编译。另：`test_oa_enrich_parallel_fetch_serial_persist` 断言 3 个并行 0.15 s 的抓取在 0.45 s 内完成（给文献清单读写和线程启动只留了 0.3 s），在负载高的机器上 0.498 s 失败而没有任何东西是串行的——改成 0.4 s 对 0.9 s | `test_source_hygiene.py` | 守卫在旧文件上失败 |
+| 53 | **高** | 部署 / 依赖（安全） | **生产镜像里的 `pypdf` 与 `httpx` 被 `patent-client` 静默降级成有 49 条公开漏洞的版本**：Dockerfile 先 `pip install -r requirements.txt`（pypdf 6.x / httpx 0.28.1），再 `pip install -e ".[…,file_ingest,intel,…]"`，而 `intel` 含 `patent-client`——它的每个发布版都要求 `httpx<0.28`、`pypdf<5`。pip 对这种冲突的处理是**替换**已装的 pin 而不是失败：用 `uv pip compile` 解析 HEAD 的 Dockerfile 组合，得到 `pypdf==4.3.1`、`httpx==0.27.2`。pypdf 是读取每个上传 / 下载 PDF 的解析器，4.3.1 有 **49 条**公开漏洞（全是构造 PDF 导致的拒绝服务：内存耗尽、死循环、超长运行）；`pip check` 说没问题，依赖审计只看 `requirements.txt`，**没有任何东西能看到它**。同一条路在运行中的实例里也存在：设置页"在线模式"一键安装（`ONLINE_CORE_EXTRAS = ("llm", "intel")`）会对**正在运行的环境**执行 `pip install patent-client …`。顺带：把 pypdf 下限抬到 6.19.0 之后，这个组合**根本解析不出来**（Docker 构建会失败；CI 不构建镜像，所以没人知道）。修复：`patent-client` 移到独立的 `patents` extra（Docker 不装、一键安装目录不提供）；`dependencies.install()` 把 `requirements.txt` 作为 pip 约束传入（固定的包不能再被替换）、目录条目带上 extra 自己的下限 / 固定版本（否则 pip 会回溯到**所请求的包**的古老版本——实测 `pip install -c <pins> patent-client` 会"成功"装上 3.2.6），无解时界面显示"与后端固定的依赖版本冲突，已拒绝"；新增 `scripts/check_docker_extras.py` 与 CI 的 `dockerfile-extras` job，按 Dockerfile 的**整串** extras 对 pin 做解析（在 HEAD 上跑退出 1：`patent-client>=5.0 and pypdf==6.14.2 → unsatisfiable`；新树整份 Dockerfile——16 个 extras 加上后续步骤里的 11 项（docling / marker-pdf / 固定版本的 PyMuPDF / OCR 运行时…）——328 个包全部解析、每个 pin 保持）；`ci-deps` 的豁免清单里 `intel` 归零（原先带着 `httpx` / `pypdf` / `ddgs` 三条）、只有 `patents` 记录这两条；README / 两份使用指南 / `CODE_WIKI` / `.env.example` 同步 | `test_dependency_declarations.py`（24，全部离线：目录条目 ⊆ 它声明的 extra、安装规格与 extra 的版本规则一致、每个声明的上下限都容纳 pin、Dockerfile 只装已声明的 extra 且不含 `patents`、`install()` 的约束 / 清理 / 冲突提示 / 超时）、`test_check_docker_extras.py`（11）、`test_ci_deps_workflow.py`（重写豁免断言 + 2） | 声明类用例在旧 `pyproject` / `Dockerfile` / 目录上 17 条失败；旧 HEAD 上 `check_docker_extras.py` 退出 1 |
+| 54 | 中 | 文档解析 / 部署 | **本地 OCR 的"可用性"三处对着不同的包**：OCR 引擎（`rapidocr_local`）import 的是 `rapidocr` 3.x；`parser_availability()` / `format_availability()` 查的是已退役的 `rapidocr_onnxruntime`；设置页一键安装目录装的也是 `rapidocr-onnxruntime`；Dockerfile 装它、还校验**它**的内置模型——镜像里 OCR 能用，只是因为 `docling-slim` 恰好把 `rapidocr` 拖了进来（对解析结果逐个确认）。两头都错：`pip install -e '.[parse_pro]'`（装的是 `rapidocr`）之后上传扫描件，提示"本机没有 OCR 解析器：安装 rapidocr（pip install -e '.[parse_pro]'）"——让用户去装他刚装完的东西；一键安装之后报告说 OCR 就绪，引擎却连 import 都不行。另一个只在干净环境里才看得到的坑：**`rapidocr` 3.9.2 不带推理运行时**——`from rapidocr import RapidOCR` 成功，构造引擎时抛 `ImportError: onnxruntime is not installed`（在干净 venv 里复现），可用性检查只看包，于是"可用"而每一页都是空的；`parse_pro` 过去靠 `pymupdf4llm → pymupdf-layout` 间接带来 onnxruntime。修复：三处统一问 `REQUIRED_MODULES = ("rapidocr", "onnxruntime")`；目录改装 `rapidocr==3.9.2` 并在**同一次 pip 调用**里带上 `onnxruntime`（新增 `Dependency.also`）；`parse_pro` 显式写 `onnxruntime`；Dockerfile 装并校验 `rapidocr` 的内置模型（真实安装里数到 3 个 `.onnx`）；`pymupdf4llm` 目录条目与 extra 一样固定 1.28.0（1.28.2 会破坏版面路径，原来界面装的是最新版）。真实验证：干净 venv 里 `rapidocr==3.9.2` + `onnxruntime` 离线读出渲染图上的 "Zinc phosphate 15.0 parts E-44" | `test_rapidocr_local.py`（+2）、`test_parsing_availability.py`（+1）、`test_dependency_declarations.py` 里的 OCR / pin 用例 | 3 条在旧代码上失败（只给 `rapidocr` 时"可用"、报告问的是退役包、`REQUIRED_MODULES` 不存在） |
+| 55 | 低 | 资料检索 / 状态 | **来源状态载荷对着不存在的东西报状态**：`literature` 探测的是没有任何代码 import、也没有任何 extra 安装的 `semanticscholar` SDK（Semantic Scholar 是直接走 HTTP 的），所以关掉 OpenAlex 后状态是 `library_missing`，界面的"在线检索依赖未安装 → 去安装依赖"横幅永远清不掉；只填 EPO 凭据就把专利状态翻成"可用"，而 EPO 与 USPTO 检索都要 `patent_client`——有凭据没 SDK 时状态说可以、检索什么都不返回；USPTO / EPO 与 ChemCrow（2026-09 已退役，没有 extra 装它、没有代码 import）的提示都写 `pip install -e '.[intel]'`，装了也不会生效。现在：`literature` 恒可用；EPO 需要凭据**和** SDK（`reason` 区分 `key_missing` / `library_missing`）；专利提示指向 `.[patents]` 并写明代价；一键安装目录里删掉没人 import 的 `semanticscholar` | `test_source_availability_honesty.py`（6） | 4 条在旧代码上失败 |
+| 56 | 中 | 依赖（安全） | **依赖里的已知漏洞**（`pip-audit` / `npm audit --omit=dev` 第一次跑）：`pypdf 6.14.2` 14 条（修在 6.19.0）、`pydantic-settings 2.14.1` 1 条（2.14.2）；前端 `jspdf` 12 条（2 条 critical、8 条 high；4.2.1）、`jspdf-autotable` 经 jspdf 带 high（5.0.8）、`dompurify` 17 条（3.4.16，与 mermaid 去重）。已升级并验证：前端导出测试 13 个、真 jsPDF 4.2.1 + autotable 5.0.8 渲染 PDF 冒烟（`%PDF-`、`lastAutoTable.finalY` 在）、`tsc` / `lint` / `vitest` 653 / `build` 通过；后端 PDF / 设置相关 619 个。新增 `dependency-audit` 工作流（`pip-audit -r requirements.txt` + `npm audit --omit=dev --audit-level=moderate`；依赖文件改动 / 每周 / 手动触发），以后新公布的漏洞会在 CI 里出现，而不是靠人想起来查。pypdf 下限在 `file_ingest` / `dev` 里同步抬到 6.19.0 | `test_dependency_declarations.py`（"每处 pypdf 声明的下限都是 6.19.0 且等于 pin"） | 下限用例在旧声明（`>=4.0`）上失败 |
+| 57 | 低 | 部署 | **声明的最低 Python 版本不可满足**：`requires-python = ">=3.10"`、两个安装脚本也放行 3.10，而 `requirements.txt` 固定的 `numpy==2.4.6` 要求 ≥3.11——3.10 上 `pip install -r requirements.txt` 在依赖解析处失败，远离原因。下限改为 3.11（`pyproject` / `install.sh` / `install.ps1` / 使用指南），安装器候选改为 3.11、3.12、3.13，"比测试过的版本新"的提示门槛移到 3.14。**3.12 与 3.13 的全量测试第一次跑过：各 4440 通过 / 18 跳过**（阻塞 job 的依赖集 + `file_ingest` / `report_export` / `color` + PyMuPDF 两个固定版本，`backend-extras` 的 265 个解析器测试也全过）；新增非阻塞 CI job `backend-newer-python`（3.12 / 3.13）持续盯着；README 写明测过的版本 | `test_installers.py`（+1：用已安装 pin 的 `Requires-Python` 元数据校验声明的下限）、`test_installers_pwsh.py`（+1：真实 PowerShell + 假 `py` 启动器，3.10 永远不会被选中） | 把下限改回 `>=3.10`，第一条失败（numpy 2.4.6 要求 ≥3.11）；旧脚本上第二条失败 |
+| 58 | 低 | 测试 | **隐藏的测试顺序依赖**：`runtime_secrets` 这层运行期覆盖（UI / API 写入，或前一个测试里的 lifespan 从 `Settings` 复制进来的）优先于 `Settings` 属性，而 conftest 的逐测试重置没有它：`test_v03` 之后跑 `test_mineru_cloud::test_missing_sdk_means_no_call`，后者 `monkeypatch.setattr(get_settings(), "mineru_api_key", "t")` 被前者留下的 `None` 覆盖，报"未配置 Token"。完整套件按字母序跑所以一直绿，换个顺序（分片、自选文件、随机序）就红。加入重置，并用一对"先弄脏、再断言干净"的测试钉住——以后新增的全局单例也放在这里 | `test_state_isolation.py`（2） | 撤掉 conftest 里的重置，第二条失败；上面那个顺序组合在 HEAD 上稳定复现、修复后通过 |
+| 59 | 低 | 工程 | **`pip install -r requirements-dev.txt` 一直装不上**：它 `-r requirements.txt`，又自己钉了一份 `pypdf==6.14.0`，而 `requirements.txt` 钉的是 6.14.2（现在 6.19.0）——`ResolutionImpossible: Cannot install pypdf==6.14.0 and pypdf==6.14.2`（在 HEAD 的检出上复现）。`requirements.txt` 的文件头把它写成"开发 / 测试依赖在这里"，CI 用 `-e '.[dev]'` 所以没人踩到；文件头里"pypdf 只在这里、生产走标准库回退"的说明也早已过期。删掉重复的 pin、改写文件头；装一遍验证能解析 | `test_dependency_declarations.py::test_requirements_dev_does_not_repin_a_runtime_pin` | 在旧文件上失败 |
+| 60 | 中（CI） | 测试 / Windows | **我上一次推送里新加的 ReDoS 测试在 Windows 上整体 setup 报错**：`@pytest.mark.parametrize` 的参数就是 4–100 万字符的字符串，于是**测试 id 也那么长**；pytest 把当前测试 id 放进环境变量 `PYTEST_CURRENT_TEST`，而 Windows 的环境变量上限是 32,767 字符——`ValueError: the environment variable is longer than 32767 characters`，`backend-windows` 的两个分片红（共 16 个 setup / teardown 错误），Linux 上却全绿。是读 CI 日志逐个分片核对才发现的（整个运行显示"成功"，因为该 job 非阻塞）。给超长参数写显式 id；并让 `conftest.py` 在**所有平台**上拒绝收集 id 超过 2000 字符的测试，下次在 Linux 上就会被拦住 | `test_node_id_guard.py`（3） | 旧测试文件在新 conftest 下收集即中止（退出码 4，列出 9 个超长 id，最长 1,000,280 字符） |
 **CI 上新增**：非阻塞 job `backend-extras`——装上 `file_ingest` / `report_export` / `color` 与 PyMuPDF 两个固定版本 + CJK 字体，跑所有需要这些可选依赖的测试，并把"被跳过"当成失败（阻塞 job 不装它们，这类测试在那里全是 `importorskip`，这正是三轮审查都没发现表格路径问题的原因；`colour-science` 那条分支此前在任何地方都没跑过）。
 
 **新增的长期守卫**（让这一类问题下次在测试里失败，而不是在线上）：
@@ -104,6 +115,7 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 `body_field_unknown_to_backend` 里的 `constraints` / `base_url` 分别由 `_migrate_legacy_constraints` 和 `populate_by_name` 接住；
 `engine="native"` 的寻优返回 `optuna-tpe` 是设计（"native" = 非 baybe 的内置寻优，取可用的最好一档）；
 未知目标指标走带 `prediction_tiers` 标注的通用先验，不是静默 0；`/health` 冷启动 0.55 s（游走里看到的 9 s 是和全量测试抢 CPU）。
+另：`.env.example`、README / 使用指南、compose 文件与部署脚本里出现的每个 `FORMUMIND_*` 名字，都对得上 Settings 字段或 `config.py` 登记的非 Settings 变量（Neo4j 连接串、Datalab 探活超时）；可选依赖的 `optional_import(...)` 探针逐个对过——只有 `docling` / `marker` / `magic_pdf`（休眠的解析档）、`molscribe`（独立 worker 的 venv，模块文档写明）、`chemcrow`（已退役，#55）没有 extra 能装上。
 
 ---
 
@@ -113,8 +125,8 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 
 | 功能 | R3 报分 | R4 校正（缺陷计入） | R4 修复后 | 这一轮的依据 | 距 9 分还差什么 |
 |---|---|---|---|---|---|
-| 资料检索 | 7.5 | 7.5 | **7.5** | 离线降级链路走通（种子语料回退 + `source_status` 标注）；本轮没发现该功能自身缺陷，也没有新增能力 | 没有评测集；走代理的部署里 SSRF 固定 IP 不生效（R3 §4-2）；测试里的 `ddgs`（primp）绕过 socket 守卫会真的访问 DuckDuckGo |
-| 文档解析 | 7.8 | 6.6 | **8.1** | 这一轮**装上了解析器**（PyMuPDF / pymupdf4llm / MarkItDown / python-docx），第一次用真实 PDF / DOCX / XLSX / PPTX 实测：解析本身都通（PDF 走 `hybrid`，页标记 / 标题 / 表格正确）；但**表格这条路有 4 处缺陷**——Word 表丢表头行并丢光单位（#21）、加粗 / `<br>` / `##` 漏进存储文本（#22）、无关键词的数据表不归一化（#23）。修复后同一张数据表从 4 种格式、中英文两种写法出来，得到同样的属性集（含单位、`耐盐雾性能 → salt_spray`）。**随后的对抗性扫描又找到三处**：HTML 回退剥离器 / 切块标题正则的正则回溯（16 KB 的输入就能把一个 worker 卡住数十秒到数分钟，#47、#48）、**批量上传里同名文件互相覆盖（一份丢失、一份重复入库，#46）** | 只测了**合成**文件，没有真实文档基准：合并单元格 / 跨页表 / 双栏论文 / 公式 / 扫描件（OCR）都没验；docling / marker / MinerU 云端各档在本沙箱不可用；解析器依赖冲突需分镜像 |
+| 资料检索 | 7.5 | 7.4 | **7.7** | 离线降级链路走通（种子语料回退 + `source_status` 标注）。本轮找到的问题都在"取数的外围"：**SSRF 校验器的结论取决于操作系统的解析器**（旧式 IPv4 写法在 Windows 上被判为安全，#35）、PubChem 不可达时每个陌生成分各等一次超时（#51）、**来源状态载荷对着不存在的 SDK / 凭据 / 已退役的集成报状态**，界面上一条清不掉的"依赖未安装"横幅（#55）。修复后状态与实际能力一致、取数的安全校验与平台无关；没有新增检索能力 | 没有评测集；走代理的部署里 SSRF 固定 IP 不生效（R3 §4-2）；测试里的 `ddgs`（primp）绕过 socket 守卫会真的访问 DuckDuckGo |
+| 文档解析 | 7.8 | 6.3 | **8.2** | 这一轮**装上了解析器**（PyMuPDF / pymupdf4llm / MarkItDown / python-docx），第一次用真实 PDF / DOCX / XLSX / PPTX 实测：解析本身都通（PDF 走 `hybrid`，页标记 / 标题 / 表格正确）；但**表格这条路有 4 处缺陷**——Word 表丢表头行并丢光单位（#21）、加粗 / `<br>` / `##` 漏进存储文本（#22）、无关键词的数据表不归一化（#23）。修复后同一张数据表从 4 种格式、中英文两种写法出来，得到同样的属性集（含单位、`耐盐雾性能 → salt_spray`）。**随后的对抗性扫描又找到三处**：HTML 回退剥离器 / 切块标题正则的正则回溯（16 KB 的输入就能把一个 worker 卡住数十秒到数分钟，#47、#48）、**批量上传里同名文件互相覆盖（一份丢失、一份重复入库，#46）**。**最后一批依赖审计又找到两处**：生产镜像里读每个 PDF 的 `pypdf` 被静默降级成有 49 条公开漏洞的 4.3.1（#53）；本地 OCR 的"可用性"报告、一键安装、Dockerfile 三处对着不同的包，且 `rapidocr` 3.9.2 不带推理运行时、装了也建不出引擎（#54） | 只测了**合成**文件，没有真实文档基准：合并单元格 / 跨页表 / 双栏论文 / 公式 / 扫描件（OCR）都没验；docling / marker / MinerU 云端各档在本沙箱不可用；解析器依赖冲突需分镜像 |
 | 知识库构建 | 8.2 | 7.0 | **8.5** | 入库 → 分块 → 检索 → 去重 → 完整性检查走通；**数据表原来在入库时被质量门当垃圾丢掉**（#20）——TDS 里最有价值的部分，进不了知识库；表格与 caption 分家（#24）；**全新克隆的首次安装原来走不完**（§2 #9）；块查看器字段错位（#5）；Neo4j 写入口不可用（#6）。修复后真实 docx / xlsx / pptx / pdf 数据表 → 带 caption 的表格 chunk + 属性集，按内容可检索 | 嵌入向量路径 CI 无覆盖；KG 实体链接无精度 / 召回评测；增量重建语义；质量门对**其他**结构化块（公式、图注）是否同样误伤，未逐类实测 |
 | **问答能力** | 7.3 | 6.5 | **7.7** | Text2SQL 路由死了（#1）；流式结构化失败直接报错（#3）；离线答案带误导性告警（#10）；**界面里无 Key 直接报错，离线路径走不到**（#19）；数据表进不了知识库因而问答查不到（#20 / #24） | 见下三项 |
 | └ 检索 | 7.7 | 7.0 | 8.3 | 结构化数据路径现在真的可达，且有硬白名单 / 项目范围；表格 chunk 不再被门丢弃，且带 caption，"耐盐雾性能 720"这类按内容的查询能命中 | 无检索评测集；非 OpenAI 兼容 provider 不能真流式；Text2SQL 的行级隔离只到"项目"这一层（§4-2） |
@@ -122,11 +134,12 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | └ 上下文 | 7.2 | 7.2 | 7.2 | 无改动 | 历史截断 / 摘要策略未量化；会话持久依赖 Redis |
 | 配方推荐 | 8.7 | 8.6 | **8.8** | 4 个领域离线推荐都满 100% 或带闭合告警；手工配方空成分 500 → 422（#11）；DOE 基准徽标重载保持（#7） | 无评测集；表面处理类强制 grounding 后只剩 97% |
 | DOE 设计 | 8.3 | 7.8 | **8.5** | 8 种设计 × 4 个领域 × 2 个引擎逐个核对范围：**混料原来全部越界**（#4）；其余均在范围内，唯一例外是 native CCD 星点 | native CCD 星点仍超出物理范围（只告警）；DOE 历史无界面 |
-| 寻优与迭代 | 8.4 | 7.4 | **8.5** | **闭环写入会自己等自己**（#2，生产里一个周期卡数分钟并拖死所有写）；自动闭环的轮次上限 / 计数重载丢失（#7）；修复后 loop 端到端（训练 → 寻优 → 下一轮 DOE）走通，结果键与前端 `LoopReport` 对得上 | 虚拟寻优曲线不是实测；无"寻优质量"评测（收敛速度 vs 随机基线） |
+| 寻优与迭代 | 8.4 | 7.4 | **8.5** | **闭环写入会自己等自己**（#2，生产里一个周期卡数分钟并拖死所有写）；目标权重写成 `NaN` / `Infinity` 会被存下来、让那条记录此后读不出（#50）；自动闭环的轮次上限 / 计数重载丢失（#7）；修复后 loop 端到端（训练 → 寻优 → 下一轮 DOE）走通，结果键与前端 `LoopReport` 对得上 | 虚拟寻优曲线不是实测；无"寻优质量"评测（收敛速度 vs 随机基线） |
 
 **一句话**：这一轮分数涨得最多的不是"新能力"，而是**把已有能力从"测试里绿"变成"生产里真的通"**——结构化问答、DOE 闭环、混料设计、材料页结构检索、数据表入库都属于这一类。
 最大的两项发现：**#2** 不是功能错误，而是**让整个系统在 DOE 闭环期间变成只读**，被 fail-open 吞得干干净净；**#20** 是**数据表被当垃圾丢弃**——它躲过了三轮审查，原因很具体：沙箱没装解析器，所有表格测试都喂手写的、表头完整的 markdown。装上解析器、用真实文件走一遍，几分钟就暴露了。
 **教训**：凡是 `importorskip` 把整类真实输入挡在 CI 外的地方，都在替缺陷放行；`backend-extras` job 就是为此加的。
+最后一批（#53–#59）与功能分数无关，却是**生产风险最高**的一类：镜像没在 CI 里构建过，所以"装进去的"和"锁定的"不是同一份——PDF 解析器被静默降级、抬高下限后 Docker 构建会直接解析失败、开发依赖文件从来装不上、OCR 的安装与报告对着不同的包。共同的修法是把声明（pyproject / 目录 / Dockerfile / 锁文件）互相钉死成离线测试，再用一个只解析、不安装的 CI 关卡对整份 Dockerfile 做一次。
 
 ---
 
@@ -159,9 +172,9 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 **6. Windows 现在是"测过的平台"——整套后端测试全绿，但仍有几块没测到**
 - 已做（CI `windows-latest`）：`install.bat` → Windows PowerShell 5.1 → `install.ps1` 在干净检出上跑完；应用可 import、迁移后的数据库存在；服务起得来并答 `/health`；故意让 pip 失败时安装器非零退出；**整套后端测试（约 4,300 条，8 个分片）全部通过**。这个过程修了 13 处只在 Windows 上显形的问题（§2 #32–#44），包括一个 SSRF 绕过（#35）和两处"健康数据被丢弃 / 被当成损坏"（#38、#39）。Windows 上第一次真跑整套的结果是 37 个失败 / 错误、分片 10–22 分钟；现在是 0 个、4.5–8 分钟。
 - 仍缺：`install.bat` 的**双击** `pause` 行为（CI 不是双击启动）；Celery worker 在 Windows 上的 `--pool=solo` 路径；Redis / Datalab 在 Windows 上的部署；前端测试没在 Windows 上跑；`msvcrt` 文件锁在**真实多进程竞争**下的行为由 `test_artifact_xproc_lock.py`（Windows 用 spawn）覆盖，已通过，但只跑了一次——是否稳定要看后续几轮 CI。
-- 已改：安装器优先选 3.11 / 3.12（§2 #45）。**仍需写明"测过的 Python 版本"**——目前只有 3.11（Docker / CI）和"安装器在 CI 上选到 3.14 也能装能起"这两个数据点，没有 3.12 / 3.13 的全量测试。
+- 已改：安装器优先选 3.11 / 3.12 / 3.13（§2 #45、#57）。**测过的 Python 版本**：3.11（Docker / 阻塞 CI）；3.12 与 3.13 的全量测试在本地各通过一次（§5），非阻塞 CI job `backend-newer-python` 开始持续跟踪，README 已写明；3.14 只有"安装器在 CI 上选到它也能装能起"这一个数据点。
 - **决策（需要你定）**：`backend-windows` 现在是非阻塞的（每次推送占 8 个 Windows runner，约 5–8 分钟）。它已经全绿，设为阻塞能防止 Windows 回归，代价是 runner 用量，以及 Windows runner 偶发慢导致的时间类用例波动（本轮已把几个时间断言改成与任务起点比较 / 给 Windows 留余量）。建议：先保持非阻塞、观察一周，再决定。
-- 验收：`backend-windows` 连续多轮全绿；README 写明测过的 Python 版本。
+- 验收：`backend-windows` 连续多轮全绿；`backend-newer-python`（3.12 / 3.13）在 CI 上首次全绿，之后连续几轮保持。
 
 **7. 质量门对短公式仍会误伤（影响小，取舍）**
 - 现状：表格已修（#20）。其余块已实测：长公式（比例 0.55–0.58）、代码块（0.54）、图注（0.58）、图片链接（0.70）都能通过；**短公式**（`$$k = A e^{-E_a / (RT)}$$` 比例 0.27，`$$x = 1$$` 只有 9 个字符）会被判垃圾。公式 chunk 脱离上下文本来就很少是检索目标，所以只是记录，不是缺陷。
@@ -170,6 +183,22 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 **8. 前端类型里的死字段**：`Formulation.measured`（没有任何生产者，只有两个图表组件把它当预测的后备）——删除或接上。（`grounding_confidence` 缺 `"medium"` 已补。）
 
 **9. 其余 R3 §4 未动的项**：#2 走代理时固定 IP 不生效、#3 `get_campaign_store()` 首次探测、#4 无界面的接口、#5 旧脚本 `verify_frontend_api.py`（现在有了 `scripts/audit/contract/`，可以直接删）、#6 `_utcnow` 帮手收敛、#8 KB 嵌入路径 CI、#9 compose 未真起过栈、#10 ESLint 范围。
+
+**10. Windows 上有一个"慢得没道理"的测试，原因未明**
+- 现状：`test_session_factory_usage.py::test_both_accessors_follow_a_database_url_change` 在 `1d5ac38` 的 Windows 分片里分别用了 **122 s 与 172 s**（Linux 上 0.2 s），上一次全绿的运行里它不在每个分片最慢的十条里。测试里只有两次 `make_engine` 加 `create_all`；已排除"DDL 条数随导入的模块增长"（整个 app 导入之后仍是 29 张表 / 112 条 DDL，Linux 上 0.13 s）。同一次运行里别的建库夹具每次只要 3–13 s，所以它不是"Windows 上 SQLite 就是慢"，而像是某种与分片内前序测试状态有关的等待（SQLite `busy_timeout` 是 60 s，两个测试的耗时都接近它的整数倍，但这只是线索不是结论）。
+- 做法：Windows 分片现在对超过 60 s 的单个测试打印**所有线程的栈**（`-o faulthandler_timeout=60`，并把慢测试清单拉长到 25 条）——下一次 `backend-windows` 运行会直接给出它在等什么。若是 `make_engine` 里逐条自动提交的 DDL，则把 `create_all` 包进一次显式事务（对首次启动在慢盘 / Docker Desktop 绑定挂载上也有好处）；若是前序测试泄漏的连接 / 线程，则找到并关掉它。
+- 验收：Windows 分片里没有超过 30 s 的单个测试；分片总耗时回到 5 min 以内。
+
+**11. Docker 镜像"构建出来能不能跑"仍不在 CI 里**
+- 现状：本轮加的 `dockerfile-extras` 关卡只回答"整份 Dockerfile 的依赖解析得出来吗、pin 还在吗"（那一类缺陷此前在构建前根本看不见）；构建本身一次要十几分钟（torch / docling），没有放进 CI。
+- 做法：每周 + 手动触发的非阻塞 job：`docker build` → `docker run --rm <image> python -c "import app.main"` → 起容器答 `/health`；构建失败或 `import` 失败即红。
+- 验收：镜像构建与启动冒烟有连续的绿色记录。
+
+**12. 休眠 / 退役的可选依赖探针还留着**：`chemcrow`（2026-09 已退役）、`magic_pdf`（本地 magic-pdf 路径已退役）、`docling` / `marker`（休眠的解析档）仍有 `optional_import` 探针与状态键；一键安装目录里 `docling` / `marker-pdf` 没有版本下限（故意不在 extra 里，装的是最新版，受 `requirements.txt` 约束）。做法：确认彻底退役后删探针与状态键（`/api/search/status` 的 `chemcrow` 键是对外契约，先在接口层标注弃用）；验收：`optional_import` 的每个名字都能由某个 extra / 目录条目装上，或在 `test_dependency_declarations.py` 的白名单里写明理由。
+
+**13. 要不要彻底去掉 `patent-client`（产品决策）**
+- 现状：#53 之后，官方 USPTO / EPO 检索只在有人手工装 `.[patents]`（会降级 httpx / pypdf）时可用；默认安装走 Google Patents / SerpAPI / CNIPA / 内置种子语料。`patent-client` 的每个发布版都钉死 `httpx<0.28`、`pypdf<5`，且 `python<3.13`，上游看起来不会放宽。
+- 做法（若要官方检索成为默认能力）：用已有的 SSRF 安全 httpx 客户端直接调 EPO OPS 的 REST 接口（凭据已有 `epo_consumer_key/secret`）与 USPTO 的公开检索接口，去掉对 SDK 的依赖——这样 `patents` extra 可以删除；验收：不装 `patent-client` 时 `epo` / `patents` 状态为可用且真的返回结果（用录制的响应做离线测试），`ci-deps` 里不再有任何豁免项。
 
 ---
 
@@ -190,8 +219,17 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | Windows 全量（`windows-latest`，8 个分片并行） | 首轮：7 个分片红、37 个失败 / 错误（其中 Redis 连接慢导致的超时类约 12 个）；两轮修复后 **全部分片通过**，分片耗时 10–22 min → 4.5–8 min。CI `f6bd3f9`：**16 个 job 全绿**（阻塞的 `backend` / `frontend`，非阻塞的 `backend-extras` / `backend-baybe` / `golden` / `deepeval` / `api-contract` / `installer-windows` / 8 个 `backend-windows` 分片） |
 | 每个测试文件单独运行（干净检出、无 `FORMUMIND_*` 环境、4 路并行，514 个文件） | 2 个顺序依赖已修（§2 #42、#44）；其余全部通过。扫描脚本本身用一个故意失败的文件验证过会报告失败 |
 | 日志洪水扫描 | 寻优 / DOE 流程里不再有重复 ≥ 3 次的 WARNING（唯一的重复项是无 Redis 时每次写入一行"写锁不可用"，是预期的降级提示） |
+| 后端全量（最终树，3.11，干净检出、不设任何 `FORMUMIND_*` 环境、装了解析器 + colour-science） | **4491 通过 / 18 跳过 / 4 取消选择（`golden_eval`），9 分 58 秒；用例收集数 3992 → 4513（本轮合计 +521，都是回归测试与守卫）** |
+| Python 3.12 / 3.13 全量（阻塞 job 的依赖集 + `file_ingest` / `report_export` / `color` + PyMuPDF 固定版本，pypdf 6.19.0） | 各 **4488 通过 / 18 跳过**（node id 守卫加入之前的树；守卫的 3 个用例是纯 Python）；`backend-extras` 的 266 个解析器测试各自通过、0 跳过 |
+| 依赖审计 | `pip-audit -r requirements.txt`：修复前 `pypdf 6.14.2` 14 条 + `pydantic-settings 2.14.1` 1 条（另有环境自带的 pip / setuptools，不在锁文件里），修复后 "No known vulnerabilities found"；`npm audit --omit=dev`：修复前 3 个（critical / high / moderate，`jspdf` 12 条、`dompurify` 17 条），修复后 0 |
+| Dockerfile 整体解析 | `scripts/check_docker_extras.py`：HEAD → 不可满足（退出 1，`patent-client>=5.0` 与 `pypdf==6.14.2`）；新树 → 328 个包解析成功、每个 pin 保持。逐个 extra 对 pin 解析：除 `patents` 外全部可解析 |
+| 逐 extra 漂移检查（pip `--dry-run --report` + `check_pins.py`，与 CI 同一流程，本地） | `file_ingest` / `science` / `llm` / `optimize` / `pydoe` / `export` / `intel` 全部通过；`patents` 恰好报 `httpx 0.28.1→0.27.2`、`pypdf 6.19.0→4.3.1`（已记入允许清单） |
+| 一键安装的约束（真 pip，`--dry-run`） | 由 `pin_constraints()` 生成的约束文件被 pip 接受；`ddgs` 装得上；**无下限的 `patent-client` 在约束下被回溯到 3.2.6**——所以目录条目现在带 extra 自己的下限，而不是裸名字 |
+| OCR 真实验证（干净 venv） | `rapidocr==3.9.2` 不带 onnxruntime → 构造引擎抛 `ImportError`；加上 `onnxruntime` 后离线读出渲染图上的 "Zinc phosphate 15.0 parts E-44"；包内带 3 个 `.onnx`（31 MB） |
+| 声明 / 探针 / 文档一致性扫描 | `optional_import` 探针与目录 ↔ extras ↔ Dockerfile 逐项对；`.env.example` / 文档 / compose / 脚本里的 `FORMUMIND_*` 全部对得上 Settings 字段或 `config.py` 登记的非 Settings 变量 |
+| `backend-windows` 在 `1d5ac38` 上（读日志逐个分片核对） | 8 个分片里 6 个绿、2 个红——红的两个都是 §2 #60；另见 §4 #10（两个原因未明的慢测试）。本轮的修复尚未在 Windows 上复跑，结果见下一次 CI |
 
-没有验证的部分：`install.bat` 的**双击**行为（Windows PowerShell 5.1 下真实执行 `install.ps1` 已由 CI 验证）；Docker compose / 镜像真构建真起栈（镜像装的是全部可选依赖，含 torch / docling，构建一次要十几分钟，没放进 CI）；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为，以及 Redis breaker 在真实 Redis 断开 / 恢复时的表现（本地与 CI 都没有 Redis：breaker 用假客户端测，写锁走"无锁继续"分支）；3.12 / 3.13 上的全量测试。
+没有验证的部分：`install.bat` 的**双击**行为（Windows PowerShell 5.1 下真实执行 `install.ps1` 已由 CI 验证）；Docker compose / 镜像真构建真起栈（镜像装的是全部可选依赖，含 torch / docling，构建一次要十几分钟，没放进 CI）；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为，以及 Redis breaker 在真实 Redis 断开 / 恢复时的表现（本地与 CI 都没有 Redis：breaker 用假客户端测，写锁走"无锁继续"分支）；一键安装在**真实 pip 上真装包**的行为（约束文件的格式与"拒绝"行为用真 pip 的 `--dry-run` 验证过，安装本身用假 `subprocess.run` 测）；Docker 镜像"构建出来能不能跑"（新增的解析关卡只回答"装得出来吗、pin 还在吗"）。
 
 ---
 
@@ -205,3 +243,8 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 - `scripts/audit/text_sweep.py`：对 `app/services` 等的每个"文本入口函数"喂 6000 字符的单字符重复串，报告耗时超过 0.7 s 的——找正则灾难性回溯 / 二次复杂度（见 §1）。名字像网络往返的条目（PubChem / OpenAlex 查询）也会显得慢，先看名字再追。
 - 日志洪水扫描思路：在 `logging` 根 logger 和 loguru 上挂计数器，跑一遍寻优 / 推荐 / DOE，列出重复 ≥ 3 次的 WARNING / ERROR——比读代码更容易发现"热路径里每次都失败一次的可选依赖探测"（`colour` 就是这么找到的）。
 - 吞异常追踪思路：`sys.settrace` 只跟随 `app/` 的帧，记录 AttributeError / NameError / TypeError（特定文案）等"像代码缺陷"的异常，不管它之后被怎样吞掉——比"只 hook 日志通道"强（text2sql 的 `.bind` 就漏过了前两版追踪器）。
+- `scripts/check_docker_extras.py`：把 Dockerfile 的**整份**依赖（extras + 后续 `pip install` 步骤里的每一项）与 `requirements.txt` 的 pin 当约束一起交给 `uv pip compile` 解析，冲突即失败；`python scripts/check_docker_extras.py --python-version 3.11`（需要 `uv`），CI 里是 `ci-deps.yml` 的 `dockerfile-extras` job。镜像不在 CI 里构建，这是目前唯一能在构建前看到"装进去的 ≠ 锁定的"的地方。
+- `.github/workflows/dependency-audit.yml`：`pip-audit -r requirements.txt` + `npm audit --omit=dev`，依赖文件变动 / 每周 / 手动触发；独立于 CI，新漏洞应该被读到、被处理，而不是挡住无关的合并。
+- `backend/tests/test_dependency_declarations.py`：声明之间的离线不变量——目录条目 ⊆ 它声明的 extra、安装规格与 extra 的版本规则一致、每个声明的上下限都容纳 pin、Dockerfile 只装已声明的 extra 且不含 `patents`、`requirements-dev.txt` 不重钉运行时依赖。以后新增 extra / 目录条目 / pin，漂移会在这里先失败。
+- `backend/tests/test_state_isolation.py` 与 `test_node_id_guard.py`：前者是"先弄脏、再断言干净"的成对测试，新增任何进程级单例都放这里；后者让 `conftest.py` 拒绝收集 id 超过 2000 字符的测试（Windows 环境变量上限 32,767）。
+- 读 CI 日志的办法：`gh` 不跟随日志下载的重定向；GitHub MCP 的 `get_job_logs` 会把大日志存成文件，再用 Python 按字符区间 / 正则切片，不要把整份日志读进上下文。非阻塞 job 的红分片不会让整个运行变红——要逐个 job 看。
