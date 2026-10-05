@@ -200,6 +200,39 @@ def upsert_material(body: MaterialSpec) -> MaterialView:
     return _to_view(name, RAW_MATERIALS.get(name, spec))
 
 
+class EnrichCatalogResponse(BaseModel):
+    enriched: int  # materials that gained a SMILES / molar mass in this call
+    scanned: int  # lookups attempted in this call
+    remaining: int  # materials still waiting (beyond this call's ``limit``)
+    available: bool = True  # False when PubChem access (pubchempy) is not installed
+
+
+@router.post("/enrich", response_model=EnrichCatalogResponse)
+def enrich_catalog(limit: int = Query(default=20, ge=1, le=100)) -> EnrichCatalogResponse:
+    """Backfill missing SMILES / molar mass across the catalogue from PubChem — what the Materials panel's
+    "属性补全" button asks for. (It used to post an empty list to ``/chemical/enrich-materials``, which enriches
+    only the materials *it is given*: nothing was enriched, and the panel reported "? 条更新".)
+
+    A bounded batch per call — every lookup is a network round-trip — so the panel can call it again until
+    ``remaining`` reaches 0. Curated values win: only blank fields are filled (same rule as the startup backfill).
+    """
+    _require_store()
+    from ..services.compounds import _pubchempy_available, enrich_materials
+
+    if not _pubchempy_available():
+        return EnrichCatalogResponse(enriched=0, scanned=0, remaining=0, available=False)
+    pending = {
+        name: spec
+        for name, spec in RAW_MATERIALS.items()
+        if not spec.get("archived") and not (spec.get("smiles") and spec.get("molar_mass"))
+    }
+    batch = dict(list(pending.items())[:limit])
+    enriched = enrich_materials(batch)  # fills the spec dicts in place
+    if enriched:
+        RAW_MATERIALS.persist_all()
+    return EnrichCatalogResponse(enriched=enriched, scanned=len(batch), remaining=len(pending) - len(batch))
+
+
 def _enrich_spec(name: str, spec: dict) -> dict:
     try:
         from ..services.chemical_lookup import lookup_chemical

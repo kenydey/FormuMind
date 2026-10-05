@@ -712,7 +712,12 @@ function KbDiagnosticsCard() {
         cas_number: upsertCas.trim() || undefined,
         smiles: upsertSmiles.trim() || undefined,
       });
-      setReport(`✓ Neo4j 化合物已写入: ${String((r as { uid?: string }).uid ?? name)}`);
+      if (!r.ok) {
+        // The endpoint answers 200 with ok=false when the Bolt write itself failed.
+        setReport(`Neo4j 化合物写入失败: ${r.message}`);
+        return;
+      }
+      setReport(`✓ Neo4j 化合物已写入: ${r.uid ?? name}`);
       setNeo4jOpen(true);
       void searchNeo4j(name);
     } catch (e) {
@@ -732,7 +737,11 @@ function KbDiagnosticsCard() {
     setReport(null);
     try {
       const r = await api.neo4jUpsertFormulation({ name });
-      setReport(`✓ Neo4j 配方已写入: ${String((r as { uid?: string }).uid ?? name)}`);
+      if (!r.ok) {
+        setReport(`Neo4j 配方写入失败: ${r.message}`);
+        return;
+      }
+      setReport(`✓ Neo4j 配方已写入: ${r.uid ?? name}`);
       setNeo4jOpen(true);
     } catch (e) {
       setReport(`Neo4j 配方写入失败: ${e instanceof Error ? e.message : String(e)}`);

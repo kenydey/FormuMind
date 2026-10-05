@@ -695,6 +695,25 @@ async def workbench_quality(campaign_id: int) -> dict:
 
 # ── Experiment attachments (Phase 0.2) ────────────────────────────────────────
 
+def _resolve_datalab_item_id(experiment_id: int, campaign_id: int, row_id: int) -> str | None:
+    """Blocking lookup behind :func:`_datalab_item_id_for` (campaign store / SQLite)."""
+    if campaign_id > 0 and row_id > 0:
+        from ..db.campaign_store import get_campaign_store
+
+        rows = get_campaign_store().list_rows_sync(campaign_id)
+        match = next((r for r in rows if r.id == row_id), None)
+        return match.item_id if match and match.item_id else None
+    if experiment_id > 0:
+        from ..db.database import default_session_factory
+        from ..db.models import ExperimentRow
+
+        # default_session_factory() is a factory: it is called once more to get the Session.
+        with default_session_factory()() as session:
+            row = session.get(ExperimentRow, experiment_id)
+            return row.item_id if row and row.item_id else None
+    return None
+
+
 async def _datalab_item_id_for(
     experiment_id: int = 0, campaign_id: int = 0, row_id: int = 0
 ) -> str | None:
@@ -706,19 +725,7 @@ async def _datalab_item_id_for(
     the local-attachment path instead of crashing.
     """
     try:
-        if campaign_id > 0 and row_id > 0:
-            from ..db.campaign_store import get_campaign_store
-
-            rows = get_campaign_store().list_rows_sync(campaign_id)
-            match = next((r for r in rows if r.id == row_id), None)
-            return (match.item_id if match and match.item_id else None)
-        if experiment_id > 0:
-            from ..db.database import default_session_factory
-            from ..db.models import ExperimentRow
-
-            with default_session_factory() as session:
-                row = session.get(ExperimentRow, experiment_id)
-                return row.item_id if row else None
+        return await run_in_threadpool(_resolve_datalab_item_id, experiment_id, campaign_id, row_id)
     except Exception:
         logger.warning("datalab item_id resolve failed", exc_info=True)
     return None
@@ -1587,9 +1594,12 @@ def pause_doecyle(
     if success:
         return {"status": "success", "message": f"DOE cycle {'paused' if is_paused else 'resumed'} for campaign {campaign_id}"}
     else:
+        # The pause flag lives in the shared state store (Redis); failing to write it means the
+        # store is unavailable — report that as 503, not as a server bug (the status endpoint below
+        # already degrades the same way instead of answering 500).
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to {'pause' if is_paused else 'resume'} DOE cycle for campaign {campaign_id}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to {'pause' if is_paused else 'resume'} DOE cycle for campaign {campaign_id}: state store unavailable",
         )
 
 

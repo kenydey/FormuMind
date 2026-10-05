@@ -274,27 +274,33 @@ def persist_experiments(
 
         logger.info("Saved %d experiments to database", len(experiment_ids))
 
-        # W2-6 (P1-2): link each saved experiment (run) to the formulation
-        # candidates it was generated from. Fail-open: never break the cycle.
-        try:
-            from . import provenance as _prov
+    # W2-6 (P1-2): link each saved experiment (run) to the formulation candidates it was generated
+    # from. Fail-open: never break the cycle.
+    #
+    # This runs *after* the transaction above has committed. ``provenance.link`` opens its own
+    # connection, and SQLite has a single writer: called from inside the ``with`` block it queued
+    # behind the very transaction waiting for it, hit the 30 s busy timeout twice per link
+    # (``ensure_provenance`` + the insert), and "failed open" — a cycle of N runs × 5 candidates
+    # stalled for N·5 minutes holding the write lock against every other request, and recorded no link.
+    try:
+        from . import provenance as _prov
 
-            _fids = [
-                _prov.formulation_id_for(f)
-                for f in (candidate_formulations or [])[:5]
-            ]
-            for _eid in experiment_ids:
-                for _fid in _fids:
-                    _prov.link("run", _eid, "formulation", _fid, "tests")
-        except Exception:
-            pass
+        _fids = [
+            _prov.formulation_id_for(f)
+            for f in (candidate_formulations or [])[:5]
+        ]
+        for _eid in experiment_ids:
+            for _fid in _fids:
+                _prov.link("run", _eid, "formulation", _fid, "tests")
+    except Exception:
+        pass
 
-        return {
-            "experiment_ids": experiment_ids,
-            "status": "success",
-            "count": len(experiment_ids),
-            "message": f"Generated {len(experiment_ids)} new experiments",
-        }
+    return {
+        "experiment_ids": experiment_ids,
+        "status": "success",
+        "count": len(experiment_ids),
+        "message": f"Generated {len(experiment_ids)} new experiments",
+    }
 
 
 def _hold_stub(

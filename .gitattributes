@@ -1,0 +1,7 @@
+# Line endings that must not depend on each contributor's core.autocrlf.
+# A CRLF checkout of a shell script fails with "bad interpreter: /bin/bash^M"; Windows batch and
+# PowerShell files are the ones that want CRLF.
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf

@@ -188,10 +188,17 @@ def _molscribe_worker_alive() -> bool:
     if now - _alive_cache["t"] < 30:
         return _alive_cache["v"]
     try:
-        from ..worker.celery_app import celery_app
+        # With the broker down, ``control.ping`` spends 6–8 s in kombu's connection retries before it
+        # gives up — on every poll of the settings panel. A plain TCP check settles that in milliseconds.
+        from ..api._dispatch import broker_reachable
 
-        pings = celery_app.control.ping(timeout=2) or {}
-        alive = any("molscribe" in str(name).lower() for name in pings)
+        if not broker_reachable():
+            alive = False
+        else:
+            from ..worker.celery_app import celery_app
+
+            pings = celery_app.control.ping(timeout=2) or {}
+            alive = any("molscribe" in str(name).lower() for name in pings)
     except Exception:
         alive = False
     _alive_cache.update(t=now, v=alive)

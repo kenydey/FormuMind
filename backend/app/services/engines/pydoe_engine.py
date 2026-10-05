@@ -97,6 +97,17 @@ def build_pydoe_plan(
     if k == 0:
         raise ValueError("At least one factor is required")
 
+    if design in _MIXTURE_DESIGNS:
+        # The simplex spans the recipe components only; temperatures and the like are not shares of a whole.
+        from .adapters.doe_adapter import split_mixture_factors
+
+        k = len(split_mixture_factors(factors)[0])
+        if k < 2:
+            raise ValueError(
+                f"混料设计 {design!r} 需要至少 2 个以 wt% 计的配方成分因子，当前只有 {k} 个 —— "
+                "请换用 LHS / 因子设计，或把成分因子的单位设为 wt%"
+            )
+
     # Designs with fixed run counts ignore n
     if design in ("ccd", "bbdesign", "simplex_lattice"):
         matrix = _generate_matrix(design, k, n or 0, seed=seed)

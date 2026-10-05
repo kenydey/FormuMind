@@ -36,6 +36,7 @@ API_ONLY_ROUTES: dict[str, str] = {
     "/api/artifacts/versions/{}/submit": f"artifact publication workflow: {_AGENT_DRIVEN}",
     "/api/artifacts/versions/{}/finalize": f"artifact publication workflow: {_AGENT_DRIVEN}",
     "/api/artifacts/versions/{}/verify": f"artifact publication workflow: {_AGENT_DRIVEN}",
+    "/api/chemical/enrich-materials": f"enriches the material list it is given (SMILES backfill + controlled-chemical screen): {_AGENT_DRIVEN}; the Materials panel's catalogue-wide button uses /api/materials/enrich",
     "/api/connectors/builtin/{}/search": f"built-in connector search tool: {_AGENT_DRIVEN}; the UI only toggles connectors",
     "/api/connectors/mcp": "bulk replace of the MCP server list; the UI imports and toggles/removes servers one by one",
     "/api/connectors/mcp/call": f"MCP tool-call proxy: {_AGENT_DRIVEN}",

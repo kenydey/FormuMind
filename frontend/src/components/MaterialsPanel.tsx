@@ -308,7 +308,14 @@ export default function MaterialsPanel({ open, onClose }: { open: boolean; onClo
       const res = await api.enrichMaterials();
       await load();
       setError(null);
-      setEnrichMsg(`属性补全完成: ${(res as { enriched?: number }).enriched ?? "?"} 条更新`);
+      setEnrichMsg(
+        !res.available
+          ? "属性补全不可用：未安装 pubchempy"
+          : res.scanned === 0
+            ? "所有材料的 SMILES / 分子量已齐全"
+            : `属性补全：本次查询 ${res.scanned} 条，更新 ${res.enriched} 条` +
+              (res.remaining > 0 ? `；还有 ${res.remaining} 条待补全，可再点一次` : "")
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

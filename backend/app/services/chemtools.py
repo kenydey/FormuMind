@@ -476,13 +476,14 @@ def mol_similarity(smiles_a: str, smiles_b: str) -> float | None:
     def compute() -> float | None:
         try:
             from rdkit import Chem, DataStructs  # type: ignore
-            from rdkit.Chem import AllChem  # type: ignore
+
+            from .fingerprints import morgan_bitvect
 
             ma, mb = Chem.MolFromSmiles(a), Chem.MolFromSmiles(b)
             if ma is None or mb is None:
                 return None
-            fa = AllChem.GetMorganFingerprintAsBitVect(ma, 2, nBits=2048)
-            fb = AllChem.GetMorganFingerprintAsBitVect(mb, 2, nBits=2048)
+            fa = morgan_bitvect(ma)
+            fb = morgan_bitvect(mb)
             return round(float(DataStructs.TanimotoSimilarity(fa, fb)), 4)
         except Exception as exc:
             return degrade_return(logger, exc, "rdkit similarity failed", None)

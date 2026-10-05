@@ -105,11 +105,11 @@ def test_golden_lhs_space_filling_lower_bound():
 
 
 def test_golden_simplex_lattice_mixture_sums():
-    """pydoe simplex_lattice: natural values conserve the recipe total.
+    """pydoe simplex_lattice: every run keeps the components' baseline total and stays in range.
 
-    Documented adapter contract (doe_adapter._mixture_row_to_run):
-    each row's simplex proportions are shares of ``sum(f.high)``,
-    so ``sum(natural) ≈ sum(high)`` for every run.
+    Contract (doe_adapter._mixture_row_to_run): the components share ``Σ midpoint`` (the mass the
+    baseline recipe gives them), each value inside its own ``[low, high]``. (The earlier contract —
+    shares of ``Σ high`` — put runs outside every declared bound.)
     """
     pytest.importorskip("pydoe", reason="pydoe engine is optional")
     from app.services.engines.pydoe_engine import build_pydoe_plan
@@ -117,11 +117,11 @@ def test_golden_simplex_lattice_mixture_sums():
     factors = _factors(3)
     plan = build_pydoe_plan(factors, design="simplex_lattice")
     assert plan.runs
-    total = sum(f.high for f in factors)
+    total = sum((f.low + f.high) / 2 for f in factors)
     for run in plan.runs:
         s = sum(run.natural[f.name] for f in factors)
-        assert abs(s - total) < 1e-6, (run.natural, s)
-        assert all(run.natural[f.name] >= 0 for f in factors)
+        assert abs(s - total) < 1e-3, (run.natural, s)
+        assert all(f.low - 1e-9 <= run.natural[f.name] <= f.high + 1e-9 for f in factors)
 
 
 def _run_matrix(plan, factors):

@@ -21,7 +21,7 @@ import time
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import CreateTable
 
@@ -76,21 +76,49 @@ class _GeneratedSQL(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def render_schema(engine: Engine, sample_rows: int = SCHEMA_SAMPLE_ROWS) -> str:
-    """Render whitelisted tables as DDL + sample rows for the prompt."""
+# Sample rows are shown to the model, so they obey the same project scope the query must.
+# measurements / doe_plans carry no project_id of their own: they inherit it through experiments.
+_SCOPED_SAMPLE_SQL = {
+    "experiments": "SELECT * FROM experiments WHERE project_id = :pid LIMIT :n",
+    "formulation_versions": "SELECT * FROM formulation_versions WHERE project_id = :pid LIMIT :n",
+    "measurements": (
+        "SELECT m.* FROM measurements AS m JOIN experiments AS e ON e.id = m.experiment_id "
+        "WHERE e.project_id = :pid LIMIT :n"
+    ),
+    "doe_plans": (
+        "SELECT p.* FROM doe_plans AS p JOIN experiments AS e ON e.id = p.experiment_id "
+        "WHERE e.project_id = :pid LIMIT :n"
+    ),
+}
+
+
+def render_schema(
+    engine: Engine,
+    sample_rows: int = SCHEMA_SAMPLE_ROWS,
+    *,
+    project_id: str | None = None,
+) -> str:
+    """Render whitelisted tables as DDL + sample rows for the prompt.
+
+    With ``project_id`` the sample rows come from that project only: they go to the LLM
+    (and can be echoed in its answer), so another project's rows must not appear there.
+    """
     insp = inspect(engine)
+    existing = set(insp.get_table_names())
     blocks: list[str] = []
     for table_name in ALLOWED_TABLES:
-        if table_name not in insp.get_table_names():
+        if table_name not in existing:
             continue
         table = _TABLE_MODELS[table_name].__table__
         ddl = str(CreateTable(table).compile(engine)).strip()
         with engine.connect() as conn:
-            rows = (
-                conn.exec_driver_sql(f"SELECT * FROM {table_name} LIMIT {sample_rows}")
-                .mappings()
-                .all()
-            )
+            if project_id:
+                result = conn.execute(
+                    text(_SCOPED_SAMPLE_SQL[table_name]), {"pid": str(project_id), "n": sample_rows}
+                )
+            else:
+                result = conn.exec_driver_sql(f"SELECT * FROM {table_name} LIMIT {sample_rows}")
+            rows = result.mappings().all()
         sample = "\n".join(str(dict(r)) for r in rows) or "(empty)"
         blocks.append(f"{ddl};\n-- sample rows ({table_name}):\n{sample}")
     return "\n\n".join(blocks)
@@ -131,15 +159,26 @@ def build_sqlite_prompt(
     return system, f"问题：{question}\nSQL:"
 
 
-def _default_complete(system: str, user: str) -> str | None:
-    """Default LLM call via the platform's structured completion."""
-    from .llm import complete_structured
+# One question must not wait on a slow provider for minutes: the route is consulted for every chat question that
+# looks structured, and the literature answer is the fallback. (Chat caps its main LLM call at 45 s the same way.)
+SQL_GENERATION_DEADLINE_S = 20.0
 
-    parsed, err = complete_structured(system, user, _GeneratedSQL, retry=False)
-    if err or parsed is None:
-        log.warning("text2sql LLM generation failed: %s", err)
-        return None
-    return parsed.sql
+
+def _default_complete(system: str, user: str) -> str | None:
+    """Default LLM call via the platform's structured completion, with a wall-clock deadline."""
+    from .llm import _call_with_deadline, complete_structured
+
+    def _generate() -> str | None:
+        parsed, err = complete_structured(system, user, _GeneratedSQL, retry=False)
+        if err or parsed is None:
+            log.warning("text2sql LLM generation failed: %s", err)
+            return None
+        return parsed.sql
+
+    sql = _call_with_deadline(_generate, SQL_GENERATION_DEADLINE_S)
+    if sql is None:
+        log.info("text2sql: no SQL within %.0fs (or generation failed) — using the literature path", SQL_GENERATION_DEADLINE_S)
+    return sql
 
 
 def generate_sql(
@@ -188,6 +227,14 @@ def validate_select_only(sql: str) -> str:
     return cleaned
 
 
+_LITERAL_OR_COMMENT = re.compile(r"('(?:[^']|'')*'|\"(?:[^\"]|\"\")*\")|--[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+def _strip_comments(sql: str) -> str:
+    """Drop ``-- …`` and ``/* … */`` while leaving string literals (which may contain ``--``) alone."""
+    return _LITERAL_OR_COMMENT.sub(lambda m: m.group(1) or " ", sql)
+
+
 def require_project_scope(sql: str, project_id: str | None) -> str:
     """Deterministic guardrail: every SQL must filter on the given project.
 
@@ -199,10 +246,11 @@ def require_project_scope(sql: str, project_id: str | None) -> str:
     """
     if not project_id:
         return sql
-    # Match on the raw text (not literal-stripped): the threat here is the
-    # model forgetting the filter, not an attacker smuggling it in.
+    # Match on the text with comments removed: a predicate that only survives inside
+    # ``-- project_id = 'p1'`` filters nothing. (The threat modelled here is the model
+    # forgetting the filter — not a hostile query — so string literals are kept as written.)
     pid = re.escape(str(project_id))
-    if not re.search(rf"project_id\s*=\s*['\"]{pid}['\"]", sql):
+    if not re.search(rf"project_id\s*=\s*['\"]{pid}['\"]", _strip_comments(sql)):
         raise Text2SQLError("SQL missing project_id scope filter")
     return sql
 
@@ -218,18 +266,74 @@ def enforce_limit(sql: str, max_rows: int = DEFAULT_TOP_K) -> str:
     return sql.rstrip().rstrip(";") + f" LIMIT {max_rows}"
 
 
+# Functions that reach outside the database (extension loading, file access). Everything else is
+# plain SQL arithmetic / string / date work the generated queries legitimately use.
+_FORBIDDEN_FUNCTIONS = frozenset({"load_extension", "readfile", "writefile", "edit", "fts3_tokenizer"})
+
+
+def _protected_names(raw_conn: sqlite3.Connection) -> frozenset[str]:
+    """Every real table / view in the database that is *not* whitelisted (lower-cased)."""
+    rows = raw_conn.execute(
+        "SELECT name FROM sqlite_master UNION SELECT name FROM sqlite_temp_master"
+    ).fetchall()
+    return frozenset(str(r[0]).lower() for r in rows) - frozenset(ALLOWED_TABLES)
+
+
+def _make_authorizer(protected: frozenset[str], denied: list[str]) -> Callable[..., int]:
+    """SQLite authorizer: no writes, no schema access, no reads of tables outside the whitelist.
+
+    ``validate_select_only`` is a text filter on what the model wrote; this is the engine itself
+    refusing — ``SELECT * FROM source_documents`` or ``sqlite_master`` fails at prepare time even
+    when the text filter lets it through (the whitelist used to exist only in the prompt).
+
+    Reads are checked against the set of *real* tables that are not whitelisted rather than
+    "anything not on the list": a CTE or sub-query alias is reported as a read too, and carries
+    no data of its own (what it selects from is authorised separately).
+    """
+
+    def authorize(action: int, arg1: str | None, arg2: str | None, _db: str | None, _source: str | None) -> int:
+        if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE):
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_READ:
+            table = (arg1 or "").lower()
+            if table in protected or table.startswith("sqlite_"):
+                denied.append(f"table {arg1}")
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_FUNCTION:
+            if (arg2 or "").lower() in _FORBIDDEN_FUNCTIONS:
+                denied.append(f"function {arg2}")
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+        denied.append(f"operation {action}")
+        return sqlite3.SQLITE_DENY
+
+    return authorize
+
+
 def _run_with_timeout(raw_conn: Any, sql: str, timeout_s: float) -> Any:
     """Execute on a raw sqlite3 connection, aborting past timeout_s."""
     if isinstance(raw_conn, sqlite3.Connection):
         deadline = time.monotonic() + timeout_s
+        denied: list[str] = []
+        protected = _protected_names(raw_conn)
 
         def _handler() -> int:
             return 1 if time.monotonic() > deadline else 0
 
         raw_conn.set_progress_handler(_handler, 1000)
+        raw_conn.set_authorizer(_make_authorizer(protected, denied))
         try:
             return raw_conn.execute(sql)
+        except sqlite3.DatabaseError as exc:
+            # The message differs by SQLite version ("not authorized" / "access to t.c is
+            # prohibited"); the callback's own record is the reliable signal.
+            if denied:
+                raise Text2SQLError(f"query touches something outside the whitelist: {denied[0]}") from exc
+            raise
         finally:
+            # The connection goes back to the pool: leave no handler or authorizer behind.
+            raw_conn.set_authorizer(None)
             raw_conn.set_progress_handler(None, 0)
     log.warning("text2sql: non-sqlite driver, statement timeout not enforced")
     return raw_conn.execute(sql)
@@ -427,10 +531,10 @@ def hybrid_answer(
     if route in ("structured", "hybrid"):
         try:
             if engine is None:
-                from ..db.database import default_session_factory
+                from ..db.database import default_engine
 
-                engine = default_session_factory().bind
-            schema_text = render_schema(engine)
+                engine = default_engine()
+            schema_text = render_schema(engine, project_id=project_id)
             gen = generate_sql(
                 question, schema_text, project_id=project_id, complete_fn=complete_fn
             )

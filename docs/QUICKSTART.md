@@ -8,8 +8,12 @@ For the full reference see [USER_GUIDE.md](./USER_GUIDE.md) (中文: [快速入�
 ## Prerequisite: start the platform
 
 ```bash
-# One-click deps
-./scripts/install.sh
+# One-click install (checks Python/Node, installs deps, writes .env, runs migrations)
+./install.sh            # macOS / Linux   (add --start to launch everything afterwards)
+install.bat             # Windows         (double-click, or: powershell -ExecutionPolicy Bypass -File install.ps1)
+
+# …or step by step:
+./scripts/install.sh    # deps only
 cp .env.example .env    # intranet: FORMUMIND_API_AUTH_ENABLED=false
 # Product defaults already pin Datalab ELN (do not switch to sqlite for "offline lab")
 

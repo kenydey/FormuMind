@@ -17,7 +17,7 @@ ASSUME_YES=0
 DO_START=0
 
 usage() {
-  sed -n '2,14p' "$0"
+  sed -n '3,12p' "$0"
 }
 
 for arg in "$@"; do
