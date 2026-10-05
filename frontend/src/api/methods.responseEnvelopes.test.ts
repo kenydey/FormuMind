@@ -11,15 +11,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./http", async (importOriginal) => {
   const orig = await importOriginal<typeof import("./http")>();
-  return { ...orig, get: vi.fn() };
+  return { ...orig, get: vi.fn(), post: vi.fn() };
 });
 
-import { get } from "./http";
+import { get, post } from "./http";
 import { apiMethods } from "./methods";
 
 const mockGet = vi.mocked(get);
+const mockPost = vi.mocked(post);
 
-beforeEach(() => mockGet.mockReset());
+beforeEach(() => {
+  mockGet.mockReset();
+  mockPost.mockReset();
+});
 
 describe("response envelopes", () => {
   it("substructureSearch returns the hits, not the envelope", async () => {
@@ -81,5 +85,14 @@ describe("attachment uploads", () => {
   it("workbench uploads carry the options the same way", async () => {
     await apiMethods.uploadWorkbenchAttachment(new File(["x"], "a.png"), 2, 9, { kind: "qc_report" });
     expect(sent[0].url).toBe("/api/experiments/workbench/2/rows/9/attachments?kind=qc_report");
+  });
+});
+
+describe("catalogue enrichment", () => {
+  it("the Materials panel's button targets the catalogue-wide endpoint, not the list-in/list-out one", async () => {
+    mockPost.mockResolvedValueOnce({ enriched: 2, scanned: 5, remaining: 0, available: true });
+    const res = await apiMethods.enrichMaterials();
+    expect(mockPost).toHaveBeenCalledWith("/api/materials/enrich?limit=20", {});
+    expect(res.enriched).toBe(2);
   });
 });

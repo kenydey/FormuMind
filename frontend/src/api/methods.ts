@@ -909,8 +909,12 @@ export const apiMethods = {
       [k: string]: unknown;
     }>("/api/materials/promote-from-requirement", { requirement }),
 
-  enrichMaterials: () =>
-    post<{ enriched: number }>("/api/chemical/enrich-materials", {}),
+  /** Catalogue-wide PubChem backfill, one bounded batch per call (repeat while `remaining` > 0). */
+  enrichMaterials: (limit = 20) =>
+    post<{ enriched: number; scanned: number; remaining: number; available: boolean }>(
+      `/api/materials/enrich?limit=${limit}`,
+      {}
+    ),
 
   // ── 化学结构搜索(SMARTS 子结构 / Murcko 骨架替代) ──
   // Both endpoints answer `{ smarts | smiles, hits: [...] }`, not a bare array. The wrappers used to
