@@ -131,8 +131,8 @@ export interface Formulation {
   predicted: Record<string, number>;
   predicted_std: Record<string, number>;
   prediction_tiers?: Record<string, string>;
-  // Stable client-side identity for DOE baseline badge matching (not persisted
-  // by the backend schema; stamped when saving a card as DOE baseline).
+  // Stable client-side identity for DOE baseline badge matching (opaque to the
+  // backend, which round-trips it; stamped when saving a card as DOE baseline).
   client_uid?: string;
   // Real experiment measurements for this formulation when it corresponds to
   // a measured run (charts prefer these over `predicted`); absent for pure
@@ -2304,13 +2304,21 @@ export interface SessionInfoResponse {
   title?: string | null;
 }
 
+/** One chunk of GET /api/kb/chunks/by-source (DocumentChunkResponse). */
 export interface KbChunk {
+  id?: string;
+  /** Older name for `id`; the endpoint has never sent it. */
   chunk_id?: string;
   source_id?: string;
+  ord?: number;
   text?: string;
   content?: string;
+  heading_path?: string;
   page?: number | null;
   paragraph?: number | null;
+  offset_start?: number | null;
+  offset_end?: number | null;
+  /** Older name for `offset_start`. */
   offset?: number | null;
 }
 

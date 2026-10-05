@@ -263,6 +263,11 @@ class Formulation(BaseModel):
     bias_corrected_metrics: list[str] = Field(default_factory=list)
     # Batch C: structured explain for FormulaLeaderboard (optional on older rows).
     explain: FormulationExplain | None = None
+    # Stable client-side identity of a card (the UI stamps it when a card becomes the DOE baseline, so the
+    # "baseline" badge matches by identity rather than by name). Opaque to the backend — but it has to
+    # survive a save/reload, or the badge disappears while the baseline itself (requirement.active_formulation)
+    # is still in force.
+    client_uid: str | None = None
 
     def total_pct(self) -> float:
         return round(sum(i.weight_pct for i in self.ingredients), 4)

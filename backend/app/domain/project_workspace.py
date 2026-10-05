@@ -54,6 +54,11 @@ class ProjectWorkspace(BaseModel):
     recommend_source_types: list[str] = Field(default_factory=lambda: ["patents", "literature", "internet"])
     last_al_engine: str | None = None
     auto_loop_on_sync: bool = False
+    # The UI's "run at most N rounds" cap and its round counter. Both used to be sent by the
+    # client and silently dropped here (an unknown key never survives model_validate), so a reload
+    # forgot the cap the user set and restarted the counter that bounds unattended auto-iterations.
+    auto_loop_max_rounds: int = 5
+    auto_loop_round: int = 0
     auto_adopt_next_doe_on_loop: bool = False
     # Top-5‴ #4: project-level dossier auto patch (global default still off).
     wiki_dossier_auto_patch: bool = False

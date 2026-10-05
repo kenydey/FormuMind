@@ -185,6 +185,19 @@ export async function exportFailure(res: Response, fallback: string): Promise<Er
   return new ApiError(message, { detail, status: res.status });
 }
 
+/**
+ * `kind` / `note` of an attachment upload are *query* parameters on the backend (only `file` is
+ * multipart). They used to be appended to the form body, where FastAPI ignores them — the upload
+ * always got the default kind and an empty note.
+ */
+function attachmentQuery(opts: { kind?: string; note?: string }): string {
+  const qs = new URLSearchParams();
+  if (opts.kind) qs.set("kind", opts.kind);
+  if (opts.note) qs.set("note", opts.note);
+  const text = qs.toString();
+  return text ? `?${text}` : "";
+}
+
 export const apiMethods = {
   research: (req: Requirement, sources: Evidence[] = [], query = "") =>
     post<ResearchResult>("/api/research", { ...req, sources, query }),
@@ -511,9 +524,7 @@ export const apiMethods = {
   ): Promise<Attachment> => {
     const body = new FormData();
     body.append("file", file);
-    if (opts.kind) body.append("kind", opts.kind);
-    if (opts.note) body.append("note", opts.note);
-    const res = await fetch(`/api/experiments/${experimentId}/attachments`, {
+    const res = await fetch(`/api/experiments/${experimentId}/attachments${attachmentQuery(opts)}`, {
       method: "POST",
       headers: apiAuthHeaders(),
       body,
@@ -587,10 +598,8 @@ export const apiMethods = {
   ): Promise<Attachment> => {
     const body = new FormData();
     body.append("file", file);
-    if (opts.kind) body.append("kind", opts.kind);
-    if (opts.note) body.append("note", opts.note);
     const res = await fetch(
-      `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments`,
+      `/api/experiments/workbench/${campaignId}/rows/${rowId}/attachments${attachmentQuery(opts)}`,
       { method: "POST", headers: apiAuthHeaders(), body }
     );
     if (!res.ok)
@@ -904,14 +913,19 @@ export const apiMethods = {
     post<{ enriched: number }>("/api/chemical/enrich-materials", {}),
 
   // ── 化学结构搜索(SMARTS 子结构 / Murcko 骨架替代) ──
-  substructureSearch: (smarts: string, topK = 20) => {
+  // Both endpoints answer `{ smarts | smiles, hits: [...] }`, not a bare array. The wrappers used to
+  // declare `ChemicalHit[]`, the panel stored the envelope as if it were the list and the first
+  // structure search crashed it with "structHits.map is not a function".
+  substructureSearch: async (smarts: string, topK = 20): Promise<ChemicalHit[]> => {
     const q = new URLSearchParams({ smarts, top_k: String(topK) });
-    return get<ChemicalHit[]>(`/api/chemical/substructure?${q}`);
+    const res = await get<{ smarts: string; hits: ChemicalHit[] }>(`/api/chemical/substructure?${q}`);
+    return res.hits ?? [];
   },
 
-  scaffoldSubstitutes: (smiles: string, topK = 20) => {
+  scaffoldSubstitutes: async (smiles: string, topK = 20): Promise<ChemicalHit[]> => {
     const q = new URLSearchParams({ smiles, top_k: String(topK) });
-    return get<ChemicalHit[]>(`/api/chemical/scaffold-substitutes?${q}`);
+    const res = await get<{ smiles: string; hits: ChemicalHit[] }>(`/api/chemical/scaffold-substitutes?${q}`);
+    return res.hits ?? [];
   },
 
   // ── 会话记忆(多会话聊天; 2026-09-05: 入库项目数据库, 支持项目过滤) ──
@@ -940,12 +954,14 @@ export const apiMethods = {
     del<{ ok: boolean }>(`/api/session/delete/${sessionId}`),
 
   // ── KB 诊断: 切块详情 / 完整性 ──
-  kbChunksBySource: (sourceId: string, limit?: number, offset?: number) => {
+  kbChunksBySource: async (sourceId: string, limit?: number, offset?: number): Promise<KbChunk[]> => {
     const qs = new URLSearchParams();
     if (limit !== undefined) qs.set("limit", String(limit));
     if (offset !== undefined) qs.set("offset", String(offset));
     const suffix = qs.toString() ? `?${qs}` : "";
-    return get<KbChunk[]>(`/api/kb/chunks/by-source/${sourceId}${suffix}`);
+    // The endpoint wraps the page as `{ chunks: [...] }` (ChunkListResponse).
+    const res = await get<{ chunks: KbChunk[] }>(`/api/kb/chunks/by-source/${sourceId}${suffix}`);
+    return res.chunks ?? [];
   },
 
   kbIntegrity: () =>
@@ -1164,14 +1180,27 @@ export const apiMethods = {
   neo4jEnsureSchema: () =>
     post<{ ok: boolean }>("/api/kg/neo4j/schema/ensure", {}),
 
-  neo4jUpsertCompound: (spec: Record<string, unknown>) =>
-    post<Record<string, unknown>>("/api/kg/neo4j/compounds", spec),
+  neo4jUpsertCompound: (spec: {
+    name: string;
+    uid?: string; // derived by the server (chem:cas:<CAS> / name slug) when omitted
+    cas_number?: string;
+    smiles?: string;
+    molecular_weight?: number;
+    supplier?: string;
+    notes?: string;
+  }) => post<{ ok: boolean; message: string; uid?: string | null }>("/api/kg/neo4j/compounds", spec),
 
   neo4jCompoundSimilar: (compUid: string) =>
     get<Neo4jHit[]>(`/api/kg/neo4j/compounds/${compUid}/similar`),
 
-  neo4jUpsertFormulation: (spec: Record<string, unknown>) =>
-    post<Record<string, unknown>>("/api/kg/neo4j/formulations", spec),
+  neo4jUpsertFormulation: (spec: {
+    name: string;
+    uid?: string; // derived from the name when omitted
+    description?: string;
+    target_property?: string;
+    target_value?: number;
+    status?: string;
+  }) => post<{ ok: boolean; message: string; uid?: string | null }>("/api/kg/neo4j/formulations", spec),
 
   neo4jFormulationCompounds: (formUid: string) =>
     get<Neo4jHit[]>(`/api/kg/neo4j/formulations/${formUid}/compounds`),

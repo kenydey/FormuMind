@@ -54,8 +54,7 @@ export default function SourceDetailModal({
       const all: KbChunk[] = [];
       const PAGE = 2000;
       for (;;) {
-        const res = await api.kbChunksBySource(sourceId, PAGE, all.length);
-        const batch = Array.isArray(res) ? res : (res as { chunks?: KbChunk[] }).chunks ?? [];
+        const batch = await api.kbChunksBySource(sourceId, PAGE, all.length);
         all.push(...batch);
         if (batch.length < PAGE) break;
       }
@@ -205,12 +204,12 @@ export default function SourceDetailModal({
                     ? `p.${c.page}${c.paragraph != null ? ` · ¶${c.paragraph}` : ""}`
                     : c.paragraph != null
                       ? `¶${c.paragraph}`
-                      : c.offset != null
-                        ? `+${c.offset}`
+                      : (c.offset_start ?? c.offset) != null
+                        ? `+${c.offset_start ?? c.offset}`
                         : "";
                 return (
                   <div
-                    key={c.chunk_id ?? gi}
+                    key={c.id ?? c.chunk_id ?? gi}
                     id={`source-chunk-${c.page ?? "na"}-${gi}`}
                     data-testid={`source-chunk-${gi}`}
                     style={CHUNK_CARD_STYLE}

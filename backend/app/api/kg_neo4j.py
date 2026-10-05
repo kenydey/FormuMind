@@ -11,6 +11,7 @@ SQLite-backed ``/api/kg/`` routes used by the recommendation pipeline.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -30,7 +31,9 @@ class StatsResponse(BaseModel):
 
 
 class CompoundIn(BaseModel):
-    uid: str
+    # Optional: the Dependency Manager form only collects a name / CAS / SMILES. Left out, the
+    # uid is derived (``chem:cas:<CAS>`` — the id the wiki projection already uses — else a name slug).
+    uid: Optional[str] = None
     name: str
     cas_number: Optional[str] = None
     smiles: Optional[str] = None
@@ -40,7 +43,7 @@ class CompoundIn(BaseModel):
 
 
 class FormulationIn(BaseModel):
-    uid: str
+    uid: Optional[str] = None  # derived from the name when omitted, like CompoundIn.uid
     name: str
     description: Optional[str] = None
     target_property: Optional[str] = None
@@ -51,6 +54,27 @@ class FormulationIn(BaseModel):
 class LinkResponse(BaseModel):
     ok: bool
     message: str
+    uid: Optional[str] = None  # the node id an upsert wrote (supplied or derived)
+
+
+_SLUG_RE = re.compile(r"[^0-9a-z\u4e00-\u9fff]+")
+
+
+def _slug(text: str) -> str:
+    return _SLUG_RE.sub("-", text.strip().lower()).strip("-")
+
+
+def _compound_uid(payload: "CompoundIn") -> str:
+    if payload.uid and payload.uid.strip():
+        return payload.uid.strip()
+    cas = (payload.cas_number or "").strip()
+    return f"chem:cas:{cas}" if cas else f"chem:name:{_slug(payload.name)}"
+
+
+def _formulation_uid(payload: "FormulationIn") -> str:
+    if payload.uid and payload.uid.strip():
+        return payload.uid.strip()
+    return f"form:{_slug(payload.name)}"
 
 
 class CompoundView(BaseModel):
@@ -118,8 +142,9 @@ def ensure_schema() -> LinkResponse:
 @router.post("/compounds", response_model=LinkResponse)
 def upsert_compound(payload: CompoundIn) -> LinkResponse:
     _ensure()
+    uid = _compound_uid(payload)
     ok = neo4j_kg.upsert_compound(
-        uid=payload.uid,
+        uid=uid,
         name=payload.name,
         cas_number=payload.cas_number,
         smiles=payload.smiles,
@@ -127,21 +152,22 @@ def upsert_compound(payload: CompoundIn) -> LinkResponse:
         supplier=payload.supplier,
         notes=payload.notes,
     )
-    return LinkResponse(ok=ok, message="upserted" if ok else "failed")
+    return LinkResponse(ok=ok, message="upserted" if ok else "failed", uid=uid)
 
 
 @router.post("/formulations", response_model=LinkResponse)
 def upsert_formulation(payload: FormulationIn) -> LinkResponse:
     _ensure()
+    uid = _formulation_uid(payload)
     ok = neo4j_kg.upsert_formulation(
-        uid=payload.uid,
+        uid=uid,
         name=payload.name,
         description=payload.description,
         target_property=payload.target_property,
         target_value=payload.target_value,
         status=payload.status,
     )
-    return LinkResponse(ok=ok, message="upserted" if ok else "failed")
+    return LinkResponse(ok=ok, message="upserted" if ok else "failed", uid=uid)
 
 
 @router.post(
