@@ -47,6 +47,16 @@ def resolve_doe_engine(engine: str, design: str) -> str:
     return "native"
 
 
+def _is_face_centred(ccd_alpha) -> bool:
+    """True for the default CCD (None / "" / "face" / alpha == 1): the one pyDOE can build."""
+    if ccd_alpha is None or (isinstance(ccd_alpha, str) and ccd_alpha.strip().lower() in ("", "face", "faced")):
+        return True
+    try:
+        return float(ccd_alpha) == 1.0
+    except (TypeError, ValueError):
+        return False
+
+
 def build_doe_plan(
     factors: list[DOEFactor],
     design: str,
@@ -55,10 +65,16 @@ def build_doe_plan(
     n: int | None = None,
     requirement=None,
     seed: int | None = None,
+    ccd_alpha: str | float | None = None,
 ) -> DOEPlan:
+    if design == "ccd" and not _is_face_centred(ccd_alpha):
+        # pyDOE cannot be asked for an arbitrary alpha, and the pyDOE adapter clips every star point into [low, high] -
+        # which is face-centred by another name. A rotatable (or explicit-alpha) CCD keeps its star points outside the
+        # box and flags them infeasible, so it is built by the native generator whichever engine was asked for.
+        return build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha)
     resolved = resolve_doe_engine(engine, design)
     if resolved == "pydoe":
         return build_plan_with_fallback(
             factors, design, n=n, requirement=requirement, seed=seed
         )
-    return build_native_plan(factors, design, n=n)
+    return build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha)

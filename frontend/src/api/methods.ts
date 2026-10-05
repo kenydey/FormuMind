@@ -315,8 +315,13 @@ export const apiMethods = {
       query: opts.query ?? "",
       n: opts.n ?? 3,
     }),
-  doe: (req: Requirement, design: string, engine = "auto") =>
-    post<DOEPlan>(`/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}`, req),
+  // ccdAlpha（仅 design=ccd 有意义）："face" 面心（后端默认，所有 run 都在 [low, high] 内）/ "rotatable" 旋转（星点越界、被标为不可行）/ 数值 α
+  doe: (req: Requirement, design: string, engine = "auto", opts: { ccdAlpha?: string | number } = {}) =>
+    post<DOEPlan>(
+      `/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}` +
+        (opts.ccdAlpha != null ? `&ccd_alpha=${encodeURIComponent(String(opts.ccdAlpha))}` : ""),
+      req
+    ),
   listDoeHistory: (opts: { campaignId?: number | null; projectId?: string | null; page?: number; pageSize?: number } = {}) =>
     get<{ items: Record<string, unknown>[]; total: number; page: number; page_size: number }>(
       `/api/doe/history?project_id=${encodeURIComponent(opts.projectId ?? "")}&page=${opts.page ?? 1}&page_size=${opts.pageSize ?? 20}` +

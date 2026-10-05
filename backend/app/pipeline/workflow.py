@@ -301,13 +301,14 @@ def build_doe(
     engine: str = "auto",
     n: int | None = None,
     seed: int | None = None,
+    ccd_alpha: str | float | None = None,
 ) -> DOEPlan:
     from ..services import chemtools
     from ..services.engines.doe_registry import build_doe_plan
 
     factors = build_doe_factors(req)
     plan = build_doe_plan(
-        factors, design=design, engine=engine, n=n, requirement=req, seed=seed
+        factors, design=design, engine=engine, n=n, requirement=req, seed=seed, ccd_alpha=ccd_alpha
     )
     plan.plan_id = uuid.uuid4().hex
     plan.domain = req.domain

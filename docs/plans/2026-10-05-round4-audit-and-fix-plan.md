@@ -104,6 +104,8 @@
 | 58 | 低 | 测试 | **隐藏的测试顺序依赖**：`runtime_secrets` 这层运行期覆盖（UI / API 写入，或前一个测试里的 lifespan 从 `Settings` 复制进来的）优先于 `Settings` 属性，而 conftest 的逐测试重置没有它：`test_v03` 之后跑 `test_mineru_cloud::test_missing_sdk_means_no_call`，后者 `monkeypatch.setattr(get_settings(), "mineru_api_key", "t")` 被前者留下的 `None` 覆盖，报"未配置 Token"。完整套件按字母序跑所以一直绿，换个顺序（分片、自选文件、随机序）就红。加入重置，并用一对"先弄脏、再断言干净"的测试钉住——以后新增的全局单例也放在这里 | `test_state_isolation.py`（2） | 撤掉 conftest 里的重置，第二条失败；上面那个顺序组合在 HEAD 上稳定复现、修复后通过 |
 | 59 | 低 | 工程 | **`pip install -r requirements-dev.txt` 一直装不上**：它 `-r requirements.txt`，又自己钉了一份 `pypdf==6.14.0`，而 `requirements.txt` 钉的是 6.14.2（现在 6.19.0）——`ResolutionImpossible: Cannot install pypdf==6.14.0 and pypdf==6.14.2`（在 HEAD 的检出上复现）。`requirements.txt` 的文件头把它写成"开发 / 测试依赖在这里"，CI 用 `-e '.[dev]'` 所以没人踩到；文件头里"pypdf 只在这里、生产走标准库回退"的说明也早已过期。删掉重复的 pin、改写文件头；装一遍验证能解析 | `test_dependency_declarations.py::test_requirements_dev_does_not_repin_a_runtime_pin` | 在旧文件上失败 |
 | 60 | 中（CI） | 测试 / Windows | **我上一次推送里新加的 ReDoS 测试在 Windows 上整体 setup 报错**：`@pytest.mark.parametrize` 的参数就是 4–100 万字符的字符串，于是**测试 id 也那么长**；pytest 把当前测试 id 放进环境变量 `PYTEST_CURRENT_TEST`，而 Windows 的环境变量上限是 32,767 字符——`ValueError: the environment variable is longer than 32767 characters`，`backend-windows` 的两个分片红（共 16 个 setup / teardown 错误），Linux 上却全绿。是读 CI 日志逐个分片核对才发现的（整个运行显示"成功"，因为该 job 非阻塞）。给超长参数写显式 id；并让 `conftest.py` 在**所有平台**上拒绝收集 id 超过 2000 字符的测试，下次在 Linux 上就会被拦住 | `test_node_id_guard.py`（3） | 旧测试文件在新 conftest 下收集即中止（退出码 4，列出 9 个超长 id，最长 1,000,280 字符） |
+| 61 | 中 | DOE 设计 | **native CCD 的星点在物理范围之外，只在备注里告警**（上一轮留给你定的产品决策，已按"面心默认 + `ccd_alpha` 参数 + 越界逐 run 标 `infeasible`"落地）：`central_composite` 默认旋转设计，α = (2^k)^¼——三因子是 1.68，对一个 0–100 wt% 的因子就是负浓度 / 超过 100%；而 pyDOE 引擎的同名设计经适配器裁剪到单位区间（= 面心 α=1），**两个引擎对同一个设计名给出不同的实验矩阵**；`test_golden_ccd_structure` 曾把"星点在 ±α"钉成契约。现在：① 所有引擎的 `ccd` 默认**面心 α=1**，每个 run 都在 [low, high] 内；② `ccd_alpha`（`face` / `rotatable` / 数值 α>0）一路透传 `POST /api/doe?ccd_alpha=` → `workflow.build_doe` → `build_doe_plan` → `domain.doe.build_plan`，非法值 422 并指名该参数，其他设计忽略它；③ 要求旋转（或 α≠1）时**始终由 native 生成器构建**（pyDOE 给不了任意 α，适配器的裁剪就是面心），星点留在范围外、**逐 run 标 `infeasible` 并写明哪个因子越界**——不裁剪（裁剪会让星点压到别的 run 上、悄悄改变设计）；④ 界面：选中 CCD 时多一个"星点：面心 α=1 / 旋转 α=n^¼（越界·标不可行）"下拉，`⚠不可行` 徽标沿用；设计下拉由读 DOM 改为受控——引擎切换使当前设计不在列表里时，"生成 DOE"发送的是下拉**实际显示**的那个（派生值，不是过期状态）。黄金测试改为"默认面心 + 旋转需显式要求" | `test_ccd_alpha.py`（11）、`test_golden_doe.py`（改）、前端 `methods.doe.test.ts`（4）、`workflowSlice.generateDoe.test.ts`（4）、`DoeResultsPanel.ccdAlpha.test.tsx`（5） | 8 / 11 失败（旧代码上：星点越界、`ccd_alpha` 未知参数） |
+
 **CI 上新增**：非阻塞 job `backend-extras`——装上 `file_ingest` / `report_export` / `color` 与 PyMuPDF 两个固定版本 + CJK 字体，跑所有需要这些可选依赖的测试，并把"被跳过"当成失败（阻塞 job 不装它们，这类测试在那里全是 `importorskip`，这正是三轮审查都没发现表格路径问题的原因；`colour-science` 那条分支此前在任何地方都没跑过）。
 
 **新增的长期守卫**（让这一类问题下次在测试里失败，而不是在线上）：
@@ -133,7 +135,7 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | └ 理解 | 7.0 | 6.9 | 7.1 | 数值一致性检查认不出 `µm`（微符号）和全角数字 / `％`，对"80 µm"这类证据形同虚设（#49），已修；长数字串上的二次复杂度一并修了 | 改写 / 澄清无评测集；歧义消解依赖 KG 质量 |
 | └ 上下文 | 7.2 | 7.2 | 7.2 | 无改动 | 历史截断 / 摘要策略未量化；会话持久依赖 Redis |
 | 配方推荐 | 8.7 | 8.6 | **8.8** | 4 个领域离线推荐都满 100% 或带闭合告警；手工配方空成分 500 → 422（#11）；DOE 基准徽标重载保持（#7） | 无评测集；表面处理类强制 grounding 后只剩 97% |
-| DOE 设计 | 8.3 | 7.8 | **8.5** | 8 种设计 × 4 个领域 × 2 个引擎逐个核对范围：**混料原来全部越界**（#4）；其余均在范围内，唯一例外是 native CCD 星点 | native CCD 星点仍超出物理范围（只告警）；DOE 历史无界面 |
+| DOE 设计 | 8.3 | 7.8 | **8.7** | 8 种设计 × 4 个领域 × 2 个引擎逐个核对范围：**混料原来全部越界**（#4）；native CCD 的星点越界与"两个引擎同名不同矩阵"（#61）：现在默认面心、所有引擎一致，旋转设计要显式要求且越界行逐个标 `infeasible` | DOE 历史无界面；旋转 CCD 的越界行只是标记——要不要自动剔除由用户在界面决定；**内切 CCD（星点在面上、因子点内缩）这种既可旋转又不越界的变体没做** |
 | 寻优与迭代 | 8.4 | 7.4 | **8.5** | **闭环写入会自己等自己**（#2，生产里一个周期卡数分钟并拖死所有写）；目标权重写成 `NaN` / `Infinity` 会被存下来、让那条记录此后读不出（#50）；自动闭环的轮次上限 / 计数重载丢失（#7）；修复后 loop 端到端（训练 → 寻优 → 下一轮 DOE）走通，结果键与前端 `LoopReport` 对得上 | 虚拟寻优曲线不是实测；无"寻优质量"评测（收敛速度 vs 随机基线） |
 
 **一句话**：这一轮分数涨得最多的不是"新能力"，而是**把已有能力从"测试里绿"变成"生产里真的通"**——结构化问答、DOE 闭环、混料设计、材料页结构检索、数据表入库都属于这一类。
@@ -156,10 +158,9 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 - 做法：执行前把白名单表按 `project_id`（及 `owner_id`）物化进一个**内存 SQLite 快照**，生成的 SQL 只在快照上跑——模型写什么都碰不到范围外的行；这样 `require_project_scope` 的正则可以退役。
 - 验收：对抗用例（`OR 1=1`、子查询、CTE 改名、`main.` 前缀）全部只返回范围内的行。
 
-**3. native CCD 星点超出物理范围（R3 §4-7 的前半）——产品决策**
-- 现状：pydoe 引擎走面心 CCD（在范围内），native 走旋转 CCD（α≈2），星点会低于 0 / 高于 100%，只在备注里告警。`test_golden_ccd_structure` 把"星点在 ±α"**钉成了契约**，所以这不是顺手能改的 bug。
-- 做法：先决定契约——native 在因子有物理边界时改用面心（α=1），或保留旋转并把星点逐 run 标 `infeasible`；`ccd_alpha` 做成参数并在界面暴露。
-- 验收：CCD 的越界行数为 0（或全部带 `infeasible` 标注），黄金测试同步更新。
+**3. ~~native CCD 星点超出物理范围~~ —— 已解决（§2 #61）**
+- 决定：默认面心（α=1），`ccd_alpha` 做成参数并在界面暴露，越界星点逐 run 标 `infeasible`；黄金测试同步更新。
+- 仍可做：内切 CCD（因子点按 1/α 内缩、星点落在面上）——既保持旋转性又不越界，需要时再加一个 `ccd_alpha` 取值。
 
 **4. 暂停 / 恢复 DOE 闭环只存在 Redis 里，且 24 小时后静默失效**
 - 现状：标志 `doe_cycle:paused:<id>` 带 24 h TTL——周五暂停的自动闭环，周日会自己恢复；没有 Redis（开发 / eager 模式）时 `pause-doecycle` 恒 503。平台文档把 Redis 列为必需基础设施，所以后者是设计，**前者是需要决定的语义**。
@@ -215,7 +216,7 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | 真实文件实测（合成文件，装了 PyMuPDF / pymupdf4llm / MarkItDown / python-docx） | PDF（`hybrid` 档）/ DOCX / XLSX / PPTX × 中英文数据表：修复前每种格式都有至少一处表格缺陷（§2 #20–#24）；修复后 4 种格式得到同样的属性集（单位齐全、`耐盐雾性能 → salt_spray`），按"耐盐雾性能 720"可检索到表格 chunk |
 | PowerShell 7.4.6 真解析 `install.ps1` | 有 BOM：0 个解析错误；无 BOM 且按 cp1252 解码：3 个解析错误（证实 BOM 必要）；`Invoke-Step` / `Invoke-Optional` 行为符合设计。现为测试，CI 的 ubuntu runner 会真跑 |
 | OpenAPI 全量游走（修复前 → 后） | 290 个接口：修复前 3 个 500 + 15 个超时（连锁）；修复后 0 个 500、0 个超时（剩余 503 均为"功能关闭 / 依赖不可用"）。游走现在只验证 HTTP 层（任务派发回 202、不跑任务体），约 20 秒 |
-| DOE 探针 | 8 种设计 × 4 个领域 × 2 个引擎：越界行数 0（native CCD 星点除外，§4-3） |
+| DOE 探针 | 8 种设计 × 4 个领域 × 2 个引擎：越界行数 0（CCD 默认面心；显式旋转时越界行全部带 `infeasible`，§2 #61） |
 | Windows 全量（`windows-latest`，8 个分片并行） | 首轮：7 个分片红、37 个失败 / 错误（其中 Redis 连接慢导致的超时类约 12 个）；两轮修复后 **全部分片通过**，分片耗时 10–22 min → 4.5–8 min。CI `f6bd3f9`：**16 个 job 全绿**（阻塞的 `backend` / `frontend`，非阻塞的 `backend-extras` / `backend-baybe` / `golden` / `deepeval` / `api-contract` / `installer-windows` / 8 个 `backend-windows` 分片） |
 | 每个测试文件单独运行（干净检出、无 `FORMUMIND_*` 环境、4 路并行，514 个文件） | 2 个顺序依赖已修（§2 #42、#44）；其余全部通过。扫描脚本本身用一个故意失败的文件验证过会报告失败 |
 | 日志洪水扫描 | 寻优 / DOE 流程里不再有重复 ≥ 3 次的 WARNING（唯一的重复项是无 Redis 时每次写入一行"写锁不可用"，是预期的降级提示） |

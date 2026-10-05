@@ -477,7 +477,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
       }
     },
 
-    generateDoe: async (design) => {
+    generateDoe: async (design, opts) => {
       set((draft) => {
         draft.busy = "doe";
         draft.error = null;
@@ -500,7 +500,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           nextAlEngine = result.engine;
           adaptiveMeta = adaptiveMetaFrom(result);
         } else {
-          plan = await api.doe(requirement, design, doeEngine);
+          plan = await api.doe(requirement, design, doeEngine, design === "ccd" ? { ccdAlpha: opts?.ccdAlpha } : {});
         }
         set((draft) => {
           draft.campaignState = nextCampaignState;

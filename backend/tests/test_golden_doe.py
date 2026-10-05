@@ -47,10 +47,10 @@ def test_golden_plackett_burman_run_count():
 def test_golden_bounds_respected_all_designs():
     """Every run's natural value must lie within [low, high]: 100%.
 
-    CCD is excluded on purpose: its rotatable axial points extend beyond
-    the factorial box by design (see test_golden_ccd_structure).
+    CCD is included: by default its axial points sit on the faces of the factorial box (alpha = 1). The rotatable
+    variant, whose star points leave the box, is opt-in and flags those runs (see test_golden_ccd_structure).
     """
-    for design in ("full_factorial", "fractional_factorial", "plackett_burman", "lhs"):
+    for design in ("full_factorial", "fractional_factorial", "plackett_burman", "ccd", "lhs"):
         factors = _factors(3, low=1.0, high=9.0)
         plan = doe_engine.build_plan(factors, design=design, n=12)
         assert plan.runs, design
@@ -60,33 +60,71 @@ def test_golden_bounds_respected_all_designs():
                 assert f.low - 1e-9 <= v <= f.high + 1e-9, (design, f.name, v)
 
 
-def test_golden_ccd_structure():
-    """CCD contract: factorial block inside bounds, axial block at +/-alpha.
+def _axial_runs(plan, factors, alpha):
+    """Runs with exactly one factor at +/-alpha and the rest at 0 - the star block of a CCD."""
+    star = []
+    for run in plan.runs:
+        coded = [run.coded[f.name] for f in factors]
+        at_alpha = [c for c in coded if abs(abs(c) - alpha) < 1e-3]  # coded is rounded to 4dp
+        rest_zero = all(abs(c) < 1e-9 for c in coded if abs(abs(c) - alpha) >= 1e-3)
+        if len(at_alpha) == 1 and rest_zero:
+            star.append(run)
+    return star
 
-    Rotatable alpha = (n_factorial)^0.25 > 1, so axial points legitimately
-    fall outside [low, high]; the gate pins this documented behaviour.
+
+def test_golden_ccd_structure():
+    """CCD contract, default: factorial block at the corners, axial block on the faces (alpha = 1), centre points.
+
+    Every run is inside [low, high] and none is marked infeasible - the earlier default (rotatable alpha, star points
+    at +/-1.68 for 3 factors) put runs at negative concentrations and only said so in a note.
     """
     k = 3
     factors = _factors(k, low=1.0, high=9.0)
     plan = doe_engine.build_plan(factors, design="ccd")
+    assert len(_axial_runs(plan, factors, 1.0)) >= 2 * k  # the faces (the factorial corners have no zero coordinate)
+    centre = [r for r in plan.runs if all(abs(v) < 1e-9 for v in r.coded.values())]
+    assert len(centre) == 3
+    for run in plan.runs:
+        assert not run.infeasible, (run.run_id, run.infeasible_reason)
+        for f in factors:
+            assert f.low - 1e-9 <= run.natural[f.name] <= f.high + 1e-9, (f.name, run.natural[f.name])
+    assert len(plan.runs) == 2**k + 2 * k + 3
+    assert "alpha=1" in plan.notes and "face-centred" in plan.notes and "WARNING" not in plan.notes
+
+
+def test_golden_ccd_rotatable_keeps_star_points_outside_and_flags_them():
+    """Opt-in rotatable CCD: axial block at +/-(n_factorial)^0.25 > 1, outside [low, high], marked infeasible."""
+    k = 3
+    factors = _factors(k, low=1.0, high=9.0)
+    plan = doe_engine.build_plan(factors, design="ccd", ccd_alpha="rotatable")
     alpha = float(2**k) ** 0.25
     assert alpha > 1.0
-    axial = 0
+    star = _axial_runs(plan, factors, alpha)
+    assert len(star) == 2 * k
+    assert {r.run_id for r in star} == {r.run_id for r in plan.runs if r.infeasible}
+    for run in star:
+        assert "星点超出因子范围" in (run.infeasible_reason or "")
     for run in plan.runs:
-        coded = [run.coded[f.name] for f in factors]
-        extreme = [c for c in coded if abs(c) > 1.0 + 1e-9]
-        if extreme:
-            # axial point: exactly one factor at +/-alpha, rest at 0
-            axial += 1
-            assert len(extreme) == 1
-            assert abs(abs(extreme[0]) - alpha) < 1e-3  # coded rounded to 4dp
-            assert all(abs(c) < 1e-9 for c in coded if abs(c) <= 1.0 + 1e-9)
-        else:
-            # factorial / centre block: inside bounds
+        if not run.infeasible:  # factorial / centre block stays inside the box
             for f in factors:
-                v = run.natural[f.name]
-                assert f.low - 1e-9 <= v <= f.high + 1e-9, (f.name, v)
-    assert axial == 2 * k
+                assert f.low - 1e-9 <= run.natural[f.name] <= f.high + 1e-9
+    assert f"{2 * k} of {len(plan.runs)} runs" in plan.notes and "marked infeasible" in plan.notes
+
+
+def test_golden_ccd_numeric_alpha_and_invalid_alpha():
+    factors = _factors(2, low=0.0, high=10.0)
+    plan = doe_engine.build_plan(factors, design="ccd", ccd_alpha=1.5)
+    assert max(abs(v) for r in plan.runs for v in r.coded.values()) == pytest.approx(1.5)
+    assert sum(1 for r in plan.runs if r.infeasible) == 4
+    assert doe_engine.build_plan(factors, design="ccd", ccd_alpha="1").notes  # a numeric string is a number
+    for bad in ("nope", 0, -1, float("nan"), float("inf"), True, [1]):
+        with pytest.raises(ValueError, match="ccd_alpha"):
+            doe_engine.build_plan(factors, design="ccd", ccd_alpha=bad)
+
+
+def test_ccd_alpha_is_ignored_by_other_designs():
+    factors = _factors(2)
+    assert len(doe_engine.build_plan(factors, design="full_factorial", ccd_alpha="nope").runs) == 4
 
 
 def test_golden_lhs_space_filling_lower_bound():

@@ -67,11 +67,20 @@ def generate_doe(
     engine: str = Query("auto", enum=DOE_ENGINES),
     n: int | None = Query(None, ge=2, le=200),
     seed: int | None = Query(None, description="随机种子；指定后 LHS 等随机设计可复现"),
+    ccd_alpha: str | None = Query(
+        None,
+        description=(
+            "仅 design=ccd：轴距。face（默认）星点落在因子范围的面上，所有 run 都在 [low, high] 内；"
+            "rotatable 为旋转设计，星点超出范围、对应 run 标为 infeasible；也可给一个数值 α。"
+        ),
+    ),
 ) -> DOEPlan:
     if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
     try:
-        plan = workflow.build_doe(requirement, design=design, engine=engine, n=n, seed=seed)
+        plan = workflow.build_doe(
+            requirement, design=design, engine=engine, n=n, seed=seed, ccd_alpha=ccd_alpha
+        )
     except ValueError as exc:
         # v9: 离散因子 + 非 full_factorial 设计 fail-closed → 422 而非 500。
         raise HTTPException(status_code=422, detail=str(exc)) from exc

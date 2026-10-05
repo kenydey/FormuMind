@@ -94,12 +94,39 @@ def plackett_burman(k: int) -> np.ndarray:
     return np.array(design, dtype=float)[:, :k]
 
 
-def central_composite(k: int, alpha: str = "rotatable") -> np.ndarray:
-    """Central composite design: factorial + axial (star) + centre points."""
+def resolve_ccd_alpha(alpha: object, n_factorial: int) -> float:
+    """The axial distance of a central composite design, in coded units.
+
+    ``"face"`` (what every caller gets by default) is 1: the star points sit on the faces of the factorial box, so
+    every run stays inside each factor's ``[low, high]`` - the right choice for a formulation, where a star point past
+    the box is a negative concentration or a temperature nobody can set. ``"rotatable"`` is ``n_factorial ** 0.25``
+    (> 1): equal prediction variance in every direction, bought with star points outside the box. A bare number is
+    taken as alpha itself. Anything else is a ValueError (the API turns it into a 422).
+    """
+    if alpha is None or (isinstance(alpha, str) and alpha.strip().lower() in ("", "face", "faced")):
+        return 1.0
+    if isinstance(alpha, str) and alpha.strip().lower() == "rotatable":
+        return float(n_factorial) ** 0.25
+    try:
+        if isinstance(alpha, bool):
+            raise TypeError("a bool is not a distance")
+        value = float(alpha)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"unknown ccd_alpha {alpha!r}: use 'face', 'rotatable' or a number > 0") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"ccd_alpha must be a finite number > 0, got {alpha!r}")
+    return value
+
+
+def central_composite(k: int, alpha: str | float = "rotatable") -> np.ndarray:
+    """Central composite design: factorial + axial (star) + centre points.
+
+    ``alpha`` is anything :func:`resolve_ccd_alpha` accepts; :func:`build_plan` asks for ``"face"`` unless told otherwise.
+    """
     if k > 4:
         _check_run_budget(2 ** (k - 1), f"central composite over {k} factors")
     factorial = full_factorial(k) if k <= 4 else fractional_factorial(k)
-    a = float(len(factorial)) ** 0.25 if alpha == "rotatable" else 1.0
+    a = resolve_ccd_alpha(alpha, len(factorial))
     axial = []
     for i in range(k):
         for sign in (-a, a):
@@ -127,7 +154,7 @@ _DESIGNS = {
     "full_factorial": lambda k, n: full_factorial(k),
     "fractional_factorial": lambda k, n: fractional_factorial(k),
     "plackett_burman": lambda k, n: plackett_burman(k),
-    "ccd": lambda k, n: central_composite(k),
+    "ccd": lambda k, n: central_composite(k, "face"),
     "lhs": lambda k, n: latin_hypercube(k, n or max(2 * k + 1, 8)),
 }
 
@@ -162,7 +189,20 @@ def _level_counts(factors: list[DOEFactor]) -> list[int]:
     ]
 
 
-def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int | None = None) -> DOEPlan:
+def build_plan(
+    factors: list[DOEFactor],
+    design: str = "full_factorial",
+    n: int | None = None,
+    *,
+    ccd_alpha: str | float | None = None,
+) -> DOEPlan:
+    """Build a design over *factors*.
+
+    ``ccd_alpha`` only matters for ``design="ccd"``: ``"face"`` (the default, every run inside ``[low, high]``),
+    ``"rotatable"`` or a number - see :func:`resolve_ccd_alpha`. Runs that land outside a factor's range (star points of
+    a non-face CCD) are kept but marked ``infeasible`` with the reason, never clipped: clipping would collapse them onto
+    other runs and silently change the design.
+    """
     if not factors:
         raise ValueError("At least one factor is required for a DOE plan.")
     if design not in _DESIGNS:
@@ -188,28 +228,40 @@ def build_plan(factors: list[DOEFactor], design: str = "full_factorial", n: int 
     if design == "full_factorial":
         # C-4a: align the design with each discrete factor's level count.
         matrix = full_factorial(k, levels=_level_counts(factors))
+    elif design == "ccd":
+        matrix = central_composite(k, "face" if ccd_alpha in (None, "") else ccd_alpha)
     else:
         matrix = _DESIGNS[design](k, n)
     runs: list[DOERun] = []
-    beyond = False
+    outside_runs = 0
     for idx, row in enumerate(matrix, start=1):
         coded: dict[str, float] = {}
         natural: dict[str, float | str] = {}
+        outside: list[str] = []
         for f, c in zip(factors, row):
             c = float(c)
-            if f.kind != "discrete" and abs(c) > 1.0 + 1e-9:
-                beyond = True
             coded[f.name] = round(c, 4)
             natural[f.name] = decode(c, f)
-        runs.append(DOERun(run_id=idx, coded=coded, natural=natural))
-    if beyond:
-        # CCD star points sit at +-alpha (>1) by contract (pinned by the
-        # golden gate). Clipping would collapse them onto the factorial
-        # corners (duplicate runs), so surface it instead: the caller must
-        # widen the physical limits or pick a face-centred design.
+            if f.kind != "discrete" and abs(c) > 1.0 + 1e-9:
+                outside.append(f"{f.name}={natural[f.name]} 不在 [{f.low:g}, {f.high:g}] 内")
+        run = DOERun(run_id=idx, coded=coded, natural=natural)
+        if outside:
+            run.infeasible = True
+            run.infeasible_reason = "星点超出因子范围：" + "；".join(outside)
+            outside_runs += 1
+        runs.append(run)
+    if design == "ccd":
+        alpha_used = float(np.max(np.abs(matrix)))
         note_extra += (
-            " WARNING: axial points extend beyond the factor [low, high] range; "
-            "check physical limits (e.g. negative concentrations) before running."
+            f" Axial distance alpha={alpha_used:.4g}"
+            + (" (face-centred: every run inside [low, high])." if alpha_used <= 1.0 + 1e-9 else " (star points outside the factor box).")
+        )
+    if outside_runs:
+        # Clipping the star points would collapse them onto other runs, so they stay as they are and are flagged:
+        # the caller must widen the physical limits, drop those runs, or ask for ccd_alpha='face'.
+        note_extra += (
+            f" WARNING: {outside_runs} of {len(runs)} runs lie outside the factor [low, high] range "
+            "(e.g. a negative concentration) and are marked infeasible; use ccd_alpha='face' to keep every run inside."
         )
     note = (
         f"{design} design over {k} factors -> {len(runs)} runs. "

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -143,6 +143,8 @@ const AI_DESIGN = { value: "ai_active", label: "🧠 AI 主动选点" };
 export default function DoeResultsPanel() {
   const [factorHints, setFactorHints] = useState<FactorCandidate[] | null>(null);
   const [factorBusy, setFactorBusy] = useState(false);
+  const [design, setDesign] = useState("ccd");
+  const [ccdAlpha, setCcdAlpha] = useState<"face" | "rotatable">("face");
   const engines = useEngineAvailability();
   const pydoeReady = engineOk(engines, "pydoe");
   const baybeReady = engineOk(engines, "baybe");
@@ -188,24 +190,29 @@ export default function DoeResultsPanel() {
     }))
   );
 
+  // memoised on the engine: the effect below lists it, and a fresh array every render would re-run it every render
+  const designs = useMemo(
+    () =>
+      doeEngine === "pydoe"
+        ? [...NATIVE_DESIGNS.filter((d) => ["ccd", "lhs"].includes(d.value)), ...PYDOE_DESIGNS, AI_DESIGN]
+        : doeEngine === "native"
+          ? [...NATIVE_DESIGNS, AI_DESIGN]
+          : [...NATIVE_DESIGNS, ...PYDOE_DESIGNS, AI_DESIGN],
+    [doeEngine]
+  );
+
+  // The engine decides which designs exist: when the chosen one is not on the list (pydoe has no full factorial) the
+  // select shows the first entry, and that - not the stale state - is what "生成 DOE" has to send.
+  const shownDesign = designs.some((d) => d.value === design) ? design : designs[0].value;
+
   useEffect(() => {
     if (!pendingDoeDesign) return;
-    const el = document.getElementById("doe-design") as HTMLSelectElement | null;
-    if (el) {
-      const has = Array.from(el.options).some((o) => o.value === pendingDoeDesign);
-      if (has) el.value = pendingDoeDesign;
-    }
-  }, [pendingDoeDesign, doeEngine]);
+    if (designs.some((d) => d.value === pendingDoeDesign)) setDesign(pendingDoeDesign);
+  }, [pendingDoeDesign, designs]);
+
   const metric = primaryObjectiveMetric(requirement);
   const pendingAdopt =
     !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
-
-  const designs =
-    doeEngine === "pydoe"
-      ? [...NATIVE_DESIGNS.filter((d) => ["ccd", "lhs"].includes(d.value)), ...PYDOE_DESIGNS, AI_DESIGN]
-      : doeEngine === "native"
-        ? [...NATIVE_DESIGNS, AI_DESIGN]
-        : [...NATIVE_DESIGNS, ...PYDOE_DESIGNS, AI_DESIGN];
 
   function trendFor(m: ModelInfo): number[] {
     return modelHistory
@@ -309,7 +316,8 @@ export default function DoeResultsPanel() {
           )}
           <select
             id="doe-design"
-            defaultValue="ccd"
+            value={shownDesign}
+            onChange={(e) => setDesign(e.target.value)}
             className="bg-ink border border-edge rounded px-2 py-1 text-xs"
           >
             {designs.map((d) => (
@@ -318,9 +326,21 @@ export default function DoeResultsPanel() {
               </option>
             ))}
           </select>
+          {shownDesign === "ccd" && (
+            <select
+              value={ccdAlpha}
+              onChange={(e) => setCcdAlpha(e.target.value as "face" | "rotatable")}
+              className="bg-ink border border-edge rounded px-2 py-1 text-xs"
+              title="CCD 星点位置：面心 α=1 时所有实验点都在因子范围内；旋转设计的星点超出范围（浓度可能为负），对应实验会被标为不可行"
+              data-testid="doe-ccd-alpha-select"
+            >
+              <option value="face">星点：面心 α=1（全部在范围内）</option>
+              <option value="rotatable">星点：旋转 α=n^¼（越界·标不可行）</option>
+            </select>
+          )}
           <button
             disabled={busy !== "idle"}
-            onClick={() => generateDoe((document.getElementById("doe-design") as HTMLSelectElement).value)}
+            onClick={() => generateDoe(shownDesign, shownDesign === "ccd" ? { ccdAlpha } : undefined)}
             className="text-xs border border-accent text-accent rounded px-2 py-1 hover:bg-accent/10 disabled:opacity-40"
           >
             {busy === "doe" ? "生成中…" : "生成 DOE"}
