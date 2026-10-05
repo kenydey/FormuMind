@@ -3,7 +3,9 @@
 Found, in one pass, three handlers that turned caller mistakes into 500s (unknown example id, a recipe with no
 ingredients, an unwritable pause flag) and a DOE-cycle step that waited on its own SQLite write lock: after
 ``POST /api/doe/cycle`` every request that wrote blocked for the 30 s busy timeout. None of it was reachable from
-a unit test that injected its own session.
+a unit test that injected its own session. (The first version of the walk also ran the dispatched job bodies, which
+is how the DOE-cycle lock showed up; that case is pinned by ``test_doe_cycle_persist_provenance``. The walk now
+answers task dispatches with a 202 and leaves the bodies to their own tests — see the ``client`` fixture.)
 
 A response is acceptable when it is a 2xx/3xx/4xx, or a 503 (a feature that is switched off or a dependency that
 is down). A 500 is a defect; a request that does not answer within the budget is a defect too.
@@ -13,7 +15,9 @@ from __future__ import annotations
 import concurrent.futures as cf
 import json
 import re
+import threading
 import time
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +34,10 @@ SKIP = re.compile(
 METHODS = ("get", "post", "put", "patch", "delete")
 
 
+# Threads the suite's conftest waits for between tests (see ``_drain_background_threads``).
+_BACKGROUND_THREADS = ("eager-", "wiki-compile", "workbench-loop")
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FORMUMIND_API_AUTH_ENABLED", "false")
@@ -38,8 +46,24 @@ def client(tmp_path, monkeypatch):
     from app.db.database import Base, default_engine
 
     Base.metadata.create_all(default_engine())
+
+    # The walk checks the HTTP layer. Under Celery-eager every task-dispatching endpoint would start its real job in
+    # a daemon thread: one minimal inverse-design request ran for 160 s and was still going while the following test
+    # modules ran — in CI it scored candidates through test_optimizer_lab_seeding's spy and failed that test. Job
+    # bodies have their own tests; here the dispatcher answers 202 and does not run them.
+    import app.api._dispatch as dispatch
+
+    monkeypatch.setattr(
+        dispatch, "_submit_eager_background", lambda task, payload, kind, *, task_id=None: task_id or str(uuid.uuid4())
+    )
+    before = {t.ident for t in threading.enumerate()}
     yield TestClient(app, raise_server_exceptions=False)
+    leaked = [
+        t.name for t in threading.enumerate()
+        if t.ident not in before and t.is_alive() and t.name.startswith(_BACKGROUND_THREADS)
+    ]
     get_settings.cache_clear()
+    assert not leaked, f"the walk left background jobs running into the next tests: {leaked}"
 
 
 def _schemas() -> dict:
