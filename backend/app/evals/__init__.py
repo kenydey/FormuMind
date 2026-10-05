@@ -2,4 +2,6 @@
 
 from __future__ import annotations
 
+from .rigor_rubric import evaluate_rigor
+
 __all__ = ["evaluate_rigor"]
