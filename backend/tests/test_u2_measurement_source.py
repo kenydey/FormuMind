@@ -109,3 +109,15 @@ def test_workbench_source_counts_as_real() -> None:
     df = records_to_dataframe([rec], req, req.objectives)
     assert not df.empty, "workbench 真实测量默认应进 GP 训练集"
     assert lab_measurement_source([rec]) == "lab", "纯 workbench 不再误报 predictor_virtual"
+
+
+def test_virtual_count_excludes_workbench():
+    """v14-3: workbench 计入 lab 点数，不再被双计入 virtual。"""
+    from app.domain.schemas import REAL_SOURCES, VIRTUAL_SOURCES
+
+    # 口径自洽：REAL 与 VIRTUAL 不交叠
+    assert not (REAL_SOURCES & VIRTUAL_SOURCES)
+    assert "workbench" in REAL_SOURCES
+    assert "workbench" not in VIRTUAL_SOURCES
+    assert "baybe_opt" in VIRTUAL_SOURCES
+    assert "predictor_virtual" in VIRTUAL_SOURCES

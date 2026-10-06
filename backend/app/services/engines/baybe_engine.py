@@ -6,6 +6,7 @@ import logging
 from ...domain.objective_contract import align_dataframe_measurement_columns, objective_metrics
 from ...domain.schemas import (
     REAL_SOURCES,
+    VIRTUAL_SOURCES,
     BaybeRecommendResult,
     ExperimentRecord,
     ObjectiveSpec,
@@ -290,12 +291,19 @@ class BaybeCampaignEngine:
             _src_counts[_s] = _src_counts.get(_s, 0) + 1
         # v13-3: workbench 真实测量也计入 lab 点数。
         _lab_n = sum(n for s, n in _src_counts.items() if s in REAL_SOURCES)
-        _virtual_n = sum(n for s, n in _src_counts.items() if s != "lab")
-        if _virtual_n:
+        # v14-3: 虚拟口径用 VIRTUAL_SOURCES（workbench 不再被双计入）；
+        # 未知 source 单独计数披露，防未来新增类型静默归类错误。
+        _virtual_n = sum(n for s, n in _src_counts.items() if s in VIRTUAL_SOURCES)
+        _unknown_n = sum(
+            n for s, n in _src_counts.items()
+            if s not in REAL_SOURCES and s not in VIRTUAL_SOURCES
+        )
+        if _virtual_n or _unknown_n:
             log.info(
                 "baybe: %d virtual measurement(s) excluded from GP training "
-                "(sources=%s); %d lab measurement(s) used",
+                "(sources=%s); %d lab measurement(s) used%s",
                 _virtual_n, _src_counts, _lab_n,
+                f"; {_unknown_n} unknown source(s) ignored" if _unknown_n else "",
             )
         df_meas = records_to_dataframe(measurements, req, objectives)
         if not df_meas.empty and metrics:
