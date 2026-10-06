@@ -49,7 +49,7 @@ export default function ParallelCoordinates({
   const scales = useMemo(() => {
     return axes.map((axis) => {
       const values = formulations
-        .map((f) => f.predicted?.[axis.key] ?? f.measured?.[axis.key])
+        .map((f) => f.predicted?.[axis.key])
         .filter((v): v is number => v != null);
       const domain = axis.domain ?? niceDomain(values, 0.02);
       const range: [number, number] =
@@ -63,7 +63,7 @@ export default function ParallelCoordinates({
     return formulations.filter((f) => {
       return brushes.every((brush) => {
         const axis = axes[brush.axisIndex];
-        const v = f.predicted?.[axis.key] ?? f.measured?.[axis.key];
+        const v = f.predicted?.[axis.key];
         if (v == null) return false;
         const s = scales[brush.axisIndex].scale(Number(v));
         const minY = Math.min(brush.min, brush.max);
@@ -118,7 +118,7 @@ export default function ParallelCoordinates({
   const renderPolyline = (f: Formulation, idx: number) => {
     const points = axes
       .map((axis, i) => {
-        const v = f.predicted?.[axis.key] ?? f.measured?.[axis.key];
+        const v = f.predicted?.[axis.key];
         if (v == null) return null;
         const x = axisPositions[i];
         const y = scales[i].scale(Number(v));

@@ -19,7 +19,6 @@ interface ParetoPoint {
   x: number;
   y: number;
   name: string;
-  source: "predicted" | "measured";
   is_pareto: boolean;
   formulation: Formulation;
 }
@@ -51,15 +50,14 @@ export default function ParetoFrontPlot({
 
   const rawPoints = formulations
     .map((f, i) => {
-      const x = f.predicted?.[xMetric] ?? f.measured?.[xMetric];
-      const y = f.predicted?.[yMetric] ?? f.measured?.[yMetric];
+      const x = f.predicted?.[xMetric];
+      const y = f.predicted?.[yMetric];
       if (x == null || y == null) return null;
       return {
         id: `${f.name}-${i}`,
         x: Number(x),
         y: Number(y),
         name: f.name,
-        source: f.measured?.[yMetric] != null ? ("measured" as const) : ("predicted" as const),
         formulation: f,
       };
     })
@@ -68,19 +66,18 @@ export default function ParetoFrontPlot({
       x: number;
       y: number;
       name: string;
-      source: "predicted" | "measured";
       formulation: Formulation;
     }>;
 
   const pointsWithPareto = useParetoFront(
-    rawPoints.map((p) => ({ id: p.id, x: p.x, y: p.y, source: p.source, name: p.name, formulation: p.formulation })),
+    rawPoints.map((p) => ({ id: p.id, x: p.x, y: p.y, name: p.name, formulation: p.formulation })),
     xDirection,
     yDirection
   );
 
   const chartPoints = pointsWithPareto.map((p) => ({
     ...p,
-    fill: p.source === "measured" ? "#34d399" : "#94a3b8",
+    fill: "#94a3b8",
     stroke: p.is_pareto ? "#fbbf24" : "transparent",
     strokeWidth: p.is_pareto ? 2 : 0,
     r: p.is_pareto ? 6 : 4,
@@ -152,23 +149,15 @@ export default function ParetoFrontPlot({
               if (!pt) return [value, name];
               return [
                 `${pt.name} | ${xLabel}: ${pt.x.toFixed(1)} | ${yLabel}: ${pt.y.toFixed(1)}`,
-                pt.is_pareto ? "★ 帕累托" : pt.source === "measured" ? "实测" : "预测",
+                pt.is_pareto ? "★ 帕累托" : "预测",
               ];
             }}
           />
           <Legend wrapperStyle={{ fontSize: 10, color: "#94a3b8" }} />
           <Scatter
             name="预测"
-            data={chartPoints.filter((p) => p.source === "predicted")}
+            data={chartPoints}
             fill="#94a3b8"
-            onClick={handleClick}
-            onMouseEnter={(d) => setHoveredId((d as ParetoPoint).id)}
-            onMouseLeave={() => setHoveredId(null)}
-          />
-          <Scatter
-            name="实测"
-            data={chartPoints.filter((p) => p.source === "measured")}
-            fill="#34d399"
             onClick={handleClick}
             onMouseEnter={(d) => setHoveredId((d as ParetoPoint).id)}
             onMouseLeave={() => setHoveredId(null)}

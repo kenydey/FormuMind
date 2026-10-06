@@ -5,7 +5,6 @@ export interface ParetoPoint {
   x: number;
   y: number;
   is_pareto: boolean;
-  source: "predicted" | "measured";
   [key: string]: unknown;
 }
 

@@ -136,10 +136,6 @@ export interface Formulation {
   // Stable client-side identity for DOE baseline badge matching (opaque to the
   // backend, which round-trips it; stamped when saving a card as DOE baseline).
   client_uid?: string;
-  // Real experiment measurements for this formulation when it corresponds to
-  // a measured run (charts prefer these over `predicted`); absent for pure
-  // predictions. Optional so existing Formulation producers are unaffected.
-  measured?: Record<string, number>;
   // Ingredient/factor values in natural units for a measured run. The backend
   // never sends it; the similarity modal falls back to the ingredients' wt%.
   factors?: Record<string, number>;
