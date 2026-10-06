@@ -95,18 +95,21 @@ def test_execute_sql_names_what_it_refused(db):
         text2sql.execute_sql(default_engine(), "SELECT * FROM source_documents")
 
 
-def test_a_scope_predicate_hidden_in_a_comment_does_not_count(db):
-    out = _ask("SELECT label FROM experiments -- project_id = 'p1'")
-    assert out["route"] == "fallback", out
-    out = _ask("SELECT label FROM experiments /* project_id = 'p1' */")
-    assert out["route"] == "fallback", out
-    # …but a '--' inside a string literal is data, not a comment
+def test_a_scope_predicate_in_a_comment_is_neither_needed_nor_honoured(db):
+    """The old guard demanded ``project_id = 'p1'`` outside comments; the statement now runs on p1's rows only, so
+    what it says about the project - or hides in a comment - cannot change what it reads."""
+    for sql in ("SELECT label FROM experiments -- project_id = 'p2'", "SELECT label FROM experiments /* project_id = 'p2' */"):
+        out = _ask(sql)
+        assert out["route"] == "structured", out
+        assert out["rows"] == [{"label": "alpha-in-scope"}]
+    # a '--' inside a string literal is data, not a comment
     ok = _ask("SELECT '--' AS dashes FROM experiments WHERE project_id = 'p1'")
     assert ok["route"] == "structured", ok
 
 
-def test_the_authorizer_is_gone_when_the_query_is_done(db):
-    """The connection returns to the pool: an authorizer left on it would break the next borrower."""
+def test_the_live_connection_never_carries_an_authorizer(db):
+    """The statement runs on a snapshot, so the pooled connections of the live database are never touched - an
+    authorizer left on one would break the next borrower."""
     with pytest.raises(Text2SQLError):
         text2sql.execute_sql(default_engine(), "SELECT * FROM source_documents")
     with default_engine().connect() as conn:

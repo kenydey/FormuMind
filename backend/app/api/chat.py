@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import field_validator
+from pydantic import PrivateAttr, field_validator
 
 from ..domain.chat_schemas import (
     ChatRequest,
@@ -98,6 +98,10 @@ def _sanitize_evidence(ev: Evidence) -> Evidence:
 
 
 class ChatRequestValidated(ChatRequest):
+    # Who sent it: set by the route from the bearer token, never read from the body (a client must not name its own
+    # owner). ``None`` = an internal call with no identity, which the Text2SQL scope treats as "restrict nothing".
+    _owner_id: str | None = PrivateAttr(default=None)
+
     @field_validator("sources", mode="before")
     @classmethod
     def _coerce_sources(cls, raw: object) -> object:
@@ -446,8 +450,17 @@ def _ensure_answer(text: str | None, *, fallback: str = "暂无可用回答。")
     return cleaned or fallback
 
 
+def _bind_owner(req: ChatRequestValidated, request: Request | None) -> None:
+    """Record the caller's owner on the request so the structured (Text2SQL) half reads only what they may see."""
+    if request is not None:
+        from ..middleware.api_auth import get_current_owner
+
+        req._owner_id = get_current_owner(request)
+
+
 @router.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequestValidated):
+def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[assignment]
+    _bind_owner(req, request)
     import time as _time
     _t0 = _time.time()
     _marks: list[str] = []
@@ -547,6 +560,7 @@ def chat(req: ChatRequestValidated):
                 retrieval_query,
                 settings=settings,
                 project_id=req.project_id,
+                owner_id=getattr(req, "_owner_id", None),
                 evidence=sources,
                 include_evidence_text=False,
             )
@@ -834,6 +848,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
             retrieval_query,
             settings=settings,
             project_id=req.project_id,
+            owner_id=getattr(req, "_owner_id", None),
             evidence=sources,
             include_evidence_text=False,
         )
@@ -998,12 +1013,13 @@ def _finalize_evidence_fields(
 
 
 @router.post("/chat/stream")
-async def chat_stream(req: "ChatRequestValidated"):
+async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # type: ignore[assignment]
     """SSE 流式问答: 检索阶段提示 → 主回答逐 token → done(含引用/claims)。
 
     结构化(StructuredAnswer)请求暂不走 token 流(需整包 JSON 校验),
     完整生成后单发 done; markdown 请求全流式。
     """
+    _bind_owner(req, request)
     import asyncio
     import threading
     from ..config import get_settings

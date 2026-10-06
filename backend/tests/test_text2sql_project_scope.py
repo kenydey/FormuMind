@@ -1,9 +1,9 @@
-"""Text2SQL project_id scoping.
+"""Text2SQL project scoping.
 
-Covers: prompt rule 7 carries the project filter, require_project_scope
-accepts scoped SQL and rejects unscoped SQL (fail-open, no cross-project
-leak), and an end-to-end two-project scenario where rows from the other
-project never surface. No langchain dependency; LLM calls are fakes.
+Covers: the prompt tells the model its database is already scoped, a model that forgets (or games) the project filter
+still only sees its own project, and an end-to-end two-project scenario where rows from the other project never
+surface. The isolation itself is structural - the statement runs on a snapshot of the project - and is tested
+adversarially in ``test_text2sql_snapshot.py``. No langchain dependency; LLM calls are fakes.
 """
 from __future__ import annotations
 
@@ -72,34 +72,12 @@ def _two_project_engine(engine):
     return engine
 
 
-def test_prompt_carries_project_scope_rule(engine):
+def test_prompt_tells_the_model_its_database_is_already_scoped(engine):
     schema = mod.render_schema(engine)
     system, _ = mod.build_sqlite_prompt("q", schema, project_id="p1")
-    assert "project_id = 'p1'" in system
+    assert "不需要" in system and "project_id" in system
     system2, _ = mod.build_sqlite_prompt("q", schema)
-    assert "project_id" not in system2 or "7." not in system2
-
-
-def test_require_project_scope_accepts_scoped():
-    sql = "SELECT id FROM experiments WHERE project_id = 'p1' AND domain = 'x'"
-    assert mod.require_project_scope(sql, "p1") == sql
-
-
-def test_require_project_scope_accepts_join_path():
-    sql = (
-        "SELECT m.value FROM measurements m JOIN experiments e "
-        "ON m.experiment_id = e.id WHERE e.project_id = \"p2\""
-    )
-    assert mod.require_project_scope(sql, "p2") == sql
-
-
-def test_require_project_scope_rejects_missing():
-    with pytest.raises(mod.Text2SQLError):
-        mod.require_project_scope("SELECT id FROM experiments", "p1")
-
-
-def test_require_project_scope_noop_without_project():
-    assert mod.require_project_scope("SELECT 1", None) == "SELECT 1"
+    assert "7." not in system2  # no project chosen: no rule
 
 
 def test_structured_block_filters_by_project(engine):
@@ -107,7 +85,7 @@ def test_structured_block_filters_by_project(engine):
     schema = mod.render_schema(eng)
 
     def fake_complete(system, user):
-        assert "project_id = 'p1'" in system
+        assert "不需要" in system
         return (
             "SELECT label FROM experiments "
             "WHERE project_id = 'p1' AND domain = '除油剂'"
@@ -126,7 +104,8 @@ def test_structured_block_filters_by_project(engine):
     assert "除油剂配方X" not in prov["fused_context"]  # other project never surfaces
 
 
-def test_unscoped_sql_fail_open(engine):
+def test_a_query_that_forgot_the_project_filter_still_only_sees_the_project(engine):
+    """Used to fall back to the literature path (the text guard refused it); now the data it can see is the project's."""
     eng = _two_project_engine(engine)
 
     def fake_complete(system, user):
@@ -140,5 +119,20 @@ def test_unscoped_sql_fail_open(engine):
         evidence=[],
         include_evidence_text=False,
     )
-    assert out["fused_context"] == ""
-    assert out["route"] == "fallback"  # literature path, answer not blocked
+    assert out["route"] == "structured"
+    assert [r["label"] for r in out["rows"]] == ["除油剂配方A"]
+    assert "除油剂配方X" not in out["fused_context"]
+
+
+def test_a_query_that_names_another_project_gets_nothing(engine):
+    eng = _two_project_engine(engine)
+    out = mod.hybrid_answer(
+        "查询除油剂配方的实验",
+        engine=eng,
+        project_id="p1",
+        complete_fn=lambda system, user: "SELECT label FROM experiments WHERE project_id = 'p2'",
+        evidence=[],
+        include_evidence_text=False,
+    )
+    assert out["route"] == "structured" and out["rows"] == []
+    assert "除油剂配方X" not in out["fused_context"]
