@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
+
+from ..db.session_utils import commit_session
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +57,42 @@ def claim_id_for_text(text_value: str) -> str:
     return f"claim:{digest}"
 
 
+def _schema_ready(session: Session) -> bool:
+    """Whether the edge table, its meta row at the current schema version and both indexes already exist - a read-only
+    question, so that the common case writes nothing."""
+    names = {
+        row[0]
+        for row in session.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE (type = 'table' AND name IN (:meta, :edges)) "
+                "OR (type = 'index' AND name IN ('idx_prov_from', 'idx_prov_to'))"
+            ),
+            {"meta": _PROV_META, "edges": _PROV_TABLE},
+        )
+    }
+    if names != {_PROV_META, _PROV_TABLE, "idx_prov_from", "idx_prov_to"}:
+        return False
+    version = session.execute(text(f"SELECT v FROM {_PROV_META} WHERE k = 'schema'")).scalar()
+    return version == _PROV_SCHEMA
+
+
 def ensure_provenance(session_factory: sessionmaker[Session] | None = None) -> None:
-    """Create the provenance edge table + schema meta if missing/outdated."""
+    """Create the provenance edge table + schema meta if missing/outdated.
+
+    Every public helper starts here, so the up-to-date case is a read: the old version ran the ``CREATE ... IF NOT EXISTS``
+    statements and a ``commit`` on every call - a write transaction per ``link`` and even per ``lineage`` read. Creation
+    (rare) goes through ``commit_session`` - the shared write lock and the "database is locked" retry - and takes SQLite's
+    write lock *before* it reads the schema version: reading first and writing after, in one transaction, is the pattern
+    WAL answers with an immediate "database is locked" when another process wrote in between.
+    """
     sf = session_factory or _session_factory()
     with sf() as session:
+        if _schema_ready(session):
+            return
+    with commit_session(sf) as session:
+        connection = session.connection()
+        if connection.dialect.name == "sqlite":
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
         session.execute(
             text(
                 f"""CREATE TABLE IF NOT EXISTS {_PROV_META} (
@@ -79,10 +114,8 @@ def ensure_provenance(session_factory: sessionmaker[Session] | None = None) -> N
                 ),
                 {"v": _PROV_SCHEMA},
             )
-            session.commit()
             return
         _create_table(session)
-        session.commit()
 
 
 def _create_table(session: Session) -> None:
@@ -121,6 +154,54 @@ def _validate_node(node_type: str, node_id: str) -> None:
         raise ValueError("provenance node id must be non-empty")
 
 
+Edge = tuple[str, str, str, str] | tuple[str, str, str, str, str]
+
+
+def link_many(
+    edges: Iterable[Edge],
+    *,
+    session_factory: sessionmaker[Session] | None = None,
+) -> bool:
+    """Record many directed edges ``(from_type, from_id, to_type, to_id[, relation])`` in ONE transaction.
+
+    One ``commit_session`` write - the cross-process write lock and the retry on "database is locked" - instead of a
+    connection, a schema check and a bare ``commit`` per edge: a DOE cycle of N runs x 5 candidate formulations is N * 5
+    edges, and ``record_claim_sources`` one per cited source. Idempotent (``INSERT OR IGNORE``) and fail-open (False on a
+    database error). Raises ``ValueError`` - before anything is written, for the whole batch - on an unknown node type or an
+    empty node id: those are programmer errors, not runtime failures.
+    """
+    now = _utcnow_iso()
+    rows: list[dict[str, str]] = []
+    for edge in edges:
+        from_type, from_id, to_type, to_id, *rest = edge
+        _validate_node(from_type, from_id)
+        _validate_node(to_type, to_id)
+        rows.append(
+            {
+                "ft": from_type, "fid": from_id, "tt": to_type, "tid": to_id,
+                "rel": (rest[0] if rest else "") or "derived_from", "now": now,
+            }
+        )
+    if not rows:
+        return True
+    try:
+        sf = session_factory or _session_factory()
+        ensure_provenance(sf)
+        with commit_session(sf) as session:
+            session.execute(
+                text(
+                    f"""INSERT OR IGNORE INTO {_PROV_TABLE}
+                    (from_type, from_id, to_type, to_id, relation, created_at)
+                    VALUES (:ft, :fid, :tt, :tid, :rel, :now)"""
+                ),
+                rows,
+            )
+        return True
+    except Exception:
+        logger.warning("provenance.link_many failed (fail-open)", exc_info=True)
+        return False
+
+
 def link(
     from_type: str,
     from_id: str,
@@ -133,34 +214,9 @@ def link(
     """Record one directed edge. Idempotent; fail-open (returns False on DB error).
 
     Raises ``ValueError`` on an unknown node type or empty node id — those are
-    programmer errors, not runtime failures.
+    programmer errors, not runtime failures. Several edges belong in :func:`link_many`.
     """
-    _validate_node(from_type, from_id)
-    _validate_node(to_type, to_id)
-    try:
-        sf = session_factory or _session_factory()
-        ensure_provenance(sf)
-        with sf() as session:
-            session.execute(
-                text(
-                    f"""INSERT OR IGNORE INTO {_PROV_TABLE}
-                    (from_type, from_id, to_type, to_id, relation, created_at)
-                    VALUES (:ft, :fid, :tt, :tid, :rel, :now)"""
-                ),
-                {
-                    "ft": from_type,
-                    "fid": from_id,
-                    "tt": to_type,
-                    "tid": to_id,
-                    "rel": relation or "derived_from",
-                    "now": _utcnow_iso(),
-                },
-            )
-            session.commit()
-        return True
-    except Exception:
-        logger.warning("provenance.link failed (fail-open)", exc_info=True)
-        return False
+    return link_many([(from_type, from_id, to_type, to_id, relation)], session_factory=session_factory)
 
 
 def record_claim_sources(
@@ -172,19 +228,11 @@ def record_claim_sources(
 ) -> str:
     """Link one claim node to its evidence sources. Returns the claim node id."""
     claim_node_id = claim_id_for_text(claim_text)
-    seen: set[str] = set()
-    for sid in source_ids or []:
-        if not sid or sid in seen:
-            continue
-        seen.add(sid)
-        link(
-            "claim",
-            claim_node_id,
-            "source",
-            sid,
-            relation,
-            session_factory=session_factory,
-        )
+    unique = list(dict.fromkeys(sid for sid in source_ids or [] if sid))
+    link_many(
+        [("claim", claim_node_id, "source", sid, relation) for sid in unique],
+        session_factory=session_factory,
+    )
     return claim_node_id
 
 
