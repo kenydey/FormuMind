@@ -69,6 +69,24 @@ Steps: `[1/5]` environment check (Python / Node / git) → `[2/5]` venv + backen
 `alembic upgrade head`. A `.venv` that is not a Windows venv, or one on a different
 interpreter, is renamed to `.venv.bak-<timestamp>` and rebuilt (never deleted).
 
+**The window at the end.** A double-click opens a console that closes together with the script, which would take the
+next-steps text (or the error) with it, so `install.bat` waits for a key - for a double-click only; a terminal, a script
+and CI are never held up. It tells them apart by the command line `cmd.exe` was started with (`%cmdcmdline%`), which was
+measured on a Windows runner (the `windows-stack` CI job prints it on every run; `backend/tests/test_install_bat_launch.py`
+runs the batch file for each row, including the real shell association via `Start-Process`):
+
+| started as | `%cmdcmdline%` | waits for a key |
+|---|---|---|
+| double-click; `Start-Process install.bat` with **no** arguments | `cmd.exe /c ""<dir>\install.bat" "` | yes |
+| `Start-Process install.bat -ArgumentList -Minimal`; `& .\install.bat -Minimal` or `& .\install.bat` in PowerShell | `cmd.exe /c ""<dir>\install.bat" -Minimal"` | no |
+| `cmd /c "<dir>\install.bat" -Minimal`, `call install.bat` from a script | ends in an argument, or in the path's own quote | no |
+| typed at a prompt | `cmd.exe /q` (the prompt's own command line) | no |
+
+Only the first row ends in quote, space, quote - the file association is `"%1" %*` and `%*` is empty - and that is the test.
+Consequence: a script that starts the installer with `Start-Process` and **no arguments** is indistinguishable from a
+double-click and will wait; give it any switch (`-Minimal`, `-Full`, `-SkipFrontend`). What has not been seen is a real
+desktop double-click on a real Windows 10/11 machine; the shell association is the call Explorer makes, on a Windows Server 2025 runner.
+
 Install tiers, in order:
 
 1. **core** — `requirements.txt`, then `.[dev,llm]`. API + Celery worker boot.

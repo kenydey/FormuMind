@@ -90,7 +90,8 @@ def test_the_batch_launcher_is_ascii_and_returns_the_installers_exit_code():
       of a UTF-8 character can be read as a lead byte and swallow the line break after it — keep it ASCII.
     * The PowerShell script's exit code has to reach the caller (CI, wrappers).
     * A double-click console closes with the script, taking the next-steps text (or the error) with it, so it
-      must pause — but only then, or every terminal / CI run would block on a key press.
+      must pause — but only then, or every terminal / CI run would block on a key press. (Which launches pause is
+      checked by running them: ``test_install_bat_launch.py``, on Windows.)
     """
     raw = (REPO / "install.bat").read_bytes()
     assert all(b < 0x80 for b in raw), "install.bat must stay ASCII"
@@ -98,7 +99,8 @@ def test_the_batch_launcher_is_ascii_and_returns_the_installers_exit_code():
     assert "install.ps1" in text
     assert re.search(r"exit\s+/b\s+%RC%", text), "the installer's exit code is not handed back"
     assert re.search(r"set\s+\"?RC=%ERRORLEVEL%", text), "the exit code must be captured right after powershell returns"
-    assert "%cmdcmdline%" in text and re.search(r"&&\s*pause\b", text), "pause only for a double-click launch"
+    assert "%cmdcmdline" in text and re.search(r"^if\s.*==.*\spause\s*$", text, re.M), "pause only for a double-click launch"
+    assert "| find" not in text, "a pipe in the launch test breaks on a path containing & ( ) - compare the command line as a variable"
 
 
 def test_script_line_endings_are_pinned():

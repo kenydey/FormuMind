@@ -333,9 +333,10 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      # What cmd.exe was started with, for each way a user runs a .bat. The shell association (Start-Process on a .bat) is the
-      # code path an Explorer double-click takes; the test below builds the same command line by hand and this prints the
-      # real one next to it.
+      # What cmd.exe was started with, for each way a user runs a .bat - the string install.bat's pause rule reads. The shell
+      # association (Start-Process on a .bat) is the code path an Explorer double-click takes. The last column is the rule
+      # itself applied to the real string (quotes -> Q, ends in "Q Q"); tests/test_install_bat_launch.py then runs the batch
+      # file for each of these and checks that it paused, or did not.
       - name: What %cmdcmdline% is for each way of starting a .bat (diagnostic)
         shell: pwsh
         continue-on-error: true
@@ -343,16 +344,25 @@ jobs:
           $dir = Join-Path $env:RUNNER_TEMP 'launch probe'
           New-Item -ItemType Directory -Force $dir | Out-Null
           $bat = Join-Path $dir 'probe.bat'
-          [System.IO.File]::WriteAllText($bat, "@echo off`r`necho %cmdcmdline%> `"%~dp0cmdline.%~1.txt`"`r`n", [System.Text.Encoding]::ASCII)
-          Start-Process -FilePath $bat -ArgumentList 'shell-association' -Wait
-          Start-Process -FilePath $bat -Wait   # no arguments at all: the call an Explorer double-click makes
-          & cmd.exe /c "`"$bat`" cmd-c-quoted"
-          & $bat powershell-call
-          "call `"$bat`" typed-at-a-prompt`r`nexit`r`n" | cmd.exe /q
+          [System.IO.File]::WriteAllText($bat, "@echo off`r`necho %cmdcmdline%> `"%~dp0cmdline.%PROBE_LABEL%.txt`"`r`n", [System.Text.Encoding]::ASCII)
+          $env:PROBE_LABEL = 'start-process-no-arguments'   # the call an Explorer double-click makes
+          Start-Process -FilePath $bat -Wait
+          $env:PROBE_LABEL = 'start-process-with-argument'
+          Start-Process -FilePath $bat -ArgumentList '-X' -Wait
+          $env:PROBE_LABEL = 'cmd-c-quoted-with-argument'
+          & cmd.exe /c "`"$bat`" -X"
+          $env:PROBE_LABEL = 'cmd-c-quoted-path-only'
+          & cmd.exe /c "`"$bat`""
+          $env:PROBE_LABEL = 'powershell-call-with-argument'
+          & $bat -X
+          $env:PROBE_LABEL = 'powershell-call-no-arguments'
+          & $bat
+          $env:PROBE_LABEL = 'typed-at-a-prompt'
+          "call `"$bat`" -X`r`nexit`r`n" | cmd.exe /q
           Get-ChildItem $dir -Filter 'cmdline.*.txt' | ForEach-Object {
             $how = $_.BaseName -replace '^cmdline\.', ''
-            if (-not $how) { $how = 'shell-association (no arguments)' }
-            '{0,-34} {1}' -f $how, (Get-Content $_.FullName -Raw).Trim()
+            $line = (Get-Content $_.FullName -Raw).Trim()
+            '{0,-31} pause={1,-5} {2}' -f $how, $line.Replace('"', 'Q').EndsWith('Q Q'), $line
           }
 
       - name: The venv install.bat builds (core tier)
