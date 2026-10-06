@@ -31,22 +31,20 @@ class SessionMemoryService:
         from ...db.database import default_session_factory
 
         self._session_factory = default_session_factory()
-        self._initialized = True
         self._redis = None  # optional hot cache, lazily created
 
     # ── lifecycle ──────────────────────────────────────────────
     async def initialize(self) -> bool:
         try:
             self._ensure_tables()
-            self._initialized = True
             return True
         except Exception as e:  # pragma: no cover
             logger.warning("session memory init failed: %s", e)
-            self._initialized = False
             return False
 
     async def close(self) -> None:
-        self._initialized = False
+        """Nothing to release: sessions live in the main SQLite database and the Redis hot cache is per call."""
+        return None
 
     async def is_available(self) -> bool:
         try:

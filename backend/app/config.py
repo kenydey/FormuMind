@@ -299,7 +299,6 @@ class Settings(BaseSettings):
     unpaywall_mailto: str | None = "formumind@example.com"  # Unpaywall polite-pool email
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
-    uspto_api_key: str | None = None           # USPTO Open Data API key
 
     # 检索增强 API（Phase 0+）
     serpapi_api_key: str | None = None

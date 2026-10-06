@@ -81,10 +81,6 @@ class DeepResearchEngine:
             # 离线引擎不走代理：避免沙箱 NO_PROXY 含 IPv6 括号格式时 httpx 解析崩溃
             trust_env=False,
         )
-        self._openalex_mailto: str | None = self._settings.openalex_mailto
-        self._epo_consumer_key: str | None = self._settings.epo_consumer_key
-        self._epo_consumer_secret: str | None = self._settings.epo_consumer_secret
-        self._uspto_api_key: str | None = self._settings.uspto_api_key
 
     def close(self) -> None:
         self._http.close()
