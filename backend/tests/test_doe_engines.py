@@ -93,3 +93,31 @@ def test_simplex_lattice_mapping_preserves_mixture_sum():
     assert sum(nat.values()) == pytest.approx(total, abs=1e-3)
     assert nat["A"] == pytest.approx(0.5 * total, abs=1e-3)
     assert all(f.low <= nat[f.name] <= f.high for f in factors)
+
+
+def test_kg_gate_applies_to_native_engine(monkeypatch):
+    """P1-5：KG 化学相容性门对 native 引擎同样生效，不再依赖 pydoe。"""
+    from app.services.engines import doe_registry as reg
+
+    class _Chk:
+        feasible = False
+        reasons = ["A 与 B 不相容（INHIBITS）"]
+
+    # mock KG 检查返回不相容
+    monkeypatch.setattr(
+        "app.services.kg_chemical_check.check_formulation_chemistry",
+        lambda *a, **k: _Chk(),
+    )
+    # mock skeleton（避免依赖真实 KG 数据）
+    monkeypatch.setattr(
+        "app.domain.knowledge.baseline_formulation",
+        lambda req: object(),
+    )
+
+    class _Req:
+        active_formulation = None
+
+    plan = build_doe_plan(FACTORS, "lhs", engine="native", n=4, requirement=_Req())
+    assert len(plan.runs) == 4
+    assert all(r.infeasible for r in plan.runs), "native 引擎也应标记 infeasible"
+    assert all("不相容" in (r.infeasible_reason or "") for r in plan.runs)

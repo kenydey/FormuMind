@@ -57,6 +57,40 @@ def _is_face_centred(ccd_alpha) -> bool:
         return False
 
 
+def apply_kg_chemical_gate(plan: DOEPlan, requirement) -> DOEPlan:
+    """P1-5: KG chemical-compatibility gate, engine-agnostic.
+
+    If the baseline formulation skeleton carries an INHIBITS relation, mark
+    every run infeasible. Applied in build_doe_plan regardless of engine
+    (pydoe/native), so the safety gate no longer depends on pydoe being
+    installed.
+    """
+    if requirement is None:
+        return plan
+    try:
+        from ..kg_chemical_check import check_formulation_chemistry
+        from ...domain import knowledge
+
+        skeleton = (
+            requirement.active_formulation
+            or knowledge.baseline_formulation(requirement)
+        )
+        if skeleton is not None:
+            chk = check_formulation_chemistry(skeleton, include_synergies=False)
+            if not chk.feasible:
+                for run in plan.runs:
+                    run.infeasible = True
+                    run.infeasible_reason = (
+                        "; ".join(chk.reasons)
+                        or "知识图谱检测到材料不相容"
+                    )
+    except Exception as exc:
+        # Gate must never break DOE generation.
+        logger = logging.getLogger(__name__)
+        logger.debug("KG chemical gate skipped (%s); allowing", exc)
+    return plan
+
+
 def build_doe_plan(
     factors: list[DOEFactor],
     design: str,
@@ -71,10 +105,14 @@ def build_doe_plan(
         # pyDOE cannot be asked for an arbitrary alpha, and the pyDOE adapter clips every star point into [low, high] -
         # which is face-centred by another name. A rotatable (or explicit-alpha) CCD keeps its star points outside the
         # box and flags them infeasible, so it is built by the native generator whichever engine was asked for.
-        return build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha)
+        plan = build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha)
+        return apply_kg_chemical_gate(plan, requirement)
     resolved = resolve_doe_engine(engine, design)
     if resolved == "pydoe":
-        return build_plan_with_fallback(
+        plan = build_plan_with_fallback(
             factors, design, n=n, requirement=requirement, seed=seed
         )
-    return build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha)
+    else:
+        plan = build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha)
+    # P1-5: gate runs for every engine, not just pydoe.
+    return apply_kg_chemical_gate(plan, requirement)
