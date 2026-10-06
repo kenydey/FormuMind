@@ -448,18 +448,29 @@ def test_parse_plain_utf16_decodes_correctly():
     from app.services.parsing import _parse_plain
 
     # with BOM
-    assert _parse_plain("你好世界".encode("utf-16")) == "你好世界"
+    assert _parse_plain("你好配方".encode("utf-16")) == "你好配方"
     assert _parse_plain("test".encode("utf-32")) == "test"
     # without BOM, LE with NULs
     assert _parse_plain("hello".encode("utf-16-le")) == "hello"
     # without BOM, LE CJK (no NUL bytes — the tricky case)
-    got = _parse_plain("你好世界".encode("utf-16-le"))
-    assert got == "你好世界", f"LE CJK 解码错误: {got!r}"
+    # v13-2: 用不含控制字节的词（旧"你好世界"含控制字节是偶然通过）
+    got = _parse_plain("你好配方".encode("utf-16-le"))
+    assert got == "你好配方", f"LE CJK 解码错误: {got!r}"
     assert "\x00" not in got
+    # without BOM, BE CJK
+    assert _parse_plain("你好配方".encode("utf-16-be")) == "你好配方"
     # regressions: existing encodings unaffected
     assert _parse_plain("hello world".encode("utf-8")) == "hello world"
     assert _parse_plain("你好".encode("gbk")) == "你好"
     assert _parse_plain("café".encode("latin-1")) == "café"
+
+
+def test_parse_plain_x0c_not_reinterpreted():
+    """v13-2: 含 \\x0c 的正常 UTF-8 文本不得被 reinterpret 为 UTF-16。"""
+    from app.services.parsing import _parse_plain
+
+    text = "第一章 总则\x0c第二章 配方设计\n环氧树脂 10kg"
+    assert _parse_plain(text.encode("utf-8")) == text
 
 
 def test_looks_like_binary_plain_text_not_binary():

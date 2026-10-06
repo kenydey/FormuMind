@@ -533,33 +533,56 @@ def _parse_plain(content: bytes) -> str | None:
                 break
     # 2. NUL bytes: almost certainly UTF-16/32 without a BOM. Must come before
     # utf-8, because utf-8 "successfully" decodes NUL bytes into garbage.
+    # v13-2: 四个候选全解码取 printable ratio 最高者（LE 平局优先，Windows
+    # 现实），替代"首个过 0.7 即返回"——无 BOM 的 BE 不再被系统性误判为 LE。
     if b"\x00" in content:
+        best, best_ratio = None, 0.0
         for enc in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
             try:
                 text = content.decode(enc)
             except Exception:
                 continue
-            if text and _printable_ratio(text) > 0.7:
-                return text
+            r = _printable_ratio(text)
+            if text and r > best_ratio:
+                best, best_ratio = text, r
+        if best and best_ratio > 0.7:
+            return best
     # 3. Plain utf-8.
+    # v13-2: 删除旧 path3 的 C0 启发式 reinterpret——正常 UTF-8 文本含 \x0c
+    # 等控制符即触发 utf-16 重解码是设计错误（其目标场景已被 path2 覆盖）。
+    # utf-8 成功即返回，不再二次猜测。
     try:
-        text = content.decode("utf-8")
+        return content.decode("utf-8")
     except Exception:
-        text = None
-    if text is not None:
-        # utf-8 "succeeds" on UTF-16-LE/BE CJK bytes (all ASCII-range) producing
-        # garbage with C0 controls. Pure-CJK without a BOM is genuinely
-        # ambiguous between LE and BE; prefer LE (Windows reality), BE as
-        # fallback. Both are validated by printable ratio.
-        if any(ord(ch) < 32 and ch not in "\n\r\t" for ch in text):
-            for enc in ("utf-16-le", "utf-16-be"):
-                try:
-                    alt = content.decode(enc)
-                except Exception:
-                    continue
-                if alt and _printable_ratio(alt) > 0.9:
-                    return alt
-        return text
+        pass
+    # 3b. v13-2: utf-8 失败后、gbk 之前，utf-16 高阈值兜底——覆盖"无 BOM
+    # 纯 CJK"（无 NUL）。必须校验字节模式，否则 GBK 中文字节流会被误判
+    # 为 UTF-16（两者解码都出高可打印率 CJK）。UTF-16-LE 的 CJK 文本：
+    # 奇数位字节集中在 0x4E-0x9F（U+4E00-U+9FFF 的高字节）；BE 则偶数位。
+    # 短输入（<8 字节）模式无统计意义（如 café 的 latin-1 字节偶然匹配），
+    # 跳过启发式走 gbk/latin-1 保守路径。
+    def _looks_like_utf16le(b: bytes) -> bool:
+        if len(b) < 8 or len(b) % 2:
+            return False
+        odd = b[1::2]
+        return sum(1 for x in odd if 0x4E <= x <= 0x9F) / len(odd) >= 0.7
+
+    def _looks_like_utf16be(b: bytes) -> bool:
+        if len(b) < 8 or len(b) % 2:
+            return False
+        even = b[0::2]
+        return sum(1 for x in even if 0x4E <= x <= 0x9F) / len(even) >= 0.7
+
+    for enc, check in (("utf-16-le", _looks_like_utf16le),
+                       ("utf-16-be", _looks_like_utf16be)):
+        if not check(content):
+            continue
+        try:
+            text = content.decode(enc)
+        except Exception:
+            continue
+        if text and _printable_ratio(text) >= 0.95:
+            return text
     # 4. Fallbacks. latin-1 never fails, so it stays last.
     for enc in ("gbk", "latin-1"):
         try:
