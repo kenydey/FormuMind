@@ -237,3 +237,30 @@ def test_anchor_columns_index_exists(tmp_path, monkeypatch):
         )
     finally:
         engine.dispose()
+
+
+def test_overlap_chunk_offsets_are_true_positions():
+    """P1-3：overlap 下 chunk 的 offset 必须是原文真实位置，不漂移。
+
+    4000 字符无分隔符文本，max_chars=1600, overlap=200：每个 chunk 的
+    offset_start/end 与 text.find(chunk) 一致；offset_end 不超文本长度。
+    """
+    from app.services.chunking import chunk_markdown
+
+    text = "a" * 4000  # 无分隔符，强制走 overlap 分支
+    chunks = chunk_markdown(text, max_chars=1600, overlap=200)
+    assert len(chunks) > 1, "应产出多个 chunk"
+    cursor = 0
+    for ch in chunks:
+        # 真实位置：从游标起 find
+        expected = text.find(ch.text, cursor)
+        assert expected != -1, f"chunk 不在原文中: {ch.text[:30]!r}"
+        assert ch.offset_start == expected, (
+            f"offset_start 漂移: 记 {ch.offset_start}，实际 {expected}"
+        )
+        assert ch.offset_end == expected + len(ch.text)
+        assert ch.offset_end <= len(text)
+        cursor = expected + 1
+    # 相邻 chunk 应有重叠（overlap 生效），而非首尾相接
+    if len(chunks) >= 2:
+        assert chunks[1].offset_start < chunks[0].offset_end, "应有 overlap"

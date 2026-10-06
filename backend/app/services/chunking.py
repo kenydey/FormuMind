@@ -94,6 +94,34 @@ class Chunk:
 # ── legacy plain-text splitter (moved verbatim from ingestion) ───────────────
 
 
+def chunk_plain_text_with_offsets(
+    text: str,
+    *,
+    max_chars: int = 1600,
+    overlap: int = 200,
+    max_depth: int = 10,
+) -> list[tuple[str, int]]:
+    """P1-3: chunk_plain_text + each chunk's start offset in ``text``.
+
+    The old call sites did ``char_pos += len(c)``, assuming chunks are
+    back-to-back — wrong when ``overlap > 0`` (offsets drift). Here offsets
+    are located with ``str.find`` from a moving cursor, so overlapping chunks
+    get their true positions. ``find`` works despite the internal stripping:
+    the stripped chunk is still a substring of the original at its location.
+    """
+    chunks = chunk_plain_text(text, max_chars=max_chars, overlap=overlap, max_depth=max_depth)
+    out: list[tuple[str, int]] = []
+    cursor = 0
+    for c in chunks:
+        idx = text.find(c, cursor)
+        if idx == -1:
+            # Shouldn't happen; fall back to cursor to avoid crashing.
+            idx = cursor
+        out.append((c, idx))
+        cursor = idx + 1  # +1 (not +len) so overlapping next chunks are found
+    return out
+
+
 def chunk_plain_text(
     text: str,
     *,
@@ -389,33 +417,40 @@ def chunk_markdown(
             # Page-marked plain text (pypdf): split page-wise so provenance
             # survives even without headings.
             chunks: list[Chunk] = []
-            char_pos = 0
             para_idx = 0
+            # P1-3: seg 在 md 中的基址用 find 定位；chunk 偏移用真实值。
+            md_cursor = 0
             for page_no, seg in pages:
                 seg = _strip_block_markers(seg)
-                for c in chunk_plain_text(seg, max_chars=max_chars, overlap=overlap):
+                seg_base = md.find(seg, md_cursor)
+                if seg_base == -1:
+                    seg_base = md_cursor
+                md_cursor = seg_base + len(seg)
+                for c, off in chunk_plain_text_with_offsets(
+                    seg, max_chars=max_chars, overlap=overlap
+                ):
                     chunks.append(Chunk(
                         c, "", page_no,
                         paragraph_idx=para_idx,
-                        offset_start=char_pos,
-                        offset_end=char_pos + len(c),
+                        offset_start=seg_base + off,
+                        offset_end=seg_base + off + len(c),
                         block_type=_classify_block_type(c),
                     ))
                     para_idx += 1
-                    char_pos += len(c)
             return chunks
         chunks: list[Chunk] = []
-        char_pos = 0
         md = _strip_block_markers(md)
-        for i, c in enumerate(chunk_plain_text(md, max_chars=max_chars, overlap=overlap)):
+        # P1-3: 用真实偏移，不再 char_pos += len(c)（overlap 下会漂移）。
+        for i, (c, off) in enumerate(
+            chunk_plain_text_with_offsets(md, max_chars=max_chars, overlap=overlap)
+        ):
             chunks.append(Chunk(
                 c,
                 paragraph_idx=i,
-                offset_start=char_pos,
-                offset_end=char_pos + len(c),
+                offset_start=off,
+                offset_end=off + len(c),
                 block_type=_classify_block_type(c),
             ))
-            char_pos += len(c)
         return chunks
 
     chunks: list[Chunk] = []
@@ -493,15 +528,19 @@ def chunk_markdown(
             current_page = page
             current_para = para_counter
             if len(block) > max_chars:
-                for c in chunk_plain_text(block, max_chars=max_chars, overlap=overlap):
+                # P1-3: block 内 chunk 用真实偏移；char_pos 按 block 全长推进
+                #（chunk 间有 overlap，不能累加 chunk 长度）。
+                for c, off in chunk_plain_text_with_offsets(
+                    block, max_chars=max_chars, overlap=overlap
+                ):
                     chunks.append(Chunk(
                         c, path, page,
                         paragraph_idx=para_counter,
-                        offset_start=char_pos,
-                        offset_end=char_pos + len(c),
+                        offset_start=char_pos + off,
+                        offset_end=char_pos + off + len(c),
                         block_type=pending_block or _classify_block_type(c),
                     ))
-                    char_pos += len(c)
+                char_pos += len(block)
                 pending_block = None
                 para_counter += 1
                 current = ""
