@@ -345,11 +345,14 @@ jobs:
           $bat = Join-Path $dir 'probe.bat'
           [System.IO.File]::WriteAllText($bat, "@echo off`r`necho %cmdcmdline%> `"%~dp0cmdline.%~1.txt`"`r`n", [System.Text.Encoding]::ASCII)
           Start-Process -FilePath $bat -ArgumentList 'shell-association' -Wait
+          Start-Process -FilePath $bat -Wait   # no arguments at all: the call an Explorer double-click makes
           & cmd.exe /c "`"$bat`" cmd-c-quoted"
           & $bat powershell-call
           "call `"$bat`" typed-at-a-prompt`r`nexit`r`n" | cmd.exe /q
           Get-ChildItem $dir -Filter 'cmdline.*.txt' | ForEach-Object {
-            '{0,-34} {1}' -f ($_.BaseName -replace '^cmdline\.', ''), (Get-Content $_.FullName -Raw).Trim()
+            $how = $_.BaseName -replace '^cmdline\.', ''
+            if (-not $how) { $how = 'shell-association (no arguments)' }
+            '{0,-34} {1}' -f $how, (Get-Content $_.FullName -Raw).Trim()
           }
 
       - name: The venv install.bat builds (core tier)
