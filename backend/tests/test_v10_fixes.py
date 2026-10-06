@@ -443,6 +443,25 @@ def test_looks_like_binary_utf16_text_not_binary():
     assert _looks_like_binary(text) is False, "UTF-16 文本不应判为二进制"
 
 
+def test_parse_plain_utf16_decodes_correctly():
+    """P0-2：UTF-16/32 必须解码正确，不能走 latin-1 兜底成乱码。"""
+    from app.services.parsing import _parse_plain
+
+    # with BOM
+    assert _parse_plain("你好世界".encode("utf-16")) == "你好世界"
+    assert _parse_plain("test".encode("utf-32")) == "test"
+    # without BOM, LE with NULs
+    assert _parse_plain("hello".encode("utf-16-le")) == "hello"
+    # without BOM, LE CJK (no NUL bytes — the tricky case)
+    got = _parse_plain("你好世界".encode("utf-16-le"))
+    assert got == "你好世界", f"LE CJK 解码错误: {got!r}"
+    assert "\x00" not in got
+    # regressions: existing encodings unaffected
+    assert _parse_plain("hello world".encode("utf-8")) == "hello world"
+    assert _parse_plain("你好".encode("gbk")) == "你好"
+    assert _parse_plain("café".encode("latin-1")) == "café"
+
+
 def test_looks_like_binary_plain_text_not_binary():
     """对照：纯文本仍放行。"""
     from app.services.ingestion import _looks_like_binary

@@ -109,8 +109,9 @@ def _ingest_parsed_text(
     guide: SourceGuideSchema | None = None
     err: str | None = None
     status = "skipped"
+    has_text = bool(text.strip())
 
-    if settings.source_guide_enabled and text.strip() and settings.get_active_api_key():
+    if has_text and settings.source_guide_enabled and settings.get_active_api_key():
         guide, err = extract_source_guide(text, title=filename)
         if guide and guide.status == "verified":
             status = "ok"
@@ -118,8 +119,12 @@ def _ingest_parsed_text(
             status = "degraded"
         else:
             status = "failed"
-    elif settings.source_guide_enabled and text.strip() and not settings.get_active_api_key():
-        status = "skipped"
+    elif has_text:
+        # P0-1: real text extracted but the LLM source guide didn't run (no
+        # API key or guide disabled). Must NOT be "skipped": downstream
+        # indexing gates use "skipped" to mean "no text/placeholder", and
+        # conflating the two silently drops real documents from the index.
+        status = "no_guide"
 
     evidence = _to_evidence(text, filename, source=source_kind)
 

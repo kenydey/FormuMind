@@ -206,8 +206,11 @@ def ingest_from_url(req: IngestUrlRequest):
     except Exception as exc:
         logger.exception("ingest_url failed")
         raise HTTPException(status_code=502, detail="文件处理失败") from exc
-    # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
-    if outcome.extraction_status != "skipped":
+    # P0-1: index when there is real evidence text. The v10 gate on
+    # extraction_status != "skipped" silently dropped real documents whenever
+    # the LLM source guide didn't run (no API key / guide disabled), because
+    # "skipped" conflated "no text" with "guide not run".
+    if outcome.evidence:
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(req.url, outcome)
 
@@ -216,8 +219,11 @@ def ingest_from_url(req: IngestUrlRequest):
 def ingest_from_text(req: IngestTextRequest):
     title = req.title or "Pasted text"
     outcome = ingest_text(req.text, title)
-    # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
-    if outcome.extraction_status != "skipped":
+    # P0-1: index when there is real evidence text. The v10 gate on
+    # extraction_status != "skipped" silently dropped real documents whenever
+    # the LLM source guide didn't run (no API key / guide disabled), because
+    # "skipped" conflated "no text" with "guide not run".
+    if outcome.evidence:
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(title, outcome)
 
@@ -233,8 +239,11 @@ def ingest_from_task(req: IngestTaskRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if outcome.error:
         raise HTTPException(status_code=502, detail=outcome.error)
-    # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
-    if outcome.extraction_status != "skipped":
+    # P0-1: index when there is real evidence text. The v10 gate on
+    # extraction_status != "skipped" silently dropped real documents whenever
+    # the LLM source guide didn't run (no API key / guide disabled), because
+    # "skipped" conflated "no text" with "guide not run".
+    if outcome.evidence:
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(outcome.identifier, outcome)
 

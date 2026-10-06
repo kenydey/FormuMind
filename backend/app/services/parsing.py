@@ -510,7 +510,58 @@ def _parse_text_file(content: bytes, ext: str) -> str | None:
 
 
 def _parse_plain(content: bytes) -> str | None:
-    for enc in ("utf-8", "gbk", "latin-1"):
+    import codecs
+
+    def _printable_ratio(text: str) -> float:
+        if not text:
+            return 0.0
+        return sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t") / len(text)
+
+    # 1. BOM sniffing: an explicit BOM is authoritative. The "utf-16"/"utf-32"
+    # codecs (no endian suffix) consume and strip the BOM.
+    for bom, enc in (
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+        (codecs.BOM_UTF8, "utf-8-sig"),
+    ):
+        if content.startswith(bom):
+            try:
+                return content.decode(enc)
+            except Exception:
+                break
+    # 2. NUL bytes: almost certainly UTF-16/32 without a BOM. Must come before
+    # utf-8, because utf-8 "successfully" decodes NUL bytes into garbage.
+    if b"\x00" in content:
+        for enc in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+            try:
+                text = content.decode(enc)
+            except Exception:
+                continue
+            if text and _printable_ratio(text) > 0.7:
+                return text
+    # 3. Plain utf-8.
+    try:
+        text = content.decode("utf-8")
+    except Exception:
+        text = None
+    if text is not None:
+        # utf-8 "succeeds" on UTF-16-LE/BE CJK bytes (all ASCII-range) producing
+        # garbage with C0 controls. Pure-CJK without a BOM is genuinely
+        # ambiguous between LE and BE; prefer LE (Windows reality), BE as
+        # fallback. Both are validated by printable ratio.
+        if any(ord(ch) < 32 and ch not in "\n\r\t" for ch in text):
+            for enc in ("utf-16-le", "utf-16-be"):
+                try:
+                    alt = content.decode(enc)
+                except Exception:
+                    continue
+                if alt and _printable_ratio(alt) > 0.9:
+                    return alt
+        return text
+    # 4. Fallbacks. latin-1 never fails, so it stays last.
+    for enc in ("gbk", "latin-1"):
         try:
             return content.decode(enc)
         except Exception:

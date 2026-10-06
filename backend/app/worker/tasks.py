@@ -894,8 +894,8 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
     )
     try:
         outcome = ingest_files_batch(files, origin_url_by_name=origin_url_by_name)
-        # v10: skipped（无文本/占位）时不索引 placeholder evidence，避免污染索引。
-        if outcome.extraction_status != "skipped":
+        # P0-1: index when there is real evidence text (see api/ingest.py).
+        if outcome.evidence:
             colbert_store.index_evidence(outcome.evidence)
         result = {
             "evidence": [e.model_dump() for e in outcome.evidence],

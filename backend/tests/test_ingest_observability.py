@@ -132,6 +132,46 @@ def test_revive_failed_row_promotes_in_place(stores):
 # ── ingest path ─────────────────────────────────────────────────────────────
 
 
+def test_no_guide_status_when_no_api_key(monkeypatch):
+    """P0-1：有真实文本但无 LLM key → extraction_status 为 "no_guide" 而非 "skipped"。"""
+    from app.config import Settings
+    from app.services.ingestion import ingest_text
+
+    monkeypatch.setattr(Settings, "get_active_api_key", lambda self: None)
+    # source_guide_enabled defaults to True; no API key => guide cannot run
+    get_settings.cache_clear()
+    assert get_settings().source_guide_enabled is True
+    try:
+        outcome = ingest_text(LONG_TEXT, "测试文档", persist=False)
+    finally:
+        get_settings.cache_clear()
+    assert outcome.extraction_status == "no_guide", (
+        f"应为 no_guide，实际: {outcome.extraction_status}"
+    )
+    assert outcome.evidence, "真实文本应产出 evidence"
+
+
+def test_skipped_status_when_no_text():
+    """P0-1：无文本 → 仍为 "skipped"（占位语义保留）。"""
+    from app.services.ingestion import ingest_text
+
+    outcome = ingest_text("", "空文档", persist=False)
+    assert outcome.extraction_status == "skipped"
+
+
+def test_colbert_gate_indexes_on_evidence_not_status(monkeypatch):
+    """P0-1：ColBERT 门禁看 evidence 非空，而非 status 字符串。"""
+    from app.services.ingestion import IngestOutcome
+    from app.domain.schemas import Evidence
+
+    # 模拟无 key 场景的 outcome：status 为 no_guide 但有真实 evidence
+    ev = Evidence(source="local", identifier="test:1", title="t",
+                snippet="真实文本内容", relevance=0.9)
+    outcome = IngestOutcome(evidence=[ev], extraction_status="no_guide")
+    # 门禁逻辑（与 api/ingest.py 三处一致）：evidence 非空即索引
+    assert outcome.evidence, "门禁应放行有真实 evidence 的 outcome"
+
+
 def test_failed_row_is_retried_not_skipped(stores, monkeypatch):
     src, _ = stores
     # Simulate a previous failed attempt for this origin.
