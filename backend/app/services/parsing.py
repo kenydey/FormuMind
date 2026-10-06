@@ -13,7 +13,9 @@ pluggable and probed at call time:
   本地 magic-pdf 路径已退役（见 ``_parse_mineru``）；
   markitdown / pypdf 是纯文本兜底。
 * **Other formats** (DOCX/XLSX/PPTX/HTML/…): MarkItDown → format-specific
-  fallbacks (python-docx, plain text decode).
+  fallbacks (python-docx, plain text decode). XLSX goes through an openpyxl
+  table reader first (titles, blank rows and merged cells are what a pandas
+  header guess gets wrong), then MarkItDown.
 * **Page provenance**: Docling and pypdf interleave ``<!-- page:N -->``
   markers; the chunker consumes them into ``Chunk.page_no`` and strips them.
 
@@ -53,7 +55,7 @@ class ParserUnavailable(RuntimeError):
 @dataclass
 class ParseResult:
     markdown: str
-    parser: str  # tier name: hybrid | docling | marker | mineru | rapidocr | markitdown | pypdf | docx | text | none
+    parser: str  # tier name: hybrid | docling | marker | mineru | rapidocr | markitdown | openpyxl | pypdf | docx | text | none
     # W2-3: structured table assets extracted after a successful parse
     # (table_contract.TableAsset). Empty when extraction is disabled/failed.
     tables: list = field(default_factory=list)
@@ -380,6 +382,123 @@ def _parse_xlsx(content: bytes) -> str | None:
         return None
 
 
+# A workbook is read cell by cell, so its size is bounded: past these a file goes to the converters below, which stream.
+_XLSX_TABLES_MAX_BYTES = 10 * 1024 * 1024
+_XLSX_TABLES_MAX_SHEET_BYTES = 40 * 1024 * 1024  # uncompressed sheet XML: a small file can declare a million formatted rows
+_XLSX_TABLES_MAX_CELLS = 400_000
+
+
+def _xlsx_cell_text(value) -> str:
+    """A cell as a reader sees it: no ``35.0`` for a stored 35, no float noise, nothing that would end a table row."""
+    import datetime
+    from decimal import Decimal
+
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return ""
+        if value == 0:
+            return "0"
+        return format(Decimal(repr(round(value, 12))).normalize(), "f")
+    if isinstance(value, datetime.datetime):
+        return value.isoformat(sep=" ", timespec="minutes") if (value.hour or value.minute or value.second) else value.date().isoformat()
+    if isinstance(value, (datetime.date, datetime.time)):
+        return value.isoformat()
+    return " ".join(str(value).split())
+
+
+def _xlsx_grid(sheet) -> list[list[str]]:
+    """The sheet's cells as text, merged ranges filled with the value of their top-left cell."""
+    grid = [[_xlsx_cell_text(v) for v in row] for row in sheet.iter_rows(values_only=True)]
+    for merged in sheet.merged_cells.ranges:
+        if merged.min_row > len(grid):
+            continue
+        top_left = grid[merged.min_row - 1][merged.min_col - 1] if merged.min_col <= len(grid[merged.min_row - 1]) else ""
+        for r in range(merged.min_row, min(merged.max_row, len(grid)) + 1):
+            row = grid[r - 1]
+            for c in range(merged.min_col, min(merged.max_col, len(row)) + 1):
+                row[c - 1] = top_left
+    return grid
+
+
+def _xlsx_block_markdown(rows: list[list[str]]) -> list[str]:
+    """One block of consecutive non-blank rows: the rows above and below the table become lines of text, the rest a table."""
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    distinct = [{c for c in r if c} for r in rows]
+    multi = [i for i, d in enumerate(distinct) if len(d) >= 2]
+    if not multi:  # a title, a note: no columns to speak of
+        return [" ".join(dict.fromkeys(c for c in r if c)) for r in rows]
+    first, last = multi[0], multi[-1]
+    lines = [" ".join(dict.fromkeys(c for c in r if c)) for r in rows[:first]]  # a title above the table, once, not per column
+    body = rows[first:last + 1]
+    used = [c for c in range(width) if any(r[c] for r in body)]
+    body = [[r[c].replace("|", "\\|") for c in used] for r in body]
+    lines.append("")
+    lines.append("| " + " | ".join(body[0]) + " |")
+    lines.append("| " + " | ".join(["---"] * len(used)) + " |")
+    lines.extend("| " + " | ".join(r) + " |" for r in body[1:])
+    lines.append("")
+    lines.extend(" ".join(dict.fromkeys(c for c in r if c)) for r in rows[last + 1:])  # notes under the table
+    return lines
+
+
+def _parse_xlsx_tables(content: bytes) -> str | None:
+    """Workbook -> Markdown with the tables a person sees: a pipe table per block of rows, titles and notes as lines.
+
+    MarkItDown reads a sheet through pandas, which takes the first row for the header. A formulation sheet starts with a
+    merged title ("水性环氧底漆配方表（单位：wt%）") and a blank row, so its header became ``Unnamed: 1``, a row of ``NaN`` followed,
+    the real header was demoted to a data row, and every empty cell read ``NaN`` - in the text that is indexed and in the
+    table the contract normalises into properties. Measured by evals/suites/parsing.py (xlsx-title-row).
+
+    Blocks are the runs of non-blank rows; within one, rows above the first row with two different values and below the last
+    one are titles and notes (a merged title is one line, not one per column), the rest is the table, its first row the
+    header. Empty columns go; merged ranges are filled with their value. A two-level header (a group label merged over
+    sub-headers) stays two rows: the second reads as the first data row.
+
+    Returns None for a file too large to hold cell by cell (the streaming converters take it), for anything unreadable, and
+    when openpyxl is missing, so the cascade moves on.
+    """
+    if len(content) > _XLSX_TABLES_MAX_BYTES:
+        return None
+    try:
+        import openpyxl  # type: ignore
+    except ImportError:
+        return None
+    try:
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            if sum(i.file_size for i in archive.infolist() if i.filename.startswith("xl/worksheets/")) > _XLSX_TABLES_MAX_SHEET_BYTES:
+                return None
+        workbook = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        if sum((ws.max_row or 0) * (ws.max_column or 0) for ws in workbook.worksheets) > _XLSX_TABLES_MAX_CELLS:
+            return None
+        parts: list[str] = []
+        any_cell = False
+        for sheet in workbook.worksheets:
+            parts.append(f"## {sheet.title}")
+            block: list[list[str]] = []
+            for row in [*_xlsx_grid(sheet), []]:  # the empty row closes the last block
+                if any(row):
+                    block.append(row)
+                elif block:
+                    parts.extend(_xlsx_block_markdown(block))
+                    parts.append("")
+                    any_cell, block = True, []
+        if not any_cell:
+            return None
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(parts)).strip()
+    except Exception as exc:
+        log_handled_exception(logger, exc, "xlsx table parse failed")
+        return None
+
+
 def _parse_text_file(content: bytes, ext: str) -> str | None:
     """Text-like uploads. An HTML page is markup, not text: URL ingestion has always converted it with
     ``html_to_markdown``, but an uploaded ``.html`` / ``.htm`` (both in the upload dialog's accept list) was stored
@@ -456,6 +575,7 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
 # through the text tier (ext not in _ALWAYS_PARSEABLE) to markitdown unchanged.
 _DOC_TIERS: tuple[tuple[str, object], ...] = (
     ("text", lambda c, e: _parse_text_file(c, e) if e in _ALWAYS_PARSEABLE else None),
+    ("openpyxl", lambda c, e: _parse_xlsx_tables(c) if e in ("xlsx", "xlsm") else None),
     ("markitdown", lambda c, e: _parse_markitdown(c, e)),
     ("docx", lambda c, e: _parse_docx(c) if e in ("docx", "doc") else None),
     ("xlsx", lambda c, e: _parse_xlsx(c) if e in ("xlsx", "xlsm") else None),
