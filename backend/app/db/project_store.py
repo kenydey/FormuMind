@@ -291,6 +291,31 @@ class ProjectStore:
                 workspace=ws,
             )
 
+    def try_consume_auto_loop_round(self, project_id: str) -> tuple[bool, str]:
+        """P1-6: 原子检查并消耗一次 auto-loop 轮数。
+
+        在同一事务内读取 auto_loop_round/max_rounds，若未达上限则 +1 并返回
+        (True, "")；若已达上限返回 (False, 原因)。防止并发超发。
+        """
+        pid = (project_id or "").strip()
+        if not pid:
+            return False, "project_id 为空"
+        with commit_session(self._session_factory) as session:
+            row = session.get(ProjectRow, pid)
+            if row is None or row.is_archived:
+                return False, "项目不存在或已归档"
+            # payload 即 workspace 平铺 dict（见 update 方法）。
+            payload = dict(row.payload or {})
+            cur = int(payload.get("auto_loop_round", 0) or 0)
+            max_rounds = int(payload.get("auto_loop_max_rounds", 5) or 5)
+            if cur >= max_rounds:
+                return False, f"已达轮数上限（{cur}/{max_rounds}），不再自动触发"
+            payload["auto_loop_round"] = cur + 1
+            row.payload = payload
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(row, "payload")
+            return True, ""
+
     def list_payload_history(self, project_id: str, limit: int = 20) -> list[dict]:
         """审计: 该项目 payload 版本历史(不含完整 payload, 只元数据+尺寸)。"""
         from .models import ProjectPayloadHistoryRow

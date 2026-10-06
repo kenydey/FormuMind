@@ -181,6 +181,18 @@ def dispatch_loop_after_sync(
     ):
         return None, ""
 
+    # P1-6: 原子消耗一次轮数；达上限则不 dispatch 并明确提示。
+    # 显式 trigger_loop=True（用户手动勾选）不受轮数上限约束。
+    if trigger_loop is not True and pid:
+        try:
+            from ..db.project_store import get_project_store
+
+            ok, reason = get_project_store().try_consume_auto_loop_round(pid)
+            if not ok:
+                return None, f"闭环未启动：{reason}"
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("auto_loop round consume failed: %s", exc)
+
     if is_doecycle_paused(workbench_campaign_id):
         return None, "闭环未启动：DOE 周期已暂停"
 
