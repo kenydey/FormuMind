@@ -7,6 +7,7 @@ the packages it has:
   and ``pypdf<5``. pip resolved the conflict with ``requirements.txt`` by *replacing* the pinned packages, so the
   production image ran pypdf 4.3.1 - 49 published advisories, all of them crafted-PDF denial of service - and httpx
   0.27.2, and nothing complained. The Settings page's one-click "online mode" did the same to a running install.
+  (The SDK has since been removed altogether: the patent search is EPO OPS over httpx.)
 * the one-click installer offered ``rapidocr-onnxruntime``, a package the OCR engine stopped importing, so the
   button added dead weight while the availability report said OCR was ready;
 * it offered ``pymupdf4llm`` unpinned, while the extra pins 1.28.0 because 1.28.2 breaks the layout path;
@@ -157,18 +158,20 @@ def test_patent_client_is_not_offered_by_the_one_click_installer():
     assert "semanticscholar" not in {d.pip_name for d in deps.CATALOG}, "no code imports the SDK (HTTP API only)"
 
 
-def test_patent_client_lives_only_in_the_patents_extra():
+def test_patent_client_is_declared_by_no_extra_and_there_is_no_patents_extra():
+    """The EPO / USPTO search is EPO OPS over httpx now; the SDK would put httpx 0.27.2 and pypdf 4.3.1 back."""
     extras = _extras()
     holders = [n for n, reqs in extras.items() if any(canonicalize_name(r.name) == "patent-client" for r in reqs)]
-    assert holders == ["patents"], holders
+    assert holders == [], holders
+    assert "patents" not in extras
+    assert "patent-client" not in {canonicalize_name(r.name) for r in _core()}
 
 
-def test_the_dockerfile_installs_only_declared_extras_and_never_patents():
+def test_the_dockerfile_installs_only_declared_extras():
     extras = _extras()
     installed = _dockerfile_extras()
     assert set(installed) <= set(extras), sorted(set(installed) - set(extras))
     assert "intel" in installed and "file_ingest" in installed  # not vacuous: the two that used to collide
-    assert "patents" not in installed
 
 
 def test_no_declared_requirement_excludes_a_pinned_version():

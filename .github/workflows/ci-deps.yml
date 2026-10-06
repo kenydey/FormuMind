@@ -6,8 +6,9 @@
 # ddgs 9.14.4 -> 9.14.3. httpx is used across the whole codebase and pypdf sits
 # in the parse cascade, so this is not cosmetic - and the Dockerfile installs
 # `intel`, so the production image shipped pypdf 4.3.1 (49 published advisories,
-# all crafted-PDF denial of service). The cause, patent-client, now lives in its
-# own `patents` extra that nothing installs by default.
+# all crafted-PDF denial of service). The cause, patent-client, has been removed
+# altogether: the patent search is EPO OPS called over httpx, so no extra waives
+# anything and every extra below must resolve with every pin held.
 #
 # `pip check` does NOT find it: after the downgrade the environment is
 # internally consistent, just not the one requirements.txt describes.
@@ -52,16 +53,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # `patents` is patent-client, which requires httpx<0.28 and
-          # pypdf<5.0: literature.py uses it for online USPTO/EPO patent
-          # search, so the dependency is real, and so is what it costs. It used
-          # to be part of `intel`, which the Dockerfile installs - the image
-          # shipped the downgraded pair. Now nothing installs it by default and
-          # the drift is recorded here with exact versions, so this stays green
-          # while it is the one that was reviewed and fails again the moment it
-          # changes or a new package joins it.
-          - extra: patents
-            allow: "httpx:0.27.2,pypdf:4.3.1"
           # `intel` must stay clean: it is installed by the Dockerfile and
           # recommended in the user guides.
           - { extra: intel,       allow: "" }

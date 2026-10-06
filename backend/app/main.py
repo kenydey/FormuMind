@@ -588,7 +588,8 @@ def health_detailed() -> dict:
                 # health-contract compatibility with older clients/tests.
                 "chemcrow": False,
                 "paperqa": _ok("paperqa"),
-                "patent_client": _ok("patent_client"),
+                # patent-client removed 2026-10 (EPO OPS is called over httpx); key kept false like chemcrow's.
+                "patent_client": False,
                 "sentence_transformers": _ok("sentence_transformers"),
                 "rdkit": _ok("rdkit"),
                 "psycopg2": _ok("psycopg2"),

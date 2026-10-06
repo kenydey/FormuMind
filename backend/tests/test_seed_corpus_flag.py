@@ -7,7 +7,6 @@ from app.services import literature
 
 def test_patent_seed_fallback_sets_is_seed_corpus(monkeypatch):
     monkeypatch.setattr(literature, "_search_epo_patents", lambda *a, **k: [])
-    monkeypatch.setattr(literature, "_online_search", lambda *a, **k: [])
 
     req = Requirement(
         domain=ProductDomain.anticorrosion_coating,

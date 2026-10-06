@@ -606,6 +606,71 @@ def search_serpapi_patents(
         return []
 
 
+def search_epo_patents(
+    query: str,
+    limit: int = 5,
+    offset: int = 0,
+    *,
+    settings: Settings | None = None,
+    cpc_codes: Sequence[str] | None = None,
+    client=None,
+) -> list[Evidence]:
+    """EPO OPS (``services.epo_ops``): worldwide patent bibliographic search - US, EP, WO, CN, JP, ... - in one call.
+
+    Needs the consumer key / secret (Settings → API); without them this is an empty list, like every keyed provider.
+    The query is a conjunction of its distinctive words, relaxed to the first three when that finds nothing (a long
+    requirement headline rarely has six words in common with one title). ``client`` is for tests (a mock transport).
+    """
+    from . import epo_ops
+
+    settings = settings or get_settings()
+    key = effective_setting(settings, "epo_consumer_key")
+    secret = effective_setting(settings, "epo_consumer_secret")
+    if not key or not secret:
+        return []
+    want = min(max(limit + offset, 1), 100)
+    if _guard_provider("epo_ops", settings):
+        return []
+    _t0 = time.monotonic()
+    try:
+        hits: list[epo_ops.OpsHit] = []
+        for max_terms in (6, 3):
+            cql = epo_ops.build_cql(query, cpc_codes, max_terms=max_terms)
+            if cql is None:
+                break
+            hits = []
+            begin = 1
+            while len(hits) < want:
+                end = min(begin + epo_ops.PAGE_SIZE - 1, begin + (want - len(hits)) - 1)
+                page = epo_ops.search(cql, key=key, secret=secret, begin=begin, end=end, timeout=_TIMEOUT_SEC, client=client)
+                hits.extend(page.hits)
+                if len(page.hits) < end - begin + 1 or begin + epo_ops.PAGE_SIZE > page.total:
+                    break  # a short page is the last page
+                begin += epo_ops.PAGE_SIZE
+            if hits or len(epo_ops.query_terms(query, limit=6)) <= 3:
+                break
+        out = [
+            Evidence(
+                source="EPO",
+                identifier=hit.publication_number,
+                title=hit.title or hit.publication_number,
+                snippet=(hit.abstract or hit.title)[:400],
+                relevance=_ranked(i, 0),
+                assignee=hit.applicant or None,
+                pub_date=hit.pub_date,
+                pub_year=hit.pub_year,
+            )
+            for i, hit in enumerate(hits[:want])
+        ]
+        record_provider_success("epo_ops", _t0)
+        return out[offset : offset + limit]
+    except Exception as exc:
+        threshold, cooldown = _breaker_settings(settings)
+        record_provider_failure("epo_ops", exc, threshold=threshold, cooldown_sec=cooldown)
+        logger.warning("EPO OPS patent search failed: %s", redact_secrets(str(exc)))
+        return []
+
+
 def search_serpapi_chain(
     query: str,
     limit: int = 5,

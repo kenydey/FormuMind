@@ -402,7 +402,6 @@ def test_search_patents_by_query_serpapi_path_no_nameerror(_keys, monkeypatch):
         lambda q, l=5, o=0, **kw: [hit],
     )
     monkeypatch.setattr("app.services.literature._search_epo_patents", lambda *a, **k: [])
-    monkeypatch.setattr("app.services.literature._online_search", lambda *a, **k: None)
 
     out = literature.search_patents_by_query("epoxy coating", limit=3)
     assert any(e.identifier == "US1" for e in out)

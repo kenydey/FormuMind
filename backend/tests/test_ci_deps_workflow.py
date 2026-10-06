@@ -89,26 +89,15 @@ def _matrix(workflow: str) -> dict[str, str]:
     return {row["extra"]: row["allow"] for row in include}
 
 
-def test_the_known_downgrades_are_recorded_at_exact_versions(workflow: str) -> None:
-    """`patents` really does downgrade two packages; that stays reviewed, not waived.
-
-    Pinned to exact versions so the exception covers only the drift that was
-    actually looked at — if it changes, the job fails again rather than the
-    waiver quietly widening.
-    """
+def test_no_extra_is_waived(workflow: str) -> None:
+    """Every extra must resolve with every pin held. There were two waivers: `intel` (patent-client dragged httpx and
+    pypdf down, and the Dockerfile installs `intel`, so the production image shipped pypdf 4.3.1) and, once the SDK moved
+    out, a `patents` extra recording httpx 0.27.2 / pypdf 4.3.1. The SDK is gone altogether (EPO OPS is called over
+    httpx), so the matrix has no `patents` row and no waiver: one added now is a downgrade shipped on purpose."""
     allow = _matrix(workflow)
-    assert "patents" in allow, "the patents extra disappeared from the matrix"
-    entries = dict(item.split(":", 1) for item in allow["patents"].split(","))
-    assert entries == {"httpx": "0.27.2", "pypdf": "4.3.1"}
-
-
-def test_no_other_extra_is_waived(workflow: str) -> None:
-    """`intel` used to carry the same waiver (plus ddgs) because it contained patent-client - and the Dockerfile
-    installs `intel`, so the production image shipped pypdf 4.3.1. It is clean now and must stay that way: a waiver
-    on an extra that real installs use is a downgrade shipped on purpose."""
-    allow = _matrix(workflow)
+    assert "patents" not in allow, "the patents extra no longer exists"
     assert allow["intel"] == "", allow["intel"]
-    waived = {name: value for name, value in allow.items() if value and name != "patents"}
+    waived = {name: value for name, value in allow.items() if value}
     assert not waived, waived
 
 

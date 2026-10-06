@@ -41,8 +41,9 @@ class Dependency:
     @property
     def install_spec(self) -> str:
         # The extra's own requirement (floor / pin / extras) when pyproject.toml is shipped: a bare name lets pip
-        # settle a conflict with the backend's pins by backtracking to an ancient release of *this* package - measured:
-        # ``pip install -c <pins> patent-client`` quietly installs 3.2.6 instead of failing.
+        # settle a conflict with the backend's pins by backtracking to an ancient release of *this* package - measured
+        # with the since-removed patent-client: ``pip install -c <pins> patent-client`` quietly installs 3.2.6 instead
+        # of failing.
         return self.spec or _declared_requirements().get((self.extra, _canonical(self.pip_name))) or self.pip_name
 
 
@@ -80,9 +81,9 @@ CATALOG: tuple[Dependency, ...] = (
     Dependency("openai", "openai", "llm", "OpenAI 及兼容供应商（DeepSeek/Qwen/Grok/Kimi…）"),
     Dependency("google-generativeai", "google.generativeai", "llm", "Google Gemini 大模型"),
     # ── Online retrieval (the offline-mode pain point) ─────────────────────
-    # Deliberately absent: patent-client (USPTO/EPO SDK). Every release requires httpx<0.28 and pypdf<5.0, so
-    # installing it from here would replace the backend's pinned httpx and pypdf (49 advisories on the pypdf it
-    # forces) in the running environment. It is the separate `patents` extra, for a shell install someone chose.
+    # Deliberately absent: patent-client (USPTO/EPO SDK), removed from the project. Every release requires httpx<0.28
+    # and pypdf<5.0, so installing it would replace the backend's pinned httpx and pypdf (49 advisories on the pypdf it
+    # forces). The patent search is EPO OPS over plain httpx (services/epo_ops.py): credentials, nothing to install.
     # Also absent: the `semanticscholar` SDK - search_semantic_scholar() calls the HTTP API directly (no SDK to hang),
     # so installing it changed nothing but a status probe.
     Dependency("ddgs", "ddgs", "intel", "DuckDuckGo 互联网检索"),

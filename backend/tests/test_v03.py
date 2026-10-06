@@ -352,11 +352,5 @@ def test_notebooklm_setup_status_default():
 def test_source_availability_patents_always_present():
     avail = literature.get_source_availability()
     assert avail["patents"]["available"] is True
-    # Without patent_client, offline_fallback must be True.
-    try:
-        import patent_client  # noqa: F401
-        patent_installed = True
-    except Exception:
-        patent_installed = False
-    if not patent_installed:
-        assert avail["patents"]["offline_fallback"] is True
+    # The seed corpus always answers; the official search (EPO OPS) needs credentials, nothing installed.
+    assert avail["patents"]["offline_fallback"] is True

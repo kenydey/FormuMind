@@ -1,9 +1,9 @@
 """Patent & literature intelligence service.
 
-When ``patent_client`` / ``paper-qa`` are installed and configured, this module
-fetches real patents from USPTO/EPO. Otherwise it serves a curated offline seed
-corpus of representative patent/literature abstracts for the three product
-domains, so research always returns cited evidence.
+With EPO OPS credentials configured (``services.epo_ops`` - plain httpx against the official REST interface) this
+module fetches real patents from the EPO's worldwide DOCDB (US, EP, WO, CN, JP, ...); Google Patents / SerpAPI /
+CNIPA add more. Otherwise it serves a curated offline seed corpus of representative patent/literature abstracts
+for the three product domains, so research always returns cited evidence.
 """
 from __future__ import annotations
 
@@ -216,77 +216,16 @@ def _build_patent_query(req: Requirement | None, query: str) -> str:
     return " ".join(dict.fromkeys(parts))
 
 
-def _online_search(
-    req: Requirement | None,
-    query: str,
-    limit: int,
-    *,
-    ipc_codes: tuple[str, ...] | list[str] | None = None,
-) -> list[Evidence] | None:
-    """Attempt real patent retrieval; return None if unavailable."""
-    try:
-        from patent_client import Patent  # type: ignore
-    except ImportError:
-        return None
-    try:
-        search_q = _build_patent_query(req, query)
-        if ipc_codes:
-            search_q = f"{search_q} {' '.join(ipc_codes[:3])}".strip()
-        results = Patent.objects.filter(search_q).limit(limit)  # pragma: no cover - network
-        evidence = []
-        for i, p in enumerate(results):
-            evidence.append(Evidence(
-                source="USPTO", identifier=str(getattr(p, "publication_number", f"P{i}")),
-                title=str(getattr(p, "title", "")), snippet=str(getattr(p, "abstract", ""))[:400],
-                relevance=max(0.1, 1.0 - i * 0.02),
-            ))
-        return evidence or None
-    except Exception as exc:  # pragma: no cover - network/credentials
-        return degrade_return(logger, exc, "patent_client online search failed", None)
-
-
 def _search_epo_patents(
     query: str,
     ipc_codes: tuple[str, ...] | list[str] | None,
     limit: int,
     offset: int = 0,
 ) -> list[Evidence]:
-    """EPO Inpadoc search with optional CPC class filter."""
-    from ..config import get_settings
-    from ..services.patent_client_env import epo_ops_env
+    """EPO OPS search (US, EP, WO, CN, JP, ...) with an optional CPC class filter; [] without credentials."""
+    from .search_providers import search_epo_patents
 
-    settings = get_settings()
-    epo_key = effective_setting(settings, "epo_consumer_key")
-    epo_secret = effective_setting(settings, "epo_consumer_secret")
-    if not epo_key or not epo_secret:
-        return []
-    try:
-        from patent_client import Inpadoc  # type: ignore
-
-        with epo_ops_env(epo_key, epo_secret):
-            filters: dict = {}
-            if query.strip():
-                filters["title_and_abstract"] = query.strip()
-            codes = list(ipc_codes or [])[:2]
-            if codes:
-                filters["cpc_class"] = codes[0]
-            if not filters:
-                return []
-            results = Inpadoc.objects.filter(**filters).limit(limit + offset)  # pragma: no cover
-            out: list[Evidence] = []
-            for i, p in enumerate(results):
-                out.append(
-                    Evidence(
-                        source="EPO",
-                        identifier=str(getattr(p, "publication_number", getattr(p, "epodoc_publication", f"EP{i}"))),
-                        title=str(getattr(p, "title", "") or getattr(p, "patent_title", "")),
-                        snippet=str(getattr(p, "abstract", "") or "")[:400],
-                        relevance=round(max(0.1, 1.0 - (offset + i) * 0.02), 3),
-                    )
-                )
-            return out[offset : offset + limit]
-    except Exception as exc:
-        return degrade_return(logger, exc, "EPO Inpadoc search failed", [])
+    return search_epo_patents(query, limit, offset, cpc_codes=list(ipc_codes or []))
 
 
 def search(req: Requirement, limit: int = 8, query: str = "") -> list[Evidence]:
@@ -303,7 +242,7 @@ def search_patents(
     ipc_codes: tuple[str, ...] | list[str] | None = None,
     chinese_query: str = "",
 ) -> list[Evidence]:
-    """专利搜索（EPO + USPTO + Google Patents + 中文专利并行，种子语料回退）。
+    """专利搜索（EPO OPS（含 US / EP / WO / CN / JP 等）+ Google Patents + 中文专利并行，种子语料回退）。
 
     Supports a legacy calling convention ``search_patents(offset, query)``
     where the first positional arg is an int offset — used by ``_build_streams``
@@ -335,9 +274,6 @@ def search_patents(
     batches: list[list[Evidence]] = [
         _search_epo_patents(patent_q, ipc_codes, want, 0),
     ]
-    us = _online_search(req, patent_q, want, ipc_codes=ipc_codes)
-    if us:
-        batches.append(us)
     if effective_setting(settings, "serpapi_api_key"):
         batches.append(search_serpapi_patents(patent_q, want, 0, settings=settings, domain=getattr(req, "domain", None)))
     cq = (chinese_query or "").strip()
@@ -376,9 +312,6 @@ def search_patents_by_query(
     batches: list[list[Evidence]] = [
         _search_epo_patents(query, ipc_codes, want, 0),
     ]
-    us = _online_search(None, query, want, ipc_codes=ipc_codes)
-    if us:
-        batches.append(us)
     if effective_setting(settings, "serpapi_api_key"):
         batches.append(search_serpapi_patents(query, want, 0, settings=settings))
     cq = (chinese_query or "").strip()
@@ -1636,9 +1569,10 @@ def get_source_availability() -> dict[str, dict]:
     )
     openalex_ok = bool(s.openalex_enabled and effective_setting(s, "openalex_mailto"))
 
-    # Both the USPTO and the EPO search go through the patent_client SDK; credentials alone enable nothing.
-    patents_online = _ok("patent_client")
-    epo_ok = epo_keys and patents_online
+    # Official patent search is EPO OPS (services.epo_ops) - plain httpx, nothing to install - and the credentials are all
+    # it needs; its DOCDB covers the US publications too, so one key serves both "patents" and "epo".
+    patents_online = epo_keys
+    epo_ok = epo_keys
     # Semantic Scholar is queried over plain HTTP (search_semantic_scholar), so literature search needs nothing
     # installed. This used to probe for the `semanticscholar` SDK that no code imports and no extra installs, which
     # reported "library_missing" - and a "去安装依赖" banner nothing could clear - whenever OpenAlex was switched off.
@@ -1655,9 +1589,9 @@ def get_source_availability() -> dict[str, dict]:
             "hint": (
                 None
                 if patents_online
-                else "USPTO/EPO 官方检索需单独安装 patent-client（pip install -e '.[patents]'）：它要求 "
-                "httpx<0.28 与 pypdf<5，会把后端固定的版本降级，所以默认不装；未装时使用 Google Patents / "
-                "SerpAPI / 内置种子语料"
+                else "官方专利检索（EPO OPS，覆盖 US / EP / WO / CN / JP 等）需要 EPO Consumer Key / Secret"
+                "（developers.epo.org 免费注册，填入 设置 → API 配置）；未配置时使用 Google Patents / SerpAPI / "
+                "内置种子语料"
             ),
         },
         "literature": {
@@ -1701,14 +1635,8 @@ def get_source_availability() -> dict[str, dict]:
         "epo": {
             "available": epo_ok,
             "offline_fallback": False,
-            "reason": None if epo_ok else ("key_missing" if not epo_keys else "library_missing"),
-            "hint": (
-                None
-                if epo_ok
-                else "FORMUMIND_EPO_CONSUMER_KEY/SECRET 未配置"
-                if not epo_keys
-                else "EPO 检索经 patent-client 发出，需单独安装：pip install -e '.[patents]'（会降级 httpx / pypdf，见文档）"
-            ),
+            "reason": None if epo_ok else "key_missing",
+            "hint": None if epo_ok else "FORMUMIND_EPO_CONSUMER_KEY/SECRET 未配置",
         },
         "google_patents_cn": {
             "available": serpapi_ok,

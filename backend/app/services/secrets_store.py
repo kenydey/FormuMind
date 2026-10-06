@@ -36,7 +36,7 @@ SECRET_REGISTRY: list[tuple[str, str, str, str]] = [
     ("tavily_api_key", "FORMUMIND_TAVILY_API_KEY", "Tavily", "search"),
     ("epo_consumer_key", "FORMUMIND_EPO_CONSUMER_KEY", "EPO OPS Consumer Key", "patent"),
     ("epo_consumer_secret", "FORMUMIND_EPO_CONSUMER_SECRET", "EPO OPS Consumer Secret", "patent"),
-    ("uspto_api_key", "FORMUMIND_USPTO_API_KEY", "USPTO Open Data", "patent"),
+    ("uspto_api_key", "FORMUMIND_USPTO_API_KEY", "USPTO Open Data（预留，暂未用于检索；美国专利经 EPO OPS 检索）", "patent"),
     ("openalex_mailto", "FORMUMIND_OPENALEX_MAILTO", "OpenAlex mailto", "research"),
     ("openalex_api_key", "FORMUMIND_OPENALEX_API_KEY", "OpenAlex 内容库（全文 PDF/TEI XML）", "research"),
     ("mineru_api_key", "FORMUMIND_MINERU_API_KEY", "MinerU 文档解析", "parse"),
@@ -299,9 +299,19 @@ def probe_secret(secret_id: str) -> dict:
     if secret_id in ("epo_consumer_key", "epo_consumer_secret"):
         epo_key = effective_setting(s, "epo_consumer_key")
         epo_secret = effective_setting(s, "epo_consumer_secret")
-        if epo_key and epo_secret:
-            return {"ok": True, "message": "EPO OPS 凭证已配置（完整检索在专利搜索阶段验证）"}
-        return {"ok": False, "message": "EPO Key/Secret 需同时配置"}
+        if not (epo_key and epo_secret):
+            return {"ok": False, "message": "EPO Key/Secret 需同时配置"}
+        # Ask OPS for a token: the cheapest call that proves the pair is accepted (it used to say "configured" and
+        # leave the first real search to find out).
+        from . import epo_ops
+
+        try:
+            ttl = epo_ops.check_credentials(epo_key, epo_secret)
+        except epo_ops.EpoOpsError as exc:
+            return {"ok": False, "message": str(exc)}
+        except Exception as exc:  # network, TLS, proxy: say what happened rather than fail the page
+            return {"ok": False, "message": f"EPO OPS 连接失败：{type(exc).__name__}"}
+        return {"ok": True, "message": f"EPO OPS 连接成功（令牌有效期约 {int(ttl // 60)} 分钟）"}
 
     if secret_id == "openalex_mailto":
         if effective_setting(s, "openalex_mailto"):

@@ -63,7 +63,6 @@ def test_the_real_dockerfile_requirements_include_the_ocr_runtime_and_the_layout
 def test_the_real_dockerfile_is_parsed_into_the_extras_it_installs():
     extras, indexes = gate.dockerfile_extras((REPO / "backend" / "Dockerfile").read_text(encoding="utf-8"))
     assert {"intel", "file_ingest", "llm", "science"} <= set(extras)
-    assert "patents" not in extras, "patent-client replaces the pinned httpx and pypdf; it must not ride into the image"
     assert indexes and all(url.startswith("https://") for url in indexes)
 
 

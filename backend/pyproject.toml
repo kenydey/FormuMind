@@ -58,14 +58,6 @@ intel = [
     "pubchempy>=1.0.4",     # enrich raw-material SMILES/molar-mass from PubChem
     "ddgs>=6.0",            # renamed from duckduckgo-search
 ]
-# Online USPTO / EPO patent search, on its own because of what it costs: every patent-client release requires
-# httpx<0.28 and pypdf<5.0, so installing it makes pip *replace* the pinned httpx (used by the whole backend) and
-# pypdf (the PDF parser that reads uploaded and downloaded files) with older releases - pypdf 4.3.1 has 49 published
-# advisories, all of them crafted-PDF denial of service (RAM exhaustion, infinite loops). It used to ride along in
-# `intel`, which the Dockerfile installs, so the production image shipped them; with the pypdf floor raised the
-# combination does not resolve at all. Patent full text does not need it (Google Patents landing pages), so install
-# this one only into an environment that is not parsing untrusted PDFs, or not at all.
-patents = ["patent-client>=5.0"]
 # MarkItDown keeps every format backend behind an extra — a bare install parses
 # nothing but plain text, so .pptx/.xlsx silently yield an empty document and
 # .docx falls back to python-docx, which drops tables. The extras are the whole
