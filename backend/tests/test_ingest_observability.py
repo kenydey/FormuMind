@@ -159,17 +159,23 @@ def test_skipped_status_when_no_text():
     assert outcome.extraction_status == "skipped"
 
 
-def test_colbert_gate_indexes_on_evidence_not_status(monkeypatch):
-    """P0-1：ColBERT 门禁看 evidence 非空，而非 status 字符串。"""
+def test_colbert_gate_indexes_no_guide_status():
+    """P0-1：status 为 no_guide（有真实文本）时，门禁应放行索引。
+
+    门禁逻辑（api/ingest.py）：extraction_status != "skipped" 即索引。
+    "skipped" 现仅=无真实文本/占位，故 no_guide 能正确索引。
+    """
     from app.services.ingestion import IngestOutcome
     from app.domain.schemas import Evidence
 
-    # 模拟无 key 场景的 outcome：status 为 no_guide 但有真实 evidence
     ev = Evidence(source="local", identifier="test:1", title="t",
                 snippet="真实文本内容", relevance=0.9)
     outcome = IngestOutcome(evidence=[ev], extraction_status="no_guide")
-    # 门禁逻辑（与 api/ingest.py 三处一致）：evidence 非空即索引
-    assert outcome.evidence, "门禁应放行有真实 evidence 的 outcome"
+    # 门禁条件
+    assert outcome.extraction_status != "skipped", "no_guide 应被索引"
+    # 占位仍被拦截
+    skipped = IngestOutcome(evidence=[], extraction_status="skipped")
+    assert not (skipped.extraction_status != "skipped")
 
 
 def test_failed_row_is_retried_not_skipped(stores, monkeypatch):

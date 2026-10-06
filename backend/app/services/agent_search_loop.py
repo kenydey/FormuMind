@@ -62,6 +62,9 @@ _FACET_STOPWORDS = {
     "如何", "什么", "怎么", "为什么", "哪些", "多少", "可以", "能够",
     "进行", "使用", "用于", "通过", "这个", "一种",
 }
+# P1-1: 单字停用词。统一分词器产出二字重叠对（如 "的了"），若对子两字皆为
+# 停用单字则整体丢弃，避免无意义 facet。
+_FACET_STOP_CHARS = frozenset("的了是在有和与或不这那个一")
 
 
 def _norm(text: str) -> str:
@@ -96,6 +99,8 @@ def extract_facets(query: str, max_facets: int = 8) -> list[str]:
     for tok in _bm25_tokenize(query or ""):
         t = tok.strip()
         if len(t) < 2 or t in _FACET_STOPWORDS:
+            continue
+        if all(ch in _FACET_STOP_CHARS for ch in t):
             continue
         if t not in seen:
             seen.append(t)

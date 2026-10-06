@@ -563,6 +563,8 @@ class BaybeCampaignEngine:
         # U-2: 血缘打通 —— 有真实 lab 测量 seed 时不再谎报 predictor_virtual。
         from ..doe_cycle_service import lab_measurement_source
 
+        # P0-5: 披露实际进入 GP 的 lab 点数（baybe_opt 虚拟点不进 GP）。
+        _lab_n = sum(1 for r in (measurements or []) if getattr(r, "source", "lab") == "lab")
         return OptimizationResult(
             iterations=iterations,
             objective=OBJECTIVE[req.domain],

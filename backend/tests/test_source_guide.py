@@ -236,7 +236,8 @@ def test_ingest_without_api_key():
             persist=True,
         )
 
-    assert outcome.extraction_status == "skipped"
+    # P0-1: 有真实文本但无 key → "no_guide"（不再是 "skipped"）
+    assert outcome.extraction_status == "no_guide"
     assert outcome.source_guide is None
     assert len(outcome.evidence) >= 1
 
@@ -269,7 +270,8 @@ def test_ingest_text_api_returns_source_fields():
     body = r.json()
     assert body["total"] >= 1
     assert "extraction_status" in body
-    assert body["extraction_status"] == "skipped"
+    # P0-1: guide 关闭但有真实文本 → "no_guide"
+    assert body["extraction_status"] == "no_guide"
 
 
 def test_get_source_endpoint():
