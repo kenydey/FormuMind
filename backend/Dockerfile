@@ -73,6 +73,11 @@ COPY scripts ./scripts
 COPY patchspec ./patchspec
 RUN python scripts/apply_patches.py
 
+# The startup check refuses to boot when the SQLite data directory is missing, and nothing created it: `docker run` without a
+# volume stopped at start-up (compose always mounts ./data over this, which is why it went unnoticed). An unmounted run is
+# ephemeral but it runs. scripts/docker_smoke.sh boots exactly that case.
+RUN mkdir -p /app/data
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -1,0 +1,43 @@
+# Does the image we ship RUN?
+#
+# ci-deps.yml proves the Dockerfile's extras resolve with every pin held - a dry run, nothing is built. Nothing in CI ever
+# built the image, so "installs" and "runs" were two claims with only one checked: a bad base image, a wheel that imports a
+# missing shared library, a data directory nothing created (docker run without a volume stopped at start-up) would all have
+# gone out green. scripts/docker_smoke.sh builds it and does what a first run does - import the app, run the migrations, boot
+# the server with no volume / Redis / Datalab, read /health, push a text file and a PDF through the ingest endpoint, and wait
+# for the image's own HEALTHCHECK.
+#
+# Building takes tens of minutes and several GB (torch CPU, docling, marker, mineru), so it does not run on every commit:
+# when the Dockerfile or the script changes, weekly (upstream wheels move without this repository changing), and on demand.
+# It is not part of the CI workflow's checks; a red run here is a broken image.
+name: Docker image smoke
+
+on:
+  push:
+    paths:
+      - "backend/Dockerfile"
+      - "scripts/docker_smoke.sh"
+      - ".github/workflows/docker-smoke.yml"
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays 04:00 UTC, an hour after the dependency pins check
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image plus its build layers do not fit in the ~14 GB the runner leaves free; these toolchains are not needed here.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Build the image and run it
+        run: scripts/docker_smoke.sh
+
+      - name: Image size
+        if: always()
+        run: docker image ls formumind-backend:smoke --format '{{.Repository}}:{{.Tag}}  {{.Size}}' || true
