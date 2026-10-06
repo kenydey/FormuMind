@@ -108,3 +108,21 @@ def test_weak_name_overlap_without_cas_is_low():
     out, warnings = ground_recommended_formulas(formulas, evidence, strict=False)
     assert out[0].components[0].grounding_confidence == "low"
     assert warnings
+
+
+def test_match_evidence_ids_per_evidence_not_global():
+    """P1-4：单条证据匹配用该条目的 token 集合，而非全局并集。
+
+    旧代码查 t in corpus（全部证据的 token 并集），导致任一 token 在语料
+    任意处出现过，所有证据 id 都被挂成引用（假引用）。
+    """
+    from app.services.grounded_recommend import _evidence_corpus, _match_evidence_ids
+
+    ev1 = _ev("CN123", "Epoxy resin cured with amine hardener for anticorrosion coating")
+    ev2 = _ev("LIT456", "Alkaline degreaser for metal surface cleaning before coating")
+    _, _, id_map, per_ev = _evidence_corpus([ev1, ev2])
+    refs = _match_evidence_ids("Epoxy resin", per_ev, id_map)
+    assert refs == ["CN123"], f"应只返回专利证据，实际: {refs}"
+    # 反向：查除油剂只返回文献
+    refs2 = _match_evidence_ids("degreaser", per_ev, id_map)
+    assert refs2 == ["LIT456"], f"实际: {refs2}"

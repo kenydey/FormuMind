@@ -118,19 +118,29 @@ def _evidence_texts(evidence: list[Evidence]) -> list[tuple[str, str]]:
     return out
 
 
-def _evidence_corpus(evidence: list[Evidence]) -> tuple[set[str], set[str], dict[str, str]]:
-    """Return (token set, CAS set, identifier map)."""
+def _evidence_corpus(evidence: list[Evidence]) -> tuple[set[str], set[str], dict[str, str], dict[str, set[str]]]:
+    """Return (token set, CAS set, identifier map, per-evidence token map).
+
+    P1-4: the per-evidence token map (ident -> tokens of THAT evidence only)
+    is used by _match_evidence_ids. The global token set must NOT be used
+    for per-evidence matching — it caused every evidence ID to match whenever
+    a token appeared anywhere in the corpus.
+    """
     tokens: set[str] = set()
     cas_set: set[str] = set()
     id_map: dict[str, str] = {}
+    per_evidence: dict[str, set[str]] = {}
     for ev in evidence:
         ident = (ev.identifier or ev.title or "").strip()
         if ident:
             id_map[ident.lower()] = ident
         blob = f"{ev.title} {ev.snippet} {ev.identifier}"
-        tokens |= _tokens(blob)
+        ev_toks = _tokens(blob)
+        tokens |= ev_toks
+        if ident:
+            per_evidence[ident] = ev_toks
         cas_set |= _extract_cas(blob)
-    return tokens, cas_set, id_map
+    return tokens, cas_set, id_map, per_evidence
 
 
 def _component_in_catalog(
@@ -188,18 +198,25 @@ def _catalog_availability_bonus(name: str, cas_no: str | None) -> float:
     return 0.0
 
 
-def _match_evidence_ids(name: str, corpus: set[str], id_map: dict[str, str]) -> list[str]:
-    name_toks = _tokens(name)
+def _match_evidence_ids(
+    name: str,
+    per_evidence_tokens: dict[str, set[str]],
+    id_map: dict[str, str],
+) -> list[str]:
+    """P1-4: match the component name against each evidence's OWN tokens.
+
+    The old code checked ``t in corpus`` where corpus was the union of ALL
+    evidence tokens — so a token appearing in ANY evidence caused EVERY
+    evidence ID to be returned as a citation (false references).
+    """
+    name_toks = {t for t in _tokens(name) if len(t) > 2}
     if not name_toks:
         return []
     hits: list[str] = []
     for ident_key, ident in id_map.items():
-        if any(t in ident_key or t in corpus for t in name_toks if len(t) > 2):
+        ev_toks = per_evidence_tokens.get(ident, set())
+        if any(t in ident_key or t in ev_toks for t in name_toks):
             if ident not in hits:
-                hits.append(ident)
-    if name_toks & corpus:
-        for ident in id_map.values():
-            if ident not in hits and any(t in ident.lower() for t in name_toks):
                 hits.append(ident)
     return hits[:3]
 
@@ -214,6 +231,7 @@ def _ground_component(
     *,
     prefer_catalog: bool = False,
     texts: list[tuple[str, str]] | None = None,
+    per_evidence_tokens: dict[str, set[str]] | None = None,
 ) -> RecommendedFormulaComponent:
     refs = list(comp.evidence_refs or [])
     raw_toks = _tokens(comp.name) | _tokens(comp.zh_name or "")
@@ -222,7 +240,7 @@ def _ground_component(
 
     if comp_cas and (comp_cas in corpus_cas or comp_cas in catalog_cas):
         if not refs:
-            refs = _match_evidence_ids(comp.name, corpus, id_map)
+            refs = _match_evidence_ids(comp.name, per_evidence_tokens, id_map)
         return comp.model_copy(
             update={"evidence_refs": refs, "grounding_confidence": "high"}
         )
@@ -236,7 +254,7 @@ def _ground_component(
         )
 
     if not refs:
-        refs = _match_evidence_ids(comp.name, corpus, id_map)
+        refs = _match_evidence_ids(comp.name, per_evidence_tokens, id_map)
 
     catalog_overlap = name_toks & catalog
     # One shortish role-like token (e.g. "additive") is not enough to ground.
@@ -294,7 +312,7 @@ def ground_recommended_formulas(
     """
     if not formulas:
         return [], []
-    corpus, corpus_cas, id_map = _evidence_corpus(evidence)
+    corpus, corpus_cas, id_map, per_evidence_tokens = _evidence_corpus(evidence)
     texts = _evidence_texts(evidence)
     catalog = _catalog_tokens()
     catalog_cas = _catalog_cas()
@@ -312,6 +330,7 @@ def ground_recommended_formulas(
                 catalog_cas,
                 prefer_catalog=prefer_materials_catalog,
                 texts=texts,
+                per_evidence_tokens=per_evidence_tokens,
             )
             for c in rec.components
         ]
