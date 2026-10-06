@@ -462,13 +462,36 @@ _DOC_TIERS: tuple[tuple[str, object], ...] = (
 )
 
 
+_dead_mineru_pin_warned = False
+
+
+def _mineru_usable() -> bool:
+    """Whether the cloud MinerU tier can run now: switched on, token configured, SDK importable."""
+    from .mineru_cloud import mineru_available
+
+    return mineru_available()[0]
+
+
 def _pdf_tier_order(prefer: str) -> list[tuple[str, object]]:
+    global _dead_mineru_pin_warned
     tiers = list(_PDF_TIERS)
     if prefer in ("auto", ""):
         return tiers
     names = [n for n, _ in tiers]
     if prefer not in names:
         logger.warning("unknown FORMUMIND_PDF_PARSER=%r — using auto order", prefer)
+        return tiers
+    if prefer == "mineru" and not _mineru_usable():
+        # Pinning a tier means "this one first, then the lighter ones below it" - so pinning the cloud tier while it cannot
+        # run also dropped hybrid, Docling and marker, the best local parsers. The "高配" profile did exactly that (it
+        # pinned the long-retired local magic-pdf path), and every install that had applied it kept parsing PDFs with
+        # MarkItDown / pypdf only.
+        if not _dead_mineru_pin_warned:
+            _dead_mineru_pin_warned = True
+            logger.warning(
+                "FORMUMIND_PDF_PARSER=mineru but the MinerU cloud tier cannot run (disabled, no token or no SDK): "
+                "using the auto order. Set FORMUMIND_PDF_PARSER=auto to silence this."
+            )
         return tiers
     idx = names.index(prefer)
     # Pinned parser first, then the lighter tiers below it as fallback.
@@ -709,7 +732,6 @@ def format_availability() -> dict[str, bool]:
                 optional_import("pymupdf4llm"),
                 optional_import("docling"),
                 optional_import("marker"),
-                optional_import("magic_pdf"),
                 # Local OCR reads scans, which none of the text-layer parsers can.
                 _local_ocr_installed(),
                 _markitdown_can("pdf"),

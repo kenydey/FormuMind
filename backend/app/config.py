@@ -382,8 +382,6 @@ class Settings(BaseSettings):
     # 都没有文字"，比"这是扫描件"严格得多，扫描件因此被逐页升级而不是走扫描件
     # 分支。关掉后该信号才回到它声称的语义。
     pdf_local_ocr: bool = False
-    # 扫描件 OCR（MinerU 管线；需 OCR 依赖，慢但能读图片型 PDF）。
-    pdf_ocr: bool = False
     # 公式增强（Docling）：显示公式转 LaTeX $$…$$，化学反应方程式保真。
     # 首次使用会额外下载公式识别模型。
     pdf_formula_enrichment: bool = True

@@ -6,10 +6,16 @@ Round-3 audit found six of them (``auto_retrain``, ``kg_link_on_ingest``,
 nothing changed. Each is now wired or removed; this test keeps it that way.
 
 A field counts as *read* when backend code (outside ``config.py`` — the
-declaration — and ``env_flags.py`` — the UI registry) touches it as an
+declaration — ``env_flags.py`` — the UI registry — and ``parse_profiles.py`` —
+which only *writes* flags into the environment) touches it as an
 attribute, a keyword, a bare name, or an exact string key (``getattr(s,
 "name")``), or when the frontend refers to it (UI toggles are read through
 ``/api/settings/env-flags``). Comments and docstrings do not count.
+
+``parse_profiles`` is excluded because its tables name every flag a profile sets
+as a string key, which this scan took for a read: ``pdf_ocr`` - a toggle for the
+retired local MinerU path, still offered by the Settings page and set by every
+profile - passed the guard for as long as the profile tables mentioned it.
 """
 from __future__ import annotations
 
@@ -34,7 +40,7 @@ def _backend_reads() -> set[str]:
     # scripts/ counts: e.g. rigor_gate.py reads evals_rigor_thresholds for CI.
     paths = [*(BACKEND / "app").rglob("*.py"), *(BACKEND / "scripts").rglob("*.py")]
     for path in paths:
-        if path.name in {"config.py", "env_flags.py"}:
+        if path.name in {"config.py", "env_flags.py", "parse_profiles.py"}:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):

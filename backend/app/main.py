@@ -584,8 +584,8 @@ def health_detailed() -> dict:
             {pkg: None for pkg in ("chemcrow", "paperqa", "patent_client", "sentence_transformers", "rdkit", "psycopg2")}
             if skip_probe
             else {
-                # chemcrow removed 2026-09 (de-ChemCrow); key kept false for
-                # health-contract compatibility with older clients/tests.
+                # chemcrow removed 2026-09 (de-ChemCrow): nothing to probe, the key is kept (always false) so that
+                # older clients reading it do not break. Deprecated - new clients should not look at it.
                 "chemcrow": False,
                 "paperqa": _ok("paperqa"),
                 # patent-client removed 2026-10 (EPO OPS is called over httpx); key kept false like chemcrow's.

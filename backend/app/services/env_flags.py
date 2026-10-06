@@ -248,9 +248,6 @@ FLAG_REGISTRY: tuple[EnvFlag, ...] = (
             "一次请求约 0.7 秒且完全不需要 OCR；中日文专利还附带英文机器翻译对照。"
             "关闭则优先下 PDF（能拿到图表原件，但慢得多，扫描件还要 OCR）。",
             "kb", "需网络；关闭后扫描版专利每页约 2 秒 OCR"),
-    EnvFlag("pdf_ocr", "扫描件 OCR 解析",
-            "PDF 解析（MinerU 层）启用 OCR 管线，可读取扫描/图片型 PDF。", "kb",
-            "需 magic-pdf OCR 依赖；解析显著变慢"),
     EnvFlag("rapidocr_enabled", "本地 OCR（扫描件）",
             "扫描件无文字层时用本地 OCR 读出文字，无需 MinerU 配额。"
             "只出文字，表格/图表仍交给 MinerU 或视觉模型。",

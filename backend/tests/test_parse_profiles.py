@@ -11,7 +11,6 @@ _ENV_KEYS = [
     "FORMUMIND_MINERU_ENABLED",
     "FORMUMIND_MINERU_BATCH_ENABLED",
     "FORMUMIND_PDF_LOCAL_OCR",
-    "FORMUMIND_PDF_OCR",
     "FORMUMIND_RAPIDOCR_ENABLED",
     "FORMUMIND_PDF_PARSER",
     "FORMUMIND_RAG_BACKEND",
@@ -43,7 +42,7 @@ def test_apply_low_disables_gpu_and_cloud(monkeypatch):
     assert env["FORMUMIND_GPU_ENABLED"] == "false"
     assert env["FORMUMIND_MINERU_ENABLED"] == "false"
     assert env["FORMUMIND_PDF_PARSER"] == "auto"
-    assert env["FORMUMIND_PDF_OCR"] == "true"
+    assert "FORMUMIND_PDF_OCR" not in env, "that toggle had no reader (the local magic-pdf path it served is retired)"
     assert result["profile"] == "low"
 
 
@@ -61,15 +60,38 @@ def test_apply_cloud_disables_local_ocr_enables_mineru_batch(monkeypatch):
     assert result["profile"] == "cloud"
 
 
-def test_apply_high_pins_mineru_and_gpu(monkeypatch):
+def test_apply_high_is_all_local_and_pins_no_parser(monkeypatch):
     monkeypatch.setattr(pp.secrets_store, "write_env_updates", lambda d: None)
     monkeypatch.setattr(pp, "probe_availability", lambda: {"ok": True})
     result = pp.apply_profile("high")
     env = result["env"]
-    assert env["FORMUMIND_PDF_PARSER"] == "mineru"
+    # It used to pin FORMUMIND_PDF_PARSER=mineru ("local magic-pdf"). That path is retired, and pinning a tier also
+    # drops every tier above it - so choosing the best profile made PDF parsing skip hybrid / Docling / marker.
+    assert env["FORMUMIND_PDF_PARSER"] == "auto"
     assert env["FORMUMIND_GPU_ENABLED"] == "true"
-    assert env["FORMUMIND_MINERU_ENABLED"] == "false"  # 本地取代云
+    assert env["FORMUMIND_MINERU_ENABLED"] == "false"  # nothing is uploaded
     assert env["FORMUMIND_PDF_LOCAL_OCR"] == "true"
+
+
+@pytest.mark.parametrize("profile", ["low", "mid", "cloud", "high"])
+def test_every_profile_is_recognised_again_after_it_is_applied(monkeypatch, profile):
+    monkeypatch.setattr(pp.secrets_store, "write_env_updates", lambda d: None)
+    monkeypatch.setattr(pp, "probe_availability", lambda: {"ok": True})
+    assert pp.apply_profile(profile)["profile"] == profile
+    assert pp.current_profile() == profile
+
+
+@pytest.mark.parametrize("profile", ["low", "mid", "cloud", "high"])
+def test_no_profile_costs_the_pdf_cascade_its_best_local_parsers(monkeypatch, profile):
+    """The consequence that mattered: whatever profile is chosen, hybrid still leads the PDF tiers."""
+    from app.config import get_settings
+    from app.services import parsing
+
+    monkeypatch.setattr(pp.secrets_store, "write_env_updates", lambda d: None)
+    monkeypatch.setattr(pp, "probe_availability", lambda: {"ok": True})
+    pp.apply_profile(profile)
+    names = [n for n, _ in parsing._pdf_tier_order(get_settings().pdf_parser)]
+    assert names[:3] == ["hybrid", "docling", "marker"], (profile, names)
 
 
 def test_apply_rejects_unknown_profile():

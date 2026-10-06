@@ -29,7 +29,7 @@ const PROFILES: Record<
   },
   high: {
     title: "高配 · GPU 主机",
-    desc: "本地 MinerU(magic-pdf,数据不出域)+ 版面解析内置 OCR + GPU ColBERT(PyLate)。",
+    desc: "全部本地、数据不出域：hybrid 版面解析优先（装了 Docling / marker 就用）+ 本地 OCR + GPU ColBERT(PyLate)。",
     needs: ["CUDA GPU ≥ 4GB"],
   },
 };

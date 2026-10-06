@@ -1550,14 +1550,6 @@ def get_source_availability() -> dict[str, dict]:
     def _ok(*pkgs: str) -> bool:
         return any(optional_import(pkg) for pkg in pkgs)
 
-    def _pip_installed(pkg: str) -> bool:
-        try:
-            from importlib.metadata import distribution
-            distribution(pkg)
-            return True
-        except Exception:
-            return False
-
     from .notebooklm import get_setup_status
     from ..config import get_settings
 
@@ -1578,8 +1570,6 @@ def get_source_availability() -> dict[str, dict]:
     # reported "library_missing" - and a "去安装依赖" banner nothing could clear - whenever OpenAlex was switched off.
     lit_ok = True
     web_ok = _ok("ddgs") or _ok("duckduckgo_search")
-    chemcrow_import_ok = _ok("chemcrow")
-    chemcrow_installed = chemcrow_import_ok or _pip_installed("chemcrow")
 
     return {
         "patents": {
@@ -1650,19 +1640,15 @@ def get_source_availability() -> dict[str, dict]:
             "reason": None if (tavily_ok or serpapi_ok) else "key_missing",
             "hint": None if (tavily_ok or serpapi_ok) else "CNIPA 并行路需 Tavily 或 SerpAPI",
         },
+        # Retired 2026-09 (de-ChemCrow): no extra installs it and no code imports it, so there is nothing left to probe - this
+        # used to report "installed but incompatible" for a package nothing uses. The key stays because /api/search/status is
+        # a public contract; `deprecated` tells clients to stop reading it.
         "chemcrow": {
-            "available": chemcrow_installed,
-            "offline_fallback": chemcrow_import_ok,
-            "reason": None if chemcrow_import_ok else ("compat_issue" if chemcrow_installed else "library_missing"),
-            "hint": (
-                None
-                if chemcrow_import_ok
-                else "chemcrow 0.3.7 已安装但与 Pydantic v2 不兼容，WebSearch/LitSearch 将通过其他引擎降级运行"
-                if chemcrow_installed
-                # De-ChemCrow (2026-09): no extra installs it any more and no code imports it. The hint used to say
-                # `pip install -e '.[intel]'`, which could not have enabled it.
-                else "ChemCrow 集成已于 2026-09 退役，无需安装（化学增强检索由 paper-qa 与网络源提供）"
-            ),
+            "available": False,
+            "offline_fallback": False,
+            "reason": "retired",
+            "deprecated": True,
+            "hint": "ChemCrow 集成已于 2026-09 退役，无需安装（化学增强检索由 paper-qa 与网络源提供）",
         },
         "notebooklm": get_setup_status(),
         "surechembl": {

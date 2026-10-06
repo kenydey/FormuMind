@@ -114,6 +114,9 @@ class SourceStatus(BaseModel):
     offline_fallback: bool = False
     reason: str | None = None
     hint: str | None = None
+    # True for a key that is kept only so older clients do not break (``chemcrow``, retired 2026-09): never
+    # available, and new code should not read it.
+    deprecated: bool = False
 
 
 class SearchResponse(BaseModel):

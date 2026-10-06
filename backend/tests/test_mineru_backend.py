@@ -77,12 +77,31 @@ def test_auto_order_keeps_mineru_slot() -> None:
                     "markitdown", "pypdf"]
 
 
-def test_prefer_mineru_pins_first_with_fallback() -> None:
+def test_prefer_mineru_pins_first_with_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(parsing, "_mineru_usable", lambda: True)
     order = parsing._pdf_tier_order("mineru")
     assert order[0][0] == "mineru"
     names = [n for n, _ in parsing._PDF_TIERS]
     rest = [n for n, _ in order[1:]]
     assert rest == names[names.index("mineru") + 1:]
+
+
+def test_a_pin_on_mineru_that_cannot_run_keeps_the_whole_cascade(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Pinning a tier drops everything above it; pinning one that cannot run (switched off, no token, no SDK) would
+    drop hybrid, Docling and marker for nothing. The 高配 profile pinned the retired local path this way, and every
+    install that had applied it kept parsing PDFs with MarkItDown / pypdf only."""
+    import logging
+
+    monkeypatch.setattr(parsing, "_mineru_usable", lambda: False)
+    monkeypatch.setattr(parsing, "_dead_mineru_pin_warned", False)
+    with caplog.at_level(logging.WARNING, logger=parsing.logger.name):
+        first = [n for n, _ in parsing._pdf_tier_order("mineru")]
+        second = [n for n, _ in parsing._pdf_tier_order("mineru")]
+    assert first == second == [n for n, _ in parsing._PDF_TIERS]
+    warnings = [r for r in caplog.records if "MinerU cloud tier cannot run" in r.getMessage()]
+    assert len(warnings) == 1, "said once, not on every document"
 
 
 def test_prefer_mineru_wins_when_available(

@@ -9,8 +9,9 @@
          (auto: 无 CUDA 自动落 bm25_faiss)；本地 OCR 优先
 - cloud: 云端解析 —— 关本地 RapidOCR/版面 OCR, 开云 MinerU + batch；
          扫描/难页 OCR 直接上云；文字 PDF 仍本地 hybrid
-- high : GPU 主机 —— pdf_parser=mineru(本地 magic-pdf) + gpu_enabled(auto
-         → pylate) + 本地版面 OCR
+- high : GPU 主机 —— 全部本地（数据不出域）：hybrid 版面解析优先、Docling / marker 装了就用，
+         + 本地 OCR + gpu_enabled(auto → pylate)。曾经写成 pdf_parser=mineru（"本地 magic-pdf"），
+         但那条本地路径早已退役，固定它只会让 PDF 解析跳过 hybrid / Docling / marker。
 
 应用动作: 写 os.environ(立即生效, config 已缓存值经 cache_clear 失效) +
 secrets_store.write_env_updates 持久化(只读 FS 时静默跳过, 同 formulation_mode)。
@@ -33,7 +34,6 @@ _PROFILES: dict[str, tuple[dict[str, bool], dict[str, str]]] = {
             "mineru_enabled": False,
             "mineru_batch_enabled": False,
             "pdf_local_ocr": False,
-            "pdf_ocr": True,
             "rapidocr_enabled": True,
         },
         {"FORMUMIND_PDF_PARSER": "auto", "FORMUMIND_RAG_BACKEND": "auto"},
@@ -44,7 +44,6 @@ _PROFILES: dict[str, tuple[dict[str, bool], dict[str, str]]] = {
             "mineru_enabled": True,  # 云 MinerU, 需 token; 无 token 时降级等同 low
             "mineru_batch_enabled": False,
             "pdf_local_ocr": False,
-            "pdf_ocr": True,
             "rapidocr_enabled": True,
         },
         {"FORMUMIND_PDF_PARSER": "auto", "FORMUMIND_RAG_BACKEND": "auto"},
@@ -55,7 +54,6 @@ _PROFILES: dict[str, tuple[dict[str, bool], dict[str, str]]] = {
             "mineru_enabled": True,  # 需 token; 扫描/难页 OCR 走云
             "mineru_batch_enabled": True,
             "pdf_local_ocr": False,
-            "pdf_ocr": True,
             "rapidocr_enabled": False,  # 关本地 OCR 优先 → hybrid 直接上云
         },
         {"FORMUMIND_PDF_PARSER": "auto", "FORMUMIND_RAG_BACKEND": "auto"},
@@ -63,13 +61,12 @@ _PROFILES: dict[str, tuple[dict[str, bool], dict[str, str]]] = {
     "high": (
         {
             "gpu_enabled": True,
-            "mineru_enabled": False,  # 本地 magic-pdf 取代云
+            "mineru_enabled": False,  # 全部本地：不向云端上传任何文档
             "mineru_batch_enabled": False,
             "pdf_local_ocr": True,
-            "pdf_ocr": True,
             "rapidocr_enabled": True,
         },
-        {"FORMUMIND_PDF_PARSER": "mineru", "FORMUMIND_RAG_BACKEND": "auto"},
+        {"FORMUMIND_PDF_PARSER": "auto", "FORMUMIND_RAG_BACKEND": "auto"},
     ),
 }
 
@@ -78,7 +75,6 @@ _BOOL_ENV = {
     "mineru_enabled": "FORMUMIND_MINERU_ENABLED",
     "mineru_batch_enabled": "FORMUMIND_MINERU_BATCH_ENABLED",
     "pdf_local_ocr": "FORMUMIND_PDF_LOCAL_OCR",
-    "pdf_ocr": "FORMUMIND_PDF_OCR",
     "rapidocr_enabled": "FORMUMIND_RAPIDOCR_ENABLED",
 }
 
@@ -124,14 +120,10 @@ def current_profile() -> str:
     from ..config import get_settings
 
     s = get_settings()
-    parser = (s.pdf_parser or "auto").lower()
-    if parser == "mineru":
-        return "high"
-    if s.mineru_enabled and not s.rapidocr_enabled:
-        return "cloud"
     if s.mineru_enabled:
-        return "mid"
-    return "low"
+        return "mid" if s.rapidocr_enabled else "cloud"
+    # Nothing leaves the host: "high" is the one that also brings GPU retrieval and the local page OCR.
+    return "high" if (s.gpu_enabled and s.pdf_local_ocr) else "low"
 
 
 def apply_profile(profile: str) -> dict:

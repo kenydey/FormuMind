@@ -334,11 +334,11 @@ def test_search_response_includes_source_status():
     assert nb["reason"] is not None
     assert nb["hint"] is not None
 
-    # ChemCrow key must be present (v0.9); library-optional, bool availability.
+    # The ChemCrow key stays in the payload (public contract) but the integration is retired: never available,
+    # explains itself, and is marked deprecated so clients stop reading it.
     cc = body["source_status"]["chemcrow"]
-    assert isinstance(cc["available"], bool)
-    if not cc["available"]:
-        assert cc["hint"] is not None, "chemcrow hint required when unavailable"
+    assert cc["available"] is False and cc["reason"] == "retired" and cc["deprecated"] is True
+    assert cc["hint"]
 
 
 def test_notebooklm_setup_status_default():

@@ -1474,6 +1474,8 @@ export interface SourceStatus {
   offline_fallback?: boolean;
   reason?: string | null;
   hint?: string | null;
+  /** A key kept only so older clients do not break (`chemcrow`, retired 2026-09): never available, do not read it. */
+  deprecated?: boolean;
 }
 
 export interface SearchResponse {

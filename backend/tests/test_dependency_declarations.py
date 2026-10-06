@@ -17,6 +17,7 @@ Every test here reads the declarations; none needs a package index.
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import tomllib
@@ -323,3 +324,130 @@ def test_an_unrelated_failure_reports_pips_last_line(monkeypatch):
     pip = _Pip(returncode=1, stderr="line one\nERROR: No matching distribution found for ddgs")
     result = _install(monkeypatch, pip, ["ddgs"])
     assert result["summary"].endswith("No matching distribution found for ddgs")
+
+
+# ── every probe names something this repository can install ──────────────────
+#
+# ``optional_import("x")`` is how the app decides what to offer: an upload format, a status badge, a "install this"
+# hint. A probe for a module nothing here installs is a promise nobody can keep - ``magic_pdf`` (the retired local
+# MinerU path) kept counting towards "a PDF parser exists", and ``chemcrow`` was probed - and reported "installed but
+# incompatible" - long after no code imported it.
+
+# import name -> the distribution that provides it
+IMPORT_TO_DISTRIBUTION = {
+    "anthropic": "anthropic",
+    "colour": "colour-science",
+    "ddgs": "ddgs",
+    "docling": "docling",
+    "docx": "python-docx",
+    "httpx": "httpx",
+    "mammoth": "mammoth",
+    "marker": "marker-pdf",
+    "markitdown": "markitdown",
+    "mineru": "mineru-open-sdk",
+    "molbloom": "molbloom",
+    "onnxruntime": "onnxruntime",
+    "openai": "openai",
+    "openpyxl": "openpyxl",
+    "paperqa": "paper-qa",
+    "pdfminer": "pdfminer.six",
+    "pdfplumber": "pdfplumber",
+    "pptx": "python-pptx",
+    "psycopg2": "psycopg2-binary",
+    "pubchempy": "pubchempy",
+    "pymupdf4llm": "pymupdf4llm",
+    "pypdf": "pypdf",
+    "rapidocr": "rapidocr",
+    "rdkit": "rdkit",
+    "sentence_transformers": "sentence-transformers",
+    "trafilatura": "trafilatura",
+}
+
+# Probed on purpose although nothing in this repository installs it - each with the reason.
+PROBED_BUT_NOT_INSTALLABLE = {
+    "duckduckgo_search": "the pre-rename name of ddgs: literature.search_web falls back to it for environments that "
+    "still have it; the extra installs ddgs",
+}
+
+# Distributions that arrive with ``markitdown[pdf,docx,pptx,xlsx]`` rather than from a line of their own.
+PROVIDED_BY_MARKITDOWN_EXTRAS = {"pdfminer.six", "pdfplumber", "mammoth"}
+
+# Probes that were retired with their integrations: they must not come back.
+RETIRED_PROBES = {
+    "magic_pdf": "the local MinerU path, never installed in this deployment (the cloud SDK is `mineru`)",
+    "chemcrow": "removed 2026-09; the status key is a fixed deprecated payload",
+    "patent_client": "removed 2026-10; the patent search is EPO OPS over httpx",
+    "semanticscholar": "Semantic Scholar is queried over HTTP",
+    "rapidocr_onnxruntime": "the engine imports rapidocr 3.x",
+}
+
+
+def _probed_names() -> dict[str, list[str]]:
+    """Every literal module name given to ``optional_import`` / the local ``_ok`` helpers, plus the module tuples the
+    parsers keep (MarkItDown's converters, the OCR runtime)."""
+    from app.services import parsing, rapidocr_local
+
+    found: dict[str, list[str]] = {}
+    for path in sorted((BACKEND / "app").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in {"optional_import", "_ok"}:
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        found.setdefault(arg.value, []).append(f"{path.relative_to(BACKEND)}:{node.lineno}")
+    for modules in parsing._MARKITDOWN_BACKENDS.values():
+        for module in modules:
+            found.setdefault(module, []).append("app/services/parsing.py:_MARKITDOWN_BACKENDS")
+    for module in rapidocr_local.REQUIRED_MODULES:
+        found.setdefault(module, []).append("app/services/rapidocr_local.py:REQUIRED_MODULES")
+    return found
+
+
+def _installable_distributions() -> set[str]:
+    out = {canonicalize_name(r.name) for r in _core()}
+    out |= {canonicalize_name(r.name) for reqs in _extras().values() for r in reqs}
+    out |= {canonicalize_name(d.pip_name) for d in deps.CATALOG}
+    out |= {canonicalize_name(Requirement(spec).name) for d in deps.CATALOG for spec in d.also}
+    out |= set(_pins())
+    return out
+
+
+def test_every_probed_module_is_installable_from_this_repository():
+    installable = _installable_distributions() | {canonicalize_name(n) for n in PROVIDED_BY_MARKITDOWN_EXTRAS}
+    problems = []
+    for module, where in sorted(_probed_names().items()):
+        if module in PROBED_BUT_NOT_INSTALLABLE:
+            continue
+        dist = IMPORT_TO_DISTRIBUTION.get(module)
+        if dist is None:
+            problems.append(f"{module} ({where[0]}): add it to IMPORT_TO_DISTRIBUTION, or to PROBED_BUT_NOT_INSTALLABLE with a reason")
+        elif canonicalize_name(dist) not in installable:
+            problems.append(f"{module} ({where[0]}): nothing installs {dist!r} - an extra, a catalog entry or a pin must")
+    assert not problems, "\n".join(problems)
+
+
+def test_the_probe_allowlists_are_not_stale():
+    probed = _probed_names()
+    assert set(PROBED_BUT_NOT_INSTALLABLE) <= set(probed), "an allowlisted probe is gone: drop it from the allowlist"
+    installable = _installable_distributions()
+    for module in PROBED_BUT_NOT_INSTALLABLE:
+        dist = IMPORT_TO_DISTRIBUTION.get(module)
+        assert dist is None or canonicalize_name(dist) not in installable, f"{module} became installable: drop the exemption"
+    assert not set(IMPORT_TO_DISTRIBUTION) - set(probed), sorted(set(IMPORT_TO_DISTRIBUTION) - set(probed))
+
+
+def test_markitdown_brings_the_backends_the_probes_rely_on():
+    markitdown = next(r for r in _extras()["file_ingest"] if canonicalize_name(r.name) == "markitdown")
+    assert {"pdf", "docx", "pptx", "xlsx"} <= markitdown.extras
+
+
+def test_retired_integrations_are_not_probed():
+    probed = set(_probed_names())
+    assert not (set(RETIRED_PROBES) & probed), {name: RETIRED_PROBES[name] for name in set(RETIRED_PROBES) & probed}
+
+
+def test_the_scan_finds_the_probes_it_exists_for(tmp_path):
+    """Not vacuous: it sees both spellings."""
+    names = _probed_names()
+    assert "pymupdf4llm" in names and "mineru" in names  # optional_import(...)
+    assert "ddgs" in names  # the local _ok(...) helper in literature.get_source_availability
+    assert "pdfminer" in names and "onnxruntime" in names  # the tuples the parsers keep
