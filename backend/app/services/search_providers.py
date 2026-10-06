@@ -642,7 +642,7 @@ def search_epo_patents(
             begin = 1
             while len(hits) < want:
                 end = min(begin + epo_ops.PAGE_SIZE - 1, begin + (want - len(hits)) - 1)
-                page = epo_ops.search(cql, key=key, secret=secret, begin=begin, end=end, timeout=_TIMEOUT_SEC, client=client)
+                page = epo_ops.search(cql, key=key, secret=secret, begin=begin, end=end, client=client)
                 hits.extend(page.hits)
                 if len(page.hits) < end - begin + 1 or begin + epo_ops.PAGE_SIZE > page.total:
                     break  # a short page is the last page

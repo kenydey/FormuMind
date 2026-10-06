@@ -175,7 +175,7 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 - 已做（CI `windows-latest`）：`install.bat` → Windows PowerShell 5.1 → `install.ps1` 在干净检出上跑完；应用可 import、迁移后的数据库存在；服务起得来并答 `/health`；故意让 pip 失败时安装器非零退出；**整套后端测试（约 4,300 条，8 个分片）全部通过**。这个过程修了 13 处只在 Windows 上显形的问题（§2 #32–#44），包括一个 SSRF 绕过（#35）和两处"健康数据被丢弃 / 被当成损坏"（#38、#39）。Windows 上第一次真跑整套的结果是 37 个失败 / 错误、分片 10–22 分钟；现在是 0 个、4.5–8 分钟。
 - 仍缺：`install.bat` 的**双击** `pause` 行为（CI 不是双击启动）；Celery worker 在 Windows 上的 `--pool=solo` 路径；Redis / Datalab 在 Windows 上的部署；前端测试没在 Windows 上跑；`msvcrt` 文件锁在**真实多进程竞争**下的行为由 `test_artifact_xproc_lock.py`（Windows 用 spawn）覆盖，已通过，但只跑了一次——是否稳定要看后续几轮 CI。
 - 已改：安装器优先选 3.11 / 3.12 / 3.13（§2 #45、#57）。**测过的 Python 版本**：3.11（Docker / 阻塞 CI）；3.12 与 3.13 的全量测试在本地各通过一次（§5），非阻塞 CI job `backend-newer-python` 开始持续跟踪，README 已写明；3.14 只有"安装器在 CI 上选到它也能装能起"这一个数据点。
-- **决策（需要你定）**：`backend-windows` 现在是非阻塞的（每次推送占 8 个 Windows runner，约 5–8 分钟）。它已经全绿，设为阻塞能防止 Windows 回归，代价是 runner 用量，以及 Windows runner 偶发慢导致的时间类用例波动（本轮已把几个时间断言改成与任务起点比较 / 给 Windows 留余量）。建议：先保持非阻塞、观察一周，再决定。
+- **决策（已定：你选了"再观察一周"，所以维持现状，一周后按 CI 记录再议）**：`backend-windows` 现在是非阻塞的（每次推送占 8 个 Windows runner，约 5–8 分钟）。它已经全绿，设为阻塞能防止 Windows 回归，代价是 runner 用量，以及 Windows runner 偶发慢导致的时间类用例波动（本轮已把几个时间断言改成与任务起点比较 / 给 Windows 留余量）。建议：先保持非阻塞、观察一周，再决定。
 - 验收：`backend-windows` 连续多轮全绿；`backend-newer-python`（3.12 / 3.13）在 CI 上首次全绿，之后连续几轮保持。
 
 **7. 质量门对短公式仍会误伤（影响小，取舍）**
@@ -225,13 +225,18 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 | 后端全量（最终树，3.11，干净检出、不设任何 `FORMUMIND_*` 环境、装了解析器 + colour-science） | **4491 通过 / 18 跳过 / 4 取消选择（`golden_eval`），9 分 58 秒；用例收集数 3992 → 4513（本轮合计 +521，都是回归测试与守卫）** |
 | Python 3.12 / 3.13 全量（阻塞 job 的依赖集 + `file_ingest` / `report_export` / `color` + PyMuPDF 固定版本，pypdf 6.19.0） | 各 **4488 通过 / 18 跳过**（node id 守卫加入之前的树；守卫的 3 个用例是纯 Python）；`backend-extras` 的 266 个解析器测试各自通过、0 跳过 |
 | 依赖审计 | `pip-audit -r requirements.txt`：修复前 `pypdf 6.14.2` 14 条 + `pydantic-settings 2.14.1` 1 条（另有环境自带的 pip / setuptools，不在锁文件里），修复后 "No known vulnerabilities found"；`npm audit --omit=dev`：修复前 3 个（critical / high / moderate，`jspdf` 12 条、`dompurify` 17 条），修复后 0 |
-| Dockerfile 整体解析 | `scripts/check_docker_extras.py`：HEAD → 不可满足（退出 1，`patent-client>=5.0` 与 `pypdf==6.14.2`）；新树 → 328 个包解析成功、每个 pin 保持。逐个 extra 对 pin 解析：除 `patents` 外全部可解析 |
-| 逐 extra 漂移检查（pip `--dry-run --report` + `check_pins.py`，与 CI 同一流程，本地） | `file_ingest` / `science` / `llm` / `optimize` / `pydoe` / `export` / `intel` 全部通过；`patents` 恰好报 `httpx 0.28.1→0.27.2`、`pypdf 6.19.0→4.3.1`（已记入允许清单） |
+| Dockerfile 整体解析 | `scripts/check_docker_extras.py`：HEAD → 不可满足（退出 1，`patent-client>=5.0` 与 `pypdf==6.14.2`）；新树 → 328 个包解析成功、每个 pin 保持。逐个 extra 对 pin 解析：全部可解析（`patents` extra 已随 `patent-client` 删除，§2 #63） |
+| 逐 extra 漂移检查（pip `--dry-run --report` + `check_pins.py`，与 CI 同一流程，本地） | `file_ingest` / `science` / `llm` / `optimize` / `pydoe` / `export` / `intel` 全部通过，**没有任何豁免**（曾经唯一的 `patents` 行——`httpx 0.28.1→0.27.2`、`pypdf 6.19.0→4.3.1`——随 `patent-client` 一起删除，§2 #63） |
 | 一键安装的约束（真 pip，`--dry-run`） | 由 `pin_constraints()` 生成的约束文件被 pip 接受；`ddgs` 装得上；**无下限的 `patent-client` 在约束下被回溯到 3.2.6**——所以目录条目现在带 extra 自己的下限，而不是裸名字 |
 | OCR 真实验证（干净 venv） | `rapidocr==3.9.2` 不带 onnxruntime → 构造引擎抛 `ImportError`；加上 `onnxruntime` 后离线读出渲染图上的 "Zinc phosphate 15.0 parts E-44"；包内带 3 个 `.onnx`（31 MB） |
 | 声明 / 探针 / 文档一致性扫描 | `optional_import` 探针与目录 ↔ extras ↔ Dockerfile 逐项对；`.env.example` / 文档 / compose / 脚本里的 `FORMUMIND_*` 全部对得上 Settings 字段或 `config.py` 登记的非 Settings 变量 |
 | `backend-windows`（读日志逐个分片核对） | `1d5ac38`：8 个分片里 6 个绿、2 个红——红的两个都是 §2 #60（16 个 setup / teardown 错误），另有两个原因未明的慢测试（§4 #10）。**`b8fe985`：8 / 8 分片全绿**，耗时 2:42–7:06，没有测试触发 60 s 的栈转储，原来慢的那个测试 3 s；两个分片的 `FAILED` / `ERROR` 清单为空 |
 | CI `b8fe985`（本轮最终推送） | **19 个 job 全绿**：阻塞的 `backend`（含 ruff 与 rigor gate）/ `frontend`，以及非阻塞的 `backend-newer-python`（3.12 / 3.13，首次）、`backend-extras`、`backend-baybe`、`golden`、`deepeval`、`api-contract`、`api-fuzz`、`installer-windows`、8 个 `backend-windows` 分片；另有 `Dependency pins`（9 个 job，含新的 `dockerfile-extras`，`intel` 零豁免）与新的 `Dependency audit`（pip-audit + npm audit）也是绿的 |
+| 合并 main（你的 Windows 安装器改写，`d13cc88`） | `install.ps1`（你的分层版 + 3.11 下限 / 3.14 警告，CRLF + BOM 原样保留）、`install.bat`（两边的改动合在一起：纯 ASCII 注释、`%*`、双击才 `pause`、退出码回传）、`test_installers*.py` 随之更新（真 PowerShell 测试改为按你的探测函数 `Invoke-Probe` 抽取）。合并后 `origin/main` 是分支的祖先，可直接快进。CI `935169b`：**19 个 job 全绿**，其中 `installer-windows` 第一次跑你的新安装器（默认 extras）通过 |
+| 后端全量（最终树 `ac1bcb3`，3.11，干净检出） | **4632 通过 / 26 跳过 / 4 取消选择，8 分 36 秒**（用例收集数 4662）。跳过全是环境原因——faiss / baybe / langgraph / Redis / pwsh 没装（CI 里装了对应依赖的 job 都通过，包括真跑 `pwsh` 的那 8 条）；本轮新增的测试没有一条被跳过 |
+| 前端（最终树） | `tsc --noEmit` / `eslint --max-warnings 0` / `vite build` 通过；`vitest run` **136 个文件 / 675 个用例通过** |
+| EPO OPS 实机（只有令牌接口与错误体） | 令牌接口：Basic + 表单 → `401 ClientId is Invalid`（走应用自己的 `make_client` + 代理 + TLS，应用把它报成 `auth` 并带原话）；无效 Bearer → `400 invalid_access_token`。后者**与路径无关**（网关先验令牌，连不存在的路径都这样答），所以它**不能证明检索路径、`X-OPS-Range`、`ta` 索引是对的**——带凭据的检索没跑过，见 §4-13 |
+| CI `ac1bcb3`（暂停标志 + 专利检索） | **全绿**：`CI`（19 个 job）、`Dependency pins`（矩阵里已没有 `patents` 行、没有任何豁免）、`Dependency audit` |
 
 没有验证的部分：`install.bat` 的**双击**行为（Windows PowerShell 5.1 下真实执行 `install.ps1` 已由 CI 验证）；Docker compose / 镜像真构建真起栈（镜像装的是全部可选依赖，含 torch / docling，构建一次要十几分钟，没放进 CI）；**真实**（非合成）文档上的解析质量——合并单元格、跨页表、双栏论文、公式、扫描件 OCR；docling / marker / MinerU 各档；带真实 LLM 的问答质量；Redis 在线时的写锁行为，以及 Redis breaker 在真实 Redis 断开 / 恢复时的表现（本地与 CI 都没有 Redis：breaker 用假客户端测，写锁走"无锁继续"分支）；一键安装在**真实 pip 上真装包**的行为（约束文件的格式与"拒绝"行为用真 pip 的 `--dry-run` 验证过，安装本身用假 `subprocess.run` 测）；Docker 镜像"构建出来能不能跑"（新增的解析关卡只回答"装得出来吗、pin 还在吗"）。
 
@@ -242,6 +247,7 @@ pyright 的 11 处 `Requirement(...)` "缺参数"是误报（`Field(0, ge=0)` �
 - `scripts/audit/contract/`：`extract_ts.cjs`（抽取前端封装）→ `dump_openapi.py`（导出后端 schema）→ `compare.py`（逐类对比，见文件头注释）。输出是**线索而不是结论**：别名、before-validator 兼容入口、FormData 成员都会被报成"未知字段"。本轮真正有价值的命中集中在 `resp_array_vs_other`、`form_field_unknown_to_backend`、`body_required_not_sent`。
 - `backend/tests/test_openapi_smoke_walk.py`：OpenAPI 全量游走，已进 CI（只验证 HTTP 层，任务派发回 202 不跑任务体；见 §2 #28 的教训）。
 - `backend/tests/test_document_parsers_real.py` + `test_table_converter_output.py` 里的真实文件段：用 python-docx / openpyxl / PyMuPDF 现场生成数据表文件，经 `POST /api/ingest` 走完整链路，再断言"表格在知识库里、带 caption / 表头 / 单位、按内容可检索"。下次要验合并单元格、跨页表、新格式时，直接在这里加一个生成函数即可。CI 的 `backend-extras` job 会跑它们，且把"被跳过"当失败。
+- `scripts/audit/epo_ops_smoke.py`：用**你的** EPO 凭据把专利检索整条链路跑一遍（令牌 → 一页检索 → 应用实际调用的 provider，`--raw` 打印原始回复与配额头；不会打印 key / secret）。这是 §2 #63 唯一没做的那一步验证。
 - `backend/tests/test_installers_pwsh.py`：用真实 PowerShell 解析并执行 `install.ps1` 的辅助函数；按 Windows PowerShell 5.1 的方式（无 BOM → ANSI）解码后再解析，可复现"没有 BOM 就解析失败"。
 - `scripts/audit/api_fuzz.py`：Schema 引导的 API 模糊测试（见 §1）。在 `backend/` 下运行 `python ../scripts/audit/api_fuzz.py [种子 ...] [--limit=N]`，有发现时退出码 1；CI 里有一个非阻塞的 `api-fuzz` job 每次用不同的种子跑。
 - `scripts/audit/text_sweep.py`：对 `app/services` 等的每个"文本入口函数"喂 6000 字符的单字符重复串，报告耗时超过 0.7 s 的——找正则灾难性回溯 / 二次复杂度（见 §1）。名字像网络往返的条目（PubChem / OpenAlex 查询）也会显得慢，先看名字再追。
