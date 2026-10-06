@@ -386,6 +386,11 @@ def _apply_answer_gates(
         getattr(settings, "chat_conflict_section_enabled", True)
         and verified
     ):
+        # P0-3: verified.evidence_indices 是相对 Wiki 过滤后列表的下标，
+        # 渲染时必须映射回完整 citations 序号，否则引用错位。
+        _filtered = _claims_evidence(citations)
+        _full_idx = {id(e): i for i, e in enumerate(citations)}
+        _f2f = [_full_idx[id(e)] for e in _filtered if id(e) in _full_idx]
         conflicts = [
             v for v in verified if v.verdict == ClaimVerdict.conflicting
         ]
@@ -393,7 +398,9 @@ def _apply_answer_gates(
             lines = ["\n\n【证据冲突】以下论断的证据相互矛盾，请谨慎采信："]
             for v in conflicts:
                 refs = ", ".join(
-                    f"[^{i + 1}]" for i in (v.evidence_indices or [])
+                    f"[^{_f2f[i] + 1}]"
+                    for i in (v.evidence_indices or [])
+                    if 0 <= i < len(_f2f)
                 )
                 src = f"（相关证据 {refs} 结论不一致）" if refs else ""
                 lines.append(f"- 「{v.text}」{src}")
@@ -641,20 +648,23 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                 try:
                     from ..services.reviewer_fix_loop import run_fix_loop
 
-                    def _repair(_q: str, auditor: str) -> str:
-                        repaired, _ = answer_question(
+                    def _repair(_q: str, auditor: str):
+                        # P0-4: 返回 (answer, citations)，供 fix-loop 重绑引用。
+                        repaired, cited = answer_question(
                             f"{question}\n\n{auditor}\n\n请输出修订后的完整回答：",
                             sources,
                             domain=req.domain,
                             history=history,
                             structure=req.structure,
                         )
-                        return _ensure_answer(repaired)
+                        return _ensure_answer(repaired), cited
 
                     answer, reviewer_fix = run_fix_loop(
                         question=question,
                         answer=answer,
-                        citations=_claims_evidence(citations),
+                        # P0-4: 传完整 citations（答案 [^n] 与之对齐）；loop 内
+                        # 部 review 时自行过滤 Wiki，重绑在完整空间做。
+                        citations=citations,
                         review=evidence_reviewer,
                         settings=settings,
                         repair_fn=_repair,
@@ -663,6 +673,8 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                     )
                     if reviewer_fix and reviewer_fix.get("findings"):
                         evidence_reviewer = reviewer_fix["findings"]
+                    if reviewer_fix and reviewer_fix.get("citations"):
+                        citations = reviewer_fix["citations"]
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("reviewer fix-loop skipped: %s", exc)
 
@@ -985,20 +997,23 @@ def _finalize_evidence_fields(
             try:
                 from ..services.reviewer_fix_loop import run_fix_loop
 
-                def _repair(_q: str, auditor: str) -> str:
-                    repaired, _ = answer_question(
+                def _repair(_q: str, auditor: str):
+                    # P0-4: 返回 (answer, citations)，供 fix-loop 重绑引用。
+                    repaired, cited = answer_question(
                         f"{question}\n\n{auditor}\n\n请输出修订后的完整回答：",
                         list(sources or citations),
                         domain=domain,
                         history=history,
                         structure=structure,
                     )
-                    return _ensure_answer(repaired)
+                    return _ensure_answer(repaired), cited
 
                 answer, reviewer_fix = run_fix_loop(
                     question=question,
                     answer=answer,
-                    citations=_claims_evidence(citations),
+                    # P0-4: 传完整 citations（答案 [^n] 与之对齐）；loop 内
+                    # 部 review 时自行过滤 Wiki，重绑在完整空间做。
+                    citations=citations,
                     review=reviewer,
                     settings=settings,
                     repair_fn=_repair,
@@ -1007,6 +1022,8 @@ def _finalize_evidence_fields(
                 )
                 if reviewer_fix and reviewer_fix.get("findings"):
                     reviewer = reviewer_fix["findings"]
+                if reviewer_fix and reviewer_fix.get("citations"):
+                    citations = reviewer_fix["citations"]
             except Exception as exc:  # noqa: BLE001
                 logger.debug("stream fix-loop skipped: %s", exc)
     return answer, doi_results, reviewer, reviewer_fix, citation_expand

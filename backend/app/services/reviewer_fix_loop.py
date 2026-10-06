@@ -59,6 +59,31 @@ def save_dispositions(key: str, claims: dict[str, ClaimDisposition]) -> None:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def rebind_citations_to_answer(answer: str, citations: list) -> tuple[str, list]:
+    """P0-4: rebind the citations list to the answer's actual [^n] references.
+
+    After ``repair_fn`` produces a new answer, the citation set may have
+    changed (added/dropped/reordered). Returns ``(rebound_answer,
+    rebound_citations)`` where ``rebound_citations`` holds exactly the cited
+    sources in order of first appearance and the answer's ``[^n]`` markers
+    are renumbered to match. Out-of-range markers (hallucinated citations)
+    are left untouched in the text so the reviewer flags them as unsupported.
+    """
+    from .citation_binder import extract_citation_indices
+
+    used = extract_citation_indices(answer)
+    valid = [n for n in used if 1 <= n <= len(citations)]
+    old_to_new = {old: new for new, old in enumerate(valid, 1)}
+    new_citations = [citations[old - 1] for old in valid]
+
+    def _repl(m: re.Match) -> str:
+        old = int(m.group(1))
+        return f"[^{old_to_new[old]}]" if old in old_to_new else m.group(0)
+
+    rebound_answer = re.sub(r"\[\^(\d+)\]", _repl, answer)
+    return rebound_answer, new_citations
+
+
 def build_auditor_note(review: dict[str, Any]) -> str:
     notes = review.get("notes") or []
     suggestion = review.get("suggestion") or ""
@@ -504,11 +529,26 @@ def run_fix_loop(
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("fix-loop repair_fn failed: %s", exc)
                     break
+                # P0-4: repair_fn 可返回 (answer, citations) 元组；若只返回
+                # str，则按新答案实际的 [^n] 对传入的 citations 重绑。
+                repair_citations = citations
+                if isinstance(repaired, tuple):
+                    repaired, repair_citations = repaired
+                    repair_citations = repair_citations or citations
                 if not (repaired or "").strip() or repaired.strip() == current.strip():
                     break
-                current = repaired
+                # P0-4: repair 可能增删/重排引用；按新答案实际的 [^n] 重绑
+                # citations，否则 review_answer 拿到的仍是入口时的旧列表。
+                current, citations = rebind_citations_to_answer(repaired, repair_citations)
                 rounds_done += 1
-                nxt = review_answer(question, current, citations, settings=settings) or last_review
+                # Review 仍只看 raw evidence（Wiki 编译页不能作 raw 佐证），
+                # 但重绑在完整空间做，保证答案 [^n] 与 citations 一致。
+                try:
+                    from ..services.wiki.retrieve import filter_raw_evidence
+                    _review_cits = filter_raw_evidence(citations)
+                except Exception:
+                    _review_cits = citations
+                nxt = review_answer(question, current, _review_cits, settings=settings) or last_review
                 history_findings.append(nxt)
                 dispositions = _update_dispositions(dispositions, nxt)
                 last_review = nxt
@@ -549,6 +589,9 @@ def run_fix_loop(
                 "run_id": run["run_id"],
                 "run_status": run["status"],
                 "run_outcome": run["outcome"],
+                # P0-4: 每轮 repair 后 citations 已按新答案重绑；调用方用此
+                # 更新自己手里的 citations，避免答案与引用脱钩。
+                "citations": citations,
             }
     except Exception as exc:  # noqa: BLE001
         logger.debug("fix-loop failed open: %s", exc)
