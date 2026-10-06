@@ -8,7 +8,7 @@
 # for the image's own HEALTHCHECK.
 #
 # Building takes tens of minutes and several GB (torch CPU, docling, marker, mineru), so it does not run on every commit:
-# when the Dockerfile or the script changes, weekly (upstream wheels move without this repository changing), and on demand.
+# when the Dockerfile, the patcher it runs or the script changes, weekly (upstream wheels move without this repository changing), and on demand.
 # It is not part of the CI workflow's checks; a red run here is a broken image.
 name: Docker image smoke
 
@@ -16,6 +16,8 @@ on:
   push:
     paths:
       - "backend/Dockerfile"
+      - "backend/scripts/apply_patches.py"   # the image's RUN steps: the patcher once needed git, which the base image lacks
+      - "backend/patchspec/**"
       - "scripts/docker_smoke.sh"
       - ".github/workflows/docker-smoke.yml"
   schedule:
