@@ -28,6 +28,7 @@ def sqlite_write_lock(
     Reduced default timeout/blocking to 30s to fail fast and surface contention
     rather than stalling callers for five minutes.
     """
+    from ..redis_compat import client_kwargs
     from ..services import redis_breaker
 
     if not redis_url or redis_breaker.is_open():
@@ -46,6 +47,7 @@ def sqlite_write_lock(
             decode_responses=True,
             socket_timeout=redis_breaker.SOCKET_TIMEOUT_S,
             socket_connect_timeout=redis_breaker.CONNECT_TIMEOUT_S,
+            **client_kwargs(),
         )
         lock = client.lock(_LOCK_KEY, timeout=timeout, blocking_timeout=blocking_timeout)
         acquired = lock.acquire(blocking=True, blocking_timeout=blocking_timeout)

@@ -1262,6 +1262,7 @@ defaults.
 | `FORMUMIND_NOTEBOOKLM_STORAGE_PATH` | `./data/notebooklm_auth.json` | session file written by `notebooklm login` |
 | `FORMUMIND_DB_URL` | `sqlite:///./data/formumind.db` | **Production must use Postgres** (`postgresql://user:pass@host:5432/formumind`). SQLite is for single-process / CI only — multi-worker write load risks `database is locked`. |
 | `FORMUMIND_REDIS_URL` | `redis://localhost:6379/0` | Celery broker |
+| `FORMUMIND_REDIS_PROTOCOL` | `2` | Redis wire protocol: `2` works with any Redis (Windows ports, Ubuntu 20.04); `3` needs Redis ≥ 6.0 |
 | `FORMUMIND_CELERY_EAGER` | `true` | run tasks in-process without a broker. **Operator-owned** — see below |
 | `FORMUMIND_OPTIMIZE_ITERATIONS` | `24` | optimization iterations |
 | `FORMUMIND_TOP_N_FORMULAS` | `5` | leaderboard size |

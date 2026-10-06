@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from celery import Celery
 
+from .. import redis_compat
 from ..config import get_settings
 
 try:
@@ -26,11 +27,16 @@ except Exception:  # pragma: no cover - never block worker boot on this
 
 settings = get_settings()
 
+# The protocol is named explicitly on every Redis connection (app/redis_compat.py): redis-py 8 opens with RESP3 (`HELLO 3`),
+# which Redis < 6 - the Windows ports, Ubuntu 20.04 - answers with "unknown command". The result backend reads it from its URL;
+# kombu has no such option, so the broker goes through a transport that adds it.
 celery_app = Celery(
     "formumind",
     broker=settings.redis_url,
-    backend=settings.redis_url,
+    backend=redis_compat.with_protocol(settings.redis_url),
 )
+if redis_compat.uses_url_protocol(settings.redis_url):
+    celery_app.conf.broker_transport = "app.worker.kombu_resp2:Transport"
 celery_app.conf.update(
     task_always_eager=settings.celery_eager,
     task_eager_propagates=True,

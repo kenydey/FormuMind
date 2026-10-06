@@ -67,12 +67,14 @@ class SessionMemoryService:
             import redis.asyncio as rredis
 
             from ...config import get_settings
+            from ...redis_compat import client_kwargs
 
             self._redis = rredis.from_url(
                 get_settings().redis_url,
                 encoding="utf-8",
                 decode_responses=True,
                 socket_connect_timeout=redis_breaker.CONNECT_TIMEOUT_S,
+                **client_kwargs(),
             )
         return self._redis
 

@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # and the frontend proxy times out (502, fixed 2026-09-05). Standalone /
     # broker-less deployments can opt back in with FORMUMIND_CELERY_EAGER=true.
     redis_url: str = "redis://localhost:6379/0"
+    # Wire protocol of every Redis connection (broker, result backend, locks, caches). 2 works against any Redis server, from
+    # Windows' 3.0.504 / 5.0.14.1 ports to 7.x; 3 (redis-py 8's own default) needs Redis >= 6.0 and fails with
+    # "unknown command `HELLO`" against anything older. See app/redis_compat.py.
+    redis_protocol: int = 2
     celery_eager: bool = False
 
     # CORS origins for the Vite dev server.

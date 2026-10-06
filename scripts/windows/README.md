@@ -23,6 +23,25 @@ Neither the installer nor the runner activates the venv: they call
 - **Node.js 20+** — for the Vite frontend
 - **Docker Desktop** — Redis (:6379), Neo4j (:7687); optional Datalab ELN (:5001)
 
+### Redis, without Docker
+
+The task queue (Celery worker, upload processing, SSE progress) needs a Redis on `:6379`. Any of these works, because the
+application speaks RESP2 to Redis unless told otherwise (`FORMUMIND_REDIS_PROTOCOL`, default `2`). redis-py 8's own default
+needs Redis ≥ 6.0 and fails on every older one - the 5.0.14.1 port below included - with ``unknown command `HELLO` ``:
+
+| Redis | Version | Notes |
+|---|---|---|
+| [Memurai](https://www.memurai.com/) | 7.x | The supported native choice (it has a free Developer edition). |
+| [tporadowski/redis](https://github.com/tporadowski/redis/releases) | 5.0.14.1 | An unofficial port that runs as a plain process; `scripts/windows/smoke-stack.ps1` and the `windows-stack` CI job run the whole stack against it. |
+| Redis in WSL2 | 6.x / 7.x | `sudo apt install redis-server`; reachable on `localhost:6379` from Windows. |
+| Docker Desktop | 7.x | `docker compose up -d redis` (what `start-dev.ps1` does unless `-NoInfra`). |
+
+### Datalab (the ELN)
+
+Datalab is a Linux-container product: it needs Docker Desktop **with Linux containers**, and there is no native Windows build.
+Without it `start-dev.ps1` says `Datalab ELN unreachable ... starting in soft-degrade mode (local sqlite ledger)` and carries on:
+DOE and the workbench stay usable, only ELN-backed campaigns need it.
+
 Python version matters: ColBERT (`ragatouille` → `voyager`) has Windows wheels
 only up to **CPython 3.12**. On 3.13/3.14 the installer skips ColBERT and warns,
 because `pip install -e ".[a,b,c]"` resolves every extra in a single
@@ -123,7 +142,8 @@ and `FORMUMIND_ENV_FILE` pointing at the repo `.env` when present.
 | `No matching distribution found for torch` | Use the CPU index: `pip install torch --extra-index-url https://download.pytorch.org/whl/cpu`. |
 | Frontend reports missing dependencies | `cd frontend; npm install --legacy-peer-deps`. |
 | `/health` shows `status: degraded` | Expected without LLM/ELN credentials. Check `database.ok`, `task_broker.reachable`, `datalab.reachable`. |
-| Redis unreachable and Docker absent | Install Memurai, or run Redis inside WSL2. Celery and SSE task progress need it. |
+| Redis unreachable and Docker absent | Install Memurai, a plain-process Redis (tporadowski), or run Redis inside WSL2 - see *Redis, without Docker* above. Celery and SSE task progress need it. |
+| `celery.err.log`: ``unknown command `HELLO` `` / every upload answers 503 | `FORMUMIND_REDIS_PROTOCOL=3` against a Redis older than 6.0. Remove it (the default, `2`, works with every Redis). |
 
 ## Notes
 

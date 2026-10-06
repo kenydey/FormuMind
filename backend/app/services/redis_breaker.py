@@ -103,7 +103,11 @@ def client_from_url(url: str, **kwargs):
     """A breaker-guarded ``redis.Redis``; raises ``ConnectionError`` at once while the breaker is open."""
     import redis
 
+    from ..redis_compat import client_kwargs
+
     refuse_if_open()
     kwargs.setdefault("socket_connect_timeout", CONNECT_TIMEOUT_S)
     kwargs.setdefault("socket_timeout", SOCKET_TIMEOUT_S)
+    for name, value in client_kwargs().items():  # the protocol, said explicitly: see app/redis_compat.py
+        kwargs.setdefault(name, value)
     return GuardedRedis(redis.Redis.from_url(url, **kwargs))

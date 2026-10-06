@@ -187,10 +187,13 @@ async def stream_task_progress(task_id: str, request: Request) -> StreamingRespo
                 redis_breaker.refuse_if_open()
                 import redis.asyncio as aioredis
 
+                from ..redis_compat import client_kwargs
+
                 client = aioredis.from_url(
                     settings.redis_url,
                     decode_responses=True,
                     socket_connect_timeout=redis_breaker.CONNECT_TIMEOUT_S,
+                    **client_kwargs(),
                 )
                 await client.ping()
                 pubsub = client.pubsub()

@@ -13,6 +13,7 @@ from ..services.errors import degrade_return, log_handled_exception
 import json
 
 from ..config import get_settings
+from ..redis_compat import client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def _client():
     try:
         import redis  # redis is a core dependency (Celery broker)
 
-        client = redis.Redis.from_url(s.redis_url, socket_connect_timeout=0.2)
+        client = redis.Redis.from_url(s.redis_url, socket_connect_timeout=0.2, **client_kwargs())
         client.ping()
         return client
     except Exception as exc:
