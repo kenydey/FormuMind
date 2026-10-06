@@ -227,7 +227,10 @@ def test_hybrid_entity_boost_lifts_entity_chunk(stores, monkeypatch):
     sid_a = src.create(filename="a.md", title="a", source_kind="local",
                        full_text="x", content_hash="ha")
     chk.replace_for_source(sid_a, [{
-        "text": "该助剂可改善涂层流平性，添加量为总配方的 0.5%。",
+        # The CAS lives in the metadata only, so what is tested is the boost. The chunk still has to share a word with the
+        # query to be a candidate at all: it used to get in through the blank before "0.5%", which the tokenizer
+        # treated as a term (a match of every query containing a space with every text containing one).
+        "text": "该硅烷助剂可改善涂层附着力，添加量为总配方的 0.5%。",
         "meta": {"chem": [{"type": "cas", "value": "2530-83-8"}]},
     }])
     sid_b = src.create(filename="b.md", title="b", source_kind="local",

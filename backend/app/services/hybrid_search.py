@@ -18,6 +18,7 @@ keeps the gate warm for a few queries after p95 cools.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -133,23 +134,45 @@ def _ann_gate_base(*, corpus_n: int, settings) -> bool:
     return bool(near_cap or hot)
 
 
+_CJK = "\u3400-\u4dbf\u4e00-\u9fff"
+_CJK_CHAR = re.compile(f"[{_CJK}]")
+# A word is a run of letters/digits of any script (``α-pinene`` keeps its ``α``, ``für`` its ``ü``); a dotted number stays whole
+# (``6.5``, ``3.1.2``), so a figure still tells near-identical documents apart.
+_WORD = re.compile(rf"[^\W_{_CJK}]+(?:\.[0-9]+)*")
+_WORD_OR_CJK_CHAR = re.compile(rf"[{_CJK}]|[^\W_{_CJK}]+(?:\.[0-9]+)*")
+
+
 def _tokenize(text: str) -> list[str]:
-    """Tokenize text for BM25, using jieba for Chinese when available."""
-    text = (text or "").strip()
+    """Tokenize text for BM25, using jieba for Chinese when available.
+
+    Every path lowercases and drops punctuation, and gives an English word or a figure the same token whether or not Chinese
+    surrounds it, so ``ISO`` in a query matches ``(iso`` in a document and ``0.5%`` matches ``0.5 %``. They did not: text
+    without Chinese was lowercased and split on blanks (``(ISO 4624 / ASTM D4541)`` -> ``(iso``, ``4624``, ``/``, ``astm``,
+    ``d4541)``) while text with Chinese went through jieba as it was, case and blanks included (``ISO``, ``' '``). A Chinese
+    question holding an English term - ``EEW 190 AHEW 95 每 100 份树脂需要多少份固化剂`` - therefore never matched the English
+    document that answers it, except through its digits. Measured by evals/suites/retrieval.py over the same 52 documents:
+    3 of the 12 numeric queries found no relevant document in the top ten (recall@10 0.71 -> 1.00 now), success@1 over all
+    answerable queries went 0.70 -> 0.74.
+    """
+    text = (text or "").strip().lower()
     if not text:
         return []
-    has_cjk = any("\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf" for c in text)
-    if has_cjk:
-        try:
-            import jieba
+    if not _CJK_CHAR.search(text):
+        return _WORD.findall(text)
+    try:
+        import jieba
 
-            return list(jieba.cut(text))
-        except ImportError:
-            logger.warning(
-                "jieba not installed; falling back to character-level tokenization for Chinese"
-            )
-            return list(text)
-    return text.lower().split()
+        pieces = jieba.cut(text)
+    except ImportError:
+        logger.warning("jieba not installed; falling back to character-level tokenization for Chinese")
+        return _WORD_OR_CJK_CHAR.findall(text)  # a Chinese character each; an English word stays a word
+    tokens: list[str] = []
+    for piece in pieces:
+        if _CJK_CHAR.search(piece):
+            tokens.append(piece)  # Chinese, as the dictionary cut it
+        else:
+            tokens.extend(_WORD.findall(piece))  # blanks and punctuation vanish; ``0.5%`` -> ``0.5``
+    return tokens
 
 
 def _to_response(c) -> DocumentChunkResponse:
