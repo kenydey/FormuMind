@@ -811,6 +811,33 @@ class DOECycleRunRow(Base):
     __table_args__ = (Index("ix_doe_cycle_runs_project", "project_id"),)
 
 
+class DOECyclePauseRow(Base):
+    """The pause flag of one campaign's closed loop.
+
+    The loop / doe_cycle tasks refuse to start while a campaign has an *active* pause. It lives in the
+    database - the one store the API process and every worker already share for ``loop_history`` - and not
+    in Redis, which a development or eager-mode install does not have (pausing answered 503 there) and which
+    answered "not paused" whenever it was unreachable, i.e. lost the user's pause exactly when something was
+    wrong.
+
+    * no row                     - running;
+    * ``lapsed_at`` is NULL      - paused, until ``paused_until`` (NULL = until somebody resumes);
+    * ``lapsed_at`` is set       - the pause ran out on its own at that moment and the loop is running again;
+      kept so the UI can say so instead of the loop starting unannounced. An explicit resume deletes the row.
+
+    Rows go with their campaign (``ON DELETE CASCADE``).
+    """
+
+    __tablename__ = "doe_cycle_pauses"
+
+    campaign_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), primary_key=True
+    )
+    paused_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lapsed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class InferredSystemRow(Base):
     """LLM-inferred formulation-system constraints, persisted for reuse (P2).
 

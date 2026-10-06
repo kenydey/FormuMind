@@ -2463,17 +2463,21 @@ export const apiMethods = {
   setWikiChatMode: (mode: string) =>
     post<{ mode: string; status: string }>("/api/settings/wiki-chat-mode", { mode }),
 
-  postDoeCyclePause: (campaignId: number | string, isPaused: boolean) =>
-    post<{ status: string; message: string }>(
+  // ttlHours（仅暂停时）：多少小时后自动恢复；0 = 手动恢复前一直暂停；省略 = 服务端默认（24 h，FORMUMIND_DOE_CYCLE_PAUSE_TTL_HOURS）
+  postDoeCyclePause: (campaignId: number | string, isPaused: boolean, opts: { ttlHours?: number } = {}) =>
+    post<{ status: string; message: string; isPaused?: boolean; pausedUntil?: string | null }>(
       `/api/experiments/hooks/pause-doecycle/${campaignId}`,
-      { isPaused },
+      opts.ttlHours != null ? { isPaused, ttlHours: opts.ttlHours } : { isPaused },
     ),
 
+  // 时间均为 ISO-8601 UTC（…Z）。pausedUntil=null 表示恢复前一直暂停；lapsedAt = 暂停自行到期的时刻（一周内）
   getDoeCycleStatus: (campaignId: number | string) =>
     get<{
       isPaused: boolean;
       lastUpdated: string | null;
       campaignId: number;
+      pausedUntil?: string | null;
+      lapsedAt?: string | null;
       degraded?: boolean;
     }>(`/api/experiments/hooks/doecyle-status/${campaignId}`),
 

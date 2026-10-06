@@ -97,11 +97,12 @@ def _campaign_loop_context(campaign_id: int) -> tuple[list[dict[str, float]], bo
 def campaign_loop_status(campaign_id: int) -> dict[str, Any]:
     """Surface loop state for Workbench / Hub: idle|running|converged|paused|failed.
 
-    Derived from ``loop_history`` + Redis pause flag (no new tables).
+    Derived from ``loop_history`` + the campaign's pause flag (``db.doe_pause_store``).
     ``running`` is inferred when the latest history entry lacks a terminal
-    ``converged``/``error`` and a Redis pause is not set — callers that know
+    ``converged``/``error`` and the loop is not paused — callers that know
     an in-flight ``loop_task_id`` may override.
     """
+    from ..db import doe_pause_store as pause_store
     from ..db.campaign_store import get_campaign_store
 
     camp = get_campaign_store().get_campaign_sync(int(campaign_id))
@@ -110,7 +111,8 @@ def campaign_loop_status(campaign_id: int) -> dict[str, Any]:
 
     history = list(getattr(camp, "loop_history", None) or [])
     rounds = len(history)
-    paused = is_doecycle_paused(int(campaign_id))
+    pause = pause_store.read_state(int(campaign_id))
+    paused = pause.paused
     last = history[-1] if history else None
     last_rmse = dict((last or {}).get("rmse_by_metric") or {}) if last else {}
     last_error = str((last or {}).get("error") or (last or {}).get("loop_error") or "")
@@ -120,7 +122,7 @@ def campaign_loop_status(campaign_id: int) -> dict[str, Any]:
     if paused:
         status = "paused"
         if not message:
-            message = "DOE 周期已暂停"
+            message = "DOE 周期已暂停（到期自动恢复）" if pause.paused_until else "DOE 周期已暂停（恢复前一直暂停）"
     elif last_error:
         status = "failed"
         if not message:
@@ -146,6 +148,7 @@ def campaign_loop_status(campaign_id: int) -> dict[str, Any]:
         "rounds": rounds,
         "converged": converged,
         "paused": paused,
+        "paused_until": pause_store.utc_iso(pause.paused_until) if paused else None,
         "last_rmse_by_metric": last_rmse,
         "last_error": last_error or None,
         "message": message,
@@ -270,58 +273,69 @@ def _safe_loop(task_id: str, payload: dict) -> None:
 
 
 # ── DOE cycle pause/resume hooks ─────────────────────────────────────────
-def pause_resume_doecyle(campaign_id: int, is_paused: bool) -> bool:
-    """Pause or resume a DOE cycle for a campaign.
+# The flag lives in the database (``db.doe_pause_store``), not in Redis: pausing has to work where there is no Redis
+# (development, eager mode) and must not read as "not paused" when something is unreachable.
+def pause_resume_doecyle(campaign_id: int, is_paused: bool, *, ttl_hours: float | None = None) -> bool:
+    """Pause or resume a campaign's closed loop; the loop / doe_cycle tasks check the flag before they start.
 
-    Implemented by setting a flag in Redis that the loop / doe_cycle tasks check.
+    A pause lasts ``ttl_hours`` - by default ``FORMUMIND_DOE_CYCLE_PAUSE_TTL_HOURS`` (24 h; 0 = until resumed) - and
+    then lapses on its own, which is logged and shown (``get_doecyle_status``). Returns False when the database
+    could not be written (the API answers 503); an unknown campaign raises ``CampaignNotFoundError``.
     """
-    try:
-        from ..worker.task_progress import _redis_client
+    from sqlalchemy.exc import SQLAlchemyError
 
-        client = _redis_client()
-        key = f"doe_cycle:paused:{campaign_id}"
-        client.set(key, str(is_paused).lower(), ex=86400)  # 24h TTL
-        logger.info("DOE cycle for campaign %s %s", campaign_id, "paused" if is_paused else "resumed")
+    from ..db import doe_pause_store as store
+
+    try:
+        if is_paused:
+            if ttl_hours is None:
+                ttl_hours = float(get_settings().doe_cycle_pause_ttl_hours)
+            state = store.set_paused(campaign_id, ttl_hours=ttl_hours)
+            logger.info(
+                "DOE cycle for campaign %s paused (%s)",
+                campaign_id,
+                f"until {store.utc_iso(state.paused_until)}" if state.paused_until else "until resumed",
+            )
+        else:
+            store.clear_pause(campaign_id)
+            logger.info("DOE cycle for campaign %s resumed", campaign_id)
         return True
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         logger.error("Failed to pause/resume DOE cycle for campaign %s: %s", campaign_id, exc)
         return False
 
 
 def is_doecycle_paused(campaign_id: int) -> bool:
-    """Whether the Redis pause flag is set for ``campaign_id`` (false on Redis errors)."""
-    status = get_doecyle_status(campaign_id)
-    return bool(status and status.get("isPaused"))
+    """Whether ``campaign_id`` has an active pause. A pause that has run out is recorded and logged by this read.
+
+    A database error propagates: the callers (loop dispatch, the worker tasks) are not allowed to take "could
+    not find out" for "not paused" and start the loop the user stopped.
+    """
+    from ..db import doe_pause_store as store
+
+    return store.read_state(campaign_id).paused
 
 
 def get_doecyle_status(campaign_id: int) -> Optional[Dict[str, Any]]:
-    """Get the current status of a DOE cycle for a campaign.
+    """The pause state of a campaign's closed loop (``None`` when the database cannot be read).
 
-    Returns: {"isPaused": bool, "lastUpdated": str, ...}
+    ``{"isPaused", "lastUpdated" (when the pause was set), "campaignId", "pausedUntil" (null = until resumed),
+    "lapsedAt"}`` - times are ISO-8601 UTC (``...Z``). ``lapsedAt`` is set for a week after a pause ran out on its
+    own, so the UI can say that the loop is running again and why.
     """
+    from ..clock import utcnow
+    from ..db import doe_pause_store as store
+
     try:
-        from ..worker.task_progress import _redis_client
-
-        client = _redis_client()
-        key = f"doe_cycle:paused:{campaign_id}"
-        is_paused_str = client.get(key)
-        if isinstance(is_paused_str, bytes):
-            is_paused_str = is_paused_str.decode("utf-8", errors="replace")
-        is_paused = str(is_paused_str).lower() == "true" if is_paused_str is not None else False
-
-        # Get last updated time from the key's TTL or metadata
-        ttl = client.ttl(key)
-        last_updated = None
-        if ttl is not None and ttl > 0:
-            # Approximate last updated based on remaining TTL
-            from datetime import datetime, timedelta
-            last_updated = (datetime.now() - timedelta(seconds=(86400 - ttl))).isoformat()
-
-        return {
-            "isPaused": is_paused,
-            "lastUpdated": last_updated,
-            "campaignId": campaign_id,
-        }
-    except Exception as exc:
+        state = store.read_state(campaign_id)
+    except Exception as exc:  # the UI polls this: degrade (see the endpoint) rather than fail it
         logger.error("Failed to get DOE cycle status for campaign %s: %s", campaign_id, exc)
         return None
+    lapsed_at = state.lapsed_at if state.lapsed_at and utcnow() - state.lapsed_at <= store.LAPSE_NOTICE else None
+    return {
+        "isPaused": state.paused,
+        "lastUpdated": store.utc_iso(state.paused_at) if state.paused else None,
+        "campaignId": campaign_id,
+        "pausedUntil": store.utc_iso(state.paused_until) if state.paused else None,
+        "lapsedAt": store.utc_iso(lapsed_at),
+    }

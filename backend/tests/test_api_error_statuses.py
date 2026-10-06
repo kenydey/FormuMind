@@ -5,8 +5,8 @@ Found by walking every OpenAPI operation with a minimal request: three of them a
 * ``GET /api/examples/{id}`` with an unknown id raised ``KeyError`` out of the handler;
 * ``POST /api/formulations/manual`` with no ingredients — validation drops the recipe and the handler then read
   ``forms[0]`` of an empty list (``IndexError``);
-* ``POST /api/experiments/hooks/pause-doecycle/{id}`` answered 500 whenever the Redis flag store could not be
-  written, while the status endpoint right next to it degrades gracefully.
+* ``POST /api/experiments/hooks/pause-doecycle/{id}`` answered 500 whenever the flag store (then Redis, now the
+  database) could not be written, while the status endpoint right next to it degrades gracefully.
 """
 from __future__ import annotations
 
@@ -61,18 +61,32 @@ def test_a_manual_formulation_with_ingredients_is_accepted(client):
     assert r.json()["formulation"]["source"] == "manual"
 
 
-def test_pausing_without_a_state_store_is_a_503(client, monkeypatch):
+@pytest.fixture()
+def campaign_id(client):
+    from app.db.database import default_session_factory
+    from app.db.models import Campaign
+
+    with default_session_factory()() as session:
+        row = Campaign(name="pause-target")
+        session.add(row)
+        session.commit()
+        return row.id
+
+
+def test_pausing_without_a_state_store_is_a_503(client, campaign_id, monkeypatch):
     import app.services.workbench_loop as loop
 
-    monkeypatch.setattr(loop, "pause_resume_doecyle", lambda campaign_id, is_paused: False)
-    r = client.post("/api/experiments/hooks/pause-doecycle/3", json={"isPaused": True})
+    monkeypatch.setattr(loop, "pause_resume_doecyle", lambda campaign_id, is_paused, **kw: False)
+    r = client.post(f"/api/experiments/hooks/pause-doecycle/{campaign_id}", json={"isPaused": True})
     assert r.status_code == 503
     assert "state store unavailable" in r.json()["detail"]
 
 
-def test_pausing_with_a_state_store_still_succeeds(client, monkeypatch):
-    import app.services.workbench_loop as loop
-
-    monkeypatch.setattr(loop, "pause_resume_doecyle", lambda campaign_id, is_paused: True)
-    r = client.post("/api/experiments/hooks/pause-doecycle/3", json={"isPaused": True})
+def test_pausing_with_a_state_store_still_succeeds(client, campaign_id):
+    r = client.post(f"/api/experiments/hooks/pause-doecycle/{campaign_id}", json={"isPaused": True})
     assert r.status_code == 200 and r.json()["status"] == "success"
+
+
+def test_pausing_a_campaign_that_does_not_exist_is_a_404_not_a_phantom_flag(client):
+    r = client.post("/api/experiments/hooks/pause-doecycle/3", json={"isPaused": True})
+    assert r.status_code == 404

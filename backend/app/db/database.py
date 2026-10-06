@@ -112,6 +112,7 @@ def make_engine(db_url: str) -> Engine:
     _ensure_source_document_columns(engine)
     _ensure_kb_entity_link_columns(engine)
     _ensure_material_columns(engine)
+    _ensure_doe_cycle_pause_table(engine)
     return engine
 
 
@@ -154,6 +155,23 @@ def _ensure_campaign_columns(engine: Engine) -> None:
         ),
     )
     _ensure_owner_id_column(engine, "campaigns")
+
+
+def _ensure_doe_cycle_pause_table(engine: Engine) -> None:
+    """The closed-loop pause flag's table (alembic 0045).
+
+    ``create_all`` covers fresh development databases; a production database that has not been migrated yet
+    needs it too - without it every loop dispatch, worker task and status poll would fail on a missing table
+    instead of merely lacking a new feature. Skipped while ``campaigns`` (its parent) does not exist.
+    """
+    from sqlalchemy import inspect
+
+    from .models import DOECyclePauseRow
+
+    if "campaigns" not in inspect(engine).get_table_names():
+        return
+    with _schema_ddl_lock:
+        DOECyclePauseRow.__table__.create(bind=engine, checkfirst=True)
 
 
 def _ensure_source_document_columns(engine: Engine) -> None:

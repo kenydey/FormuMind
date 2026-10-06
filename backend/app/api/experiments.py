@@ -23,6 +23,8 @@ from sqlalchemy import func, select, true
 from ..config import get_settings
 from ..db.campaign_store import get_campaign_store
 from ..db.campaign_types import WorkbenchRow
+from ..db.doe_pause_store import MAX_TTL_HOURS as MAX_PAUSE_TTL_HOURS
+from ..db.doe_pause_store import CampaignNotFoundError, campaign_owner
 from ..db.models import Campaign
 from ..domain.schemas import DOEPlan, ExperimentSubmission, ModelInfo, ProductDomain, Requirement, TrainingReport
 from ..services import io_export
@@ -1577,46 +1579,81 @@ def campaign_rounds(
 
 
 # ── Pause/Resume DOE cycle hooks ─────────────────────────────────────────
-@router.post("/experiments/hooks/pause-doecycle/{campaign_id}", response_model=Dict[str, str])
+class DoeCyclePauseRequest(BaseModel):
+    isPaused: bool = False
+    ttlHours: float | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_PAUSE_TTL_HOURS,
+        description=(
+            "仅暂停时有效：多少小时后自动恢复；0 = 手动恢复前一直暂停；省略 = 取 "
+            "FORMUMIND_DOE_CYCLE_PAUSE_TTL_HOURS（默认 24）"
+        ),
+    )
+
+
+@router.post("/experiments/hooks/pause-doecycle/{campaign_id}", response_model=Dict[str, Any])
 def pause_doecyle(
     campaign_id: int,
-    payload: Dict[str, bool],
-) -> Dict[str, str]:
-    """Pause or resume a DOE cycle for a campaign.
+    payload: DoeCyclePauseRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    """Pause or resume a campaign's DOE cycle.
 
-    Expected payload: {"isPaused": true/false}
+    Expected payload: ``{"isPaused": true/false, "ttlHours": 24}`` (``ttlHours`` optional, pausing only). The flag
+    is kept in the database, so this works without Redis; a pause lapses on its own after its TTL and the status
+    endpoint then reports ``lapsedAt``.
     """
+    from ..middleware.api_auth import assert_owner, get_current_owner
+    from ..services.workbench_loop import get_doecyle_status as _status
     from ..services.workbench_loop import pause_resume_doecyle
 
-    is_paused = payload.get("isPaused", False)
-    success = pause_resume_doecyle(campaign_id, is_paused)
+    try:
+        assert_owner(campaign_owner(campaign_id), get_current_owner(request))
+        success = pause_resume_doecyle(campaign_id, payload.isPaused, ttl_hours=payload.ttlHours)
+    except CampaignNotFoundError:
+        raise HTTPException(status_code=404, detail="Campaign not found") from None
 
     if success:
-        return {"status": "success", "message": f"DOE cycle {'paused' if is_paused else 'resumed'} for campaign {campaign_id}"}
-    else:
-        # The pause flag lives in the shared state store (Redis); failing to write it means the
-        # store is unavailable — report that as 503, not as a server bug (the status endpoint below
-        # already degrades the same way instead of answering 500).
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to {'pause' if is_paused else 'resume'} DOE cycle for campaign {campaign_id}: state store unavailable",
-        )
+        state = _status(campaign_id) or {}
+        return {
+            "status": "success",
+            "message": f"DOE cycle {'paused' if payload.isPaused else 'resumed'} for campaign {campaign_id}",
+            "isPaused": bool(state.get("isPaused", payload.isPaused)),
+            "pausedUntil": state.get("pausedUntil"),
+        }
+    # The flag is a database row; failing to write it means the database is unavailable — report that as
+    # 503, not as a server bug (the status endpoint below degrades the same way instead of answering 500).
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=f"Failed to {'pause' if payload.isPaused else 'resume'} DOE cycle for campaign {campaign_id}: state store unavailable",
+    )
 
 
 @router.get("/experiments/hooks/doecyle-status/{campaign_id}", response_model=Dict[str, Any])
 def get_doecyle_status(
     campaign_id: int,
+    request: Request,
 ) -> Dict[str, Any]:
     """Get the current status of a DOE cycle for a campaign.
 
-    Returns: {"isPaused": bool, "lastUpdated": str, "campaignId": int, ...}
+    Returns: ``{"isPaused", "lastUpdated" (when it was paused), "campaignId", "pausedUntil" (null = until resumed),
+    "lapsedAt" (a pause that ran out by itself within the last week)}``; times are ISO-8601 UTC.
     """
+    from ..middleware.api_auth import assert_owner, get_current_owner
     from ..services.workbench_loop import get_doecyle_status as _impl
 
+    try:
+        assert_owner(campaign_owner(campaign_id), get_current_owner(request))
+    except CampaignNotFoundError:
+        pass  # nothing to protect, and "not paused" is what an unknown campaign has always answered
     status_val = _impl(campaign_id)
     if status_val is None:
-        # Redis unavailable — still answer so the UI can poll without hard failure.
-        return {"isPaused": False, "lastUpdated": None, "campaignId": campaign_id, "degraded": True}
+        # Database unavailable — still answer so the UI can poll without hard failure.
+        return {
+            "isPaused": False, "lastUpdated": None, "campaignId": campaign_id,
+            "pausedUntil": None, "lapsedAt": None, "degraded": True,
+        }
     return status_val
 
 

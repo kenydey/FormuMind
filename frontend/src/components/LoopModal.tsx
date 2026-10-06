@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, formatApiError } from "../api";
 import { useStore } from "../store";
@@ -6,6 +6,13 @@ import SimPlaceholder from "./SimPlaceholder";
 import { AdaptiveDoeInsights } from "./AdaptiveDoeInsights";
 import { CANCEL_BUTTON_CLASS, coldStartMessage } from "../hooks/useTaskCancel";
 import { engineOk, useEngineAvailability } from "../hooks/useEngineAvailability";
+
+// ISO-8601 UTC from the API → the viewer's local "MM/DD HH:mm".
+function localStamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
 
 function RmseTrend({ history, metric }: { history: Record<string, number>[]; metric: string }) {
   const series = history.map((snap) => snap[metric]).filter((v) => v != null);
@@ -91,6 +98,9 @@ export default function LoopModal() {
     !!doePlan && (!doePlan.plan_id || doePlan.plan_id !== workbenchAdoptedPlanId);
 
   const [cyclePaused, setCyclePaused] = useState(false);
+  // null while paused = until somebody resumes; lapsedAt = a pause that ran out by itself (loop running again)
+  const [cyclePausedUntil, setCyclePausedUntil] = useState<string | null>(null);
+  const [cycleLapsedAt, setCycleLapsedAt] = useState<string | null>(null);
   const [cycleStatusBusy, setCycleStatusBusy] = useState(false);
   const [cycleStatusError, setCycleStatusError] = useState<string | null>(null);
   // Wave 3-2: per-project closed-loop cycle statistics (fail-open).
@@ -139,9 +149,17 @@ export default function LoopModal() {
     };
   }, [envFlagsRevision, setAutoAdoptNextDoeOnLoop]);
 
+  const applyCycleStatus = useCallback((st: Awaited<ReturnType<typeof api.getDoeCycleStatus>>) => {
+    setCyclePaused(Boolean(st.isPaused));
+    setCyclePausedUntil(st.isPaused ? (st.pausedUntil ?? null) : null);
+    setCycleLapsedAt(st.isPaused ? null : (st.lapsedAt ?? null));
+  }, []);
+
   useEffect(() => {
     if (workbenchCampaignId == null) {
       setCyclePaused(false);
+      setCyclePausedUntil(null);
+      setCycleLapsedAt(null);
       setCycleStatusError(null);
       return;
     }
@@ -150,7 +168,7 @@ export default function LoopModal() {
       try {
         const st = await api.getDoeCycleStatus(workbenchCampaignId);
         if (!cancelled) {
-          setCyclePaused(Boolean(st.isPaused));
+          applyCycleStatus(st);
           setCycleStatusError(null);
         }
       } catch (e) {
@@ -163,7 +181,7 @@ export default function LoopModal() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [workbenchCampaignId]);
+  }, [workbenchCampaignId, applyCycleStatus]);
 
   async function toggleCyclePause() {
     if (workbenchCampaignId == null) return;
@@ -171,8 +189,7 @@ export default function LoopModal() {
     setCycleStatusError(null);
     try {
       await api.postDoeCyclePause(workbenchCampaignId, !cyclePaused);
-      const st = await api.getDoeCycleStatus(workbenchCampaignId);
-      setCyclePaused(Boolean(st.isPaused));
+      applyCycleStatus(await api.getDoeCycleStatus(workbenchCampaignId));
     } catch (e) {
       setCycleStatusError(formatApiError(e));
     } finally {
@@ -310,6 +327,16 @@ export default function LoopModal() {
         <span className={cyclePaused ? "text-amber-300" : "text-emerald-400/80"}>
           DOE 闭环：{workbenchCampaignId == null ? "未绑定台账" : cyclePaused ? "已暂停" : "运行中"}
         </span>
+        {workbenchCampaignId != null && cyclePaused && (
+          <span className="ml-2 text-amber-300/80" data-testid="doe-cycle-paused-until">
+            {cyclePausedUntil ? `至 ${localStamp(cyclePausedUntil)} 自动恢复` : "恢复前一直暂停"}
+          </span>
+        )}
+        {workbenchCampaignId != null && !cyclePaused && cycleLapsedAt && (
+          <span className="ml-2 text-amber-300/80" data-testid="doe-cycle-lapsed">
+            暂停已于 {localStamp(cycleLapsedAt)} 到期，闭环已自动恢复
+          </span>
+        )}
         {cycleStatusError && <span className="ml-2 text-rose-300">{cycleStatusError}</span>}
       </div>
       {cycleStats && (

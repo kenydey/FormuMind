@@ -576,6 +576,9 @@ class Settings(BaseSettings):
     # W5 / W3′（2026-09-25）：闭环成功后是否自动把 next_doe adopt 进台账。
     # 默认关——避免静默改写实验台；需 Settings / LoopModal 显式打开。
     auto_adopt_next_doe_on_loop: bool = False
+    # How long "暂停闭环" holds before the pause lapses on its own (hours; 0 = until somebody resumes). A lapse is
+    # logged and shown in the loop panel; the API can override it per request (``ttlHours``).
+    doe_cycle_pause_ttl_hours: float = Field(default=24.0, ge=0, le=24 * 366)
     # Closed-loop RMSE plateau detection (Phase C L-2): skip optimize+DOE when flat.
     loop_convergence_enabled: bool = True
     loop_convergence_eps: float = 0.01
