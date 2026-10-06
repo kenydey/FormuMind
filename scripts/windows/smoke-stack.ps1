@@ -137,12 +137,14 @@ if ($health) {
     Check 'the database is ok' ($health.database.ok -eq $true)
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     1..3 | ForEach-Object { Invoke-RestMethod -Uri "$Api/health" -TimeoutSec 10 | Out-Null }
-    Write-Host ("info  /health takes {0:N0} ms per call (the broker probe is a socket connect each time)" -f ($timer.ElapsedMilliseconds / 3))
-    # Why that number matters: `localhost` is tried as ::1 first on Windows, and a refused connection takes ~0.5 s there.
-    foreach ($name in @('localhost', '127.0.0.1')) {
+    Write-Host ("info  /health takes {0:N0} ms per call" -f ($timer.ElapsedMilliseconds / 3))
+    # Where those milliseconds go: /health probes Datalab, and with nothing listening on :5001 a refused loopback connection takes
+    # seconds to be reported on Windows - the probe gives up after datalab_client.LOOPBACK_CONNECT_TIMEOUT_S (0.5 s), which is about
+    # what the line above shows. (`localhost` to Redis is not the cause: it connects in milliseconds, as the next lines show.)
+    foreach ($target in @(@('localhost', 6379), @('127.0.0.1', 6379), @('127.0.0.1', 5001))) {
         $connect = [System.Diagnostics.Stopwatch]::StartNew()
-        try { $probe = New-Object System.Net.Sockets.TcpClient($name, 6379); $probe.Close() } catch { }
-        Write-Host ("info  a TCP connect to {0}:6379 takes {1:N0} ms" -f $name, $connect.ElapsedMilliseconds)
+        try { $probe = New-Object System.Net.Sockets.TcpClient($target[0], $target[1]); $probe.Close() } catch { }
+        Write-Host ("info  a TCP connect to {0}:{1} takes {2:N0} ms" -f $target[0], $target[1], $connect.ElapsedMilliseconds)
     }
 }
 
