@@ -373,16 +373,20 @@ def _lab_points(
     ``x`` follows ``factors``: a lever the experiment varied takes its recorded
     value (clipped into range); one it did not record stays at the baseline
     recipe's value, which is what a DOE run that varies a subset of the levers
-    actually did. Only ``source == "lab"`` rows with measured values count, an
-    experiment that recorded none of the optimizer's levers says nothing about
-    this search space, and a project-scoped request ignores other projects'.
+    actually did. Only ``source in REAL_SOURCES`` rows with measured values
+    count, an experiment that recorded none of the optimizer's levers says
+    nothing about this search space, and a project-scoped request ignores
+    other projects'.
     """
+    from ...domain.schemas import REAL_SOURCES
+
     baseline = reconstruct.baseline_lever_values(levers, base, process)
     pid = (req.project_id or "").strip()
     out: list[tuple[list[float], dict[str, float]]] = []
     for rec in records or []:
         try:
-            if getattr(rec, "source", "") != "lab" or not rec.measured:
+            # v13-3: workbench 真实测量也算 real。
+            if getattr(rec, "source", "") not in REAL_SOURCES or not rec.measured:
                 continue
             if rec.domain != req.domain:
                 continue

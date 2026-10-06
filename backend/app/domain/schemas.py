@@ -735,6 +735,11 @@ class Measurement(BaseModel):
         return self
 
 
+# v13-3: 测量来源分类。真实测量（进 GP 训练）vs 虚拟/预测（默认不进 GP）。
+REAL_SOURCES = frozenset({"lab", "workbench"})
+VIRTUAL_SOURCES = frozenset({"baybe_opt", "predictor_virtual"})
+
+
 class ExperimentRecord(BaseModel):
     """A single measured DOE/lab result fed back into the platform.
 

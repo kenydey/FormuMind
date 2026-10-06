@@ -90,13 +90,16 @@ def load_prior_measurements(requirement: Requirement) -> list[ExperimentRecord]:
 def lab_measurement_source(prior_measurements: list[ExperimentRecord]) -> str:
     """P0-2: 本轮 DOE/优化所依据数据的来源标记。
 
-    任一 prior 记录为真实 lab 测量 (``source == "lab"`` 且有实测值) 即返回
+    任一 prior 记录为真实测量 (``source in REAL_SOURCES`` 且有实测值) 即返回
     ``"lab"``; 否则 ``"predictor_virtual"``。此前该标记在三处被写死, 永远
     到不了 ``"lab"`` —— 即使 BayBE 实际已被 lab 数据 seed。
     """
+    from ..domain.schemas import REAL_SOURCES
+
     for rec in prior_measurements or []:
         try:
-            if getattr(rec, "source", "") == "lab" and rec.measured:
+            # v13-3: workbench 真实测量也算 real。
+            if getattr(rec, "source", "") in REAL_SOURCES and rec.measured:
                 return "lab"
         except Exception:  # noqa: BLE001
             continue

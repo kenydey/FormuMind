@@ -86,3 +86,26 @@ def test_baybe_path_uses_lab_measurement_source() -> None:
     assert res.measurement_source == "lab"
     res2 = eng.run_optimization(_req(), iterations=2, measurements=[])
     assert res2.measurement_source == "predictor_virtual"
+
+
+def test_workbench_source_counts_as_real() -> None:
+    """v13-3: source="workbench" 的真实测量默认进 GP，不再静默丢弃。"""
+    from app.domain.schemas import ExperimentRecord, REAL_SOURCES
+    from app.services.engines.adapters.measurements_adapter import records_to_dataframe
+    from app.services.doe_cycle_service import lab_measurement_source
+
+    assert "workbench" in REAL_SOURCES
+    assert "lab" in REAL_SOURCES
+
+    from app.domain.schemas import ProductDomain
+
+    rec = ExperimentRecord(
+        domain=ProductDomain.anticorrosion_coating,
+        factors={"resin": 50.0},
+        measured={"salt_spray_hours": 500.0},
+        source="workbench",
+    )
+    req = _req()
+    df = records_to_dataframe([rec], req, req.objectives)
+    assert not df.empty, "workbench 真实测量默认应进 GP 训练集"
+    assert lab_measurement_source([rec]) == "lab", "纯 workbench 不再误报 predictor_virtual"

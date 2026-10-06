@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ....domain.objective_contract import objective_metrics, normalize_objectives
-from ....domain.schemas import ExperimentRecord, Requirement
+from ....domain.schemas import ExperimentRecord, Requirement, REAL_SOURCES
 from .baybe_objective_builder import primary_metric
 
 
@@ -22,18 +22,20 @@ def records_to_dataframe(
     """Convert records to a BayBE measurements DataFrame.
 
     P0-5: GP training data is stratified by ``rec.source``. By default only
-    ``"lab"`` (real measurements) are included — virtual records
-    (``"baybe_opt"`` / ``"predictor_virtual"``) must NOT silently pollute the
-    GP, otherwise the optimizer trains on its own predictions (self-reinforcing
-    loop). Pass ``include_sources`` explicitly to opt in to virtual data
-    (e.g. cold-start seeding, which has its own dedicated path).
+    real measurements (``REAL_SOURCES`` = {"lab", "workbench"}) are included —
+    virtual records (``"baybe_opt"`` / ``"predictor_virtual"``) must NOT
+    silently pollute the GP, otherwise the optimizer trains on its own
+    predictions (self-reinforcing loop). Pass ``include_sources`` explicitly
+    to opt in to virtual data (e.g. cold-start seeding, which has its own
+    dedicated path).
     """
     import pandas as pd
 
     from ....domain.objective_contract import normalize_objectives, objective_metrics
 
     if include_sources is None:
-        include_sources = {"lab"}
+        # v13-3: workbench 真实测量也是 REAL_SOURCES，默认进 GP。
+        include_sources = REAL_SOURCES
     records = [r for r in records if getattr(r, "source", "lab") in include_sources]
     if not records:
         return pd.DataFrame()

@@ -5,6 +5,7 @@ import logging
 
 from ...domain.objective_contract import align_dataframe_measurement_columns, objective_metrics
 from ...domain.schemas import (
+    REAL_SOURCES,
     BaybeRecommendResult,
     ExperimentRecord,
     ObjectiveSpec,
@@ -287,7 +288,8 @@ class BaybeCampaignEngine:
         for _r in measurements or []:
             _s = getattr(_r, "source", "lab") or "lab"
             _src_counts[_s] = _src_counts.get(_s, 0) + 1
-        _lab_n = _src_counts.get("lab", 0)
+        # v13-3: workbench 真实测量也计入 lab 点数。
+        _lab_n = sum(n for s, n in _src_counts.items() if s in REAL_SOURCES)
         _virtual_n = sum(n for s, n in _src_counts.items() if s != "lab")
         if _virtual_n:
             log.info(
@@ -564,7 +566,11 @@ class BaybeCampaignEngine:
         from ..doe_cycle_service import lab_measurement_source
 
         # P0-5: 披露实际进入 GP 的 lab 点数（baybe_opt 虚拟点不进 GP）。
-        _lab_n = sum(1 for r in (measurements or []) if getattr(r, "source", "lab") == "lab")
+        # v13-3: workbench 真实测量也计入。
+        _lab_n = sum(
+            1 for r in (measurements or [])
+            if getattr(r, "source", "lab") in REAL_SOURCES
+        )
         return OptimizationResult(
             iterations=iterations,
             objective=OBJECTIVE[req.domain],
