@@ -281,6 +281,20 @@ class BaybeCampaignEngine:
         else:
             campaign, factor_list = self._new_campaign(req, objectives, wb_factors)
 
+        # P0-5: GP 只吃 lab 真实测量；虚拟记录（baybe_opt/predictor_virtual）
+        # 不进 GP，只计数披露。无 lab 数据时走冷启动分支。
+        _src_counts: dict[str, int] = {}
+        for _r in measurements or []:
+            _s = getattr(_r, "source", "lab") or "lab"
+            _src_counts[_s] = _src_counts.get(_s, 0) + 1
+        _lab_n = _src_counts.get("lab", 0)
+        _virtual_n = sum(n for s, n in _src_counts.items() if s != "lab")
+        if _virtual_n:
+            log.info(
+                "baybe: %d virtual measurement(s) excluded from GP training "
+                "(sources=%s); %d lab measurement(s) used",
+                _virtual_n, _src_counts, _lab_n,
+            )
         df_meas = records_to_dataframe(measurements, req, objectives)
         if not df_meas.empty and metrics:
             df_meas = align_dataframe_measurement_columns(df_meas, metrics, log=log)
@@ -557,4 +571,6 @@ class BaybeCampaignEngine:
             top_formulations=top,
             engine="baybe",
             measurement_source=lab_measurement_source(measurements or []),
+            # P0-5: 披露实际进入 GP 的 lab 点数（虚拟点已被过滤）。
+            lab_points_used=_lab_n,
         )

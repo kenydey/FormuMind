@@ -91,7 +91,7 @@ def test_golden_baybe_beats_random_on_synthetic(monkeypatch):
 
     # ── BayBE arm ──
     records = _to_records(req, seed_rows, truth)
-    campaign.add_measurements(records_to_dataframe(records, req, req.objectives))
+    campaign.add_measurements(records_to_dataframe(records, req, req.objectives, include_sources={"golden"}))
     baybe_best = max(r.measured["synth_score"] for r in records)
     for _ in range(N_ROUNDS):
         rec_df = campaign.recommend(batch_size=BATCH)
@@ -103,7 +103,7 @@ def test_golden_baybe_beats_random_on_synthetic(monkeypatch):
         new_records = _to_records(req, new_rows, truth)
         records.extend(new_records)
         campaign.add_measurements(
-            records_to_dataframe(new_records, req, req.objectives)
+            records_to_dataframe(new_records, req, req.objectives, include_sources={"golden"})
         )
         baybe_best = max(
             [baybe_best] + [truth(r)["synth_score"] for r in new_rows]
@@ -208,7 +208,7 @@ def test_golden_mock_optimizer_beats_random_on_synthetic():
     # ── Mock optimizer arm (same budget/shape as the BayBE golden) ──
     records = _to_records(req, seed_rows, truth)
     campaign = _MockHillClimbCampaign(factor_list, np.random.default_rng(8))
-    campaign.add_measurements(records_to_dataframe(records, req, req.objectives))
+    campaign.add_measurements(records_to_dataframe(records, req, req.objectives, include_sources={"golden"}))
     mock_best = max(r.measured["synth_score"] for r in records)
     for _ in range(N_ROUNDS):
         rec_df = campaign.recommend(batch_size=BATCH)
@@ -224,7 +224,7 @@ def test_golden_mock_optimizer_beats_random_on_synthetic():
         new_records = _to_records(req, new_rows, truth)
         records.extend(new_records)
         campaign.add_measurements(
-            records_to_dataframe(new_records, req, req.objectives)
+            records_to_dataframe(new_records, req, req.objectives, include_sources={"golden"})
         )
         mock_best = max(
             [mock_best] + [truth(r)["synth_score"] for r in new_rows]
@@ -242,3 +242,31 @@ def test_golden_mock_optimizer_beats_random_on_synthetic():
         f"mock optimizer ({mock_best:.1f}) did not beat random ({random_best:.1f}); "
         "measurement framing or plan conversion may have regressed"
     )
+
+
+def test_records_to_dataframe_filters_virtual_by_default():
+    """P0-5：GP 训练数据默认只收 lab 真实测量，虚拟记录不进 GP。"""
+    from app.services.engines.adapters.measurements_adapter import records_to_dataframe
+
+    req = _req()
+    recs = [
+        ExperimentRecord(domain=req.domain, factors={"x": 1.0},
+                         measured={"synth_score": 10.0}, source="lab"),
+        ExperimentRecord(domain=req.domain, factors={"x": 2.0},
+                         measured={"synth_score": 20.0}, source="lab"),
+        ExperimentRecord(domain=req.domain, factors={"x": 3.0},
+                         measured={"synth_score": 999.0}, source="baybe_opt"),
+        ExperimentRecord(domain=req.domain, factors={"x": 4.0},
+                         measured={"synth_score": 888.0}, source="predictor_virtual"),
+    ]
+    df = records_to_dataframe(recs, req, req.objectives)
+    # 只有 2 条 lab 进 GP；虚拟的 999/888 不能污染训练数据
+    assert len(df) == 2, f"应只含 lab 记录，实际 {len(df)} 行"
+    assert sorted(df["synth_score"].tolist()) == [10.0, 20.0]
+
+    # 显式 opt-in 才放行虚拟（冷启动等专用路径）
+    df_all = records_to_dataframe(
+        recs, req, req.objectives,
+        include_sources={"lab", "baybe_opt", "predictor_virtual"},
+    )
+    assert len(df_all) == 4
