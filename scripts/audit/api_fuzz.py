@@ -4,8 +4,10 @@ For each operation the OpenAPI smoke walk's minimal request (``backend/tests/tes
 leaf by leaf with values that real clients and hostile ones send — empty / 20 KB / NUL-containing / injection-looking
 strings, 0 / -1 / 2**63 / 1e308 / NaN / Infinity numbers, wrong JSON types, empty and 3000-element lists, nulls — plus
 ids too large for the database, NUL and 3000-character path segments, and junk ``limit`` / ``page`` / ``offset``. Task
-dispatch is stubbed (as in the walk) so the HTTP layer is what is exercised. Anything that answers 5xx other than 503
-(a feature switched off or a dependency down) or does not answer within 20 s is a defect.
+dispatch is stubbed (as in the walk) so the HTTP layer is what is exercised, and outbound network is denied (the suite's
+``tests/_network_guard.py``): the fuzzer used to send its hostile input to the real SureChEMBL, OpenAlex, DuckDuckGo and
+USPTO, and went red whenever one of them answered slowly. Anything that answers 5xx other than 503 (a feature switched
+off or a dependency down) or does not answer within 20 s is a defect.
 
 Run from ``backend/``::
 
@@ -53,6 +55,10 @@ os.environ.update(
 )
 
 os.chdir(TMP)  # relative ``./data`` writes land in the throw-away directory, not in the checkout
+
+from tests import _network_guard  # noqa: E402
+
+_network_guard.install()  # before the app: nothing here may reach a third-party service or wait on one
 
 import app.api._dispatch as dispatch  # noqa: E402
 from app.db.database import Base, default_engine  # noqa: E402

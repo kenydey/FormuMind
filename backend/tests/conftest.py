@@ -1,10 +1,7 @@
 """Pytest bootstrap — disable API auth so legacy TestClient tests keep working."""
 from __future__ import annotations
 
-import errno
-import ipaddress
 import os
-import socket
 import tempfile
 import threading
 import time
@@ -67,136 +64,13 @@ def _throwaway_databases_do_not_fsync(dbapi_connection, _record):  # pragma: no 
 
 
 # ── hermetic network guard ──────────────────────────────────────────────────
-# The suite used to reach the public internet: a tracer run counted ~330 real
-# requests to PubChem (285, 117 from test_research_endpoint alone), OpenAlex,
-# Semantic Scholar, SureChEMBL and DuckDuckGo, and a stream test sent a fake key
-# to api.deepseek.com. Results then depended on third-party uptime and rate
-# limits (a 429 from OpenAlex is just one of the ways that bites), and daemon
-# threads left behind by one test kept calling out during later ones. Every
-# non-loopback connect now fails fast (ENETUNREACH) — exactly the "offline"
-# degrade the application code already handles — unless the test is marked
-# ``@pytest.mark.network`` or FORMUMIND_TEST_ALLOW_NETWORK=1 is set.
+# Every non-loopback connect fails fast (ENETUNREACH) - exactly the "offline" degrade the application code already handles -
+# unless the test is marked ``@pytest.mark.network`` or FORMUMIND_TEST_ALLOW_NETWORK=1 is set. The mechanism (and why it
+# exists) lives in ``_network_guard.py`` so the API fuzzer, which does not run under pytest, can install the same one.
+from tests import _network_guard  # noqa: E402
+
 _NETWORK_ALLOWED = False
-_ALLOW_ALL_NETWORK = os.environ.get("FORMUMIND_TEST_ALLOW_NETWORK", "").strip().lower() in {"1", "true", "yes"}
-_REAL_CONNECT = socket.socket.connect
-_REAL_CONNECT_EX = socket.socket.connect_ex
-
-
-def _is_local_address(address) -> bool:
-    if isinstance(address, (str, bytes)):  # AF_UNIX path
-        return True
-    host = address[0]
-    if isinstance(host, bytes):
-        host = host.decode("ascii", "ignore")
-    host = str(host).split("%", 1)[0]
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return host == "localhost"
-    return ip.is_loopback or ip.is_unspecified
-
-
-def _blocked(address) -> bool:
-    return not (_NETWORK_ALLOWED or _ALLOW_ALL_NETWORK or _is_local_address(address))
-
-
-def _guarded_connect(self, address):
-    if _blocked(address):
-        raise OSError(
-            errno.ENETUNREACH,
-            f"outbound network is disabled in tests ({address[0]!r}); "
-            "mock it, or mark the test with @pytest.mark.network",
-        )
-    return _REAL_CONNECT(self, address)
-
-
-def _guarded_connect_ex(self, address):
-    if _blocked(address):
-        return errno.ENETUNREACH
-    return _REAL_CONNECT_EX(self, address)
-
-
-socket.socket.connect = _guarded_connect  # type: ignore[method-assign]
-socket.socket.connect_ex = _guarded_connect_ex  # type: ignore[method-assign]
-
-
-def _host_is_local(host: str | None) -> bool:
-    return _is_local_address((host or "", 0))
-
-
-def _assert_host_allowed(host: str | None) -> str | None:
-    """Return an error message when a request to *host* must not leave the machine."""
-    if _NETWORK_ALLOWED or _ALLOW_ALL_NETWORK or _host_is_local(host):
-        return None
-    return (
-        f"outbound network is disabled in tests ({host!r}); "
-        "mock it, or mark the test with @pytest.mark.network"
-    )
-
-
-# The socket layer cannot see through an HTTP(S) proxy (a loopback proxy is
-# "local"), so also gate the HTTP clients by the *request host*. Transport-level,
-# so ``httpx.MockTransport``-based tests are unaffected.
-def _install_http_client_guards() -> None:
-    try:
-        import httpx
-
-        real_handle = httpx.HTTPTransport.handle_request
-
-        def handle_request(self, request):
-            msg = _assert_host_allowed(request.url.host)
-            if msg:
-                raise httpx.ConnectError(msg, request=request)
-            return real_handle(self, request)
-
-        httpx.HTTPTransport.handle_request = handle_request  # type: ignore[method-assign]
-
-        real_ahandle = httpx.AsyncHTTPTransport.handle_async_request
-
-        async def handle_async_request(self, request):
-            msg = _assert_host_allowed(request.url.host)
-            if msg:
-                raise httpx.ConnectError(msg, request=request)
-            return await real_ahandle(self, request)
-
-        httpx.AsyncHTTPTransport.handle_async_request = handle_async_request  # type: ignore[method-assign]
-    except ImportError:
-        pass
-    try:
-        import requests
-        from urllib.parse import urlparse
-
-        real_send = requests.adapters.HTTPAdapter.send
-
-        def send(self, request, *args, **kwargs):
-            msg = _assert_host_allowed(urlparse(request.url).hostname)
-            if msg:
-                raise requests.exceptions.ConnectionError(msg, request=request)
-            return real_send(self, request, *args, **kwargs)
-
-        requests.adapters.HTTPAdapter.send = send  # type: ignore[method-assign]
-    except ImportError:
-        pass
-    try:
-        import urllib.error
-        import urllib.request
-        from urllib.parse import urlparse
-
-        real_open = urllib.request.OpenerDirector.open
-
-        def opener_open(self, fullurl, *args, **kwargs):
-            url = fullurl if isinstance(fullurl, str) else getattr(fullurl, "full_url", "")
-            msg = _assert_host_allowed(urlparse(url).hostname)
-            if msg:
-                raise urllib.error.URLError(msg)
-            return real_open(self, fullurl, *args, **kwargs)
-
-        urllib.request.OpenerDirector.open = opener_open  # type: ignore[method-assign]
-    except ImportError:
-        pass
-
-
-_install_http_client_guards()
+_network_guard.install(lambda: _NETWORK_ALLOWED)
 
 
 @pytest.fixture(autouse=True)
