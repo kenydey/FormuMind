@@ -437,7 +437,16 @@ def prepare_chunk_rows(
             max_chars=settings.ingest_chunk_max_chars,
             overlap=settings.ingest_chunk_overlap,
         )
-        chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.kb_max_chunks_per_source]
+        from .kb_retrieval_gate import chunk_floor, is_formula_text
+
+        # A formula is atomic and short by nature (``$$k = A e^{-E_a / (RT)}$$`` is 24 characters), so it is held to
+        # the gate's own floor instead of the 30-character one that suits running text.
+        formula_floor = chunk_floor()
+        chunks = [
+            c for c in chunks
+            if len(c.text.strip()) > 30
+            or (is_formula_text(c.text, c.block_type) and len(c.text.strip()) >= formula_floor)
+        ][: settings.kb_max_chunks_per_source]
         if not chunks:
             return None
 

@@ -168,23 +168,46 @@ def _without_table_markup(text: str) -> str:
     return "\n".join(out)
 
 
-def is_garbage_chunk_text(text: str, *, min_chars: int | None = None) -> bool:
+def chunk_floor() -> int:
+    """The shortest chunk body the gate keeps: ``max(20, min_snippet_chars // 2)`` - softer than literature's
+    ``title + snippet`` floor because a stored chunk can be a short technical paragraph."""
+    base = int(getattr(get_settings(), "content_filter_min_snippet_chars", 40) or 40)
+    return max(20, base // 2)
+
+
+# What ``chunking._classify_block_type`` calls a formula: the chunk opens with display-math syntax.
+_FORMULA_OPENERS = ("$$", "\\[", "\\begin{")
+# A formula keeps no density rule, but it still has to contain *something*: ``$$-----------------$$`` is long enough.
+_FORMULA_MIN_WORD_CHARS = 3
+
+
+def is_formula_text(text: str, block_type: str | None = None) -> bool:
+    """A display-math chunk: stored as ``block_type == "formula"``, or - for callers that only have the text - one that
+    opens the way the chunker's classifier recognises a formula."""
+    if block_type:
+        return block_type == "formula"
+    return (text or "").lstrip().startswith(_FORMULA_OPENERS)
+
+
+def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type: str | None = None) -> bool:
     """Chunk-body analogue of literature garbage-snippet detection.
 
     Literature filters ``title + snippet`` (often >40 chars). Stored chunks can
     be shorter technical paragraphs, so the default floor is softer
-    (``max(20, min_snippet_chars // 2)``) unless the caller overrides.
+    (``chunk_floor()``) unless the caller overrides.
+
+    A formula is mostly operators by construction (``$$k = A e^{-E_a / (RT)}$$`` scores 0.27 on the word-character
+    ratio), so it is measured by length only - plus a handful of word characters so that a line of symbols still
+    fails. ``block_type`` says what the chunk is; without it a chunk that opens with display-math syntax counts as a
+    formula, exactly as the chunker classifies it.
     """
-    settings = get_settings()
-    if min_chars is None:
-        base = int(getattr(settings, "content_filter_min_snippet_chars", 40) or 40)
-        limit = max(20, base // 2)
-    else:
-        limit = int(min_chars)
+    limit = chunk_floor() if min_chars is None else int(min_chars)
     body = _without_table_markup((text or "").strip()).strip()
     if len(body) < limit:
         return True
     word_chars = len(_WORD_RE.findall(body))
+    if is_formula_text(text, block_type):
+        return word_chars < _FORMULA_MIN_WORD_CHARS
     return word_chars / max(1, len(body)) < 0.4
 
 
@@ -248,7 +271,7 @@ def drop_reason_for_chunk(
         return "blocked_domain"
 
     text = getattr(chunk, "text", "") or ""
-    if is_garbage_chunk_text(text):
+    if is_garbage_chunk_text(text, block_type=getattr(chunk, "block_type", None)):
         return "garbage_snippet"
 
     return None
@@ -339,7 +362,7 @@ def gate_ingest_rows(
     garbage_n = 0
     for row in rows:
         text = (row.get("text") if isinstance(row, dict) else "") or ""
-        if is_garbage_chunk_text(text):
+        if is_garbage_chunk_text(text, block_type=row.get("block_type") if isinstance(row, dict) else None):
             garbage_n += 1
             continue
         kept.append(row)
