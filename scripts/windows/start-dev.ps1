@@ -111,6 +111,7 @@ function Wait-For {
 # ------------------------------------------------------------------- setup ---
 
 $Root     = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$ScriptName = Split-Path -Leaf $PSCommandPath
 $Backend  = Join-Path $Root 'backend'
 $Frontend = Join-Path $Root 'frontend'
 $Logs     = Join-Path $Root 'logs'
@@ -282,10 +283,15 @@ function Start-Worker {
         'worker', '--loglevel=info', '--pool=solo'
     ) -WorkingDirectory $Backend -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
-    $proc.Id | Out-File -FilePath $Pids.worker -Encoding ascii
+    $proc.Id | Out-File -FilePath $PidFiles.worker -Encoding ascii
 
+    # Celery logs through the logging module, i.e. to stderr: "celery@HOST ready." lands in the .err log. Looking only at
+    # the stdout log made every start wait the full 60 s and then warn about a worker that was fine.
     $ready = Wait-For -Condition {
-        (Test-Path $out) -and (Select-String -Path $out -Pattern 'ready\.' -Quiet -ErrorAction SilentlyContinue)
+        foreach ($log in @($out, $err)) {
+            if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'ready\.' -Quiet -ErrorAction SilentlyContinue)) { return $true }
+        }
+        return $false
     } -TimeoutSec 60 -Label 'worker'
     if ($ready) { Write-Ok "worker ready (log: $out)" }
     else { Write-Warn2 "worker not confirmed ready within 60s - inspect $out and $err" }
@@ -305,7 +311,7 @@ function Start-Frontend {
         'run', 'dev', '--', '--host', '127.0.0.1', '--port', "$VitePort"
     ) -WorkingDirectory $Frontend -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
-    $proc.Id | Out-File -FilePath $Pids.vite -Encoding ascii
+    $proc.Id | Out-File -FilePath $PidFiles.vite -Encoding ascii
 
     if (Wait-For -Condition { Test-HttpOk -Url "http://127.0.0.1:$VitePort/" -TimeoutSec 2 } -TimeoutSec 90 -Label 'vite') {
         Write-Ok "frontend ready on http://127.0.0.1:$VitePort  (log: $out)"
@@ -337,7 +343,7 @@ function Invoke-Start {
     $viteRunning = Test-PortOpen -Port $VitePort
 
     if ($apiRunning) {
-        Write-Warn2 "port $ApiPort already in use - skipping API start (run `"$($MyInvocation.MyCommand.Name) stop`" first)"
+        Write-Warn2 "port $ApiPort already in use - skipping API start (run `"$ScriptName stop`" first)"
     } else {
         # Migrations before boot: a stale schema shows up as
         # "schema drift: 缺失列 document_chunks.bbox … 请先运行 alembic upgrade head".
