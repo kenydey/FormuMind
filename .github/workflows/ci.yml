@@ -508,6 +508,44 @@ jobs:
         # A different seed set per run (the run number), so repeated runs cover more of the input space.
         run: python ../scripts/audit/api_fuzz.py $((GITHUB_RUN_NUMBER % 1000)) $((GITHUB_RUN_NUMBER % 1000 + 1)) $((GITHUB_RUN_NUMBER % 1000 + 2)) --limit=10
 
+  # Round-5: the evaluation harness (backend/evals) - retrieval, QA context, parsing and optimisation scored against labelled
+  # datasets and reference systems, compared with the committed baseline (evals/baselines/baseline.json). Until it existed
+  # nothing measured whether retrieval finds the right document, whether a parsed table is still a table, or whether the
+  # optimiser beats random picks. It found three defects on its first run (see backend/evals/README.md). Non-blocking by design:
+  # it reports numbers and their movement in the job summary; a number below baseline is read, it does not gate an unrelated
+  # merge. The slow BoTorch engine is left out (python -m evals --suite optimization --engines botorch-ei runs it by hand).
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend (the parser extras are part of what is measured)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e '.[dev,science,optimize,file_ingest,report_export]' pandas "pymupdf4llm==1.28.0" "PyMuPDF==1.28.0"
+
+      - name: Evaluate
+        run: python -m evals --out evals-report.json --markdown "$GITHUB_STEP_SUMMARY" --fail-on-regression
+
+      - name: Keep the full report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-report
+          path: backend/evals-report.json
+
   # P1 #27: optional DeepEval faithfulness gate (skipped unless explicitly enabled).
   deepeval:
     runs-on: ubuntu-latest

@@ -1,0 +1,86 @@
+{"id": "lex-01", "category": "lexical", "lang": "zh", "text": "中性盐雾试验的温度和pH范围是多少", "relevant": {"nss-gbt1771": 3, "astm-b117-en": 2}, "facts": ["35 ℃", "pH 值控制在 6.5～7.2"]}
+{"id": "lex-02", "category": "lexical", "lang": "zh", "text": "CASS试验加入氯化铜的浓度是多少", "relevant": {"cass-iso9227": 3}, "facts": ["0.26 g/L"]}
+{"id": "lex-03", "category": "lexical", "lang": "zh", "text": "乙酸盐雾试验AASS的pH和温度", "relevant": {"aass-acetic": 3, "cass-iso9227": 1}, "facts": ["pH 降至 3.1～3.3", "35 ℃"]}
+{"id": "lex-04", "category": "lexical", "lang": "zh", "text": "环氧树脂与聚酰胺固化剂的配比和适用期", "relevant": {"epoxy-polyamide": 3}, "facts": ["质量比 100:50", "适用期约 4 h"]}
+{"id": "lex-05", "category": "lexical", "lang": "zh", "text": "低温施工时环氧固化剂在5 ℃下多久实干", "relevant": {"epoxy-cycloaliphatic-lowtemp": 3}, "facts": ["24 h 可实干"]}
+{"id": "lex-06", "category": "lexical", "lang": "zh", "text": "酸酐固化剂的固化程序和玻璃化转变温度", "relevant": {"epoxy-anhydride-cure": 3}, "facts": ["120 ℃ × 2 h", "130 ℃"]}
+{"id": "lex-07", "category": "lexical", "lang": "zh", "text": "如何用DSC计算环氧固化度", "relevant": {"epoxy-dsc-degree-of-cure": 3}, "facts": ["α 不低于 95%"]}
+{"id": "lex-08", "category": "lexical", "lang": "zh", "text": "磷酸锌在环氧底漆中的添加量", "relevant": {"zinc-phosphate-dosage": 3, "atp-pigment": 1}, "facts": ["8%～12%"]}
+{"id": "lex-09", "category": "lexical", "lang": "zh", "text": "富锌底漆中锌粉含量要求", "relevant": {"zinc-rich-primer-zh": 3, "zinc-rich-primer-en": 3}, "facts": ["80% 以上"]}
+{"id": "lex-10", "category": "lexical", "lang": "zh", "text": "喷砂Sa2.5的表面粗糙度要求", "relevant": {"blasting-sa25": 3, "galvanized-prep": 1}, "facts": ["Rz 控制在 40～75 μm"]}
+{"id": "lex-11", "category": "lexical", "lang": "zh", "text": "碱性除油的温度和水膜连续法检验", "relevant": {"degreasing-alkaline": 3}, "facts": ["60 ℃", "30 s 内不破裂"]}
+{"id": "lex-12", "category": "lexical", "lang": "zh", "text": "锌系磷化膜的重量和处理温度", "relevant": {"zinc-phosphating": 3}, "facts": ["2～4 g/m²", "50～60 ℃"]}
+{"id": "lex-13", "category": "lexical", "lang": "zh", "text": "锆钛系无铬转化膜的pH和膜厚", "relevant": {"zirconium-conversion": 3}, "facts": ["pH 4.0～4.5", "30～60 nm"]}
+{"id": "lex-14", "category": "lexical", "lang": "zh", "text": "水性环氧涂料的VOC含量是多少", "relevant": {"wb-epoxy-voc": 3}, "facts": ["85 g/L"]}
+{"id": "lex-15", "category": "lexical", "lang": "zh", "text": "闪锈抑制剂的添加量", "relevant": {"flash-rust-inhibitor": 3}, "facts": ["0.3%～0.8%"]}
+{"id": "lex-16", "category": "lexical", "lang": "zh", "text": "划格法附着力的切割间距", "relevant": {"crosscut-iso2409": 3}, "facts": ["切割间距取 2 mm"]}
+{"id": "lex-17", "category": "lexical", "lang": "zh", "text": "QUV紫外老化的循环条件", "relevant": {"quv-cycle": 3}, "facts": ["8 h 紫外辐照"]}
+{"id": "lex-18", "category": "lexical", "lang": "zh", "text": "氟碳面漆耐候性光泽保持率", "relevant": {"fluorocarbon-topcoat": 3, "acrylic-pu-topcoat": 1, "quv-cycle": 1}, "facts": ["5000 h", "80% 以上"]}
+{"id": "lex-19", "category": "lexical", "lang": "zh", "text": "缩孔鱼眼的成因", "relevant": {"cratering-silicone": 3}, "facts": ["表面张力梯度"]}
+{"id": "lex-20", "category": "lexical", "lang": "zh", "text": "橘皮缺陷如何改善", "relevant": {"orange-peel-leveling": 3}, "facts": ["0.1%～0.5%"]}
+{"id": "lex-21", "category": "lexical", "lang": "zh", "text": "EIS低频阻抗如何判断涂层屏蔽性", "relevant": {"eis-barrier": 3}, "facts": ["10^9 Ω·cm²", "0.01 Hz"]}
+{"id": "lex-22", "category": "lexical", "lang": "zh", "text": "塔菲尔极化曲线的扫描速率", "relevant": {"tafel-polarization": 3}, "facts": ["0.5 mV/s"]}
+{"id": "lex-23", "category": "lexical", "lang": "zh", "text": "铈盐转化膜的工艺参数", "relevant": {"cerium-conversion": 3}, "facts": ["硝酸铈 5 g/L"]}
+{"id": "lex-24", "category": "lexical", "lang": "zh", "text": "不锈钢钝化用多少浓度的硝酸", "relevant": {"stainless-passivation": 3}, "facts": ["20%～25% 硝酸"]}
+{"id": "lex-25", "category": "lexical", "lang": "zh", "text": "云母氧化铁在中间漆中的作用和用量", "relevant": {"mio-barrier": 3}, "facts": ["30%～40%"]}
+{"id": "lex-26", "category": "lexical", "lang": "zh", "text": "涂层鼓泡与可溶盐的关系", "relevant": {"blistering-osmosis": 3}, "facts": ["50 mg/m²"]}
+{"id": "par-01", "category": "paraphrase", "lang": "zh", "text": "盐水喷雾加速腐蚀箱的工作温度与溶液酸碱度", "relevant": {"nss-gbt1771": 3, "astm-b117-en": 3}, "facts": ["35 ℃", "pH 值控制在 6.5～7.2"]}
+{"id": "par-02", "category": "paraphrase", "lang": "zh", "text": "二液型环氧与胺类硬化剂的称量比例怎么推算", "relevant": {"epoxy-stoichiometry-en": 3, "epoxy-excess-hardener": 2, "epoxy-polyamide": 2}, "facts": ["50 parts of hardener"]}
+{"id": "par-03", "category": "paraphrase", "lang": "zh", "text": "冬天冷天气下环氧漆多久能干透", "relevant": {"epoxy-cycloaliphatic-lowtemp": 3}, "facts": ["24 h 可实干"]}
+{"id": "par-04", "category": "paraphrase", "lang": "zh", "text": "怎样判断环氧涂层是否完全交联", "relevant": {"epoxy-dsc-degree-of-cure": 3, "epoxy-excess-hardener": 1}, "facts": ["α 不低于 95%"]}
+{"id": "par-05", "category": "paraphrase", "lang": "zh", "text": "钢结构上靠金属锌粉牺牲保护的底漆需要含多少锌", "relevant": {"zinc-rich-primer-zh": 3, "zinc-rich-primer-en": 3}, "facts": ["80% 以上"]}
+{"id": "par-06", "category": "paraphrase", "lang": "zh", "text": "钢板喷丸清理后表面的粗糙程度控制多少合适", "relevant": {"blasting-sa25": 3}, "facts": ["Rz 控制在 40～75 μm"]}
+{"id": "par-07", "category": "paraphrase", "lang": "zh", "text": "去除工件表面油污的碱液配方和检验方法", "relevant": {"degreasing-alkaline": 3}, "facts": ["30 s 内不破裂"]}
+{"id": "par-08", "category": "paraphrase", "lang": "zh", "text": "不含铬的环保型金属前处理膜层有哪些", "relevant": {"zirconium-conversion": 3, "cr6-free-passivation": 3, "cerium-conversion": 2, "silane-pretreatment-en": 2}, "facts": ["锆钛系无铬转化膜", "三价铬"]}
+{"id": "par-09", "category": "paraphrase", "lang": "zh", "text": "水性涂料怎样把挥发性有机物降得很低", "relevant": {"wb-epoxy-voc": 3}, "facts": ["85 g/L"]}
+{"id": "par-10", "category": "paraphrase", "lang": "zh", "text": "涂层表面出现火山口状凹坑是什么原因", "relevant": {"cratering-silicone": 3}, "facts": ["表面张力梯度"]}
+{"id": "par-11", "category": "paraphrase", "lang": "zh", "text": "喷涂后漆面像橘子皮一样不平整怎么办", "relevant": {"orange-peel-leveling": 3}, "facts": ["0.1%～0.5%"]}
+{"id": "par-12", "category": "paraphrase", "lang": "zh", "text": "怎样量化评价涂层隔绝电解质溶液的能力", "relevant": {"eis-barrier": 3, "ocp-monitoring-en": 2}, "facts": ["10^9 Ω·cm²"]}
+{"id": "par-13", "category": "paraphrase", "lang": "zh", "text": "怎样避免水性底漆刚涂到钢板上就泛出黄褐色锈点", "relevant": {"flash-rust-inhibitor": 3}, "facts": ["0.3%～0.8%"]}
+{"id": "par-14", "category": "paraphrase", "lang": "zh", "text": "用胶带撕拉方格测试漆膜结合力怎么评级", "relevant": {"crosscut-iso2409": 3, "pull-off-en": 1}, "facts": ["不低于 1 级"]}
+{"id": "par-15", "category": "paraphrase", "lang": "zh", "text": "室外长期日晒雨淋后漆膜变色粉化在哪些地点评定", "relevant": {"weathering-field-test": 3, "epoxy-chalking": 1}, "facts": ["朝南 45°"]}
+{"id": "num-01", "category": "numeric", "lang": "zh", "text": "50 ℃ pH 3.1～3.3 加氯化铜的盐雾试验", "relevant": {"cass-iso9227": 3}, "facts": ["0.26 g/L"]}
+{"id": "num-02", "category": "numeric", "lang": "zh", "text": "35 ℃ pH 3.1～3.3 不加氯化铜的盐雾试验", "relevant": {"aass-acetic": 3}, "facts": ["pH 降至 3.1～3.3"]}
+{"id": "num-03", "category": "numeric", "lang": "zh", "text": "划线试样 1000 h 盐雾后单侧蔓延不大于 3 mm", "relevant": {"salt-scribe-rating": 3}, "facts": ["1000 h 盐雾后单侧蔓延不大于 3 mm"]}
+{"id": "num-04", "category": "numeric", "lang": "zh", "text": "50 ℃ 热储存 7 d 粘度变化不超过 15%", "relevant": {"wb-storage-stability": 3}, "facts": ["±15%"]}
+{"id": "num-05", "category": "numeric", "lang": "zh", "text": "环氧值 0.44 的树脂按 100:50 混合", "relevant": {"epoxy-polyamide": 3}, "facts": ["质量比 100:50"]}
+{"id": "num-06", "category": "numeric", "lang": "zh", "text": "EEW 190 AHEW 95 每 100 份树脂需要多少份固化剂", "relevant": {"epoxy-stoichiometry-en": 3}, "facts": ["50 parts of hardener"]}
+{"id": "num-07", "category": "numeric", "lang": "zh", "text": "干膜 60～80 μm 锌粉 80% 的环氧底漆", "relevant": {"zinc-rich-primer-zh": 3, "zinc-rich-primer-en": 3}, "facts": ["80% 以上"]}
+{"id": "num-08", "category": "numeric", "lang": "zh", "text": "ISO 4624 拉开法 20 mm 试柱要求 5 MPa", "relevant": {"pull-off-en": 3}, "facts": ["at least 5 MPa"]}
+{"id": "num-09", "category": "numeric", "lang": "zh", "text": "8 h 紫外 60 ℃ 加 4 h 冷凝 50 ℃ 的老化循环", "relevant": {"quv-cycle": 3}, "facts": ["8 h 紫外辐照"]}
+{"id": "num-10", "category": "numeric", "lang": "zh", "text": "CAS 7779-90-0 的防锈颜料", "relevant": {"zinc-phosphate-dosage": 3}, "facts": ["8%～12%"]}
+{"id": "num-11", "category": "numeric", "lang": "zh", "text": "Rz 20～40 μm 的热镀锌表面处理", "relevant": {"galvanized-prep": 3}, "facts": ["Rz 达到 20～40 μm"]}
+{"id": "num-12", "category": "numeric", "lang": "zh", "text": "3.5% NaCl 中开路电位 −0.65 V 说明什么", "relevant": {"ocp-monitoring-en": 3}, "facts": ["about −0.65 V"]}
+{"id": "neg-01", "category": "hard_negative", "lang": "zh", "text": "NSS 盐雾沉降率 1～2 mL/(80 cm²·h) 对应的试验标准", "relevant": {"nss-gbt1771": 3, "astm-b117-en": 3}, "facts": [["35 ℃", "35 ± 2 °C"]]}
+{"id": "neg-02", "category": "hard_negative", "lang": "zh", "text": "盐雾试验重现性差的原因", "relevant": {"salt-fixture-factors": 3}, "facts": ["每周测定一次沉降率和 pH"]}
+{"id": "neg-03", "category": "hard_negative", "lang": "zh", "text": "涂层体系盐雾 720 h 的合格判据", "relevant": {"nss-gbt1771": 3, "salt-scribe-rating": 1}, "facts": ["720 h 无起泡"]}
+{"id": "neg-04", "category": "hard_negative", "lang": "zh", "text": "磷酸锌与三聚磷酸铝复配使用", "relevant": {"atp-pigment": 3, "zinc-phosphate-dosage": 2}, "facts": ["5%～8%"]}
+{"id": "neg-05", "category": "hard_negative", "lang": "zh", "text": "环氧涂层户外紫外线下粉化", "relevant": {"epoxy-chalking": 3, "weathering-field-test": 1}, "facts": ["ISO 4628-6"]}
+{"id": "neg-06", "category": "hard_negative", "lang": "zh", "text": "附着力促进剂对镀锌板划格附着力的改善", "relevant": {"adhesion-promoter": 3}, "facts": ["由 2 级提高到 0 级"]}
+{"id": "neg-07", "category": "hard_negative", "lang": "zh", "text": "重涂间隔对层间附着力的影响", "relevant": {"interlayer-adhesion": 3}, "facts": ["不超过 7 d（23 ℃）"]}
+{"id": "neg-08", "category": "hard_negative", "lang": "zh", "text": "固化剂过量对玻璃化转变温度和交联密度的影响", "relevant": {"epoxy-excess-hardener": 3, "epoxy-stoichiometry-en": 1}, "facts": ["当量比 0.95～1.05"]}
+{"id": "neg-09", "category": "hard_negative", "lang": "zh", "text": "无铬钝化的白锈出现时间", "relevant": {"cr6-free-passivation": 3}, "facts": ["约 96 h"]}
+{"id": "xl-01", "category": "crosslingual", "lang": "en", "text": "What temperature and pH does the neutral salt spray test use?", "relevant": {"nss-gbt1771": 3, "astm-b117-en": 3}, "facts": [["35 ℃", "35 ± 2 °C"]]}
+{"id": "xl-02", "category": "crosslingual", "lang": "en", "text": "epoxy polyamide hardener mixing ratio and pot life", "relevant": {"epoxy-polyamide": 3}, "facts": ["质量比 100:50", "适用期约 4 h"]}
+{"id": "xl-03", "category": "crosslingual", "lang": "en", "text": "zinc phosphate dosage in epoxy primer", "relevant": {"zinc-phosphate-dosage": 3}, "facts": ["8%～12%"]}
+{"id": "xl-04", "category": "crosslingual", "lang": "en", "text": "cross-cut adhesion test cutting spacing", "relevant": {"crosscut-iso2409": 3}, "facts": ["切割间距取 2 mm"]}
+{"id": "xl-05", "category": "crosslingual", "lang": "en", "text": "QUV accelerated weathering cycle conditions", "relevant": {"quv-cycle": 3}, "facts": ["8 h 紫外辐照"]}
+{"id": "xl-06", "category": "crosslingual", "lang": "zh", "text": "硅烷前处理的水解 pH 和固化温度", "relevant": {"silane-pretreatment-en": 3}, "facts": ["100 °C for 10 minutes"]}
+{"id": "xl-07", "category": "crosslingual", "lang": "zh", "text": "拉开法附着力试验的合格数值", "relevant": {"pull-off-en": 3, "crosscut-iso2409": 1}, "facts": ["at least 5 MPa"]}
+{"id": "xl-08", "category": "crosslingual", "lang": "zh", "text": "水性环氧的诱导时间和适用期", "relevant": {"wb-epoxy-induction-en": 3, "wb-epoxy-voc": 1}, "facts": ["10 to 15 minutes", "3 to 4 hours at 23 °C"]}
+{"id": "xl-09", "category": "crosslingual", "lang": "zh", "text": "开路电位监测涂层失效的判据", "relevant": {"ocp-monitoring-en": 3, "eis-barrier": 2}, "facts": ["about −0.65 V"]}
+{"id": "mul-01", "category": "multi_doc", "lang": "zh", "text": "对比中性盐雾与铜加速乙酸盐雾的温度和 pH", "relevant": {"nss-gbt1771": 3, "cass-iso9227": 3, "aass-acetic": 1, "astm-b117-en": 1}, "facts": ["35 ℃", "50 ℃"]}
+{"id": "mul-02", "category": "multi_doc", "lang": "zh", "text": "环氧涂层的固化剂选择：聚酰胺、脂环胺、酸酐各自的固化条件", "relevant": {"epoxy-polyamide": 3, "epoxy-cycloaliphatic-lowtemp": 3, "epoxy-anhydride-cure": 3}, "facts": ["适用期约 4 h", "24 h 可实干", "120 ℃ × 2 h"]}
+{"id": "mul-03", "category": "multi_doc", "lang": "zh", "text": "无铬前处理：锆钛转化膜与硅烷的工艺条件", "relevant": {"zirconium-conversion": 3, "silane-pretreatment-en": 3, "cerium-conversion": 1, "cr6-free-passivation": 1}, "facts": ["pH 4.0～4.5", "100 °C for 10 minutes"]}
+{"id": "mul-04", "category": "multi_doc", "lang": "zh", "text": "喷砂粗糙度与磷化膜重量对涂层附着力的要求", "relevant": {"blasting-sa25": 3, "zinc-phosphating": 3}, "facts": ["Rz 控制在 40～75 μm", "2～4 g/m²"]}
+{"id": "mul-05", "category": "multi_doc", "lang": "zh", "text": "氟碳和丙烯酸聚氨酯面漆的 QUV 保光率对比", "relevant": {"fluorocarbon-topcoat": 3, "acrylic-pu-topcoat": 3, "quv-cycle": 1}, "facts": ["5000 h", "2000 h"]}
+{"id": "una-01", "category": "unanswerable", "lang": "zh", "text": "船舶防污涂料的铜离子释放速率", "relevant": {}, "facts": []}
+{"id": "una-02", "category": "unanswerable", "lang": "zh", "text": "膨胀型防火涂料的膨胀倍数与耐火极限", "relevant": {}, "facts": []}
+{"id": "una-03", "category": "unanswerable", "lang": "zh", "text": "汽车阴极电泳漆槽液的固含量与电导率管理", "relevant": {}, "facts": []}
+{"id": "una-04", "category": "unanswerable", "lang": "zh", "text": "粉末涂料的静电喷涂电压与上粉率", "relevant": {}, "facts": []}
+{"id": "una-05", "category": "unanswerable", "lang": "zh", "text": "混凝土表面防护涂料的碳化深度测试", "relevant": {}, "facts": []}
+{"id": "una-06", "category": "unanswerable", "lang": "zh", "text": "锂电池电解液添加剂的分解电压", "relevant": {}, "facts": []}
+{"id": "una-07", "category": "unanswerable", "lang": "zh", "text": "聚氨酯泡沫的发泡剂比例", "relevant": {}, "facts": []}
+{"id": "una-08", "category": "unanswerable", "lang": "zh", "text": "橡胶硫化体系的促进剂配比", "relevant": {}, "facts": []}
+{"id": "una-09", "category": "unanswerable", "lang": "zh", "text": "航空发动机热障涂层的氧化锆厚度", "relevant": {}, "facts": []}
+{"id": "una-10", "category": "unanswerable", "lang": "en", "text": "pH meter calibration procedure with buffer solutions", "relevant": {}, "facts": []}

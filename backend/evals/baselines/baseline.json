@@ -1,0 +1,317 @@
+{
+ "meta": {
+  "generated": "2026-10-06T05:34:07+00:00",
+  "git": "72ed358",
+  "python": "3.11.15",
+  "platform": "Linux-6.18.44-fc-v70-x86_64-with-glibc2.39",
+  "libraries": {
+   "jieba": "0.42.1",
+   "rank-bm25": "0.2.2",
+   "numpy": "2.4.6",
+   "optuna": "5.0.0",
+   "botorch": "0.18.1",
+   "markitdown": "0.1.8",
+   "pymupdf4llm": "1.28.0",
+   "PyMuPDF": "1.28.0",
+   "trafilatura": "2.3.0",
+   "openpyxl": "3.1.5",
+   "python-docx": "1.2.0",
+   "fpdf2": "2.8.9"
+  },
+  "quick": false,
+  "seconds": 21.7,
+  "note": "regenerate with: python -m evals --update-baseline"
+ },
+ "metrics": {
+  "optimization/noise0.0/halton/advantage_over_random": {
+   "value": -0.0015,
+   "direction": "higher",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.0/halton/final_regret": {
+   "value": 0.186,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.0/numpy-ucb/advantage_over_random": {
+   "value": -0.0014,
+   "direction": "higher",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.0/numpy-ucb/final_regret": {
+   "value": 0.1859,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.0/optuna-tpe/advantage_over_random": {
+   "value": 0.1056,
+   "direction": "higher",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.0/optuna-tpe/final_regret": {
+   "value": 0.0789,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.0/random/final_regret": {
+   "value": 0.1845,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/halton/advantage_over_random": {
+   "value": -0.0001,
+   "direction": "higher",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/halton/final_regret": {
+   "value": 0.1894,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/numpy-ucb/advantage_over_random": {
+   "value": -0.0119,
+   "direction": "higher",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/numpy-ucb/final_regret": {
+   "value": 0.2012,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/optuna-tpe/advantage_over_random": {
+   "value": 0.0873,
+   "direction": "higher",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/optuna-tpe/final_regret": {
+   "value": 0.1021,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "optimization/noise0.03/random/final_regret": {
+   "value": 0.1893,
+   "direction": "lower",
+   "tolerance": 0.05
+  },
+  "parsing/naive/mean_score": {
+   "value": 0.6875,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/naive/pass_rate": {
+   "value": 0.5,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/format/docx": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/format/html": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/format/pdf": {
+   "value": 0.9167,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/format/xlsx": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/kind/noise": {
+   "value": 0.5,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/kind/reading_order": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/kind/table": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/kind/units": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/mean_score": {
+   "value": 0.9583,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "parsing/production/pass_rate": {
+   "value": 0.9167,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/context_precision@5": {
+   "value": 0.2527,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/fact_recall@1": {
+   "value": 0.7244,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/fact_recall@3": {
+   "value": 0.8333,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/fact_recall@5": {
+   "value": 0.86,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/full_context@5": {
+   "value": 0.8533,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/gate/refuses_unanswerable": {
+   "value": 0.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/bm25_reference/gate/starves_answerable": {
+   "value": 0.0,
+   "direction": "lower",
+   "tolerance": 0.03
+  },
+  "qa/production/context_precision@5": {
+   "value": 0.2351,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/production/fact_recall@1": {
+   "value": 0.6711,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/production/fact_recall@3": {
+   "value": 0.8556,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/production/fact_recall@5": {
+   "value": 0.8689,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/production/full_context@5": {
+   "value": 0.8533,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/production/gate/refuses_unanswerable": {
+   "value": 0.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "qa/production/gate/starves_answerable": {
+   "value": 0.0,
+   "direction": "lower",
+   "tolerance": 0.03
+  },
+  "retrieval/abstention/production/auroc": {
+   "value": 0.5,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/bm25_reference/mrr@10": {
+   "value": 0.8656,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/bm25_reference/ndcg@10": {
+   "value": 0.7963,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/bm25_reference/recall@10": {
+   "value": 0.8509,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/bm25_reference/success@1": {
+   "value": 0.8158,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/bm25_reference/success@5": {
+   "value": 0.9342,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/crosslingual/success@5": {
+   "value": 0.3333,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/hard_negative/success@1": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/lexical/success@1": {
+   "value": 0.9615,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/mrr@10": {
+   "value": 0.8136,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/multi_doc/success@1": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/ndcg@10": {
+   "value": 0.7709,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/numeric/success@1": {
+   "value": 0.8333,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/paraphrase/success@5": {
+   "value": 1.0,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/recall@10": {
+   "value": 0.8311,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/success@1": {
+   "value": 0.7368,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production/success@5": {
+   "value": 0.9211,
+   "direction": "higher",
+   "tolerance": 0.03
+  },
+  "retrieval/production_minus_bm25_reference/ndcg@10": {
+   "value": -0.0254,
+   "direction": "higher",
+   "tolerance": 0.03
+  }
+ }
+}
