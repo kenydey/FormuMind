@@ -76,6 +76,22 @@ def test_hybrid_single_chunk(stores):
     assert "环氧" in data[0]["text"]
 
 
+def test_hybrid_finds_a_term_the_dictionary_cuts_through(stores):
+    """jieba reads 耐盐雾性能 as 耐盐 / 雾 / 性能: before the character pairs were indexed, ``盐雾`` was in no token of the
+    document that answers it and the query found nothing at all (found by the retrieval evaluation, evals/)."""
+    client = _client()
+    documents = (
+        ("盐雾", "涂层耐盐雾性能达到 720 小时，划线处无红锈，起泡等级不低于 0 级，适用于重防腐环境下的钢结构底漆体系。"),
+        ("附着力", "划格法评定涂层附着力等级，切割间距取 2 mm，用胶带粘贴后撕起，按脱落面积评为 0 到 5 级，工业防腐涂料一般要求不低于 1 级。"),
+    )
+    for title, text in documents:  # long enough for the ingest quality gate, which refuses a one-line fragment
+        body = client.post("/api/kb/ingest", json={"text": text, "title": title}).json()
+        assert body["status"] != "failed" and body["chunk_count"] >= 1, body
+
+    data = client.post("/api/kb/hybrid-search", json={"query": "盐雾", "top_k": 3}).json()
+    assert data and "耐盐雾性能" in data[0]["text"], data
+
+
 # ── test 3: ranking by relevance ────────────────────────────────────────────
 
 

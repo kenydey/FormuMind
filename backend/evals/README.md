@@ -60,21 +60,37 @@ All fixed in the commit that introduced the suite that found it; each fix has it
   text and in the table the contract normalises (its columns were `['水性环氧底漆配方表（单位：wt%）', 'Unnamed: 1', 'Unnamed: 2']`
   instead of `['组分', '含量', '功能']`). Case score 0.75 → 1.00 (the two junk patterns present → none; the cells and rows were all there, in the wrong places).
   (`parsing._parse_xlsx_tables`, `tests/test_xlsx_tables.py`)
+* **The BM25 channel indexed Chinese only as jieba words, and the application's retriever trailed a plain BM25 over character pairs.**
+  jieba reads `耐盐雾性能` as `耐盐` / `雾` / `性能`, so a question for `盐雾` shared no token with the document that answers it, and
+  `拉开法附着力试验的合格数值` did not return the cross-cut adhesion document at all: the one rare word both texts share (`合格`) decided
+  the ranking. Without the vector channel the application's success@1 was 0.737 against 0.816 for the reference. The tokenizer now
+  indexes the overlapping character pairs of each Chinese run besides the words: success@1 0.737 → 0.816, nDCG@10 0.771 → 0.800
+  (paired bootstrap of the nDCG difference over the 76 answerable queries: +0.03, 95 % interval +0.01 to +0.05), MRR@10 0.814 → 0.863, paraphrase success@1 0.40 → 0.67, QA fact recall@1 0.66 → 0.73. The same change caches the cut:
+  jieba costs about 2.5 ms per 700-character chunk and every query repeated it for every chunk of the scan - about 3 s a query over 1,500
+  chunks before, 0.2 s after (through `hybrid_search_scored`). Variants tried on the way, same data
+  (`scripts/audit/bm25_tokenizer_variants.py` reproduces the table, with the intervals): jieba's search mode 0.789 / nDCG 0.793,
+  words + pairs + single characters 0.842 / 0.810 (one hard-negative question lost), characters + pairs without jieba 0.855 / 0.823 -
+  better on this corpus, dropped because it throws away the dictionary on a corpus of 52 documents that I wrote.
+  (`hybrid_search._tokenize`, `tests/test_hybrid_tokenizer.py`, `tests/test_hybrid_search.py`)
 * (side effect) The API fuzzer was sending its hostile input to the real SureChEMBL, OpenAlex, DuckDuckGo and USPTO; it now shares the
   test suite's network guard.
 
 ## What it says about the current state (not fixed; measured)
 
-Numbers from `python -m evals` at the commit that introduced the harness; see the baseline for the exact values.
+Numbers from `python -m evals` at the last baseline refresh; see the baseline for the exact values.
 
 * **Retrieval confidence carries no information.** The hybrid retriever normalises scores by the best hit, so the top hit's
   relevance is a constant (0.3 here) whatever was asked. Abstention separability (AUROC) is 0.50, against 0.87 for a plain BM25's
   per-term score. Together with the QA suite's finding that retrieval **never returns nothing** (0 of 10 unanswerable questions got an
   empty result, so chat's `if not citations` gate never fires on a populated knowledge base), refusing to answer rests entirely on the
   LLM claim check.
-* **Without an embedding model, cross-language and paraphrase questions are retrieved poorly:** success@5 0.33 for the nine
-  cross-language questions (a plain BM25 gets 0.56), paraphrase success@1 0.40 (0.53). The vector channel is not exercised by this
-  offline suite (`config.vector_channel` says whether it was present); the Docker image has it, so these numbers are the floor.
+* **Cross-language questions are still retrieved poorly, paraphrases less so:** success@5 0.44 for the nine cross-language questions
+  (a plain BM25 gets 0.56; it was 0.33 before the character pairs), success@1 0.22 (0.44); paraphrase success@1 0.67 (0.53 for the
+  reference). The vector channel is not exercised by this offline suite (`config.vector_channel` says whether it was present); the
+  Docker image has it, so the cross-language numbers are probably a floor - not measured. Part of what is left is the scoring, not the
+  tokens: with the same tokens and a Lucene-style IDF the application's tokenization reaches 0.56 on the cross-language success@5
+  (one question of nine) - `rank_bm25.BM25Okapi` gives a term that is in more than half the documents a positive floor instead of its
+  negative IDF. Not changed: it is the scoring of every question the application answers, and it moves one question here.
 * **The default optimiser is no better than random search.** At 30 experiments the numpy-UCB engine (what runs when neither Optuna
   nor BoTorch is installed) ends with regret 0.186 against 0.184 for random points (paired advantage −0.001, clearly ahead on 0 of 4
   functions). Optuna's TPE: 0.079, clearly ahead on 3 of 4 (hartmann6 1.00 win rate). BoTorch GP-EI (3 seeds): 0.012. With 3 % noise:

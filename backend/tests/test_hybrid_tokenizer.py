@@ -10,9 +10,17 @@ from __future__ import annotations
 import sys
 
 import pytest
-from app.services.hybrid_search import _tokenize
+from app.services.hybrid_search import _tokenize, _tokenize_cjk
 
 pytest.importorskip("jieba")
+
+
+@pytest.fixture(autouse=True)
+def _cold_token_cache():
+    """The tokenizer caches by text, process-wide: a test that counts or swaps jieba must not meet another test's entries."""
+    _tokenize_cjk.cache_clear()
+    yield
+    _tokenize_cjk.cache_clear()
 
 
 def test_english_is_lowercased_and_split_on_punctuation():
@@ -56,4 +64,82 @@ def test_no_token_is_blank_or_punctuation_and_none_is_upper_case():
 
 def test_without_jieba_a_word_stays_a_word_and_a_chinese_character_stands_alone(monkeypatch):
     monkeypatch.setitem(sys.modules, "jieba", None)  # ``import jieba`` raises ImportError
-    assert _tokenize("EEW 190 每 100 份树脂 α-pinene 0.5%") == ["eew", "190", "每", "100", "份", "树", "脂", "α", "pinene", "0.5"]
+    # the characters, then the pairs of each run of Chinese (the lone 每 has none)
+    assert _tokenize("EEW 190 每 100 份树脂 α-pinene 0.5%") == [
+        "eew", "190", "每", "100", "份", "树", "脂", "α", "pinene", "0.5", "份树", "树脂",
+    ]
+
+
+# ── Chinese is indexed twice: as the dictionary cuts it, and as overlapping pairs of characters ─────────────────────────────
+
+
+def test_chinese_is_indexed_as_the_dictionary_cuts_it_and_as_overlapping_character_pairs():
+    import jieba
+
+    text = "耐盐雾性能"
+    tokens = _tokenize(text)
+    assert set(jieba.cut(text)) <= set(tokens)
+    assert {"耐盐", "盐雾", "雾性", "性能"} <= set(tokens)
+
+
+def test_a_term_the_dictionary_cuts_through_is_still_a_token():
+    """jieba reads 耐盐雾性能 as 耐盐 / 雾 / 性能, so ``盐雾`` - the thing people ask for - was in no token of the text that
+    answers them, and a question holding it matched nothing there (found by the retrieval evaluation)."""
+    assert "盐雾" in _tokenize("涂层耐盐雾性能达到 720 h")
+    assert "盐雾" in _tokenize("盐雾")
+
+
+def test_a_pair_never_spans_a_blank_a_punctuation_mark_or_a_latin_word():
+    for text in ("附着 力", "附着，力", "附着ISO力", "附着\n力", "附着(力)"):
+        tokens = _tokenize(text)
+        assert "着力" not in tokens and "附力" not in tokens, (text, tokens)
+    assert "附着" in _tokenize("附着 力")
+
+
+def test_a_lone_character_is_one_token_and_has_no_pair():
+    assert _tokenize("锌 与 铬") == ["锌", "与", "铬"]
+
+
+def test_text_without_chinese_is_not_given_pairs_of_anything():
+    assert _tokenize("zinc phosphate 3.5 phr") == ["zinc", "phosphate", "3.5", "phr"]
+
+
+# ── the cut is the expensive part, and the scan repeats it for every chunk on every query ─────────────────────────────────────
+
+
+def test_the_dictionary_cut_runs_once_per_text(monkeypatch):
+    import jieba
+
+    calls: list[str] = []
+    real_cut = jieba.cut
+
+    def counting_cut(text, *args, **kwargs):
+        calls.append(text)
+        return real_cut(text, *args, **kwargs)
+
+    monkeypatch.setattr(jieba, "cut", counting_cut)
+    for _ in range(3):
+        _tokenize("耐盐雾性能达到 720 h")
+    assert len(calls) == 1
+    _tokenize("划格法附着力")
+    assert len(calls) == 2
+
+
+def test_a_caller_gets_its_own_list_so_the_cache_cannot_be_edited_through_it():
+    first = _tokenize("耐盐雾性能")
+    first.append("junk")
+    assert "junk" not in _tokenize("耐盐雾性能")
+
+
+def test_with_and_without_jieba_never_share_a_cached_result(monkeypatch):
+    text = "耐盐雾性能"
+    with_jieba = _tokenize(text)
+    monkeypatch.setitem(sys.modules, "jieba", None)
+    without = _tokenize(text)
+    assert without != with_jieba and {"耐", "盐", "雾", "盐雾"} <= set(without)
+    monkeypatch.undo()
+    assert _tokenize(text) == with_jieba
+
+
+def test_the_cache_is_bounded():
+    assert _tokenize_cjk.cache_info().maxsize is not None and _tokenize_cjk.cache_info().maxsize <= 20_000

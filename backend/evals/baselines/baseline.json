@@ -1,7 +1,7 @@
 {
  "meta": {
-  "generated": "2026-10-06T06:01:06+00:00",
-  "git": "a39b1ce",
+  "generated": "2026-10-06T09:44:30+00:00",
+  "git": "23a2201",
   "python": "3.11.15",
   "platform": "Linux-6.18.44-fc-v70-x86_64-with-glibc2.39",
   "libraries": {
@@ -19,7 +19,7 @@
    "fpdf2": "2.8.9"
   },
   "quick": false,
-  "seconds": 20.9,
+  "seconds": 40.4,
   "note": "regenerate with: python -m evals --update-baseline"
  },
  "metrics": {
@@ -189,27 +189,27 @@
    "tolerance": 0.03
   },
   "qa/production/context_precision@5": {
-   "value": 0.2373,
+   "value": 0.2399,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/fact_recall@1": {
-   "value": 0.6623,
+   "value": 0.7281,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/fact_recall@3": {
-   "value": 0.8509,
+   "value": 0.8487,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/fact_recall@5": {
-   "value": 0.864,
+   "value": 0.8618,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/full_context@5": {
-   "value": 0.8421,
+   "value": 0.8553,
    "direction": "higher",
    "tolerance": 0.03
   },
@@ -254,7 +254,7 @@
    "tolerance": 0.03
   },
   "retrieval/production/crosslingual/success@5": {
-   "value": 0.3333,
+   "value": 0.4444,
    "direction": "higher",
    "tolerance": 0.03
   },
@@ -264,12 +264,12 @@
    "tolerance": 0.03
   },
   "retrieval/production/lexical/success@1": {
-   "value": 0.9615,
+   "value": 1.0,
    "direction": "higher",
    "tolerance": 0.03
   },
   "retrieval/production/mrr@10": {
-   "value": 0.8136,
+   "value": 0.8634,
    "direction": "higher",
    "tolerance": 0.03
   },
@@ -279,7 +279,7 @@
    "tolerance": 0.03
   },
   "retrieval/production/ndcg@10": {
-   "value": 0.7709,
+   "value": 0.8001,
    "direction": "higher",
    "tolerance": 0.03
   },
@@ -294,22 +294,22 @@
    "tolerance": 0.03
   },
   "retrieval/production/recall@10": {
-   "value": 0.8311,
+   "value": 0.841,
    "direction": "higher",
    "tolerance": 0.03
   },
   "retrieval/production/success@1": {
-   "value": 0.7368,
+   "value": 0.8158,
    "direction": "higher",
    "tolerance": 0.03
   },
   "retrieval/production/success@5": {
-   "value": 0.9211,
+   "value": 0.9342,
    "direction": "higher",
    "tolerance": 0.03
   },
   "retrieval/production_minus_bm25_reference/ndcg@10": {
-   "value": -0.0254,
+   "value": 0.0038,
    "direction": "higher",
    "tolerance": 0.03
   }

@@ -139,8 +139,8 @@ def production():
 def test_the_production_retriever_finds_the_answer_in_the_top_five_for_most_questions(production):
     ret, _ = production
     overall = ret["systems"]["production"]["overall"]
-    assert overall["success@5"]["mean"] >= 0.85
-    assert overall["success@1"]["mean"] >= 0.65
+    assert overall["success@5"]["mean"] >= 0.90
+    assert overall["success@1"]["mean"] >= 0.78
     assert overall["success@5"]["mean"] > ret["systems"]["random"]["overall"]["success@5"]["mean"] + 0.6
 
 
@@ -150,6 +150,16 @@ def test_it_keeps_up_with_a_plain_bm25_on_questions_that_repeat_the_documents_wo
     assert by["production"]["lexical"]["success@1"] >= 0.9
     assert by["production"]["hard_negative"]["success@1"] >= by["bm25_reference"]["hard_negative"]["success@1"] - 0.12
     assert by["production"]["numeric"]["success@1"] >= by["bm25_reference"]["numeric"]["success@1"] - 0.12
+
+
+def test_it_is_no_longer_behind_a_plain_bm25_overall_or_on_paraphrases(production):
+    """The BM25 channel indexed Chinese only as jieba words, and the evaluation found a plain BM25 over character pairs ahead of it
+    (nDCG@10 0.796 against 0.771, paraphrase success@1 0.53 against 0.40; without a vector channel on either side). Indexing the
+    pairs as well closed it (0.800, 0.67). The reference stays ahead on cross-language questions - see ``evals/README.md``."""
+    ret, _ = production
+    prod, ref = ret["systems"]["production"], ret["systems"]["bm25_reference"]
+    assert prod["overall"]["ndcg@10"]["mean"] >= ref["overall"]["ndcg@10"]["mean"] - 0.02
+    assert prod["by_category"]["paraphrase"]["success@1"] >= ref["by_category"]["paraphrase"]["success@1"] - 0.05
 
 
 def test_numeric_questions_asked_in_chinese_reach_the_english_document_that_answers_them(production):
