@@ -71,6 +71,7 @@ def generate_doe(
         None,
         description=(
             "仅 design=ccd：轴距。face（默认）星点落在因子范围的面上，所有 run 都在 [low, high] 内；"
+            "inscribed（内切）：旋转设计整体按 1/α 内缩，仍是旋转设计、星点在面上、所有 run 都在范围内（因子点内缩）；"
             "rotatable 为旋转设计，星点超出范围、对应 run 标为 infeasible；也可给一个数值 α。"
         ),
     ),

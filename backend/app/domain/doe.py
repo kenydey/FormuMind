@@ -94,25 +94,37 @@ def plackett_burman(k: int) -> np.ndarray:
     return np.array(design, dtype=float)[:, :k]
 
 
+_INSCRIBED = ("inscribed", "cci")
+
+
+def is_inscribed(alpha: object) -> bool:
+    """True for the inscribed central composite design (``"inscribed"`` / ``"cci"``)."""
+    return isinstance(alpha, str) and alpha.strip().lower() in _INSCRIBED
+
+
 def resolve_ccd_alpha(alpha: object, n_factorial: int) -> float:
-    """The axial distance of a central composite design, in coded units.
+    """The axial distance of a central composite design, in coded units, *before* any scaling of the whole design.
 
     ``"face"`` (what every caller gets by default) is 1: the star points sit on the faces of the factorial box, so
     every run stays inside each factor's ``[low, high]`` - the right choice for a formulation, where a star point past
     the box is a negative concentration or a temperature nobody can set. ``"rotatable"`` is ``n_factorial ** 0.25``
-    (> 1): equal prediction variance in every direction, bought with star points outside the box. A bare number is
-    taken as alpha itself. Anything else is a ValueError (the API turns it into a 422).
+    (> 1): equal prediction variance in every direction, bought with star points outside the box. ``"inscribed"`` is the
+    same distance, and :func:`central_composite` then shrinks the whole design by ``1 / alpha``: still rotatable, star
+    points on the faces, factorial points inside - the way to keep both properties. A bare number is taken as alpha
+    itself. Anything else is a ValueError (the API turns it into a 422).
     """
     if alpha is None or (isinstance(alpha, str) and alpha.strip().lower() in ("", "face", "faced")):
         return 1.0
-    if isinstance(alpha, str) and alpha.strip().lower() == "rotatable":
+    if isinstance(alpha, str) and (alpha.strip().lower() == "rotatable" or is_inscribed(alpha)):
         return float(n_factorial) ** 0.25
     try:
         if isinstance(alpha, bool):
             raise TypeError("a bool is not a distance")
         value = float(alpha)  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        raise ValueError(f"unknown ccd_alpha {alpha!r}: use 'face', 'rotatable' or a number > 0") from None
+        raise ValueError(
+            f"unknown ccd_alpha {alpha!r}: use 'face', 'rotatable', 'inscribed' or a number > 0"
+        ) from None
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"ccd_alpha must be a finite number > 0, got {alpha!r}")
     return value
@@ -122,6 +134,8 @@ def central_composite(k: int, alpha: str | float = "rotatable") -> np.ndarray:
     """Central composite design: factorial + axial (star) + centre points.
 
     ``alpha`` is anything :func:`resolve_ccd_alpha` accepts; :func:`build_plan` asks for ``"face"`` unless told otherwise.
+    ``"inscribed"`` returns the rotatable design scaled by ``1 / alpha``: star points at +-1, factorial points at
+    +-``1 / alpha``.
     """
     if k > 4:
         _check_run_budget(2 ** (k - 1), f"central composite over {k} factors")
@@ -134,7 +148,8 @@ def central_composite(k: int, alpha: str | float = "rotatable") -> np.ndarray:
             pt[i] = sign
             axial.append(pt)
     centre = [[0.0] * k for _ in range(3)]
-    return np.vstack([factorial, np.array(axial), np.array(centre)])
+    design = np.vstack([factorial, np.array(axial), np.array(centre)])
+    return design / a if is_inscribed(alpha) else design
 
 
 def latin_hypercube(k: int, n: int, seed: int = 0) -> np.ndarray:
@@ -199,9 +214,10 @@ def build_plan(
     """Build a design over *factors*.
 
     ``ccd_alpha`` only matters for ``design="ccd"``: ``"face"`` (the default, every run inside ``[low, high]``),
-    ``"rotatable"`` or a number - see :func:`resolve_ccd_alpha`. Runs that land outside a factor's range (star points of
-    a non-face CCD) are kept but marked ``infeasible`` with the reason, never clipped: clipping would collapse them onto
-    other runs and silently change the design.
+    ``"inscribed"`` (rotatable and every run inside, factorial points pulled in), ``"rotatable"`` or a number - see
+    :func:`resolve_ccd_alpha`. Runs that land outside a factor's range (star points of a rotatable or large-alpha CCD)
+    are kept but marked ``infeasible`` with the reason, never clipped: clipping would collapse them onto other runs and
+    silently change the design.
     """
     if not factors:
         raise ValueError("At least one factor is required for a DOE plan.")
@@ -252,16 +268,23 @@ def build_plan(
         runs.append(run)
     if design == "ccd":
         alpha_used = float(np.max(np.abs(matrix)))
-        note_extra += (
-            f" Axial distance alpha={alpha_used:.4g}"
-            + (" (face-centred: every run inside [low, high])." if alpha_used <= 1.0 + 1e-9 else " (star points outside the factor box).")
-        )
+        if is_inscribed(ccd_alpha):
+            inner = float(np.min(np.abs(matrix[np.abs(matrix) > 1e-12])))
+            note_extra += (
+                f" Inscribed (rotatable alpha={1.0 / inner:.4g} scaled by 1/alpha): star points on the faces, "
+                f"factorial points at +-{inner:.4g}; every run inside [low, high]."
+            )
+        else:
+            note_extra += (
+                f" Axial distance alpha={alpha_used:.4g}"
+                + (" (face-centred: every run inside [low, high])." if alpha_used <= 1.0 + 1e-9 else " (star points outside the factor box).")
+            )
     if outside_runs:
         # Clipping the star points would collapse them onto other runs, so they stay as they are and are flagged:
         # the caller must widen the physical limits, drop those runs, or ask for ccd_alpha='face'.
         note_extra += (
             f" WARNING: {outside_runs} of {len(runs)} runs lie outside the factor [low, high] range "
-            "(e.g. a negative concentration) and are marked infeasible; use ccd_alpha='face' to keep every run inside."
+            "(e.g. a negative concentration) and are marked infeasible; use ccd_alpha='face' or 'inscribed' to keep every run inside."
         )
     note = (
         f"{design} design over {k} factors -> {len(runs)} runs. "

@@ -61,6 +61,15 @@ describe("DoeResultsPanel CCD star-point choice", () => {
     expect(generateDoe).toHaveBeenCalledWith("ccd", { ccdAlpha: "rotatable" });
   });
 
+  it("offers the inscribed design: rotatable and still inside the ranges", async () => {
+    render(<DoeResultsPanel />);
+    const alpha = (await screen.findByTestId("doe-ccd-alpha-select")) as HTMLSelectElement;
+    expect(Array.from(alpha.options).map((o) => o.value)).toEqual(["face", "inscribed", "rotatable"]);
+    fireEvent.change(alpha, { target: { value: "inscribed" } });
+    fireEvent.click(generate());
+    expect(generateDoe).toHaveBeenCalledWith("ccd", { ccdAlpha: "inscribed" });
+  });
+
   it("offers the choice for the central composite design only", async () => {
     render(<DoeResultsPanel />);
     fireEvent.change(designSelect(), { target: { value: "lhs" } });

@@ -255,8 +255,11 @@ export interface AppState {
   runDeepResearch: () => Promise<void>;
   cancelDeepResearch: () => Promise<void>;
   runOptimize: () => Promise<void>;
-  /** `ccdAlpha` only applies to design "ccd": "face" (default, every run inside the ranges) or "rotatable" (star points outside, flagged infeasible). */
-  generateDoe: (design: string, opts?: { ccdAlpha?: "face" | "rotatable" }) => Promise<void>;
+  /**
+   * `ccdAlpha` only applies to design "ccd": "face" (default, every run inside the ranges), "inscribed" (rotatable and
+   * every run inside, factorial points pulled in) or "rotatable" (star points outside, flagged infeasible).
+   */
+  generateDoe: (design: string, opts?: { ccdAlpha?: "face" | "rotatable" | "inscribed" }) => Promise<void>;
   setDoeEngine: (engine: "auto" | "native" | "pydoe") => void;
   setAlEngine: (engine: "auto" | "legacy" | "baybe") => void;
   setOptimizeEngine: (engine: "auto" | "baybe" | "legacy") => void;

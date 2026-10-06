@@ -315,7 +315,7 @@ export const apiMethods = {
       query: opts.query ?? "",
       n: opts.n ?? 3,
     }),
-  // ccdAlpha（仅 design=ccd 有意义）："face" 面心（后端默认，所有 run 都在 [low, high] 内）/ "rotatable" 旋转（星点越界、被标为不可行）/ 数值 α
+  // ccdAlpha（仅 design=ccd 有意义）："face" 面心（后端默认，所有 run 都在 [low, high] 内）/ "inscribed" 内切（旋转 + 全在范围内，因子点内缩）/ "rotatable" 旋转（星点越界、被标为不可行）/ 数值 α
   doe: (req: Requirement, design: string, engine = "auto", opts: { ccdAlpha?: string | number } = {}) =>
     post<DOEPlan>(
       `/api/doe?design=${encodeURIComponent(design)}&engine=${encodeURIComponent(engine)}` +

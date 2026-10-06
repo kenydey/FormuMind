@@ -63,6 +63,11 @@ describe("generateDoe ccd_alpha", () => {
     expect(doe).toHaveBeenCalledWith(expect.anything(), "ccd", "native", { ccdAlpha: "rotatable" });
   });
 
+  it("passes the inscribed request for ccd", async () => {
+    await useStore.getState().generateDoe("ccd", { ccdAlpha: "inscribed" });
+    expect(doe).toHaveBeenCalledWith(expect.anything(), "ccd", "native", { ccdAlpha: "inscribed" });
+  });
+
   it("asks for nothing in particular when the caller did not choose", async () => {
     await useStore.getState().generateDoe("ccd");
     expect(doe).toHaveBeenCalledWith(expect.anything(), "ccd", "native", { ccdAlpha: undefined });

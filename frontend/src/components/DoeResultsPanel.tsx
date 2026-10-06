@@ -144,7 +144,7 @@ export default function DoeResultsPanel() {
   const [factorHints, setFactorHints] = useState<FactorCandidate[] | null>(null);
   const [factorBusy, setFactorBusy] = useState(false);
   const [design, setDesign] = useState("ccd");
-  const [ccdAlpha, setCcdAlpha] = useState<"face" | "rotatable">("face");
+  const [ccdAlpha, setCcdAlpha] = useState<"face" | "rotatable" | "inscribed">("face");
   const engines = useEngineAvailability();
   const pydoeReady = engineOk(engines, "pydoe");
   const baybeReady = engineOk(engines, "baybe");
@@ -329,12 +329,13 @@ export default function DoeResultsPanel() {
           {shownDesign === "ccd" && (
             <select
               value={ccdAlpha}
-              onChange={(e) => setCcdAlpha(e.target.value as "face" | "rotatable")}
+              onChange={(e) => setCcdAlpha(e.target.value as "face" | "rotatable" | "inscribed")}
               className="bg-ink border border-edge rounded px-2 py-1 text-xs"
-              title="CCD 星点位置：面心 α=1 时所有实验点都在因子范围内；旋转设计的星点超出范围（浓度可能为负），对应实验会被标为不可行"
+              title="CCD 星点位置：面心 α=1 时所有实验点都在因子范围内；内切 = 旋转设计整体按 1/α 内缩（仍是旋转设计、星点在面上、全部在范围内，代价是因子点离边界更远）；旋转设计的星点超出范围（浓度可能为负），对应实验会被标为不可行"
               data-testid="doe-ccd-alpha-select"
             >
               <option value="face">星点：面心 α=1（全部在范围内）</option>
+              <option value="inscribed">星点：内切（旋转 + 全在范围内，因子点内缩）</option>
               <option value="rotatable">星点：旋转 α=n^¼（越界·标不可行）</option>
             </select>
           )}

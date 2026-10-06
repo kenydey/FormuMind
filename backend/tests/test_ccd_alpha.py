@@ -1,4 +1,5 @@
-"""``ccd_alpha`` through the engines and the API: face-centred by default, rotatable on request, flagged not clipped.
+"""``ccd_alpha`` through the engines and the API: face-centred by default, rotatable on request, flagged not clipped -
+and an inscribed variant that is rotatable *and* stays inside the factor ranges.
 
 Round 4 left this open (plan #3): the native CCD put its star points at +/-(n_factorial)^0.25 - 1.68 coded units for
 three factors, i.e. negative concentrations - and only said so in a note, while the pyDOE engine clipped the same points
@@ -7,9 +8,11 @@ available on request and keeps its star points outside the box, marked ``infeasi
 """
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app.domain import doe as doe_domain
 from app.domain.schemas import DOEFactor
 from app.main import app
 from app.services.engines.doe_registry import build_doe_plan, pydoe_available
@@ -106,3 +109,86 @@ def test_the_api_refuses_a_bad_alpha_with_a_422_naming_it():
 def test_the_api_ignores_ccd_alpha_for_other_designs():
     r = _post("design=full_factorial&engine=native&ccd_alpha=nope")
     assert r.status_code == 200, r.text
+
+
+# ── inscribed: rotatable and inside ──────────────────────────────────────────
+
+
+def _rotatability_gap(design: np.ndarray) -> float:
+    """How far a design is from rotatable, by the classical moment condition: sum x_i^4 = 3 sum x_i^2 x_j^2 for every
+    pair (the odd moments vanish by symmetry in these designs). 0 = rotatable."""
+    k = design.shape[1]
+    gap = 0.0
+    for i in range(k):
+        m4 = float(np.sum(design[:, i] ** 4))
+        for j in range(k):
+            if i != j:
+                gap = max(gap, abs(m4 - 3.0 * float(np.sum(design[:, i] ** 2 * design[:, j] ** 2))))
+    return gap
+
+
+@pytest.mark.parametrize("k", [2, 3, 4, 5])
+def test_the_inscribed_design_is_rotatable_and_never_leaves_the_box(k):
+    inscribed = doe_domain.central_composite(k, "inscribed")
+    assert _rotatability_gap(inscribed) < 1e-9
+    assert float(np.max(np.abs(inscribed))) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("k", [2, 3, 4])
+def test_only_the_rotatable_and_inscribed_designs_are_rotatable(k):
+    """Not vacuous: the same check says face-centred and an arbitrary alpha are not."""
+    assert _rotatability_gap(doe_domain.central_composite(k, "rotatable")) < 1e-9
+    assert _rotatability_gap(doe_domain.central_composite(k, "face")) > 0.1
+    assert _rotatability_gap(doe_domain.central_composite(k, 1.2)) > 0.1
+
+
+@pytest.mark.parametrize("k", [2, 3, 4])
+def test_the_inscribed_design_is_the_rotatable_one_shrunk_by_its_alpha(k):
+    factorial_runs = 2**k
+    alpha = factorial_runs**0.25
+    rotatable = doe_domain.central_composite(k, "rotatable")
+    inscribed = doe_domain.central_composite(k, "inscribed")
+    assert np.allclose(inscribed, rotatable / alpha)
+    # star points land exactly on the faces, factorial points on +-1/alpha
+    star_rows = inscribed[factorial_runs : factorial_runs + 2 * k]
+    assert np.allclose(np.sort(np.abs(star_rows[star_rows != 0])), 1.0)
+    assert np.allclose(np.abs(inscribed[:factorial_runs]), 1.0 / alpha)
+
+
+@pytest.mark.parametrize("alias", ["inscribed", "INSCRIBED", " Inscribed ", "cci"])
+def test_the_inscribed_design_has_aliases_and_the_resolver_names_it(alias):
+    assert np.allclose(doe_domain.central_composite(3, alias), doe_domain.central_composite(3, "inscribed"))
+    with pytest.raises(ValueError, match="inscribed"):
+        doe_domain.resolve_ccd_alpha("nope", 8)
+
+
+@pytest.mark.parametrize("engine", ["native", "auto", "pydoe"])
+def test_an_inscribed_request_stays_inside_every_range_on_every_engine(engine):
+    plan = build_doe_plan(FACTORS, "ccd", engine=engine, ccd_alpha="inscribed")
+    assert plan.notes.startswith("engine=native"), "pyDOE cannot be asked for it: built where it can be kept"
+    assert _inside(plan)
+    assert not any(run.infeasible for run in plan.runs)
+    assert "Inscribed" in plan.notes and "every run inside" in plan.notes and "WARNING" not in plan.notes
+    assert len(plan.runs) == len(doe_domain.central_composite(len(FACTORS), "inscribed"))
+
+
+def test_the_inscribed_plan_trades_range_for_rotatability():
+    """The price, stated: the factorial corners are pulled in to 1/alpha of the half-range."""
+    face = build_doe_plan(FACTORS, "ccd", engine="native")
+    inscribed = build_doe_plan(FACTORS, "ccd", engine="native", ccd_alpha="inscribed")
+    low_a, high_a = FACTORS[0].low, FACTORS[0].high
+    mid, half = (low_a + high_a) / 2, (high_a - low_a) / 2
+    assert max(run.natural["A"] for run in face.runs) == pytest.approx(high_a)
+    corners = [run.natural["A"] for run in inscribed.runs[:8]]
+    assert max(corners) == pytest.approx(mid + half / 8**0.25, abs=1e-3)  # natural values are rounded to 4 places
+    assert max(run.natural["A"] for run in inscribed.runs) == pytest.approx(high_a), "the star points still reach the faces"
+
+
+def test_the_api_accepts_an_inscribed_ccd_and_its_422_lists_the_choices():
+    r = _post("design=ccd&engine=native&ccd_alpha=inscribed")
+    assert r.status_code == 200, r.text
+    plan = r.json()
+    assert not any(run["infeasible"] for run in plan["runs"])
+    assert "Inscribed" in plan["notes"]
+    bad = _post("design=ccd&engine=native&ccd_alpha=nope")
+    assert bad.status_code == 422 and "inscribed" in bad.text
