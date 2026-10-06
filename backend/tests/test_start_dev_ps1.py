@@ -122,3 +122,57 @@ def test_worker_readiness_is_read_from_the_log_celery_writes_it_to():
     text = RUNNER.read_text(encoding="utf-8")
     block = text[text.index("function Start-Worker"): text.index("function Start-Frontend")]
     assert "$err" in block.split("Wait-For", 1)[1], "the readiness check does not look at the stderr log"
+
+
+# ── Redis is addressed by the IPv4 loopback ────────────────────────────────────────────────────────
+
+_ENV_HARNESS = r"""
+param([string]$Script, [string]$RootDir)
+$errs = $null; $tokens = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$tokens, [ref]$errs)
+$type = [System.Management.Automation.Language.FunctionDefinitionAst]
+foreach ($fn in $ast.FindAll({ param($n) $n -is $type -and $n.Name -in 'Test-EnvFileSets', 'Set-FormuMindEnv' }, $true)) {
+  Invoke-Expression $fn.Extent.Text
+}
+$Root = $RootDir
+Set-FormuMindEnv
+"REDIS=$env:FORMUMIND_REDIS_URL"
+"DONE"
+"""
+
+
+def _redis_url_the_runner_sets(tmp_path: Path, *, env_file: str | None = None, environment: str | None = None) -> str:
+    harness = tmp_path / "env_harness.ps1"
+    harness.write_text(_ENV_HARNESS, encoding="utf-8")
+    root = tmp_path / "checkout"
+    root.mkdir(exist_ok=True)
+    if env_file is not None:
+        (root / ".env").write_text(env_file, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k not in ("FORMUMIND_REDIS_URL", "FORMUMIND_ENV_FILE")}
+    env.update({"DOTNET_SYSTEM_GLOBALIZATION_INVARIANT": "1", "POWERSHELL_TELEMETRY_OPTOUT": "1"})
+    if environment is not None:
+        env["FORMUMIND_REDIS_URL"] = environment
+    proc = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness), "-Script", str(RUNNER), "-RootDir", str(root)],
+        capture_output=True, text=True, encoding="utf-8", timeout=120, env=env,
+    )
+    lines = proc.stdout.splitlines()
+    assert lines and lines[-1] == "DONE", proc.stdout + proc.stderr
+    return next(ln for ln in lines if ln.startswith("REDIS=")).split("=", 1)[1]
+
+
+def test_the_runner_names_the_ipv4_loopback_for_redis_because_localhost_costs_half_a_second_per_connection_on_windows(tmp_path):
+    assert _redis_url_the_runner_sets(tmp_path) == "redis://127.0.0.1:6379/0"
+
+
+def test_a_redis_the_user_chose_in_the_environment_is_left_alone(tmp_path):
+    assert _redis_url_the_runner_sets(tmp_path, environment="redis://cache.example:6380/2") == "redis://cache.example:6380/2"
+
+
+def test_a_redis_the_user_chose_in_the_env_file_is_left_alone(tmp_path):
+    chosen = _redis_url_the_runner_sets(tmp_path, env_file="FORMUMIND_LLM_MODEL=x\nFORMUMIND_REDIS_URL=redis://cache.example:6380/2\n")
+    assert chosen == "", "the runner overrode what the .env file says (the process environment beats the file)"
+
+
+def test_a_commented_out_redis_line_in_the_env_file_is_not_a_choice(tmp_path):
+    assert _redis_url_the_runner_sets(tmp_path, env_file="# FORMUMIND_REDIS_URL=redis://cache.example:6380/2\n") == "redis://127.0.0.1:6379/0"

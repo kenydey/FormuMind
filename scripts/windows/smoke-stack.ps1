@@ -138,6 +138,12 @@ if ($health) {
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     1..3 | ForEach-Object { Invoke-RestMethod -Uri "$Api/health" -TimeoutSec 10 | Out-Null }
     Write-Host ("info  /health takes {0:N0} ms per call (the broker probe is a socket connect each time)" -f ($timer.ElapsedMilliseconds / 3))
+    # Why that number matters: `localhost` is tried as ::1 first on Windows, and a refused connection takes ~0.5 s there.
+    foreach ($name in @('localhost', '127.0.0.1')) {
+        $connect = [System.Diagnostics.Stopwatch]::StartNew()
+        try { $probe = New-Object System.Net.Sockets.TcpClient($name, 6379); $probe.Close() } catch { }
+        Write-Host ("info  a TCP connect to {0}:6379 takes {1:N0} ms" -f $name, $connect.ElapsedMilliseconds)
+    }
 }
 
 # ---------------------------------------------------------------- a real task through the solo worker

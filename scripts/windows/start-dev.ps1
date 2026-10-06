@@ -167,6 +167,14 @@ function Stop-ByPort {
 
 # ------------------------------------------------------------- environment ---
 
+function Test-EnvFileSets {
+    # Whether the .env file the settings read assigns $Key (a commented-out line does not count).
+    param([string]$Key)
+    $file = $env:FORMUMIND_ENV_FILE
+    if (-not $file -or -not (Test-Path $file)) { return $false }
+    return [bool](Select-String -Path $file -Pattern "^\s*$Key\s*=" -Quiet)
+}
+
 function Set-FormuMindEnv {
     $rootSlash = $Root -replace '\\', '/'
 
@@ -183,6 +191,15 @@ function Set-FormuMindEnv {
     $env:FORMUMIND_COLBERT_INDEX_DIR = Join-Path $dataDir 'colbert_index'
 
     $env:FORMUMIND_CELERY_EAGER = 'false'
+
+    # `localhost` resolves to ::1 first on Windows, and a Redis that listens on 127.0.0.1 only refuses that - slowly: a refused
+    # connection takes ~0.5 s there. The API paid it on every /health call (513 ms each, measured by smoke-stack.ps1) and on every
+    # dispatch, and the worker on every Redis connection. Name the IPv4 loopback - unless the user chose a Redis themselves,
+    # in the environment or in the .env file the settings read.
+    if (-not $env:FORMUMIND_REDIS_URL -and -not (Test-EnvFileSets -Key 'FORMUMIND_REDIS_URL')) {
+        $env:FORMUMIND_REDIS_URL = 'redis://127.0.0.1:6379/0'
+    }
+
     $env:FORMUMIND_DATALAB_API_URL = if ($env:FORMUMIND_DATALAB_API_URL) { $env:FORMUMIND_DATALAB_API_URL } else { 'http://127.0.0.1:5001' }
 }
 
