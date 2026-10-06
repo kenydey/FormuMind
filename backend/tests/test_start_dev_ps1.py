@@ -73,17 +73,26 @@ def _scan(script: Path, tmp_path: Path) -> list[str]:
     return lines
 
 
-def test_the_runner_parses(tmp_path):
-    assert "PARSE_ERRORS=0" in _scan(RUNNER, tmp_path)
+SCRIPTS = sorted((REPO / "scripts" / "windows").glob("*.ps1"))
 
 
-def test_no_member_is_read_off_a_path_string(tmp_path):
-    lines = _scan(RUNNER, tmp_path)
+def test_the_scripts_under_test_are_the_ones_that_exist():
+    assert {p.name for p in SCRIPTS} >= {"start-dev.ps1", "smoke-stack.ps1"}
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_the_script_parses(tmp_path, script):
+    assert "PARSE_ERRORS=0" in _scan(script, tmp_path)
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_no_member_is_read_off_a_path_string(tmp_path, script):
+    lines = _scan(script, tmp_path)
     found = [ln for ln in lines if ln.startswith("MEMBER_ON_PATH")]
     assert not found, found
     # not vacuous: the scan did see the path variables it exists for
     variables = next(ln for ln in lines if ln.startswith("PATH_VARIABLES=")).split("=", 1)[1].split(",")
-    assert {"Pids", "Logs", "Root", "VenvPy"} <= set(variables), variables
+    assert {"Logs", "Root"} <= set(variables), variables
 
 
 def test_the_scan_catches_the_original_mistake(tmp_path):

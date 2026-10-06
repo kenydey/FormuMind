@@ -314,6 +314,84 @@ jobs:
           python -m pytest -m "not golden_eval" -q -p no:cacheprovider --maxfail=400 -rfE --durations=25 -o faulthandler_timeout=60 @mine
           exit $LASTEXITCODE
 
+  # The Windows host stack as a user runs it, which no other job exercises: install.bat's launch behaviour, then
+  # `start-dev.ps1 start` -> a real upload processed by `celery --pool=solo` through a real Redis -> `status` -> `stop` and
+  # nothing left running. (Everything else on Windows here is unit-level: the runner was only ever grepped, and it
+  # dropped the worker's PID and the frontend on every start without a single test noticing.) Datalab and Neo4j are Linux
+  # containers and are not part of it; a missing Datalab must only degrade the ledger, which the smoke script pins.
+  # Non-blocking, like the other Windows jobs, while it settles.
+  windows-stack:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # What cmd.exe was started with, for each way a user runs a .bat. The shell association (Start-Process on a .bat) is the
+      # code path an Explorer double-click takes; the test below builds the same command line by hand and this prints the
+      # real one next to it.
+      - name: What %cmdcmdline% is for each way of starting a .bat (diagnostic)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'launch probe'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $bat = Join-Path $dir 'probe.bat'
+          [System.IO.File]::WriteAllText($bat, "@echo off`r`necho %cmdcmdline%> `"%~dp0cmdline.%~1.txt`"`r`n", [System.Text.Encoding]::ASCII)
+          Start-Process -FilePath $bat -ArgumentList 'shell-association' -Wait
+          & cmd.exe /c "`"$bat`" cmd-c-quoted"
+          & $bat powershell-call
+          "call `"$bat`" typed-at-a-prompt`r`nexit`r`n" | cmd.exe /q
+          Get-ChildItem $dir -Filter 'cmdline.*.txt' | ForEach-Object {
+            '{0,-34} {1}' -f ($_.BaseName -replace '^cmdline\.', ''), (Get-Content $_.FullName -Raw).Trim()
+          }
+
+      - name: The venv install.bat builds (core tier)
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\.venv\Scripts\python.exe -m pip install -e ".[dev,llm]"
+
+      # install.bat: pauses for a double-click only, forwards arguments and the exit code. The task-registration test is the
+      # race a Windows runner caught once (a finished upload sat at "queued").
+      - name: install.bat launch behaviour, and the task-registration race
+        working-directory: backend
+        run: .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider -s tests/test_install_bat_launch.py tests/test_task_registration_idempotent.py
+
+      # A real Redis, as a plain process (the unofficial 5.x port; Memurai is the supported native choice and is not
+      # exercised here). Docker Desktop's Linux containers do not exist on this runner.
+      - name: Redis for Windows
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'redis.zip'
+          Invoke-WebRequest -Uri 'https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'redis')
+          Start-Process -FilePath (Join-Path $env:RUNNER_TEMP 'redis\redis-server.exe') -ArgumentList '--port', '6379' -WindowStyle Hidden
+          for ($i = 0; $i -lt 30; $i++) {
+            try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 6379); $c.Close(); Write-Host 'redis answers on :6379'; exit 0 } catch { Start-Sleep -Seconds 1 }
+          }
+          Write-Error 'redis never answered'
+
+      - name: Start, use and stop the stack with the real runner
+        shell: powershell
+        run: scripts\windows\smoke-stack.ps1 -TimeoutSec 240
+
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-stack-logs
+          path: logs/
+          if-no-files-found: ignore
+
   # Retrieval quality gate (W1′). Separate job so main backend stays fast;
   # still required — failures block merge once calibrated.
   golden:
