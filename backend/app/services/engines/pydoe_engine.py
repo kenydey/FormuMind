@@ -116,34 +116,8 @@ def build_pydoe_plan(
 
     plan = matrix_to_doe_plan(matrix, factors, design, engine="pydoe")
 
-    # KG chemical-compatibility gate: if the baseline formulation skeleton
-    # carries an INHIBITS relation, mark every run infeasible. Mirrors the
-    # baybe_engine gate so both DOE engines produce consistent results.
-    if requirement is not None:
-        try:
-            # engines/ → services/: one dot up, not ``..services`` (that resolves
-            # to app.services.services and silently no-ops the whole gate).
-            from ..kg_chemical_check import check_formulation_chemistry
-            from ...domain import knowledge
-
-            skeleton = (
-                requirement.active_formulation
-                or knowledge.baseline_formulation(requirement)
-            )
-            if skeleton is not None:
-                chk = check_formulation_chemistry(skeleton, include_synergies=False)
-                if not chk.feasible:
-                    for run in plan.runs:
-                        run.infeasible = True
-                        run.infeasible_reason = (
-                            "; ".join(chk.reasons)
-                            or "知识图谱检测到材料不相容"
-                        )
-        except Exception as exc:
-            # Gate must never break DOE generation, but swallow-without-log
-            # hid the broken import for weeks — keep a debug breadcrumb.
-            logger.debug("KG chemical gate skipped (%s); allowing", exc)
-
+    # v13-5: KG 门已由 doe_registry.apply_kg_chemical_gate 统一执行，此处内联
+    # 门删除（曾致双执行）。
     return plan
 
 

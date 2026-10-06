@@ -343,7 +343,11 @@ class BaybeCampaignEngine:
             campaign.add_measurements(df_meas_clean)
 
         if campaign_state is None and df_meas_clean.empty:
-            seed_plan = build_doe_plan(factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8))
+            # v13-5: 透传 requirement，冷启动 seed 也过 KG 化学门。
+            seed_plan = build_doe_plan(
+                factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8),
+                requirement=req,
+            )
             virtual = surrogate_measurements_from_plan(seed_plan, req, None)
             if not virtual.empty and metrics:
                 virtual = align_dataframe_measurement_columns(virtual, metrics, log=log)

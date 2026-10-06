@@ -86,8 +86,11 @@ def apply_kg_chemical_gate(plan: DOEPlan, requirement) -> DOEPlan:
                     )
     except Exception as exc:
         # Gate must never break DOE generation.
+        # v13-5: fail-open 不得静默——warning + plan 留痕，调用方可见安全检查没跑。
         logger = logging.getLogger(__name__)
-        logger.debug("KG chemical gate skipped (%s); allowing", exc)
+        logger.warning("KG chemical gate skipped (%s); allowing", exc)
+        note = f"KG chemical gate skipped: {exc}"
+        plan.notes = f"{plan.notes}\n{note}".strip() if plan.notes else note
     return plan
 
 

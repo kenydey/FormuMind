@@ -19,17 +19,15 @@ class _Infeasible:
 
 
 def test_pydoe_kg_gate_marks_runs_infeasible(monkeypatch):
-    """Requirement + infeasible KG check → every DOE run flagged."""
-    monkeypatch.setattr(mod, "pydoe_available", lambda: True)
+    """Requirement + infeasible KG check → every DOE run flagged.
 
-    def fake_matrix(design, k, n, seed=None):
-        import numpy as np
+    v13-5: 门已统一到 doe_registry.apply_kg_chemical_gate，pydoe 内联门删除。
+    """
+    from app.services.engines import doe_registry as reg
 
-        return np.array([[0.0, 0.0], [1.0, 1.0], [0.5, 0.5]])
+    monkeypatch.setattr(reg, "resolve_doe_engine", lambda engine, design: "pydoe")
 
-    monkeypatch.setattr(mod, "_generate_matrix", fake_matrix)
-
-    def fake_plan(matrix, factors, design, engine="pydoe"):
+    def fake_fallback(factors, design, n=None, requirement=None, seed=None):
         return SimpleNamespace(
             runs=[
                 SimpleNamespace(infeasible=False, infeasible_reason=None),
@@ -39,7 +37,7 @@ def test_pydoe_kg_gate_marks_runs_infeasible(monkeypatch):
             notes="",
         )
 
-    monkeypatch.setattr(mod, "matrix_to_doe_plan", fake_plan)
+    monkeypatch.setattr(reg, "build_plan_with_fallback", fake_fallback)
 
     import app.services.kg_chemical_check as kg
     import app.domain.knowledge as knowledge
@@ -54,20 +52,24 @@ def test_pydoe_kg_gate_marks_runs_infeasible(monkeypatch):
     )
 
     req = SimpleNamespace(active_formulation=None)
-    plan = mod.build_pydoe_plan(FACTORS, "lhs", n=3, requirement=req)
+    plan = reg.build_doe_plan(FACTORS, "lhs", engine="pydoe", n=3, requirement=req)
 
     assert all(r.infeasible for r in plan.runs)
     assert all("不相容" in (r.infeasible_reason or "") for r in plan.runs)
 
 
-def test_pydoe_kg_gate_import_path_is_services_local():
-    """Regression: ``from ..services.kg_…`` resolved to app.services.services."""
+def test_pydoe_kg_gate_not_duplicated():
+    """v13-5: pydoe 内联门已删，门只在 doe_registry 执行一次（不双执行）。"""
     import inspect
     import textwrap
 
     src = textwrap.dedent(inspect.getsource(mod.build_pydoe_plan))
-    assert "from ..kg_chemical_check import" in src
-    assert "from ..services.kg_chemical_check" not in src
+    assert "check_formulation_chemistry" not in src, "内联门应已删除"
+    # 门在 registry 统一执行
+    from app.services.engines import doe_registry as reg
+
+    rsrc = textwrap.dedent(inspect.getsource(reg.apply_kg_chemical_gate))
+    assert "check_formulation_chemistry" in rsrc
 
 
 def test_build_doe_plan_forwards_requirement(monkeypatch):
