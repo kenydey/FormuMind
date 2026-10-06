@@ -456,15 +456,34 @@ def chunk_markdown(
     chunks: list[Chunk] = []
     page: int | None = None
     para_counter = 0
-    char_pos = 0
+    # v13-4: 结构化路径改用真实偏移（find+游标），不再 char_pos 合成累计。
+    md_cursor = 0
     # Block kind announced by a layout-aware parser via <!-- block:K -->.
     # Overrides the markdown heuristic for the next emitted chunk only.
     pending_block: str | None = None
+
+    def _locate_block(bd: str, needle: str, cursor: int) -> tuple[int, int]:
+        """在 body 中定位 needle，返回 (body 相对位置, 新 cursor)。找不到则
+        返回 (-1, cursor)（防御性，正常不应发生）。"""
+        pos = bd.find(needle, cursor)
+        if pos == -1:
+            return -1, cursor
+        return pos, pos + len(needle)
+
     for path, body in sections:
+        # section body 在 md 中的基址
+        seg_base = md.find(body, md_cursor)
+        if seg_base == -1:
+            seg_base = md_cursor  # 防御性
+        md_cursor = seg_base + len(body)
+        body_cursor = 0
+        current_start_body = 0  # `current` 首 block 在 body 中的位置
         current = ""
         current_page = page
         current_para = para_counter
         for block in _split_blocks(body):
+            # 推进 body_cursor（markers 也占原文位置）
+            bpos, body_cursor = _locate_block(body, block, body_cursor)
             m = PAGE_MARKER_RE.match(block)
             if m:
                 page = int(m.group(1))
@@ -477,86 +496,114 @@ def chunk_markdown(
                 continue
             if _is_atomic(block):
                 caption = ""
+                caption_body_pos = -1
                 if current.strip() and _is_table_block(block):
                     head, _, tail = current.rpartition("\n\n")
                     if _is_table_caption(tail):
                         caption, current = tail.strip(), head
+                        # caption 在 body 中的位置（current 起始处搜索）
+                        caption_body_pos, _ = _locate_block(
+                            body, caption, current_start_body
+                        )
                 if current.strip():
-                    clen = len(current.strip())
+                    t = current.strip()
+                    # v13-4: current 起始于 current_start_body（首 block 位置，
+                    # block 已 strip 故无前导空白）
+                    os_ = seg_base + current_start_body
+                    if md[os_:os_ + len(t)] != t:
+                        # 防御：分隔符与原文不一致时回退到搜索
+                        fpos = body.find(t, current_start_body)
+                        os_ = seg_base + fpos if fpos != -1 else os_
                     chunks.append(Chunk(
-                        current.strip(), path, current_page,
+                        t, path, current_page,
                         paragraph_idx=current_para,
-                        offset_start=char_pos,
-                        offset_end=char_pos + clen,
+                        offset_start=os_,
+                        offset_end=os_ + len(t),
                         block_type=pending_block or "text",
                     ))
-                    char_pos += clen
                     current = ""
                     pending_block = None
                 atom = f"{caption}\n\n{block}" if caption else block
-                alen = len(atom)
+                # v13-4: atom 定位——优先找完整 atom，否则用 caption 位置，
+                # 再否则用 block 位置（bpos）
+                atom_body_pos, _ = _locate_block(body, atom, current_start_body)
+                if atom_body_pos == -1 and caption_body_pos != -1:
+                    atom_body_pos = caption_body_pos
+                if atom_body_pos == -1:
+                    atom_body_pos = bpos if bpos != -1 else body_cursor
+                aos_ = seg_base + atom_body_pos
                 chunks.append(Chunk(
                     atom, path, page,
                     paragraph_idx=para_counter,
-                    offset_start=char_pos,
-                    offset_end=char_pos + alen,
+                    offset_start=aos_,
+                    offset_end=aos_ + len(atom),
                     block_type=pending_block or _classify_block_type(block),
                 ))
                 pending_block = None
                 para_counter += 1
-                char_pos += alen
                 current_page = page
+                # v13-4: cursor 已在循环顶部推进到 block 末尾；current 已清空
                 continue
             if not current.strip():
                 current_page = page
                 current_para = para_counter
             if len(current) + len(block) + 2 <= max_chars:
+                if not current:
+                    # v13-4: 新累积段的起始位置（首 block 处）
+                    current_start_body = bpos if bpos != -1 else body_cursor
                 current = f"{current}\n\n{block}" if current else block
                 para_counter += 1
                 continue
             if current.strip():
-                clen = len(current.strip())
+                t = current.strip()
+                os_ = seg_base + current_start_body
+                if md[os_:os_ + len(t)] != t:
+                    fpos = body.find(t, current_start_body)
+                    os_ = seg_base + fpos if fpos != -1 else os_
                 chunks.append(Chunk(
-                    current.strip(), path, current_page,
+                    t, path, current_page,
                     paragraph_idx=current_para,
-                    offset_start=char_pos,
-                    offset_end=char_pos + clen,
+                    offset_start=os_,
+                    offset_end=os_ + len(t),
                     block_type=pending_block or "text",
                 ))
-                char_pos += clen
                 pending_block = None
             current_page = page
             current_para = para_counter
             if len(block) > max_chars:
-                # P1-3: block 内 chunk 用真实偏移；char_pos 按 block 全长推进
-                #（chunk 间有 overlap，不能累加 chunk 长度）。
+                # v13-4: block 基址用真实位置（bpos），不再 char_pos 合成。
+                block_base = seg_base + (bpos if bpos != -1 else body_cursor)
                 for c, off in chunk_plain_text_with_offsets(
                     block, max_chars=max_chars, overlap=overlap
                 ):
                     chunks.append(Chunk(
                         c, path, page,
                         paragraph_idx=para_counter,
-                        offset_start=char_pos + off,
-                        offset_end=char_pos + off + len(c),
+                        offset_start=block_base + off,
+                        offset_end=block_base + off + len(c),
                         block_type=pending_block or _classify_block_type(c),
                     ))
-                char_pos += len(block)
                 pending_block = None
                 para_counter += 1
                 current = ""
                 continue
             else:
+                # v13-4: block 太长放不下、current 已刷出，block 独立成段
+                current_start_body = bpos if bpos != -1 else body_cursor
                 current = block
             para_counter += 1
         if current.strip():
-            clen = len(current.strip())
+            t = current.strip()
+            os_ = seg_base + current_start_body
+            if md[os_:os_ + len(t)] != t:
+                fpos = body.find(t, current_start_body)
+                os_ = seg_base + fpos if fpos != -1 else os_
             chunks.append(Chunk(
-                current.strip(), path, current_page,
+                t, path, current_page,
                 paragraph_idx=current_para,
-                offset_start=char_pos,
-                offset_end=char_pos + clen,
+                offset_start=os_,
+                offset_end=os_ + len(t),
                 block_type=pending_block or "text",
             ))
-            char_pos += clen
             pending_block = None
     return chunks

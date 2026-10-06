@@ -264,3 +264,25 @@ def test_overlap_chunk_offsets_are_true_positions():
     # 相邻 chunk 应有重叠（overlap 生效），而非首尾相接
     if len(chunks) >= 2:
         assert chunks[1].offset_start < chunks[0].offset_end, "应有 overlap"
+
+
+def test_structured_path_exact_offsets():
+    """v13-4: 结构化路径（有标题/表格）每个 chunk 满足 md[os:oe] == text。"""
+    from app.services.chunking import chunk_markdown
+
+    md = (
+        "# 配方设计\n\n"
+        "环氧树脂是常用的基体树脂，具有优异的附着力。\n\n"
+        "## 固化剂选择\n\n"
+        "表1：固化剂配比\n\n"
+        "| 固化剂 | 用量 |\n|---|---|\n| 593 | 10% |\n\n"
+        "胺类固化剂常温固化快。\n"
+    )
+    chunks = chunk_markdown(md)
+    assert len(chunks) >= 3, "结构化文档应走 sections 路径"
+    for ch in chunks:
+        assert ch.offset_end - ch.offset_start == len(ch.text)
+        assert md[ch.offset_start:ch.offset_end] == ch.text, (
+            f"结构化 offset 错位: {ch.text[:25]!r} "
+            f"[{ch.offset_start}:{ch.offset_end}]"
+        )

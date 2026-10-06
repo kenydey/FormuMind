@@ -378,7 +378,7 @@ def _lab_points(
     nothing about this search space, and a project-scoped request ignores
     other projects'.
     """
-    from ...domain.schemas import REAL_SOURCES
+    from ..domain.schemas import REAL_SOURCES
 
     baseline = reconstruct.baseline_lever_values(levers, base, process)
     pid = (req.project_id or "").strip()

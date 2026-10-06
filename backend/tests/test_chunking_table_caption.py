@@ -79,10 +79,15 @@ def test_a_code_fence_does_not_take_a_caption():
 
 
 def test_offsets_still_describe_each_chunk():
-    chunks = _chunks(f"# T\n\n前言段落内容。\n\n表1 典型性能\n\n{TABLE}\n")
+    # v13-4: 真实偏移——md[os:oe] == chunk.text（不再要求连续，标题/空行
+    # 本就有间隔）
+    md = f"# T\n\n前言段落内容。\n\n表1 典型性能\n\n{TABLE}\n"
+    chunks = _chunks(md)
     for c in chunks:
         assert c.offset_end - c.offset_start == len(c.text)
-    assert chunks[1].offset_start == chunks[0].offset_end
+        assert md[c.offset_start:c.offset_end] == c.text, (
+            f"offset 错位: {c.text[:20]!r}"
+        )
 
 
 def test_the_caption_is_searchable_through_the_table_chunk():
