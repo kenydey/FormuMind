@@ -237,3 +237,84 @@ def test_maybe_auto_review_prunes_stale_scopes(auto_state_isolated):
     assert "dead" not in rfl._AUTO_STATE
     assert "live" in rfl._AUTO_STATE
     assert rfl._AUTO_STATE["live"]["ts"] >= now
+
+
+def test_finalize_evidence_fields_returns_rebound_citations(monkeypatch):
+    """v13-1: 流式 fix-loop 重绑的 citations 必须随 6 元组返回。
+
+    回归：旧 5 元组丢弃重绑结果，流式答案与引用卡片脱钩。
+    """
+    import app.api.chat as chat_mod
+
+    old_citations = [{"title": "old1"}, {"title": "old2"}]
+    new_citations = [{"title": "newA"}]
+    new_answer = "修复后答案 [^1]"
+
+    # _finalize_evidence_fields 内 from ..services.evidence_synthesis import
+    import app.services.evidence_synthesis as es
+
+    monkeypatch.setattr(es, "evidence_mode_active", lambda mode, settings: True)
+    monkeypatch.setattr(
+        es, "postprocess_evidence_answer", lambda answer, settings=None: (answer, {})
+    )
+    monkeypatch.setattr(
+        chat_mod, "_run_evidence_review",
+        lambda *a, **k: {"status": "failure", "notes": ["x"]},
+    )
+    monkeypatch.setattr(chat_mod, "_reviewer_failed", lambda r: False)
+    monkeypatch.setattr(chat_mod, "_claims_evidence", lambda c: [])
+    import app.services.reviewer_fix_loop as rfl
+
+    monkeypatch.setattr(
+        rfl, "run_fix_loop",
+        lambda **kw: (new_answer, {"citations": new_citations, "findings": []}),
+    )
+    monkeypatch.setattr(chat_mod, "answer_question", lambda *a, **k: ("", []))
+    monkeypatch.setattr(chat_mod, "_ensure_answer", lambda x: x)
+
+    class S:
+        pass
+
+    out = chat_mod._finalize_evidence_fields(
+        "q", "原答案 [^1][^2]", old_citations,
+        settings=S(), mode="evidence", selected_skills=None,
+    )
+    assert len(out) == 6, "必须返回 6 元组（含 citations）"
+    answer, _d, _r, _rf, _ce, citations = out
+    assert answer == new_answer
+    assert citations == new_citations, "重绑后的 citations 必须返回，不用旧表"
+
+
+def test_finalize_evidence_fields_empty_rebind_not_dropped(monkeypatch):
+    """v13-1: 重绑结果为空列表时也不得回退到旧表（is not None）。"""
+    import app.api.chat as chat_mod
+    import app.services.evidence_synthesis as es
+
+    old_citations = [{"title": "old1"}]
+    monkeypatch.setattr(es, "evidence_mode_active", lambda mode, settings: True)
+    monkeypatch.setattr(
+        es, "postprocess_evidence_answer", lambda answer, settings=None: (answer, {})
+    )
+    monkeypatch.setattr(
+        chat_mod, "_run_evidence_review",
+        lambda *a, **k: {"status": "failure", "notes": ["x"]},
+    )
+    monkeypatch.setattr(chat_mod, "_reviewer_failed", lambda r: False)
+    monkeypatch.setattr(chat_mod, "_claims_evidence", lambda c: [])
+    import app.services.reviewer_fix_loop as rfl
+
+    monkeypatch.setattr(
+        rfl, "run_fix_loop",
+        lambda **kw: ("无引用答案", {"citations": [], "findings": []}),
+    )
+    monkeypatch.setattr(chat_mod, "answer_question", lambda *a, **k: ("", []))
+    monkeypatch.setattr(chat_mod, "_ensure_answer", lambda x: x)
+
+    class S:
+        pass
+
+    *_, citations = chat_mod._finalize_evidence_fields(
+        "q", "原答案 [^1]", old_citations,
+        settings=S(), mode="evidence", selected_skills=None,
+    )
+    assert citations == [], "空重绑结果必须生效，不能回退旧表"

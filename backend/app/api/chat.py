@@ -673,7 +673,8 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                     )
                     if reviewer_fix and reviewer_fix.get("findings"):
                         evidence_reviewer = reviewer_fix["findings"]
-                    if reviewer_fix and reviewer_fix.get("citations"):
+                    # v13-1: 空列表也是合法重绑结果，用 is not None。
+                    if reviewer_fix and reviewer_fix.get("citations") is not None:
                         citations = reviewer_fix["citations"]
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("reviewer fix-loop skipped: %s", exc)
@@ -971,10 +972,11 @@ def _finalize_evidence_fields(
     domain: str | None = None,
     history: list | None = None,
     structure: dict | None = None,
-) -> tuple[str, dict | None, dict | None, dict | None, list | None]:
+) -> tuple[str, dict | None, dict | None, dict | None, list | None, list]:
     """DOI annotate + optional reviewer + 1-round fix-loop.
 
-    Returns (answer, doi_results, reviewer, reviewer_fix, citation_expand).
+    Returns (answer, doi_results, reviewer, reviewer_fix, citation_expand,
+    citations). citations is the possibly re-bound table after fix-loop.
     """
     from ..services.evidence_synthesis import evidence_mode_active, postprocess_evidence_answer
 
@@ -1022,11 +1024,12 @@ def _finalize_evidence_fields(
                 )
                 if reviewer_fix and reviewer_fix.get("findings"):
                     reviewer = reviewer_fix["findings"]
-                if reviewer_fix and reviewer_fix.get("citations"):
+                # v13-1: 空列表也是合法重绑结果，用 is not None。
+                if reviewer_fix and reviewer_fix.get("citations") is not None:
                     citations = reviewer_fix["citations"]
             except Exception as exc:  # noqa: BLE001
                 logger.debug("stream fix-loop skipped: %s", exc)
-    return answer, doi_results, reviewer, reviewer_fix, citation_expand
+    return answer, doi_results, reviewer, reviewer_fix, citation_expand, citations
 
 
 @router.post("/chat/stream")
@@ -1158,7 +1161,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                     yield _sse({"type": "phase", "phase": "claims"})
                     # Crossref + LLM reviewer + repair loop: seconds of blocking
                     # I/O — never on the event loop.
-                    answer, doi_results, reviewer, reviewer_fix, citation_expand = (
+                    # v13-1: 取回重绑后的 citations，后续 claims/gates/done 用新表。
+                    answer, doi_results, reviewer, reviewer_fix, citation_expand, citations = (
                         await asyncio.to_thread(
                             _finalize_evidence_fields,
                             question,
@@ -1612,7 +1616,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
             citations = [
                 _sanitize_evidence(c) for c in plan["relevant"]
             ]
-            answer, doi_results, reviewer, reviewer_fix, citation_expand = (
+            # v13-1: 取回重绑后的 citations，后续 claims/gates/done 用新表。
+            answer, doi_results, reviewer, reviewer_fix, citation_expand, citations = (
                 await asyncio.to_thread(
                     _finalize_evidence_fields,
                     question,
