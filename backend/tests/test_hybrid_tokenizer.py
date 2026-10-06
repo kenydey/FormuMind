@@ -10,7 +10,9 @@ from __future__ import annotations
 import sys
 
 import pytest
-from app.services.hybrid_search import _tokenize, _tokenize_cjk
+from app.services.hybrid_search import _tokenize
+# P1-1: tokenizer moved to text_tokenize.py (unified across paths)
+from app.services.text_tokenize import _tokenize_cjk
 
 pytest.importorskip("jieba")
 
