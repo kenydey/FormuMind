@@ -11,7 +11,7 @@ import os
 import threading
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -30,12 +30,21 @@ def create_all_metadata(bind) -> None:
     On a SQLite *engine* the whole schema is created in one transaction. pysqlite opens no transaction for DDL, so each of
     the ~110 CREATE TABLE / CREATE INDEX statements otherwise commits - and fsyncs - on its own: 3 to 26 seconds per fresh
     database in the setup of a test on a Windows runner (measured in CI), and a crash half-way leaves a half-built
-    schema. Inside one ``BEGIN`` it is a single commit, and all-or-nothing.
+    schema. Inside one ``BEGIN IMMEDIATE`` it is a single commit, and all-or-nothing.
+
+    ``IMMEDIATE`` also settles the first boot: the API, the worker and the scheduler start against the same empty file and
+    each used to check for a missing table and then create it. Measured with four processes: 24 of 32 attempts failed -
+    "table experiments already exists" with a commit per statement, "database is locked" with a plain ``BEGIN`` (a WAL
+    reader whose snapshot went stale cannot upgrade to a writer). Taking the write lock first makes the others wait
+    (``busy_timeout``) and then find nothing left to create. A complete schema - every boot after the first - is looked at
+    read-only and returns, so it never queues behind a long writer.
     """
     with _schema_ddl_lock:
         if isinstance(bind, Engine) and bind.dialect.name == "sqlite":
             with bind.connect() as conn:
-                conn.exec_driver_sql("BEGIN")  # the driver would not: that is the whole point
+                if set(Base.metadata.tables) <= set(inspect(conn).get_table_names()):
+                    return
+                conn.exec_driver_sql("BEGIN IMMEDIATE")  # the driver would not begin one for DDL: that is the whole point
                 try:
                     Base.metadata.create_all(conn, checkfirst=True)
                 except BaseException:

@@ -10,6 +10,10 @@ created while a transaction is open, and a failure part-way leaves nothing behin
 """
 from __future__ import annotations
 
+import multiprocessing as mp
+import sqlite3
+import threading
+
 import pytest
 from sqlalchemy import Table, event, inspect
 
@@ -97,3 +101,60 @@ def test_a_connection_passed_in_keeps_the_callers_transaction_rules(tmp_path):
         conn.commit()
     assert len(inspect(engine).get_table_names()) == EXPECTED
     engine.dispose()
+
+
+# ── the first boot: several processes, one empty file ────────────────────────────
+
+
+def _boot(db_url: str, barrier, queue) -> None:
+    """What the API, the worker and the scheduler each do at start: build the engine, and with it the schema."""
+    import logging
+    import os
+
+    os.environ["FORMUMIND_API_AUTH_ENABLED"] = "false"
+    logging.disable(logging.CRITICAL)
+    from sqlalchemy import inspect as _inspect
+
+    from app.db.database import make_engine as _make
+
+    barrier.wait(timeout=120)
+    try:
+        engine = _make(db_url)
+        queue.put(("ok", len(_inspect(engine).get_table_names())))
+        engine.dispose()
+    except Exception as exc:  # noqa: BLE001 - the message is the assertion
+        queue.put(("error", f"{type(exc).__name__}: {str(exc)[:160]}"))
+
+
+def test_processes_booting_together_against_an_empty_file_all_succeed(tmp_path):
+    """Measured on the previous code with four processes: 24 of 32 attempts failed (``table experiments already
+    exists`` with a commit per statement, ``database is locked`` with a plain BEGIN). Spawned, so it runs on Windows too."""
+    ctx = mp.get_context("spawn")
+    for trial in range(2):
+        url = f"sqlite:///{tmp_path}/boot{trial}.db"
+        barrier, queue = ctx.Barrier(4), ctx.Queue()
+        procs = [ctx.Process(target=_boot, args=(url, barrier, queue)) for _ in range(4)]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=240)
+        results = [queue.get(timeout=10) for _ in procs]
+        assert all(p.exitcode == 0 for p in procs), [p.exitcode for p in procs]
+        assert results == [("ok", EXPECTED)] * 4, results
+
+
+def test_a_complete_schema_does_not_queue_behind_a_writer(tmp_path):
+    """Every boot after the first finds nothing to create; it must not wait for a long write transaction elsewhere
+    just to find that out (``busy_timeout`` is 60 s)."""
+    engine = make_engine(f"sqlite:///{tmp_path}/busy.db")
+    other = sqlite3.connect(tmp_path / "busy.db", isolation_level=None)
+    other.execute("BEGIN IMMEDIATE")  # a writer holds the lock for the whole test
+    try:
+        worker = threading.Thread(target=create_all_metadata, args=(engine,), daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "create_all_metadata waited for the writer although the schema was complete"
+    finally:
+        other.execute("ROLLBACK")
+        other.close()
+        engine.dispose()
