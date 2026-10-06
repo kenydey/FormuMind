@@ -25,8 +25,24 @@ _schema_ddl_lock = threading.Lock()
 
 
 def create_all_metadata(bind) -> None:
-    """Process-wide locked ``Base.metadata.create_all(..., checkfirst=True)``."""
+    """Process-wide locked ``Base.metadata.create_all(..., checkfirst=True)``.
+
+    On a SQLite *engine* the whole schema is created in one transaction. pysqlite opens no transaction for DDL, so each of
+    the ~110 CREATE TABLE / CREATE INDEX statements otherwise commits - and fsyncs - on its own: 3 to 26 seconds per fresh
+    database in the setup of a test on a Windows runner (measured in CI), and a crash half-way leaves a half-built
+    schema. Inside one ``BEGIN`` it is a single commit, and all-or-nothing.
+    """
     with _schema_ddl_lock:
+        if isinstance(bind, Engine) and bind.dialect.name == "sqlite":
+            with bind.connect() as conn:
+                conn.exec_driver_sql("BEGIN")  # the driver would not: that is the whole point
+                try:
+                    Base.metadata.create_all(conn, checkfirst=True)
+                except BaseException:
+                    conn.rollback()
+                    raise
+                conn.commit()
+            return
         Base.metadata.create_all(bind, checkfirst=True)
 
 
