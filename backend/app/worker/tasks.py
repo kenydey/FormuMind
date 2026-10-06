@@ -218,12 +218,25 @@ class TaskManager:
             self._owners.popitem(last=False)
 
     def register_celery_task(self, task_id: str, kind: str, owner_id: str | None = None) -> None:
+        """Announce a task as ``queued`` - once.
+
+        Registration is idempotent and never moves a task backwards: the first call writes ``queued``; a later call (the
+        upload route registers after ``dispatch_file_ingest`` already did, and a worker that ends in milliseconds - a
+        duplicate upload, a missing parser - has long finished by then) only records the owner. It used to rewrite
+        ``queued`` over the finished task's progress meta and snapshot, so the upload sat at "queued" for good although
+        its result was stored (seen once on a Windows runner as a 30 s poll that never saw the task end).
+        """
         # owner 优先来自显式参数，否则沿用已有记录
         if owner_id is None:
             owner_id = self._owners.get(task_id)
         self._remember(task_id, kind, owner_id)
         existing = load_persisted_task(task_id)
         if existing and existing.state in (TaskState.completed, TaskState.failed, TaskState.cancelled):
+            return
+        from .task_progress import get_task_meta
+
+        if (get_task_meta(task_id) or {}).get("status"):
+            self._sync_owner_meta(task_id, owner_id)
             return
         register_pending(task_id, kind)
         status = TaskStatus(
@@ -235,6 +248,10 @@ class TaskManager:
             owner_id=owner_id,
         )
         _persist_task(task_id, status)
+        self._sync_owner_meta(task_id, owner_id)
+
+    @staticmethod
+    def _sync_owner_meta(task_id: str, owner_id: str | None) -> None:
         # 同步写入 owner 到 meta，便于 _status_from_progress 回读
         try:
             from .task_progress import _redis_client, _meta_key
