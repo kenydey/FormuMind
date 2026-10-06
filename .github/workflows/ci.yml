@@ -292,6 +292,14 @@ jobs:
           pip install -r requirements.txt
           pip install -e ".[dev,llm,science,optimize,pydoe]" pandas
 
+      # Setting up a fresh SQLite database took 3-26 s per test here and the cause was a guess (a commit - an fsync - per DDL
+      # statement). One shard prints what a commit, a new file and a rename cost on the runner, so the next change is made on
+      # numbers. Diagnostic only: it asserts nothing.
+      - name: Probe what a commit costs on this runner (diagnostic)
+        if: matrix.shard == 0
+        continue-on-error: true
+        run: python scripts/probe_commit_cost.py
+
       - name: Backend tests (shard ${{ matrix.shard }} of 8)
         shell: pwsh
         env:
