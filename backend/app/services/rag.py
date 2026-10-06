@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 _WORD = re.compile(r"[a-z0-9]+")
 
 
-def _tokenize(text: str) -> list[str]:
-    return _WORD.findall(text.lower())
+# P1-1: unified tokenizer (was ASCII-only _WORD.findall; Chinese queries
+# never matched properly on the chat session RAG path).
+from .text_tokenize import tokenize as _tokenize
 
 
 @dataclass
@@ -254,16 +255,8 @@ class EmbeddingStore:
 # ── BM25 + FAISS hybrid retriever (Phase 2 CPU backend) ───────────────────
 
 def _bm25_tokenize(text: str) -> list[str]:
-    """Tokenize for BM25: jieba for CJK, whitespace for ASCII."""
-    tokens = _tokenize(text)
-    if tokens:
-        return tokens
-    # Fall back to jieba for Chinese/CJK text
-    try:
-        import jieba
-        return [w for w in jieba.cut(text) if w.strip()]
-    except ImportError:
-        return text.split()
+    """Tokenize for BM25 — unified with the persistent-KB path (P1-1)."""
+    return _tokenize(text)
 
 
 def _doc_text(ev: Evidence) -> str:

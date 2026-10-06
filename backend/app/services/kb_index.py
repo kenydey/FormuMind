@@ -751,7 +751,9 @@ def reindex_all(*, embed: bool = True) -> dict:
 
 
 def _tokens(text: str) -> set[str]:
-    return set(_TOKEN_RE.findall((text or "").lower()))
+    # P1-1: unified tokenizer (was ASCII-only regex; Chinese never matched).
+    from .text_tokenize import tokenize
+    return set(tokenize(text))
 
 
 def _keyword_score(query_tokens: set[str], text: str) -> float:

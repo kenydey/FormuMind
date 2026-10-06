@@ -34,6 +34,7 @@ from ..config import get_settings
 from ..domain.schemas import DocumentChunkResponse
 from . import kb_index
 from .errors import degrade_return
+from .text_tokenize import tokenize as _tokenize  # P1-1: unified tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -136,73 +137,6 @@ def _ann_gate_base(*, corpus_n: int, settings) -> bool:
     return bool(near_cap or hot)
 
 
-_CJK = "\u3400-\u4dbf\u4e00-\u9fff"
-_CJK_CHAR = re.compile(f"[{_CJK}]")
-_CJK_RUN = re.compile(f"[{_CJK}]+")
-# A word is a run of letters/digits of any script (``α-pinene`` keeps its ``α``, ``für`` its ``ü``); a dotted number stays whole
-# (``6.5``, ``3.1.2``), so a figure still tells near-identical documents apart.
-_WORD = re.compile(rf"[^\W_{_CJK}]+(?:\.[0-9]+)*")
-_WORD_OR_CJK_CHAR = re.compile(rf"[{_CJK}]|[^\W_{_CJK}]+(?:\.[0-9]+)*")
-# The chunks one query scans (``kb_search_scan_limit``: 5000 by default) fit with room to spare; an entry is ~5 KB.
-_TOKEN_CACHE_SIZE = 8192
-
-
-def _tokenize(text: str) -> list[str]:
-    """Tokenize text for BM25. Chinese is indexed twice over: as jieba cuts it, and as overlapping character pairs.
-
-    Every path lowercases and drops punctuation, and gives an English word or a figure the same token whether or not Chinese
-    surrounds it, so ``ISO`` in a query matches ``(iso`` in a document and ``0.5%`` matches ``0.5 %``. They did not: text
-    without Chinese was lowercased and split on blanks (``(ISO 4624 / ASTM D4541)`` -> ``(iso``, ``4624``, ``/``, ``astm``,
-    ``d4541)``) while text with Chinese went through jieba as it was, case and blanks included (``ISO``, ``' '``). A Chinese
-    question holding an English term - ``EEW 190 AHEW 95 每 100 份树脂需要多少份固化剂`` - therefore never matched the English
-    document that answers it, except through its digits. Measured by evals/suites/retrieval.py over the same 52 documents:
-    3 of the 12 numeric queries found no relevant document in the top ten (recall@10 0.71 -> 1.00 now), success@1 over all
-    answerable queries went 0.70 -> 0.74.
-
-    The character pairs (``附着力`` -> ``附着``, ``着力``, besides the word) are the second fix from the same evaluation. A
-    dictionary cut decides what a word is before it sees the question, so a question that names a thing differently from the
-    document - or in a term the dictionary does not know (``拉开法``) - shares no token with it, and the rare function word that
-    happens to be in both (``合格``) decides the ranking: a plain BM25 over character pairs put the right document first where
-    this one did not return it at all. Without the vector channel, over the 76 answerable queries success@1 went 0.737 -> 0.816 and
-    nDCG@10 0.771 -> 0.800 (paired bootstrap of the nDCG difference: +0.03, 95 % interval +0.01 to +0.05;
-    scripts/audit/bm25_tokenizer_variants.py reproduces it, with the variants that did not make it); paraphrase questions
-    0.40 -> 0.67. A pair never spans a blank, a punctuation mark or a Latin word, and a lone character is kept as the word it is.
-
-    The cut is the expensive part (about 2.5 ms for a 700-character chunk), and the scan tokenizes every chunk on every query,
-    so the result is cached by text.
-    """
-    text = (text or "").strip().lower()
-    if not text:
-        return []
-    if not _CJK_CHAR.search(text):
-        return _WORD.findall(text)
-    try:
-        import jieba  # noqa: F401 - the cached function imports it; this only decides which cache entry is meant
-
-        with_jieba = True
-    except ImportError:
-        logger.warning("jieba not installed; falling back to character-level tokenization for Chinese")
-        with_jieba = False
-    return list(_tokenize_cjk(text, with_jieba))
-
-
-@lru_cache(maxsize=_TOKEN_CACHE_SIZE)
-def _tokenize_cjk(text: str, with_jieba: bool) -> tuple[str, ...]:
-    """The tokens of an already lowercased text that holds Chinese (a tuple: the cache hands the same object to every caller)."""
-    words: list[str] = []
-    if with_jieba:
-        import jieba
-
-        for piece in jieba.cut(text):
-            if _CJK_CHAR.search(piece):
-                words.append(piece)  # Chinese, as the dictionary cut it
-            else:
-                words.extend(_WORD.findall(piece))  # blanks and punctuation vanish; ``0.5%`` -> ``0.5``
-    else:
-        words = _WORD_OR_CJK_CHAR.findall(text)  # a Chinese character each; an English word stays a word
-    for run in _CJK_RUN.findall(text):
-        words.extend(run[i : i + 2] for i in range(len(run) - 1))
-    return tuple(sys.intern(t) for t in words)  # the same few thousand words, once, however many chunks hold them
 
 
 def _to_response(c) -> DocumentChunkResponse:
