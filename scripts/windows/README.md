@@ -78,14 +78,17 @@ runs the batch file for each row, including the real shell association via `Star
 | started as | `%cmdcmdline%` | waits for a key |
 |---|---|---|
 | double-click; `Start-Process install.bat` with **no** arguments | `cmd.exe /c ""<dir>\install.bat" "` | yes |
-| `Start-Process install.bat -ArgumentList -Minimal`; `& .\install.bat -Minimal` or `& .\install.bat` in PowerShell | `cmd.exe /c ""<dir>\install.bat" -Minimal"` | no |
-| `cmd /c "<dir>\install.bat" -Minimal`, `call install.bat` from a script | ends in an argument, or in the path's own quote | no |
-| typed at a prompt | `cmd.exe /q` (the prompt's own command line) | no |
+| `Start-Process install.bat -ArgumentList -Minimal`; `& .\install.bat -Minimal` in PowerShell | `cmd.exe /c ""<dir>\install.bat" -Minimal"` | no |
+| `& .\install.bat` in PowerShell, no arguments | `cmd.exe /c ""<dir>\install.bat""` | no |
+| `cmd /c "<dir>\install.bat"`; `cmd /c ""<dir>\install.bat" -Minimal"` | `"cmd.exe" /c "<dir>\install.bat"`; `"cmd.exe" /c ""<dir>\install.bat" -Minimal"` | no |
+| `call install.bat` from a script | the script's own command line, which does not end that way | no |
+| typed at a prompt | `"cmd.exe" /q` (the prompt's own command line) | no |
 
 Only the first row ends in quote, space, quote - the file association is `"%1" %*` and `%*` is empty - and that is the test.
 Consequence: a script that starts the installer with `Start-Process` and **no arguments** is indistinguishable from a
-double-click and will wait; give it any switch (`-Minimal`, `-Full`, `-SkipFrontend`). What has not been seen is a real
-desktop double-click on a real Windows 10/11 machine; the shell association is the call Explorer makes, on a Windows Server 2025 runner.
+double-click and will wait; give it any switch (`-Minimal`, `-Full`, `-SkipFrontend`). The table was measured on a GitHub
+Actions Windows Server 2025 runner (10.0.26100), where the shell association is the call Explorer makes; a double-click on a
+real Windows 10/11 desktop was not observed, and the same command line is expected, not shown.
 
 Install tiers, in order:
 
