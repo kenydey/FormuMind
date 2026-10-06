@@ -40,6 +40,7 @@ directly.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 
@@ -87,10 +88,30 @@ def local_available() -> tuple[bool, str]:
     return True, ""
 
 
-def _open(content: bytes):
+def _open(content: bytes, *, name: str | None = None):
     import pymupdf  # type: ignore
 
+    if name:
+        return pymupdf.open(stream=content, filetype="pdf", filename=name)
     return pymupdf.open(stream=content, filetype="pdf")
+
+
+def _layout_name(content: bytes, *, ocr: bool) -> str:
+    """A name for a document opened from bytes, unique to its content (and to whether OCR runs on it).
+
+    pymupdf's layout model caches the layout it last predicted under ``(doc.name, page.number)``, and a document opened from
+    a stream has no name (``None``). So the first page of any PDF parsed right after a *single-page* one found that page's
+    layout in the cache and used it for its own: its text was matched against another document's boxes - dropped, or read in
+    the wrong order - and ``assemble`` then skipped the blank page without a trace. Found by evals/suites/parsing.py: a
+    one-page PDF followed by a three-page one returned page 1 with 0 characters (the page holds 119); parsed a second time it
+    came back whole, because by then the cache held that document's own last page. A worker that parses uploads one after
+    another hits this on every upload that follows a one-page PDF.
+
+    The digest costs ~1 ms per MB; the OCR flag is part of the name because a page predicted without OCR text must not be
+    reused for the same page read with it.
+    """
+    digest = hashlib.blake2b(content, digest_size=12).hexdigest()
+    return f"{digest}{'-ocr' if ocr else ''}.pdf"
 
 
 _layout_configured = False
@@ -186,7 +207,8 @@ def extract_pages(content: bytes, *, ocr: bool | None = None) -> list[LocalPage]
     try:
         import pymupdf4llm  # type: ignore
 
-        doc = _open(content)
+        use_ocr = bool(get_settings().pdf_local_ocr if ocr is None else ocr)
+        doc = _open(content, name=_layout_name(content, ocr=use_ocr))
         try:
             chunks = pymupdf4llm.to_markdown(
                 doc, page_chunks=True, **_markdown_kwargs(ocr)
