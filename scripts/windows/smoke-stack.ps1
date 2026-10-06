@@ -52,17 +52,25 @@ function Check {
 }
 
 function Invoke-Runner {
-    # The runner as a user runs it: its own powershell.exe, execution policy bypassed. Stderr is merged, so the preference is
-    # relaxed for the call (a native command's stderr is an ErrorRecord, which Stop turns into a terminating error).
+    # The runner as a user runs it: its own powershell.exe, execution policy bypassed.
+    #
+    # Its output goes to files, not through a pipe. `start` leaves the API and the Celery worker running, and a child
+    # inherits the handles of its parent: with `& powershell.exe ... 2>&1 | Out-String` the worker held the write end of
+    # that pipe, so the capture never saw end-of-file and the smoke test hung for as long as the worker lived. (And
+    # `Start-Process -Wait` waits for the whole process tree, which is the same hang.) WaitForExit waits for the runner only.
     param([string]$Action, [string[]]$Extra = @())
+    New-Item -ItemType Directory -Force -Path $Logs | Out-Null
+    $stdout = Join-Path $Logs "smoke-$Action.out.log"
+    $stderr = Join-Path $Logs "smoke-$Action.err.log"
     $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Runner, $Action) + $Extra
-    $saved = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $text = (& powershell.exe @argv 2>&1 | Out-String)
-        $code = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $saved
+    $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argv -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $null = $proc.Handle  # keeps ExitCode readable after the wait (a Start-Process -PassThru quirk)
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+    $text = ''
+    foreach ($f in @($stdout, $stderr)) {
+        if (Test-Path $f) { $text += (Get-Content $f -Raw -ErrorAction SilentlyContinue) }
     }
     Write-Host $text
     return @{ Code = $code; Text = $text }
