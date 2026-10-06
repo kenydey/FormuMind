@@ -38,7 +38,10 @@ points and a shifted Halton sequence. "Below the reference" is a regression or a
 flip in a nine-query category from reading as a regression), 0.05 for optimisation (seeded, but a new Optuna release changes its
 sampler). `python -m evals` prints what is worse, better, unchanged, new; `--fail-on-regression` turns "worse" into a failing
 exit status. The numbers depend on the installed libraries (jieba, markitdown, pymupdf4llm, optuna - versions are in the report's
-`meta`); the baseline was taken with the pins in `requirements.txt` and without the embedding and BoTorch extras.
+`meta`); the baseline was taken with the pins in `requirements.txt` and without the embedding and BoTorch extras. With the same
+library versions the numbers are reproducible across machines: the first CI run produced exactly the 58 numbers of a local run.
+`tests/test_evals_retrieval_qa.py` pins the retrieval and QA numbers to the baseline to within 0.005, so a baseline that lags the
+datasets or the code cannot be committed unnoticed.
 
 ## What the harness has found so far
 

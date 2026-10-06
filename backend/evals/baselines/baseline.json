@@ -1,7 +1,7 @@
 {
  "meta": {
-  "generated": "2026-10-06T05:34:07+00:00",
-  "git": "72ed358",
+  "generated": "2026-10-06T06:01:06+00:00",
+  "git": "a39b1ce",
   "python": "3.11.15",
   "platform": "Linux-6.18.44-fc-v70-x86_64-with-glibc2.39",
   "libraries": {
@@ -19,7 +19,7 @@
    "fpdf2": "2.8.9"
   },
   "quick": false,
-  "seconds": 21.7,
+  "seconds": 20.9,
   "note": "regenerate with: python -m evals --update-baseline"
  },
  "metrics": {
@@ -154,27 +154,27 @@
    "tolerance": 0.03
   },
   "qa/bm25_reference/context_precision@5": {
-   "value": 0.2527,
+   "value": 0.252,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/bm25_reference/fact_recall@1": {
-   "value": 0.7244,
+   "value": 0.7149,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/bm25_reference/fact_recall@3": {
-   "value": 0.8333,
+   "value": 0.8224,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/bm25_reference/fact_recall@5": {
-   "value": 0.86,
+   "value": 0.8487,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/bm25_reference/full_context@5": {
-   "value": 0.8533,
+   "value": 0.8421,
    "direction": "higher",
    "tolerance": 0.03
   },
@@ -189,27 +189,27 @@
    "tolerance": 0.03
   },
   "qa/production/context_precision@5": {
-   "value": 0.2351,
+   "value": 0.2373,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/fact_recall@1": {
-   "value": 0.6711,
+   "value": 0.6623,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/fact_recall@3": {
-   "value": 0.8556,
+   "value": 0.8509,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/fact_recall@5": {
-   "value": 0.8689,
+   "value": 0.864,
    "direction": "higher",
    "tolerance": 0.03
   },
   "qa/production/full_context@5": {
-   "value": 0.8533,
+   "value": 0.8421,
    "direction": "higher",
    "tolerance": 0.03
   },

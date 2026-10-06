@@ -180,6 +180,27 @@ def test_the_retrieval_config_says_what_was_run(production):
     assert "vector_channel" in config and "bm25_tokenizer" in config
 
 
+def test_the_committed_baseline_matches_what_retrieval_and_qa_measure_now(production):
+    """A baseline that lags the datasets or the code makes every later comparison noise (it did, once: a query was given its facts
+    after the baseline was taken, and ten QA numbers sat 0.01 off). Retrieval and QA are deterministic - fixed corpus, no sampling -
+    so they must agree to rounding. Tighter than the 0.03 a run reports as a regression; run ``python -m evals --update-baseline``
+    after a change that is meant to move them. (Parsing and optimisation depend on which extras and library versions are installed,
+    so they are not pinned here.)"""
+    import json
+
+    from evals import report as R
+    from evals import run as runner
+
+    ret, answers = production
+    if ret["config"].get("vector_channel"):
+        pytest.skip("an embedding model is installed here: the baseline was taken without the vector channel")
+    baseline = json.loads(runner.BASELINE.read_text(encoding="utf-8"))["metrics"]
+    now = R.headline({"suites": {"retrieval": ret, "qa": answers}})
+    assert now, "nothing was measured"
+    stale = {n: (baseline[n]["value"], m.value) for n, m in now.items() if abs(baseline[n]["value"] - m.value) > 0.005}
+    assert not stale, f"the baseline is out of date (python -m evals --update-baseline): {stale}"
+
+
 def test_documents_are_collapsed_from_chunks_to_ids_at_their_best_rank():
     assert M.dedupe_keep_first([h.doc_id for h in [Hit("a", 1, ""), Hit("b", 1, ""), Hit("a", 1, "")]]) == ["a", "b"]
     assert retrieval.K == 10
