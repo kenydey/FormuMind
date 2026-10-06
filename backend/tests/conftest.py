@@ -49,6 +49,23 @@ os.environ.setdefault(
 )
 
 
+# ── throwaway databases do not fsync ────────────────────────────────────────
+# Measured on the Windows CI runner (scripts/probe_commit_cost.py): the same 300 DDL statements take 1175 ms with a commit each
+# under synchronous=FULL (7.8 ms per fsync there), 89 ms under NORMAL and 49 ms under OFF. The Alembic-built fixtures run ~450
+# statements, which was ~4.5 s of setup in every test that uses one. Nothing here asserts that a commit survives power loss;
+# production keeps SQLite's default. Engine-wide, so it also reaches the engine Alembic builds for itself.
+import sqlite3 as _sqlite3  # noqa: E402
+
+from sqlalchemy import event as _sa_event  # noqa: E402
+from sqlalchemy.engine import Engine as _Engine  # noqa: E402
+
+
+@_sa_event.listens_for(_Engine, "connect")
+def _throwaway_databases_do_not_fsync(dbapi_connection, _record):  # pragma: no cover - driver hook
+    if isinstance(dbapi_connection, _sqlite3.Connection):
+        dbapi_connection.execute("PRAGMA synchronous=OFF")
+
+
 # ── hermetic network guard ──────────────────────────────────────────────────
 # The suite used to reach the public internet: a tracer run counted ~330 real
 # requests to PubChem (285, 117 from test_research_endpoint alone), OpenAlex,
