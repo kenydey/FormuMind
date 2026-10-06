@@ -76,7 +76,8 @@ def test_finalize_evidence_fields_runs_off_the_event_loop(monkeypatch, client):
             seen["on_event_loop"] = False
         seen["thread"] = threading.current_thread().name
         seen["kwargs"] = sorted(kwargs)
-        return answer + "·checked", {"10.1/x": "ok"}, None, None, None
+        # v14-1: spy 返回 6 元组（a61c5d1 漏改）
+        return answer + "·checked", {"10.1/x": "ok"}, None, None, None, []
 
     monkeypatch.setattr(chat_mod, "_finalize_evidence_fields", spy)
 

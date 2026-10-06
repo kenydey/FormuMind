@@ -63,7 +63,8 @@ def test_finalize_evidence_fields_reviewer_error_no_fix_loop(monkeypatch):
 
     monkeypatch.setattr(rfl, "run_fix_loop", _must_not_run)
 
-    answer, doi_results, reviewer, reviewer_fix, citation_expand = (
+    # v14-1: 6 元组解包（a61c5d1 漏改）
+    answer, doi_results, reviewer, reviewer_fix, citation_expand, citations = (
         chat_mod._finalize_evidence_fields(
             "q?",
             "原始答案",
@@ -74,6 +75,7 @@ def test_finalize_evidence_fields_reviewer_error_no_fix_loop(monkeypatch):
             project_id="p1",
         )
     )
+    assert citations == [], "reviewer 出错不跑 fix-loop，citations 应原样返回"
     assert answer == "原始答案"
     assert reviewer_fix is None
     assert isinstance(reviewer, dict)
