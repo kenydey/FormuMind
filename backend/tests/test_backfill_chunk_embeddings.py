@@ -130,3 +130,35 @@ def test_backfill_empty_db(tmp_path, monkeypatch):
     con.commit()
     con.close()
     assert main(db_path=db) == 0
+
+
+def test_embed_single_lang_failure_keeps_other_group(monkeypatch):
+    """v14-4: 单语言组 embed 失败只丢该组，成功组照常写向量。"""
+    import app.services.kb_index as kbi
+
+    def fake_embed(texts, mname):
+        # 中文模型失败，英文模型成功
+        if "zh" in mname:
+            raise RuntimeError("zh model unavailable")
+        return [[0.1] * 8 for _ in texts]
+
+    monkeypatch.setattr(kbi, "_embed_texts", fake_embed)
+    import app.services.rag as rag_mod
+    monkeypatch.setattr(rag_mod, "embed_model_name",
+                        lambda lang: "bge-zh" if lang == "zh" else "minilm-en")
+
+    text = (
+        "# English Section\n\n"
+        + ("This is English text about epoxy resin formulation. " * 10)
+        + "\n\n# 中文部分\n\n"
+        + ("这是关于环氧树脂配方的中文文本。" * 10)
+        + "\n"
+    )
+    rows = kbi.prepare_chunk_rows(text, "test-src", embed=True)
+    assert rows is not None, "prepare_chunk_rows 不应返回 None"
+    en_rows = [r for r in rows if (r.get("lang") or "en") == "en"]
+    zh_rows = [r for r in rows if r.get("lang") == "zh"]
+    assert en_rows, "英文组应存在"
+    assert all(r.get("embedding") for r in en_rows), "英文组应有向量"
+    if zh_rows:
+        assert not any(r.get("embedding") for r in zh_rows), "中文组失败应无向量"

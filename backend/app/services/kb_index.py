@@ -495,30 +495,38 @@ def prepare_chunk_rows(
             group_idxs.setdefault(_lang_of(_r), []).append(_i)
         model_per_row: dict[int, str] = {}
         vec_map: dict[int, list[float]] = {}
-        mismatch = False
+        # v14-4: 单语言组失败只丢该组（走 BM25），不再整源丢弃向量。
+        failed_langs: set[str] = set()
         with timing.span("embed"):
             for lang, idxs in group_idxs.items():
                 mname = _model_for_lang(lang)
                 texts = [rows[i]["text"] for i in idxs]
-                vecs = _embed_texts(texts, mname)
+                try:
+                    vecs = _embed_texts(texts, mname)
+                except Exception:
+                    vecs = None
                 if not vecs or len(vecs) != len(idxs):
-                    mismatch = True
-                    break
+                    failed_langs.add(lang)
+                    logger.error(
+                        "kb embedding failed for lang %s (source %s) — "
+                        "%d rows fall back to BM25",
+                        lang, source_id, len(idxs),
+                    )
+                    continue
                 for j, i in enumerate(idxs):
                     vec_map[i] = vecs[j]
                     model_per_row[id(rows[i])] = mname
-        if len(vec_map) != len(rows):
-            mismatch = True
-        if mismatch:
+        if failed_langs:
             logger.error(
-                "kb embedding count mismatch for source %s — skipping embeddings",
-                source_id,
+                "kb embedding partial failure for source %s: langs=%s",
+                source_id, sorted(failed_langs),
             )
-            vectors = None
-        else:
-            vectors = [vec_map[i] for i in range(len(rows))]
+        vectors = [vec_map.get(i) for i in range(len(rows))]
         if vectors:
             for row, vec in zip(rows, vectors):
+                # v14-4: 失败组 vec 为 None，不写 embedding（走 BM25）
+                if vec is None:
+                    continue
                 row["embedding"] = vec
                 row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
         # embedding 缺失结构化告警 + 覆盖率计数
