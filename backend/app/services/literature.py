@@ -52,8 +52,23 @@ def _search_cache_key(
     total_limit: int,
     per_source_cap: int,
     domain,
+    req=None,
 ) -> str:
-    """sha256(query | 排序后 source_types | total_limit | per_source_cap | domain)。"""
+    """sha256(query | 排序后 source_types | total_limit | per_source_cap | domain | req指纹)。
+
+    P1-2: req 指纹（substrate 等）必须进 key。_merge_filter_rank 用 req 做
+    substrate 过滤，旧 key 缺 req 维度，换需求后 600s 内命中脏缓存。
+    """
+    req_fp = ""
+    if req is not None:
+        fp_parts = [
+            str(getattr(req, "substrate", "") or ""),
+            str(getattr(req, "salt_spray_hours", "") or ""),
+            str(getattr(req, "product_type", "") or ""),
+            str(getattr(req, "project_id", "") or ""),
+            str(getattr(req, "notebooklm_notebook_id", "") or ""),
+        ]
+        req_fp = hashlib.sha256("|".join(fp_parts).encode("utf-8")).hexdigest()[:16]
     payload = "|".join(
         [
             str(query or ""),
@@ -61,6 +76,7 @@ def _search_cache_key(
             str(total_limit),
             str(per_source_cap),
             str(domain or ""),
+            req_fp,
         ]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -1102,7 +1118,7 @@ def iter_search(
     _cache_settings = get_settings()
     cache_ttl_s = int(getattr(_cache_settings, "search_cache_ttl_s", 600) or 0)
     domain_hint = getattr(req, "domain", None) if req is not None else None
-    cache_key = _search_cache_key(query, source_types, total_limit, per_source_cap, domain_hint)
+    cache_key = _search_cache_key(query, source_types, total_limit, per_source_cap, domain_hint, req)
     if cache_ttl_s > 0:
         hit = _search_cache_get(cache_key, cache_ttl_s)
         if hit is not None:
