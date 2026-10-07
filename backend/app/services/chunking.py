@@ -535,7 +535,7 @@ def chunk_markdown(
                     if _is_table_caption(tail):
                         caption, current = tail.strip(), head
                         # v14-5: caption 是最后一个 block，current_blocks 去尾
-                        caption_block = current_blocks[-1] if current_blocks else ""
+                        # v15: 删死变量 caption_block（赋值后未使用）
                         current_blocks = current_blocks[:-1]
                         # caption 在 body 中的位置（current 起始处搜索）
                         caption_body_pos, _ = _locate_block(

@@ -61,6 +61,8 @@ def main(db_path: Path | None = None) -> int:
         return 0
 
     loaded: dict[str, object] = {}
+    # v15: per-lang try/except + 结构化摘要（与在线索引一致的 partial-failure 语义）
+    summary: dict[str, str] = {}
     t0 = time.time()
     done = 0
     for lang, model_name in MODELS.items():
@@ -70,31 +72,48 @@ def main(db_path: Path | None = None) -> int:
             (lang,),
         ).fetchall()
         if not rows:
+            summary[lang] = "0 行待回填，跳过"
             continue
         if lang not in loaded:
             t1 = time.time()
-            loaded[lang] = SentenceTransformer(model_name)
+            try:
+                loaded[lang] = SentenceTransformer(model_name)
+            except Exception as exc:  # noqa: BLE001
+                # v15: 单语言模型加载失败只跳过该语言，不崩脚本
+                summary[lang] = f"模型加载失败，跳过 {len(rows)} 行: {exc}"
+                print(f"[{lang}] {summary[lang]}", flush=True)
+                continue
             print(f"模型 {model_name} 加载 {time.time()-t1:.1f}s", flush=True)
         model = loaded[lang]
-        for i in range(0, len(rows), BATCH):
-            batch = rows[i : i + BATCH]
-            vecs = model.encode(
-                [t for _, t in batch], batch_size=BATCH, show_progress_bar=False,
-                normalize_embeddings=True,
-            )
-            for (cid, _), vec in zip(batch, vecs):
-                blob = vec.astype("<f4").tobytes()
-                cur.execute(
-                    "UPDATE document_chunks SET embedding_blob = ?, "
-                    "embedding_model = ? WHERE id = ?",
-                    (blob, model_name, cid),
+        lang_done = 0
+        try:
+            for i in range(0, len(rows), BATCH):
+                batch = rows[i : i + BATCH]
+                vecs = model.encode(
+                    [t for _, t in batch], batch_size=BATCH, show_progress_bar=False,
+                    normalize_embeddings=True,
                 )
-            con.commit()
-            done += len(batch)
-            print(f"  [{lang}] {done}/{total_missing}", flush=True)
+                for (cid, _), vec in zip(batch, vecs):
+                    blob = vec.astype("<f4").tobytes()
+                    cur.execute(
+                        "UPDATE document_chunks SET embedding_blob = ?, "
+                        "embedding_model = ? WHERE id = ?",
+                        (blob, model_name, cid),
+                    )
+                con.commit()
+                lang_done += len(batch)
+                done += len(batch)
+                print(f"  [{lang}] {done}/{total_missing}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            summary[lang] = f"编码中断，已回填 {lang_done}/{len(rows)} 行: {exc}"
+            print(f"[{lang}] {summary[lang]}", flush=True)
+            continue
+        summary[lang] = f"回填 {lang_done} 行"
 
     con.close()
     print(f"回填完成: {done} chunks, 耗时 {time.time()-t0:.1f}s", flush=True)
+    for lang, note in summary.items():
+        print(f"  [{lang}] {note}", flush=True)
     return 0
 
 

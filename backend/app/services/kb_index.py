@@ -35,8 +35,21 @@ logger = logging.getLogger(__name__)
 import threading as _threading
 
 _KB_COVERAGE_LOCK = _threading.Lock()
-_KB_COVERAGE = {"kb_chunks_embedded": 0, "kb_chunks_total": 0}
-_KB_COVERAGE_KEYS = ("kb_chunks_embedded", "kb_chunks_total")
+# v15: 按语言分桶（en/zh 有向量；bm25_fallback 无向量走 BM25）
+_KB_COVERAGE = {
+    "kb_chunks_embedded": 0,
+    "kb_chunks_total": 0,
+    "kb_chunks_embedded_en": 0,
+    "kb_chunks_embedded_zh": 0,
+    "kb_chunks_bm25_fallback": 0,
+}
+_KB_COVERAGE_KEYS = (
+    "kb_chunks_embedded",
+    "kb_chunks_total",
+    "kb_chunks_embedded_en",
+    "kb_chunks_embedded_zh",
+    "kb_chunks_bm25_fallback",
+)
 
 
 def _coverage_session_factory():
@@ -73,10 +86,25 @@ def get_kb_coverage_stats() -> dict[str, int]:
         return dict(_KB_COVERAGE)
 
 
-def _bump_kb_coverage(*, embedded: int, total: int) -> None:
+def _bump_kb_coverage(
+    *,
+    embedded: int,
+    total: int,
+    embedded_en: int = 0,
+    embedded_zh: int = 0,
+    bm25_fallback: int = 0,
+) -> None:
+    """v15: 支持按语言分桶（en/zh/bm25_fallback）；旧调用方只传 embedded/total 仍兼容。"""
+    deltas = {
+        "kb_chunks_embedded": embedded,
+        "kb_chunks_total": total,
+        "kb_chunks_embedded_en": embedded_en,
+        "kb_chunks_embedded_zh": embedded_zh,
+        "kb_chunks_bm25_fallback": bm25_fallback,
+    }
     with _KB_COVERAGE_LOCK:
-        _KB_COVERAGE["kb_chunks_embedded"] += embedded
-        _KB_COVERAGE["kb_chunks_total"] += total
+        for key, delta in deltas.items():
+            _KB_COVERAGE[key] += delta
     # B-3: write-through to SQLite (atomic increment, cross-process safe via
     # the shared sqlite write lock). Failure never breaks ingest.
     try:
@@ -84,7 +112,6 @@ def _bump_kb_coverage(*, embedded: int, total: int) -> None:
 
         from ..db.session_utils import commit_session
 
-        deltas = {"kb_chunks_embedded": embedded, "kb_chunks_total": total}
         with commit_session(_coverage_session_factory()) as session:
             for key, delta in deltas.items():
                 session.execute(
@@ -529,9 +556,8 @@ def prepare_chunk_rows(
                     continue
                 row["embedding"] = vec
                 row["embedding_model"] = model_per_row.get(id(row)) or _embed_model_name()
-        # embedding 缺失结构化告警 + 覆盖率计数
+        # embedding 缺失结构化告警（dedupe 前计数仅用于告警；覆盖率统计后移）
         n_embedded = sum(1 for r in rows if r.get("embedding"))
-        _bump_kb_coverage(embedded=n_embedded, total=len(rows))
         if n_embedded == 0:
             logger.warning(
                 "kb_embedding_missing event=kb_embedding_missing source=%s "
@@ -544,6 +570,18 @@ def prepare_chunk_rows(
     from .kb_dedup import dedupe_chunk_rows
 
     rows = dedupe_chunk_rows(rows, source_id, session)
+    # v15: 覆盖率统计后移到 dedupe 之后（消除虚高），按语言分桶
+    if rows:
+        _n_emb = sum(1 for r in rows if r.get("embedding"))
+        _n_en = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "en")
+        _n_zh = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "zh")
+        _bump_kb_coverage(
+            embedded=_n_emb,
+            total=len(rows),
+            embedded_en=_n_en,
+            embedded_zh=_n_zh,
+            bm25_fallback=len(rows) - _n_emb,
+        )
     return rows if rows else None
 
 
