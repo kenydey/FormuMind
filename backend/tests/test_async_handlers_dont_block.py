@@ -37,6 +37,9 @@ ALLOWED: dict[str, str] = {
     "services.redis_breaker.refuse_if_open": "a monotonic-clock comparison; raises or returns, no I/O",
     "services.redis_breaker.note_failure": "an isinstance check and one float assignment, no I/O",
     "services.redis_breaker.was_refused": "reads one attribute of an exception, no I/O",
+    # v16 P2-1: chat.py structured fix-loop 的 _repair_summary 仅在
+    # asyncio.to_thread(run_fix_loop) 内被调用，不在 event loop 上阻塞。
+    "services.llm.answer_question": "called only inside asyncio.to_thread(run_fix_loop) in chat.py structured path",
 }
 
 
