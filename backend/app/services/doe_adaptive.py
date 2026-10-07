@@ -44,8 +44,18 @@ def _constraint_warnings_for_runs(
     return warnings_by_run
 
 
-def resample_plan_for_constraints(req: Requirement, plan: DOEPlan, *, max_rounds: int = 2) -> DOEPlan:
-    """Swap AI-suggested runs that fail gate validation with cleaner alternates."""
+def resample_plan_for_constraints(
+    req: Requirement,
+    plan: DOEPlan,
+    *,
+    max_rounds: int = 2,
+    resample_fn=None,
+) -> DOEPlan:
+    """Swap AI-suggested runs that fail gate validation with cleaner alternates.
+
+    v16 P2-9: BayBE 计划所有 run 的 ai_suggested=True，替换池恒空。
+    调用方可传 resample_fn(n) 生成 n 个候补 run（BayBE 路径用 searchspace 补采样）。
+    """
     from ..domain.schemas import DOERun
 
     current = plan
@@ -65,6 +75,12 @@ def resample_plan_for_constraints(req: Requirement, plan: DOEPlan, *, max_rounds
             for r in current.runs
             if r.run_id not in suggested_ids and not _run_has_constraint_warnings(req, r)
         ]
+        # v16 P2-9: 替换池空时用 resample_fn 补采样，保证 batch 恒满。
+        if not alternates and resample_fn is not None:
+            try:
+                alternates = resample_fn(len(bad_suggested)) or []
+            except Exception:  # noqa: BLE001 - fail-open
+                alternates = []
         if not alternates:
             break
 
@@ -159,8 +175,9 @@ def enrich_baybe_result(
     existing: list[ExperimentRecord],
     *,
     budget_remaining: int | None = None,
+    resample_fn=None,
 ) -> BaybeRecommendResult:
-    plan = resample_plan_for_constraints(req, result.plan)
+    plan = resample_plan_for_constraints(req, result.plan, resample_fn=resample_fn)
     base = result.model_copy(update={"plan": plan}) if plan is not result.plan else result
     meta = build_adaptive_metadata(req, base.plan, existing, budget_remaining=budget_remaining)
     return base.model_copy(update=meta)

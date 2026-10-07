@@ -177,7 +177,11 @@ def _l2_near(
     session,
     settings,
 ) -> list[dict]:
-    """Drop/audit rows whose embedding is >= threshold cosine to a live chunk."""
+    """Drop/audit rows whose embedding is >= threshold cosine to a live chunk.
+
+    v16 P2-6: 无向量行打标 needs_l2_review —— backfill 补向量后应重跑 L2，
+    否则近重复行永久漏检。
+    """
     enforce = bool(getattr(settings, "kb_near_dedup_enabled", False))
     audit = bool(getattr(settings, "kb_near_dedup_audit", True))
     if not (enforce or audit):
@@ -192,6 +196,11 @@ def _l2_near(
     for i, row in enumerate(rows):
         vec = row.get("embedding")
         if not vec:
+            # v16 P2-6: 无向量行打标，backfill 后重跑 L2。
+            meta = row.get("meta") or {}
+            if isinstance(meta, dict):
+                meta["needs_l2_review"] = True
+                row["meta"] = meta
             continue
         indexed.append((i, _row_lang(row), vec))
     if not indexed:

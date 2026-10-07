@@ -1312,6 +1312,51 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("chat/stream structured reviewer: %s", exc)
                         evidence_reviewer = None
+                    # v16 P2-1: structured 路径补 fix-loop（仅修 summary 文本，
+                    # 不重生成 structured 对象 —— 保持对象契约）。
+                    reviewer_fix = None
+                    if (
+                        evidence_reviewer
+                        and not _reviewer_failed(evidence_reviewer)
+                        and (evidence_reviewer.get("status") or "pass") != "pass"
+                    ):
+                        try:
+                            from ..services.reviewer_fix_loop import run_fix_loop
+
+                            def _repair_summary(q: str, hint: str) -> str:
+                                # 用 answer_question 重生成 summary 文本；
+                                # structured 对象保持不变（仅 summary 字段同步）。
+                                from ..services.llm import answer_question
+
+                                repaired, _ = answer_question(
+                                    f"{question}\n\n{hint}\n\n请输出修订后的摘要：",
+                                    citations,
+                                    domain=req.domain,
+                                    history=req.history,
+                                )
+                                return _ensure_answer(repaired)
+
+                            answer, reviewer_fix = await asyncio.to_thread(
+                                run_fix_loop,
+                                question=question,
+                                answer=answer,
+                                citations=citations,
+                                review=evidence_reviewer,
+                                settings=settings,
+                                repair_fn=_repair_summary,
+                                max_rounds=1,
+                                project_id=req.project_id,
+                            )
+                            # 同步 structured.summary，保持对象契约一致。
+                            if structured is not None and reviewer_fix:
+                                try:
+                                    structured = structured.model_copy(
+                                        update={"summary": answer}
+                                    )
+                                except Exception:  # noqa: BLE001
+                                    pass
+                        except Exception as exc:  # noqa: BLE001 - fail-open
+                            logger.warning("chat/stream structured fix-loop: %s", exc)
                     _degr_notices = _retrieval_degradation_notices(kb_used) or []
                     yield _sse(
                         {
@@ -1326,6 +1371,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             "rewritten_query": plan["rewritten_query"],
                             # 风险5：reviewer 结果透出（与 paperqa 整包路径同字段）。
                             "evidence_reviewer": evidence_reviewer,
+                            # v16 P2-1: fix-loop 结果透出。
+                            "reviewer_fix": reviewer_fix,
                             # v7 问答-4: claims/audit 进 SSE（与 paperqa 整包路径同字段），
                             # 否则前端无法展示。
                             "sourced_claims": _claims,

@@ -642,6 +642,8 @@ class ActiveDoeResult(AdaptiveDOEMetadata):
     # v11: deterministic physical-constraint verdict (acid stability +
     # compliance). Mirrors BaybeRecommendResult.physical_constraints.
     physical_constraints: dict | None = None
+    # v16 P2-4: 实际喂给 GP 的 lab 点数（血缘；legacy 路径为 0）。
+    lab_points_used: int = 0
 
 
 class OptimizationResult(BaseModel):

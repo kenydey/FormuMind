@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 # only a fail-open fallback when the DB is unavailable.
 import threading as _threading
 
+# v16 P2-8: embedding 模型熔断 —— 连续失败 N 次后跳过该模型（走 BM25），
+# 避免每次 ingest 都付失败成本；进程重启自动恢复。
+_EMBED_BREAKER_LOCK = _threading.Lock()
+_EMBED_FAIL_COUNT: dict[str, int] = {}
+_EMBED_BREAKER_THRESHOLD = 5
+_EMBED_BROKEN: set[str] = set()
+
 _KB_COVERAGE_LOCK = _threading.Lock()
 # v15: 按语言分桶（en/zh 有向量；bm25_fallback 无向量走 BM25）
 _KB_COVERAGE = {
@@ -556,6 +563,16 @@ def prepare_chunk_rows(
         with timing.span("embed"):
             for lang, idxs in group_idxs.items():
                 mname = _model_for_lang(lang)
+                # v16 P2-8: 熔断检查 —— 已熔断模型直接跳过（走 BM25）。
+                with _EMBED_BREAKER_LOCK:
+                    if mname in _EMBED_BROKEN:
+                        failed_langs.add(lang)
+                        logger.warning(
+                            "kb embedding skipped for lang %s (source %s): "
+                            "model %s circuit-broken",
+                            lang, source_id, mname,
+                        )
+                        continue
                 texts = [rows[i]["text"] for i in idxs]
                 try:
                     vecs = _embed_texts(texts, mname)
@@ -563,12 +580,25 @@ def prepare_chunk_rows(
                     vecs = None
                 if not vecs or len(vecs) != len(idxs):
                     failed_langs.add(lang)
+                    # v16 P2-8: 失败计数，达阈值熔断。
+                    with _EMBED_BREAKER_LOCK:
+                        _EMBED_FAIL_COUNT[mname] = _EMBED_FAIL_COUNT.get(mname, 0) + 1
+                        if _EMBED_FAIL_COUNT[mname] >= _EMBED_BREAKER_THRESHOLD:
+                            _EMBED_BROKEN.add(mname)
+                            logger.error(
+                                "kb embedding CIRCUIT-BROKEN: model %s failed %d times — "
+                                "skipping until process restart",
+                                mname, _EMBED_FAIL_COUNT[mname],
+                            )
                     logger.error(
                         "kb embedding failed for lang %s (source %s) — "
                         "%d rows fall back to BM25",
                         lang, source_id, len(idxs),
                     )
                     continue
+                # 成功则清零失败计数。
+                with _EMBED_BREAKER_LOCK:
+                    _EMBED_FAIL_COUNT.pop(mname, None)
                 for j, i in enumerate(idxs):
                     vec_map[i] = vecs[j]
                     model_per_row[id(rows[i])] = mname

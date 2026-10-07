@@ -246,6 +246,8 @@ def active_learning_doe(
                         budget_remaining=result.budget_remaining,
                         chemical_feasibility=result.chemical_feasibility,
                         physical_constraints=result.physical_constraints,
+                        # v16 P2-4: 血缘透传（BaybeRecommendResult 已有该字段）。
+                        lab_points_used=getattr(result, "lab_points_used", 0) or 0,
                     )
                 # P1 #18: package importable but engine reports unavailable.
                 logger.warning(

@@ -344,14 +344,7 @@ class BaybeCampaignEngine:
             )
             df_wb = workbench_dataframes_to_baybe(actual_X, measurements_Y, metrics)
             if not df_wb.empty:
-                import pandas as pd
-
-                log.info(
-                    "Workbench measurements for campaign %s: metrics=%s rows=%d",
-                    workbench_campaign_id,
-                    metrics,
-                    len(df_wb),
-                )
+                # v16 P2-3: 日志移到去重后 —— 去重前计数与实际进 GP 的行数不一致。
                 # P1-4: pass the searchspace factor names so a measurement
                 # frame missing a required factor (e.g. cure_temperature_c)
                 # fails closed with a clear message instead of an obscure
@@ -384,6 +377,14 @@ class BaybeCampaignEngine:
             df_meas_clean, [f.name for f in factor_list], log,
             metric_names=metrics,
         )
+        # v16 P2-3: 去重后日志（计数与实际进 GP 一致）。
+        if workbench_campaign_id is not None:
+            log.info(
+                "Workbench measurements for campaign %s: metrics=%s rows=%d (post-dedupe)",
+                workbench_campaign_id,
+                metrics,
+                len(df_meas_clean),
+            )
         if not df_meas_clean.empty:
             campaign.add_measurements(df_meas_clean)
 
@@ -495,25 +496,23 @@ class BaybeCampaignEngine:
         )
         from ..doe_adaptive import enrich_baybe_result
 
-        all_records = list(measurements)
-        if workbench_campaign_id is not None:
-            wb_rows = campaign_store.get_experiments_sync(workbench_campaign_id)
-            for row in wb_rows:
-                if row.measurements:
-                    all_records.append(
-                        ExperimentRecord(
-                            domain=req.domain,
-                            factors=dict(row.actual_params or row.planned_params or {}),
-                            measured={
-                                k: float(v)
-                                for k, v in row.measurements.items()
-                                if v is not None and v != ""
-                            },
-                            source="workbench",
-                            label=f"wb-{row.id}",
-                        )
-                    )
-        return enrich_baybe_result(result, req, all_records, budget_remaining=budget_remaining)
+        # v16 P2-9: BayBE 替换池恒空 —— 用 LHS 从因子范围补采样，保证 batch 恒满。
+        def _baybe_resample(n: int):
+            from .doe_registry import build_doe_plan
+            from ...pipeline.workflow import build_doe_factors
+
+            try:
+                factors = build_doe_factors(req)
+                alt_plan = build_doe_plan(factors, "lhs", engine="native", n=n)
+                return alt_plan.runs
+            except Exception:  # noqa: BLE001 - fail-open
+                return []
+
+        return enrich_baybe_result(
+            result, req, all_records,
+            budget_remaining=budget_remaining,
+            resample_fn=_baybe_resample,
+        )
 
     def run_optimization(
         self,
