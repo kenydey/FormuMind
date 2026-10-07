@@ -99,7 +99,8 @@ def _search_cache_get(key: str, ttl_s: int) -> "tuple[list[Evidence], dict] | No
             if time.monotonic() - ts > ttl_s:
                 _SEARCH_CACHE.pop(key, None)
                 return None
-            return final, payload
+            # v15: 返回浅拷贝，防调用方原地修改污染后续缓存命中
+            return list(final), dict(payload)
     except Exception:
         return None
 

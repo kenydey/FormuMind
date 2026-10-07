@@ -102,6 +102,8 @@ class DeepResearchEngine:
         total_limit: int | None = None,
         per_source_cap: int | None = None,
         progress_cb: Callable[[list[Evidence]], None] | None = None,
+        # v15: per-project NotebookLM notebook（None = 用全局配置）
+        notebooklm_notebook_id: str | None = None,
     ) -> tuple[list[Evidence], ExpandedQuery]:
         """QueryExpander + iter_search 多源检索。"""
         domain = getattr(req, "domain", None) if req is not None else None
@@ -119,6 +121,7 @@ class DeepResearchEngine:
             total_limit=limit,
             per_source_cap=cap,
             progress_cb=progress_cb,
+            notebooklm_notebook_id=notebooklm_notebook_id,
         )[0]
 
         # Full-text acquisition: upgrade the top fetchable hits (patent PDF /

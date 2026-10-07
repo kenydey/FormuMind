@@ -37,3 +37,28 @@ def test_cache_key_differs_by_notebook_id():
     k3 = _search_cache_key("q", ["notebooklm"], 10, 5, "d", None,
                            notebooklm_notebook_id="nb-A")
     assert k1 == k3, "同 notebook key 稳定"
+
+
+def test_v15_search_cache_defensive_copy():
+    """v15: _search_cache_get 返回浅拷贝，调用方原地修改不污染缓存。"""
+    from app.services import literature
+
+    literature._search_cache_put("v15k", ["a", "b"], {"x": 1})
+    f1, p1 = literature._search_cache_get("v15k", 600)
+    assert f1 is not None
+    f1.append("c")
+    p1["y"] = 2
+    f2, p2 = literature._search_cache_get("v15k", 600)
+    assert f2 == ["a", "b"], "缓存 list 不应被调用方污染"
+    assert p2 == {"x": 1}, "缓存 payload 不应被调用方污染"
+
+
+def test_v15_federated_search_notebook_param():
+    """v15: FederatedSearchEngine.search 接受 notebooklm_notebook_id 形参。"""
+    import inspect
+
+    from app.services.federated_search import FederatedSearchEngine
+
+    assert "notebooklm_notebook_id" in inspect.signature(
+        FederatedSearchEngine.search
+    ).parameters

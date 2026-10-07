@@ -447,7 +447,9 @@ def is_due(collection: dict[str, Any], now: float | None = None) -> bool:
 
 
 def _run_search(
-    query: str, filters: dict[str, Any], settings: Any = None
+    query: str, filters: dict[str, Any], settings: Any = None,
+    # v15: per-project NotebookLM notebook（None = 用全局配置）
+    notebooklm_notebook_id: str | None = None,
 ) -> list[Any]:
     from .federated_search import FederatedSearchEngine
 
@@ -457,6 +459,7 @@ def _run_search(
         date_from=filters.get("date_from"),
         date_to=filters.get("date_to"),
         domain_allowlist=filters.get("domain_allowlist"),
+        notebooklm_notebook_id=notebooklm_notebook_id,
     )
     return list(result.evidence or [])
 
@@ -523,8 +526,19 @@ def refresh_collection(
         query = col.get("query") or ""
         filters = dict(col.get("filters") or {})
 
+    # v15: per-project NotebookLM notebook（项目 workspace 配置；失败时降级全局）
+    nb_id: str | None = None
+    try:
+        from ..db.project_store import get_project_store
+
+        detail = get_project_store().get(project_id)
+        if detail is not None and detail.workspace is not None:
+            nb_id = detail.workspace.notebooklm_notebook_id
+    except Exception:
+        nb_id = None
+
     # 阶段 2：耗时 IO（外部文献搜索），不持有任何 store 锁。
-    evidence = _run_search(query, filters, settings=settings)
+    evidence = _run_search(query, filters, settings=settings, notebooklm_notebook_id=nb_id)
 
     # 阶段 3：持久化（manifest 合并 + 快照），按 project 串行。
     with _project_txn(project_id) as store:

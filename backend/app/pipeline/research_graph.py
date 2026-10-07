@@ -48,6 +48,8 @@ class ResearchGraphState(TypedDict, total=False):
     topic: str
     query: str
     req: Requirement | None
+    # v15: per-project NotebookLM notebook（None = 用全局配置；fallback 透传）
+    notebooklm_notebook_id: str | None
     pre_index: list[Evidence]
     evidence: list[Evidence]
     grounded_evidence: list[Evidence]
@@ -311,6 +313,8 @@ def fallback_node(
     settings = settings or get_settings()
     query = state.get("query") or state.get("topic") or ""
     req = state.get("req")
+    # v15: per-project notebook 透传（Requirement schema 无该字段，走 state 独立键）
+    nb_id = state.get("notebooklm_notebook_id")
 
     # The fallback is itself a network call, and CRAG only gets here because
     # local retrieval was already judged insufficient. Letting an upstream
@@ -331,10 +335,11 @@ def fallback_node(
                 total_limit=30,
                 per_source_cap=10,
                 max_rounds=1,
+                notebooklm_notebook_id=nb_id,
             )[0]
         else:
             fed = FederatedSearchEngine(settings)
-            result = fed.search(query, req=req)
+            result = fed.search(query, req=req, notebooklm_notebook_id=nb_id)
             evidence = result.evidence
     except Exception as exc:
         evidence = degrade_return(logger, exc, "CRAG fallback search failed", [])
