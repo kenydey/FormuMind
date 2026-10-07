@@ -705,10 +705,10 @@ class BaybeCampaignEngine:
 
         top = _rank_by_pareto_then_score(ranked, objectives, settings.top_n_formulas)
         for score, form in top:
-            # v17 CI-5: name 分数与 form.score 同步 —— test_optimization_top_names_match_true_scores
-            # 要求 name 中的分数与真分数一致。
-            form.score = score
-            form.name = f"BayBE {req.domain.value} (score {score:.3f})"
+            # v17 CI-5: name 用 form.score（真分数），而非 ranking combined 分数 ——
+            # test_optimization_top_names_match_true_scores 要求 name 与真分数一致，
+            # test_pipeline 要求 form.score 为真实目标值。两者不能混用。
+            form.name = f"BayBE {req.domain.value} (score {form.score:.3f})"
         top = [form for _, form in top]
 
         # U-2: 血缘打通 —— 有真实 lab 测量 seed 时不再谎报 predictor_virtual。
