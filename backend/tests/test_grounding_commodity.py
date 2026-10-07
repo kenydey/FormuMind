@@ -184,3 +184,40 @@ def test_v16_prefilled_hallucinated_ref_rejected_in_pipeline():
     assert "LLM-picked" not in comp.evidence_refs
     assert comp.evidence_refs == ["US1"]
 
+
+def test_v16_cas_branch_rejects_unrelated_prefilled_ref():
+    """v16 P1-4: CAS 命中但预填了无关真实 ID → 剔除重算，不标 high 张冠李戴。"""
+    anchor = C(name="Zinc phosphate", component_type="inhibitor", weight_pct=10.0, cas_no="7779-90-0")
+    comp = C(
+        name="Zinc phosphate",
+        component_type="inhibitor",
+        weight_pct=5.0,
+        cas_no="7779-90-0",
+        evidence_refs=["EP999"],  # 真实存在但与磷酸锌无关
+    )
+    ev = [
+        Evidence(source="patent", identifier="EP999", title="Epoxy resin doc",
+                 snippet="Epoxy resin cures fast.", relevance=0.9),
+        Evidence(source="patent", identifier="US2", title="Zinc phosphate doc",
+                 snippet="Zinc phosphate 7779-90-0 inhibits corrosion.", relevance=0.9),
+    ]
+    out, _ = ground_recommended_formulas([_formula(anchor, comp)], ev)
+    got = {c.name: c for c in out[0].components}["Zinc phosphate"]
+    assert "EP999" not in got.evidence_refs, "无关预填 ID 不得保留"
+    # 相关性复核后应回退到真实匹配（US2 提到磷酸锌）
+    assert "US2" in got.evidence_refs
+
+
+def test_v16_id_map_case_collision_keeps_both():
+    """v16 P2-5: identifier 大小写碰撞不再互相覆盖。"""
+    from app.services.grounded_recommend import _evidence_corpus
+
+    ev = [
+        Evidence(source="patent", identifier="US1", title="Doc A",
+                 snippet="Zinc phosphate test.", relevance=0.9),
+        Evidence(source="patent", identifier="us1", title="Doc B",
+                 snippet="Epoxy resin test.", relevance=0.9),
+    ]
+    _, _, id_map, _ = _evidence_corpus(ev)
+    assert sorted(id_map["us1"]) == ["US1", "us1"]
+

@@ -128,12 +128,15 @@ def _evidence_corpus(evidence: list[Evidence]) -> tuple[set[str], set[str], dict
     """
     tokens: set[str] = set()
     cas_set: set[str] = set()
-    id_map: dict[str, str] = {}
+    # v16: 大小写碰撞时保留全部（"US1" vs "us1" 不再互相覆盖）
+    id_map: dict[str, list[str]] = {}
     per_evidence: dict[str, set[str]] = {}
     for ev in evidence:
         ident = (ev.identifier or ev.title or "").strip()
         if ident:
-            id_map[ident.lower()] = ident
+            key = ident.lower()
+            if ident not in id_map.get(key, []):
+                id_map.setdefault(key, []).append(ident)
         blob = f"{ev.title} {ev.snippet} {ev.identifier}"
         ev_toks = _tokens(blob)
         tokens |= ev_toks
@@ -201,7 +204,7 @@ def _catalog_availability_bonus(name: str, cas_no: str | None) -> float:
 def _match_evidence_ids(
     name: str,
     per_evidence_tokens: dict[str, set[str]],
-    id_map: dict[str, str],
+    id_map: dict[str, list[str]],
 ) -> list[str]:
     """P1-4: match the component name against each evidence's OWN tokens.
 
@@ -213,11 +216,12 @@ def _match_evidence_ids(
     if not name_toks:
         return []
     hits: list[str] = []
-    for ident_key, ident in id_map.items():
-        ev_toks = per_evidence_tokens.get(ident, set())
-        if any(t in ident_key or t in ev_toks for t in name_toks):
-            if ident not in hits:
-                hits.append(ident)
+    for ident_key, idents in id_map.items():
+        for ident in idents:
+            ev_toks = per_evidence_tokens.get(ident, set())
+            if any(t in ident_key or t in ev_toks for t in name_toks):
+                if ident not in hits:
+                    hits.append(ident)
     return hits[:3]
 
 
@@ -225,7 +229,7 @@ def _ground_component(
     comp: RecommendedFormulaComponent,
     corpus: set[str],
     corpus_cas: set[str],
-    id_map: dict[str, str],
+    id_map: dict[str, list[str]],
     catalog: set[str],
     catalog_cas: set[str],
     *,
@@ -236,13 +240,17 @@ def _ground_component(
     # v15: 预填 evidence_refs 校验闭环 —— 只采信真实证据 ID（id_map 的值域），
     # 未知引用（幻觉 ID）直接剔除并回退到 verbatim/匹配重算，防幻觉引用
     # 以 high 置信度直达前端。
-    _valid_ids = set(id_map.values()) if id_map else set()
+    _valid_ids = {i for v in id_map.values() for i in v} if id_map else set()
     refs = [r for r in (comp.evidence_refs or []) if r in _valid_ids]
     raw_toks = _tokens(comp.name) | _tokens(comp.zh_name or "")
     name_toks = {t for t in raw_toks if len(t) >= 5}
     comp_cas = (comp.cas_no or "").strip().lower()
 
     if comp_cas and (comp_cas in corpus_cas or comp_cas in catalog_cas):
+        # v16: CAS 分支也要复核预填 refs 的相关性 —— 存在但无关的真实 ID
+        #（如磷酸锌预填了环氧树脂的证据 ID）不能标 high。
+        related = set(_match_evidence_ids(comp.name, per_evidence_tokens, id_map))
+        refs = [r for r in refs if r in related]
         if not refs:
             refs = _match_evidence_ids(comp.name, per_evidence_tokens, id_map)
         return comp.model_copy(
