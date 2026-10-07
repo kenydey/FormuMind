@@ -262,8 +262,12 @@ def _ground_component(
 
     # The evidence states the component by name: that is support, however short
     # the name is or whichever script it is written in.
+    # v18-10: verbatim 分支也要复核预填 refs 的相关性 —— 与 CAS 分支对齐。
+    # 预填的真实但无关 ID（如磷酸锌预填了环氧树脂的证据）不能标 high。
     verbatim = _verbatim_refs(comp, texts or [])
     if verbatim:
+        _vset = set(verbatim)
+        refs = [r for r in refs if r in _vset]
         return comp.model_copy(
             update={"evidence_refs": refs or verbatim, "grounding_confidence": "high"}
         )
@@ -385,7 +389,17 @@ def ground_recommended_formulas(
             form_warnings.append(
                 f"优先材料库：{in_cat}/{len(comps)} 个成分命中全局材料库（未命中者仍保留）"
             )
-        out.append(rec.model_copy(update={"components": comps, "warnings": form_warnings}))
+        out.append(
+            rec.model_copy(
+                update={
+                    "components": comps,
+                    "warnings": form_warnings,
+                    # v18-12: 剔除成分后 predicted 过期（针对剔除前完整配方的预测），
+                    # 置空避免下游误用。
+                    "predicted": {},
+                }
+            )
+        )
 
     if prefer_materials_catalog and len(out) > 1:
         # Stable soft reorder: higher catalog coverage first; never filter.

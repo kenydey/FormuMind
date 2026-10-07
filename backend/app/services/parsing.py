@@ -756,7 +756,13 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
         if ext == "pdf":
             order = _pdf_tier_order(prefer if prefer is not None else get_settings().pdf_parser)
             for name, fn in order:
-                out = fn(content, ext)
+                # v18-15: tier 异常不杀整篇 —— 记 note 后继续下一 tier。
+                # 违背 fail-open 承诺是数据丢失级 bug。
+                try:
+                    out = fn(content, ext)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("parse tier %s failed: %s", name, exc)
+                    continue
                 # Tiers may return a full ParseResult (mineru_cloud) or plain
                 # text; both are accepted so existing tiers stay untouched.
                 if isinstance(out, ParseResult):

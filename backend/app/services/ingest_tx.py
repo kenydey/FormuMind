@@ -162,7 +162,7 @@ def ingest_document_tx(
 
             # v16 P2-7: DB 提交成功后再 bump 覆盖率（与 index_source 同口径）。
             if rows:
-                from .kb_index import _bump_kb_coverage
+                from .kb_index import _bump_kb_coverage, _sync_source_fts
 
                 _n_emb = sum(1 for r in rows if r.get("embedding"))
                 _n_en = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "en")
@@ -174,6 +174,11 @@ def ingest_document_tx(
                     embedded_zh=_n_zh,
                     bm25_fallback=len(rows) - _n_emb,
                 )
+                # v18-4: 同步 FTS5 镜像，否则 BM25 搜不到新文档。
+                try:
+                    _sync_source_fts(source_id, rows, settings)
+                except Exception:  # noqa: BLE001
+                    pass
 
             return IngestTxResult(
                 source_id=source_id, chunk_count=chunk_count, already_existed=False

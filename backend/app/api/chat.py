@@ -685,9 +685,30 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                         citations = reviewer_fix["citations"]
                     # v17-3: 同步 structured.summary —— fix-loop 重生成了 answer，
                     # structured 对象仍是旧文本，两张皮。
+                    # v18-2: 同步补全 —— key_findings 等文本字段清空（迫使
+                    # _extract_claims 回退到按 answer 分句提取，避免验证过期文本）；
+                    # formulation_hints 的 [n] 型 evidence_ref 清空（无 old_to_new
+                    # 映射，错误编号比缺失更糟）。
                     if structured is not None and reviewer_fix:
                         try:
-                            structured = structured.model_copy(update={"summary": answer})
+                            import re as _re
+
+                            _hints = []
+                            for _h in structured.formulation_hints or []:
+                                _ref = _h.evidence_ref or ""
+                                if _re.fullmatch(r"\[\d+\]", _ref.strip()):
+                                    _h = _h.model_copy(update={"evidence_ref": ""})
+                                _hints.append(_h)
+                            structured = structured.model_copy(
+                                update={
+                                    "summary": answer,
+                                    "key_findings": [],
+                                    "data_conflicts": [],
+                                    "uncertainty_notes": [],
+                                    "assumptions": [],
+                                    "formulation_hints": _hints,
+                                }
+                            )
                         except Exception:  # noqa: BLE001
                             pass
                 except Exception as exc:  # noqa: BLE001
@@ -1337,18 +1358,20 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                         try:
                             from ..services.reviewer_fix_loop import run_fix_loop
 
-                            def _repair_summary(q: str, hint: str) -> str:
+                            def _repair_summary(q: str, hint: str):
                                 # 用 answer_question 重生成 summary 文本；
-                                # structured 对象保持不变（仅 summary 字段同步）。
+                                # v18-8: 返回 (repaired, cited) 元组，与同步路径
+                                # _repair 一致，否则 fix-loop 拿不到重排后的
+                                # citations，导致 [^n] 错位。
                                 from ..services.llm import answer_question
 
-                                repaired, _ = answer_question(
+                                repaired, cited = answer_question(
                                     f"{question}\n\n{hint}\n\n请输出修订后的摘要：",
                                     citations,
                                     domain=req.domain,
                                     history=req.history,
                                 )
-                                return _ensure_answer(repaired)
+                                return _ensure_answer(repaired), cited
 
                             answer, reviewer_fix = await asyncio.to_thread(
                                 run_fix_loop,
@@ -1361,13 +1384,29 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                                 max_rounds=1,
                                 project_id=req.project_id,
                             )
-                            # 同步 structured.summary，保持对象契约一致。
+                            # 同步 structured，保持对象契约一致。
                             # v17-3: 同时重绑 citations —— reviewer_fix 可能重排了引用，
                             # 只同步 summary 会导致答案与引用表脱钩（v11 P0-4 变体）。
+                            # v18-2: 同步补全（同同步路径）——清空过期文本字段。
                             if structured is not None and reviewer_fix:
                                 try:
+                                    import re as _re2
+
+                                    _hints2 = []
+                                    for _h2 in structured.formulation_hints or []:
+                                        _ref2 = _h2.evidence_ref or ""
+                                        if _re2.fullmatch(r"\[\d+\]", _ref2.strip()):
+                                            _h2 = _h2.model_copy(update={"evidence_ref": ""})
+                                        _hints2.append(_h2)
                                     structured = structured.model_copy(
-                                        update={"summary": answer}
+                                        update={
+                                            "summary": answer,
+                                            "key_findings": [],
+                                            "data_conflicts": [],
+                                            "uncertainty_notes": [],
+                                            "assumptions": [],
+                                            "formulation_hints": _hints2,
+                                        }
                                     )
                                     if reviewer_fix.get("citations") is not None:
                                         citations = reviewer_fix["citations"]

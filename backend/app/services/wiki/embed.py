@@ -188,6 +188,24 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
             sid,
             _wiki_rows,
         )
+        # v18-4: wiki 路径补齐覆盖率 bump + FTS 同步，与 index_source 拉齐。
+        if _wiki_rows:
+            try:
+                from ..kb_index import _bump_kb_coverage, _sync_source_fts
+                from ...config import get_settings as _get_settings
+
+                _settings = _get_settings()
+                _n_emb = sum(1 for r in _wiki_rows if r.get("embedding"))
+                _bump_kb_coverage(
+                    embedded=_n_emb,
+                    total=len(_wiki_rows),
+                    embedded_en=_n_emb,  # wiki 默认为英文
+                    embedded_zh=0,
+                    bm25_fallback=len(_wiki_rows) - _n_emb,
+                )
+                _sync_source_fts(sid, _wiki_rows, _settings)
+            except Exception:  # noqa: BLE001
+                pass
 
     try:
         get_chunk_store().bump_generation()

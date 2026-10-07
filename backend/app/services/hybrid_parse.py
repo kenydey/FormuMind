@@ -131,11 +131,15 @@ def _render_blocks(blocks: list[mineru_cloud.MinerUBlock], *, page_label: str) -
         # demoted every heading to prose, which cost `heading_path` on every
         # escalated page. `_heading_markdown` adds the numbered-heading rule
         # layer on top (API 把 1./1.1 扁平化为同 level)。
-        heading = _heading_markdown(block.text, block.text_level)
-        if heading:
-            text, level = heading
-            parts.append(f"{'#' * level} {text}")
-            continue
+        # v18-3: 只对文本类块做标题判定 —— equation/table 块的文本可能以
+        # "数字编号+空白"开头（如表格首单元格"1. 试剂名称"），误判为标题
+        # 会导致整表 HTML 静默丢失。
+        if kind in ("text", "title", "list"):
+            heading = _heading_markdown(block.text, block.text_level)
+            if heading:
+                text, level = heading
+                parts.append(f"{'#' * level} {text}")
+                continue
 
         if kind == "equation":
             # Already LaTeX. A vision model can only do worse.

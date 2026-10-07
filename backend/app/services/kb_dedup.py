@@ -200,11 +200,13 @@ def _l2_near(
             # v16 P2-6: 无向量行打标，backfill 后重跑 L2。
             # v17 CI-2: embed=False 显式禁用时不打标 —— 行本就不该有向量，
             # 打标会破坏 FORMUMIND_CHEM_EXTRACT_ENABLED=false 时 meta is None 的契约。
+            # v18-19: meta 为 None 时不打标（保持 None 契约），避免 None→{} 转变。
             if mark_needs_l2:
-                meta = row.get("meta") or {}
+                meta = row.get("meta")
                 if isinstance(meta, dict):
                     meta["needs_l2_review"] = True
                     row["meta"] = meta
+                # meta 为 None 时跳过打标，保持 None（v18-19）
             continue
         indexed.append((i, _row_lang(row), vec))
     if not indexed:

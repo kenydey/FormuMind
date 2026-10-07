@@ -98,6 +98,8 @@ def _count_source_chunks(source_id: str) -> tuple[int, int, int, int]:
 
     用于 re-ingest 前扣减旧计数。语言从 embedding_model 名推断
     （bge/zh → zh，其余 → en）；fail-open 返回全零。
+    v18-4: 同时统计 embedding_blob（P0-1 backfill 产物），与
+    delete_for_source 同口径，否则删除扣减不足。
     """
     try:
         from ..db.chunk_store import get_chunk_store
@@ -109,7 +111,8 @@ def _count_source_chunks(source_id: str) -> tuple[int, int, int, int]:
         en = 0
         zh = 0
         for r in rows:
-            if getattr(r, "embedding", None):
+            # v18-4: 向量可能在 embedding (JSON) 或 embedding_blob (BLOB)
+            if getattr(r, "embedding", None) or getattr(r, "embedding_blob", None):
                 embedded += 1
                 mname = (getattr(r, "embedding_model", "") or "").lower()
                 if "bge" in mname or "zh" in mname:

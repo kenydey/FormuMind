@@ -208,7 +208,9 @@ def ingest_from_url(req: IngestUrlRequest):
         raise HTTPException(status_code=502, detail="文件处理失败") from exc
     # P0-1: "skipped" 现仅表示无真实文本/占位（有文本但 guide 未跑为
     # "no_guide"），故按 status 门禁即可正确索引真实文档。
-    if outcome.extraction_status == "ok":
+    # v18-16: 与 worker/tasks.py:901 对齐（!= "skipped"），否则离线部署
+    #（无 LLM key → no_guide）下 ColBERT 索引恒空。
+    if outcome.extraction_status != "skipped":
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(req.url, outcome)
 

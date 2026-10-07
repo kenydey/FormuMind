@@ -40,7 +40,9 @@ def _generate_matrix(
         # pydoe>=1.0 uses OS entropy when no seed is given -> non-reproducible
         # plans. Thread an explicit seed; `seed=` is the non-deprecated
         # parameter in pydoe>=1.0 (random_state= is deprecated in 1.5).
-        raw = pydoe.lhs(k, n, seed=seed)
+        # v18-14: seed=None 时映射为 0，与 native 引擎一致（"不指定即确定性默认"），
+        # 消除环境依赖行为（是否装 pydoe 导致同一请求行为不同）。
+        raw = pydoe.lhs(k, n, seed=seed if seed is not None else 0)
     elif design == "ccd":
         fn = getattr(pydoe, "ccdesign", None) or getattr(pydoe, "ccd", None)
         if fn is None:

@@ -114,6 +114,8 @@ class ActiveDoeRequest(Requirement):
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None
     budget_remaining: int | None = None
+    # v18-13: 加 seed 字段，否则主动学习 DOE 永远不可复现。
+    seed: int | None = Field(default=None, description="随机种子，指定后可复现")
 
 
 @router.post("/doe/active", response_model=ActiveDoeResult)
@@ -144,6 +146,7 @@ def active_doe(req: ActiveDoeRequest) -> ActiveDoeResult:
             doe_engine=req.doe_engine,
             workbench_campaign_id=req.workbench_campaign_id,
             budget_remaining=req.budget_remaining,
+            seed=req.seed,
         )
     except ValueError as exc:
         # v9: 离散因子 + 非 full_factorial 设计 fail-closed → 422 而非 500。

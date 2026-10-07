@@ -203,6 +203,20 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type
     """
     limit = chunk_floor() if min_chars is None else int(min_chars)
     body = _without_table_markup((text or "").strip()).strip()
+    # v18-5: 数字豁免 —— 含数字+单位/配比模式的 chunk（如"固体含量 65 %"、
+    # "中性盐雾 720 h"）是化学检索的核心目标，用宽松 floor（10）而非 20，
+    # 且跳过词比检查。否则短数字 chunk 被系统性丢弃（numeric 检索缺口根因）。
+    import re as _re
+
+    _is_numeric = bool(
+        _re.search(r"\d", body)
+        and _re.search(
+            r"%|℃|°C|h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg|g\b|ml|L\b|s\b|min|°|phr|viscosity|含量|盐雾|硬度|附着力",
+            body,
+        )
+    )
+    if _is_numeric:
+        return len(body) < 8
     if len(body) < limit:
         return True
     word_chars = len(_WORD_RE.findall(body))

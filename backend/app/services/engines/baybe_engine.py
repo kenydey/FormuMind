@@ -325,11 +325,23 @@ class BaybeCampaignEngine:
 
         # v17-4: seed 透传到 BayBE GP 采样层 —— Campaign/recommend 不收 seed，
         # 用 torch 全局种子控制采集函数随机性（fail-open）。
+        # v18-6: 保存/恢复 RNG 状态，避免并发请求间的种子污染。
+        # 同时播种 numpy（BayBE 内部可能用 numpy 随机）。
+        _torch_rng_state = None
+        _np_rng_state = None
         if seed is not None:
             try:
                 import torch
 
+                _torch_rng_state = torch.get_rng_state()
                 torch.manual_seed(seed)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                import numpy as np
+
+                _np_rng_state = np.random.get_state()
+                np.random.seed(seed % (2**32))
             except Exception:  # noqa: BLE001
                 pass
 
@@ -353,8 +365,8 @@ class BaybeCampaignEngine:
         else:
             campaign, factor_list = self._new_campaign(req, objectives, wb_factors)
 
-        # P0-5: GP 只吃 lab 真实测量；虚拟记录（baybe_opt/predictor_virtual）
-        # 不进 GP，只计数披露。无 lab 数据时走冷启动分支。
+        # P0-5: GP 只吃 lab 真实测量；外部虚拟记录（predictor_virtual）不进 GP。
+        # v18-1: baybe_opt 是内部循环反馈，必须进 GP（否则多轮 GP 冻结）。
         _src_counts: dict[str, int] = {}
         for _r in measurements or []:
             _s = getattr(_r, "source", "lab") or "lab"
@@ -362,8 +374,12 @@ class BaybeCampaignEngine:
         # v13-3: workbench 真实测量也计入 lab 点数。
         _lab_n = sum(n for s, n in _src_counts.items() if s in REAL_SOURCES)
         # v14-3: 虚拟口径用 VIRTUAL_SOURCES（workbench 不再被双计入）；
+        # v18-1: baybe_opt 已进 GP，不再计入"被排除"。
         # 未知 source 单独计数披露，防未来新增类型静默归类错误。
-        _virtual_n = sum(n for s, n in _src_counts.items() if s in VIRTUAL_SOURCES)
+        _virtual_n = sum(
+            n for s, n in _src_counts.items()
+            if s in VIRTUAL_SOURCES and s != "baybe_opt"
+        )
         _unknown_n = sum(
             n for s, n in _src_counts.items()
             if s not in REAL_SOURCES and s not in VIRTUAL_SOURCES
@@ -375,7 +391,13 @@ class BaybeCampaignEngine:
                 _virtual_n, _src_counts, _lab_n,
                 f"; {_unknown_n} unknown source(s) ignored" if _unknown_n else "",
             )
-        df_meas = records_to_dataframe(measurements, req, objectives)
+        df_meas = records_to_dataframe(
+            measurements, req, objectives,
+            # v18-1: 内部循环反馈 —— 本轮产生的 baybe_opt 记录必须进 GP，
+            # 否则多轮优化的 GP 后验冻结（"迭代"名存实亡）。
+            # 与外部传入的虚拟记录区分：baybe_opt 是内部反馈源。
+            include_sources=REAL_SOURCES | {"baybe_opt"},
+        )
         if not df_meas.empty and metrics:
             df_meas = align_dataframe_measurement_columns(df_meas, metrics, log=log)
 
@@ -592,6 +614,22 @@ class BaybeCampaignEngine:
                 return alt_plan.runs
             except Exception:  # noqa: BLE001 - fail-open
                 return []
+
+        # v18-6: 恢复 RNG 状态，避免污染调用方。
+        if _torch_rng_state is not None:
+            try:
+                import torch
+
+                torch.set_rng_state(_torch_rng_state)
+            except Exception:  # noqa: BLE001
+                pass
+        if _np_rng_state is not None:
+            try:
+                import numpy as np
+
+                np.random.set_state(_np_rng_state)
+            except Exception:  # noqa: BLE001
+                pass
 
         return enrich_baybe_result(
             result, req, all_records,

@@ -349,9 +349,13 @@ def find_substitutes(
 
     candidates: list[dict] = []
     scored_forms: list[tuple[dict, object]] = []  # (candidate row, its scored Formulation)
+    # v18-11: 提取 domain 传给 structural_score，否则 _DOMAIN_WEIGHT_OVERRIDES 永不生效。
+    _domain = None
+    if req is not None:
+        _domain = getattr(req.domain, "value", None) or str(req.domain)
     for name in pool:
         spec = dict(knowledge.RAW_MATERIALS.get(name) or {})
-        score, breakdown = structural_score(original_spec, spec)
+        score, breakdown = structural_score(original_spec, spec, domain=_domain)
         swapped = genome.with_material(slot_index, name)
         try:
             form = reconstruct.formulation_from_genome(target, swapped, strict=False)

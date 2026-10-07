@@ -1963,6 +1963,9 @@ def answer_question(
             answer = f"根据已加载资料：{quoted}[^1]"
         else:
             answer = "暂无相关资料，请先检索或上传文献。"
+    # v18-9: 过滤空 snippet，避免 _build_context 的 [^n] 断号
+    #（空条目 LLM 没见过但 citations 里有，导致引用错位）。
+    relevant = [e for e in relevant if (e.snippet or "").strip()]
     return answer, relevant
 
 
