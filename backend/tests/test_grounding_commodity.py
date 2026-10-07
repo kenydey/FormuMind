@@ -169,8 +169,18 @@ def test_substring_coincidences_do_not_ground(name, snippet):
 
 def test_existing_refs_are_kept_when_the_evidence_also_names_the_component():
     comp = _one(
+        C(name="Benzotriazole", component_type="inhibitor", weight_pct=1.0, evidence_refs=["US1"]),
+        "Benzotriazole inhibits copper corrosion.",
+    )
+    assert comp.evidence_refs == ["US1"] and comp.grounding_confidence == "high"
+
+
+def test_v16_prefilled_hallucinated_ref_rejected_in_pipeline():
+    """v16: 预填的幻觉 ID 被剔除，回退到真实证据匹配（v15-4 新语义）。"""
+    comp = _one(
         C(name="Benzotriazole", component_type="inhibitor", weight_pct=1.0, evidence_refs=["LLM-picked"]),
         "Benzotriazole inhibits copper corrosion.",
     )
-    assert comp.evidence_refs == ["LLM-picked"] and comp.grounding_confidence == "high"
+    assert "LLM-picked" not in comp.evidence_refs
+    assert comp.evidence_refs == ["US1"]
 
