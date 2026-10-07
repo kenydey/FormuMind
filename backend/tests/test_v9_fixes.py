@@ -284,7 +284,7 @@ def test_prepare_chunk_rows_gate_before_embed_dedupe(monkeypatch):
         events.append(("embed", len(texts)))
         return [[0.1] * 384 for _ in texts]
 
-    def fake_dedupe(rows, source_id, session=None):
+    def fake_dedupe(rows, source_id, session=None, **kwargs):
         events.append(("dedupe", len(rows)))
         return rows
 
@@ -294,6 +294,10 @@ def test_prepare_chunk_rows_gate_before_embed_dedupe(monkeypatch):
 
     monkeypatch.setattr(kb_index, "_embed_texts", fake_embed)
     monkeypatch.setattr(dedup_mod, "dedupe_chunk_rows", fake_dedupe)
+    # v16 P3-17: L1 前移 —— mock 掉 l1_dedupe_chunk_rows（直通）
+    monkeypatch.setattr(
+        dedup_mod, "l1_dedupe_chunk_rows", lambda rows, sid, sess=None: rows
+    )
 
     text = " ".join(f"段落{i} " + "环氧树脂防腐涂料配方研究内容填充 " * 10 for i in range(4))
     rows = prepare_chunk_rows_gate_helper(text, gate_fn)

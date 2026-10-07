@@ -518,19 +518,27 @@ def _parse_plain(content: bytes) -> str | None:
         return sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t") / len(text)
 
     def _utf16_tiebreak(b: bytes, new_enc: str, cur_enc: str | None) -> bool:
-        """v16 P3-2: LE/BE 可打印率平局时，用 CJK 高字节位置裁决。
+        """v16 P3-2: LE/BE 可打印率平局时裁决。
 
-        UTF-16-LE 的 CJK 文本奇数位字节集中在 0x4E-0x9F；
-        BE 则偶数位集中。返回 True 表示 new_enc 更可信。
+        策略：
+        1. NUL 位置优先：LE 的 NUL 在奇数位，BE 的 NUL 在偶数位。
+           这对 ASCII 最可靠（CJK 的高字节也可能为 0x00，但 NUL 模式更稳定）。
+        2. CJK 高字节 (0x4E-0x9F) 集中位置为次要信号。
+        仅当信号明确时才推翻 LE 优先；否则保持 LE（Windows 现实）。
         """
         if len(b) < 4 or len(b) % 2:
             return False
-        odd_hit = sum(1 for x in b[1::2] if 0x4E <= x <= 0x9F) / max(1, len(b[1::2]))
-        even_hit = sum(1 for x in b[0::2] if 0x4E <= x <= 0x9F) / max(1, len(b[0::2]))
-        if "le" in new_enc and "be" in (cur_enc or ""):
-            return odd_hit > even_hit
-        if "be" in new_enc and "le" in (cur_enc or ""):
-            return even_hit > odd_hit
+        odd = b[1::2]
+        even = b[0::2]
+        odd_nul = sum(1 for x in odd if x == 0) / max(1, len(odd))
+        even_nul = sum(1 for x in even if x == 0) / max(1, len(even))
+        # NUL 模式明确：奇数位多 NUL → LE；偶数位多 NUL → BE
+        if odd_nul >= 0.5 and odd_nul > even_nul + 0.2:
+            # 明确是 LE
+            return "le" in new_enc and "be" in (cur_enc or "")
+        if even_nul >= 0.5 and even_nul > odd_nul + 0.2:
+            # 明确是 BE
+            return "be" in new_enc and "le" in (cur_enc or "")
         return False
 
     # 1. BOM sniffing: an explicit BOM is authoritative. The "utf-16"/"utf-32"
