@@ -211,7 +211,8 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type
     _is_numeric = bool(
         _re.search(r"\d", body)
         and _re.search(
-            r"%|℃|°C|h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg|g\b|ml|L\b|s\b|min|°|phr|viscosity|含量|盐雾|硬度|附着力",
+            # v19-fix: min 加前向约束，排除 "admin" 等词内匹配。
+            r"%|℃|°C|h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg|g\b|ml|L\b|s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
             body,
         )
     )

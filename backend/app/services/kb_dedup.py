@@ -179,8 +179,7 @@ def _l2_near(
 ) -> list[dict]:
     """Drop/audit rows whose embedding is >= threshold cosine to a live chunk.
 
-    v16 P2-6: 无向量行打标 needs_l2_review —— backfill 补向量后应重跑 L2，
-    否则近重复行永久漏检。
+    v18-18: 无向量行直接跳过 L2（打标机制已移除）。
     """
     enforce = bool(getattr(settings, "kb_near_dedup_enabled", False))
     audit = bool(getattr(settings, "kb_near_dedup_audit", True))

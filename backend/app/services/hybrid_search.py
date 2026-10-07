@@ -362,7 +362,13 @@ def hybrid_search_scored(
                 if extras:
                     chunks = chunks + extras
 
-        tokenized = [(c, t) for c, t in zip(chunks, (_tokenize(c.text) for c in chunks)) if t]
+        # v19-fix: 空 token 但有向量的 chunk 不丢弃（BM25 得 0，但 cosine 可得分）。
+        # 否则向量再相关也搜不到 —— 静默召回损失。
+        tokenized = [
+            (c, t)
+            for c, t in zip(chunks, (_tokenize(c.text) for c in chunks))
+            if t or getattr(c, "embedding", None)
+        ]
         if not tokenized:
             return []
         chunks = [c for c, _ in tokenized]

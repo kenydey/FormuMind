@@ -359,6 +359,8 @@ def ground_recommended_formulas(
             form_warnings.append(
                 f"常规成分未在证据/材料库中核实（已保留，请人工确认）: {', '.join(medium[:5])}"
             )
+        # v19-fix: 跟踪是否实际剔除（v18-12 过度清空修复）。
+        _dropped = False
         if strict and low:
             # A-5: drop instead of only tagging. Never renormalize weight_pct:
             # the remaining recipe is honest about what was removed.
@@ -373,6 +375,9 @@ def ground_recommended_formulas(
             warnings.append(
                 f"{rec.name}: 剔除 {len(low)} 个低可信度成分（{', '.join(low[:5])}）"
             )
+            comps = kept
+            # v19-fix: 标记实际发生了剔除（v18-12 过度清空修复）。
+            _dropped = True
             if not kept:
                 warnings.append(f"{rec.name}: 全部分成分均低可信度，整个配方已剔除")
                 continue
@@ -396,7 +401,8 @@ def ground_recommended_formulas(
                     "warnings": form_warnings,
                     # v18-12: 剔除成分后 predicted 过期（针对剔除前完整配方的预测），
                     # 置空避免下游误用。
-                    "predicted": {},
+                    # v19-fix: 只在实际剔除时清空，无剔除时保留（修复过度清空）。
+                    "predicted": {} if _dropped else rec.predicted,
                 }
             )
         )

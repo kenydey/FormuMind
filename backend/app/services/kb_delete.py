@@ -41,8 +41,8 @@ def delete_kb_source(source_id: str) -> dict[str, Any]:
 
         _old_total, _old_emb, _old_en, _old_zh = _count_source_chunks(sid)
         removed = get_chunk_store().delete_for_source(sid) or {}
-        chunks_removed = int(removed.get("total", 0))
-        if chunks_removed:
+        # v19-fix: 守卫与扣减同源（都用 _old_total），避免查询口径分裂。
+        if _old_total > 0:
             _bump_kb_coverage(
                 total=-_old_total,
                 embedded=-_old_emb,

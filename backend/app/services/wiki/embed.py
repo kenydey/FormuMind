@@ -183,34 +183,49 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
             sid,
             session,
         )
+        # v19-fix (Bug 2): replace 前查旧覆盖率，用于净增量计算。
+        _wiki_old_counts = (0, 0, 0, 0)
+        try:
+            from ..kb_index import _count_source_chunks
+
+            _wiki_old_counts = _count_source_chunks(sid)
+        except Exception:  # noqa: BLE001
+            pass
         get_chunk_store().replace_for_source_in(
             session,
             sid,
             _wiki_rows,
         )
-        # v18-4: wiki 路径补齐覆盖率 bump + FTS 同步，与 index_source 拉齐。
-        if _wiki_rows:
-            try:
-                from ..kb_index import _bump_kb_coverage, _sync_source_fts
-                from ...config import get_settings as _get_settings
-
-                _settings = _get_settings()
-                _n_emb = sum(1 for r in _wiki_rows if r.get("embedding"))
-                _bump_kb_coverage(
-                    embedded=_n_emb,
-                    total=len(_wiki_rows),
-                    embedded_en=_n_emb,  # wiki 默认为英文
-                    embedded_zh=0,
-                    bm25_fallback=len(_wiki_rows) - _n_emb,
-                )
-                _sync_source_fts(sid, _wiki_rows, _settings)
-            except Exception:  # noqa: BLE001
-                pass
+        # v19-fix: 覆盖率 bump + FTS 同步移出事务（Bug 1）。
+        # 必须在 with 块提交成功后执行，否则回滚导致计数虚增/FTS 孤儿。
 
     try:
         get_chunk_store().bump_generation()
     except Exception:  # noqa: BLE001
         pass
+
+    # v19-fix: wiki 路径补齐覆盖率 bump + FTS 同步，与 index_source 拉齐。
+    # 位置：在 DB 提交之后（v16 P2-7 原则）。
+    # v19-fix: re-embed 先扣旧值（Bug 2），否则每次编辑单调虚增。
+    if _wiki_rows:
+        try:
+            from ..kb_index import _bump_kb_coverage, _sync_source_fts
+            from ...config import get_settings as _get_settings
+
+            _settings = _get_settings()
+            _n_emb = sum(1 for r in _wiki_rows if r.get("embedding"))
+            # 净增量 = 新 - 旧（_wiki_old_counts 在 with 块内 replace 前获取）
+            _old_total, _old_emb, _old_en, _old_zh = _wiki_old_counts
+            _bump_kb_coverage(
+                embedded=_n_emb - _old_emb,
+                total=len(_wiki_rows) - _old_total,
+                embedded_en=_n_emb - _old_en,  # wiki 默认为英文
+                embedded_zh=0 - _old_zh,
+                bm25_fallback=(len(_wiki_rows) - _n_emb) - (_old_total - _old_emb),
+            )
+            _sync_source_fts(sid, _wiki_rows, _settings)
+        except Exception:  # noqa: BLE001
+            pass
 
     return {
         "ok": True,
