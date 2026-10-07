@@ -316,11 +316,14 @@ class BM25FAISSStore:
 
         # FAISS dense index — only for small batches (<200 docs)
         # to avoid OOM on CPU VPS with sentence-transformers
+        # v21-fix: 跳过批次时置 None，避免向量位置与 docs 错位归因。
         if len(evidence) <= 200:
             try:
                 self._build_faiss_index(evidence)
             except Exception:
                 pass  # FAISS is optional; BM25 alone still works
+        else:
+            self._faiss_index = None
 
         return len(self.docs)
 

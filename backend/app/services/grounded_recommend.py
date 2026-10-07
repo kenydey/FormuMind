@@ -5,7 +5,12 @@ import re
 
 from ..domain.chemistry import normalize_role
 from ..domain.knowledge import RAW_MATERIALS
-from ..domain.schemas import Evidence, RecommendedFormula, RecommendedFormulaComponent
+from ..domain.schemas import (
+    Evidence,
+    EvidenceRef,
+    RecommendedFormula,
+    RecommendedFormulaComponent,
+)
 
 _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 _CAS_RE = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
@@ -257,13 +262,14 @@ def _ground_component(
         if not refs:
             refs = _match_evidence_ids(comp.name, per_evidence_tokens, id_map)
         # v20-1: 引用可解释性 —— 记录命中原因。
+        # v21-fix: 用 EvidenceRef 对象而非 dict，避免 Pydantic 警告。
         details = [
-            {
-                "id": r,
-                "hit_type": "cas",
-                "hit_detail": f"CAS {comp.cas_no} 命中",
-                "confidence": "high",
-            }
+            EvidenceRef(
+                id=r,
+                hit_type="cas",
+                hit_detail=f"CAS {comp.cas_no} 命中",
+                confidence="high",
+            )
             for r in refs
         ]
         return comp.model_copy(
@@ -284,13 +290,14 @@ def _ground_component(
         refs = [r for r in refs if r in _vset]
         _final_refs = refs or verbatim
         # v20-1: 引用可解释性 —— 记录命中原因。
+        # v21-fix: 用 EvidenceRef 对象而非 dict。
         details = [
-            {
-                "id": r,
-                "hit_type": "verbatim",
-                "hit_detail": f"逐字命中 '{comp.name}'",
-                "confidence": "high",
-            }
+            EvidenceRef(
+                id=r,
+                hit_type="verbatim",
+                hit_detail=f"逐字命中 '{comp.name}'",
+                confidence="high",
+            )
             for r in _final_refs
         ]
         return comp.model_copy(
@@ -312,28 +319,24 @@ def _ground_component(
 
     if catalog_hit or (refs and strong_token_hit):
         conf = "high"
-    elif prefer_catalog and catalog_hit:
-        conf = "high"
     else:
         # v15: 原 `elif refs or token_hit` 与 `else` 双分支同值，合并
+        # v21: 删除不可达的 `elif prefer_catalog and catalog_hit`（catalog_hit 为真时已在上一分支）
         conf = "low"
-
-    # Soft prefer: catalog hits escalate low→high when prefer is on and evidence is weak.
-    if prefer_catalog and catalog_hit and conf != "high":
-        conf = "high"
 
     # Unverified but commodity: keep it (flagged), do not drop it.
     if conf == "low" and _is_commodity(comp):
         conf = "medium"
 
     # v20-1: 引用可解释性 —— token 命中的原因。
+    # v21-fix: 用 EvidenceRef 对象而非 dict；"语义相关"改为"关键词匹配（证据标识）"更诚实。
     details = [
-        {
-            "id": r,
-            "hit_type": "token",
-            "hit_detail": "关键词匹配" if token_hit else "语义相关",
-            "confidence": conf,
-        }
+        EvidenceRef(
+            id=r,
+            hit_type="token",
+            hit_detail="关键词匹配" if token_hit else "关键词匹配（证据标识）",
+            confidence=conf,
+        )
         for r in refs
     ]
     return comp.model_copy(

@@ -204,13 +204,13 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type
     limit = chunk_floor() if min_chars is None else int(min_chars)
     body = _without_table_markup((text or "").strip()).strip()
     # v18-5: 数字豁免 —— 含数字+单位/配比模式的 chunk（如"固体含量 65 %"、
-    # "中性盐雾 720 h"）是化学检索的核心目标，用宽松 floor（10）而非 20，
+    # "中性盐雾 720 h"）是化学检索的核心目标，用宽松 floor（8）而非 20，
     # 且跳过词比检查。否则短数字 chunk 被系统性丢弃（numeric 检索缺口根因）。
-    import re as _re
+    # v21: 删除冗余的 import re as _re（模块顶部已有 import re）。
 
     _is_numeric = bool(
-        _re.search(r"\d", body)
-        and _re.search(
+        re.search(r"\d", body)
+        and re.search(
             # v19-fix: min 加前向约束，排除 "admin" 等词内匹配。
             r"%|℃|°C|h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg|g\b|ml|L\b|s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
             body,

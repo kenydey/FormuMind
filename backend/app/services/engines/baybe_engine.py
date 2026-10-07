@@ -719,10 +719,10 @@ class BaybeCampaignEngine:
                 best_so_far = max(best_so_far, combined)
                 history.append(round(best_so_far, 3))
                 ranked.append((combined, form))
-                measured_vals = {
-                    m: form.predicted.get(m, combined if m == metric else form.predicted.get(m, 0.0))
-                    for m in objective_metric_names
-                }
+                # v21-fix: 缺 key 时写 None（下游 B-DOE-1 清洗处理），
+                # 不用 combined（[0,1] 归一化分）或 0.0 填充 —— 错误量纲毒化 GP。
+                # 与 measurements_adapter 的 "skip 而非 0.0" 原则对齐。
+                measured_vals = {m: form.predicted.get(m) for m in objective_metric_names}
                 measurements.append(
                     ExperimentRecord(
                         domain=req.domain,
@@ -774,7 +774,8 @@ class BaybeCampaignEngine:
         # U-2: 血缘打通 —— 有真实 lab 测量 seed 时不再谎报 predictor_virtual。
         from ..doe_cycle_service import lab_measurement_source
 
-        # P0-5: 披露实际进入 GP 的 lab 点数（baybe_opt 虚拟点不进 GP）。
+        # P0-5: 披露实际进入 GP 的 lab 点数。
+        # v18-1: baybe_opt 进 GP（内部反馈）；v19-3: lab_points_used 只计 REAL_SOURCES。
         # v13-3: workbench 真实测量也计入。
         # v15: 以各轮 recommend() 实际喂给 GP 的 lab 点数（取最大值）为事实源。
         _src = (

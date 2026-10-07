@@ -882,6 +882,9 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         except Exception as exc:  # noqa: BLE001 - fail-open
             logger.debug("stream query compression skipped: %s", exc)
 
+    # v21-fix: 过滤空 snippet（与 answer_question 的 v19-1 同构），
+    # 否则 prompt 的 [^n] 与返回的 relevant 错位。
+    relevant = [e for e in relevant if (e.snippet or "").strip()]
     prompt = _chat_prompt(
         question, relevant, req.domain, history=history, structure=req.structure
     )
@@ -1415,6 +1418,19 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                         except Exception as exc:  # noqa: BLE001 - fail-open
                             logger.warning("chat/stream structured fix-loop: %s", exc)
                     _degr_notices = _retrieval_degradation_notices(kb_used) or []
+                    # v21-fix: fix-loop 可能修改答案，重算 claims/audit（与同步路径对齐）。
+                    # 只在 reviewer_fix 非空且答案被修改时重算，避免重复开销。
+                    if reviewer_fix and reviewer_fix.get("repaired"):
+                        try:
+                            _claims, _audit, _verified = await asyncio.to_thread(
+                                _claims_and_audit,
+                                question,
+                                answer,
+                                citations,
+                                structured=structured,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                     yield _sse(
                         {
                             "type": "done",
