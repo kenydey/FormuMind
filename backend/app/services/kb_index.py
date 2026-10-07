@@ -86,6 +86,34 @@ def get_kb_coverage_stats() -> dict[str, int]:
         return dict(_KB_COVERAGE)
 
 
+def _count_source_chunks(source_id: str) -> tuple[int, int, int, int]:
+    """v16 P1-7: 统计某 source 的 (total, embedded, embedded_en, embedded_zh)。
+
+    用于 re-ingest 前扣减旧计数。语言从 embedding_model 名推断
+    （bge/zh → zh，其余 → en）；fail-open 返回全零。
+    """
+    try:
+        from ..db.chunk_store import get_chunk_store
+
+        store = get_chunk_store()
+        rows = store.get_by_source(source_id, limit=100000)
+        total = len(rows)
+        embedded = 0
+        en = 0
+        zh = 0
+        for r in rows:
+            if getattr(r, "embedding", None):
+                embedded += 1
+                mname = (getattr(r, "embedding_model", "") or "").lower()
+                if "bge" in mname or "zh" in mname:
+                    zh += 1
+                else:
+                    en += 1
+        return total, embedded, en, zh
+    except Exception:  # noqa: BLE001
+        return 0, 0, 0, 0
+
+
 def _bump_kb_coverage(
     *,
     embedded: int,
@@ -130,9 +158,10 @@ def _bump_kb_coverage(
 
 def reset_kb_coverage_stats() -> None:
     """Test seam: zero both the DB counters and the process-local fallback."""
+    # v16: 遍历 _KB_COVERAGE_KEYS —— v15-5 加了新分桶但 reset 漏了，硬编码必再漏。
     with _KB_COVERAGE_LOCK:
-        _KB_COVERAGE["kb_chunks_embedded"] = 0
-        _KB_COVERAGE["kb_chunks_total"] = 0
+        for key in _KB_COVERAGE_KEYS:
+            _KB_COVERAGE[key] = 0
     try:
         from sqlalchemy import text as _text
 
@@ -570,18 +599,8 @@ def prepare_chunk_rows(
     from .kb_dedup import dedupe_chunk_rows
 
     rows = dedupe_chunk_rows(rows, source_id, session)
-    # v15: 覆盖率统计后移到 dedupe 之后（消除虚高），按语言分桶
-    if rows:
-        _n_emb = sum(1 for r in rows if r.get("embedding"))
-        _n_en = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "en")
-        _n_zh = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "zh")
-        _bump_kb_coverage(
-            embedded=_n_emb,
-            total=len(rows),
-            embedded_en=_n_en,
-            embedded_zh=_n_zh,
-            bm25_fallback=len(rows) - _n_emb,
-        )
+    # v16 P2-7: 覆盖率 bump 不在此处 —— 移到 index_source 的 DB 写成功之后，
+    # 否则写失败会导致计数虚增。dedupe 后的 rows 由调用方负责 bump。
     return rows if rows else None
 
 
@@ -628,9 +647,24 @@ def index_source(
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
             return 0
+        # v16 P1-7: re-ingest 扣减旧计数（调用方在 DB 写成功后 bump）。
+        _old_counts = _count_source_chunks(source_id)
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)
+        # v16 P2-7: DB 写成功后再 bump 覆盖率（写失败不虚增）。
+        if rows:
+            _old_total, _old_emb, _old_en, _old_zh = _old_counts
+            _n_emb = sum(1 for r in rows if r.get("embedding"))
+            _n_en = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "en")
+            _n_zh = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "zh")
+            _bump_kb_coverage(
+                embedded=_n_emb - _old_emb,
+                total=len(rows) - _old_total,
+                embedded_en=_n_en - _old_en,
+                embedded_zh=_n_zh - _old_zh,
+                bm25_fallback=(len(rows) - _n_emb) - (_old_total - _old_emb),
+            )
         # ``kg_link_on_ingest`` is the legacy master switch kept as a compat
         # alias: False still disables linking even if the split flags are on.
         if n and settings.kg_enabled and settings.kg_link_on_ingest and (

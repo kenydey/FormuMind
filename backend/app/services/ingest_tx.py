@@ -160,6 +160,21 @@ def ingest_document_tx(
             session.commit()
             chunk_store.bump_generation()
 
+            # v16 P2-7: DB 提交成功后再 bump 覆盖率（与 index_source 同口径）。
+            if rows:
+                from .kb_index import _bump_kb_coverage
+
+                _n_emb = sum(1 for r in rows if r.get("embedding"))
+                _n_en = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "en")
+                _n_zh = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "zh")
+                _bump_kb_coverage(
+                    embedded=_n_emb,
+                    total=len(rows),
+                    embedded_en=_n_en,
+                    embedded_zh=_n_zh,
+                    bm25_fallback=len(rows) - _n_emb,
+                )
+
             return IngestTxResult(
                 source_id=source_id, chunk_count=chunk_count, already_existed=False
             )

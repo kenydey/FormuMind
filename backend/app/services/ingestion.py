@@ -199,8 +199,13 @@ def _ingest_parsed_text(
                     else "index_source produced 0 chunks"
                 )
                 try:
+                    # v16: 同步 extraction_status —— 否则 API 显示 "ok"、
+                    # 重试逻辑（source_store.py:256）捕捉不到。
                     store.update_fields(
-                        source_id, ingest_status="failed", ingest_error=reason
+                        source_id,
+                        ingest_status="failed",
+                        ingest_error=reason,
+                        extraction_status="failed",
                     )
                 except Exception:  # noqa: BLE001
                     logger.warning("mark zero-chunk source failed (fail-open)")

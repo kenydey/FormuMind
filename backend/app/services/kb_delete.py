@@ -34,7 +34,17 @@ def delete_kb_source(source_id: str) -> dict[str, Any]:
     wiki_pages_touched = 0
 
     try:
-        chunks_removed = int(get_chunk_store().delete_for_source(sid) or 0)
+        # v16 P1-7: 删除扣减覆盖率计数器（否则单调虚增）。
+        removed = get_chunk_store().delete_for_source(sid) or {}
+        chunks_removed = int(removed.get("total", 0))
+        embedded_removed = int(removed.get("embedded", 0))
+        if chunks_removed:
+            from .kb_index import _bump_kb_coverage
+
+            _bump_kb_coverage(
+                embedded=-embedded_removed,
+                total=-chunks_removed,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("kb delete: chunks failed for %s: %s", sid, exc)
 

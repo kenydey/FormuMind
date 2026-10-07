@@ -424,15 +424,28 @@ class ChunkStore:
                 or 0
             )
 
-    def delete_for_source(self, source_id: str) -> int:
+    def delete_for_source(self, source_id: str) -> dict[str, int]:
+        """Delete all chunks for a source.
+
+        v16: 返回 {"total": 删除总数, "embedded": 其中有向量的}，
+        供覆盖率计数器扣减（P1-7）。
+        """
         with commit_session(self._session_factory) as session:
+            embedded = (
+                session.query(DocumentChunk)
+                .filter(
+                    DocumentChunk.source_id == source_id,
+                    DocumentChunk.embedding.isnot(None),
+                )
+                .count()
+            )
             n = (
                 session.query(DocumentChunk)
                 .filter(DocumentChunk.source_id == source_id)
                 .delete()
             )
         self.generation += 1
-        return int(n)
+        return {"total": int(n), "embedded": int(embedded)}
 
 
 _store: ChunkStore | None = None
