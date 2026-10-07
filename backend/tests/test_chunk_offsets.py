@@ -286,3 +286,36 @@ def test_structured_path_exact_offsets():
             f"结构化 offset 错位: {ch.text[:25]!r} "
             f"[{ch.offset_start}:{ch.offset_end}]"
         )
+
+
+def _assert_verbatim(md: str):
+    """所有 chunk 满足 md[os:oe] == text（verbatim 承诺）。"""
+    from app.services.chunking import chunk_markdown
+
+    chunks = chunk_markdown(md)
+    assert chunks, "应产生 chunks"
+    for ch in chunks:
+        assert md[ch.offset_start:ch.offset_end] == ch.text, (
+            f"verbatim 破裂: {ch.text[:30]!r} [{ch.offset_start}:{ch.offset_end}]"
+        )
+    return chunks
+
+
+def test_verbatim_caption_multi_blank_lines():
+    """v14-5 E: caption 与表格间多空行时拆开发射，仍 verbatim。"""
+    _assert_verbatim("# T\n\n表1 性能\n\n\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+
+
+def test_verbatim_marker_between_caption_and_table():
+    """v14-5 I: marker 隔断 caption 与表格时拆开发射，不含 marker 文本。"""
+    md = "# T\n\n表1 性能\n\n<!-- page:2 -->\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+    chunks = _assert_verbatim(md)
+    for ch in chunks:
+        assert "page:2" not in ch.text, "chunk 不得含 marker 文本"
+
+
+def test_verbatim_current_multi_blank_lines():
+    """v14-5 M: current 累积段多空行时退化逐 block 发射。"""
+    chunks = _assert_verbatim("# T\n\n段落一。\n\n\n\n段落二。\n\n段落三。\n")
+    # 降级后应为 3 个独立 block（而非 1 个归一化拼接）
+    assert len(chunks) == 3

@@ -470,6 +470,37 @@ def chunk_markdown(
             return -1, cursor
         return pos, pos + len(needle)
 
+    def _emit_verbatim_or_split(
+        t: str, os_: int, blocks: list[str], body_start: int,
+        seg_base: int, md: str, body: str, path: str, page_no,
+        para_idx: int, blk_type: str,
+    ) -> list["Chunk"]:
+        """v14-5: 优先整体发射（verbatim）；md[os:oe]!=t 时退化逐 block 发射。
+
+        单个 strip block 经 body.find 必命中，verbatim 天然成立。
+        """
+        oe_ = os_ + len(t)
+        if md[os_:oe_] == t:
+            return [Chunk(
+                t, path, page_no, paragraph_idx=para_idx,
+                offset_start=os_, offset_end=oe_, block_type=blk_type,
+            )]
+        # 降级：逐 block 发射
+        out: list["Chunk"] = []
+        cursor = body_start
+        for blk in blocks:
+            bpos, cursor = _locate_block(body, blk, cursor)
+            if bpos == -1:
+                # 极端防御：找不到则跳过该 block（不应发生）
+                continue
+            bos_ = seg_base + bpos
+            out.append(Chunk(
+                blk, path, page_no, paragraph_idx=para_idx,
+                offset_start=bos_, offset_end=bos_ + len(blk),
+                block_type=_classify_block_type(blk),
+            ))
+        return out
+
     for path, body in sections:
         # section body 在 md 中的基址
         seg_base = md.find(body, md_cursor)
@@ -479,6 +510,8 @@ def chunk_markdown(
         body_cursor = 0
         current_start_body = 0  # `current` 首 block 在 body 中的位置
         current = ""
+        # v14-5: 保留块边界，用于 verbatim 降级（逐 block 发射）
+        current_blocks: list[str] = []
         current_page = page
         current_para = para_counter
         for block in _split_blocks(body):
@@ -501,6 +534,9 @@ def chunk_markdown(
                     head, _, tail = current.rpartition("\n\n")
                     if _is_table_caption(tail):
                         caption, current = tail.strip(), head
+                        # v14-5: caption 是最后一个 block，current_blocks 去尾
+                        caption_block = current_blocks[-1] if current_blocks else ""
+                        current_blocks = current_blocks[:-1]
                         # caption 在 body 中的位置（current 起始处搜索）
                         caption_body_pos, _ = _locate_block(
                             body, caption, current_start_body
@@ -509,36 +545,64 @@ def chunk_markdown(
                     t = current.strip()
                     # v13-4: current 起始于 current_start_body（首 block 位置，
                     # block 已 strip 故无前导空白）
+                    # v14-5: verbatim 不成立时退化逐 block 发射
                     os_ = seg_base + current_start_body
-                    if md[os_:os_ + len(t)] != t:
-                        # 防御：分隔符与原文不一致时回退到搜索
-                        fpos = body.find(t, current_start_body)
-                        os_ = seg_base + fpos if fpos != -1 else os_
-                    chunks.append(Chunk(
-                        t, path, current_page,
-                        paragraph_idx=current_para,
-                        offset_start=os_,
-                        offset_end=os_ + len(t),
-                        block_type=pending_block or "text",
+                    chunks.extend(_emit_verbatim_or_split(
+                        t, os_, current_blocks, current_start_body,
+                        seg_base, md, body, path, current_page,
+                        current_para, pending_block or "text",
                     ))
                     current = ""
+                    current_blocks = []
                     pending_block = None
                 atom = f"{caption}\n\n{block}" if caption else block
                 # v13-4: atom 定位——优先找完整 atom，否则用 caption 位置，
                 # 再否则用 block 位置（bpos）
+                # v14-5: verbatim 不成立时（多空行/marker 隔断）拆开发射
                 atom_body_pos, _ = _locate_block(body, atom, current_start_body)
                 if atom_body_pos == -1 and caption_body_pos != -1:
                     atom_body_pos = caption_body_pos
                 if atom_body_pos == -1:
                     atom_body_pos = bpos if bpos != -1 else body_cursor
                 aos_ = seg_base + atom_body_pos
-                chunks.append(Chunk(
-                    atom, path, page,
-                    paragraph_idx=para_counter,
-                    offset_start=aos_,
-                    offset_end=aos_ + len(atom),
-                    block_type=pending_block or _classify_block_type(block),
-                ))
+                aoe_ = aos_ + len(atom)
+                if md[aos_:aoe_] == atom:
+                    chunks.append(Chunk(
+                        atom, path, page,
+                        paragraph_idx=para_counter,
+                        offset_start=aos_,
+                        offset_end=aoe_,
+                        block_type=pending_block or _classify_block_type(block),
+                    ))
+                elif caption and caption_body_pos != -1:
+                    # v14-5: caption 与表格被多空行/marker 隔断，拆开发射
+                    cos_ = seg_base + caption_body_pos
+                    chunks.append(Chunk(
+                        caption, path, page,
+                        paragraph_idx=para_counter,
+                        offset_start=cos_,
+                        offset_end=cos_ + len(caption),
+                        block_type="text",
+                    ))
+                    # block 单独成 atom（用 bpos 真实位置）
+                    bbs_ = seg_base + (bpos if bpos != -1 else body_cursor)
+                    chunks.append(Chunk(
+                        block, path, page,
+                        paragraph_idx=para_counter,
+                        offset_start=bbs_,
+                        offset_end=bbs_ + len(block),
+                        block_type=pending_block or _classify_block_type(block),
+                    ))
+                else:
+                    # v14-5: block 单独发射（verbatim 必成立）
+                    bbs_ = seg_base + (bpos if bpos != -1 else body_cursor)
+                    chunks.append(Chunk(
+                        block, path, page,
+                        paragraph_idx=para_counter,
+                        offset_start=bbs_,
+                        offset_end=bbs_ + len(block),
+                        block_type=pending_block or _classify_block_type(block),
+                    ))
                 pending_block = None
                 para_counter += 1
                 current_page = page
@@ -552,21 +616,21 @@ def chunk_markdown(
                     # v13-4: 新累积段的起始位置（首 block 处）
                     current_start_body = bpos if bpos != -1 else body_cursor
                 current = f"{current}\n\n{block}" if current else block
+                # v14-5: 同步块边界
+                current_blocks.append(block)
                 para_counter += 1
                 continue
             if current.strip():
                 t = current.strip()
                 os_ = seg_base + current_start_body
-                if md[os_:os_ + len(t)] != t:
-                    fpos = body.find(t, current_start_body)
-                    os_ = seg_base + fpos if fpos != -1 else os_
-                chunks.append(Chunk(
-                    t, path, current_page,
-                    paragraph_idx=current_para,
-                    offset_start=os_,
-                    offset_end=os_ + len(t),
-                    block_type=pending_block or "text",
+                # v14-5: verbatim 不成立时退化逐 block 发射
+                chunks.extend(_emit_verbatim_or_split(
+                    t, os_, current_blocks, current_start_body,
+                    seg_base, md, body, path, current_page,
+                    current_para, pending_block or "text",
                 ))
+                current = ""
+                current_blocks = []
                 pending_block = None
             current_page = page
             current_para = para_counter
@@ -586,24 +650,23 @@ def chunk_markdown(
                 pending_block = None
                 para_counter += 1
                 current = ""
+                current_blocks = []
                 continue
             else:
                 # v13-4: block 太长放不下、current 已刷出，block 独立成段
                 current_start_body = bpos if bpos != -1 else body_cursor
                 current = block
+                # v14-5: 同步块边界
+                current_blocks = [block]
             para_counter += 1
         if current.strip():
             t = current.strip()
             os_ = seg_base + current_start_body
-            if md[os_:os_ + len(t)] != t:
-                fpos = body.find(t, current_start_body)
-                os_ = seg_base + fpos if fpos != -1 else os_
-            chunks.append(Chunk(
-                t, path, current_page,
-                paragraph_idx=current_para,
-                offset_start=os_,
-                offset_end=os_ + len(t),
-                block_type=pending_block or "text",
+            # v14-5: verbatim 不成立时退化逐 block 发射
+            chunks.extend(_emit_verbatim_or_split(
+                t, os_, current_blocks, current_start_body,
+                seg_base, md, body, path, current_page,
+                current_para, pending_block or "text",
             ))
             pending_block = None
     return chunks
