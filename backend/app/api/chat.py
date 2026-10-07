@@ -1439,6 +1439,23 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             _sanitize_evidence(c)
                             for c in plan["relevant"]
                         ]
+                        # v16: chem-tools 路径接入 reviewer+fix-loop+DOI（与主 token 流对齐）。
+                        answer, doi_results, reviewer, reviewer_fix, citation_expand, cites = (
+                            await asyncio.to_thread(
+                                _finalize_evidence_fields,
+                                question,
+                                answer,
+                                cites,
+                                settings=settings,
+                                mode=req.mode,
+                                selected_skills=list(req.selected_skills or []),
+                                project_id=req.project_id,
+                                sources=list(plan["sources"]),
+                                domain=req.domain,
+                                history=list(req.history or []),
+                                structure=req.structure,
+                            )
+                        )
                         claims, sources_audit = None, None
                         try:
                             claims, sources_audit, _verified = await asyncio.to_thread(
@@ -1475,6 +1492,12 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             "sourced_claims": claims,
                             "sources_audit": sources_audit,
                             "tools_used": tools_used or result_holder.get("tools_used") or [],
+                            # v16: chem-tools 路径也带 reviewer/doi 字段（与主 token 流对齐）。
+                            "mode": req.mode,
+                            "doi_results": doi_results,
+                            "citation_expand": citation_expand,
+                            "evidence_reviewer": reviewer,
+                            "reviewer_fix": reviewer_fix,
                             # B-1: BM25-only 退化提示位 + P2 门 notices。
                             "notices": (
                                 list(_retrieval_degradation_notices(kb_used) or [])
