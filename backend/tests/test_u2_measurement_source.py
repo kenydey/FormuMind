@@ -124,7 +124,7 @@ def test_virtual_count_excludes_workbench():
 
 
 def test_v15_dedupe_measurement_frame():
-    """v15: 双通道重复行按因子指纹去重，measurements 通道优先保留。"""
+    """v15: 双通道重复行按因子+指标指纹去重，measurements 通道优先保留。"""
     import logging
 
     import pandas as pd
@@ -135,13 +135,32 @@ def test_v15_dedupe_measurement_frame():
     df = pd.DataFrame(
         [
             {"x": 1.0, "y": 2.0, "salt_spray_hours": 600.0, "src": "meas"},
-            {"x": 1.0, "y": 2.0, "salt_spray_hours": 610.0, "src": "wb"},  # 重复
+            {"x": 1.0, "y": 2.0, "salt_spray_hours": 600.0, "src": "wb"},  # 真重复
             {"x": 3.0, "y": 4.0, "salt_spray_hours": 620.0, "src": "wb"},
         ]
     )
-    out = _dedupe_measurement_frame(df, ["x", "y"], log)
+    out = _dedupe_measurement_frame(df, ["x", "y"], log, metric_names=["salt_spray_hours"])
     assert len(out) == 2, "重复行应被去重"
     assert list(out["src"]) == ["meas", "wb"], "measurements 通道优先保留"
+
+
+def test_v16_dedupe_keeps_repeat_experiments():
+    """v16: 同一因子组合的多次独立测量（纯误差估计）不被误杀。"""
+    import logging
+
+    import pandas as pd
+
+    from app.services.engines.baybe_engine import _dedupe_measurement_frame
+
+    log = logging.getLogger("test")
+    df = pd.DataFrame(
+        [
+            {"x": 1.0, "y": 2.0, "salt_spray_hours": 600.0},
+            {"x": 1.0, "y": 2.0, "salt_spray_hours": 620.0},  # 重复实验
+        ]
+    )
+    out = _dedupe_measurement_frame(df, ["x", "y"], log, metric_names=["salt_spray_hours"])
+    assert len(out) == 2, "真实重复实验必须保留"
 
 
 def test_v15_dedupe_empty_or_no_factor_cols():

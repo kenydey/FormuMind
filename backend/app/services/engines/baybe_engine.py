@@ -169,14 +169,20 @@ def _prepare_measurement_dataframe(df, metrics: list[str], expected_params: list
     return cleaned
 
 
-def _dedupe_measurement_frame(df, factor_names: list[str], log):
-    """v15: 按因子指纹去重（df_meas 在前，measurements 通道优先保留）。
+def _dedupe_measurement_frame(df, factor_names: list[str], log, metric_names: list[str] | None = None):
+    """v15: 按因子+指标指纹去重（df_meas 在前，measurements 通道优先保留）。
 
     消除 measurements 形参通道与 workbench_campaign_id 通道的重复行。
+    v16: 指纹纳入指标列 —— 同一因子组合的多次独立测量（估计纯误差的常规
+    DOE 手段）测量值不同，不再被误杀；只有因子+指标全相同的真重复行才去重。
     """
     if df is None or getattr(df, "empty", True):
         return df
     fp_cols = [c for c in factor_names if c in df.columns]
+    # v16: 指标列纳入指纹，保护真实重复实验
+    for m in metric_names or []:
+        if m in df.columns and m not in fp_cols:
+            fp_cols.append(m)
     if not fp_cols:
         return df
     before = len(df)
@@ -372,10 +378,11 @@ class BaybeCampaignEngine:
         )
         # v15: 双通道归一去重 —— df_meas（measurements 形参）与 df_wb
         # （workbench_campaign_id）可能含同一批行（ingest_workbench_rows 已入库
-        # 又经 measurements 传回）。按因子指纹去重，measurements 优先保留，
+        # 又经 measurements 传回）。按因子+指标指纹去重，measurements 优先保留，
         # 否则 GP 训练集重复行致后验过度自信。
         df_meas_clean = _dedupe_measurement_frame(
-            df_meas_clean, [f.name for f in factor_list], log
+            df_meas_clean, [f.name for f in factor_list], log,
+            metric_names=metrics,
         )
         if not df_meas_clean.empty:
             campaign.add_measurements(df_meas_clean)
