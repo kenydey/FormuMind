@@ -52,6 +52,12 @@ def test_run_optimization_labels_virtual_source(monkeypatch):
         "app.services.engines.doe_registry.baybe_available",
         lambda: False,
     )
+    # v17 CI fix: registry 可能在 CI 上有残留 lab 记录，导致 measurement_source='lab'。
+    # 显式 mock 为空，确保 virtual-only。
+    monkeypatch.setattr(
+        "app.services.training.registry.records_for",
+        lambda *a, **k: [],
+    )
     req = Requirement(domain=ProductDomain.anticorrosion_coating)
     out = workflow.run_optimization(req, iterations=2, engine="legacy")
     assert out.measurement_source == "predictor_virtual"

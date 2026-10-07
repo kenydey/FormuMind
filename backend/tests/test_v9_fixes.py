@@ -292,7 +292,8 @@ def test_prepare_chunk_rows_gate_before_embed_dedupe(monkeypatch):
         events.append(("gate", len(rows)))
         return rows[:1], "test"  # 只留 1 个
 
-    monkeypatch.setattr(kb_index, "_embed_texts", fake_embed)
+    # v17 CI fix: 用字符串路径 mock，确保在 CI 上也生效。
+    monkeypatch.setattr("app.services.kb_index._embed_texts", fake_embed)
     monkeypatch.setattr(dedup_mod, "dedupe_chunk_rows", fake_dedupe)
     # v16 P3-17: L1 前移 —— mock 掉 l1_dedupe_chunk_rows（直通）
     monkeypatch.setattr(
