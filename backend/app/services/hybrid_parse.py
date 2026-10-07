@@ -304,6 +304,13 @@ def _escalate_pages_batch(
     upgraded: dict[int, str] = {}
     for page_no, document in zip(order, documents):
         if document is None or not document.blocks:
+            # v21-fix: 批量路径加 note，与串行路径对齐（否则静默）。
+            try:
+                from .parse_notices import note
+
+                note(f"MinerU 批量解析第 {page_no} 页返回空结果，已回退本地文本层")
+            except Exception:  # noqa: BLE001
+                pass
             continue
         rendered = _render_blocks(document.blocks, page_label=f"p.{page_no}")
         if rendered:

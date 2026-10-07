@@ -630,7 +630,8 @@ def _parse_plain(content: bytes) -> str | None:
         if text and _printable_ratio(text) >= 0.95:
             return text
     # 4. Fallbacks. latin-1 never fails, so it stays last.
-    for enc in ("gbk", "latin-1"):
+    # v21-fix: gbk → gb18030（超集，能解更多生僻字）。
+    for enc in ("gb18030", "latin-1"):
         try:
             return content.decode(enc)
         except Exception:

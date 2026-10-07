@@ -471,7 +471,7 @@ class BaybeCampaignEngine:
 
         if campaign_state is None and df_meas_clean.empty:
             # v13-5: 透传 requirement，冷启动 seed 也过 KG 化学门。
-            # v15: 透传 seed，冷启动 LHS 可复现（None 时走 OS 熵，保持旧行为）。
+            # v15: 透传 seed，冷启动 LHS 可复现（None 时用确定性默认 0，与 DOE 链一致）。
             seed_plan = build_doe_plan(
                 factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8),
                 requirement=req, seed=seed,

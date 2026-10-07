@@ -76,7 +76,7 @@ def generate_doe(
         ),
     ),
 ) -> DOEPlan:
-    if design not in ALL_DESIGNS and design not in NATIVE_DESIGNS:
+    if design not in ALL_DESIGNS:
         raise HTTPException(status_code=400, detail=f"Unknown design {design!r}")
     try:
         plan = workflow.build_doe(

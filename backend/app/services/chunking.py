@@ -253,27 +253,30 @@ def _split_blocks(body: str) -> list[str]:
             blocks.append(block)
         current.clear()
 
-    # v19-2: math 块行数上限，未闭合时强制闭合，避免吞整篇。
-    _math_lines = 0
-    _MATH_MAX_LINES = 50
+    # v19-2: 块级行数上限，未闭合时强制闭合，避免吞整篇。
+    # v21-fix: 推广到 fence/html_table（与 math 同类问题）。
+    _BLOCK_MAX_LINES = 50
+    _block_lines = 0
 
     for line in lines:
         stripped = line.strip()
         if mode == "fence":
             current.append(line)
-            if stripped.startswith("```"):
+            _block_lines += 1
+            if stripped.startswith("```") or _block_lines >= _BLOCK_MAX_LINES:
                 flush()
                 mode = "text"
+                _block_lines = 0
             continue
         if mode == "math":
             current.append(line)
-            _math_lines += 1
+            _block_lines += 1
             # v19-2: closer 改行首匹配（与 opener 对称），避免行内 $$5$$ 提前闭合。
             # 未闭合超过上限时强制闭合，避免吞整篇。
-            if stripped.startswith(math_closer) or _math_lines >= _MATH_MAX_LINES:
+            if stripped.startswith(math_closer) or _block_lines >= _BLOCK_MAX_LINES:
                 flush()
                 mode = "text"
-                _math_lines = 0
+                _block_lines = 0
             continue
         if stripped.startswith("```"):
             flush()
@@ -300,7 +303,7 @@ def _split_blocks(body: str) -> list[str]:
             flush()
             mode = "math"
             math_closer = closer
-            _math_lines = 0
+            _block_lines = 0
             current.append(line)
             continue
         is_table_row = stripped.startswith("|") and stripped.count("|") >= 2
@@ -316,13 +319,16 @@ def _split_blocks(body: str) -> list[str]:
             mode = "text"
         if mode == "html_table":
             current.append(line)
-            if _is_html_table_end:
+            _block_lines += 1
+            if _is_html_table_end or _block_lines >= _BLOCK_MAX_LINES:
                 flush()
                 mode = "text"
+                _block_lines = 0
             continue
         if _is_html_table_start:
             flush()
             mode = "html_table"
+            _block_lines = 0
             current.append(line)
             # 单行完整表格直接结束
             if _is_html_table_end:

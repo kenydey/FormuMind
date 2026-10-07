@@ -41,13 +41,17 @@ def delete_kb_source(source_id: str) -> dict[str, Any]:
 
         _old_total, _old_emb, _old_en, _old_zh = _count_source_chunks(sid)
         removed = get_chunk_store().delete_for_source(sid) or {}
+        # v21-fix: 恢复 chunks_removed 赋值（v19-9 误删），仅用于响应字段。
         # v19-fix: 守卫与扣减同源（都用 _old_total），避免查询口径分裂。
+        chunks_removed = int(removed.get("total", 0))
         if _old_total > 0:
             _bump_kb_coverage(
                 total=-_old_total,
                 embedded=-_old_emb,
                 embedded_en=-_old_en,
                 embedded_zh=-_old_zh,
+                # v21-fix: 补 bm25_fallback 扣减（旧行中的无向量行）。
+                bm25_fallback=-(_old_total - _old_emb),
             )
         # v17-5: 清空 FTS5 镜像 —— 否则已删文档仍可被 BM25 搜到。
         try:

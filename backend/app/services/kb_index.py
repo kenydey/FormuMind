@@ -676,8 +676,15 @@ def index_source(
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
             # v17-5: 扣减旧计数
+            # v21-fix: 补 bm25_fallback 扣减。
             _old_total, _old_emb, _old_en, _old_zh = _old_counts
-            _bump_kb_coverage(total=-_old_total, embedded=-_old_emb, embedded_en=-_old_en, embedded_zh=-_old_zh)
+            _bump_kb_coverage(
+                total=-_old_total,
+                embedded=-_old_emb,
+                embedded_en=-_old_en,
+                embedded_zh=-_old_zh,
+                bm25_fallback=-(_old_total - _old_emb),
+            )
             return 0
         # U-1: 公共 chunk 准备（chunking → gate → lang → entity → embedding → dedupe）
         # 与 ingest_document_tx 共用，保证双写入路径永远一致。
@@ -694,8 +701,15 @@ def index_source(
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
             # v17-5: 扣减旧计数
+            # v21-fix: 补 bm25_fallback 扣减。
             _old_total, _old_emb, _old_en, _old_zh = _old_counts
-            _bump_kb_coverage(total=-_old_total, embedded=-_old_emb, embedded_en=-_old_en, embedded_zh=-_old_zh)
+            _bump_kb_coverage(
+                total=-_old_total,
+                embedded=-_old_emb,
+                embedded_en=-_old_en,
+                embedded_zh=-_old_zh,
+                bm25_fallback=-(_old_total - _old_emb),
+            )
             return 0
         # v16 P1-7: re-ingest 扣减旧计数（调用方在 DB 写成功后 bump）。
         n = get_chunk_store().replace_for_source(source_id, rows)
