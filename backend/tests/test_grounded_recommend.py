@@ -126,3 +126,38 @@ def test_match_evidence_ids_per_evidence_not_global():
     # 反向：查除油剂只返回文献
     refs2 = _match_evidence_ids("degreaser", per_ev, id_map)
     assert refs2 == ["LIT456"], f"实际: {refs2}"
+
+
+def test_v15_prefilled_hallucinated_ref_rejected():
+    """v15: 预填的幻觉引用被剔除，回退到真实证据匹配。"""
+    from app.services.grounded_recommend import _ground_component
+
+    id_map = {"zinc phosphate cn123": "CN123"}
+    comp = RecommendedFormulaComponent(
+        name="Zinc Phosphate",
+        zh_name="磷酸锌",
+        evidence_refs=["doi:10.9999/fake.1234"],  # 幻觉 ID
+    )
+    out = _ground_component(
+        comp, set(), set(), id_map, set(), set(),
+        texts=[], per_evidence_tokens={"CN123": {"zinc", "phosphate"}},
+    )
+    assert "doi:10.9999/fake.1234" not in out.evidence_refs
+    assert out.evidence_refs == ["CN123"]
+
+
+def test_v15_prefilled_valid_ref_kept():
+    """v15: 预填的真实引用保留。"""
+    from app.services.grounded_recommend import _ground_component
+
+    id_map = {"zinc phosphate cn123": "CN123"}
+    comp = RecommendedFormulaComponent(
+        name="Zinc Phosphate",
+        zh_name="磷酸锌",
+        evidence_refs=["CN123"],
+    )
+    out = _ground_component(
+        comp, set(), set(), id_map, set(), set(),
+        texts=[], per_evidence_tokens={"CN123": {"zinc", "phosphate"}},
+    )
+    assert out.evidence_refs == ["CN123"]

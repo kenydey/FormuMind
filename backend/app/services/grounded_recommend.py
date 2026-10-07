@@ -233,7 +233,11 @@ def _ground_component(
     texts: list[tuple[str, str]] | None = None,
     per_evidence_tokens: dict[str, set[str]] | None = None,
 ) -> RecommendedFormulaComponent:
-    refs = list(comp.evidence_refs or [])
+    # v15: 预填 evidence_refs 校验闭环 —— 只采信真实证据 ID（id_map 的值域），
+    # 未知引用（幻觉 ID）直接剔除并回退到 verbatim/匹配重算，防幻觉引用
+    # 以 high 置信度直达前端。
+    _valid_ids = set(id_map.values()) if id_map else set()
+    refs = [r for r in (comp.evidence_refs or []) if r in _valid_ids]
     raw_toks = _tokens(comp.name) | _tokens(comp.zh_name or "")
     name_toks = {t for t in raw_toks if len(t) >= 5}
     comp_cas = (comp.cas_no or "").strip().lower()
@@ -266,9 +270,8 @@ def _ground_component(
         conf = "high"
     elif prefer_catalog and catalog_hit:
         conf = "high"
-    elif refs or token_hit:
-        conf = "low"
     else:
+        # v15: 原 `elif refs or token_hit` 与 `else` 双分支同值，合并
         conf = "low"
 
     # Soft prefer: catalog hits escalate low→high when prefer is on and evidence is weak.
