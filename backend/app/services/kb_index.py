@@ -640,8 +640,7 @@ def prepare_chunk_rows(
     from .kb_dedup import dedupe_chunk_rows
 
     # v16 P3-17: L1 已在 embedding 前做过，此处仅做 L2。
-    # v17 CI-2: embed=False 时不打 needs_l2_review 标记。
-    rows = dedupe_chunk_rows(rows, source_id, session, skip_l1=True, mark_needs_l2=embed)
+    rows = dedupe_chunk_rows(rows, source_id, session, skip_l1=True)
     # v16 P2-7: 覆盖率 bump 不在此处 —— 移到 index_source 的 DB 写成功之后，
     # 否则写失败会导致计数虚增。dedupe 后的 rows 由调用方负责 bump。
     return rows if rows else None

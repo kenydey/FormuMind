@@ -261,6 +261,10 @@ def _faiss_vector_scores(
             top_k * 4,
             int(getattr(settings, "kb_hybrid_ann_candidate_pool", 800) or 800),
         )
+        # v18-20: 项目隔离查询时全局 ANN 命中被稀释 —— pool 放大 3 倍，
+        # 确保项目过滤后仍有足够候选（否则向量通道名存实亡）。
+        if project_id:
+            pool = pool * 3
         out: dict[str, float] = {}
         for model in buckets:
             vecs = kb_index._embed_texts(

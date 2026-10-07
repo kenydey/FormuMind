@@ -176,7 +176,6 @@ def _l2_near(
     source_id: str,
     session,
     settings,
-    mark_needs_l2: bool = True,
 ) -> list[dict]:
     """Drop/audit rows whose embedding is >= threshold cosine to a live chunk.
 
@@ -197,16 +196,8 @@ def _l2_near(
     for i, row in enumerate(rows):
         vec = row.get("embedding")
         if not vec:
-            # v16 P2-6: 无向量行打标，backfill 后重跑 L2。
-            # v17 CI-2: embed=False 显式禁用时不打标 —— 行本就不该有向量，
-            # 打标会破坏 FORMUMIND_CHEM_EXTRACT_ENABLED=false 时 meta is None 的契约。
-            # v18-19: meta 为 None 时不打标（保持 None 契约），避免 None→{} 转变。
-            if mark_needs_l2:
-                meta = row.get("meta")
-                if isinstance(meta, dict):
-                    meta["needs_l2_review"] = True
-                    row["meta"] = meta
-                # meta 为 None 时跳过打标，保持 None（v18-19）
+            # v18-18: needs_l2_review 机制移除 —— 该标记从未被消费（无重跑逻辑），
+            # 留着是半拉子功能。无向量行直接跳过 L2（fail-open）。
             continue
         indexed.append((i, _row_lang(row), vec))
     if not indexed:
@@ -313,7 +304,6 @@ def dedupe_chunk_rows(
     session=None,
     *,
     skip_l1: bool = False,
-    mark_needs_l2: bool = True,
 ) -> list[dict]:
     """Apply L1 (+L2) ingest-time dedup. Returns the kept rows.
 
@@ -341,7 +331,7 @@ def dedupe_chunk_rows(
             rows = _l1_exact(rows, source_id, session, settings)
             if not rows:
                 return rows
-        rows = _l2_near(rows, source_id, session, settings, mark_needs_l2=mark_needs_l2)
+        rows = _l2_near(rows, source_id, session, settings)
         return rows
     finally:
         if own_session and session is not None:

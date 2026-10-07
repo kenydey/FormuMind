@@ -741,6 +741,21 @@ class BaybeCampaignEngine:
             if progress_cb:
                 progress_cb((r + 1) / rounds, f"baybe batch {r + 1}/{rounds}: best={best_so_far:.3f}")
 
+            # v18-7: 收敛早停 —— 目标达成即停，节省 GP 采样与 predictor 计算。
+            # 用首个 objective 的 target（multi-objective 时按 combined score 的归一化目标近似）。
+            try:
+                from ..convergence import target_achieved
+
+                _obj0 = objectives[0] if objectives else None
+                if _obj0 is not None and target_achieved(best_so_far, _obj0):
+                    log.info(
+                        "baybe: target achieved at round %d/%d (best=%.3f), early stop",
+                        r + 1, rounds, best_so_far,
+                    )
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+
         top = _rank_by_pareto_then_score(ranked, objectives, settings.top_n_formulas)
         for score, form in top:
             # v17 CI-5: name 用 form.score（真分数），而非 ranking combined 分数 ——
