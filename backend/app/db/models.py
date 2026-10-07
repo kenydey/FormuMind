@@ -417,6 +417,12 @@ class MaterialRow(Base):
     carrier: Mapped[str | None] = mapped_column(String(16), nullable=True)
     water_compatible: Mapped[bool | None] = mapped_column(nullable=True)
 
+    # ── v20-2: Hansen 溶解度参数 (δd, δp, δh)，单位 MPa^0.5。
+    # 用于 structural_score 的化学相似度计算。NULL = 未知（fail-open）。
+    hansen_d: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hansen_p: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hansen_h: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # ── substitution / sourcing metadata (new in the material space) ──
     # Chemical family within a role ("epoxy", "isocyanate", "amine", "phosphate",
     # "silane"…) — the first filter when looking for a drop-in replacement.
