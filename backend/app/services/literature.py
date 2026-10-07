@@ -54,13 +54,16 @@ def _search_cache_key(
     domain,
     req=None,
     notebooklm_notebook_id: "str | None" = None,
+    max_rounds: int = 5,
 ) -> str:
-    """sha256(query | 排序后 source_types | total_limit | per_source_cap | domain | req指纹 | notebook)。
+    """sha256(query | 排序后 source_types | total_limit | per_source_cap | domain | req指纹 | notebook | max_rounds)。
 
     P1-2: req 指纹（substrate 等）必须进 key。_merge_filter_rank 用 req 做
     substrate 过滤，旧 key 缺 req 维度，换需求后 600s 内命中脏缓存。
     v14-2: notebooklm_notebook_id 是 iter_search 的独立形参（Requirement
     schema 无此字段），必须单独进 key，否则同 query 切 notebook 命中脏缓存。
+    v16 P3-7: max_rounds 进 key —— 轮数影响终态（早停条件），不同轮数
+    不应共享缓存。
     """
     req_fp = ""
     if req is not None:
@@ -83,6 +86,7 @@ def _search_cache_key(
             str(domain or ""),
             req_fp,
             str(nb_id),
+            str(max_rounds),
         ]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -99,8 +103,11 @@ def _search_cache_get(key: str, ttl_s: int) -> "tuple[list[Evidence], dict] | No
             if time.monotonic() - ts > ttl_s:
                 _SEARCH_CACHE.pop(key, None)
                 return None
-            # v15: 返回浅拷贝，防调用方原地修改污染后续缓存命中
-            return list(final), dict(payload)
+            # v16 P3-19: 深拷贝 —— 浅拷贝仍共享 Evidence 对象，
+            # 调用方改 evidence.relevance 会污染后续缓存命中。
+            import copy
+
+            return copy.deepcopy(final), copy.deepcopy(payload)
     except Exception:
         return None
 
@@ -217,8 +224,10 @@ def _prepare_search_queries(query: str, domain=None):
 
 
 def _seed_evidence(doc: dict, index: int) -> Evidence:
+    # v16 P3-6: 种子回退 relevance 降权 —— 种子是"无结果时的保底"，
+    # 不应与真实检索结果同权竞争排序。
     return Evidence(
-        relevance=round(max(0.4, 1.0 - index * 0.08), 2),
+        relevance=round(max(0.1, 0.3 - index * 0.02), 2),
         is_seed_corpus=True,
         **doc,
     )
@@ -1129,6 +1138,8 @@ def iter_search(
         query, source_types, total_limit, per_source_cap, domain_hint, req,
         # v14-2: 独立形参进 key，防跨 notebook 脏缓存
         notebooklm_notebook_id=notebooklm_notebook_id,
+        # v16 P3-7: max_rounds 进 key
+        max_rounds=max_rounds,
     )
     if cache_ttl_s > 0:
         hit = _search_cache_get(cache_key, cache_ttl_s)
@@ -1501,54 +1512,6 @@ def search_chem_web(query: str, limit: int = 5) -> list[Evidence]:
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+")
 
 
-def split_lit_answer(
-    text: str, *, query: str, limit: int = 5, relevance: float = 0.92
-) -> list[Evidence]:
-    """Split a literature-search answer into per-citation Evidence rows.
-
-    paper-qa answers embed DOIs in their citation lines.  One Evidence per
-    unique DOI (identifier ``doi:...``) lets the rows participate in dedup,
-    re-ranking and citation chips like any other literature hit.  The full
-    answer is always kept as the first row; when no DOI is present the output
-    degrades to exactly the legacy single-blob shape.
-    """
-    body = str(text).strip()
-    if not body:
-        return []
-    out = [
-        Evidence(
-            source="ChemCrow-Lit",
-            identifier=f"chemlit:{abs(hash(query)) % 0xFFFF:04x}",
-            title=f"LitSearch: {query[:80]}",
-            snippet=body[:600],
-            relevance=relevance,
-        )
-    ]
-    seen: set[str] = set()
-    for match in _DOI_RE.finditer(body):
-        doi = match.group(0).rstrip(".,;)")
-        if doi in seen:
-            continue
-        seen.add(doi)
-        # Use the line containing the DOI as the citation title/snippet.
-        line_start = body.rfind("\n", 0, match.start()) + 1
-        line_end = body.find("\n", match.end())
-        line = body[line_start : line_end if line_end >= 0 else len(body)].strip()
-        title = line.replace(doi, "").strip(" -–—:.,;()[]") or f"DOI {doi}"
-        out.append(
-            Evidence(
-                source="ChemCrow-Lit",
-                identifier=f"doi:{doi}",
-                title=title[:160],
-                snippet=line[:600] or body[:600],
-                relevance=max(0.0, min(1.0, relevance - 0.03)),
-            )
-        )
-        if len(out) >= limit + 1:
-            break
-    return out
-
-
 def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
     """Chemical literature search via Semantic Scholar (arXiv tier removed).
 
@@ -1565,7 +1528,6 @@ def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
 # Compatibility aliases retained for historical imports/tests (de-ChemCrow 2026-09).
 search_chemcrow_web = search_chem_web
 search_chemcrow_lit = search_chem_lit
-split_chemcrow_answer = split_lit_answer
 
 
 def get_source_availability() -> dict[str, dict]:

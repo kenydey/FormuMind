@@ -537,6 +537,14 @@ def prepare_chunk_rows(
             if not rows:
                 return None
 
+    # v16 P3-17: L1 exact-dedupe 前移到 embedding 之前 —— 重复 chunk 不再浪费向量计算。
+    # L2 near-dedupe 仍需向量，保留在 embedding 之后。
+    from .kb_dedup import l1_dedupe_chunk_rows
+
+    rows = l1_dedupe_chunk_rows(rows, source_id, session)
+    if not rows:
+        return None
+
     # 双语分流：嵌入前预标 lang（与 chunk_store 写入判定同源）
     from ..db.chunk_store import _detect_chunk_lang
 
@@ -628,7 +636,8 @@ def prepare_chunk_rows(
 
     from .kb_dedup import dedupe_chunk_rows
 
-    rows = dedupe_chunk_rows(rows, source_id, session)
+    # v16 P3-17: L1 已在 embedding 前做过，此处仅做 L2。
+    rows = dedupe_chunk_rows(rows, source_id, session, skip_l1=True)
     # v16 P2-7: 覆盖率 bump 不在此处 —— 移到 index_source 的 DB 写成功之后，
     # 否则写失败会导致计数虚增。dedupe 后的 rows 由调用方负责 bump。
     return rows if rows else None

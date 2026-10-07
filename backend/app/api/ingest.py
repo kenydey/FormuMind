@@ -208,7 +208,7 @@ def ingest_from_url(req: IngestUrlRequest):
         raise HTTPException(status_code=502, detail="文件处理失败") from exc
     # P0-1: "skipped" 现仅表示无真实文本/占位（有文本但 guide 未跑为
     # "no_guide"），故按 status 门禁即可正确索引真实文档。
-    if outcome.extraction_status != "skipped":
+    if outcome.extraction_status == "ok":
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(req.url, outcome)
 
@@ -219,7 +219,7 @@ def ingest_from_text(req: IngestTextRequest):
     outcome = ingest_text(req.text, title)
     # P0-1: "skipped" 现仅表示无真实文本/占位（有文本但 guide 未跑为
     # "no_guide"），故按 status 门禁即可正确索引真实文档。
-    if outcome.extraction_status != "skipped":
+    if outcome.extraction_status == "ok":
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(title, outcome)
 
@@ -237,7 +237,7 @@ def ingest_from_task(req: IngestTaskRequest):
         raise HTTPException(status_code=502, detail=outcome.error)
     # P0-1: "skipped" 现仅表示无真实文本/占位（有文本但 guide 未跑为
     # "no_guide"），故按 status 门禁即可正确索引真实文档。
-    if outcome.extraction_status != "skipped":
+    if outcome.extraction_status == "ok":
         colbert_store.index_evidence(outcome.evidence)
     return _to_ingest_response(outcome.identifier, outcome)
 

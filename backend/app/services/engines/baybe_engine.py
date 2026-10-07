@@ -169,6 +169,37 @@ def _prepare_measurement_dataframe(df, metrics: list[str], expected_params: list
     return cleaned
 
 
+def _fps_select(df, k: int) -> list[int]:
+    """v16 P3-14: Farthest Point Sampling —— 从 df 选 k 个在因子空间最分散的行。
+
+    用于冷启动先验点的多样性选点。fail-open：异常时返回前 k 个索引。
+    """
+    try:
+        import numpy as np
+
+        vals = df.select_dtypes(include=[np.number]).to_numpy(dtype=float)
+        if vals.shape[0] == 0 or vals.shape[1] == 0:
+            return list(range(min(k, len(df))))
+        # 标准化到 [0,1]
+        lo = vals.min(axis=0)
+        hi = vals.max(axis=0)
+        span = np.where(hi > lo, hi - lo, 1.0)
+        norm = (vals - lo) / span
+        n = len(norm)
+        k = min(k, n)
+        selected = [0]
+        min_dist = np.full(n, np.inf)
+        for _ in range(1, k):
+            last = norm[selected[-1]]
+            d = np.linalg.norm(norm - last, axis=1)
+            min_dist = np.minimum(min_dist, d)
+            min_dist[selected] = -1  # 已选不再选
+            selected.append(int(np.argmax(min_dist)))
+        return selected
+    except Exception:  # noqa: BLE001 - fail-open
+        return list(range(min(k, len(df))))
+
+
 def _dedupe_measurement_frame(df, factor_names: list[str], log, metric_names: list[str] | None = None):
     """v15: 按因子+指标指纹去重（df_meas 在前，measurements 通道优先保留）。
 
@@ -399,7 +430,17 @@ class BaybeCampaignEngine:
             if not virtual.empty and metrics:
                 virtual = align_dataframe_measurement_columns(virtual, metrics, log=log)
             if not virtual.empty:
-                campaign.add_measurements(virtual.head(min(3, len(virtual))))
+                # v16 P3-14: FPS 多样性选点（替代 head(3) 的顺序截断）——
+                # 冷启动先验点应在因子空间均匀散布，而非取 LHS 的前 3 个。
+                # TODO(P3-14): 先验仍与 predictor 同源；理想是无信息 prior。
+                try:
+                    from .adapters.baybe_space_builder import factors_for_requirement
+
+                    _fps_idx = _fps_select(virtual, min(3, len(virtual)))
+                    virtual = virtual.iloc[_fps_idx]
+                except Exception:  # noqa: BLE001 - fail-open
+                    virtual = virtual.head(min(3, len(virtual)))
+                campaign.add_measurements(virtual)
 
         rec_df = campaign.recommend(batch_size=batch_size)
         plan = dataframe_to_doe_plan(rec_df, factor_list, design, engine="baybe", ai_suggested=True)

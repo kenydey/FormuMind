@@ -160,6 +160,11 @@ def finalize_scored_formulations(
         name_to_recs[r.name].append(r)
     formulas = []
     for f in scored:
+        # v16 P3-12: 优先位置配对（_src_idx 随对象携带），回退名称配对。
+        _si = getattr(f, "_src_idx", None)
+        if _si is not None and 0 <= _si < len(rec_formulas):
+            formulas.append(rec_formulas[_si])
+            continue
         queue = name_to_recs.get(f.name)
         if queue:
             formulas.append(queue.popleft())
@@ -251,16 +256,20 @@ def finalize_recommendation_bundle(
     warnings: list[str] = []
     scored: list[Formulation] = []
 
-    for rec in rec_formulas:
+    for _ri, rec in enumerate(rec_formulas):
         try:
             form = recommended_to_formulation(rec)
             # ``objectives`` is the list trade-off analysis and the LLM prompt
             # use; scoring must rank by the same one (see _score_and_validate).
-            scored.append(
-                _score_and_validate(
-                    form, process, req, chem_screen=True, objectives=objectives
-                )
+            scored_form = _score_and_validate(
+                form, process, req, chem_screen=True, objectives=objectives
             )
+            # v16 P3-12: 位置配对 —— 把原始下标挂在对象上，随排序/dedupe/MMR 携带。
+            try:
+                object.__setattr__(scored_form, "_src_idx", _ri)
+            except Exception:  # noqa: BLE001
+                pass
+            scored.append(scored_form)
         except ValueError as exc:
             warnings.append(str(exc))
 

@@ -72,6 +72,13 @@ def _reviewer_failed(review) -> bool:
     return isinstance(review, dict) and bool(review.get("reviewer_error"))
 
 
+def _reviewer_notices(reviewer) -> list[str]:
+    """v16 P3-11: reviewer fail-open 时给用户可见提示（不再静默）。"""
+    if _reviewer_failed(reviewer):
+        return ["证据评审未完成（reviewer 异常），回答未经第二轮校验"]
+    return []
+
+
 def _clamp_relevance(value: float) -> float:
     try:
         n = float(value)
@@ -269,7 +276,7 @@ def _claims_and_audit(
 #   1. P2-1 数值检查：标注 + claim 降级（不替换答案）；
 #   2. P2-3 冲突段：答案尾追加（不替换答案）；
 #   3. P2-2 拒答门：触发时整体替换为拒答模板（硬门）。
-# Token 流式路径不经过此函数（P2-2 决策 A：已知缺口）。
+# v16: 同步与流式路径均调用此函数（旧注释"流式不经过"已过时）。
 
 _ABSTAIN_TEMPLATE = (
     "证据不足，无法基于现有证据回答该问题。\n\n"
@@ -1378,7 +1385,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             "sourced_claims": _claims,
                             "sources_audit": _audit,
                             # B-1: BM25-only 退化提示位 + P1-4 门 notices 合并。
-                            "notices": list(_degr_notices) + list(gate_notices or []) or None,
+                            # v16 P3-11: reviewer fail-open 提示位。
+                            "notices": list(_degr_notices) + list(gate_notices or []) + _reviewer_notices(evidence_reviewer) or None,
                         }
                     )
                     return
@@ -1545,10 +1553,11 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             "citation_expand": citation_expand,
                             "evidence_reviewer": reviewer,
                             "reviewer_fix": reviewer_fix,
-                            # B-1: BM25-only 退化提示位 + P2 门 notices。
+                            # B-1: BM25-only 退化提示位 + P2 门 notices + v16 P3-11 reviewer fail-open。
                             "notices": (
                                 list(_retrieval_degradation_notices(kb_used) or [])
                                 + list(_gate_notices or [])
+                                + _reviewer_notices(reviewer)
                             ) or None,
                         }
                         yield _sse(done_payload)
@@ -1761,10 +1770,11 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                     "evidence_provenance": evidence_provenance,
                     "evidence_reviewer": reviewer,
                     "reviewer_fix": reviewer_fix,
-                    # B-1: BM25-only 退化提示位 + P2 门 notices。
+                    # B-1: BM25-only 退化提示位 + P2 门 notices + v16 P3-11 reviewer fail-open。
                     "notices": (
                         list(_retrieval_degradation_notices(kb_used) or [])
                         + list(_gate_notices or [])
+                        + _reviewer_notices(reviewer)
                     ) or None,
                 }
             )

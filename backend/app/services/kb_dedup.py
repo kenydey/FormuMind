@@ -305,12 +305,16 @@ def dedupe_chunk_rows(
     rows: list[dict],
     source_id: str,
     session=None,
+    *,
+    skip_l1: bool = False,
 ) -> list[dict]:
     """Apply L1 (+L2) ingest-time dedup. Returns the kept rows.
 
     ``session`` may be a caller-owned SQLAlchemy session (ingest_tx / wiki
     paths); when omitted a short-lived read session is opened. The session
     is never committed here — callers own their transactions.
+
+    v16 P3-17: skip_l1=True 时仅做 L2（L1 已在 embedding 前做过）。
     """
     if not rows:
         return rows
@@ -326,11 +330,42 @@ def dedupe_chunk_rows(
             from ..db.chunk_store import get_chunk_store
 
             session = get_chunk_store().session_factory()
-        if bool(getattr(settings, "kb_dedup_exact_enabled", True)):
+        if not skip_l1 and bool(getattr(settings, "kb_dedup_exact_enabled", True)):
             rows = _l1_exact(rows, source_id, session, settings)
             if not rows:
                 return rows
         rows = _l2_near(rows, source_id, session, settings)
+        return rows
+    finally:
+        if own_session and session is not None:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def l1_dedupe_chunk_rows(
+    rows: list[dict],
+    source_id: str,
+    session=None,
+) -> list[dict]:
+    """v16 P3-17: 仅做 L1 exact-dedupe（embedding 之前调用，省向量计算）。
+
+    L2 near-dedupe 仍需向量，保留在 embedding 之后。
+    """
+    if not rows:
+        return rows
+    from ..config import get_settings
+
+    settings = get_settings()
+    own_session = session is None
+    try:
+        if own_session:
+            from ..db.chunk_store import get_chunk_store
+
+            session = get_chunk_store().session_factory()
+        if bool(getattr(settings, "kb_dedup_exact_enabled", True)):
+            rows = _l1_exact(rows, source_id, session, settings)
         return rows
     finally:
         if own_session and session is not None:

@@ -265,6 +265,10 @@ def _escalate_page(content: bytes, page: pdf_local.LocalPage) -> str | None:
         page_pdf, ext="pdf", timeout=float(get_settings().mineru_page_timeout_s)
     )
     if document is None or not document.blocks:
+        # v16 P3-4: MinerU 空结果不再静默 —— 写用户可见 note。
+        from .parse_notices import note
+
+        note(f"MinerU 解析第 {page.page_no} 页返回空结果，已回退本地文本层")
         return None
     return _render_blocks(document.blocks, page_label=f"p.{page.page_no}") or None
 
@@ -326,6 +330,10 @@ def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | No
     logger.info("hybrid: no text layer, sending %d pages to MinerU with OCR", len(pages))
     document = mineru_cloud.parse_bytes(content, ext="pdf", ocr=True)
     if document is None or not document.blocks:
+        # v16 P3-4: MinerU 空结果不再静默 —— 写用户可见 note。
+        from .parse_notices import note
+
+        note("MinerU OCR 解析返回空结果，已回退本地处理")
         return None
 
     by_page: dict[int, list[mineru_cloud.MinerUBlock]] = {}

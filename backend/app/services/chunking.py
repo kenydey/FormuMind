@@ -486,18 +486,20 @@ def chunk_markdown(
                 offset_start=os_, offset_end=oe_, block_type=blk_type,
             )]
         # 降级：逐 block 发射
+        # v16 P3-18: 每个 block 递增 paragraph_idx（不再共享）；
+        # block_type 优先用传入的 blk_type（调用方已知），分类失败才重算。
         out: list["Chunk"] = []
         cursor = body_start
-        for blk in blocks:
+        for _bi, blk in enumerate(blocks):
             bpos, cursor = _locate_block(body, blk, cursor)
             if bpos == -1:
                 # 极端防御：找不到则跳过该 block（不应发生）
                 continue
             bos_ = seg_base + bpos
             out.append(Chunk(
-                blk, path, page_no, paragraph_idx=para_idx,
+                blk, path, page_no, paragraph_idx=para_idx + _bi,
                 offset_start=bos_, offset_end=bos_ + len(blk),
-                block_type=_classify_block_type(blk),
+                block_type=blk_type or _classify_block_type(blk),
             ))
         return out
 

@@ -517,6 +517,22 @@ def _parse_plain(content: bytes) -> str | None:
             return 0.0
         return sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t") / len(text)
 
+    def _utf16_tiebreak(b: bytes, new_enc: str, cur_enc: str | None) -> bool:
+        """v16 P3-2: LE/BE 可打印率平局时，用 CJK 高字节位置裁决。
+
+        UTF-16-LE 的 CJK 文本奇数位字节集中在 0x4E-0x9F；
+        BE 则偶数位集中。返回 True 表示 new_enc 更可信。
+        """
+        if len(b) < 4 or len(b) % 2:
+            return False
+        odd_hit = sum(1 for x in b[1::2] if 0x4E <= x <= 0x9F) / max(1, len(b[1::2]))
+        even_hit = sum(1 for x in b[0::2] if 0x4E <= x <= 0x9F) / max(1, len(b[0::2]))
+        if "le" in new_enc and "be" in (cur_enc or ""):
+            return odd_hit > even_hit
+        if "be" in new_enc and "le" in (cur_enc or ""):
+            return even_hit > odd_hit
+        return False
+
     # 1. BOM sniffing: an explicit BOM is authoritative. The "utf-16"/"utf-32"
     # codecs (no endian suffix) consume and strip the BOM.
     for bom, enc in (
@@ -536,7 +552,24 @@ def _parse_plain(content: bytes) -> str | None:
     # v13-2: 四个候选全解码取 printable ratio 最高者（LE 平局优先，Windows
     # 现实），替代"首个过 0.7 即返回"——无 BOM 的 BE 不再被系统性误判为 LE。
     if b"\x00" in content:
+        # v16 P3-3: 极短输入（<8B）按 NUL 位置直判端序 ——
+        # LE 的 NUL 在奇数位，BE 的 NUL 在偶数位。
+        if len(content) < 8:
+            odd_nul = sum(1 for i in range(1, len(content), 2) if content[i] == 0)
+            even_nul = sum(1 for i in range(0, len(content), 2) if content[i] == 0)
+            if odd_nul > even_nul:
+                try:
+                    return content.decode("utf-16-le")
+                except Exception:
+                    pass
+            elif even_nul > odd_nul:
+                try:
+                    return content.decode("utf-16-be")
+                except Exception:
+                    pass
+            # NUL 数量持平则走下通用路径
         best, best_ratio = None, 0.0
+        best_enc = None
         for enc in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
             try:
                 text = content.decode(enc)
@@ -544,7 +577,12 @@ def _parse_plain(content: bytes) -> str | None:
                 continue
             r = _printable_ratio(text)
             if text and r > best_ratio:
-                best, best_ratio = text, r
+                best, best_ratio, best_enc = text, r, enc
+            elif text and r == best_ratio and best is not None:
+                # v16 P3-2: 平局裁决 —— 纯 ASCII 下 LE/BE 可打印率相同，
+                # 用 CJK 高字节位置模式裁决（LE: 奇数位集中 0x4E-0x9F）。
+                if _utf16_tiebreak(content, enc, best_enc):
+                    best, best_enc = text, enc
         if best and best_ratio > 0.7:
             return best
     # 3. Plain utf-8.

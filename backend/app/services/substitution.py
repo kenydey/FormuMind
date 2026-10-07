@@ -38,6 +38,34 @@ _W_CLASS = 0.25
 _W_HANSEN = 0.15
 _W_TANIMOTO = 0.10
 
+# v16 P3-13: 按 domain 动态加权 —— 溶解性主导的场景（如涂料溶剂替换）
+# 提高 Hansen 权重；官能团主导的场景提高 class 权重。
+_DOMAIN_WEIGHT_OVERRIDES = {
+    # 溶剂替换：溶解性是第一性原理
+    "solvent": {"hansen": 0.35, "group": 0.35, "class": 0.20, "tanimoto": 0.10},
+    # 涂料成膜：官能团兼容性优先
+    "anticorrosion_coating": {"hansen": 0.20, "group": 0.45, "class": 0.25, "tanimoto": 0.10},
+}
+
+
+def _weights_for(domain: str | None) -> dict[str, float]:
+    """v16 P3-13: domain 相关的权重；未知 domain 用默认权重。"""
+    if domain:
+        override = _DOMAIN_WEIGHT_OVERRIDES.get(str(domain).lower())
+        if override:
+            return {
+                "group": override["group"],
+                "class": override["class"],
+                "hansen": override["hansen"],
+                "tanimoto": override["tanimoto"],
+            }
+    return {
+        "group": _W_GROUP,
+        "class": _W_CLASS,
+        "hansen": _W_HANSEN,
+        "tanimoto": _W_TANIMOTO,
+    }
+
 # Hansen distance (MPa^0.5) beyond which two materials are treated as
 # unrelated. ~8 is the usual "outside the solubility sphere" radius.
 _HANSEN_LIMIT = 8.0
@@ -75,12 +103,17 @@ def _tanimoto(a: dict, b: dict) -> float | None:
     return chemtools.mol_similarity(smiles_a, smiles_b)
 
 
-def structural_score(a: dict, b: dict) -> tuple[float, dict]:
+def structural_score(
+    a: dict, b: dict, *, domain: str | None = None
+) -> tuple[float, dict]:
     """Similarity in [0, 1] plus the per-signal breakdown that produced it.
 
     Renormalised over the signals actually available, so a material with no
     Hansen data is not penalised relative to one that has it.
+
+    v16 P3-13: domain 动态加权（None = 默认权重，向后兼容）。
     """
+    _w = _weights_for(domain)
     parts: dict[str, float] = {}
     total = 0.0
     weight = 0.0
@@ -88,28 +121,28 @@ def structural_score(a: dict, b: dict) -> tuple[float, dict]:
     if a.get("substitute_group") and b.get("substitute_group"):
         hit = 1.0 if a["substitute_group"] == b["substitute_group"] else 0.0
         parts["substitute_group"] = hit
-        total += _W_GROUP * hit
-        weight += _W_GROUP
+        total += _w['group'] * hit
+        weight += _w['group']
 
     if a.get("functional_class") and b.get("functional_class"):
         hit = 1.0 if a["functional_class"] == b["functional_class"] else 0.0
         parts["functional_class"] = hit
-        total += _W_CLASS * hit
-        weight += _W_CLASS
+        total += _w['class'] * hit
+        weight += _w['class']
 
     distance = hansen_distance(a, b)
     if distance is not None:
         closeness = max(0.0, 1.0 - distance / _HANSEN_LIMIT)
         parts["hansen"] = round(closeness, 4)
         parts["hansen_distance"] = distance
-        total += _W_HANSEN * closeness
-        weight += _W_HANSEN
+        total += _w['hansen'] * closeness
+        weight += _w['hansen']
 
     tanimoto = _tanimoto(a, b)
     if tanimoto is not None:
         parts["tanimoto"] = tanimoto
-        total += _W_TANIMOTO * tanimoto
-        weight += _W_TANIMOTO
+        total += _w['tanimoto'] * tanimoto
+        weight += _w['tanimoto']
 
     return (round(total / weight, 4) if weight else 0.0), parts
 

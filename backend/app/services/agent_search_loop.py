@@ -102,6 +102,9 @@ def extract_facets(query: str, max_facets: int = 8) -> list[str]:
             continue
         if all(ch in _FACET_STOP_CHARS for ch in t):
             continue
+        # v16 P3-5: 二字 CJK 含停用单字多为切分碎片（如"的防"），丢弃。
+        if len(t) == 2 and any(ch in _FACET_STOP_CHARS for ch in t):
+            continue
         if t not in seen:
             seen.append(t)
         if len(seen) >= max_facets:
