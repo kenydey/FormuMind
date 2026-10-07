@@ -1,6 +1,8 @@
 """KB P2 tests — persistent chunk store, kb_index service, chat/API integration."""
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -441,14 +443,15 @@ def test_embed_texts_receives_every_chunk_it_is_asked_about(stores, monkeypatch)
         seen.append(list(texts))
         return [[float(i), 0.0] for i in range(len(texts))]
 
-    # v17 CI fix: 用字符串路径 mock，确保在 CI 上也生效；同时 mock gate
-    # 防止环境差异导致 chunk 被过滤（gate_ingest_rows 是函数内导入，patch 源模块）。
-    monkeypatch.setattr("app.services.kb_index._embed_texts", fake_embed)
-    monkeypatch.setattr(
+    # v17 CI fix: mock.patch 装饰器比 monkeypatch.setattr 更可靠，
+    # 在 CI 上能确保 _embed_texts 被替换。
+    with mock.patch(
+        "app.services.kb_index._embed_texts", side_effect=fake_embed
+    ), mock.patch(
         "app.services.kb_retrieval_gate.gate_ingest_rows",
-        lambda rows, source_id=None: (rows, None),
-    )
-    kb_index.index_source(sid, text)
+        side_effect=lambda rows, source_id=None: (rows, None),
+    ):
+        kb_index.index_source(sid, text)
 
     assert seen, "_embed_texts was never called"
     rows = chk.get_by_source(sid)

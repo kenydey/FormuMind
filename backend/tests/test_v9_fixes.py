@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest import mock
 
 import pytest
 
@@ -292,16 +293,18 @@ def test_prepare_chunk_rows_gate_before_embed_dedupe(monkeypatch):
         events.append(("gate", len(rows)))
         return rows[:1], "test"  # 只留 1 个
 
-    # v17 CI fix: 用字符串路径 mock，确保在 CI 上也生效。
-    monkeypatch.setattr("app.services.kb_index._embed_texts", fake_embed)
-    monkeypatch.setattr(dedup_mod, "dedupe_chunk_rows", fake_dedupe)
-    # v16 P3-17: L1 前移 —— mock 掉 l1_dedupe_chunk_rows（直通）
-    monkeypatch.setattr(
-        dedup_mod, "l1_dedupe_chunk_rows", lambda rows, sid, sess=None: rows
-    )
+    # v17 CI fix: 用 mock.patch 确保在 CI 上生效。
+    with mock.patch(
+        "app.services.kb_index._embed_texts", side_effect=fake_embed
+    ):
+        monkeypatch.setattr(dedup_mod, "dedupe_chunk_rows", fake_dedupe)
+        # v16 P3-17: L1 前移 —— mock 掉 l1_dedupe_chunk_rows（直通）
+        monkeypatch.setattr(
+            dedup_mod, "l1_dedupe_chunk_rows", lambda rows, sid, sess=None: rows
+        )
 
-    text = " ".join(f"段落{i} " + "环氧树脂防腐涂料配方研究内容填充 " * 10 for i in range(4))
-    rows = prepare_chunk_rows_gate_helper(text, gate_fn)
+        text = " ".join(f"段落{i} " + "环氧树脂防腐涂料配方研究内容填充 " * 10 for i in range(4))
+        rows = prepare_chunk_rows_gate_helper(text, gate_fn)
 
     kinds = [e[0] for e in events]
     assert kinds == ["gate", "embed", "dedupe"], f"顺序错误: {kinds}"

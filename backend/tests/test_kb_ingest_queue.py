@@ -326,6 +326,11 @@ def test_fetches_run_concurrently_but_indexing_stays_serial(monkeypatch):
     inside = {"n": 0}
 
     def fake_fetch(ev, kind, timeout, emit, doc, allow_pdf=True):
+        import time
+
+        # v17 CI fix: Windows 上无 sleep 时 12 个快任务可能全跑在同一线程，
+        # 加短 sleep 确保并行可观测（真实 fetch 有网络 IO 更慢）。
+        time.sleep(0.02)
         fetch_threads.add(threading.get_ident())
         return "全文内容"
 
