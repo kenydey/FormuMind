@@ -169,6 +169,28 @@ def _prepare_measurement_dataframe(df, metrics: list[str], expected_params: list
     return cleaned
 
 
+def _dedupe_measurement_frame(df, factor_names: list[str], log):
+    """v15: 按因子指纹去重（df_meas 在前，measurements 通道优先保留）。
+
+    消除 measurements 形参通道与 workbench_campaign_id 通道的重复行。
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+    fp_cols = [c for c in factor_names if c in df.columns]
+    if not fp_cols:
+        return df
+    before = len(df)
+    out = df.drop_duplicates(subset=fp_cols, keep="first")
+    dup = before - len(out)
+    if dup:
+        log.info(
+            "baybe: dropped %d duplicate measurement row(s) "
+            "after merging measurements + workbench channels",
+            dup,
+        )
+    return out
+
+
 def _rank_by_pareto_then_score(
     ranked: list[tuple[float, object]],
     objectives: list,
@@ -348,6 +370,13 @@ class BaybeCampaignEngine:
             if not df_meas.empty
             else df_meas
         )
+        # v15: 双通道归一去重 —— df_meas（measurements 形参）与 df_wb
+        # （workbench_campaign_id）可能含同一批行（ingest_workbench_rows 已入库
+        # 又经 measurements 传回）。按因子指纹去重，measurements 优先保留，
+        # 否则 GP 训练集重复行致后验过度自信。
+        df_meas_clean = _dedupe_measurement_frame(
+            df_meas_clean, [f.name for f in factor_list], log
+        )
         if not df_meas_clean.empty:
             campaign.add_measurements(df_meas_clean)
 
@@ -454,6 +483,8 @@ class BaybeCampaignEngine:
             engine="baybe",
             chemical_feasibility=chem_verdict,
             physical_constraints=phys_verdict,
+            # v15: 实际喂给 add_measurements 的 lab 点数（去重后，含 df_wb 通道）
+            lab_points_used=len(df_meas_clean),
         )
         from ..doe_adaptive import enrich_baybe_result
 
@@ -514,6 +545,8 @@ class BaybeCampaignEngine:
         metric = primary_metric(req)
         objective_metric_names = objective_metrics(objectives)
         settings = get_settings()
+        # v15: 聚合各轮实际喂给 GP 的 lab 点数
+        _max_lab_points = 0
 
         for r in range(rounds):
             result = self.recommend(
@@ -526,6 +559,8 @@ class BaybeCampaignEngine:
                 store=campaign_store,
             )
             state = result.campaign_state
+            # v15: 聚合各轮实际喂给 GP 的 lab 点数
+            _max_lab_points = max(_max_lab_points, result.lab_points_used)
 
             for run in result.plan.runs:
                 run_process = dict(process)
@@ -581,9 +616,11 @@ class BaybeCampaignEngine:
 
         # P0-5: 披露实际进入 GP 的 lab 点数（baybe_opt 虚拟点不进 GP）。
         # v13-3: workbench 真实测量也计入。
-        _lab_n = sum(
-            1 for r in (measurements or [])
-            if getattr(r, "source", "lab") in REAL_SOURCES
+        # v15: 以各轮 recommend() 实际喂给 GP 的 lab 点数（取最大值）为事实源。
+        _src = (
+            "lab"
+            if _max_lab_points > 0
+            else lab_measurement_source(measurements or [])
         )
         return OptimizationResult(
             iterations=iterations,
@@ -592,7 +629,7 @@ class BaybeCampaignEngine:
             history=history or [0.0],
             top_formulations=top,
             engine="baybe",
-            measurement_source=lab_measurement_source(measurements or []),
+            measurement_source=_src,
             # P0-5: 披露实际进入 GP 的 lab 点数（虚拟点已被过滤）。
-            lab_points_used=_lab_n,
+            lab_points_used=_max_lab_points,
         )

@@ -617,6 +617,8 @@ class BaybeRecommendResult(AdaptiveDOEMetadata):
     plan: DOEPlan
     campaign_state: str
     engine: str = "baybe"
+    # v15: 实际喂给 GP 的 lab 点数（df_meas_clean 行数，含 workbench 通道）
+    lab_points_used: int = 0
     # KG chemical-compatibility verdict for the shared formulation skeleton.
     # None when KG is disabled or no material resolved. Structured as
     # {"feasible": bool, "status": str, "reasons": list[str]}.

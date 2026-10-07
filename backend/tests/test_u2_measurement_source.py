@@ -121,3 +121,38 @@ def test_virtual_count_excludes_workbench():
     assert "workbench" not in VIRTUAL_SOURCES
     assert "baybe_opt" in VIRTUAL_SOURCES
     assert "predictor_virtual" in VIRTUAL_SOURCES
+
+
+def test_v15_dedupe_measurement_frame():
+    """v15: 双通道重复行按因子指纹去重，measurements 通道优先保留。"""
+    import logging
+
+    import pandas as pd
+
+    from app.services.engines.baybe_engine import _dedupe_measurement_frame
+
+    log = logging.getLogger("test")
+    df = pd.DataFrame(
+        [
+            {"x": 1.0, "y": 2.0, "salt_spray_hours": 600.0, "src": "meas"},
+            {"x": 1.0, "y": 2.0, "salt_spray_hours": 610.0, "src": "wb"},  # 重复
+            {"x": 3.0, "y": 4.0, "salt_spray_hours": 620.0, "src": "wb"},
+        ]
+    )
+    out = _dedupe_measurement_frame(df, ["x", "y"], log)
+    assert len(out) == 2, "重复行应被去重"
+    assert list(out["src"]) == ["meas", "wb"], "measurements 通道优先保留"
+
+
+def test_v15_dedupe_empty_or_no_factor_cols():
+    """v15: 空帧/无因子列时原样返回。"""
+    import logging
+
+    import pandas as pd
+
+    from app.services.engines.baybe_engine import _dedupe_measurement_frame
+
+    log = logging.getLogger("test")
+    assert _dedupe_measurement_frame(pd.DataFrame(), ["x"], log).empty
+    df = pd.DataFrame([{"a": 1}])
+    assert len(_dedupe_measurement_frame(df, ["x"], log)) == 1
