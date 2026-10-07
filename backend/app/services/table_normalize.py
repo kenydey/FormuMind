@@ -203,6 +203,11 @@ _UNIT_MAP: dict[str, str] = {
     "g/ml": "g/mL", "g/cc": "g/mL",
     "kg/m³": "kg/m3", "kg/m3": "kg/m3",
     "kg/l": "kg/L", "g/l": "g/L",
+    # 压力/力 pressure/force (v19-3: 补涂料常用单位)
+    "mpa": "MPa", "kpa": "kPa", "pa": "Pa",
+    "n": "N", "kn": "kN",
+    # 涂料专用 coatings
+    "phr": "phr",
     # 分数 fraction
     "%": "%", "％": "%", "percent": "%", "pct": "%",
     # 时间 time

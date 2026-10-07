@@ -567,7 +567,16 @@ def ingest_url(url: str, *, persist: bool = True) -> IngestOutcome:
     _url_parse_warnings: list = []
     text = ""
     if "html" in content_type or body.lstrip()[:15].lower().startswith(b"<!doctype") or b"<html" in body[:500].lower():
-        text = _html_to_text(body.decode("utf-8", errors="replace"))
+        # v19-5: 先尝试 charset 检测，避免 GBK 站整页乱码。
+        # 用 charset_normalizer（若可用），否则回退 UTF-8。
+        try:
+            from charset_normalizer import from_bytes
+
+            _detected = from_bytes(body).best()
+            _html = str(_detected) if _detected else body.decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            _html = body.decode("utf-8", errors="replace")
+        text = _html_to_text(_html)
     elif is_pdf:
         # v7 解析-4: 无 PDF 解析器时给出可操作的 hint（与 ingest_file 同口径）。
         from .parsing import can_parse, parse_document

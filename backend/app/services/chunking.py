@@ -253,6 +253,10 @@ def _split_blocks(body: str) -> list[str]:
             blocks.append(block)
         current.clear()
 
+    # v19-2: math 块行数上限，未闭合时强制闭合，避免吞整篇。
+    _math_lines = 0
+    _MATH_MAX_LINES = 50
+
     for line in lines:
         stripped = line.strip()
         if mode == "fence":
@@ -263,9 +267,13 @@ def _split_blocks(body: str) -> list[str]:
             continue
         if mode == "math":
             current.append(line)
-            if math_closer in stripped:
+            _math_lines += 1
+            # v19-2: closer 改行首匹配（与 opener 对称），避免行内 $$5$$ 提前闭合。
+            # 未闭合超过上限时强制闭合，避免吞整篇。
+            if stripped.startswith(math_closer) or _math_lines >= _MATH_MAX_LINES:
                 flush()
                 mode = "text"
+                _math_lines = 0
             continue
         if stripped.startswith("```"):
             flush()
@@ -292,6 +300,7 @@ def _split_blocks(body: str) -> list[str]:
             flush()
             mode = "math"
             math_closer = closer
+            _math_lines = 0
             current.append(line)
             continue
         is_table_row = stripped.startswith("|") and stripped.count("|") >= 2

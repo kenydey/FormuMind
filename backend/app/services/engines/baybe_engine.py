@@ -612,7 +612,8 @@ class BaybeCampaignEngine:
 
             try:
                 factors = build_doe_factors(req)
-                alt_plan = build_doe_plan(factors, "lhs", engine="native", n=n)
+                # v19-4: 透传 seed，补齐 seed 链（seed=None 时 native 内部用 0，确定性）。
+                alt_plan = build_doe_plan(factors, "lhs", engine="native", n=n, seed=seed)
                 return alt_plan.runs
             except Exception:  # noqa: BLE001 - fail-open
                 return []

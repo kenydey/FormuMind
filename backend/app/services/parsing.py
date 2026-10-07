@@ -779,7 +779,14 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
             return ParseResult("", "none")
 
         for name, fn in _DOC_TIERS:
-            text = fn(content, ext)
+            # v19-1: 非 PDF tier 加 try/except（与 v18-15 同构），
+            # 异常记 note 后继续降级，不杀整篇。
+            try:
+                text = fn(content, ext)
+            except Exception as exc:  # noqa: BLE001
+                timing.note(parser=f"{name}:error")
+                logger.warning("doc tier %s failed for %s: %s", name, ext, exc)
+                continue
             if text and text.strip():
                 timing.note(parser=name)
                 return _maybe_extract_tables(ParseResult(text, name), content)
