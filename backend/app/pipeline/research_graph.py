@@ -643,6 +643,8 @@ def run_research_graph(
     mode: Literal["recommend", "deep"] = "deep",
     modify_prompt: str = "",
     base_formulas: list[Formulation] | None = None,
+    # v16: per-project NotebookLM notebook（None = 用全局配置）
+    notebooklm_notebook_id: str | None = None,
 ) -> ResearchGraphState:
     """Execute CRAG pipeline (LangGraph-compatible linear runner).
 
@@ -654,6 +656,19 @@ def run_research_graph(
     settings = settings or get_settings()
     q = build_research_query(query or topic, req)
 
+    # v16: 未显式传入时，从项目工作区解析 per-project notebook（fail-open）。
+    if notebooklm_notebook_id is None and req is not None:
+        try:
+            from ..db.project_store import get_project_store
+
+            pid = getattr(req, "project_id", "") or ""
+            if pid:
+                detail = get_project_store().get(pid)
+                if detail is not None:
+                    notebooklm_notebook_id = detail.workspace.notebooklm_notebook_id
+        except Exception:  # noqa: BLE001 - fail-open
+            notebooklm_notebook_id = None
+
     state: ResearchGraphState = {
         "topic": topic,
         "query": q,
@@ -662,6 +677,8 @@ def run_research_graph(
         "fallback_used": False,
         "modify_prompt": modify_prompt,
         "base_formulas": base_formulas or [],
+        # v16: per-project NotebookLM notebook 传给 fallback_node
+        "notebooklm_notebook_id": notebooklm_notebook_id,
     }
 
     state = _run_crag_retrieval(state, settings, mode, progress_cb)
