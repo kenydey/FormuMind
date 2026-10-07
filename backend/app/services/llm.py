@@ -1630,8 +1630,10 @@ def _chat_prompt(
         for turn in history[-4:]:
             role = getattr(turn, "role", None) or (turn.get("role") if isinstance(turn, dict) else "")
             content = getattr(turn, "content", None) or (turn.get("content") if isinstance(turn, dict) else "")
+            # v16: 不再硬截 400 字符——trim_history 已做 token 预算管理并生成
+            # 摘要轮（~1600 字符）；此处再截会把摘要机制击穿。
             if content:
-                lines.append(f"{role}: {str(content)[:400]}")
+                lines.append(f"{role}: {str(content)}")
         if lines:
             hist_block = "Recent dialogue:\n" + "\n".join(lines) + "\n\n"
     # P0: 结构图识别结果铺进推理上下文 — MolJSON 显式原子/键让 LLM

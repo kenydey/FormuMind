@@ -93,7 +93,7 @@ def trim_history(
         return turns
 
     # 从最新往最旧累积：保留能装进预算的轮次，被挤掉的旧轮次压缩为摘要。
-    # reserve 给摘要预留 token；最新一轮永远保留（prompt 层另有单轮截断）。
+    # reserve 给摘要预留 token；最新一轮永远保留（_chat_prompt 不再做单轮截断）。
     reserve = min(400, max(100, budget // 4))
     kept: list[ChatTurn] = []
     used = 0
