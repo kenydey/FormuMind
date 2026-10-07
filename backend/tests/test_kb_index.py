@@ -68,7 +68,8 @@ def test_chunk_store_counts_embedded(stores):
         {"text": "vec", "embedding": [0.1, 0.2], "embedding_model": "m"},
     ])
     assert chk.counts() == (2, 1)
-    assert chk.delete_for_source("s1") == 2
+    # v16 P1-7: delete_for_source 返回 {"total", "embedded"} 明细
+    assert chk.delete_for_source("s1") == {"total": 2, "embedded": 1}
 
 
 def test_chunk_store_counts_blob_only_as_embedded(stores):

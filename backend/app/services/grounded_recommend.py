@@ -217,6 +217,9 @@ def _match_evidence_ids(
         return []
     hits: list[str] = []
     for ident_key, idents in id_map.items():
+        # v16 P2-5: 兼容旧格式（str）和新格式（list[str]）
+        if isinstance(idents, str):
+            idents = [idents]
         for ident in idents:
             ev_toks = per_evidence_tokens.get(ident, set())
             if any(t in ident_key or t in ev_toks for t in name_toks):

@@ -245,7 +245,8 @@ def test_delete_for_source_triggers_rebuild(tmpdb):
     store.replace_for_source("src-2", _seed_chunks(5, 32))
     assert kb_ann.ensure_index()["ready"] is True
 
-    assert store.delete_for_source("src-2") == 5
+    # v16 P1-7: delete_for_source 返回 {"total", "embedded"} 明细
+    assert store.delete_for_source("src-2")["total"] == 5
     res = kb_ann.ensure_index()
     assert res["ready"] is True
     assert res["buckets"]["buckets"]["test-model"]["count"] == 10
