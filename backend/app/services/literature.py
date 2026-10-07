@@ -1525,9 +1525,62 @@ def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
         return []
 
 
+def split_lit_answer(
+    text: str, *, query: str, limit: int = 5, relevance: float = 0.92
+) -> list[Evidence]:
+    """Split a literature-search answer into per-citation Evidence rows.
+
+    paper-qa answers embed DOIs in their citation lines.  One Evidence per
+    unique DOI (identifier ``doi:...``) lets the rows participate in dedup,
+    re-ranking and citation chips like any other literature hit.  The full
+    answer is always kept as the first row; when no DOI is present the output
+    degrades to exactly the legacy single-blob shape.
+    """
+    body = str(text).strip()
+    if not body:
+        return []
+    out = [
+        Evidence(
+            source="ChemCrow-Lit",
+            # v16: 非确定性 hash() 改为 sha256（跨进程稳定）
+            identifier=f"chemlit:{hashlib.sha256(query.encode()).hexdigest()[:4]}",
+            title=f"LitSearch: {query[:80]}",
+            snippet=body[:600],
+            relevance=relevance,
+        )
+    ]
+    seen: set[str] = set()
+    for match in _DOI_RE.finditer(body):
+        doi = match.group(0).rstrip(".,;)")
+        if doi in seen:
+            continue
+        seen.add(doi)
+        # Use the line containing the DOI as the citation title/snippet.
+        line_start = body.rfind("\n", 0, match.start()) + 1
+        line_end = body.find("\n", match.end())
+        line = body[line_start : line_end if line_end >= 0 else len(body)].strip()
+        title = line.replace(doi, "").strip(" -–—:.,;()[]") or f"DOI {doi}"
+        out.append(
+            Evidence(
+                source="ChemCrow-Lit",
+                identifier=f"doi:{doi}",
+                title=title[:160],
+                snippet=line[:600] or body[:600],
+                relevance=max(0.0, min(1.0, relevance - 0.03)),
+            )
+        )
+        if len(out) >= limit + 1:
+            break
+    return out
+
+
+def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
+
+
 # Compatibility aliases retained for historical imports/tests (de-ChemCrow 2026-09).
 search_chemcrow_web = search_chem_web
 search_chemcrow_lit = search_chem_lit
+split_chemcrow_answer = split_lit_answer
 
 
 def get_source_availability() -> dict[str, dict]:
