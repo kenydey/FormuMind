@@ -581,7 +581,9 @@ class BaybeCampaignEngine:
             chemical_feasibility=chem_verdict,
             physical_constraints=phys_verdict,
             # v15: 实际喂给 add_measurements 的 lab 点数（去重后，含 df_wb 通道）
-            lab_points_used=len(df_meas_clean),
+            # v19-fix: 只计 REAL_SOURCES，不含 baybe_opt（v18-1 回归修复）。
+            # _lab_n 是去重前计数，用于 measurement_source 诚实性判定已足够。
+            lab_points_used=_lab_n,
         )
         from ..doe_adaptive import enrich_baybe_result
 
@@ -742,17 +744,21 @@ class BaybeCampaignEngine:
                 progress_cb((r + 1) / rounds, f"baybe batch {r + 1}/{rounds}: best={best_so_far:.3f}")
 
             # v18-7: 收敛早停 —— 目标达成即停，节省 GP 采样与 predictor 计算。
-            # 用首个 objective 的 target（multi-objective 时按 combined score 的归一化目标近似）。
+            # v19-fix: 用原始 metric 值判收敛（best_so_far 是归一化 [0,1] 分，
+            # 与 target 的原始量纲不可比 —— v18 量纲 bug）。
             try:
                 from ..convergence import target_achieved
 
                 _obj0 = objectives[0] if objectives else None
-                if _obj0 is not None and target_achieved(best_so_far, _obj0):
-                    log.info(
-                        "baybe: target achieved at round %d/%d (best=%.3f), early stop",
-                        r + 1, rounds, best_so_far,
-                    )
-                    break
+                if _obj0 is not None and ranked:
+                    _top_form = max(ranked, key=lambda t: t[0])[1]
+                    _raw_val = (_top_form.predicted or {}).get(_obj0.metric)
+                    if target_achieved(_raw_val, _obj0):
+                        log.info(
+                            "baybe: target achieved at round %d/%d (%s=%.3f), early stop",
+                            r + 1, rounds, _obj0.metric, _raw_val,
+                        )
+                        break
             except Exception:  # noqa: BLE001
                 pass
 

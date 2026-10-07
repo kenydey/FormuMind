@@ -1583,10 +1583,13 @@ def _build_context(evidence: list[Evidence], *, max_chars: int | None = None) ->
         total += len(line)
         return True
 
-    for i, e in enumerate(evidence):
+    # v19-1 Bug-3: 用独立计数器，防御未来调用方传入未过滤的 evidence。
+    _n = 0
+    for e in evidence:
         snippet = (e.snippet or "").strip()
         if not snippet:
             continue
+        _n += 1
         is_wiki = (e.source or "") == "wiki" or (e.identifier or "").startswith("wiki:")
         tag = "Wiki编译结论" if is_wiki else "原始摘录"
         # P1 #16: page/paragraph anchors aligned with CitationAnchor.to_citation_text.
@@ -1599,7 +1602,7 @@ def _build_context(evidence: list[Evidence], *, max_chars: int | None = None) ->
             loc_bits.append(f"¶{paragraph}")
         loc = f" ({', '.join(loc_bits)})" if loc_bits else ""
         # P2: [^n] markers shared with citation_binder / STORM (not bare [n]).
-        line = f"[^{i+1}]{loc} ({tag} · {e.source}) {e.title}: {snippet}"
+        line = f"[^{_n}]{loc} ({tag} · {e.source}) {e.title}: {snippet}"
         bucket = wiki_parts if is_wiki else raw_parts
         if not _append(bucket, line):
             break
@@ -1936,6 +1939,10 @@ def answer_question(
             relevant = compress_evidence(question, relevant, token_budget=budget)
         except Exception as exc:  # noqa: BLE001 - fail-open
             log.debug("answer_question query compression skipped: %s", exc)
+    # v19-1 (v18-9 修正): 过滤空 snippet 必须在 prompt 构建之前，
+    # 否则 _build_context 的 [^n] 断号仍在，且 prompt 编号与返回的
+    # citations 错位。
+    relevant = [e for e in relevant if (e.snippet or "").strip()]
     prompt = _chat_prompt(question, relevant, domain, history=history, structure=structure)
     if prompt_prefix and str(prompt_prefix).strip():
         prompt = f"{str(prompt_prefix).strip()}\n\n---\n\n{prompt}"
@@ -1963,9 +1970,6 @@ def answer_question(
             answer = f"根据已加载资料：{quoted}[^1]"
         else:
             answer = "暂无相关资料，请先检索或上传文献。"
-    # v18-9: 过滤空 snippet，避免 _build_context 的 [^n] 断号
-    #（空条目 LLM 没见过但 citations 里有，导致引用错位）。
-    relevant = [e for e in relevant if (e.snippet or "").strip()]
     return answer, relevant
 
 
