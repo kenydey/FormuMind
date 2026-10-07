@@ -238,7 +238,7 @@ def test_task_success_marks_the_outbox_row_done(db, monkeypatch) -> None:
 
     _eager_celery(monkeypatch)
     monkeypatch.setattr(
-        doe_cycle_service, "run_doe_cycle", lambda requirement, budget_remaining=None: {"ok": True}
+        doe_cycle_service, "run_doe_cycle", lambda requirement, budget_remaining=None, seed=None: {"ok": True}
     )
     payload = {
         "requirement": {
@@ -416,7 +416,7 @@ def test_the_task_body_runs_under_the_heartbeat(db, monkeypatch) -> None:
 
     seen: dict[str, datetime] = {}
 
-    def body(requirement, budget_remaining=None):
+    def body(requirement, budget_remaining=None, seed=None):
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             seen["updated_at"] = _row_times(db, outbox_id)[0]

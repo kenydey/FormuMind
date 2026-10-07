@@ -32,7 +32,7 @@ def search_hits(monkeypatch):
     """Swap the real federated search for a controllable stub."""
     state = {"evidence": []}
 
-    def fake_run_search(query, filters, settings=None):
+    def fake_run_search(query, filters, settings=None, notebooklm_notebook_id=None):
         state["query"] = query
         state["filters"] = dict(filters)
         return list(state["evidence"])

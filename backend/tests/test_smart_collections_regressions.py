@@ -149,7 +149,7 @@ def test_b4_get_list_not_blocked_by_inflight_refresh(data_dir, monkeypatch):
     """后台刷新在途（含分钟级搜索）时，GET list 不被长时间阻塞。"""
     search_sleep_s = 5.0
 
-    def slow_search(query, filters, settings=None):
+    def slow_search(query, filters, settings=None, notebooklm_notebook_id=None):
         time.sleep(search_sleep_s)
         return []
 

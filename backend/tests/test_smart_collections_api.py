@@ -21,7 +21,7 @@ def data_dir(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def no_search(monkeypatch):
-    monkeypatch.setattr(sc, "_run_search", lambda q, f, settings=None: [])
+    monkeypatch.setattr(sc, "_run_search", lambda q, f, settings=None, notebooklm_notebook_id=None: [])
     return True
 
 

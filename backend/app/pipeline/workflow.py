@@ -483,7 +483,7 @@ def run_optimization(
         Factor(name=l.name, low=l.low, high=l.high)
         for l in levers
     ]
-    opt = build_optimizer(factors=factors, seed=42)
+    opt = build_optimizer(factors=factors, seed=seed if seed is not None else 42)
     objective = OBJECTIVE[req.domain]
     objectives = req.objectives or default_objectives(req.domain)
     process = process_for(req)

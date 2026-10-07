@@ -323,6 +323,16 @@ class BaybeCampaignEngine:
         if not self.available():
             raise RuntimeError("baybe is not installed (pip install -e '.[baybe,bo,science]')")
 
+        # v17-4: seed 透传到 BayBE GP 采样层 —— Campaign/recommend 不收 seed，
+        # 用 torch 全局种子控制采集函数随机性（fail-open）。
+        if seed is not None:
+            try:
+                import torch
+
+                torch.manual_seed(seed)
+            except Exception:  # noqa: BLE001
+                pass
+
         from ...db.campaign_store import get_campaign_store
 
         campaign_store = store or get_campaign_store()
@@ -419,7 +429,23 @@ class BaybeCampaignEngine:
                 len(df_meas_clean),
             )
         if not df_meas_clean.empty:
-            campaign.add_measurements(df_meas_clean)
+            # v17-1: 跨轮去重 —— campaign_state 反序列化已含上一轮测量，
+            # 全量 measurements 会重复添加。用因子+指标指纹过滤已存在行。
+            if campaign_state is not None:
+                try:
+                    existing = campaign.measurements
+                    if existing is not None and not existing.empty:
+                        fp_cols = [c for c in df_meas_clean.columns if c in existing.columns]
+                        if fp_cols:
+                            existing_fp = set(map(tuple, existing[fp_cols].astype(str).values.tolist()))
+                            mask = ~df_meas_clean[fp_cols].astype(str).apply(tuple, axis=1).isin(existing_fp)
+                            df_meas_clean = df_meas_clean[mask]
+                            if df_meas_clean.empty:
+                                log.info("baybe: all measurements already in campaign, skipping add")
+                except Exception:
+                    pass  # fail-open: 指纹过滤失败则按原逻辑添加
+            if not df_meas_clean.empty:
+                campaign.add_measurements(df_meas_clean)
 
         if campaign_state is None and df_meas_clean.empty:
             # v13-5: 透传 requirement，冷启动 seed 也过 KG 化学门。
@@ -679,6 +705,9 @@ class BaybeCampaignEngine:
 
         top = _rank_by_pareto_then_score(ranked, objectives, settings.top_n_formulas)
         for score, form in top:
+            # v17 CI-5: name 分数与 form.score 同步 —— test_optimization_top_names_match_true_scores
+            # 要求 name 中的分数与真分数一致。
+            form.score = score
             form.name = f"BayBE {req.domain.value} (score {score:.3f})"
         top = [form for _, form in top]
 

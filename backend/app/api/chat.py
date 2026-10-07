@@ -683,6 +683,13 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                     # v13-1: 空列表也是合法重绑结果，用 is not None。
                     if reviewer_fix and reviewer_fix.get("citations") is not None:
                         citations = reviewer_fix["citations"]
+                    # v17-3: 同步 structured.summary —— fix-loop 重生成了 answer，
+                    # structured 对象仍是旧文本，两张皮。
+                    if structured is not None and reviewer_fix:
+                        try:
+                            structured = structured.model_copy(update={"summary": answer})
+                        except Exception:  # noqa: BLE001
+                            pass
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("reviewer fix-loop skipped: %s", exc)
 
@@ -1355,11 +1362,15 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                                 project_id=req.project_id,
                             )
                             # 同步 structured.summary，保持对象契约一致。
+                            # v17-3: 同时重绑 citations —— reviewer_fix 可能重排了引用，
+                            # 只同步 summary 会导致答案与引用表脱钩（v11 P0-4 变体）。
                             if structured is not None and reviewer_fix:
                                 try:
                                     structured = structured.model_copy(
                                         update={"summary": answer}
                                     )
+                                    if reviewer_fix.get("citations") is not None:
+                                        citations = reviewer_fix["citations"]
                                 except Exception:  # noqa: BLE001
                                     pass
                         except Exception as exc:  # noqa: BLE001 - fail-open

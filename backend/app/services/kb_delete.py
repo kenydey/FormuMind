@@ -35,16 +35,25 @@ def delete_kb_source(source_id: str) -> dict[str, Any]:
 
     try:
         # v16 P1-7: 删除扣减覆盖率计数器（否则单调虚增）。
+        # v17-5: 先统计语言分桶，再删除（delete_for_source 只返回 total/embedded）。
+        from .kb_index import _bump_kb_coverage, _count_source_chunks, _sync_source_fts
+        from ..config import get_settings
+
+        _old_total, _old_emb, _old_en, _old_zh = _count_source_chunks(sid)
         removed = get_chunk_store().delete_for_source(sid) or {}
         chunks_removed = int(removed.get("total", 0))
-        embedded_removed = int(removed.get("embedded", 0))
         if chunks_removed:
-            from .kb_index import _bump_kb_coverage
-
             _bump_kb_coverage(
-                embedded=-embedded_removed,
-                total=-chunks_removed,
+                total=-_old_total,
+                embedded=-_old_emb,
+                embedded_en=-_old_en,
+                embedded_zh=-_old_zh,
             )
+        # v17-5: 清空 FTS5 镜像 —— 否则已删文档仍可被 BM25 搜到。
+        try:
+            _sync_source_fts(sid, [], get_settings())
+        except Exception:  # noqa: BLE001
+            pass
     except Exception as exc:  # noqa: BLE001
         logger.exception("kb delete: chunks failed for %s: %s", sid, exc)
 

@@ -429,13 +429,19 @@ class ChunkStore:
 
         v16: 返回 {"total": 删除总数, "embedded": 其中有向量的}，
         供覆盖率计数器扣减（P1-7）。
+        v17-5: embedded 统计包含只有 embedding_blob 的历史行（P0-1 backfill 只写 blob）。
         """
         with commit_session(self._session_factory) as session:
+            from sqlalchemy import or_
+
             embedded = (
                 session.query(DocumentChunk)
                 .filter(
                     DocumentChunk.source_id == source_id,
-                    DocumentChunk.embedding.isnot(None),
+                    or_(
+                        DocumentChunk.embedding.isnot(None),
+                        DocumentChunk.embedding_blob.isnot(None),
+                    ),
                 )
                 .count()
             )

@@ -399,6 +399,8 @@ def run_deep_research_task(self, payload: dict) -> dict:
             pre_index=sources or None,
             progress_cb=graph_progress,
             mode="deep",
+            # v17-2: 从 payload 透传 per-project notebook ID
+            notebooklm_notebook_id=payload.get("notebooklm_notebook_id"),
         )
         grounded = state.get("grounded_evidence") or []
         report = ComprehensiveReport(

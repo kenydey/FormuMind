@@ -28,6 +28,8 @@ class DeepResearchRequest(BaseModel):
     requirement: Requirement
     sources: list[Evidence] = Field(default_factory=list)
     query: str = ""
+    # v17-2: per-project NotebookLM notebook 透传（v16 P1-3 只修了本体，API→worker 漏了）
+    notebooklm_notebook_id: str | None = None
 
 
 class ModifyRequest(BaseModel):
@@ -90,6 +92,8 @@ def start_deep_research(body: DeepResearchRequest, request: Request) -> JSONResp
         "requirement": body.requirement.model_dump(),
         "sources": [s.model_dump() for s in body.sources],
         "query": body.query or body.topic,
+        # v17-2: notebook ID 透传给 worker
+        "notebooklm_notebook_id": body.notebooklm_notebook_id,
     }
     outbox_id = _enqueue_outbox("research_deep", payload)
     return submit(run_deep_research_task, payload, "deep_research", outbox_id=outbox_id, owner_id=get_current_owner(request))

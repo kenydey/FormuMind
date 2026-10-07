@@ -637,7 +637,8 @@ def prepare_chunk_rows(
     from .kb_dedup import dedupe_chunk_rows
 
     # v16 P3-17: L1 已在 embedding 前做过，此处仅做 L2。
-    rows = dedupe_chunk_rows(rows, source_id, session, skip_l1=True)
+    # v17 CI-2: embed=False 时不打 needs_l2_review 标记。
+    rows = dedupe_chunk_rows(rows, source_id, session, skip_l1=True, mark_needs_l2=embed)
     # v16 P2-7: 覆盖率 bump 不在此处 —— 移到 index_source 的 DB 写成功之后，
     # 否则写失败会导致计数虚增。dedupe 后的 rows 由调用方负责 bump。
     return rows if rows else None
@@ -662,6 +663,8 @@ def index_source(
         from .kb_retrieval_gate import gate_ingest_rows, ingest_block_reason_for_source
 
         settings = get_settings()
+        # v17-5: _old_counts 前移 —— 提前 return 分支清空旧 chunk 时也需要扣减覆盖率。
+        _old_counts = _count_source_chunks(source_id)
         # Ingest-time quality gate (same rules as hybrid #111): blocked origin
         # never becomes document_chunks — clear any prior rows and stop early.
         if ingest_block_reason_for_source(source_id):
@@ -670,6 +673,9 @@ def index_source(
             record_gate_drop("ingest", "blocked_domain")
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
+            # v17-5: 扣减旧计数
+            _old_total, _old_emb, _old_en, _old_zh = _old_counts
+            _bump_kb_coverage(total=-_old_total, embedded=-_old_emb, embedded_en=-_old_en, embedded_zh=-_old_zh)
             return 0
         # U-1: 公共 chunk 准备（chunking → gate → lang → entity → embedding → dedupe）
         # 与 ingest_document_tx 共用，保证双写入路径永远一致。
@@ -685,9 +691,11 @@ def index_source(
         if not rows:
             get_chunk_store().replace_for_source(source_id, [])
             _sync_source_fts(source_id, [], settings)
+            # v17-5: 扣减旧计数
+            _old_total, _old_emb, _old_en, _old_zh = _old_counts
+            _bump_kb_coverage(total=-_old_total, embedded=-_old_emb, embedded_en=-_old_en, embedded_zh=-_old_zh)
             return 0
         # v16 P1-7: re-ingest 扣减旧计数（调用方在 DB 写成功后 bump）。
-        _old_counts = _count_source_chunks(source_id)
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)
