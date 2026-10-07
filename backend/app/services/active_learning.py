@@ -164,10 +164,11 @@ def _legacy_active_learning_doe(
     design: str,
     *,
     doe_engine: str = "auto",
+    seed: int | None = None,
 ) -> DOEPlan:
     from ..pipeline.workflow import build_doe
 
-    plan = build_doe(req, design=design, engine=doe_engine)
+    plan = build_doe(req, design=design, engine=doe_engine, seed=seed)
     plan.notes = f"engine=legacy; AI 主动选点 (n={n_suggest}, design={design})"
 
     suggested_ids = {
@@ -200,6 +201,7 @@ def active_learning_doe(
     doe_engine: str = "auto",
     workbench_campaign_id: int | None = None,
     budget_remaining: int | None = None,
+    seed: int | None = None,
 ) -> ActiveDoeResult:
     """Generate a DOE plan and annotate the most informative runs."""
     eng = (engine or "auto").lower()
@@ -225,6 +227,7 @@ def active_learning_doe(
                         design=f"baybe_{design}",
                         workbench_campaign_id=workbench_campaign_id,
                         budget_remaining=budget_remaining,
+                        seed=seed,
                     )
                     result.plan.plan_id = uuid.uuid4().hex
                     result.plan.domain = req.domain
@@ -258,7 +261,7 @@ def active_learning_doe(
                     exc,
                 )
 
-    plan = _legacy_active_learning_doe(req, existing, n_suggest, design, doe_engine=doe_engine)
+    plan = _legacy_active_learning_doe(req, existing, n_suggest, design, doe_engine=doe_engine, seed=seed)
     from ..pipeline.workflow import _cache_plan
     from ..services.doe_adaptive import enrich_active_doe_result
 

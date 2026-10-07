@@ -525,8 +525,13 @@ class BaybeCampaignEngine:
         progress_cb=None,
         workbench_campaign_id: int | None = None,
         store=None,
+        seed: int | None = None,
     ) -> OptimizationResult:
-        """Iterative baybe batch recommendations scored via FormuMind predictor."""
+        """Iterative baybe batch recommendations scored via FormuMind predictor.
+
+        seed: None = OS entropy (historical default); int = reproducible.
+        Multi-round campaigns use ``seed + round_index`` per round.
+        """
         from ...db.campaign_store import get_campaign_store
 
         campaign_store = store or get_campaign_store()
@@ -564,6 +569,7 @@ class BaybeCampaignEngine:
                 design="baybe_opt",
                 workbench_campaign_id=workbench_campaign_id,
                 store=campaign_store,
+                seed=None if seed is None else seed + r,
             )
             state = result.campaign_state
             # v15: 聚合各轮实际喂给 GP 的 lab 点数

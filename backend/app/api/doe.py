@@ -163,6 +163,8 @@ class DoeCycleBody(BaseModel):
     workbench_campaign_id: int | None = None
     # P2-4: remaining experiment budget; <= 0 hard-stops with a hold stub.
     budget_remaining: int | None = None
+    # v16: DOE 冷启动种子。None = OS 熵（历史默认）；整数 = 可复现。
+    seed: int | None = None
 
 
 @router.post("/doe/cycle", status_code=202)
@@ -172,6 +174,7 @@ def start_doe_cycle(body: DoeCycleBody) -> JSONResponse:
         "requirement": body.requirement.model_dump(),
         "workbench_campaign_id": body.workbench_campaign_id,
         "budget_remaining": body.budget_remaining,
+        "seed": body.seed,
     }
     outbox_id = enqueue_outbox("doe_cycle", payload)
     return submit(run_doe_cycle_task, payload, "doe_cycle", outbox_id=outbox_id)

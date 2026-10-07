@@ -132,6 +132,7 @@ def loop_iterate(
     prior_optimization: OptimizationResult | None = None,
     prior_next_doe: DOEPlan | None = None,
     budget_remaining: int | None = None,
+    seed: int | None = None,
 ) -> LoopReport:
     """Run one full turn of the self-driving loop and bundle the result."""
     from . import active_learning
@@ -209,6 +210,7 @@ def loop_iterate(
         existing_records=records,
         campaign_state=campaign_state,
         workbench_campaign_id=workbench_campaign_id,
+        seed=seed,
     )
 
     if progress_cb:
@@ -230,6 +232,7 @@ def loop_iterate(
         campaign_state=campaign_state,
         workbench_campaign_id=workbench_campaign_id,
         budget_remaining=budget_remaining,
+        seed=seed,
     )
     chem = getattr(next_result, "chemical_feasibility", None)
     phys = getattr(next_result, "physical_constraints", None)

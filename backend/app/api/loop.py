@@ -27,6 +27,7 @@ def iterate_loop(payload: LoopRequest, request: Request) -> JSONResponse:
                 "prior_optimization",
                 "prior_next_doe",
                 "budget_remaining",
+                "seed",
             }
         )
     )
@@ -44,4 +45,5 @@ def iterate_loop(payload: LoopRequest, request: Request) -> JSONResponse:
         else None,
         "prior_next_doe": payload.prior_next_doe.model_dump() if payload.prior_next_doe else None,
         "budget_remaining": payload.budget_remaining,
+        "seed": payload.seed,
     }, "loop", owner_id=get_current_owner(request))

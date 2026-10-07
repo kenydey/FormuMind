@@ -427,6 +427,7 @@ def run_optimization(
     campaign_state: str | None = None,
     existing_records: list | None = None,
     workbench_campaign_id: int | None = None,
+    seed: int | None = None,
 ) -> OptimizationResult:
     settings = get_settings()
     iterations = iterations or settings.optimize_iterations
@@ -450,6 +451,7 @@ def run_optimization(
                         measurements=list(records),
                         progress_cb=progress_cb,
                         workbench_campaign_id=workbench_campaign_id,
+                        seed=seed,
                     )
             except Exception as exc:
                 if resolved == "baybe":

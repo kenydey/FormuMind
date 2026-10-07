@@ -633,6 +633,7 @@ def run_optimize_task(self, payload: dict) -> dict:
             engine=payload.get("engine", "auto"),
             campaign_state=payload.get("campaign_state"),
             workbench_campaign_id=payload.get("workbench_campaign_id"),
+            seed=payload.get("seed"),
         )
         data = result.model_dump()
         tracker.emit(
@@ -1304,6 +1305,7 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
             ),
             prior_next_doe=_parse_optional_model(payload.get("prior_next_doe"), DOEPlan),
             budget_remaining=payload.get("budget_remaining"),
+            seed=payload.get("seed"),
         )
         # 先持久化（内部会给 next_doe.plan_id 赋新 UUID），再 dump，
         # 否则任务结果里的 plan_id 是旧值，前端无法关联该 DOE 计划。
@@ -1488,6 +1490,7 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
         result = doe_cycle_service.run_doe_cycle(
             requirement,
             budget_remaining=payload.get("budget_remaining"),
+            seed=payload.get("seed"),
         )
 
         tracker.emit(
