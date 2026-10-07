@@ -384,6 +384,8 @@ class BaybeCampaignEngine:
                     df_wb, metrics,
                     expected_params=[f.name for f in factor_list],
                 )
+                import pandas as pd
+
                 df_meas = (
                     pd.concat([df_meas, df_wb], ignore_index=True)
                     if not df_meas.empty
@@ -434,8 +436,6 @@ class BaybeCampaignEngine:
                 # 冷启动先验点应在因子空间均匀散布，而非取 LHS 的前 3 个。
                 # TODO(P3-14): 先验仍与 predictor 同源；理想是无信息 prior。
                 try:
-                    from .adapters.baybe_space_builder import factors_for_requirement
-
                     _fps_idx = _fps_select(virtual, min(3, len(virtual)))
                     virtual = virtual.iloc[_fps_idx]
                 except Exception:  # noqa: BLE001 - fail-open
@@ -537,6 +537,24 @@ class BaybeCampaignEngine:
         )
         from ..doe_adaptive import enrich_baybe_result
 
+        all_records = list(measurements)
+        if workbench_campaign_id is not None:
+            wb_rows = campaign_store.get_experiments_sync(workbench_campaign_id)
+            for row in wb_rows:
+                if row.measurements:
+                    all_records.append(
+                        ExperimentRecord(
+                            domain=req.domain,
+                            factors=dict(row.actual_params or row.planned_params or {}),
+                            measured={
+                                k: float(v)
+                                for k, v in row.measurements.items()
+                                if v is not None and v != ""
+                            },
+                            source="workbench",
+                            label=f"wb-{row.id}",
+                        )
+                    )
         # v16 P2-9: BayBE 替换池恒空 —— 用 LHS 从因子范围补采样，保证 batch 恒满。
         def _baybe_resample(n: int):
             from .doe_registry import build_doe_plan
