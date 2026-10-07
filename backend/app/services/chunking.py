@@ -244,7 +244,7 @@ def _split_blocks(body: str) -> list[str]:
     lines = body.split("\n")
     blocks: list[str] = []
     current: list[str] = []
-    mode = "text"  # text | table | fence | math
+    mode = "text"  # text | table | html_table | fence | math
     math_closer = ""
 
     def flush() -> None:
@@ -295,12 +295,31 @@ def _split_blocks(body: str) -> list[str]:
             current.append(line)
             continue
         is_table_row = stripped.startswith("|") and stripped.count("|") >= 2
+        # v18-17: HTML 表格原子化 —— <table>...</table> 遇空行不截断，
+        # 与模块头"表格原子"承诺对齐。
+        _is_html_table_start = stripped.lower().startswith("<table")
+        _is_html_table_end = "</table>" in stripped.lower()
         if mode == "table":
             if is_table_row:
                 current.append(line)
                 continue
             flush()
             mode = "text"
+        if mode == "html_table":
+            current.append(line)
+            if _is_html_table_end:
+                flush()
+                mode = "text"
+            continue
+        if _is_html_table_start:
+            flush()
+            mode = "html_table"
+            current.append(line)
+            # 单行完整表格直接结束
+            if _is_html_table_end:
+                flush()
+                mode = "text"
+            continue
         if is_table_row:
             flush()
             mode = "table"
