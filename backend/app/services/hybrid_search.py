@@ -18,13 +18,10 @@ keeps the gate warm for a few queries after p95 cools.
 from __future__ import annotations
 
 import logging
-import re
-import sys
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any
 
 import numpy as np
