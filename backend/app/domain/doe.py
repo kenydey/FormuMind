@@ -210,6 +210,7 @@ def build_plan(
     n: int | None = None,
     *,
     ccd_alpha: str | float | None = None,
+    seed: int | None = None,
 ) -> DOEPlan:
     """Build a design over *factors*.
 
@@ -218,6 +219,9 @@ def build_plan(
     :func:`resolve_ccd_alpha`. Runs that land outside a factor's range (star points of a rotatable or large-alpha CCD)
     are kept but marked ``infeasible`` with the reason, never clipped: clipping would collapse them onto other runs and
     silently change the design.
+
+    ``seed`` feeds the LHS RNG (``design="lhs"``); other designs are deterministic
+    and ignore it. ``seed=None`` keeps the historical default seed 0.
     """
     if not factors:
         raise ValueError("At least one factor is required for a DOE plan.")
@@ -246,6 +250,9 @@ def build_plan(
         matrix = full_factorial(k, levels=_level_counts(factors))
     elif design == "ccd":
         matrix = central_composite(k, "face" if ccd_alpha in (None, "") else ccd_alpha)
+    elif design == "lhs":
+        # v15: seed 透传（None 时保持历史默认 0，保证旧行为可复现）
+        matrix = latin_hypercube(k, n or max(2 * k + 1, 8), seed if seed is not None else 0)
     else:
         matrix = _DESIGNS[design](k, n)
     runs: list[DOERun] = []

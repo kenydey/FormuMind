@@ -259,6 +259,7 @@ class BaybeCampaignEngine:
         workbench_campaign_id: int | None = None,
         store=None,
         budget_remaining: int | None = None,
+        seed: int | None = None,
     ) -> BaybeRecommendResult:
         if not self.available():
             raise RuntimeError("baybe is not installed (pip install -e '.[baybe,bo,science]')")
@@ -352,9 +353,10 @@ class BaybeCampaignEngine:
 
         if campaign_state is None and df_meas_clean.empty:
             # v13-5: 透传 requirement，冷启动 seed 也过 KG 化学门。
+            # v15: 透传 seed，冷启动 LHS 可复现（None 时走 OS 熵，保持旧行为）。
             seed_plan = build_doe_plan(
                 factor_list, "lhs", engine="auto", n=max(batch_size * 2, 8),
-                requirement=req,
+                requirement=req, seed=seed,
             )
             virtual = surrogate_measurements_from_plan(seed_plan, req, None)
             if not virtual.empty and metrics:

@@ -11,8 +11,11 @@ def build_native_plan(
     n: int | None = None,
     *,
     ccd_alpha: str | float | None = None,
+    seed: int | None = None,
 ) -> DOEPlan:
-    plan = doe_engine.build_plan(factors, design=design, n=n, ccd_alpha=ccd_alpha)
+    plan = doe_engine.build_plan(
+        factors, design=design, n=n, ccd_alpha=ccd_alpha, seed=seed
+    )
     if "engine=" not in plan.notes:
         plan.notes = f"engine=native; {plan.notes}"
     return plan

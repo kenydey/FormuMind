@@ -49,3 +49,49 @@ def test_unknown_design_raises():
 
     with pytest.raises(ValueError):
         doe.build_plan(FACTORS, design="nope")
+
+
+def _lhs_factors():
+    from app.domain.schemas import DOEFactor
+
+    return [
+        DOEFactor(name="x", kind="continuous", low=0.0, high=10.0, unit=""),
+        DOEFactor(name="y", kind="continuous", low=0.0, high=10.0, unit=""),
+    ]
+
+
+def test_v15_native_lhs_seed_reproducible():
+    """v15: native 引擎 LHS 透传 seed——同 seed 相同、异 seed 不同。"""
+    from app.services.engines.doe_registry import build_doe_plan
+
+    fs = _lhs_factors()
+    key = lambda p: [tuple(r.natural.values()) for r in p.runs]  # noqa: E731
+    p1 = build_doe_plan(fs, "lhs", engine="native", n=8, seed=123)
+    p2 = build_doe_plan(fs, "lhs", engine="native", n=8, seed=456)
+    p3 = build_doe_plan(fs, "lhs", engine="native", n=8, seed=123)
+    assert key(p1) != key(p2), "不同 seed 应生成不同方案"
+    assert key(p1) == key(p3), "相同 seed 应生成相同方案"
+
+
+def test_v15_pydoe_fallback_keeps_seed():
+    """v15: pydoe→native fallback 不丢 seed（monckeypatch 强制 fallback）。"""
+    import app.services.engines.pydoe_engine as pe
+    from app.services.engines.doe_registry import build_doe_plan
+
+    fs = _lhs_factors()
+    key = lambda p: [tuple(r.natural.values()) for r in p.runs]  # noqa: E731
+    real = pe.build_pydoe_plan
+
+    def boom(*a, **k):
+        raise RuntimeError("forced fallback")
+
+    pe.build_pydoe_plan = boom
+    try:
+        p1 = build_doe_plan(fs, "lhs", engine="pydoe", n=8, seed=123)
+        p2 = build_doe_plan(fs, "lhs", engine="pydoe", n=8, seed=123)
+        p3 = build_doe_plan(fs, "lhs", engine="pydoe", n=8, seed=456)
+    finally:
+        pe.build_pydoe_plan = real
+    assert "fallback" in p1.notes
+    assert key(p1) == key(p2), "fallback 后同 seed 应相同"
+    assert key(p1) != key(p3), "fallback 后异 seed 应不同"

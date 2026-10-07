@@ -142,7 +142,7 @@ def build_plan_with_fallback(
                 f"混料设计 {design!r} 不受支持或 pyDOE 不可用 — "
                 "混料约束(成分和=100%)无法由无约束 LHS 兜底"
             )
-        return build_native_plan(factors, design, n=n)
+        return build_native_plan(factors, design, n=n, seed=seed)
     try:
         return build_pydoe_plan(factors, design, n=n, requirement=requirement, seed=seed)
     except Exception as exc:
@@ -157,6 +157,7 @@ def build_plan_with_fallback(
         if isinstance(exc, ValueError) and "discrete factors" in str(exc):
             raise
         native_design = design if design in {"lhs", "ccd"} else "lhs"
-        plan = build_native_plan(factors, native_design, n=n)
+        # v15: fallback 也透传 seed，保证"指定 seed → 可复现"承诺不断裂
+        plan = build_native_plan(factors, native_design, n=n, seed=seed)
         plan.notes = f"engine=native (pydoe fallback: {exc}); {plan.notes}"
         return plan

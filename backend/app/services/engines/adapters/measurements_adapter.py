@@ -77,6 +77,11 @@ def surrogate_measurements_from_plan(plan, req: Requirement, objective_metric: s
 
     rows = []
     for run in plan.runs:
+        # v15: KG 门标 infeasible 的 run 不进 GP 先验（语义自洽：死刑配方
+        # 不应成为优化起点；其余 run 照常走 predictor 虚拟值）。
+        if getattr(run, "infeasible", False):
+            log.debug("surrogate skip run %s: marked infeasible", getattr(run, "id", "?"))
+            continue
         row = dict(run.natural)
         try:
             form = reconstruct.formulation_from_factors(req, run.natural)
