@@ -256,8 +256,22 @@ def _ground_component(
         refs = [r for r in refs if r in related]
         if not refs:
             refs = _match_evidence_ids(comp.name, per_evidence_tokens, id_map)
+        # v20-1: 引用可解释性 —— 记录命中原因。
+        details = [
+            {
+                "id": r,
+                "hit_type": "cas",
+                "hit_detail": f"CAS {comp.cas_no} 命中",
+                "confidence": "high",
+            }
+            for r in refs
+        ]
         return comp.model_copy(
-            update={"evidence_refs": refs, "grounding_confidence": "high"}
+            update={
+                "evidence_refs": refs,
+                "evidence_details": details,
+                "grounding_confidence": "high",
+            }
         )
 
     # The evidence states the component by name: that is support, however short
@@ -268,8 +282,23 @@ def _ground_component(
     if verbatim:
         _vset = set(verbatim)
         refs = [r for r in refs if r in _vset]
+        _final_refs = refs or verbatim
+        # v20-1: 引用可解释性 —— 记录命中原因。
+        details = [
+            {
+                "id": r,
+                "hit_type": "verbatim",
+                "hit_detail": f"逐字命中 '{comp.name}'",
+                "confidence": "high",
+            }
+            for r in _final_refs
+        ]
         return comp.model_copy(
-            update={"evidence_refs": refs or verbatim, "grounding_confidence": "high"}
+            update={
+                "evidence_refs": _final_refs,
+                "evidence_details": details,
+                "grounding_confidence": "high",
+            }
         )
 
     if not refs:
@@ -297,7 +326,23 @@ def _ground_component(
     if conf == "low" and _is_commodity(comp):
         conf = "medium"
 
-    return comp.model_copy(update={"evidence_refs": refs, "grounding_confidence": conf})
+    # v20-1: 引用可解释性 —— token 命中的原因。
+    details = [
+        {
+            "id": r,
+            "hit_type": "token",
+            "hit_detail": "关键词匹配" if token_hit else "语义相关",
+            "confidence": conf,
+        }
+        for r in refs
+    ]
+    return comp.model_copy(
+        update={
+            "evidence_refs": refs,
+            "evidence_details": details,
+            "grounding_confidence": conf,
+        }
+    )
 
 
 def _formula_catalog_score(rec: RecommendedFormula, catalog: set[str], catalog_cas: set[str]) -> float:

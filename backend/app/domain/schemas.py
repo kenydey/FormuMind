@@ -250,6 +250,8 @@ class Formulation(BaseModel):
     ingredients: list[Ingredient]
     rationale: str = ""
     source: str = ""  # e.g. "manual", "ai_modify", "recommend"
+    # v20-3: predicted 是原始目标值（如 {"salt_spray_h": 720.0}），
+    # score 是 0-1 归一化加权分（用于排序）。前端应双字段展示。
     predicted: dict[str, float] = Field(default_factory=dict)
     predicted_std: dict[str, float] = Field(default_factory=dict)
     prediction_tiers: dict[str, str] = Field(default_factory=dict)
@@ -273,6 +275,18 @@ class Formulation(BaseModel):
         return round(sum(i.weight_pct for i in self.ingredients), 4)
 
 
+class EvidenceRef(BaseModel):
+    """v20-1: 引用可解释性 —— 每条引用附带命中原因。
+
+    前端用此展示"为什么引用这条证据"。
+    """
+
+    id: str  # 如 "EV1"
+    hit_type: str  # "verbatim" | "cas" | "token" | "semantic"
+    hit_detail: str = ""  # 如 "逐字命中 '磷酸锌 10%'", "CAS 7779-90-0"
+    confidence: str = "high"  # "high" | "medium" | "low"
+
+
 class RecommendedFormulaComponent(BaseModel):
     """One row in the structured lab recipe table (LLM output + UI)."""
 
@@ -289,6 +303,8 @@ class RecommendedFormulaComponent(BaseModel):
     weight_pct: float | None = Field(default=None, ge=0, le=100)
     notes: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
+    # v20-1: 引用可解释性明细（与 evidence_refs 一一对应，向后兼容）。
+    evidence_details: list[EvidenceRef] = Field(default_factory=list)
     grounding_confidence: Literal["high", "medium", "low"] = "high"
 
 class RecommendedFormula(BaseModel):

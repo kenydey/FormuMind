@@ -125,6 +125,10 @@ class RecommendFormulationsResponse(BaseModel):
     # hands it to the KB-ingest dispatcher; before this field existed both read
     # a key the response never carried, so they always saw an empty list.
     grounded_evidence: list[Evidence] = Field(default_factory=list)
+    # v20-3: 目标定义（含单位、方向），前端用此标注 raw_metrics 的列。
+    # Formulation.score 是 0-1 归一化分（用于排序），
+    # Formulation.predicted 是原始目标值（如盐雾 720h）。
+    objectives: list[dict] = Field(default_factory=list)
 
 
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
@@ -256,6 +260,17 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         relation_insights=insights,
         recommend_id=bundle.recommend_id,
         grounded_evidence=list(evidence)[:_ECHO_EVIDENCE_CAP],
+        # v20-3: 返回目标定义，前端用此标注 predicted 的原始值列。
+        objectives=[
+            {
+                "metric": o.metric,
+                "direction": o.direction,
+                "weight": o.weight,
+                "target_value": o.target_value,
+                "unit": getattr(o, "unit", None),
+            }
+            for o in objectives
+        ],
     )
 
 
