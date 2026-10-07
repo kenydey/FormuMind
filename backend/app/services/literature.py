@@ -1575,6 +1575,16 @@ def split_lit_answer(
 
 
 def search_chem_lit(query: str, limit: int = 5) -> list[Evidence]:
+    """Chemical literature search via Semantic Scholar (arXiv tier removed).
+
+    (ChemCrow's LiteratureSearch wrapper was removed 2026-09: it required
+    paper-qa + an OpenAI key this DeepSeek-only deployment never had, so it
+    had always degraded to [] in practice.)
+    """
+    try:
+        return search_semantic_scholar(query, limit=limit)
+    except Exception:
+        return []
 
 
 # Compatibility aliases retained for historical imports/tests (de-ChemCrow 2026-09).
