@@ -224,6 +224,42 @@ def _claims_evidence(evidence: list[Evidence]) -> list[Evidence]:
         return evidence
 
 
+def _claims_evidence_with_mapping(
+    evidence: list[Evidence],
+) -> tuple[list[Evidence], dict[int, int]]:
+    """v24-fix: 返回 (过滤后列表, old_idx→new_idx 映射)，供 reviewer 坐标对齐用。
+
+    答案中的 [^n] 基于完整 citations 编号，reviewer 看到的却是过滤 wiki 后的列表。
+    调用方需用映射重写答案中的 [^n]，删除指向被过滤条目的标记。
+    """
+    filtered = _claims_evidence(evidence)
+    # 用 id() 建立 old→new 映射（Evidence 可能不可哈希）
+    id_to_new = {id(e): i for i, e in enumerate(filtered)}
+    mapping = {
+        old: id_to_new[id(e)]
+        for old, e in enumerate(evidence)
+        if id(e) in id_to_new
+    }
+    return filtered, mapping
+
+
+def _remap_citation_numbers(answer: str, mapping: dict[int, int]) -> str:
+    """v24-fix: 用 old→new 映射重写答案中的 [^n]，删除指向被过滤条目的标记。
+
+    [^1] 是 1-based，mapping 的 key 是 0-based old_idx。
+    """
+    import re
+
+    def _repl(m: re.Match) -> str:
+        old_idx = int(m.group(1)) - 1
+        new_idx = mapping.get(old_idx)
+        if new_idx is None:
+            return ""  # 指向 wiki（被过滤），删除标记
+        return f"[^{new_idx + 1}]"
+
+    return re.sub(r"\[\^(\d+)\]", _repl, answer)
+
+
 def _claims_and_audit(
     question: str,
     answer: str,
@@ -644,8 +680,11 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
             answer, emeta = postprocess_evidence_answer(answer, settings=settings)
             doi_results = emeta.get("doi_results")
             citation_expand = emeta.get("citation_expand") or None
+            # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
+            _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
+            _rev_answer = _remap_citation_numbers(answer, _rev_mapping)
             evidence_reviewer = _run_evidence_review(
-                question, answer, _claims_evidence(citations), settings
+                question, _rev_answer, _rev_evidence, settings
             )
             if (
                 evidence_reviewer
@@ -1026,8 +1065,11 @@ def _finalize_evidence_fields(
         answer, emeta = postprocess_evidence_answer(answer, settings=settings)
         doi_results = emeta.get("doi_results")
         citation_expand = emeta.get("citation_expand") or None
+        # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
+        _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
+        _rev_answer = _remap_citation_numbers(answer, _rev_mapping)
         reviewer = _run_evidence_review(
-            question, answer, _claims_evidence(citations), settings
+            question, _rev_answer, _rev_evidence, settings
         )
         if (
             reviewer
@@ -1340,11 +1382,14 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             or req.selected_skills
                             or req.selected_mcp_servers
                         ):
+                            # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
+                            _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
+                            _rev_answer = _remap_citation_numbers(answer, _rev_mapping)
                             evidence_reviewer = await asyncio.to_thread(
                                 _run_evidence_review,
                                 question,
-                                answer,
-                                _claims_evidence(citations),
+                                _rev_answer,
+                                _rev_evidence,
                                 settings,
                             )
                     except Exception as exc:  # noqa: BLE001

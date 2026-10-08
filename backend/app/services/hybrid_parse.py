@@ -30,6 +30,7 @@ its own column rather than hiding it.
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 import re
 
@@ -52,7 +53,10 @@ _DISCARD = frozenset({"header", "footer", "page_number"})
 # every ``parse()`` call so a broken endpoint on one document does not leak
 # into the next.  Transient failures (timeout, 503 cold-start) do NOT
 # increment this counter — retrying may succeed.
-_vision_consecutive_failures = 0
+# v24-fix: 改为 ContextVar，每请求隔离，避免并发文档互相清零/污染。
+_vision_consecutive_failures: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "vision_consecutive_failures", default=0
+)
 
 
 def _needs_escalation(page: pdf_local.LocalPage) -> bool:
@@ -188,7 +192,6 @@ def _visual_markdown(
     would have no way to tell a page with an unreadable figure from a page with
     no figure at all.
     """
-    global _vision_consecutive_failures
 
     caption = (block.caption or "").strip()
     fallback = f"> [图 · {page_label}]{' ' + caption if caption else ''}"
@@ -201,15 +204,15 @@ def _visual_markdown(
     # ── circuit breaker: skip when the endpoint has been telling us no ──
     settings = get_settings()
     budget = int(settings.vision_max_consecutive_failures)
-    if budget and _vision_consecutive_failures >= budget:
+    if budget and _vision_consecutive_failures.get() >= budget:
         logger.info(
             "hybrid: vision breaker open after %d consecutive permanent "
             "failures — skipping remaining figures in this document",
-            _vision_consecutive_failures,
+            _vision_consecutive_failures.get(),
         )
         return (
             f"{fallback}\n>\n>"
-            f" _（视觉解析已跳过：端点连续 {_vision_consecutive_failures} 次返回不可恢复错误）_"
+            f" _（视觉解析已跳过：端点连续 {_vision_consecutive_failures.get()} 次返回不可恢复错误）_"
         )
 
     try:
@@ -233,24 +236,24 @@ def _visual_markdown(
         from .vision_extract import _is_permanent_vision_failure
 
         if _is_permanent_vision_failure(error):
-            _vision_consecutive_failures += 1
+            _vision_consecutive_failures.set(_vision_consecutive_failures.get() + 1)
             # Quota exhaustion (429 insufficient_quota) is not going to recover
             # until the vendor resets the weekly quota — skip the "wait N pages"
             # ramp and open the breaker immediately so every remaining figure in
             # this document degrades to a placeholder instead of retrying 3× each.
             lower = (error or "").lower()
             if "insufficient_quota" in lower or "quota has been exhausted" in lower:
-                _vision_consecutive_failures = max(_vision_consecutive_failures, budget)
+                _vision_consecutive_failures.set(max(_vision_consecutive_failures.get(), budget))
                 logger.info("hybrid: vision quota exhausted — breaker opened immediately")
             logger.info(
                 "hybrid: vision permanent failure #%d for %s — "
                 "breaker at %d; %s",
-                _vision_consecutive_failures, page_label, budget, error,
+                _vision_consecutive_failures.get(), page_label, budget, error,
             )
         return f"{fallback}\n>\n> _（视觉解析未返回结果，详见服务端日志）_"
 
     # A successful call resets the counter: the endpoint is reachable again.
-    _vision_consecutive_failures = 0
+    _vision_consecutive_failures.set(0)
     rendered = image_markdown(extraction, page_label)
     return f"{caption}\n\n{rendered}" if caption else rendered
 
@@ -369,6 +372,13 @@ def _scanned_vision_fallback(content: bytes) -> str | None:
     from .pdf_local import page_as_png
     from ..config import get_settings
 
+    # v24-fix: 熔断检查 —— 熔断器打开时直接返回 None，不绕过。
+    _settings = get_settings()
+    _budget = int(_settings.vision_max_consecutive_failures)
+    if _budget and _vision_consecutive_failures.get() >= _budget:
+        logger.info("hybrid: scanned vision fallback skipped (breaker open)")
+        return None
+
     try:
         ok, _why = vision_extract.vision_available()
     except Exception:
@@ -428,7 +438,8 @@ def _scanned_without_cloud(content: bytes) -> str | None:
         if len(text.strip()) < 200:
             visual = _scanned_vision_fallback(content)
             if visual:
-                return visual
+                # v24-fix: 拼接而非整体替换 —— 保留第 4 页起的 OCR 内容。
+                return text + "\n\n" + visual
         return text
 
     # Same page cap as RapidOCR on purpose: this is the same job by another
@@ -449,8 +460,7 @@ def parse(content: bytes) -> str | None:
     cascade moves on. Every other failure degrades to the local result: a
     cloud outage should cost quality, never the upload.
     """
-    global _vision_consecutive_failures
-    _vision_consecutive_failures = 0
+    _vision_consecutive_failures.set(0)
 
     pages = pdf_local.extract_pages(content)
     if not pages:

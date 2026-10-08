@@ -459,8 +459,15 @@ class BaybeCampaignEngine:
                     if existing is not None and not existing.empty:
                         fp_cols = [c for c in df_meas_clean.columns if c in existing.columns]
                         if fp_cols:
-                            existing_fp = set(map(tuple, existing[fp_cols].astype(str).values.tolist()))
-                            mask = ~df_meas_clean[fp_cols].astype(str).apply(tuple, axis=1).isin(existing_fp)
+                            # v24-fix: round(6) 后转 str，避免跨 pandas/numpy 版本浮点格式差异导致指纹 miss。
+                            def _fp_str(df):
+                                return df[fp_cols].apply(
+                                    lambda col: col.apply(
+                                        lambda x: f"{round(float(x), 6):.6f}" if isinstance(x, (int, float)) else str(x)
+                                    ) if col.dtype.kind in "ifc" else col.astype(str)
+                                )
+                            existing_fp = set(map(tuple, _fp_str(existing).values.tolist()))
+                            mask = ~_fp_str(df_meas_clean).apply(tuple, axis=1).isin(existing_fp)
                             df_meas_clean = df_meas_clean[mask]
                             if df_meas_clean.empty:
                                 log.info("baybe: all measurements already in campaign, skipping add")

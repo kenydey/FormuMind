@@ -279,21 +279,55 @@ def _html_table_to_markdown(html: str) -> str:
     current_row: list[str] = []
     current_cell: list[str] = []
     in_cell = False
+    # v24-fix: colspan/rowspan 展开 —— 合并单元格按属性展开，空位填 ""。
+    pending_rowspans: list[tuple[int, int, str]] = []  # (col_idx, remaining_rows, text)
+    current_colspan = 1
+    current_rowspan = 1
 
     class _P(HTMLParser):
         def handle_starttag(self, tag, attrs):
-            nonlocal in_cell
+            nonlocal in_cell, current_colspan, current_rowspan
             if tag == "tr":
                 current_row.clear()
+                # 应用上一行的 rowspan 占位
+                _col = 0
+                _new_pending = []
+                for _cidx, _rem, _txt in pending_rowspans:
+                    while len(current_row) <= _cidx:
+                        current_row.append("")
+                    current_row[_cidx] = _txt
+                    if _rem > 1:
+                        _new_pending.append((_cidx, _rem - 1, _txt))
+                pending_rowspans.clear()
+                pending_rowspans.extend(_new_pending)
             elif tag in ("td", "th"):
                 in_cell = True
                 current_cell.clear()
+                _attrs = dict(attrs)
+                try:
+                    current_colspan = max(1, int(_attrs.get("colspan", 1)))
+                except (ValueError, TypeError):
+                    current_colspan = 1
+                try:
+                    current_rowspan = max(1, int(_attrs.get("rowspan", 1)))
+                except (ValueError, TypeError):
+                    current_rowspan = 1
 
         def handle_endtag(self, tag):
             nonlocal in_cell
             if tag in ("td", "th"):
                 in_cell = False
-                current_row.append("".join(current_cell).strip())
+                _text = "".join(current_cell).strip()
+                _col_idx = len(current_row)
+                # colspan: 横向展开
+                for _i in range(current_colspan):
+                    current_row.append(_text if _i == 0 else "")
+                # rowspan: 记录到 pending，下一行填充
+                if current_rowspan > 1:
+                    for _i in range(current_colspan):
+                        pending_rowspans.append((_col_idx + _i, current_rowspan - 1, _text if _i == 0 else ""))
+                current_row.append("")  # 占位，实际由上循环填充（保持原逻辑兼容）
+                current_row.pop()  # 移除占位
             elif tag == "tr":
                 rows.append(list(current_row))
 
