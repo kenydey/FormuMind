@@ -56,3 +56,22 @@ def test_recommend_formulations_invalid_n():
         json={"requirement": _req().model_dump(), "n": 0},
     )
     assert res.status_code == 422
+
+
+def test_resolve_request_objectives_normalizes_alias():
+    """v25: 显式 objectives 的 metric 别名必须被规范化（v23 第 4 处绕过）。
+
+    用户传 objectives=[{"metric": "salt spray"}] 时必须解析为 salt_spray_hours，
+    否则下游 multi_objective_score 按别名取 0.0，静默打出错误排序。
+    """
+    from types import SimpleNamespace
+
+    from app.api.formulations import _resolve_request_objectives
+    from app.domain.schemas import ObjectiveSpec
+
+    body = SimpleNamespace(
+        objectives=[ObjectiveSpec(metric="salt spray", direction="maximize")],
+        requirement=SimpleNamespace(),  # 非空 objectives 应短路，不被调用
+    )
+    out = _resolve_request_objectives(body)
+    assert out[0].metric == "salt_spray_hours"

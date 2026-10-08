@@ -157,6 +157,40 @@ def _to_response(c) -> DocumentChunkResponse:
     )
 
 
+def _null_model_second_pass(
+    chunks: list,
+    indices: list[int],
+    cosine_scores: np.ndarray,
+    model_cols: set[str],
+    query: str,
+) -> None:
+    """v25-fix: NULL-model chunk 第二遍（ANN-gate / 非 gate 路径共享）。
+
+    legacy 行（embedding_model IS NULL）在第一遍中永远不会被打分
+    （第一遍只处理 ``c.embedding_model == mname`` 的行，含矩阵路径），
+    所以这里只处理 NULL-model 行，无需浮点哨兵。query 向量按模型预计算一次。
+    """
+    from .rag import bge_query_prefix
+
+    null_idx = [i for i in indices if getattr(chunks[i], "embedding_model", None) is None]
+    if not null_idx or not model_cols:
+        return
+    qv_by_model: dict[str, tuple[list[float], int]] = {}
+    for mname in sorted(model_cols):
+        vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
+        if not vecs or not vecs[0]:
+            continue
+        qv_by_model[mname] = (vecs[0], len(vecs[0]))
+    for i in null_idx:
+        c = chunks[i]
+        for mname, (qv, dim) in qv_by_model.items():
+            # U-2: comparable_embedding 返回 (ok, vec)，不再二次反序列化
+            ok, cemb = kb_index.comparable_embedding(c, dim, mname)
+            if ok and cemb:
+                cosine_scores[i] = kb_index._dot(qv, cemb)
+                break
+
+
 def _cosine_on_indices(
     query: str,
     chunks: list,
@@ -194,22 +228,9 @@ def _cosine_on_indices(
                 ok, cemb = kb_index.comparable_embedding(c, dim, mname)
                 if ok and cemb:
                     cosine_scores[i] = kb_index._dot(qv, cemb)
-    # v23-fix: NULL-model chunk 第二遍 —— legacy 行（embedding_model IS NULL）按维度回退，
+    # v25-fix: NULL-model 第二遍抽为共享函数（gate/非 gate 路径统一），
     # 与 comparable_embedding docstring 承诺对齐。
-    from .rag import bge_query_prefix
-    for i in indices:
-        c = chunks[i]
-        if getattr(c, "embedding_model", None) is None and cosine_scores[i] == 0.0:
-            for mname in sorted(model_cols):
-                vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
-                if not vecs or not vecs[0]:
-                    continue
-                qv = vecs[0]
-                dim = len(qv)
-                ok, cemb = kb_index.comparable_embedding(c, dim, mname)
-                if ok and cemb:
-                    cosine_scores[i] = kb_index._dot(qv, cemb)
-                    break
+    _null_model_second_pass(chunks, indices, cosine_scores, model_cols, query)
     return used_matrix
 
 
@@ -442,6 +463,8 @@ def hybrid_search_scored(
                         ok, cemb = kb_index.comparable_embedding(c, dim, mname)
                         if ok and cemb:
                             cosine_scores[i] = kb_index._dot(qv, cemb)
+            # v25-fix: 非 gate 路径也补 NULL-model 第二遍（v23 只修了 gate 路径）。
+            _null_model_second_pass(chunks, list(range(len(chunks))), cosine_scores, model_cols, query)
 
         bm25_scores = bm25_raw.copy()
         bm25_max = float(bm25_scores.max()) if bm25_scores.size else 0.0

@@ -350,3 +350,21 @@ def test_gatekeeper_llm_off_by_default() -> None:
 def test_gatekeeper_never_raises() -> None:
     structured = mineru_structured.MinerUStructured(markdown="", blocks=[])
     mineru_structured.formula_gatekeeper(structured)  # must not raise
+
+
+def test_html_table_to_markdown_rowspan_non_first_col() -> None:
+    """v25: 非首列 rowspan 不错位（v24 引入的 bug，实机复现）。"""
+    md = mineru_structured._html_table_to_markdown(
+        '<table><tr><td>B</td><td rowspan="2">A</td></tr><tr><td>C</td></tr></table>'
+    )
+    assert md == "| B | A |\n| --- | --- |\n| C | A |"
+
+
+def test_html_table_shape_expands_colspan() -> None:
+    """v25: _html_table_shape 按展开后列数计数，与 markdown 实际列数一致。"""
+    assert (
+        mineru_structured._html_table_shape(
+            '<table><tr><td colspan="2">A</td></tr><tr><td>B</td><td>C</td></tr></table>'
+        )
+        == (2, 2)
+    )

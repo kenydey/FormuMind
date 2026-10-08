@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ..domain.examples import BUILTIN_METRICS, EXAMPLE_PROJECTS, ROLE_CATALOG, load_example
 from ..domain.formulation_gate import validate_formulations
 from ..domain.knowledge import baseline_formulation
-from ..domain.objective_contract import normalize_objectives
+from ..domain.objective_contract import normalize_objective, normalize_objectives
 from ..domain.schemas import (
     Evidence,
     Formulation,
@@ -131,6 +131,18 @@ class RecommendFormulationsResponse(BaseModel):
     objectives: list[dict] = Field(default_factory=list)
 
 
+def _resolve_request_objectives(body: RecommendFormulationsRequest) -> list[ObjectiveSpec]:
+    """v25-fix: 显式 objectives 也要过别名规范化（v23 第 4 处绕过补齐）。
+
+    用户显式传 ``objectives: [{"metric": "salt spray"}]`` 时 metric 别名
+    （"salt spray" → "salt_spray_hours"）必须被解析，否则下游
+    ``multi_objective_score`` 按别名取 0.0，静默打出错误排序。
+    """
+    return [normalize_objective(o) for o in body.objectives] or normalize_objectives(
+        body.requirement
+    )
+
+
 @router.post("/formulations/recommend", response_model=RecommendFormulationsResponse)
 def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormulationsResponse:
     """LLM structured formulation recommend grounded on KB evidence.
@@ -149,7 +161,7 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
     )
 
     settings = get_settings()
-    objectives = body.objectives or normalize_objectives(body.requirement)
+    objectives = _resolve_request_objectives(body)
     requested_n = resolve_recommend_n(body.n, settings=settings)
     llm_n = llm_candidate_count(requested_n, settings=settings)
     query = body.requirement.headline()

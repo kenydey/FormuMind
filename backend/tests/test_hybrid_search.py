@@ -174,3 +174,30 @@ def test_hybrid_alpha_defaults_to_settings(monkeypatch, stores):
 
     hybrid_search("anything", top_k=3)  # alpha omitted → settings
     assert seen.get("alpha") == pytest.approx(0.55)
+
+
+def test_null_model_second_pass_scores_legacy_chunks(monkeypatch):
+    """v25: 非 gate 路径 NULL-model chunk 也要打分（v23 只修了 gate 路径）。
+
+    legacy 行（embedding_model IS NULL）在第一遍中永远不会被打分，
+    共享的第二遍必须给它们非零 cosine 分数。
+    """
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from app.services import hybrid_search, kb_index
+
+    dim = 8
+    legacy = SimpleNamespace(embedding_model=None, embedding=[0.5] * dim, text="legacy")
+    fresh = SimpleNamespace(embedding_model="m", embedding=[0.5] * dim, text="fresh")
+    chunks = [legacy, fresh]
+
+    def _fake_embed_texts(texts, model_name):
+        return [[1.0] + [0.0] * (dim - 1)]
+
+    monkeypatch.setattr(kb_index, "_embed_texts", _fake_embed_texts)
+    scores = np.zeros(2, dtype=float)
+    hybrid_search._null_model_second_pass(chunks, [0, 1], scores, {"m"}, "query")
+    assert scores[0] != 0.0  # legacy chunk 被第二遍打分
+    assert scores[1] == 0.0  # 非 NULL 行不动（第一遍的职责）

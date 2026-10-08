@@ -543,22 +543,15 @@ def run_fix_loop(
                 rounds_done += 1
                 # Review 仍只看 raw evidence（Wiki 编译页不能作 raw 佐证）。
                 # v24-fix: 坐标对齐 —— 重写答案 [^n] 到过滤后空间（与 chat.py 一致）。
+                # v25: 抽为 services/citation_coords.py 共享函数，消除双实现漂移。
                 try:
-                    from ..services.wiki.retrieve import filter_raw_evidence
-                    _review_cits = filter_raw_evidence(citations)
-                    # 构建 old→new 映射并重写答案坐标
-                    _id_to_new = {id(e): i for i, e in enumerate(_review_cits)}
-                    _mapping = {
-                        old: _id_to_new[id(e)]
-                        for old, e in enumerate(citations)
-                        if id(e) in _id_to_new
-                    }
-                    import re as _re
-                    def _repl(m: _re.Match) -> str:
-                        _old_idx = int(m.group(1)) - 1
-                        _new_idx = _mapping.get(_old_idx)
-                        return f"[^{_new_idx + 1}]" if _new_idx is not None else ""
-                    _review_answer = _re.sub(r"\[\^(\d+)\]", _repl, current)
+                    from .citation_coords import (
+                        claims_evidence_with_mapping,
+                        remap_citation_numbers,
+                    )
+
+                    _review_cits, _mapping = claims_evidence_with_mapping(citations)
+                    _review_answer = remap_citation_numbers(current, _mapping)
                 except Exception:
                     _review_cits = citations
                     _review_answer = current

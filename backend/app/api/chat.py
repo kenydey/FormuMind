@@ -214,50 +214,15 @@ def _augment_with_kb(
     return sources + added, len(added) + wiki_added, resolution, kg_stats
 
 
-def _claims_evidence(evidence: list[Evidence]) -> list[Evidence]:
-    """Strip Wiki rows so claims cannot cite compiled pages as Raw proof."""
-    try:
-        from ..services.wiki.retrieve import filter_raw_evidence
-
-        return filter_raw_evidence(evidence)
-    except Exception:
-        return evidence
-
-
-def _claims_evidence_with_mapping(
-    evidence: list[Evidence],
-) -> tuple[list[Evidence], dict[int, int]]:
-    """v24-fix: 返回 (过滤后列表, old_idx→new_idx 映射)，供 reviewer 坐标对齐用。
-
-    答案中的 [^n] 基于完整 citations 编号，reviewer 看到的却是过滤 wiki 后的列表。
-    调用方需用映射重写答案中的 [^n]，删除指向被过滤条目的标记。
-    """
-    filtered = _claims_evidence(evidence)
-    # 用 id() 建立 old→new 映射（Evidence 可能不可哈希）
-    id_to_new = {id(e): i for i, e in enumerate(filtered)}
-    mapping = {
-        old: id_to_new[id(e)]
-        for old, e in enumerate(evidence)
-        if id(e) in id_to_new
-    }
-    return filtered, mapping
-
-
-def _remap_citation_numbers(answer: str, mapping: dict[int, int]) -> str:
-    """v24-fix: 用 old→new 映射重写答案中的 [^n]，删除指向被过滤条目的标记。
-
-    [^1] 是 1-based，mapping 的 key 是 0-based old_idx。
-    """
-    import re
-
-    def _repl(m: re.Match) -> str:
-        old_idx = int(m.group(1)) - 1
-        new_idx = mapping.get(old_idx)
-        if new_idx is None:
-            return ""  # 指向 wiki（被过滤），删除标记
-        return f"[^{new_idx + 1}]"
-
-    return re.sub(r"\[\^(\d+)\]", _repl, answer)
+from ..services.citation_coords import (
+    claims_evidence as _claims_evidence,
+)
+from ..services.citation_coords import (
+    claims_evidence_with_mapping as _claims_evidence_with_mapping,
+)
+from ..services.citation_coords import (
+    remap_citation_numbers as _remap_citation_numbers,
+)
 
 
 def _claims_and_audit(
@@ -810,7 +775,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
             _fire_auto_review(
                 question=question,
                 answer=answer,
-                citations=_claims_evidence(citations),
+                citations=citations,
                 settings=settings,
                 session_id=req.chat_session_id,
                 project_id=req.project_id,
@@ -1020,13 +985,21 @@ def _fire_auto_review(
         import threading as _th
         import uuid as _uuid
 
+        from ..services.citation_coords import (
+            claims_evidence_with_mapping,
+            remap_citation_numbers,
+        )
         from ..services.reviewer_fix_loop import maybe_auto_review
 
+        # v25-fix: 坐标对齐 —— 传完整 citations，在内部做 mapping+remap
+        #（与 4 处主调用点同构；之前这里传的是过滤后列表，reviewer 看到的编号错位）。
+        _rev_evidence, _rev_mapping = claims_evidence_with_mapping(citations)
+        _rev_answer = remap_citation_numbers(answer, _rev_mapping)
         kwargs = dict(
             turn_id=_uuid.uuid4().hex,
             question=question,
-            answer=answer,
-            citations=citations,
+            answer=_rev_answer,
+            citations=_rev_evidence,
             settings=settings,
             session_id=session_id,
             project_id=project_id,
@@ -1895,7 +1868,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                 _fire_auto_review(
                     question=question,
                     answer=answer,
-                    citations=_claims_evidence(citations),
+                    citations=citations,
                     settings=settings,
                     session_id=req.chat_session_id,
                     project_id=req.project_id,

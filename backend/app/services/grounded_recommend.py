@@ -142,7 +142,7 @@ def _evidence_corpus(evidence: list[Evidence]) -> tuple[set[str], set[str], dict
             key = ident.lower()
             if ident not in id_map.get(key, []):
                 id_map.setdefault(key, []).append(ident)
-        blob = f"{ev.title} {ev.snippet} {ev.identifier}"
+        blob = f"{ev.title or ''} {ev.snippet or ''} {ev.identifier or ''}"
         ev_toks = _tokens(blob)
         tokens |= ev_toks
         if ident:

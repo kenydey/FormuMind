@@ -403,6 +403,8 @@ def find_substitutes(
         except Exception:
             cand["supply_badges"] = []
             cand["stale_price"] = False
+            cand["missing_price"] = False
+            cand["long_lead_time"] = False
         cand["requirement_fit"] = _requirement_fit(cand, req)
         candidates.append(cand)
         scored_forms.append((cand, form))

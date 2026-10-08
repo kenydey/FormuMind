@@ -318,3 +318,22 @@ def test_finalize_evidence_fields_empty_rebind_not_dropped(monkeypatch):
         settings=S(), mode="evidence", selected_skills=None,
     )
     assert citations == [], "空重绑结果必须生效，不能回退旧表"
+
+
+def test_citation_coords_remap_drops_filtered(monkeypatch):
+    """v25: citation_coords 共享函数 —— 过滤后映射 + 答案重写 + 删除被过滤标记。"""
+    from types import SimpleNamespace
+
+    from app.services import citation_coords as cc
+
+    kb1 = SimpleNamespace(title="kb1")
+    wiki = SimpleNamespace(title="wiki")
+    kb2 = SimpleNamespace(title="kb2")
+    citations = [kb1, wiki, kb2]
+    monkeypatch.setattr(cc, "claims_evidence", lambda ev: [kb1, kb2])
+
+    filtered, mapping = cc.claims_evidence_with_mapping(citations)
+    assert filtered == [kb1, kb2]
+    assert mapping == {0: 0, 2: 1}
+    out = cc.remap_citation_numbers("A[^1]W[^2]B[^3]", mapping)
+    assert out == "A[^1]WB[^2]"
