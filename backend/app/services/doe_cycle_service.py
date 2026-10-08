@@ -222,6 +222,10 @@ def _generate_via_baybe(
         budget_remaining=budget_remaining,
         seed=seed,
     )
+    # v27 P0-3: 预算截断（direct baybe 路径；active_learning_doe 内的两条路径已各自截断）。
+    from ..services.active_learning import apply_budget_cap
+
+    apply_budget_cap(active_result.plan, budget_remaining)
     experiment_dicts = [_run_to_dict(run) for run in active_result.plan.runs]
     logger.info("Generated %d experiments via Baybe", len(experiment_dicts))
     return "baybe", experiment_dicts

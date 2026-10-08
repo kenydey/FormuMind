@@ -283,3 +283,28 @@ def test_end_to_end_ingest_dedup_then_write(factory):
     assert n == 1
     assert _count(factory, "src-b") == 1
     assert _count(factory, "src-a") == 1
+
+
+def test_l1_long_heading_cross_source_dropped(factory):
+    """v27 P0-5: 写入侧 heading_path[:120] 截断，查询侧必须同一口径。
+
+    长标题（>120 字符）chunk 跨源重复时，去重 key 必须命中已入库行。
+    种子行走真实写入路径（replace_for_source_in），覆盖写入/查询两端。
+    """
+    long_heading = "Section " + "x" * 150  # 158 chars > 120
+    assert len(long_heading) > 120
+    store = ChunkStore(factory)
+    with factory() as s:
+        n = store.replace_for_source_in(
+            s, "src-a", [_row("Long heading duplicate text.", heading_path=long_heading)]
+        )
+        s.commit()
+    assert n == 1
+    with factory() as s:
+        kept = dedupe_chunk_rows(
+            [_row("  long heading DUPLICATE text. ", heading_path=long_heading)],
+            "src-b",
+            s,
+        )
+    assert kept == [], "长标题跨源重复 chunk 应被 L1 去重"
+    assert gate_drop_stats()["ingest"]["dedup_exact"] == 1

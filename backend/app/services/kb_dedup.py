@@ -78,6 +78,17 @@ def chunk_dedup_key(text: str | None, heading_path: str | None, page_no: Any) ->
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
+def dedup_key_for_row(row: dict) -> str:
+    """v27 P0-5: 查询侧与写入侧同一口径。
+
+    写入侧 (chunk_store) 对 ``heading_path`` 做 ``[:120]`` 截断后才算
+    ``dedup_key``；查询侧此前未截断，长标题 chunk 的跨源重复永远查不中。
+    """
+    return chunk_dedup_key(
+        row.get("text"), (row.get("heading_path") or "")[:120], row.get("page_no")
+    )
+
+
 def _l1_exact(
     rows: list[dict],
     source_id: str,
@@ -95,13 +106,7 @@ def _l1_exact(
     try:
         from ..db.models import DocumentChunk
 
-        wanted = {
-            chunk_dedup_key(
-                row.get("text"), row.get("heading_path"), row.get("page_no")
-            )
-            for row in rows
-        }
-        wanted.discard(None)
+        wanted = {dedup_key_for_row(row) for row in rows}
         existing_keys: set[str] = set()
         if wanted:
             # IN 切片：SQLite 变量上限 999，入库行数通常远小于此，仍做保护。
@@ -132,12 +137,14 @@ def _l1_exact(
                 )
                 .yield_per(1000)
             ):
-                existing_keys.add(chunk_dedup_key(text, heading_path, page_no))
+                existing_keys.add(
+                    chunk_dedup_key(text, (heading_path or "")[:120], page_no)
+                )
 
         out: list[dict] = []
         dropped = 0
         for row in rows:
-            if chunk_dedup_key(row.get("text"), row.get("heading_path"), row.get("page_no")) in existing_keys:
+            if dedup_key_for_row(row) in existing_keys:
                 dropped += 1
                 continue
             out.append(row)

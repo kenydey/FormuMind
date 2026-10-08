@@ -190,6 +190,25 @@ def _legacy_active_learning_doe(
     return plan
 
 
+def apply_budget_cap(plan, budget_remaining: int | None):
+    """v27 P0-3: budget_remaining 非空时截断 plan runs 并在 notes 声明。
+
+    `budget_remaining <= 0` 由各调用方的硬停处理（A-7）；这里只处理
+    `0 < budget < len(runs)` 的静默超发。
+    """
+    if budget_remaining is None:
+        return plan
+    runs = list(plan.runs or [])
+    if len(runs) > budget_remaining:
+        plan.runs = runs[:budget_remaining]
+        note = (
+            f"budget_remaining={budget_remaining}: "
+            f"truncated {len(runs)} runs to {budget_remaining}"
+        )
+        plan.notes = f"{plan.notes}\n{note}".strip() if getattr(plan, "notes", None) else note
+    return plan
+
+
 def active_learning_doe(
     req: Requirement,
     existing: list[ExperimentRecord] | None = None,
@@ -231,6 +250,8 @@ def active_learning_doe(
                     )
                     result.plan.plan_id = uuid.uuid4().hex
                     result.plan.domain = req.domain
+                    # v27 P0-3: 预算截断（baybe 路径）。
+                    apply_budget_cap(result.plan, budget_remaining)
                     from ..pipeline.workflow import _cache_plan
 
                     _cache_plan(result.plan)
@@ -264,6 +285,8 @@ def active_learning_doe(
                 )
 
     plan = _legacy_active_learning_doe(req, existing, n_suggest, design, doe_engine=doe_engine, seed=seed)
+    # v27 P0-3: 预算截断（legacy 路径）。
+    apply_budget_cap(plan, budget_remaining)
     from ..pipeline.workflow import _cache_plan
     from ..services.doe_adaptive import enrich_active_doe_result
 

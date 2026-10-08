@@ -21,6 +21,8 @@ _RETIRED_ENV_KEYS = frozenset({
     "FORMUMIND_PDF_DOWNLOAD_MAX",
     "FORMUMIND_CHAT_RERANK_ENABLED",  # LLM rerank dropped from the chat path
     "FORMUMIND_AGENT_SEARCH_LLM_ASSESS",  # reserved placeholder, never implemented
+    "FORMUMIND_PDF_OCR",  # dead key in repo-root .env; nothing reads it (v27 P0-1)
+    "FORMUMIND_USPTO_API_KEY",  # dead key in repo-root .env; nothing reads it (v27 P0-1)
 })
 # Env keys read by subsystems but not declared on Settings.
 _INFRA_ENV_KEYS = frozenset({

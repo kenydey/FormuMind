@@ -65,7 +65,12 @@ def _generate_matrix(
         fn = getattr(pydoe, "sobol_sequence", None)
         if fn is None:
             raise ValueError("pydoe has no sobol_sequence")
-        raw = fn(n, k)
+        # v27 P0-4: pydoe>=1.0 默认 use_pow_of_2=True 会把 n 静默放大到 2 的幂
+        #（要 10 得 16）；显式关闭，旧版无此参数时回退旧行为。
+        try:
+            raw = fn(n, k, use_pow_of_2=False)
+        except TypeError:
+            raw = fn(n, k)
     else:
         raise ValueError(f"Design {design!r} is not supported by pydoe engine")
 

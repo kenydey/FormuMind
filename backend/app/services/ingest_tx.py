@@ -86,9 +86,22 @@ def ingest_document_tx(
                 )
                 # No savepoint (see outbox_store.enqueue): begin_nested() on
                 # SQLite commits the flushed INSERT, so a caller rollback could
-                # not undo it. A concurrent-duplicate IntegrityError propagates;
-                # the retry sees the now-committed document (idempotent).
-                session.flush()
+                # not undo it.
+                try:
+                    session.flush()
+                except IntegrityError:
+                    # v27 P0-6: 并发双提交 —— 另一请求已先写入 SourceDocument。
+                    # 与 chunk-insert 竞态同构：verify 后返回幂等，不再把
+                    # IntegrityError 抛给调用方（docstring 的承诺）。
+                    session.rollback()
+                    with session_factory() as verify_s:
+                        if verify_s.get(SourceDocument, source_id) is not None:
+                            return IngestTxResult(
+                                source_id=source_id,
+                                chunk_count=0,
+                                already_existed=True,
+                            )
+                    raise
 
             # ── 2. Chunk idempotency check + write ─────────────────────────
             existing = session.query(DocumentChunk).filter(

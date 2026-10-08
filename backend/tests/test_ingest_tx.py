@@ -191,3 +191,48 @@ def test_recovery_after_failed_ingest(factory, monkeypatch) -> None:
     assert _doc_count(factory, sid) == 1
     assert _chunk_count(factory, sid) > 0
     assert _outbox_count(factory, sid) == 1
+
+
+def test_concurrent_double_submit_loser_returns_idempotent(factory, tmp_path):
+    """v27 P0-6: 并发双提交同一 source_id —— loser 不抛 IntegrityError。
+
+    docstring 承诺 "the loser catches the IntegrityError and returns the
+    idempotent response"。文件库 + 多线程实测：1 个成功 + N-1 个幂等返回，
+    0 异常；DB 最终状态正确（1 doc + chunks）。
+    """
+    import threading
+
+    from app.services.ingest_tx import ingest_document_tx
+
+    engine = make_engine(f"sqlite:///{tmp_path}/conc.db")
+    Base.metadata.create_all(engine)
+    fac = make_session_factory(engine)
+
+    sid = f"conc-{_uuid.uuid4().hex[:8]}"
+    n_threads = 4
+    barrier = threading.Barrier(n_threads)
+    results: list = []
+    errors: list = []
+
+    def _worker():
+        try:
+            barrier.wait(timeout=30)
+            r = ingest_document_tx(fac, source_id=sid, text=PAGED_MD, title="Conc")
+            results.append(r)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=_worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)
+
+    assert not errors, f"loser 线程不应抛异常: {errors!r}"
+    assert len(results) == n_threads
+    n_ok = sum(1 for r in results if not r.already_existed and not r.failed)
+    n_idem = sum(1 for r in results if r.already_existed)
+    assert n_ok == 1, f"应恰好 1 个成功: {n_ok}"
+    assert n_idem == n_threads - 1, f"其余应幂等返回: {n_idem}"
+    assert _doc_count(fac, sid) == 1
+    assert _chunk_count(fac, sid) > 0
