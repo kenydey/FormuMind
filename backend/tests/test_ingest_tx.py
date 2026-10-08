@@ -236,3 +236,19 @@ def test_concurrent_double_submit_loser_returns_idempotent(factory, tmp_path):
     assert n_idem == n_threads - 1, f"其余应幂等返回: {n_idem}"
     assert _doc_count(fac, sid) == 1
     assert _chunk_count(fac, sid) > 0
+
+
+def test_all_duplicate_content_returns_duplicate_not_failed(factory):
+    """v27 P2-20: 不同 source_id、同内容入库 → duplicate=True 而非 failed。"""
+    from app.services.ingest_tx import ingest_document_tx
+
+    r1 = ingest_document_tx(factory, source_id="dup-a", text=PAGED_MD, title="A")
+    assert r1.chunk_count > 0 and not r1.failed and not r1.duplicate
+
+    r2 = ingest_document_tx(factory, source_id="dup-b", text=PAGED_MD, title="B")
+    assert r2.chunk_count == 0
+    assert not r2.failed, "全重复不应报 failed"
+    assert r2.duplicate is True
+    # 无僵尸行：dup-b 的 SourceDocument 已回滚
+    assert _doc_count(factory, "dup-b") == 0
+    assert _chunk_count(factory, "dup-b") == 0

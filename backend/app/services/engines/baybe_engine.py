@@ -32,6 +32,29 @@ from .doe_registry import baybe_available, build_doe_plan
 log = logging.getLogger(__name__)
 
 
+def _fp_val(x):
+    """v27 P2-18: 测量行指纹的逐值格式化 —— 不按列 dtype 分支。
+
+    object 列（含 None 的测量列常见）此前走 ``astype(str)``，
+    ``round(6)`` 归一化被跳过，``0.1+0.2`` vs ``0.3`` 去重 miss。
+    bool 优先于 int/float 判断（bool 是 int 子类）；NaN 经 f-string 得 "nan"。
+    """
+    if isinstance(x, bool):
+        return str(x)
+    if isinstance(x, (int, float)):
+        return f"{round(float(x), 6):.6f}"
+    try:
+        import numpy as _np
+
+        if isinstance(x, _np.bool_):
+            return str(bool(x))
+        if isinstance(x, (_np.integer, _np.floating)):
+            return f"{round(float(x), 6):.6f}"
+    except ImportError:
+        pass
+    return str(x)
+
+
 def fetch_campaign_data_for_baybe(
     campaign_id: int,
     req: Requirement | None = None,
@@ -460,12 +483,9 @@ class BaybeCampaignEngine:
                         fp_cols = [c for c in df_meas_clean.columns if c in existing.columns]
                         if fp_cols:
                             # v24-fix: round(6) 后转 str，避免跨 pandas/numpy 版本浮点格式差异导致指纹 miss。
+                            # v27 P2-18: 用模块级 _fp_val 逐值格式化（见上）。
                             def _fp_str(df):
-                                return df[fp_cols].apply(
-                                    lambda col: col.apply(
-                                        lambda x: f"{round(float(x), 6):.6f}" if isinstance(x, (int, float)) else str(x)
-                                    ) if col.dtype.kind in "ifc" else col.astype(str)
-                                )
+                                return df[fp_cols].apply(lambda col: col.map(_fp_val))
                             existing_fp = set(map(tuple, _fp_str(existing).values.tolist()))
                             mask = ~_fp_str(df_meas_clean).apply(tuple, axis=1).isin(existing_fp)
                             df_meas_clean = df_meas_clean[mask]

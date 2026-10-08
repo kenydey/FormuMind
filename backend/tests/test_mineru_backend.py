@@ -368,3 +368,25 @@ def test_html_table_shape_expands_colspan() -> None:
         )
         == (2, 2)
     )
+
+
+def test_html_table_nested_ignored() -> None:
+    """v27 P2-14: 嵌套 <table> 的内层事件全部忽略，不混入外层行列。"""
+    md = mineru_structured._html_table_to_markdown(
+        '<table><tr><td><table><tr><td>inner</td></tr></table></td><td>B</td></tr></table>'
+    )
+    assert "inner" not in md
+    assert "B" in md
+    # shape 与 markdown 列数一致
+    assert mineru_structured._html_table_shape(
+        '<table><tr><td><table><tr><td>inner</td></tr></table></td><td>B</td></tr></table>'
+    ) == (1, 2)
+
+
+def test_html_table_unclosed_td_implicit_close() -> None:
+    """v27 P2-15: 未闭合 <td> 隐式闭合（浏览器语义），A、B 不丢失。"""
+    md = mineru_structured._html_table_to_markdown(
+        '<table><tr><td>A<td>B</tr><tr><td>C</td></tr></table>'
+    )
+    assert "| A | B |" in md
+    assert "C" in md

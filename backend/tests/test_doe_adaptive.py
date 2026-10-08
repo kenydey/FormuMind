@@ -241,3 +241,47 @@ def test_ei_acquisition_minimize_direction():
     ei_max = _ei_acquisition(mean=30.0, std=1.0, y_best=20.0)
     assert ei_max == _ei_acquisition(mean=30.0, std=1.0, y_best=20.0, direction="maximize")
     assert ei_max > 9.9
+
+
+def test_resample_keeps_original_infeasible_or(monkeypatch):
+    """v27 P2-19: 补采样替换时两侧 infeasible 取 OR。
+
+    KG/物理门是对整批共享 skeleton 的判定，标记在原始 run 上；
+    LHS 候补 run 从未经过这两个门（恒 False）。替换后原始 run 的
+    KG reason 不能丢。
+    """
+    from app.domain.schemas import DOEFactor, DOEPlan, DOERun
+    from app.services import doe_adaptive as da_mod
+    from app.services.doe_adaptive import resample_plan_for_constraints
+
+    req = Requirement(domain=ProductDomain.anticorrosion_coating, salt_spray_hours=500)
+    factors = [DOEFactor(name="Zinc phosphate", low=2.0, high=14.0, unit="wt%")]
+    bad = DOERun(
+        run_id=1,
+        coded={},
+        natural={"Zinc phosphate": 5.0},
+        ai_suggested=True,
+        infeasible=True,
+        infeasible_reason="KG 不相容",
+    )
+    plan = DOEPlan(
+        design="lhs",
+        factors=factors,
+        runs=[bad],
+        domain=ProductDomain.anticorrosion_coating,
+    )
+    # run 1 有约束警告；替换池为空时走 resample_fn
+    monkeypatch.setattr(
+        da_mod, "_constraint_warnings_for_runs", lambda req, plan: {1: ["w"]}
+    )
+    monkeypatch.setattr(da_mod, "_run_has_constraint_warnings", lambda req, r: [])
+    alt = DOERun(
+        run_id=99, coded={}, natural={"Zinc phosphate": 6.0},
+        infeasible=False, infeasible_reason="",
+    )
+    out = resample_plan_for_constraints(req, plan, resample_fn=lambda n: [alt])
+    assert len(out.runs) == 1
+    r = out.runs[0]
+    assert r.run_id == 1
+    assert r.infeasible is True
+    assert "KG 不相容" in r.infeasible_reason

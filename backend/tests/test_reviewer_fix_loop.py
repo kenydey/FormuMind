@@ -337,3 +337,28 @@ def test_citation_coords_remap_drops_filtered(monkeypatch):
     assert mapping == {0: 0, 2: 1}
     out = cc.remap_citation_numbers("A[^1]W[^2]B[^3]", mapping)
     assert out == "A[^1]WB[^2]"
+
+
+def test_remap_dangling_citation_warns(caplog):
+    """v27 P2-17: 越界 [^99] 删除标记时记 warning，不再无痕。"""
+    import logging
+
+    import app.services.citation_coords as cc
+
+    with caplog.at_level(logging.WARNING, logger="app.services.citation_coords"):
+        out = cc.remap_citation_numbers("X[^99] Y[^1]", {0: 0}, n_evidence=2)
+    assert out == "X Y[^1]"
+    assert any("dangling" in r.message and "99" in r.message for r in caplog.records)
+
+
+def test_remap_filtered_wiki_no_warning(caplog):
+    """v27 P2-17: 指向被过滤 wiki 条目的删除仍是预期的，不告警。"""
+    import logging
+
+    import app.services.citation_coords as cc
+
+    # mapping 缺 old_idx=1（wiki 被过滤），[^2] 删除但 n_evidence=3 范围内 → 不告警
+    with caplog.at_level(logging.WARNING, logger="app.services.citation_coords"):
+        out = cc.remap_citation_numbers("A[^1]W[^2]B[^3]", {0: 0, 2: 1}, n_evidence=3)
+    assert out == "A[^1]WB[^2]"
+    assert not [r for r in caplog.records if "dangling" in r.message]

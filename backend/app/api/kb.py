@@ -770,7 +770,12 @@ def ingest(body: IngestRequest) -> IngestResponse:
     return IngestResponse(
         source_id=result.source_id,
         chunk_count=result.chunk_count,
-        status="failed" if result.failed else "ok",
+        # v27 P2-20: 全重复内容不再报 failed。
+        status=(
+            "duplicate"
+            if result.duplicate
+            else "failed" if result.failed else "ok"
+        ),
     )
 
 

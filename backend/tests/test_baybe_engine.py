@@ -185,3 +185,23 @@ def test_baybe_recommend_all_measurements_dropped_takes_seed_plan():
     assert r.engine == "baybe"
     assert len(r.plan.runs) == 2
     assert r.campaign_state
+
+
+def test_fp_val_object_column_dedup_hit():
+    """v27 P2-18: object 列（含 None）中的数值也要过 round(6) 归一化。
+
+    0.1+0.2（0.30000000000000004）vs 0.3 的指纹必须一致，否则去重 miss。
+    """
+    import pandas as pd
+
+    from app.services.engines.baybe_engine import _fp_val
+
+    df1 = pd.DataFrame({"a": [0.1 + 0.2, None], "b": [1.0, 2.0]}, dtype=object)
+    df2 = pd.DataFrame({"a": [0.3, None], "b": [1.0, 2.0]}, dtype=object)
+    fp1 = set(map(tuple, df1.apply(lambda c: c.map(_fp_val)).values.tolist()))
+    fp2 = set(map(tuple, df2.apply(lambda c: c.map(_fp_val)).values.tolist()))
+    assert fp1 == fp2
+    # float64 路径不退化；bool/NaN 一致
+    assert _fp_val(True) == "True"
+    assert _fp_val(float("nan")) == "nan"
+    assert _fp_val(None) == "None"

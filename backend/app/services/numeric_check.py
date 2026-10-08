@@ -134,12 +134,22 @@ def check_answer_numbers(
     if not answer_nums:
         return []
     indices = extract_citation_indices(answer)
+    # v27 P2-17: 越界引用（如 [^99]）不再静默忽略 —— 记为明确 failure，
+    # 提示可能是幻觉引用编号。
+    failures: list[dict[str, str]] = []
+    for n in indices:
+        if not 1 <= n <= len(evidence_texts):
+            failures.append(
+                {
+                    "claim": f"[^{n}]",
+                    "reason": f"引用越界：答案引用了 [^{n}]，但只有 {len(evidence_texts)} 条证据（可能是幻觉编号）",
+                }
+            )
     cited = [
         evidence_texts[n - 1]
         for n in indices
         if 1 <= n <= len(evidence_texts)
     ]
-    failures: list[dict[str, str]] = []
     if not cited:
         # 答案含数字但无有效引用：不回退全 evidence 池，直接 fail。
         # 数字必须绑定到其引用 passage，不允许"未引用证据命中数字"蒙混。

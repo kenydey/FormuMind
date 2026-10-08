@@ -213,8 +213,12 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type
         and re.search(
             # v19-fix: min 加前向约束，排除 "admin" 等词内匹配。
             # v23-fix: s/g/h/mg/ml 同理收紧（照 min 前例）。
-            r"%|℃|°C|(?<![a-zA-Z])h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg\b|(?<![a-zA-Z])g\b|ml\b|L\b|(?<![a-zA-Z])s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
+            # v27 P2-13: IGNORECASE —— "100 MG"/"10 KG"/"8 H"/"20 MPA" 也豁免；
+            # 补 kg\b（"KG" 的 g 前是字母，走不了 (?<![a-zA-Z])g 分支）。
+            # L 保持大小写敏感（(?-i:...)）：否则 "panel" 词尾的 l 会被命中。
+            r"%|℃|°C|(?<![a-zA-Z])h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg\b|kg\b|(?<![a-zA-Z])g\b|ml\b|(?-i:L\b)|(?<![a-zA-Z])s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
             body,
+            re.IGNORECASE,
         )
     )
     if _is_numeric:

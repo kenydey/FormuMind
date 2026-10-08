@@ -551,7 +551,9 @@ def run_fix_loop(
                     )
 
                     _review_cits, _mapping = claims_evidence_with_mapping(citations)
-                    _review_answer = remap_citation_numbers(current, _mapping)
+                    _review_answer = remap_citation_numbers(
+                        current, _mapping, n_evidence=len(citations)
+                    )
                 except Exception:
                     _review_cits = citations
                     _review_answer = current

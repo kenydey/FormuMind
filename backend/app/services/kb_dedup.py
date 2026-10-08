@@ -59,6 +59,11 @@ def all_chunks_were_duplicates() -> bool:
     return _ALL_CHUNKS_DUPLICATE.get()
 
 
+# v27 P2-21: L2 语料归一化矩阵缓存 —— (generation, lang, audit_cap) →
+# (chunk_ids, 归一化矩阵)。generation 由 chunk 写入时 bump；进程内有效。
+_L2_MAT_CACHE: dict[tuple, tuple[list[str], object]] = {}
+
+
 def normalize_text(text: str | None) -> str:
     """Canonical form for the L1 exact-dup key."""
     return _WS_RE.sub(" ", (text or "").strip().lower())
@@ -187,6 +192,8 @@ def _l2_near(
     """Drop/audit rows whose embedding is >= threshold cosine to a live chunk.
 
     v18-18: 无向量行直接跳过 L2（打标机制已移除）。
+    v27 P2-21: 全库归一化矩阵按 chunk_store.generation 缓存 —— 每次 ingest
+    不再全量扫描语料向量；audit 模式另加每语言抽样上限。
     """
     enforce = bool(getattr(settings, "kb_near_dedup_enabled", False))
     audit = bool(getattr(settings, "kb_near_dedup_audit", True))
@@ -216,49 +223,88 @@ def _l2_near(
         return rows
 
     try:
+        from ..db.chunk_store import get_chunk_store
         from ..db.models import DocumentChunk
 
-        # Live DB vectors per language (BLOB-first, JSON fallback), excluding
-        # this source's own (about-to-be-replaced) rows.
-        db_vecs: dict[str, list[tuple[str, _np.ndarray]]] = {}
-        q = (
-            session.query(
-                DocumentChunk.id,
-                DocumentChunk.source_id,
-                DocumentChunk.lang,
-                DocumentChunk.embedding_blob,
-                DocumentChunk.embedding,
+        # v27 P2-21: 语料矩阵缓存 —— (generation, lang) → (ids, 归一化矩阵)。
+        # generation 由 chunk 写入时 bump，进程内有效。
+        # 只对默认 chunk store 的 session 用缓存（测试/独立 session 各自建矩阵，
+        # 否则跨库污染）。
+        _store = get_chunk_store()
+        generation = _store.generation
+        try:
+            _default_bind = _store.session_factory.kw.get("bind")
+            _sess_bind = session.get_bind()
+            use_cache = _default_bind is not None and _sess_bind is _default_bind
+        except Exception:  # noqa: BLE001
+            use_cache = False
+        # audit 模式（非 enforce）抽样上限：每语言最多扫描 N 行语料。
+        audit_cap = None
+        if audit and not enforce:
+            try:
+                audit_cap = int(getattr(settings, "kb_near_dedup_audit_cap", 2000))
+            except (TypeError, ValueError):
+                audit_cap = 2000
+
+        def _corpus_matrix(lang: str):
+            key = (generation, lang, audit_cap)
+            if use_cache:
+                hit = _L2_MAT_CACHE.get(key)
+                if hit is not None:
+                    return hit
+            vecs: list[tuple[str, Any]] = []
+            q = (
+                session.query(
+                    DocumentChunk.id,
+                    DocumentChunk.lang,
+                    DocumentChunk.embedding_blob,
+                    DocumentChunk.embedding,
+                )
+                .filter(
+                    DocumentChunk.source_id != source_id,
+                    # lang NULL 的历史行按 en 处理（与写入侧 _detect_chunk_lang 回退一致）
+                    (DocumentChunk.lang == lang)
+                    | ((DocumentChunk.lang.is_(None)) & (lang == "en")),
+                )
+                .yield_per(1000)
             )
-            .filter(DocumentChunk.source_id != source_id)
-            .yield_per(1000)
-        )
-        for cid, _sid, lang, blob, js in q:
-            raw = None
-            if blob:
-                try:
-                    raw = _np.frombuffer(bytes(blob), dtype="<f4").astype(_np.float32)
-                except Exception:  # noqa: BLE001
-                    raw = None
-            if raw is None or raw.size == 0:
-                if not js:
+            for cid, _lang, blob, js in q:
+                if audit_cap is not None and len(vecs) >= audit_cap:
+                    break
+                raw = None
+                if blob:
+                    try:
+                        raw = _np.frombuffer(bytes(blob), dtype="<f4").astype(_np.float32)
+                    except Exception:  # noqa: BLE001
+                        raw = None
+                if raw is None or raw.size == 0:
+                    if not js:
+                        continue
+                    try:
+                        raw = _np.asarray(js, dtype=_np.float32)
+                    except Exception:  # noqa: BLE001
+                        continue
+                if raw.size == 0:
                     continue
-                try:
-                    raw = _np.asarray(js, dtype=_np.float32)
-                except Exception:  # noqa: BLE001
+                n = float(_np.linalg.norm(raw))
+                if n <= 0:
                     continue
-            if raw.size == 0:
-                continue
-            n = float(_np.linalg.norm(raw))
-            if n <= 0:
-                continue
-            key = (lang or "en").strip().lower() or "en"
-            db_vecs.setdefault(key, []).append((cid, (raw / n).astype(_np.float32)))
+                vecs.append((cid, (raw / n).astype(_np.float32)))
+            if not vecs:
+                return None
+            mat = _np.stack([v for _, v in vecs])
+            val = ([cid for cid, _ in vecs], mat)
+            # 缓存上限：防语言爆炸吃内存；非默认 session 不写缓存
+            if use_cache and len(_L2_MAT_CACHE) < 32:
+                _L2_MAT_CACHE[key] = val
+            return val
 
         drop_idx: set[int] = set()
         for i, lang, vec in indexed:
-            pop = db_vecs.get(lang)
-            if not pop:
+            got = _corpus_matrix(lang)
+            if not got:
                 continue
+            ids, mat = got
             try:
                 qv = _np.asarray(vec, dtype=_np.float32)
             except Exception:  # noqa: BLE001
@@ -267,14 +313,13 @@ def _l2_near(
             if n <= 0:
                 continue
             qv = qv / n
-            mat = _np.stack([v for _, v in pop])
             if mat.shape[1] != qv.shape[0]:
                 continue  # dim mismatch — different model bucket, skip safely
             sims = mat @ qv
             best = int(_np.argmax(sims))
             score = float(sims[best])
             if score >= threshold:
-                match_id = pop[best][0]
+                match_id = ids[best]
                 if enforce:
                     drop_idx.add(i)
                 if enforce or audit:

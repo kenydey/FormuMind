@@ -65,3 +65,9 @@ def test_mutation_conversion_removed_would_fail():
     assert pool == [(1000.0, "um")]
     # 换算路径：mm→um 系数 1000
     assert check_answer_numbers("膜厚 1mm[^1]。", ["涂层厚度 1000微米"]) == []
+
+
+def test_check_answer_numbers_dangling_citation_failure():
+    """v27 P2-17: 越界引用记为明确 failure，不再静默忽略。"""
+    fails = check_answer_numbers("数值为 720 h[^99]", ["盐雾 720 h"])
+    assert any("[^99]" in f["claim"] and "越界" in f["reason"] for f in fails)

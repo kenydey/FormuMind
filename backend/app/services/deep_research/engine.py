@@ -208,7 +208,6 @@ class DeepResearchEngine:
         req: Requirement | None = None,
         source_types: list[str] | None = None,
         progress_cb: Callable[[float, str], None] | None = None,
-        retrieval_progress_cb: Callable[[list[Evidence]], None] | None = None,
     ) -> ComprehensiveReport:
         """完整深度研究 — delegates to CRAG research graph."""
         from ...pipeline.research_graph import run_research_graph
@@ -224,8 +223,8 @@ class DeepResearchEngine:
         }
 
         def graph_progress(stage: str, message: str, partial: dict | None = None) -> None:
-            if retrieval_progress_cb and stage == "retrieve" and partial:
-                pass
+            # v27 P2-24: retrieval_progress_cb 死参数已删除（全仓库无调用方，
+            # 原实现是 pass 占位）。如需渐进 evidence 回调，另行设计。
             p, _ = stage_map.get(stage, (0.5, message))
             if progress_cb:
                 progress_cb(p, message)
@@ -239,12 +238,16 @@ class DeepResearchEngine:
         grounded = state.get("grounded_evidence") or []
         if progress_cb:
             progress_cb(1.0, "done")
+        # v27: web_count 不再硬编码 0 —— 按 source 归类统计。
+        from ...pipeline.workflow import _evidence_matches_type
+
+        web_count = sum(1 for e in grounded if _evidence_matches_type(e, "internet"))
         return ComprehensiveReport(
             topic=topic,
             report_markdown=state.get("report_markdown") or state.get("answer") or "",
             citations=state.get("citations") or grounded,
             candidates=state.get("recommended") or [],
-            web_count=0,
+            web_count=web_count,
             kb_count=len(grounded),
             engine=state.get("recommend_engine") or "offline",
             verified_claims=state.get("verified_claims") or [],
@@ -258,7 +261,6 @@ def conduct_research(
     req: Requirement | None = None,
     source_types: list[str] | None = None,
     progress_cb: Callable[[float, str], None] | None = None,
-    retrieval_progress_cb: Callable[[list[Evidence]], None] | None = None,
 ) -> ComprehensiveReport:
     """Module-level entry point for tasks and scripts."""
     return DeepResearchEngine().run(
@@ -266,5 +268,4 @@ def conduct_research(
         req=req,
         source_types=source_types,
         progress_cb=progress_cb,
-        retrieval_progress_cb=retrieval_progress_cb,
     )

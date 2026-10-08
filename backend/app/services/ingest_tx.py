@@ -23,6 +23,7 @@ class IngestTxResult:
     chunk_count: int       # 0 = idempotent hit
     already_existed: bool
     failed: bool = False   # v9: 0-chunk / 全过滤时为 True（P0-3 修复裸 dict 崩溃）
+    duplicate: bool = False  # v27 P2-20: 全重复（内容已在库）时为 True，failed=False
 
 
 def ingest_document_tx(
@@ -120,6 +121,10 @@ def ingest_document_tx(
 
             # v10: 接入质量门 —— 与 index_source 同口径（gate 在 embedding/dedupe
             # 之前）；全过滤时 prepare 返回 None，走 failed+rollback 分支。
+            # v27 P2-20: 先 reset 重复标记，区分"全是重复"与" genuine 失败"。
+            from .kb_dedup import all_chunks_were_duplicates, reset_all_duplicate_flag
+
+            reset_all_duplicate_flag()
             rows = prepare_chunk_rows(
                 text,
                 source_id,
@@ -131,6 +136,15 @@ def ingest_document_tx(
             #（与 v7 KB-1 的上传路径同口径）。
             if not rows:
                 session.rollback()
+                if all_chunks_were_duplicates():
+                    # 内容已在库（跨 source_id 重复）：不是失败，前端不再误报。
+                    return IngestTxResult(
+                        source_id=source_id,
+                        chunk_count=0,
+                        already_existed=False,
+                        failed=False,
+                        duplicate=True,
+                    )
                 return IngestTxResult(
                     source_id=source_id, chunk_count=0, already_existed=False, failed=True
                 )

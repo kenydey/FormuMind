@@ -175,7 +175,7 @@ def _null_model_second_pass(
     """
     from .rag import bge_query_prefix, embed_model_name
 
-    null_idx = [i for i in indices if getattr(chunks[i], "embedding_model", None) is None]
+    null_idx = [i for i in indices if not getattr(chunks[i], "embedding_model", None)]
     if not null_idx:
         return
     if not model_cols:

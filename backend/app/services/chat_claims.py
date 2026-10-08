@@ -54,6 +54,17 @@ def verify_answer_claims(
     if not claims:
         return []
 
+    # v27 P2-16: 记录验证覆盖率（实际验证句数 / 答案总句数）。
+    _total_sentences = len(
+        [p for p in _SENTENCE_SPLIT.split(answer or "") if p.strip()]
+    )
+    if _total_sentences:
+        logger.info(
+            "chat claim coverage: %d/%d sentences sampled for verification",
+            len(claims),
+            _total_sentences,
+        )
+
     try:
         _ex = _claim_executor()
         _fut = None
@@ -167,8 +178,27 @@ def build_sources_audit(
 def _extract_claims(answer: str, structured: StructuredAnswer | None) -> list[str]:
     if structured and structured.key_findings:
         return [c.strip() for c in structured.key_findings if c.strip()]
-    parts = [p.strip() for p in _SENTENCE_SPLIT.split(answer or "") if p.strip()]
-    return parts[:8]
+    # v27 P2-16: 与 claim_checker.check_claims 统一采样策略 —— per-section
+    # 每 section 最多 8 句、总共最多 20 条，不再硬截前 8 句。
+    # （check_claims 侧按行切分适合 markdown 报告；问答答案是散文体，
+    # 这里按句切分，但采样策略一致，避免长答案尾部逃逸验证。）
+    from ..pipeline.claim_checker import _MAX_CLAIMS, _SECTION_HEADING_RE
+
+    max_total = _MAX_CLAIMS  # 20
+    sections = [
+        p for p in _SECTION_HEADING_RE.split(answer or "") if (p or "").strip()
+    ] or [answer or ""]
+    # 多 section 时每段最多 8 句（防头部偏置）；单段答案允许到总上限，
+    # 否则 12 句的单段答案尾部仍然逃逸。
+    per_section = 8 if len(sections) > 1 else max_total
+    out: list[str] = []
+    for sec in sections:
+        sentences = [p.strip() for p in _SENTENCE_SPLIT.split(sec) if p.strip()]
+        for s in sentences[:per_section]:
+            out.append(s)
+            if len(out) >= max_total:
+                return out
+    return out
 
 
 def _indices_to_chunk_ids(indices: list[int], sources: list[Evidence]) -> list[str]:

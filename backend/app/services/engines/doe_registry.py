@@ -104,6 +104,10 @@ def build_doe_plan(
     seed: int | None = None,
     ccd_alpha: str | float | None = None,
 ) -> DOEPlan:
+    # v27 P2-23: n=0 不再静默替换为默认 run 数 —— 显式拒绝。
+    # （API 层有 ge=2 防护，这里管内部调用。）
+    if n is not None and n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
     # v27 P1-11: 固定 run 数设计的 n-ignored 提示统一收口到此。
     # v23 只在 domain/doe.py 的 else 分支加了提示，native ccd / full_factorial
     # 分支和 pydoe 路径漏网。notes 已带提示的不重复加。

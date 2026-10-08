@@ -33,18 +33,41 @@ def claims_evidence_with_mapping(evidence: list) -> tuple[list, dict[int, int]]:
     return filtered, mapping
 
 
-def remap_citation_numbers(answer: str, mapping: dict[int, int]) -> str:
+def remap_citation_numbers(
+    answer: str,
+    mapping: dict[int, int],
+    n_evidence: int | None = None,
+) -> str:
     """用 old → new 映射重写答案中的 ``[^n]``，删除指向被过滤条目的标记。
 
     ``[^1]`` 是 1-based，mapping 的 key 是 0-based old_idx。
+
+    v27 P2-17: 越界引用（如 ``[^99]`` 而原文只有 5 条 evidence）不再无痕删除 ——
+    传 ``n_evidence``（过滤前原文条数）时记 warning，调用方可在 reviewer 前看到。
+    指向被过滤 wiki 条目的删除仍是预期的（v25 设计），不告警。
     """
+    import logging
     import re
+
+    logger = logging.getLogger(__name__)
+    dangling: list[int] = []
 
     def _repl(m: re.Match) -> str:
         old_idx = int(m.group(1)) - 1
         new_idx = mapping.get(old_idx)
         if new_idx is None:
-            return ""  # 指向 wiki（被过滤），删除标记
+            if n_evidence is not None and old_idx >= n_evidence:
+                dangling.append(old_idx + 1)  # 记回 1-based
+            return ""  # 指向 wiki（被过滤）或越界，删除标记
         return f"[^{new_idx + 1}]"
 
-    return re.sub(r"\[\^(\d+)\]", _repl, answer)
+    out = re.sub(r"\[\^(\d+)\]", _repl, answer)
+    if dangling:
+        logger.warning(
+            "remap_citation_numbers: %d dangling citation(s) %s beyond %d evidence items — "
+            "possible hallucinated citation numbers",
+            len(dangling),
+            sorted(set(dangling)),
+            n_evidence,
+        )
+    return out

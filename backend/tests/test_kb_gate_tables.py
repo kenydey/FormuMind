@@ -113,3 +113,19 @@ def test_a_datasheet_table_reaches_the_knowledge_base(stores):
     stored = chk.get_by_source(sid)
     assert any("耐盐雾性能" in c.text and "720" in c.text for c in stored), [c.text[:40] for c in stored]
     assert any(c.block_type == "table" for c in stored)
+
+
+def test_numeric_exemption_case_insensitive_units():
+    """v27 P2-13: 大写单位也拿数字豁免（floor 8 而非 20）。"""
+    assert not is_garbage_chunk_text("含量 100 MG")   # 9 chars ≥ 8
+    assert not is_garbage_chunk_text("10 KG 含量x")
+    assert not is_garbage_chunk_text("8 H 测试xx")    # 8 chars ≥ 8
+    assert not is_garbage_chunk_text("20 MPA 盐雾")
+    assert not is_garbage_chunk_text("10 L 溶剂xx")   # 大写 L 仍豁免
+
+
+def test_numeric_exemption_no_word_internal_match():
+    """v27 P2-13: admin/things/panel 等词内匹配不豁免；L 保持大小写敏感。"""
+    assert is_garbage_chunk_text("admin panel v2")  # panel 词尾 l 不命中（L 大小写敏感）
+    assert is_garbage_chunk_text("things 12345")    # 无单位 → floor 20
+    assert is_garbage_chunk_text("10 l 溶剂xx")      # 小写 l 不豁免

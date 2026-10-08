@@ -285,11 +285,41 @@ def _html_table_to_markdown(html: str) -> str:
     occupied: set[int] = set()  # 本行已被 rowspan 占用的列索引
     current_colspan = 1
     current_rowspan = 1
+    table_depth = 0  # v27 P2-14: 嵌套 <table> 计数
+
+    def _flush_cell() -> None:
+        """把当前单元格写入行（v27 P2-15 抽取，供隐式闭合复用）。"""
+        nonlocal in_cell
+        in_cell = False
+        _text = "".join(current_cell).strip()
+        # v25-fix: 填首个未被 rowspan 占用的列，而非 append 到行尾。
+        _col_idx = 0
+        while _col_idx in occupied:
+            _col_idx += 1
+        # colspan: 横向展开
+        for _i in range(current_colspan):
+            while len(current_row) <= _col_idx + _i:
+                current_row.append("")
+            current_row[_col_idx + _i] = _text if _i == 0 else ""
+            occupied.add(_col_idx + _i)
+        # rowspan: 记录到 pending，下一行填充
+        if current_rowspan > 1:
+            for _i in range(current_colspan):
+                pending_rowspans.append((_col_idx + _i, current_rowspan - 1, _text if _i == 0 else ""))
 
     class _P(HTMLParser):
         def handle_starttag(self, tag, attrs):
-            nonlocal in_cell, current_colspan, current_rowspan, occupied
+            nonlocal in_cell, current_colspan, current_rowspan, occupied, table_depth
+            if tag == "table":
+                # v27 P2-14: 嵌套表格 —— 内层事件全部忽略，只处理最外层。
+                table_depth += 1
+                return
+            if table_depth != 1:
+                return
             if tag == "tr":
+                # v27 P2-15: 未闭合 <td> 在行结束时隐式闭合（浏览器语义）。
+                if in_cell:
+                    _flush_cell()
                 current_row.clear()
                 # 应用上一行的 rowspan 占位
                 occupied = set()
@@ -304,6 +334,9 @@ def _html_table_to_markdown(html: str) -> str:
                 pending_rowspans.clear()
                 pending_rowspans.extend(_new_pending)
             elif tag in ("td", "th"):
+                # v27 P2-15: 新 <td> 开始时若上一个未闭合，先隐式闭合（浏览器语义）。
+                if in_cell:
+                    _flush_cell()
                 in_cell = True
                 current_cell.clear()
                 _attrs = dict(attrs)
@@ -317,29 +350,23 @@ def _html_table_to_markdown(html: str) -> str:
                     current_rowspan = 1
 
         def handle_endtag(self, tag):
-            nonlocal in_cell
+            nonlocal in_cell, table_depth
+            if tag == "table":
+                table_depth = max(0, table_depth - 1)
+                return
+            if table_depth != 1:
+                return
             if tag in ("td", "th"):
-                in_cell = False
-                _text = "".join(current_cell).strip()
-                # v25-fix: 填首个未被 rowspan 占用的列，而非 append 到行尾。
-                _col_idx = 0
-                while _col_idx in occupied:
-                    _col_idx += 1
-                # colspan: 横向展开
-                for _i in range(current_colspan):
-                    while len(current_row) <= _col_idx + _i:
-                        current_row.append("")
-                    current_row[_col_idx + _i] = _text if _i == 0 else ""
-                    occupied.add(_col_idx + _i)
-                # rowspan: 记录到 pending，下一行填充
-                if current_rowspan > 1:
-                    for _i in range(current_colspan):
-                        pending_rowspans.append((_col_idx + _i, current_rowspan - 1, _text if _i == 0 else ""))
+                _flush_cell()
             elif tag == "tr":
+                # v27 P2-15: 行结束时残留单元格隐式闭合。
+                if in_cell:
+                    _flush_cell()
                 rows.append(list(current_row))
 
         def handle_data(self, data):
-            if in_cell:
+            # v27 P2-14: 嵌套表格内的文本不混入外层单元格。
+            if in_cell and table_depth == 1:
                 current_cell.append(data)
 
     try:
@@ -372,10 +399,16 @@ def _html_table_shape(html: str) -> tuple[int | None, int | None]:
     in_row = False
     in_cell = False
     cell_count = 0
+    table_depth = 0  # v27 P2-14: 嵌套 <table> 计数，只统计最外层
 
     class _P(HTMLParser):
         def handle_starttag(self, tag, attrs):
-            nonlocal in_row, in_cell, cell_count
+            nonlocal in_row, in_cell, cell_count, table_depth
+            if tag == "table":
+                table_depth += 1
+                return
+            if table_depth != 1:
+                return
             if tag == "tr":
                 in_row = True
                 cell_count = 0
@@ -391,7 +424,12 @@ def _html_table_shape(html: str) -> tuple[int | None, int | None]:
                     cell_count += _cs
 
         def handle_endtag(self, tag):
-            nonlocal in_row, in_cell
+            nonlocal in_row, in_cell, table_depth
+            if tag == "table":
+                table_depth = max(0, table_depth - 1)
+                return
+            if table_depth != 1:
+                return
             if tag in ("td", "th"):
                 in_cell = False
             elif tag == "tr":

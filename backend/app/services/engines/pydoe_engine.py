@@ -47,7 +47,9 @@ def _generate_matrix(
         fn = getattr(pydoe, "ccdesign", None) or getattr(pydoe, "ccd", None)
         if fn is None:
             raise ValueError("pydoe has no central composite design function")
-        raw = fn(k)
+        # v27 P2-22: 与 native 对齐 —— face-centred + 3 个中心点（2 cube + 1 axial）。
+        # pydoe 默认 center=(4,4) 给 8 个中心点，k=2 时 16 runs vs native 11 runs。
+        raw = fn(k, face="faced", center=(2, 1))
     elif design == "bbdesign":
         fn = getattr(pydoe, "bbdesign", None) or getattr(pydoe, "bb", None)
         if fn is None:

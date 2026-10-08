@@ -93,15 +93,22 @@ def resample_plan_for_constraints(
                 except StopIteration:
                     new_runs.append(run)
                     continue
+                # v27 P2-19: 两侧 infeasible 取 OR —— KG/物理门是对整批共享
+                # skeleton 的判定，标记写在原始 run 上；LHS 候补 run 从未经过
+                # 这两个门。v10 只保留了替换源一侧，原始 run 的标记被静默丢弃。
+                _reasons = [
+                    r
+                    for r in (run.infeasible_reason, replacement.infeasible_reason)
+                    if r
+                ]
                 new_runs.append(
                     DOERun(
                         run_id=run.run_id,
                         coded=replacement.coded,
                         natural=replacement.natural,
                         ai_suggested=True,
-                        # v10: 保留替换源的 infeasible 信号，避免 KG 不相容标记丢失。
-                        infeasible=replacement.infeasible,
-                        infeasible_reason=replacement.infeasible_reason,
+                        infeasible=run.infeasible or replacement.infeasible,
+                        infeasible_reason="；".join(_reasons),
                     )
                 )
             else:

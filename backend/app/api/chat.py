@@ -647,7 +647,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
             citation_expand = emeta.get("citation_expand") or None
             # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
             _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
-            _rev_answer = _remap_citation_numbers(answer, _rev_mapping)
+            _rev_answer = _remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
             evidence_reviewer = _run_evidence_review(
                 question, _rev_answer, _rev_evidence, settings
             )
@@ -994,7 +994,7 @@ def _fire_auto_review(
         # v25-fix: 坐标对齐 —— 传完整 citations，在内部做 mapping+remap
         #（与 4 处主调用点同构；之前这里传的是过滤后列表，reviewer 看到的编号错位）。
         _rev_evidence, _rev_mapping = claims_evidence_with_mapping(citations)
-        _rev_answer = remap_citation_numbers(answer, _rev_mapping)
+        _rev_answer = remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
         kwargs = dict(
             turn_id=_uuid.uuid4().hex,
             question=question,
@@ -1040,7 +1040,7 @@ def _finalize_evidence_fields(
         citation_expand = emeta.get("citation_expand") or None
         # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
         _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
-        _rev_answer = _remap_citation_numbers(answer, _rev_mapping)
+        _rev_answer = _remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
         reviewer = _run_evidence_review(
             question, _rev_answer, _rev_evidence, settings
         )
@@ -1357,7 +1357,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                         ):
                             # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
                             _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
-                            _rev_answer = _remap_citation_numbers(answer, _rev_mapping)
+                            _rev_answer = _remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
                             evidence_reviewer = await asyncio.to_thread(
                                 _run_evidence_review,
                                 question,
