@@ -204,10 +204,20 @@ def _split_sections(md: str) -> list[tuple[str, str]]:
     sections: list[tuple[str, list[str]]] = [("", [])]
     stack: list[tuple[int, str]] = []  # (level, title)
     in_fence = False
+    in_math = False  # v22: 跟踪 math 块，避免 math 内行首 # 被误判为标题
     for line in lines:
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
-        heading = None if in_fence else _parse_heading(line)
+        stripped = line.strip()
+        # v22: math 块状态跟踪（复用 _math_open/_math_selfclosed）
+        if not in_fence and not in_math:
+            if not _math_selfclosed(stripped):
+                closer = _math_open(stripped)
+                if closer:
+                    in_math = closer
+        elif in_math and stripped.startswith(in_math):
+            in_math = False
+        heading = None if (in_fence or in_math) else _parse_heading(line)
         if heading:
             level, title = heading
             while stack and stack[-1][0] >= level:
@@ -218,7 +228,6 @@ def _split_sections(md: str) -> list[tuple[str, str]]:
         else:
             sections[-1][1].append(line)
     return [(path, "\n".join(body).strip()) for path, body in sections if "\n".join(body).strip()]
-
 
 def _math_open(stripped: str) -> str | None:
     """If *stripped* opens a display-math block, return the closer token."""

@@ -195,6 +195,8 @@ def _requirement_fit(candidate: dict, req: Requirement | None) -> float:
     """Soft score: how well candidate deltas move toward requirement objectives.
 
     Higher is better. Missing objectives / deltas → 0 (no penalty).
+    For ranking only; the value has no absolute meaning and is not
+    comparable across different numbers of objectives.
     """
     if req is None:
         return 0.0

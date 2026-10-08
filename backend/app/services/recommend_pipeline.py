@@ -169,6 +169,10 @@ def finalize_scored_formulations(
         if queue:
             formulas.append(queue.popleft())
 
+    # v22: 配对完整性断言（fail-fast，暴露未来重构引入的错位）。
+    assert len(formulas) == len(scored), (
+        f"recommendation pairing broken: {len(formulas)} != {len(scored)}"
+    )
     return scored, formulas, dedup_notes, diversity_applied
 
 

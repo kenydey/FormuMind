@@ -51,6 +51,9 @@ def generate_structured_answer(
         except Exception as exc:  # noqa: BLE001 - fail-open
             logger.debug("structured query compression skipped: %s", exc)
 
+        # v22-fix: 过滤空 snippet（与 v21-4 同构），否则 [n] 编号被空条目占用。
+        sources = [e for e in sources if (e.snippet or "").strip()]
+
     if not sources:
         fallback = StructuredAnswer(
             summary="暂无可用资料支撑结构化回答，请先检索或上传文献。",

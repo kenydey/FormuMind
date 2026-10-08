@@ -8,6 +8,22 @@ from .schemas import ObjectiveSpec, ProductDomain, Requirement
 
 logger = logging.getLogger(__name__)
 
+# v22-fix: metric 别名表下移到 domain 层（避免 domain→service 倒置）。
+# normalize_objective 在此规范化 metric，全链路受益。
+METRIC_ALIASES: dict[str, str] = {
+    "耐盐雾": "salt_spray_hours",
+    "salt spray": "salt_spray_hours",
+    "salt_spray": "salt_spray_hours",
+    "清洗率": "cleaning_efficiency",
+    "cost": "cost_cny_per_kg",
+    "voc": "voc_gpl",
+}
+
+
+def _resolve_metric_name(metric: str) -> str:
+    return METRIC_ALIASES.get(metric.strip().lower(), METRIC_ALIASES.get(metric, metric))
+
+
 _METRIC_UNITS: dict[str, str] = {
     "salt_spray_hours": "h",
     "cleaning_efficiency": "%",
@@ -41,6 +57,9 @@ def default_display_name(metric: str) -> str:
 
 def normalize_objective(obj: ObjectiveSpec) -> ObjectiveSpec:
     data = obj.model_dump()
+    # v22-fix: 规范化 metric 别名（single choke point，全链路受益）。
+    if data.get("metric"):
+        data["metric"] = _resolve_metric_name(data["metric"])
     if not data.get("id"):
         data["id"] = data.get("metric") or uuid4().hex[:8]
     if not data.get("display_name"):

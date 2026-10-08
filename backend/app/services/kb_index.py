@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import TYPE_CHECKING
 
 from ..config import get_settings
@@ -39,7 +40,8 @@ import threading as _threading
 _EMBED_BREAKER_LOCK = _threading.Lock()
 _EMBED_FAIL_COUNT: dict[str, int] = {}
 _EMBED_BREAKER_THRESHOLD = 5
-_EMBED_BROKEN: set[str] = set()
+_EMBED_BROKEN: dict[str, float] = {}  # v22: 模型名 → 熔断时间戳（含 TTL，超时自动半开重试）
+_EMBED_BREAKER_COOLDOWN_S = 600.0  # v22: 熔断冷却时间（秒），超时后允许一次半开重试
 
 _KB_COVERAGE_LOCK = _threading.Lock()
 # v15: 按语言分桶（en/zh 有向量；bm25_fallback 无向量走 BM25）
@@ -114,8 +116,12 @@ def _count_source_chunks(source_id: str) -> tuple[int, int, int, int]:
             # v18-4: 向量可能在 embedding (JSON) 或 embedding_blob (BLOB)
             if getattr(r, "embedding", None) or getattr(r, "embedding_blob", None):
                 embedded += 1
-                mname = (getattr(r, "embedding_model", "") or "").lower()
-                if "bge" in mname or "zh" in mname:
+                # v22-fix: 优先按 DB lang 列分桶（与 bump 侧口径一致），NULL 时回退模型名推断。
+                lang = (getattr(r, "lang", "") or "").lower()
+                if not lang:
+                    mname = (getattr(r, "embedding_model", "") or "").lower()
+                    lang = "zh" if ("bge" in mname or "zh" in mname) else "en"
+                if lang == "zh":
                     zh += 1
                 else:
                     en += 1
@@ -575,15 +581,25 @@ def prepare_chunk_rows(
             for lang, idxs in group_idxs.items():
                 mname = _model_for_lang(lang)
                 # v16 P2-8: 熔断检查 —— 已熔断模型直接跳过（走 BM25）。
+                # v22: 加 TTL，冷却超时后摘除并允许一次半开重试。
                 with _EMBED_BREAKER_LOCK:
-                    if mname in _EMBED_BROKEN:
-                        failed_langs.add(lang)
-                        logger.warning(
-                            "kb embedding skipped for lang %s (source %s): "
-                            "model %s circuit-broken",
-                            lang, source_id, mname,
-                        )
-                        continue
+                    _broken_ts = _EMBED_BROKEN.get(mname)
+                    if _broken_ts is not None:
+                        if time.monotonic() - _broken_ts >= _EMBED_BREAKER_COOLDOWN_S:
+                            del _EMBED_BROKEN[mname]
+                            _EMBED_FAIL_COUNT[mname] = 0
+                            logger.info(
+                                "kb embedding circuit half-open: model %s cooldown expired, retrying",
+                                mname,
+                            )
+                        else:
+                            failed_langs.add(lang)
+                            logger.warning(
+                                "kb embedding skipped for lang %s (source %s): "
+                                "model %s circuit-broken",
+                                lang, source_id, mname,
+                            )
+                            continue
                 texts = [rows[i]["text"] for i in idxs]
                 try:
                     vecs = _embed_texts(texts, mname)
@@ -595,11 +611,11 @@ def prepare_chunk_rows(
                     with _EMBED_BREAKER_LOCK:
                         _EMBED_FAIL_COUNT[mname] = _EMBED_FAIL_COUNT.get(mname, 0) + 1
                         if _EMBED_FAIL_COUNT[mname] >= _EMBED_BREAKER_THRESHOLD:
-                            _EMBED_BROKEN.add(mname)
+                            _EMBED_BROKEN[mname] = time.monotonic()
                             logger.error(
                                 "kb embedding CIRCUIT-BROKEN: model %s failed %d times — "
-                                "skipping until process restart",
-                                mname, _EMBED_FAIL_COUNT[mname],
+                                "skipping for %.0fs (cooldown)",
+                                mname, _EMBED_FAIL_COUNT[mname], _EMBED_BREAKER_COOLDOWN_S,
                             )
                     logger.error(
                         "kb embedding failed for lang %s (source %s) — "

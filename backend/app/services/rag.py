@@ -361,6 +361,12 @@ class BM25FAISSStore:
         import faiss
         import numpy as np
 
+        # v22-fix: 之前有过未索引的 docs（跳过批次），保持 None 降级纯 BM25，
+        # 不重建错位索引。_build_faiss_index 在 self.docs.extend(evidence) 后调用，
+        # 故 len(self.docs) 含当前批次；len(self.docs) > len(evidence) 说明有历史未索引。
+        if self._faiss_index is None and len(self.docs) > len(evidence):
+            return
+
         emb = self._get_embedder()
         if emb is None:
             return

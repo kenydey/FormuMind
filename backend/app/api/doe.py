@@ -166,7 +166,7 @@ class DoeCycleBody(BaseModel):
     workbench_campaign_id: int | None = None
     # P2-4: remaining experiment budget; <= 0 hard-stops with a hold stub.
     budget_remaining: int | None = None
-    # v16: DOE 冷启动种子。None = OS 熵（历史默认）；整数 = 可复现。
+    # v16: DOE 冷启动种子。None = 确定性默认 0；整数 = 可复现。
     seed: int | None = None
 
 

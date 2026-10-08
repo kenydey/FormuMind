@@ -762,6 +762,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                 try:
                     out = fn(content, ext)
                 except Exception as exc:  # noqa: BLE001
+                    timing.note(parser=f"{name}:error")  # v22: 与非 PDF 路径对齐
                     logger.warning("parse tier %s failed: %s", name, exc)
                     continue
                 # Tiers may return a full ParseResult (mineru_cloud) or plain

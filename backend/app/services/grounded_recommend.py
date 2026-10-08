@@ -368,9 +368,10 @@ def ground_recommended_formulas(
 ) -> tuple[list[RecommendedFormula], list[str]]:
     """Verify components appear in evidence or material catalog.
 
-    ``prefer_materials_catalog`` is a *soft* bias: catalog hits get stronger
-    grounding / stable sort priority. It never drops formulas whose components
-    are outside the catalog.
+    ``prefer_materials_catalog`` is a *soft* bias: it triggers soft sorting by
+    material-catalog hit rate plus a hit-rate note. It does not change
+    per-component ``grounding_confidence``. It never drops formulas whose
+    components are outside the catalog.
 
     ``strict`` (default True): drop low-confidence components instead of only
     tagging them. A formula whose every component is low-confidence is dropped

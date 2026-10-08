@@ -394,6 +394,8 @@ def hybrid_search_scored(
             )
             pool = min(pool, n)
             # Top-BM25 indices for cosine (keep zeros elsewhere → BM25-only for tail).
+            # v22-note: 空 token chunk（bm25=0）在 ANN gate 下 cosine 恒 0 ——
+            # 性能权衡（小库/冷路径走全量 cosine，不受影响）。
             top_idx = np.argsort(-bm25_raw)[:pool].tolist()
             matrix_min = int(
                 getattr(settings, "kb_hybrid_ann_matrix_min_dim", 512) or 512

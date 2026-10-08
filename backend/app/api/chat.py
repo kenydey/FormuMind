@@ -1376,6 +1376,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                                 )
                                 return _ensure_answer(repaired), cited
 
+                            # v22-fix: 保存修复前答案，用于判断是否被修改（v21-5 死代码修复）。
+                            _answer_before = answer
                             answer, reviewer_fix = await asyncio.to_thread(
                                 run_fix_loop,
                                 question=question,
@@ -1419,8 +1421,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             logger.warning("chat/stream structured fix-loop: %s", exc)
                     _degr_notices = _retrieval_degradation_notices(kb_used) or []
                     # v21-fix: fix-loop 可能修改答案，重算 claims/audit（与同步路径对齐）。
-                    # 只在 reviewer_fix 非空且答案被修改时重算，避免重复开销。
-                    if reviewer_fix and reviewer_fix.get("repaired"):
+                    # v22-fix: 用答案文本比较触发（"repaired" 键不存在，v21-5 死代码）。
+                    if reviewer_fix and answer != _answer_before:
                         try:
                             _claims, _audit, _verified = await asyncio.to_thread(
                                 _claims_and_audit,

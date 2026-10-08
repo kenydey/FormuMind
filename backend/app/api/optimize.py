@@ -18,7 +18,7 @@ class OptimizeRequest(BaseModel):
     engine: str = "auto"
     campaign_state: str | None = None
     workbench_campaign_id: int | None = None
-    # v16: DOE 冷启动种子。None = OS 熵（历史默认）；整数 = 可复现。
+    # v16: DOE 冷启动种子。None = 确定性默认 0；整数 = 可复现。
     # 边界：设计矩阵可复现 ≠ BayBE GP 采样可复现（GP 内部仍走其自身随机性）。
     seed: int | None = Field(default=None, description="DOE cold-start seed; None=OS entropy")
 

@@ -6,18 +6,7 @@ from ...domain.schemas import Formulation, Requirement
 from .metric_prior import evaluate_prior_spec
 from .. import predictor
 
-METRIC_ALIASES: dict[str, str] = {
-    "耐盐雾": "salt_spray_hours",
-    "salt spray": "salt_spray_hours",
-    "salt_spray": "salt_spray_hours",
-    "清洗率": "cleaning_efficiency",
-    "cost": "cost_cny_per_kg",
-    "voc": "voc_gpl",
-}
-
-
-def _resolve_metric_name(metric: str) -> str:
-    return METRIC_ALIASES.get(metric.strip().lower(), METRIC_ALIASES.get(metric, metric))
+from ..domain.objective_contract import _resolve_metric_name
 
 
 def _generic_role_prior(form: Formulation) -> tuple[float, str]:
