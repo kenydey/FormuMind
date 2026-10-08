@@ -1,6 +1,7 @@
 """Baybe Campaign engine — stateless via JSON serialization."""
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from ...domain.objective_contract import align_dataframe_measurement_columns, objective_metrics
@@ -30,6 +31,51 @@ from .campaign_objectives import resolve_campaign_objectives
 from .doe_registry import baybe_available, build_doe_plan
 
 log = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _seeded_rng(seed: int | None):
+    """v27 P3-27: 播种 torch/numpy 全局 RNG，退出时恢复原状态。
+
+    替代 v18-6 的手工 save/restore —— 原写法在冷启动早期返回点
+    （return alt_plan.runs / return []）泄漏，污染调用方 RNG。
+    try/finally 保证任何返回路径（含异常）都恢复。
+    """
+    _torch_state, _np_state = None, None
+    if seed is None:
+        yield
+        return
+    try:
+        import torch
+
+        _torch_state = torch.get_rng_state()
+        torch.manual_seed(seed)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import numpy as np
+
+        _np_state = np.random.get_state()
+        np.random.seed(seed % (2**32))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        yield
+    finally:
+        if _torch_state is not None:
+            try:
+                import torch
+
+                torch.set_rng_state(_torch_state)
+            except Exception:  # noqa: BLE001
+                pass
+        if _np_state is not None:
+            try:
+                import numpy as np
+
+                np.random.set_state(_np_state)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _fp_val(x):
@@ -345,28 +391,35 @@ class BaybeCampaignEngine:
     ) -> BaybeRecommendResult:
         if not self.available():
             raise RuntimeError("baybe is not installed (pip install -e '.[baybe,bo,science]')")
+        # v27 P3-27: RNG 播种/恢复走 _seeded_rng 上下文管理器 —— try/finally
+        # 保证冷启动早期返回也不泄漏种子。原 v18-6 手工写法在
+        # return alt_plan.runs / return [] 处跳过恢复。
+        with _seeded_rng(seed):
+            return self._recommend_inner(
+                req,
+                campaign_state=campaign_state,
+                measurements=measurements,
+                batch_size=batch_size,
+                design=design,
+                workbench_campaign_id=workbench_campaign_id,
+                store=store,
+                budget_remaining=budget_remaining,
+                seed=seed,
+            )
 
-        # v17-4: seed 透传到 BayBE GP 采样层 —— Campaign/recommend 不收 seed，
-        # 用 torch 全局种子控制采集函数随机性（fail-open）。
-        # v18-6: 保存/恢复 RNG 状态，避免并发请求间的种子污染。
-        # 同时播种 numpy（BayBE 内部可能用 numpy 随机）。
-        _torch_rng_state = None
-        _np_rng_state = None
-        if seed is not None:
-            try:
-                import torch
-
-                _torch_rng_state = torch.get_rng_state()
-                torch.manual_seed(seed)
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                import numpy as np
-
-                _np_rng_state = np.random.get_state()
-                np.random.seed(seed % (2**32))
-            except Exception:  # noqa: BLE001
-                pass
+    def _recommend_inner(
+        self,
+        req: Requirement,
+        *,
+        campaign_state: str | None = None,
+        measurements: list[ExperimentRecord] | None = None,
+        batch_size: int = 4,
+        design: str = "baybe_active",
+        workbench_campaign_id: int | None = None,
+        store=None,
+        budget_remaining: int | None = None,
+        seed: int | None = None,
+    ) -> BaybeRecommendResult:
 
         from ...db.campaign_store import get_campaign_store
 
@@ -644,22 +697,6 @@ class BaybeCampaignEngine:
                 return alt_plan.runs
             except Exception:  # noqa: BLE001 - fail-open
                 return []
-
-        # v18-6: 恢复 RNG 状态，避免污染调用方。
-        if _torch_rng_state is not None:
-            try:
-                import torch
-
-                torch.set_rng_state(_torch_rng_state)
-            except Exception:  # noqa: BLE001
-                pass
-        if _np_rng_state is not None:
-            try:
-                import numpy as np
-
-                np.random.set_state(_np_rng_state)
-            except Exception:  # noqa: BLE001
-                pass
 
         return enrich_baybe_result(
             result, req, all_records,

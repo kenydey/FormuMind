@@ -205,3 +205,55 @@ def test_fp_val_object_column_dedup_hit():
     assert _fp_val(True) == "True"
     assert _fp_val(float("nan")) == "nan"
     assert _fp_val(None) == "None"
+
+
+def test_seeded_rng_restores_state_on_early_return():
+    """v27 P3-27: _seeded_rng 在任何退出路径都恢复 RNG 状态。
+
+    之前 v18-6 的手工写法在冷启动早期返回（return alt_plan.runs / return []）
+    处泄漏，seed 污染调用方。
+    """
+    import numpy as np
+
+    from app.services.engines.baybe_engine import _seeded_rng
+
+    np.random.seed(12345)
+    before = np.random.get_state()[1].copy()
+
+    # 正常退出
+    with _seeded_rng(999):
+        np.random.rand(10)
+    assert (np.random.get_state()[1] == before).all()
+
+    # 异常退出也恢复
+    with __import__("pytest").raises(RuntimeError):
+        with _seeded_rng(999):
+            np.random.rand(10)
+            raise RuntimeError("boom")
+    assert (np.random.get_state()[1] == before).all()
+
+    # seed=None 时不播种（透传）
+    with _seeded_rng(None):
+        pass
+    assert (np.random.get_state()[1] == before).all()
+
+
+def test_recommend_cold_start_does_not_pollute_rng():
+    """v27 P3-27: recommend 冷启动路径（早期返回）不污染调用方 RNG。"""
+    import numpy as np
+
+    from app.domain.schemas import DOEFactor, ProductDomain, Requirement
+    from app.services.engines.baybe_engine import BaybeCampaignEngine
+
+    engine = BaybeCampaignEngine()
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        factors=[DOEFactor(name="a", low=0.0, high=1.0)],
+    )
+    np.random.seed(777)
+    before = np.random.get_state()[1].copy()
+
+    # 无测量数据 → 冷启动 LHS 路径（原泄漏点：return alt_plan.runs）
+    engine.recommend(req, measurements=[], seed=42, batch_size=4)
+
+    assert (np.random.get_state()[1] == before).all(), "RNG 状态被污染"
