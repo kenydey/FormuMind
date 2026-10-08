@@ -194,6 +194,22 @@ def _cosine_on_indices(
                 ok, cemb = kb_index.comparable_embedding(c, dim, mname)
                 if ok and cemb:
                     cosine_scores[i] = kb_index._dot(qv, cemb)
+    # v23-fix: NULL-model chunk 第二遍 —— legacy 行（embedding_model IS NULL）按维度回退，
+    # 与 comparable_embedding docstring 承诺对齐。
+    from .rag import bge_query_prefix
+    for i in indices:
+        c = chunks[i]
+        if getattr(c, "embedding_model", None) is None and cosine_scores[i] == 0.0:
+            for mname in sorted(model_cols):
+                vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)
+                if not vecs or not vecs[0]:
+                    continue
+                qv = vecs[0]
+                dim = len(qv)
+                ok, cemb = kb_index.comparable_embedding(c, dim, mname)
+                if ok and cemb:
+                    cosine_scores[i] = kb_index._dot(qv, cemb)
+                    break
     return used_matrix
 
 

@@ -164,6 +164,7 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
         # KB dedup (2026-10-01): wiki chunks go through the same L1/L2 filter
         # as the other ingest paths (single-chunk source; embedding present).
         from ..kb_dedup import dedupe_chunk_rows
+        from ...db.chunk_store import _detect_chunk_lang
 
         _wiki_rows = dedupe_chunk_rows(
             [
@@ -178,6 +179,8 @@ def embed_wiki_page(path: str) -> dict[str, Any]:
                     },
                     "embedding": embedding,
                     "embedding_model": emb_model,
+                    # v23-fix: 预标 lang（与 chunk_store.py:124 落库同源），bump 侧不再等价硬编码 en。
+                    "lang": _detect_chunk_lang(blob) or "en",
                 }
             ],
             sid,

@@ -1353,6 +1353,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                     # v16 P2-1: structured 路径补 fix-loop（仅修 summary 文本，
                     # 不重生成 structured 对象 —— 保持对象契约）。
                     reviewer_fix = None
+                    _answer_before = answer  # v23-fix: 初始化，避免 try 提前异常导致 NameError
                     if (
                         evidence_reviewer
                         and not _reviewer_failed(evidence_reviewer)
@@ -1376,8 +1377,6 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                                 )
                                 return _ensure_answer(repaired), cited
 
-                            # v22-fix: 保存修复前答案，用于判断是否被修改（v21-5 死代码修复）。
-                            _answer_before = answer
                             answer, reviewer_fix = await asyncio.to_thread(
                                 run_fix_loop,
                                 question=question,

@@ -906,7 +906,7 @@ class LoopRequest(Requirement):
     prior_optimization: OptimizationResult | None = None
     prior_next_doe: DOEPlan | None = None
     budget_remaining: int | None = None
-    # v16: DOE 冷启动种子。None = OS 熵（历史默认）；整数 = 可复现。
+    # v16: DOE 冷启动种子。None = 确定性默认 0；整数 = 可复现。  # v23-fix: 与 v22 的两处对齐
     seed: int | None = None
 
 

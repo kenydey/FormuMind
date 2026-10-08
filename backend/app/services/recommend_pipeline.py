@@ -202,7 +202,8 @@ def _rescore_with_shared_bounds(scored: list[Formulation], objectives, process) 
         return
     try:
         objectives = list(objectives)
-        props = [predictor.predict(f, process) for f in scored]
+        # v23-fix: 用 f.predicted（已含 metric_priors/bias 修正），与展示同源。
+        props = [dict(f.predicted) if f.predicted else predictor.predict(f, process) for f in scored]
         shared = predictor.shared_bounds(objectives, props)
         rescored: list[float] = []
         for form, p in zip(scored, props):

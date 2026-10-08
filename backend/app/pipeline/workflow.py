@@ -14,6 +14,7 @@ from collections.abc import Callable
 from ..config import get_settings
 from ..domain import knowledge
 from ..domain.chemistry import full_safety_check, validate_formulation
+from ..domain.objective_contract import normalize_objectives
 from ..domain.schemas import (
     DOEPlan,
     Formulation,
@@ -140,7 +141,8 @@ def _score_and_validate(
     # a different number, on a different scale, than the one that actually
     # drove ranking/selection.
     if objectives is None:
-        objectives = req.objectives if req else None
+        # v23-fix: 规范化别名（与 v22-5 同主题），避免 BayBE 循环内 form.score 对别名恒 0.0。
+        objectives = normalize_objectives(req) if req else None
     if objectives:
         if predictor.score_is_raw(objectives):
             metric = objectives[0].metric
@@ -153,7 +155,10 @@ def _score_and_validate(
             # off the ranking score, just less drastically.
             if bounds is None:
                 bounds = predictor.default_bounds(objectives, form)
-            form.score = float(predictor.multi_objective_score(form, objectives, process, bounds))
+            # v23-fix: 用 form.predicted（已含 metric_priors/bias 修正），与展示同源。
+            form.score = float(predictor.multi_objective_score(
+                form, objectives, process, bounds, props=form.predicted
+            ))
     else:
         metric = primary_objective(req) if req else OBJECTIVE[form.domain]
         form.score = float(form.predicted.get(metric, 0.0))
@@ -486,7 +491,8 @@ def run_optimization(
     # v21-fix: seed=None → 0（与 DOE 链统一，之前用 42 是历史遗留）。
     opt = build_optimizer(factors=factors, seed=seed if seed is not None else 0)
     objective = OBJECTIVE[req.domain]
-    objectives = req.objectives or default_objectives(req.domain)
+    # v23-fix: 规范化别名（与 v22-5 同主题），fallback 路径不再静默全错。
+    objectives = normalize_objectives(req)
     process = process_for(req)
     history: list[float] = []
     best_so_far = float("-inf")

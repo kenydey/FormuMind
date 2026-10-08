@@ -550,7 +550,14 @@ def _fetch_landing_text(landing_url: str, timeout: float) -> str | None:
         return degrade_return(logger, exc, f"landing fetch failed: {landing_url}", None)
     if "html" not in ct and not body.lstrip()[:200].lower().startswith(b"<"):
         return None
-    text = _extract_web_text(body.decode("utf-8", errors="replace"))
+    # v23-fix: charset 检测（与 v19-5 同构），避免 GBK 站整页乱码。
+    try:
+        from charset_normalizer import from_bytes
+        _detected = from_bytes(body).best()
+        _html = str(_detected) if _detected else body.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        _html = body.decode("utf-8", errors="replace")
+    text = _extract_web_text(_html)
     return text or None
 
 

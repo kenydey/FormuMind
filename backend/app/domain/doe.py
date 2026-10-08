@@ -254,6 +254,9 @@ def build_plan(
         # v15: seed 透传（None 时保持历史默认 0，保证旧行为可复现）
         matrix = latin_hypercube(k, n or max(2 * k + 1, 8), seed if seed is not None else 0)
     else:
+        # v23-fix: 固定 run 数设计忽略 n 时给出提示，避免用户困惑。
+        if n is not None:
+            note_extra += f" (n={n} ignored: {design} has fixed run count)"
         matrix = _DESIGNS[design](k, n)
     runs: list[DOERun] = []
     outside_runs = 0

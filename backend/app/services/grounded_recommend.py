@@ -430,7 +430,6 @@ def ground_recommended_formulas(
             if not kept:
                 warnings.append(f"{rec.name}: 全部分成分均低可信度，整个配方已剔除")
                 continue
-            comps = kept
         elif low:
             form_warnings.append(
                 f"低可信度成分（证据未覆盖）: {', '.join(low[:5])}"

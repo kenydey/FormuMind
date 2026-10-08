@@ -6,7 +6,7 @@ from ...domain.schemas import Formulation, Requirement
 from .metric_prior import evaluate_prior_spec
 from .. import predictor
 
-from ..domain.objective_contract import _resolve_metric_name
+from ...domain.objective_contract import _resolve_metric_name
 
 
 def _generic_role_prior(form: Formulation) -> tuple[float, str]:

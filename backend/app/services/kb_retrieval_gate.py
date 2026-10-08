@@ -212,7 +212,8 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type
         re.search(r"\d", body)
         and re.search(
             # v19-fix: min 加前向约束，排除 "admin" 等词内匹配。
-            r"%|℃|°C|h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg|g\b|ml|L\b|s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
+            # v23-fix: s/g/h/mg/ml 同理收紧（照 min 前例）。
+            r"%|℃|°C|(?<![a-zA-Z])h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg\b|(?<![a-zA-Z])g\b|ml\b|L\b|(?<![a-zA-Z])s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
             body,
         )
     )

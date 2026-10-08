@@ -23,6 +23,7 @@ from typing import Any
 from ..db.datalab_client import datalab_headers, parse_item_envelope
 from ..db.measurement_store import MeasurementStore
 from ..db.models import ExperimentRow
+from ..domain.objective_contract import _resolve_metric_name
 from ..db.session_utils import commit_session
 from ..domain.schemas import Measurement
 from .http_safe import make_client
@@ -130,7 +131,8 @@ def apply_lab_measurements(
             else:
                 merged = dict(row.measured or {})
                 for m in measurements:
-                    merged[m.metric] = float(m.value)
+                    # v23-fix: 规范化 metric key（与 v22-5 同主题），避免别名 key 被 B-DOE-1 丢弃。
+                    merged[_resolve_metric_name(m.metric)] = float(m.value)
                 row.measured = merged  # 赋新 dict, SQLAlchemy 可检测到变更
                 report["mirrored"] = True
             report["written"] = int(n)

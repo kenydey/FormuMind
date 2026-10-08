@@ -20,7 +20,8 @@ class OptimizeRequest(BaseModel):
     workbench_campaign_id: int | None = None
     # v16: DOE 冷启动种子。None = 确定性默认 0；整数 = 可复现。
     # 边界：设计矩阵可复现 ≠ BayBE GP 采样可复现（GP 内部仍走其自身随机性）。
-    seed: int | None = Field(default=None, description="DOE cold-start seed; None=OS entropy")
+    # v23-fix: description 与注释对齐（v22 遗漏）。
+    seed: int | None = Field(default=None, description="DOE cold-start seed; None=deterministic default 0")
 
 
 @router.post("/optimize", status_code=202)

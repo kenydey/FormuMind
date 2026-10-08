@@ -22,7 +22,7 @@ from ...pipeline.workflow import (
 )
 from ...services import predictor
 from ...config import get_settings
-from .adapters.baybe_objective_builder import build_objective_from_specs, primary_metric
+from .adapters.baybe_objective_builder import build_objective_from_specs
 from .adapters.baybe_space_builder import build_searchspace, factors_for_requirement, factors_from_campaign
 from .adapters.doe_adapter import dataframe_to_doe_plan
 from .adapters.measurements_adapter import records_to_dataframe, surrogate_measurements_from_plan
@@ -679,7 +679,7 @@ class BaybeCampaignEngine:
         bounds: dict[str, tuple[float, float]] = predictor.default_bounds(objectives)
         ranked: list[tuple[float, object]] = []
         state = campaign_state
-        metric = primary_metric(req)
+        # v23-fix: 删除死代码（metric 赋值后无引用，且 primary_metric 用裸 objectives）。
         objective_metric_names = objective_metrics(objectives)
         settings = get_settings()
         # v15: 聚合各轮实际喂给 GP 的 lab 点数
