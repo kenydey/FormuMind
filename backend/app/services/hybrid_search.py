@@ -169,12 +169,17 @@ def _null_model_second_pass(
     legacy 行（embedding_model IS NULL）在第一遍中永远不会被打分
     （第一遍只处理 ``c.embedding_model == mname`` 的行，含矩阵路径），
     所以这里只处理 NULL-model 行，无需浮点哨兵。query 向量按模型预计算一次。
+
+    v27 P1-7: 全 legacy 语料时 model_cols 为空 —— 回退当前默认模型，
+    否则 query 向量根本不生成，向量通道静默失效。
     """
-    from .rag import bge_query_prefix
+    from .rag import bge_query_prefix, embed_model_name
 
     null_idx = [i for i in indices if getattr(chunks[i], "embedding_model", None) is None]
-    if not null_idx or not model_cols:
+    if not null_idx:
         return
+    if not model_cols:
+        model_cols = {embed_model_name()}
     qv_by_model: dict[str, tuple[list[float], int]] = {}
     for mname in sorted(model_cols):
         vecs = kb_index._embed_texts([bge_query_prefix(mname) + query], mname)

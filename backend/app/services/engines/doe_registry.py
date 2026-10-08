@@ -104,12 +104,31 @@ def build_doe_plan(
     seed: int | None = None,
     ccd_alpha: str | float | None = None,
 ) -> DOEPlan:
+    # v27 P1-11: 固定 run 数设计的 n-ignored 提示统一收口到此。
+    # v23 只在 domain/doe.py 的 else 分支加了提示，native ccd / full_factorial
+    # 分支和 pydoe 路径漏网。notes 已带提示的不重复加。
+    _FIXED_N = frozenset(
+        {
+            "full_factorial",
+            "fractional_factorial",
+            "plackett_burman",
+            "ccd",
+            "simplex_lattice",
+        }
+    )
+
+    def _with_n_hint(plan: DOEPlan) -> DOEPlan:
+        if n is not None and design in _FIXED_N and "ignored" not in (plan.notes or ""):
+            hint = f"(n={n} ignored: {design} has fixed run count)"
+            plan.notes = f"{plan.notes}\n{hint}".strip() if plan.notes else hint
+        return plan
+
     if design == "ccd" and not _is_face_centred(ccd_alpha):
         # pyDOE cannot be asked for an arbitrary alpha, and the pyDOE adapter clips every star point into [low, high] -
         # which is face-centred by another name. A rotatable (or explicit-alpha) CCD keeps its star points outside the
         # box and flags them infeasible, so it is built by the native generator whichever engine was asked for.
         plan = build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha, seed=seed)
-        return apply_kg_chemical_gate(plan, requirement)
+        return _with_n_hint(apply_kg_chemical_gate(plan, requirement))
     resolved = resolve_doe_engine(engine, design)
     if resolved == "pydoe":
         plan = build_plan_with_fallback(
@@ -118,4 +137,4 @@ def build_doe_plan(
     else:
         plan = build_native_plan(factors, design, n=n, ccd_alpha=ccd_alpha, seed=seed)
     # P1-5: gate runs for every engine, not just pydoe.
-    return apply_kg_chemical_gate(plan, requirement)
+    return _with_n_hint(apply_kg_chemical_gate(plan, requirement))

@@ -75,3 +75,34 @@ def test_resolve_request_objectives_normalizes_alias():
     )
     out = _resolve_request_objectives(body)
     assert out[0].metric == "salt_spray_hours"
+
+
+def test_recommend_formulations_unknown_metric_422():
+    """v27 P1-8: 显式 objectives 传非法 metric → 422，不再静默 0 分错排。"""
+    res = client.post(
+        "/api/formulations/recommend",
+        json={
+            "requirement": Requirement(domain=ProductDomain.degreaser).model_dump(),
+            "objectives": [
+                {"metric": "not_a_real_metric_xyz", "weight": 1.0, "direction": "maximize"},
+            ],
+            "n": 2,
+        },
+    )
+    assert res.status_code == 422
+    assert "not_a_real_metric_xyz" in res.json()["detail"]
+
+
+def test_recommend_formulations_alias_metric_still_ok():
+    """v27 P1-8: 别名 metric（salt spray）解析后合法 → 200（v26 别名修复不退化）。"""
+    res = client.post(
+        "/api/formulations/recommend",
+        json={
+            "requirement": Requirement(domain=ProductDomain.anticorrosion_coating).model_dump(),
+            "objectives": [
+                {"metric": "salt spray", "weight": 1.0, "direction": "maximize"},
+            ],
+            "n": 2,
+        },
+    )
+    assert res.status_code == 200

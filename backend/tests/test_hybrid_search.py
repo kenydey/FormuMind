@@ -201,3 +201,32 @@ def test_null_model_second_pass_scores_legacy_chunks(monkeypatch):
     hybrid_search._null_model_second_pass(chunks, [0, 1], scores, {"m"}, "query")
     assert scores[0] != 0.0  # legacy chunk 被第二遍打分
     assert scores[1] == 0.0  # 非 NULL 行不动（第一遍的职责）
+
+
+def test_null_model_second_pass_all_legacy_falls_back_to_default_model(monkeypatch):
+    """v27 P1-7: 全 legacy 语料时 model_cols 为空 —— 必须回退默认模型。
+
+    否则 query 向量不生成，向量通道静默失效（scores 全 0）。
+    """
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from app.services import hybrid_search, kb_index
+
+    dim = 8
+    chunks = [
+        SimpleNamespace(embedding_model=None, embedding=[0.5] * dim, text="a"),
+        SimpleNamespace(embedding_model=None, embedding=[0.5] * dim, text="b"),
+    ]
+
+    def _fake_embed_texts(texts, model_name):
+        assert model_name == "default-model"
+        return [[1.0] + [0.0] * (dim - 1)]
+
+    monkeypatch.setattr(kb_index, "_embed_texts", _fake_embed_texts)
+    monkeypatch.setattr("app.services.rag.embed_model_name", lambda *a, **k: "default-model")
+    scores = np.zeros(2, dtype=float)
+    hybrid_search._null_model_second_pass(chunks, [0, 1], scores, set(), "query")
+    assert scores[0] != 0.0
+    assert scores[1] != 0.0

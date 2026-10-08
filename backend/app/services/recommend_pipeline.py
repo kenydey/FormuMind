@@ -162,12 +162,20 @@ def finalize_scored_formulations(
     for f in scored:
         # v16 P3-12: 优先位置配对（_src_idx 随对象携带），回退名称配对。
         _si = getattr(f, "_src_idx", None)
+        rec = None
         if _si is not None and 0 <= _si < len(rec_formulas):
-            formulas.append(rec_formulas[_si])
-            continue
-        queue = name_to_recs.get(f.name)
-        if queue:
-            formulas.append(queue.popleft())
+            rec = rec_formulas[_si]
+        else:
+            queue = name_to_recs.get(f.name)
+            if queue:
+                rec = queue.popleft()
+        if rec is not None:
+            # v27 P1-9: 编排算出的 score/predicted 回填到响应 formulas。
+            # 此前直接返回原始 RecommendedFormula，score=None、predicted={}
+            #（v20 双字段展示契约未兑现）。
+            rec.score = f.score
+            rec.predicted = dict(f.predicted or {})
+            formulas.append(rec)
 
     # v22: 配对完整性断言（fail-fast，暴露未来重构引入的错位）。
     assert len(formulas) == len(scored), (

@@ -65,3 +65,22 @@ def test_objective_metrics_order():
         )
     )
     assert objective_metrics(objs) == ["cleaning_efficiency", "voc_gpl"]
+
+
+def test_known_metrics_covers_predictor_props():
+    """v27 P1-8 漂移守护：KNOWN_METRICS 必须覆盖 predictor 可产出的全部 props 键。
+
+    否则显式 objectives 的 422 校验会误杀合法指标，或漏掉静默 0 分的非法指标。
+    """
+    import re
+    from pathlib import Path
+
+    from app.domain.objective_contract import KNOWN_METRICS
+
+    backend_root = Path(__file__).resolve().parent.parent
+    src = (backend_root / "app" / "services" / "predictor.py").read_text(encoding="utf-8")
+    produced = set(re.findall(r'props\["([a-z_]+)"\]\s*=', src))
+    # props[metric] 动态写入（_blend_trained）不计入静态扫描
+    assert produced, "predictor.py 中未扫描到 props 键"
+    missing = produced - set(KNOWN_METRICS)
+    assert not missing, f"KNOWN_METRICS 漏掉 predictor 产出的指标: {sorted(missing)}"

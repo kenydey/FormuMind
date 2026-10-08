@@ -318,7 +318,7 @@ def test_legacy_active_learning_preserves_infeasible(monkeypatch):
     )
     monkeypatch.setattr(
         al_mod, "suggest_next_experiments",
-        lambda plan_, existing, n_suggest=4: plan_.runs[:2],
+        lambda plan_, existing, n_suggest=4, **kw: plan_.runs[:2],
     )
     from app.domain.schemas import Requirement
 

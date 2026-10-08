@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.schemas import Formulation, Ingredient, ProductDomain
+from app.domain.schemas import Formulation, Ingredient, ProductDomain, RecommendedFormula
 from app.services.recommend_pipeline import finalize_scored_formulations
 from app.services.kg_chemical_check import ChemicalCheckResult
 from app.services.kg_recommend_score import record_kg_compat
@@ -47,7 +47,11 @@ def test_kg_incompatible_sinks_in_ranking(monkeypatch):
     )
     bad.score = 0.8 * 0.5  # kg_compat_adjust would have applied this penalty
 
-    recs = []
+    # v27: v22 起配对断言要求 recs 与 scored 对齐 —— 传真实 recs。
+    recs = [
+        RecommendedFormula(name="合规配方", domain=ProductDomain.anticorrosion_coating),
+        RecommendedFormula(name="不相容配方", domain=ProductDomain.anticorrosion_coating),
+    ]
     scored, formulas, _, _ = finalize_scored_formulations(recs, [good, bad], n=2)
     # The penalized (incompatible) formula must come after the good one.
     assert scored.index(good) < scored.index(bad)
@@ -72,7 +76,11 @@ def test_kg_compat_field_survives_pipeline(monkeypatch):
             feasible=True, status="pass", synergy_pairs=[("C", "D", "synergizes")]
         ),
     )
-    scored, _, _, _ = finalize_scored_formulations([], [f], n=1)
+    scored, _, _, _ = finalize_scored_formulations(
+        [RecommendedFormula(name="X", domain=ProductDomain.anticorrosion_coating)],
+        [f],
+        n=1,
+    )
     assert scored[0].kg_compat is not None
     assert scored[0].kg_compat["synergy_pairs"][0]["relation"] == "synergizes"
 
@@ -203,3 +211,31 @@ def test_score_and_validate_keeps_metric_measured_bonus(monkeypatch):
     assert out.score == pytest.approx(800.0 * 1.12)
     assert any("目标指标实测加成" in w for w in out.warnings)
     assert out.kg_compat["measured_metric_hits"][0]["quality"] == "good"
+
+def test_finalize_backfills_score_and_predicted(monkeypatch):
+    """v27 P1-9: 配对时把 Formulation.score/predicted 回填到 RecommendedFormula。
+
+    此前 formulas[].score=None、predicted={}（v20 双字段契约未兑现）。
+    """
+    from app.services.recommend_pipeline import finalize_scored_formulations
+
+    class _S:
+        recommend_diversity_enabled = False
+        recommend_default_n = 10
+        recommend_max_n = 10
+        recommend_diversity_lambda = 0.5
+
+    monkeypatch.setattr("app.services.recommend_pipeline.get_settings", lambda: _S())
+
+    f = _form("回填配方", 0.72)
+    f.predicted = {"salt_spray_hours": 640.0}
+    f._src_idx = 0
+    rec = RecommendedFormula(name="回填配方", domain=ProductDomain.anticorrosion_coating)
+    assert rec.score is None and rec.predicted == {}
+
+    scored, formulas, _, _ = finalize_scored_formulations([rec], [f], n=1)
+    assert len(formulas) == 1
+    assert formulas[0].score == 0.72
+    assert formulas[0].predicted == {"salt_spray_hours": 640.0}
+    # scored 侧不受影响
+    assert scored[0].score == 0.72

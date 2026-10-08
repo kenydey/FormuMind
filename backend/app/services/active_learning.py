@@ -79,19 +79,31 @@ def _surrogate_score(
     return float(mean), float(std)
 
 
-def _ei_acquisition(mean: float, std: float, y_best: float, kappa: float = 1.0) -> float:
+def _ei_acquisition(
+    mean: float, std: float, y_best: float, kappa: float = 1.0,
+    direction: str = "maximize",
+) -> float:
     """Expected Improvement acquisition (Gaussian, analytic).
 
     Falls back to UCB = mean + kappa·std when scipy is unavailable.
+
+    v27 P1-10: 支持 minimize —— 此时 improvement = y_best - mean
+   （y_best 为已观测最小值），UCB 回退用 -(mean - kappa·std) 使越大越好。
     """
     if std < 1e-9:
         return 0.0
+    minimize = (direction or "maximize") == "minimize"
     try:
         from scipy import stats  # type: ignore
 
+        if minimize:
+            z = (y_best - mean) / std
+            return float((y_best - mean) * stats.norm.cdf(z) + std * stats.norm.pdf(z))
         z = (mean - y_best) / std
         return float((mean - y_best) * stats.norm.cdf(z) + std * stats.norm.pdf(z))
     except Exception:
+        if minimize:
+            return float(kappa * std - mean)
         return float(mean + kappa * std)
 
 
@@ -109,6 +121,7 @@ def suggest_next_experiments(
     existing: list[ExperimentRecord],
     n_suggest: int = 4,
     objective_metric: str | None = None,
+    direction: str = "maximize",
 ) -> list[DOERun]:
     """Return the n_suggest most informative un-run DOE experiments.
 
@@ -126,9 +139,12 @@ def suggest_next_experiments(
 
     obj_metric = objective_metric or OBJECTIVE.get(plan.domain, "salt_spray_hours")
 
+    # v27 P1-10: minimize 时 y_best 取最小值。
+    minimize = (direction or "maximize") == "minimize"
     y_best = 0.0
     if existing:
-        y_best = max(rec.measured.get(obj_metric, 0.0) for rec in existing)
+        vals = [rec.measured.get(obj_metric, 0.0) for rec in existing]
+        y_best = min(vals) if minimize else max(vals)
 
     # Runs that breached a spec are negative evidence. Expected improvement
     # cannot see them — a low value and a failed acceptance test look the same
@@ -139,7 +155,7 @@ def suggest_next_experiments(
     scored: list[tuple[float, DOERun]] = []
     for run in plan.runs:
         mean, std = _surrogate_score(run.natural, plan.domain, existing, obj_metric)
-        acq = _ei_acquisition(mean, std, y_best)
+        acq = _ei_acquisition(mean, std, y_best, direction=direction)
         if failures:
             acq *= failure_memory.penalty_for(run.natural, failures)
         scored.append((acq, run))
@@ -171,9 +187,22 @@ def _legacy_active_learning_doe(
     plan = build_doe(req, design=design, engine=doe_engine, seed=seed)
     plan.notes = f"engine=legacy; AI 主动选点 (n={n_suggest}, design={design})"
 
+    # v27 P1-10: 从 req 目标推导主优化方向 —— 用户显式传 cost 类 minimize
+    # 目标时 EI 不再反向推荐。默认目标的主 metric 与 OBJECTIVE 一致，行为不变。
+    from ..domain.objective_contract import normalize_objective
+    from ..pipeline.workflow import default_objectives
+
+    _objs = [normalize_objective(o) for o in (req.objectives or default_objectives(req.domain))]
+    _primary = max(_objs, key=lambda o: (o.weight or 0.0))
     suggested_ids = {
         r.run_id
-        for r in suggest_next_experiments(plan, existing or [], n_suggest=n_suggest)
+        for r in suggest_next_experiments(
+            plan,
+            existing or [],
+            n_suggest=n_suggest,
+            objective_metric=_primary.metric,
+            direction=_primary.direction or "maximize",
+        )
     }
     plan.runs = [
         DOERun(

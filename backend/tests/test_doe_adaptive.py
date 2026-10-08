@@ -226,3 +226,18 @@ def test_active_doe_api_returns_adaptive_fields():
     assert len(body["run_explanations"]) >= 1
     assert body["recommended_next_action"]
     assert body["budget_remaining"] == 12
+
+
+def test_ei_acquisition_minimize_direction():
+    """v27 P1-10: EI 支持 minimize —— cost 越低 EI 越高，不再反向推荐。"""
+    from app.services.active_learning import _ei_acquisition
+
+    # y_best=20 为已观测最小 cost
+    ei_low_cost = _ei_acquisition(mean=10.0, std=1.0, y_best=20.0, direction="minimize")
+    ei_high_cost = _ei_acquisition(mean=30.0, std=1.0, y_best=20.0, direction="minimize")
+    assert ei_low_cost > ei_high_cost
+    assert ei_high_cost < 1e-6  # 高于已观测最小值 → 无 improvement
+    # maximize 路径行为不变（默认 direction）
+    ei_max = _ei_acquisition(mean=30.0, std=1.0, y_best=20.0)
+    assert ei_max == _ei_acquisition(mean=30.0, std=1.0, y_best=20.0, direction="maximize")
+    assert ei_max > 9.9

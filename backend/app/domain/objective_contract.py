@@ -24,6 +24,28 @@ def _resolve_metric_name(metric: str) -> str:
     return METRIC_ALIASES.get(metric.strip().lower(), METRIC_ALIASES.get(metric, metric))
 
 
+# v27 P1-8: 规范 metric 名集合 —— 显式 objectives 强校验用。
+# 必须与 predictor 可产出的 props 键一致（predictor.py 的 props[...] 赋值）；
+# 不在此集合的 metric 下游 props.get(metric, 0.0) 会静默 0 分错排。
+# tests/test_objective_contract.py 有漂移测试守护两者一致。
+KNOWN_METRICS: frozenset[str] = frozenset(
+    {
+        "salt_spray_hours",
+        "cleaning_efficiency",
+        "cost_cny_per_kg",
+        "voc_gpl",
+        "sustainability_idx",
+        "coating_weight_gsm",
+        "film_weight_gsm",
+        "adhesion_mpa",
+        "pencil_hardness_idx",
+        "foam_index",
+        "bath_life_cycles",
+        "adhesion_promotion_idx",
+    }
+)
+
+
 _METRIC_UNITS: dict[str, str] = {
     "salt_spray_hours": "h",
     "cleaning_efficiency": "%",
