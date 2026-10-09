@@ -276,6 +276,21 @@ def _registry_fingerprint(settings: Settings, collection: str, registry: dict) -
     return (collection, mtime, len(registry))
 
 
+# v29 Phase4: 缓存命中指标（可观测性）
+_CACHE_HITS = 0
+_CACHE_MISSES = 0
+
+
+def cache_stats() -> dict[str, int]:
+    """返回 _STORE_CACHE 命中统计。"""
+    with _STORE_CACHE_LOCK:
+        return {
+            "hits": _CACHE_HITS,
+            "misses": _CACHE_MISSES,
+            "size": len(_STORE_CACHE),
+        }
+
+
 def _get_cached_store(
     settings: Settings,
     collection: str,
@@ -287,13 +302,16 @@ def _get_cached_store(
     # 精确指纹在调用方计算后传入。简化：用 filtered 的 id 列表哈希。
     import hashlib
 
+    global _CACHE_HITS, _CACHE_MISSES
     doc_ids = sorted(_doc_id_for_evidence(ev) for ev in filtered)
     fp = hashlib.md5("|".join(doc_ids).encode()).hexdigest()[:16]
     key = (collection, fp, source_types_key, len(filtered))
     with _STORE_CACHE_LOCK:
         store = _STORE_CACHE.get(key)
-    if store is not None:
-        return store
+        if store is not None:
+            _CACHE_HITS += 1
+            return store
+        _CACHE_MISSES += 1
     store = rag.build_store()
     store.ingest(filtered)
     with _STORE_CACHE_LOCK:
@@ -318,6 +336,11 @@ def search(
     # v29 B-11: k 钳制 —— API 层有 le=1000 保护，但直接调用 search() 时无上限，
     # k=10**9 会全量返回。统一钳制到 1000。
     k = min(k or settings.colbert_top_k, 1000)
+
+    # v29 Phase4: 超时保护 + 耗时可观测
+    import time as _time
+    _t0 = _time.perf_counter()
+    _timeout_ms = float(getattr(settings, "colbert_search_timeout_ms", 10000) or 10000)
 
     registry = _load_registry(settings, collection)
     if not registry:
@@ -389,6 +412,23 @@ def search(
                 passage=ev.snippet,
                 evidence=ev.model_copy(update={"relevance": score}),
             )
+        )
+    # v29 Phase4: 耗时可观测 + 超时告警
+    _elapsed_ms = (_time.perf_counter() - _t0) * 1000.0
+    _stats = cache_stats()
+    logger.debug(
+        "colbert_store.search query=%r hits=%d elapsed_ms=%.1f cache=%s",
+        (query or "")[:80],
+        len(hits),
+        _elapsed_ms,
+        _stats,
+    )
+    if _elapsed_ms > _timeout_ms:
+        logger.warning(
+            "colbert_store.search 超时: query=%r elapsed_ms=%.1f > %.0fms",
+            (query or "")[:80],
+            _elapsed_ms,
+            _timeout_ms,
         )
     return hits[:k]
 

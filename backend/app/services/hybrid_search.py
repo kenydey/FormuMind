@@ -556,6 +556,38 @@ def hybrid_search_scored(
     finally:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         record_hybrid_latency_ms(elapsed_ms)
+        # v29 Phase4: per-query 检索日志 —— query→候选数→各通道 top 分数→耗时。
+        # 问题定位从小时级降到分钟级。DEBUG 级别避免生产日志爆炸。
+        _loc = locals()
+        def _top(name: str) -> float:
+            try:
+                arr = _loc.get(name)
+                return round(float(np.max(arr)), 4) if arr is not None else 0.0
+            except Exception:
+                return 0.0
+        logger.debug(
+            "hybrid_search query=%r n=%d top_bm25=%.4f top_cosine=%.4f top_hybrid=%.4f "
+            "fusion=%s ann=%s elapsed_ms=%.1f",
+            (query or "")[:80],
+            _loc.get("n", 0),
+            _top("bm25_scores"),
+            _top("cosine_scores"),
+            _top("combined"),
+            (getattr(settings, "kb_hybrid_fusion", None) or "weighted"),
+            _loc.get("ann_active", False),
+            elapsed_ms,
+        )
+        # v29 Phase4: 慢查询告警 —— 单次超 2s 打 warning
+        _slow_ms = float(getattr(settings, "kb_hybrid_slow_query_ms", 2000) or 2000)
+        if elapsed_ms > _slow_ms:
+            logger.warning(
+                "hybrid_search 慢查询: query=%r elapsed_ms=%.1f > %.0fms n=%d ann=%s",
+                (query or "")[:80],
+                elapsed_ms,
+                _slow_ms,
+                _loc.get("n", 0),
+                _loc.get("ann_active", False),
+            )
         sticky_budget = int(
             getattr(settings, "kb_hybrid_ann_sticky_queries", 3) or 3
         )
