@@ -1001,6 +1001,11 @@ class Settings(BaseSettings):
     ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
     # P2: URL 下载上限 —— 无上限时一个超大 PDF/页面可吃掉 worker 内存。
     ingest_max_url_bytes: int = 20 * 1024 * 1024  # 20 MiB per URL fetch
+    # v3 P1 M-7: D-2 规模守卫配置化 —— 此前只在 getattr 默认值里，不可配置
+    parse_max_file_mb: float = 200.0  # 解析文件大小上限（MB）
+    parse_max_pdf_pages: int = 2000  # PDF 页数上限
+    ingest_upload_timeout_s: float = 300.0  # 单文件上传超时（秒）
+    ingest_batch_timeout_s: float = 600.0  # 批量上传总超时（秒）
     # Server-side pip install via POST /api/dependencies/install. Unset → on in
     # development/test, **off** in production (opposite of api_auth_enabled).
     deps_install_enabled: bool | None = None

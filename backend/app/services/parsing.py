@@ -988,7 +988,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
 
     # v29 Phase4 D-2: 文档级规模守卫 —— 2000 页 PDF ≈ 6 分钟 + 350MB，
     # 无守卫会拖死 worker。超限直接拒绝（fail-fast），而非慢死。
-    _max_mb = float(getattr(get_settings(), "parse_max_file_mb", 200) or 200)
+    _max_mb = float(get_settings().parse_max_file_mb or 200)
     if len(content) > _max_mb * 1024 * 1024:
         logger.warning(
             "parse_document: 文件 %.1fMB 超上限 %.0fMB，拒绝解析",
@@ -998,7 +998,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
         r.table_stats = {"error": f"文件超限（{_max_mb:.0f}MB）"}
         return r
     if ext == "pdf":
-        _max_pages = int(getattr(get_settings(), "parse_max_pdf_pages", 2000) or 2000)
+        _max_pages = int(get_settings().parse_max_pdf_pages or 2000)
         try:
             from . import pdf_local
             n = pdf_local.page_count(content)

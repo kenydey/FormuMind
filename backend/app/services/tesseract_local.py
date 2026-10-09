@@ -57,6 +57,10 @@ def ocr_png(png: bytes, lang: str = "eng") -> str | None:
         text = _tsv_to_text_with_confidence(r.stdout)
         if text:
             return text
+        # v3 P1 M-4: 空白页不跑第二次 —— tsv 成功但无词 = 空白页，
+        # 再跑纯文本也是空，省一次 subprocess。
+        if r.returncode == 0:
+            return None
         # tsv 失败时回退纯文本
         r2 = subprocess.run(
             ["tesseract", path, "stdout", "-l", lang],

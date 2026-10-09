@@ -81,7 +81,7 @@ async def _read_upload_capped(file: UploadFile, filename: str) -> bytes:
     """
     import asyncio
 
-    timeout_s = float(getattr(get_settings(), "ingest_upload_timeout_s", 300) or 300)
+    timeout_s = float(get_settings().ingest_upload_timeout_s or 300)
     try:
         content = await asyncio.wait_for(
             read_upload_capped(
@@ -101,11 +101,16 @@ async def _read_upload_capped(file: UploadFile, filename: str) -> bytes:
 
 
 # v29 Phase4 M-16: 常见文件魔数
+# v3 P1 M-5: 扩展覆盖 —— 补 doc/xls/ppt（OLE2）、rtf
 _MAGIC_BY_EXT = {
     "pdf": [b"%PDF"],
     "docx": [b"PK\x03\x04"],  # zip
     "xlsx": [b"PK\x03\x04"],  # zip
     "pptx": [b"PK\x03\x04"],  # zip
+    "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],  # OLE2
+    "xls": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],  # OLE2
+    "ppt": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],  # OLE2
+    "rtf": [b"{\\rtf"],
     "png": [b"\x89PNG\r\n\x1a\n"],
     "jpg": [b"\xff\xd8\xff"],
     "jpeg": [b"\xff\xd8\xff"],
@@ -122,8 +127,10 @@ def _check_magic(content: bytes, filename: str) -> None:
     if not magics or len(content) < 8:
         return  # 未知类型或太小，跳过
     if not any(content.startswith(m) for m in magics):
-        logger.warning("上传文件魔数不符: %s (ext=%s)", filename, ext)
-        raise HTTPException(415, f"文件类型与扩展名不符: {filename}")
+        # v3 P1 M-6: 文件名消毒 —— 防日志注入/响应头注入，不回显原始文件名
+        safe_name = "".join(c for c in filename if c.isprintable())[:50]
+        logger.warning("上传文件魔数不符: %s (ext=%s)", safe_name, ext)
+        raise HTTPException(415, f"文件类型与扩展名不符: {safe_name}")
 
 
 def _to_ingest_response(filename: str, outcome) -> IngestResponse:
@@ -206,24 +213,35 @@ async def ingest_document(file: UploadFile = File(...)):
 @router.post("/ingest/batch")
 async def ingest_batch(files: list[UploadFile] = File(...)):
     """Queue a multi-file ingest: 202 + task_id, results via SSE/poll."""
+    import asyncio
+
     started = time.time()
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     if len(files) > 20:
         raise HTTPException(status_code=413, detail="最多同时上传20个文件")
 
+    # v3 P1 H-2: 批量总超时 —— 单文件 300s，20 文件串行可占连接 100 分钟。
+    # 总超时可配置，超限抛 408。
+    BATCH_TIMEOUT = float(get_settings().ingest_batch_timeout_s or 600)
     upload_dir = tempfile.mkdtemp(prefix="formumind_upload_")
     queued: list[dict] = []
     seen: set[str] = set()
     try:
-        for f in files:
-            name = f.filename or "upload"
-            content = await _read_upload_capped(f, name)
-            digest = hashlib.sha256(content).hexdigest()
-            if digest in seen:  # byte-identical file picked twice in one dialog
-                continue
-            seen.add(digest)
-            queued.append({"name": name, "path": _write_upload(content, name, upload_dir)})
+        async def _read_all():
+            for f in files:
+                name = f.filename or "upload"
+                content = await _read_upload_capped(f, name)
+                digest = hashlib.sha256(content).hexdigest()
+                if digest in seen:  # byte-identical file picked twice in one dialog
+                    continue
+                seen.add(digest)
+                queued.append({"name": name, "path": _write_upload(content, name, upload_dir)})
+
+        try:
+            await asyncio.wait_for(_read_all(), timeout=BATCH_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise HTTPException(408, f"批量上传超时（>{BATCH_TIMEOUT:.0f}s），请分批上传")
     except HTTPException:
         shutil.rmtree(upload_dir, ignore_errors=True)
         raise

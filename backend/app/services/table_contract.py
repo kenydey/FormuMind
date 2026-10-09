@@ -575,18 +575,24 @@ def blocks_from_markdown(markdown: str) -> list[MdBlock]:
         i += 1
 
     # Caption matching (nearby): up to 3 text lines before, else 1 line after.
+    # v3 P1 M-2: 认领仲裁 —— 同一 caption 行不被相邻两表重复认领。
+    claimed: set[int] = set()
     for block, start in zip(blocks, table_line_nos):
         for ln_no in range(start - 1, max(start - 4, -1), -1):
+            if ln_no in claimed:
+                continue
             if 0 <= ln_no < n and lines[ln_no].strip() \
                     and _is_caption_line(lines[ln_no]):
                 block.caption = _clean_caption(lines[ln_no])
+                claimed.add(ln_no)
                 break
         else:
             end_span = len((block.html or block.text).strip().splitlines())
             after = start + end_span
-            if after < n and lines[after].strip() \
+            if after not in claimed and after < n and lines[after].strip() \
                     and _is_caption_line(lines[after]):
                 block.caption = _clean_caption(lines[after])
+                claimed.add(after)
 
     return blocks
 
