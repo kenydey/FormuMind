@@ -148,10 +148,15 @@ def _l1_exact(
 
         out: list[dict] = []
         dropped = 0
+        # v29 M-3: 同批次内去重 —— 此前只查 DB 已有键，批次内重复的
+        # chunk 会双双通过。现同时追踪本批次已见键。
+        seen_in_batch: set[str] = set()
         for row in rows:
-            if dedup_key_for_row(row) in existing_keys:
+            key = dedup_key_for_row(row)
+            if key in existing_keys or key in seen_in_batch:
                 dropped += 1
                 continue
+            seen_in_batch.add(key)
             out.append(row)
         if dropped and not out:
             _ALL_CHUNKS_DUPLICATE.set(True)

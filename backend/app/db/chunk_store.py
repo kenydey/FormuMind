@@ -1,6 +1,7 @@
 """SQLite/Postgres-backed persistent chunk store for the knowledge base."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -10,6 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .models import DocumentChunk
 from .db_common import safe_bbox
 from .session_utils import commit_session
+
+logger = logging.getLogger(__name__)
 
 # P2 (0042): L1 去重索引键 —— kb_dedup 顶层只依赖标准库，无循环导入。
 from ..services.kb_dedup import chunk_dedup_key as _chunk_dedup_key
@@ -55,6 +58,9 @@ class ChunkStore:
         flushed before returning so a unique-constraint race surfaces as
         ``IntegrityError`` here rather than at the caller's commit.
 
+        v29 M-5: 并发 replace 的 IntegrityError 重试一次 —— 双线程同时
+        delete+insert 时唯一键冲突，重试可恢复（幂等操作）。
+
         Each chunk dict: {text, heading_path?, page_no?, paragraph_idx?,
         offset_start?, offset_end?, meta?, embedding?, embedding_model?,
         bbox?, block_type?}.
@@ -62,6 +68,25 @@ class ChunkStore:
         offset_start/offset_end/paragraph_idx are persisted both as column-level
         values and inside ``meta`` (for back-compat until all consumers migrate).
         """
+        from sqlalchemy.exc import IntegrityError
+
+        for attempt in range(2):
+            try:
+                return self._replace_for_source_inner(session, source_id, chunks)
+            except IntegrityError:
+                if attempt == 0:
+                    logger.warning(
+                        "chunk_store: 并发 replace 冲突，重试一次 (source=%s)",
+                        source_id,
+                    )
+                    session.rollback()
+                    continue
+                raise
+        return 0
+
+    def _replace_for_source_inner(
+        self, session: Session, source_id: str, chunks: list[dict]
+    ) -> int:
         session.query(DocumentChunk).filter(
             DocumentChunk.source_id == source_id
         ).delete()

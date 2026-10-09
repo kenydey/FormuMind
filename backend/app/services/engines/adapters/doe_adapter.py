@@ -164,7 +164,22 @@ def dataframe_to_doe_plan(
     engine: str,
     ai_suggested: bool = True,
 ) -> DOEPlan:
-    """Map a baybe recommend() DataFrame to DOEPlan."""
+    """Map a baybe recommend() DataFrame to DOEPlan.
+
+    v29 M-16: 缺列警告 —— 此前因子名不在 DataFrame 时静默跳过，
+    导致 DOE 计划缺因子。现 warning 日志。
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    # 预检查缺列
+    df_cols = set(df.columns) if hasattr(df, "columns") else set()
+    missing = [f.name for f in factors if f.name not in df_cols]
+    if missing:
+        logger.warning(
+            "doe_adapter: DataFrame 缺 %d 列 %s（factors=%d），对应因子将跳过",
+            len(missing), missing, len(factors),
+        )
     rows = []
     for idx, (_, row) in enumerate(df.iterrows(), start=1):
         # B-DOE-3: 离散因子（C-4a）的 natural 值可能是字符串水平，

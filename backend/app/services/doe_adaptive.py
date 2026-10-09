@@ -114,8 +114,13 @@ def resample_plan_for_constraints(
                 )
             else:
                 new_runs.append(run)
-        note = current.notes
+        note = current.notes or ""
         if bad_suggested:
+            # v29 M-15: resample note 去重计数 —— 此前多次调用会重复追加，
+            # 且计数可能不对。现先 strip 旧的 resample note 再追加。
+            import re
+
+            note = re.sub(r"\s*\|\s*约束重采样：替换 \d+ 个不合格 AI 点", "", note).strip(" |")
             note = f"{note} | 约束重采样：替换 {len(bad_suggested)} 个不合格 AI 点".strip(" |")
         current = current.model_copy(update={"runs": new_runs, "notes": note})
     return current

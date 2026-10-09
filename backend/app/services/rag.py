@@ -336,13 +336,20 @@ class BM25FAISSStore:
         # FAISS dense index — only for small batches (<200 docs)
         # to avoid OOM on CPU VPS with sentence-transformers
         # v21-fix: 跳过批次时置 None，避免向量位置与 docs 错位归因。
+        # v29 M-1: 大批量不再摧毁已有索引 —— 此前 _faiss_index=None 把
+        # 之前小批量建好的索引也清掉，向量通道静默死亡。现仅跳过本次构建，
+        # 保留已有索引。
         if len(evidence) <= 200:
             try:
                 self._build_faiss_index(evidence)
             except Exception:
                 pass  # FAISS is optional; BM25 alone still works
         else:
-            self._faiss_index = None
+            logger.warning(
+                "rag ingest: %d docs 超 200，大批量跳过 FAISS 增量构建（保留已有索引）",
+                len(evidence),
+            )
+            # 不碰 self._faiss_index，保留已有索引
 
         return len(self.docs)
 
