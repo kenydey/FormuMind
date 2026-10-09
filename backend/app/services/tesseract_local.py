@@ -129,11 +129,14 @@ def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | Non
     total = pdf_local.page_count(content)
     if total <= 0:
         return None
+    _truncated = False
+    _orig_total = total
     if total > max_pages:
         logger.warning(
             "tesseract ocr: %d 页超上限 %d，仅处理前 %d 页",
             total, max_pages, max_pages,
         )
+        _truncated = True
         total = max_pages
     rendered: list[tuple[int, str]] = []
     for page_no in range(1, total + 1):
@@ -146,4 +149,9 @@ def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | Non
             rendered.append((page_no, text))
     if not rendered:
         return None
-    return pdf_local.assemble(rendered)
+    result = pdf_local.assemble(rendered)
+    # v2 P1 M-8: 截断 note —— 超页数时用户可见提示（rapidocr 已有，此处补齐）
+    if _truncated:
+        note = f"\n\n> 注：原文共 {_orig_total} 页，仅 OCR 前 {max_pages} 页（tesseract 页数上限）。"
+        result = (result or "") + note
+    return result

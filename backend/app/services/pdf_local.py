@@ -237,6 +237,11 @@ def extract_pages(content: bytes, *, ocr: bool | None = None) -> list[LocalPage]
         use_ocr = bool(get_settings().pdf_local_ocr if ocr is None else ocr)
         doc = _open(content, name=_layout_name(content, ocr=use_ocr))
         try:
+            # v2 P1 M-6: 加密分流 —— 加密 PDF 不再走 OCR 空转，直接返回 None
+            # 让上游明确知道是加密而非扫描件。
+            if getattr(doc, "_formumind_encrypted", False):
+                logger.warning("pdf_local: 加密 PDF，跳过解析（非扫描件，需密码）")
+                return None
             chunks = pymupdf4llm.to_markdown(
                 doc, page_chunks=True, **_markdown_kwargs(ocr)
             )

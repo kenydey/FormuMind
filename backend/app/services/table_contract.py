@@ -440,11 +440,42 @@ def _is_borderless_row(line: str) -> bool:
     return len(parts) >= 2
 
 
+def _col_breaks(line: str) -> list[int]:
+    """v2 P1 M-5: 列分隔位置（多空格的起始索引），用于对齐校验。"""
+    breaks = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if line[i] == " " and i + 1 < n and line[i + 1] == " ":
+            # 连续空格的起始
+            breaks.append(i)
+            while i < n and line[i] == " ":
+                i += 1
+        else:
+            i += 1
+    return breaks
+
+
 def _looks_like_borderless_table(lines: list[str], i: int, n: int) -> bool:
-    """连续 3+ 行都像无框线表格行。"""
+    """连续 3+ 行都像无框线表格行，且列分隔位置对齐。
+
+    v2 P1 M-5: 加列对齐校验 —— 此前 3 行双空格散文即被判为表。
+    要求至少 2 个分隔位置在 ±3 字符内对齐。
+    """
     if i + 2 >= n:
         return False
-    return all(_is_borderless_row(lines[j]) for j in range(i, i + 3))
+    if not all(_is_borderless_row(lines[j]) for j in range(i, i + 3)):
+        return False
+    # 列对齐校验
+    breaks_list = [_col_breaks(lines[j]) for j in range(i, i + 3)]
+    # 找共同对齐的分隔位置
+    aligned = 0
+    for b0 in breaks_list[0]:
+        # 在其他两行找 ±3 内对齐的
+        if any(abs(b0 - b1) <= 3 for b1 in breaks_list[1]) and \
+           any(abs(b0 - b2) <= 3 for b2 in breaks_list[2]):
+            aligned += 1
+    return aligned >= 2
 
 
 def _borderless_to_pipe(buf: list[str]) -> str | None:

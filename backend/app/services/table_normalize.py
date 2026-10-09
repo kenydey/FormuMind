@@ -233,12 +233,26 @@ _UNIT_MAP: dict[str, str] = {
 }
 
 # Full-width → half-width (digits and common symbols).
-_FW_TRANS = str.maketrans("０１２３４５６７８９．，－＋％", "0123456789.,-+%")
+_FW_TRANS = str.maketrans("０１２３４５６７８９．，－＋％−", "0123456789.,-+%-")
+# v2 P1 M-3: 补 Unicode 负号 U+2212（−）→ ASCII 连字符。此前 "−5.2" 整体丢失。
+# v2 P1 M-4: 中文科学计数法预处理在 _sci_zh_to_ascii()（×10ⁿ → eⁿ）。
 
 _NUM_RE = re.compile(r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:[eE][+-]?\d+)?")
 # v29 Phase2 M-11: 支持科学计数法（如 1.2e-3、2E+5）。此前 1.2e-3 会被
 # 切成 (1.2, 'e-3')，数值丢失。
 _CMP_PREFIX_CHARS = "≥≤><≧≦=＝~～ \t"
+
+# v2 P1 M-4: 中文科学计数法上标映射（×10ⁿ → en）
+_SCI_SUPER = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
+_SCI_ZH_RE = re.compile(r"×\s*10\s*([⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]+)")
+
+
+def _sci_zh_to_ascii(text: str) -> str:
+    """v2 P1 M-4: 中文科学计数法 `1.2×10⁻³` → `1.2e-3`。"""
+    def _repl(m: re.Match) -> str:
+        exp = m.group(1).translate(_SCI_SUPER)
+        return f"e{exp}"
+    return _SCI_ZH_RE.sub(_repl, text)
 
 
 def normalize_unit(raw: str) -> str:
@@ -263,6 +277,8 @@ def _split_number_unit(text: str) -> tuple[float | None, str, bool]:
     t = (text or "").translate(_FW_TRANS).strip()
     if not t:
         return None, "", False
+    # v2 P1 M-4: 中文科学计数法预处理
+    t = _sci_zh_to_ascii(t)
     t2 = t.lstrip(_CMP_PREFIX_CHARS)
     m = _NUM_RE.match(t2)
     if not m:

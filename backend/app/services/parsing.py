@@ -342,10 +342,15 @@ def _parse_pypdf(content: bytes) -> str | None:
         from .chunking import page_marker
 
         reader = pypdf.PdfReader(io.BytesIO(content))
-        parts = [
-            f"{page_marker(i + 1)}\n\n{page.extract_text() or ''}"
-            for i, page in enumerate(reader.pages)
-        ]
+        # v2 P1 M-7: 单页保护 —— 一页坏不杀死整篇（与 pdf_local M-14 对齐）
+        parts = []
+        for i, page in enumerate(reader.pages):
+            try:
+                txt = page.extract_text() or ""
+            except Exception as exc:
+                logger.warning("pypdf: 第 %d 页提取失败，已跳过: %s", i + 1, exc)
+                continue
+            parts.append(f"{page_marker(i + 1)}\n\n{txt}")
         text = "\n\n".join(parts)
         # Marker-only output means no extractable text at all.
         stripped = "\n".join(
