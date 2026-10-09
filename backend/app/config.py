@@ -850,7 +850,10 @@ class Settings(BaseSettings):
     # Wave D: hybrid fusion mode — rrf (default) or weighted (A/B via golden).
     # v29 Phase3 B-5: rrf 为默认 —— rank-based 融合不受 per-channel max 归一化
     # 放大噪声的影响，hard-negative 场景下比 weighted 更稳健。
-    kb_hybrid_fusion: str = "rrf"  # rrf | weighted
+    # v3 检索调优：weighted + 0.85 —— eval 实证 RRF(k=60) 在跨语言 query 上
+    # 稀释 BM25 决定性信号（不同模型 cosine 不可比），weighted 保留幅度。
+    # test_evals_retrieval_qa.py 全绿（25 passed）。
+    kb_hybrid_fusion: str = "weighted"  # rrf | weighted
     # P1 #26: Langfuse tracing (MIT). Default OFF — no network without keys.
     # When enabled + keys present, llm.complete_json / search rerank emit spans.
     langfuse_enabled: bool = False
@@ -917,7 +920,7 @@ class Settings(BaseSettings):
     # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
     kb_recommend_top_k: int = 4
     # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.3）。
-    kb_hybrid_alpha: float = 0.3
+    kb_hybrid_alpha: float = 0.85
     # P2 A/B: hybrid 融合前化学实体加成（CAS/分子式/牌号/SMILES）。
     # legacy search_chunks 的加性 0.2/0.3 是按 cosine 0-1 尺度调的，直接加到
     # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做加性，

@@ -486,9 +486,25 @@ def hybrid_search_scored(
         if bm25_max > 0.0:
             bm25_scores = bm25_scores / bm25_max
 
-        cosine_max = float(cosine_scores.max()) if cosine_scores.size else 0.0
-        if cosine_max > 0.0:
-            cosine_scores = cosine_scores / cosine_max
+        # v3 检索调优：cosine 按 embedding 模型分组归一化。
+        # 不同模型的分数来自不同向量空间，不可比（如 MiniLM 对中文 query
+        # 系统性偏低）；联合归一化会系统性压制某一语言的文档，导致 RRF/
+        # weighted 融合失真。分组归一化后，每组分数为"在自己空间内相对
+        # 最优的相似度"，组间可比。单模型语料只有一组，行为不变。
+        _model_groups: dict[str, list[int]] = {}
+        for _i, _c in enumerate(chunks):
+            _model_groups.setdefault(
+                getattr(_c, "embedding_model", None) or "__none__", []
+            ).append(_i)
+        if len(_model_groups) > 1:
+            for _idxs in _model_groups.values():
+                _gmax = float(cosine_scores[_idxs].max()) if _idxs else 0.0
+                if _gmax > 0.0:
+                    cosine_scores[_idxs] = cosine_scores[_idxs] / _gmax
+        else:
+            cosine_max = float(cosine_scores.max()) if cosine_scores.size else 0.0
+            if cosine_max > 0.0:
+                cosine_scores = cosine_scores / cosine_max
 
         # P2 A/B: kb_hybrid_entity_boost —— 化学实体加成移到融合前。
         # legacy search_chunks 是 cosine 0-1 尺度上的加性 0.2/0.3；直接加到
