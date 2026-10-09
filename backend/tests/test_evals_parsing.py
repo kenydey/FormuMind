@@ -147,9 +147,11 @@ def _have(*modules: str) -> bool:
 
 @pytest.mark.skipif(not _have("markitdown", "docx"), reason="the blocking CI job has no MarkItDown: Word tables go through python-docx there")
 def test_word_tables_survive_where_the_last_resort_tier_loses_them_all(result):
+    # v28 P-1 起：python-docx fallback tier 也保留表格（不再静默丢弃），
+    # 因此 naive 分数不再 < 0.5。核心断言：production 满分，且不低于 naive。
     for case_id in ("docx-table", "docx-merged-header", "docx-reading-order"):
         assert _case(result, case_id)["production"]["score"] == 1.0, case_id
-        assert _case(result, case_id)["naive"]["score"] < 0.5, case_id
+        assert _case(result, case_id)["production"]["score"] >= _case(result, case_id)["naive"]["score"], case_id
 
 
 def test_a_spreadsheet_with_a_title_row_comes_out_clean(result):
@@ -178,4 +180,7 @@ def test_production_is_never_below_the_last_resort_tier_by_much(result):
 def test_with_the_whole_stack_installed_the_overall_score_holds(result):
     systems = result["systems"]
     assert systems["production"]["overall"]["mean_score"] >= 0.9
-    assert systems["production"]["overall"]["mean_score"] > systems["naive"]["overall"]["mean_score"] + 0.15
+    # v28 P-1 起：naive tier（python-docx fallback）也保留表格，分数从
+    # 低位升至 ~0.92，与 production 的差距收窄。保留"production 不劣于
+    # naive"的核心断言，阈值从 +0.15 放宽。
+    assert systems["production"]["overall"]["mean_score"] >= systems["naive"]["overall"]["mean_score"]

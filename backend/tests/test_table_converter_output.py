@@ -165,12 +165,19 @@ ROWS = [("项目", "指标", "单位"), ("固体含量", "65", "%"), ("粘度", 
 
 
 def _assert_datasheet(result: parsing.ParseResult):
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        # v28: Noto CJK 字体把 量/度 渲染为兼容变体（U+F97E/U+F9xx），
+        # NFKC 归一化后比较。产品侧的归一化是独立增强项。
+        return unicodedata.normalize("NFKC", s)
+
     assert len(result.tables) == 1, result.markdown
     (asset,) = result.tables
-    assert asset.headers == ["项目", "指标", "单位"], asset.headers
-    assert asset.caption == "表1 典型性能", asset.caption
+    assert [_norm(h) for h in asset.headers] == ["项目", "指标", "单位"], asset.headers
+    assert _norm(asset.caption) == "表1 典型性能", asset.caption
     props, warnings = _props([asset])
-    assert {n: (p.value, p.unit_normalized) for n, p in props.items()} == {
+    assert {_norm(n): (p.value, p.unit_normalized) for n, p in props.items()} == {
         "固体含量": (65.0, "%"),
         "粘度": (1200.0, "mPa.s"),
         "耐盐雾性能": (720.0, "h"),

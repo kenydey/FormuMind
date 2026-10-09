@@ -129,12 +129,11 @@ def test_an_incomplete_recipe_scores_below_the_same_recipe_completed():
     process = process_for(req)
     a = _score_and_validate(full, process, req, enrich_network=False)
     b = _score_and_validate(partial, process, req, enrich_network=False)
-    # raw single-maximize score = predicted value; the partial one is discounted by the cap
-    from app.pipeline.workflow import default_objectives
-
-    metric = (req.objectives or default_objectives(req.domain))[0].metric
-    assert a.score == pytest.approx(a.predicted[metric])
-    assert b.score == pytest.approx(b.predicted[metric] * 0.8)
+    # 默认 objectives 已是多目标（salt_spray/cost/sustainability），分数经
+    # multi_objective_score 归一化，不再是 raw 单值。核心断言：完整配方得分
+    # 高于同配方缺料版（closure 折扣生效）。
+    assert a.score > b.score
+    assert b.predicted["salt_spray_hours"] < a.predicted["salt_spray_hours"]
 
 
 def _rank(req, forms):

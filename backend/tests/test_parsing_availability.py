@@ -263,14 +263,15 @@ def test_docx_tables_survive_the_markitdown_path(docx_with_table: bytes) -> None
     assert "12.5" in result.markdown
 
 
-def test_the_python_docx_fallback_loses_tables(docx_with_table: bytes) -> None:
-    """Why the extras matter, stated as a fact rather than a warning: the
-    fallback returns the heading and drops every cell. A .docx parsed this way
-    looks successful and contains none of the numbers."""
+def test_the_python_docx_fallback_keeps_tables(docx_with_table: bytes) -> None:
+    """v28 P-1: the python-docx fallback tier now preserves tables as pipe tables
+    (previously it silently dropped every cell). The fallback must not lose data
+    when markitdown is unavailable."""
     text = parsing._parse_docx(docx_with_table) or ""
     assert "环氧防腐配方" in text          # heading survives
-    assert "Zinc phosphate" not in text    # the table does not
-    assert "12.5" not in text
+    assert "Zinc phosphate" in text    # the table survives too
+    assert "12.5" in text
+    assert "| 组分 | wt% |" in text    # rendered as a pipe table
 
 
 def test_pptx_speaker_notes_and_titles_are_extracted(tmp_path: Path) -> None:

@@ -40,6 +40,10 @@ ALLOWED: dict[str, str] = {
     # v16 P2-1: chat.py structured fix-loop 的 _repair_summary 仅在
     # asyncio.to_thread(run_fix_loop) 内被调用，不在 event loop 上阻塞。
     "services.llm.answer_question": "called only inside asyncio.to_thread(run_fix_loop) in chat.py structured path",
+    # v28: reviewer 坐标对齐的两个纯函数 —— 列表过滤 + 字典映射 + 正则替换，
+    # 无 I/O、无网络、无磁盘，微秒级 CPU，不阻塞 event loop。
+    "services.citation_coords.claims_evidence_with_mapping": "pure in-memory list filter and dict build, no I/O",
+    "services.citation_coords.remap_citation_numbers": "pure in-memory regex remap, no I/O",
 }
 
 

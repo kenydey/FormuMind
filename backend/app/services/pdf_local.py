@@ -74,7 +74,13 @@ class LocalPage:
         read after `to_markdown` has run, and that call writes its own OCR back
         into the page — so with OCR on, this silently becomes "even after OCR
         there is no text", and real scans stop being recognised as scans.
+
+        v28: a page with detected tables is not scanned — tables are structure
+        from a text layer (or layout analysis); a pure image has neither.
+        The 80-char threshold misfires on table-heavy datasheets.
         """
+        if self.n_tables > 0:
+            return False
         return self.char_count < _SCANNED_CHARS_PER_PAGE
 
 

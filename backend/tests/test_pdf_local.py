@@ -20,6 +20,16 @@ pymupdf = pytest.importorskip("pymupdf")
 pytest.importorskip("pymupdf4llm")
 
 
+@pytest.fixture(autouse=True)
+def _reset_layout_config():
+    """v28: _configure_layout() 是进程级一次性开关。若某测试把
+    pdf_layout_analysis 设为 False 期间触发了它，pymupdf4llm 的 layout
+    会永久关闭，导致后续测试的表格检测失败（order-dependent）。
+    每个测试后重置，下次调用按当前 setting 重新配置。"""
+    yield
+    pdf_local._layout_configured = False
+
+
 @pytest.fixture(scope="module")
 def three_page_pdf() -> bytes:
     """Page 1 plain prose, page 2 a ruled table, page 3 a large figure.

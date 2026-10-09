@@ -193,4 +193,6 @@ def score_numeric_failures(
     if not answer_nums:
         return {"score": 1.0, "failures": []}
     ok = len(answer_nums) - len(failures)
-    return {"score": round(ok / len(answer_nums), 4), "failures": failures}
+    # v28: 同一数字可能因"引用越界"+"无有效引用"被记两次（P2-17 起），
+    # 分数钳制在 [0, 1]，不出现负分。
+    return {"score": max(0.0, round(ok / len(answer_nums), 4)), "failures": failures}

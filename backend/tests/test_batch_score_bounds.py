@@ -137,11 +137,19 @@ def test_rescore_skips_single_objective_and_empty_batches(fake_predict):
 
 
 def test_rescore_is_fail_open(monkeypatch):
+    """predictor 抛异常时分数保持不变（fail-open）。
+
+    v23 后 _rescore 优先用 f.predicted（已含 bias 修正），predicted 非空时
+    根本不调 predictor.predict —— 要触发 fail-open 路径，必须让 predicted
+    为空，使代码真正走到 predictor.predict 调用。
+    """
+
     def boom(form, process=None):
         raise RuntimeError("predictor down")
 
     monkeypatch.setattr(predictor, "predict", boom)
     f = _form("c", WEAK)
+    f.predicted = None  # 迫使 _rescore 调用 predictor.predict（会抛异常）
     f.score = 0.42
     rp._rescore_with_shared_bounds([f], OBJS, None)
     assert f.score == 0.42

@@ -96,11 +96,12 @@ def resample_plan_for_constraints(
                 # v27 P2-19: 两侧 infeasible 取 OR —— KG/物理门是对整批共享
                 # skeleton 的判定，标记写在原始 run 上；LHS 候补 run 从未经过
                 # 这两个门。v10 只保留了替换源一侧，原始 run 的标记被静默丢弃。
-                _reasons = [
+                # v28: 去重（两侧可能携带相同 reason）。
+                _reasons = list(dict.fromkeys(
                     r
                     for r in (run.infeasible_reason, replacement.infeasible_reason)
                     if r
-                ]
+                ))
                 new_runs.append(
                     DOERun(
                         run_id=run.run_id,

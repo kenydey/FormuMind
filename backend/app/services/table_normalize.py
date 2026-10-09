@@ -172,7 +172,12 @@ _NUMERIC_LABEL = re.compile(r"^[<>≥≤~±+\-\s]*\d[\d,]*(?:\.\d+)?\s*%?$")
 
 
 def _norm_name_key(text: str) -> str:
+    import unicodedata
+
     key = (text or "").strip()
+    # v28: NFKC 归一化 CJK 兼容变体（Noto 字体把 量/度 渲染为 U+F97E 等），
+    # 否则同一属性会因字体不同产生重复 key。
+    key = unicodedata.normalize("NFKC", key)
     key = _PAREN_SUFFIX_RE.sub("", key).strip()
     key = re.sub(r"\s+", " ", key)
     # Lowercase ASCII letters even inside CJK strings ("pH值" → "ph值").
