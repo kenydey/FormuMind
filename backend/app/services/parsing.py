@@ -366,7 +366,35 @@ def _docx_table_to_markdown(table) -> str:
     return "\n".join(lines)
 
 
+# v29 Phase1 M-7/M-3: zip 炸弹防护 —— OOXML（docx/xlsx）是 zip，
+# 恶意小文件可解压出 GB 级内容。统一检查未压缩总大小。
+_ZIP_BOMB_MAX_UNCOMPRESSED = 100 * 1024 * 1024  # 100MB
+
+
+def _check_zip_bomb(content: bytes, label: str) -> bool:
+    """True=安全，False=疑似 zip 炸弹（已打日志）。"""
+    try:
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            total = sum(i.file_size for i in zf.infolist())
+            if total > _ZIP_BOMB_MAX_UNCOMPRESSED:
+                logger.warning(
+                    "%s 疑似 zip 炸弹：未压缩 %d MB > %d MB，拒绝解析",
+                    label, total // (1024 * 1024),
+                    _ZIP_BOMB_MAX_UNCOMPRESSED // (1024 * 1024),
+                )
+                return False
+        return True
+    except Exception:
+        # 非 zip 文件，交由调用方处理
+        return True
+
+
 def _parse_docx(content: bytes) -> str | None:
+    # v29 Phase1 M-7: DOCX zip 炸弹检查
+    if not _check_zip_bomb(content, "docx"):
+        return None
     try:
         import docx  # type: ignore
 
@@ -400,6 +428,9 @@ def _parse_docx(content: bytes) -> str | None:
 
 def _parse_xlsx(content: bytes) -> str | None:
     """Lightweight openpyxl fallback when markitdown[xlsx] is not installed."""
+    # v29 Phase1 M-3: 复用 zip 炸弹检查（相邻 _parse_xlsx_tables 有，未复用）
+    if not _check_zip_bomb(content, "xlsx"):
+        return None
     try:
         import openpyxl  # type: ignore
     except ImportError:
@@ -408,6 +439,20 @@ def _parse_xlsx(content: bytes) -> str | None:
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         lines: list[str] = []
         for sheet in wb.worksheets:
+            # v29 Phase1 H-2: 维度门禁 —— 稀疏大维度文件（如 A1:XFD1048576）
+            # 会导致 ~1.7×10¹⁰ 次单元格访问，hang 住 ingest 线程。
+            # 必须在 iter_rows 之前检查。
+            try:
+                dims = (sheet.max_row or 0) * (sheet.max_column or 0)
+            except Exception:
+                dims = 0
+            if dims > _XLSX_TABLES_MAX_CELLS:
+                logger.warning(
+                    "xlsx sheet '%s' 维度 %d cells 超限 %d，跳过",
+                    sheet.title, dims, _XLSX_TABLES_MAX_CELLS,
+                )
+                lines.append(f"## {sheet.title}（表格过大，已跳过）")
+                continue
             lines.append(f"## {sheet.title}")
             for row in sheet.iter_rows(values_only=True):
                 cells = ["" if c is None else str(c) for c in row]

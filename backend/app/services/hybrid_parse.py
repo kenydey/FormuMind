@@ -158,6 +158,14 @@ def _render_blocks(blocks: list[mineru_cloud.MinerUBlock], *, page_label: str) -
                     parts.append(f"**{block.caption.strip()}**")
                 parts.append(block.html.strip())
                 continue
+            # v29 Phase1 H-3: block.text 兜底 —— 无 HTML 时先查 block.text，
+            # 有文本则按 pipe table 保留，避免表格变占位符且下游不可恢复。
+            if block.text and block.text.strip():
+                if block.caption:
+                    parts.append(f"**{block.caption.strip()}**")
+                parts.append(block.text.strip())
+                logger.debug("MinerU 表格无 HTML，已用 block.text 兜底")
+                continue
             # A table MinerU could not render is the one table worth a look.
             parts.append(_visual_markdown(block, page_label, can_see, vision_hint,
                                           extract_image, image_markdown))

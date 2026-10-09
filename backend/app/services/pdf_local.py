@@ -365,12 +365,31 @@ def page_count(content: bytes) -> int:
 
 def page_as_png(content: bytes, page_no: int, dpi: int = 150) -> bytes | None:
     """One page rendered to PNG — for scans, where there is no text to keep."""
+    # v29 Phase1 H-1: MediaBox 尺寸上限 —— 畸形 MediaBox（如 200×200 英寸）
+    # 会导致 get_pixmap 一次分配 ~3.3GB，OOM 杀死 worker。
+    # 上限：单页像素数不超过 100MP（约 A0@300dpi 的 2 倍），超限降 dpi。
+    _MAX_PIXELS = 100_000_000
     try:
         source = _open(content)
         try:
             if not 1 <= page_no <= source.page_count:
                 return None
-            pixmap = source[page_no - 1].get_pixmap(dpi=dpi)
+            page = source[page_no - 1]
+            # 预估像素数：rect 单位是 pt（1/72 英寸）
+            w_pt, h_pt = page.rect.width, page.rect.height
+            if w_pt <= 0 or h_pt <= 0:
+                return None
+            pixels = (w_pt * dpi / 72) * (h_pt * dpi / 72)
+            use_dpi = dpi
+            if pixels > _MAX_PIXELS:
+                # 按比例降 dpi，使像素数回到上限内
+                scale = (_MAX_PIXELS / pixels) ** 0.5
+                use_dpi = max(36, int(dpi * scale))
+                logger.warning(
+                    "page_as_png: 页面尺寸异常 %.0f×%.0f pt，dpi %d→%d（防 OOM）",
+                    w_pt, h_pt, dpi, use_dpi,
+                )
+            pixmap = page.get_pixmap(dpi=use_dpi)
             try:
                 return pixmap.tobytes("png")
             finally:

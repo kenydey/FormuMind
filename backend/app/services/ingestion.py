@@ -817,15 +817,10 @@ def ingest_files_batch(
             # P2: 单文件一般异常不杀死整批 —— 记录失败行后继续下一个。
             logger.exception("batch ingest: %s failed", name)
             _record_batch_failure(name, origin, f"{type(exc).__name__}: {exc}")
-            all_evidence.append(
-                Evidence(
-                    source="local",
-                    identifier=name,
-                    title=name,
-                    snippet=f"入库失败：{type(exc).__name__}",
-                    relevance=0.5,
-                )
-            )
+            # v29 Phase1 M-1: 不再向 all_evidence 追加占位 Evidence ——
+            # 占位符会被索引进检索库，污染检索结果（snippet="入库失败"）。
+            # 失败已记入 record_ingest_failure（可查询/可复活），此处仅加 warning。
+            all_warnings.append(f"{name}：入库失败（{type(exc).__name__}），已记录")
             continue
         all_evidence.extend(outcome.evidence)
         for w in outcome.warnings:
