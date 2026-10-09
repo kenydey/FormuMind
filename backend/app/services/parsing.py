@@ -899,6 +899,30 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
     if not content:
         return ParseResult("", "none")
 
+    # v29 Phase4 D-2: 文档级规模守卫 —— 2000 页 PDF ≈ 6 分钟 + 350MB，
+    # 无守卫会拖死 worker。超限直接拒绝（fail-fast），而非慢死。
+    _max_mb = float(getattr(get_settings(), "parse_max_file_mb", 200) or 200)
+    if len(content) > _max_mb * 1024 * 1024:
+        logger.warning(
+            "parse_document: 文件 %.1fMB 超上限 %.0fMB，拒绝解析",
+            len(content) / (1024 * 1024), _max_mb,
+        )
+        r = ParseResult("", "none")
+        r.table_stats = {"error": f"文件超限（{_max_mb:.0f}MB）"}
+        return r
+    if ext == "pdf":
+        _max_pages = int(getattr(get_settings(), "parse_max_pdf_pages", 2000) or 2000)
+        try:
+            from . import pdf_local
+            n = pdf_local.page_count(content)
+            if n > _max_pages:
+                logger.warning("parse_document: PDF %d 页超上限 %d，拒绝解析", n, _max_pages)
+                r = ParseResult("", "none")
+                r.table_stats = {"error": f"PDF 页数超限（{_max_pages}）"}
+                return r
+        except Exception:
+            pass  # 页数获取失败，交由解析链处理
+
     with timing.span("parse"):
         if ext == "pdf":
             order = _pdf_tier_order(prefer if prefer is not None else get_settings().pdf_parser)

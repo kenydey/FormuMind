@@ -75,10 +75,55 @@ async def _read_upload_capped(file: UploadFile, filename: str) -> bytes:
     B-17：此前先 ``await file.read()`` 全量读入内存再检查大小，大文件可致
     内存耗尽（DoS）。此处按 1MiB 分块读，一旦累计字节超过
     ``ingest_max_upload_bytes`` 立刻 413，不再继续读后续字节。
+
+    v29 Phase4 L-10: 上传超时保护 —— 慢速上传（如 10KB/s 传 100MB）
+    会占用连接数小时。超 ingest_upload_timeout_s（默认 300s）抛 408。
     """
-    return await read_upload_capped(
-        file, filename, limit=get_settings().ingest_max_upload_bytes
-    )
+    import asyncio
+
+    timeout_s = float(getattr(get_settings(), "ingest_upload_timeout_s", 300) or 300)
+    try:
+        content = await asyncio.wait_for(
+            read_upload_capped(
+                file, filename, limit=get_settings().ingest_max_upload_bytes
+            ),
+            timeout=timeout_s,
+        )
+    except asyncio.TimeoutError:
+        from fastapi import HTTPException
+
+        logger.warning("上传超时: %s (>%.0fs)", filename, timeout_s)
+        raise HTTPException(408, f"上传超时（>{timeout_s:.0f}s），请重试或压缩文件")
+    # v29 Phase4 M-16: 魔数校验 —— 扩展名与文件头不符时拒绝，
+    # 防伪装文件（如 .pdf 实际是 exe）。
+    _check_magic(content, filename)
+    return content
+
+
+# v29 Phase4 M-16: 常见文件魔数
+_MAGIC_BY_EXT = {
+    "pdf": [b"%PDF"],
+    "docx": [b"PK\x03\x04"],  # zip
+    "xlsx": [b"PK\x03\x04"],  # zip
+    "pptx": [b"PK\x03\x04"],  # zip
+    "png": [b"\x89PNG\r\n\x1a\n"],
+    "jpg": [b"\xff\xd8\xff"],
+    "jpeg": [b"\xff\xd8\xff"],
+    "gif": [b"GIF87a", b"GIF89a"],
+}
+
+
+def _check_magic(content: bytes, filename: str) -> None:
+    """校验文件魔数，不符时抛 415。未知扩展名跳过（fail-open）。"""
+    from fastapi import HTTPException
+
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
+    magics = _MAGIC_BY_EXT.get(ext)
+    if not magics or len(content) < 8:
+        return  # 未知类型或太小，跳过
+    if not any(content.startswith(m) for m in magics):
+        logger.warning("上传文件魔数不符: %s (ext=%s)", filename, ext)
+        raise HTTPException(415, f"文件类型与扩展名不符: {filename}")
 
 
 def _to_ingest_response(filename: str, outcome) -> IngestResponse:

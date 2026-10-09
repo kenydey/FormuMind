@@ -789,8 +789,13 @@ def ingest_files_batch(
     all_evidence: list[Evidence] = []
     all_warnings: list[str] = []
     last_outcome: IngestOutcome | None = None
-    for name, content in files:
+    # v29 Phase4 D-4: 批量进度日志 —— 长任务无反馈时，用户不知道卡在哪。
+    total_files = len(files)
+    for idx, (name, content) in enumerate(files, 1):
+        # v29 Phase4 M-15: 逐文件释放内存 —— 处理完立即 del content，
+        # 避免整批文件同时驻留内存（大批量上传时 OOM）。
         origin = (origin_url_by_name or {}).get(name)
+        logger.info("batch ingest: [%d/%d] %s", idx, total_files, name)
         try:
             outcome = ingest_file(
                 name,
@@ -826,6 +831,8 @@ def ingest_files_batch(
         for w in outcome.warnings:
             all_warnings.append(f"{name}：{w}")
         last_outcome = outcome
+        # v29 Phase4 M-15: 释放已处理文件内存
+        del content
     return IngestOutcome(
         evidence=all_evidence,
         source_id=last_outcome.source_id if last_outcome else None,
