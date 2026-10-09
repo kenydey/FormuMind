@@ -436,9 +436,19 @@ def hybrid_search_scored(
             )
             pool = min(pool, n)
             # Top-BM25 indices for cosine (keep zeros elsewhere → BM25-only for tail).
-            # v22-note: 空 token chunk（bm25=0）在 ANN gate 下 cosine 恒 0 ——
-            # 性能权衡（小库/冷路径走全量 cosine，不受影响）。
+            # v29 Phase3 B-6: 双池 —— 空 token chunk（bm25=0）此前在 ANN gate 下
+            # cosine 恒 0（静默召回损失）。现把零 token chunk 也纳入 cosine 池，
+            # 用向量通道补召回。
             top_idx = np.argsort(-bm25_raw)[:pool].tolist()
+            # 零 token 但有 embedding 的 chunk：bm25=0，纳入 cosine 池
+            zero_token_idx = [
+                i for i in range(n)
+                if not corpus_tokens[i] and i not in top_idx
+            ]
+            if zero_token_idx:
+                # 限制数量，避免池爆炸：最多补 pool 大小
+                zero_token_idx = zero_token_idx[:pool]
+                top_idx = top_idx + zero_token_idx
             matrix_min = int(
                 getattr(settings, "kb_hybrid_ann_matrix_min_dim", 512) or 512
             )

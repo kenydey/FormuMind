@@ -845,8 +845,10 @@ class Settings(BaseSettings):
     chat_cross_encoder_enabled: bool = False
     cross_encoder_timeout_s: float = 2.5
     cross_encoder_max_candidates: int = 30
-    # Wave D: hybrid fusion mode — weighted (default) or rrf (A/B via golden).
-    kb_hybrid_fusion: str = "weighted"  # weighted | rrf
+    # Wave D: hybrid fusion mode — rrf (default) or weighted (A/B via golden).
+    # v29 Phase3 B-5: rrf 为默认 —— rank-based 融合不受 per-channel max 归一化
+    # 放大噪声的影响，hard-negative 场景下比 weighted 更稳健。
+    kb_hybrid_fusion: str = "rrf"  # rrf | weighted
     # P1 #26: Langfuse tracing (MIT). Default OFF — no network without keys.
     # When enabled + keys present, llm.complete_json / search rerank emit spans.
     langfuse_enabled: bool = False
